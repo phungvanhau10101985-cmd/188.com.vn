@@ -242,6 +242,10 @@ Tạo **server block riêng** (file mới trong `sites-available`), không sửa
 - `location /api/` → `proxy_pass` tới `**http://127.0.0.1:<cổng_API_188>`** (vd. `8001` nếu 188 dùng 8001).
 - `location /` → `proxy_pass http://127.0.0.1:3001` (Next 188).
 
+Trong mỗi `location` có `proxy_pass`, thêm (Next.js Server Actions ổn định hơn):
+
+`proxy_set_header Host $host;` · `proxy_set_header X-Real-IP $remote_addr;` · `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` · `proxy_set_header X-Forwarded-Proto $scheme;` · **`proxy_set_header X-Forwarded-Host $host;`**
+
 Hai site cùng IP: Nginx phân biệt theo `**server_name**`, mỗi site một **upstream** cổng nội bộ khác nhau.
 
 ```bash

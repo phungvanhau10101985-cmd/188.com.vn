@@ -1,6 +1,12 @@
 // frontend/next.config - CLEAN FIXED VERSION
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  experimental: {
+    // Sau Nginx: Server Actions cần Origin hợp lệ — tránh "Missing origin header"
+    serverActions: {
+      allowedOrigins: ['188.com.vn', 'www.188.com.vn', 'localhost:3000'],
+    },
+  },
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: '**' },
