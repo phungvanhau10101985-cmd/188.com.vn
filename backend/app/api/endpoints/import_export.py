@@ -12,8 +12,15 @@ import threading
 import traceback
 from datetime import datetime
 import json
+import logging
+import time
 
 from app.db.session import get_db
+
+logger = logging.getLogger(__name__)
+
+# Chuỗi cố định để grep log: grep IMPORT_EXCEL trên VPS
+IMPORT_EXCEL_LOG_PREFIX = "[IMPORT_EXCEL]"
 from app.services.excel_importer import ExcelImporter
 from app.core.config import settings
 from app.services.category_seo_analyzer import scan_and_create_mappings
@@ -152,6 +159,8 @@ def _run_import_excel_job(
     """Chạy sau khi POST /import/excel/async trả 202."""
     from app.db.session import SessionLocal
 
+    _tick = {"phase": "", "mono": 0.0}
+
     def on_progress(phase: str, current: int, total: Optional[int]) -> None:
         _import_job_update(
             job_id,
@@ -162,9 +171,44 @@ def _run_import_excel_job(
             message=_import_progress_message(phase, current, total),
             percent=_import_job_percent(phase, current, total),
         )
+        # Tránh spam: đổi phase hoặc mỗi ~25 giây
+        now_m = time.monotonic()
+        phase_changed = _tick["phase"] != phase
+        _tick["phase"] = phase
+        elapsed = now_m - _tick["mono"]
+        if phase_changed:
+            _tick["mono"] = now_m
+            logger.info(
+                "%s job=%s phase=%s current=%s total=%s",
+                IMPORT_EXCEL_LOG_PREFIX,
+                job_id,
+                phase,
+                current,
+                total,
+            )
+        elif elapsed >= 25.0:
+            _tick["mono"] = now_m
+            logger.info(
+                "%s job=%s phase=%s current=%s total=%s (định kỳ)",
+                IMPORT_EXCEL_LOG_PREFIX,
+                job_id,
+                phase,
+                current,
+                total,
+            )
 
     db = SessionLocal()
     try:
+        fz = os.path.getsize(temp_file_path) if os.path.isfile(temp_file_path) else 0
+        logger.info(
+            "%s start job=%s file=%s size=%s overwrite=%s tmp=%s",
+            IMPORT_EXCEL_LOG_PREFIX,
+            job_id,
+            original_filename,
+            fz,
+            overwrite,
+            temp_file_path,
+        )
         _import_job_update(
             job_id,
             status="running",
@@ -206,6 +250,12 @@ def _run_import_excel_job(
                 warnings=warn_lines_out if warn_lines_out else None,
                 total_rows=result.get("total_rows"),
             )
+            logger.error(
+                "%s failed job=%s importer_error=%s",
+                IMPORT_EXCEL_LOG_PREFIX,
+                job_id,
+                str(result["error"])[:500],
+            )
             return
 
         data = {
@@ -233,7 +283,15 @@ def _run_import_excel_job(
             },
         )
         threading.Thread(target=auto_scan_category_seo_safe, daemon=True).start()
-        print(f"✅ [Job {job_id}] Import xong, đã khởi chạy auto scan SEO.")
+        logger.info(
+            "%s done job=%s created=%s updated=%s processed=%s file=%s (auto_scan_seo_spawned=yes)",
+            IMPORT_EXCEL_LOG_PREFIX,
+            job_id,
+            result.get("created"),
+            result.get("updated"),
+            result.get("total_processed"),
+            original_filename,
+        )
 
     except Exception as e:
         traceback.print_exc()
@@ -248,6 +306,12 @@ def _run_import_excel_job(
             message=f"Import thất bại: {e}",
             percent=None,
             errors=[f"{type(e).__name__}: {e}", *tb_lines] if tb_lines else [f"{type(e).__name__}: {e}"],
+        )
+        logger.exception(
+            "%s exception job=%s:%s",
+            IMPORT_EXCEL_LOG_PREFIX,
+            job_id,
+            str(e)[:400],
         )
     finally:
         db.close()
@@ -307,6 +371,14 @@ async def import_excel_async(
         tmp.write(content)
 
     job_id = str(uuid.uuid4())
+    logger.info(
+        "%s queued job=%s file=%s bytes=%s overwrite=%s",
+        IMPORT_EXCEL_LOG_PREFIX,
+        job_id,
+        file.filename,
+        len(content) if content else 0,
+        overwrite,
+    )
     initial = {
         "job_id": job_id,
         "status": "queued",
@@ -403,9 +475,20 @@ async def import_excel(
             # Read and write file
             content = await file.read()
             tmp.write(content)
+
+        nbytes = len(content) if content is not None else 0
         
         print(f"✅ Đã lưu file tạm: {temp_file_path}")
-        print(f"📏 Kích thước: {len(content):,} bytes")
+        print(f"📏 Kích thước: {nbytes:,} bytes")
+
+        logger.info(
+            "%s sync_start file=%s bytes=%s overwrite=%s tmp=%s",
+            IMPORT_EXCEL_LOG_PREFIX,
+            file.filename,
+            nbytes,
+            overwrite,
+            temp_file_path,
+        )
         
         # Close file handle
         del content
@@ -432,6 +515,17 @@ async def import_excel(
         print(f"   ⚠️  Cảnh báo: {len(result.get('warnings', []))}")
         print(f"   ❌ Lỗi: {len(result.get('errors', []))}")
         print(f"{'='*60}")
+
+        logger.info(
+            "%s sync_done file=%s created=%s updated=%s total_processed=%s warnings=%s errors=%s",
+            IMPORT_EXCEL_LOG_PREFIX,
+            file.filename,
+            result.get("created", 0),
+            result.get("updated", 0),
+            result.get("total_processed", 0),
+            len(result.get("warnings", []) or []),
+            len(result.get("errors", []) or []),
+        )
         
         # Tự động scan SEO danh mục trong background (session mới, không dùng db request)
         background_tasks.add_task(auto_scan_category_seo_safe)
@@ -458,13 +552,16 @@ async def import_excel(
         raise
     except Exception as e:
         print(f"❌ LỖI IMPORT: {str(e)}")
-        import traceback
         traceback.print_exc()
+        logger.exception(
+            "%s sync_failed file=%s",
+            IMPORT_EXCEL_LOG_PREFIX,
+            getattr(file, "filename", None) or "(unknown)",
+        )
         
         # Cleanup temp file
         if temp_file_path and os.path.exists(temp_file_path):
             try:
-                import time
                 time.sleep(0.1)
                 os.remove(temp_file_path)
             except:
@@ -478,7 +575,6 @@ async def import_excel(
         # Always try to cleanup
         if temp_file_path and os.path.exists(temp_file_path):
             try:
-                import time
                 for _ in range(3):
                     try:
                         os.remove(temp_file_path)

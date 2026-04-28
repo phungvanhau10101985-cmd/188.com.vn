@@ -337,32 +337,18 @@ async def not_found_exception_handler(request, exc):
     """Custom 404 handler hiển thị available endpoints"""
     from fastapi.responses import JSONResponse
     
-    # Collect available endpoints
-    available_endpoints = []
-    for route in app.routes:
-        if hasattr(route, 'path'):
-            available_endpoints.append({
-                "path": route.path,
-                "methods": getattr(route, 'methods', ['GET'])
-            })
-    
+    paths = sorted(
+        {route.path for route in app.routes if hasattr(route, "path") and route.path},
+    )
     return JSONResponse(
         status_code=404,
         content={
             "error": "Endpoint not found",
             "requested": str(request.url),
-            "available_endpoints": [
-                "/api/v1/import-export/import/excel",
-                "/api/v1/import-export/export/excel", 
-                "/api/v1/import-export/export/sample",
-                "/api/v1/import-export/download/latest-export",
-                "/docs",
-                "/api/v1",
-                "/health"
-            ],
+            "available_paths_sample": paths[:80],
             "docs": "/docs",
-            "note": "Check /docs for complete API documentation"
-        }
+            "note": "Đầy đủ trong OpenAPI /docs. Import async: POST /api/v1/import-export/import/excel/async — poll GET /api/v1/import-export/import/excel/job/{job_id}",
+        },
     )
 
 if __name__ == "__main__":
