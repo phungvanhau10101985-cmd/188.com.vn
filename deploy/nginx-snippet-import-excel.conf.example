@@ -1,5 +1,10 @@
 # Ghép vào block `server { ... }` phục vụ HTTPS cho API hoặc reverse proxy tới Uvicorn.
 # Mục đích: upload file Excel lớn + import chạy lâu không bị nginx cắt (trùng HUONG_DAN_DEPLOY).
+#
+# QUAN TRỌNG — upload treo giữa chừng (vd. đứng ở 30–40%):
+#   - client_body_timeout mặc định của nginx là 60s (hoặc tương đương): NẾU giữa hai lần nhận
+#     chunk từ trình duyệt cách nhau > 60s → nginx đóng kết nối → upload “đứng”.
+#   - Phải TĂNG client_body_timeout (và send_timeout) trong location hoặc server.
 
 # Trong khối http { ... } (tùy VPS, một lần):
 #   client_max_body_size 200m;
@@ -14,8 +19,14 @@ location /api/v1/import-export/import/ {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
 
+    # Đọc body upload từ client — đủ lớn để mạng chậm / Wi‑Fi không bị cắt giữa chừng
+    client_body_timeout 3600s;
+    send_timeout 3600s;
+
     proxy_connect_timeout 60s;
     proxy_send_timeout 3600s;
     proxy_read_timeout 3600s;
-    send_timeout 3600s;
+
+    # Tùy chọn: stream body lên backend thay vì buffer hết (giảm RAM; có khi hết treo buffer)
+    # proxy_request_buffering off;
 }

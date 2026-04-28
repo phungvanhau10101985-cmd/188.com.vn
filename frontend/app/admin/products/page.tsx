@@ -13,6 +13,9 @@ const PAGE_SIZE = 100;
 
 const API_V1 = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1';
 
+/** Lưu job_id đang chạy để khôi phục khi reload trang giữa chừng. */
+const IMPORT_JOB_STORAGE_KEY = 'admin:products:import_excel:job';
+
 /** Nội dung panel + toast sau khi poll job import xong */
 function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
   panel: { variant: 'err' | 'warn' | 'ok'; title: string; body: string } | null;
@@ -92,6 +95,12 @@ export default function AdminProductsPage() {
   const [importProgress, setImportProgress] = useState<{
     message: string;
     percent: number | null;
+    /** Phụ — current/total dòng từ server để admin biết ETA. */
+    current?: number | null;
+    total?: number | null;
+    phase?: string | null;
+    /** Cảnh báo poll lỗi tạm thời. */
+    warn?: string | null;
   } | null>(null);
   /** Chi tiết lỗi/cảnh báo sau import (giữ đến khi import lại hoặc đóng) */
   const [importDetailPanel, setImportDetailPanel] = useState<{
@@ -99,6 +108,8 @@ export default function AdminProductsPage() {
     title: string;
     body: string;
   } | null>(null);
+  /** Cờ huỷ theo dõi (job vẫn chạy ở server). */
+  const cancelTrackRef = useRef(false);
   const [exporting, setExporting] = useState(false);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -145,24 +156,104 @@ export default function AdminProductsPage() {
     fetchProducts();
   };
 
+  /** Poll job với backoff + chịu lỗi mạng tạm thời (503/timeout) — file 30k dòng có thể chạy vài phút. */
+  const pollImportJob = useCallback(
+    async (jobId: string): Promise<AdminImportExcelJob> => {
+      let lastJob: AdminImportExcelJob | null = null;
+      let consecutiveErrors = 0;
+      let pollIdx = 0;
+
+      for (;;) {
+        if (cancelTrackRef.current) {
+          if (lastJob) return lastJob;
+          throw new Error('Đã dừng theo dõi job (job vẫn chạy ở server, refresh để xem lại).');
+        }
+
+        try {
+          const job = await adminProductAPI.getImportExcelJob(jobId);
+          consecutiveErrors = 0;
+          lastJob = job;
+
+          setImportProgress({
+            message: job.message || 'Đang xử lý…',
+            percent: job.percent ?? null,
+            current: job.current ?? null,
+            total: job.total ?? null,
+            phase: job.phase || null,
+            warn: null,
+          });
+
+          if (job.status === 'done' || job.status === 'error') return job;
+        } catch (err) {
+          consecutiveErrors += 1;
+          const msg = err instanceof Error ? err.message : String(err);
+          setImportProgress((prev) => ({
+            message: prev?.message || 'Đang chờ server…',
+            percent: prev?.percent ?? null,
+            current: prev?.current ?? null,
+            total: prev?.total ?? null,
+            phase: prev?.phase ?? null,
+            warn: `Mất kết nối tạm thời (${consecutiveErrors}): ${msg.slice(0, 120)} — đang thử lại.`,
+          }));
+          if (consecutiveErrors >= 30) {
+            throw new Error(
+              `Không thể theo dõi job sau ${consecutiveErrors} lần thử. Lỗi cuối: ${msg}\n` +
+                `Job có thể vẫn đang chạy trên server (job_id=${jobId}). Reload trang để theo dõi tiếp.`,
+            );
+          }
+        }
+
+        pollIdx += 1;
+        const delayMs = pollIdx <= 5 ? 800 : pollIdx <= 30 ? 2500 : 5000;
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    },
+    [],
+  );
+
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    cancelTrackRef.current = false;
     setImporting(true);
     setImportDetailPanel(null);
-    setImportProgress({ message: 'Đang tải file lên...', percent: null });
+    const szMb = file.size / (1024 * 1024);
+    setImportProgress({
+      message:
+        szMb >= 2
+          ? `Đang tải file (${szMb.toFixed(1)} MB)… File lớn có thể vài phút.`
+          : 'Đang tải file lên server…',
+      percent: null,
+    });
     try {
-      const { job_id } = await adminProductAPI.startImportExcelAsync(file);
-
-      let job: AdminImportExcelJob;
-      for (;;) {
-        job = await adminProductAPI.getImportExcelJob(job_id);
+      const { job_id } = await adminProductAPI.startImportExcelAsync(file, false, (loaded, total) => {
+        const pct = total > 0 ? Math.min(99, Math.round((loaded / total) * 100)) : 0;
         setImportProgress({
-          message: job.message,
-          percent: job.percent ?? null,
+          message: `Đang tải lên ${pct}% (${(loaded / (1024 * 1024)).toFixed(2)} / ${(total / (1024 * 1024)).toFixed(2)} MB)`,
+          percent: pct,
         });
-        if (job.status === 'done' || job.status === 'error') break;
-        await new Promise((r) => setTimeout(r, 500));
+      });
+
+      try {
+        localStorage.setItem(
+          IMPORT_JOB_STORAGE_KEY,
+          JSON.stringify({ job_id, started_at: Date.now(), file: file.name }),
+        );
+      } catch {
+        /* localStorage có thể đầy / disabled — bỏ qua */
+      }
+
+      setImportProgress({
+        message: 'Đã nhận file, đang xử lý trên server (file 30k dòng có thể vài phút)…',
+        percent: null,
+      });
+
+      const job = await pollImportJob(job_id);
+
+      try {
+        localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+      } catch {
+        /* noop */
       }
 
       const { panel, toast: tmsg } = formatImportExcelJobOutcome(job);
@@ -181,9 +272,67 @@ export default function AdminProductsPage() {
     } finally {
       setImporting(false);
       setImportProgress(null);
+      cancelTrackRef.current = false;
       e.target.value = '';
     }
   };
+
+  /** Khi reload trang trong lúc đang chạy job — tự động khôi phục theo dõi. */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let saved: { job_id?: string; started_at?: number; file?: string } | null = null;
+      try {
+        const raw = localStorage.getItem(IMPORT_JOB_STORAGE_KEY);
+        saved = raw ? (JSON.parse(raw) as typeof saved) : null;
+      } catch {
+        saved = null;
+      }
+      if (!saved?.job_id) return;
+      // Bỏ qua job > 6h trước (có thể đã rớt)
+      if (saved.started_at && Date.now() - saved.started_at > 6 * 60 * 60 * 1000) {
+        try {
+          localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+        } catch {
+          /* noop */
+        }
+        return;
+      }
+
+      cancelTrackRef.current = false;
+      setImporting(true);
+      setImportProgress({
+        message: `Khôi phục theo dõi job đang chạy (file: ${saved.file || '?'})…`,
+        percent: null,
+      });
+      try {
+        const job = await pollImportJob(saved.job_id);
+        if (cancelled) return;
+        try {
+          localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+        } catch {
+          /* noop */
+        }
+        const { panel, toast: tmsg } = formatImportExcelJobOutcome(job);
+        if (panel) setImportDetailPanel(panel);
+        showToast(tmsg.type, tmsg.msg, 6000);
+        if (job.status !== 'error') fetchProducts();
+      } catch (err) {
+        if (cancelled) return;
+        const msg = (err as Error)?.message || 'Lỗi khôi phục job';
+        setImportDetailPanel({ variant: 'err', title: 'Không khôi phục được job', body: msg });
+      } finally {
+        if (!cancelled) {
+          setImporting(false);
+          setImportProgress(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleExport = async () => {
     setExporting(true);
@@ -359,7 +508,7 @@ export default function AdminProductsPage() {
                 {importing ? 'Đang import...' : 'Import Excel'}
               </button>
               {importing && importProgress ? (
-                <div className="w-full max-w-[20rem] space-y-1">
+                <div className="w-full max-w-[22rem] space-y-1">
                   <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
                     {importProgress.percent != null ? (
                       <div
@@ -370,9 +519,33 @@ export default function AdminProductsPage() {
                       <div className="h-full w-full bg-emerald-500/70 animate-pulse rounded-full" />
                     )}
                   </div>
-                  <p className="text-xs text-gray-600 leading-snug text-right line-clamp-2">
+                  <p className="text-xs text-gray-600 leading-snug text-right line-clamp-3">
                     {importProgress.message}
                   </p>
+                  {importProgress.current != null && importProgress.total != null ? (
+                    <p className="text-[11px] text-gray-500 text-right">
+                      Dòng: {importProgress.current.toLocaleString()} / {importProgress.total.toLocaleString()}
+                      {importProgress.phase ? ` · ${importProgress.phase}` : ''}
+                    </p>
+                  ) : importProgress.phase ? (
+                    <p className="text-[11px] text-gray-500 text-right">{importProgress.phase}</p>
+                  ) : null}
+                  {importProgress.warn ? (
+                    <p className="text-[11px] text-amber-700 leading-snug text-right">
+                      {importProgress.warn}
+                    </p>
+                  ) : null}
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        cancelTrackRef.current = true;
+                      }}
+                      className="text-[11px] text-gray-500 underline hover:text-gray-700"
+                    >
+                      Ẩn theo dõi (job vẫn chạy ở server)
+                    </button>
+                  </div>
                 </div>
               ) : null}
             </div>

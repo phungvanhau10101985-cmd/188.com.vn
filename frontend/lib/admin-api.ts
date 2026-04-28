@@ -1,7 +1,64 @@
 /**
  * Admin API client - dùng admin_token (Bearer) cho các endpoint /api/v1/orders/admin/*
  */
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1';
+import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
+
+/** Grep trên trình duyệt (Console): IMPORT_EXCEL_CLIENT */
+const IMPORT_EXCEL_CLIENT_TAG = '[IMPORT_EXCEL_CLIENT]';
+
+function logImportExcelClient(stage: string, url: string, err: unknown) {
+  console.warn(IMPORT_EXCEL_CLIENT_TAG, stage, url, err instanceof Error ? err.message : err);
+}
+
+/**
+ * Khi `fetch` báo "Failed to fetch" — thường là lỗi mạng/CORS/mixed content, không phải lỗi JSON từ API.
+ * Server: nếu không thấy `[IMPORT_EXCEL] queued` trong log backend thì request chưa tới API.
+ */
+export function formatImportFetchFailureMessage(
+  stage: 'post_async' | 'poll_job' | 'post_sync',
+  url: string,
+  err: unknown,
+): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  const base = typeof window !== 'undefined' ? getApiBaseUrl() : '';
+  if (!/failed to fetch|networkerror|load failed/i.test(msg)) {
+    return msg;
+  }
+  const stepLabel =
+    stage === 'post_async'
+      ? 'POST …/import/excel/async (tải file)'
+      : stage === 'poll_job'
+        ? 'GET …/import/excel/job/{id} (poll tiến trình)'
+        : 'POST …/import/excel (đồng bộ)';
+  let corsHint = '';
+  if (typeof window !== 'undefined' && base && url) {
+    try {
+      const pageHost = window.location.hostname;
+      const apiHost = new URL(base).hostname;
+      if (
+        (pageHost === 'localhost' || pageHost === '127.0.0.1') &&
+        apiHost !== pageHost &&
+        apiHost !== ''
+      ) {
+        corsHint =
+          'Rất hay gặp: admin chạy trên localhost nhưng API trỏ domain production → trình duyệt chặn CORS → Failed to fetch. Cách xử lý: (1) Trên VPS: thêm http://localhost:3001,http://127.0.0.1:3001 vào BACKEND_CORS_ORIGINS trong .env backend rồi restart pm2; hoặc (2) dev full local: NEXT_PUBLIC_API_BASE_URL=http://localhost:8001/api/v1 và chạy FastAPI cổng 8001.';
+      }
+    } catch {
+      /* ignore URL parse */
+    }
+  }
+  return [
+    `Lỗi mạng tại: ${stepLabel}`,
+    `(${msg})`,
+    url ? `URL: ${url}` : '',
+    base ? `API đang dùng: ${base}` : '',
+    corsHint ||
+      'Hay gặp: trang HTTPS gọi nhầm http://localhost — dùng cùng host /api/v1. Kiểm tra nginx, pm2.',
+    'Trên server: pm2 logs … | findstr IMPORT_EXCEL — không có "queued" thì request chưa tới API (thường CORS/mạng).',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
 
 function getAdminToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -31,9 +88,10 @@ async function fetchAdmin<T>(endpoint: string, options: RequestInit = {}): Promi
   if (!token) {
     throw new Error('Chưa đăng nhập admin');
   }
-  const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
+  const url = endpoint.startsWith('http') ? endpoint : `${getApiBaseUrl()}${endpoint}`;
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
+    ...ngrokFetchHeaders(),
     ...(options.headers as Record<string, string>),
   };
   if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
@@ -182,6 +240,93 @@ export interface AdminSearchMappingCreateRequest {
   type: 'product_search' | 'category_redirect';
 }
 
+/** Upload multipart, chờ 202 + JSON — có xhr.upload progress (fetch không báo %). */
+function postImportExcelAsyncMultipart(
+  url: string,
+  token: string,
+  file: File,
+  onUploadProgress?: (loaded: number, total: number) => void,
+): Promise<{ job_id: string; message?: string; poll_url?: string }> {
+  const form = new FormData();
+  form.append('file', file);
+  const ng = ngrokFetchHeaders();
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.timeout = 35 * 60 * 1000;
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    Object.entries(ng).forEach(([k, v]) => {
+      if (v) xhr.setRequestHeader(k, v);
+    });
+
+    let lastLoaded = 0;
+    let lastActivity = Date.now();
+    /** Nếu không còn byte nào được gửi trong ~90s nhưng chưa xong → rất hay do nginx client_body_timeout (~60s). */
+    const stallIv = window.setInterval(() => {
+      if (xhr.readyState === XMLHttpRequest.DONE) {
+        clearInterval(stallIv);
+        return;
+      }
+      const idle = Date.now() - lastActivity;
+      if (idle >= 90000 && lastLoaded > 0 && lastLoaded < file.size) {
+        console.warn(
+          IMPORT_EXCEL_CLIENT_TAG,
+          'upload_idle — không có byte mới',
+          Math.round(idle / 1000),
+          's @',
+          Math.round((lastLoaded / file.size) * 100),
+          '% — kiểm tra nginx client_body_timeout / mạng',
+        );
+        lastActivity = Date.now();
+      }
+    }, 15000);
+
+    const cleanup = () => clearInterval(stallIv);
+
+    xhr.upload.onprogress = (ev) => {
+      lastLoaded = ev.loaded;
+      lastActivity = Date.now();
+      if (ev.lengthComputable && onUploadProgress && ev.total > 0) {
+        onUploadProgress(ev.loaded, ev.total);
+      }
+    };
+
+    xhr.onload = () => {
+      cleanup();
+      try {
+        const text = xhr.responseText || '';
+        const data = text ? (JSON.parse(text) as { detail?: unknown; job_id?: string }) : {};
+        if (xhr.status === 202 && data.job_id) {
+          resolve(data as { job_id: string; message?: string; poll_url?: string });
+          return;
+        }
+        const detail = formatFastApiDetail(data?.detail ?? data);
+        reject(new Error(detail || `Import lỗi ${xhr.status}`));
+      } catch {
+        reject(new Error(`Phản hồi không hợp lệ (${xhr.status})`));
+      }
+    };
+
+    xhr.onerror = () => {
+      cleanup();
+      logImportExcelClient('post_async', url, new Error('xhr network error'));
+      reject(new Error(formatImportFetchFailureMessage('post_async', url, new Error('Failed to fetch'))));
+    };
+
+    xhr.ontimeout = () => {
+      cleanup();
+      reject(
+        new Error(
+          'Hết thời gian chờ upload (35 phút). Kiểm tra mạng và nginx (proxy_read_timeout, client_max_body_size, client_body_timeout).',
+        ),
+      );
+    };
+
+    xhr.send(form);
+  });
+}
+
 export const adminProductAPI = {
   getProducts: (params?: { skip?: number; limit?: number; q?: string; product_id?: string }) => {
     const sp = new URLSearchParams();
@@ -206,12 +351,18 @@ export const adminProductAPI = {
     if (!token) throw new Error('Chưa đăng nhập admin');
     const form = new FormData();
     form.append('file', file);
-    const url = `${API_BASE}/import-export/import/excel?overwrite=${overwrite}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
-    });
+    const url = `${getApiBaseUrl()}/import-export/import/excel?overwrite=${overwrite}`;
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+        body: form,
+      });
+    } catch (err) {
+      logImportExcelClient('post_sync', url, err);
+      throw new Error(formatImportFetchFailureMessage('post_sync', url, err));
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
       throw new Error(formatFastApiDetail(err?.detail ?? err) || `Import lỗi ${res.status}`);
@@ -219,38 +370,48 @@ export const adminProductAPI = {
     return res.json();
   },
 
-  /** Import lớn: server trả 202 + job_id; dùng getImportExcelJob để poll tiến trình. */
-  startImportExcelAsync: async (file: File, overwrite = false) => {
+  /**
+   * Import lớn: server trả 202 + job_id; dùng getImportExcelJob để poll tiến trình.
+   * Dùng XMLHttpRequest để có tiến trình upload (loaded/total); fetch không có %.
+   */
+  startImportExcelAsync: async (
+    file: File,
+    overwrite = false,
+    onUploadProgress?: (loaded: number, total: number) => void,
+  ) => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
-    const form = new FormData();
-    form.append('file', file);
-    const url = `${API_BASE}/import-export/import/excel/async?overwrite=${overwrite}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
+    const url = `${getApiBaseUrl()}/import-export/import/excel/async?overwrite=${overwrite}`;
+    console.info('[IMPORT_EXCEL_CLIENT]', 'post_async_start', {
+      url,
+      file: file.name,
+      bytes: file.size,
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      const detail = formatFastApiDetail(err?.detail ?? err);
-      throw new Error(detail || `Import lỗi ${res.status}`);
-    }
-    if (res.status !== 202) {
-      throw new Error('Server không trả job import (thiếu 202)');
-    }
-    const body = await res.json();
-    return body as { job_id: string; message: string; poll_url?: string };
+    return postImportExcelAsyncMultipart(url, token, file, onUploadProgress);
   },
 
-  getImportExcelJob: (jobId: string) =>
-    fetchAdmin<AdminImportExcelJob>(`/import-export/import/excel/job/${encodeURIComponent(jobId)}`),
+  getImportExcelJob: async (jobId: string) => {
+    const ep = `/import-export/import/excel/job/${encodeURIComponent(jobId)}`;
+    const url = `${getApiBaseUrl()}${ep}`;
+    try {
+      return await fetchAdmin<AdminImportExcelJob>(ep);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/failed to fetch|networkerror|load failed/i.test(msg)) {
+        logImportExcelClient('poll_job', url, err);
+        throw new Error(formatImportFetchFailureMessage('poll_job', url, err));
+      }
+      throw err;
+    }
+  },
 
   exportExcel: async () => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
-    const url = `${API_BASE}/import-export/export/excel?download=true`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const url = `${getApiBaseUrl()}/import-export/export/excel?download=true`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+    });
     if (!res.ok) throw new Error('Export thất bại');
     const blob = await res.blob();
     const disposition = res.headers.get('Content-Disposition');
@@ -267,8 +428,10 @@ export const adminProductAPI = {
   downloadSampleTemplate: async () => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
-    const url = `${API_BASE}/import-export/download/sample`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const url = `${getApiBaseUrl()}/import-export/download/sample`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+    });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
       throw new Error(err.detail || 'Tải file mẫu thất bại');
@@ -519,10 +682,10 @@ export const adminProductQuestionsAPI = {
     if (!token) throw new Error('Chưa đăng nhập admin');
     const form = new FormData();
     form.append('file', file);
-    const url = `${API_BASE}/product-questions/admin/import/excel`;
+    const url = `${getApiBaseUrl()}/product-questions/admin/import/excel`;
     const res = await fetch(url, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
       body: form,
     });
     if (!res.ok) {
@@ -536,9 +699,9 @@ export const adminProductQuestionsAPI = {
   downloadSampleExcel: async () => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
-    const url = `${API_BASE}/product-questions/admin/export/sample`;
+    const url = `${getApiBaseUrl()}/product-questions/admin/export/sample`;
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
     });
     if (!res.ok) throw new Error('Không tải được file mẫu');
     const blob = await res.blob();
@@ -599,10 +762,10 @@ export const adminProductReviewsAPI = {
     if (!token) throw new Error('Chưa đăng nhập admin');
     const form = new FormData();
     form.append('file', file);
-    const url = `${API_BASE}/product-reviews/admin/import/excel`;
+    const url = `${getApiBaseUrl()}/product-reviews/admin/import/excel`;
     const res = await fetch(url, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
       body: form,
     });
     if (!res.ok) {
@@ -615,9 +778,9 @@ export const adminProductReviewsAPI = {
   downloadSampleExcel: async () => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
-    const url = `${API_BASE}/product-reviews/admin/export/sample`;
+    const url = `${getApiBaseUrl()}/product-reviews/admin/export/sample`;
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
     });
     if (!res.ok) throw new Error('Không tải được file mẫu');
     const blob = await res.blob();
@@ -648,9 +811,9 @@ export const adminLoyaltyAPI = {
 };
 
 export async function adminLogin(username: string, password: string) {
-  const res = await fetch(`${API_BASE}/admin/login`, {
+  const res = await fetch(`${getApiBaseUrl()}/admin/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...ngrokFetchHeaders() },
     body: JSON.stringify({ username, password }),
   });
   if (!res.ok) {

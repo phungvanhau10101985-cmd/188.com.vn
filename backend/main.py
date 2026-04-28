@@ -251,9 +251,12 @@ async def startup_event():
             print(f"   📤 {path}")
     
     print("\n📌 IMPORTANT ENDPOINTS TO TEST:")
-    print("   POST   /api/v1/import-export/import/excel")
+    print("   POST   /api/v1/import-export/import/excel          (đồng bộ, cần Bearer admin)")
+    print("   POST   /api/v1/import-export/import/excel/async    (202 + job_id)")
+    print("   GET    /api/v1/import-export/import/excel/job/{job_id}")
     print("   GET    /api/v1/import-export/export/excel")
     print("   GET    /api/v1/import-export/export/sample")
+    print("   GET    /api/v1/import-export/download/sample       (file mẫu import — UI admin)")
     print("   GET    /api/v1/import-export/download/latest-export")
     
     from app.core.config import settings as _startup_settings
@@ -310,10 +313,13 @@ async def api_v1_root():
         "status": "active",
         "endpoints": {
             "import_export": {
-                "import": "POST /api/v1/import-export/import/excel",
+                "import_sync": "POST /api/v1/import-export/import/excel",
+                "import_async": "POST /api/v1/import-export/import/excel/async",
+                "import_job": "GET /api/v1/import-export/import/excel/job/{job_id}",
                 "export": "GET /api/v1/import-export/export/excel",
                 "sample": "GET /api/v1/import-export/export/sample",
-                "latest": "GET /api/v1/import-export/download/latest-export"
+                "template_download": "GET /api/v1/import-export/download/sample",
+                "latest": "GET /api/v1/import-export/download/latest-export",
             },
             "products": "GET /api/v1/products",
             "categories": "GET /api/v1/categories",

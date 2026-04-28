@@ -106,7 +106,7 @@ export default async function RootLayout({
         {/* GA4 / GTM / Pixel / Zalo: cấu hình tại /admin/embed-codes */}
       </head>
       
-      <body className="antialiased font-sans bg-[#fafafa] text-gray-900 min-h-screen">
+      <body className="antialiased font-sans bg-[#fafafa] text-gray-900 min-h-screen" suppressHydrationWarning>
         <SiteEmbedsRoot embeds={siteEmbeds} />
         {/* Global Providers + Header/Footer xuyên suốt */}
         <ToastProvider>

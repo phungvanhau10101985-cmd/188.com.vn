@@ -362,6 +362,14 @@ async def import_excel_async(
             detail="Chỉ hỗ trợ file Excel (.xlsx, .xls).",
         )
 
+    # Log TRƯỚC khi đọc body — nếu không thấy dòng này thì request chưa vào handler (nginx/CORS/mạng).
+    logger.info(
+        "%s async_accept filename=%s overwrite=%s (next: read upload body)",
+        IMPORT_EXCEL_LOG_PREFIX,
+        file.filename,
+        overwrite,
+    )
+
     temp_dir = "temp_uploads"
     os.makedirs(temp_dir, exist_ok=True)
 

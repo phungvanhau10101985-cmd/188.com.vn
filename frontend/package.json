@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3001",
+    "dev": "node scripts/next-dev.cjs",
     "build": "next build",
-    "start": "next start",
+    "start": "node scripts/next-start.cjs",
     "lint": "next lint",
     "clear-cache": "node -e \"const fs=require('fs');['.next','node_modules/.cache'].forEach(p=>{try{fs.rmSync(p,{recursive:true,force:true})}catch(e){}})\"",
     "type-check": "tsc --noEmit",

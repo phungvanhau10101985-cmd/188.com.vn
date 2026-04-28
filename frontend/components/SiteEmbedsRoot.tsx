@@ -1,6 +1,6 @@
 'use client';
 
-import { useLayoutEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import type { PublicSiteEmbeds } from '@/lib/site-embeds-public';
 
 function appendFragment(target: ParentNode, html: string) {
@@ -26,11 +26,15 @@ function prependBodyFragment(html: string) {
   }
 }
 
-/** Chèn mã từ /admin/embed-codes (đã SSR fetch) vào head/body một lần */
+/**
+ * Chèn mã từ /admin/embed-codes (đã SSR fetch) vào head/body một lần.
+ * Dùng useEffect (không dùng useLayoutEffect): chèn sau khi React hydrate xong.
+ * Nếu chèn trước, DOM trong <body> lệch thứ tự (vd. GTM có <input>) → lỗi hydration Suspense.
+ */
 export default function SiteEmbedsRoot({ embeds }: { embeds: PublicSiteEmbeds }) {
   const initial = useRef(embeds);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const win = typeof window !== 'undefined' ? (window as Window & { __188_SITE_EMBEDS__?: boolean }) : null;
     if (!win || win.__188_SITE_EMBEDS__) return;
     win.__188_SITE_EMBEDS__ = true;
