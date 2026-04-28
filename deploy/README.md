@@ -8,7 +8,7 @@
 
 ## 2. Trên VPS
 
-1. Cài **PostgreSQL**, tạo DB/user (xem `postgres-init.sql.example`). Nếu log API báo **`FATAL: database "188comvn" does not exist`**: trên VPS chạy **`sudo bash deploy/postgres-create-db.sh`** (hoặc `sudo -u postgres psql -c "CREATE DATABASE 188comvn;"`), rồi `cd backend && source .venv/bin/activate && python -c "from main import init_database_tables; init_database_tables()"` và **`pm2 restart 188-api`**.
+1. Cài **PostgreSQL**, tạo DB/user (xem `postgres-init.sql.example`). Script **`deploy/update-vps.sh`** (mặc định) sẽ **tự tạo database PostgreSQL** nếu đọc `DATABASE_URL` trỏ tới Postgres (tên DB lấy sau path, vd. `188comvn`), rồi chạy **`init_database_tables()`** (tạo bảng + **`run_migrations()`**). Tuỳ chọn: `DEPLOY_SKIP_DB_INIT=1` (bỏ qua toàn bộ bước DB), `DEPLOY_CREATE_DATABASE=0` (chỉ không gọi `postgres-create-db.sh`, vẫn chạy migrations), `DEPLOY_STRICT_DB_INIT=0` (lỗi DB không dừng script deploy). Nếu log API báo **`FATAL: database "…" does not exist`** mà chưa chạy script: tạo tay hoặc **`sudo bash deploy/postgres-create-db.sh`** (cần `sudo -u postgres`).
 2. (Tùy chọn) **Redis** — `redis-notes.txt`.
 3. Clone repo, chạy **`bash deploy/prepare-vps.sh`** từ root project (Linux).
 4. Lần đầu chạy API: bảng được tạo qua `init_database_tables()` trong `main.py` (và migration trong `app/db/migrations.py`).

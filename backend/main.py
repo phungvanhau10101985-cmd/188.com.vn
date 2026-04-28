@@ -55,7 +55,8 @@ app.add_middleware(CORSMiddleware, **_cors_kwargs)
 
 # ========== DATABASE INITIALIZATION ==========
 def init_database_tables():
-    """Tạo database tables nếu chưa có"""
+    """Tạo database tables nếu chưa có."""
+    strict = os.getenv("DEPLOY_STRICT_DB_INIT", "").strip().lower() in ("1", "true", "yes")
     try:
         from sqlalchemy import create_engine
         from app.db.base import Base
@@ -87,6 +88,8 @@ def init_database_tables():
             run_migrations()
         except Exception as mig_err:
             print(f"⚠️  Migrations warning: {mig_err}")
+            if strict:
+                raise
         try:
             from app.db.session import SessionLocal
             from app.crud.site_embed_code import ensure_default_embed_codes
@@ -103,6 +106,8 @@ def init_database_tables():
     except Exception as e:
         print(f"⚠️  Database initialization warning: {e}")
         print("   Some features may not work without proper database setup.")
+        if strict:
+            raise RuntimeError(f"DEPLOY_STRICT_DB_INIT: database init failed: {e}") from e
 
 # ========== LOAD API ROUTES ==========
 def load_api_routes():

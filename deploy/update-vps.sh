@@ -12,6 +12,9 @@
 #   WEB_INTERNAL_PORT             (mặc định 3001 — Next start)
 #   DEPLOY_RESTART_PM2=0          bỏ qua pm2 restart sau build
 #   DEPLOY_STRICT_HEALTH=1        exit 1 nếu curl health không 200
+#   DEPLOY_SKIP_DB_INIT=1         không tạo DB / không chạy init_database_tables + migrations
+#   DEPLOY_CREATE_DATABASE=0      không gọi postgres-create-db.sh (DB đã có sẵn)
+#   DEPLOY_STRICT_DB_INIT=0       nếu khởi tạo DB lỗi vẫn tiếp tục deploy (mặc định bật strict từ script)
 #
 set -euo pipefail
 
@@ -25,6 +28,32 @@ PM2_API="${PM2_API_NAME:-188-api}"
 PM2_WEB="${PM2_WEB_NAME:-188-web}"
 API_INTERNAL_PORT="${API_INTERNAL_PORT:-8001}"
 WEB_INTERNAL_PORT="${WEB_INTERNAL_PORT:-3001}"
+
+ensure_postgres_database_for_deploy() {
+  [[ "${DEPLOY_CREATE_DATABASE:-1}" == "1" ]] || return 0
+  local envf="${BACKEND}/.env"
+  if [[ ! -f "$envf" ]]; then
+    echo "    (Không có backend/.env — bỏ qua tạo database PostgreSQL)"
+    return 0
+  fi
+  local raw
+  raw=$(grep -m1 '^DATABASE_URL=' "$envf" | cut -d= -f2- | tr -d '\r')
+  raw="${raw#\"}"
+  raw="${raw%\"}"
+  raw="${raw#\'}"
+  raw="${raw%\'}"
+  case "$raw" in
+    postgresql:*|postgres:*|postgresql+*) ;;
+    *) return 0 ;;
+  esac
+  local tail="${raw##*/}"
+  local dbname="${tail%%\?*}"
+  if [[ -z "$dbname" ]] || [[ "$dbname" == "$raw" ]]; then
+    return 0
+  fi
+  echo "    PostgreSQL → tạo database nếu chưa có: ${dbname}"
+  POSTGRES_DB_NAME="$dbname" bash "${PROJECT_ROOT}/deploy/postgres-create-db.sh"
+}
 
 cd "${PROJECT_ROOT}"
 
@@ -48,9 +77,13 @@ pip install -r "${BACKEND}/requirements.txt"
 
 cd "${BACKEND}"
 if [[ "${DEPLOY_SKIP_DB_INIT:-0}" != "1" ]]; then
-  set +e
-  python -c "from main import init_database_tables; init_database_tables()"
-  set -e
+  echo "==> Database: tạo DB (PostgreSQL) + bảng mới + migrations (trước khi build frontend)"
+  ensure_postgres_database_for_deploy
+  # Chỉ áp strict cho subprocess này — không để vào .env/server (tránh uvicorn exit khi lỗi DB)
+  DEPLOY_STRICT_DB_INIT="${DEPLOY_STRICT_DB_INIT:-1}" \
+    python -c "from main import init_database_tables; init_database_tables()"
+else
+  echo "==> Database: DEPLOY_SKIP_DB_INIT=1 — bỏ qua."
 fi
 deactivate
 
