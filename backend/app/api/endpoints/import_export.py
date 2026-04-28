@@ -272,12 +272,13 @@ async def export_excel(
         from app.crud.product import get_products, get_all_products_for_export
         
         if category or subcategory:
+            export_cap = max(1, int(getattr(settings, "MAX_EXCEL_IMPORT_ROWS", 30000) or 30000))
             result = get_products(
-                db, 
+                db,
                 category=category,
                 subcategory=subcategory,
                 is_active=is_active,
-                limit=10000
+                limit=export_cap,
             )
             products_data = result.get("products", [])
             print(f"📊 Lọc theo: category={category}, subcategory={subcategory}")

@@ -14,8 +14,9 @@ from app.crud.product import (
     bulk_import_products,
     get_all_products_for_export,
     get_category_final_mappings,
-    apply_category_final_mapping_to_product
+    apply_category_final_mapping_to_product,
 )
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +39,18 @@ class ExcelImporter:
             
             if df.empty:
                 return {"error": "File Excel trống hoặc không có dữ liệu"}
-            
-            logger.info(f"✅ Đọc được {len(df)} dòng, {len(df.columns)} cột")
+
+            max_rows = int(getattr(settings, "MAX_EXCEL_IMPORT_ROWS", 30000) or 30000)
+            row_count = len(df)
+            if row_count > max_rows:
+                return {
+                    "error": (
+                        f"File có {row_count:,} dòng — vượt giới hạn một lần ({max_rows:,} dòng). "
+                        "Chia nhỏ file Excel hoặc tăng MAX_EXCEL_IMPORT_ROWS trong backend/.env (không khuyến nghị)."
+                    ),
+                }
+
+            logger.info(f"✅ Đọc được {row_count} dòng, {len(df.columns)} cột")
             
             df.columns = [str(col).strip() for col in df.columns]
             logger.info(f"📋 Các cột trong file: {list(df.columns)}")

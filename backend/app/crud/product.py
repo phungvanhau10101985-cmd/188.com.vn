@@ -13,6 +13,7 @@ import logging
 import json
 import time
 from datetime import datetime
+from app.core.config import settings
 from app.utils.vietnamese import (
     normalize_for_search_no_accent,
     VIETNAMESE_ACCENT_MAP,
@@ -1429,9 +1430,15 @@ def bulk_import_products(db: Session, products_data: List[Dict]):
     updated = 0
     errors = []
     warnings = []
-    
-    BATCH_SIZE = 50
-    
+
+    batch_size = max(
+        1,
+        min(
+            int(getattr(settings, "EXCEL_IMPORT_COMMIT_BATCH_SIZE", 250) or 250),
+            500,
+        ),
+    )
+
     for idx, product_data in enumerate(products_data):
         try:
             product_id = product_data.get('product_id')
@@ -1465,8 +1472,8 @@ def bulk_import_products(db: Session, products_data: List[Dict]):
                 created += 1
                 logger.debug(f"➕ Created product: {product_id}")
             
-            # Batch commit
-            if (idx + 1) % BATCH_SIZE == 0:
+            # Batch commit (lô lớn hơn khi import ~30k dòng để giảm số transaction)
+            if (idx + 1) % batch_size == 0:
                 db.commit()
                 logger.info(f"💾 Batch commit: {idx + 1} products")
                 

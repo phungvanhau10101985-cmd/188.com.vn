@@ -255,6 +255,9 @@ class Settings:
         self.UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "app/static/uploads")
         self.MAX_UPLOAD_SIZE_MB: int = int(os.getenv("MAX_UPLOAD_SIZE_MB", "10"))
         self.ALLOWED_EXTENSIONS: List[str] = os.getenv("ALLOWED_EXTENSIONS", "jpg,jpeg,png,gif,pdf,xlsx,xls").split(",")
+        # Import Excel: tối đa số dòng/lần (mặc định 30k); commit DB theo lô để giảm overhead transaction
+        self.MAX_EXCEL_IMPORT_ROWS: int = int(os.getenv("MAX_EXCEL_IMPORT_ROWS", "30000"))
+        self.EXCEL_IMPORT_COMMIT_BATCH_SIZE: int = int(os.getenv("EXCEL_IMPORT_COMMIT_BATCH_SIZE", "250"))
         
         # ========================
         # CORS CONFIGURATION
