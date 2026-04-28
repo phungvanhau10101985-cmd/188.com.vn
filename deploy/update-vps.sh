@@ -82,9 +82,19 @@ fi
 health_check_local() {
   echo ""
   echo "==> Kiểm tra sức khỏe service (localhost, sau PM2 restart)"
-  local api_code web_code
-  api_code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${API_INTERNAL_PORT}/health" 2>/dev/null || echo "000")
-  web_code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${WEB_INTERNAL_PORT}/" 2>/dev/null || echo "000")
+  local api_code="000" web_code
+  # Uvicorn đôi khi cần >3s sau pm2 restart (import SQLAlchemy, DB…). Thử lại tối đa ~20s.
+  local _i
+  for _i in $(seq 1 20); do
+    api_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 \
+      "http://127.0.0.1:${API_INTERNAL_PORT}/health" 2>/dev/null || echo "000")
+    if [[ "${api_code}" == "200" ]]; then
+      break
+    fi
+    sleep 1
+  done
+  web_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 \
+    "http://127.0.0.1:${WEB_INTERNAL_PORT}/" 2>/dev/null || echo "000")
   echo "    GET http://127.0.0.1:${API_INTERNAL_PORT}/health  → ${api_code}"
   echo "    GET http://127.0.0.1:${WEB_INTERNAL_PORT}/           → ${web_code}"
   if [[ "${api_code}" == "200" && "${web_code}" == "200" ]]; then
@@ -92,6 +102,10 @@ health_check_local() {
     return 0
   fi
   echo "⚠️  Sức khỏe bất thường — xem: pm2 logs ${PM2_API} | pm2 logs ${PM2_WEB}"
+  if [[ "${api_code}" != "200" ]]; then
+    echo "    Gợi ý API: đảm bảo backend lắng nghe cổng ${API_INTERNAL_PORT} (SERVER_PORT=${API_INTERNAL_PORT} trong backend/.env hoặc"
+    echo "    args uvicorn: --port ${API_INTERNAL_PORT}). Kiểm tra: pm2 show ${PM2_API} | ss -tlnp | grep -E ':${API_INTERNAL_PORT}\\b'"
+  fi
   [[ "${DEPLOY_STRICT_HEALTH:-0}" == "1" ]] && return 1
   return 0
 }

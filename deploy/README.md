@@ -8,7 +8,7 @@
 
 ## 2. Trên VPS
 
-1. Cài **PostgreSQL**, tạo DB/user (xem `postgres-init.sql.example`).
+1. Cài **PostgreSQL**, tạo DB/user (xem `postgres-init.sql.example`). Nếu log API báo **`FATAL: database "188comvn" does not exist`**: trên VPS chạy **`sudo bash deploy/postgres-create-db.sh`** (hoặc `sudo -u postgres psql -c "CREATE DATABASE 188comvn;"`), rồi `cd backend && source .venv/bin/activate && python -c "from main import init_database_tables; init_database_tables()"` và **`pm2 restart 188-api`**.
 2. (Tùy chọn) **Redis** — `redis-notes.txt`.
 3. Clone repo, chạy **`bash deploy/prepare-vps.sh`** từ root project (Linux).
 4. Lần đầu chạy API: bảng được tạo qua `init_database_tables()` trong `main.py` (và migration trong `app/db/migrations.py`).
@@ -29,6 +29,19 @@ Script sẽ **tự `pm2 restart`** (nếu đã có `188-api` / `188-web`) và **
 Lệnh không dùng `pm2 stop all` (tránh làm nanoai). Đặt biến `PM2_API_NAME` / `PM2_WEB_NAME` nếu tên PM2 khác `188-api` / `188-web`.
 
 **Cùng VPS với site khác (vd. nanoai.vn):** nanoai thường chiếm Next **`3000`** — chạy 188 với **`PORT=3001`** (hoặc cổng trống khác). API 188 dùng cổng **không trùng** API đang có (vd. `8001` nếu `8000` là nanoai). Chi tiết bảng cổng và Nginx: **`HUONG_DAN_DEPLOY.md` → Phần 4, mục “Cùng VPS với nanoai.vn”**.
+
+### Health check API trả `000` (không kết nối được)
+
+- Script coi **`curl` → `000`** là không mở được TCP tới cổng đó (khác với HTTP 502/503).
+- **`188-web` = 200** mà **`188-api` = 000**: thường do **PM2 vẫn chạy uvicorn cổng cũ** (vd. 8000) trong khi kiểm tra **8001**.
+- Sửa một lần trên VPS:
+
+  1. `grep SERVER_PORT /var/www/188.com.vn/backend/.env` → nên là **`SERVER_PORT=8001`** (hoặc khớp `API_INTERNAL_PORT`).
+  2. `pm2 show 188-api` → xem **`script args`** / cwd: phải có `--port 8001` **hoặc** biến môi trường tương đương khi khởi động.
+  3. Cập nhật lệnh start rồi: `pm2 restart 188-api --update-env` và `pm2 save`.
+  4. Xác nhận: `ss -tlnp | grep 8001` và `curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8001/health`.
+
+- Nếu vẫn lỗi: `pm2 logs 188-api --lines 80` (lỗi import DB, thiếu `.env`, v.v.).
 
 ## 3. Tài liệu liên quan
 
