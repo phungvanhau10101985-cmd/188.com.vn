@@ -1,0 +1,881 @@
+'use client';
+
+import { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
+import AdminLayout from '@/components/admin/AdminLayout';
+import { apiClient } from '@/lib/api-client';
+import type { CategoryLevel1, CategoryLevel2, CategoryLevel3 } from '@/types/api';
+
+type TabType = 'list' | 'move-down' | 'move-up' | 'merge-level2' | 'merge-level3';
+
+interface FlatCategory {
+  level: 1 | 2 | 3;
+  name: string;
+  slug: string;
+  path: string;
+  url: string;
+  fullName: string;
+}
+
+function slugOf(node: { name: string; slug?: string }): string {
+  return (node.slug || node.name).toString().trim().toLowerCase().replace(/\s+/g, '-');
+}
+
+function flattenTree(tree: CategoryLevel1[]): FlatCategory[] {
+  const out: FlatCategory[] = [];
+  for (const c1 of tree) {
+    const s1 = slugOf(c1);
+    out.push({
+      level: 1,
+      name: c1.name,
+      slug: s1,
+      path: s1,
+      url: `/danh-muc/${s1}`,
+      fullName: c1.name,
+    });
+    for (const c2 of c1.children || []) {
+      const s2 = slugOf(c2);
+      const path2 = `${s1}/${s2}`;
+      out.push({
+        level: 2,
+        name: c2.name,
+        slug: s2,
+        path: path2,
+        url: `/danh-muc/${path2}`,
+        fullName: `${c1.name} › ${c2.name}`,
+      });
+      const children3 = c2.children || [];
+      for (const c3 of children3) {
+        const name3 = typeof c3 === 'object' && c3 !== null && 'name' in c3 ? (c3 as CategoryLevel3).name : String(c3);
+        const s3 = typeof c3 === 'object' && c3 !== null && 'slug' in c3 ? ((c3 as CategoryLevel3).slug || name3) : name3;
+        const s3Norm = String(s3).trim().toLowerCase().replace(/\s+/g, '-');
+        const path3 = `${path2}/${s3Norm}`;
+        out.push({
+          level: 3,
+          name: name3,
+          slug: s3Norm,
+          path: path3,
+          url: `/danh-muc/${path3}`,
+          fullName: `${c1.name} › ${c2.name} › ${name3}`,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+type RedirectItem = { from: string; to: string; source_name: string; canonical_name: string };
+
+export default function AdminDanhMucSeoPage() {
+  const [tree, setTree] = useState<CategoryLevel1[]>([]);
+  const [redirects, setRedirects] = useState<RedirectItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState<TabType>('list');
+  
+  // State cho form chuyển cấp 2 xuống cấp 3
+  const [moveDownForm, setMoveDownForm] = useState({
+    category: '',
+    subcategory: '',
+    target_subcategory: '',
+    new_name: ''
+  });
+  
+  // State cho form chuyển cấp 3 lên cấp 2
+  const [moveUpForm, setMoveUpForm] = useState({
+    category: '',
+    subcategory: '',
+    sub_subcategory: '',
+    new_name: ''
+  });
+  
+  // State cho form gộp cấp 2
+  const [mergeLevel2Form, setMergeLevel2Form] = useState({
+    category: '',
+    source_subcategories: [] as string[],
+    target_subcategory: ''
+  });
+  
+  // State cho form gộp cấp 3
+  const [mergeLevel3Form, setMergeLevel3Form] = useState({
+    category: '',
+    subcategory: '',
+    source_sub_subcategories: [] as string[],
+    target_sub_subcategory: ''
+  });
+  
+  const [processing, setProcessing] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // Tính năng scan/gộp tự động intent SEO đã tắt hoàn toàn.
+
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [treeData, redirectData] = await Promise.all([
+        apiClient.getCategoryTreeFromProducts(),
+        apiClient.getCategorySeoRedirects(),
+      ]);
+      setTree(Array.isArray(treeData) ? treeData : []);
+      setRedirects(redirectData.redirects || []);
+    } catch {
+      setError('Không tải được danh mục');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  // Helper: Lấy danh sách level 1 categories
+  const level1Categories = useMemo(() => {
+    return tree.map(c => c.name);
+  }, [tree]);
+
+  // Helper: Lấy danh sách level 2 categories theo level 1
+  const getLevel2Categories = (categoryName: string) => {
+    const cat = tree.find(c => c.name === categoryName);
+    return cat?.children?.map(c => c.name) || [];
+  };
+
+  // Helper: Lấy danh sách level 3 categories theo level 1 và level 2
+  const getLevel3Categories = (categoryName: string, subcategoryName: string) => {
+    const cat = tree.find(c => c.name === categoryName);
+    const subcat = cat?.children?.find(c => c.name === subcategoryName);
+    return (subcat?.children || []).map(c => 
+      typeof c === 'object' && c !== null && 'name' in c ? c.name : String(c)
+    );
+  };
+
+  // Handle move level 2 to level 3
+  const handleMoveDown = async () => {
+    if (!moveDownForm.category || !moveDownForm.subcategory || !moveDownForm.target_subcategory) {
+      alert('Vui lòng điền đầy đủ thông tin');
+      return;
+    }
+
+    setProcessing(true);
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      const result = await apiClient.moveLevel2ToLevel3({
+        category: moveDownForm.category,
+        subcategory: moveDownForm.subcategory,
+        target_subcategory: moveDownForm.target_subcategory,
+        new_sub_subcategory_name: moveDownForm.new_name || undefined
+      });
+
+      setSuccessMessage(`✅ ${result.message} - Đã cập nhật ${result.products_updated} sản phẩm`);
+      setMoveDownForm({ category: '', subcategory: '', target_subcategory: '', new_name: '' });
+      await loadData();
+    } catch (err: any) {
+      setError(err.message || 'Có lỗi xảy ra');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Handle move level 3 to level 2
+  const handleMoveUp = async () => {
+    if (!moveUpForm.category || !moveUpForm.subcategory || !moveUpForm.sub_subcategory) {
+      alert('Vui lòng điền đầy đủ thông tin');
+      return;
+    }
+
+    setProcessing(true);
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      const result = await apiClient.moveLevel3ToLevel2({
+        category: moveUpForm.category,
+        subcategory: moveUpForm.subcategory,
+        sub_subcategory: moveUpForm.sub_subcategory,
+        new_subcategory_name: moveUpForm.new_name || undefined
+      });
+
+      setSuccessMessage(`✅ ${result.message} - Đã cập nhật ${result.products_updated} sản phẩm`);
+      setMoveUpForm({ category: '', subcategory: '', sub_subcategory: '', new_name: '' });
+      await loadData();
+    } catch (err: any) {
+      setError(err.message || 'Có lỗi xảy ra');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Handle merge level 2
+  const handleMergeLevel2 = async () => {
+    if (!mergeLevel2Form.category || mergeLevel2Form.source_subcategories.length === 0 || !mergeLevel2Form.target_subcategory) {
+      alert('Vui lòng điền đầy đủ thông tin và chọn ít nhất 1 danh mục nguồn');
+      return;
+    }
+
+    setProcessing(true);
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      const result = await apiClient.mergeLevel2Categories({
+        category: mergeLevel2Form.category,
+        source_subcategories: mergeLevel2Form.source_subcategories,
+        target_subcategory: mergeLevel2Form.target_subcategory
+      });
+
+      setSuccessMessage(`✅ ${result.message} - Đã cập nhật ${result.products_updated} sản phẩm`);
+      setMergeLevel2Form({ category: '', source_subcategories: [], target_subcategory: '' });
+      await loadData();
+    } catch (err: any) {
+      setError(err.message || 'Có lỗi xảy ra');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Handle merge level 3
+  const handleMergeLevel3 = async () => {
+    if (!mergeLevel3Form.category || !mergeLevel3Form.subcategory || mergeLevel3Form.source_sub_subcategories.length === 0 || !mergeLevel3Form.target_sub_subcategory) {
+      alert('Vui lòng điền đầy đủ thông tin và chọn ít nhất 1 danh mục nguồn');
+      return;
+    }
+
+    setProcessing(true);
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      const result = await apiClient.mergeLevel3Categories({
+        category: mergeLevel3Form.category,
+        subcategory: mergeLevel3Form.subcategory,
+        source_sub_subcategories: mergeLevel3Form.source_sub_subcategories,
+        target_sub_subcategory: mergeLevel3Form.target_sub_subcategory
+      });
+
+      setSuccessMessage(`✅ ${result.message} - Đã cập nhật ${result.products_updated} sản phẩm`);
+      setMergeLevel3Form({ category: '', subcategory: '', source_sub_subcategories: [], target_sub_subcategory: '' });
+      await loadData();
+    } catch (err: any) {
+      setError(err.message || 'Có lỗi xảy ra');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Toggle category selection for merge
+  const toggleCategorySelection = (list: string[], item: string) => {
+    return list.includes(item) ? list.filter(x => x !== item) : [...list, item];
+  };
+
+  const redirectMap = useMemo(() => {
+    const m = new Map<string, string>();
+    redirects.forEach((r) => m.set(r.from, r.to));
+    return m;
+  }, [redirects]);
+
+  const flat = useMemo(() => flattenTree(tree), [tree]);
+  const filtered = useMemo(() => {
+    if (!search.trim()) return flat;
+    const q = search.trim().toLowerCase();
+    return flat.filter(
+      (row) =>
+        row.name.toLowerCase().includes(q) ||
+        row.fullName.toLowerCase().includes(q) ||
+        row.path.toLowerCase().includes(q)
+    );
+  }, [flat, search]);
+
+  return (
+    <AdminLayout>
+      <div className="p-6">
+        <h1>Test</h1>
+      </div>
+    </AdminLayout>
+  );
+}
+
+        {/* Tabs */}
+        <div className="mb-6 border-b border-gray-200">
+          <nav className="-mb-px flex space-x-8">
+            <button
+              onClick={() => setActiveTab('list')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'list'
+                  ? 'border-[#ea580c] text-[#ea580c]'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Danh sách danh mục
+            </button>
+            <button
+              onClick={() => setActiveTab('move-down')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'move-down'
+                  ? 'border-[#ea580c] text-[#ea580c]'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Chuyển cấp 2 → cấp 3
+            </button>
+            <button
+              onClick={() => setActiveTab('move-up')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'move-up'
+                  ? 'border-[#ea580c] text-[#ea580c]'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Chuyển cấp 3 → cấp 2
+            </button>
+            <button
+              onClick={() => setActiveTab('merge-level2')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'merge-level2'
+                  ? 'border-[#ea580c] text-[#ea580c]'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Gộp danh mục cấp 2
+            </button>
+            <button
+              onClick={() => setActiveTab('merge-level3')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'merge-level3'
+                  ? 'border-[#ea580c] text-[#ea580c]'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Gộp danh mục cấp 3
+            </button>
+          </nav>
+        </div>
+
+        {/* Success/Error Messages */}
+        {successMessage && (
+          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg text-green-800">
+            {successMessage}
+          </div>
+        )}
+        {error && activeTab !== 'list' && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800">
+            {error}
+          </div>
+        )}
+        {loading ? (
+          <p className="text-gray-500">Đang tải...</p>
+        ) : (
+          <>
+            {/* Tab: Danh sách danh mục */}
+            {activeTab === 'list' && (
+              <>
+                <div className="mb-6 space-y-3">
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-800">
+                    <strong>Ý nghĩa bảng (chiến lược hợp nhất URL)</strong>
+                    <ul className="mt-2 list-disc list-inside space-y-1">
+                      <li><strong>→ 301 → …</strong> = URL này bị &quot;khai tử&quot;, toàn bộ sức mạnh SEO/backlink/index dồn sang URL đích. Google chỉ công nhận trang đích. Trang bị 301 không nên SEO lại.</li>
+                      <li><strong>Canonical</strong> = Trang vẫn tồn tại, là bản gốc; Google ưu tiên index trang này. Dùng khi category chính, không trùng intent.</li>
+                      <li><strong>Mục tiêu:</strong> 1 ý định tìm kiếm = 1 URL mạnh duy nhất.</li>
+                    </ul>
+                  </div>
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">
+                    <strong>Cách dùng:</strong> Hệ thống đã <strong>tắt</strong> phân tích ý định SEO và gộp sản phẩm tự động.
+                    Bảng dưới chỉ dùng để xem danh sách URL danh mục và mở trang. Nếu cần redirect/canonical/noindex,
+                    hãy cấu hình thủ công trong bảng mapping (hoặc qua backend) và chỉnh sửa danh mục sản phẩm bằng tay.
+                  </div>
+                </div>
+
+                <div className="mb-4 flex flex-wrap items-center gap-3">
+                  <input
+                    type="text"
+                    placeholder="Tìm theo tên hoặc slug..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-64"
+                  />
+                  <span className="text-sm text-gray-500">
+                    {filtered.length} / {flat.length} danh mục
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => loadData()}
+                    disabled={loading}
+                    className="px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    {loading ? 'Đang tải...' : 'Làm mới'}
+                  </button>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        <th className="text-left py-3 px-4 font-semibold text-gray-700 w-20">Cấp</th>
+                        <th className="text-left py-3 px-4 font-semibold text-gray-700">Tên</th>
+                        <th className="text-left py-3 px-4 font-semibold text-gray-700">Path (slug)</th>
+                        <th className="text-left py-3 px-4 font-semibold text-gray-700">URL</th>
+                        <th className="text-left py-3 px-4 font-semibold text-gray-700 min-w-[140px]">Trạng thái SEO</th>
+                        <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((row, i) => (
+                        <tr key={`${row.path}-${i}`} className="border-b border-gray-100 hover:bg-gray-50/50">
+                          <td className="py-2 px-4">
+                            <span
+                              className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                                row.level === 1
+                                  ? 'bg-orange-100 text-orange-800'
+                                  : row.level === 2
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-gray-100 text-gray-700'
+                              }`}
+                            >
+                              Cấp {row.level}
+                            </span>
+                          </td>
+                          <td className="py-2 px-4 font-medium text-gray-900">{row.fullName}</td>
+                          <td className="py-2 px-4 text-gray-600 font-mono text-xs">{row.path}</td>
+                          <td className="py-2 px-4 text-gray-600 truncate max-w-xs">{row.url}</td>
+                          <td className="py-2 px-4 text-sm">
+                            {redirectMap.get(row.url) ? (
+                              <span className="text-amber-700" title="Trang này 301 về URL canonical">
+                                → 301 → <span className="font-mono text-xs">{redirectMap.get(row.url)}</span>
+                              </span>
+                            ) : (
+                              <span className="text-green-700">Canonical</span>
+                            )}
+                          </td>
+                          <td className="py-2 px-4">
+                            <a
+                              href={row.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[#ea580c] hover:underline font-medium"
+                            >
+                              Mở trang
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Tab: Chuyển cấp 2 xuống cấp 3 */}
+            {activeTab === 'move-down' && (
+              <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Chuyển danh mục cấp 2 xuống cấp 3</h2>
+                <p className="text-sm text-gray-600 mb-6">
+                  Chuyển một danh mục cấp 2 xuống làm danh mục cấp 3 dưới một danh mục cấp 2 khác. Tất cả sản phẩm sẽ được chuyển theo.
+                </p>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Danh mục cấp 1 <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={moveDownForm.category}
+                      onChange={(e) => setMoveDownForm({ ...moveDownForm, category: e.target.value, subcategory: '', target_subcategory: '' })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    >
+                      <option value="">-- Chọn danh mục cấp 1 --</option>
+                      {level1Categories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {moveDownForm.category && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Danh mục cấp 2 cần chuyển xuống <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={moveDownForm.subcategory}
+                        onChange={(e) => setMoveDownForm({ ...moveDownForm, subcategory: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      >
+                        <option value="">-- Chọn danh mục cấp 2 --</option>
+                        {getLevel2Categories(moveDownForm.category).map(sub => (
+                          <option key={sub} value={sub}>{sub}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {moveDownForm.category && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Danh mục cấp 2 đích (sẽ trở thành parent) <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={moveDownForm.target_subcategory}
+                        onChange={(e) => setMoveDownForm({ ...moveDownForm, target_subcategory: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      >
+                        <option value="">-- Chọn danh mục đích --</option>
+                        {getLevel2Categories(moveDownForm.category)
+                          .filter(sub => sub !== moveDownForm.subcategory)
+                          .map(sub => (
+                            <option key={sub} value={sub}>{sub}</option>
+                          ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Tên mới cho cấp 3 (tùy chọn)
+                    </label>
+                    <input
+                      type="text"
+                      value={moveDownForm.new_name}
+                      onChange={(e) => setMoveDownForm({ ...moveDownForm, new_name: e.target.value })}
+                      placeholder="Để trống sẽ giữ nguyên tên"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
+
+                  {moveDownForm.subcategory && moveDownForm.target_subcategory && (
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900">
+                      <strong>Kết quả:</strong>
+                      <div className="mt-2">
+                        <div className="text-gray-600">Từ: {moveDownForm.category} &gt; {moveDownForm.subcategory}</div>
+                        <div className="text-green-700 font-medium">
+                          Thành: {moveDownForm.category} &gt; {moveDownForm.target_subcategory} &gt; {moveDownForm.new_name || moveDownForm.subcategory}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleMoveDown}
+                    disabled={processing || !moveDownForm.category || !moveDownForm.subcategory || !moveDownForm.target_subcategory}
+                    className="w-full bg-[#ea580c] text-white px-4 py-2 rounded-lg font-medium hover:bg-[#c2410c] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {processing ? 'Đang xử lý...' : 'Chuyển danh mục'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Tab: Chuyển cấp 3 lên cấp 2 */}
+            {activeTab === 'move-up' && (
+              <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Chuyển danh mục cấp 3 lên cấp 2</h2>
+                <p className="text-sm text-gray-600 mb-6">
+                  Chuyển một danh mục cấp 3 lên làm danh mục cấp 2. Tất cả sản phẩm sẽ được chuyển theo.
+                </p>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Danh mục cấp 1 <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={moveUpForm.category}
+                      onChange={(e) => setMoveUpForm({ ...moveUpForm, category: e.target.value, subcategory: '', sub_subcategory: '' })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    >
+                      <option value="">-- Chọn danh mục cấp 1 --</option>
+                      {level1Categories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {moveUpForm.category && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Danh mục cấp 2 hiện tại <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={moveUpForm.subcategory}
+                        onChange={(e) => setMoveUpForm({ ...moveUpForm, subcategory: e.target.value, sub_subcategory: '' })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      >
+                        <option value="">-- Chọn danh mục cấp 2 --</option>
+                        {getLevel2Categories(moveUpForm.category).map(sub => (
+                          <option key={sub} value={sub}>{sub}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {moveUpForm.subcategory && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Danh mục cấp 3 cần chuyển lên <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={moveUpForm.sub_subcategory}
+                        onChange={(e) => setMoveUpForm({ ...moveUpForm, sub_subcategory: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      >
+                        <option value="">-- Chọn danh mục cấp 3 --</option>
+                        {getLevel3Categories(moveUpForm.category, moveUpForm.subcategory).map(sub => (
+                          <option key={sub} value={sub}>{sub}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Tên mới cho cấp 2 (tùy chọn)
+                    </label>
+                    <input
+                      type="text"
+                      value={moveUpForm.new_name}
+                      onChange={(e) => setMoveUpForm({ ...moveUpForm, new_name: e.target.value })}
+                      placeholder="Để trống sẽ giữ nguyên tên"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
+
+                  {moveUpForm.sub_subcategory && (
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900">
+                      <strong>Kết quả:</strong>
+                      <div className="mt-2">
+                        <div className="text-gray-600">Từ: {moveUpForm.category} &gt; {moveUpForm.subcategory} &gt; {moveUpForm.sub_subcategory}</div>
+                        <div className="text-green-700 font-medium">
+                          Thành: {moveUpForm.category} &gt; {moveUpForm.new_name || moveUpForm.sub_subcategory}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleMoveUp}
+                    disabled={processing || !moveUpForm.category || !moveUpForm.subcategory || !moveUpForm.sub_subcategory}
+                    className="w-full bg-[#ea580c] text-white px-4 py-2 rounded-lg font-medium hover:bg-[#c2410c] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {processing ? 'Đang xử lý...' : 'Chuyển danh mục'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Tab: Gộp danh mục cấp 2 */}
+            {activeTab === 'merge-level2' && (
+              <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Gộp các danh mục cấp 2</h2>
+                <p className="text-sm text-gray-600 mb-6">
+                  Gộp nhiều danh mục cấp 2 thành một. Tất cả sản phẩm từ các danh mục nguồn sẽ được chuyển sang danh mục đích.
+                </p>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Danh mục cấp 1 <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={mergeLevel2Form.category}
+                      onChange={(e) => setMergeLevel2Form({ ...mergeLevel2Form, category: e.target.value, source_subcategories: [], target_subcategory: '' })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    >
+                      <option value="">-- Chọn danh mục cấp 1 --</option>
+                      {level1Categories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {mergeLevel2Form.category && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Chọn các danh mục cấp 2 nguồn (cần gộp) <span className="text-red-500">*</span>
+                        </label>
+                        <div className="border border-gray-300 rounded-lg p-3 max-h-60 overflow-y-auto space-y-2">
+                          {getLevel2Categories(mergeLevel2Form.category).map(sub => (
+                            <label key={sub} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                              <input
+                                type="checkbox"
+                                checked={mergeLevel2Form.source_subcategories.includes(sub)}
+                                onChange={() => setMergeLevel2Form({
+                                  ...mergeLevel2Form,
+                                  source_subcategories: toggleCategorySelection(mergeLevel2Form.source_subcategories, sub)
+                                })}
+                                className="rounded"
+                              />
+                              <span className="text-sm">{sub}</span>
+                            </label>
+                          ))}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Đã chọn: {mergeLevel2Form.source_subcategories.length} danh mục
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Danh mục cấp 2 đích (gộp vào đây) <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          value={mergeLevel2Form.target_subcategory}
+                          onChange={(e) => setMergeLevel2Form({ ...mergeLevel2Form, target_subcategory: e.target.value })}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        >
+                          <option value="">-- Chọn danh mục đích --</option>
+                          {getLevel2Categories(mergeLevel2Form.category)
+                            .filter(sub => !mergeLevel2Form.source_subcategories.includes(sub))
+                            .map(sub => (
+                              <option key={sub} value={sub}>{sub}</option>
+                            ))}
+                        </select>
+                      </div>
+                    </>
+                  )}
+
+                  {mergeLevel2Form.source_subcategories.length > 0 && mergeLevel2Form.target_subcategory && (
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900">
+                      <strong>Kết quả:</strong>
+                      <div className="mt-2 space-y-1">
+                        {mergeLevel2Form.source_subcategories.map(sub => (
+                          <div key={sub} className="text-gray-600">
+                            {mergeLevel2Form.category} &gt; {sub} → <span className="text-green-700 font-medium">{mergeLevel2Form.category} &gt; {mergeLevel2Form.target_subcategory}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleMergeLevel2}
+                    disabled={processing || !mergeLevel2Form.category || mergeLevel2Form.source_subcategories.length === 0 || !mergeLevel2Form.target_subcategory}
+                    className="w-full bg-[#ea580c] text-white px-4 py-2 rounded-lg font-medium hover:bg-[#c2410c] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {processing ? 'Đang xử lý...' : `Gộp ${mergeLevel2Form.source_subcategories.length} danh mục`}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Tab: Gộp danh mục cấp 3 */}
+            {activeTab === 'merge-level3' && (
+              <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Gộp các danh mục cấp 3</h2>
+                <p className="text-sm text-gray-600 mb-6">
+                  Gộp nhiều danh mục cấp 3 thành một. Tất cả sản phẩm từ các danh mục nguồn sẽ được chuyển sang danh mục đích.
+                </p>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Danh mục cấp 1 <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={mergeLevel3Form.category}
+                      onChange={(e) => setMergeLevel3Form({ ...mergeLevel3Form, category: e.target.value, subcategory: '', source_sub_subcategories: [], target_sub_subcategory: '' })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    >
+                      <option value="">-- Chọn danh mục cấp 1 --</option>
+                      {level1Categories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {mergeLevel3Form.category && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Danh mục cấp 2 <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={mergeLevel3Form.subcategory}
+                        onChange={(e) => setMergeLevel3Form({ ...mergeLevel3Form, subcategory: e.target.value, source_sub_subcategories: [], target_sub_subcategory: '' })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      >
+                        <option value="">-- Chọn danh mục cấp 2 --</option>
+                        {getLevel2Categories(mergeLevel3Form.category).map(sub => (
+                          <option key={sub} value={sub}>{sub}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {mergeLevel3Form.subcategory && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Chọn các danh mục cấp 3 nguồn (cần gộp) <span className="text-red-500">*</span>
+                        </label>
+                        <div className="border border-gray-300 rounded-lg p-3 max-h-60 overflow-y-auto space-y-2">
+                          {getLevel3Categories(mergeLevel3Form.category, mergeLevel3Form.subcategory).map(sub => (
+                            <label key={sub} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                              <input
+                                type="checkbox"
+                                checked={mergeLevel3Form.source_sub_subcategories.includes(sub)}
+                                onChange={() => setMergeLevel3Form({
+                                  ...mergeLevel3Form,
+                                  source_sub_subcategories: toggleCategorySelection(mergeLevel3Form.source_sub_subcategories, sub)
+                                })}
+                                className="rounded"
+                              />
+                              <span className="text-sm">{sub}</span>
+                            </label>
+                          ))}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Đã chọn: {mergeLevel3Form.source_sub_subcategories.length} danh mục
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Danh mục cấp 3 đích (gộp vào đây) <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          value={mergeLevel3Form.target_sub_subcategory}
+                          onChange={(e) => setMergeLevel3Form({ ...mergeLevel3Form, target_sub_subcategory: e.target.value })}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        >
+                          <option value="">-- Chọn danh mục đích --</option>
+                          {getLevel3Categories(mergeLevel3Form.category, mergeLevel3Form.subcategory)
+                            .filter(sub => !mergeLevel3Form.source_sub_subcategories.includes(sub))
+                            .map(sub => (
+                              <option key={sub} value={sub}>{sub}</option>
+                            ))}
+                        </select>
+                      </div>
+                    </>
+                  )}
+
+                  {mergeLevel3Form.source_sub_subcategories.length > 0 && mergeLevel3Form.target_sub_subcategory && (
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900">
+                      <strong>Kết quả:</strong>
+                      <div className="mt-2 space-y-1">
+                        {mergeLevel3Form.source_sub_subcategories.map(sub => (
+                          <div key={sub} className="text-gray-600">
+                            {mergeLevel3Form.category} &gt; {mergeLevel3Form.subcategory} &gt; {sub} →{' '}
+                            <span className="text-green-700 font-medium">
+                              {mergeLevel3Form.category} &gt; {mergeLevel3Form.subcategory} &gt; {mergeLevel3Form.target_sub_subcategory}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleMergeLevel3}
+                    disabled={processing || !mergeLevel3Form.category || !mergeLevel3Form.subcategory || mergeLevel3Form.source_sub_subcategories.length === 0 || !mergeLevel3Form.target_sub_subcategory}
+                    className="w-full bg-[#ea580c] text-white px-4 py-2 rounded-lg font-medium hover:bg-[#c2410c] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {processing ? 'Đang xử lý...' : `Gộp ${mergeLevel3Form.source_sub_subcategories.length} danh mục`}
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </AdminLayout>
+  );
+}

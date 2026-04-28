@@ -1,0 +1,20 @@
+# UpGit (pluveto/upgit) — upload ảnh/file GitHub RAW cho site 188.com.vn (dự án độc lập).
+#
+# Sao chép file này → upgit.config.toml và điền PAT (file upgit.config.toml không commit được).
+#
+# Repo GitHub: public để RAW URL không 404 — org/user của bạn và tên repo bên dưới khớp.
+# Cách dùng:
+#   1. Sao chép: copy upgit.config.example.toml upgit.config.toml
+#   2. PAT GitHub quyền repo — hoặc biến môi trường UPGIT_TOKEN (không commit PAT)
+#   3. Chạy ví dụ: upgit.exe -c path\to\upgit.config.toml anh.png
+
+default_uploader = "github"
+
+# File lưu thư mục media/ trong repo để tách khỏi mã nguồn
+rename = "media/{year}/{month}/188_{unix_ts}{ext}"
+
+[uploaders.github]
+username = "phungvanhau10101985-cmd"
+repo = "188.com.vn"
+branch = "main"
+pat = ""

@@ -1,0 +1,36 @@
+# backend/app/models/cart.py - FIXED VERSION (NO Cart CLASS)
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey
+from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+from app.db.base import Base
+
+
+class CartItem(Base):
+    __tablename__ = "cart_items"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    quantity = Column(Integer, default=1, nullable=False)
+    selected_size = Column(String(50))
+    selected_color = Column(String(50))
+    selected_color_name = Column(String(100))
+    
+    # Product snapshot
+    product_name = Column(String(500))
+    product_price = Column(Float)
+    product_image = Column(String(500))
+    requires_deposit = Column(Boolean, default=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    user = relationship("User", back_populates="cart_items")
+    product = relationship("Product")
+    
+    def __repr__(self):
+        return f"<CartItem {self.product_name} x{self.quantity}>"
+
+# KHÔNG CÓ class Cart Ở ĐÂY NỮA

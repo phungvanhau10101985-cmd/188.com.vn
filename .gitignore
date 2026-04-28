@@ -1,0 +1,46 @@
+# Monorepo — không commit secret / build / dependencies
+**/node_modules/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Env (giữ *.env.example trong repo)
+.env
+.env.*
+!.env.example
+# UpGit: file config local có PAT — không commit
+upgit.config.toml
+**/backend/.env
+**/frontend/.env.local
+**/frontend/.env.production
+
+# Frontend / Python build
+**/frontend/.next/
+**/frontend/out/
+**/.next/
+**/.next.stale*/
+dist/
+build/
+
+# Logs & IDE
+*.log
+.idea/
+.vscode/
+.cursor/
+
+# Local SQLite (dev — không vào repo)
+app.db
+*.db-journal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated scan — có thể nhúng nhầm nội dung file nhạy cảm; không commit
+ai_analysis/project_analysis.json
+
+# Backend uploads (file user tải lên — không vào git)
+**/backend/app/static/uploads/*
+!**/backend/app/static/uploads/.gitkeep

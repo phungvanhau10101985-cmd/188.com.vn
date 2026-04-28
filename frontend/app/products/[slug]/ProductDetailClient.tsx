@@ -1,0 +1,543 @@
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { apiClient } from '@/lib/api-client';
+import { useCart } from '@/features/cart/hooks/useCart';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+import { useFavorites } from '@/features/favorites/hooks/useFavorites';
+import type { Product, CategoryLevel1 } from '@/types/api';
+import ProductHeader from './components/ProductHeader/ProductHeader';
+import ProductGallery from './components/ProductGallery/ProductGallery';
+import ProductInfo from './components/ProductInfo/ProductInfo';
+import ProductTabs from '@/components/product-detail/ProductTabs';
+import ProductQASection from './components/ProductQASection/ProductQASection';
+import ProductReviewSection from './components/ProductReviewSection/ProductReviewSection';
+import RelatedProducts from '@/components/product-detail/RelatedProducts';
+import ProductDetailMobile from './ProductDetailMobile';
+import ErrorState from './components/ErrorState/ErrorState';
+import { useToast } from '@/components/ToastProvider';
+import { trackEvent } from '@/lib/analytics';
+
+interface ProductDetailClientProps {
+  initialProduct: Product;
+  slug: string;
+}
+
+export default function ProductDetailClient({
+  initialProduct,
+  slug,
+}: ProductDetailClientProps) {
+  const router = useRouter();
+  const [product, setProduct] = useState<Product>(initialProduct);
+  const [isFavorited, setIsFavorited] = useState(false);
+  const [qaModalOpen, setQaModalOpen] = useState(false);
+  const [reviewsModalOpen, setReviewsModalOpen] = useState(false);
+  const [selectedColorImage, setSelectedColorImage] = useState<string | null>(null);
+  const [categoryTree, setCategoryTree] = useState<CategoryLevel1[]>([]);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [openLevel1, setOpenLevel1] = useState<string | null>(null);
+  const [isStickyPinned, setIsStickyPinned] = useState(false);
+  const [stickySearchTerm, setStickySearchTerm] = useState('');
+  const stickyBarRef = useRef<HTMLDivElement>(null);
+  const menuCloseTimerRef = useRef<number | null>(null);
+  const { addToCart, isLoading: cartLoading, getCartItemCount } = useCart();
+  const { isAuthenticated, user } = useAuth();
+  const { refreshFavorites, favoriteCount } = useFavorites();
+  const { pushToast } = useToast();
+
+  // Chỉ ghi nhận "đã xem" khi đã đăng nhập — nếu xem khi chưa đăng nhập sẽ không lưu
+  useEffect(() => {
+    if (!isAuthenticated || !product?.id) return;
+    apiClient.trackProductView(product.id, {
+      id: product.id,
+      product_id: product.product_id,
+      name: product.name,
+      price: product.price,
+      main_image: product.main_image,
+      brand_name: product.brand_name,
+      slug: product.slug,
+    }).catch(() => {});
+  }, [product?.id, isAuthenticated, product?.name, product?.price, product?.main_image, product?.brand_name, product?.slug, product?.product_id]);
+
+  useEffect(() => {
+    setSelectedColorImage(null);
+  }, [product?.id]);
+
+  useEffect(() => {
+    let active = true;
+    apiClient.getCategoryTreeFromProducts()
+      .then((data) => {
+        if (!active) return;
+        const tree = Array.isArray(data) ? data : [];
+        setCategoryTree(tree);
+      })
+      .catch(() => setCategoryTree([]));
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (categoryTree.length && !openLevel1) setOpenLevel1(categoryTree[0].name);
+  }, [categoryTree, openLevel1]);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!stickyBarRef.current) return;
+      const rect = stickyBarRef.current.getBoundingClientRect();
+      setIsStickyPinned(rect.top <= 0);
+    };
+    handleScroll();
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    if (product?.id && isAuthenticated) {
+      apiClient.isProductFavorited(product.id).then((r) => setIsFavorited(r.is_favorited)).catch(() => setIsFavorited(false));
+    } else if (!isAuthenticated) {
+      setIsFavorited(false);
+    }
+  }, [product?.id, isAuthenticated]);
+
+  const handleAddToCart = async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
+    try {
+      await addToCart({
+        product_id: p.id,
+        quantity,
+        selected_size: selectedSize,
+        selected_color: selectedColor,
+        product_data: {
+          id: p.id,
+          product_id: p.product_id,
+          name: p.name,
+          price: p.price,
+          main_image: p.main_image,
+          brand_name: p.brand_name,
+          available: p.available,
+          original_price: p.original_price,
+        },
+      });
+      pushToast({ title: 'Đã thêm vào giỏ hàng', variant: 'success', durationMs: 2000 });
+      trackEvent('add_to_cart_click', { product_id: p.id, quantity });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('Authentication required') || message.includes('401')) {
+        pushToast({ title: 'Vui lòng đăng nhập lại', description: 'Phiên đăng nhập đã hết hạn.', variant: 'info', durationMs: 2500 });
+        router.push('/auth/login');
+      } else {
+        pushToast({ title: 'Không thể thêm vào giỏ hàng', description: message, variant: 'error', durationMs: 3000 });
+      }
+    }
+  };
+
+  const handleToggleFavorite = async (p: Product) => {
+    try {
+      if (!isAuthenticated) {
+        pushToast({ title: 'Vui lòng đăng nhập để dùng yêu thích', variant: 'info', durationMs: 2500 });
+        return;
+      }
+      if (isFavorited) {
+        await apiClient.removeFromFavorites(p.id);
+        setIsFavorited(false);
+        setProduct((prev) => (prev && prev.id === p.id ? { ...prev, likes: Math.max(0, (prev.likes ?? 0) - 1) } : prev));
+        trackEvent('favorite_remove', { product_id: p.id });
+        pushToast({ title: 'Đã bỏ yêu thích', variant: 'success', durationMs: 2000 });
+      } else {
+        await apiClient.addToFavorites(p.id, {
+          id: p.id,
+          product_id: p.product_id,
+          name: p.name,
+          price: p.price,
+          main_image: p.main_image,
+          brand_name: p.brand_name,
+          slug: p.slug,
+        });
+        setIsFavorited(true);
+        setProduct((prev) => (prev && prev.id === p.id ? { ...prev, likes: (prev.likes ?? 0) + 1 } : prev));
+        trackEvent('favorite_add', { product_id: p.id });
+        pushToast({ title: 'Đã thêm vào yêu thích', variant: 'success', durationMs: 2000 });
+      }
+      await refreshFavorites();
+    } catch (err: unknown) {
+      if (err instanceof Error && (err.message.includes('Authentication') || err.message.includes('401'))) {
+        pushToast({ title: 'Vui lòng đăng nhập lại', variant: 'info', durationMs: 2500 });
+        router.push('/auth/login');
+      } else {
+        pushToast({ title: 'Không thể cập nhật yêu thích', description: err instanceof Error ? err.message : 'Vui lòng thử lại', variant: 'error', durationMs: 3000 });
+      }
+    }
+  };
+
+  const handleStickySearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const term = stickySearchTerm.trim();
+    router.push(term ? `/?q=${encodeURIComponent(term)}` : '/');
+  };
+
+  const handleMenuEnter = () => {
+    if (menuCloseTimerRef.current) {
+      window.clearTimeout(menuCloseTimerRef.current);
+      menuCloseTimerRef.current = null;
+    }
+    setIsMenuOpen(true);
+    if (!openLevel1 && categoryTree.length) setOpenLevel1(categoryTree[0].name);
+  };
+
+  const handleMenuLeave = () => {
+    if (menuCloseTimerRef.current) window.clearTimeout(menuCloseTimerRef.current);
+    menuCloseTimerRef.current = window.setTimeout(() => setIsMenuOpen(false), 150);
+  };
+
+  const openCategory = categoryTree.find((c) => c.name === openLevel1);
+  const displayCartCount = getCartItemCount();
+
+  const handleBuyNow = async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
+    try {
+      await addToCart({
+        product_id: p.id,
+        quantity,
+        selected_size: selectedSize,
+        selected_color: selectedColor,
+        product_data: {
+          id: p.id,
+          product_id: p.product_id,
+          name: p.name,
+          price: p.price,
+          main_image: p.main_image,
+          brand_name: p.brand_name,
+          available: p.available,
+          original_price: p.original_price,
+        },
+      });
+      trackEvent('buy_now', { product_id: p.id, quantity });
+      pushToast({ title: 'Đã thêm vào giỏ hàng', description: 'Chuyển đến giỏ hàng để thanh toán.', variant: 'success', durationMs: 2200 });
+      router.push('/cart');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('Authentication required') || message.includes('401')) {
+        pushToast({ title: 'Vui lòng đăng nhập lại', description: 'Phiên đăng nhập đã hết hạn.', variant: 'info', durationMs: 2500 });
+        router.push('/auth/login');
+      } else {
+        pushToast({ title: 'Không thể mua hàng', description: message, variant: 'error', durationMs: 3000 });
+      }
+    }
+  };
+
+  const normalizePriceValue = (value?: string | number | null, mode: 'min' | 'max' = 'min'): number | null => {
+    if (value === undefined || value === null) return null;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    const matches = value.match(/\d[\d.,]*/g) || [];
+    if (matches.length === 0) return null;
+    const pick = mode === 'max' ? matches[matches.length - 1] : matches[0];
+    if (!pick) return null;
+    const cleaned = pick.replace(/[^\d]/g, '');
+    if (!cleaned) return null;
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const buildFilterLink = (
+    params: Record<string, string | number | undefined | null>,
+    fallbackQuery?: string
+  ) => {
+    const query: Record<string, string> = {};
+    Object.entries(params).forEach(([key, val]) => {
+      if (val === undefined || val === null || val === '') return;
+      query[key] = String(val);
+    });
+    if (Object.keys(query).length === 0 && fallbackQuery) {
+      query.q = fallbackQuery;
+    }
+    return { pathname: '/', query };
+  };
+
+  const sameCategoryParams = {
+    category: product.category || undefined,
+    subcategory: product.subcategory || undefined,
+    sub_subcategory: product.sub_subcategory || undefined,
+  };
+  const normalizeGroupValue = (value?: string | null) => {
+    if (!value) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (trimmed.toLowerCase() === 'nan') return null;
+    return trimmed;
+  };
+  const lowerGroup = normalizeGroupValue(product.pro_lower_price ?? null);
+  const higherGroup = normalizeGroupValue(product.pro_high_price ?? null);
+  const shopIdGroup = normalizeGroupValue(product.shop_id ?? null);
+  const shopNameGroup = normalizeGroupValue(product.shop_name ?? null);
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Mobile: giao diện chi tiết sản phẩm theo bản mobile (chỉ trang này) */}
+      <div className="md:hidden">
+        <ProductDetailMobile
+          product={product}
+          isFavorited={isFavorited}
+          isCartLoading={cartLoading}
+          onAddToCart={handleAddToCart}
+          onBuyNow={handleBuyNow}
+          onToggleFavorite={handleToggleFavorite}
+        />
+      </div>
+
+      {/* Desktop: layout cũ */}
+      <div className="hidden md:block">
+        <ProductHeader product={product} />
+        <div
+          ref={stickyBarRef}
+          className={`sticky top-0 left-0 right-0 z-[30] backdrop-blur border-b border-gray-100 ${isStickyPinned ? 'bg-[#ea580c]' : 'bg-white/95'}`}
+        >
+          <div className="max-w-7xl mx-auto px-4 py-0">
+            <div className="grid grid-cols-[224px_1fr_224px] items-center gap-3">
+              <div className={`${isStickyPinned ? '' : 'pointer-events-none opacity-0'}`}>
+                <div className="flex items-center gap-3">
+                  <div
+                    className="relative"
+                    onMouseEnter={handleMenuEnter}
+                    onMouseLeave={handleMenuLeave}
+                  >
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium bg-white/20 text-white hover:bg-white/30 shadow-sm whitespace-nowrap"
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                      </svg>
+                      Danh mục
+                    </button>
+
+                    {isStickyPinned && isMenuOpen && (
+                      <div
+                        className="absolute left-0 top-full mt-0 w-[720px] bg-white border border-gray-200 shadow-lg rounded-xl overflow-hidden z-[40] py-2"
+                        onMouseEnter={handleMenuEnter}
+                        onMouseLeave={handleMenuLeave}
+                      >
+                        <div className="grid grid-cols-[220px_1fr]">
+                          <div className="bg-gray-50/80 border-r border-gray-100 p-3">
+                            <div className="grid grid-cols-1 gap-1">
+                              {categoryTree.length === 0 && (
+                                <div className="text-xs text-gray-500">Chưa có danh mục.</div>
+                              )}
+                              {categoryTree.map((level1) => {
+                                const slug1 = level1.slug || level1.name;
+                                const isActive = openLevel1 === level1.name;
+                                return (
+                                  <Link
+                                    key={level1.name}
+                                    href={`/danh-muc/${encodeURIComponent(slug1)}`}
+                                    onMouseEnter={() => setOpenLevel1(level1.name)}
+                                    className={`px-2.5 py-2 rounded-md text-xs font-medium truncate ${
+                                      isActive ? 'bg-orange-50 text-orange-700' : 'text-gray-700 hover:bg-white'
+                                    }`}
+                                  >
+                                    {level1.name}
+                                  </Link>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div className="p-3">
+                            {!openCategory && (
+                              <div className="text-xs text-gray-500">Di chuột vào danh mục để xem cấp 2, cấp 3.</div>
+                            )}
+                            {openCategory && (
+                              <div className="grid grid-cols-2 gap-3">
+                                {openCategory.children.map((level2) => {
+                                  const slug1 = openCategory.slug || openCategory.name;
+                                  const slug2 = level2.slug || level2.name;
+                                  return (
+                                    <div key={level2.name} className="min-w-0">
+                                      <Link
+                                        href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`}
+                                        className="block text-xs font-semibold text-gray-800 hover:text-[#ea580c]"
+                                      >
+                                        {level2.name}
+                                      </Link>
+                                      {level2.children && level2.children.length > 0 && (
+                                        <div className="mt-1 flex flex-col gap-1">
+                                          {level2.children.map((level3) => {
+                                            const name3 = level3.name;
+                                            const slug3 = level3.slug || level3.name;
+                                            return (
+                                              <Link
+                                                key={name3}
+                                                href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
+                                                className="text-[11px] text-gray-600 hover:text-[#ea580c] truncate"
+                                              >
+                                                {name3}
+                                              </Link>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <form onSubmit={handleStickySearch} className="flex-shrink-0 ml-6">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={stickySearchTerm}
+                        onChange={(e) => setStickySearchTerm(e.target.value)}
+                        placeholder="Tìm kiếm..."
+                        className="w-40 pl-3 pr-9 py-2 text-xs rounded-lg border-0 bg-white focus:outline-none focus:ring-2 focus:ring-orange-200"
+                      />
+                      <button
+                        type="submit"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-[#ea580c]"
+                        aria-label="Tìm kiếm"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+
+              <div className={`flex flex-wrap items-center justify-center gap-2 ${isStickyPinned ? 'bg-transparent px-2 py-1.5' : 'bg-[#ea580c] rounded-lg px-2 py-1.5'}`}>
+                {shopIdGroup && (
+                  <Link
+                    href={buildFilterLink({ shop_id: shopIdGroup })}
+                    className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-white bg-white/20 hover:bg-white/30 transition-colors"
+                  >
+                    Sản phẩm bán chạy
+                  </Link>
+                )}
+                {lowerGroup && (
+                  <Link
+                    href={buildFilterLink({ pro_lower_price: lowerGroup }, lowerGroup)}
+                    className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-white bg-white/20 hover:bg-white/30 transition-colors"
+                  >
+                    Cùng loại giá thấp hơn
+                  </Link>
+                )}
+                {shopNameGroup && (
+                  <Link
+                    href={buildFilterLink({ shop_name: shopNameGroup })}
+                    className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-white bg-white/20 hover:bg-white/30 transition-colors"
+                  >
+                    Cùng loại cùng tầm giá
+                  </Link>
+                )}
+                {higherGroup && (
+                  <Link
+                    href={buildFilterLink({ pro_high_price: higherGroup }, higherGroup)}
+                    className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-white bg-white/20 hover:bg-white/30 transition-colors"
+                  >
+                    Cùng loại giá cao hơn
+                  </Link>
+                )}
+              </div>
+
+              <div className={`justify-self-end ${isStickyPinned ? '' : 'pointer-events-none opacity-0'}`}>
+                <div className="flex items-center gap-6 px-3 h-[32px]">
+                  <Link href="/da-xem" className="flex items-center text-white/90 hover:text-white transition-colors group">
+                    <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    </div>
+                  </Link>
+
+                  {isAuthenticated ? (
+                    <Link href="/account" className="flex items-center text-white/90 hover:text-white transition-colors group">
+                      <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                        <span className="text-white font-semibold text-sm">
+                          {user?.full_name?.charAt(0) || 'U'}
+                        </span>
+                      </div>
+                    </Link>
+                  ) : (
+                    <Link href="/auth/login" className="flex items-center text-white/90 hover:text-white transition-colors group">
+                      <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                      </div>
+                    </Link>
+                  )}
+
+                  <Link href="/favorites" className="flex items-center text-white/90 hover:text-white transition-colors group relative">
+                    <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors relative">
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                      </svg>
+                      {favoriteCount > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 bg-white text-[#ea580c] rounded-full min-w-[16px] h-4 text-[10px] flex items-center justify-center font-bold leading-none">
+                          {favoriteCount}
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+
+                  <Link href="/cart" className="flex items-center text-white/90 hover:text-white transition-colors group relative">
+                    <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors relative">
+                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                      </svg>
+                      {displayCartCount > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 bg-white text-[#ea580c] rounded-full min-w-[16px] h-4 text-[10px] flex items-center justify-center font-bold leading-none">
+                          {displayCartCount}
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <main
+          id="main-content"
+          className="max-w-7xl mx-auto px-4 py-5 md:pt-0 md:pb-20"
+          role="main"
+          aria-label="Nội dung chính - Chi tiết sản phẩm"
+        >
+          <article className="bg-white rounded-xl shadow-lg overflow-visible" aria-label={product.name}>
+            <div className="p-4">
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-6">
+              <div className="self-start">
+                <ProductGallery
+                  product={product}
+                  selectedImageUrl={selectedColorImage}
+                  onSelectImage={setSelectedColorImage}
+                />
+              </div>
+              <ProductInfo
+                product={product}
+                onAddToCart={handleAddToCart}
+                onToggleFavorite={handleToggleFavorite}
+                onBuyNow={handleBuyNow}
+                onOpenQA={() => setQaModalOpen(true)}
+                onOpenReviews={() => setReviewsModalOpen(true)}
+                isCartLoading={cartLoading}
+                isFavorited={isFavorited}
+                onColorImageChange={setSelectedColorImage}
+              />
+            </div>
+            </div>
+            <div className="border-t">
+              <ProductTabs product={product} />
+            </div>
+            <ProductQASection product={product} modalOnly modalOpen={qaModalOpen} onModalClose={() => setQaModalOpen(false)} onModalOpen={() => setQaModalOpen(true)} />
+            <ProductReviewSection product={product} modalOnly modalOpen={reviewsModalOpen} onModalClose={() => setReviewsModalOpen(false)} onModalOpen={() => setReviewsModalOpen(true)} />
+          </article>
+          <RelatedProducts currentProduct={product} />
+        </main>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,11 @@
+Redis (tùy chọn — cache trong config REDIS_URL)
+
+Ubuntu:
+  sudo apt-get install -y redis-server
+  sudo systemctl enable redis-server
+  sudo systemctl start redis-server
+
+Backend .env:
+  REDIS_URL=redis://127.0.0.1:6379/0
+
+Nếu không dùng Redis: để REDIS_URL trống hoặc tắt CACHE theo code (xem app.core.config).

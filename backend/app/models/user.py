@@ -1,0 +1,127 @@
+# backend/app/models/user.py - COMPLETE WITH RELATIONSHIPS (FIXED)
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Date, JSON, ForeignKey
+from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+from app.db.base import Base
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    phone = Column(String(10), unique=True, index=True, nullable=True)
+    email = Column(String(255), unique=True, index=True, nullable=True)
+    full_name = Column(String(255), nullable=True)
+    date_of_birth = Column(Date, nullable=True)
+    gender = Column(String(10), nullable=True)
+    address = Column(Text, nullable=True)
+    avatar = Column(String(500), nullable=True)
+    
+    # Authentication
+    is_active = Column(Boolean, default=True)
+    is_verified = Column(Boolean, default=True)
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    last_login = Column(DateTime(timezone=True), nullable=True)
+    
+    # ========== RELATIONSHIPS ==========
+    addresses = relationship("UserAddress", back_populates="user", cascade="all, delete-orphan")
+    cart = relationship("Cart", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    orders = relationship("Order", back_populates="user", cascade="all, delete-orphan")
+    favorites = relationship("UserFavorite", back_populates="user", cascade="all, delete-orphan")
+    product_views = relationship("UserProductView", back_populates="user", cascade="all, delete-orphan")
+    cart_items = relationship("CartItem", back_populates="user", cascade="all, delete-orphan")
+    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
+    # ===================================
+    
+    def __repr__(self):
+        return f"<User {self.email or self.phone}>"
+
+
+class UserProductView(Base):
+    __tablename__ = "user_product_views"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    product_id = Column(Integer, nullable=False, index=True)
+    product_data = Column(JSON, nullable=True)
+    viewed_at = Column(DateTime(timezone=True), server_default=func.now())
+    view_count = Column(Integer, default=1)
+    time_spent_seconds = Column(Integer, default=0)
+    
+    # Relationship
+    user = relationship("User", back_populates="product_views")
+
+
+class UserFavorite(Base):
+    __tablename__ = "user_favorites"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    product_id = Column(Integer, nullable=False, index=True)
+    product_data = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationship
+    user = relationship("User", back_populates="favorites")
+
+
+class UserCategoryView(Base):
+    __tablename__ = "user_category_views"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    category_id = Column(Integer, nullable=False, index=True)
+    category_name = Column(String(255), nullable=True)
+    viewed_at = Column(DateTime(timezone=True), server_default=func.now())
+    view_count = Column(Integer, default=1)
+    
+    # Relationship
+    user = relationship("User", backref="category_views")
+
+
+class UserBrandView(Base):
+    __tablename__ = "user_brand_views"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    brand_name = Column(String(255), nullable=False)
+    viewed_at = Column(DateTime(timezone=True), server_default=func.now())
+    view_count = Column(Integer, default=1)
+    
+    # Relationship
+    user = relationship("User", backref="brand_views")
+
+
+class UserSearchHistory(Base):
+    __tablename__ = "user_search_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    search_query = Column(String(500), nullable=False)
+    search_filters = Column(JSON, nullable=True)
+    search_results_count = Column(Integer, default=0)
+    searched_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationship
+    user = relationship("User", backref="search_history")
+
+
+class UserShopInteraction(Base):
+    __tablename__ = "user_shop_interactions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    shop_name = Column(String(255), nullable=False)
+    shop_id = Column(String(100), nullable=True)
+    shop_search_url = Column(String(500), nullable=True)
+    shop_id_search_url = Column(String(500), nullable=True)
+    related_cheaper_search_url = Column(String(500), nullable=True)
+    related_expensive_search_url = Column(String(500), nullable=True)
+    interaction_type = Column(String(50), nullable=False)
+    interacted_at = Column(DateTime(timezone=True), server_default=func.now())
+    interaction_count = Column(Integer, default=1)
+    
+    # Relationship
+    user = relationship("User", backref="shop_interactions")

@@ -1,0 +1,57 @@
+# backend/app/models/__init__.py - FIXED (NO Cart)
+from app.db.base import Base
+
+# ========== IMPORT ĐÚNG THỨ TỰ ==========
+from app.models.category import Category
+print("✅ Category model loaded")
+
+from app.models.product import Product
+print("✅ Product model loaded")
+
+from app.models.user import User, UserProductView, UserFavorite
+print("✅ User models loaded")
+
+# CHỈ import CartItem, KHÔNG import Cart
+from app.models.cart import CartItem
+print("✅ Cart model loaded")
+
+try:
+    from app.models.admin import AdminUser
+    print("✅ AdminUser model loaded")
+except ImportError:
+    print("ℹ️  AdminUser model not available")
+
+from app.models.order import Order, OrderItem, Payment
+print("✅ Order models loaded")
+
+try:
+    from app.models.user import UserCategoryView, UserBrandView, UserSearchHistory, UserShopInteraction
+    print("✅ User behavior models loaded")
+except ImportError:
+    print("ℹ️  Some user behavior models not available")
+
+# ========== DANH SÁCH MODELS ==========
+__all__ = [
+    "Category",
+    "Product", 
+    "User",
+    "UserProductView",
+    "UserFavorite",
+    "CartItem",  # CHỈ CartItem, không có Cart
+    "Order",
+    "OrderItem", 
+    "Payment",
+]
+
+try:
+    __all__.extend(["UserCategoryView", "UserBrandView", "UserSearchHistory", "UserShopInteraction"])
+except:
+    pass
+
+try:
+    __all__.append("AdminUser")
+except:
+    pass
+
+print(f"📦 Total models loaded: {len(__all__)}")
+print(f"   Models: {', '.join(sorted(__all__))}")

@@ -1,0 +1,12 @@
+-- Mẫu chuẩn bị database trên VPS (chạy với user postgres hoặc superuser).
+-- Đổi tên database, user, password trước khi thực thi.
+
+-- CREATE USER app_188 WITH PASSWORD 'thay-bang-mat-khau-manh';
+-- CREATE DATABASE comvn188 OWNER app_188 ENCODING 'UTF8' LC_COLLATE 'en_US.UTF-8' LC_CTYPE 'en_US.UTF-8' TEMPLATE template0;
+-- GRANT ALL PRIVILEGES ON DATABASE comvn188 TO app_188;
+
+-- DATABASE_URL (backend/.env):
+-- postgresql://app_188:thay-bang-mat-khau-manh@127.0.0.1:5432/comvn188
+
+-- PostgreSQL trên Ubuntu: lắng nghe localhost, mở firewall nội bộ nếu DB tách server:
+-- listen_addresses = 'localhost'   (chỉ cùng máy với app)
