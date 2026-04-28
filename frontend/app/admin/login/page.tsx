@@ -50,8 +50,12 @@ export default function AdminLoginPage() {
           <p className="text-gray-500 mt-1">Đăng nhập quản trị</p>
         </div>
         {setupHint && (
-          <div className="mb-4 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg p-3">
-            Chưa có tài khoản admin. {setupHint}
+          <div className="mb-4 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg p-3 space-y-2">
+            <p>Chưa có tài khoản admin. {setupHint}</p>
+            <p className="font-medium text-gray-900">
+              Sau khi chạy xong script: đăng nhập <span className="font-mono">admin</span> /{' '}
+              <span className="font-mono">admin123</span> rồi đổi mật khẩu.
+            </p>
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-4">

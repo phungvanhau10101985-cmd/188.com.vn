@@ -21,28 +21,38 @@ from app.core.config import settings
 
 router = APIRouter()
 
+FIRST_ADMIN_HINT = (
+    "Trên server, trong thư mục backend: python create_first_admin.py — "
+    "sau đó đăng nhập username admin, mật khẩu admin123 (đổi sau khi vào được)."
+)
+
+
 @router.get("/check-setup")
 def admin_check_setup(db: Session = Depends(get_db)):
     """Kiểm tra đã có admin chưa (để hiển thị gợi ý trên trang login). Không cần auth."""
     count = db.query(func.count(AdminUser.id)).scalar() or 0
-    return {"admin_exists": count > 0, "hint": "Chạy: python create_first_admin.py" if count == 0 else None}
+    return {
+        "admin_exists": count > 0,
+        "hint": FIRST_ADMIN_HINT if count == 0 else None,
+    }
 
 @router.post("/login", response_model=AdminTokenResponse)
 def admin_login(login_data: AdminLogin, db: Session = Depends(get_db)):
     """Đăng nhập admin - trả về JWT token"""
     admin = crud.verify_admin_password(db, login_data.username, login_data.password)
     if not admin:
-        hint = ""
-        if settings.DEBUG:
-            has_any = db.query(func.count(AdminUser.id)).scalar() or 0
-            if has_any == 0:
-                hint = " Chưa có admin. Trong thư mục backend chạy: python create_first_admin.py"
-            else:
-                hint = " Đặt lại mật khẩu: python reset_admin_password.py"
-        raise HTTPException(
-            status_code=401,
-            detail="Sai tên đăng nhập hoặc mật khẩu." + hint,
-        )
+        has_any = db.query(func.count(AdminUser.id)).scalar() or 0
+        if has_any == 0:
+            msg = (
+                "Chưa có tài khoản admin trong database. SSH vào VPS, cd backend, "
+                "chạy: python create_first_admin.py — rồi đăng nhập username admin và mật khẩu admin123 "
+                "(đổi trong trang quản trị)."
+            )
+        elif settings.DEBUG:
+            msg = "Sai tên đăng nhập hoặc mật khẩu. Gợi ý: python reset_admin_password.py trong backend."
+        else:
+            msg = "Sai tên đăng nhập hoặc mật khẩu."
+        raise HTTPException(status_code=401, detail=msg)
     if not admin.is_active:
         raise HTTPException(status_code=403, detail="Tài khoản admin đã bị vô hiệu hóa")
     crud.update_admin_last_login(db, admin.id)
