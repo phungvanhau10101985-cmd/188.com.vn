@@ -8,6 +8,22 @@
 
 ## 2. Trên VPS
 
+**Git (một lần):** Git 2.x có thể báo *divergent branches* khi `git pull`. Trên VPS, trong repo:
+
+```bash
+git -C /var/www/188.com.vn config pull.rebase false
+```
+
+Sau đó có thể dùng cố định:
+
+```bash
+cd /var/www/188.com.vn
+git pull origin main
+DEPLOY_SKIP_GIT=1 DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
+```
+
+(`DEPLOY_SKIP_GIT=1` = không chạy `git` thêm lần nữa trong script, vì đã `git pull` tay; bỏ biến này nếu muốn script tự `git pull`.)
+
 1. Cài **PostgreSQL**, tạo DB/user (xem `postgres-init.sql.example`). Script **`deploy/update-vps.sh`** (mặc định) sẽ **tự tạo database PostgreSQL** nếu đọc `DATABASE_URL` trỏ tới Postgres (tên DB lấy sau path, vd. `188comvn`), rồi chạy **`init_database_tables()`** (tạo bảng + **`run_migrations()`**). Tuỳ chọn: `DEPLOY_SKIP_DB_INIT=1` (bỏ qua toàn bộ bước DB), `DEPLOY_CREATE_DATABASE=0` (chỉ không gọi `postgres-create-db.sh`, vẫn chạy migrations), `DEPLOY_STRICT_DB_INIT=0` (lỗi DB không dừng script deploy). Nếu log API báo **`FATAL: database "…" does not exist`** mà chưa chạy script: tạo tay hoặc **`sudo bash deploy/postgres-create-db.sh`** (cần `sudo -u postgres`).
 2. (Tùy chọn) **Redis** — `redis-notes.txt`.
 3. Clone repo, chạy **`bash deploy/prepare-vps.sh`** từ root project (Linux).
@@ -20,6 +36,12 @@
 cd /var/www/188.com.vn
 chmod +x deploy/update-vps.sh   # chỉ một lần
 DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_BUILD_VPS=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
+```
+
+Nếu Git báo **divergent branches** hoặc cần **bỏ mọi thay đổi chỉ có trên VPS** và làm khớp hẳn `origin/main`:
+
+```bash
+DEPLOY_GIT_SYNC=reset-hard DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
 ```
 
 **Nginx → Next (Server Actions):** trong mỗi `location` proxy, nên có đủ header: `Host`, `X-Forwarded-For`, `X-Forwarded-Proto`; thêm **`proxy_set_header X-Forwarded-Host $host;`** giúp giảm cảnh báo *Missing origin*. Chi tiết ví dụ: `HUONG_DAN_DEPLOY.md` — Phần 4.

@@ -3,7 +3,11 @@
 # Cùng máy với nanoai: KHÔNG dùng "pm2 stop all" — chỉ dừng process tên 188-*.
 #
 # Usage (từ root repo trên VPS):
-#   cd /var/www/188.com.vn
+#   Một lần: git config pull.rebase false   # để "git pull origin main" không báo divergent (merge mặc định)
+#   Mỗi lần — chỉ pull tay rồi deploy (không git trong script):
+#     cd /var/www/188.com.vn && git pull origin main
+#     DEPLOY_SKIP_GIT=1 DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
+#   Hoặc một lệnh script (tự git pull --no-rebase): bỏ DEPLOY_SKIP_GIT
 #   DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
 #
 # Biến tuỳ chọn:
@@ -15,6 +19,10 @@
 #   DEPLOY_SKIP_DB_INIT=1         không tạo DB / không chạy init_database_tables + migrations
 #   DEPLOY_CREATE_DATABASE=0      không gọi postgres-create-db.sh (DB đã có sẵn)
 #   DEPLOY_STRICT_DB_INIT=0       nếu khởi tạo DB lỗi vẫn tiếp tục deploy (mặc định bật strict từ script)
+#   DEPLOY_GIT_SYNC=merge          git: merge khi VPS và origin/main lệch (mặc định — tránh lỗi Git 2.x "divergent branches")
+#   DEPLOY_GIT_SYNC=rebase         git pull --rebase
+#   DEPLOY_GIT_SYNC=reset-hard      git fetch + reset --hard origin/<branch> — xóa chỉnh sửa local trên VPS, khớp GitHub
+#   DEPLOY_SKIP_GIT=1               không chạy git trong script (đã git pull tay trước đó)
 #
 set -euo pipefail
 
@@ -63,8 +71,32 @@ if [[ "${DEPLOY_STOP_PM2_BEFORE_BUILD:-0}" == "1" ]]; then
   pm2 stop "${PM2_WEB}" 2>/dev/null || true
 fi
 
-echo "==> git pull origin ${BRANCH}"
-git pull origin "${BRANCH}"
+# Git ≥2.27: pull cần strategy khi có commit local không có trên origin (divergent). Mặc định merge.
+deploy_git_sync() {
+  local mode="${DEPLOY_GIT_SYNC:-merge}"
+  case "${mode}" in
+    reset-hard|hard)
+      echo "==> Git: FETCH + reset --hard origin/${BRANCH} (bỏ mọi chỉnh sửa chưa commit / commit chỉ có trên VPS)"
+      git fetch origin "${BRANCH}"
+      git checkout "${BRANCH}" 2>/dev/null || git checkout -b "${BRANCH}" "origin/${BRANCH}" 2>/dev/null || true
+      git reset --hard "origin/${BRANCH}"
+      ;;
+    rebase)
+      echo "==> git pull origin ${BRANCH} --rebase"
+      git pull --rebase origin "${BRANCH}"
+      ;;
+    merge|*)
+      echo "==> git pull origin ${BRANCH} --no-rebase (merge nếu cần)"
+      git pull origin "${BRANCH}" --no-rebase
+      ;;
+  esac
+}
+
+if [[ "${DEPLOY_SKIP_GIT:-0}" == "1" ]]; then
+  echo "==> Git: DEPLOY_SKIP_GIT=1 — bỏ qua (đã git pull / sync tay trước khi chạy script)."
+else
+  deploy_git_sync
+fi
 
 echo "==> Backend: venv + pip"
 if [[ ! -d "${VENV}" ]]; then
