@@ -1,5 +1,5 @@
 /* PWA: cache tối thiểu, ưu tiên mạng; xử lý thông báo Web Push (tài khoản) */
-const CACHE = "188-static-v1";
+const CACHE = "188-static-v2";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -14,7 +14,11 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   event.respondWith(
-    fetch(event.request).catch(() => caches.match("/offline") || fetch(event.request))
+    fetch(event.request).catch(async () => {
+      const cached = await caches.match("/offline");
+      if (cached) return cached;
+      return new Response("Offline", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    })
   );
 });
 

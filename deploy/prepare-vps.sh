@@ -53,6 +53,6 @@ fi
 
 echo ""
 echo "==> Chạy API production (ví dụ, sau Nginx terminate SSL):"
-echo "  cd ${BACKEND} && source .venv/bin/activate && uvicorn main:app --host 127.0.0.1 --port 8000"
+echo "  cd ${BACKEND} && source .venv/bin/activate && uvicorn main:app --host 127.0.0.1 --port 8001"
 echo "==> Next.js: cd ${FRONTEND} && npm run start  (hoặc pm2)"
 echo "Xem thêm: deploy/README.md, HUONG_DAN_DEPLOY.md"

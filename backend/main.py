@@ -260,10 +260,11 @@ async def startup_event():
     else:
         _db_quick = "Configured via DATABASE_URL"
 
+    _p = _startup_settings.SERVER_PORT
     print("\n📌 QUICK ACCESS:")
-    print("   📄 API Documentation: http://localhost:8000/docs")
+    print(f"   📄 API Documentation: http://localhost:{_p}/docs")
     print(f"   📊 Database: {_db_quick}")
-    print("   🏃 Server: http://localhost:8000")
+    print(f"   🏃 Server: http://localhost:{_p}")
     print("="*60)
 
 # ========== BASIC ROUTES ==========
@@ -360,11 +361,13 @@ async def not_found_exception_handler(request, exc):
     )
 
 if __name__ == "__main__":
+    from app.core.config import settings as _cli_settings
+    _port = _cli_settings.SERVER_PORT
     print("🔄 Starting server with debug mode...")
     uvicorn.run(
-        "main:app", 
-        host="0.0.0.0", 
-        port=8000, 
+        "main:app",
+        host="0.0.0.0",
+        port=_port,
         reload=True,
-        log_level="debug"
+        log_level="debug",
     )

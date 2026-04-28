@@ -58,7 +58,7 @@ python -m scripts.migrate_sqlite_to_postgres
 
 ```bash
 cd backend
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 ---

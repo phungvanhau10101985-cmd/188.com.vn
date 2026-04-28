@@ -3,7 +3,7 @@
  *
  * - Trang HTTPS (ngrok, production) không dùng `http://localhost` từ env — trình duyệt chặn
  *   (mixed content) → "Failed to fetch". Khi đó dùng cùng host + `/api/v1` (Next rewrite → FastAPI).
- * - `next dev` + HTTP localhost: cùng origin `/api/v1` hoặc fallback localhost:8000.
+ * - `next dev` + HTTP localhost: cùng origin `/api/v1` hoặc fallback localhost:8001.
  * - Tắt rewrite: NEXT_PUBLIC_API_NEXT_PROXY=0; nếu gọi thẳng API, NEXT_PUBLIC_API_BASE_URL phải là HTTPS công khai.
  */
 function stripTrailingSlash(url: string): string {
@@ -47,14 +47,14 @@ export function getApiBaseUrl(): string {
     if (!proxyOff && useSameOriginByEnv) {
       return `${window.location.origin}/api/v1`;
     }
-    return 'http://localhost:8000/api/v1';
+    return 'http://localhost:8001/api/v1';
   }
 
   if (!proxyOff && process.env.NEXT_PUBLIC_API_NEXT_PROXY === '1') {
-    const internal = (process.env.API_INTERNAL_ORIGIN || 'http://127.0.0.1:8000').replace(/\/$/, '');
+    const internal = (process.env.API_INTERNAL_ORIGIN || 'http://127.0.0.1:8001').replace(/\/$/, '');
     return `${internal}/api/v1`;
   }
-  return 'http://127.0.0.1:8000/api/v1';
+  return 'http://127.0.0.1:8001/api/v1';
 }
 
 /** Tránh trang cảnh báo ngrok chặn một số request (tuỳ phiên bản). */

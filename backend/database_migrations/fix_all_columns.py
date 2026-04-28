@@ -217,14 +217,14 @@ def main():
         
         1. KHỞI ĐỘNG LẠI SERVER:
            cd backend
-           python -m uvicorn main:app --reload --port 8000
+           python -m uvicorn main:app --reload --port 8001
         
         2. TEST ENDPOINT:
-           curl http://localhost:8000/api/v1/categories/
-           Hoặc mở: http://localhost:8000/api/v1/categories/
+           curl http://localhost:8001/api/v1/categories/
+           Hoặc mở: http://localhost:8001/api/v1/categories/
         
         3. KIỂM TRA SWAGGER:
-           http://localhost:8000/docs
+           http://localhost:8001/docs
         
         4. NẾU VẪN LỖI:
            - Kiểm tra log server

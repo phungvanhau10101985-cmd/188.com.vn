@@ -4,7 +4,7 @@ const nextConfig = {
   experimental: {
     // Sau Nginx: Server Actions cần Origin hợp lệ — tránh "Missing origin header"
     serverActions: {
-      allowedOrigins: ['188.com.vn', 'www.188.com.vn', 'localhost:3000'],
+      allowedOrigins: ['188.com.vn', 'www.188.com.vn', 'localhost:3001'],
     },
   },
   images: {

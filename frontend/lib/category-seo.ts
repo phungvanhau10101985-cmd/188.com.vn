@@ -6,7 +6,7 @@
 import type { CategoryLevel1 } from "@/types/api";
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api/v1";
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001/api/v1";
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_DOMAIN || "https://188.com.vn";
 
 /** Tránh treo SSR khi backend tắt / mạng chặn (Windows hay gặp). */

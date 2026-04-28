@@ -507,7 +507,7 @@ def export_merchant_center_feed_tsv(db: Session = Depends(get_db)):
     """
     from app.services.merchant_feed_tsv import iter_merchant_feed_lines
 
-    shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3000"
+    shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3001"
     cur = getattr(settings, "MERCHANT_FEED_CURRENCY", "VND") or "VND"
     img = getattr(settings, "MERCHANT_FEED_IMAGE_BASE_URL", "") or ""
 
@@ -535,7 +535,7 @@ def export_meta_catalog_feed_tsv(db: Session = Depends(get_db)):
     """
     from app.services.social_catalog_feed_tsv import iter_meta_catalog_lines
 
-    shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3000"
+    shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3001"
     cur = getattr(settings, "MERCHANT_FEED_CURRENCY", "VND") or "VND"
     img = getattr(settings, "MERCHANT_FEED_IMAGE_BASE_URL", "") or ""
     fb_cat = getattr(settings, "META_FEED_FB_PRODUCT_CATEGORY", "") or "Apparel & Accessories"
@@ -572,7 +572,7 @@ def export_tiktok_catalog_feed_tsv(db: Session = Depends(get_db)):
     """
     from app.services.social_catalog_feed_tsv import iter_tiktok_catalog_lines
 
-    shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3000"
+    shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3001"
     cur = getattr(settings, "MERCHANT_FEED_CURRENCY", "VND") or "VND"
     img = getattr(settings, "MERCHANT_FEED_IMAGE_BASE_URL", "") or ""
     gcat = getattr(settings, "CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY", "") or ""

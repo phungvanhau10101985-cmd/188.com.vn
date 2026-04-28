@@ -27,7 +27,7 @@
 ```bash
 cd backend
 # Tạo .env từ .env.example và điền giá trị
-uvicorn main:app --host 0.0.0.0 --port 8000
+uvicorn main:app --host 0.0.0.0 --port 8001
 # Không dùng --reload trên production
 ```
 

@@ -6,7 +6,7 @@ import { adminProductAPI, type AdminProduct, type AdminProductsResponse } from '
 
 const PAGE_SIZE = 100;
 
-const API_V1 = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
+const API_V1 = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1';
 
 /** Feed TSV công khai — Commerce Manager / Ads dùng “URL đến file” */
 const FEED_MERCHANT_CENTER_TSV = `${API_V1}/import-export/export/merchant-center-feed.tsv`;

@@ -9,7 +9,7 @@ export type PublicSiteEmbeds = {
 const empty: PublicSiteEmbeds = { head: [], body_open: [], body_close: [] };
 
 export async function fetchPublicSiteEmbeds(): Promise<PublicSiteEmbeds> {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:8000/api/v1';
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:8001/api/v1';
   try {
     const res = await fetch(`${base}/embed-codes/public`, {
       next: { revalidate: 120 },

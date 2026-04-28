@@ -9,7 +9,7 @@ const BASE_URL =
   "https://188.com.vn";
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api/v1";
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001/api/v1";
 
 /** Lấy tất cả slug sản phẩm từ API (phân trang). */
 async function getAllProductSlugs(): Promise<{ slug: string; updated_at?: string }[]> {

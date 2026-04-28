@@ -7,6 +7,18 @@ import NanoaiSimilarProductCard from '@/components/NanoaiSimilarProductCard';
 import type { NanoaiSearchProduct, NanoaiSearchResponse } from '@/types/api';
 import { useLazyRevealList } from '@/hooks/useLazyRevealList';
 import { imageUrlToFile, looksLikeHttpUrl } from '@/lib/image-from-url';
+import {
+  humanizeNanoaiImageSearchError,
+  shouldRetryNanoaiGeminiTransient,
+} from '@/lib/nanoai-search-errors';
+
+const RETRY_AFTER_MS = 2500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 /** Ảnh từ Header qua sessionStorage (consumePendingImageFile). */
 export default function TimTheoAnhPage() {
@@ -31,13 +43,40 @@ export default function TimTheoAnhPage() {
         if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
         return url;
       });
-      const res: NanoaiSearchResponse = await apiClient.nanoaiImageSearch(file, NANOAI_IMAGE_SEARCH_LIMIT);
-      setProducts(Array.isArray(res.products) ? res.products : []);
-      if (res.error && (!res.products || res.products.length === 0)) {
-        setSoftMessage(res.error);
+
+      let lastErr: string | null = null;
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const res = await apiClient.nanoaiImageSearch(file, NANOAI_IMAGE_SEARCH_LIMIT);
+        const list = Array.isArray(res.products) ? res.products : [];
+        const errRaw = res.error ? String(res.error) : '';
+
+        if (list.length > 0) {
+          setProducts(list);
+          if (attempt > 0) {
+            setSoftMessage(null);
+          }
+          break;
+        }
+
+        lastErr = errRaw || null;
+
+        const transient = shouldRetryNanoaiGeminiTransient(lastErr);
+        if (transient && attempt === 0) {
+          setSoftMessage('Đang thử lại sau lỗi tạm thời…');
+          await sleep(RETRY_AFTER_MS);
+          continue;
+        }
+
+        setProducts([]);
+        if (lastErr) {
+          setSoftMessage(humanizeNanoaiImageSearchError(lastErr));
+        }
+        break;
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Không tìm được. Vui lòng thử lại.');
+      const raw = e instanceof Error ? e.message : 'Không tìm được. Vui lòng thử lại.';
+      setError(humanizeNanoaiImageSearchError(raw) || raw);
       setProducts([]);
     } finally {
       setLoading(false);
@@ -211,7 +250,9 @@ export default function TimTheoAnhPage() {
       )}
 
       {softMessage && !error && products.length === 0 && !loading && (
-        <p className="text-xs text-amber-800 mb-2">{softMessage}</p>
+        <p className="text-xs text-amber-800 mb-2" role="status">
+          {softMessage}
+        </p>
       )}
 
       <section aria-live="polite" className="mt-2">
@@ -248,7 +289,7 @@ export default function TimTheoAnhPage() {
             ) : null}
             <div ref={sentinelRef} className="h-4 w-full" aria-hidden />
           </>
-        ) : !loading && !error ? (
+        ) : !loading && !error && !softMessage ? (
           <p className="text-xs text-gray-500 py-6 text-center">Chưa có kết quả.</p>
         ) : null}
       </section>

@@ -80,7 +80,7 @@ Bạn cần **tự chọn** một trong các hướng sau (hoặc tương tự):
 
 | Thành phần   | Gợi ý                                                        | Việc bạn làm                                                                                         |
 | ------------ | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| **Backend**  | VPS (DigitalOcean, AWS EC2, Vultr…), Railway, Render         | Thuê server, cài Python, chạy `uvicorn main:app --host 0.0.0.0 --port 8000` (không dùng `--reload`). |
+| **Backend**  | VPS (DigitalOcean, AWS EC2, Vultr…), Railway, Render         | Thuê server, cài Python, chạy `uvicorn main:app --host 0.0.0.0 --port 8001` (không dùng `--reload`). |
 | **Database** | Supabase, Neon, Railway PostgreSQL, hoặc PostgreSQL trên VPS | Tạo database, lấy chuỗi `DATABASE_URL` và ghi vào backend `.env`.                                    |
 | **Frontend** | Vercel, Netlify, hoặc cùng VPS với Nginx                     | Đẩy code frontend, set env (Bước 2), build và chạy (hoặc dùng “Build command” của Vercel/Netlify).   |
 | **Domain**   | Mua domain (vd: 188.com.vn)                                  | Trỏ domain/subdomain tới server hoặc Vercel/Netlify.                                                 |
@@ -88,7 +88,7 @@ Bạn cần **tự chọn** một trong các hướng sau (hoặc tương tự):
 
 Ví dụ nhanh:
 
-- **Backend:** Trên VPS: `cd backend` → `pip install -r requirements.txt` → tạo `.env` → `uvicorn main:app --host 0.0.0.0 --port 8000`.
+- **Backend:** Trên VPS: `cd backend` → `pip install -r requirements.txt` → tạo `.env` → `uvicorn main:app --host 0.0.0.0 --port 8001`.
 - **Frontend trên Vercel:** Đẩy repo lên GitHub → kết nối Vercel → thêm env `NEXT_PUBLIC_API_BASE_URL` và `NEXT_PUBLIC_DOMAIN` → Deploy.
 
 ---
@@ -195,13 +195,13 @@ Tạo file `**.env**` production: `DATABASE_URL`, `SECRET_KEY`, `BACKEND_CORS_OR
 
 **Migration / tạo bảng:** không có lệnh `alembic`. Cách đơn giản: sau khi `.env` đúng và DB trống/được phép migrate, chỉ cần **khởi động Uvicorn** một lần — app sẽ gọi migration khi startup. Hoặc (tùy) chạy script init nếu bạn có gói trong `deploy/` (xem `deploy/README.md`).
 
-Chạy thử (listen localhost) — ví dụ cổng **8000**; nếu **8000** đã là API nanoai thì đổi **8001**:
+Chạy thử (listen localhost) — dự án mặc định cổng **8001**; nếu **8001** đã bị chiếm thì đổi `SERVER_PORT` / lệnh `uvicorn` cho khớp:
 
 ```bash
-uvicorn main:app --host 127.0.0.1 --port 8000
+uvicorn main:app --host 127.0.0.1 --port 8001
 ```
 
-Kiểm tra: `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/docs` (ứng với port bạn chọn — rồi Ctrl+C).
+Kiểm tra: `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8001/docs` (ứng với port bạn chọn — rồi Ctrl+C).
 
 ### 5. Chạy backend “nền” (systemd hoặc PM2)
 

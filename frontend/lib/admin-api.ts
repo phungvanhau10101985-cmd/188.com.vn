@@ -1,7 +1,7 @@
 /**
  * Admin API client - dùng admin_token (Bearer) cho các endpoint /api/v1/orders/admin/*
  */
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1';
 
 function getAdminToken(): string | null {
   if (typeof window === 'undefined') return null;

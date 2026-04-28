@@ -16,7 +16,7 @@ export default function AdminLoginPage() {
   const [setupHint, setSetupHint] = useState<string | null>(null);
 
   useEffect(() => {
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
+    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1';
     fetch(`${apiBase}/admin/check-setup`)
       .then((r) => r.json())
       .then((d: { admin_exists?: boolean; hint?: string }) => {

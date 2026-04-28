@@ -19,7 +19,7 @@ class Settings:
         self.API_V1_STR: str = os.getenv("API_V1_STR", "/api/v1")
         self.SERVER_NAME: str = os.getenv("SERVER_NAME", "188.com.vn")
         self.SERVER_HOST: str = os.getenv("SERVER_HOST", "0.0.0.0")
-        self.SERVER_PORT: int = int(os.getenv("SERVER_PORT", "8000"))
+        self.SERVER_PORT: int = int(os.getenv("SERVER_PORT", "8001"))
         self.ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")  # development/staging/production
         self.DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
         
@@ -73,10 +73,10 @@ class Settings:
         )
         _ss = os.getenv("AUTH_COOKIE_SAMESITE", "lax").strip().lower()
         self.AUTH_COOKIE_SAMESITE: str = _ss if _ss in ("lax", "strict", "none") else "lax"
-        self.FRONTEND_BASE_URL: str = (os.getenv("FRONTEND_BASE_URL", "http://localhost:3000").strip().rstrip("/") or "http://localhost:3000")
+        self.FRONTEND_BASE_URL: str = (os.getenv("FRONTEND_BASE_URL", "http://localhost:3001").strip().rstrip("/") or "http://localhost:3001")
         self.BACKEND_PUBLIC_URL: str = (
             os.getenv("BACKEND_PUBLIC_URL", "").strip().rstrip("/")
-            or f"http://{os.getenv('SERVER_HOST', '127.0.0.1')}:{os.getenv('SERVER_PORT', '8000')}".replace("0.0.0.0", "127.0.0.1")
+            or f"http://{os.getenv('SERVER_HOST', '127.0.0.1')}:{os.getenv('SERVER_PORT', '8001')}".replace("0.0.0.0", "127.0.0.1")
         )
         # Meta Conversion API — bí mật gọi POST /embed-codes/facebook/capi/send-event (Authorization: Bearer …)
         self.FACEBOOK_GRAPH_API_VERSION: str = (os.getenv("FACEBOOK_GRAPH_API_VERSION", "v21.0").strip() or "v21.0").lstrip("/")
@@ -259,7 +259,10 @@ class Settings:
         # ========================
         # CORS CONFIGURATION
         # ========================
-        cors_env = os.getenv("BACKEND_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000")
+        cors_env = os.getenv(
+            "BACKEND_CORS_ORIGINS",
+            "http://localhost:3001,http://127.0.0.1:3001",
+        )
         self.BACKEND_CORS_ORIGINS: List[str] = [origin.strip() for origin in cors_env.split(",") if origin.strip()]
         # Cho phép tunnel ngrok khi frontend gọi thẳng API (không qua Next proxy). Để trống = tắt.
         _cors_re = os.getenv("BACKEND_CORS_ORIGIN_REGEX", "").strip()

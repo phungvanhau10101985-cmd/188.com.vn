@@ -21,7 +21,7 @@ const HOP_BY_HOP = new Set([
 ]);
 
 function backendBase(): string {
-  return (process.env.API_INTERNAL_ORIGIN || 'http://127.0.0.1:8000').replace(/\/$/, '');
+  return (process.env.API_INTERNAL_ORIGIN || 'http://127.0.0.1:8001').replace(/\/$/, '');
 }
 
 function forwardRequestHeaders(req: NextRequest, opts?: { omitContentLength?: boolean }): Headers {

@@ -3,13 +3,27 @@
  * Gọi API backend để kiểm tra path có cần redirect về trang canonical không.
  * Google/bot nhận 301 ngay từ server → không index URL trùng.
  */
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+/**
+ * Dùng đường cụ thể thay vì next/server vì một số phiên bản/webpack resolve
+ * next/dist/server/web/exports/next-response (không có file) → Module not found.
+ */
+import type { NextRequest } from "next/dist/server/web/spec-extension/request";
+import { NextResponse } from "next/dist/server/web/spec-extension/response";
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api/v1";
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001/api/v1";
+
+const CANON_HOST = "188.com.vn";
 
 export async function middleware(request: NextRequest) {
+  const host = request.headers.get("host")?.split(":")[0]?.toLowerCase();
+  // Một canonical (apex): tránh xen kẽ www và apex làm fetch RSC bị CORS giữa hai origin.
+  if (host === "www.188.com.vn") {
+    const dest = request.nextUrl.clone();
+    dest.hostname = CANON_HOST;
+    return NextResponse.redirect(dest, 308);
+  }
+
   const pathname = request.nextUrl.pathname;
 
   // Chỉ xử lý /danh-muc/xxx (có ít nhất 1 segment)
@@ -39,5 +53,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/danh-muc/:path*"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+  ],
 };

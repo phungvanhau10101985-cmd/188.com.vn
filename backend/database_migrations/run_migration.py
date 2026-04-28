@@ -238,11 +238,11 @@ def run_migration():
         
         1. KHỞI ĐỘNG LẠI SERVER:
            cd backend
-           python -m uvicorn main:app --reload --port 8000
+           python -m uvicorn main:app --reload --port 8001
         
         2. KIỂM TRA ENDPOINT:
-           Mở trình duyệt: http://localhost:8000/api/v1/categories/
-           Hoặc dùng curl: curl http://localhost:8000/api/v1/categories/
+           Mở trình duyệt: http://localhost:8001/api/v1/categories/
+           Hoặc dùng curl: curl http://localhost:8001/api/v1/categories/
         
         3. KIỂM TRA FRONTEND:
            Truy cập frontend và kiểm tra danh mục sản phẩm

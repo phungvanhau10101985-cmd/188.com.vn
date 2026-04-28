@@ -17,7 +17,7 @@ const HOP_BY_HOP = new Set([
 ]);
 
 function backendBase(): string {
-  return (process.env.API_INTERNAL_ORIGIN || 'http://127.0.0.1:8000').replace(/\/$/, '');
+  return (process.env.API_INTERNAL_ORIGIN || 'http://127.0.0.1:8001').replace(/\/$/, '');
 }
 
 function targetUrl(req: NextRequest, segments: string[]): string {
@@ -70,7 +70,7 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
   const url = targetUrl(req, segments);
   const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
   const headers = forwardRequestHeaders(req, { omitContentLength: hasBody });
-  // Phải `follow`: nếu `manual`, upstream 301/308 với Location `http://127.0.0.1:8000/...`
+  // Phải `follow`: nếu `manual`, upstream 301/308 với Location `http://127.0.0.1:8001/...`
   // được chuyển nguyên xuống trình duyệt (ngrok/mobile) → client nhảy tới 127.0.0.1 → lỗi & banner "offline".
   // Không follow tại Node (undici hay 502 khi Host bị override trước redirect):
   // Thay vào đó, ta tự rewrite Location về cùng path /api/v1 để client follow.
