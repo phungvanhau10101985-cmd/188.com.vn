@@ -310,3 +310,26 @@ chmod 600 /var/www/188.com.vn/backend/.env /var/www/188.com.vn/frontend/.env.loc
 ```
 
 **Sau khi sửa env frontend:** `cd /var/www/188.com.vn/frontend` → `npm run build` → khởi động lại PM2 / process Next. **Sau khi sửa `backend/.env`:** khởi động lại service Uvicorn.
+
+---
+
+## Import Excel & SEO — chạy khi tắt máy tính cá nhân?
+
+- **Quan trọng:** Toàn bộ **ghi DB + SEO** (kể cả thread nền sau import lớn) chạy **trên máy chủ** chạy API (Ví dụ process **PM2 `188-api`** trên VPS), **không** chạy trên laptop/trình duyệt.
+- Nếu bạn mở **trang admin production** (API trỏ tới `https://…/api/v1`), chọn file Excel rồi **tắt máy tính / đóng trình duyệt**: **file đã upload xong** và server đã nhận job thì phần xử lý **vẫn tiếp tục trên VPS** cho đến khi xong (hoặc lỗi), miễn là **VPS không reboot** và **PM2 không restart** process API.
+
+**Trường hợp vẫn mất khi tắt máy:**
+
+- Bạn chạy **backend trên chính PC** (`uvicorn` local) — tắt PC = tắt API = dừng import/SEO. **Cách đúng cho file lớn:** chạy import trên **môi trường production** (VPS), không dựa vào máy dev.
+- **Reboot VPS** hoặc `pm2 restart 188-api` **giữa chừng**: job theo dõi trong RAM có thể mất; dữ liệu sản phẩm **đã commit** vẫn trong PostgreSQL. SEO nền có thể bị cắt — xem log `pm2 logs 188-api` (dòng `EXCEL_IMPORT [nền]`); có thể chạy lại scan SEO danh mục bằng các công cụ/script hiện có trong project nếu cần.
+
+**Gợi ý cấu hình máy chủ (import nặng):**
+
+- **Nginx** (nếu có): `client_max_body_size` đủ cho file `.xlsx`; `proxy_read_timeout` / `send_timeout` đủ lớn cho **POST upload** (vài phút nếu mạng chậm).
+- **Một process API** cho job import (tránh poll job lệch worker nếu sau này tăng số worker — xem mã `IMPORT_EXCEL_JOBS` trong code).
+
+**Tóm lại:** Để “tắt máy vẫn import/SEO chạy”, hãy **import qua admin trên site thật** (API trên VPS), không chạy import dài trên **localhost** trên PC cá nhân.
+
+**Đã có trong code:** tiến trình job (`GET …/import/excel/job/{id}`) được **ghi vào file** dưới `backend/temp_uploads/import_jobs/*.json`, nên **sau `pm2 restart` vẫn đọc lại được trạng thái cuối** (để biết đã done/lỗi). **Riêng tiến trình import đang chạy trong process** có thể bị **dừng** khi restart — lúc đó chỉ biết điểm dừng từ file; dữ liệu SP **đã commit** vẫn trong Postgres.
+
+**Nginx:** có `deploy/nginx-snippet-import-excel.conf.example` (timeout + ví dụ `location`). Nếu không cấu hình đủ, upload hoặc request dài có thể bị 502/413.

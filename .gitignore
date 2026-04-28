@@ -44,3 +44,6 @@ ai_analysis/project_analysis.json
 # Backend uploads (file user tải lên — không vào git)
 **/backend/app/static/uploads/*
 !**/backend/app/static/uploads/.gitkeep
+
+# Job import Excel (JSON trên đĩa — không vào git)
+**/backend/temp_uploads/

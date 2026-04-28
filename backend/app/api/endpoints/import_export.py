@@ -17,6 +17,7 @@ from app.db.session import get_db
 from app.services.excel_importer import ExcelImporter
 from app.core.config import settings
 from app.services.category_seo_analyzer import scan_and_create_mappings
+from app.services.import_excel_job_store import load_import_job, persist_import_job
 
 excel_to_db_mapping = {
     # ID & Basic Info
@@ -127,9 +128,19 @@ def _import_job_percent(phase: str, current: int, total: Optional[int]) -> Optio
 
 
 def _import_job_update(job_id: str, **kwargs) -> None:
+    """Đồng bộ RAM + file JSON để GET /job/:id hoạt động sau pm2 restart (trùng thư mục)."""
     with _import_job_lock:
-        if job_id in IMPORT_EXCEL_JOBS:
-            IMPORT_EXCEL_JOBS[job_id].update(kwargs)
+        st = IMPORT_EXCEL_JOBS.get(job_id)
+        if st is None:
+            st = load_import_job(job_id)
+        if st is None:
+            st = {}
+        st.update(kwargs)
+        IMPORT_EXCEL_JOBS[job_id] = st
+        try:
+            persist_import_job(job_id, st)
+        except OSError:
+            pass
 
 
 def _run_import_excel_job(
@@ -296,20 +307,25 @@ async def import_excel_async(
         tmp.write(content)
 
     job_id = str(uuid.uuid4())
+    initial = {
+        "job_id": job_id,
+        "status": "queued",
+        "phase": "queued",
+        "current": 0,
+        "total": None,
+        "percent": None,
+        "message": "Đã nhận file, đang vào hàng đợi...",
+        "created_at": datetime.now().isoformat(),
+        "finished_at": None,
+        "result": None,
+        "detail": None,
+    }
     with _import_job_lock:
-        IMPORT_EXCEL_JOBS[job_id] = {
-            "job_id": job_id,
-            "status": "queued",
-            "phase": "queued",
-            "current": 0,
-            "total": None,
-            "percent": None,
-            "message": "Đã nhận file, đang vào hàng đợi...",
-            "created_at": datetime.now().isoformat(),
-            "finished_at": None,
-            "result": None,
-            "detail": None,
-        }
+        IMPORT_EXCEL_JOBS[job_id] = initial
+        try:
+            persist_import_job(job_id, IMPORT_EXCEL_JOBS[job_id])
+        except OSError:
+            pass
 
     background_tasks.add_task(
         _run_import_excel_job,
@@ -331,9 +347,14 @@ async def import_excel_async(
 
 @router.get("/import/excel/job/{job_id}")
 def get_import_excel_job(job_id: str):
-    """Trạng thái import async (tiến trình + kết quả khi xong)."""
+    """Trạng thái import async (tiến trình + kết quả khi xong). Đọc từ RAM hoặc file (sau khi restart API)."""
     with _import_job_lock:
         job = IMPORT_EXCEL_JOBS.get(job_id)
+        if job is None:
+            loaded = load_import_job(job_id)
+            if loaded:
+                IMPORT_EXCEL_JOBS[job_id] = loaded
+                job = loaded
     if not job:
         raise HTTPException(status_code=404, detail="Không tìm thấy job import.")
     return job

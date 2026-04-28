@@ -23,6 +23,7 @@ from app.utils.vietnamese import (
 from difflib import SequenceMatcher
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 import re
+import threading
 
 # Import slug function từ slug.py
 try:
@@ -1422,6 +1423,52 @@ def delete_product(db: Session, product_id: int):
         db.commit()
     return db_product
 
+def _collect_unique_category_paths_for_import(products_data: List[Dict]) -> List[tuple]:
+    """Từ dữ liệu SP import, gom path slug danh mục (cấp 1 / 1+2 / đủ 3) cho SEO body."""
+    unique_paths = set()
+    for product_data in products_data:
+        c1 = (product_data.get("category") or "").strip()
+        c2 = (product_data.get("subcategory") or "").strip()
+        c3 = (product_data.get("sub_subcategory") or "").strip()
+        path_tuple = _category_path_slugs_from_names(c1, c2 if c2 else None, c3 if c3 else None)
+        if path_tuple[0]:
+            unique_paths.add(path_tuple)
+            level1, level2, level3 = path_tuple
+            unique_paths.add((level1, None, None))
+            if level2:
+                unique_paths.add((level1, level2, None))
+    return list(unique_paths)
+
+
+def _run_category_seo_body_loop_for_import_paths(
+    db: Session,
+    paths_list: List[tuple],
+    progress_callback,
+) -> int:
+    """Gọi ensure_category_seo_body cho từng path; trả về số danh mục đã sinh body mới."""
+    n_paths = len(paths_list)
+    if n_paths == 0:
+        return 0
+    generated = 0
+    for path_i, (level1, level2, level3) in enumerate(paths_list):
+        try:
+            if progress_callback and (path_i % 3 == 0 or path_i == n_paths - 1):
+                progress_callback("seo_categories", path_i + 1, n_paths)
+            if ensure_category_seo_body(db, level1_slug=level1, level2_slug=level2, level3_slug=level3, is_active=True):
+                generated += 1
+                logger.info(
+                    f"📝 SEO body tự sinh cho danh mục: {level1}"
+                    + (f"/{level2}" if level2 else "")
+                    + (f"/{level3}" if level3 else "")
+                )
+                time.sleep(1.2)
+        except Exception as e:
+            logger.warning(
+                f"⚠️ Không sinh SEO body cho {level1}/{level2 or ''}/{level3 or ''}: {e}"
+            )
+    return generated
+
+
 # ========== BULK IMPORT FUNCTION ==========
 
 def bulk_import_products(
@@ -1517,36 +1564,50 @@ def bulk_import_products(
             "success_rate": f"{success_rate:.1f}%",
         }
 
-    # Tự động đảm bảo seo_body cho các danh mục có trong lô import (đã có thì bỏ qua, chưa có thì sinh bằng Gemini).
-    # Luôn thêm cả path cấp 1 (level1, None, None) và cấp 2 (level1, level2, None) để trang danh mục cấp 1/cấp 2 cũng có SEO body.
-    unique_paths = set()
-    for product_data in products_data:
-        c1 = (product_data.get("category") or "").strip()
-        c2 = (product_data.get("subcategory") or "").strip()
-        c3 = (product_data.get("sub_subcategory") or "").strip()
-        path_tuple = _category_path_slugs_from_names(c1, c2 if c2 else None, c3 if c3 else None)
-        if path_tuple[0]:
-            unique_paths.add(path_tuple)
-            # Thêm path cấp 1 và cấp 2 (nếu có) để đảm bảo trang cha cũng có seo_body
-            level1, level2, level3 = path_tuple
-            unique_paths.add((level1, None, None))
-            if level2:
-                unique_paths.add((level1, level2, None))
+    paths_list_import = _collect_unique_category_paths_for_import(products_data)
+
+    # Lô ≥ ngưỡng: không chạy Gemini SEO ngay trong request import (coi là xong để không “treo”),
+    # nhưng vẫn chạy SEO đủ trong thread nền (daemon).
+    seo_skip_thresh = max(
+        0,
+        int(getattr(settings, "EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS", 2500) or 0),
+    )
+    skip_inline_seo = seo_skip_thresh > 0 and n_products >= seo_skip_thresh
+
     generated = 0
-    paths_list = list(unique_paths)
-    n_paths = len(paths_list)
+    category_seo_bg_started = False
+    if not skip_inline_seo:
+        generated = _run_category_seo_body_loop_for_import_paths(db, paths_list_import, progress_callback)
+    else:
+        if progress_callback:
+            progress_callback("seo_categories", n_products, n_products)
+        logger.warning(
+            "EXCEL_IMPORT: batch %s SP ≥ %s — SEO danh mục chạy NỀN (không chặn kết thúc import). "
+            "Đặt EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS=0 để chạy SEO ngay trong import (chậm với batch lớn).",
+            n_products,
+            seo_skip_thresh,
+        )
 
-    for path_i, (level1, level2, level3) in enumerate(paths_list):
-        try:
-            if progress_callback and (path_i % 3 == 0 or path_i == n_paths - 1):
-                progress_callback("seo_categories", path_i + 1, n_paths)
+        paths_snapshot = list(paths_list_import)
 
-            if ensure_category_seo_body(db, level1_slug=level1, level2_slug=level2, level3_slug=level3, is_active=True):
-                generated += 1
-                logger.info(f"📝 SEO body tự sinh cho danh mục: {level1}" + (f"/{level2}" if level2 else "") + (f"/{level3}" if level3 else ""))
-                time.sleep(1.2)
-        except Exception as e:
-            logger.warning(f"⚠️ Không sinh SEO body cho {level1}/{level2 or ''}/{level3 or ''}: {e}")
+        def _defer_category_seo_after_bulk() -> None:
+            from app.db.session import SessionLocal
+
+            db2 = SessionLocal()
+            try:
+                logger.info(
+                    "EXCEL_IMPORT [nền] Bắt đầu sinh SEO danh mục (%s path) sau import lớn...",
+                    len(paths_snapshot),
+                )
+                gen = _run_category_seo_body_loop_for_import_paths(db2, paths_snapshot, None)
+                logger.info("EXCEL_IMPORT [nền] Hoàn tất SEO danh mục — sinh mới ~%s body (nếu có).", gen)
+            except Exception as exc:
+                logger.exception("EXCEL_IMPORT [nền] Lỗi SEO danh mục: %s", exc)
+            finally:
+                db2.close()
+
+        threading.Thread(target=_defer_category_seo_after_bulk, daemon=True).start()
+        category_seo_bg_started = True
 
     # Calculate success rate
     total_processed = len(products_data)
@@ -1562,7 +1623,13 @@ def bulk_import_products(
     }
     if generated:
         result["seo_bodies_generated"] = generated
-    
+    if category_seo_bg_started:
+        result["category_seo_background"] = True
+        result["category_seo_note"] = (
+            f"SEO danh mục (Gemini) đang chạy nền sau import — batch ≥{seo_skip_thresh} SP "
+            "(xem log API: EXCEL_IMPORT [nền])."
+        )
+
     logger.info(f"📦 BULK IMPORT COMPLETE:")
     logger.info(f"   ➕ Created: {created}")
     logger.info(f"   🔄 Updated: {updated}")

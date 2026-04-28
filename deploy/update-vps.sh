@@ -7,7 +7,8 @@
 #   Mỗi lần — chỉ pull tay rồi deploy (không git trong script):
 #     cd /var/www/188.com.vn && git pull origin main
 #     DEPLOY_SKIP_GIT=1 DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
-#   Hoặc một lệnh script (tự git pull --no-rebase): bỏ DEPLOY_SKIP_GIT
+#   Hoặc một lệnh (script đã TÍCH HỢP git pull origin <nhánh>): bỏ DEPLOY_SKIP_GIT
+#     → trong script: deploy_git_sync → git pull origin <nhánh> --no-rebase (đối số đầu, mặc định main)
 #   DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
 #
 # Biến tuỳ chọn:

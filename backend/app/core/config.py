@@ -258,6 +258,15 @@ class Settings:
         # Import Excel: tối đa số dòng/lần (mặc định 30k); commit DB theo lô để giảm overhead transaction
         self.MAX_EXCEL_IMPORT_ROWS: int = int(os.getenv("MAX_EXCEL_IMPORT_ROWS", "30000"))
         self.EXCEL_IMPORT_COMMIT_BATCH_SIZE: int = int(os.getenv("EXCEL_IMPORT_COMMIT_BATCH_SIZE", "250"))
+        # bulk_import_products: sau khi ghi DB sẽ (trước đây) gọi Gemini + sleep cho MỖI danh mục mới —
+        # với batch lớn (vd. ~30k SP) có thể mất giờ, job poll tưởng “treo”.
+        # Nếu số SP hợp lệ trong lô ≥ ngưỡng này thì BỎ QUA vòng SEO danh mục ngay trong import (vẫn có thể chạy job SEO sau).
+        # Đặt 0 để không bỏ qua — luôn chạy vòng SEO (hành vi cũ, rất chậm với file lớn).
+        try:
+            _seo_skip_thr = os.getenv("EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS", "2500").strip()
+            self.EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS = int(_seo_skip_thr) if _seo_skip_thr != "" else 2500
+        except ValueError:
+            self.EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS = 2500
         
         # ========================
         # CORS CONFIGURATION

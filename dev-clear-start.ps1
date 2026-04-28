@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
   Xoá cache, rồi khởi động local: backend (uvicorn), frontend (Next.js), ngrok.
-  Cấu hình cổng ở biến bên dưới (mặc định: backend 8000, frontend 3000; trùng với .env / NEXT_PUBLIC_API_BASE_URL).
+  Cấu hình cổng ở biến bên dưới (mặc định: backend 8001, frontend 3001 — trùng deploy/update-vps.sh + NEXT_PUBLIC_API_BASE_URL).
   Chạy: powershell -ExecutionPolicy Bypass -File .\dev-clear-start.ps1
   Nếu .next vẫn khóa: powershell -ExecutionPolicy Bypass -File .\dev-clear-start.ps1 -KillAllNode
     (dừng mọi node.exe trên máy — đóng hết dự án Node khác trước khi chạy)
@@ -14,8 +14,8 @@ param(
 $ErrorActionPreference = "Continue"
 
 # --- Cấu hình ---
-$BackendPort  = 8000
-$FrontendPort = 3000
+$BackendPort  = 8001
+$FrontendPort = 3001
 # ngrok mở tunnel tới frontend (cùng cổng dev Next)
 
 $Root         = $PSScriptRoot
@@ -268,5 +268,6 @@ if ($ngrokPath) {
 
 Write-Host ""
 Write-Host "Xong. Kiem tra cua so CMD: BACKEND, FRONTEND, ngrok." -ForegroundColor Green
-Write-Host "  API:  http://127.0.0.1:$BackendPort/docs" -ForegroundColor Gray
-Write-Host "  Web:  http://127.0.0.1:$FrontendPort" -ForegroundColor Gray
+Write-Host "  API:      http://127.0.0.1:${BackendPort}/docs  (NEXT_PUBLIC tuong ung http://localhost:${BackendPort}/api/v1 )" -ForegroundColor Gray
+Write-Host "  Web:      http://127.0.0.1:$FrontendPort" -ForegroundColor Gray
+Write-Host "  Health:   curl http://127.0.0.1:${BackendPort}/health" -ForegroundColor DarkGray
