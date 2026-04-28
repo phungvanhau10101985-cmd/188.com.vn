@@ -198,8 +198,8 @@ export default function AdminEmbedCodesPage() {
       return;
     }
 
-    const base: Partial<SiteEmbedCodeAdmin> & Pick<SiteEmbedCodeAdmin, 'title' | 'placement' | 'is_active'> = {
-      platform: form.platform.trim(),
+    const common = {
+      platform: form.platform.trim() || 'other',
       category: form.category.trim() || 'custom',
       title: form.title.trim(),
       placement: form.placement,
@@ -211,7 +211,7 @@ export default function AdminEmbedCodesPage() {
     try {
       if (editingId != null) {
         const patch: Partial<SiteEmbedCodeAdmin> = {
-          ...base,
+          ...common,
         };
         if (!keepCapiSecret) {
           patch.content = form.content;
@@ -219,7 +219,7 @@ export default function AdminEmbedCodesPage() {
         await adminSiteEmbedAPI.update(editingId, patch);
       } else {
         await adminSiteEmbedAPI.create({
-          ...base,
+          ...common,
           content: form.content,
         });
       }
