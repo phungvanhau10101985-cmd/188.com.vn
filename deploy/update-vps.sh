@@ -4,7 +4,14 @@
 #
 # Usage (từ root repo trên VPS):
 #   cd /var/www/188.com.vn
-#   NODE_BUILD_HEAP_MB=3072 DEPLOY_SKIP_LINT=1 bash ./deploy/update-vps.sh main
+#   DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
+#
+# Biến tuỳ chọn:
+#   PM2_API_NAME / PM2_WEB_NAME   (mặc định 188-api, 188-web)
+#   API_INTERNAL_PORT             (mặc định 8001 — Uvicorn FastAPI)
+#   WEB_INTERNAL_PORT             (mặc định 3001 — Next start)
+#   DEPLOY_RESTART_PM2=0          bỏ qua pm2 restart sau build
+#   DEPLOY_STRICT_HEALTH=1        exit 1 nếu curl health không 200
 #
 set -euo pipefail
 
@@ -16,6 +23,8 @@ VENV="${BACKEND}/.venv"
 
 PM2_API="${PM2_API_NAME:-188-api}"
 PM2_WEB="${PM2_WEB_NAME:-188-web}"
+API_INTERNAL_PORT="${API_INTERNAL_PORT:-8001}"
+WEB_INTERNAL_PORT="${WEB_INTERNAL_PORT:-3001}"
 
 cd "${PROJECT_ROOT}"
 
@@ -70,8 +79,41 @@ if [[ "${DEPLOY_SKIP_TYPECHECK:-0}" == "1" ]]; then
   echo "==> Lưu ý: DEPLOY_SKIP_TYPECHECK=1 không tự tắt TS — cần ignoreBuildErrors trong next.config nếu muốn bỏ qua lỗi type."
 fi
 
+health_check_local() {
+  echo ""
+  echo "==> Kiểm tra sức khỏe service (localhost, sau PM2 restart)"
+  local api_code web_code
+  api_code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${API_INTERNAL_PORT}/health" 2>/dev/null || echo "000")
+  web_code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${WEB_INTERNAL_PORT}/" 2>/dev/null || echo "000")
+  echo "    GET http://127.0.0.1:${API_INTERNAL_PORT}/health  → ${api_code}"
+  echo "    GET http://127.0.0.1:${WEB_INTERNAL_PORT}/           → ${web_code}"
+  if [[ "${api_code}" == "200" && "${web_code}" == "200" ]]; then
+    echo "✅ Sức khỏe: OK."
+    return 0
+  fi
+  echo "⚠️  Sức khỏe bất thường — xem: pm2 logs ${PM2_API} | pm2 logs ${PM2_WEB}"
+  [[ "${DEPLOY_STRICT_HEALTH:-0}" == "1" ]] && return 1
+  return 0
+}
+
+if [[ "${DEPLOY_RESTART_PM2:-1}" != "1" ]]; then
+  echo ""
+  echo "==> DEPLOY_RESTART_PM2=0 — không restart PM2. Chạy tay: pm2 restart ${PM2_API} ${PM2_WEB}"
+  health_check_local || true
+  exit 0
+fi
+
 echo ""
-echo "==> Xong build. Khởi động lại PM2 (ví dụ):"
-echo "    pm2 restart ${PM2_API} ${PM2_WEB}"
-echo "    # hoặc lần đầu: xem HUONG_DAN_DEPLOY.md (uvicorn 8001, PORT=3001)"
+echo "==> PM2: khởi động lại ${PM2_API} và ${PM2_WEB}"
+if pm2 describe "${PM2_API}" &>/dev/null && pm2 describe "${PM2_WEB}" &>/dev/null; then
+  pm2 restart "${PM2_API}" "${PM2_WEB}"
+  pm2 save || true
+  sleep 3
+else
+  echo "⚠️  Chưa có process ${PM2_API} / ${PM2_WEB} — bỏ qua restart (tạo lần đầu: xem HUONG_DAN_DEPLOY.md)."
+fi
+
+health_check_local
+
 echo ""
+echo "==> Deploy xong."

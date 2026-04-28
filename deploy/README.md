@@ -22,7 +22,9 @@ chmod +x deploy/update-vps.sh   # chỉ một lần
 DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_BUILD_VPS=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
 ```
 
-Lệnh không dùng `pm2 stop all` (tránh làm nanoai). Đặt biến `PM2_API_NAME` / `PM2_WEB_NAME` nếu tên PM2 khác `188-api` / `188-web`. Sau đó `pm2 restart …`.
+Script sẽ **tự `pm2 restart`** (nếu đã có `188-api` / `188-web`) và **`pm2 save`**, rồi **curl kiểm tra** `:${API_INTERNAL_PORT:-8001}/health` và `:${WEB_INTERNAL_PORT:-3001}/`. `DEPLOY_RESTART_PM2=0` để chỉ build không restart. `DEPLOY_STRICT_HEALTH=1` để fail (exit≠0) khi không 200.
+
+Lệnh không dùng `pm2 stop all` (tránh làm nanoai). Đặt biến `PM2_API_NAME` / `PM2_WEB_NAME` nếu tên PM2 khác `188-api` / `188-web`.
 
 **Cùng VPS với site khác (vd. nanoai.vn):** nanoai thường chiếm Next **`3000`** — chạy 188 với **`PORT=3001`** (hoặc cổng trống khác). API 188 dùng cổng **không trùng** API đang có (vd. `8001` nếu `8000` là nanoai). Chi tiết bảng cổng và Nginx: **`HUONG_DAN_DEPLOY.md` → Phần 4, mục “Cùng VPS với nanoai.vn”**.
 
