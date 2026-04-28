@@ -8,6 +8,24 @@ function getAdminToken(): string | null {
   return localStorage.getItem('admin_token');
 }
 
+/** Chuỗi thân thiện từ FastAPI detail (chuỗi | mảng validation) */
+function formatFastApiDetail(detail: unknown): string {
+  if (detail == null || detail === '') return '';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail))
+    return detail
+      .map((item) =>
+        typeof item === 'object' && item !== null && 'msg' in item
+          ? String((item as { msg?: unknown }).msg ?? '')
+          : typeof item === 'string'
+            ? item
+            : JSON.stringify(item),
+      )
+      .filter(Boolean)
+      .join('; ');
+  return String(detail);
+}
+
 async function fetchAdmin<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = getAdminToken();
   if (!token) {
@@ -108,6 +126,38 @@ export interface AdminProductsResponse {
   total_pages: number;
 }
 
+/** Trạng thái import Excel async (GET .../import/excel/job/{id}) */
+export interface AdminImportExcelJob {
+  job_id: string;
+  status: 'queued' | 'running' | 'done' | 'error';
+  phase: string;
+  current: number;
+  total: number | null;
+  percent: number | null;
+  message: string;
+  created_at?: string;
+  finished_at?: string | null;
+  result?: {
+    success?: boolean;
+    message?: string;
+    data?: {
+      created: number;
+      updated: number;
+      total_processed: number;
+      success_rate?: string;
+      file_name?: string;
+      import_time?: string;
+    };
+    warnings?: string[];
+    errors?: string[];
+  } | null;
+  detail?: string | null;
+  /** Kèm detail khi lỗi (dòng trong file / traceback rút gọn) */
+  errors?: string[] | null;
+  warnings?: string[] | null;
+  total_rows?: number | null;
+}
+
 export interface AdminSearchMapping {
   id: number;
   keyword_input: string;
@@ -164,10 +214,37 @@ export const adminProductAPI = {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || `Import lỗi ${res.status}`);
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || `Import lỗi ${res.status}`);
     }
     return res.json();
   },
+
+  /** Import lớn: server trả 202 + job_id; dùng getImportExcelJob để poll tiến trình. */
+  startImportExcelAsync: async (file: File, overwrite = false) => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const form = new FormData();
+    form.append('file', file);
+    const url = `${API_BASE}/import-export/import/excel/async?overwrite=${overwrite}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      const detail = formatFastApiDetail(err?.detail ?? err);
+      throw new Error(detail || `Import lỗi ${res.status}`);
+    }
+    if (res.status !== 202) {
+      throw new Error('Server không trả job import (thiếu 202)');
+    }
+    const body = await res.json();
+    return body as { job_id: string; message: string; poll_url?: string };
+  },
+
+  getImportExcelJob: (jobId: string) =>
+    fetchAdmin<AdminImportExcelJob>(`/import-export/import/excel/job/${encodeURIComponent(jobId)}`),
 
   exportExcel: async () => {
     const token = getAdminToken();

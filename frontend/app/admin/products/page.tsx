@@ -2,11 +2,79 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import AdminLayout from '@/components/admin/AdminLayout';
-import { adminProductAPI, type AdminProduct, type AdminProductsResponse } from '@/lib/admin-api';
+import {
+  adminProductAPI,
+  type AdminImportExcelJob,
+  type AdminProduct,
+  type AdminProductsResponse,
+} from '@/lib/admin-api';
 
 const PAGE_SIZE = 100;
 
 const API_V1 = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1';
+
+/** Nội dung panel + toast sau khi poll job import xong */
+function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
+  panel: { variant: 'err' | 'warn' | 'ok'; title: string; body: string } | null;
+  toast: { type: 'ok' | 'err'; msg: string };
+} {
+  if (job.status === 'error') {
+    const parts: string[] = [];
+    parts.push(job.detail?.trim() || job.message?.trim() || 'Import thất bại');
+    if (job.total_rows != null) parts.push('', `Số dòng trong file (tham khảo): ${job.total_rows}`);
+    if (job.errors?.length) {
+      parts.push('', 'Chi tiết:');
+      for (const line of job.errors.slice(0, 200)) parts.push(typeof line === 'string' ? line : String(line));
+      if (job.errors.length > 200) parts.push(`… và ${job.errors.length - 200} dòng khác`);
+    }
+    if (job.warnings?.length) {
+      parts.push('', 'Cảnh báo đi kèm:');
+      for (const w of job.warnings.slice(0, 50)) parts.push(typeof w === 'string' ? w : String(w));
+    }
+    return {
+      panel: { variant: 'err', title: 'Import thất bại', body: parts.join('\n') },
+      toast: { type: 'err', msg: 'Import lỗi — xem chi tiết phía dưới ô Import.' },
+    };
+  }
+
+  const d = job.result?.data;
+  const rowErrs = job.result?.errors ?? [];
+  const warns = job.result?.warnings ?? [];
+  const headline = `Tạo mới ${d?.created ?? 0}, cập nhật ${d?.updated ?? 0} (${d?.success_rate ?? '—'} thành công, tổng xử lý ${d?.total_processed ?? 0}).`;
+
+  if (!rowErrs.length && !warns.length) {
+    return {
+      panel: null,
+      toast: { type: 'ok', msg: `Import xong: ${d?.created ?? 0} mới, ${d?.updated ?? 0} cập nhật` },
+    };
+  }
+
+  const body: string[] = [headline];
+  if (rowErrs.length) {
+    body.push('', `Lỗi theo dòng (${rowErrs.length}):`);
+    rowErrs.slice(0, 200).forEach((e) => body.push(typeof e === 'string' ? e : String(e)));
+    if (rowErrs.length > 200) body.push(`… và ${rowErrs.length - 200} lỗi khác`);
+  }
+  if (warns.length) {
+    body.push('', `Cảnh báo (${warns.length}):`);
+    warns.slice(0, 80).forEach((w) => body.push(typeof w === 'string' ? w : String(w)));
+    if (warns.length > 80) body.push(`… và ${warns.length - 80} cảnh báo khác`);
+  }
+
+  const variant = rowErrs.length ? 'warn' : 'ok';
+  const toastMsg = rowErrs.length
+    ? 'Import hoàn thành nhưng có lỗi ở một số dòng — xem chi tiết phía dưới ô Import.'
+    : 'Import xong có cảnh báo — xem chi tiết phía dưới ô Import.';
+
+  return {
+    panel: {
+      variant,
+      title: rowErrs.length ? 'Import xong nhưng còn lỗi dòng' : 'Import xong (cảnh báo)',
+      body: body.join('\n'),
+    },
+    toast: { type: 'ok', msg: toastMsg },
+  };
+}
 
 /** Feed TSV công khai — Commerce Manager / Ads dùng “URL đến file” */
 const FEED_MERCHANT_CENTER_TSV = `${API_V1}/import-export/export/merchant-center-feed.tsv`;
@@ -21,6 +89,16 @@ export default function AdminProductsPage() {
   const [page, setPage] = useState(1);
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{
+    message: string;
+    percent: number | null;
+  } | null>(null);
+  /** Chi tiết lỗi/cảnh báo sau import (giữ đến khi import lại hoặc đóng) */
+  const [importDetailPanel, setImportDetailPanel] = useState<{
+    variant: 'err' | 'warn' | 'ok';
+    title: string;
+    body: string;
+  } | null>(null);
   const [exporting, setExporting] = useState(false);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -30,9 +108,9 @@ export default function AdminProductsPage() {
   const [saving, setSaving] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
 
-  const showToast = (type: 'ok' | 'err', msg: string) => {
+  const showToast = (type: 'ok' | 'err', msg: string, persistMs?: number) => {
     setToast({ type, msg });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), persistMs ?? 3000);
   };
 
   const fetchProducts = useCallback(async () => {
@@ -71,15 +149,38 @@ export default function AdminProductsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setImporting(true);
+    setImportDetailPanel(null);
+    setImportProgress({ message: 'Đang tải file lên...', percent: null });
     try {
-      const result = await adminProductAPI.importExcel(file);
-      const d = result?.data || result;
-      showToast('ok', `Import xong: ${d?.created ?? 0} mới, ${d?.updated ?? 0} cập nhật`);
-      fetchProducts();
+      const { job_id } = await adminProductAPI.startImportExcelAsync(file);
+
+      let job: AdminImportExcelJob;
+      for (;;) {
+        job = await adminProductAPI.getImportExcelJob(job_id);
+        setImportProgress({
+          message: job.message,
+          percent: job.percent ?? null,
+        });
+        if (job.status === 'done' || job.status === 'error') break;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+
+      const { panel, toast: tmsg } = formatImportExcelJobOutcome(job);
+      if (panel) setImportDetailPanel(panel);
+      showToast(tmsg.type, tmsg.msg, tmsg.type === 'err' || panel?.variant === 'warn' ? 8000 : 4500);
+
+      if (job.status !== 'error') fetchProducts();
     } catch (err: unknown) {
-      showToast('err', (err as Error)?.message || 'Import thất bại');
+      const raw = (err as Error)?.message || 'Import thất bại';
+      setImportDetailPanel({
+        variant: 'err',
+        title: 'Không thể bắt đầu hoặc theo dõi import',
+        body: raw,
+      });
+      showToast('err', raw, 9000);
     } finally {
       setImporting(false);
+      setImportProgress(null);
       e.target.value = '';
     }
   };
@@ -248,14 +349,33 @@ export default function AdminProductsPage() {
             >
               {downloadingTemplate ? 'Đang tải...' : 'Tải file mẫu'}
             </button>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={importing}
-              className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium disabled:opacity-70"
-            >
-              {importing ? 'Đang import...' : 'Import Excel'}
-            </button>
+            <div className="flex flex-col items-end gap-1 min-w-[10rem]">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={importing}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium disabled:opacity-70 w-full sm:w-auto"
+              >
+                {importing ? 'Đang import...' : 'Import Excel'}
+              </button>
+              {importing && importProgress ? (
+                <div className="w-full max-w-[20rem] space-y-1">
+                  <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
+                    {importProgress.percent != null ? (
+                      <div
+                        className="h-full rounded-full bg-emerald-600 transition-[width] duration-300 ease-out"
+                        style={{ width: `${Math.min(100, importProgress.percent)}%` }}
+                      />
+                    ) : (
+                      <div className="h-full w-full bg-emerald-500/70 animate-pulse rounded-full" />
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-600 leading-snug text-right line-clamp-2">
+                    {importProgress.message}
+                  </p>
+                </div>
+              ) : null}
+            </div>
             <button
               type="button"
               onClick={handleExport}
@@ -265,6 +385,31 @@ export default function AdminProductsPage() {
               {exporting ? 'Đang export...' : 'Export Excel'}
             </button>
           </form>
+          {importDetailPanel ? (
+            <div
+              className={`mt-3 rounded-lg border p-3 text-sm ${
+                importDetailPanel.variant === 'err'
+                  ? 'border-red-300 bg-red-50 text-gray-900'
+                  : importDetailPanel.variant === 'warn'
+                    ? 'border-amber-300 bg-amber-50 text-gray-900'
+                    : 'border-sky-200 bg-sky-50 text-gray-900'
+              }`}
+            >
+              <div className="flex justify-between gap-2 items-start mb-2">
+                <span className="font-semibold">{importDetailPanel.title}</span>
+                <button
+                  type="button"
+                  onClick={() => setImportDetailPanel(null)}
+                  className="text-xs shrink-0 px-2 py-1 rounded border border-gray-400/60 hover:bg-white/80 text-gray-700"
+                >
+                  Đóng
+                </button>
+              </div>
+              <pre className="whitespace-pre-wrap break-words max-h-[22rem] overflow-y-auto font-mono text-xs leading-relaxed text-gray-800">
+                {importDetailPanel.body}
+              </pre>
+            </div>
+          ) : null}
           <div className="mt-4 pt-4 border-t border-gray-100 space-y-2 text-sm text-gray-700">
             <p>
               <span className="font-medium text-gray-800">Google Merchant Center</span>{' '}

@@ -1424,8 +1424,12 @@ def delete_product(db: Session, product_id: int):
 
 # ========== BULK IMPORT FUNCTION ==========
 
-def bulk_import_products(db: Session, products_data: List[Dict]):
-    """Import multiple products from Excel data"""
+def bulk_import_products(
+    db: Session,
+    products_data: List[Dict],
+    progress_callback=None,
+):
+    """Import multiple products from Excel data. progress_callback(phase, current, total) optional."""
     created = 0
     updated = 0
     errors = []
@@ -1438,6 +1442,12 @@ def bulk_import_products(db: Session, products_data: List[Dict]):
             500,
         ),
     )
+
+    n_products = len(products_data)
+    db_tick = max(50, batch_size)
+
+    if progress_callback and n_products:
+        progress_callback("database", 0, n_products)
 
     for idx, product_data in enumerate(products_data):
         try:
@@ -1476,7 +1486,12 @@ def bulk_import_products(db: Session, products_data: List[Dict]):
             if (idx + 1) % batch_size == 0:
                 db.commit()
                 logger.info(f"💾 Batch commit: {idx + 1} products")
-                
+
+            if progress_callback and (
+                (idx + 1) % db_tick == 0 or (idx + 1) == n_products
+            ):
+                progress_callback("database", idx + 1, n_products)
+
         except Exception as e:
             error_msg = f"Dòng {idx+1}: {str(e)}"
             errors.append(error_msg)
@@ -1518,8 +1533,14 @@ def bulk_import_products(db: Session, products_data: List[Dict]):
             if level2:
                 unique_paths.add((level1, level2, None))
     generated = 0
-    for (level1, level2, level3) in unique_paths:
+    paths_list = list(unique_paths)
+    n_paths = len(paths_list)
+
+    for path_i, (level1, level2, level3) in enumerate(paths_list):
         try:
+            if progress_callback and (path_i % 3 == 0 or path_i == n_paths - 1):
+                progress_callback("seo_categories", path_i + 1, n_paths)
+
             if ensure_category_seo_body(db, level1_slug=level1, level2_slug=level2, level3_slug=level3, is_active=True):
                 generated += 1
                 logger.info(f"📝 SEO body tự sinh cho danh mục: {level1}" + (f"/{level2}" if level2 else "") + (f"/{level3}" if level3 else ""))

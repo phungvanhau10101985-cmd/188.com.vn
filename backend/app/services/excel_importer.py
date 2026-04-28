@@ -1,7 +1,7 @@
 # backend/app/services/excel_importer.py - FIXED FOR 36-37 COLUMNS
 import pandas as pd
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Callable, Optional
 import json
 import logging
 import os
@@ -20,14 +20,26 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Báo tiến trình parse file (tránh gọi quá dày với file lớn)
+PARSE_PROGRESS_EVERY = 200
+
+
 class ExcelImporter:
     def __init__(self, db: Session):
         self.db = db
     
-    def import_from_excel(self, file_path: str, overwrite: bool = False) -> Dict[str, Any]:
+    def import_from_excel(
+        self,
+        file_path: str,
+        overwrite: bool = False,
+        progress_callback: Optional[Callable[[str, int, Optional[int]], None]] = None,
+    ) -> Dict[str, Any]:
         """
         Import sản phẩm từ file Excel 36 cột A-AJ
         Slug được tự động tạo
+
+        progress_callback(phase, current, total):
+          phase ∈ reading | parsing | database | seo_categories
         """
         try:
             logger.info(f"📥 BẮT ĐẦU IMPORT: {file_path}")
@@ -35,6 +47,9 @@ class ExcelImporter:
             if not os.path.exists(file_path):
                 return {"error": f"File không tồn tại: {file_path}"}
             
+            if progress_callback:
+                progress_callback("reading", 0, None)
+
             df = self._read_excel_with_detection(file_path)
             
             if df.empty:
@@ -68,8 +83,13 @@ class ExcelImporter:
             
             mappings = get_category_final_mappings(self.db)
 
-            for idx, row in df.iterrows():
+            for i, (idx, row) in enumerate(df.iterrows()):
                 try:
+                    if progress_callback and (
+                        i % PARSE_PROGRESS_EVERY == 0 or i == row_count - 1
+                    ):
+                        progress_callback("parsing", i + 1, row_count)
+
                     row_number = idx + 2
                     row_dict = row.to_dict()
                     
@@ -99,7 +119,11 @@ class ExcelImporter:
             
             if products_data:
                 logger.info("🔄 ĐANG IMPORT VÀO DATABASE...")
-                result = bulk_import_products(self.db, products_data)
+                result = bulk_import_products(
+                    self.db,
+                    products_data,
+                    progress_callback=progress_callback,
+                )
                 
                 all_errors = errors + result.get("errors", [])
                 all_warnings = warnings + result.get("warnings", [])

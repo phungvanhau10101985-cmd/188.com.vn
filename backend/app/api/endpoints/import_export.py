@@ -1,12 +1,15 @@
 # backend/app/api/endpoints/import_export.py - COMPLETE FINAL VERSION
 import pandas as pd
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, BackgroundTasks, Query
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import tempfile
 import os
 import shutil
+import uuid
+import threading
+import traceback
 from datetime import datetime
 import json
 
@@ -83,6 +86,166 @@ excel_to_db_mapping = {
 
 router = APIRouter()
 
+# --- Import Excel async (job + tiến trình) — dùng khi file lớn; server single-process ---
+_import_job_lock = threading.Lock()
+IMPORT_EXCEL_JOBS: dict = {}  # job_id -> trạng thái
+
+
+def auto_scan_category_seo_safe() -> None:
+    """Gọi scan SEO với session mới (an toàn sau khi request/import job đóng DB)."""
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        auto_scan_category_seo(db)
+    finally:
+        db.close()
+
+
+def _import_progress_message(phase: str, current: int, total: Optional[int]) -> str:
+    if phase == "reading":
+        return "Đang đọc file Excel..."
+    if phase == "parsing" and total:
+        return f"Đang xử lý dòng {current:,} / {total:,}..."
+    if phase == "parsing":
+        return "Đang xử lý các dòng trong file..."
+    if phase == "database" and total is not None:
+        return f"Đang ghi CSDL: {current:,} / {total:,} sản phẩm..."
+    if phase == "seo_categories" and total:
+        return f"Sinh nội dung SEO danh mục: {current} / {total}..."
+    if phase == "seo_categories":
+        return "Đang sinh nội dung SEO cho danh mục..."
+    if phase == "done":
+        return "Hoàn tất import."
+    return "Đang xử lý..."
+
+
+def _import_job_percent(phase: str, current: int, total: Optional[int]) -> Optional[float]:
+    if total and total > 0 and current >= 0:
+        return min(100.0, round(100.0 * current / total, 1))
+    return None
+
+
+def _import_job_update(job_id: str, **kwargs) -> None:
+    with _import_job_lock:
+        if job_id in IMPORT_EXCEL_JOBS:
+            IMPORT_EXCEL_JOBS[job_id].update(kwargs)
+
+
+def _run_import_excel_job(
+    job_id: str,
+    temp_file_path: str,
+    overwrite: bool,
+    original_filename: str,
+) -> None:
+    """Chạy sau khi POST /import/excel/async trả 202."""
+    from app.db.session import SessionLocal
+
+    def on_progress(phase: str, current: int, total: Optional[int]) -> None:
+        _import_job_update(
+            job_id,
+            status="running",
+            phase=phase,
+            current=current,
+            total=total,
+            message=_import_progress_message(phase, current, total),
+            percent=_import_job_percent(phase, current, total),
+        )
+
+    db = SessionLocal()
+    try:
+        _import_job_update(
+            job_id,
+            status="running",
+            phase="reading",
+            current=0,
+            total=None,
+            message=_import_progress_message("reading", 0, None),
+            percent=None,
+        )
+        importer = ExcelImporter(db)
+        result = importer.import_from_excel(
+            temp_file_path,
+            overwrite,
+            progress_callback=on_progress,
+        )
+
+        if result.get("error"):
+            err_lines = result.get("errors") or []
+            if isinstance(err_lines, list):
+                err_lines_out = [
+                    str(x) for x in err_lines[:200] if x is not None and str(x).strip()
+                ]
+            else:
+                err_lines_out = []
+            warn_lines = result.get("warnings") or []
+            if isinstance(warn_lines, list):
+                warn_lines_out = [str(x) for x in warn_lines[:80] if x is not None and str(x).strip()]
+            else:
+                warn_lines_out = []
+            _import_job_update(
+                job_id,
+                status="error",
+                phase="error",
+                finished_at=datetime.now().isoformat(),
+                detail=str(result["error"]),
+                message=str(result["error"]),
+                percent=None,
+                errors=err_lines_out if err_lines_out else None,
+                warnings=warn_lines_out if warn_lines_out else None,
+                total_rows=result.get("total_rows"),
+            )
+            return
+
+        data = {
+            "created": result.get("created", 0),
+            "updated": result.get("updated", 0),
+            "total_processed": result.get("total_processed", 0),
+            "success_rate": result.get("success_rate", "0%"),
+            "file_name": original_filename,
+            "import_time": datetime.now().isoformat(),
+            "auto_seo_scan": "running_in_background",
+        }
+        _import_job_update(
+            job_id,
+            status="done",
+            phase="done",
+            finished_at=datetime.now().isoformat(),
+            percent=100.0,
+            message=_import_progress_message("done", 0, None),
+            result={
+                "success": True,
+                "message": f"Đã import {result.get('total_processed', 0)} sản phẩm.",
+                "data": data,
+                "warnings": result.get("warnings", [])[:50],
+                "errors": result.get("errors", [])[:150],
+            },
+        )
+        threading.Thread(target=auto_scan_category_seo_safe, daemon=True).start()
+        print(f"✅ [Job {job_id}] Import xong, đã khởi chạy auto scan SEO.")
+
+    except Exception as e:
+        traceback.print_exc()
+        tb = traceback.format_exc()
+        tb_lines = [ln for ln in tb.strip().splitlines() if ln.strip()][-40:]
+        _import_job_update(
+            job_id,
+            status="error",
+            phase="error",
+            finished_at=datetime.now().isoformat(),
+            detail=str(e),
+            message=f"Import thất bại: {e}",
+            percent=None,
+            errors=[f"{type(e).__name__}: {e}", *tb_lines] if tb_lines else [f"{type(e).__name__}: {e}"],
+        )
+    finally:
+        db.close()
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except OSError:
+                pass
+
 
 def auto_scan_category_seo(db: Session):
     """
@@ -107,6 +270,74 @@ def auto_scan_category_seo(db: Session):
         # Không raise - import vẫn thành công
 
 # ========== IMPORT FUNCTIONS ==========
+
+@router.post("/import/excel/async")
+async def import_excel_async(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    overwrite: bool = False,
+):
+    """
+    Nhận file Excel, trả về job_id ngay (202). Client poll GET /import/excel/job/{job_id}
+    để xem tiến trình (parse dòng, ghi DB, SEO danh mục).
+    """
+    if not file.filename or not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(
+            status_code=400,
+            detail="Chỉ hỗ trợ file Excel (.xlsx, .xls).",
+        )
+
+    temp_dir = "temp_uploads"
+    os.makedirs(temp_dir, exist_ok=True)
+
+    with tempfile.NamedTemporaryFile(dir=temp_dir, suffix=".xlsx", delete=False) as tmp:
+        temp_file_path = tmp.name
+        content = await file.read()
+        tmp.write(content)
+
+    job_id = str(uuid.uuid4())
+    with _import_job_lock:
+        IMPORT_EXCEL_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "phase": "queued",
+            "current": 0,
+            "total": None,
+            "percent": None,
+            "message": "Đã nhận file, đang vào hàng đợi...",
+            "created_at": datetime.now().isoformat(),
+            "finished_at": None,
+            "result": None,
+            "detail": None,
+        }
+
+    background_tasks.add_task(
+        _run_import_excel_job,
+        job_id,
+        temp_file_path,
+        overwrite,
+        file.filename,
+    )
+
+    return JSONResponse(
+        status_code=202,
+        content={
+            "job_id": job_id,
+            "message": "Đã nhận file. Dùng GET /import-export/import/excel/job/{job_id} để theo dõi tiến trình.",
+            "poll_url": f"/api/v1/import-export/import/excel/job/{job_id}",
+        },
+    )
+
+
+@router.get("/import/excel/job/{job_id}")
+def get_import_excel_job(job_id: str):
+    """Trạng thái import async (tiến trình + kết quả khi xong)."""
+    with _import_job_lock:
+        job = IMPORT_EXCEL_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Không tìm thấy job import.")
+    return job
+
 
 @router.post("/import/excel")
 async def import_excel(
@@ -181,8 +412,8 @@ async def import_excel(
         print(f"   ❌ Lỗi: {len(result.get('errors', []))}")
         print(f"{'='*60}")
         
-        # Tự động scan SEO danh mục trong background (không chặn response)
-        background_tasks.add_task(auto_scan_category_seo, db)
+        # Tự động scan SEO danh mục trong background (session mới, không dùng db request)
+        background_tasks.add_task(auto_scan_category_seo_safe)
         print("🚀 Đã thêm task: Auto scan SEO danh mục (chạy background)")
         
         return {
