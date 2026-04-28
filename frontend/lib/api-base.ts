@@ -39,7 +39,12 @@ export function getApiBaseUrl(): string {
 
   if (typeof window !== 'undefined') {
     const httpsPage = window.location.protocol === 'https:';
-    if (!proxyOff && (useSameOriginByEnv || httpsPage)) {
+    // Trang HTTPS: luôn gọi API qua reverse proxy trên cùng host (/api/) — tránh rơi vào localhost khi NEXT_PUBLIC không khớp hoặc proxyOff=1
+    if (httpsPage) {
+      return `${window.location.origin}/api/v1`;
+    }
+    // HTTP (localhost dev): cùng origin hoặc gọi thẳng cổng backend
+    if (!proxyOff && useSameOriginByEnv) {
       return `${window.location.origin}/api/v1`;
     }
     return 'http://localhost:8000/api/v1';
