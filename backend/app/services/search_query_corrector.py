@@ -1,5 +1,5 @@
 # backend/app/services/search_query_corrector.py - Gemini sửa cụm từ tìm kiếm
-"""Dùng Gemini 2.0 Flash để sửa cụm từ tìm kiếm khi thiếu dấu, sai chữ."""
+"""Dùng Gemini (GEMINI_MODEL, mặc định gemini-2.5-flash) để sửa cụm từ tìm kiếm khi thiếu dấu, sai chữ."""
 
 import logging
 import json
@@ -16,7 +16,7 @@ GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
 def correct_search_query_via_ai(query: str, gender_context: Optional[str] = None) -> Optional[str]:
     """
-    Gọi Gemini 2.0 Flash để chuẩn hóa cụm từ tìm kiếm tiếng Việt.
+    Gọi Gemini (theo GEMINI_MODEL) để chuẩn hóa cụm từ tìm kiếm tiếng Việt.
     Trả về cụm từ đã sửa (có dấu, đúng chính tả) hoặc None nếu lỗi.
     """
     if not query or not query.strip():

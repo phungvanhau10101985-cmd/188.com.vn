@@ -58,3 +58,35 @@ export function parseVideoLink(link: string | undefined | null): ParsedVideo | n
 export function hasVideoLink(link: string | undefined | null): boolean {
   return parseVideoLink(link) !== null;
 }
+
+/**
+ * Origin site cho tham số ?origin= của player YouTube (iframe API / giảm lỗi từ chối embed).
+ * Ưu tiên NEXT_PUBLIC_SITE_URL (SSR/build); fallback window hoặc domain production.
+ */
+export function getSiteOriginForEmbed(): string {
+  const fromEnv =
+    (typeof process !== "undefined" &&
+      process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "")) ||
+    "";
+  if (fromEnv) return fromEnv;
+  if (typeof window !== "undefined") return window.location.origin;
+  return "https://188.com.vn";
+}
+
+/**
+ * URL nhúng YouTube (privacy-enhanced nocookie + origin + playsinline).
+ * Dùng cho iframe src — không dùng link watch trực tiếp.
+ */
+export function buildYoutubeEmbedSrc(videoId: string): string {
+  const id = encodeURIComponent(videoId);
+  const origin = getSiteOriginForEmbed();
+  const q = new URLSearchParams({
+    autoplay: "0",
+    rel: "0",
+    modestbranding: "1",
+    playsinline: "1",
+    enablejsapi: "1",
+    origin,
+  });
+  return `https://www.youtube-nocookie.com/embed/${id}?${q.toString()}`;
+}

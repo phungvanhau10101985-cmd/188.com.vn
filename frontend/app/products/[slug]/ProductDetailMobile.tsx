@@ -8,7 +8,7 @@ import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { formatPrice, getDiscountPercentage } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
-import { hasVideoLink, parseVideoLink } from '@/lib/video-utils';
+import { hasVideoLink, parseVideoLink, buildYoutubeEmbedSrc } from '@/lib/video-utils';
 import RelatedProducts from '@/components/product-detail/RelatedProducts';
 import ProductTabs from '@/components/product-detail/ProductTabs';
 import ProductVariantModal from './components/ProductVariantModal/ProductVariantModal';
@@ -132,10 +132,11 @@ export default function ProductDetailMobile({
                 <>
                   <iframe
                     title={`Video ${product.name}`}
-                    src={`https://www.youtube.com/embed/${parsedVideo.urlOrId}?autoplay=0`}
+                    src={buildYoutubeEmbedSrc(parsedVideo.urlOrId)}
                     className="absolute inset-0 w-full h-full"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
                     allowFullScreen
+                    referrerPolicy="strict-origin-when-cross-origin"
                   />
                   <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
                     <span className="w-5 h-5 rounded-full bg-white/80 flex items-center justify-center text-black font-bold text-[10px]">T</span>

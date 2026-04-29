@@ -1,5 +1,5 @@
 # backend/app/services/category_seo_service.py - AI viết mô tả SEO cho danh mục
-"""Dùng Gemini 1.5 Pro để viết mô tả SEO chuẩn cho danh mục sản phẩm."""
+"""Dùng Gemini (GEMINI_MODEL, mặc định gemini-2.5-flash) để viết mô tả SEO chuẩn cho danh mục sản phẩm."""
 
 import logging
 from typing import Optional, List
@@ -59,7 +59,7 @@ def generate_category_seo_description(
     sample_product_names: Optional[List[str]] = None
 ) -> Optional[str]:
     """
-    Gọi Gemini 1.5 Pro để viết mô tả SEO cho danh mục.
+    Gọi Gemini (GEMINI_MODEL, qua _call_gemini) để viết mô tả SEO cho danh mục.
     
     Args:
         category_name: Tên đầy đủ danh mục (vd: "Áo khoác nam")

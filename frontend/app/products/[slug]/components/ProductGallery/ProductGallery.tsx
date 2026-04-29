@@ -5,7 +5,7 @@ import { useState } from 'react';
 import Image from 'next/image';
 import { Product } from '@/types/api';
 import { getOptimizedImage } from '@/lib/image-utils';
-import { hasVideoLink, parseVideoLink } from '@/lib/video-utils';
+import { hasVideoLink, parseVideoLink, buildYoutubeEmbedSrc } from '@/lib/video-utils';
 
 interface ProductGalleryProps {
   product: Product;
@@ -51,10 +51,11 @@ export default function ProductGallery({ product, selectedImageUrl, onSelectImag
           parsedVideo.kind === 'youtube' ? (
             <iframe
               title={`Video ${product.name}`}
-              src={`https://www.youtube.com/embed/${parsedVideo.urlOrId}?autoplay=0`}
+              src={buildYoutubeEmbedSrc(parsedVideo.urlOrId)}
               className="w-full h-full"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
               allowFullScreen
+              referrerPolicy="strict-origin-when-cross-origin"
             />
           ) : (
             <video

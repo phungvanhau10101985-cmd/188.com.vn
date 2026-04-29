@@ -1,4 +1,4 @@
-# app/services/ai_classifier.py - ĐÃ SỬA LÀM SẠCH TIẾNG TRUNG, DÙNG GEMINI 2.0 FLASH
+# app/services/ai_classifier.py — phân loại / Gemini (model từ settings.GEMINI_MODEL)
 import requests
 import json
 from typing import Dict, Any, Optional, List
@@ -18,7 +18,7 @@ class AIClassifier:
         
     def classify_product(self, product_name: str, chinese_name: str = "") -> Dict[str, Any]:
         """
-        Phân loại sản phẩm chi tiết cho export Excel - Dùng Gemini 2.0 Flash, fallback rule-based.
+        Phân loại sản phẩm chi tiết cho export Excel — Gemini (GEMINI_MODEL), fallback rule-based.
         """
         try:
             # 🎯 QUAN TRỌNG: LƯU TÊN SẢN PHẨM GỐC ĐỂ GHÉP VÀO CUỐI MÔ TẢ VÀ TRÍCH MÃ NHÀ CUNG CẤP
@@ -39,16 +39,16 @@ class AIClassifier:
                 logger.warning("Không có văn bản để phân tích AI")
                 return self._get_detailed_fallback_classification(product_name)
             
-            print(f"🤖 Bắt đầu phân tích AI chi tiết (Gemini 2.0 Flash): '{analysis_text}'")
+            print(f"🤖 Bắt đầu phân tích AI chi tiết ({self.gemini_model}): '{analysis_text}'")
             print(f"   🔍 Mã nhà cung cấp trích xuất: '{supplier_code}'")
             print(f"   🔍 Category từ tên gốc: '{original_category}'")
             
-            # 🎯 Dùng Gemini 2.0 Flash
+            # 🎯 Gemini generateContent
             if self.gemini_api_key and len(self.gemini_api_key) >= 10:
-                print("🔗 Gọi Gemini 2.0 Flash API...")
+                print(f"🔗 Gọi Gemini API ({self.gemini_model})...")
                 result = self._call_gemini_api(analysis_text)
                 if result and self._is_valid_detailed_classification(result):
-                    print("✅ Gemini 2.0 Flash thành công!")
+                    print(f"✅ Gemini ({self.gemini_model}) thành công!")
                     return result
                 print("❌ Gemini không trả về kết quả hợp lệ")
             
@@ -111,7 +111,7 @@ class AIClassifier:
             return ""
     
     def _call_gemini_api(self, text: str) -> Optional[Dict[str, Any]]:
-        """Gọi Gemini 1.5 Pro API cho phân loại chi tiết"""
+        """Gọi Gemini generateContent (GEMINI_MODEL) cho phân loại chi tiết."""
         try:
             system_instruction = (
                 "Bạn là chuyên gia phân loại sản phẩm thương mại điện tử chuyên sâu. "
@@ -142,7 +142,7 @@ class AIClassifier:
                 if not parts:
                     return None
                 content = (parts[0].get("text") or "").strip()
-                print(f"📨 Gemini 1.5 Pro response received ({len(content)} chars)")
+                print(f"📨 Gemini response received ({self.gemini_model}, {len(content)} chars)")
                 return self._parse_detailed_ai_response(content)
             logger.error("Gemini API error: %s - %s", response.status_code, response.text)
             return None

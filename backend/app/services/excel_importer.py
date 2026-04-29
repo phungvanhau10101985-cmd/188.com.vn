@@ -37,6 +37,7 @@ class ExcelImporter:
         """
         Import sản phẩm từ file Excel 36 cột A-AJ
         Slug được tự động tạo
+        Template thường gặp: hàng 1 = tên cột (id, sku, ...), hàng 2 = nhãn tiếng Việt, dữ liệu từ hàng 3.
 
         progress_callback(phase, current, total):
           phase ∈ reading | parsing | database | seo_categories
@@ -50,6 +51,7 @@ class ExcelImporter:
             if progress_callback:
                 progress_callback("reading", 0, None)
 
+            self._excel_first_data_row_1based = 2
             df = self._read_excel_with_detection(file_path)
             
             if df.empty:
@@ -90,7 +92,9 @@ class ExcelImporter:
                     ):
                         progress_callback("parsing", i + 1, row_count)
 
-                    row_number = idx + 2
+                    row_number = idx + int(
+                        getattr(self, "_excel_first_data_row_1based", 2)
+                    )
                     row_dict = row.to_dict()
                     
                     if idx < 5:
@@ -110,7 +114,10 @@ class ExcelImporter:
                         logger.warning(error_msg)
                         
                 except Exception as e:
-                    error_msg = f"Dòng {idx + 2}: {str(e)}"
+                    error_msg = (
+                        f"Dòng {idx + int(getattr(self, '_excel_first_data_row_1based', 2))}: "
+                        f"{str(e)}"
+                    )
                     errors.append(error_msg)
                     logger.error(f"❌ {error_msg}")
                     logger.error(traceback.format_exc())
@@ -168,6 +175,7 @@ class ExcelImporter:
                     return df
             
             logger.warning("⚠️  Không phát hiện header rõ ràng, đọc raw data")
+            self._excel_first_data_row_1based = 1
             return pd.read_excel(file_path, header=None)
             
         except Exception as e:
@@ -176,11 +184,15 @@ class ExcelImporter:
     
     def _try_read_method_1(self, file_path: str, sheet_name: str = None) -> pd.DataFrame:
         try:
-            df = pd.read_excel(file_path, sheet_name=sheet_name, header=0)
+            # Dòng 1: tên cột kỹ thuật (id, sku, ...). Dòng 2: nhãn tiếng Việt — bỏ qua; dữ liệu từ Excel hàng 3.
+            df = pd.read_excel(file_path, sheet_name=sheet_name, header=0, skiprows=[1])
             if not df.empty and len(df.columns) >= 10:
                 first_col = str(df.columns[0]).strip().lower() if len(df.columns) > 0 else ""
                 if first_col in ['id', 'product_id', 'id sản phẩm']:
-                    logger.info("✅ Phát hiện header tiếng Anh ở dòng 1")
+                    logger.info(
+                        "✅ Phát hiện header tiếng Anh ở dòng 1, bỏ dòng 2 (nhãn); import từ hàng 3"
+                    )
+                    self._excel_first_data_row_1based = 3
                     return df
         except:
             pass
@@ -192,7 +204,8 @@ class ExcelImporter:
             if not df.empty and len(df.columns) >= 10:
                 first_col = str(df.columns[0]).strip().lower() if len(df.columns) > 0 else ""
                 if any(keyword in first_col for keyword in ['id', 'mã', 'product', 'sản phẩm']):
-                    logger.info("✅ Phát hiện header tiếng Việt ở dòng 2")
+                    logger.info("✅ Phát hiện header tiếng Việt ở dòng 2; dữ liệu từ hàng 3")
+                    self._excel_first_data_row_1based = 3
                     return df
         except:
             pass
@@ -209,6 +222,7 @@ class ExcelImporter:
                     len(first_cell) > 10 and 
                     ('188b' in first_cell.lower() or 'a188b' in first_cell.lower())):
                     logger.info(f"✅ Phát hiện dữ liệu bắt đầu ở dòng {i+1}")
+                    self._excel_first_data_row_1based = i + 1
                     return pd.read_excel(file_path, sheet_name=sheet_name, skiprows=i)
         except:
             pass
