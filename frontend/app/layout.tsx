@@ -81,6 +81,11 @@ export const metadata: Metadata = {
       "max-snippet": -1,
     },
   },
+  icons: {
+    icon: [{ url: "/favicon.png", type: "image/png" }],
+    shortcut: "/favicon.png",
+    apple: "/favicon.png",
+  },
   verification: {
     google: "your-google-verification-code",
     yandex: "your-yandex-verification-code",
