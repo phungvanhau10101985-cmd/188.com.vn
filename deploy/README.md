@@ -65,6 +65,21 @@ Lệnh không dùng `pm2 stop all` (tránh làm nanoai). Đặt biến `PM2_API_
 
 - Nếu vẫn lỗi: `pm2 logs 188-api --lines 80` (lỗi import DB, thiếu `.env`, v.v.).
 
+### Admin / API báo **504 Gateway Timeout**
+
+- **Nguyên nhân hay gặp:** Nginx `proxy_read_timeout` mặc định (~60s) nhỏ hơn thời gian FastAPI chờ **PostgreSQL** (pool hoặc query chậm) → Nginx trả 504 trước khi API xong.
+- **Sửa:** Trong `location /api/` trên VPS thêm (hoặc đồng bộ với `deploy/nginx-site-188.com.vn.conf.example` đã cập nhật):
+
+```nginx
+proxy_connect_timeout 75s;
+proxy_send_timeout 180s;
+proxy_read_timeout 180s;
+```
+
+Sau đó `sudo nginx -t && sudo systemctl reload nginx`.
+
+- **Đồng thời:** Giữ `DATABASE_POOL_*` trong `backend/.env` đủ lớn và `pm2 restart 188-api --update-env`; xem log `QueuePool` / `TimeoutError`.
+
 ## 3. Tài liệu liên quan
 
 - `../HUONG_DAN_DEPLOY.md` — biến môi trường, build, domain.

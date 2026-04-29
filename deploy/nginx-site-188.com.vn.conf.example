@@ -72,6 +72,12 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Tránh 504 Gateway Timeout khi API chờ PostgreSQL (pool đầy / query chậm).
+        # Mặc định nginx thường ~60s — nhỏ hơn DATABASE_POOL_TIMEOUT hoặc thời gian chờ SP.
+        proxy_connect_timeout 75s;
+        proxy_send_timeout 180s;
+        proxy_read_timeout 180s;
     }
 
     location / {
