@@ -1,6 +1,10 @@
 // frontend/next.config - CLEAN FIXED VERSION
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Trình duyệt mặc định GET /favicon.ico — không có file .ico thì trả về favicon.png (200).
+  async rewrites() {
+    return [{ source: "/favicon.ico", destination: "/favicon.png" }];
+  },
   experimental: {
     // Sau Nginx: Server Actions cần Origin hợp lệ — tránh "Missing origin header"
     serverActions: {

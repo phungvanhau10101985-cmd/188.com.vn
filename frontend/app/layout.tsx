@@ -16,6 +16,14 @@ import { ToastProvider } from "@/components/ToastProvider";
 import PwaPushRegister from "@/components/PwaPushRegister";
 import { getCategoryTreeForLayout } from "@/lib/category-seo";
 
+/** Origin cho metadata (OG, icons). Dev mặc định localhost — tránh /favicon bị resolve sang https://188.com.vn khi chạy local. */
+const METADATA_BASE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+  process.env.NEXT_PUBLIC_DOMAIN?.trim() ||
+  (process.env.NODE_ENV === "development"
+    ? "http://localhost:3001"
+    : "https://188.com.vn");
+
 // Fonts: self-hosted via @fontsource (no compile-time fetch from fonts.googleapis.com — avoids timeouts/offline failures).
 
 // Viewport configuration cho PWA ready
@@ -41,7 +49,7 @@ export const metadata: Metadata = {
     address: false,
     telephone: false,
   },
-  metadataBase: new URL("https://188.com.vn"),
+  metadataBase: new URL(METADATA_BASE_URL),
   alternates: {
     canonical: "/",
     languages: {
@@ -81,10 +89,13 @@ export const metadata: Metadata = {
       "max-snippet": -1,
     },
   },
-  icons: {
-    icon: [{ url: "/favicon.png", type: "image/png" }],
-    shortcut: "/favicon.png",
-    apple: "/favicon.png",
+  // Icon từ app/icon.png — Next tự thêm <link rel="icon">; /favicon.ico → rewrite sang /favicon.png trong next.config
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+  },
+  other: {
+    "mobile-web-app-capable": "yes",
   },
   verification: {
     google: "your-google-verification-code",
@@ -101,16 +112,6 @@ export default async function RootLayout({
   const siteEmbeds = await fetchPublicSiteEmbeds();
   return (
     <html lang="vi" suppressHydrationWarning>
-      <head>
-        {/* Head mobile: viewport + themeColor do export viewport ở trên; meta PWA/status bar */}
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="mobile-web-app-capable" content="yes" />
-        <meta name="format-detection" content="telephone=no, email=no, address=no" />
-        {/* Fonts: @fontsource trong globals.css / imports đầu file */}
-        {/* GA4 / GTM / Pixel / Zalo: cấu hình tại /admin/embed-codes */}
-      </head>
-      
       <body className="antialiased font-sans bg-[#fafafa] text-gray-900 min-h-screen" suppressHydrationWarning>
         <SiteEmbedsRoot embeds={siteEmbeds} />
         {/* Global Providers + Header/Footer xuyên suốt */}
