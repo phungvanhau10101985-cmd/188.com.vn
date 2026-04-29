@@ -38,8 +38,9 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   const isAuthPage = pathname?.startsWith('/auth/');
   const isProductDetailPage = pathname?.match(/^\/products\/[^/]+$/);
 
-  /** Trang chủ có query lọc/tìm — cố định header + nav desktop khi cuộn */
+  /** Trang chủ có query lọc/tìm, hoặc trang /info/* — cố định header + nav desktop khi cuộn */
   const keepDesktopHeaderPinned = useMemo(() => {
+    if (pathname?.startsWith('/info')) return true;
     const home =
       pathname === '/' ||
       pathname === '' ||

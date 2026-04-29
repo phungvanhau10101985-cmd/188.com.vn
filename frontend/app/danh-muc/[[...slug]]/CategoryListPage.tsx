@@ -126,7 +126,7 @@ export default function CategoryListPage({ categoryTree }: CategoryListPageProps
                       const isOpenL2 = openL2.has(keyL2);
 
                       return (
-                        <div key={c2.name} className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+                        <div key={keyL2} className="border border-gray-200 rounded-lg bg-white overflow-hidden">
                           <div className="flex items-center w-full py-2.5 px-3 text-gray-800 font-medium text-sm min-h-[44px]">
                             <Link
                               href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`}
@@ -151,7 +151,7 @@ export default function CategoryListPage({ categoryTree }: CategoryListPageProps
                                 const slug3 = c3.slug || slugOf(c3.name);
                                 return (
                                   <Link
-                                    key={c3.name}
+                                    key={`${keyL2}/${slug3}`}
                                     href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
                                     className="flex items-center w-full py-2 px-3 text-gray-500 font-medium text-xs active:bg-gray-200 border-b border-gray-100 last:border-b-0 hover:text-[#ea580c] transition-colors"
                                   >

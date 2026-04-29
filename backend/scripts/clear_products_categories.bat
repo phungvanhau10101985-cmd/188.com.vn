@@ -7,6 +7,7 @@ REM    clear_products_categories.bat              -> hoi xac nhan
 REM    clear_products_categories.bat --yes        -> bo qua confirm
 REM    clear_products_categories.bat --dry-run    -> chi xem COUNT(*)
 REM    clear_products_categories.bat --keep-views -> giu lai cart/views/search
+REM    clear_products_categories.bat --keep-categories -> chi xoa SP, giu categories + SEO DM
 REM ============================================================
 chcp 65001 >nul
 cd /d "%~dp0\.."

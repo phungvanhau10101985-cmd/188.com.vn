@@ -1,6 +1,7 @@
 # backend/app/crud/product.py - COMPLETE FIXED VERSION
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
+from sqlalchemy import func as sql_func
+from typing import List, Optional, Dict, Any, Set
 from app.models.product import Product
 from app.models.search_mapping import SearchMapping, SearchMappingType
 from app.models.search_log import SearchLog
@@ -50,6 +51,45 @@ logger = logging.getLogger(__name__)
 
 _ACCENT_SRC = "".join([k for k in VIETNAMESE_ACCENT_MAP.keys() if k.islower()])
 _ACCENT_DST = "".join([VIETNAMESE_ACCENT_MAP[k] for k in VIETNAMESE_ACCENT_MAP.keys() if k.islower()])
+
+def category_field_equals_ci(column, value: Optional[str]):
+    """
+    So khớp tên danh mục trong DB với chuỗi tham chiếu (tree/API): trim + không phân biệt hoa thường.
+    Tránh 0 sản phẩm khi mapping/import lệch casing hoặc khoảng trắng so với breadcrumb.
+    """
+    if value is None:
+        return None
+    nv = str(value).strip().lower()
+    if not nv:
+        return None
+    return sql_func.lower(sql_func.trim(column)) == nv
+
+
+def subcategory_field_in_ci(column, values: Optional[List[str]]):
+    """IN trên subcategory sau khi lower(trim(col)); values là danh sách chuỗi tham chiếu."""
+    if not values:
+        return None
+    norms = []
+    for v in values:
+        nv = str(v).strip().lower() if v is not None else ""
+        if nv:
+            norms.append(nv)
+    if not norms:
+        return None
+    return sql_func.lower(sql_func.trim(column)).in_(norms)
+
+
+def _normalize_category_url_slug(segment: Optional[str]) -> Optional[str]:
+    """Segment trong URL /danh-muc/... có thể chứa dấu tiếng Việt; chuẩn hoá giống slug trong cây."""
+    if segment is None:
+        return None
+    s = str(segment).strip()
+    if not s:
+        return None
+    if SLUG_AVAILABLE:
+        return slugify_vietnamese(s).lower()
+    return s.lower()
+
 
 def _normalize_search_key(raw_query: str) -> str:
     try:
@@ -459,6 +499,39 @@ def apply_category_final_mapping_to_product(
     product_data["sub_subcategory"] = sub_subcategory
     return product_data
 
+
+def batch_apply_final_mapping_to_products(db: Session, mapping: CategoryFinalMapping) -> int:
+    """
+    Gán trực tiếp category / subcategory / sub_subcategory trên `products` khớp *nguồn* của một CategoryFinalMapping.
+
+    Chỉ áp khi `from_sub_subcategory` không rỗng (đã chọn danh mục cấp 3 nguồn cụ thể).
+    Mapping kiểu wildcard cấp 3 rỗng không đụng DB để không gộp nhầm toàn bộ L3 dưới một L2.
+
+    Khớp nguồn dùng cùng logic slug như `apply_category_final_mapping_to_product`.
+    """
+    if not (mapping.from_sub_subcategory or "").strip():
+        return 0
+    mappings_one = [mapping]
+    updated = 0
+    for p in db.query(Product).all():
+        orig = {
+            "category": p.category,
+            "subcategory": p.subcategory,
+            "sub_subcategory": p.sub_subcategory,
+        }
+        new_d = apply_category_final_mapping_to_product(dict(orig), mappings_one)
+        if (
+            (orig.get("category") or "").strip() != (new_d.get("category") or "").strip()
+            or (orig.get("subcategory") or "").strip() != (new_d.get("subcategory") or "").strip()
+            or (orig.get("sub_subcategory") or "").strip() != (new_d.get("sub_subcategory") or "").strip()
+        ):
+            p.category = new_d.get("category")
+            p.subcategory = new_d.get("subcategory")
+            p.sub_subcategory = new_d.get("sub_subcategory")
+            updated += 1
+    return updated
+
+
 def excel_row_to_product(row: Dict) -> Dict:
     """
     Convert Excel row (36 columns A-AJ) to product dictionary
@@ -783,16 +856,24 @@ def get_products(
 ):
     query = db.query(Product)
     
-    if category:
-        query = query.filter(Product.category == category)
-    if subcategory:
+    if category and str(category).strip():
+        ce = category_field_equals_ci(Product.category, category)
+        if ce is not None:
+            query = query.filter(ce)
+    if subcategory and str(subcategory).strip():
         subcat_group = get_subcategory_group_for_query(category or "", subcategory)
         if subcat_group:
-            query = query.filter(Product.subcategory.in_(subcat_group))
+            ine = subcategory_field_in_ci(Product.subcategory, subcat_group)
+            if ine is not None:
+                query = query.filter(ine)
         else:
-            query = query.filter(Product.subcategory == subcategory)
-    if sub_subcategory:
-        query = query.filter(Product.sub_subcategory == sub_subcategory)
+            se = category_field_equals_ci(Product.subcategory, subcategory)
+            if se is not None:
+                query = query.filter(se)
+    if sub_subcategory and str(sub_subcategory).strip():
+        sse = category_field_equals_ci(Product.sub_subcategory, sub_subcategory)
+        if sse is not None:
+            query = query.filter(sse)
     if shop_name:
         query = query.filter(Product.shop_name.ilike(f"%{shop_name.strip()}%"))
     if shop_id:
@@ -947,12 +1028,171 @@ def get_products(
     }
 
 
-def get_category_tree_from_products(db: Session, is_active: bool = True) -> List[Dict[str, Any]]:
+def count_products_for_category_path(
+    db: Session,
+    name1: str,
+    name2: Optional[str] = None,
+    name3: Optional[str] = None,
+    is_active: bool = True,
+) -> int:
+    """
+    Đếm sản phẩm active khớp đường danh mục (cùng logic filter với get_category_by_path).
+    name2/name3 None hoặc rỗng = không siết thêm cấp đó (đếm phạm vi rộng hơn).
+    """
+    name1 = (name1 or "").strip()
+    if not name1:
+        return 0
+    filt_l1 = [Product.is_active == is_active]
+    _e = category_field_equals_ci(Product.category, name1)
+    if _e is not None:
+        filt_l1.append(_e)
+    if not name2 or not str(name2).strip():
+        return db.query(Product).filter(*filt_l1).count()
+    name2 = str(name2).strip()
+    subcat_group = get_subcategory_group_for_query(name1, name2)
+    q = db.query(Product).filter(Product.is_active == is_active)
+    _e1 = category_field_equals_ci(Product.category, name1)
+    if _e1 is not None:
+        q = q.filter(_e1)
+    if not name3 or not str(name3).strip():
+        if subcat_group:
+            _ins = subcategory_field_in_ci(Product.subcategory, subcat_group)
+            if _ins is not None:
+                q = q.filter(_ins)
+        else:
+            _e2 = category_field_equals_ci(Product.subcategory, name2)
+            if _e2 is not None:
+                q = q.filter(_e2)
+        return q.count()
+    name3 = str(name3).strip()
+    q = db.query(Product).filter(Product.is_active == is_active)
+    _ca = category_field_equals_ci(Product.category, name1)
+    _ss = category_field_equals_ci(Product.sub_subcategory, name3)
+    if _ca is not None:
+        q = q.filter(_ca)
+    if _ss is not None:
+        q = q.filter(_ss)
+    if subcat_group:
+        _inq = subcategory_field_in_ci(Product.subcategory, subcat_group)
+        if _inq is not None:
+            q = q.filter(_inq)
+    else:
+        _sb = category_field_equals_ci(Product.subcategory, name2)
+        if _sb is not None:
+            q = q.filter(_sb)
+    return q.count()
+
+
+def prune_category_tree_empty_branches(
+    db: Session,
+    tree: List[Dict[str, Any]],
+    is_active: bool,
+) -> List[Dict[str, Any]]:
+    """Ẩn nhánh không có sản phẩm: chỉ giữ cấp có ít nhất một SP active (menu /from-products)."""
+    slug_fn = slugify_vietnamese if SLUG_AVAILABLE else (lambda x: (x or "").lower().replace(" ", "-"))
+
+    def _l3_sig(c3: Any) -> str:
+        """Chữ ký dedupe trong một cột cấp 2 (trùng tên cấp 3 do lỗi merge)."""
+        if isinstance(c3, dict):
+            n = (c3.get("name") or "").strip()
+            sl = (c3.get("slug") or slug_fn(n)).strip().lower()
+            nl = re.sub(r"\s+", " ", n.lower()).strip()
+            return f"{nl}|{sl}"
+        s = str(c3).strip()
+        return f"{s.lower()}|{slug_fn(s).lower()}"
+
+    out: List[Dict[str, Any]] = []
+    for c1 in tree:
+        name1 = (c1.get("name") or "").strip()
+        if not name1:
+            continue
+        children2_in = c1.get("children") or []
+        pruned_l2: List[Dict[str, Any]] = []
+        for c2 in children2_in:
+            name2 = (c2.get("name") or "").strip()
+            if not name2:
+                continue
+            children3_in = c2.get("children") or []
+            pruned_l3: List[Any] = []
+            for c3 in children3_in:
+                n3 = c3.get("name", c3) if isinstance(c3, dict) else c3
+                n3s = (str(n3) if n3 is not None else "").strip()
+                if not n3s:
+                    continue
+                if count_products_for_category_path(db, name1, name2, n3s, is_active) > 0:
+                    pruned_l3.append(c3)
+            seen_l3: Set[str] = set()
+            dedup_l3: List[Any] = []
+            for c3 in pruned_l3:
+                sig = _l3_sig(c3)
+                if sig in seen_l3:
+                    continue
+                seen_l3.add(sig)
+                dedup_l3.append(c3)
+            pruned_l3 = dedup_l3
+            keep_l2 = bool(pruned_l3) or count_products_for_category_path(db, name1, name2, None, is_active) > 0
+            if keep_l2:
+                pruned_l2.append({**c2, "children": pruned_l3})
+        keep_l1 = bool(pruned_l2) or count_products_for_category_path(db, name1, None, None, is_active) > 0
+        if keep_l1:
+            out.append({**c1, "children": pruned_l2})
+    return out
+
+
+def resolve_category_breadcrumb_names_from_tree(
+    tree: List[Dict[str, Any]],
+    level1_slug: str,
+    level2_slug: Optional[str] = None,
+    level3_slug: Optional[str] = None,
+) -> Optional[List[str]]:
+    """
+    Khớp slug URL với một cây danh mục đã có (không query DB).
+    Trả về [cấp1], [cấp1,cấp2] hoặc [cấp1,cấp2,cấp3] tên hiển thị; không khớp → None.
+    """
+    level1_slug = _normalize_category_url_slug(level1_slug) or ""
+    level2_slug = _normalize_category_url_slug(level2_slug)
+    level3_slug = _normalize_category_url_slug(level3_slug)
+    for c1 in tree:
+        slug1 = (c1.get("slug") or slugify_vietnamese(c1.get("name", "")) if SLUG_AVAILABLE else "").lower()
+        if slug1 != level1_slug:
+            continue
+        name1 = c1.get("name", "")
+        children2 = c1.get("children") or []
+        if not level2_slug:
+            return [name1]
+        for c2 in children2:
+            slug2 = (c2.get("slug") or (slugify_vietnamese(c2.get("name", "")) if SLUG_AVAILABLE else "")).lower()
+            if slug2 != level2_slug:
+                continue
+            name2 = c2.get("name", "")
+            children3 = c2.get("children") or []
+            if not level3_slug:
+                return [name1, name2]
+            for c3 in children3:
+                name3 = c3.get("name", c3) if isinstance(c3, dict) else c3
+                slug3 = (c3.get("slug") if isinstance(c3, dict) else (slugify_vietnamese(name3) if SLUG_AVAILABLE else "")).lower()
+                if slug3 != level3_slug:
+                    continue
+                return [name1, name2, name3 if isinstance(name3, str) else str(name3)]
+            break
+        break
+    return None
+
+
+def get_category_tree_from_products(
+    db: Session,
+    is_active: bool = True,
+    hide_empty_branches: bool = True,
+) -> List[Dict[str, Any]]:
     """
     Tạo cây danh mục 3 cấp từ sản phẩm:
     - Cấp 1 (AB): Product.category
     - Cấp 2 (AC): Product.subcategory
     - Cấp 3 (AD): Product.sub_subcategory
+    Đồng thời áp category_final_mappings để hiển thị nhánh đích; và merge các nhánh đích đủ 3 cấp
+    từ bảng mapping vào cây (để menu có đường dẫn đích đã khai báo).
+    Nếu hide_empty_branches=True: bỏ nhánh không có sản phẩm active (menu web).
+    hide_empty_branches=False: dùng cho dọn DB / resolve đường đầy đủ trước khi đếm SP.
     Trả về danh sách nested: [{ name, slug, children: [{ name, slug, children: [{ name, slug }] }] }]
     """
     query = db.query(
@@ -989,9 +1229,10 @@ def get_category_tree_from_products(db: Session, is_active: bool = True) -> List
         return str(value).strip()
 
     mapping_lookup: Dict[tuple, CategoryFinalMapping] = {}
+    final_mappings: List[CategoryFinalMapping] = []
     try:
-        mappings = get_category_final_mappings(db)
-        for m in mappings:
+        final_mappings = list(get_category_final_mappings(db))
+        for m in final_mappings:
             from_c1 = _norm_map_name(m.from_category)
             from_c2 = _norm_map_name(m.from_subcategory)
             from_c3 = _norm_map_name(m.from_sub_subcategory)
@@ -999,8 +1240,33 @@ def get_category_tree_from_products(db: Session, is_active: bool = True) -> List
             mapping_lookup[key] = m
     except Exception:
         mapping_lookup = {}
+        final_mappings = []
 
     tree: Dict[str, Dict[str, Any]] = {}
+
+    def _merge_distinct_row_into_tree(c1: str, c2: str, c3: str) -> None:
+        """Gộp một bộ (cấp1, cấp2, cấp3) vào cây hiển thị."""
+        if not c1:
+            return
+        if c1 not in tree:
+            tree[c1] = {"name": c1, "slug": slug_fn(c1), "children": {}}
+        if not c2:
+            return
+        c2_key = _norm_map_name(c2)
+        if c2_key not in tree[c1]["children"]:
+            tree[c1]["children"][c2_key] = {
+                "name": c2,
+                "slug": slug_fn(c2),
+                "children": [],
+                "children_norm": set(),
+            }
+        if not c3:
+            return
+        c3_key = _norm_map_name(c3)
+        if c3_key not in tree[c1]["children"][c2_key]["children_norm"]:
+            tree[c1]["children"][c2_key]["children"].append({"name": c3, "slug": slug_fn(c3)})
+            tree[c1]["children"][c2_key]["children_norm"].add(c3_key)
+
     for cat, subcat, subsub in rows:
         c1 = (cat or "").strip()
         c2 = (subcat or "").strip() if subcat else ""
@@ -1017,22 +1283,16 @@ def get_category_tree_from_products(db: Session, is_active: bool = True) -> List
                 c2 = _keep_or_value(wildcard.to_subcategory, c2)
         if not c1:
             continue
-        if c1 not in tree:
-            tree[c1] = {"name": c1, "slug": slug_fn(c1), "children": {}}
-        if c2:
-            c2_key = _norm_map_name(c2)
-            if c2_key not in tree[c1]["children"]:
-                tree[c1]["children"][c2_key] = {
-                    "name": c2,
-                    "slug": slug_fn(c2),
-                    "children": [],
-                    "children_norm": set(),
-                }
-            if c3:
-                c3_key = _norm_map_name(c3)
-                if c3_key not in tree[c1]["children"][c2_key]["children_norm"]:
-                    tree[c1]["children"][c2_key]["children"].append({"name": c3, "slug": slug_fn(c3)})
-                    tree[c1]["children"][c2_key]["children_norm"].add(c3_key)
+        _merge_distinct_row_into_tree(c1, c2, c3)
+
+    # Luôn hiển thị nhánh đích đã khai báo trong mapping (đủ 3 cấp), kể cả khi tổ hợp DISTINCT từ SP
+    # không khớp chuẩn hoá hoặc chưa có SP đích trong DB — tránh menu thiếu danh mục đích.
+    for m in final_mappings:
+        tc = (m.to_category or "").strip()
+        ts = (m.to_subcategory or "").strip()
+        tss = (m.to_sub_subcategory or "").strip()
+        if tc and ts and tss:
+            _merge_distinct_row_into_tree(tc, ts, tss)
 
     result: List[Dict[str, Any]] = []
     for name, node in sorted(tree.items(), key=lambda x: x[0]):
@@ -1051,6 +1311,8 @@ def get_category_tree_from_products(db: Session, is_active: bool = True) -> List
                 sub_children = [{"name": s, "slug": slug_fn(s)} for s in (v.get("children") or [])]
             children_list.append({"name": v["name"], "slug": v.get("slug", slug_fn(v["name"])), "children": sub_children})
         result.append({"name": name, "slug": node.get("slug", slug_fn(name)), "children": children_list})
+    if hide_empty_branches:
+        return prune_category_tree_empty_branches(db, result, is_active)
     return result
 
 
@@ -1065,78 +1327,41 @@ def get_category_by_path(
     Resolve path slugs (level1, level2?, level3?) thành thông tin danh mục cho SEO.
     Trả về: { level: 1|2|3, name, full_name, breadcrumb_names: [c1, c2?, c3?], product_count }
     """
-    tree = get_category_tree_from_products(db, is_active=is_active)
-    level1_slug = (level1_slug or "").strip().lower()
-    level2_slug = (level2_slug or "").strip().lower() if level2_slug else None
-    level3_slug = (level3_slug or "").strip().lower() if level3_slug else None
+    level1_slug = _normalize_category_url_slug(level1_slug) or ""
+    level2_slug = _normalize_category_url_slug(level2_slug)
+    level3_slug = _normalize_category_url_slug(level3_slug)
 
-    for c1 in tree:
-        slug1 = (c1.get("slug") or slugify_vietnamese(c1.get("name", "")) if SLUG_AVAILABLE else "").lower()
-        if slug1 != level1_slug:
-            continue
-        name1 = c1.get("name", "")
-        children2 = c1.get("children") or []
-        if not level2_slug:
-            count = db.query(Product).filter(
-                Product.is_active == is_active,
-                Product.category == name1,
-            ).count()
-            return {
-                "level": 1,
-                "name": name1,
-                "full_name": name1,
-                "breadcrumb_names": [name1],
-                "product_count": count,
-            }
-        for c2 in children2:
-            slug2 = (c2.get("slug") or (slugify_vietnamese(c2.get("name", "")) if SLUG_AVAILABLE else "")).lower()
-            if slug2 != level2_slug:
-                continue
-            name2 = c2.get("name", "")
-            children3 = c2.get("children") or []
-            subcat_group = get_subcategory_group_for_query(name1, name2)
-            if not level3_slug:
-                q = db.query(Product).filter(
-                    Product.is_active == is_active,
-                    Product.category == name1,
-                )
-                if subcat_group:
-                    q = q.filter(Product.subcategory.in_(subcat_group))
-                else:
-                    q = q.filter(Product.subcategory == name2)
-                count = q.count()
-                return {
-                    "level": 2,
-                    "name": name2,
-                    "full_name": f"{name1} - {name2}",
-                    "breadcrumb_names": [name1, name2],
-                    "product_count": count,
-                }
-            for c3 in children3:
-                name3 = c3.get("name", c3) if isinstance(c3, dict) else c3
-                slug3 = (c3.get("slug") if isinstance(c3, dict) else (slugify_vietnamese(name3) if SLUG_AVAILABLE else "")).lower()
-                if slug3 != level3_slug:
-                    continue
-                q = db.query(Product).filter(
-                    Product.is_active == is_active,
-                    Product.category == name1,
-                    Product.sub_subcategory == name3,
-                )
-                if subcat_group:
-                    q = q.filter(Product.subcategory.in_(subcat_group))
-                else:
-                    q = q.filter(Product.subcategory == name2)
-                count = q.count()
-                return {
-                    "level": 3,
-                    "name": name3,
-                    "full_name": f"{name1} - {name2} - {name3}",
-                    "breadcrumb_names": [name1, name2, name3],
-                    "product_count": count,
-                }
-            break
-        break
-    return None
+    tree = get_category_tree_from_products(db, is_active=is_active, hide_empty_branches=True)
+    bc = resolve_category_breadcrumb_names_from_tree(tree, level1_slug, level2_slug, level3_slug)
+    if not bc:
+        return None
+    n = len(bc)
+    if n == 1:
+        count = count_products_for_category_path(db, bc[0], None, None, is_active)
+        return {
+            "level": 1,
+            "name": bc[0],
+            "full_name": bc[0],
+            "breadcrumb_names": [bc[0]],
+            "product_count": count,
+        }
+    if n == 2:
+        count = count_products_for_category_path(db, bc[0], bc[1], None, is_active)
+        return {
+            "level": 2,
+            "name": bc[1],
+            "full_name": f"{bc[0]} - {bc[1]}",
+            "breadcrumb_names": [bc[0], bc[1]],
+            "product_count": count,
+        }
+    count = count_products_for_category_path(db, bc[0], bc[1], bc[2], is_active)
+    return {
+        "level": 3,
+        "name": bc[2],
+        "full_name": f"{bc[0]} - {bc[1]} - {bc[2]}",
+        "breadcrumb_names": [bc[0], bc[1], bc[2]],
+        "product_count": count,
+    }
 
 
 def get_category_sibling_names(
@@ -1151,9 +1376,9 @@ def get_category_sibling_names(
     Dùng để đưa vào prompt Gemini, giúp đoạn văn SEO nhắc tên danh mục con → dễ gắn internal link.
     """
     tree = get_category_tree_from_products(db, is_active=is_active)
-    level1_slug = (level1_slug or "").strip().lower()
-    level2_slug = (level2_slug or "").strip().lower() if level2_slug else None
-    level3_slug = (level3_slug or "").strip().lower() if level3_slug else None
+    level1_slug = _normalize_category_url_slug(level1_slug) or ""
+    level2_slug = _normalize_category_url_slug(level2_slug)
+    level3_slug = _normalize_category_url_slug(level3_slug)
     out: List[str] = []
 
     for c1 in tree:
@@ -1270,17 +1495,25 @@ def get_category_seo_data(
     query = db.query(Product).filter(Product.is_active == is_active)
     if len(breadcrumb_names) >= 1:
         name1 = breadcrumb_names[0]
-        query = query.filter(Product.category == name1)
+        _e = category_field_equals_ci(Product.category, name1)
+        if _e is not None:
+            query = query.filter(_e)
     if len(breadcrumb_names) >= 2:
         name2 = breadcrumb_names[1]
         subcat_group = get_subcategory_group_for_query(name1, name2)
         if subcat_group:
-            query = query.filter(Product.subcategory.in_(subcat_group))
+            _inq = subcategory_field_in_ci(Product.subcategory, subcat_group)
+            if _inq is not None:
+                query = query.filter(_inq)
         else:
-            query = query.filter(Product.subcategory == name2)
+            _e2 = category_field_equals_ci(Product.subcategory, name2)
+            if _e2 is not None:
+                query = query.filter(_e2)
     if len(breadcrumb_names) >= 3:
         name3 = breadcrumb_names[2]
-        query = query.filter(Product.sub_subcategory == name3)
+        _e3 = category_field_equals_ci(Product.sub_subcategory, name3)
+        if _e3 is not None:
+            query = query.filter(_e3)
 
     products = query.filter(
         Product.main_image.isnot(None),
@@ -1590,43 +1823,9 @@ def bulk_import_products(
             "success_rate": f"{success_rate:.1f}%",
         }
 
-    paths_list_import = _collect_unique_category_paths_for_import(products_data)
-
-    seo_body_enabled = getattr(settings, "EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED", True)
-
-    # Lô ≥ ngưỡng: không chạy Gemini SEO ngay trong request import (coi là xong để không “treo”),
-    # nhưng vẫn chạy SEO đủ trong thread nền (daemon).
-    seo_skip_thresh = max(
-        0,
-        int(getattr(settings, "EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS", 2500) or 0),
-    )
-    skip_inline_seo = seo_skip_thresh > 0 and n_products >= seo_skip_thresh
-
-    paths_snapshot = list(paths_list_import)
-
-    # True + đủ nhỏ: Gemini trong luồng import. Còn lại (False HOẶC batch lớn): chỉ nền sau khi import xong — vẫn bổ sung đủ seo_body.
-    generated = 0
-    category_seo_bg_started = False
-    if seo_body_enabled and not skip_inline_seo:
-        generated = _run_category_seo_body_loop_for_import_paths(db, paths_snapshot, progress_callback)
-    elif paths_snapshot:
-        if progress_callback:
-            progress_callback("seo_categories", n_products or 1, n_products or 1)
-        if seo_body_enabled and skip_inline_seo:
-            logger.warning(
-                "EXCEL_IMPORT: batch %s SP ≥ %s — SEO danh mục chạy NỀN (không chặn kết thúc import). "
-                "Đặt EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS=0 để chạy SEO ngay trong import (chậm với batch lớn).",
-                n_products,
-                seo_skip_thresh,
-            )
-        else:
-            logger.info(
-                "EXCEL_IMPORT: EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED=false — SEO danh mục (Gemini) chỉ chạy NỀN "
-                "sau khi import xong (bổ sung đủ seo_body cho các path); không chặn luồng upload."
-            )
-        _spawn_category_seo_body_background(paths_snapshot)
-        category_seo_bg_started = True
-    elif progress_callback:
+    # Gemini sinh seo_body không chạy tự động sau import — chỉ khi admin bấm tạo SEO trong «Danh mục SEO»
+    # hoặc POST /category-seo/seo-bodies/generate (hoặc script generate_all_seo_bodies.py).
+    if progress_callback:
         progress_callback("seo_categories", n_products or 1, n_products or 1)
 
     # Calculate success rate
@@ -1641,20 +1840,6 @@ def bulk_import_products(
         "total_processed": total_processed,
         "success_rate": f"{success_rate:.1f}%"
     }
-    if generated:
-        result["seo_bodies_generated"] = generated
-    if category_seo_bg_started:
-        result["category_seo_background"] = True
-        if not seo_body_enabled:
-            result["category_seo_note"] = (
-                "SEO danh mục (Gemini) đang chạy nền sau khi import xong — bổ sung đủ seo_body cho các path liên quan "
-                "(EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED=false; xem log: EXCEL_IMPORT [nền])."
-            )
-        else:
-            result["category_seo_note"] = (
-                f"SEO danh mục (Gemini) đang chạy nền sau import — batch ≥{seo_skip_thresh} SP "
-                "(xem log API: EXCEL_IMPORT [nền])."
-            )
 
     logger.info(f"📦 BULK IMPORT COMPLETE:")
     logger.info(f"   ➕ Created: {created}")

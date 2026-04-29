@@ -61,59 +61,17 @@ def read_category_seo_data(
     """
     Lấy dữ liệu SEO đầy đủ cho danh mục:
     - Thông tin cơ bản (level, name, full_name, breadcrumb_names, product_count)
-    - 4 ảnh sản phẩm đầu tiên (cho og:image)
-    - Mô tả SEO được viết bởi AI
-    
-    Trả về: {
-        level, name, full_name, breadcrumb_names, product_count,
-        images: [url1, url2, url3, url4],
-        seo_description: "Mô tả SEO chuẩn 150-160 ký tự"
-    }
-    """
-    from app.services.category_seo_service import (
-        generate_category_seo_description,
-        generate_category_seo_body,
-    )
+    - Ảnh (ưu tiên category_seo_meta, không thì từ sản phẩm)
+    - seo_description / seo_body nếu đã có trong DB — **không** gọi Gemini tự động.
 
-    # Lấy dữ liệu: ưu tiên từ category_seo_meta (4 ảnh + mô tả cố định), không thì từ products
+    Để có đoạn văn SEO (Gemini): dùng admin «Quản lý danh mục SEO» → chạy tạo SEO body, hoặc script/job chủ động.
+    """
     data = crud_product.get_category_seo_data(
         db, level1_slug=level1, level2_slug=level2, level3_slug=level3,
         is_active=is_active, image_limit=4
     )
     if data is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy danh mục")
-
-    # Mô tả SEO ngắn: nếu đã có trong data thì dùng luôn, không gọi AI
-    seo_description = data.get("seo_description")
-    if not seo_description:
-        seo_description = generate_category_seo_description(
-            category_name=data.get("full_name", ""),
-            breadcrumb_names=data.get("breadcrumb_names", []),
-            product_count=data.get("product_count", 0),
-            sample_product_names=data.get("sample_product_names", [])
-        )
-
-    # Đoạn văn SEO 150-300 từ (cuối trang): nếu chưa có thì gọi Gemini và lưu
-    seo_body = data.get("seo_body")
-    if not seo_body:
-        sibling_names = crud_product.get_category_sibling_names(
-            db, level1_slug=level1, level2_slug=level2, level3_slug=level3, is_active=is_active
-        )
-        seo_body = generate_category_seo_body(
-            category_name=data.get("full_name", ""),
-            breadcrumb_names=data.get("breadcrumb_names", []),
-            product_count=data.get("product_count", 0),
-            sample_product_names=data.get("sample_product_names", []),
-            related_category_names=sibling_names if sibling_names else None,
-        )
-        if seo_body:
-            path_parts = [level1]
-            if level2:
-                path_parts.append(level2)
-            if level3:
-                path_parts.append(level3)
-            category_path = "/".join(path_parts)
-            crud_product.set_category_seo_body(db, category_path=category_path, seo_body=seo_body)
 
     return {
         "level": data.get("level"),
@@ -122,8 +80,8 @@ def read_category_seo_data(
         "breadcrumb_names": data.get("breadcrumb_names"),
         "product_count": data.get("product_count"),
         "images": data.get("images", []),
-        "seo_description": seo_description,
-        "seo_body": seo_body,
+        "seo_description": data.get("seo_description"),
+        "seo_body": data.get("seo_body"),
     }
 
 

@@ -36,6 +36,16 @@ function slugNorm(s: string | undefined): string {
   return (s || '').trim().toLowerCase();
 }
 
+/** Key React cho link cấp 3: trùng tên cấp 3 khác cấp 2 hoặc trùng trong cùng cột không bị gộp nhầm. */
+function level3ReactKey(slug2: string | undefined, slug3: string | undefined, name3: string): string {
+  return `${slugNorm(slug2)}::${slugNorm(slug3 ?? name3)}`;
+}
+
+/** Key React cho cột cấp 2 (tránh trùng tên hiển thị giữa các nhánh). */
+function level2ReactKey(slug1: string | undefined, slug2: string | undefined, name2: string): string {
+  return `${slugNorm(slug1)}::${slugNorm(slug2 ?? name2)}`;
+}
+
 export default function Navigation({
   selectedFilter,
   onCategoryChange,
@@ -279,7 +289,10 @@ export default function Navigation({
                             const slug1 = openCategory.slug || openCategory.name;
                             const slug2 = level2.slug || level2.name;
                             return (
-                              <div key={level2.name} className="min-w-0">
+                              <div
+                                key={level2ReactKey(slug1, slug2, level2.name)}
+                                className="min-w-0"
+                              >
                                 <Link
                                   href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`}
                                   className="block text-xs font-semibold text-gray-800 hover:text-[#ea580c]"
@@ -293,7 +306,7 @@ export default function Navigation({
                                       const slug3 = typeof level3 === 'object' && level3 !== null && 'slug' in level3 ? (level3 as { slug?: string }).slug : name3;
                                       return (
                                         <Link
-                                          key={name3}
+                                          key={level3ReactKey(slug2, slug3 || undefined, name3)}
                                           href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3 || name3)}`}
                                           className="text-[11px] text-gray-600 hover:text-[#ea580c] truncate"
                                         >
@@ -484,7 +497,10 @@ export default function Navigation({
                 const hasL3 = level2.children && level2.children.length > 0;
 
                 return (
-                  <div key={level2.name} className="rounded-md bg-white border border-gray-100 shadow-sm overflow-hidden">
+                  <div
+                    key={level2ReactKey(slug1, slug2, level2.name)}
+                    className="rounded-md bg-white border border-gray-100 shadow-sm overflow-hidden"
+                  >
                     <Link
                       href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`}
                       onClick={() => setOpenLevel1(null)}
@@ -510,7 +526,7 @@ export default function Navigation({
                             effectiveFilter.category === openCategory.name;
                           return (
                             <Link
-                              key={name3}
+                              key={level3ReactKey(slug2, slug3 || undefined, name3)}
                               href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3 || name3)}`}
                               onClick={() => setOpenLevel1(null)}
                               className={`inline-block text-[11px] px-2 py-1 rounded ${

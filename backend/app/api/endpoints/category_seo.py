@@ -18,6 +18,7 @@ from app.models.category_transform_rule import CategoryTransformRule
 from app.models.category_final_mapping import CategoryFinalMapping
 from app.models.product import Product
 from app.crud import product as crud_product
+from app.crud.product import category_field_equals_ci
 from app.services.category_seo_service import generate_category_seo_body
 from app.services.category_seo_analyzer import (
     scan_and_create_mappings,
@@ -240,36 +241,6 @@ def _apply_rules_to_product_model(product, rules: List[CategoryTransformRule]) -
     }
     updated = crud_product.apply_category_transform_rules_to_product(original.copy(), rules)
     if updated != original:
-        product.category = updated.get("category")
-        product.subcategory = updated.get("subcategory")
-        product.sub_subcategory = updated.get("sub_subcategory")
-        return True
-    return False
-
-
-def _apply_final_mapping_to_product_model(
-    product,
-    mappings: List[CategoryFinalMapping],
-    use_raw_base: bool = True,
-) -> bool:
-    original = {
-        "category": product.category,
-        "subcategory": product.subcategory,
-        "sub_subcategory": product.sub_subcategory,
-    }
-    if use_raw_base:
-        original = {
-            "category": product.raw_category or product.category,
-            "subcategory": product.raw_subcategory or product.subcategory,
-            "sub_subcategory": product.raw_sub_subcategory or product.sub_subcategory,
-        }
-    updated = crud_product.apply_category_final_mapping_to_product(original.copy(), mappings)
-    changed = (
-        (product.category or "") != (updated.get("category") or "")
-        or (product.subcategory or "") != (updated.get("subcategory") or "")
-        or (product.sub_subcategory or "") != (updated.get("sub_subcategory") or "")
-    )
-    if changed:
         product.category = updated.get("category")
         product.subcategory = updated.get("subcategory")
         product.sub_subcategory = updated.get("sub_subcategory")
@@ -672,17 +643,17 @@ def move_level3_to_level2(
     from app.models.product import Product
     
     # Tìm các sản phẩm thuộc danh mục cấp 3 cần chuyển
-    products = db.query(Product).filter(
-        Product.category == category,
-        Product.subcategory == subcategory,
-        Product.sub_subcategory == sub_subcategory
-    ).all()
-    
-    if not products:
+    _fc = category_field_equals_ci(Product.category, category)
+    _fs = category_field_equals_ci(Product.subcategory, subcategory)
+    _fss = category_field_equals_ci(Product.sub_subcategory, sub_subcategory)
+    if _fc is None or _fs is None or _fss is None:
         raise HTTPException(
-            status_code=404, 
-            detail=f"Không tìm thấy sản phẩm nào trong danh mục '{category} > {subcategory} > {sub_subcategory}'"
+            status_code=400,
+            detail="Thiếu hoặc không hợp lệ category / subcategory / sub_subcategory",
         )
+    products = db.query(Product).filter(
+        _fc, _fs, _fss,
+    ).all()
     
     # Tên cấp 2 mới
     new_name = new_subcategory_name if new_subcategory_name else sub_subcategory
@@ -878,10 +849,16 @@ def rename_category(
     level2_slug = slugify_vietnamese(subcategory)
     old_path = "/".join([level1_slug, level2_slug, slugify_vietnamese(sub_subcategory)])
     new_path = "/".join([level1_slug, level2_slug, slugify_vietnamese(new_name)])
+    _fc = category_field_equals_ci(Product.category, category)
+    _fs = category_field_equals_ci(Product.subcategory, subcategory)
+    _fss = category_field_equals_ci(Product.sub_subcategory, sub_subcategory)
+    if _fc is None or _fs is None or _fss is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Thiếu hoặc không hợp lệ category / subcategory / sub_subcategory",
+        )
     products = db.query(Product).filter(
-        Product.category == category,
-        Product.subcategory == subcategory,
-        Product.sub_subcategory == sub_subcategory
+        _fc, _fs, _fss,
     ).all()
     for product in products:
         product.sub_subcategory = new_name
@@ -1144,7 +1121,10 @@ def create_final_mapping(
         db.commit()
     db.add(rule)
     db.commit()
-    return {"status": "success", "mapping_id": rule.id}
+    db.refresh(rule)
+    products_updated = crud_product.batch_apply_final_mapping_to_products(db, rule)
+    db.commit()
+    return {"status": "success", "mapping_id": rule.id, "products_updated": products_updated}
 
 
 @router.put("/mappings-final/{mapping_id}")
@@ -1167,7 +1147,9 @@ def update_final_mapping(
         if field in payload:
             setattr(mapping, field, payload[field] or "")
     db.commit()
-    return {"status": "success", "mapping_id": mapping.id}
+    products_updated = crud_product.batch_apply_final_mapping_to_products(db, mapping)
+    db.commit()
+    return {"status": "success", "mapping_id": mapping.id, "products_updated": products_updated}
 
 
 @router.delete("/mappings-final/{mapping_id}")
@@ -1182,37 +1164,18 @@ def delete_final_mapping(mapping_id: int, db: Session = Depends(get_db)):
 
 @router.post("/mappings-final/apply")
 def apply_final_mappings(db: Session = Depends(get_db)):
-    mappings = db.query(CategoryFinalMapping).order_by(CategoryFinalMapping.created_at.asc()).all()
-    products = db.query(Product).all()
-    # Backfill raw_* and reset current categories to raw for a clean base
-    for product in products:
-        if (product.raw_category is None or product.raw_category == "") and product.category:
-            product.raw_category = product.category
-        if (product.raw_subcategory is None or product.raw_subcategory == "") and product.subcategory:
-            product.raw_subcategory = product.subcategory
-        if (product.raw_sub_subcategory is None or product.raw_sub_subcategory == "") and product.sub_subcategory:
-            product.raw_sub_subcategory = product.sub_subcategory
-        if product.raw_category:
-            product.category = product.raw_category
-        if product.raw_subcategory is not None:
-            product.subcategory = product.raw_subcategory
-        if product.raw_sub_subcategory is not None:
-            product.sub_subcategory = product.raw_sub_subcategory
+    """
+    Đồng bộ lại sản phẩm theo các mapping đã lưu — **không** reset raw_* hay áp wildcard L2 lên toàn bộ SP.
 
-    updated_ids = set()
-    iterations = 0
-    max_iterations = 10
-    while iterations < max_iterations:
-        iterations += 1
-        changed_this_round = 0
-        for product in products:
-            if _apply_final_mapping_to_product_model(product, mappings, use_raw_base=False):
-                changed_this_round += 1
-                updated_ids.add(product.id)
-        if changed_this_round == 0:
-            break
+    Chỉ cập nhật các hàng khớp đúng (category, subcategory, sub_subcategory) nguồn có **cấp 3 đầy đủ**
+    (`from_sub_subcategory` không rỗng), giống lúc POST/PUT mapping.
+    """
+    mappings = db.query(CategoryFinalMapping).order_by(CategoryFinalMapping.id.asc()).all()
+    total_updates = 0
+    for m in mappings:
+        total_updates += crud_product.batch_apply_final_mapping_to_products(db, m)
     db.commit()
-    return {"status": "success", "updated": len(updated_ids), "iterations": iterations}
+    return {"status": "success", "updated": total_updates}
 
 
 @router.get("/mappings-final/export")
@@ -1256,7 +1219,11 @@ def import_final_mappings(
         db.add(mapping)
         created += 1
     db.commit()
-    return {"status": "success", "created": created, "replaced": replace}
+    products_updated = 0
+    for m in db.query(CategoryFinalMapping).order_by(CategoryFinalMapping.id.asc()).all():
+        products_updated += crud_product.batch_apply_final_mapping_to_products(db, m)
+    db.commit()
+    return {"status": "success", "created": created, "replaced": replace, "products_updated": products_updated}
 
 
 @router.post("/merge-level2")

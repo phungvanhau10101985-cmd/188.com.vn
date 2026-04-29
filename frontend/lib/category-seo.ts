@@ -99,9 +99,9 @@ export interface CategoryByPathInfo {
 }
 
 export interface CategorySeoData extends CategoryByPathInfo {
-  images: string[];  // 4 ảnh sản phẩm đầu tiên cho og:image
-  seo_description: string | null;  // Mô tả SEO được viết bởi AI
-  seo_body: string | null;  // Đoạn văn SEO 150-300 từ (cuối trang), do AI viết
+  images: string[]; // 4 ảnh SP hoặc meta
+  seo_description: string | null; // Meta đã lưu (không còn sinh tự động qua API xem trang)
+  seo_body: string | null; // Đoạn cuối trang — chỉ có sau khi admin/script chủ động tạo
 }
 
 export async function getCategoryByPathForSeo(
@@ -127,10 +127,8 @@ export async function getCategoryByPathForSeo(
 }
 
 /**
- * Lấy dữ liệu SEO đầy đủ cho danh mục bao gồm:
- * - Thông tin cơ bản
- * - 4 ảnh sản phẩm đầu tiên (cho og:image)
- * - Mô tả SEO được viết bởi AI
+ * Lấy dữ liệu SEO đầy đủ cho danh mục (ảnh, seo_description, seo_body đã lưu trong DB).
+ * Không gọi Gemini — chỉ admin/script mới tạo seo_body.
  */
 export async function getCategorySeoData(
   level1: string,

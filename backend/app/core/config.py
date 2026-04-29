@@ -298,10 +298,9 @@ class Settings:
             self.EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS = int(_seo_skip_thr) if _seo_skip_thr != "" else 2500
         except ValueError:
             self.EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS = 2500
-        # False = không gọi Gemini trong luồng import (upload xong nhanh); SEO danh mục vẫn chạy NỀN sau import,
-        # bổ sung đủ seo_body — không “tắt” Gemini. True = batch nhỏ có thể sinh SEO ngay trong request import.
+        # Gemini seo_body sau import Excel — không còn tự động (bulk_import không gọi). Giữ biến/env để tương thích cấu hình cũ.
         self.EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED: bool = (
-            os.getenv("EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED", "true").lower() == "true"
+            os.getenv("EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED", "false").lower() == "true"
         )
         
         # ========================

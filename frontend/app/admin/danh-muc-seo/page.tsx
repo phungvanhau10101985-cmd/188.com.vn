@@ -3,7 +3,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import AdminLayout from '@/components/admin/AdminLayout';
 import { apiClient } from '@/lib/api-client';
+import { generateSlug } from '@/lib/utils';
 import type { CategoryLevel1, CategoryLevel3 } from '@/types/api';
+
+/** Phân tách cặp l2/l3 trong key multi-select */
+const FROM_L2_L3_SEP = '\x1f';
+
+/** Mọi từ (cách bằng khoảng trắng) đều phải có trong nhãn — thứ tự không quan trọng */
+function labelMatchesTokenSearch(label: string, searchRaw: string): boolean {
+  const tokens = searchRaw
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((t) => t.length > 0);
+  if (tokens.length === 0) return true;
+  const haystack = label.toLowerCase();
+  return tokens.every((t) => haystack.includes(t));
+}
 
 type TabType = 'list' | 'rules';
 type MappingItem = {
@@ -35,6 +51,63 @@ type RedirectItem = {
 
 function slugOf(node: { name: string; slug?: string }): string {
   return (node.slug || node.name).toString().trim().toLowerCase().replace(/\s+/g, '-');
+}
+
+/** Giống slug URL backend / Navigation — không dùng slug chỉ lowercase có dấu. */
+function slugFromPlainName(name: string): string {
+  return generateSlug(name).replace(/^-+|-+$/g, '') || slugOf({ name });
+}
+
+/**
+ * Ba tên danh mục đích (giống chuỗi hiển thị cột «Đến»): cấp 2 có thể lấy từ from_subcategory khi chỉ đích là cấp 3.
+ */
+function mappingDestinationSegmentNames(r: MappingItem): string[] {
+  const t1 = r.to_category?.trim();
+  if (!t1) return [];
+  const hasT3 = !!(r.to_sub_subcategory && String(r.to_sub_subcategory).trim());
+  const t2Raw = r.to_subcategory && String(r.to_subcategory).trim();
+  const t2 = t2Raw
+    ? String(r.to_subcategory).trim()
+    : hasT3 && r.from_subcategory
+      ? String(r.from_subcategory).trim()
+      : '';
+  const t3 = r.to_sub_subcategory?.trim();
+  const parts = [t1];
+  if (t2) parts.push(t2);
+  if (t3) parts.push(t3);
+  return parts;
+}
+
+/** URL `/danh-muc/slug1/...` tới danh mục đích đã map (ưu tiên slug trên cây đã tải). */
+function mappingDestinationDanhMucPath(tree: CategoryLevel1[], r: MappingItem): string | null {
+  const names = mappingDestinationSegmentNames(r);
+  if (names.length === 0) return null;
+
+  const slugs: string[] = [];
+  const c1 = tree.find((c) => c.name === names[0]);
+  slugs.push(c1 ? slugOf(c1) : slugFromPlainName(names[0]));
+
+  if (names.length >= 2) {
+    const c2 = c1?.children?.find((c) => c.name === names[1]);
+    slugs.push(c2 ? slugOf(c2) : slugFromPlainName(names[1]));
+  }
+  if (names.length >= 3) {
+    const l2 = c1?.children?.find((c) => c.name === names[1]);
+    const l3list = l2?.children || [];
+    const want = names[2];
+    let foundObj: CategoryLevel3 | undefined;
+    for (const c3 of l3list) {
+      const nm =
+        typeof c3 === 'object' && c3 !== null && 'name' in c3 ? (c3 as CategoryLevel3).name : String(c3);
+      if (nm === want && typeof c3 === 'object' && c3 !== null) {
+        foundObj = c3 as CategoryLevel3;
+        break;
+      }
+    }
+    slugs.push(foundObj ? slugOf(foundObj) : slugFromPlainName(names[2]));
+  }
+
+  return `/danh-muc/${slugs.map((s) => encodeURIComponent(s)).join('/')}`;
 }
 
 function flattenTree(tree: CategoryLevel1[]): FlatCategory[] {
@@ -114,6 +187,11 @@ export default function AdminDanhMucSeoPage() {
   const [mappingEditId, setMappingEditId] = useState<number | null>(null);
   const [mappingJson, setMappingJson] = useState('');
   const [mappingReplace, setMappingReplace] = useState(false);
+  /** Nguồn: chọn nhiều cấp 2 / nhiều cặp cấp 3 (chỉ khi tạo mới, không dùng khi sửa một dòng) */
+  const [mappingSourceL2Multi, setMappingSourceL2Multi] = useState<string[]>([]);
+  const [mappingSourceL3Multi, setMappingSourceL3Multi] = useState<string[]>([]);
+  const [mappingSourceL2Search, setMappingSourceL2Search] = useState('');
+  const [mappingSourceL3Search, setMappingSourceL3Search] = useState('');
 
   const loadData = async () => {
     setLoading(true);
@@ -204,6 +282,71 @@ export default function AdminDanhMucSeoPage() {
 
   function getLevel3Options(categoryName: string, subcategoryName: string) {
     return getLevel3Categories(categoryName, subcategoryName);
+  }
+
+  /** Danh sách cấp 2 nguồn sau khi lọc từ khóa (giống logic cấp 3) */
+  const level2OptionsFilteredForDisplay = useMemo(() => {
+    if (!mappingForm.from_category) return [] as string[];
+    const opts = getLevel2Options(mappingForm.from_category);
+    if (!mappingSourceL2Search.trim()) return opts;
+    return opts.filter((sub) => labelMatchesTokenSearch(sub, mappingSourceL2Search));
+  }, [tree, mappingForm.from_category, mappingSourceL2Search]);
+
+  /** Cặp (cấp 2 › cấp 3): chỉ các nhánh thuộc các cấp 2 nguồn đã chọn */
+  const level3PairsUnderFromCategory = useMemo(() => {
+    const catName = mappingForm.from_category;
+    if (!catName) return [] as { key: string; label: string }[];
+    const c1 = tree.find((c) => c.name === catName);
+    if (!c1?.children?.length) return [];
+    if (mappingSourceL2Multi.length === 0) return [];
+    const allowed = new Set(mappingSourceL2Multi);
+    const out: { key: string; label: string }[] = [];
+    for (const c2 of c1.children || []) {
+      const l2 = c2.name;
+      if (!l2?.trim() || !allowed.has(l2)) continue;
+      for (const c3 of c2.children || []) {
+        const n3 =
+          typeof c3 === 'object' && c3 !== null && 'name' in c3 ? (c3 as CategoryLevel3).name : String(c3);
+        if (!String(n3).trim()) continue;
+        const key = `${l2}${FROM_L2_L3_SEP}${n3}`;
+        out.push({ key, label: `${l2} › ${n3}` });
+      }
+    }
+    return out.sort((a, b) => a.label.localeCompare(b.label, 'vi'));
+  }, [tree, mappingForm.from_category, mappingSourceL2Multi]);
+
+  /** Danh sách cấp 3 hiển thị sau khi lọc từ khóa */
+  const level3PairsFilteredForDisplay = useMemo(() => {
+    if (!mappingSourceL3Search.trim()) return level3PairsUnderFromCategory;
+    return level3PairsUnderFromCategory.filter(({ label }) =>
+      labelMatchesTokenSearch(label, mappingSourceL3Search)
+    );
+  }, [level3PairsUnderFromCategory, mappingSourceL3Search]);
+
+  /** Bỏ tick cấp 3 nếu không còn thuộc cấp 2 đang chọn */
+  useEffect(() => {
+    if (mappingEditId) return;
+    const allowed = new Set(mappingSourceL2Multi);
+    setMappingSourceL3Multi((prev) =>
+      prev.filter((key) => {
+        const i = key.indexOf(FROM_L2_L3_SEP);
+        if (i <= 0) return false;
+        const l2 = key.slice(0, i);
+        return allowed.has(l2);
+      })
+    );
+  }, [mappingSourceL2Multi, mappingEditId]);
+
+  function toggleMappingSourceL2(name: string) {
+    setMappingSourceL2Multi((prev) =>
+      prev.includes(name) ? prev.filter((x) => x !== name) : [...prev, name]
+    );
+  }
+
+  function toggleMappingSourceL3(key: string) {
+    setMappingSourceL3Multi((prev) =>
+      prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key]
+    );
   }
 
 
@@ -297,26 +440,67 @@ export default function AdminDanhMucSeoPage() {
     setError(null);
     setSuccessMessage(null);
     try {
-      const normalizedToSubcategory =
+      const normalizedDestSubcategory = (fromSubForInfer: string) =>
         !mappingForm.to_subcategory.trim() && mappingForm.to_sub_subcategory.trim()
-          ? mappingForm.from_subcategory
+          ? fromSubForInfer
           : mappingForm.to_subcategory;
-      const payload = {
+
+      const buildPayload = (from_subcategory: string, from_sub_subcategory: string) => ({
         from_category: mappingForm.from_category,
-        from_subcategory: mappingForm.from_subcategory || '',
-        from_sub_subcategory: mappingForm.from_sub_subcategory || '',
+        from_subcategory: from_subcategory || '',
+        from_sub_subcategory: from_sub_subcategory || '',
         to_category: mappingForm.to_category || mappingForm.from_category,
-        to_subcategory: normalizedToSubcategory || '',
+        to_subcategory: normalizedDestSubcategory(from_subcategory) || '',
         to_sub_subcategory: mappingForm.to_sub_subcategory || '',
-      };
+      });
+
       if (mappingEditId) {
-        await apiClient.updateFinalMapping(mappingEditId, payload);
-        const applied = await apiClient.applyFinalMappings();
-        setSuccessMessage(`✅ Đã cập nhật mapping và áp dụng cho ${applied.updated} sản phẩm`);
+        const payload = buildPayload(mappingForm.from_subcategory, mappingForm.from_sub_subcategory);
+        const res = await apiClient.updateFinalMapping(mappingEditId, payload);
+        const n = res.products_updated ?? 0;
+        setSuccessMessage(`✅ Đã cập nhật mapping. ${n} sản phẩm khớp nguồn đã chuyển sang đích.`);
       } else {
-        await apiClient.createFinalMapping(payload);
-        const applied = await apiClient.applyFinalMappings();
-        setSuccessMessage(`✅ Đã tạo mapping và áp dụng cho ${applied.updated} sản phẩm`);
+        const l2HasSelectedL3 = new Set<string>();
+        for (const key of mappingSourceL3Multi) {
+          const i = key.indexOf(FROM_L2_L3_SEP);
+          if (i <= 0) continue;
+          l2HasSelectedL3.add(key.slice(0, i));
+        }
+        const expanded: { fs: string; fss: string }[] = [];
+        for (const key of mappingSourceL3Multi) {
+          const i = key.indexOf(FROM_L2_L3_SEP);
+          if (i === -1) continue;
+          const l2 = key.slice(0, i);
+          const l3 = key.slice(i + FROM_L2_L3_SEP.length);
+          expanded.push({ fs: l2, fss: l3 });
+        }
+        for (const l2 of mappingSourceL2Multi) {
+          if (l2HasSelectedL3.has(l2)) {
+            continue;
+          }
+          expanded.push({ fs: l2, fss: '' });
+        }
+        const seen = new Set<string>();
+        const uniq = expanded.filter((r) => {
+          const k = `${r.fs}\u0000${r.fss}`;
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+        if (uniq.length === 0) {
+          alert('Vui lòng chọn ít nhất một danh mục nguồn cấp 2 hoặc một nhánh cấp 3');
+          return;
+        }
+        let created = 0;
+        let productsUpdated = 0;
+        for (const row of uniq) {
+          const res = await apiClient.createFinalMapping(buildPayload(row.fs, row.fss));
+          created += 1;
+          productsUpdated += res.products_updated ?? 0;
+        }
+        setSuccessMessage(
+          `✅ Đã tạo ${created} mapping. ${productsUpdated} sản phẩm khớp nguồn (cấp 3 đã chọn) đã chuyển sang đích — cấp 3 khác không đổi.`
+        );
       }
       setMappingForm({
         from_category: '',
@@ -326,6 +510,10 @@ export default function AdminDanhMucSeoPage() {
         to_subcategory: '',
         to_sub_subcategory: '',
       });
+      setMappingSourceL2Multi([]);
+      setMappingSourceL3Multi([]);
+      setMappingSourceL2Search('');
+      setMappingSourceL3Search('');
       setMappingEditId(null);
       await loadMappings();
       await loadData();
@@ -338,6 +526,10 @@ export default function AdminDanhMucSeoPage() {
 
   const handleEditMapping = (mapping: MappingItem) => {
     setMappingEditId(mapping.id);
+    setMappingSourceL2Multi([]);
+    setMappingSourceL3Multi([]);
+    setMappingSourceL2Search('');
+    setMappingSourceL3Search('');
     setMappingForm({
       from_category: mapping.from_category || '',
       from_subcategory: mapping.from_subcategory || '',
@@ -385,7 +577,11 @@ export default function AdminDanhMucSeoPage() {
     }
     setProcessing(true);
     try {
-      await apiClient.importFinalMappings({ mappings: parsed.mappings || [], replace: mappingReplace });
+      const res = await apiClient.importFinalMappings({ mappings: parsed.mappings || [], replace: mappingReplace });
+      const pu = res.products_updated ?? 0;
+      setSuccessMessage(
+        `✅ Import xong (${res.created} mapping${pu ? `; ${pu} sản phẩm khớp nguồn cấp 3 đã cập nhật` : ''}).`
+      );
       await loadMappings();
     } finally {
       setProcessing(false);
@@ -469,6 +665,10 @@ export default function AdminDanhMucSeoPage() {
             {activeTab === 'list' && (
               <div>
                 <div className="mb-4 space-y-3">
+                  <p className="text-xs text-gray-500">
+                    Nội dung SEO cuối trang (Gemini) <strong>chỉ</strong> chạy khi bạn bấm «Chạy tất cả» hoặc «Chạy danh mục đã chọn»
+                    bên dưới — không tự động khi khách mở trang danh mục hay sau import Excel.
+                  </p>
                   <div className="flex flex-wrap items-center gap-3">
                     <button
                       type="button"
@@ -711,7 +911,7 @@ export default function AdminDanhMucSeoPage() {
                       disabled={processing}
                       className="px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                     >
-                      Đồng bộ mapping cho sản phẩm cũ
+                      Đồng bộ mapping cho sản phẩm cũ (chỉ nhánh có cấp 3 nguồn trong mapping; không reset toàn bộ SP)
                     </button>
                   </div>
 
@@ -726,20 +926,40 @@ export default function AdminDanhMucSeoPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {mappings.map((r) => (
+                        {mappings.map((r) => {
+                          const destUrl = mappingDestinationDanhMucPath(tree, r);
+                          return (
                           <tr key={r.id} className="border-t">
                             <td className="px-3 py-2">{r.id}</td>
                             <td className="px-3 py-2">
                               {[r.from_category, r.from_subcategory, r.from_sub_subcategory].filter(Boolean).join(' > ')}
                             </td>
                             <td className="px-3 py-2">
-                              {[
-                                r.to_category,
-                                r.to_subcategory || (r.to_sub_subcategory ? r.from_subcategory : ''),
-                                r.to_sub_subcategory,
-                              ]
-                                .filter(Boolean)
-                                .join(' > ')}
+                              <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                                <span className="break-words text-gray-900 flex-1 min-w-0">
+                                  {[
+                                    r.to_category,
+                                    r.to_subcategory || (r.to_sub_subcategory ? r.from_subcategory : ''),
+                                    r.to_sub_subcategory,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' > ')}
+                                </span>
+                                {destUrl && (
+                                  <a
+                                    href={destUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="shrink-0 inline-flex items-center gap-1 text-[#ea580c] hover:underline font-medium whitespace-nowrap text-xs sm:text-sm"
+                                    title="Mở trang danh mục đích trên site"
+                                  >
+                                    Mở danh mục
+                                    <span aria-hidden className="opacity-70">
+                                      ↗
+                                    </span>
+                                  </a>
+                                )}
+                              </div>
                             </td>
                             <td className="px-3 py-2 space-x-2">
                               <button
@@ -758,7 +978,8 @@ export default function AdminDanhMucSeoPage() {
                               </button>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                         {mappings.length === 0 && !mappingsLoading && (
                           <tr>
                             <td className="px-3 py-3 text-gray-500" colSpan={4}>
@@ -772,26 +993,38 @@ export default function AdminDanhMucSeoPage() {
                 </div>
 
                 <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-                  <h3 className="text-lg font-semibold mb-4">{mappingEditId ? 'Sửa mapping' : 'Tạo mapping'}</h3>
+                  <h3 className={`text-lg font-semibold ${mappingEditId ? 'mb-4' : 'mb-1'}`}>
+                    {mappingEditId ? 'Sửa mapping' : 'Tạo mapping'}
+                  </h3>
+                  {!mappingEditId && (
+                    <p className="text-xs text-gray-500 mb-4">
+                      Nguồn: chọn cấp 2 + chỉ tick những **cấp 3** muốn map; sản phẩm thuộc cùng cấp 2 nhưng **không** tick vẫn giữ danh mục cũ. Mỗi nhánh đã tick tạo một mapping; backend cập nhật **đúng** SP khớp 3 cột nguồn sang đích. Không dùng “đồng bộ” kiểu gộp cả cấp 2.
+                    </p>
+                  )}
                   <div className="border border-gray-200 rounded-lg overflow-hidden">
                     <div className="grid grid-cols-2 bg-gray-50 text-sm font-medium text-gray-700">
                       <div className="px-3 py-2 border-r border-gray-200">Nguồn</div>
                       <div className="px-3 py-2">Đích</div>
                     </div>
-                    <div className="grid grid-cols-2 items-center">
+                    <div className="grid grid-cols-2 items-start">
                       <div className="px-3 py-2 border-r border-gray-200">
                         <div className="text-xs text-gray-500 mb-1">Cấp 1</div>
                         <select
                           value={mappingForm.from_category}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            const v = e.target.value;
                             setMappingForm({
                               ...mappingForm,
-                              from_category: e.target.value,
+                              from_category: v,
                               from_subcategory: '',
                               from_sub_subcategory: '',
-                            to_category: e.target.value,
-                            })
-                          }
+                              to_category: v,
+                            });
+                            setMappingSourceL2Multi([]);
+                            setMappingSourceL3Multi([]);
+                            setMappingSourceL2Search('');
+                            setMappingSourceL3Search('');
+                          }}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                         >
                           <option value="">-- Chọn cấp 1 --</option>
@@ -821,26 +1054,66 @@ export default function AdminDanhMucSeoPage() {
                         </select>
                       </div>
                       <div className="px-3 py-2 border-r border-gray-200 border-t border-gray-200">
-                        <div className="text-xs text-gray-500 mb-1">Cấp 2</div>
-                        <select
-                          value={mappingForm.from_subcategory}
-                          onChange={(e) =>
-                            setMappingForm({
-                              ...mappingForm,
-                              from_subcategory: e.target.value,
-                              from_sub_subcategory: '',
-                            })
-                          }
-                          disabled={!mappingForm.from_category}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                        >
-                          <option value="">-- Chọn cấp 2 --</option>
-                          {getLevel2Options(mappingForm.from_category).map((sub) => (
-                            <option key={sub} value={sub}>
-                              {sub}
-                            </option>
-                          ))}
-                        </select>
+                        {mappingEditId ? (
+                          <>
+                            <div className="text-xs text-gray-500 mb-1">Cấp 2</div>
+                          <select
+                            value={mappingForm.from_subcategory}
+                            onChange={(e) =>
+                              setMappingForm({
+                                ...mappingForm,
+                                from_subcategory: e.target.value,
+                                from_sub_subcategory: '',
+                              })
+                            }
+                            disabled={!mappingForm.from_category}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                          >
+                            <option value="">-- Chọn cấp 2 --</option>
+                            {getLevel2Options(mappingForm.from_category).map((sub) => (
+                              <option key={sub} value={sub}>
+                                {sub}
+                              </option>
+                            ))}
+                          </select>
+                          </>
+                        ) : (
+                          <>
+                            <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                              <span className="text-xs text-gray-500 shrink-0">Cấp 2 (chọn nhiều)</span>
+                              <input
+                                type="search"
+                                value={mappingSourceL2Search}
+                                onChange={(e) => setMappingSourceL2Search(e.target.value)}
+                                placeholder="Tìm (nhiều từ, thứ tự tuỳ ý)…"
+                                disabled={!mappingForm.from_category}
+                                className="flex-1 min-w-[7rem] border border-gray-200 rounded-md px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 disabled:bg-gray-50 disabled:text-gray-400"
+                                aria-label="Lọc danh mục cấp 2 nguồn"
+                              />
+                            </div>
+                            <div className="max-h-52 overflow-y-auto border border-gray-200 rounded-lg p-2 space-y-1.5 bg-white">
+                              {!mappingForm.from_category ? (
+                                <p className="text-xs text-gray-400">Chọn cấp 1 trước</p>
+                              ) : getLevel2Options(mappingForm.from_category).length === 0 ? (
+                                <p className="text-xs text-gray-400">Không có cấp 2</p>
+                              ) : level2OptionsFilteredForDisplay.length === 0 ? (
+                                <p className="text-xs text-gray-400">Không có danh mục khớp từ khóa</p>
+                              ) : (
+                                level2OptionsFilteredForDisplay.map((sub) => (
+                                  <label key={sub} className="flex items-start gap-2 text-sm cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      className="mt-0.5 shrink-0"
+                                      checked={mappingSourceL2Multi.includes(sub)}
+                                      onChange={() => toggleMappingSourceL2(sub)}
+                                    />
+                                    <span>{sub}</span>
+                                  </label>
+                                ))
+                              )}
+                            </div>
+                          </>
+                        )}
                       </div>
                       <div className="px-3 py-2 border-t border-gray-200">
                         <div className="text-xs text-gray-500 mb-1">Cấp 2</div>
@@ -865,20 +1138,64 @@ export default function AdminDanhMucSeoPage() {
                         </datalist>
                       </div>
                       <div className="px-3 py-2 border-r border-gray-200 border-t border-gray-200">
-                        <div className="text-xs text-gray-500 mb-1">Cấp 3</div>
-                        <select
-                          value={mappingForm.from_sub_subcategory}
-                          onChange={(e) => setMappingForm({ ...mappingForm, from_sub_subcategory: e.target.value })}
-                          disabled={!mappingForm.from_category || !mappingForm.from_subcategory}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                        >
-                          <option value="">-- Chọn cấp 3 --</option>
-                          {getLevel3Options(mappingForm.from_category, mappingForm.from_subcategory).map((sub) => (
-                            <option key={sub} value={sub}>
-                              {sub}
-                            </option>
-                          ))}
-                        </select>
+                        {mappingEditId ? (
+                          <>
+                            <div className="text-xs text-gray-500 mb-1">Cấp 3</div>
+                            <select
+                              value={mappingForm.from_sub_subcategory}
+                              onChange={(e) => setMappingForm({ ...mappingForm, from_sub_subcategory: e.target.value })}
+                              disabled={!mappingForm.from_category || !mappingForm.from_subcategory}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                            >
+                              <option value="">-- Chọn cấp 3 --</option>
+                              {getLevel3Options(mappingForm.from_category, mappingForm.from_subcategory).map((sub) => (
+                                <option key={sub} value={sub}>
+                                  {sub}
+                                </option>
+                              ))}
+                            </select>
+                          </>
+                        ) : (
+                          <>
+                            <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                              <span className="text-xs text-gray-500 shrink-0">Cấp 3 (chọn nhiều)</span>
+                              <input
+                                type="search"
+                                value={mappingSourceL3Search}
+                                onChange={(e) => setMappingSourceL3Search(e.target.value)}
+                                placeholder="Tìm (nhiều từ, thứ tự tuỳ ý)…"
+                                disabled={!mappingForm.from_category || mappingSourceL2Multi.length === 0}
+                                className="flex-1 min-w-[7rem] border border-gray-200 rounded-md px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 disabled:bg-gray-50 disabled:text-gray-400"
+                                aria-label="Lọc danh mục cấp 3 nguồn"
+                              />
+                            </div>
+                            <div className="max-h-52 overflow-y-auto border border-gray-200 rounded-lg p-2 space-y-1.5 bg-white">
+                              {!mappingForm.from_category ? (
+                                <p className="text-xs text-gray-400">Chọn cấp 1 trước</p>
+                              ) : mappingSourceL2Multi.length === 0 ? (
+                                <p className="text-xs text-gray-400">
+                                  Chọn ít nhất một danh mục cấp 2 — chỉ hiển thị cấp 3 thuộc các cấp 2 đã chọn
+                                </p>
+                              ) : level3PairsUnderFromCategory.length === 0 ? (
+                                <p className="text-xs text-gray-400">Không có cấp 3 trong các cấp 2 đã chọn</p>
+                              ) : level3PairsFilteredForDisplay.length === 0 ? (
+                                <p className="text-xs text-gray-400">Không có danh mục khớp từ khóa</p>
+                              ) : (
+                                level3PairsFilteredForDisplay.map(({ key, label }) => (
+                                  <label key={key} className="flex items-start gap-2 text-sm cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      className="mt-0.5 shrink-0"
+                                      checked={mappingSourceL3Multi.includes(key)}
+                                      onChange={() => toggleMappingSourceL3(key)}
+                                    />
+                                    <span className="leading-snug">{label}</span>
+                                  </label>
+                                ))
+                              )}
+                            </div>
+                          </>
+                        )}
                       </div>
                       <div className="px-3 py-2 border-t border-gray-200">
                         <div className="text-xs text-gray-500 mb-1">Cấp 3</div>
@@ -912,6 +1229,10 @@ export default function AdminDanhMucSeoPage() {
                         type="button"
                         onClick={() => {
                           setMappingEditId(null);
+                          setMappingSourceL2Multi([]);
+                          setMappingSourceL3Multi([]);
+                          setMappingSourceL2Search('');
+                          setMappingSourceL3Search('');
                           setMappingForm({
                             from_category: '',
                             from_subcategory: '',

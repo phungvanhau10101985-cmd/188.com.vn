@@ -15,6 +15,7 @@ Các bảng được xóa (theo nhóm):
   3) Danh mục + SEO danh mục:       categories, category_seo_mappings, category_seo_meta,
                                     category_seo_dictionary, category_final_mappings,
                                     category_transform_rules
+                                    (bỏ qua nếu có --keep-categories)
 
 Các bảng KHÔNG bị động: users, admin_users, orders, payments, loyalty_tiers, bank_accounts,
                        site_embed_codes, notifications, user_addresses, user_trusted_devices,
@@ -24,7 +25,8 @@ Cách dùng:
   python scripts/clear_products_categories.py                 # in danh sách + chờ gõ YES
   python scripts/clear_products_categories.py --yes           # bỏ qua confirm (CI/script)
   python scripts/clear_products_categories.py --dry-run       # chỉ in COUNT(*) từng bảng
-  python scripts/clear_products_categories.py --keep-views    # KHÔNG xóa nhóm 2 (tương tác)
+  python scripts/clear_products_categories.py --keep-views       # KHÔNG xóa nhóm 2 (tương tác)
+  python scripts/clear_products_categories.py --keep-categories  # chỉ xóa SP + phụ thuộc; GIỮ categories + SEO danh mục
 """
 
 from __future__ import annotations
@@ -129,6 +131,11 @@ def main() -> int:
     parser.add_argument("--yes", action="store_true", help="Không hỏi xác nhận")
     parser.add_argument("--dry-run", action="store_true", help="Chỉ in COUNT(*) từng bảng")
     parser.add_argument("--keep-views", action="store_true", help="Giữ lại nhóm tương tác/cart/search")
+    parser.add_argument(
+        "--keep-categories",
+        action="store_true",
+        help="Không xóa categories và các bảng SEO danh mục (category_*); chỉ xóa sản phẩm và phụ thuộc",
+    )
     args = parser.parse_args()
 
     db_url = str(engine.url)
@@ -153,7 +160,8 @@ def main() -> int:
     if not args.keep_views:
         targets.extend([t for t in GROUP_INTERACTIONS if t in avail])
     targets.extend([t for t in TABLE_PRODUCTS_LAST if t in avail])
-    targets.extend([t for t in GROUP_CATEGORIES if t in avail])
+    if not args.keep_categories:
+        targets.extend([t for t in GROUP_CATEGORIES if t in avail])
 
     if not targets:
         print(" Không tìm thấy bảng nào để xóa. (DB trống hoặc chưa migrate?)")

@@ -891,7 +891,7 @@ class ApiClient {
   }
 
   /** Tạo mapping */
-  async createFinalMapping(payload: any): Promise<{ status: string; mapping_id: number }> {
+  async createFinalMapping(payload: any): Promise<{ status: string; mapping_id: number; products_updated?: number }> {
     return this.fetch(`/category-seo/mappings-final`, {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -899,7 +899,7 @@ class ApiClient {
   }
 
   /** Cập nhật mapping */
-  async updateFinalMapping(id: number, payload: any): Promise<{ status: string; mapping_id: number }> {
+  async updateFinalMapping(id: number, payload: any): Promise<{ status: string; mapping_id: number; products_updated?: number }> {
     return this.fetch(`/category-seo/mappings-final/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
@@ -922,7 +922,12 @@ class ApiClient {
   }
 
   /** Import mapping */
-  async importFinalMappings(payload: { mappings: any[]; replace?: boolean }): Promise<{ status: string; created: number; replaced: boolean }> {
+  async importFinalMappings(payload: { mappings: any[]; replace?: boolean }): Promise<{
+    status: string;
+    created: number;
+    replaced: boolean;
+    products_updated?: number;
+  }> {
     const query = new URLSearchParams();
     if (payload.replace) query.append('replace', 'true');
     return this.fetch(`/category-seo/mappings-final/import?${query.toString()}`, {
