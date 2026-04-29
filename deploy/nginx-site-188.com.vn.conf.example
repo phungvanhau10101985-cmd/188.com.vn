@@ -90,5 +90,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        # Next App Router (RSC/streaming): tránh buffer làm treo hoặc HTML trống trên một số VPS
+        proxy_buffering off;
     }
 }

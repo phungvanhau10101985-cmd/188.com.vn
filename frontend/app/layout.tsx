@@ -16,13 +16,21 @@ import { ToastProvider } from "@/components/ToastProvider";
 import PwaPushRegister from "@/components/PwaPushRegister";
 import { getCategoryTreeForLayout } from "@/lib/category-seo";
 
-/** Origin cho metadata (OG, icons). Dev mặc định localhost — tránh /favicon bị resolve sang https://188.com.vn khi chạy local. */
-const METADATA_BASE_URL =
+/** Origin cho metadata (OG, icons). Luôn có scheme — `new URL("188.com.vn")` throw → SSR 500 / trắng trang nếu env prod thiếu https:// */
+function normalizeAbsoluteSiteUrl(raw: string): string {
+  const t = raw.trim();
+  if (!t) return "https://188.com.vn";
+  if (/^https?:\/\//i.test(t)) return t;
+  return `https://${t.replace(/^\/+/, "")}`;
+}
+
+const METADATA_BASE_URL = normalizeAbsoluteSiteUrl(
   process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
-  process.env.NEXT_PUBLIC_DOMAIN?.trim() ||
-  (process.env.NODE_ENV === "development"
-    ? "http://localhost:3001"
-    : "https://188.com.vn");
+    process.env.NEXT_PUBLIC_DOMAIN?.trim() ||
+    (process.env.NODE_ENV === "development"
+      ? "http://localhost:3001"
+      : "https://188.com.vn")
+);
 
 // Fonts: self-hosted via @fontsource (no compile-time fetch from fonts.googleapis.com — avoids timeouts/offline failures).
 
