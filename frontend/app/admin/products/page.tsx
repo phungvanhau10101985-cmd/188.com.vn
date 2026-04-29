@@ -281,10 +281,11 @@ export default function AdminProductsPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      let saved: { job_id?: string; started_at?: number; file?: string } | null = null;
+      type StoredImportJob = { job_id?: string; started_at?: number; file?: string };
+      let saved: StoredImportJob | null = null;
       try {
         const raw = localStorage.getItem(IMPORT_JOB_STORAGE_KEY);
-        saved = raw ? (JSON.parse(raw) as typeof saved) : null;
+        saved = raw ? (JSON.parse(raw) as StoredImportJob) : null;
       } catch {
         saved = null;
       }
