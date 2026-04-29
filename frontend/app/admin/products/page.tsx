@@ -87,6 +87,8 @@ const FEED_TIKTOK_CATALOG_TSV = `${API_V1}/import-export/export/tiktok-catalog-f
 export default function AdminProductsPage() {
   const [data, setData] = useState<AdminProductsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Phân biệt lỗi API với danh sách rỗng thật */
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [searchName, setSearchName] = useState('');
   const [searchId, setSearchId] = useState('');
   const [page, setPage] = useState(1);
@@ -126,6 +128,7 @@ export default function AdminProductsPage() {
 
   const fetchProducts = useCallback(async () => {
     setLoading(true);
+    setFetchError(null);
     try {
       const res = await adminProductAPI.getProducts({
         skip: (page - 1) * PAGE_SIZE,
@@ -134,8 +137,11 @@ export default function AdminProductsPage() {
         product_id: searchId.trim() || undefined,
       });
       setData(res);
-    } catch {
-      showToast('err', 'Lỗi tải danh sách sản phẩm');
+    } catch (e) {
+      const msg =
+        e instanceof Error ? e.message : 'Lỗi tải danh sách sản phẩm';
+      setFetchError(msg.length > 400 ? `${msg.slice(0, 400)}…` : msg);
+      showToast('err', msg.length > 220 ? `${msg.slice(0, 220)}…` : msg, 8000);
       setData(null);
     } finally {
       setLoading(false);
@@ -628,6 +634,17 @@ export default function AdminProductsPage() {
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           {loading ? (
             <div className="p-12 text-center text-gray-500">Đang tải...</div>
+          ) : fetchError ? (
+            <div className="p-12 text-center space-y-4">
+              <p className="text-red-600 whitespace-pre-wrap max-w-2xl mx-auto">{fetchError}</p>
+              <button
+                type="button"
+                onClick={() => fetchProducts()}
+                className="inline-flex items-center px-4 py-2 rounded-lg bg-gray-900 text-white text-sm hover:bg-gray-800"
+              >
+                Thử lại
+              </button>
+            </div>
           ) : !data?.products?.length ? (
             <div className="p-12 text-center text-gray-500">Không có sản phẩm nào.</div>
           ) : (

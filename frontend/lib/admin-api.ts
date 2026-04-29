@@ -83,32 +83,61 @@ function formatFastApiDetail(detail: unknown): string {
   return String(detail);
 }
 
-async function fetchAdmin<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function fetchAdmin<T>(
+  endpoint: string,
+  options: RequestInit & { timeoutMs?: number } = {},
+): Promise<T> {
   const token = getAdminToken();
   if (!token) {
     throw new Error('Chưa đăng nhập admin');
   }
   const url = endpoint.startsWith('http') ? endpoint : `${getApiBaseUrl()}${endpoint}`;
+  const { timeoutMs, signal: userSignal, ...fetchOpts } = options;
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     ...ngrokFetchHeaders(),
-    ...(options.headers as Record<string, string>),
+    ...(fetchOpts.headers as Record<string, string>),
   };
   if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
-  const res = await fetch(url, { ...options, headers });
-  if (res.status === 401) {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('admin_token');
-      window.location.href = '/admin/login';
+
+  const ctrl = new AbortController();
+  const tid =
+    typeof timeoutMs === 'number' && timeoutMs > 0
+      ? setTimeout(() => ctrl.abort(), timeoutMs)
+      : undefined;
+  if (userSignal) {
+    if (userSignal.aborted) ctrl.abort();
+    else userSignal.addEventListener('abort', () => ctrl.abort(), { once: true });
+  }
+
+  try {
+    const res = await fetch(url, { ...fetchOpts, headers, signal: ctrl.signal });
+    if (res.status === 401) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('admin_token');
+        window.location.href = '/admin/login';
+      }
+      throw new Error('Phiên đăng nhập hết hạn');
     }
-    throw new Error('Phiên đăng nhập hết hạn');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `Lỗi ${res.status}`);
+    }
+    if (res.status === 204) return {} as T;
+    return res.json();
+  } catch (e) {
+    const aborted =
+      (typeof DOMException !== 'undefined' && e instanceof DOMException && e.name === 'AbortError') ||
+      (e instanceof Error && e.name === 'AbortError');
+    if (aborted) {
+      throw new Error(
+        'Hết thời gian chờ server (timeout). API có thể quá tải hoặc pool PostgreSQL đầy — xem pm2 logs 188-api.',
+      );
+    }
+    throw e;
+  } finally {
+    if (tid !== undefined) clearTimeout(tid);
   }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `Lỗi ${res.status}`);
-  }
-  if (res.status === 204) return {} as T;
-  return res.json();
 }
 
 export interface AdminOrderItem {
@@ -327,6 +356,9 @@ function postImportExcelAsyncMultipart(
   });
 }
 
+/** Timeout danh sách SP admin — tránh treo "Đang tải..." khi API/pool DB chờ quá lâu */
+const ADMIN_PRODUCTS_LIST_TIMEOUT_MS = 120_000;
+
 export const adminProductAPI = {
   getProducts: (params?: { skip?: number; limit?: number; q?: string; product_id?: string }) => {
     const sp = new URLSearchParams();
@@ -334,7 +366,9 @@ export const adminProductAPI = {
     sp.set('limit', String(params?.limit ?? 100));
     if (params?.q) sp.set('q', params.q);
     if (params?.product_id) sp.set('product_id', params.product_id);
-    return fetchAdmin<AdminProductsResponse>(`/products/?${sp.toString()}`);
+    return fetchAdmin<AdminProductsResponse>(`/products/?${sp.toString()}`, {
+      timeoutMs: ADMIN_PRODUCTS_LIST_TIMEOUT_MS,
+    });
   },
 
   updateProduct: (productId: string, data: Partial<AdminProduct>) =>

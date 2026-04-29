@@ -21,6 +21,7 @@ else:
     engine_kwargs["pool_size"] = settings.DATABASE_POOL_SIZE
     engine_kwargs["max_overflow"] = settings.DATABASE_MAX_OVERFLOW
     engine_kwargs["pool_recycle"] = settings.DATABASE_POOL_RECYCLE
+    engine_kwargs["pool_timeout"] = settings.DATABASE_POOL_TIMEOUT
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL, **engine_kwargs)
 

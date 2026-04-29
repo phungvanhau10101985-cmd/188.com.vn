@@ -74,9 +74,11 @@ class Settings:
             self.ACTUAL_DATABASE_PATH = actual_db_path
             self.IS_POSTGRESQL = False
         
-        self.DATABASE_POOL_SIZE: int = int(os.getenv("DATABASE_POOL_SIZE", "5"))
-        self.DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "10"))
+        # PostgreSQL: QueuePool — pool nhỏ + nhiều request đồng thời → TimeoutError (sqlalchemy.me/e/20/3o7r)
+        self.DATABASE_POOL_SIZE: int = int(os.getenv("DATABASE_POOL_SIZE", "15"))
+        self.DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "25"))
         self.DATABASE_POOL_RECYCLE: int = int(os.getenv("DATABASE_POOL_RECYCLE", "3600"))
+        self.DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "60"))
         
         # ========================
         # SECURITY CONFIGURATION

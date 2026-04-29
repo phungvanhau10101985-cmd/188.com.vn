@@ -66,7 +66,13 @@ def init_database_tables():
         url = settings.DATABASE_URL
         kwargs = {}
         if not url.startswith("sqlite"):
-            kwargs = dict(pool_pre_ping=True, pool_size=settings.DATABASE_POOL_SIZE, max_overflow=settings.DATABASE_MAX_OVERFLOW)
+            kwargs = dict(
+                pool_pre_ping=True,
+                pool_size=settings.DATABASE_POOL_SIZE,
+                max_overflow=settings.DATABASE_MAX_OVERFLOW,
+                pool_recycle=settings.DATABASE_POOL_RECYCLE,
+                pool_timeout=settings.DATABASE_POOL_TIMEOUT,
+            )
         else:
             kwargs = dict(connect_args={"check_same_thread": False})
         engine = create_engine(url, **kwargs)
