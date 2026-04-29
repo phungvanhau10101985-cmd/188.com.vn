@@ -14,7 +14,7 @@ GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 class AIClassifier:
     def __init__(self):
         self.gemini_api_key = getattr(settings, "GEMINI_API_KEY", "") or ""
-        self.gemini_model = getattr(settings, "GEMINI_MODEL", "gemini-2.0-flash")
+        self.gemini_model = getattr(settings, "GEMINI_MODEL", "gemini-2.5-flash")
         
     def classify_product(self, product_name: str, chinese_name: str = "") -> Dict[str, Any]:
         """

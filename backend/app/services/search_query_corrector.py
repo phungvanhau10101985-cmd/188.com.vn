@@ -26,7 +26,7 @@ def correct_search_query_via_ai(query: str, gender_context: Optional[str] = None
         print("[AI-CORRECT] disabled by config")
         return None
     api_key = getattr(settings, "GEMINI_API_KEY", None) or ""
-    model = getattr(settings, "GEMINI_MODEL", "gemini-2.0-flash")
+    model = getattr(settings, "GEMINI_MODEL", "gemini-2.5-flash")
     if not api_key or len(api_key) < 10:
         logger.info("GEMINI_API_KEY chưa cấu hình - bỏ qua sửa từ khóa bằng AI")
         print("[AI-CORRECT] missing GEMINI_API_KEY")
@@ -80,7 +80,7 @@ def propose_search_queries_via_ai(query: str, gender_context: Optional[str] = No
     if not getattr(settings, "AI_SEARCH_CORRECTION_ENABLED", True):
         return []
     api_key = getattr(settings, "GEMINI_API_KEY", None) or ""
-    model = getattr(settings, "GEMINI_MODEL", "gemini-2.0-flash")
+    model = getattr(settings, "GEMINI_MODEL", "gemini-2.5-flash")
     if not api_key or len(api_key) < 10:
         return []
     gender_note = f"\nGiới tính/đối tượng ưu tiên: {gender_context}." if gender_context else ""
@@ -151,7 +151,7 @@ def suggest_category_matches_via_ai(query: str, categories_json: str, limit: int
     if not getattr(settings, "AI_SEARCH_CORRECTION_ENABLED", True):
         return []
     api_key = getattr(settings, "GEMINI_API_KEY", None) or ""
-    model = getattr(settings, "GEMINI_MODEL", "gemini-2.0-flash")
+    model = getattr(settings, "GEMINI_MODEL", "gemini-2.5-flash")
     if not api_key or len(api_key) < 10:
         return []
     prompt = f"""Người dùng tìm "{query.strip()}" nhưng không có sản phẩm.

@@ -25,7 +25,7 @@ def _cache_key(category_name: str) -> str:
 def _call_gemini(prompt: str, max_tokens: int = 200, temperature: float = 0.7) -> Optional[str]:
     """Gọi Gemini API (generateContent), trả về text hoặc None."""
     api_key = getattr(settings, "GEMINI_API_KEY", None) or ""
-    model = getattr(settings, "GEMINI_MODEL", "gemini-2.0-flash")
+    model = getattr(settings, "GEMINI_MODEL", "gemini-2.5-flash")
     if not api_key or len(api_key) < 10:
         return None
     url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"

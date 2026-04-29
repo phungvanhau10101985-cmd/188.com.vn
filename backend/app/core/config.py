@@ -180,9 +180,10 @@ class Settings:
         self.DEEPSEEK_SEARCH_CORRECTION_ENABLED = self.AI_SEARCH_CORRECTION_ENABLED  # Alias cho code cũ
 
         # Gemini - dùng cho SEO danh mục, sửa từ khóa, phân loại sản phẩm
-        # Model: gemini-2.0-flash (stable), gemini-1.5-flash. Tránh gemini-1.5-pro (dễ 404)
+        # Model mặc định: gemini-2.5-flash (Google đã tắt 2.0-flash 404 → bắt buộc nâng).
+        # Tham khảo khác: gemini-2.5-pro (chậm, đắt hơn), gemini-2.5-flash-lite (rẻ, ngữ cảnh ngắn).
         self.GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-        self.GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        self.GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
         # Category SEO: tự động duyệt mapping khi AI confidence đủ cao
         self.CATEGORY_SEO_AUTO_APPROVE: bool = os.getenv("CATEGORY_SEO_AUTO_APPROVE", "True").lower() == "true"
