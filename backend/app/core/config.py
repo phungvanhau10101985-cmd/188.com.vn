@@ -8,7 +8,8 @@ from pathlib import Path
 # Load .env từ thư mục backend (luôn đúng dù chạy uvicorn từ repo root hay từ backend/)
 _backend_root = Path(__file__).resolve().parents[2]
 load_dotenv(_backend_root / ".env")
-load_dotenv()  # cwd .env ghi đè nếu có
+load_dotenv(_backend_root / ".env.local", override=True)  # ghi đè .env (dev/local, không commit)
+load_dotenv(override=False)  # cwd .env — chỉ bổ sung biến chưa có (không đè .env.local)
 
 class Settings:
     def __init__(self):
@@ -268,6 +269,11 @@ class Settings:
             self.EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS = int(_seo_skip_thr) if _seo_skip_thr != "" else 2500
         except ValueError:
             self.EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS = 2500
+        # False = không gọi Gemini trong luồng import (upload xong nhanh); SEO danh mục vẫn chạy NỀN sau import,
+        # bổ sung đủ seo_body — không “tắt” Gemini. True = batch nhỏ có thể sinh SEO ngay trong request import.
+        self.EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED: bool = (
+            os.getenv("EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED", "true").lower() == "true"
+        )
         
         # ========================
         # CORS CONFIGURATION

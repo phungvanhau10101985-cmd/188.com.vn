@@ -1469,6 +1469,32 @@ def _run_category_seo_body_loop_for_import_paths(
     return generated
 
 
+def _spawn_category_seo_body_background(paths_snapshot: List[tuple]) -> None:
+    """Chạy Gemini sinh seo_body trong thread daemon (session DB riêng). paths_snapshot đã copy."""
+    if not paths_snapshot:
+        return
+
+    snap = list(paths_snapshot)
+
+    def _defer_category_seo_after_bulk() -> None:
+        from app.db.session import SessionLocal
+
+        db2 = SessionLocal()
+        try:
+            logger.info(
+                "EXCEL_IMPORT [nền] Bắt đầu sinh SEO danh mục (%s path) sau import...",
+                len(snap),
+            )
+            gen = _run_category_seo_body_loop_for_import_paths(db2, snap, None)
+            logger.info("EXCEL_IMPORT [nền] Hoàn tất SEO danh mục — sinh mới ~%s body (nếu có).", gen)
+        except Exception as exc:
+            logger.exception("EXCEL_IMPORT [nền] Lỗi SEO danh mục: %s", exc)
+        finally:
+            db2.close()
+
+    threading.Thread(target=_defer_category_seo_after_bulk, daemon=True).start()
+
+
 # ========== BULK IMPORT FUNCTION ==========
 
 def bulk_import_products(
@@ -1566,6 +1592,8 @@ def bulk_import_products(
 
     paths_list_import = _collect_unique_category_paths_for_import(products_data)
 
+    seo_body_enabled = getattr(settings, "EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED", True)
+
     # Lô ≥ ngưỡng: không chạy Gemini SEO ngay trong request import (coi là xong để không “treo”),
     # nhưng vẫn chạy SEO đủ trong thread nền (daemon).
     seo_skip_thresh = max(
@@ -1574,40 +1602,32 @@ def bulk_import_products(
     )
     skip_inline_seo = seo_skip_thresh > 0 and n_products >= seo_skip_thresh
 
+    paths_snapshot = list(paths_list_import)
+
+    # True + đủ nhỏ: Gemini trong luồng import. Còn lại (False HOẶC batch lớn): chỉ nền sau khi import xong — vẫn bổ sung đủ seo_body.
     generated = 0
     category_seo_bg_started = False
-    if not skip_inline_seo:
-        generated = _run_category_seo_body_loop_for_import_paths(db, paths_list_import, progress_callback)
-    else:
+    if seo_body_enabled and not skip_inline_seo:
+        generated = _run_category_seo_body_loop_for_import_paths(db, paths_snapshot, progress_callback)
+    elif paths_snapshot:
         if progress_callback:
-            progress_callback("seo_categories", n_products, n_products)
-        logger.warning(
-            "EXCEL_IMPORT: batch %s SP ≥ %s — SEO danh mục chạy NỀN (không chặn kết thúc import). "
-            "Đặt EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS=0 để chạy SEO ngay trong import (chậm với batch lớn).",
-            n_products,
-            seo_skip_thresh,
-        )
-
-        paths_snapshot = list(paths_list_import)
-
-        def _defer_category_seo_after_bulk() -> None:
-            from app.db.session import SessionLocal
-
-            db2 = SessionLocal()
-            try:
-                logger.info(
-                    "EXCEL_IMPORT [nền] Bắt đầu sinh SEO danh mục (%s path) sau import lớn...",
-                    len(paths_snapshot),
-                )
-                gen = _run_category_seo_body_loop_for_import_paths(db2, paths_snapshot, None)
-                logger.info("EXCEL_IMPORT [nền] Hoàn tất SEO danh mục — sinh mới ~%s body (nếu có).", gen)
-            except Exception as exc:
-                logger.exception("EXCEL_IMPORT [nền] Lỗi SEO danh mục: %s", exc)
-            finally:
-                db2.close()
-
-        threading.Thread(target=_defer_category_seo_after_bulk, daemon=True).start()
+            progress_callback("seo_categories", n_products or 1, n_products or 1)
+        if seo_body_enabled and skip_inline_seo:
+            logger.warning(
+                "EXCEL_IMPORT: batch %s SP ≥ %s — SEO danh mục chạy NỀN (không chặn kết thúc import). "
+                "Đặt EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS=0 để chạy SEO ngay trong import (chậm với batch lớn).",
+                n_products,
+                seo_skip_thresh,
+            )
+        else:
+            logger.info(
+                "EXCEL_IMPORT: EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED=false — SEO danh mục (Gemini) chỉ chạy NỀN "
+                "sau khi import xong (bổ sung đủ seo_body cho các path); không chặn luồng upload."
+            )
+        _spawn_category_seo_body_background(paths_snapshot)
         category_seo_bg_started = True
+    elif progress_callback:
+        progress_callback("seo_categories", n_products or 1, n_products or 1)
 
     # Calculate success rate
     total_processed = len(products_data)
@@ -1625,10 +1645,16 @@ def bulk_import_products(
         result["seo_bodies_generated"] = generated
     if category_seo_bg_started:
         result["category_seo_background"] = True
-        result["category_seo_note"] = (
-            f"SEO danh mục (Gemini) đang chạy nền sau import — batch ≥{seo_skip_thresh} SP "
-            "(xem log API: EXCEL_IMPORT [nền])."
-        )
+        if not seo_body_enabled:
+            result["category_seo_note"] = (
+                "SEO danh mục (Gemini) đang chạy nền sau khi import xong — bổ sung đủ seo_body cho các path liên quan "
+                "(EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED=false; xem log: EXCEL_IMPORT [nền])."
+            )
+        else:
+            result["category_seo_note"] = (
+                f"SEO danh mục (Gemini) đang chạy nền sau import — batch ≥{seo_skip_thresh} SP "
+                "(xem log API: EXCEL_IMPORT [nền])."
+            )
 
     logger.info(f"📦 BULK IMPORT COMPLETE:")
     logger.info(f"   ➕ Created: {created}")
