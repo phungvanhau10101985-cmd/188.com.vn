@@ -18,13 +18,6 @@ import ProductReviewSection from './components/ProductReviewSection/ProductRevie
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 
-const RELATED_TABS = [
-  { id: 'bestselling', label: 'Sản phẩm bán chạy' },
-  { id: 'same_price', label: 'SP cùng loại cùng tầm giá' },
-  { id: 'lower_price', label: 'SP cùng loại giá thấp hơn' },
-  { id: 'higher_price', label: 'SP cùng loại giá cao hơn' },
-];
-
 interface ProductDetailMobileProps {
   product: Product;
   isFavorited: boolean;
@@ -43,7 +36,6 @@ export default function ProductDetailMobile({
   onToggleFavorite,
 }: ProductDetailMobileProps) {
   const [selectedImage, setSelectedImage] = useState(0);
-  const [activeTab, setActiveTab] = useState(RELATED_TABS[0].id);
   const [variantModalOpen, setVariantModalOpen] = useState(false);
   const [qaModalOpen, setQaModalOpen] = useState(false);
   const [reviewsModalOpen, setReviewsModalOpen] = useState(false);
@@ -93,26 +85,6 @@ export default function ProductDetailMobile({
 
   return (
     <div className="md:hidden min-h-screen bg-white pb-32">
-      {/* Tabs: Sản phẩm bán chạy, SP cùng loại... */}
-      <div className="sticky top-0 z-10 bg-white border-b border-gray-100 overflow-x-auto scrollbar-hide">
-        <div className="flex gap-2 min-w-max px-4 py-2">
-          {RELATED_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
-                activeTab === tab.id
-                  ? 'bg-[#ea580c] text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       <div className="px-4 py-3">
         {/* Tiêu đề sản phẩm */}
         <h1 className="text-base font-bold text-gray-900 leading-tight mb-3 uppercase">

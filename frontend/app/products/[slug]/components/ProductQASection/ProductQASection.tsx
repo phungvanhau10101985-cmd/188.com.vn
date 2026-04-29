@@ -2,12 +2,14 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
-import { Product } from '@/types/api';
+import Link from 'next/link';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { Product, type ProductQuestionItem } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
-import type { ProductQuestionItem } from '@/types/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { formatPrice } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
+import { buildAuthLoginHrefFromParts } from '@/lib/auth-redirect';
 import { useToast } from '@/components/ToastProvider';
 
 interface ProductQASectionProps {
@@ -36,6 +38,8 @@ function formatDate(s: string | null | undefined) {
 }
 
 export default function ProductQASection({ product, embedded, modalOnly, modalOpen: modalOpenProp, onModalClose, onModalOpen }: ProductQASectionProps) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { isAuthenticated } = useAuth();
   const { pushToast } = useToast();
   const [questions, setQuestions] = useState<ProductQuestionItem[]>([]);
@@ -280,26 +284,41 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
     [handleSubmitReply, handleToggleUseful, isAuthenticated, replyingId, replyContent, togglingUsefulId]
   );
 
+  const askLoginHref = buildAuthLoginHrefFromParts(pathname, searchParams, '#qa');
+
   const askForm = (
     <div className="mt-6">
       <p className="text-sm font-medium text-gray-700 mb-2">Đặt câu hỏi của bạn</p>
-      <form onSubmit={handleSubmitQuestion} className="flex flex-col sm:flex-row gap-2">
-        <textarea
-          value={askContent}
-          onChange={(e) => setAskContent(e.target.value)}
-          placeholder={isAuthenticated ? 'Nhập câu hỏi...' : 'Đăng nhập để đặt câu hỏi'}
-          rows={2}
-          className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm resize-none"
-          disabled={!isAuthenticated}
-        />
-        <button
-          type="submit"
-          disabled={!askContent.trim() || submitting}
-          className="px-4 py-2 bg-[#ea580c] text-white rounded-lg hover:bg-[#c2410c] text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {submitting ? 'Đang gửi...' : 'Gửi câu hỏi'}
-        </button>
-      </form>
+      {isAuthenticated ? (
+        <form onSubmit={handleSubmitQuestion} className="flex flex-col sm:flex-row gap-2">
+          <textarea
+            value={askContent}
+            onChange={(e) => setAskContent(e.target.value)}
+            placeholder="Nhập câu hỏi..."
+            rows={2}
+            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm resize-none"
+          />
+          <button
+            type="submit"
+            disabled={!askContent.trim() || submitting}
+            className="px-4 py-2 bg-[#ea580c] text-white rounded-lg hover:bg-[#c2410c] text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+          >
+            {submitting ? 'Đang gửi...' : 'Gửi câu hỏi'}
+          </button>
+        </form>
+      ) : (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p className="mb-3">
+            Đặt câu hỏi cho sản phẩm chỉ dành cho tài khoản đã đăng nhập.
+          </p>
+          <Link
+            href={askLoginHref}
+            className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-[#ea580c] text-white font-medium hover:bg-[#c2410c] transition-colors"
+          >
+            Đăng nhập để đặt câu hỏi
+          </Link>
+        </div>
+      )}
     </div>
   );
 

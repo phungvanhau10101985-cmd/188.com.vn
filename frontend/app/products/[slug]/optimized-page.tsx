@@ -7,7 +7,6 @@ import Link from 'next/link';
 import { apiClient } from '@/lib/api-client';
 import { formatPrice, getDiscountPercentage, validateImageUrl, truncateText } from '@/lib/utils';
 import type { Product, SimpleProductResponse } from '@/types/api';
-import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCart } from '@/features/cart/hooks/useCart';
 
 // Import product detail components
@@ -35,7 +34,6 @@ export default function ProductDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
-  const { isAuthenticated } = useAuth();
   const { addToCart } = useCart();
 
   const fetchProductDetail = useCallback(async () => {
@@ -69,8 +67,15 @@ export default function ProductDetailPage() {
 
       if (productData) {
         setProduct(productData);
-        // Track product view
-        await apiClient.trackProductView(productData.id);
+        await apiClient.trackProductView(productData.id, {
+          id: productData.id,
+          product_id: productData.product_id,
+          name: productData.name,
+          price: productData.price,
+          main_image: productData.main_image,
+          brand_name: productData.brand_name,
+          slug: productData.slug,
+        });
       } else {
         throw new Error('Không thể tải thông tin sản phẩm');
       }
@@ -95,11 +100,6 @@ export default function ProductDetailPage() {
 
   const handleAddToCart = useCallback(
     async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
-      if (!isAuthenticated) {
-        const shouldLogin = confirm('Bạn cần đăng nhập để thêm sản phẩm vào giỏ hàng.\n\nBấm OK để chuyển đến trang đăng nhập.');
-        if (shouldLogin) router.push('/auth/login');
-        return;
-      }
       try {
         await addToCart({
           product_id: p.id,
@@ -121,16 +121,11 @@ export default function ProductDetailPage() {
         alert(err instanceof Error ? err.message : 'Không thể thêm vào giỏ hàng');
       }
     },
-    [addToCart, isAuthenticated, router]
+    [addToCart]
   );
 
   const handleAddToFavorite = useCallback(
     async (p: Product) => {
-      if (!isAuthenticated) {
-        const shouldLogin = confirm('Bạn cần đăng nhập để thêm/bỏ yêu thích.\n\nBấm OK để chuyển đến trang đăng nhập.');
-        if (shouldLogin) router.push('/auth/login');
-        return;
-      }
       try {
         await apiClient.addToFavorites(p.id, {
           id: p.id,
@@ -145,7 +140,7 @@ export default function ProductDetailPage() {
         alert(err instanceof Error ? err.message : 'Không thể thêm yêu thích');
       }
     },
-    [isAuthenticated, router]
+    []
   );
 
   // Loading state

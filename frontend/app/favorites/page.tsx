@@ -3,11 +3,8 @@
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { getOptimizedImage } from '@/lib/image-utils';
-import { useAuth } from '@/features/auth/hooks/useAuth';
-import { useCart } from '@/features/cart/hooks/useCart';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
@@ -31,8 +28,6 @@ function formatVnd(n: number) {
 }
 
 export default function FavoritesPage() {
-  const router = useRouter();
-  const { isAuthenticated } = useAuth();
   const { refreshFavorites } = useFavorites();
   const { pushToast } = useToast();
   const [items, setItems] = useState<FavoriteItem[]>([]);
@@ -41,10 +36,7 @@ export default function FavoritesPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      router.replace('/auth/login');
-      return;
-    }
+    setLoading(true);
     apiClient
       .getFavorites()
       .then(async (list) => {
@@ -84,7 +76,7 @@ export default function FavoritesPage() {
         setError((e as Error)?.message || 'Không thể tải danh sách yêu thích');
       })
       .finally(() => setLoading(false));
-  }, [isAuthenticated, router]);
+  }, []);
 
   const handleRemove = async (productId: number, favoriteId: number) => {
     setRemovingId(favoriteId);
@@ -100,10 +92,6 @@ export default function FavoritesPage() {
       setRemovingId(null);
     }
   };
-
-  if (!isAuthenticated) {
-    return null;
-  }
 
   return (
     <div className="min-h-screen bg-gray-50">

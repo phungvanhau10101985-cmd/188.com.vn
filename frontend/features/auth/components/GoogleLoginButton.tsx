@@ -49,13 +49,28 @@ export default function GoogleLoginButton({ onCredential, onError }: GoogleLogin
       return;
     }
 
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = initialize;
-    script.onerror = () => onError?.('Không thể tải Google Identity Services.');
-    document.body.appendChild(script);
+    const failFinal = () =>
+      onError?.(
+        'Không tải được script Google. Thử mạng khác / tắt VPN–AdBlock; với ngrok thêm URL site vào Authorized JavaScript origins (OAuth Web client).'
+      );
+
+    const loadScript = (isRetry: boolean) => {
+      const script = document.createElement('script');
+      script.src = `https://accounts.google.com/gsi/client${isRetry ? `?retry=${Date.now()}` : ''}`;
+      script.async = true;
+      script.defer = true;
+      script.onload = initialize;
+      script.onerror = () => {
+        if (!isRetry) {
+          window.setTimeout(() => loadScript(true), 1500);
+          return;
+        }
+        failFinal();
+      };
+      document.body.appendChild(script);
+    };
+
+    loadScript(false);
   }, [onCredential, onError]);
 
   return <div ref={buttonRef} className="flex justify-center" />;

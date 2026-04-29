@@ -11,6 +11,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { useCart } from '@/features/cart/hooks/useCart';
 import type { CategoryLevel1, CategoryLevel2 } from '@/types/api';
+import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 
 export interface CategoryFilter {
   category?: string;
@@ -27,6 +28,8 @@ interface NavigationProps {
   headerVisible?: boolean;
   /** Tắt thanh sticky (VD: trang chi tiết sản phẩm) */
   disableStickyBar?: boolean;
+  /** Đặt trong khối sticky chung với Header (AppShell) — bỏ sticky riêng của nav để head + danh mục luôn dính cùng nhau */
+  embedInStickyChrome?: boolean;
 }
 
 function slugNorm(s: string | undefined): string {
@@ -39,6 +42,7 @@ export default function Navigation({
   initialCategoryTree = [],
   headerVisible = true,
   disableStickyBar = false,
+  embedInStickyChrome = false,
 }: NavigationProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -51,6 +55,7 @@ export default function Navigation({
   const [stickyMenuOpen, setStickyMenuOpen] = useState(false);
   const stickyMenuCloseTimerRef = useRef<number | null>(null);
   const { isAuthenticated, user } = useAuth();
+  const loginHref = useLoginRedirectHref();
   const { favoriteCount } = useFavorites();
   const { getCartItemCount } = useCart();
   const displayCartCount = getCartItemCount();
@@ -171,13 +176,18 @@ export default function Navigation({
   const activePill = 'bg-white/20 text-white shadow-sm';
   const inactivePill = 'bg-white/20 text-white hover:bg-white/30 shadow-sm';
 
-  const stickyTopClass = headerVisible ? 'top-20' : 'top-0';
+  const navLayoutClass = embedInStickyChrome
+    ? 'relative'
+    : headerVisible
+      ? 'sticky top-20'
+      : 'sticky top-0';
   const stickyBarTopClass = 'top-0';
+  /** Overlay cố định đầu trang + ô tìm kiếm khi cuộn; pills luôn hiển thị song song */
   const showStickyBar = isScrolled && !headerVisible && !disableStickyBar;
 
   if (loading) {
     return (
-      <nav className={`bg-white/95 backdrop-blur border-b border-gray-100 sticky ${stickyTopClass} z-40 shadow-sm`}>
+      <nav className={`bg-white/95 backdrop-blur border-b border-gray-100 ${navLayoutClass} z-40 shadow-sm`.trim()}>
         <div className="max-w-7xl mx-auto px-3">
           <div className="flex gap-1.5 overflow-hidden py-1.5">
             {[...Array(6)].map((_, i) => (
@@ -344,7 +354,7 @@ export default function Navigation({
                     </div>
                   </Link>
                 ) : (
-                  <Link href="/auth/login" className="flex items-center text-white/90 hover:text-white transition-colors group">
+                  <Link href={loginHref} className="flex items-center text-white/90 hover:text-white transition-colors group">
                     <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
@@ -385,13 +395,11 @@ export default function Navigation({
       </div>
       <nav
         ref={dropdownRef}
-        className={`sticky ${stickyTopClass} z-40 transition-all duration-300 ${
+        className={`${navLayoutClass} z-40 transition-all duration-300 ${
           isScrolled ? 'bg-[#ea580c]/95 backdrop-blur-md shadow-md border-b border-orange-600' : 'bg-[#ea580c] border-b border-orange-600 shadow-sm'
         }`}
       >
-        {showStickyBar && <div className="h-[44px]" />}
         <div className="max-w-7xl mx-auto px-3">
-        {!showStickyBar && (
           <div className="flex items-center gap-1.5 py-1.5 overflow-x-auto overflow-y-visible scroll-smooth hide-scrollbar">
             <span className="hidden sm:inline-flex text-[11px] font-semibold text-white/80 uppercase tracking-wider mr-1 flex-shrink-0">
               Danh mục
@@ -458,7 +466,6 @@ export default function Navigation({
               <span>Hàng mới</span>
             </Link>
           </div>
-        )}
 
 
         {/* Panel danh mục cấp 2 & 3 - hiển thị dưới thanh, không bị overflow cắt */}

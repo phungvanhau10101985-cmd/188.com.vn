@@ -19,6 +19,9 @@ import ProductDetailMobile from './ProductDetailMobile';
 import ErrorState from './components/ErrorState/ErrorState';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
+import { persistRelatedFiltersFromProduct } from '@/lib/product-related-tabs';
+import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
+import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 
 interface ProductDetailClientProps {
   initialProduct: Product;
@@ -45,11 +48,12 @@ export default function ProductDetailClient({
   const { addToCart, isLoading: cartLoading, getCartItemCount } = useCart();
   const { isAuthenticated, user } = useAuth();
   const { refreshFavorites, favoriteCount } = useFavorites();
+  const loginHref = useLoginRedirectHref();
   const { pushToast } = useToast();
 
-  // Chỉ ghi nhận "đã xem" khi đã đăng nhập — nếu xem khi chưa đăng nhập sẽ không lưu
+  /** Đã xem: lưu theo phiên khách (header X-Guest-Session-Id) hoặc tài khoản — merge khi đăng nhập */
   useEffect(() => {
-    if (!isAuthenticated || !product?.id) return;
+    if (!product?.id) return;
     apiClient.trackProductView(product.id, {
       id: product.id,
       product_id: product.product_id,
@@ -59,11 +63,15 @@ export default function ProductDetailClient({
       brand_name: product.brand_name,
       slug: product.slug,
     }).catch(() => {});
-  }, [product?.id, isAuthenticated, product?.name, product?.price, product?.main_image, product?.brand_name, product?.slug, product?.product_id]);
+  }, [product?.id, product?.name, product?.price, product?.main_image, product?.brand_name, product?.slug, product?.product_id]);
 
   useEffect(() => {
     setSelectedColorImage(null);
   }, [product?.id]);
+
+  useEffect(() => {
+    persistRelatedFiltersFromProduct(product);
+  }, [product]);
 
   useEffect(() => {
     let active = true;
@@ -93,12 +101,9 @@ export default function ProductDetailClient({
   }, []);
 
   useEffect(() => {
-    if (product?.id && isAuthenticated) {
-      apiClient.isProductFavorited(product.id).then((r) => setIsFavorited(r.is_favorited)).catch(() => setIsFavorited(false));
-    } else if (!isAuthenticated) {
-      setIsFavorited(false);
-    }
-  }, [product?.id, isAuthenticated]);
+    if (!product?.id) return;
+    apiClient.isProductFavorited(product.id).then((r) => setIsFavorited(r.is_favorited)).catch(() => setIsFavorited(false));
+  }, [product?.id]);
 
   const handleAddToCart = async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
     try {
@@ -124,7 +129,7 @@ export default function ProductDetailClient({
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes('Authentication required') || message.includes('401')) {
         pushToast({ title: 'Vui lòng đăng nhập lại', description: 'Phiên đăng nhập đã hết hạn.', variant: 'info', durationMs: 2500 });
-        router.push('/auth/login');
+        router.push(buildAuthLoginHrefFromFullPath(getBrowserReturnLocation()));
       } else {
         pushToast({ title: 'Không thể thêm vào giỏ hàng', description: message, variant: 'error', durationMs: 3000 });
       }
@@ -133,10 +138,6 @@ export default function ProductDetailClient({
 
   const handleToggleFavorite = async (p: Product) => {
     try {
-      if (!isAuthenticated) {
-        pushToast({ title: 'Vui lòng đăng nhập để dùng yêu thích', variant: 'info', durationMs: 2500 });
-        return;
-      }
       if (isFavorited) {
         await apiClient.removeFromFavorites(p.id);
         setIsFavorited(false);
@@ -162,7 +163,7 @@ export default function ProductDetailClient({
     } catch (err: unknown) {
       if (err instanceof Error && (err.message.includes('Authentication') || err.message.includes('401'))) {
         pushToast({ title: 'Vui lòng đăng nhập lại', variant: 'info', durationMs: 2500 });
-        router.push('/auth/login');
+        router.push(buildAuthLoginHrefFromFullPath(getBrowserReturnLocation()));
       } else {
         pushToast({ title: 'Không thể cập nhật yêu thích', description: err instanceof Error ? err.message : 'Vui lòng thử lại', variant: 'error', durationMs: 3000 });
       }
@@ -217,7 +218,7 @@ export default function ProductDetailClient({
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes('Authentication required') || message.includes('401')) {
         pushToast({ title: 'Vui lòng đăng nhập lại', description: 'Phiên đăng nhập đã hết hạn.', variant: 'info', durationMs: 2500 });
-        router.push('/auth/login');
+        router.push(buildAuthLoginHrefFromFullPath(getBrowserReturnLocation()));
       } else {
         pushToast({ title: 'Không thể mua hàng', description: message, variant: 'error', durationMs: 3000 });
       }
@@ -461,7 +462,7 @@ export default function ProductDetailClient({
                       </div>
                     </Link>
                   ) : (
-                    <Link href="/auth/login" className="flex items-center text-white/90 hover:text-white transition-colors group">
+                    <Link href={loginHref} className="flex items-center text-white/90 hover:text-white transition-colors group">
                       <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />

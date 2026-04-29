@@ -3,8 +3,10 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
+import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 
 function CompleteInner() {
+  const loginHref = useLoginRedirectHref();
   const sp = useSearchParams();
   const code = sp.get('code') || '';
   const needsDeposit = sp.get('needs_deposit') === '1';
@@ -25,7 +27,7 @@ function CompleteInner() {
         {needsDeposit ? (
           <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-sm text-left">
             Đơn hàng cần đặt cọc. Vui lòng{' '}
-            <Link href="/auth/login?redirect=/account/orders" className="underline font-medium">
+            <Link href={loginHref} className="underline font-medium">
               đăng nhập
             </Link>{' '}
             cùng email đã đặt hàng để xem đơn và thanh toán cọc, hoặc liên hệ hỗ trợ kèm mã đơn.
@@ -39,7 +41,7 @@ function CompleteInner() {
             Về trang chủ
           </Link>
           <Link
-            href="/auth/login?redirect=/account/orders"
+            href={loginHref}
             className="px-5 py-2.5 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-center"
           >
             Đăng nhập để theo dõi đơn

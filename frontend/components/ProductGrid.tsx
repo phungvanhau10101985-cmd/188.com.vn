@@ -1,9 +1,11 @@
 // frontend/components/ProductGrid.tsx - COMPLETE UPDATED VERSION
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Product } from '@/types/api';
 import { SimpleProductCard } from './ProductCard';
+import { apiClient } from '@/lib/api-client';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 
 interface ProductGridProps {
   products: Product[];
@@ -167,23 +169,59 @@ export default function ProductGrid({
   onReload,
   showFilters = true
 }: ProductGridProps) {
-  const [favorites, setFavorites] = useState<Set<number>>(new Set());
+  const { isAuthenticated } = useAuth();
+  const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());
   const [sortBy, setSortBy] = useState('popular');
   const [priceRange, setPriceRange] = useState('all');
 
-  const handleFavorite = (productId: number, e: React.MouseEvent) => {
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getFavorites()
+      .then((list) => {
+        if (cancelled || !Array.isArray(list)) return;
+        const ids = list
+          .map((x: { product_id?: number }) => x.product_id)
+          .filter((n): n is number => typeof n === 'number');
+        setFavoriteIds(new Set(ids));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
+
+  const handleFavorite = async (productId: number, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    setFavorites(prev => {
-      const newFavorites = new Set(prev);
-      if (newFavorites.has(productId)) {
-        newFavorites.delete(productId);
+    const product = sortedProducts.find((p) => p.id === productId);
+    const had = favoriteIds.has(productId);
+    try {
+      if (had) {
+        await apiClient.removeFromFavorites(productId);
+        setFavoriteIds((prev) => {
+          const n = new Set(prev);
+          n.delete(productId);
+          return n;
+        });
       } else {
-        newFavorites.add(productId);
+        await apiClient.addToFavorites(
+          productId,
+          product
+            ? {
+                name: product.name,
+                main_image: product.main_image,
+                price: product.price,
+                slug: product.slug,
+                product_id: product.product_id,
+              }
+            : undefined
+        );
+        setFavoriteIds((prev) => new Set(prev).add(productId));
       }
-      return newFavorites;
-    });
+    } catch {
+      /* ignore */
+    }
   };
 
   const handleSortChange = (sortType: string) => {
@@ -275,6 +313,7 @@ export default function ProductGrid({
             key={product.id}
             product={product}
             onFavorite={handleFavorite}
+            isFavorited={favoriteIds.has(product.id)}
           />
         ))}
       </div>

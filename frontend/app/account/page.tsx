@@ -55,7 +55,7 @@ export default function AccountPage() {
       <div className="md:hidden bg-white">
         <div className="px-4 py-3 border-b border-gray-200">
           <h1 className="text-lg font-bold text-gray-900">{user?.full_name || 'Tài khoản'}</h1>
-          <Link href="/account" className="text-xs text-blue-600 font-medium">
+          <Link href="/account/profile" className="text-xs text-blue-600 font-medium">
             Chỉnh sửa thông tin cá nhân
           </Link>
         </div>
@@ -135,7 +135,15 @@ export default function AccountPage() {
 
       <div className="hidden md:block">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Thông tin tài khoản</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h2 className="text-xl font-bold text-gray-900">Thông tin tài khoản</h2>
+            <Link
+              href="/account/profile"
+              className="inline-flex items-center rounded-lg bg-[#ea580c] px-4 py-2 text-sm font-semibold text-white hover:bg-[#c2410c] transition-colors"
+            >
+              Chỉnh sửa hồ sơ
+            </Link>
+          </div>
           <dl className="space-y-3">
             <div>
               <dt className="text-sm text-gray-500">Họ tên</dt>

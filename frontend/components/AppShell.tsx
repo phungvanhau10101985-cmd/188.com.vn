@@ -1,7 +1,7 @@
 // components/AppShell.tsx - Header + Navigation + Footer xuyên suốt tất cả các trang
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
 import { usePathname, useSearchParams, useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
@@ -38,6 +38,50 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   const isAuthPage = pathname?.startsWith('/auth/');
   const isProductDetailPage = pathname?.match(/^\/products\/[^/]+$/);
 
+  /** Trang chủ có query lọc/tìm — cố định header + nav desktop khi cuộn */
+  const keepDesktopHeaderPinned = useMemo(() => {
+    const home =
+      pathname === '/' ||
+      pathname === '' ||
+      (pathname != null && pathname.replace(/\/$/, '') === '');
+    if (!home) return false;
+    const t = (k: string) => (searchParams.get(k) ?? '').trim();
+    if (t('q')) return true;
+    if (t('shop_id')) return true;
+    if (t('shop_name')) return true;
+    if (t('pro_lower_price')) return true;
+    if (t('pro_high_price')) return true;
+    if (t('min_price')) return true;
+    if (t('max_price')) return true;
+    if (t('category')) return true;
+    if (t('subcategory')) return true;
+    if (t('sub_subcategory')) return true;
+    const page = searchParams.get('page');
+    if (page != null && page.trim() !== '') {
+      const n = Number(page);
+      if (Number.isFinite(n) && n > 1) return true;
+    }
+    return false;
+  }, [pathname, searchParams]);
+
+  /** Chiều cao khối chrome cố định — spacer đẩy main, tránh nội dung chui dưới fixed bar */
+  const listingChromeRef = useRef<HTMLDivElement>(null);
+  const [listingChromeHeight, setListingChromeHeight] = useState(168);
+
+  useLayoutEffect(() => {
+    if (!keepDesktopHeaderPinned) return;
+    const el = listingChromeRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const apply = () => {
+      const h = el.offsetHeight;
+      if (h > 0) setListingChromeHeight(h);
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [keepDesktopHeaderPinned]);
+
   useEffect(() => {
     if (isAuthenticated) {
       apiClient.getSearchSuggestions(12)
@@ -57,7 +101,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (isProductDetailPage) {
+    if (isProductDetailPage || keepDesktopHeaderPinned) {
       setHeaderVisible(true);
       return;
     }
@@ -71,7 +115,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
-  }, [pathname, isProductDetailPage]);
+  }, [pathname, isProductDetailPage, keepDesktopHeaderPinned]);
 
   const handleSuggestionClick = (term: string) => {
     const raw = term.trim();
@@ -134,24 +178,58 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     <div className="min-h-screen flex flex-col bg-gray-50">
       {/* Desktop: Header + Navigation */}
       <div className="hidden md:block">
-        <div
-          className={`sticky top-0 z-50 transition-transform duration-300 ease-out ${
-            headerVisible ? 'translate-y-0' : '-translate-y-full'
-          }`}
-        >
-          <Header
-            onSearch={handleSuggestionClick}
-            cartItemsCount={getCartItemCount()}
-            favoriteItemsCount={favoriteCount}
+      {keepDesktopHeaderPinned ? (
+        <>
+          {/* fixed: sticky trong flex column hay gãy — luôn ghim hai thanh theo viewport */}
+          <div
+            ref={listingChromeRef}
+            className="fixed top-0 left-0 right-0 z-[60] bg-gray-50 shadow-md"
+          >
+            <Header
+              onSearch={handleSuggestionClick}
+              cartItemsCount={getCartItemCount()}
+              favoriteItemsCount={favoriteCount}
+            />
+            <Navigation
+              selectedFilter={selectedFilter}
+              onCategoryChange={handleCategoryChange}
+              initialCategoryTree={initialCategoryTree}
+              headerVisible={true}
+              embedInStickyChrome
+              disableStickyBar={Boolean(isProductDetailPage)}
+            />
+          </div>
+          <div
+            className="shrink-0 w-full"
+            style={{ height: listingChromeHeight }}
+            aria-hidden
           />
-        </div>
-        <Navigation
-          selectedFilter={selectedFilter}
-          onCategoryChange={handleCategoryChange}
-          initialCategoryTree={initialCategoryTree}
-          headerVisible={headerVisible}
-          disableStickyBar={Boolean(isProductDetailPage)}
-        />
+        </>
+      ) : (
+        <>
+          <div
+            className={`sticky top-0 z-50 shrink-0 self-start w-full transition-transform duration-300 ease-out ${
+              headerVisible ? 'translate-y-0' : '-translate-y-full'
+            }`}
+          >
+            <Header
+              onSearch={handleSuggestionClick}
+              cartItemsCount={getCartItemCount()}
+              favoriteItemsCount={favoriteCount}
+            />
+          </div>
+          <div className="shrink-0 self-start w-full">
+            <Navigation
+              selectedFilter={selectedFilter}
+              onCategoryChange={handleCategoryChange}
+              initialCategoryTree={initialCategoryTree}
+              headerVisible={headerVisible}
+              embedInStickyChrome={false}
+              disableStickyBar={Boolean(isProductDetailPage)}
+            />
+          </div>
+        </>
+      )}
       </div>
       {/* Mobile: Header hiển thị trên tất cả các trang */}
       <MobileHeader

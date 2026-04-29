@@ -55,13 +55,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthState((prev) => ({ ...prev, isLoading: false }));
   }, []);
 
-  const triggerMergeGuestBehavior = () => {
-    void import('@/lib/api-client').then(({ apiClient }) =>
-      apiClient.mergeGuestBehaviorSession().catch(() => {})
-    );
+  const mergeGuestBehavior = async (): Promise<void> => {
+    try {
+      const { apiClient } = await import('@/lib/api-client');
+      await apiClient.mergeGuestBehaviorSession();
+    } catch {
+      /* ignore */
+    }
   };
 
-  const applyTokenSession = (result: Token, nextPath?: string | null) => {
+  const applyTokenSession = async (result: Token, nextPath?: string | null) => {
     localStorage.setItem('access_token', result.access_token);
     localStorage.setItem('user', JSON.stringify(result.user));
     setAuthState({
@@ -70,14 +73,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: true,
       isLoading: false
     });
-    triggerMergeGuestBehavior();
+    await mergeGuestBehavior();
     markFreshLoginSession();
     const fromApi =
       nextPath && nextPath.startsWith('/') && !nextPath.startsWith('//') ? nextPath : null;
     router.push(fromApi ?? getLoginRedirectFromUrl());
   };
 
-  const setSessionFromEmailAuth = (user: UserResponse, nextPath?: string) => {
+  const setSessionFromEmailAuth = async (user: UserResponse, nextPath?: string) => {
     localStorage.removeItem('access_token');
     localStorage.setItem('user', JSON.stringify(user));
     setAuthState({
@@ -86,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: true,
       isLoading: false,
     });
-    triggerMergeGuestBehavior();
+    await mergeGuestBehavior();
     markFreshLoginSession();
     const dest =
       nextPath && nextPath.startsWith('/') && !nextPath.startsWith('//')
@@ -98,7 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginWithGoogle = async (idToken: string, deviceId?: string) => {
     try {
       const result = await authAPI.googleLogin(idToken, deviceId);
-      applyTokenSession(result);
+      await applyTokenSession(result);
     } catch (error: any) {
       throw new Error(error.message || 'Đăng nhập Gmail thất bại');
     }
@@ -107,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginWithEmailOtp = async (email: string, code: string, deviceId?: string) => {
     try {
       const result = await authAPI.verifyEmailOtp(email, code, deviceId);
-      applyTokenSession(result);
+      await applyTokenSession(result);
     } catch (error: any) {
       throw new Error(error.message || 'Xác nhận mã email thất bại');
     }
@@ -125,7 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isLoading: false
     });
 
-    router.push('/auth/login');
+    router.push('/');
   };
 
   const switchAccount = (returnPath: string) => {

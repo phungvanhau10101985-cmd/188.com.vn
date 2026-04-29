@@ -3,10 +3,8 @@
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { getOptimizedImage } from '@/lib/image-utils';
-import { useAuth } from '@/features/auth/hooks/useAuth';
 
 interface ViewedItem {
   id: number;
@@ -28,16 +26,11 @@ function formatVnd(n: number) {
 }
 
 export default function DaXemPage() {
-  const router = useRouter();
-  const { isAuthenticated } = useAuth();
   const [items, setItems] = useState<ViewedItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      router.replace('/auth/login');
-      return;
-    }
+    setLoading(true);
     apiClient
       .getViewedProducts(24)
       .then(async (list) => {
@@ -72,11 +65,7 @@ export default function DaXemPage() {
       })
       .catch(() => setItems([]))
       .finally(() => setLoading(false));
-  }, [isAuthenticated, router]);
-
-  if (!isAuthenticated) {
-    return null;
-  }
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -86,8 +75,8 @@ export default function DaXemPage() {
           <p className="text-gray-600 mt-1">
             Các sản phẩm bạn đã xem gần đây ({items.length})
           </p>
-          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
-            Chỉ sản phẩm bạn xem <strong>khi đã đăng nhập</strong> mới được lưu vào đây. Nếu bạn xem khi chưa đăng nhập thì sẽ không thấy trong danh sách.
+          <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mt-2">
+            Không cần đăng nhập vẫn xem được danh sách đã xem trong phiên trình duyệt này. Đăng nhập để đồng bộ và giữ trên tài khoản (phiên khách được gộp vào tài khoản khi đăng nhập).
           </p>
         </div>
 

@@ -14,10 +14,24 @@ import { trackEvent } from '@/lib/analytics';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { formatPrice } from '@/lib/utils';
 import type { Product, ProductListResponse, NanoaiSearchProduct } from '@/types/api';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+import { useFavorites } from '@/features/favorites/hooks/useFavorites';
+
+function favoritePayloadFromProduct(p: Product): Record<string, unknown> {
+  return {
+    name: p.name,
+    main_image: p.main_image,
+    price: p.price,
+    slug: p.slug,
+    product_id: p.product_id,
+  };
+}
 
 export default function HomePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { isAuthenticated, user } = useAuth();
+  const { refreshFavorites } = useFavorites();
   const qFromUrl = searchParams.get('q') ?? '';
   const shopIdFromUrl = searchParams.get('shop_id') ?? undefined;
   const shopNameFromUrl = searchParams.get('shop_name') ?? undefined;
@@ -296,7 +310,29 @@ export default function HomePage() {
     })
     : products;
 
-  const [favorites, setFavorites] = useState<Set<number>>(new Set());
+  const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getFavorites()
+      .then((list) => {
+        if (cancelled || !Array.isArray(list)) return;
+        const ids = list
+          .map((x: { product_id?: number }) => x.product_id)
+          .filter((n): n is number => typeof n === 'number');
+        setFavoriteIds(new Set(ids));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, user?.id]);
+
+  const recommendationKey = `${isAuthenticated}-${user?.id ?? 'guest'}-${user?.gender ?? ''}-${
+    user?.date_of_birth ?? ''
+  }`;
+
   const [sameAgeGenderProducts, setSameAgeGenderProducts] = useState<Product[]>([]);
   const [sameAgeGenderLoading, setSameAgeGenderLoading] = useState(false);
   const [sameAgeGenderPanelOpen, setSameAgeGenderPanelOpen] = useState(false);
@@ -315,7 +351,7 @@ export default function HomePage() {
       .then((list) => setSameAgeGenderProducts(list || []))
       .catch(() => setSameAgeGenderProducts([]))
       .finally(() => setSameAgeGenderLoading(false));
-  }, []);
+  }, [recommendationKey]);
 
   useEffect(() => {
     setSameShopLoading(true);
@@ -331,7 +367,7 @@ export default function HomePage() {
         setSameShopSeed(null);
       })
       .finally(() => setSameShopLoading(false));
-  }, []);
+  }, [recommendationKey]);
 
   const loadMoreSameShop = useCallback(() => {
     if (!sameShopHasMore || sameShopLoadMoreLoading) return;
@@ -361,15 +397,34 @@ export default function HomePage() {
     return () => obs.disconnect();
   }, [sameShopHasMore, sameShopProducts.length, loadMoreSameShop]);
 
-  const handleFavorite = (productId: number, e: React.MouseEvent) => {
+  const handleFavorite = async (productId: number, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setFavorites((prev) => {
-      const next = new Set(prev);
-      if (next.has(productId)) next.delete(productId);
-      else next.add(productId);
-      return next;
-    });
+    const product =
+      filteredProducts.find((p) => p.id === productId) ??
+      products.find((p) => p.id === productId) ??
+      sameShopProducts.find((p) => p.id === productId) ??
+      sameAgeGenderProducts.find((p) => p.id === productId);
+    const had = favoriteIds.has(productId);
+    try {
+      if (had) {
+        await apiClient.removeFromFavorites(productId);
+        setFavoriteIds((prev) => {
+          const next = new Set(prev);
+          next.delete(productId);
+          return next;
+        });
+      } else {
+        await apiClient.addToFavorites(
+          productId,
+          product ? favoritePayloadFromProduct(product) : undefined
+        );
+        setFavoriteIds((prev) => new Set(prev).add(productId));
+      }
+      void refreshFavorites();
+    } catch {
+      /* im lặng — có thể thêm toast sau */
+    }
   };
 
   return (
@@ -444,6 +499,7 @@ export default function HomePage() {
                       key={product.id}
                       product={product}
                       onFavorite={handleFavorite}
+                      isFavorited={favoriteIds.has(product.id)}
                     />
                   ))}
                 </div>
@@ -572,7 +628,7 @@ export default function HomePage() {
             SẢN PHẨM ĐỀ XUẤT THEO TUỔI VÀ GIỚI TÍNH
           </h2>
           <Link
-            href="/account?tab=profile"
+            href="/account/profile"
             className="inline-block mt-2 bg-[#ea580c] text-white text-sm font-semibold px-4 py-2.5 rounded-lg hover:bg-[#c2410c] transition-colors"
           >
             CẬP NHẬT TUỔI VÀ GIỚI TÍNH
@@ -736,6 +792,7 @@ export default function HomePage() {
                       key={product.id}
                       product={product}
                       onFavorite={handleFavorite}
+                      isFavorited={favoriteIds.has(product.id)}
                     />
                   ))}
                 </div>

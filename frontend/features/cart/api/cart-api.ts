@@ -34,10 +34,11 @@ class CartAPI {
 
       if (!response.ok) {
         if (response.status === 401) {
-          // Token expired or invalid
+          // Token expired or invalid — quay lại đúng trang sau đăng nhập lại
           localStorage.removeItem('access_token');
           localStorage.removeItem('user');
-          window.location.href = '/auth/login';
+          const { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } = await import('@/lib/auth-redirect');
+          window.location.href = buildAuthLoginHrefFromFullPath(getBrowserReturnLocation());
           throw new Error('Authentication required');
         }
         

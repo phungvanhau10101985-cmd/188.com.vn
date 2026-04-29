@@ -7,8 +7,10 @@ import GoogleLoginButton from './GoogleLoginButton';
 import EmailOtpPanel from './EmailOtpPanel';
 import { useAuth } from '../hooks/useAuth';
 import { getOrCreateDeviceId } from '@/lib/auth-device-id';
+import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 
 export default function RegisterForm() {
+  const loginHref = useLoginRedirectHref();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const { loginWithGoogle } = useAuth();
@@ -54,7 +56,7 @@ export default function RegisterForm() {
         </div>
 
         <p className="mt-4 text-center text-sm text-gray-500">
-          Đã có tài khoản? <Link href="/auth/login" className="text-blue-600 font-medium hover:underline">Đăng nhập</Link>
+          Đã có tài khoản? <Link href={loginHref} className="text-blue-600 font-medium hover:underline">Đăng nhập</Link>
         </p>
       </div>
     </div>

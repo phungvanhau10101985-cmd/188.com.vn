@@ -1,14 +1,23 @@
 'use client';
 
-import { useState, useEffect, useRef, useId } from 'react';
+import { useState, useEffect, useRef, useId, useMemo } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import type { CategoryLevel1, CategoryLevel2, CategoryLevel3 } from '@/types/api';
 import { storePendingImageAndNavigate } from '@/lib/nanoai-pending-image';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import {
+  PRODUCT_RELATED_TABS,
+  parseRelatedTabFromSearch,
+  buildHomeListingSearchParams,
+  readStoredRelatedFilters,
+  type ProductRelatedTabId,
+} from '@/lib/product-related-tabs';
 
-const SCROLL_THRESHOLD = 50;
+/** Cuộn xuống: ẩn logo (thu chiều cao). Cuộn lên gần đầu trang: hiện lại — hai ngưỡng tránh nhảy scroll */
+const SCROLL_COLLAPSE_Y = 72;
+const SCROLL_EXPAND_Y = 28;
 
 function slugOf(s: string | undefined): string {
   return (s || '').trim().toLowerCase().replace(/\s+/g, '-');
@@ -48,6 +57,41 @@ export default function MobileHeader({
 
   const isHome = pathname === '/';
 
+  /** Trang chủ có filter từ tab SP liên quan — vẫn hiện nút quay lại (về trang chi tiết / trước đó) */
+  const hasHomeRelatedListingFilters =
+    isHome &&
+    Boolean(
+      searchParams.get('shop_id')?.trim() ||
+        searchParams.get('shop_name')?.trim() ||
+        searchParams.get('pro_lower_price')?.trim() ||
+        searchParams.get('pro_high_price')?.trim()
+    );
+  const showHeaderBack = !isHome || hasHomeRelatedListingFilters;
+
+  /** /products/[slug] — hiển thị tab SP liên quan trong vùng cam (thay hàng gợi ý từ khóa) */
+  const isProductDetailPage =
+    pathname != null &&
+    pathname.startsWith('/products/') &&
+    pathname.split('/').filter(Boolean).length === 2;
+
+  const activeRelatedTab = parseRelatedTabFromSearch(searchParams.get('rt'));
+
+  const setRelatedTab = (id: ProductRelatedTabId) => {
+    if (!pathname) return;
+    /** Trang chi tiết: mở trang chủ với filter (shop_id / shop_name / pro_*). Thiếu dữ liệu → chỉ đổi ?rt= như cũ */
+    if (isProductDetailPage) {
+      const listingParams = buildHomeListingSearchParams(id, readStoredRelatedFilters());
+      if (listingParams) {
+        router.push(`/?${listingParams.toString()}`);
+        return;
+      }
+    }
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('rt', id);
+    const q = params.toString();
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+  };
+
   useEffect(() => {
     if (isHome) {
       const q = searchParams.get('q') ?? '';
@@ -57,11 +101,31 @@ export default function MobileHeader({
 
   useEffect(() => {
     const handleScroll = () => {
-      setIsScrolled(window.scrollY > SCROLL_THRESHOLD);
+      const y = window.scrollY;
+      setIsScrolled((prev) => {
+        if (prev) return y > SCROLL_EXPAND_Y;
+        return y > SCROLL_COLLAPSE_Y;
+      });
     };
     handleScroll();
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  /** Đồng bộ chiều cao header → CSS var để sticky bar (vd. tabs SP cùng loại) nằm ngay dưới header, không chui sau header cam */
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const apply = () => {
+      const h = el.offsetHeight;
+      if (h > 0) {
+        document.documentElement.style.setProperty('--mobile-app-header-height', `${h}px`);
+      }
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   const handleSearch = (e: React.FormEvent) => {
@@ -108,19 +172,40 @@ export default function MobileHeader({
 
   const list = initialCategoryTree || [];
 
+  /** Gợi ý tìm kiếm (đăng nhập) hoặc chip danh mục cấp 1 — tránh hàng trống dưới ô search */
+  const searchStripContent = useMemo(() => {
+    if (suggestions.length > 0) {
+      return { mode: 'suggestions' as const, suggestions: suggestions.slice(0, 8) };
+    }
+    const cats = list.slice(0, 6);
+    if (cats.length > 0) {
+      return { mode: 'categories' as const, categories: cats };
+    }
+    return { mode: 'fallback' as const };
+  }, [suggestions, list]);
+
+  const chipClass =
+    'flex-shrink-0 text-xs text-orange-100 hover:text-white px-2 py-0.5 rounded-full bg-white/10 hover:bg-white/20 whitespace-nowrap border border-white/10';
+
   const iconBtn =
     'flex-shrink-0 w-8 h-8 min-[390px]:w-9 min-[390px]:h-9 flex items-center justify-center text-white rounded-full bg-white/15 hover:bg-white/25 active:bg-white/30';
 
   return (
     <div className="md:hidden sticky top-0 z-50" ref={panelRef}>
       <header className="bg-[#ea580c] shadow-md border-b border-orange-700/20">
-        <div className="px-3 pt-1.5 pb-1">
+        <div className={`px-3 pb-1 transition-[padding] duration-200 ${isScrolled ? 'pt-1' : 'pt-1.5'}`}>
+          {/* Thu max-height khi cuộn — ResizeObserver cập nhật --mobile-app-header-height để thanh tabs SP cùng loại dính đúng dưới */}
           <div
-            className={`flex justify-center overflow-hidden transition-all duration-200 ${
-              isScrolled ? 'max-h-0 opacity-0 mt-0 mb-0' : 'max-h-16 opacity-100 mb-0'
+            className={`flex justify-center shrink-0 items-center overflow-hidden transition-[max-height,opacity] duration-200 ease-out ${
+              isScrolled ? 'max-h-0 opacity-0' : 'max-h-[2.75rem] opacity-100'
             }`}
           >
-            <Link href="/" className="block">
+            <Link
+              href="/"
+              tabIndex={isScrolled ? -1 : undefined}
+              className={`block ${isScrolled ? 'pointer-events-none' : ''}`}
+              aria-hidden={isScrolled}
+            >
               <Image
                 src="https://188comvn.b-cdn.net/logo%20head%20188.png"
                 alt="188.com.vn"
@@ -132,8 +217,8 @@ export default function MobileHeader({
           </div>
 
           {/* Danh mục + ô tìm kiếm mobile + icon nhanh */}
-          <div className={`flex items-center gap-1 relative z-10 transition-all duration-200 ${isScrolled ? 'mt-0' : '-mt-1'}`}>
-            {!isHome && (
+          <div className="flex items-center gap-1 relative z-10 pt-0.5">
+            {showHeaderBack && (
               <button
                 type="button"
                 onClick={() => router.back()}
@@ -227,21 +312,84 @@ export default function MobileHeader({
             </Link>
           </div>
 
-          {/* Gợi ý từ khóa */}
-          <div className="flex items-center gap-1.5 mt-1.5 overflow-hidden min-h-[28px]">
-            <div className="flex-1 min-w-0 overflow-hidden flex items-center gap-1 py-0.5 whitespace-nowrap flex-nowrap">
-              {suggestions.slice(0, 8).map((term) => (
+          {/* Trang chi tiết SP: danh mục SP liên quan trong vùng cam — không để khoảng trống; các trang khác: gợi ý từ khóa */}
+          {isProductDetailPage ? (
+            <div
+              className="flex gap-1.5 mt-1 pb-1 -mx-0.5 px-1 overflow-x-auto scrollbar-hide"
+              role="tablist"
+              aria-label="Nhóm sản phẩm liên quan"
+            >
+              {PRODUCT_RELATED_TABS.map((tab) => (
                 <button
-                  key={term}
+                  key={tab.id}
                   type="button"
-                  onClick={() => onSuggestionClick(term)}
-                  className="flex-shrink-0 text-xs text-orange-100 hover:text-white px-2 py-0.5 rounded-full bg-white/10 hover:bg-white/20 whitespace-nowrap"
+                  role="tab"
+                  aria-selected={activeRelatedTab === tab.id}
+                  onClick={() => setRelatedTab(tab.id)}
+                  className={`flex-shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium whitespace-nowrap transition-colors ${
+                    activeRelatedTab === tab.id
+                      ? 'bg-white text-[#ea580c] shadow-sm'
+                      : 'bg-white/15 text-white border border-white/25 hover:bg-white/25'
+                  }`}
                 >
-                  {term}
+                  {tab.label}
                 </button>
               ))}
             </div>
-          </div>
+          ) : (
+            <div
+              className="flex items-center gap-1.5 mt-1.5 pb-1 overflow-x-auto scrollbar-hide min-h-[28px] -mx-0.5 px-1"
+              role="navigation"
+              aria-label={
+                searchStripContent.mode === 'suggestions'
+                  ? 'Gợi ý tìm kiếm'
+                  : searchStripContent.mode === 'categories'
+                    ? 'Danh mục nhanh'
+                    : 'Truy cập nhanh'
+              }
+            >
+              <div className="flex flex-nowrap items-center gap-1 py-0.5 min-w-0">
+                {searchStripContent.mode === 'suggestions' &&
+                  searchStripContent.suggestions.map((term) => (
+                    <button
+                      key={term}
+                      type="button"
+                      onClick={() => onSuggestionClick(term)}
+                      className={chipClass}
+                    >
+                      {term}
+                    </button>
+                  ))}
+                {searchStripContent.mode === 'categories' &&
+                  searchStripContent.categories.map((cat) => {
+                    const slug = cat.slug || slugOf(cat.name);
+                    return (
+                      <button
+                        key={cat.name}
+                        type="button"
+                        onClick={() => router.push(`/danh-muc/${encodeURIComponent(slug)}`)}
+                        className={chipClass}
+                      >
+                        {cat.name}
+                      </button>
+                    );
+                  })}
+                {searchStripContent.mode === 'fallback' && (
+                  <>
+                    <button type="button" onClick={() => setCategoryPanelOpen(true)} className={chipClass}>
+                      Danh mục
+                    </button>
+                    <Link href="/tim-theo-anh" className={chipClass}>
+                      Tìm ảnh
+                    </Link>
+                    <Link href="/cart" className={chipClass}>
+                      Giỏ hàng
+                    </Link>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </header>
 

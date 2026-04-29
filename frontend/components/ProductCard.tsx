@@ -264,13 +264,15 @@ export default function ProductCard({
 // Optimized Product Card cho ProductGrid (không có quick actions)
 export const SimpleProductCard = ({ 
   product, 
-  onFavorite 
+  onFavorite,
+  isFavorited = false,
 }: { 
   product: Product;
-  onFavorite: (productId: number, e: React.MouseEvent) => void;
+  onFavorite: (productId: number, e: React.MouseEvent) => void | Promise<void>;
+  /** Trạng thái thích từ server (khách + đăng nhập); mặc định false */
+  isFavorited?: boolean;
 }) => {
   const [imageError, setImageError] = useState(false);
-  const [isFavorite, setIsFavorite] = useState(false);
   
   const imageUrl = getOptimizedImage(product.main_image, {
     width: 250,
@@ -282,8 +284,7 @@ export const SimpleProductCard = ({
   const handleFavorite = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsFavorite(!isFavorite);
-    onFavorite(product.id, e);
+    void onFavorite(product.id, e);
   };
 
   const handleImageError = () => {
@@ -316,12 +317,12 @@ export const SimpleProductCard = ({
         <button
           onClick={handleFavorite}
           className={`absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center text-xs transition-all ${
-            isFavorite
+            isFavorited
               ? 'bg-red-500 text-white shadow'
               : 'bg-white bg-opacity-90 text-gray-600 hover:bg-red-500 hover:text-white'
           }`}
         >
-          {isFavorite ? '❤️' : '🤍'}
+          {isFavorited ? '❤️' : '🤍'}
         </button>
       </div>
 

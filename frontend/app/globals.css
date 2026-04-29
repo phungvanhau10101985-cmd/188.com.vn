@@ -2,6 +2,8 @@
 :root {
   --font-inter: "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif;
   --font-roboto-mono: "Roboto Mono", ui-monospace, monospace;
+  /** Chiều cao header mobile — MobileHeader cập nhật qua JS (ResizeObserver); fallback cho SSR */
+  --mobile-app-header-height: 104px;
 }
 
 @tailwind base;

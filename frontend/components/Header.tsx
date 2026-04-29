@@ -9,6 +9,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCart } from '@/features/cart/hooks/useCart';
 import { apiClient } from '@/lib/api-client';
 import DesktopImageSearchPopover from '@/components/DesktopImageSearchPopover';
+import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 
 interface HeaderProps {
   onSearch?: (searchTerm: string) => void;
@@ -27,6 +28,7 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const accountRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
+  const loginHref = useLoginRedirectHref();
   const { user, isAuthenticated, logout } = useAuth();
   const isProductDetailPage = Boolean(pathname?.match(/^\/products\/[^/]+$/));
 
@@ -199,7 +201,7 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
                 <span className="text-xs font-medium">Tài khoản</span>
               </Link>
             ) : (
-              <Link href="/auth/login" className="flex flex-col items-center space-y-1 text-white/90 hover:text-white transition-colors group">
+              <Link href={loginHref} className="flex flex-col items-center space-y-1 text-white/90 hover:text-white transition-colors group">
                 <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />

@@ -6,8 +6,10 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { format } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import Link from 'next/link';
+import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 
 export default function MyNotificationsPage() {
+  const loginHref = useLoginRedirectHref();
   const { user, isAuthenticated } = useAuth();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,7 +53,7 @@ export default function MyNotificationsPage() {
     return (
       <div className="container mx-auto px-4 py-12 text-center">
         <p className="mb-4">Vui lòng đăng nhập để xem thông báo.</p>
-        <Link href="/auth/login" className="text-blue-600 hover:underline">Đăng nhập ngay</Link>
+        <Link href={loginHref} className="text-blue-600 hover:underline">Đăng nhập ngay</Link>
       </div>
     );
   }

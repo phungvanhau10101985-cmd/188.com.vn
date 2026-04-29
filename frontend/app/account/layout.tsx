@@ -72,6 +72,7 @@ export default function AccountLayout({
 
   const nav = [
     { href: '/account', label: 'Tài khoản', icon: '👤' },
+    { href: '/account/profile', label: 'Chỉnh sửa hồ sơ', icon: '✏️' },
     { href: '/cart', label: 'Giỏ hàng', icon: '🛒' },
     { href: '/account/orders', label: 'Đơn hàng', icon: '🧾' },
     { href: '/da-xem', label: 'Sản phẩm đã xem', icon: '🕒' },

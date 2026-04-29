@@ -320,7 +320,7 @@ class ApiClient {
     }).catch(() => {});
   }
 
-  /** Danh sách sản phẩm đã xem (cần đăng nhập). */
+  /** Danh sách sản phẩm đã xem (tài khoản hoặc phiên khách qua X-Guest-Session-Id). */
   async getViewedProducts(limit = 24): Promise<any[]> {
     return this.fetch<any[]>(`/user-behavior/products/viewed?limit=${limit}`);
   }
