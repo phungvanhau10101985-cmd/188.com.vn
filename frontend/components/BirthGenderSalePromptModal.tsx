@@ -10,6 +10,24 @@ import type { UserResponse } from '@/features/auth/types/auth';
 
 const DISMISS_KEY = '188_birth_gender_prompt_dismissed';
 
+const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => {
+  const monthNum = i + 1;
+  const value = String(monthNum).padStart(2, '0');
+  return { value, label: `Tháng ${monthNum}` };
+});
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(year, month, 0).getDate();
+}
+
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1) return false;
+  const max = daysInMonth(year, month);
+  if (day > max) return false;
+  const dt = new Date(year, month - 1, day);
+  return dt.getFullYear() === year && dt.getMonth() === month - 1 && dt.getDate() === day;
+}
+
 function needsBirthOrGender(user: UserResponse | null): boolean {
   if (!user) return false;
   const dob = user.date_of_birth;
@@ -42,10 +60,13 @@ export default function BirthGenderSalePromptModal() {
   const pathname = usePathname();
   const titleId = useId();
   const descId = useId();
-  const dateRef = useRef<HTMLInputElement>(null);
+  const firstDobRef = useRef<HTMLSelectElement>(null);
   const [open, setOpen] = useState(false);
-  const [dob, setDob] = useState('');
-  const [gender, setGender] = useState<'male' | 'female' | 'other' | ''>('');
+  /** Giá trị select: "" hoặc "01".."31" / "01".."12" / năm đủ 4 chữ số */
+  const [dobDay, setDobDay] = useState('');
+  const [dobMonth, setDobMonth] = useState('');
+  const [dobYear, setDobYear] = useState('');
+  const [gender, setGender] = useState<'male' | 'female' | ''>('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,13 +95,23 @@ export default function BirthGenderSalePromptModal() {
     }
     const u = user;
     if (u.date_of_birth && typeof u.date_of_birth === 'string') {
-      setDob(u.date_of_birth.slice(0, 10));
+      const ymd = u.date_of_birth.slice(0, 10);
+      const p = ymd.split('-');
+      if (p.length === 3) {
+        setDobYear(p[0]);
+        setDobMonth(p[1]);
+        setDobDay(p[2]);
+      } else {
+        setDobYear('');
+        setDobMonth('');
+        setDobDay('');
+      }
     } else {
-      setDob('');
+      setDobYear('');
+      setDobMonth('');
+      setDobDay('');
     }
-    setGender(
-      u.gender === 'male' || u.gender === 'female' || u.gender === 'other' ? u.gender : ''
-    );
+    setGender(u.gender === 'male' || u.gender === 'female' ? u.gender : '');
     setError(null);
     setOpen(true);
   }, [isAuthenticated, user, isLoading, pathname]);
@@ -91,7 +122,7 @@ export default function BirthGenderSalePromptModal() {
 
   useEffect(() => {
     if (!open) return;
-    const t = window.setTimeout(() => dateRef.current?.focus(), 100);
+    const t = window.setTimeout(() => firstDobRef.current?.focus(), 100);
     return () => window.clearTimeout(t);
   }, [open]);
 
@@ -104,11 +135,36 @@ export default function BirthGenderSalePromptModal() {
     return () => window.removeEventListener('keydown', onKey);
   }, [open, handleDefer]);
 
+  /** Khi đổi tháng/năm, thu ngày nếu không còn hợp lệ (vd. 31 → tháng 2). */
+  useEffect(() => {
+    if (!dobYear || !dobMonth || !dobDay) return;
+    const y = parseInt(dobYear, 10);
+    const m = parseInt(dobMonth, 10);
+    const max = daysInMonth(y, m);
+    const d = parseInt(dobDay, 10);
+    if (d > max) setDobDay(String(max).padStart(2, '0'));
+  }, [dobYear, dobMonth, dobDay]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!dob.trim()) {
-      setError('Vui lòng chọn ngày sinh.');
+    if (!dobYear || !dobMonth || !dobDay) {
+      setError('Vui lòng chọn đủ ngày, tháng và năm sinh.');
+      return;
+    }
+    const y = parseInt(dobYear, 10);
+    const m = parseInt(dobMonth, 10);
+    const d = parseInt(dobDay, 10);
+    if (!isValidCalendarDate(y, m, d)) {
+      setError('Ngày sinh không hợp lệ (kiểm tra ngày/tháng/năm).');
+      return;
+    }
+    const dobIso = `${dobYear}-${dobMonth}-${dobDay}`;
+    const dobDate = new Date(y, m - 1, d);
+    const endToday = new Date();
+    endToday.setHours(23, 59, 59, 999);
+    if (dobDate > endToday) {
+      setError('Ngày sinh không được sau hôm nay.');
       return;
     }
     if (!gender) {
@@ -118,7 +174,7 @@ export default function BirthGenderSalePromptModal() {
     setSaving(true);
     try {
       const updated = await apiClient.updateProfile({
-        date_of_birth: dob.trim(),
+        date_of_birth: dobIso,
         gender,
       });
       const normalized = normalizeUserFromApi(updated as Record<string, unknown>);
@@ -145,7 +201,15 @@ export default function BirthGenderSalePromptModal() {
 
   if (!open) return null;
 
-  const today = new Date().toISOString().slice(0, 10);
+  const currentYear = new Date().getFullYear();
+  const minYear = currentYear - 100;
+  const yearOptions: number[] = [];
+  for (let y = currentYear; y >= minYear; y -= 1) yearOptions.push(y);
+
+  const maxDays =
+    dobYear && dobMonth
+      ? daysInMonth(parseInt(dobYear, 10), parseInt(dobMonth, 10))
+      : 31;
 
   return (
     <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -172,21 +236,72 @@ export default function BirthGenderSalePromptModal() {
           </p>
 
           <form onSubmit={handleSubmit} className="mt-4 space-y-3">
-            <div>
-              <label htmlFor="sale-prompt-dob" className="block text-xs font-medium text-gray-700 mb-1">
-                Ngày sinh
-              </label>
-              <input
-                ref={dateRef}
-                id="sale-prompt-dob"
-                type="date"
-                max={today}
-                value={dob}
-                onChange={(e) => setDob(e.target.value)}
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#ea580c]/30 focus:border-[#ea580c]"
-                required
-              />
-            </div>
+            <fieldset className="space-y-1.5">
+              <legend className="block text-xs font-medium text-gray-700 mb-1">Ngày sinh</legend>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label htmlFor="sale-prompt-dob-day" className="sr-only">
+                    Ngày
+                  </label>
+                  <select
+                    ref={firstDobRef}
+                    id="sale-prompt-dob-day"
+                    value={dobDay}
+                    onChange={(e) => setDobDay(e.target.value)}
+                    className="w-full rounded-lg border border-gray-200 px-2 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#ea580c]/30 focus:border-[#ea580c]"
+                  >
+                    <option value="">Ngày</option>
+                    {Array.from({ length: maxDays }, (_, i) => {
+                      const dayNum = i + 1;
+                      const val = String(dayNum).padStart(2, '0');
+                      return (
+                        <option key={val} value={val}>
+                          {dayNum}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="sale-prompt-dob-month" className="sr-only">
+                    Tháng
+                  </label>
+                  <select
+                    id="sale-prompt-dob-month"
+                    value={dobMonth}
+                    onChange={(e) => {
+                      setDobMonth(e.target.value);
+                    }}
+                    className="w-full rounded-lg border border-gray-200 px-2 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#ea580c]/30 focus:border-[#ea580c]"
+                  >
+                    <option value="">Tháng</option>
+                    {MONTH_OPTIONS.map(({ value, label }) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="sale-prompt-dob-year" className="sr-only">
+                    Năm
+                  </label>
+                  <select
+                    id="sale-prompt-dob-year"
+                    value={dobYear}
+                    onChange={(e) => setDobYear(e.target.value)}
+                    className="w-full rounded-lg border border-gray-200 px-2 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#ea580c]/30 focus:border-[#ea580c]"
+                  >
+                    <option value="">Năm</option>
+                    {yearOptions.map((y) => (
+                      <option key={y} value={String(y)}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </fieldset>
             <div>
               <span className="block text-xs font-medium text-gray-700 mb-1.5">Giới tính</span>
               <div className="flex flex-wrap gap-2">
@@ -194,7 +309,6 @@ export default function BirthGenderSalePromptModal() {
                   [
                     { v: 'male' as const, label: 'Nam' },
                     { v: 'female' as const, label: 'Nữ' },
-                    { v: 'other' as const, label: 'Khác' },
                   ] as const
                 ).map(({ v, label }) => (
                   <button
