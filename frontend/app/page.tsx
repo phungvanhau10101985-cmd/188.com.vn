@@ -621,6 +621,76 @@ export default function HomePage() {
           </div>
         )}
 
+        {/* Grid SP chính: không có ?category/lọc URL — trước đây không render danh sách filteredProducts */}
+        {!hasFilterParams && (
+          <section className="mb-8" aria-labelledby="home-all-products-heading">
+            <h2
+              id="home-all-products-heading"
+              className="text-base font-bold text-gray-900 mb-4 border-b-2 border-[#ea580c] pb-1 w-fit"
+            >
+              TẤT CẢ SẢN PHẨM
+            </h2>
+            {loading ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
+                {[...Array(10)].map((_, i) => (
+                  <div key={i} className="bg-white rounded-xl border border-gray-100 overflow-hidden animate-pulse">
+                    <div className="aspect-square bg-gray-100" />
+                    <div className="p-3 space-y-2">
+                      <div className="h-3 bg-gray-100 rounded w-3/4" />
+                      <div className="h-3 bg-gray-100 rounded w-full" />
+                      <div className="h-4 bg-gray-100 rounded w-2/5" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : filteredProducts.length > 0 ? (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {filteredProducts.map((product) => (
+                    <SimpleProductCard
+                      key={product.id}
+                      product={product}
+                      onFavorite={handleFavorite}
+                      isFavorited={favoriteIds.has(product.id)}
+                    />
+                  ))}
+                </div>
+                {showPagination && (
+                  <div className="mt-6 flex flex-wrap items-center justify-between gap-3 text-sm">
+                    <p className="text-gray-600">
+                      Trang {currentPage} / {totalPages} — Tổng {totalProducts} sản phẩm
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPage(currentPage - 1)}
+                        disabled={currentPage <= 1}
+                        className="px-3 py-2 rounded-lg border border-gray-200 text-gray-700 disabled:opacity-50 hover:bg-gray-50"
+                      >
+                        Trang trước
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPage(currentPage + 1)}
+                        disabled={currentPage >= totalPages}
+                        className="px-3 py-2 rounded-lg border border-gray-200 text-gray-700 disabled:opacity-50 hover:bg-gray-50"
+                      >
+                        Trang sau
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-center text-gray-500 py-10">
+                {apiStatus === 'offline'
+                  ? 'Không tải được danh sách sản phẩm. Vui lòng thử lại sau.'
+                  : 'Chưa có sản phẩm nào.'}
+              </p>
+            )}
+          </section>
+        )}
+
         {/* Section Đề xuất theo tuổi và giới tính - mobile + desktop giống nhau */}
         {!hasFilterParams && (
           <section className="mb-6">
