@@ -352,6 +352,11 @@ class Settings:
         self.SEPAY_WEBHOOK_TRUST_NO_AUTH_IP: bool = os.getenv(
             "SEPAY_WEBHOOK_TRUST_NO_AUTH_IP", "false"
         ).lower() in ("1", "true", "yes")
+        # true = đọc X-Forwarded-For + X-Real-IP dù peer không phải IP private (ví dụ hop bị báo sai).
+        # Chỉ bật khi API không lộ ra internet trực tiếp — chỉ Nginx/proxy được gọi vào cổng app.
+        self.SEPAY_WEBHOOK_TRUST_PROXY_HEADERS: bool = os.getenv(
+            "SEPAY_WEBHOOK_TRUST_PROXY_HEADERS", "false"
+        ).lower() in ("1", "true", "yes")
         _sepay_ip_env = os.getenv("SEPAY_WEBHOOK_IP_ALLOWLIST", "").strip()
         _sepay_default_ips = (
             "172.236.138.20",

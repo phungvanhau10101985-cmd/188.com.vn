@@ -134,17 +134,41 @@ def _peer_trust_x_forwarded_for(host: str) -> bool:
 
 
 def _webhook_ip_candidates(request: Request) -> list[str]:
-    """IP để đối chiếu allowlist: peer trực tiếp hoặc toàn bộ chuỗi XFF khi peer là localhost/private."""
+    """
+    IP để đối chiếu allowlist SePay.
+
+    - Peer loopback/private: tin X-Forwarded-For (toàn chuỗi) và X-Real-IP (Nginx hay chỉ set một trong hai).
+    - SEPAY_WEBHOOK_TRUST_PROXY_HEADERS=true: cùng logic dù peer không được coi là private (chỉ khi app sau proxy độc quyền).
+    """
     direct = ""
     if request.client and request.client.host:
         direct = _normalize_client_ip(request.client.host)
+
     xff_raw = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For") or ""
     parts = [_normalize_client_ip(p) for p in xff_raw.split(",") if p.strip()]
-    if _peer_trust_x_forwarded_for(direct):
-        return [p for p in parts if p]
+    real_raw = (request.headers.get("x-real-ip") or request.headers.get("X-Real-IP") or "").strip()
+    real_norm = _normalize_client_ip(real_raw) if real_raw else ""
+
+    trust_fwd = _peer_trust_x_forwarded_for(direct) or getattr(
+        settings, "SEPAY_WEBHOOK_TRUST_PROXY_HEADERS", False
+    )
+
+    if trust_fwd:
+        out: list[str] = []
+        seen: set[str] = set()
+        for p in parts:
+            if p and p not in seen:
+                seen.add(p)
+                out.append(p)
+        if real_norm and real_norm not in seen:
+            out.append(real_norm)
+        if out:
+            return out
+        return [direct] if direct else []
+
     if direct:
         return [direct]
-    return parts[:1] if parts else []
+    return parts[:1] if parts else ([real_norm] if real_norm else [])
 
 
 def verify_webhook(request: Request, raw_body: bytes) -> bool:
