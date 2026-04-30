@@ -43,7 +43,14 @@ def _call_gemini(prompt: str, max_tokens: int = 200, temperature: float = 0.7) -
         candidates = data.get("candidates", [])
         if not candidates:
             return None
-        parts = candidates[0].get("content", {}).get("parts", [])
+        cand0 = candidates[0]
+        finish = (cand0.get("finishReason") or "").upper()
+        if "MAX" in finish and "TOKEN" in finish:
+            logger.warning(
+                "Gemini dừng do giới hạn token output (finishReason=%s): cân nhắc tăng maxOutputTokens.",
+                finish,
+            )
+        parts = cand0.get("content", {}).get("parts", [])
         if not parts:
             return None
         return (parts[0].get("text") or "").strip()
@@ -162,8 +169,9 @@ def generate_category_seo_body(
         return None
 
     # Cache không dùng product_count để nội dung ổn định
+    # Bump khi đổi logic sinh/token — cache cũ có thể là đoạn cụt câu.
     cache_key = hashlib.md5(
-        f"body:{category_name}:{','.join(related_category_names or [])}".encode()
+        f"body:v2:{category_name}:{','.join(related_category_names or [])}".encode()
     ).hexdigest()
     if cache_key in _body_cache:
         return _body_cache[cache_key]
@@ -197,7 +205,8 @@ Yêu cầu nội dung (tự nhiên, không liệt kê số):
 Giọng văn: thân thiện, chuyên nghiệp, có CTA nhẹ (xem thêm, mua ngay tại 188). Không spam từ khóa.
 Chỉ trả về đoạn văn liền mạch, không tiêu đề con, không markdown, không dấu ngoặc kép."""
 
-    content = _call_gemini(prompt, max_tokens=650, temperature=0.7)
+    # 150–300 từ TV + model 2.5 có thể tốn token "thinking" — giữ maxOutputTokens đủ cao để không cụt câu (...là không thể)
+    content = _call_gemini(prompt, max_tokens=4096, temperature=0.7)
     if not content:
         return None
 
