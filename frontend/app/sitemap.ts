@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 import { getCategoryTreeForLayout } from "@/lib/category-seo";
 import type { CategoryLevel1 } from "@/types/api";
 import { INFO_PAGES } from "@/app/info/info-pages.config";
+import { listSeoClusters } from "@/lib/seo-cluster";
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ||
@@ -39,7 +40,7 @@ async function getAllProductSlugs(): Promise<{ slug: string; updated_at?: string
   return results;
 }
 
-/** Flatten cây danh mục 3 cấp thành danh sách path (slug). */
+/** Flatten cây danh mục 2 cấp đầu (cat1 + cat2) cho sitemap. Cat3 đã gom về `/c/<cluster>`. */
 function flattenCategoryPaths(tree: CategoryLevel1[]): string[] {
   const paths: string[] = [];
   for (const c1 of tree) {
@@ -50,12 +51,6 @@ function flattenCategoryPaths(tree: CategoryLevel1[]): string[] {
       const slug2 = (c2.slug || c2.name || "").trim().toLowerCase();
       if (!slug2) continue;
       paths.push(`${slug1}/${slug2}`);
-      for (const c3 of c2.children || []) {
-        const name3 = typeof c3 === "object" && c3 !== null && "name" in c3 ? (c3 as { name: string }).name : String(c3);
-        const slug3 = ((c3 as { slug?: string }).slug || name3 || "").trim().toLowerCase();
-        if (!slug3) continue;
-        paths.push(`${slug1}/${slug2}/${slug3}`);
-      }
     }
   }
   return paths;
@@ -81,7 +76,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.9,
   });
 
-  // Các trang danh mục (cấp 1, 2, 3)
+  // Trang danh mục cấp 1, 2 (cat3 đã được gom về /c/<cluster>, không index trong sitemap)
   const tree = await getCategoryTreeForLayout();
   const categoryPaths = flattenCategoryPaths(tree);
   for (const path of categoryPaths) {
@@ -90,6 +85,18 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       lastModified: now,
       changeFrequency: "daily",
       priority: 0.8,
+    });
+  }
+
+  // Landing SEO clusters: /c/<slug> — chỉ index những cluster có index_policy=index
+  const clusters = await listSeoClusters();
+  for (const c of clusters) {
+    if (c.index_policy !== "index") continue;
+    entries.push({
+      url: `${BASE_URL}/c/${c.slug}`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.85,
     });
   }
 

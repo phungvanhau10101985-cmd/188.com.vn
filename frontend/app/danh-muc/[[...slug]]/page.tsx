@@ -1,6 +1,8 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { getCategoryByPathForSeo, getCategorySeoData, getProductsByCategory, getCategoryTreeForLayout } from '@/lib/category-seo';
 import { buildInternalLinkMap } from '@/lib/internal-links';
+import { getClusterSlugForCat3 } from '@/lib/seo-cluster';
 import CategoryPageClient from './CategoryPageClient';
 import CategoryListPage from './CategoryListPage';
 import type { Product } from '@/types/api';
@@ -16,6 +18,17 @@ export default async function CategoryPage({ params, searchParams }: Props) {
   const { slug } = params;
   const { page: pageParam } = searchParams;
   const [level1, level2, level3] = slug || [];
+
+  // Cat3 (URL có 3 segments): theo plan SEO mới, mỗi cat3 đã gom về 1 SEO cluster.
+  // Redirect 301 sang `/c/<cluster_slug>` để gom traffic + tránh duplicate content.
+  if (level3) {
+    const clusterSlug = await getClusterSlugForCat3(level3);
+    if (clusterSlug) {
+      redirect(`/c/${clusterSlug}`);
+    }
+    // Không tìm được cluster (cat3 chưa có trong taxonomy mới) — render fallback ở dưới.
+  }
+
   const page = Math.max(1, parseInt(String(pageParam), 10) || 1);
   const skip = (page - 1) * PAGE_SIZE;
 

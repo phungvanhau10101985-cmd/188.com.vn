@@ -129,6 +129,7 @@ def load_api_routes():
         ("categories", "/categories", "categories"),
         ("category_seo", "/category-seo", "category-seo"),
         ("taxonomy_admin", "/taxonomy", "taxonomy-admin"),
+        ("seo_clusters", "/seo-clusters", "seo-clusters"),
         ("cart", "/cart", "cart"),
         ("orders", "/orders", "orders"),
         ("import_export", "/import-export", "import-export"),  # ĐẶC BIỆT DEBUG

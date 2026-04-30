@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List, Any, Optional
+from typing import List, Any, Dict, Optional
 from app.db.session import SessionLocal, get_db
 from app.schemas.category import Category, CategoryCreate, CategoryUpdate
 from app.crud import category as crud_category
 from app.crud import product as crud_product
+from app.models.category import Category as CategoryModel
+from app.models.seo_cluster import SeoCluster
 from app.utils.ttl_cache import cache as ttl_cache
 
 router = APIRouter()
@@ -49,6 +51,73 @@ def read_category_tree_from_products(is_active: bool = True):
         _CATEGORY_TREE_TTL,
         lambda: _fetch_category_tree(is_active),
     )
+
+
+# ----- Tree v2: trả từ bảng `categories` (sau khi import taxonomy) -----
+_TREE_V2_TTL = 60.0
+_TREE_V2_KEY_ACTIVE = "category_tree_v2:active=true"
+_TREE_V2_KEY_ALL = "category_tree_v2:active=false"
+
+
+def _fetch_category_tree_v2(is_active_only: bool) -> List[Dict[str, Any]]:
+    """
+    Cây 3 cấp dựng từ bảng `categories`. Mỗi cat3 kèm `cluster_slug` để menu
+    link thẳng sang `/c/<cluster_slug>` (cat3 đã noindex, không vào URL `/danh-muc/.../<cat3>`).
+    """
+    db = SessionLocal()
+    try:
+        q = db.query(
+            CategoryModel.id,
+            CategoryModel.parent_id,
+            CategoryModel.level,
+            CategoryModel.name,
+            CategoryModel.slug,
+            CategoryModel.full_slug,
+            CategoryModel.sort_order,
+            CategoryModel.is_active,
+            CategoryModel.seo_index,
+            SeoCluster.slug.label("cluster_slug"),
+        ).outerjoin(SeoCluster, CategoryModel.seo_cluster_id == SeoCluster.id)
+        if is_active_only:
+            q = q.filter(CategoryModel.is_active.is_(True))
+        rows = q.order_by(CategoryModel.level, CategoryModel.sort_order, CategoryModel.id).all()
+    finally:
+        db.close()
+
+    by_id: Dict[int, Dict[str, Any]] = {}
+    for r in rows:
+        by_id[r.id] = {
+            "id": r.id,
+            "parent_id": r.parent_id,
+            "level": r.level,
+            "name": r.name,
+            "slug": r.slug,
+            "full_slug": r.full_slug,
+            "sort_order": r.sort_order,
+            "is_active": r.is_active,
+            "seo_index": r.seo_index,
+            "cluster_slug": r.cluster_slug,
+            "children": [],
+        }
+    roots: List[Dict[str, Any]] = []
+    for node in by_id.values():
+        pid = node["parent_id"]
+        if pid and pid in by_id:
+            by_id[pid]["children"].append(node)
+        elif node["level"] == 1:
+            roots.append(node)
+    return roots
+
+
+@router.get("/tree-v2")
+def read_category_tree_v2(is_active_only: bool = True):
+    """
+    Cây danh mục 3 cấp đọc trực tiếp từ bảng `categories` (nguồn taxonomy chính sau khi
+    `/admin/taxonomy/import`). Mỗi cat3 trả thêm `cluster_slug` → frontend menu link `/c/<slug>`.
+    Cache 60s.
+    """
+    key = _TREE_V2_KEY_ACTIVE if is_active_only else _TREE_V2_KEY_ALL
+    return ttl_cache.get_or_fetch(key, _TREE_V2_TTL, lambda: _fetch_category_tree_v2(is_active_only))
 
 
 @router.get("/from-products/by-path")
