@@ -191,7 +191,7 @@ export default function AdminDanhMucSeoPage() {
   const [geminiRows, setGeminiRows] = useState<GeminiCatalogRow[]>([]);
   const [geminiSummary, setGeminiSummary] = useState<Record<string, number> | null>(null);
   const [geminiLoading, setGeminiLoading] = useState(false);
-  const [geminiMessage, setGeminiMessage] = useState<string | null>(null);
+  const [geminiBanner, setGeminiBanner] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
   const [geminiFilter, setGeminiFilter] = useState<'all' | 'targets' | 'missing_desc' | 'missing_body'>('all');
   const [geminiSearch, setGeminiSearch] = useState('');
   const [geminiRunPicked, setGeminiRunPicked] = useState<string[]>([]);
@@ -405,7 +405,7 @@ export default function AdminDanhMucSeoPage() {
       setGeminiAppSettings(app);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Không tải được catalog Gemini SEO';
-      setGeminiMessage(msg);
+      setGeminiBanner({ text: msg, tone: 'error' });
     } finally {
       setGeminiLoading(false);
     }
@@ -413,13 +413,13 @@ export default function AdminDanhMucSeoPage() {
 
   async function handlePersistGeminiAuto(enabled: boolean) {
     setGeminiSettingsSaving(true);
-    setGeminiMessage(null);
+    setGeminiBanner(null);
     try {
       await apiClient.putCategorySeoAppSettings({ gemini_auto_enabled: enabled });
       await loadGeminiCatalog();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Không lưu được cài đặt';
-      setGeminiMessage(msg);
+      setGeminiBanner({ text: msg, tone: 'error' });
     } finally {
       setGeminiSettingsSaving(false);
     }
@@ -459,10 +459,10 @@ export default function AdminDanhMucSeoPage() {
       await apiClient.setGeminiTargets({ paths: [path], enabled });
       setGeminiRows((prev) => prev.map((r) => (r.path === path ? { ...r, gemini_enabled: enabled } : r)));
       await loadGeminiCatalog();
-      setGeminiMessage(null);
+      setGeminiBanner(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Không cập nhật được Gemini đích';
-      setGeminiMessage(msg);
+      setGeminiBanner({ text: msg, tone: 'error' });
     }
   }
 
@@ -471,6 +471,21 @@ export default function AdminDanhMucSeoPage() {
   };
 
   const handleGeminiRun = async (mode: 'whitelist' | 'picked') => {
+    const whitelistTargets = geminiRows.filter((r) => r.gemini_enabled);
+    if (mode === 'whitelist' && whitelistTargets.length === 0) {
+      setGeminiBanner({
+        text: 'Không có danh mục nào đánh dấu «Đích». Tick cột Đích ít nhất một dòng, hoặc dùng nút «Lần này».',
+        tone: 'error',
+      });
+      return;
+    }
+    if (mode === 'picked' && geminiRunPicked.length === 0) {
+      setGeminiBanner({
+        text: 'Chưa chọn dòng nào trong cột «Lần này». Tick ít nhất một dòng rồi ấn lại.',
+        tone: 'error',
+      });
+      return;
+    }
     if (
       !confirm(
         'Gemini sẽ tạo/cập nhật meta và đoạn SEO cuối trang cho danh mục đã chọn. Việc này có thể vài phút và tốn quota API. Tiếp tục?'
@@ -479,16 +494,12 @@ export default function AdminDanhMucSeoPage() {
       return;
     let paths: string[] | undefined;
     if (mode === 'picked') {
-      if (geminiRunPicked.length === 0) {
-        alert('Chọn ít nhất một dòng trong cột «Lần này».');
-        return;
-      }
       paths = [...geminiRunPicked];
     }
     let delay = Number.parseFloat(geminiDelayInput.replace(',', '.'));
     if (!Number.isFinite(delay) || delay < 0) delay = 1.2;
     setProcessing(true);
-    setGeminiMessage(null);
+    setGeminiBanner(null);
     try {
       await apiClient.runGeminiTargets({
         ...(paths !== undefined ? { paths } : {}),
@@ -496,11 +507,11 @@ export default function AdminDanhMucSeoPage() {
         force_body: geminiRunForceBody,
         delay,
       });
-      setGeminiMessage('Đã bắt đầu Gemini (meta + body). Xem tiến độ bên dưới.');
+      setGeminiBanner({ text: 'Đã bắt đầu Gemini (meta + body). Xem tiến độ bên dưới.', tone: 'success' });
       startGeminiPolling();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Không khởi chạy được job';
-      setGeminiMessage(msg);
+      setGeminiBanner({ text: msg, tone: 'error' });
     } finally {
       setProcessing(false);
     }
@@ -1052,7 +1063,18 @@ export default function AdminDanhMucSeoPage() {
                     </div>
                   </div>
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Danh mục trong catalog (slug = /danh-muc/…)</p>
-                  {geminiMessage && <p className="mt-2 text-sm text-emerald-800">{geminiMessage}</p>}
+                  {geminiBanner && (
+                    <p
+                      className={
+                        geminiBanner.tone === 'error'
+                          ? 'mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900'
+                          : 'mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900'
+                      }
+                      role={geminiBanner.tone === 'error' ? 'alert' : 'status'}
+                    >
+                      {geminiBanner.text}
+                    </p>
+                  )}
                   <div className="mt-1 max-h-72 overflow-auto rounded-lg border border-gray-200 bg-white">
                     <table className="w-full text-left text-xs">
                       <thead className="sticky top-0 bg-gray-100 text-[11px] uppercase tracking-wide text-gray-600">
