@@ -10,6 +10,7 @@ const ADMIN_LINKS = [
   { href: '/admin/product-questions', label: 'Câu hỏi Câu trả lời sản phẩm' },
   { href: '/admin/product-reviews', label: 'Đánh giá sản phẩm' },
   { href: '/admin/danh-muc-seo', label: 'Tổng hợp danh mục SEO' },
+  { href: '/admin/taxonomy', label: 'Cây danh mục (taxonomy)' },
   { href: '/admin/search-mappings', label: 'Từ khóa mapping' },
   { href: '/admin/members', label: 'Quản lý thành viên' },
   { href: '/admin/loyalty', label: 'Cấu hình thành viên' },
