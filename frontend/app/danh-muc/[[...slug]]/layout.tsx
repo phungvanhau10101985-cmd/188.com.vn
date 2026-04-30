@@ -6,12 +6,12 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_DOM
 const DEFAULT_OG_IMAGE = absolutePublicAssetUrl("/images/og-default.jpg");
 
 type Props = {
-  params: Promise<{ slug?: string[] }>;
+  params: { slug?: string[] };
   children: React.ReactNode;
 };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { slug } = await params;
+  const { slug } = params;
   const [level1, level2, level3] = slug || [];
   if (!level1) {
     return {
@@ -87,7 +87,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function CategoryLayout({ params, children }: Props) {
-  const { slug } = await params;
+  const { slug } = params;
   const [level1, level2, level3] = slug || [];
   if (!level1) {
     return <>{children}</>;

@@ -8,13 +8,13 @@ import type { Product } from '@/types/api';
 const PAGE_SIZE = 96;
 
 type Props = {
-  params: Promise<{ slug?: string[] }>;
-  searchParams: Promise<{ page?: string }>;
+  params: { slug?: string[] };
+  searchParams: { page?: string };
 };
 
 export default async function CategoryPage({ params, searchParams }: Props) {
-  const { slug } = await params;
-  const { page: pageParam } = await searchParams;
+  const { slug } = params;
+  const { page: pageParam } = searchParams;
   const [level1, level2, level3] = slug || [];
   const page = Math.max(1, parseInt(String(pageParam), 10) || 1);
   const skip = (page - 1) * PAGE_SIZE;
