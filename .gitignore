@@ -10,6 +10,7 @@ venv/
 .env
 .env.*
 !.env.example
+!frontend/.env.local.example
 !frontend/.env.development
 # UpGit: file config local có PAT — không commit
 upgit.config.toml

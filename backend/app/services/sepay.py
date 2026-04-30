@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode
 
 from fastapi import Request
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -66,11 +67,33 @@ def resolve_order_from_sepay_transfer_content(db: Session, content: str) -> Opti
     order = crud_order.get_order_by_code(db, token)
     if order:
         return order
+    order = db.query(Order).filter(func.lower(Order.order_code) == func.lower(token)).first()
+    if order:
+        return order
     m = re.match(r"^DH(\d+)$", token, re.IGNORECASE)
     if not m:
         return None
     oid = int(m.group(1))
     return crud_order.get_order(db, oid)
+
+
+def resolve_order_from_sepay_payload(db: Session, data: Dict[str, Any], text_blob: str) -> Optional[Order]:
+    """Ưu tiên trường `code` do SePay nhận diện (Công ty → Cấu hình chung), sau đó mới parse nội dung SMS."""
+    raw_code = _pick(data, "code")
+    if raw_code is not None and str(raw_code).strip():
+        s = str(raw_code).strip()
+        if re.match(r"^DH\d+$", s, re.IGNORECASE):
+            tok = s.upper()
+            o = crud_order.get_order_by_code(db, tok)
+            if o:
+                return o
+            o = db.query(Order).filter(func.lower(Order.order_code) == s.lower()).first()
+            if o:
+                return o
+            m = re.match(r"^DH(\d+)$", s, re.IGNORECASE)
+            if m:
+                return crud_order.get_order(db, int(m.group(1)))
+    return resolve_order_from_sepay_transfer_content(db, text_blob)
 
 
 def build_sepay_qr_image_url(*, account_number: str, bank_code: str, amount: Decimal, des: str) -> str:
@@ -235,7 +258,9 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
     except Exception:
         return False, "invalid_amount", None
 
-    content = str(_pick(data, "content", "transaction_content", "description") or "")
+    raw_content = str(_pick(data, "content", "transaction_content") or "")
+    raw_desc = str(_pick(data, "description") or "")
+    text_blob = f"{raw_content} {raw_desc}".strip()
     sepay_id = _pick(data, "id", "transaction_id")
     if sepay_id is None:
         return False, "missing_id", None
@@ -251,10 +276,16 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
         logger.info("SePay webhook account mismatch: %s vs %s", acc_in, expected_acc)
         return False, "account_mismatch", None
 
-    if not extract_order_code_from_content(content):
+    sepay_code = _pick(data, "code")
+    code_looks_order = bool(
+        sepay_code is not None
+        and str(sepay_code).strip()
+        and re.match(r"^DH\d+$", str(sepay_code).strip(), re.IGNORECASE)
+    )
+    if not code_looks_order and not extract_order_code_from_content(text_blob):
         return False, "no_order_code_in_content", None
 
-    order = resolve_order_from_sepay_transfer_content(db, content)
+    order = resolve_order_from_sepay_payload(db, data, text_blob)
     if not order:
         return False, "order_not_found", None
 
@@ -266,7 +297,7 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
         return False, "no_deposit_required", None
 
     expected_content = build_transfer_content_for_order(order)
-    norm_c = content.upper().replace(" ", "")
+    norm_c = text_blob.upper().replace(" ", "")
     norm_e = expected_content.upper().replace(" ", "")
     oc = order.order_code.upper().replace(" ", "")
     id_ref = f"DH{order.id}".upper()

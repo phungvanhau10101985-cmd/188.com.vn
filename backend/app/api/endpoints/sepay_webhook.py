@@ -42,4 +42,5 @@ async def sepay_webhook(
     logger.info("SePay webhook processed applied=%s detail=%s order_id=%s", ok, msg, order_id)
     if ok and msg == "ok" and order_id:
         background_tasks.add_task(send_deposit_confirmed_email_task, order_id)
-    return JSONResponse({"success": True, "applied": ok, "detail": msg}, status_code=201)
+    # Tài liệu SePay: thân phản hồi phải có {"success": true}, HTTP 200 hoặc 201 (OAuth: 201).
+    return JSONResponse({"success": True}, status_code=201)
