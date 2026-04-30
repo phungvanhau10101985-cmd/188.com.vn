@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ToastProvider';
+import AccountSessionActions from '@/components/account/AccountSessionActions';
 
 interface OrderLite {
   id: number;
@@ -131,6 +132,10 @@ export default function AccountPage() {
             <span className="text-gray-400">›</span>
           </button>
         </div>
+
+        <div className="px-4 py-4 border-t border-gray-200 bg-[#fafafa]">
+          <AccountSessionActions returnPath="/account" />
+        </div>
       </div>
 
       <div className="hidden md:block">
@@ -165,6 +170,10 @@ export default function AccountPage() {
             >
               Quản lý sổ địa chỉ →
             </Link>
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-gray-100">
+            <AccountSessionActions returnPath="/account" />
           </div>
         </div>
       </div>

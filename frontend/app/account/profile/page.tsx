@@ -6,6 +6,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ToastProvider';
 import type { UserResponse } from '@/features/auth/types/auth';
+import AccountSessionActions from '@/components/account/AccountSessionActions';
 
 function normalizeUserFromApi(raw: Record<string, unknown>): UserResponse {
   const prev = raw as unknown as UserResponse;
@@ -193,6 +194,10 @@ export default function AccountProfilePage() {
             </Link>
           </div>
         </form>
+      </div>
+
+      <div className="mt-4">
+        <AccountSessionActions returnPath="/account/profile" />
       </div>
     </div>
   );

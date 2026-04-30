@@ -99,6 +99,7 @@ export default function OrderDepositPage() {
   } | null>(null);
   const { pushToast } = useToast();
   const prevStatusRef = useRef<string | null>(null);
+  const [qrDownloading, setQrDownloading] = useState(false);
 
   const formatVnd = (n: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
   
@@ -126,6 +127,53 @@ export default function OrderDepositPage() {
     }
     return `https://img.vietqr.io/image/${selectedAccount.bank_short_name}-${selectedAccount.account_number}-compact2.png?amount=${order.deposit_amount}&addInfo=${encodeURIComponent(transferContent)}&accountName=${encodeURIComponent(selectedAccount.account_holder || '')}`;
   }, [sepayInfo, order, selectedAccount, transferContent]);
+
+  const handleDownloadQr = async () => {
+    if (!qrValue || !order) return;
+    setQrDownloading(true);
+    const safeCode = String(order.order_code || `don-${id}`).replace(/[^\da-zA-Z._-]+/g, '_') || String(id);
+    const filename = `qr-chuyen-khoan-${safeCode}.png`;
+
+    try {
+      const res = await fetch(qrValue, { mode: 'cors' });
+      if (!res.ok) throw new Error('HTTP');
+      const blob = await res.blob();
+      const mime = blob.type || '';
+      const ext =
+        mime.includes('png') ? '.png' : mime.includes('jpeg') || mime.includes('jpg') ? '.jpg' : mime.includes('webp') ? '.webp' : '';
+      const name = ext && !filename.endsWith(ext) ? filename.replace(/\.png$/i, ext) : filename;
+
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = name;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objectUrl);
+      pushToast({ title: 'Đã tải mã QR', variant: 'success', durationMs: 2500 });
+    } catch {
+      try {
+        window.open(qrValue, '_blank', 'noopener,noreferrer');
+        pushToast({
+          title: 'Đã mở ảnh QR trong tab mới',
+          description: 'Chuột phải hoặc dùng lệnh «Lưu ảnh» của trình duyệt nếu tải trực tiếp không dùng được.',
+          variant: 'info',
+          durationMs: 4500,
+        });
+      } catch {
+        pushToast({
+          title: 'Không tải được mã QR',
+          description: 'Thử quét QR trực tiếp hoặc chụp màn hình.',
+          variant: 'error',
+          durationMs: 4000,
+        });
+      }
+    } finally {
+      setQrDownloading(false);
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -503,6 +551,30 @@ export default function OrderDepositPage() {
                   <p className="text-[11px] text-gray-500 mt-1.5 text-center max-w-[280px] leading-snug">
                     Quét mã bằng app ngân hàng.
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadQr()}
+                    disabled={qrDownloading}
+                    className="mt-3 inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-60 transition-colors w-full max-w-[240px]"
+                  >
+                    {qrDownloading ? (
+                      <>
+                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+                        Đang tải…
+                      </>
+                    ) : (
+                      <>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                          <path
+                            fillRule="evenodd"
+                            d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        Tải mã QR
+                      </>
+                    )}
+                  </button>
                 </>
               ) : (
                 <p className="text-sm text-gray-500 text-center py-8">Chọn tài khoản để hiển thị mã QR.</p>

@@ -3,60 +3,22 @@
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
-import { apiClient } from '@/lib/api-client';
-
-interface OrderLite {
-  id: number;
-  status: string;
-}
-
-const ORDER_TABS = [
-  { key: 'all', label: 'Tất cả', statuses: null as string[] | null },
-  { key: 'waiting_deposit', label: 'Chờ đặt cọc', statuses: ['waiting_deposit'] },
-  { key: 'waiting_receive', label: 'Chờ nhận hàng', statuses: ['deposit_paid', 'confirmed', 'processing', 'shipping'] },
-  { key: 'delivered', label: 'Đã nhận hàng', statuses: ['delivered'] },
-  { key: 'completed', label: 'Đã đánh giá', statuses: ['completed'] },
-  { key: 'cancelled', label: 'Đã hủy', statuses: ['cancelled'] },
-];
-
-function matchTab(order: OrderLite, tab: (typeof ORDER_TABS)[0]): boolean {
-  if (tab.key === 'all') return true;
-  if (!tab.statuses) return false;
-  return tab.statuses.includes(order.status);
-}
+import { useEffect } from 'react';
 
 export default function AccountLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { isAuthenticated, isLoading, logout, switchAccount } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
-  const [orders, setOrders] = useState<OrderLite[]>([]);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.push('/auth/login?redirect=' + encodeURIComponent(pathname || '/account'));
     }
   }, [isAuthenticated, isLoading, router, pathname]);
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      apiClient
-        .getOrders({ limit: 200 })
-        .then((data) => setOrders(Array.isArray(data) ? data : []))
-        .catch(() => setOrders([]));
-    }
-  }, [isAuthenticated]);
-
-  const tabWithCounts = useMemo(() => {
-    return ORDER_TABS.map((t) => {
-      const count = t.key === 'all' ? orders.length : orders.filter((o) => matchTab(o, t)).length;
-      return { ...t, count };
-    });
-  }, [orders]);
 
   if (isLoading) {
     return (
@@ -109,45 +71,9 @@ export default function AccountLayout({
                   </Link>
                 );
               })}
-              <div className="border-t border-gray-200 p-3 space-y-2 bg-gray-50/90">
-                <button
-                  type="button"
-                  className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2.5 text-sm font-medium text-blue-700 hover:bg-blue-50 transition-colors"
-                  onClick={() => switchAccount(pathname || '/account')}
-                  aria-label="Chuyển sang đăng nhập tài khoản khác"
-                >
-                  Chuyển tài khoản khác
-                </button>
-                <button
-                  type="button"
-                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm font-medium text-gray-800 hover:bg-gray-100 transition-colors"
-                  onClick={() => logout()}
-                  aria-label="Đăng xuất khỏi tài khoản"
-                >
-                  Đăng xuất
-                </button>
-              </div>
             </nav>
           </aside>
           <main className="flex-1 min-w-0">
-            <div className="md:hidden flex flex-col sm:flex-row gap-2 sm:gap-3 mb-3">
-              <button
-                type="button"
-                className="flex-1 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm font-medium text-blue-700 shadow-sm hover:bg-blue-50 transition-colors"
-                onClick={() => switchAccount(pathname || '/account')}
-                aria-label="Chuyển sang đăng nhập tài khoản khác"
-              >
-                Chuyển tài khoản khác
-              </button>
-              <button
-                type="button"
-                className="flex-1 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-800 shadow-sm hover:bg-gray-50 transition-colors"
-                onClick={() => logout()}
-                aria-label="Đăng xuất khỏi tài khoản"
-              >
-                Đăng xuất
-              </button>
-            </div>
             {children}
           </main>
         </div>
