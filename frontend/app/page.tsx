@@ -57,6 +57,7 @@ export default function HomePage() {
   const [nanoaiTextProducts, setNanoaiTextProducts] = useState<NanoaiSearchProduct[]>([]);
   const [nanoaiTextLoading, setNanoaiTextLoading] = useState(false);
   const [nanoaiTextError, setNanoaiTextError] = useState<string | null>(null);
+  const [homeFeedPersonalized, setHomeFeedPersonalized] = useState(false);
   const nanoaiReveal = useLazyRevealList(nanoaiTextProducts, { initial: 12, step: 12 });
   const isSearching = qFromUrl.trim().length > 0;
   const pageFromUrl = Number(searchParams.get('page') || 1);
@@ -67,26 +68,35 @@ export default function HomePage() {
     try {
       setLoading(true);
       setError(null);
-      const response: ProductListResponse = await apiClient.getProducts({
-        limit: PAGE_SIZE,
-        skip: (currentPage - 1) * PAGE_SIZE,
-        is_active: true,
-        ...filters,
-      });
-      if ((filters?.shop_id ?? '').toString().trim() && (response.products?.length ?? 0) === 0) {
-        const fallbackResponse: ProductListResponse = await apiClient.getProducts({
-          limit: 48,
+      const skip = (currentPage - 1) * PAGE_SIZE;
+      const usePersonalizedHome = !filters || Object.keys(filters).length === 0;
+
+      let response: ProductListResponse;
+
+      if (usePersonalizedHome) {
+        response = await apiClient.getPersonalizedHomeFeed(skip, PAGE_SIZE);
+        setHomeFeedPersonalized(Boolean(response.personalized));
+      } else {
+        setHomeFeedPersonalized(false);
+        response = await apiClient.getProducts({
+          limit: PAGE_SIZE,
+          skip,
           is_active: true,
           ...filters,
-          shop_id: undefined,
-          shop_name: String(filters.shop_id),
         });
-        setProducts(fallbackResponse.products || []);
-        setTotalProducts(fallbackResponse.total ?? (fallbackResponse.products?.length ?? 0));
-      } else {
-        setProducts(response.products || []);
-        setTotalProducts(response.total ?? (response.products?.length ?? 0));
+        if ((filters?.shop_id ?? '').toString().trim() && (response.products?.length ?? 0) === 0) {
+          response = await apiClient.getProducts({
+            limit: 48,
+            is_active: true,
+            ...filters,
+            shop_id: undefined,
+            shop_name: String(filters.shop_id),
+          });
+        }
       }
+
+      setProducts(response.products || []);
+      setTotalProducts(response.total ?? (response.products?.length ?? 0));
       setApiStatus('online');
     } catch (err: any) {
       console.error('❌ Lỗi tải dữ liệu:', err);
@@ -94,6 +104,7 @@ export default function HomePage() {
       setApiStatus('offline');
       setProducts([]);
       setTotalProducts(0);
+      setHomeFeedPersonalized(false);
     } finally {
       setLoading(false);
     }
@@ -244,7 +255,7 @@ export default function HomePage() {
     } else {
       fetchProducts();
     }
-  }, [categoryFromUrl, subcategoryFromUrl, subSubcategoryFromUrl, shopIdFromUrl, shopNameFromUrl, proLowerFromUrl, proHighFromUrl, minPriceFromUrl, maxPriceFromUrl, qFromUrl, fetchProducts]);
+  }, [categoryFromUrl, subcategoryFromUrl, subSubcategoryFromUrl, shopIdFromUrl, shopNameFromUrl, proLowerFromUrl, proHighFromUrl, minPriceFromUrl, maxPriceFromUrl, qFromUrl, fetchProducts, user?.id]);
 
   useEffect(() => {
     if (!qFromUrl.trim() || loading) return;
@@ -624,12 +635,19 @@ export default function HomePage() {
         {/* Grid SP chính: không có ?category/lọc URL — trước đây không render danh sách filteredProducts */}
         {!hasFilterParams && (
           <section className="mb-8" aria-labelledby="home-all-products-heading">
-            <h2
-              id="home-all-products-heading"
-              className="text-base font-bold text-gray-900 mb-4 border-b-2 border-[#ea580c] pb-1 w-fit"
-            >
-              TẤT CẢ SẢN PHẨM
-            </h2>
+            <div className="mb-4">
+              <h2
+                id="home-all-products-heading"
+                className="text-base font-bold text-gray-900 mb-2 border-b-2 border-[#ea580c] pb-1 w-fit"
+              >
+                TẤT CẢ SẢN PHẨM
+              </h2>
+              {homeFeedPersonalized ? (
+                <p className="text-xs text-gray-600">
+                  Ưu tiên theo danh mục và shop gần với sản phẩm bạn đã xem hoặc thích.
+                </p>
+              ) : null}
+            </div>
             {loading ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
                 {[...Array(10)].map((_, i) => (

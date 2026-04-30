@@ -665,32 +665,49 @@ export default function AdminProductsPage() {
                 Thử lại
               </button>
             </div>
-          ) : !data?.products?.length ? (
-            <div className="p-12 text-center text-gray-500">Không có sản phẩm nào.</div>
-          ) : (
+          ) : data ? (
             <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-200">
-                      <th className="text-left py-3 px-4 font-semibold text-gray-700 w-10">
-                        <input
-                          type="checkbox"
-                          checked={allSelectedOnPage}
-                          onChange={toggleSelectAllOnPage}
-                          aria-label="Chọn tất cả sản phẩm trong trang"
-                        />
-                      </th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">ID</th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Tên</th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-700 w-24">Giá</th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-700 w-32">Thương hiệu</th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">Danh mục</th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-700 w-20">Trạng thái</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.products.map((p) => (
+              <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50/90 text-sm text-gray-700">
+                <span className="font-semibold tabular-nums text-gray-900">
+                  {data.total.toLocaleString('vi-VN')}
+                </span>{' '}
+                sản phẩm trong danh sách
+                {totalPages > 1 ? (
+                  <span className="text-gray-500">
+                    {' '}
+                    · Trang này:{' '}
+                    <span className="tabular-nums text-gray-700">{data.products.length.toLocaleString('vi-VN')}</span>
+                    {' / '}
+                    <span className="tabular-nums text-gray-700">{data.total.toLocaleString('vi-VN')}</span>
+                  </span>
+                ) : null}
+              </div>
+              {!data.products?.length ? (
+                <div className="p-12 text-center text-gray-500">Không có sản phẩm nào.</div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200">
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 w-10">
+                            <input
+                              type="checkbox"
+                              checked={allSelectedOnPage}
+                              onChange={toggleSelectAllOnPage}
+                              aria-label="Chọn tất cả sản phẩm trong trang"
+                            />
+                          </th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">ID</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700">Tên</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 w-24">Giá</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 w-32">Thương hiệu</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">Danh mục</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 w-20">Trạng thái</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.products.map((p) => (
                       <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50/50">
                         <td className="py-2 px-4">
                           <input
@@ -836,8 +853,10 @@ export default function AdminProductsPage() {
                   </button>
                 </div>
               </div>
+                </>
+              )}
             </>
-          )}
+          ) : null}
         </div>
 
         {toast && (

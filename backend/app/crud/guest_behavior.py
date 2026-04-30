@@ -76,6 +76,21 @@ def recent_guest_view_product_ids(db: Session, session_id: str, limit: int = 8) 
     return [r[0] for r in rows]
 
 
+def recent_guest_favorite_product_ids(db: Session, session_id: str, limit: int = 28) -> List[int]:
+    """product_id yêu thích gần nhất trong phiên khách (cho feed trang chủ)."""
+    sid = _norm_session(session_id)
+    if not sid:
+        return []
+    rows = (
+        db.query(GuestFavorite.product_id)
+        .filter(GuestFavorite.session_id == sid)
+        .order_by(GuestFavorite.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
 def add_guest_favorite(db: Session, session_id: str, favorite_data: FavoriteCreate) -> GuestFavorite:
     """Guest yêu thích: không tăng product.likes (tránh đếm đôi khi merge tài khoản)."""
     sid = _norm_session(session_id)

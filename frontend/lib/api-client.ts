@@ -333,6 +333,15 @@ class ApiClient {
     return res?.products ?? [];
   }
 
+  /**
+   * Lưới «Tất cả sản phẩm» trang chủ (không lọc): ưu tiên theo danh mục/shop từ lượt xem + thích.
+   * Khách và đăng nhập đều dùng header Bearer / X-Guest-Session-Id như mọi request.
+   */
+  async getPersonalizedHomeFeed(skip = 0, limit = 48): Promise<ProductListResponse> {
+    const params = new URLSearchParams({ skip: String(skip), limit: String(limit) });
+    return this.fetch<ProductListResponse>(`/user-behavior/products/home-feed?${params}`);
+  }
+
   /** Sản phẩm cùng shop với 8 sản phẩm xem gần nhất; phân trang: limit, offset, seed. */
   async getProductsSameShopAsRecentViews(
     limit = 60,

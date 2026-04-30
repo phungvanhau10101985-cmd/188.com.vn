@@ -162,6 +162,8 @@ export interface ProductListResponse {
   page: number;
   size: number;
   total_pages: number;
+  /** true khi API home-feed sắp xếp theo lượt xem / yêu thích */
+  personalized?: boolean;
   applied_query?: string | null;
   normalized_query?: string | null;
   suggested_queries?: string[];

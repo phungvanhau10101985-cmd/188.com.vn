@@ -1,6 +1,7 @@
 # backend/app/api/endpoints/user_behavior.py - COMPLETE VERSION
+import math
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Response
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.user import User
@@ -13,6 +14,8 @@ from app.schemas.user import (
     UserBehaviorStats
 )
 from app.crud import guest_behavior as guest_behavior_crud
+from app.crud.personalized_feed import get_personalized_home_products
+from app.schemas.product import Product as ProductSchema
 from app.crud.user import (
     add_product_view_with_data, get_user_viewed_products,
     get_products_viewed_by_same_age_gender, get_products_same_shop_as_recent_views,
@@ -134,6 +137,51 @@ def get_products_same_shop_as_recent_views_endpoint(
         else:
             products_list.append(p)
     return {"products": products_list, "total": total, "seed": returned_seed}
+
+
+@router.get("/products/home-feed", response_model=dict)
+def get_home_feed_products(
+    response: Response,
+    skip: int = 0,
+    limit: int = 48,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
+):
+    """
+    Danh sách trang chủ (không lọc): ưu tiên danh mục / shop trùng với sản phẩm đã xem & đã thích.
+    Khách: header X-Guest-Session-Id (frontend luôn gửi). Không tín hiệu → sắp xếp theo purchases.
+    """
+    response.headers["Cache-Control"] = "private, no-store"
+    lim = max(1, min(limit, 100))
+    sk = max(0, skip)
+    uid = current_user.id if current_user else None
+    sid = None if uid else (x_guest_session_id or "").strip() or None
+
+    products, total, personalized = get_personalized_home_products(
+        db,
+        user_id=uid,
+        guest_session_id=sid,
+        skip=sk,
+        limit=lim,
+    )
+    products_list = []
+    for product in products:
+        try:
+            products_list.append(ProductSchema.model_validate(product).model_dump())
+        except Exception:
+            products_list.append(product)
+
+    total_pages = math.ceil(total / lim) if lim > 0 else 1
+    page = sk // lim + 1 if lim > 0 else 1
+    return {
+        "products": products_list,
+        "total": total,
+        "page": page,
+        "size": lim,
+        "total_pages": total_pages,
+        "personalized": personalized,
+    }
 
 
 # Favorites
