@@ -74,6 +74,69 @@ type CategorySeoAppSettingsSnap = {
   gemini_whitelist_only_env: boolean;
 };
 
+/** Mục report từ job Gemini đích — backend chỉ có vài kiểu. */
+type GeminiJobReportRow = {
+  path?: string;
+  status?: string;
+  part?: string;
+  message?: string;
+  meta?: string;
+  body?: string;
+  had_meta?: boolean;
+  had_body?: boolean;
+};
+
+function parseUtcIsoMs(s: string | null | undefined): number | null {
+  if (!s) return null;
+  let t = Date.parse(s);
+  if (!Number.isFinite(t)) t = Date.parse(`${s}Z`);
+  return Number.isFinite(t) ? t : null;
+}
+
+/** Chuỗi thời lượng (UTC) và trạng thái có chạy xong không. */
+function geminiJobTimeSummary(job: Record<string, unknown> | null | undefined): { line: string; running: boolean } | null {
+  if (!job) return null;
+  const running = !!job.running;
+  const started = parseUtcIsoMs(job.started_at as string | undefined);
+  const endCandidate = running ? Date.now() : parseUtcIsoMs(job.finished_at as string | undefined);
+  if (started == null || endCandidate == null) return running ? { line: 'Đã bắt đầu', running } : null;
+  const sec = Math.max(0, Math.round((endCandidate - started) / 1000));
+  let line: string;
+  if (sec < 60) line = `${sec}s`;
+  else if (sec < 3600) line = `${Math.floor(sec / 60)} phút ${sec % 60}s`;
+  else line = `${Math.floor(sec / 3600)} giờ ${Math.floor((sec % 3600) / 60)} phút`;
+  return {
+    line: running ? `${line} · chưa kết thúc` : line,
+    running,
+  };
+}
+
+function geminiPartLabel(part: string | undefined): string {
+  switch (part) {
+    case 'generated':
+      return 'Đã sinh';
+    case 'skipped':
+      return 'Giữ nguyên (đã có / bỏ qua)';
+    case 'error':
+      return 'Lỗi';
+    default:
+      return part || '—';
+  }
+}
+
+/** Bảng chỉ các dòng tổng kết cuối mỗi path (ô «ok» và «failed» — bỏ bản duplicate part meta/body error). */
+function geminiCompactReport(report: unknown): GeminiJobReportRow[] {
+  if (!Array.isArray(report)) return [];
+  const rows: GeminiJobReportRow[] = [];
+  for (const item of report) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as GeminiJobReportRow;
+    if (r.status === 'error' && r.part) continue;
+    if (r.status === 'ok' || r.status === 'failed') rows.push(r);
+  }
+  return rows;
+}
+
 function slugOf(node: { name: string; slug?: string }): string {
   return (node.slug || node.name).toString().trim().toLowerCase().replace(/\s+/g, '-');
 }
@@ -200,6 +263,7 @@ export default function AdminDanhMucSeoPage() {
   const [geminiDelayInput, setGeminiDelayInput] = useState('1.2');
   const [geminiJobStatus, setGeminiJobStatus] = useState<any | null>(null);
   const geminiPollRef = useRef<number | null>(null);
+  const [geminiBulkTargetUpdating, setGeminiBulkTargetUpdating] = useState(false);
 
   const [geminiAppSettings, setGeminiAppSettings] = useState<CategorySeoAppSettingsSnap | null>(null);
   const [geminiSettingsSaving, setGeminiSettingsSaving] = useState(false);
@@ -686,6 +750,33 @@ export default function AdminDanhMucSeoPage() {
     return r;
   }, [geminiRows, geminiFilter, geminiSearch]);
 
+  async function bulkToggleGeminiTargetsFiltered() {
+    const rows = filteredGeminiRows;
+    if (rows.length === 0) return;
+    const allOn = rows.every((r) => r.gemini_enabled);
+    const nextEnabled = !allOn;
+    setGeminiBulkTargetUpdating(true);
+    setGeminiBanner(null);
+    try {
+      await apiClient.setGeminiTargets({
+        paths: rows.map((r) => r.path),
+        enabled: nextEnabled,
+      });
+      await loadGeminiCatalog();
+      setGeminiBanner({
+        text: nextEnabled
+          ? `Đã bật «Đích» và lưu server cho ${rows.length} danh mục đang xem.`
+          : `Đã gỡ «Đích» và lưu server cho ${rows.length} danh mục đang xem.`,
+        tone: 'success',
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Không cập nhật hàng loạt được';
+      setGeminiBanner({ text: msg, tone: 'error' });
+    } finally {
+      setGeminiBulkTargetUpdating(false);
+    }
+  }
+
 
   const redirectMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -1027,8 +1118,20 @@ export default function AdminDanhMucSeoPage() {
                             ? 'Bỏ «Lần này» trên các dòng đang xem'
                             : 'Tick hết «Lần này» các dòng đang xem'}
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => void bulkToggleGeminiTargetsFiltered()}
+                          disabled={processing || geminiLoading || geminiBulkTargetUpdating || filteredGeminiRows.length === 0}
+                          className="rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          {filteredGeminiRows.length > 0 && filteredGeminiRows.every((r) => r.gemini_enabled)
+                            ? 'Gỡ «Đích» trên các dòng đang xem'
+                            : 'Tick hết «Đích» các dòng đang xem'}
+                        </button>
                       </div>
-                      <p className="mt-1.5 text-[11px] text-gray-500">Nút cam dùng cột Đích. Nút viền xám dùng cột «Lần này».</p>
+                      <p className="mt-1.5 text-[11px] text-gray-500">
+                        Nút cam dùng cột Đích. Nút «Lần này» chỉ phiên này; nút «Đích» lưu server (có chọn tất cả theo bộ lọc đang xem).
+                      </p>
                     </div>
 
                     <div>
@@ -1135,28 +1238,108 @@ export default function AdminDanhMucSeoPage() {
                       </tbody>
                     </table>
                   </div>
-                  {geminiJobStatus && geminiJobStatus.total > 0 && (
-                    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[11px] text-gray-700">
-                      <span className="font-medium">{geminiJobStatus.running ? 'Đang chạy' : 'Hoàn tất'}</span>
-                      <span className="mx-1.5 text-gray-300">·</span>
-                      <span>
-                        {geminiJobStatus.processed ?? 0}/{geminiJobStatus.total ?? 0}
-                      </span>
-                      <span className="mx-1.5 text-gray-300">·</span>
-                      <span>meta +{geminiJobStatus.meta_generated ?? 0}</span>
-                      <span className="text-gray-400"> ~{geminiJobStatus.meta_skipped ?? 0}</span>
-                      <span className="mx-1.5 text-gray-300">·</span>
-                      <span>body +{geminiJobStatus.body_generated ?? 0}</span>
-                      <span className="text-gray-400"> ~{geminiJobStatus.body_skipped ?? 0}</span>
-                      <span className="mx-1.5 text-gray-300">·</span>
-                      <span className={geminiJobStatus.failed ? 'text-red-700' : ''}>lỗi {geminiJobStatus.failed ?? 0}</span>
-                      {geminiJobStatus.current_path && geminiJobStatus.running ? (
-                        <div className="mt-1 truncate font-mono text-[10px] text-gray-500">
-                          → {geminiJobStatus.current_path}
+                  {geminiJobStatus && geminiJobStatus.total > 0 && (() => {
+                    const job = geminiJobStatus as Record<string, unknown>;
+                    const timeInfo = geminiJobTimeSummary(job);
+                    const compact = geminiCompactReport(job.report);
+                    return (
+                      <div className="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-[11px] text-gray-700">
+                        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                          <span className="font-semibold text-gray-900">{geminiJobStatus.running ? 'Đang chạy' : 'Hoàn tất'}</span>
+                          <span className="text-gray-300">·</span>
+                          <span>
+                            {geminiJobStatus.processed ?? 0}/{geminiJobStatus.total ?? 0} danh mục
+                          </span>
+                          <span className="text-gray-300">·</span>
+                          <span title="Meta: số lần đã sinh · số lần giữ nguyên (đã có hoặc bỏ qua)">
+                            meta đã sinh <strong>{geminiJobStatus.meta_generated ?? 0}</strong>
+                            <span className="text-gray-400"> · giữ nguyên {geminiJobStatus.meta_skipped ?? 0}</span>
+                          </span>
+                          <span className="text-gray-300">·</span>
+                          <span title="Body cuối trang">
+                            body đã sinh <strong>{geminiJobStatus.body_generated ?? 0}</strong>
+                            <span className="text-gray-400"> · giữ nguyên {geminiJobStatus.body_skipped ?? 0}</span>
+                          </span>
+                          <span className="text-gray-300">·</span>
+                          <span className={geminiJobStatus.failed ? 'font-medium text-red-700' : ''}>lỗi {geminiJobStatus.failed ?? 0}</span>
+                          {timeInfo ? (
+                            <>
+                              <span className="text-gray-300">·</span>
+                              <span className="text-gray-600">Thời gian {timeInfo.line}</span>
+                            </>
+                          ) : null}
                         </div>
-                      ) : null}
-                    </div>
-                  )}
+                        <p className="mt-1 text-[10px] leading-snug text-gray-500">
+                          Tuỳ chọn lúc chạy: luôn ghi đè meta{' '}
+                          <strong>{geminiJobStatus.force_description ? 'bật' : 'tắt'}</strong>, body{' '}
+                          <strong>{geminiJobStatus.force_body ? 'bật' : 'tắt'}</strong>
+                          {geminiJobStatus.started_at ? (
+                            <>
+                              {' '}
+                              · Bắt đầu UTC <span className="font-mono">{String(geminiJobStatus.started_at)}</span>
+                            </>
+                          ) : null}
+                          {!geminiJobStatus.running && geminiJobStatus.finished_at ? (
+                            <>
+                              {' '}
+                              · Xong UTC <span className="font-mono">{String(geminiJobStatus.finished_at)}</span>
+                            </>
+                          ) : null}
+                        </p>
+                        {geminiJobStatus.current_path && geminiJobStatus.running ? (
+                          <div className="mt-1 truncate font-mono text-[10px] text-gray-600">
+                            Đang xử lý → {geminiJobStatus.current_path}
+                          </div>
+                        ) : null}
+                        {compact.length > 0 ? (
+                          <details
+                            className="mt-2 border-t border-gray-100 pt-2"
+                            // `defaultOpen` is valid for <details>; some @types/react versions omit it.
+                            {...{ defaultOpen: !geminiJobStatus.running }}
+                          >
+                            <summary className="cursor-pointer select-none text-xs font-semibold text-gray-800">
+                              Báo cáo chi tiết từng path ({compact.length})
+                            </summary>
+                            <div className="mt-2 max-h-56 overflow-auto rounded border border-gray-100">
+                              <table className="w-full text-left text-[10px]">
+                                <thead className="sticky top-0 bg-gray-50 text-gray-600">
+                                  <tr>
+                                    <th className="px-2 py-1 font-medium">Path</th>
+                                    <th className="px-2 py-1 font-medium">Meta</th>
+                                    <th className="px-2 py-1 font-medium">Body</th>
+                                    <th className="px-2 py-1 font-medium">Ghi chú / lỗi</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {compact.map((r, i) => (
+                                    <tr key={`${r.path ?? i}-${i}`} className="border-t border-gray-100 align-top">
+                                      <td className="px-2 py-1 font-mono text-[10px] text-gray-800">{r.path ?? '—'}</td>
+                                      <td className="px-2 py-1">{r.status === 'ok' ? geminiPartLabel(r.meta) : '—'}</td>
+                                      <td className="px-2 py-1">{r.status === 'ok' ? geminiPartLabel(r.body) : '—'}</td>
+                                      <td className="px-2 py-1 text-gray-700">
+                                        {r.status === 'failed'
+                                          ? r.message ?? 'Thất bại'
+                                          : r.message
+                                            ? r.message
+                                            : r.status === 'ok'
+                                              ? [
+                                                  typeof r.had_meta === 'boolean' ? `Trước chạy: meta ${r.had_meta ? 'đã có' : 'chưa có'}` : null,
+                                                  typeof r.had_body === 'boolean' ? `body ${r.had_body ? 'đã có' : 'chưa có'}` : null,
+                                                ]
+                                                  .filter(Boolean)
+                                                  .join(' · ')
+                                              : '—'}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </details>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="mb-2">
