@@ -69,7 +69,7 @@ export default function Navigation({
   const { favoriteCount } = useFavorites();
   const { getCartItemCount } = useCart();
   const displayCartCount = getCartItemCount();
-  const dropdownRef = useRef<HTMLNavElement>(null);
+  const dropdownRef = useRef<HTMLElement | null>(null);
   /** Căn mega-menu theo đúng pill cấp 1 — container và từng pill (không ép full-width trái). */
   const categoryBarWrapRef = useRef<HTMLDivElement>(null);
   const pillsScrollRef = useRef<HTMLDivElement>(null);

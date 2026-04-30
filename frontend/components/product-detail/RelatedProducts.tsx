@@ -146,13 +146,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   const title = useMemo(() => sectionTitle(relatedTab), [relatedTab]);
   const fullListingHref = useMemo(
     () => buildHomeListingHref(relatedTab, filtersFromProduct(currentProduct)),
-    [
-      relatedTab,
-      currentProduct.shop_id,
-      currentProduct.shop_name,
-      currentProduct.pro_lower_price,
-      currentProduct.pro_high_price,
-    ]
+    [relatedTab, currentProduct]
   );
 
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
@@ -167,12 +161,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   const shopNameFilter = useMemo(() => excelCell(currentProduct.shop_name), [currentProduct.shop_name]);
   const sameShopGroupHref = useMemo(
     () => buildHomeListingHref('same_price', filtersFromProduct(currentProduct)),
-    [
-      currentProduct.shop_name,
-      currentProduct.shop_id,
-      currentProduct.pro_lower_price,
-      currentProduct.pro_high_price,
-    ]
+    [currentProduct]
   );
 
   const fetchRelatedProducts = useCallback(async () => {
@@ -222,14 +211,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
     } finally {
       setLoading(false);
     }
-  }, [
-    currentProduct.id,
-    currentProduct.shop_id,
-    currentProduct.shop_name,
-    currentProduct.pro_lower_price,
-    currentProduct.pro_high_price,
-    relatedTab,
-  ]);
+  }, [currentProduct, relatedTab]);
 
   useEffect(() => {
     fetchRelatedProducts();

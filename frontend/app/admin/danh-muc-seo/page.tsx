@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import AdminLayout from '@/components/admin/AdminLayout';
 import { apiClient } from '@/lib/api-client';
+import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
+import {
+  buildCategorySeoSitemapXml,
+  triggerDownloadXml,
+} from '@/lib/category-sitemap';
 import { generateSlug } from '@/lib/utils';
 import type { CategoryLevel1, CategoryLevel3 } from '@/types/api';
 
@@ -206,6 +211,7 @@ export default function AdminDanhMucSeoPage() {
 
   const [geminiAppSettings, setGeminiAppSettings] = useState<CategorySeoAppSettingsSnap | null>(null);
   const [geminiSettingsSaving, setGeminiSettingsSaving] = useState(false);
+  const [sitemapDownloading, setSitemapDownloading] = useState(false);
 
   const [mappings, setMappings] = useState<MappingItem[]>([]);
   const [mappingsLoading, setMappingsLoading] = useState(false);
@@ -768,6 +774,46 @@ export default function AdminDanhMucSeoPage() {
     );
   }, [flat, search]);
 
+  const handleDownloadCategorySitemap = async () => {
+    const siteBase =
+      (process.env.NEXT_PUBLIC_SITE_URL ||
+        process.env.NEXT_PUBLIC_DOMAIN ||
+        (typeof window !== 'undefined' ? window.location.origin : '')
+      ).replace(/\/$/, '') || '';
+    if (!siteBase) return;
+    setSitemapDownloading(true);
+    try {
+      const indexedClusterUrls: string[] = [];
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/seo-clusters/`, {
+          headers: { 'Content-Type': 'application/json', ...ngrokFetchHeaders() },
+        });
+        if (res.ok) {
+          const data = (await res.json()) as Array<{ slug?: string; index_policy?: string }>;
+          if (Array.isArray(data)) {
+            for (const c of data) {
+              if (!c.slug || c.index_policy !== 'index') continue;
+              indexedClusterUrls.push(
+                `${siteBase}/c/${encodeURIComponent(String(c.slug).replace(/^\/+|\/+$/g, ''))}`
+              );
+            }
+          }
+        }
+      } catch {
+        /* bỏ qua cluster — vẫn tải sitemap chỉ danh mục */
+      }
+      const xml = buildCategorySeoSitemapXml({
+        siteBase,
+        categories: flat.map(({ url, level }) => ({ url, level })),
+        indexedClusterAbsoluteUrls: indexedClusterUrls,
+      });
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      triggerDownloadXml(`sitemap-danh-muc-seo-${stamp}.xml`, xml);
+    } finally {
+      setSitemapDownloading(false);
+    }
+  };
+
   return (
     <AdminLayout>
       <div className="p-6 max-w-7xl">
@@ -775,6 +821,27 @@ export default function AdminDanhMucSeoPage() {
         <p className="text-gray-600 text-sm mb-4">
           Quản lý danh mục cấp 1, 2, 3 và mapping SEO.
         </p>
+
+        <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50/90 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm text-gray-700 max-w-xl">
+            <span className="font-semibold text-gray-900">Sitemap XML (SEO danh mục)</span>
+            <p className="mt-1 text-xs text-gray-600 leading-snug">
+              Tải file gồm <code className="text-[11px]">/danh-muc</code> (danh sách tổng), toàn bộ URL{' '}
+              <code className="text-[11px]">/danh-muc/&lt;cấp-1[/cấp-2[/cấp-3]]&gt;</code> theo cây hiện tại, và các landing{' '}
+              <code className="text-[11px]">/c/&lt;slug&gt;</code> có chính sách index (giống logic{' '}
+              <code className="text-[11px]">app/sitemap.ts</code>). Base URL lấy từ{' '}
+              <code className="text-[11px]">NEXT_PUBLIC_SITE_URL</code> hoặc origin trình duyệt.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleDownloadCategorySitemap()}
+            disabled={loading || sitemapDownloading}
+            className="shrink-0 rounded-lg border border-[#ea580c] bg-white px-4 py-2 text-sm font-medium text-[#c2410c] hover:bg-orange-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {sitemapDownloading ? 'Đang tạo file…' : 'Tải sitemap-danh-muc-seo.xml'}
+          </button>
+        </div>
 
         <div className="mb-6 border-b border-gray-200">
           <nav className="-mb-px flex space-x-8">
