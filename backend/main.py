@@ -22,6 +22,9 @@ _settings = _get_app_config()
 
 def _setup_file_logging() -> None:
     """Ghi log ra LOG_FILE (.env) — trước đây biến này tồn tại nhưng không được gắn handler."""
+    rel = (getattr(_settings, "LOG_FILE", "") or "").strip()
+    if not rel:
+        return
     backend_root = Path(__file__).resolve().parent
     path = Path(rel)
     if not path.is_absolute():
