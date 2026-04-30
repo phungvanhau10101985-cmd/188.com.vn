@@ -11,15 +11,15 @@ export default function MobilePromoBanner() {
       >
         <div className="flex items-start justify-between gap-2">
           <div>
-            <span className="text-3xl font-bold leading-tight block">60%</span>
-            <span className="text-sm font-medium text-white/95">Xả kho hàng lẻ size</span>
+            <span className="text-3xl font-bold leading-tight block text-white">60%</span>
+            <span className="text-sm font-medium text-white">Xả kho hàng lẻ size</span>
           </div>
-          <span className="text-[10px] font-semibold text-white/95 uppercase tracking-wider">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-white">
             188.COM.VN
           </span>
         </div>
         <div className="mt-3 text-center">
-          <span className="inline-flex min-h-[44px] items-center justify-center bg-white/20 hover:bg-white/30 text-white text-xs font-semibold px-5 py-2.5 rounded-lg transition-colors">
+          <span className="inline-flex min-h-[44px] min-w-[140px] items-center justify-center bg-white/25 text-white text-xs font-semibold px-5 py-2.5 rounded-lg transition-colors">
             &gt;&gt; Xem ngay &lt;&lt;
           </span>
         </div>

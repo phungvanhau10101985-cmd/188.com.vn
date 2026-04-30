@@ -1,7 +1,7 @@
 // frontend/components/product-detail/RelatedProducts.tsx
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { cdnUrl } from '@/lib/cdn-url';
 import Image from 'next/image';
@@ -124,6 +124,64 @@ function buildFetchPlan(product: Product, tab: ProductRelatedTabId): FetchPlan {
   }
 }
 
+/** Hai khối RelatedProducts trên cùng trang (tabs + cuối trang) chia sẻ một request — giảm TBT và gánh mạng. */
+type RelatedFetchSnapshot = {
+  relatedProducts: Product[];
+  shopGroupProducts: Product[];
+};
+
+function relatedFetchDedupeKey(productId: number, tab: ProductRelatedTabId, plan: Extract<FetchPlan, { ok: true }>): string {
+  return `${productId}:${tab}:${plan.sortPurchasesDesc ? '1' : '0'}:${JSON.stringify(plan.params)}`;
+}
+
+const inflightRelatedFetches = new Map<string, Promise<RelatedFetchSnapshot>>();
+
+async function loadRelatedProductsSnapshot(
+  currentProduct: Product,
+  relatedTab: ProductRelatedTabId
+): Promise<RelatedFetchSnapshot> {
+  const plan = buildFetchPlan(currentProduct, relatedTab);
+  if (!plan.ok) {
+    return { relatedProducts: [], shopGroupProducts: [] };
+  }
+
+  const key = relatedFetchDedupeKey(currentProduct.id, relatedTab, plan);
+  let batch = inflightRelatedFetches.get(key);
+  if (!batch) {
+    batch = (async () => {
+      const shopName = excelCell(currentProduct.shop_name);
+      const fetchSameShopNameGroup =
+        relatedTab === 'bestselling' && shopName
+          ? apiClient.getProducts({
+              limit: 120,
+              is_active: true,
+              shop_name: shopName,
+            })
+          : Promise.resolve({ products: [] as Product[] });
+
+      const [response, shopGroupResponse] = await Promise.all([
+        apiClient.getProducts(plan.params),
+        fetchSameShopNameGroup,
+      ]);
+
+      let list = (response.products || []).filter((p) => p.id !== currentProduct.id);
+      if (plan.sortPurchasesDesc) {
+        list = [...list].sort((a, b) => (b.purchases ?? 0) - (a.purchases ?? 0));
+      }
+
+      let sgList = (shopGroupResponse.products || []).filter((p) => p.id !== currentProduct.id);
+      sgList = [...sgList].sort((a, b) => (b.purchases ?? 0) - (a.purchases ?? 0));
+
+      return { relatedProducts: list, shopGroupProducts: sgList };
+    })().finally(() => {
+      inflightRelatedFetches.delete(key);
+    });
+    inflightRelatedFetches.set(key, batch);
+  }
+
+  return batch;
+}
+
 const BESTSELLING_GRID_CLASS = 'grid grid-cols-2 lg:grid-cols-5 gap-4';
 const BESTSELLING_IMAGE_SIZES = '(max-width: 1023px) 50vw, (min-width: 1024px) 20vw';
 
@@ -164,58 +222,64 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
     [currentProduct]
   );
 
-  const fetchRelatedProducts = useCallback(async () => {
-    const plan = buildFetchPlan(currentProduct, relatedTab);
-    if (!plan.ok) {
-      setRelatedProducts([]);
-      setShopGroupProducts([]);
-      setShopGroupVisibleCount(relatedStripInitialVisible(0));
-      setLoading(false);
-      return;
-    }
+  useEffect(() => {
+    const ac = new AbortController();
 
-    try {
-      setLoading(true);
-      const shopName = excelCell(currentProduct.shop_name);
-      const fetchSameShopNameGroup =
-        relatedTab === 'bestselling' && shopName
-          ? apiClient.getProducts({
-              limit: 120,
-              is_active: true,
-              shop_name: shopName,
-            })
-          : Promise.resolve({ products: [] as Product[] });
-
-      const [response, shopGroupResponse] = await Promise.all([
-        apiClient.getProducts(plan.params),
-        fetchSameShopNameGroup,
-      ]);
-
-      let list = (response.products || []).filter((p) => p.id !== currentProduct.id);
-      if (plan.sortPurchasesDesc) {
-        list = [...list].sort((a, b) => (b.purchases ?? 0) - (a.purchases ?? 0));
-      }
-
+    const applySnapshot = (list: Product[], sgList: Product[]) => {
       setRelatedProducts(list);
       setVisibleCount(relatedTab === 'bestselling' ? relatedStripInitialVisible(list.length) : 5);
-
-      let sgList = (shopGroupResponse.products || []).filter((p) => p.id !== currentProduct.id);
-      sgList = [...sgList].sort((a, b) => (b.purchases ?? 0) - (a.purchases ?? 0));
       setShopGroupProducts(sgList);
       setShopGroupVisibleCount(relatedStripInitialVisible(sgList.length));
-    } catch (error) {
-      console.error('Error fetching related products:', error);
-      setRelatedProducts([]);
-      setShopGroupProducts([]);
-      setShopGroupVisibleCount(relatedStripInitialVisible(0));
-    } finally {
-      setLoading(false);
-    }
-  }, [currentProduct, relatedTab]);
+    };
 
-  useEffect(() => {
-    fetchRelatedProducts();
-  }, [fetchRelatedProducts]);
+    const runFetch = async () => {
+      const plan = buildFetchPlan(currentProduct, relatedTab);
+      if (!plan.ok) {
+        if (ac.signal.aborted) return;
+        setRelatedProducts([]);
+        setShopGroupProducts([]);
+        setShopGroupVisibleCount(relatedStripInitialVisible(0));
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        const { relatedProducts: list, shopGroupProducts: sgList } =
+          await loadRelatedProductsSnapshot(currentProduct, relatedTab);
+        if (ac.signal.aborted) return;
+        applySnapshot(list, sgList);
+      } catch (error) {
+        console.error('Error fetching related products:', error);
+        if (ac.signal.aborted) return;
+        setRelatedProducts([]);
+        setShopGroupProducts([]);
+        setShopGroupVisibleCount(relatedStripInitialVisible(0));
+      } finally {
+        if (!ac.signal.aborted) setLoading(false);
+      }
+    };
+
+    const kickoff = () => {
+      void runFetch();
+    };
+
+    let idleHandle: number | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      idleHandle = window.requestIdleCallback(kickoff, { timeout: 2200 });
+    } else {
+      timeoutId = setTimeout(kickoff, 0);
+    }
+
+    return () => {
+      ac.abort();
+      if (idleHandle !== undefined && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleHandle);
+      }
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    };
+  }, [currentProduct, relatedTab]);
 
   if (loading) {
     const showShopGroupSkeleton = relatedTab === 'bestselling' && !!shopNameFilter;

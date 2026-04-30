@@ -1,7 +1,8 @@
 /* frontend/app/globals.css - Design system hiện đại */
 :root {
   /** Chiều cao header mobile — MobileHeader cập nhật qua JS (ResizeObserver); fallback cho SSR */
-  --mobile-app-header-height: 104px;
+  /** Chiều cao ước lượng header mobile mở rộng (logo + ô tìm + chip) — giảm CLS khi ResizeObserver cập nhật */
+  --mobile-app-header-height: 140px;
 }
 
 @tailwind base;

@@ -49,9 +49,23 @@ export default function ProductDetailMobile({
   const available = (product.available || 0) > 0;
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (!isAuthenticated) return;
+    let idleHandle: number | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const load = () => {
       apiClient.getMyLoyaltyStatus().then(setLoyaltyStatus).catch(() => {});
+    };
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      idleHandle = window.requestIdleCallback(load, { timeout: 3500 });
+    } else {
+      timeoutId = setTimeout(load, 0);
     }
+    return () => {
+      if (idleHandle !== undefined && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleHandle);
+      }
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    };
   }, [isAuthenticated]);
 
   const loyaltyDiscountPercent = loyaltyStatus?.current_tier?.discount_percent || 0;
@@ -106,6 +120,7 @@ export default function ProductDetailMobile({
                     title={`Video ${product.name}`}
                     src={buildYoutubeEmbedSrc(parsedVideo.urlOrId)}
                     className="absolute inset-0 w-full h-full"
+                    loading="lazy"
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
                     allowFullScreen
                     referrerPolicy="strict-origin-when-cross-origin"
@@ -140,6 +155,8 @@ export default function ProductDetailMobile({
                   fill
                   className="object-cover"
                   sizes="100vw"
+                  priority={!isShowingVideo}
+                  fetchPriority={isShowingVideo ? 'auto' : 'high'}
                 />
                 <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
                   <span className="font-medium truncate max-w-[140px]">{product.brand_name || '188 com vn'}</span>

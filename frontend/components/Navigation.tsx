@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { generateSlug } from '@/lib/utils';
-import DesktopImageSearchPopover from '@/components/DesktopImageSearchPopover';
+import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { useCart } from '@/features/cart/hooks/useCart';
@@ -382,7 +382,7 @@ export default function Navigation({
                 autoComplete="off"
                 className="w-full pl-4 pr-24 py-2 text-xs rounded-lg border-0 bg-white focus:outline-none focus:ring-2 focus:ring-orange-200"
               />
-              <DesktopImageSearchPopover panelZClass="z-[110]" />
+              <LazyDesktopImageSearchPopover panelZClass="z-[110]" />
               <button
                 type="submit"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-[#ea580c]"

@@ -283,6 +283,7 @@ export const SimpleProductCard = ({
     quality: 80,
     fallbackStrategy: 'local'
   });
+  const blurDataUrl = getOptimizedImage(undefined, { width: 20, height: 20 });
 
   const handleFavorite = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -310,6 +311,8 @@ export const SimpleProductCard = ({
             onError={handleImageError}
             sizes="(max-width: 768px) 50vw, 25vw"
             priority={priority}
+            placeholder="blur"
+            blurDataURL={blurDataUrl}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gray-200">

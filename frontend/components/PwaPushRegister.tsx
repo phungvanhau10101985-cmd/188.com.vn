@@ -25,7 +25,12 @@ export default function PwaPushRegister() {
         .register("/sw.js", { scope: "/" })
         .catch((e) => console.warn("[PWA] SW register:", e));
 
-    regSw();
+    const w = window;
+    const ric = w.requestIdleCallback?.bind(w);
+    let idleId: ReturnType<typeof requestIdleCallback> | undefined;
+    let swTimeoutId: ReturnType<typeof setTimeout> | undefined;
+    if (ric) idleId = ric(() => regSw(), { timeout: 6000 });
+    else swTimeoutId = setTimeout(regSw, 400);
 
     const tryPush = async () => {
       if (done.current) return;
@@ -80,6 +85,8 @@ export default function PwaPushRegister() {
       if (n >= 24) clearInterval(iv);
     }, 5000);
     return () => {
+      if (idleId != null && w.cancelIdleCallback) w.cancelIdleCallback(idleId);
+      if (swTimeoutId != null) clearTimeout(swTimeoutId);
       clearTimeout(t);
       clearInterval(iv);
       window.removeEventListener("storage", onStorage);

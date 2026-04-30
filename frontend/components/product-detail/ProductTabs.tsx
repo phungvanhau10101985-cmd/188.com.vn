@@ -286,6 +286,7 @@ export default function ProductTabs({ product }: ProductTabsProps) {
                             alt={`${product.name} chi tiết ${index + 1}`}
                             width={800}
                             height={600}
+                            sizes="(max-width: 1024px) 100vw, 800px"
                             className="w-full h-auto max-w-4xl mx-auto"
                             onError={(e) => {
                               e.currentTarget.src = cdnUrl('/images/placeholder.jpg');

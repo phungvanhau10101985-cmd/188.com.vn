@@ -53,6 +53,7 @@ export default function ProductGallery({ product, selectedImageUrl, onSelectImag
               title={`Video ${product.name}`}
               src={buildYoutubeEmbedSrc(parsedVideo.urlOrId)}
               className="w-full h-full"
+              loading="lazy"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
               allowFullScreen
               referrerPolicy="strict-origin-when-cross-origin"

@@ -33,16 +33,36 @@ export default function SiteEmbedsRootClient({ embeds }: { embeds: PublicSiteEmb
   const initial = useRef(embeds);
 
   useEffect(() => {
-    const win = typeof window !== 'undefined' ? (window as Window & { __188_SITE_EMBEDS__?: boolean }) : null;
-    if (!win || win.__188_SITE_EMBEDS__) return;
-    win.__188_SITE_EMBEDS__ = true;
+    const inject = () => {
+      const win = typeof window !== "undefined" ? (window as Window & { __188_SITE_EMBEDS__?: boolean }) : null;
+      if (!win || win.__188_SITE_EMBEDS__) return;
+      win.__188_SITE_EMBEDS__ = true;
 
-    const { head, body_open, body_close } = initial.current;
+      const { head, body_open, body_close } = initial.current;
 
-    head.forEach((h) => appendFragment(document.head, h));
+      head.forEach((h) => appendFragment(document.head, h));
 
-    for (let i = body_open.length - 1; i >= 0; i--) prependBodyFragment(body_open[i] ?? '');
-    body_close.forEach((b) => appendFragment(document.body, b));
+      for (let i = body_open.length - 1; i >= 0; i--) prependBodyFragment(body_open[i] ?? "");
+      body_close.forEach((b) => appendFragment(document.body, b));
+    };
+
+    const w = typeof window !== "undefined" ? window : null;
+    if (!w) return;
+
+    const ric = w.requestIdleCallback?.bind(w);
+    let idleId: ReturnType<typeof requestIdleCallback> | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    if (ric) {
+      idleId = ric(() => inject(), { timeout: 3200 });
+    } else {
+      timeoutId = setTimeout(inject, 400);
+    }
+
+    return () => {
+      if (idleId != null && w.cancelIdleCallback) w.cancelIdleCallback(idleId);
+      if (timeoutId != null) clearTimeout(timeoutId);
+    };
   }, []);
 
   return null;

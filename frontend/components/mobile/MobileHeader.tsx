@@ -184,21 +184,30 @@ export default function MobileHeader({
     return { mode: 'fallback' as const };
   }, [suggestions, list]);
 
+  /** Trang chủ không nút Back — header gọn: logo nhỏ hơn một chút, thanh search pill một khối. */
+  const compactHomeChrome = isHome && !showHeaderBack;
+
   const chipClass =
-    'flex-shrink-0 text-xs text-white/95 hover:text-white px-2.5 py-1 rounded-full bg-white/15 hover:bg-white/25 whitespace-nowrap border border-white/20';
+    'flex-shrink-0 text-[11px] leading-tight font-medium text-white px-2 py-1 rounded-full bg-white/18 hover:bg-white/28 whitespace-nowrap border border-white/25 shadow-sm active:scale-[0.98] transition-transform';
 
   const iconBtn =
-    'flex-shrink-0 min-w-[44px] min-h-[44px] w-11 h-11 shrink-0 flex items-center justify-center text-white rounded-full bg-white/15 hover:bg-white/25 active:bg-white/30';
+    'flex-shrink-0 min-w-[44px] min-h-[44px] w-11 h-11 shrink-0 flex items-center justify-center text-white rounded-xl bg-white/15 hover:bg-white/25 active:bg-white/35 transition-colors backdrop-blur-[2px]';
 
   return (
     <div className="md:hidden sticky top-0 z-50" ref={panelRef}>
-      <header className="bg-[#ea580c] shadow-md border-b border-orange-700/20">
-        <div className={`px-3 pb-1 transition-[padding] duration-200 ${isScrolled ? 'pt-1' : 'pt-1.5'}`}>
+      <header className="bg-gradient-to-b from-[#f97316] to-[#ea580c] shadow-sm border-b border-orange-800/15">
+        <div className={`px-2.5 sm:px-3 transition-[padding] duration-200 ${isScrolled ? 'pt-1 pb-1' : compactHomeChrome ? 'pt-1 pb-1.5' : 'pt-1.5 pb-1'}`}>
           {/* Thu max-height khi cuộn — ResizeObserver cập nhật --mobile-app-header-height để thanh tabs SP cùng loại dính đúng dưới */}
           <div
             className={`flex justify-center shrink-0 items-center overflow-hidden transition-[max-height,opacity] duration-200 ease-out ${
-              isScrolled ? 'max-h-0 opacity-0' : 'max-h-[2.75rem] opacity-100'
+              isScrolled
+                ? 'max-h-0 opacity-0 pointer-events-none'
+                : compactHomeChrome
+                  ? 'max-h-9 opacity-100'
+                  : 'max-h-[2.75rem] opacity-100'
             }`}
+            aria-hidden={isScrolled}
+            {...(isScrolled ? ({ inert: true as const } as object) : {})}
           >
             <Link
               href="/"
@@ -209,15 +218,16 @@ export default function MobileHeader({
               <Image
                 src="https://188comvn.b-cdn.net/logo%20head%20188.png"
                 alt="188.com.vn"
-                width={220}
-                height={44}
-                className="h-11 w-auto object-contain block"
+                width={200}
+                height={40}
+                className={`w-auto object-contain block ${compactHomeChrome ? 'h-8' : 'h-10 sm:h-11'}`}
+                priority={compactHomeChrome}
               />
             </Link>
           </div>
 
-          {/* Danh mục + ô tìm kiếm mobile + icon nhanh */}
-          <div className="flex items-center gap-1 relative z-10 pt-0.5">
+          {/* Danh mục + ô tìm kiếm (pill) + icon nhanh */}
+          <div className="flex items-center gap-1.5 relative z-10 pt-0.5">
             {showHeaderBack && (
               <button
                 type="button"
@@ -234,19 +244,19 @@ export default function MobileHeader({
             <button
               type="button"
               onClick={() => setCategoryPanelOpen((o) => !o)}
-              className={`flex-shrink-0 flex items-center justify-center min-w-[44px] min-h-[44px] w-11 h-11 text-white rounded-lg transition-colors ${
-                categoryPanelOpen ? 'bg-white/30' : 'bg-white/15 hover:bg-white/25'
-              }`}
+              className={`${iconBtn} ${categoryPanelOpen ? '!bg-white/35 ring-1 ring-white/40' : ''}`}
               aria-label="Danh mục"
               aria-expanded={categoryPanelOpen}
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-[22px] h-[22px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
 
-            <form onSubmit={handleSearch} className="flex-1 min-w-0 relative">
-              {/* sr-only thay vì hidden: iOS/Safari thường chặn .click() vào input display:none */}
+            <form
+              onSubmit={handleSearch}
+              className="flex-1 min-w-0 flex h-11 items-stretch rounded-xl bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] overflow-hidden touch-manipulation"
+            >
               <input
                 id={mobileImageInputId}
                 type="file"
@@ -255,34 +265,44 @@ export default function MobileHeader({
                 tabIndex={-1}
                 onChange={onImagePick}
               />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Tìm kiếm…"
-                autoComplete="off"
-                className="w-full pl-3 pr-[5.75rem] py-2.5 bg-white border-0 rounded-lg text-gray-900 placeholder-gray-600 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-white/70"
-              />
-              <label
-                htmlFor={mobileImageInputId}
-                className="absolute right-[3.25rem] top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md text-gray-600 hover:text-[#ea580c] hover:bg-orange-50 active:bg-orange-100 cursor-pointer"
-                aria-label="Tìm bằng ảnh"
-                title="Tìm theo ảnh (NanoAI)"
-              >
-                <svg className="w-4 h-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </label>
-              <button
-                type="submit"
-                className="absolute right-1 top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] w-11 h-11 rounded-md bg-[#ea580c] text-white flex items-center justify-center hover:bg-orange-600 shadow-sm"
-                aria-label="Tìm trên 188"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </button>
+              <div className="flex flex-1 min-w-0 items-center gap-2 pl-2.5 pr-1">
+                <span className="text-gray-400 shrink-0" aria-hidden>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </span>
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder={compactHomeChrome ? 'Tìm trên 188.COM.VN…' : 'Tìm sản phẩm…'}
+                  autoComplete="off"
+                  enterKeyHint="search"
+                  className="flex-1 min-w-0 h-full bg-transparent border-0 text-[15px] text-gray-900 placeholder:text-gray-500 focus:ring-0 focus:outline-none"
+                />
+              </div>
+              <div className="flex shrink-0 self-stretch divide-x divide-gray-200/90 border-l border-gray-100">
+                <label
+                  htmlFor={mobileImageInputId}
+                  className="flex w-11 min-h-[44px] items-center justify-center text-gray-500 hover:text-[#ea580c] hover:bg-orange-50/90 active:bg-orange-100 cursor-pointer transition-colors"
+                  aria-label="Tìm bằng ảnh"
+                  title="Tìm theo ảnh (NanoAI)"
+                >
+                  <svg className="w-[18px] h-[18px] pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </label>
+                <button
+                  type="submit"
+                  className="flex w-11 min-h-[44px] items-center justify-center bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-orange-800 transition-colors"
+                  aria-label="Tìm trên 188"
+                >
+                  <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.25} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </button>
+              </div>
             </form>
 
             <Link href="/da-xem" className={iconBtn} aria-label="Đã xem" title="Đã xem">
@@ -292,7 +312,8 @@ export default function MobileHeader({
               </svg>
             </Link>
 
-            {isAuthenticated && (
+            {/* Trang chủ: thanh nút thoáng — thông báo đã có ở bottom nav */}
+            {isAuthenticated && !compactHomeChrome && (
               <Link href="/account/notifications" className={`${iconBtn} relative`} aria-label="Thông báo" title="Thông báo">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -338,7 +359,7 @@ export default function MobileHeader({
             </div>
           ) : (
             <div
-              className="flex items-center gap-1.5 mt-1.5 pb-1 overflow-x-auto scrollbar-hide min-h-[28px] -mx-0.5 px-1"
+              className="flex items-center gap-1 mt-1 pb-1 overflow-x-auto scrollbar-hide min-h-[26px] -mx-0.5 px-0.5"
               role="navigation"
               aria-label={
                 searchStripContent.mode === 'suggestions'
@@ -348,7 +369,7 @@ export default function MobileHeader({
                     : 'Truy cập nhanh'
               }
             >
-              <div className="flex flex-nowrap items-center gap-1 py-0.5 min-w-0">
+              <div className="flex flex-nowrap items-center gap-1 min-w-0">
                 {searchStripContent.mode === 'suggestions' &&
                   searchStripContent.suggestions.map((term) => (
                     <button

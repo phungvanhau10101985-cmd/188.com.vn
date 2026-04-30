@@ -10,6 +10,8 @@ interface DesktopImageSearchPopoverProps {
   triggerButtonClassName?: string;
   /** z-index cho panel (thanh sticky cần cao hơn header) */
   panelZClass?: string;
+  /** Mount sau lazy-load: mở panel ngay (giữ UX một lần bấm máy ảnh). */
+  initialOpen?: boolean;
 }
 
 /**
@@ -19,12 +21,13 @@ interface DesktopImageSearchPopoverProps {
 export default function DesktopImageSearchPopover({
   triggerButtonClassName = 'text-gray-500 hover:text-[#ea580c] p-1 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ea580c]/40',
   panelZClass = 'z-[100]',
+  initialOpen = false,
 }: DesktopImageSearchPopoverProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const pasteRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialOpen);
   const [panelError, setPanelError] = useState<string | null>(null);
   const [panelBusy, setPanelBusy] = useState(false);
 

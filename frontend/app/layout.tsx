@@ -151,10 +151,26 @@ export default async function RootLayout({
                     <Suspense
                       fallback={
                         <div
-                          className="min-h-[50vh] bg-gray-50"
+                          className="min-h-[min(560px,78dvh)] bg-[#fafafa] px-4 py-6"
                           aria-busy="true"
                           aria-label="Đang tải nội dung"
-                        />
+                        >
+                          <div className="mx-auto max-w-7xl space-y-6">
+                            <div className="h-12 max-w-md animate-pulse rounded-lg bg-gray-200" />
+                            <div className="grid gap-4 md:grid-cols-[1.2fr_1fr]">
+                              <div className="min-h-[14rem] animate-pulse rounded-2xl bg-gray-100" />
+                              <div className="min-h-[14rem] animate-pulse rounded-2xl bg-gray-100" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                              {[...Array(8)].map((_, i) => (
+                                <div
+                                  key={i}
+                                  className="h-24 animate-pulse rounded-xl bg-gray-100/90"
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
                       }
                     >
                       {children}

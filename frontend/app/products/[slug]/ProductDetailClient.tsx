@@ -75,14 +75,31 @@ export default function ProductDetailClient({
 
   useEffect(() => {
     let active = true;
-    apiClient.getCategoryTreeFromProducts()
-      .then((data) => {
-        if (!active) return;
-        const tree = Array.isArray(data) ? data : [];
-        setCategoryTree(tree);
-      })
-      .catch(() => setCategoryTree([]));
-    return () => { active = false; };
+    let idleHandle: number | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const load = () => {
+      apiClient.getCategoryTreeFromProducts()
+        .then((data) => {
+          if (!active) return;
+          const tree = Array.isArray(data) ? data : [];
+          setCategoryTree(tree);
+        })
+        .catch(() => {
+          if (active) setCategoryTree([]);
+        });
+    };
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      idleHandle = window.requestIdleCallback(load, { timeout: 2800 });
+    } else {
+      timeoutId = setTimeout(load, 0);
+    }
+    return () => {
+      active = false;
+      if (idleHandle !== undefined && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleHandle);
+      }
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    };
   }, []);
 
   useEffect(() => {

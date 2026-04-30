@@ -8,7 +8,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCart } from '@/features/cart/hooks/useCart';
 import { apiClient } from '@/lib/api-client';
-import DesktopImageSearchPopover from '@/components/DesktopImageSearchPopover';
+import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 
 interface HeaderProps {
@@ -111,7 +111,7 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
             placeholder="Tìm kiếm sản phẩm, thương hiệu..."
             className="w-full pl-4 pr-24 py-3 bg-white border-0 rounded-xl focus:outline-none text-gray-800 placeholder-gray-500 text-sm"
           />
-          <DesktopImageSearchPopover />
+          <LazyDesktopImageSearchPopover />
           <button
             type="submit"
             className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-[#ea580c]"
