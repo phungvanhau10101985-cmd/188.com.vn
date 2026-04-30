@@ -131,6 +131,14 @@ export default function TaxonomyAdminPage() {
     }
   }, []);
 
+  const handleStructureOnlyDownload = useCallback(async () => {
+    try {
+      await downloadFile('/taxonomy/sample?blank_template=true');
+    } catch (e) {
+      alert(`Tải mẫu cấu trúc thất bại: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, []);
+
   const handleWipe = useCallback(async () => {
     if (
       !window.confirm(
@@ -228,17 +236,27 @@ export default function TaxonomyAdminPage() {
         <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900">1. Tải file mẫu</h2>
           <p className="mt-1 text-sm text-gray-600">
-            Tải file mẫu chuẩn (thường là <code>backend/temp_uploads/taxonomy_import.xlsx</code> trong repo — đầy đủ danh
-            mục). Nếu server chưa có file đó, API trả bản skeleton ít dòng để xem đủ sheet/cột — chỉnh rồi upload ở mục
-            dưới.
+            Tải <strong>taxonomy_import.xlsx</strong>: bản đầy đủ dòng trong{' '}
+            <code>backend/temp_uploads/</code> (nếu deploy có); không thì{' '}
+            <code>backend/assets/taxonomy_import_template.xlsx</code> — đủ 4 sheet và đủ cột (trong đó{' '}
+            <code>category_paths</code> có cat1–cat3 + slug cluster). Luôn có thể sinh từ API nếu thiếu cả hai file.
           </p>
-          <button
-            type="button"
-            onClick={handleSampleDownload}
-            className="mt-3 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-          >
-            Tải taxonomy_import.xlsx
-          </button>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void handleSampleDownload()}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            >
+              Tải taxonomy_import.xlsx
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleStructureOnlyDownload()}
+              className="rounded-md border border-indigo-600 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50"
+            >
+              Chỉ mẫu đủ cột (nhẹ)
+            </button>
+          </div>
         </section>
 
         <section className="rounded-lg border border-red-200 bg-red-50 p-4">
