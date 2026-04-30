@@ -8,10 +8,9 @@ import {
   type AdminProduct,
   type AdminProductsResponse,
 } from '@/lib/admin-api';
+import { getCatalogFeedApiBaseUrl, isNonPublicCatalogFeedBase } from '@/lib/api-base';
 
 const PAGE_SIZE = 100;
-
-const API_V1 = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1';
 
 /** Lưu job_id đang chạy để khôi phục khi reload trang giữa chừng. */
 const IMPORT_JOB_STORAGE_KEY = 'admin:products:import_excel:job';
@@ -79,11 +78,6 @@ function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
   };
 }
 
-/** Feed TSV công khai — Commerce Manager / Ads dùng “URL đến file” */
-const FEED_MERCHANT_CENTER_TSV = `${API_V1}/import-export/export/merchant-center-feed.tsv`;
-const FEED_META_CATALOG_TSV = `${API_V1}/import-export/export/meta-catalog-feed.tsv`;
-const FEED_TIKTOK_CATALOG_TSV = `${API_V1}/import-export/export/tiktok-catalog-feed.tsv`;
-
 export default function AdminProductsPage() {
   const [data, setData] = useState<AdminProductsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -120,6 +114,12 @@ export default function AdminProductsPage() {
   const [editing, setEditing] = useState<{ productId: string; field: string; value: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+
+  const catalogFeedBase = useMemo(() => getCatalogFeedApiBaseUrl(), []);
+  const feedMerchantCenterTsv = `${catalogFeedBase}/import-export/export/merchant-center-feed.tsv`;
+  const feedMetaCatalogTsv = `${catalogFeedBase}/import-export/export/meta-catalog-feed.tsv`;
+  const feedTiktokCatalogTsv = `${catalogFeedBase}/import-export/export/tiktok-catalog-feed.tsv`;
+  const feedUrlIsNonPublic = isNonPublicCatalogFeedBase(catalogFeedBase);
 
   const showToast = (type: 'ok' | 'err', msg: string, persistMs?: number) => {
     setToast({ type, msg });
@@ -591,39 +591,54 @@ export default function AdminProductsPage() {
             </div>
           ) : null}
           <div className="mt-4 pt-4 border-t border-gray-100 space-y-2 text-sm text-gray-700">
+            {feedUrlIsNonPublic ? (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 text-xs leading-snug">
+                Google, Meta và TikTok chỉ tải được nguồn cấp qua URL <strong className="font-semibold">HTTPS công khai</strong> (domain thật).
+                Link <code className="text-[11px]">localhost</code> chỉ để thử trên máy bạn. Trên production hãy đặt{' '}
+                <code className="text-[11px]">NEXT_PUBLIC_SITE_URL</code> hoặc{' '}
+                <code className="text-[11px]">NEXT_PUBLIC_CATALOG_FEED_API_BASE_URL</code> trỏ tới base{' '}
+                <code className="text-[11px]">…/api/v1</code> công khai, rồi dán URL hiển thị bên
+                dưới vào các nền tảng.
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500 leading-snug">
+                Nguồn cấp theo lịch: dán các URL dưới đây vào Merchant Center / Commerce Manager / TikTok Ads —
+                họ cần URL HTTPS có thể truy cập từ Internet (không phải máy cục bộ).
+              </p>
+            )}
             <p>
               <span className="font-medium text-gray-800">Google Merchant Center</span>{' '}
               <a
-                href={FEED_MERCHANT_CENTER_TSV}
+                href={feedMerchantCenterTsv}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-blue-700 hover:underline break-all"
               >
-                {FEED_MERCHANT_CENTER_TSV}
+                {feedMerchantCenterTsv}
               </a>
               <span className="text-gray-500"> — Nguồn dữ liệu · URL máy chủ · TSV (tab).</span>
             </p>
             <p>
               <span className="font-medium text-gray-800">Meta (Facebook / Instagram) catalogue</span>{' '}
               <a
-                href={FEED_META_CATALOG_TSV}
+                href={feedMetaCatalogTsv}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-blue-700 hover:underline break-all"
               >
-                {FEED_META_CATALOG_TSV}
+                {feedMetaCatalogTsv}
               </a>
               <span className="text-gray-500"> — Commerce Manager · Scheduled data feed · cột theo catalogue Meta (`fb_product_category` chỉnh `.env`).</span>
             </p>
             <p>
               <span className="font-medium text-gray-800">TikTok catalogue</span>{' '}
               <a
-                href={FEED_TIKTOK_CATALOG_TSV}
+                href={feedTiktokCatalogTsv}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-blue-700 hover:underline break-all"
               >
-                {FEED_TIKTOK_CATALOG_TSV}
+                {feedTiktokCatalogTsv}
               </a>
               <span className="text-gray-500"> — Ads Manager · Data feed schedule · ID mục là `sku_id` (= product_id).</span>
             </p>

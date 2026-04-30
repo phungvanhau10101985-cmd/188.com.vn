@@ -242,7 +242,7 @@ export default function AccountOrderDetailPage() {
         </span>
       </div>
 
-      <div className="bg-white rounded-xl shadow border border-gray-100 p-6 space-y-6">
+      <div className="bg-white rounded-xl shadow border border-gray-100 p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <p className="text-gray-500 text-sm">Ngày đặt</p>
@@ -284,63 +284,157 @@ export default function AccountOrderDetailPage() {
           </div>
         )}
 
-        <div>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-gray-500">
-                <th className="py-2">Sản phẩm</th>
-                <th className="py-2 text-center w-20">SL</th>
-                <th className="py-2 text-right w-28">Đơn giá</th>
-                <th className="py-2 text-right w-28">Thành tiền</th>
-                {['delivered', 'completed'].includes(order.status) && <th className="py-2 w-28"></th>}
-              </tr>
-            </thead>
-            <tbody>
-              {(order.items || []).map((item) => (
-                <tr key={item.id} className="border-b">
-                  <td className="py-2">
-                    <div className="flex items-center gap-2">
-                      {item.product_image ? (
-                        <div className="w-12 h-12 rounded overflow-hidden bg-gray-100 flex-shrink-0 relative">
-                          <Image
-                            src={getOptimizedImage(item.product_image, { fallbackStrategy: 'local' })}
-                            alt=""
-                            fill
-                            sizes="48px"
-                            className="object-cover"
-                          />
-                        </div>
-                      ) : null}
-                      <span>{item.product_name}</span>
-                    </div>
-                  </td>
-                  <td className="py-2 text-center font-medium">{item.quantity}</td>
-                  <td className="py-2 text-right font-medium">{formatVnd(item.unit_price)}</td>
-                  <td className="py-2 text-right font-semibold text-[#ea580c]">{formatVnd((item.total_price ?? item.unit_price * item.quantity))}</td>
-                  {['delivered', 'completed'].includes(order.status) && item.product_id && (
-                    <td className="py-2">
-                      {reviewedProductIds.has(item.product_id) ? (
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-gray-900 md:hidden">Sản phẩm trong đơn</h3>
+
+          {/* Mobile: thẻ từng dòng — tên có đủ chiều ngang, không bó vào cột hẹp như table */}
+          <ul className="md:hidden flex flex-col gap-3">
+            {(order.items || []).map((item) => {
+              const lineTotal = item.total_price ?? item.unit_price * item.quantity;
+              const showReview = ['delivered', 'completed'].includes(order.status) && item.product_id;
+              return (
+                <li
+                  key={item.id}
+                  className="rounded-xl border border-gray-100 bg-gray-50/50 p-4 shadow-sm"
+                >
+                  <div className="flex gap-3">
+                    {item.product_image ? (
+                      <div className="relative h-[4.75rem] w-[4.75rem] shrink-0 overflow-hidden rounded-lg bg-gray-100">
+                        <Image
+                          src={getOptimizedImage(item.product_image, { fallbackStrategy: 'local' })}
+                          alt=""
+                          fill
+                          sizes="76px"
+                          className="object-cover"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex h-[4.75rem] w-[4.75rem] shrink-0 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-100 text-[10px] text-gray-400">
+                        —
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      {item.product_slug ? (
                         <Link
-                          href={item.product_slug ? `/products/${item.product_slug}/reviews` : '#'}
-                          className="inline-block px-3 py-1.5 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300"
+                          href={`/products/${item.product_slug}`}
+                          className="text-[15px] font-medium leading-snug text-gray-900 hover:text-orange-700"
                         >
-                          Xem đánh giá
+                          {item.product_name}
                         </Link>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => setReviewModalProductId(item.product_id!)}
-                          className="px-3 py-1.5 bg-[#ea580c] text-white rounded text-sm hover:bg-[#c2410c] font-medium"
-                        >
-                          Đánh giá
-                        </button>
+                        <p className="text-[15px] font-medium leading-snug text-gray-900">{item.product_name}</p>
                       )}
-                    </td>
-                  )}
+                      <div className="mt-3 grid grid-cols-3 gap-2 border-t border-gray-200/80 pt-3">
+                        <div>
+                          <p className="text-[11px] uppercase tracking-wide text-gray-500">SL</p>
+                          <p className="mt-0.5 text-sm font-semibold tabular-nums text-gray-900">{item.quantity}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-500">Đơn giá</p>
+                          <p className="mt-0.5 text-sm font-medium tabular-nums text-gray-800">{formatVnd(item.unit_price)}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-500">Thành tiền</p>
+                          <p className="mt-0.5 text-sm font-bold tabular-nums text-[#ea580c]">{formatVnd(lineTotal)}</p>
+                        </div>
+                      </div>
+                      {showReview && (
+                        <div className="mt-3">
+                          {reviewedProductIds.has(item.product_id!) ? (
+                            <Link
+                              href={item.product_slug ? `/products/${item.product_slug}/reviews` : '#'}
+                              className="block w-full rounded-lg bg-gray-200 py-2.5 text-center text-sm font-medium text-gray-800 hover:bg-gray-300"
+                            >
+                              Xem đánh giá
+                            </Link>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setReviewModalProductId(item.product_id!)}
+                              className="w-full rounded-lg bg-[#ea580c] py-2.5 text-sm font-medium text-white hover:bg-[#c2410c]"
+                            >
+                              Đánh giá
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+
+          {/* md+: bảng truyền thống */}
+          <div className="hidden md:block md:rounded-lg md:border md:border-gray-100 md:overflow-hidden">
+            <table className="w-full table-fixed text-sm">
+              <colgroup>
+                <col className="" />
+                <col className="w-16" />
+                <col className="w-[7.5rem]" />
+                <col className="w-[8.25rem]" />
+                {['delivered', 'completed'].includes(order.status) ? <col className="w-36" /> : null}
+              </colgroup>
+              <thead className="bg-gray-50">
+                <tr className="border-b border-gray-200 text-left text-gray-600">
+                  <th className="px-3 py-3">Sản phẩm</th>
+                  <th className="px-3 py-3 text-center">SL</th>
+                  <th className="px-3 py-3 text-right">Đơn giá</th>
+                  <th className="px-3 py-3 text-right">Thành tiền</th>
+                  {['delivered', 'completed'].includes(order.status) ? <th className="px-3 py-3" /> : null}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {(order.items || []).map((item) => (
+                  <tr key={item.id}>
+                    <td className="px-3 py-3 align-top">
+                      <div className="flex items-start gap-3">
+                        {item.product_image ? (
+                          <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded bg-gray-100">
+                            <Image
+                              src={getOptimizedImage(item.product_image, { fallbackStrategy: 'local' })}
+                              alt=""
+                              fill
+                              sizes="48px"
+                              className="object-cover"
+                            />
+                          </div>
+                        ) : null}
+                        <span className="min-w-0 break-words leading-snug">{item.product_name}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-center align-top font-medium tabular-nums">{item.quantity}</td>
+                    <td className="px-3 py-3 text-right align-top font-medium tabular-nums">{formatVnd(item.unit_price)}</td>
+                    <td className="px-3 py-3 text-right align-top font-semibold tabular-nums text-[#ea580c]">
+                      {formatVnd(item.total_price ?? item.unit_price * item.quantity)}
+                    </td>
+                    {['delivered', 'completed'].includes(order.status) && item.product_id ? (
+                      <td className="px-3 py-3 align-top">
+                        {reviewedProductIds.has(item.product_id) ? (
+                          <Link
+                            href={item.product_slug ? `/products/${item.product_slug}/reviews` : '#'}
+                            className="inline-block rounded-lg bg-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-300"
+                          >
+                            Xem đánh giá
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setReviewModalProductId(item.product_id!)}
+                            className="rounded-lg bg-[#ea580c] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#c2410c]"
+                          >
+                            Đánh giá
+                          </button>
+                        )}
+                      </td>
+                    ) : ['delivered', 'completed'].includes(order.status) ? (
+                      <td className="px-3 py-3" />
+                    ) : null}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {/* Nút theo trạng thái */}

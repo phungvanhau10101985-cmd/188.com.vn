@@ -57,6 +57,35 @@ export function getApiBaseUrl(): string {
   return 'http://127.0.0.1:8001/api/v1';
 }
 
+/**
+ * Base `/api/v1` để dán vào Google Merchant Center / Meta / TikTok — phải là URL **công khai**
+ * (HTTPS, truy cập được từ Internet). `localhost` không dùng được cho scheduled fetch của họ.
+ *
+ * Thứ tự: `NEXT_PUBLIC_CATALOG_FEED_API_BASE_URL` → `NEXT_PUBLIC_SITE_URL` / `NEXT_PUBLIC_DOMAIN` + `/api/v1`
+ * → `NEXT_PUBLIC_API_BASE_URL` (cùng kết quả trên server và client — tránh lệch hydrate với `window.origin`).
+ */
+export function getCatalogFeedApiBaseUrl(): string {
+  const explicit = (process.env.NEXT_PUBLIC_CATALOG_FEED_API_BASE_URL || '').trim();
+  if (explicit) {
+    return stripTrailingSlash(explicit);
+  }
+  const site = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_DOMAIN || '').trim();
+  if (site) {
+    return `${stripTrailingSlash(site)}/api/v1`;
+  }
+  return stripTrailingSlash(process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1');
+}
+
+/** True nếu URL feed rõ ràng không thể truy cập từ server của Google/Meta/TikTok. */
+export function isNonPublicCatalogFeedBase(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
 /** Tránh trang cảnh báo ngrok chặn một số request (tuỳ phiên bản). */
 export function ngrokFetchHeaders(): Record<string, string> {
   if (typeof window === 'undefined') return {};
