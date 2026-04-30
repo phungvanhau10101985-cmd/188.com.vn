@@ -18,6 +18,7 @@ from app.models.email_login_challenge import EmailLoginChallenge
 from app.models.email_trusted_device import EmailTrustedDevice
 from app.models.bank_account import BankAccount
 from app.models.site_embed_code import SiteEmbedCode
+from app.models.category_seo import CategorySeoGeminiTarget, CategorySeoSettings
 from app.models.guest_behavior import GuestProductView, GuestFavorite, GuestSearchHistory
 from app.db.session import engine
 from app.core.config import settings
@@ -216,6 +217,24 @@ class MigrationManager:
             logger.warning(f"  _create_table_if_not_exists({table_name}): {e}")
             return False
 
+    def _seed_category_seo_settings_singleton(self) -> bool:
+        """Hàng id=1 mặc định: không auto Gemini cho đến khi admin bật trong /admin."""
+        try:
+            from app.db.session import SessionLocal
+            from app.models.category_seo import CategorySeoSettings as _Css
+
+            db = SessionLocal()
+            try:
+                if db.query(_Css).filter(_Css.id == 1).first() is None:
+                    db.add(_Css(id=1, gemini_auto_enabled=False))
+                    db.commit()
+                return True
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning("  _seed_category_seo_settings_singleton: %s", e)
+            return False
+
     def _sync_table_columns(self, table_name: str, model_class) -> bool:
         """Thêm mọi cột thiếu của bảng theo model (dùng chung cho orders, order_items, ...)."""
         try:
@@ -403,6 +422,13 @@ class MigrationManager:
         results['products_sync_columns'] = self._sync_table_columns("products", Product)
         # 9. category_seo_meta.seo_body (đoạn văn SEO 150-300 từ)
         results['category_seo_meta_seo_body'] = self.migrate_category_seo_meta_seo_body()
+        results['category_seo_gemini_targets_create'] = self._create_table_if_not_exists(
+            "category_seo_gemini_targets", CategorySeoGeminiTarget
+        )
+        results['category_seo_settings_create'] = self._create_table_if_not_exists(
+            "category_seo_settings", CategorySeoSettings
+        )
+        results['category_seo_settings_seed'] = self._seed_category_seo_settings_singleton()
         # 10. search_mappings
         results['search_mappings_create'] = self._create_table_if_not_exists(
             "search_mappings", SearchMapping

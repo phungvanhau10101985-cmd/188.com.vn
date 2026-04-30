@@ -1,7 +1,7 @@
 // frontend/components/Navigation.tsx - Danh mục 3 cấp từ sản phẩm (AB, AC, AD)
 'use client';
 
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
@@ -69,7 +69,12 @@ export default function Navigation({
   const { favoriteCount } = useFavorites();
   const { getCartItemCount } = useCart();
   const displayCartCount = getCartItemCount();
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLNavElement>(null);
+  /** Căn mega-menu theo đúng pill cấp 1 — container và từng pill (không ép full-width trái). */
+  const categoryBarWrapRef = useRef<HTMLDivElement>(null);
+  const pillsScrollRef = useRef<HTMLDivElement>(null);
+  const level1WrapRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  const [megaPlacement, setMegaPlacement] = useState<{ left: number; width: number } | null>(null);
 
   // Khi đang ở /danh-muc/... thì highlight theo slug (resolve từ tree)
   const effectiveFilter = useMemo(() => {
@@ -147,6 +152,46 @@ export default function Navigation({
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
+
+  const updateMegaPlacement = useCallback(() => {
+    if (!openLevel1 || typeof window === 'undefined') {
+      setMegaPlacement(null);
+      return;
+    }
+    const wrap = categoryBarWrapRef.current;
+    const pill = level1WrapRefs.current.get(openLevel1);
+    if (!wrap || !pill) {
+      setMegaPlacement(null);
+      return;
+    }
+    const wr = wrap.getBoundingClientRect();
+    const pr = pill.getBoundingClientRect();
+    const gutter = 8;
+    const innerW = wr.width;
+    const maxPanel = 720;
+    const desiredW = Math.min(maxPanel, Math.max(280, innerW - gutter * 2));
+    let left = pr.left - wr.left;
+    left = Math.max(gutter, Math.min(left, innerW - desiredW - gutter));
+    setMegaPlacement({ left, width: desiredW });
+  }, [openLevel1]);
+
+  useLayoutEffect(() => {
+    updateMegaPlacement();
+  }, [updateMegaPlacement, tree]);
+
+  useEffect(() => {
+    if (!openLevel1) return;
+    const el = pillsScrollRef.current;
+    const onSync = () => updateMegaPlacement();
+    el?.addEventListener('scroll', onSync, { passive: true });
+    window.addEventListener('resize', onSync);
+    window.addEventListener('scroll', onSync, { passive: true });
+    return () => {
+      el?.removeEventListener('scroll', onSync);
+      window.removeEventListener('resize', onSync);
+      window.removeEventListener('scroll', onSync);
+    };
+  }, [openLevel1, updateMegaPlacement]);
 
   const handleStickySearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -412,8 +457,11 @@ export default function Navigation({
           isScrolled ? 'bg-[#ea580c]/95 backdrop-blur-md shadow-md border-b border-orange-600' : 'bg-[#ea580c] border-b border-orange-600 shadow-sm'
         }`}
       >
-        <div className="max-w-7xl mx-auto px-3">
-          <div className="flex items-center gap-1.5 py-1.5 overflow-x-auto overflow-y-visible scroll-smooth hide-scrollbar">
+        <div ref={categoryBarWrapRef} className="relative max-w-7xl mx-auto px-3">
+          <div
+            ref={pillsScrollRef}
+            className="flex items-center gap-1.5 py-1.5 overflow-x-auto overflow-y-visible scroll-smooth hide-scrollbar"
+          >
             <span className="hidden sm:inline-flex text-[11px] font-semibold text-white/80 uppercase tracking-wider mr-1 flex-shrink-0">
               Danh mục
             </span>
@@ -426,6 +474,11 @@ export default function Navigation({
               return (
                 <div
                   key={level1.name}
+                  ref={(el) => {
+                    const m = level1WrapRefs.current;
+                    if (el) m.set(level1.name, el);
+                    else m.delete(level1.name);
+                  }}
                   className="relative flex-shrink-0 inline-flex"
                   onMouseEnter={hasChildren ? () => setOpenLevel1(level1.name) : undefined}
                 >
@@ -482,9 +535,14 @@ export default function Navigation({
 
 
         {/* Panel danh mục cấp 2 & 3 - hiển thị dưới thanh, không bị overflow cắt */}
-        {openCategory && openCategory.children && openCategory.children.length > 0 && (
+        {openCategory && megaPlacement && openCategory.children && openCategory.children.length > 0 && (
           <div
-            className="border-t border-gray-100 bg-gray-50/80 py-2.5"
+            className="absolute z-[100] -mt-1.5 pt-1.5 border-t border-gray-100 bg-gray-50/90 py-2.5 shadow-lg rounded-b-xl"
+            style={{
+              left: megaPlacement.left,
+              top: '100%',
+              width: megaPlacement.width,
+            }}
             onMouseLeave={() => setOpenLevel1(null)}
           >
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-1.5">

@@ -107,3 +107,34 @@ class CategorySeoMeta(Base):
 
     def __repr__(self):
         return f"<CategorySeoMeta({self.category_path})>"
+
+
+class CategorySeoGeminiTarget(Base):
+    """
+    Danh mục admin chọn để chạy / ưu tiên Gemini SEO (meta + body).
+    path slug chữ thường, VD: giay-dep-nam/giay-luoi-nam
+    """
+
+    __tablename__ = "category_seo_gemini_targets"
+
+    category_path = Column(String(1000), primary_key=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<CategorySeoGeminiTarget({self.category_path})>"
+
+
+class CategorySeoSettings(Base):
+    """
+    Singleton id=1: cấu hình SEO danh mục được admin thay không cần deploy.
+    gemini_auto_enabled: khi True (và .env VPS cho phép) mới auto Gemini sau import/API.
+    """
+
+    __tablename__ = "category_seo_settings"
+
+    id = Column(Integer, primary_key=True)
+    gemini_auto_enabled = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<CategorySeoSettings(auto={self.gemini_auto_enabled})>"

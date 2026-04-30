@@ -5,7 +5,7 @@ from typing import List, Optional, Dict, Any, Set
 from app.models.product import Product
 from app.models.search_mapping import SearchMapping, SearchMappingType
 from app.models.search_log import SearchLog
-from app.models.category_seo import CategorySeoMeta
+from app.models.category_seo import CategorySeoMeta, CategorySeoGeminiTarget, CategorySeoSettings
 from app.models.category_transform_rule import CategoryTransformRule
 from app.models.category_final_mapping import CategoryFinalMapping
 from app.schemas.product import ProductCreate, ProductUpdate
@@ -1554,6 +1554,74 @@ def set_category_seo_body(
     db.commit()
 
 
+def set_category_seo_description(
+    db: Session,
+    category_path: str,
+    seo_description: str,
+) -> None:
+    """Tạo hoặc cập nhật seo_description cho category_seo_meta (category_path lowercase)."""
+    category_path = (category_path or "").strip().lower()
+    text = (seo_description or "").strip()
+    meta = db.query(CategorySeoMeta).filter(CategorySeoMeta.category_path == category_path).first()
+    if meta:
+        meta.seo_description = text
+    else:
+        meta = CategorySeoMeta(category_path=category_path, seo_description=text)
+        db.add(meta)
+    db.commit()
+
+
+def ensure_category_seo_description(
+    db: Session,
+    level1_slug: str,
+    level2_slug: Optional[str] = None,
+    level3_slug: Optional[str] = None,
+    is_active: bool = True,
+    force: bool = False,
+) -> bool:
+    """
+    Nếu đã có seo_description trong meta thì bỏ qua (trừ khi force=True).
+    Chỉ chạy khi danh mục resolve được và có ít nhất 1 SP active.
+    Trả True nếu đã sinh/lưu mới.
+    """
+    from app.services.category_seo_service import generate_category_seo_description
+
+    data = get_category_seo_data(
+        db,
+        level1_slug=level1_slug,
+        level2_slug=level2_slug,
+        level3_slug=level3_slug,
+        is_active=is_active,
+        image_limit=4,
+    )
+    if not data:
+        return False
+    if (data.get("product_count") or 0) < 1:
+        return False
+    if data.get("seo_description") and not force:
+        return False
+
+    breadcrumb_names = list(data.get("breadcrumb_names") or [])
+    leaf_name = breadcrumb_names[-1] if breadcrumb_names else data.get("full_name") or ""
+    sample = list(data.get("sample_product_names") or [])
+    desc = generate_category_seo_description(
+        category_name=str(leaf_name or data.get("name") or ""),
+        breadcrumb_names=breadcrumb_names,
+        product_count=int(data.get("product_count") or 0),
+        sample_product_names=sample if sample else None,
+    )
+    if not desc:
+        return False
+    path_parts = [level1_slug]
+    if level2_slug:
+        path_parts.append(level2_slug)
+    if level3_slug:
+        path_parts.append(level3_slug)
+    category_path = "/".join((p or "").strip().lower() for p in path_parts)
+    set_category_seo_description(db, category_path=category_path, seo_description=desc)
+    return True
+
+
 def _category_path_slugs_from_names(
     c1_name: Optional[str],
     c2_name: Optional[str] = None,
@@ -1583,10 +1651,12 @@ def ensure_category_seo_body(
     level2_slug: Optional[str] = None,
     level3_slug: Optional[str] = None,
     is_active: bool = True,
+    force: bool = False,
 ) -> bool:
     """
-    Nếu danh mục đã có seo_body thì bỏ qua (return False).
-    Nếu chưa có thì gọi Gemini tạo và lưu (return True).
+    Nếu danh mục đã có seo_body thì bỏ qua (return False), trừ khi force=True.
+    Chỉ chạy khi có ít nhất 1 SP trong path (ưu tiên Gemini có ví dụ tên SP).
+    Nếu chưa có seo_body thì gọi Gemini tạo và lưu (return True).
     Trả về True nếu đã sinh mới, False nếu bỏ qua hoặc path không tồn tại.
     """
     data = get_category_seo_data(
@@ -1597,7 +1667,11 @@ def ensure_category_seo_body(
         is_active=is_active,
         image_limit=4,
     )
-    if not data or data.get("seo_body"):
+    if not data:
+        return False
+    if not force and data.get("seo_body"):
+        return False
+    if (data.get("product_count") or 0) < 1:
         return False
     from app.services.category_seo_service import generate_category_seo_body
     sibling_names = get_category_sibling_names(
@@ -1631,6 +1705,7 @@ def create_product(db: Session, product: ProductCreate):
     db.add(db_product)
     db.commit()
     db.refresh(db_product)
+    _maybe_schedule_category_gemini_for_product(db, db_product)
     return db_product
 
 def update_product(db: Session, product_id: int, product_update: ProductUpdate):
@@ -1647,6 +1722,7 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
         
         db.commit()
         db.refresh(db_product)
+        _maybe_schedule_category_gemini_for_product(db, db_product)
     return db_product
 
 def delete_product(db: Session, product_id: int):
@@ -1655,6 +1731,45 @@ def delete_product(db: Session, product_id: int):
         db.delete(db_product)
         db.commit()
     return db_product
+
+def get_category_gemini_auto_settings_snapshot(db: Session) -> Dict[str, Any]:
+    """Trả trạng thái chế độ auto Gemini SEO danh mục cho trang admin."""
+    env_ok = bool(getattr(settings, "CATEGORY_GEMINI_SEO_AUTO_ENABLED", False))
+    row = db.query(CategorySeoSettings).filter(CategorySeoSettings.id == 1).first()
+    admin_flag = bool(row.gemini_auto_enabled) if row is not None else False
+    return {
+        "gemini_auto_enabled_admin": admin_flag,
+        "env_allows_gemini_auto": env_ok,
+        "gemini_auto_effective": env_ok and admin_flag,
+        "gemini_whitelist_only_env": bool(getattr(settings, "CATEGORY_GEMINI_SEO_WHITELIST_ONLY", False)),
+    }
+
+
+def category_gemini_auto_is_effective(db: Session) -> bool:
+    """True khi .env đã cho phép (VPS) và admin bật trong bảng category_seo_settings."""
+    if not getattr(settings, "CATEGORY_GEMINI_SEO_AUTO_ENABLED", False):
+        return False
+    row = db.query(CategorySeoSettings).filter(CategorySeoSettings.id == 1).first()
+    if row is None:
+        return False
+    return bool(row.gemini_auto_enabled)
+
+
+def _should_run_auto_category_gemini_after_import(db: Session, rows_in_batch: int) -> bool:
+    """Import Excel: chỉ spawn Gemini nền khi admin + env bật auto; né batch quá lớn."""
+    if not category_gemini_auto_is_effective(db):
+        return False
+    thr = int(getattr(settings, "EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS", 0) or 0)
+    if thr > 0 and rows_in_batch >= thr:
+        logger.info(
+            "EXCEL_IMPORT: Bỏ qua Gemini SEO danh mục (nền) — %s dòng ≥ ngưỡng %s "
+            "(đặt EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS=0 để vẫn chạy)",
+            rows_in_batch,
+            thr,
+        )
+        return False
+    return True
+
 
 def _collect_unique_category_paths_for_import(products_data: List[Dict]) -> List[tuple]:
     """Từ dữ liệu SP import, gom path slug danh mục (cấp 1 / 1+2 / đủ 3) cho SEO body."""
@@ -1673,59 +1788,126 @@ def _collect_unique_category_paths_for_import(products_data: List[Dict]) -> List
     return list(unique_paths)
 
 
-def _run_category_seo_body_loop_for_import_paths(
+def _filter_category_paths_by_gemini_whitelist(db: Session, paths_list: List[tuple]) -> List[tuple]:
+    """Khi CATEGORY_GEMINI_SEO_WHITELIST_ONLY: chỉ giữ path có trong category_seo_gemini_targets."""
+    if not getattr(settings, "CATEGORY_GEMINI_SEO_WHITELIST_ONLY", False):
+        return paths_list
+    if not paths_list:
+        return paths_list
+    rows = db.query(CategorySeoGeminiTarget.category_path).all()
+    targets = {(r[0] or "").strip().lower() for r in rows if r[0]}
+    if not targets:
+        return []
+    out: List[tuple] = []
+    for tup in paths_list:
+        path_str = "/".join((x or "").strip().lower() for x in tup if x)
+        if path_str in targets:
+            out.append(tup)
+    return out
+
+
+def _run_category_gemini_seo_loop_for_paths(
     db: Session,
     paths_list: List[tuple],
     progress_callback,
-) -> int:
-    """Gọi ensure_category_seo_body cho từng path; trả về số danh mục đã sinh body mới."""
+) -> tuple:
+    """Sinh seo_description + seo_body (Gemini) cho từng path; sleep khi có thay đổi. Trả (n_desc, n_body)."""
     n_paths = len(paths_list)
     if n_paths == 0:
-        return 0
-    generated = 0
+        return (0, 0)
+    n_desc = 0
+    n_body = 0
     for path_i, (level1, level2, level3) in enumerate(paths_list):
         try:
             if progress_callback and (path_i % 3 == 0 or path_i == n_paths - 1):
                 progress_callback("seo_categories", path_i + 1, n_paths)
-            if ensure_category_seo_body(db, level1_slug=level1, level2_slug=level2, level3_slug=level3, is_active=True):
-                generated += 1
+            touched = False
+            if ensure_category_seo_description(
+                db,
+                level1_slug=str(level1),
+                level2_slug=str(level2) if level2 else None,
+                level3_slug=str(level3) if level3 else None,
+                is_active=True,
+            ):
+                n_desc += 1
+                touched = True
+            if ensure_category_seo_body(
+                db,
+                level1_slug=str(level1),
+                level2_slug=str(level2) if level2 else None,
+                level3_slug=str(level3) if level3 else None,
+                is_active=True,
+            ):
+                n_body += 1
+                touched = True
+            if touched:
                 logger.info(
-                    f"📝 SEO body tự sinh cho danh mục: {level1}"
-                    + (f"/{level2}" if level2 else "")
-                    + (f"/{level3}" if level3 else "")
+                    "GEMINI_CATEGORY_SEO path %s%s%s — description/body đã cập nhật (hoặc một phần)",
+                    level1,
+                    f"/{level2}" if level2 else "",
+                    f"/{level3}" if level3 else "",
                 )
                 time.sleep(1.2)
         except Exception as e:
-            logger.warning(
-                f"⚠️ Không sinh SEO body cho {level1}/{level2 or ''}/{level3 or ''}: {e}"
-            )
-    return generated
+            logger.warning("⚠️ Gemini SEO danh mục lỗi %s/%s/%s: %s", level1, level2, level3, e)
+    return (n_desc, n_body)
 
 
-def _spawn_category_seo_body_background(paths_snapshot: List[tuple]) -> None:
-    """Chạy Gemini sinh seo_body trong thread daemon (session DB riêng). paths_snapshot đã copy."""
+def _spawn_category_gemini_background(paths_snapshot: List[tuple]) -> None:
+    """Thread daemon: CATEGORY_GEMINI_SEO_AUTO — sinh seo_description + seo_body theo các path slug."""
     if not paths_snapshot:
         return
 
     snap = list(paths_snapshot)
 
-    def _defer_category_seo_after_bulk() -> None:
+    def _defer_gemini_categories() -> None:
         from app.db.session import SessionLocal
 
         db2 = SessionLocal()
         try:
+            snap_f = _filter_category_paths_by_gemini_whitelist(db2, snap)
+            if getattr(settings, "CATEGORY_GEMINI_SEO_WHITELIST_ONLY", False) and not snap_f:
+                logger.info(
+                    "CATEGORY_GEMINI [nền] Bỏ qua — CATEGORY_GEMINI_SEO_WHITELIST_ONLY và không có path trong whitelist (%s ban đầu)",
+                    len(snap),
+                )
+                return
+            logger.info("CATEGORY_GEMINI [nền] Bắt đầu — %s path", len(snap_f))
+            nd, nb = _run_category_gemini_seo_loop_for_paths(db2, snap_f, None)
             logger.info(
-                "EXCEL_IMPORT [nền] Bắt đầu sinh SEO danh mục (%s path) sau import...",
-                len(snap),
+                "CATEGORY_GEMINI [nền] Xong — meta description mới: %s, body mới: %s",
+                nd,
+                nb,
             )
-            gen = _run_category_seo_body_loop_for_import_paths(db2, snap, None)
-            logger.info("EXCEL_IMPORT [nền] Hoàn tất SEO danh mục — sinh mới ~%s body (nếu có).", gen)
         except Exception as exc:
-            logger.exception("EXCEL_IMPORT [nền] Lỗi SEO danh mục: %s", exc)
+            logger.exception("CATEGORY_GEMINI [nền] Lỗi: %s", exc)
         finally:
             db2.close()
 
-    threading.Thread(target=_defer_category_seo_after_bulk, daemon=True).start()
+    threading.Thread(target=_defer_gemini_categories, daemon=True).start()
+
+
+def _maybe_schedule_category_gemini_for_product(db: Session, product: Optional[Product]) -> None:
+    """API tạo/sửa SP: nếu auto hiệu lực (env + DB) và SP active có nhánh DM — Gemini SEO (nền) cho path đó."""
+    if not category_gemini_auto_is_effective(db):
+        return
+    if product is None:
+        return
+    if not bool(getattr(product, "is_active", True)):
+        return
+    c1 = (getattr(product, "category", None) or "").strip()
+    if not c1:
+        return
+    c2 = (getattr(product, "subcategory", None) or "").strip()
+    c3 = (getattr(product, "sub_subcategory", None) or "").strip()
+    path_tuple = _category_path_slugs_from_names(c1, c2 or None if c2 else None, c3 or None if c3 else None)
+    if not path_tuple[0]:
+        return
+    if getattr(settings, "CATEGORY_GEMINI_SEO_WHITELIST_ONLY", False):
+        path_str = "/".join((p or "").strip().lower() for p in path_tuple if p)
+        if not db.query(CategorySeoGeminiTarget).filter(CategorySeoGeminiTarget.category_path == path_str).first():
+            return
+    _spawn_category_gemini_background([path_tuple])
 
 
 # ========== BULK IMPORT FUNCTION ==========
@@ -1921,14 +2103,24 @@ def bulk_import_products(
         )
         logger.warning("⚠️  %d products unmatched cat3 — first 10: %s", unmatched_count, sample)
 
-    # Gemini sinh seo_body không chạy tự động sau import — chỉ khi admin bấm tạo SEO trong «Danh mục SEO»
-    # hoặc POST /category-seo/seo-bodies/generate (hoặc script generate_all_seo_bodies.py).
+    # CATEGORY_GEMINI_SEO_AUTO: sinh seo_description + seo_body (Gemini, nền) cho path DM có trong batch — né batch cực lớn.
+    total_processed = len(products_data)
+    success_rate_pct = ((created + updated) / total_processed * 100) if total_processed > 0 else 0
+
+    if _should_run_auto_category_gemini_after_import(db, total_processed):
+        paths = _collect_unique_category_paths_for_import(products_data)
+        if paths:
+            warnings.append(
+                "Đã bật Gemini SEO danh mục — đang chạy nền cho các path trong file import "
+                "(xem pm2 logs CATEGORY_GEMINI)."
+            )
+            _spawn_category_gemini_background(paths)
+
     if progress_callback:
         progress_callback("seo_categories", n_products or 1, n_products or 1)
 
     # Calculate success rate
-    total_processed = len(products_data)
-    success_rate = ((created + updated) / total_processed * 100) if total_processed > 0 else 0
+    success_rate = f"{success_rate_pct:.1f}%"
     
     result = {
         "created": created,
@@ -1936,7 +2128,7 @@ def bulk_import_products(
         "errors": errors,
         "warnings": warnings,
         "total_processed": total_processed,
-        "success_rate": f"{success_rate:.1f}%"
+        "success_rate": success_rate,
     }
 
     logger.info(f"📦 BULK IMPORT COMPLETE:")
@@ -1944,7 +2136,7 @@ def bulk_import_products(
     logger.info(f"   🔄 Updated: {updated}")
     logger.info(f"   ⚠️  Warnings: {len(warnings)}")
     logger.info(f"   ❌ Errors: {len(errors)}")
-    logger.info(f"   📈 Success rate: {success_rate:.1f}%")
+    logger.info(f"   📈 Success rate: {success_rate}")
     
     return result
 

@@ -5,11 +5,13 @@
  *
  * Quản lý cây danh mục + SEO cluster qua file Excel 4 sheet.
  *
- * Quy trình lần đầu:
- *   1. Bấm "Wipe products + categories" (xóa sạch products + 7 bảng category/seo cũ).
- *   2. Bấm "Tải file mẫu" để xem format (taxonomy_import.xlsx — 4 sheet).
- *   3. Upload file Excel → backend seed categories + seo_clusters.
- *   4. Quay sang trang Sản phẩm → import lại Excel SP — `category_id` sẽ tự link vào cat3.
+ * Migration lần đầu (xoá SP + DROP bảng taxonomy cũ): chỉ chạy CLI trên máy dev —
+ * trong thư mục backend: python scripts/wipe_taxonomy_migration.py (xem script).
+ *
+ * Sau đó:
+ *   1. Tải file mẫu taxonomy_import.xlsx (4 sheet).
+ *   2. Upload Excel trên web → seed categories + seo_clusters.
+ *   3. Trang Sản phẩm → import lại Excel SP — category_id map theo cat3.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -32,14 +34,6 @@ interface ImportSummary {
     category_paths: string[];
   };
   meta: Record<string, string>;
-  elapsed_ms: number;
-}
-
-interface WipeResult {
-  ok: boolean;
-  wiped: Record<string, number>;
-  dropped: string[];
-  created: string[];
   elapsed_ms: number;
 }
 
@@ -102,10 +96,6 @@ export default function TaxonomyAdminPage() {
   const [importResult, setImportResult] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
 
-  const [wiping, setWiping] = useState(false);
-  const [wipeResult, setWipeResult] = useState<WipeResult | null>(null);
-  const [wipeError, setWipeError] = useState<string | null>(null);
-
   const reloadInfo = useCallback(async () => {
     setLoadingInfo(true);
     setErrorInfo(null);
@@ -138,28 +128,6 @@ export default function TaxonomyAdminPage() {
       alert(`Tải mẫu cấu trúc thất bại: ${e instanceof Error ? e.message : String(e)}`);
     }
   }, []);
-
-  const handleWipe = useCallback(async () => {
-    if (
-      !window.confirm(
-        'CẢNH BÁO: thao tác này XÓA toàn bộ products (mọi SP đã import) + 7 bảng categories/seo cũ.\n' +
-          'Orders/users/cart không bị ảnh hưởng.\n\nTiếp tục?',
-      )
-    )
-      return;
-    setWiping(true);
-    setWipeError(null);
-    setWipeResult(null);
-    try {
-      const data = await callApi<WipeResult>('/taxonomy/wipe', { method: 'POST' });
-      setWipeResult(data);
-      void reloadInfo();
-    } catch (e) {
-      setWipeError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setWiping(false);
-    }
-  }, [reloadInfo]);
 
   const handleImport = useCallback(
     async (file: File) => {
@@ -259,44 +227,17 @@ export default function TaxonomyAdminPage() {
           </div>
         </section>
 
-        <section className="rounded-lg border border-red-200 bg-red-50 p-4">
-          <h2 className="text-lg font-semibold text-red-900">2. Wipe products + categories</h2>
-          <p className="mt-1 text-sm text-red-800">
-            Xoá toàn bộ <strong>products</strong> + 7 bảng category/seo cũ trước khi import lại taxonomy. Cần làm
-            trước lần đầu (vì schema categories đã đổi). Orders/users/cart KHÔNG bị động đến.
+        <section className="rounded-lg border border-amber-100 bg-amber-50 p-4 text-sm text-amber-950">
+          <p className="font-medium text-amber-900">Migration taxonomy lần đầu (xoá SP + tái tạo bảng danh mục)</p>
+          <p className="mt-2 text-amber-900/90">
+            Không có trên web. Trên máy dev mở thư mục <code className="rounded bg-white/70 px-1">backend</code>, chạy:{' '}
+            <code className="rounded bg-white/70 px-1">python scripts/wipe_taxonomy_migration.py</code>
+            {' '}(hoặc thêm <code className="rounded bg-white/70 px-1">--yes</code>). Sau đó dùng bước upload bên dưới.
           </p>
-          <button
-            type="button"
-            onClick={() => void handleWipe()}
-            disabled={wiping}
-            className="mt-3 rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
-          >
-            {wiping ? 'Đang xoá…' : 'Wipe ngay'}
-          </button>
-          {wipeError ? (
-            <div className="mt-3 rounded border border-red-300 bg-white p-3 text-sm text-red-700">
-              {wipeError}
-            </div>
-          ) : null}
-          {wipeResult ? (
-            <div className="mt-3 rounded border border-green-300 bg-white p-3 text-sm text-green-800">
-              <div>Đã xoá ({wipeResult.elapsed_ms} ms):</div>
-              <ul className="ml-4 list-disc">
-                {Object.entries(wipeResult.wiped).map(([t, n]) => (
-                  <li key={t}>
-                    <code>{t}</code>: {n}
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-2">
-                Re-create: <code>{wipeResult.created.join(', ') || '(không cần)'}</code>
-              </div>
-            </div>
-          ) : null}
         </section>
 
         <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">3. Upload taxonomy_import.xlsx</h2>
+          <h2 className="text-lg font-semibold text-gray-900">2. Upload taxonomy_import.xlsx</h2>
           <p className="mt-1 text-sm text-gray-600">
             File phải có đủ 4 sheet: <code>categories</code>, <code>category_paths</code>,{' '}
             <code>seo_clusters</code>, <code>meta</code>. Upsert theo cột <code>id</code> (string), an toàn

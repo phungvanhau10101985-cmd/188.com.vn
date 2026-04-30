@@ -78,7 +78,7 @@ from app.models.product_review import ProductReview, ProductReviewUsefulVote
 print("✅ ProductReview model loaded")
 
 # 6e. Category SEO mapping (quản lý canonical/redirect cho danh mục)
-from app.models.category_seo import CategorySeoMapping, CategorySeoDictionary, CategorySeoMeta
+from app.models.category_seo import CategorySeoMapping, CategorySeoDictionary, CategorySeoMeta, CategorySeoGeminiTarget, CategorySeoSettings
 print("✅ CategorySeoMapping model loaded")
 
 # 6f. Category transform rules (lưu lịch sử chỉnh danh mục)
@@ -156,6 +156,8 @@ __all__ = [
     "CategorySeoMapping",
     "CategorySeoDictionary",
     "CategorySeoMeta",
+    "CategorySeoGeminiTarget",
+    "CategorySeoSettings",
     "CategoryTransformRule",
     "CategoryFinalMapping",
     "SearchQueryMapping",

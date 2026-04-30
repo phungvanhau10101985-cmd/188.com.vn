@@ -8,17 +8,24 @@ API endpoints cho:
 
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Body
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from datetime import datetime
 import re
 
 from app.db.session import get_db, SessionLocal
-from app.models.category_seo import CategorySeoMapping, CategorySeoDictionary, CategorySeoMeta
+from app.models.category_seo import (
+    CategorySeoMapping,
+    CategorySeoDictionary,
+    CategorySeoMeta,
+    CategorySeoGeminiTarget,
+    CategorySeoSettings,
+)
 from app.models.category_transform_rule import CategoryTransformRule
 from app.models.category_final_mapping import CategoryFinalMapping
 from app.models.product import Product
 from app.crud import product as crud_product
 from app.crud.product import category_field_equals_ci
+from app.core.config import settings
 from app.services.category_seo_service import generate_category_seo_body
 from app.services.category_seo_analyzer import (
     scan_and_create_mappings,
@@ -127,6 +134,158 @@ def _flatten_tree_to_paths(tree):
                 if slug3:
                     paths.append((slug1, slug2, slug3))
     return paths
+
+
+GEMINI_TARGETS_JOB_STATUS = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "total": 0,
+    "processed": 0,
+    "meta_generated": 0,
+    "meta_skipped": 0,
+    "body_generated": 0,
+    "body_skipped": 0,
+    "failed": 0,
+    "current_path": None,
+    "report": [],
+    "force_description": False,
+    "force_body": False,
+}
+
+
+def _reset_gemini_targets_status(force_description: bool, force_body: bool):
+    GEMINI_TARGETS_JOB_STATUS.update({
+        "running": True,
+        "started_at": datetime.utcnow().isoformat(),
+        "finished_at": None,
+        "total": 0,
+        "processed": 0,
+        "meta_generated": 0,
+        "meta_skipped": 0,
+        "body_generated": 0,
+        "body_skipped": 0,
+        "failed": 0,
+        "current_path": None,
+        "report": [],
+        "force_description": force_description,
+        "force_body": force_body,
+    })
+
+
+def _append_gemini_targets_report(item: dict):
+    report = GEMINI_TARGETS_JOB_STATUS.get("report") or []
+    report.append(item)
+    if len(report) > 500:
+        report = report[-500:]
+    GEMINI_TARGETS_JOB_STATUS["report"] = report
+
+
+def _path_str_to_slug_tuple(path_str: str) -> Optional[Tuple[str, Optional[str], Optional[str]]]:
+    parts = [p.strip().lower() for p in (path_str or "").split("/") if p.strip()]
+    if not parts:
+        return None
+    level1 = parts[0]
+    level2 = parts[1] if len(parts) > 1 else None
+    level3 = parts[2] if len(parts) > 2 else None
+    return (level1, level2, level3)
+
+
+def _gemini_targets_full_job(
+    path_strs: List[str],
+    force_description: bool,
+    force_body: bool,
+    delay: float,
+):
+    db = SessionLocal()
+    try:
+        _reset_gemini_targets_status(force_description, force_body)
+        norm_paths = []
+        for p in path_strs:
+            k = (p or "").strip().lower()
+            if k and k not in norm_paths:
+                norm_paths.append(k)
+        GEMINI_TARGETS_JOB_STATUS["total"] = len(norm_paths)
+        import time
+
+        for path_str in norm_paths:
+            GEMINI_TARGETS_JOB_STATUS["current_path"] = path_str
+            tup = _path_str_to_slug_tuple(path_str)
+            if not tup:
+                GEMINI_TARGETS_JOB_STATUS["failed"] += 1
+                _append_gemini_targets_report({"path": path_str, "status": "failed", "message": "path không hợp lệ"})
+                GEMINI_TARGETS_JOB_STATUS["processed"] += 1
+                continue
+            level1, level2, level3 = tup
+            data = crud_product.get_category_seo_data(
+                db,
+                level1_slug=level1,
+                level2_slug=level2,
+                level3_slug=level3,
+                is_active=True,
+                image_limit=4,
+            )
+            if not data:
+                GEMINI_TARGETS_JOB_STATUS["failed"] += 1
+                _append_gemini_targets_report({"path": path_str, "status": "failed", "message": "Không resolve danh mục"})
+                GEMINI_TARGETS_JOB_STATUS["processed"] += 1
+                continue
+            had_desc_before = bool((data.get("seo_description") or "").strip())
+            had_body_before = bool((data.get("seo_body") or "").strip())
+            did_desc = False
+            did_body = False
+            meta_err = None
+            body_err = None
+            try:
+                did_desc = crud_product.ensure_category_seo_description(
+                    db,
+                    level1_slug=str(level1),
+                    level2_slug=str(level2) if level2 else None,
+                    level3_slug=str(level3) if level3 else None,
+                    is_active=True,
+                    force=bool(force_description),
+                )
+                if did_desc:
+                    GEMINI_TARGETS_JOB_STATUS["meta_generated"] += 1
+                else:
+                    GEMINI_TARGETS_JOB_STATUS["meta_skipped"] += 1
+            except Exception as e:
+                meta_err = str(e)
+                GEMINI_TARGETS_JOB_STATUS["failed"] += 1
+                _append_gemini_targets_report({"path": path_str, "part": "meta", "status": "error", "message": meta_err})
+            try:
+                did_body = crud_product.ensure_category_seo_body(
+                    db,
+                    level1_slug=str(level1),
+                    level2_slug=str(level2) if level2 else None,
+                    level3_slug=str(level3) if level3 else None,
+                    is_active=True,
+                    force=bool(force_body),
+                )
+                if did_body:
+                    GEMINI_TARGETS_JOB_STATUS["body_generated"] += 1
+                else:
+                    GEMINI_TARGETS_JOB_STATUS["body_skipped"] += 1
+            except Exception as e:
+                body_err = str(e)
+                GEMINI_TARGETS_JOB_STATUS["failed"] += 1
+                _append_gemini_targets_report({"path": path_str, "part": "body", "status": "error", "message": body_err})
+            _append_gemini_targets_report({
+                "path": path_str,
+                "status": "ok",
+                "meta": "error" if meta_err else ("generated" if did_desc else "skipped"),
+                "body": "error" if body_err else ("generated" if did_body else "skipped"),
+                "had_meta": had_desc_before,
+                "had_body": had_body_before,
+            })
+            GEMINI_TARGETS_JOB_STATUS["processed"] += 1
+            if delay and delay > 0:
+                time.sleep(delay)
+    finally:
+        GEMINI_TARGETS_JOB_STATUS["running"] = False
+        GEMINI_TARGETS_JOB_STATUS["current_path"] = None
+        GEMINI_TARGETS_JOB_STATUS["finished_at"] = datetime.utcnow().isoformat()
+        db.close()
 
 
 def _generate_seo_bodies_job(force: bool, delay: float, path: Optional[str]):
@@ -893,6 +1052,177 @@ def rename_category(
     }
 
 
+@router.get("/app-settings")
+def get_category_seo_app_settings(db: Session = Depends(get_db)):
+    """
+    Trạng thái Gemini SEO danh mục: admin bật / .env VPS cho phép / hiệu lực cuối cùng.
+    """
+    return crud_product.get_category_gemini_auto_settings_snapshot(db)
+
+
+@router.put("/app-settings")
+def put_category_seo_app_settings(payload: dict = Body(...), db: Session = Depends(get_db)):
+    """Bật/tắt chạy tự động sau import và khi tạo-sửa SP (chỉ khi máy chủ đã cho phép qua .env)."""
+    val = bool(payload.get("gemini_auto_enabled"))
+    if val and not getattr(settings, "CATEGORY_GEMINI_SEO_AUTO_ENABLED", False):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Không thể bật tự động: chỉ VPS (ENVIRONMENT=staging|production và "
+                "CATEGORY_GEMINI_SEO_AUTO_ENABLED=true trong .env) mới cho phép. "
+                "Trên máy dev hãy dùng nút sinh Gemini thủ công trong trang này."
+            ),
+        )
+    row = db.query(CategorySeoSettings).filter(CategorySeoSettings.id == 1).first()
+    if row is None:
+        row = CategorySeoSettings(id=1, gemini_auto_enabled=val)
+        db.add(row)
+    else:
+        row.gemini_auto_enabled = val
+    db.commit()
+    return {"status": "success", **crud_product.get_category_gemini_auto_settings_snapshot(db)}
+
+
+@router.get("/gemini-targets/catalog")
+def gemini_targets_catalog(db: Session = Depends(get_db)):
+    """
+    Danh sách danh mục từ SP + trạng thái meta/body + đã đánh dấu Gemini đích hay chưa (lưu DB).
+    """
+    tree = crud_product.get_category_tree_from_products(db, is_active=True)
+    paths = _flatten_tree_to_paths(tree)
+    meta_map = {
+        (m.category_path or "").strip().lower(): m
+        for m in db.query(CategorySeoMeta).all()
+    }
+    target_set = {
+        (t.category_path or "").strip().lower()
+        for t in db.query(CategorySeoGeminiTarget).all()
+    }
+    rows = []
+    for (level1, level2, level3) in paths:
+        path_str = "/".join(x for x in (level1, level2, level3) if x)
+        data = crud_product.get_category_seo_data(
+            db,
+            level1_slug=level1,
+            level2_slug=level2,
+            level3_slug=level3,
+            is_active=True,
+            image_limit=4,
+        )
+        if not data:
+            continue
+        meta = meta_map.get(path_str)
+        desc_text = (data.get("seo_description") or (getattr(meta, "seo_description", None) or "") or "").strip()
+        body_text = (data.get("seo_body") or (getattr(meta, "seo_body", None) or "") or "").strip()
+        product_count = int(data.get("product_count") or 0)
+        rows.append({
+            "path": path_str,
+            "breadcrumb_label": data.get("full_name") or path_str,
+            "level": len([x for x in (level1, level2, level3) if x]),
+            "product_count": product_count,
+            "has_seo_description": bool(desc_text),
+            "has_seo_body": bool(body_text),
+            "gemini_enabled": path_str in target_set,
+        })
+
+    total = len(rows)
+    with_p = sum(1 for r in rows if r["product_count"] > 0)
+    ge = sum(1 for r in rows if r["gemini_enabled"])
+    miss_d = sum(1 for r in rows if r["gemini_enabled"] and not r["has_seo_description"])
+    miss_b = sum(1 for r in rows if r["gemini_enabled"] and not r["has_seo_body"])
+    return {
+        "total": total,
+        "summary": {
+            "paths_total": total,
+            "with_products": with_p,
+            "gemini_target_count": ge,
+            "gemini_missing_description": miss_d,
+            "gemini_missing_body": miss_b,
+            "not_marked_for_gemini": total - ge,
+        },
+        "rows": rows,
+    }
+
+
+@router.put("/gemini-targets")
+def gemini_targets_toggle(payload: dict = Body(...), db: Session = Depends(get_db)):
+    """Bật/tắt danh mục trong whitelist Gemini (category_path slug chữ thường)."""
+    raw = payload.get("paths")
+    paths = raw if isinstance(raw, list) else []
+    enabled = bool(payload.get("enabled", True))
+    affected = 0
+    for p in paths:
+        key = (str(p) if p is not None else "").strip().lower()
+        if not key:
+            continue
+        existing = db.query(CategorySeoGeminiTarget).filter(CategorySeoGeminiTarget.category_path == key).first()
+        if enabled:
+            if not existing:
+                db.add(CategorySeoGeminiTarget(category_path=key))
+                affected += 1
+        else:
+            if existing:
+                db.delete(existing)
+                affected += 1
+    db.commit()
+    return {"status": "success", "affected": affected}
+
+
+@router.post("/gemini-targets/run")
+def gemini_targets_run(background_tasks: BackgroundTasks, payload: dict = Body(default_factory=dict)):
+    """
+    Sinh meta description + seo_body (Gemini) cho danh sách path.
+    Nếu body.paths rỗng/không gửi → chạy toàn bộ path đang có trong whitelist DB.
+    """
+    if SEO_BODY_JOB_STATUS.get("running") or GEMINI_TARGETS_JOB_STATUS.get("running"):
+        raise HTTPException(status_code=409, detail="Đang có job SEO chạy, vui lòng đợi xong.")
+
+    raw_paths = payload.get("paths")
+    force_description = bool(payload.get("force_description", False))
+    force_body = bool(payload.get("force_body", False))
+    try:
+        delay = float(payload.get("delay") if payload.get("delay") is not None else 1.2)
+    except (TypeError, ValueError):
+        delay = 1.2
+    if delay < 0:
+        delay = 0
+
+    db = SessionLocal()
+    try:
+        if isinstance(raw_paths, list) and len(raw_paths) > 0:
+            path_list = list({(str(p) if p is not None else "").strip().lower() for p in raw_paths if (str(p) if p is not None else "").strip()})
+        else:
+            path_list = sorted({(r.category_path or "").strip().lower() for r in db.query(CategorySeoGeminiTarget).all() if (r.category_path or "").strip()})
+    finally:
+        db.close()
+
+    if not path_list:
+        raise HTTPException(
+            status_code=400,
+            detail="Không có danh mục để chạy: thêm path vào Gemini đích hoặc gửi paths trong body.",
+        )
+
+    background_tasks.add_task(
+        _gemini_targets_full_job,
+        path_list,
+        force_description,
+        force_body,
+        delay,
+    )
+    return {
+        "status": "started",
+        "path_count": len(path_list),
+        "force_description": force_description,
+        "force_body": force_body,
+        "delay": delay,
+    }
+
+
+@router.get("/gemini-targets/status")
+def gemini_targets_run_status():
+    return GEMINI_TARGETS_JOB_STATUS
+
+
 @router.post("/seo-bodies/generate")
 def generate_seo_bodies(
     background_tasks: BackgroundTasks,
@@ -905,6 +1235,8 @@ def generate_seo_bodies(
     Tạo lại seo_body cho danh mục (Gemini).
     Nếu dry_run=true sẽ chỉ trả danh sách path.
     """
+    if not dry_run and (SEO_BODY_JOB_STATUS.get("running") or GEMINI_TARGETS_JOB_STATUS.get("running")):
+        raise HTTPException(status_code=409, detail="Đang có job SEO chạy, vui lòng đợi xong.")
     if dry_run:
         db = SessionLocal()
         try:

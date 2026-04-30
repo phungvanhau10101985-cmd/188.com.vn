@@ -824,6 +824,53 @@ class ApiClient {
     return this.fetch(`/category-seo/seo-bodies/status`);
   }
 
+  /** Cài đặt chế độ tự động / tay (Gemini danh mục sau import API) — lưu DB */
+  async getCategorySeoAppSettings(): Promise<{
+    gemini_auto_enabled_admin: boolean;
+    env_allows_gemini_auto: boolean;
+    gemini_auto_effective: boolean;
+    gemini_whitelist_only_env: boolean;
+  }> {
+    return this.fetch(`/category-seo/app-settings`);
+  }
+
+  async putCategorySeoAppSettings(payload: { gemini_auto_enabled: boolean }): Promise<any> {
+    return this.fetch(`/category-seo/app-settings`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  /** Catalog danh mục + thống kê Gemini đích */
+  async getGeminiTargetsCatalog(): Promise<any> {
+    return this.fetch(`/category-seo/gemini-targets/catalog`);
+  }
+
+  /** Bật/tắt danh mục trong whitelist Gemini SEO */
+  async setGeminiTargets(payload: { paths: string[]; enabled: boolean }): Promise<{ status: string; affected: number }> {
+    return this.fetch(`/category-seo/gemini-targets`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  /** Chạy Gemini meta description + seo_body cho paths (hoặc toàn bộ whitelist nếu paths rỗng) */
+  async runGeminiTargets(payload?: {
+    paths?: string[];
+    force_description?: boolean;
+    force_body?: boolean;
+    delay?: number;
+  }): Promise<any> {
+    return this.fetch(`/category-seo/gemini-targets/run`, {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  async getGeminiTargetsJobStatus(): Promise<any> {
+    return this.fetch(`/category-seo/gemini-targets/status`);
+  }
+
   /** Lấy danh sách rules */
   async getCategoryRules(): Promise<{ total: number; rules: any[] }> {
     return this.fetch(`/category-seo/rules`);

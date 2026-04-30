@@ -2,7 +2,6 @@
 """
 Admin endpoint quản lý taxonomy (cây danh mục + SEO cluster) qua file Excel 4 sheet.
 
-- POST /api/v1/taxonomy/wipe   : xóa products + 6 bảng category/seo cũ, tạo lại schema mới.
 - POST /api/v1/taxonomy/import : upload taxonomy_import.xlsx → seed categories + seo_clusters.
 - GET  /api/v1/taxonomy/sample : ưu tiên `temp_uploads/taxonomy_import.xlsx` (dữ liệu đầy đủ),
   sau đó `assets/taxonomy_import_template.xlsx` (mẫu đủ cột + vài dòng minh họa),
@@ -22,13 +21,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import inspect, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app import models
 from app.core.security import get_current_admin
-from app.db.base import Base
-from app.db.session import engine, get_db
+from app.db.session import get_db
 from app.models.category import Category
 from app.models.seo_cluster import SeoCluster
 from app.utils.ttl_cache import cache as ttl_cache
@@ -268,18 +266,6 @@ def write_taxonomy_schema_template_to_disk(path: Optional[Path] = None) -> Path:
     return target
 
 
-# Thứ tự DROP an toàn (con trước, cha sau) để không vướng FK.
-WIPE_TABLES_ORDER = [
-    "category_seo_meta",
-    "category_seo_mappings",
-    "category_seo_dictionary",
-    "category_transform_rules",
-    "category_final_mappings",
-    "categories",
-    "seo_clusters",
-]
-
-
 def _truthy_active(val: Any) -> bool:
     s = str(val).strip().lower()
     return s in ("1", "true", "yes", "y")
@@ -296,70 +282,6 @@ def _safe_int(val: Any, default: int = 0) -> int:
     except (TypeError, ValueError):
         return default
 
-
-# ---------- WIPE ----------
-@router.post("/wipe")
-def wipe_taxonomy_and_products(
-    db: Session = Depends(get_db),
-    _admin: models.AdminUser = Depends(get_current_admin),
-) -> Dict[str, Any]:
-    """
-    Xóa products + 7 bảng taxonomy/SEO cũ, sau đó tạo lại theo schema mới.
-    GIỮ NGUYÊN orders/users/cart/notifications/...
-
-    Trả `{wiped: {...}, created: [...], elapsed_ms}`.
-    """
-    started = time.time()
-    insp = inspect(engine)
-
-    # Đếm trước khi xoá
-    counts_before: Dict[str, int] = {}
-    for t in ["products"] + WIPE_TABLES_ORDER:
-        if insp.has_table(t):
-            try:
-                counts_before[t] = db.execute(text(f"SELECT COUNT(*) FROM {t}")).scalar() or 0
-            except Exception:
-                counts_before[t] = -1
-
-    # Xoá row trong products trước (để FK products.category_id không vướng khi DROP categories)
-    if insp.has_table("products"):
-        db.execute(text("DELETE FROM products"))
-        db.commit()
-
-    # DROP TABLE CASCADE (Postgres) — bảng cũ có thể không có cột mới (vd parent_id);
-    # cách an toàn nhất là drop rồi để Base.metadata.create_all dựng lại.
-    dialect = engine.dialect.name
-    cascade_clause = " CASCADE" if dialect == "postgresql" else ""
-    dropped: List[str] = []
-    for t in WIPE_TABLES_ORDER:
-        if insp.has_table(t):
-            db.execute(text(f"DROP TABLE IF EXISTS {t}{cascade_clause}"))
-            dropped.append(t)
-    db.commit()
-
-    # Re-create từ Base.metadata
-    insp = inspect(engine)
-    created: List[str] = []
-    target_tables = [
-        Base.metadata.tables[t]
-        for t in WIPE_TABLES_ORDER
-        if t in Base.metadata.tables and not insp.has_table(t)
-    ]
-    if target_tables:
-        Base.metadata.create_all(bind=engine, tables=target_tables)
-        created = [t.name for t in target_tables]
-
-    # Reset cache cây danh mục cũ (kẻo trả tree cũ)
-    ttl_cache.invalidate_all()
-
-    elapsed_ms = int((time.time() - started) * 1000)
-    return {
-        "ok": True,
-        "wiped": counts_before,
-        "dropped": dropped,
-        "created": created,
-        "elapsed_ms": elapsed_ms,
-    }
 
 
 # ---------- IMPORT ----------

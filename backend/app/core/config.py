@@ -291,20 +291,43 @@ class Settings:
         # Import Excel: tối đa số dòng/lần (mặc định 30k); commit DB theo lô để giảm overhead transaction
         self.MAX_EXCEL_IMPORT_ROWS: int = int(os.getenv("MAX_EXCEL_IMPORT_ROWS", "30000"))
         self.EXCEL_IMPORT_COMMIT_BATCH_SIZE: int = int(os.getenv("EXCEL_IMPORT_COMMIT_BATCH_SIZE", "250"))
-        # bulk_import_products: sau khi ghi DB sẽ (trước đây) gọi Gemini + sleep cho MỖI danh mục mới —
-        # với batch lớn (vd. ~30k SP) có thể mất giờ, job poll tưởng “treo”.
-        # Nếu số SP hợp lệ trong lô ≥ ngưỡng này thì BỎ QUA vòng SEO danh mục ngay trong import (vẫn có thể chạy job SEO sau).
-        # Đặt 0 để không bỏ qua — luôn chạy vòng SEO (hành vi cũ, rất chậm với file lớn).
+        # bulk_import_products: sau khi ghi DB có thể chạy Gemini (meta description + seo_body) theo từng path danh mục.
+        # Với batch rất lớn (vd. ~30k SP) luồng nền có thể lâu — nếu số dòng import ≥ ngưỡng dưới thì BỎ QUA tự động (chạy script / admin sau).
+        # Đặt 0 để luôn cho phép chạy nền khi CATEGORY_GEMINI_SEO_AUTO_ENABLED bật.
         try:
             _seo_skip_thr = os.getenv("EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS", "2500").strip()
             self.EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS = int(_seo_skip_thr) if _seo_skip_thr != "" else 2500
         except ValueError:
             self.EXCEL_IMPORT_AUTO_SKIP_CATEGORY_SEO_MIN_ROWS = 2500
-        # Gemini seo_body sau import Excel — không còn tự động (bulk_import không gọi). Giữ biến/env để tương thích cấu hình cũ.
-        self.EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED: bool = (
-            os.getenv("EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED", "false").lower() == "true"
+        # Gemini SEO danh mục tự động (Import Excel + API tạo/sửa SP):
+        # CATEGORY_GEMINI_SEO_* trên VPS (staging/production) là điều kiện cần — điều kiện đủ là admin phải bật trong
+        # bảng category_seo_settings (PUT /category-seo/app-settings hay trang /admin/danh-muc-seo).
+        # Máy dev: luôn tắt (kể cả .env có true — tránh gọi Gemini nhầm).
+        _env_for_gemini = (getattr(self, "ENVIRONMENT", "") or "development").strip().lower()
+        _gemini_auto_allowed_env = _env_for_gemini in ("production", "staging")
+        _cat_auto_raw = os.getenv("CATEGORY_GEMINI_SEO_AUTO_ENABLED", "").strip()
+        _legacy_cat_seo_raw = os.getenv("EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED", "").strip()
+        _want_gemini = (
+            _cat_auto_raw.lower() == "true"
+            or (_legacy_cat_seo_raw or "false").strip().lower() == "true"
         )
-        
+        if _gemini_auto_allowed_env:
+            _gemini_cat_auto = _want_gemini
+        else:
+            _gemini_cat_auto = False
+            if _want_gemini:
+                _settings_logger.info(
+                    "CATEGORY_GEMINI_SEO_AUTO: bỏ qua .env=true — chỉ bật trên VPS (ENVIRONMENT=staging hoặc production). "
+                    "Hiện ENVIRONMENT=%s.",
+                    getattr(self, "ENVIRONMENT", ""),
+                )
+        self.CATEGORY_GEMINI_SEO_AUTO_ENABLED: bool = _gemini_cat_auto
+        self.EXCEL_IMPORT_CATEGORY_SEO_BODY_ENABLED: bool = _gemini_cat_auto
+        # Nếu true: import Excel + API tạo/sửa SP chỉ kích Gemini cho path có trong category_seo_gemini_targets (admin đã đánh dấu).
+        self.CATEGORY_GEMINI_SEO_WHITELIST_ONLY: bool = (
+            os.getenv("CATEGORY_GEMINI_SEO_WHITELIST_ONLY", "false").strip().lower() == "true"
+        )
+
         # ========================
         # CORS CONFIGURATION
         # ========================
