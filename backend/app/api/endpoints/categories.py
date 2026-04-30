@@ -1,33 +1,54 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Any, Optional
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.schemas.category import Category, CategoryCreate, CategoryUpdate
 from app.crud import category as crud_category
 from app.crud import product as crud_product
+from app.utils.ttl_cache import cache as ttl_cache
 
 router = APIRouter()
 
+# Cache cây danh mục từ sản phẩm (60s) — endpoint này được Next SSR layout gọi mỗi request,
+# query tốn ~1-3s, dễ làm tràn pool DB khi có traffic / bot. Admin sửa danh mục: chờ ≤ 60s.
+_CATEGORY_TREE_TTL = 60.0
+_CATEGORY_TREE_CACHE_KEY_ACTIVE = "category_tree_v1:from_products:active=true"
+_CATEGORY_TREE_CACHE_KEY_ALL = "category_tree_v1:from_products:active=false"
+
+
+def _fetch_category_tree(is_active: bool):
+    """Mở session thủ công — khi cache hit, không cần gọi hàm này, không tốn connection."""
+    db = SessionLocal()
+    try:
+        return crud_product.get_category_tree_from_products(db, is_active=is_active)
+    finally:
+        db.close()
+
 
 def _get_category_tree_from_products_impl(db: Session, is_active: bool = True):
-    """Shared impl để dùng cho cả /from-products và /from-products/."""
+    """Shared impl: vẫn nhận `db` để các caller nội bộ tận dụng được session sẵn có."""
     return crud_product.get_category_tree_from_products(db, is_active=is_active)
 
 
 @router.get("/from-products", response_model=List[Any])
 @router.get("/from-products/", response_model=List[Any])
-def read_category_tree_from_products(
-    is_active: bool = True,
-    db: Session = Depends(get_db),
-):
+def read_category_tree_from_products(is_active: bool = True):
     """
     Cây danh mục 3 cấp sinh từ sản phẩm:
     - Cấp 1 (cột AB): category
     - Cấp 2 (cột AC): subcategory
     - Cấp 3 (cột AD): sub_subcategory
     Trả về [{ name, slug, children: [{ name, slug, children: [{ name, slug }] }] }]
+
+    Có cache 60s trong process (singleflight). Không nhận `Depends(get_db)` vì
+    khi cache hit ta không muốn pool DB cấp connection (đó là nguồn QueuePool tràn ở prod).
     """
-    return _get_category_tree_from_products_impl(db, is_active=is_active)
+    key = _CATEGORY_TREE_CACHE_KEY_ACTIVE if is_active else _CATEGORY_TREE_CACHE_KEY_ALL
+    return ttl_cache.get_or_fetch(
+        key,
+        _CATEGORY_TREE_TTL,
+        lambda: _fetch_category_tree(is_active),
+    )
 
 
 @router.get("/from-products/by-path")
