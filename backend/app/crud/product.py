@@ -1730,6 +1730,76 @@ def _spawn_category_seo_body_background(paths_snapshot: List[tuple]) -> None:
 
 # ========== BULK IMPORT FUNCTION ==========
 
+def _build_cat3_lookup_indexes(db: Session) -> Dict[str, Dict[str, int]]:
+    """
+    Trả 3 dict tra cứu cat3 → category_id (level=3).
+    Dùng trong bulk_import_products để map sản phẩm theo slug/full_slug/name (O(1) thay vì query DB từng row).
+    """
+    from app.models.category import Category as _Cat
+    by_full_slug: Dict[str, int] = {}
+    by_slug: Dict[str, int] = {}
+    by_name: Dict[str, int] = {}
+    rows = (
+        db.query(_Cat.id, _Cat.full_slug, _Cat.slug, _Cat.name)
+        .filter(_Cat.level == 3)
+        .all()
+    )
+    for r in rows:
+        if r.full_slug:
+            by_full_slug[r.full_slug.strip().lower()] = r.id
+        if r.slug:
+            by_slug.setdefault(r.slug.strip().lower(), r.id)
+        if r.name:
+            by_name.setdefault(r.name.strip().lower(), r.id)
+    return {"by_full_slug": by_full_slug, "by_slug": by_slug, "by_name": by_name}
+
+
+def _resolve_category_id_from_row(
+    product_data: Dict[str, Any], idx: Dict[str, Dict[str, int]]
+) -> Optional[int]:
+    """
+    Tra cat3.id theo thứ tự ưu tiên:
+      1) full_slug (vd `giay-dep-nam/sneaker-giay-chay-nam/giay-chay-trail-nam`)
+         - lấy từ `slug_seo` hoặc `cat3_full_slug` (nếu Excel có), hoặc ghép từ category/sub/sub-sub.
+      2) slug đơn (cat3_slug hoặc `slug_seo` chưa có dấu /)
+      3) tên cat3 (`sub_subcategory`)
+    Trả None nếu không match được — admin xử lý sau qua /admin/taxonomy.
+    """
+    cat = (product_data.get("category") or "").strip()
+    sub = (product_data.get("subcategory") or "").strip()
+    subsub = (product_data.get("sub_subcategory") or "").strip()
+
+    candidates_full: List[str] = []
+    for k in ("cat3_full_slug", "slug_seo", "full_slug"):
+        v = (product_data.get(k) or "").strip()
+        if "/" in v:
+            candidates_full.append(v.lower())
+
+    # Ghép từ category/sub/sub-sub nếu các trường đã được slug-hoá (không dùng nếu là tên VN có dấu)
+    if cat and sub and subsub and all("/" not in s for s in (cat, sub, subsub)):
+        candidates_full.append(f"{cat}/{sub}/{subsub}".lower())
+
+    for fs in candidates_full:
+        cid = idx["by_full_slug"].get(fs)
+        if cid:
+            return cid
+
+    # Slug đơn của cat3
+    for k in ("cat3_slug", "slug_seo"):
+        v = (product_data.get(k) or "").strip()
+        if v and "/" not in v:
+            cid = idx["by_slug"].get(v.lower())
+            if cid:
+                return cid
+
+    # Tên cat3
+    if subsub:
+        cid = idx["by_name"].get(subsub.lower())
+        if cid:
+            return cid
+    return None
+
+
 def bulk_import_products(
     db: Session,
     products_data: List[Dict],
@@ -1755,6 +1825,10 @@ def bulk_import_products(
     if progress_callback and n_products:
         progress_callback("database", 0, n_products)
 
+    # Cache cat3 lookup 1 lần (tránh query DB N lần). Nếu admin chưa import taxonomy, các dict rỗng.
+    cat3_idx = _build_cat3_lookup_indexes(db)
+    unmatched_cat3: List[str] = []
+
     for idx, product_data in enumerate(products_data):
         try:
             product_id = product_data.get('product_id')
@@ -1771,6 +1845,19 @@ def bulk_import_products(
                     product_data['slug'] = new_slug
                     warnings.append(f"Dòng {idx+1}: Slug '{slug_value}' bị trùng, đã đổi thành '{new_slug}'")
             
+            # Tra `category_id` (cat3.id) theo slug/full_slug/name. Không match → để None,
+            # log để admin biết cần bổ sung taxonomy hoặc đồng bộ tên Excel.
+            resolved_cat_id = _resolve_category_id_from_row(product_data, cat3_idx)
+            product_data["category_id"] = resolved_cat_id
+            if resolved_cat_id is None and (
+                product_data.get("category") or product_data.get("sub_subcategory")
+            ):
+                unmatched_cat3.append(
+                    f"{product_id}: {product_data.get('category', '')}/"
+                    f"{product_data.get('subcategory', '')}/"
+                    f"{product_data.get('sub_subcategory', '')}"
+                )
+
             existing = db.query(Product).filter(Product.product_id == product_id).first()
             
             if existing:
@@ -1822,6 +1909,17 @@ def bulk_import_products(
             "total_processed": total_processed,
             "success_rate": f"{success_rate:.1f}%",
         }
+
+    # Cảnh báo SP không match được cat3 trong taxonomy (chỉ summary, không spam log)
+    if unmatched_cat3:
+        unmatched_count = len(unmatched_cat3)
+        sample = unmatched_cat3[:10]
+        warnings.append(
+            f"Có {unmatched_count} sản phẩm không tìm được cat3 trong taxonomy "
+            f"(category_id = NULL). Mẫu 10 SP đầu: {sample}. "
+            "Kiểm tra /admin/taxonomy đã import chưa hoặc cập nhật slug_seo/cat3_slug trong file."
+        )
+        logger.warning("⚠️  %d products unmatched cat3 — first 10: %s", unmatched_count, sample)
 
     # Gemini sinh seo_body không chạy tự động sau import — chỉ khi admin bấm tạo SEO trong «Danh mục SEO»
     # hoặc POST /category-seo/seo-bodies/generate (hoặc script generate_all_seo_bodies.py).
