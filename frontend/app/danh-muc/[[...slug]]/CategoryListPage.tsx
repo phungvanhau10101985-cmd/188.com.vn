@@ -71,24 +71,10 @@ export default function CategoryListPage({ categoryTree }: CategoryListPageProps
     <>
       {/* Mobile: header cam + list danh mục, mũi tên sổ cấp 2/3, bấm chữ mới vào trang */}
       <div className="md:hidden min-h-screen bg-white pb-16">
-        {/* Header cam: back + "Danh mục sản phẩm" */}
-        <header className="bg-[#ea580c] text-white sticky top-0 z-40 shadow-md">
-          <div className="flex items-center h-12 px-3 gap-2">
-            <button
-              type="button"
-              onClick={() => router.back()}
-              className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-white/20 active:bg-white/30"
-              aria-label="Quay lại"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <h1 className="flex-1 text-center text-base font-bold pr-10">
-              Danh mục sản phẩm
-            </h1>
-          </div>
-        </header>
+        {/* Tiêu đề trang: back/search nằm ở MobileHeader global — tránh hai lớp header cam khi cuộn */}
+        <div className="px-4 py-3 border-b border-gray-100 bg-white">
+          <h1 className="text-center text-base font-bold text-gray-900">Danh mục sản phẩm</h1>
+        </div>
 
         {/* List danh mục: bấm mũi tên sổ cấp 2/3, bấm chữ mới vào trang */}
         <nav className="bg-white" aria-label="Danh mục sản phẩm">

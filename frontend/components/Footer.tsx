@@ -40,7 +40,7 @@ export default function Footer() {
               </div>
             </Link>
             <p className="text-gray-700 text-sm leading-relaxed max-w-xs">
-              Thời trang nam chất lượng cao, giá hợp lý. Cam kết chính hãng, giao hàng toàn quốc.
+              Thời trang nam nữ và nhiều sản phẩm khác — chất lượng cao, giá hợp lý. Cam kết chính hãng, giao hàng toàn quốc.
             </p>
             <div className="flex gap-3" role="group" aria-label="Mạng xã hội (đang hoàn thiện liên kết)">
               <button

@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "188.COM.VN",
     short_name: "188",
     description:
-      "Nền tảng thương mại điện tử 188.com.vn — thời trang nam, giày dép, phụ kiện.",
+      "Nền tảng thương mại điện tử 188.com.vn — thời trang nam nữ, nhiều ngành hàng khác, giày dép, phụ kiện.",
     start_url: "/",
     display: "standalone",
     background_color: "#fafafa",

@@ -2,7 +2,7 @@
 :root {
   /** Chiều cao header mobile — MobileHeader cập nhật qua JS (ResizeObserver); fallback cho SSR */
   /** Chiều cao ước lượng header mobile mở rộng (logo + ô tìm + chip) — giảm CLS khi ResizeObserver cập nhật */
-  --mobile-app-header-height: 140px;
+  --mobile-app-header-height: calc(140px + env(safe-area-inset-top, 0px));
 }
 
 @tailwind base;

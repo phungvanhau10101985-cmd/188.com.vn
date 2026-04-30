@@ -237,14 +237,16 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
         </>
       )}
       </div>
-      {/* Mobile: Header hiển thị trên tất cả các trang */}
-      <MobileHeader
-        cartItemsCount={getCartItemCount()}
-        favoriteItemsCount={favoriteCount}
-        suggestions={suggestions}
-        onSuggestionClick={handleSuggestionClick}
-        initialCategoryTree={initialCategoryTree}
-      />
+      {/* Mobile: header site — ẩn trang /auth/* (đồng bộ bottom nav, form đăng nhập đỡ chật) */}
+      {!isAuthPage && (
+        <MobileHeader
+          cartItemsCount={getCartItemCount()}
+          favoriteItemsCount={favoriteCount}
+          suggestions={suggestions}
+          onSuggestionClick={handleSuggestionClick}
+          initialCategoryTree={initialCategoryTree}
+        />
+      )}
 
       <main className={`flex-1 md:pb-0 ${showMobileBottomNav ? 'pb-16' : ''}`}>{children}</main>
 

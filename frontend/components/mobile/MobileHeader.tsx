@@ -199,7 +199,10 @@ export default function MobileHeader({
     'flex-shrink-0 min-w-[40px] min-h-[40px] w-10 h-10 shrink-0 flex items-center justify-center text-white rounded-lg bg-white/15 hover:bg-white/25 active:bg-white/35 transition-colors backdrop-blur-[2px]';
 
   return (
-    <div className="md:hidden sticky top-0 z-50" ref={panelRef}>
+    <div
+      ref={panelRef}
+      className="md:hidden sticky top-0 z-50 bg-[#f97316] pt-[env(safe-area-inset-top,0px)]"
+    >
       <header className="bg-gradient-to-b from-[#f97316] to-[#ea580c] shadow-sm border-b border-orange-800/15">
         <div className={`px-2 sm:px-2.5 transition-[padding] duration-200 ${isScrolled ? 'pt-1 pb-1' : compactChrome ? 'pt-1 pb-1.5' : 'pt-1.5 pb-1'}`}>
           {/* Thu max-height khi cuộn — ResizeObserver cập nhật --mobile-app-header-height để thanh tabs SP cùng loại dính đúng dưới */}

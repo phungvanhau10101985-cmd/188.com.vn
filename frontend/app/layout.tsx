@@ -50,6 +50,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   themeColor: "#ea580c",
+  viewportFit: "cover",
 };
 
 // Metadata với SEO optimization
@@ -58,8 +59,16 @@ export const metadata: Metadata = {
     template: "%s | 188.COM.VN",
     default: "188.COM.VN - Nền tảng TMĐT số 1 Việt Nam",
   },
-  description: "188.COM.VN - Nền tảng thương mại điện tử hàng đầu Việt Nam. Thời trang nam cao cấp, giày dép, phụ kiện chính hãng.",
-  keywords: ["thời trang nam", "giày dép nam", "phụ kiện nam", "mua sắm online", "188.com.vn"],
+  description:
+    "188.COM.VN - Nền tảng thương mại điện tử hàng đầu Việt Nam. Thời trang nam nữ, giày dép, phụ kiện và nhiều mặt hàng khác — chính hãng, giao hàng toàn quốc.",
+  keywords: [
+    "thời trang nam",
+    "thời trang nữ",
+    "giày dép",
+    "phụ kiện",
+    "mua sắm online",
+    "188.com.vn",
+  ],
   authors: [{ name: "188 Team" }],
   creator: "188.com.vn",
   publisher: "188.com.vn",
@@ -81,7 +90,7 @@ export const metadata: Metadata = {
     url: "https://188.com.vn",
     siteName: "188.COM.VN",
     title: "188.COM.VN - Nền tảng TMĐT số 1 Việt Nam",
-    description: "Thời trang nam cao cấp, giày dép, phụ kiện chính hãng",
+    description: "Thời trang nam nữ và đa dạng sản phẩm — chính hãng, giao hàng toàn quốc",
     images: [
       {
         url: "https://188comvn.b-cdn.net/logo188.png",
@@ -94,7 +103,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "188.COM.VN - Nền tảng TMĐT số 1",
-    description: "Thời trang nam cao cấp, giày dép, phụ kiện chính hãng",
+    description: "Thời trang nam nữ và đa dạng sản phẩm — chính hãng, giao hàng toàn quốc",
     images: ["https://188comvn.b-cdn.net/logo188.png"],
   },
   robots: {

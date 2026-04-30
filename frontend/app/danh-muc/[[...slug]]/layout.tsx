@@ -16,7 +16,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!level1) {
     return {
       title: "Danh mục sản phẩm",
-      description: "Khám phá danh mục sản phẩm thời trang nam tại 188.com.vn.",
+      description: "Khám phá danh mục sản phẩm thời trang nam nữ và nhiều mặt hàng khác tại 188.com.vn.",
       robots: { index: true, follow: true },
     };
   }
