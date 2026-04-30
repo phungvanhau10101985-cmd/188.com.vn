@@ -128,6 +128,7 @@ def load_api_routes():
         ("embed_codes", "/embed-codes", "embed-codes"),
         ("categories", "/categories", "categories"),
         ("category_seo", "/category-seo", "category-seo"),
+        ("taxonomy_admin", "/taxonomy", "taxonomy-admin"),
         ("cart", "/cart", "cart"),
         ("orders", "/orders", "orders"),
         ("import_export", "/import-export", "import-export"),  # ĐẶC BIỆT DEBUG
