@@ -38,17 +38,17 @@ const nextConfig = {
     unoptimized: process.env.NODE_ENV === "development",
   },
   typescript: { ignoreBuildErrors: false },
-  webpack: (config, { isServer }) => {
+  webpack: (config) => {
     const root = process.cwd();
     config.resolve.alias = {
       ...config.resolve.alias,
+      // Antd compat: lib → es (tree-shaking + tránh build chậm).
       "antd/lib": path.resolve(root, "node_modules/antd/es"),
     };
-    // Chỉ ép singleton React trên bundle client — ép trên server có thể phá resolve react-server/RSC của Next.
-    if (!isServer) {
-      config.resolve.alias.react = path.resolve(root, "node_modules/react");
-      config.resolve.alias["react-dom"] = path.resolve(root, "node_modules/react-dom");
-    }
+    // KHÔNG alias 'react' / 'react-dom' về node_modules ở đây —
+    // Next 14.2.18 client runtime gọi React.use() (chỉ có trong bản React canary mà Next bundle sẵn ở
+    // next/dist/compiled/react). Nếu ép alias về node_modules/react@18.2.0 → React.use undefined →
+    // "(0,s.use) is not a function" + Minified React error #423 lúc hydrate.
     return config;
   },
 };
