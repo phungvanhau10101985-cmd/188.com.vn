@@ -3,6 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime
+from pathlib import Path
+import logging
 import uvicorn
 import sys
 import os
@@ -16,6 +18,39 @@ def _get_app_config():
     return settings
 
 _settings = _get_app_config()
+
+
+def _setup_file_logging() -> None:
+    """Ghi log ra LOG_FILE (.env) — trước đây biến này tồn tại nhưng không được gắn handler."""
+    backend_root = Path(__file__).resolve().parent
+    path = Path(rel)
+    if not path.is_absolute():
+        path = backend_root / path
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    log_file = str(path.resolve())
+    root = logging.getLogger()
+    for h in root.handlers:
+        if isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", None):
+            try:
+                if os.path.abspath(str(h.baseFilename)) == log_file:
+                    return
+            except (TypeError, ValueError):
+                pass
+    lvl_name = (getattr(_settings, "LOG_LEVEL", None) or "INFO").upper()
+    level = getattr(logging, lvl_name, logging.INFO)
+    root.setLevel(level)
+    fh = logging.FileHandler(path, encoding="utf-8")
+    fh.setLevel(level)
+    fh.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
+    root.addHandler(fh)
+
+
+_setup_file_logging()
 
 # Production: tắt Swagger/ReDoc nếu cần (đặt DISABLE_DOCS=true trong .env)
 _docs_url = None if os.getenv("DISABLE_DOCS", "").lower() == "true" else "/docs"
