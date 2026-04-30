@@ -13,6 +13,20 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Thông điệp `error` (EN) để đối chiếu log SePay / chế độ xác minh — HTTP 200 tránh retry vô hạn khi sai nghiệp vụ.
+_SEPAY_WEBHOOK_ERROR_EN: dict[str, str] = {
+    "missing_amount": "Transfer amount missing",
+    "invalid_amount": "Invalid transfer amount",
+    "missing_id": "Transaction id missing",
+    "account_mismatch": "Bank account does not match configured SePay account",
+    "no_order_code_in_content": "Payment code not found in transfer content",
+    "order_not_found": "Pending payment not found",
+    "order_not_waiting_deposit": "Order is not awaiting deposit",
+    "no_deposit_required": "Order does not require deposit",
+    "content_mismatch": "Transfer content does not match expected order reference",
+    "amount_mismatch": "Transfer amount does not match required deposit",
+}
+
 
 async def _handle_sepay_webhook_post(
     request: Request,
@@ -39,9 +53,17 @@ async def _handle_sepay_webhook_post(
     data = sepay_svc.parse_webhook_payload(raw, request.headers.get("content-type", ""))
     ok, msg, order_id = sepay_svc.apply_sepay_incoming_transfer(db, data)
     logger.info("SePay webhook processed applied=%s detail=%s order_id=%s", ok, msg, order_id)
-    if ok and msg == "ok" and order_id:
-        background_tasks.add_task(send_deposit_confirmed_email_task, order_id)
-    return JSONResponse({"success": True}, status_code=201)
+
+    if ok:
+        # duplicate / ignored_out / ok — SePay chờ success true (+ 200/201 tuỳ auth)
+        if msg == "ok" and order_id:
+            background_tasks.add_task(send_deposit_confirmed_email_task, order_id)
+        return JSONResponse({"success": True}, status_code=201)
+
+    err_en = _SEPAY_WEBHOOK_ERROR_EN.get(msg, msg.replace("_", " "))
+    body = {"success": False, "error": err_en, "code": msg}
+    # HTTP 200: kết nối OK, không kích retry mạng; SePay không ghi nhận là giao dịch đã khớp đơn.
+    return JSONResponse(body, status_code=200)
 
 
 @router.post("/webhook")
