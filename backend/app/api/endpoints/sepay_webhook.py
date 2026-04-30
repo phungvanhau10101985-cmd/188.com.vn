@@ -14,15 +14,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/webhook")
-async def sepay_webhook(
+async def _handle_sepay_webhook_post(
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-):
+    db: Session,
+) -> JSONResponse:
     """
-    URL đăng ký trên SePay: https://<domain>/api/v1/sepay/webhook
-    Trả 201 + JSON success khi xử lý xong (tài liệu SePay: OAuth bắt 201; Api Key / không chứng thực chấp 200 hoặc 201).
+    URL chuẩn: https://<domain>/api/v1/sepay/webhook
+    Alias khi chỉ có backend (Nginx ``/api/*`` → FastAPI): ``.../api/sepay-webhook`` (đăng ký trong ``main.load_api_routes``).
     """
     raw = await request.body()
     peer = request.client.host if request.client else "?"
@@ -42,5 +41,23 @@ async def sepay_webhook(
     logger.info("SePay webhook processed applied=%s detail=%s order_id=%s", ok, msg, order_id)
     if ok and msg == "ok" and order_id:
         background_tasks.add_task(send_deposit_confirmed_email_task, order_id)
-    # Tài liệu SePay: thân phản hồi phải có {"success": true}, HTTP 200 hoặc 201 (OAuth: 201).
     return JSONResponse({"success": True}, status_code=201)
+
+
+@router.post("/webhook")
+async def sepay_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Đăng ký SePay: POST .../api/v1/sepay/webhook"""
+    return await _handle_sepay_webhook_post(request, background_tasks, db)
+
+
+async def sepay_webhook_public_path(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """POST .../api/sepay-webhook — main.py add_api_route (Nginx gửi /api/* thẳng vào FastAPI)."""
+    return await _handle_sepay_webhook_post(request, background_tasks, db)

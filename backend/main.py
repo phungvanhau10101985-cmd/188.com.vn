@@ -260,6 +260,23 @@ def load_api_routes():
         print(f"  ⚠️  products: Skipping - {str(e)[:80]}")
         failed.append(("products", str(e)))
     
+    # Alias SePay: nhiều deploy gửi toàn bộ /api/* vào FastAPI — SePay đăng ký .../api/sepay-webhook (Next)
+    # thì vẫn cần endpoint này trên backend.
+    try:
+        from app.api.endpoints import sepay_webhook as _sepay_wh
+
+        app.add_api_route(
+            "/api/sepay-webhook",
+            _sepay_wh.sepay_webhook_public_path,
+            methods=["POST"],
+            tags=["sepay"],
+        )
+        loaded.append(("sepay_webhook_alias", "/api/sepay-webhook"))
+        print("  ✅ sepay_webhook_alias: POST /api/sepay-webhook")
+    except Exception as e:
+        print(f"  ⚠️  sepay_webhook_alias: {str(e)[:80]}")
+        failed.append(("sepay_webhook_alias", str(e)))
+    
     print(f"\n📊 {'='*50}")
     print(f"📊 ROUTE LOADING SUMMARY")
     print(f"   ✅ Loaded: {len(loaded)} routes")
