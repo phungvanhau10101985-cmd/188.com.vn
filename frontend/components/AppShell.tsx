@@ -2,6 +2,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { usePathname, useSearchParams, useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
@@ -9,8 +10,12 @@ import Navigation from '@/components/Navigation';
 import MobileHeader from '@/components/mobile/MobileHeader';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import BackToTopButton from '@/components/BackToTopButton';
-import CartAddedPopup from '@/components/CartAddedPopup';
-import BirthGenderSalePromptModal from '@/components/BirthGenderSalePromptModal';
+
+const CartAddedPopup = dynamic(() => import('@/components/CartAddedPopup'), { ssr: false });
+const BirthGenderSalePromptModal = dynamic(
+  () => import('@/components/BirthGenderSalePromptModal'),
+  { ssr: false }
+);
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCart } from '@/features/cart/hooks/useCart';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';

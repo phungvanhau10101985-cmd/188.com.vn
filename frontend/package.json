@@ -15,8 +15,6 @@
   },
   "dependencies": {
     "@ant-design/icons": "^5.2.6",
-    "@fontsource-variable/inter": "^5.2.8",
-    "@fontsource/roboto-mono": "^5.2.8",
     "@tailwindcss/container-queries": "^0.1.1",
     "antd": "^5.12.0",
     "date-fns": "^4.1.0",

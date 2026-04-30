@@ -185,10 +185,10 @@ export default function MobileHeader({
   }, [suggestions, list]);
 
   const chipClass =
-    'flex-shrink-0 text-xs text-orange-100 hover:text-white px-2 py-0.5 rounded-full bg-white/10 hover:bg-white/20 whitespace-nowrap border border-white/10';
+    'flex-shrink-0 text-xs text-white/95 hover:text-white px-2.5 py-1 rounded-full bg-white/15 hover:bg-white/25 whitespace-nowrap border border-white/20';
 
   const iconBtn =
-    'flex-shrink-0 w-8 h-8 min-[390px]:w-9 min-[390px]:h-9 flex items-center justify-center text-white rounded-full bg-white/15 hover:bg-white/25 active:bg-white/30';
+    'flex-shrink-0 min-w-[44px] min-h-[44px] w-11 h-11 shrink-0 flex items-center justify-center text-white rounded-full bg-white/15 hover:bg-white/25 active:bg-white/30';
 
   return (
     <div className="md:hidden sticky top-0 z-50" ref={panelRef}>
@@ -234,7 +234,7 @@ export default function MobileHeader({
             <button
               type="button"
               onClick={() => setCategoryPanelOpen((o) => !o)}
-              className={`flex-shrink-0 flex items-center justify-center w-8 h-8 min-[390px]:w-9 min-[390px]:h-9 text-white rounded-lg transition-colors ${
+              className={`flex-shrink-0 flex items-center justify-center min-w-[44px] min-h-[44px] w-11 h-11 text-white rounded-lg transition-colors ${
                 categoryPanelOpen ? 'bg-white/30' : 'bg-white/15 hover:bg-white/25'
               }`}
               aria-label="Danh mục"
@@ -261,11 +261,11 @@ export default function MobileHeader({
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Tìm kiếm…"
                 autoComplete="off"
-                className="w-full pl-3 pr-[4.25rem] py-2.5 bg-white border-0 rounded-lg text-gray-900 placeholder-gray-400 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-white/70"
+                className="w-full pl-3 pr-[5.75rem] py-2.5 bg-white border-0 rounded-lg text-gray-900 placeholder-gray-600 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-white/70"
               />
               <label
                 htmlFor={mobileImageInputId}
-                className="absolute right-9 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-md text-gray-500 hover:text-[#ea580c] hover:bg-orange-50 active:bg-orange-100 cursor-pointer"
+                className="absolute right-[3.25rem] top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md text-gray-600 hover:text-[#ea580c] hover:bg-orange-50 active:bg-orange-100 cursor-pointer"
                 aria-label="Tìm bằng ảnh"
                 title="Tìm theo ảnh (NanoAI)"
               >
@@ -276,7 +276,7 @@ export default function MobileHeader({
               </label>
               <button
                 type="submit"
-                className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 rounded-md bg-[#ea580c] text-white flex items-center justify-center hover:bg-orange-600 shadow-sm"
+                className="absolute right-1 top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] w-11 h-11 rounded-md bg-[#ea580c] text-white flex items-center justify-center hover:bg-orange-600 shadow-sm"
                 aria-label="Tìm trên 188"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

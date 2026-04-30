@@ -564,12 +564,13 @@ export default function HomePage() {
                 </div>
               ) : filteredProducts.length > 0 ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {filteredProducts.map((product) => (
+                  {filteredProducts.map((product, index) => (
                     <SimpleProductCard
                       key={product.id}
                       product={product}
                       onFavorite={handleFavorite}
                       isFavorited={favoriteIds.has(product.id)}
+                      priority={index < 6}
                     />
                   ))}
                 </div>
@@ -718,12 +719,13 @@ export default function HomePage() {
             ) : sameShopProducts.length > 0 ? (
               <>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {sameShopProducts.map((product) => (
+                  {sameShopProducts.map((product, index) => (
                     <SimpleProductCard
                       key={product.id}
                       product={product}
                       onFavorite={handleFavorite}
                       isFavorited={favoriteIds.has(product.id)}
+                      priority={index < 4}
                     />
                   ))}
                 </div>
@@ -780,12 +782,13 @@ export default function HomePage() {
             ) : filteredProducts.length > 0 ? (
               <>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {filteredProducts.map((product) => (
+                  {filteredProducts.map((product, index) => (
                     <SimpleProductCard
                       key={product.id}
                       product={product}
                       onFavorite={handleFavorite}
                       isFavorited={favoriteIds.has(product.id)}
+                      priority={index < 4 && sameShopProducts.length === 0}
                     />
                   ))}
                 </div>

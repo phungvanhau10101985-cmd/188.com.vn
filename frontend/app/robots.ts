@@ -1,11 +1,19 @@
 import type { MetadataRoute } from "next";
 
-const BASE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  process.env.NEXT_PUBLIC_DOMAIN ||
-  "https://188.com.vn";
+/** URL tuyệt đối — PSI/Lighthouse báo robots.txt lỗi nếu Sitemap không phải https://... đầy đủ */
+function normalizeSiteOrigin(): string {
+  const raw =
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_DOMAIN?.trim() ||
+    "https://188.com.vn";
+  if (!raw) return "https://188.com.vn";
+  if (/^https?:\/\//i.test(raw)) return raw.replace(/\/+$/, "");
+  return `https://${raw.replace(/^\/+/, "").replace(/\/+$/, "")}`;
+}
 
 export default function robots(): MetadataRoute.Robots {
+  const origin = normalizeSiteOrigin();
+
   return {
     rules: [
       {
@@ -20,20 +28,7 @@ export default function robots(): MetadataRoute.Robots {
           "/cart",
         ],
       },
-      {
-        userAgent: "Googlebot",
-        allow: "/",
-        disallow: [
-          "/admin/",
-          "/account/",
-          "/api/",
-          "/auth/",
-          "/checkout/",
-          "/cart",
-        ],
-      },
     ],
-    sitemap: `${BASE_URL}/sitemap.xml`,
-    host: BASE_URL,
+    sitemap: `${origin}/sitemap.xml`,
   };
 }

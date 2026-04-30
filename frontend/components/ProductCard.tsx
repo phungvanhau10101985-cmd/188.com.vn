@@ -266,11 +266,14 @@ export const SimpleProductCard = ({
   product, 
   onFavorite,
   isFavorited = false,
+  /** Ưu tiên tải ảnh đầu trang — cải thiện LCP (PSI) */
+  priority = false,
 }: { 
   product: Product;
   onFavorite: (productId: number, e: React.MouseEvent) => void | Promise<void>;
   /** Trạng thái thích từ server (khách + đăng nhập); mặc định false */
   isFavorited?: boolean;
+  priority?: boolean;
 }) => {
   const [imageError, setImageError] = useState(false);
   
@@ -306,6 +309,7 @@ export const SimpleProductCard = ({
             className="object-cover group-hover:scale-105 transition-transform duration-300"
             onError={handleImageError}
             sizes="(max-width: 768px) 50vw, 25vw"
+            priority={priority}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gray-200">
@@ -315,12 +319,14 @@ export const SimpleProductCard = ({
 
         {/* Favorite Button */}
         <button
+          type="button"
           onClick={handleFavorite}
-          className={`absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center text-xs transition-all ${
+          className={`absolute top-1 right-1 min-w-[44px] min-h-[44px] w-11 h-11 -mt-1 -mr-1 rounded-full flex items-center justify-center text-xs transition-all ${
             isFavorited
               ? 'bg-red-500 text-white shadow'
               : 'bg-white bg-opacity-90 text-gray-600 hover:bg-red-500 hover:text-white'
           }`}
+          aria-label={isFavorited ? 'Bỏ yêu thích' : 'Thêm yêu thích'}
         >
           {isFavorited ? '❤️' : '🤍'}
         </button>

@@ -1,9 +1,7 @@
 // app/layout.tsx - HOÀN CHỈNH
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
-import "@fontsource-variable/inter/wght.css";
-import "@fontsource/roboto-mono/latin-400.css";
-import "@fontsource/roboto-mono/vietnamese-400.css";
+import { Inter, Roboto_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/features/auth/hooks/useAuth";
 import { CartProvider } from "@/features/cart/hooks/useCart";
@@ -32,7 +30,20 @@ const METADATA_BASE_URL = normalizeAbsoluteSiteUrl(
       : "https://188.com.vn")
 );
 
-// Fonts: self-hosted via @fontsource (no compile-time fetch from fonts.googleapis.com — avoids timeouts/offline failures).
+const inter = Inter({
+  subsets: ["latin", "vietnamese"],
+  display: "swap",
+  variable: "--font-inter",
+});
+
+const robotoMono = Roboto_Mono({
+  subsets: ["latin", "vietnamese"],
+  display: "swap",
+  variable: "--font-roboto-mono",
+  weight: ["400"],
+});
+
+// Fonts: next/font — tối ưu tải, giảm CSS chặn render và CLS so với @fontsource toàn trang.
 
 // Viewport configuration cho PWA ready
 export const viewport: Viewport = {
@@ -119,7 +130,11 @@ export default async function RootLayout({
   const initialCategoryTree = await getCategoryTreeForLayout();
   const siteEmbeds = await fetchPublicSiteEmbeds();
   return (
-    <html lang="vi" suppressHydrationWarning>
+    <html
+      lang="vi"
+      className={`${inter.variable} ${robotoMono.variable}`}
+      suppressHydrationWarning
+    >
       <body className="antialiased font-sans bg-[#fafafa] text-gray-900 min-h-screen" suppressHydrationWarning>
         <SiteEmbedsRoot embeds={siteEmbeds} />
         {/* Global Providers + Header/Footer xuyên suốt */}

@@ -276,6 +276,7 @@ export default function Navigation({
           showStickyBar ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'
         }`}
         aria-hidden={!showStickyBar}
+        {...(!showStickyBar ? { inert: true as const } : {})}
       >
         <div className="max-w-7xl mx-auto px-3">
           <div className="grid grid-cols-[224px_1fr_224px] items-center gap-3 py-1.5">
