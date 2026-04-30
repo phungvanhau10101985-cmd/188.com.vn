@@ -152,12 +152,10 @@ def verify_webhook(request: Request, raw_body: bytes) -> bool:
             "(webhook my.sepay.vn thường dùng Apikey hoặc Không chứng thực, không ký body bằng secret này)"
         )
 
-    if getattr(settings, "SEPAY_REQUIRE_SIGNATURE", False):
-        logger.warning("SePay webhook: thiếu chữ ký / API key nhưng SEPAY_REQUIRE_SIGNATURE=true")
-        return False
     if getattr(settings, "SEPAY_ALLOW_INSECURE_DEV", False):
         logger.warning("SePay webhook: bỏ qua xác thực (SEPAY_ALLOW_INSECURE_DEV) — chỉ dùng khi test")
         return True
+    # TRUST_NO_AUTH_IP trước REQUIRE_SIGNATURE: webhook "Không chứng thực" vẫn chấp nhận theo IP SePay.
     if getattr(settings, "SEPAY_WEBHOOK_TRUST_NO_AUTH_IP", False):
         allow = getattr(settings, "SEPAY_WEBHOOK_IP_ALLOWLIST", frozenset())
         candidates = _webhook_ip_candidates(request)
@@ -169,7 +167,10 @@ def verify_webhook(request: Request, raw_body: bytes) -> bool:
             "SePay webhook: TRUST_NO_AUTH_IP bật nhưng không có IP khớp allowlist trong %s",
             candidates or ["(không xác định)"],
         )
-    else:
+    if getattr(settings, "SEPAY_REQUIRE_SIGNATURE", False):
+        logger.warning("SePay webhook: thiếu chữ ký / API key nhưng SEPAY_REQUIRE_SIGNATURE=true")
+        return False
+    if not getattr(settings, "SEPAY_WEBHOOK_TRUST_NO_AUTH_IP", False):
         logger.warning(
             "SePay webhook: không có SEPAY_WEBHOOK_API_KEY / chữ ký hợp lệ — "
             "đặt key trùng SePay (Authorization: Apikey …), hoặc SEPAY_WEBHOOK_TRUST_NO_AUTH_IP=true nếu webhook là Không chứng thực"
