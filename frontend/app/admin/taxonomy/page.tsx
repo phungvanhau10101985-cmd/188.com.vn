@@ -228,8 +228,9 @@ export default function TaxonomyAdminPage() {
         <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900">1. Tải file mẫu</h2>
           <p className="mt-1 text-sm text-gray-600">
-            Lấy bản mẫu hiện có trên server (<code>backend/temp_uploads/taxonomy_import.xlsx</code>) — chỉnh
-            tay rồi upload lại ở mục bên dưới.
+            Tải file mẫu chuẩn (thường là <code>backend/temp_uploads/taxonomy_import.xlsx</code> trong repo — đầy đủ danh
+            mục). Nếu server chưa có file đó, API trả bản skeleton ít dòng để xem đủ sheet/cột — chỉnh rồi upload ở mục
+            dưới.
           </p>
           <button
             type="button"

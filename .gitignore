@@ -46,5 +46,7 @@ ai_analysis/project_analysis.json
 **/backend/app/static/uploads/*
 !**/backend/app/static/uploads/.gitkeep
 
-# Job import Excel (JSON trên đĩa — không vào git)
-**/backend/temp_uploads/
+# Backend temp_uploads: file tạm / job JSON không commit; giữ taxonomy_import.xlsx (mẫu đầy đủ trong repo).
+**/backend/temp_uploads/*
+!**/backend/temp_uploads/taxonomy_import.xlsx
+**/backend/temp_uploads/import_jobs/**

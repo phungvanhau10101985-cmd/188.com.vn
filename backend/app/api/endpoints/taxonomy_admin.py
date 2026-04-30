@@ -4,7 +4,8 @@ Admin endpoint quản lý taxonomy (cây danh mục + SEO cluster) qua file Exce
 
 - POST /api/v1/taxonomy/wipe   : xóa products + 6 bảng category/seo cũ, tạo lại schema mới.
 - POST /api/v1/taxonomy/import : upload taxonomy_import.xlsx → seed categories + seo_clusters.
-- GET  /api/v1/taxonomy/sample : tải file mẫu nếu có (`backend/temp_uploads/taxonomy_import.xlsx`).
+- GET  /api/v1/taxonomy/sample : tải `backend/temp_uploads/taxonomy_import.xlsx` nếu có (thường đã commit trong git);
+  thiếu file thì trả workbook mẫu sinh trong code (đủ sheet/cột — chỉ vài dòng minh họa).
 
 Yêu cầu Bearer admin (Depends(get_current_admin)). Idempotent: import có thể chạy lại nhiều lần,
 upsert theo `external_id` (cột `id` trong Excel).
@@ -13,13 +14,13 @@ from __future__ import annotations
 
 import io
 import logging
-import os
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
@@ -35,6 +36,161 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 REQUIRED_SHEETS = {"categories", "category_paths", "seo_clusters", "meta"}
+
+_XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_ATTACHMENT_TAXONOMY = 'attachment; filename="taxonomy_import.xlsx"'
+
+
+def _taxonomy_backend_dir() -> Path:
+    """Thư mục `backend/` (cha của package `app`)."""
+    return Path(__file__).resolve().parents[3]
+
+
+def _taxonomy_sample_disk_path() -> Path:
+    """File mẫu đầy đủ 4 sheet — nên commit trong repo (`backend/temp_uploads/taxonomy_import.xlsx`)."""
+    return _taxonomy_backend_dir() / "temp_uploads" / "taxonomy_import.xlsx"
+
+
+def _minimal_taxonomy_template_bytes() -> bytes:
+    """Workbook đúng 4 sheet + đủ cột (vài dòng ví dụ). Dùng khi chưa có file đầy đủ trên đĩa — không thay bản taxonomy thật trong git."""
+    buf = io.BytesIO()
+    cat_cols = [
+        "id",
+        "parent_id",
+        "level",
+        "name",
+        "slug",
+        "full_slug",
+        "sort_order",
+        "is_active",
+        "seo_index",
+        "seo_cluster_id",
+    ]
+    cluster_cols = ["id", "slug", "name", "canonical_path", "index_policy", "source", "notes"]
+    cluster_rows = [
+        {
+            "id": "cluster__dep-sandal-nu-quai-ngang",
+            "slug": "dep-sandal-nu-quai-ngang",
+            "name": "Dép sandal nữ quai ngang",
+            "canonical_path": "/c/dep-sandal-nu-quai-ngang",
+            "index_policy": "index",
+            "source": "sample_template",
+            "notes": "Ví dụ — xóa/sửa theo site thật.",
+        },
+        {
+            "id": "cluster__dep-tong-nu-xop-mot",
+            "slug": "dep-tong-nu-xop-mot",
+            "name": "Dép tông nữ xốp một",
+            "canonical_path": "/c/dep-tong-nu-xop-mot",
+            "index_policy": "index",
+            "source": "sample_template",
+            "notes": "",
+        },
+        {
+            "id": "cluster__sneaker-giay-bet-nu",
+            "slug": "sneaker-giay-bet-nu",
+            "name": "Sneaker & giày bệt nữ",
+            "canonical_path": "/c/sneaker-giay-bet-nu",
+            "index_policy": "index",
+            "source": "sample_template",
+            "notes": "",
+        },
+    ]
+    cat_rows = [
+        {
+            "id": "cat1__giay-dep-nu",
+            "parent_id": "",
+            "level": 1,
+            "name": "Giày dép nữ",
+            "slug": "giay-dep-nu",
+            "full_slug": "giay-dep-nu",
+            "sort_order": 1,
+            "is_active": "1",
+            "seo_index": "index",
+            "seo_cluster_id": "",
+        },
+        {
+            "id": "cat2__giay-dep-nu__dep-sandal-nu",
+            "parent_id": "cat1__giay-dep-nu",
+            "level": 2,
+            "name": "Dép sandal Nữ",
+            "slug": "dep-sandal-nu",
+            "full_slug": "giay-dep-nu/dep-sandal-nu",
+            "sort_order": 1,
+            "is_active": "1",
+            "seo_index": "index",
+            "seo_cluster_id": "",
+        },
+        {
+            "id": "cat2__giay-dep-nu__sneaker-giay-bet-nu",
+            "parent_id": "cat1__giay-dep-nu",
+            "level": 2,
+            "name": "Sneaker & giày bệt",
+            "slug": "sneaker-giay-bet-nu",
+            "full_slug": "giay-dep-nu/sneaker-giay-bet-nu",
+            "sort_order": 2,
+            "is_active": "1",
+            "seo_index": "index",
+            "seo_cluster_id": "",
+        },
+        {
+            "id": "cat3__giay-dep-nu__dep-sandal-nu__dep-quai-ngang-nu",
+            "parent_id": "cat2__giay-dep-nu__dep-sandal-nu",
+            "level": 3,
+            "name": "Dép quai ngang nữ",
+            "slug": "dep-quai-ngang-nu",
+            "full_slug": "giay-dep-nu/dep-sandal-nu/dep-quai-ngang-nu",
+            "sort_order": 1,
+            "is_active": "1",
+            "seo_index": "index",
+            "seo_cluster_id": "cluster__dep-sandal-nu-quai-ngang",
+        },
+        {
+            "id": "cat3__giay-dep-nu__dep-sandal-nu__dep-tong-nu-xop-mot",
+            "parent_id": "cat2__giay-dep-nu__dep-sandal-nu",
+            "level": 3,
+            "name": "Dép tông nữ xốp một",
+            "slug": "dep-tong-nu-xop-mot",
+            "full_slug": "giay-dep-nu/dep-sandal-nu/dep-tong-nu-xop-mot",
+            "sort_order": 2,
+            "is_active": "1",
+            "seo_index": "noindex",
+            "seo_cluster_id": "cluster__dep-tong-nu-xop-mot",
+        },
+        {
+            "id": "cat3__giay-dep-nu__sneaker-giay-bet-nu__giay-bup-be-nu",
+            "parent_id": "cat2__giay-dep-nu__sneaker-giay-bet-nu",
+            "level": 3,
+            "name": "Giày búp bê nữ",
+            "slug": "giay-bup-be-nu",
+            "full_slug": "giay-dep-nu/sneaker-giay-bet-nu/giay-bup-be-nu",
+            "sort_order": 1,
+            "is_active": "1",
+            "seo_index": "index",
+            "seo_cluster_id": "cluster__sneaker-giay-bet-nu",
+        },
+    ]
+    path_rows = [
+        {"cat3_id": "cat3__giay-dep-nu__dep-sandal-nu__dep-quai-ngang-nu", "seo_cluster_id": "cluster__dep-sandal-nu-quai-ngang"},
+        {"cat3_id": "cat3__giay-dep-nu__dep-sandal-nu__dep-tong-nu-xop-mot", "seo_cluster_id": "cluster__dep-tong-nu-xop-mot"},
+        {"cat3_id": "cat3__giay-dep-nu__sneaker-giay-bet-nu__giay-bup-be-nu", "seo_cluster_id": "cluster__sneaker-giay-bet-nu"},
+    ]
+    df_clusters = pd.DataFrame(cluster_rows)[cluster_cols]
+    df_cats = pd.DataFrame(cat_rows)[cat_cols]
+    df_paths = pd.DataFrame(path_rows)
+    df_meta = pd.DataFrame(
+        [
+            {"key": "template_note", "value": "Bản đầy đủ nên lấy taxonomy_import.xlsx trong repo/deploy; đây chỉ là skeleton."},
+            {"key": "external_id", "value": "Giữ cột id khi re-import để upsert ổn định."},
+        ]
+    )
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df_clusters.to_excel(writer, sheet_name="seo_clusters", index=False)
+        df_cats.to_excel(writer, sheet_name="categories", index=False)
+        df_paths.to_excel(writer, sheet_name="category_paths", index=False)
+        df_meta.to_excel(writer, sheet_name="meta", index=False)
+    return buf.getvalue()
+
 
 # Thứ tự DROP an toàn (con trước, cha sau) để không vướng FK.
 WIPE_TABLES_ORDER = [
@@ -342,18 +498,22 @@ async def import_taxonomy(
 def download_sample_taxonomy_file(
     _admin: models.AdminUser = Depends(get_current_admin),
 ):
-    """Trả file mẫu `backend/temp_uploads/taxonomy_import.xlsx` nếu admin đã upload sẵn."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    candidate = os.path.normpath(os.path.join(here, "..", "..", "..", "temp_uploads", "taxonomy_import.xlsx"))
-    if not os.path.exists(candidate):
-        raise HTTPException(
-            status_code=404,
-            detail="Chưa có file mẫu — đặt taxonomy_import.xlsx trong backend/temp_uploads/.",
-        )
-    return FileResponse(
-        candidate,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename="taxonomy_import.xlsx",
+    """Có file `taxonomy_import.xlsx` trên đĩa thì trả file đó (bản đầy đủ); không thì trả skeleton sinh trong code."""
+    disk = _taxonomy_sample_disk_path()
+    if disk.is_file():
+        try:
+            return FileResponse(
+                str(disk),
+                media_type=_XLSX_MEDIA,
+                filename="taxonomy_import.xlsx",
+            )
+        except OSError as exc:
+            logger.warning("Không đọc được taxonomy sample tại %s: %s — dùng skeleton.", disk, exc)
+    body = _minimal_taxonomy_template_bytes()
+    return Response(
+        content=body,
+        media_type=_XLSX_MEDIA,
+        headers={"Content-Disposition": _ATTACHMENT_TAXONOMY},
     )
 
 
