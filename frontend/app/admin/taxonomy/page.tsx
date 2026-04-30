@@ -110,7 +110,7 @@ export default function TaxonomyAdminPage() {
     setLoadingInfo(true);
     setErrorInfo(null);
     try {
-      const data = await callApi<TaxonomyInfo>('/api/v1/taxonomy/info');
+      const data = await callApi<TaxonomyInfo>('/taxonomy/info');
       setInfo(data);
     } catch (e) {
       setErrorInfo(e instanceof Error ? e.message : String(e));
@@ -125,7 +125,7 @@ export default function TaxonomyAdminPage() {
 
   const handleSampleDownload = useCallback(async () => {
     try {
-      await downloadFile('/api/v1/taxonomy/sample');
+      await downloadFile('/taxonomy/sample');
     } catch (e) {
       alert(`Tải file mẫu thất bại: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -143,7 +143,7 @@ export default function TaxonomyAdminPage() {
     setWipeError(null);
     setWipeResult(null);
     try {
-      const data = await callApi<WipeResult>('/api/v1/taxonomy/wipe', { method: 'POST' });
+      const data = await callApi<WipeResult>('/taxonomy/wipe', { method: 'POST' });
       setWipeResult(data);
       void reloadInfo();
     } catch (e) {
@@ -161,7 +161,7 @@ export default function TaxonomyAdminPage() {
       try {
         const fd = new FormData();
         fd.append('file', file);
-        const data = await callApi<ImportSummary>('/api/v1/taxonomy/import', {
+        const data = await callApi<ImportSummary>('/taxonomy/import', {
           method: 'POST',
           body: fd,
           isFormData: true,

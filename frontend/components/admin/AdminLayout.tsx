@@ -45,7 +45,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     setClearingCache(true);
     setCacheMessage(null);
     try {
-      const res = await fetch('/api/clear-cache', { method: 'POST' });
+      const res = await fetch('/admin/clear-cache', { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.ok) {
         setCacheMessage('Đã xóa sạch cache.');

@@ -3,9 +3,9 @@ import { NextResponse } from "next/server";
 import { CACHE_TAG_CATEGORY_SEO } from "@/lib/category-seo";
 
 /**
- * POST /api/clear-cache
- * Xóa cache danh mục/sản phẩm (fetch cache có tag category-seo).
- * Trên production (Nginx proxy /api/* → FastAPI), UI admin gọi POST /admin/clear-cache thay cho route này.
+ * POST /admin/clear-cache
+ * Tránh xung đột với Nginx: `location /api/` thường proxy hết sang FastAPI → /api/clear-cache
+ * không tới được Next. Đường dẫn /admin/* đi qua `location /` tới Next.
  */
 export async function POST() {
   try {
