@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import AdminLayout from '@/components/admin/AdminLayout';
 import { adminMemberAPI, type AdminMember } from '@/lib/admin-api';
 
@@ -10,6 +11,16 @@ function formatDate(s: string | null | undefined) {
   if (!s) return '—';
   const d = new Date(s);
   return d.toLocaleDateString('vi-VN') + ' ' + d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatBirthShort(s: string | null | undefined) {
+  if (!s) return '—';
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const [y, m, d] = s.slice(0, 10).split('-');
+    return `${d}/${m}/${y}`;
+  }
+  const dt = new Date(s);
+  return Number.isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('vi-VN');
 }
 
 export default function AdminMembersPage() {
@@ -87,7 +98,9 @@ export default function AdminMembersPage() {
         <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Quản lý thành viên</h1>
-            <p className="text-gray-600 text-sm mt-1">Xem danh sách và trạng thái tài khoản khách hàng</p>
+            <p className="text-gray-600 text-sm mt-1">
+              Danh sách khách hàng — bấm <strong>Chi tiết</strong> để xem email, ngày sinh, thời gian tạo.
+            </p>
           </div>
           <button
             type="button"
@@ -142,6 +155,7 @@ export default function AdminMembersPage() {
                       <th className="py-3 px-4">Số điện thoại</th>
                       <th className="py-3 px-4">Họ tên</th>
                       <th className="py-3 px-4">Email</th>
+                      <th className="py-3 px-4">Ngày sinh</th>
                       <th className="py-3 px-4">Trạng thái</th>
                       <th className="py-3 px-4">Ngày đăng ký</th>
                       <th className="py-3 px-4">Đăng nhập gần nhất</th>
@@ -152,9 +166,10 @@ export default function AdminMembersPage() {
                     {members.map((m) => (
                       <tr key={m.id} className="border-b border-gray-100 hover:bg-gray-50/50">
                         <td className="py-3 px-4 font-mono text-gray-600">{m.id}</td>
-                        <td className="py-3 px-4 font-medium">{m.phone}</td>
+                        <td className="py-3 px-4 font-medium">{m.phone || '—'}</td>
                         <td className="py-3 px-4">{m.full_name || '—'}</td>
                         <td className="py-3 px-4 text-gray-600">{m.email || '—'}</td>
+                        <td className="py-3 px-4 text-gray-600 whitespace-nowrap">{formatBirthShort(m.date_of_birth)}</td>
                         <td className="py-3 px-4">
                           <span
                             className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
@@ -167,18 +182,26 @@ export default function AdminMembersPage() {
                         <td className="py-3 px-4 text-gray-600">{formatDate(m.created_at)}</td>
                         <td className="py-3 px-4 text-gray-600">{formatDate(m.last_login)}</td>
                         <td className="py-3 px-4 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleActive(m)}
-                            disabled={updatingId === m.id}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50 ${
-                              m.is_active
-                                ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
-                                : 'bg-green-100 text-green-800 hover:bg-green-200'
-                            }`}
-                          >
-                            {updatingId === m.id ? '...' : m.is_active ? 'Khóa' : 'Mở khóa'}
-                          </button>
+                          <div className="flex flex-wrap items-center justify-center gap-1.5">
+                            <Link
+                              href={`/admin/members/${m.id}`}
+                              className="inline-block px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-800 hover:bg-slate-200"
+                            >
+                              Chi tiết
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleActive(m)}
+                              disabled={updatingId === m.id}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50 ${
+                                m.is_active
+                                  ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                                  : 'bg-green-100 text-green-800 hover:bg-green-200'
+                              }`}
+                            >
+                              {updatingId === m.id ? '...' : m.is_active ? 'Khóa' : 'Mở khóa'}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

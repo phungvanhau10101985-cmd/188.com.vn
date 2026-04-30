@@ -68,17 +68,20 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           </Link>
         </div>
         <nav className="flex-1 p-2">
-          {ADMIN_LINKS.map(({ href, label }) => (
+          {ADMIN_LINKS.map(({ href, label }) => {
+            const active = pathname === href || pathname.startsWith(`${href}/`);
+            return (
             <Link
               key={href}
               href={href}
               className={`block px-3 py-2 rounded-lg mb-1 transition-colors ${
-                pathname === href ? 'bg-slate-600 text-white' : 'text-slate-300 hover:bg-slate-700 hover:text-white'
+                active ? 'bg-slate-600 text-white' : 'text-slate-300 hover:bg-slate-700 hover:text-white'
               }`}
             >
               {label}
             </Link>
-          ))}
+            );
+          })}
         </nav>
         <div className="p-2 border-t border-slate-700">
           <button

@@ -608,10 +608,10 @@ export const adminBankAPI = {
 
 export interface AdminMember {
   id: number;
-  phone: string;
+  phone?: string | null;
   email?: string | null;
   full_name?: string | null;
-  date_of_birth: string;
+  date_of_birth?: string | null;
   gender?: string | null;
   address?: string | null;
   avatar?: string | null;
