@@ -188,17 +188,6 @@ export default function AdminDanhMucSeoPage() {
 
   const [processing, setProcessing] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [seoBodyForce, setSeoBodyForce] = useState(false);
-  const [seoBodyMessage, setSeoBodyMessage] = useState<string | null>(null);
-  const [seoBodyMode, setSeoBodyMode] = useState<'all' | 'selected'>('all');
-  const [seoBodyPaths, setSeoBodyPaths] = useState<string[]>([]);
-  const [seoBodySelected, setSeoBodySelected] = useState<string[]>([]);
-  const [seoBodyLoading, setSeoBodyLoading] = useState(false);
-  const [seoBodySearch, setSeoBodySearch] = useState('');
-  const [seoBodyLevelFilter, setSeoBodyLevelFilter] = useState<'all' | '1' | '2' | '3'>('all');
-  const [seoBodyStatus, setSeoBodyStatus] = useState<any | null>(null);
-  const seoBodyPollRef = useRef<number | null>(null);
-
   const [geminiRows, setGeminiRows] = useState<GeminiCatalogRow[]>([]);
   const [geminiSummary, setGeminiSummary] = useState<Record<string, number> | null>(null);
   const [geminiLoading, setGeminiLoading] = useState(false);
@@ -260,12 +249,6 @@ export default function AdminDanhMucSeoPage() {
   useEffect(() => {
     setPublicSitemapBase(window.location.origin);
   }, []);
-
-  useEffect(() => {
-    if (seoBodyMode === 'selected' && seoBodyPaths.length === 0 && !seoBodyLoading) {
-      loadSeoBodyPaths();
-    }
-  }, [seoBodyMode, seoBodyPaths.length, seoBodyLoading]);
 
   const level1Categories = useMemo(() => tree.map((c) => c.name), [tree]);
   const level2ByLevel1 = useMemo(() => {
@@ -397,41 +380,6 @@ export default function AdminDanhMucSeoPage() {
   }
 
 
-  const loadSeoBodyPaths = async () => {
-    setSeoBodyLoading(true);
-    setSeoBodyMessage(null);
-    try {
-      const result = await apiClient.generateSeoBodies({ dry_run: true });
-      setSeoBodyPaths(Array.isArray(result?.paths) ? result.paths : []);
-    } catch (err: any) {
-      setSeoBodyMessage(err.message || 'Không tải được danh sách danh mục');
-    } finally {
-      setSeoBodyLoading(false);
-    }
-  };
-
-  const loadSeoBodyStatus = async () => {
-    try {
-      const status = await apiClient.getSeoBodiesStatus();
-      setSeoBodyStatus(status);
-      if (!status?.running && seoBodyPollRef.current) {
-        window.clearInterval(seoBodyPollRef.current);
-        seoBodyPollRef.current = null;
-        setSeoBodyMessage('Đã hoàn tất. Xem kết quả bên dưới.');
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  const startSeoBodyPolling = () => {
-    if (seoBodyPollRef.current) {
-      window.clearInterval(seoBodyPollRef.current);
-    }
-    seoBodyPollRef.current = window.setInterval(loadSeoBodyStatus, 2000);
-    loadSeoBodyStatus();
-  };
-
   const loadMappings = async () => {
     setMappingsLoading(true);
     setError(null);
@@ -443,39 +391,6 @@ export default function AdminDanhMucSeoPage() {
     } finally {
       setMappingsLoading(false);
     }
-  };
-
-  const handleGenerateSeoBodies = async () => {
-    if (seoBodyMode === 'selected' && seoBodySelected.length === 0) {
-      alert('Vui lòng chọn ít nhất 1 danh mục');
-      return;
-    }
-    if (!confirm('Tạo lại SEO body? Thao tác này có thể mất thời gian.')) return;
-    setProcessing(true);
-    setSeoBodyMessage(null);
-    try {
-      if (seoBodyMode === 'all') {
-        const result = await apiClient.generateSeoBodies({ force: seoBodyForce });
-        setSeoBodyMessage(result?.message || 'Đã bắt đầu tạo lại SEO body');
-        startSeoBodyPolling();
-      } else {
-        let done = 0;
-        for (const path of seoBodySelected) {
-          await apiClient.generateSeoBodies({ force: seoBodyForce, path });
-          done += 1;
-        }
-        setSeoBodyMessage(`Đã bắt đầu tạo lại ${done} danh mục đã chọn`);
-        startSeoBodyPolling();
-      }
-    } catch (err: any) {
-      setSeoBodyMessage(err.message || 'Có lỗi xảy ra');
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  const toggleSeoBodySelected = (path: string) => {
-    setSeoBodySelected((prev) => (prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path]));
   };
 
   async function loadGeminiCatalog() {
@@ -556,11 +471,16 @@ export default function AdminDanhMucSeoPage() {
   };
 
   const handleGeminiRun = async (mode: 'whitelist' | 'picked') => {
-    if (!confirm('Gọi Gemini cho meta description + đoạn body? Có thể mất vài phút và tốn quota API.')) return;
+    if (
+      !confirm(
+        'Gemini sẽ tạo/cập nhật meta và đoạn SEO cuối trang cho danh mục đã chọn. Việc này có thể vài phút và tốn quota API. Tiếp tục?'
+      )
+    )
+      return;
     let paths: string[] | undefined;
     if (mode === 'picked') {
       if (geminiRunPicked.length === 0) {
-        alert('Chọn ít nhất một dòng trong cột «Chạy lần này».');
+        alert('Chọn ít nhất một dòng trong cột «Lần này».');
         return;
       }
       paths = [...geminiRunPicked];
@@ -743,17 +663,6 @@ export default function AdminDanhMucSeoPage() {
     }
   };
 
-  const filteredSeoBodyPaths = useMemo(() => {
-    if (!seoBodySearch.trim()) return seoBodyPaths;
-    const q = seoBodySearch.trim().toLowerCase();
-    return seoBodyPaths.filter((p) => p.toLowerCase().includes(q));
-  }, [seoBodyPaths, seoBodySearch]);
-
-  const levelFilteredSeoBodyPaths = useMemo(() => {
-    if (seoBodyLevelFilter === 'all') return filteredSeoBodyPaths;
-    return filteredSeoBodyPaths.filter((p) => p.split('/').filter(Boolean).length === Number(seoBodyLevelFilter));
-  }, [filteredSeoBodyPaths, seoBodyLevelFilter]);
-
   const filteredGeminiRows = useMemo(() => {
     let r = geminiRows;
     if (geminiFilter === 'targets') r = r.filter((x) => x.gemini_enabled);
@@ -826,26 +735,26 @@ export default function AdminDanhMucSeoPage() {
     <AdminLayout>
       <div className="p-6 max-w-7xl">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Quản lý danh mục SEO</h1>
-        <p className="text-gray-600 text-sm mb-4">
-          Quản lý danh mục cấp 1, 2, 3 và mapping SEO.
-        </p>
+        <p className="text-gray-600 text-sm mb-4">Sitemap · sinh SEO danh mục (Gemini) · mapping nguồn → đích.</p>
 
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50/90 px-4 py-3">
           <div className="max-w-xl text-sm text-gray-700">
-            <span className="font-semibold text-gray-900">Sitemap XML (SEO danh mục)</span>
-            <p className="mt-1 text-xs leading-snug text-gray-600">
-              Mở trực tiếp bằng URL (Tab mới) — dùng cho trình duyệt hoặc dán vào Google Search Console. Nội dung:{' '}
-              <code className="text-[11px]">/danh-muc</code>, mọi{' '}
-              <code className="text-[11px]">/danh-muc/…</code> từ API cây danh mục, và{' '}
-              <code className="text-[11px]">/c/&lt;slug&gt;</code> có chính sách index — cùng logic với nút tải file.
-            </p>
-            <p className="mt-2 text-[11px] text-gray-600">
-              URL đầy đủ:{` `}
-              <code className="break-all rounded bg-white/80 px-1 py-0.5 text-[11px] text-[#c2410c]">
-                {publicSitemapBase}
-                {CATEGORY_SEO_SITEMAP_PATH}
-              </code>
-            </p>
+            <span className="font-semibold text-gray-900">Sitemap XML danh mục</span>
+            <p className="mt-1 text-xs text-gray-600">Dùng Search Console hoặc tải file .xml.</p>
+            <details className="mt-2 text-xs text-gray-600">
+              <summary className="cursor-pointer select-none text-gray-700 hover:underline">Chi tiết URL &amp; phạm vi</summary>
+              <p className="mt-2 leading-snug">
+                Gồm <code className="text-[11px]">/danh-muc</code>, các nhánh từ API, và <code className="text-[11px]">/c/&lt;slug&gt;</code> được
+                index — cùng nội dung với file tải xuống.
+              </p>
+              <p className="mt-2 text-[11px]">
+                URL:{` `}
+                <code className="break-all rounded bg-white/80 px-1 py-0.5 text-[11px] text-[#c2410c]">
+                  {publicSitemapBase}
+                  {CATEGORY_SEO_SITEMAP_PATH}
+                </code>
+              </p>
+            </details>
           </div>
           <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
             <Link
@@ -877,7 +786,7 @@ export default function AdminDanhMucSeoPage() {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Danh sách danh mục
+              Danh mục &amp; Gemini
             </button>
             <button
               onClick={async () => {
@@ -908,194 +817,270 @@ export default function AdminDanhMucSeoPage() {
           <>
             {activeTab === 'list' && (
               <div>
-                <div className="mb-6 rounded-xl border border-orange-100 bg-orange-50/35 p-4 space-y-3">
+                <div className="mb-6 rounded-xl border border-orange-100 bg-gradient-to-b from-orange-50/50 to-orange-50/20 p-4 space-y-4">
                   <div>
-                    <h2 className="text-base font-semibold text-gray-900">Gemini SEO danh mục</h2>
+                    <h2 className="text-lg font-semibold text-gray-900">Sinh nội dung SEO bằng Gemini</h2>
+                    <p className="mt-0.5 text-xs text-gray-500">Meta mô tả + đoạn văn cuối trang danh mục (slug giống URL /danh-muc/...).</p>
+
+                    <div className="mt-3 rounded-lg border border-orange-200/80 bg-white p-3 text-xs text-gray-700 shadow-sm">
+                      <p className="font-semibold text-gray-900">Cách làm (chọn một)</p>
+                      <ul className="mt-2 list-none space-y-2 pl-0">
+                        <li className="flex gap-2">
+                          <span
+                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#ea580c] text-[11px] font-bold text-white"
+                            aria-hidden
+                          >
+                            A
+                          </span>
+                          <span>
+                            <strong className="text-gray-900">Chạy theo nhóm cố định:</strong> tick cột <strong>Đích</strong> (lưu server) → bấm{' '}
+                            <strong className="text-[#c2410c]">nút cam</strong>.
+                          </span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span
+                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-600 text-[11px] font-bold text-white"
+                            aria-hidden
+                          >
+                            B
+                          </span>
+                          <span>
+                            <strong className="text-gray-900">Chạy vài dòng trong lần này:</strong> tick cột <strong>Lần này</strong> (không lưu) →
+                            bấm <strong>nút xám</strong>.
+                          </span>
+                        </li>
+                      </ul>
+                      <p className="mt-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500">
+                        Lọc «Đích thiếu meta/body»: chỉ dùng khi đã có ít nhất một dòng tick <strong>Đích</strong>. Xem SEO trên web: dùng «Xóa sạch
+                        cache» (menu admin).
+                      </p>
+                    </div>
 
                     {geminiAppSettings && (
-                      <div className="mt-3 rounded-lg border border-orange-200/70 bg-white/70 px-3 py-2.5">
-                        <p className="text-xs font-semibold text-gray-900">Import Excel và API tạo/sửa sản phẩm</p>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => void handlePersistGeminiAuto(false)}
-                            disabled={geminiSettingsSaving}
-                            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                              !geminiAppSettings.gemini_auto_enabled_admin
-                                ? 'border-2 border-[#ea580c] bg-orange-50 text-[#c2410c]'
-                                : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                            } disabled:opacity-50`}
-                          >
-                            Chỉ chạy tay
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handlePersistGeminiAuto(true)}
-                            disabled={geminiSettingsSaving || !geminiAppSettings.env_allows_gemini_auto}
-                            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                              geminiAppSettings.gemini_auto_enabled_admin
-                                ? 'border-2 border-[#ea580c] bg-orange-50 text-[#c2410c]'
-                                : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                            } disabled:opacity-50`}
-                          >
-                            Tự động Gemini
-                          </button>
-                          {geminiSettingsSaving && <span className="text-xs text-gray-500">Đang lưu...</span>}
-                        </div>
-                        <p className="mt-2 text-[11px] leading-relaxed text-gray-600">
-                          <strong className="text-gray-800">Đang có hiệu lực:</strong>{' '}
-                          {geminiAppSettings.gemini_auto_effective
-                            ? 'Tự động sau import / khi lưu sản phẩm API (đủ điều kiện .env + ngưỡng dòng import).'
-                            : 'Đang tắt — dùng các nút «Chạy Gemini» và bảng dưới.'}
+                      <details className="mt-3 rounded-lg border border-orange-200/70 bg-white/90 px-3 py-2 text-xs text-gray-700">
+                        <summary className="cursor-pointer select-none font-medium text-gray-900 hover:text-[#c2410c]">
+                          Tự động sau khi import / lưu sản phẩm (tuỳ cấu hình server)
+                        </summary>
+                        <div className="mt-3 space-y-2 border-t border-gray-100 pt-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void handlePersistGeminiAuto(false)}
+                              disabled={geminiSettingsSaving}
+                              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                                !geminiAppSettings.gemini_auto_enabled_admin
+                                  ? 'border-2 border-[#ea580c] bg-orange-50 text-[#c2410c]'
+                                  : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                              } disabled:opacity-50`}
+                            >
+                              Không auto — chỉ bấm nút tay
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handlePersistGeminiAuto(true)}
+                              disabled={geminiSettingsSaving || !geminiAppSettings.env_allows_gemini_auto}
+                              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                                geminiAppSettings.gemini_auto_enabled_admin
+                                  ? 'border-2 border-[#ea580c] bg-orange-50 text-[#c2410c]'
+                                  : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                              } disabled:opacity-50`}
+                            >
+                              Bật auto
+                            </button>
+                            {geminiSettingsSaving && <span className="text-gray-500">Đang lưu…</span>}
+                          </div>
+                          <p className="text-gray-700">
+                            Trạng thái thực tế:{` `}
+                            <strong>{geminiAppSettings.gemini_auto_effective ? 'Đang bật auto' : 'Đang tắt auto'}</strong>
+                            {!geminiAppSettings.gemini_auto_effective && ' — chỉ chạy bằng nút Sinh SEO bên dưới.'}
+                          </p>
                           {!geminiAppSettings.env_allows_gemini_auto && (
-                            <span className="block mt-1 text-amber-800">
-                              Trên máy dev hoặc khi VPS chưa bật <span className="font-mono">CATEGORY_GEMINI_SEO_AUTO_ENABLED</span> — không gọi
-                              Gemini sau import/API; chỉ chạy tay từ trang này.
-                            </span>
+                            <p className="rounded bg-amber-50 px-2 py-1 text-amber-900">
+                              Môi trường này chưa cho auto (thiếu <span className="font-mono">CATEGORY_GEMINI_SEO_AUTO_ENABLED</span> + production/staging nếu
+                              có quy định).
+                            </p>
                           )}
                           {geminiAppSettings.env_allows_gemini_auto && geminiAppSettings.gemini_whitelist_only_env && (
-                            <span className="block mt-1 text-gray-700">
-                              .env chỉ auto cho các path đã đánh «Gemini đích» trong bảng dưới.
-                            </span>
+                            <p className="text-gray-600">Auto chỉ áp dụng cho path đã tick <strong>Đích</strong> (whitelist trong .env).</p>
                           )}
-                        </p>
-                      </div>
+                        </div>
+                      </details>
                     )}
 
-                    <p className="mt-3 text-xs text-gray-600">
-                      Dưới đây: đánh «Gemini đích» và thống kê — chạy thủ công meta + body một lần.
-                      Backend:{' '}
-                      <span className="font-mono text-[11px]">GET/PUT /category-seo/app-settings</span>,{' '}
-                      <span className="font-mono text-[11px]">PUT /category-seo/gemini-targets</span>,{' '}
-                      <span className="font-mono text-[11px]">POST /category-seo/gemini-targets/run</span>.
-                    </p>
+                    <details className="mt-2 text-[11px] text-gray-500">
+                      <summary className="cursor-pointer select-none hover:text-gray-700">API (cho dev)</summary>
+                      <p className="mt-2 font-mono leading-relaxed text-gray-700">
+                        GET/PUT /category-seo/app-settings · PUT /category-seo/gemini-targets · POST /category-seo/gemini-targets/run
+                      </p>
+                      <p className="mt-2 text-gray-600">
+                        Body-only riêng (ít dùng): POST /category-seo/seo-bodies/generate
+                      </p>
+                    </details>
                   </div>
+
                   {geminiSummary && (
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-700">
+                    <div>
+                      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Thống kê catalog</p>
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-md bg-white px-2 py-1.5 text-[11px] text-gray-700 ring-1 ring-orange-100/80">
                       <span>
-                        Path tổng: <strong>{geminiSummary.paths_total ?? 0}</strong>
+                        Tổng <strong>{geminiSummary.paths_total ?? 0}</strong>
                       </span>
+                      <span className="text-gray-300">|</span>
                       <span>
-                        Có sản phẩm active: <strong>{geminiSummary.with_products ?? 0}</strong>
+                        Có SP <strong>{geminiSummary.with_products ?? 0}</strong>
                       </span>
+                      <span className="text-gray-300">|</span>
                       <span>
-                        Đã đánh Gemini đích: <strong>{geminiSummary.gemini_target_count ?? 0}</strong>
+                        Đích <strong>{geminiSummary.gemini_target_count ?? 0}</strong>
                       </span>
+                      <span className="text-gray-300">|</span>
                       <span>
-                        Đích thiếu meta: <strong>{geminiSummary.gemini_missing_description ?? 0}</strong>
+                        Đích thiếu meta <strong>{geminiSummary.gemini_missing_description ?? 0}</strong>
                       </span>
+                      <span className="text-gray-300">|</span>
                       <span>
-                        Đích thiếu body: <strong>{geminiSummary.gemini_missing_body ?? 0}</strong>
+                        Đích thiếu body <strong>{geminiSummary.gemini_missing_body ?? 0}</strong>
                       </span>
+                      <span className="text-gray-300">|</span>
                       <span>
-                        Chưa đánh đích: <strong>{geminiSummary.not_marked_for_gemini ?? 0}</strong>
+                        Chưa đích <strong>{geminiSummary.not_marked_for_gemini ?? 0}</strong>
                       </span>
                     </div>
+                    </div>
                   )}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="text"
-                      value={geminiSearch}
-                      onChange={(e) => setGeminiSearch(e.target.value)}
-                      placeholder="Tìm theo breadcrumb hoặc path slug..."
-                      className="rounded-lg border border-gray-300 px-3 py-2 text-sm w-64 max-w-full"
-                    />
-                    <select
-                      value={geminiFilter}
-                      onChange={(e) => setGeminiFilter(e.target.value as typeof geminiFilter)}
-                      className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                    >
-                      <option value="all">Tất cả path</option>
-                      <option value="targets">Chỉ danh mục đích</option>
-                      <option value="missing_desc">Đích thiếu meta description</option>
-                      <option value="missing_body">Đích thiếu SEO body</option>
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => void loadGeminiCatalog()}
-                      disabled={geminiLoading}
-                      className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      {geminiLoading ? 'Đang tải...' : 'Làm mới catalog'}
-                    </button>
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Tìm và lọc</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <input
+                          type="text"
+                          value={geminiSearch}
+                          onChange={(e) => setGeminiSearch(e.target.value)}
+                          placeholder="Tìm breadcrumb hoặc slug path…"
+                          className="rounded-lg border border-gray-300 px-3 py-2 text-sm w-56 max-w-full"
+                        />
+                        <select
+                          value={geminiFilter}
+                          onChange={(e) => setGeminiFilter(e.target.value as typeof geminiFilter)}
+                          className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        >
+                          <option value="all">Tất cả danh mục</option>
+                          <option value="targets">Chỉ các dòng là Đích</option>
+                          <option value="missing_desc">Trong các Đích: còn thiếu meta</option>
+                          <option value="missing_body">Trong các Đích: còn thiếu body</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => void loadGeminiCatalog()}
+                          disabled={geminiLoading}
+                          className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          {geminiLoading ? 'Đang tải...' : 'Làm mới'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Chạy Gemini</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleGeminiRun('whitelist')}
+                          disabled={processing}
+                          className="rounded-lg border border-[#ea580c] bg-[#ea580c] px-3 py-2 text-sm font-medium text-white hover:bg-[#c2410c] disabled:opacity-50"
+                        >
+                          Sinh SEO — mọi dòng là Đích
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleGeminiRun('picked')}
+                          disabled={processing}
+                          className="rounded-lg border border-gray-400 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          Sinh SEO — các dòng tick «Lần này»
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const pathsShown = filteredGeminiRows.map((r) => r.path);
+                            const allMarked = pathsShown.length > 0 && pathsShown.every((p) => geminiRunPicked.includes(p));
+                            if (allMarked) {
+                              setGeminiRunPicked((prev) => prev.filter((p) => !pathsShown.includes(p)));
+                            } else {
+                              setGeminiRunPicked((prev) => Array.from(new Set([...prev, ...pathsShown])));
+                            }
+                          }}
+                          className="rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                        >
+                          {filteredGeminiRows.every((r) => geminiRunPicked.includes(r.path)) && filteredGeminiRows.length > 0
+                            ? 'Bỏ «Lần này» trên các dòng đang xem'
+                            : 'Tick hết «Lần này» các dòng đang xem'}
+                        </button>
+                      </div>
+                      <p className="mt-1.5 text-[11px] text-gray-500">Nút cam dùng cột Đích. Nút viền xám dùng cột «Lần này».</p>
+                    </div>
+
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Tuỳ chọn sinh</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-4 text-xs text-gray-600">
+                        <label className="flex cursor-pointer items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={geminiRunForceMeta}
+                            onChange={(e) => setGeminiRunForceMeta(e.target.checked)}
+                          />
+                          Luôn ghi đè meta cũ
+                        </label>
+                        <label className="flex cursor-pointer items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={geminiRunForceBody}
+                            onChange={(e) => setGeminiRunForceBody(e.target.checked)}
+                          />
+                          Luôn ghi đè đoạn body cũ
+                        </label>
+                        <label className="flex items-center gap-2">
+                          Nghỉ giữa mỗi lần (giây)
+                          <input
+                            type="text"
+                            value={geminiDelayInput}
+                            onChange={(e) => setGeminiDelayInput(e.target.value)}
+                            className="w-12 rounded border border-gray-300 px-1.5 py-0.5 font-mono text-xs"
+                          />
+                        </label>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => void handleGeminiRun('whitelist')}
-                      disabled={processing}
-                      className="rounded-lg border border-[#ea580c] bg-[#ea580c]/10 px-3 py-2 text-sm font-medium text-[#c2410c] hover:bg-[#ea580c]/20 disabled:opacity-50"
-                    >
-                      Chạy Gemini: toàn bộ danh mục đích
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleGeminiRun('picked')}
-                      disabled={processing}
-                      className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      Chạy Gemini: dòng có «Chạy lần này»
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const pathsShown = filteredGeminiRows.map((r) => r.path);
-                        const allMarked = pathsShown.length > 0 && pathsShown.every((p) => geminiRunPicked.includes(p));
-                        if (allMarked) {
-                          setGeminiRunPicked((prev) => prev.filter((p) => !pathsShown.includes(p)));
-                        } else {
-                          setGeminiRunPicked((prev) => Array.from(new Set([...prev, ...pathsShown])));
-                        }
-                      }}
-                      className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                    >
-                      {filteredGeminiRows.every((r) => geminiRunPicked.includes(r.path)) && filteredGeminiRows.length > 0
-                        ? 'Bỏ «Chạy lần này» (lọc hiện tại)'
-                        : 'Chọn tất «Chạy lần này» (lọc hiện tại)'}
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={geminiRunForceMeta}
-                        onChange={(e) => setGeminiRunForceMeta(e.target.checked)}
-                      />
-                      Ghi đè meta (force_description)
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={geminiRunForceBody} onChange={(e) => setGeminiRunForceBody(e.target.checked)} />
-                      Ghi đè SEO body (force_body)
-                    </label>
-                    <label className="flex items-center gap-2 text-xs">
-                      Nghỉ (giây)
-                      <input
-                        type="text"
-                        value={geminiDelayInput}
-                        onChange={(e) => setGeminiDelayInput(e.target.value)}
-                        className="w-14 rounded border border-gray-300 px-2 py-1 font-mono text-xs"
-                      />
-                    </label>
-                  </div>
-                  {geminiMessage && <p className="text-sm text-emerald-800">{geminiMessage}</p>}
-                  <div className="max-h-72 overflow-auto rounded-lg border border-gray-200 bg-white">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Danh mục trong catalog (slug = /danh-muc/…)</p>
+                  {geminiMessage && <p className="mt-2 text-sm text-emerald-800">{geminiMessage}</p>}
+                  <div className="mt-1 max-h-72 overflow-auto rounded-lg border border-gray-200 bg-white">
                     <table className="w-full text-left text-xs">
                       <thead className="sticky top-0 bg-gray-100 text-[11px] uppercase tracking-wide text-gray-600">
                         <tr>
                           <th className="px-2 py-2">Breadcrumb</th>
                           <th className="px-2 py-2 font-mono">Path</th>
                           <th className="px-2 py-2 text-center">SP</th>
-                          <th className="px-2 py-2 text-center">Meta</th>
-                          <th className="px-2 py-2 text-center">Body</th>
-                          <th className="px-2 py-2 text-center">Đích Gemini</th>
-                          <th className="px-2 py-2 text-center">Chạy lần này</th>
+                          <th className="px-2 py-2 text-center" title="Đã có meta (Gemini/thủ công)?">
+                            Meta
+                          </th>
+                          <th className="px-2 py-2 text-center" title="Đã có đoạn cuối trang (Gemini/thủ công)?">
+                            Body
+                          </th>
+                          <th className="px-2 py-2 text-center" title="Whitelist lưu DB">
+                            Đích
+                          </th>
+                          <th className="px-2 py-2 text-center" title="Chỉ phiên hiện tại">
+                            Lần này
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
                         {filteredGeminiRows.length === 0 ? (
                           <tr>
                             <td colSpan={7} className="px-3 py-8 text-center text-gray-500">
-                              {geminiLoading ? 'Đang tải...' : 'Không có dòng khớp bộ lọc.'}
+                              {geminiLoading
+                                ? 'Đang tải...'
+                                : 'Không có dòng nào khớp lọc — thử «Tất cả danh mục» hoặc tick vài ô Đích rồi Làm mới.'}
                             </td>
                           </tr>
                         ) : (
@@ -1111,7 +1096,7 @@ export default function AdminDanhMucSeoPage() {
                                   type="checkbox"
                                   checked={row.gemini_enabled}
                                   onChange={(e) => void toggleGeminiTarget(row.path, e.target.checked)}
-                                  aria-label="Gemini đích"
+                                  aria-label="Đích — lưu trên server"
                                 />
                               </td>
                               <td className="px-2 py-1.5 text-center">
@@ -1119,7 +1104,7 @@ export default function AdminDanhMucSeoPage() {
                                   type="checkbox"
                                   checked={geminiRunPicked.includes(row.path)}
                                   onChange={() => toggleGeminiRunPicked(row.path)}
-                                  aria-label="Chạy lần này"
+                                  aria-label="Chạy trong lần mở trang này"
                                 />
                               </td>
                             </tr>
@@ -1129,173 +1114,34 @@ export default function AdminDanhMucSeoPage() {
                     </table>
                   </div>
                   {geminiJobStatus && geminiJobStatus.total > 0 && (
-                    <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-700">
-                      <div className="flex flex-wrap gap-3">
-                        <span>Gemini (meta + body): {geminiJobStatus.running ? 'Đang chạy' : 'Hoàn tất'}</span>
-                        <span>
-                          Tiến độ: {geminiJobStatus.processed ?? 0}/{geminiJobStatus.total ?? 0}
-                        </span>
-                        <span>Meta sinh {geminiJobStatus.meta_generated ?? 0}</span>
-                        <span>bỏ meta {geminiJobStatus.meta_skipped ?? 0}</span>
-                        <span>Body sinh {geminiJobStatus.body_generated ?? 0}</span>
-                        <span>bỏ body {geminiJobStatus.body_skipped ?? 0}</span>
-                        <span>Lỗi {geminiJobStatus.failed ?? 0}</span>
-                      </div>
-                      {geminiJobStatus.current_path && (
-                        <div className="mt-2 font-mono text-[11px] text-gray-500">Đang: {geminiJobStatus.current_path}</div>
-                      )}
+                    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[11px] text-gray-700">
+                      <span className="font-medium">{geminiJobStatus.running ? 'Đang chạy' : 'Hoàn tất'}</span>
+                      <span className="mx-1.5 text-gray-300">·</span>
+                      <span>
+                        {geminiJobStatus.processed ?? 0}/{geminiJobStatus.total ?? 0}
+                      </span>
+                      <span className="mx-1.5 text-gray-300">·</span>
+                      <span>meta +{geminiJobStatus.meta_generated ?? 0}</span>
+                      <span className="text-gray-400"> ~{geminiJobStatus.meta_skipped ?? 0}</span>
+                      <span className="mx-1.5 text-gray-300">·</span>
+                      <span>body +{geminiJobStatus.body_generated ?? 0}</span>
+                      <span className="text-gray-400"> ~{geminiJobStatus.body_skipped ?? 0}</span>
+                      <span className="mx-1.5 text-gray-300">·</span>
+                      <span className={geminiJobStatus.failed ? 'text-red-700' : ''}>lỗi {geminiJobStatus.failed ?? 0}</span>
+                      {geminiJobStatus.current_path && geminiJobStatus.running ? (
+                        <div className="mt-1 truncate font-mono text-[10px] text-gray-500">
+                          → {geminiJobStatus.current_path}
+                        </div>
+                      ) : null}
                     </div>
                   )}
                 </div>
 
-                <div className="mb-4 space-y-3">
+                <div className="mb-2">
+                  <h2 className="text-base font-semibold text-gray-900">Cây danh mục hiển thị trên web</h2>
                   <p className="text-xs text-gray-500">
-                    Riêng <strong>SEO body cuối trang</strong> (Gemini): bảng sau cho phép chạy tất cả / theo checklist cũ. Đề xuất dùng khối
-                    cam phía trên để <strong>một lần</strong> có cả meta description + body. Trên server có thể bật auto sau import/API khi có biến
-                    env tương ứng.
+                    URL và redirect (nếu có). Tìm trong bảng Gemini phía trên nếu chỉ cần sinh SEO cho path.
                   </p>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setSeoBodyMode('all')}
-                      className={`px-3 py-2 text-sm font-medium rounded-lg border ${
-                        seoBodyMode === 'all'
-                          ? 'border-[#ea580c] text-[#ea580c] bg-orange-50'
-                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                      }`}
-                    >
-                      Chọn tất cả danh mục
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        setSeoBodyMode('selected');
-                      }}
-                      className={`px-3 py-2 text-sm font-medium rounded-lg border ${
-                        seoBodyMode === 'selected'
-                          ? 'border-[#ea580c] text-[#ea580c] bg-orange-50'
-                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                      }`}
-                    >
-                      Chọn từng danh mục
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleGenerateSeoBodies}
-                      disabled={processing}
-                      className="px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      {processing ? 'Đang chạy...' : seoBodyMode === 'all' ? 'Chạy tất cả' : 'Chạy danh mục đã chọn'}
-                    </button>
-                    <label className="flex items-center gap-2 text-sm text-gray-600">
-                      <input
-                        type="checkbox"
-                        checked={seoBodyForce}
-                        onChange={(e) => setSeoBodyForce(e.target.checked)}
-                      />
-                      Ghi đè (force)
-                    </label>
-                    {seoBodyMessage && <span className="text-sm text-emerald-700">{seoBodyMessage}</span>}
-                  </div>
-
-                  {seoBodyMode === 'selected' && (
-                    <div className="border border-gray-200 rounded-lg p-3 bg-white">
-                      <div className="flex items-center gap-3 mb-2">
-                        <input
-                          type="text"
-                          value={seoBodySearch}
-                          onChange={(e) => setSeoBodySearch(e.target.value)}
-                          placeholder="Tìm danh mục..."
-                          className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-64"
-                        />
-                        <select
-                          value={seoBodyLevelFilter}
-                          onChange={(e) => setSeoBodyLevelFilter(e.target.value as 'all' | '1' | '2' | '3')}
-                          className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                        >
-                          <option value="all">Tất cả cấp</option>
-                          <option value="1">Cấp 1</option>
-                          <option value="2">Cấp 2</option>
-                          <option value="3">Cấp 3</option>
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const all = levelFilteredSeoBodyPaths;
-                            setSeoBodySelected((prev) =>
-                              all.every((p) => prev.includes(p)) ? prev.filter((p) => !all.includes(p)) : Array.from(new Set([...prev, ...all]))
-                            );
-                          }}
-                          className="px-2 py-1 text-xs font-medium rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
-                        >
-                          {levelFilteredSeoBodyPaths.every((p) => seoBodySelected.includes(p)) ? 'Bỏ chọn' : 'Chọn tất cả'}
-                        </button>
-                        {seoBodyLoading && <span className="text-xs text-gray-500">Đang tải...</span>}
-                        <span className="text-xs text-gray-500">
-                          Đã chọn: {seoBodySelected.length} / {seoBodyPaths.length}
-                        </span>
-                      </div>
-                      {seoBodyPaths.length === 0 ? (
-                        <p className="text-sm text-gray-500">Chưa có danh mục.</p>
-                      ) : (
-                        <div className="max-h-48 overflow-y-auto space-y-1 text-sm">
-                          {levelFilteredSeoBodyPaths.map((path) => (
-                            <label key={path} className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded">
-                              <input
-                                type="checkbox"
-                                checked={seoBodySelected.includes(path)}
-                                onChange={() => toggleSeoBodySelected(path)}
-                              />
-                              <span className="font-mono text-xs">{path}</span>
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {seoBodyStatus && (
-                    <div className="border border-gray-200 rounded-lg p-3 bg-white text-sm">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <span className="text-gray-700">
-                          Trạng thái: {seoBodyStatus.running ? 'Đang chạy' : 'Đã hoàn tất'}
-                        </span>
-                        <span className="text-gray-600">
-                          Tiến độ: {seoBodyStatus.done}/{seoBodyStatus.total || 0}
-                        </span>
-                        <span className="text-gray-600">Bỏ qua: {seoBodyStatus.skipped || 0}</span>
-                        <span className="text-gray-600">Lỗi: {seoBodyStatus.failed || 0}</span>
-                      </div>
-                      {seoBodyStatus.current_path && (
-                        <div className="mt-2 text-xs text-gray-500">
-                          Đang chạy: <span className="font-mono">{seoBodyStatus.current_path}</span>
-                        </div>
-                      )}
-                      {(seoBodyStatus.report || []).length > 0 && (
-                        <div className="mt-3 max-h-40 overflow-y-auto text-xs">
-                          {(seoBodyStatus.report || []).slice(-20).map((item: any, idx: number) => (
-                            <div key={`${item.path}-${idx}`} className="flex flex-wrap items-center gap-2">
-                              <span className="font-mono text-gray-700">{item.path}</span>
-                              <span className="text-gray-500">({item.status})</span>
-                              {item.message && <span className="text-gray-400">- {item.message}</span>}
-                              {typeof item.seo_body_len === 'number' && (
-                                <span className="text-gray-400">len={item.seo_body_len}</span>
-                              )}
-                              {typeof item.has_links !== 'undefined' && (
-                                <span className="text-gray-400">has_links={String(item.has_links)}</span>
-                              )}
-                              {typeof item.sibling_count === 'number' && (
-                                <span className="text-gray-400">siblings={item.sibling_count}</span>
-                              )}
-                              {typeof item.sibling_mentions === 'number' && (
-                                <span className="text-gray-400">mentions={item.sibling_mentions}</span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 <div className="mb-4 flex flex-wrap items-center gap-3">
