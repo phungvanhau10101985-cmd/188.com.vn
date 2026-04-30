@@ -12,9 +12,9 @@ Các bảng được xóa (theo nhóm):
                                     guest_product_views, guest_favorites, guest_search_history,
                                     cart_items, carts, search_logs, search_mappings,
                                     search_query_mappings, analytics_events
-  3) Danh mục + SEO danh mục:       categories, category_seo_mappings, category_seo_meta,
-                                    category_seo_dictionary, category_final_mappings,
-                                    category_transform_rules
+  3) Danh mục + SEO + cluster:      categories, seo_clusters, category_seo_mappings,
+                                    category_seo_meta, category_seo_dictionary,
+                                    category_final_mappings, category_transform_rules
                                     (bỏ qua nếu có --keep-categories)
 
 Các bảng KHÔNG bị động: users, admin_users, orders, payments, loyalty_tiers, bank_accounts,
@@ -78,6 +78,8 @@ GROUP_CATEGORIES = [
     "category_final_mappings",
     "category_transform_rules",
     "categories",
+    # Sau categories: Category.seo_cluster_id → seo_clusters (taxonomy import tái tạo cluster)
+    "seo_clusters",
 ]
 TABLE_PRODUCTS_LAST = ["products"]
 
