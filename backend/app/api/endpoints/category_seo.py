@@ -1087,6 +1087,9 @@ def put_category_seo_app_settings(payload: dict = Body(...), db: Session = Depen
 def gemini_targets_catalog(db: Session = Depends(get_db)):
     """
     Danh sách danh mục từ SP + trạng thái meta/body + đã đánh dấu Gemini đích hay chưa (lưu DB).
+
+    Tránh gọi get_category_seo_data() theo từng path (mỗi lần rebuild cây + có thể query SP lấy ảnh) —
+    đó là nguyên nhân hay gây timeout 504 proxy khi có nhiều danh mục.
     """
     tree = crud_product.get_category_tree_from_products(db, is_active=True)
     paths = _flatten_tree_to_paths(tree)
@@ -1101,28 +1104,34 @@ def gemini_targets_catalog(db: Session = Depends(get_db)):
     rows = []
     for (level1, level2, level3) in paths:
         path_str = "/".join(x for x in (level1, level2, level3) if x)
-        data = crud_product.get_category_seo_data(
-            db,
-            level1_slug=level1,
-            level2_slug=level2,
-            level3_slug=level3,
-            is_active=True,
-            image_limit=4,
-        )
-        if not data:
+        bc = crud_product.resolve_category_breadcrumb_names_from_tree(tree, level1, level2, level3)
+        if not bc:
             continue
-        meta = meta_map.get(path_str)
-        desc_text = (data.get("seo_description") or (getattr(meta, "seo_description", None) or "") or "").strip()
-        body_text = (data.get("seo_body") or (getattr(meta, "seo_body", None) or "") or "").strip()
-        product_count = int(data.get("product_count") or 0)
+        n = len(bc)
+        if n == 1:
+            full_name = bc[0]
+        elif n == 2:
+            full_name = f"{bc[0]} - {bc[1]}"
+        else:
+            full_name = f"{bc[0]} - {bc[1]} - {bc[2]}"
+        product_count = crud_product.count_products_for_category_path(
+            db,
+            bc[0],
+            bc[1] if n > 1 else None,
+            bc[2] if n > 2 else None,
+            is_active=True,
+        )
+        meta = meta_map.get(path_str.strip().lower())
+        desc_text = ((getattr(meta, "seo_description", None) or "") if meta else "").strip()
+        body_text = ((getattr(meta, "seo_body", None) or "") if meta else "").strip()
         rows.append({
             "path": path_str,
-            "breadcrumb_label": data.get("full_name") or path_str,
-            "level": len([x for x in (level1, level2, level3) if x]),
-            "product_count": product_count,
+            "breadcrumb_label": full_name,
+            "level": n,
+            "product_count": int(product_count or 0),
             "has_seo_description": bool(desc_text),
             "has_seo_body": bool(body_text),
-            "gemini_enabled": path_str in target_set,
+            "gemini_enabled": path_str.strip().lower() in target_set,
         })
 
     total = len(rows)

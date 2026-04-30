@@ -1,11 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import AdminLayout from '@/components/admin/AdminLayout';
 import { apiClient } from '@/lib/api-client';
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
 import {
   buildCategorySeoSitemapXml,
+  CATEGORY_SEO_SITEMAP_PATH,
+  flattenCategoryTreeForSitemap,
   triggerDownloadXml,
 } from '@/lib/category-sitemap';
 import { generateSlug } from '@/lib/utils';
@@ -212,6 +215,7 @@ export default function AdminDanhMucSeoPage() {
   const [geminiAppSettings, setGeminiAppSettings] = useState<CategorySeoAppSettingsSnap | null>(null);
   const [geminiSettingsSaving, setGeminiSettingsSaving] = useState(false);
   const [sitemapDownloading, setSitemapDownloading] = useState(false);
+  const [publicSitemapBase, setPublicSitemapBase] = useState('');
 
   const [mappings, setMappings] = useState<MappingItem[]>([]);
   const [mappingsLoading, setMappingsLoading] = useState(false);
@@ -251,6 +255,10 @@ export default function AdminDanhMucSeoPage() {
 
   useEffect(() => {
     loadData();
+  }, []);
+
+  useEffect(() => {
+    setPublicSitemapBase(window.location.origin);
   }, []);
 
   useEffect(() => {
@@ -804,7 +812,7 @@ export default function AdminDanhMucSeoPage() {
       }
       const xml = buildCategorySeoSitemapXml({
         siteBase,
-        categories: flat.map(({ url, level }) => ({ url, level })),
+        categories: flattenCategoryTreeForSitemap(tree),
         indexedClusterAbsoluteUrls: indexedClusterUrls,
       });
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
@@ -822,25 +830,41 @@ export default function AdminDanhMucSeoPage() {
           Quản lý danh mục cấp 1, 2, 3 và mapping SEO.
         </p>
 
-        <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50/90 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-          <div className="text-sm text-gray-700 max-w-xl">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50/90 px-4 py-3">
+          <div className="max-w-xl text-sm text-gray-700">
             <span className="font-semibold text-gray-900">Sitemap XML (SEO danh mục)</span>
-            <p className="mt-1 text-xs text-gray-600 leading-snug">
-              Tải file gồm <code className="text-[11px]">/danh-muc</code> (danh sách tổng), toàn bộ URL{' '}
-              <code className="text-[11px]">/danh-muc/&lt;cấp-1[/cấp-2[/cấp-3]]&gt;</code> theo cây hiện tại, và các landing{' '}
-              <code className="text-[11px]">/c/&lt;slug&gt;</code> có chính sách index (giống logic{' '}
-              <code className="text-[11px]">app/sitemap.ts</code>). Base URL lấy từ{' '}
-              <code className="text-[11px]">NEXT_PUBLIC_SITE_URL</code> hoặc origin trình duyệt.
+            <p className="mt-1 text-xs leading-snug text-gray-600">
+              Mở trực tiếp bằng URL (Tab mới) — dùng cho trình duyệt hoặc dán vào Google Search Console. Nội dung:{' '}
+              <code className="text-[11px]">/danh-muc</code>, mọi{' '}
+              <code className="text-[11px]">/danh-muc/…</code> từ API cây danh mục, và{' '}
+              <code className="text-[11px]">/c/&lt;slug&gt;</code> có chính sách index — cùng logic với nút tải file.
+            </p>
+            <p className="mt-2 text-[11px] text-gray-600">
+              URL đầy đủ:{` `}
+              <code className="break-all rounded bg-white/80 px-1 py-0.5 text-[11px] text-[#c2410c]">
+                {publicSitemapBase}
+                {CATEGORY_SEO_SITEMAP_PATH}
+              </code>
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => void handleDownloadCategorySitemap()}
-            disabled={loading || sitemapDownloading}
-            className="shrink-0 rounded-lg border border-[#ea580c] bg-white px-4 py-2 text-sm font-medium text-[#c2410c] hover:bg-orange-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {sitemapDownloading ? 'Đang tạo file…' : 'Tải sitemap-danh-muc-seo.xml'}
-          </button>
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+            <Link
+              href={CATEGORY_SEO_SITEMAP_PATH}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center rounded-lg bg-[#ea580c] px-4 py-2 text-center text-sm font-medium text-white hover:bg-[#c2410c]"
+            >
+              Mở sitemap (tab mới)
+            </Link>
+            <button
+              type="button"
+              onClick={() => void handleDownloadCategorySitemap()}
+              disabled={loading || sitemapDownloading}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {sitemapDownloading ? 'Đang tạo file…' : 'Tải file .xml'}
+            </button>
+          </div>
         </div>
 
         <div className="mb-6 border-b border-gray-200">
