@@ -9,7 +9,11 @@ from app.db.base import Base
 
 # ========== IMPORT ĐÚNG THỨ TỰ ==========
 
-# 1. Import Category trước (không phụ thuộc vào model nào)
+# 1a. Import SeoCluster trước (Category trỏ FK tới seo_clusters)
+from app.models.seo_cluster import SeoCluster
+print("✅ SeoCluster model loaded")
+
+# 1b. Import Category (phụ thuộc SeoCluster qua seo_cluster_id)
 from app.models.category import Category
 print("✅ Category model loaded")
 
@@ -123,6 +127,7 @@ except ImportError:
 
 # ========== TẠO DANH SÁCH ==========
 __all__ = [
+    "SeoCluster",
     "Category",
     "Product",
     "ProductQuestion",
