@@ -186,23 +186,28 @@ export default function MobileHeader({
 
   /** Trang chủ không nút Back — header gọn: logo nhỏ hơn một chút, thanh search pill một khối. */
   const compactHomeChrome = isHome && !showHeaderBack;
+  /** Trang chi tiết SP: có Back + ví dụ nhiều icon — chrome gọn hơn, logo như trang chủ compact. */
+  const compactChrome = compactHomeChrome || isProductDetailPage;
 
   const chipClass =
     'flex-shrink-0 text-[11px] leading-tight font-medium text-white px-2 py-1 rounded-full bg-white/18 hover:bg-white/28 whitespace-nowrap border border-white/25 shadow-sm active:scale-[0.98] transition-transform';
 
   const iconBtn =
     'flex-shrink-0 min-w-[44px] min-h-[44px] w-11 h-11 shrink-0 flex items-center justify-center text-white rounded-xl bg-white/15 hover:bg-white/25 active:bg-white/35 transition-colors backdrop-blur-[2px]';
+  /** Trang chi tiết: không dùng 44×44 để chừng chỗ cho ô tìm (vẫn đạt tap target ~40px). */
+  const iconBtnCondensed =
+    'flex-shrink-0 min-w-[40px] min-h-[40px] w-10 h-10 shrink-0 flex items-center justify-center text-white rounded-lg bg-white/15 hover:bg-white/25 active:bg-white/35 transition-colors backdrop-blur-[2px]';
 
   return (
     <div className="md:hidden sticky top-0 z-50" ref={panelRef}>
       <header className="bg-gradient-to-b from-[#f97316] to-[#ea580c] shadow-sm border-b border-orange-800/15">
-        <div className={`px-2.5 sm:px-3 transition-[padding] duration-200 ${isScrolled ? 'pt-1 pb-1' : compactHomeChrome ? 'pt-1 pb-1.5' : 'pt-1.5 pb-1'}`}>
+        <div className={`px-2 sm:px-2.5 transition-[padding] duration-200 ${isScrolled ? 'pt-1 pb-1' : compactChrome ? 'pt-1 pb-1.5' : 'pt-1.5 pb-1'}`}>
           {/* Thu max-height khi cuộn — ResizeObserver cập nhật --mobile-app-header-height để thanh tabs SP cùng loại dính đúng dưới */}
           <div
             className={`flex justify-center shrink-0 items-center overflow-hidden transition-[max-height,opacity] duration-200 ease-out ${
               isScrolled
                 ? 'max-h-0 opacity-0 pointer-events-none'
-                : compactHomeChrome
+                : compactChrome
                   ? 'max-h-9 opacity-100'
                   : 'max-h-[2.75rem] opacity-100'
             }`}
@@ -220,19 +225,19 @@ export default function MobileHeader({
                 alt="188.com.vn"
                 width={200}
                 height={40}
-                className={`w-auto object-contain block ${compactHomeChrome ? 'h-8' : 'h-10 sm:h-11'}`}
-                priority={compactHomeChrome}
+                className={`w-auto object-contain block ${compactChrome ? 'h-8' : 'h-10 sm:h-11'}`}
+                priority={compactHomeChrome && !isProductDetailPage}
               />
             </Link>
           </div>
 
           {/* Danh mục + ô tìm kiếm (pill) + icon nhanh */}
-          <div className="flex items-center gap-1.5 relative z-10 pt-0.5">
+          <div className={`flex items-center gap-1 relative z-10 pt-0.5 ${isProductDetailPage ? 'gap-1' : 'gap-1.5'}`}>
             {showHeaderBack && (
               <button
                 type="button"
                 onClick={() => router.back()}
-                className={iconBtn}
+                className={isProductDetailPage ? iconBtnCondensed : iconBtn}
                 aria-label="Quay lại"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -244,7 +249,7 @@ export default function MobileHeader({
             <button
               type="button"
               onClick={() => setCategoryPanelOpen((o) => !o)}
-              className={`${iconBtn} ${categoryPanelOpen ? '!bg-white/35 ring-1 ring-white/40' : ''}`}
+              className={`${isProductDetailPage ? iconBtnCondensed : iconBtn} ${categoryPanelOpen ? '!bg-white/35 ring-1 ring-white/40' : ''}`}
               aria-label="Danh mục"
               aria-expanded={categoryPanelOpen}
             >
@@ -255,7 +260,7 @@ export default function MobileHeader({
 
             <form
               onSubmit={handleSearch}
-              className="flex-1 min-w-0 flex h-11 items-stretch rounded-xl bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] overflow-hidden touch-manipulation"
+              className={`flex-1 min-w-0 flex items-stretch rounded-xl bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] overflow-hidden touch-manipulation ${isProductDetailPage ? 'h-10 min-h-[40px]' : 'h-11'}`}
             >
               <input
                 id={mobileImageInputId}
@@ -275,16 +280,22 @@ export default function MobileHeader({
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder={compactHomeChrome ? 'Tìm trên 188.COM.VN…' : 'Tìm sản phẩm…'}
+                  placeholder={
+                    compactHomeChrome
+                      ? 'Tìm trên 188.COM.VN…'
+                      : isProductDetailPage
+                        ? 'Tìm trên 188…'
+                        : 'Tìm sản phẩm…'
+                  }
                   autoComplete="off"
                   enterKeyHint="search"
-                  className="flex-1 min-w-0 h-full bg-transparent border-0 text-[15px] text-gray-900 placeholder:text-gray-500 focus:ring-0 focus:outline-none"
+                  className={`flex-1 min-w-0 h-full bg-transparent border-0 text-gray-900 placeholder:text-gray-500 focus:ring-0 focus:outline-none ${isProductDetailPage ? 'text-sm' : 'text-[15px]'}`}
                 />
               </div>
               <div className="flex shrink-0 self-stretch divide-x divide-gray-200/90 border-l border-gray-100">
                 <label
                   htmlFor={mobileImageInputId}
-                  className="flex w-11 min-h-[44px] items-center justify-center text-gray-500 hover:text-[#ea580c] hover:bg-orange-50/90 active:bg-orange-100 cursor-pointer transition-colors"
+                  className={`flex items-center justify-center text-gray-500 hover:text-[#ea580c] hover:bg-orange-50/90 active:bg-orange-100 cursor-pointer transition-colors ${isProductDetailPage ? 'w-10 min-h-[40px]' : 'w-11 min-h-[44px]'}`}
                   aria-label="Tìm bằng ảnh"
                   title="Tìm theo ảnh (NanoAI)"
                 >
@@ -295,7 +306,7 @@ export default function MobileHeader({
                 </label>
                 <button
                   type="submit"
-                  className="flex w-11 min-h-[44px] items-center justify-center bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-orange-800 transition-colors"
+                  className={`flex items-center justify-center bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-orange-800 transition-colors ${isProductDetailPage ? 'w-10 min-h-[40px]' : 'w-11 min-h-[44px]'}`}
                   aria-label="Tìm trên 188"
                 >
                   <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -305,7 +316,7 @@ export default function MobileHeader({
               </div>
             </form>
 
-            <Link href="/da-xem" className={iconBtn} aria-label="Đã xem" title="Đã xem">
+            <Link href="/da-xem" className={isProductDetailPage ? iconBtnCondensed : iconBtn} aria-label="Đã xem" title="Đã xem">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
@@ -313,7 +324,7 @@ export default function MobileHeader({
             </Link>
 
             {/* Trang chủ: thanh nút thoáng — thông báo đã có ở bottom nav */}
-            {isAuthenticated && !compactHomeChrome && (
+            {isAuthenticated && !compactChrome && (
               <Link href="/account/notifications" className={`${iconBtn} relative`} aria-label="Thông báo" title="Thông báo">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -321,7 +332,7 @@ export default function MobileHeader({
               </Link>
             )}
 
-            <Link href="/cart" className={`${iconBtn} relative`} aria-label="Giỏ hàng" title="Giỏ hàng">
+            <Link href="/cart" className={`${isProductDetailPage ? iconBtnCondensed : iconBtn} relative`} aria-label="Giỏ hàng" title="Giỏ hàng">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
               </svg>
@@ -336,7 +347,7 @@ export default function MobileHeader({
           {/* Trang chi tiết SP: danh mục SP liên quan trong vùng cam — không để khoảng trống; các trang khác: gợi ý từ khóa */}
           {isProductDetailPage ? (
             <div
-              className="flex gap-1.5 mt-1 pb-1 -mx-0.5 px-1 overflow-x-auto scrollbar-hide"
+              className={`flex mt-1 -mx-0.5 px-0.5 overflow-x-auto scrollbar-hide snap-x snap-mandatory ${isScrolled ? 'gap-1 pb-0.5 pt-0' : 'gap-1.5 pb-1'}`}
               role="tablist"
               aria-label="Nhóm sản phẩm liên quan"
             >
@@ -347,7 +358,9 @@ export default function MobileHeader({
                   role="tab"
                   aria-selected={activeRelatedTab === tab.id}
                   onClick={() => setRelatedTab(tab.id)}
-                  className={`flex-shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium whitespace-nowrap transition-colors ${
+                  className={`flex-shrink-0 rounded-full font-medium whitespace-nowrap transition-colors snap-start ${
+                    isScrolled ? 'px-2 py-0.5 text-[10px] leading-tight' : 'px-2.5 py-1 text-[11px]'
+                  } ${
                     activeRelatedTab === tab.id
                       ? 'bg-white text-[#ea580c] shadow-sm'
                       : 'bg-white/15 text-white border border-white/25 hover:bg-white/25'
