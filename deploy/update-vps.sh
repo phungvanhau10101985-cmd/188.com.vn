@@ -20,10 +20,11 @@
 #   DEPLOY_SKIP_DB_INIT=1         không tạo DB / không chạy init_database_tables + migrations
 #   DEPLOY_CREATE_DATABASE=0      không gọi postgres-create-db.sh (DB đã có sẵn)
 #   DEPLOY_STRICT_DB_INIT=0       nếu khởi tạo DB lỗi vẫn tiếp tục deploy (mặc định bật strict từ script)
-#   DEPLOY_GIT_SYNC=merge          git: merge khi VPS và origin/main lệch (mặc định — tránh lỗi Git 2.x "divergent branches")
+#   DEPLOY_GIT_SYNC=merge          (mặc định) merge --no-edit; tránh lỗi Git 2.x "divergent branches" và không mở nano
 #   DEPLOY_GIT_SYNC=rebase         git pull --rebase
-#   DEPLOY_GIT_SYNC=reset-hard      git fetch + reset --hard origin/<branch> — xóa chỉnh sửa local trên VPS, khớp GitHub
-#   DEPLOY_SKIP_GIT=1               không chạy git trong script (đã git pull tay trước đó)
+#   DEPLOY_GIT_SYNC=ff-only        chỉ fast-forward — fail nếu VPS có commit lệch (không tạo merge commit)
+#   DEPLOY_GIT_SYNC=reset-hard     git fetch + reset --hard origin/<branch> — xóa chỉnh sửa local trên VPS, khớp GitHub
+#   DEPLOY_SKIP_GIT=1              không chạy git trong script (đã git pull tay trước đó)
 #
 set -euo pipefail
 
@@ -86,9 +87,15 @@ deploy_git_sync() {
       echo "==> git pull origin ${BRANCH} --rebase"
       git pull --rebase origin "${BRANCH}"
       ;;
+    ff-only|fast-forward)
+      echo "==> git pull origin ${BRANCH} --ff-only (chỉ fast-forward — không tạo merge commit)"
+      git fetch origin "${BRANCH}"
+      git pull --ff-only origin "${BRANCH}"
+      ;;
     merge|*)
-      echo "==> git pull origin ${BRANCH} --no-rebase (merge nếu cần)"
-      git pull origin "${BRANCH}" --no-rebase
+      echo "==> git pull origin ${BRANCH} --no-rebase --no-edit (merge nếu cần, không mở editor)"
+      # GIT_MERGE_AUTOEDIT=no + --no-edit để git không bật nano hỏi commit message khi merge.
+      GIT_MERGE_AUTOEDIT=no git pull --no-edit origin "${BRANCH}" --no-rebase
       ;;
   esac
 }
