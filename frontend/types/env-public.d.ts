@@ -7,6 +7,8 @@ declare namespace NodeJS {
     NEXT_PUBLIC_DOMAIN?: string;
     NEXT_PUBLIC_API_BASE_URL?: string;
     NEXT_PUBLIC_SEPAY_CONTENT_PREFIX?: string;
+    NEXT_PUBLIC_SEPAY_CONTENT_SUFFIX_MIN_LENGTH?: string;
+    NEXT_PUBLIC_SEPAY_CONTENT_SUFFIX_MAX_LENGTH?: string;
   }
 }
 
