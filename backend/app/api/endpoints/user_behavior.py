@@ -82,24 +82,34 @@ def get_products_viewed_by_same_age_gender_endpoint(
     db: Session = Depends(get_db)
 ):
     """
-    Sản phẩm mà khách cùng tuổi (cùng năm sinh) và cùng giới tính đã xem.
-    Nếu chưa đăng nhập hoặc user chưa có tuổi/giới tính thì trả về danh sách rỗng.
+    Gợi ý theo nhóm tuổi + giới (đã đăng nhập và đã cập nhật ngày sinh + giới tính trong hồ sơ).
+
+    cohort_mode:
+    - requires_login: chưa đăng nhập
+    - profile_incomplete: thiếu ngày sinh hoặc giới tính → cập nhật tại /account/profile
+    - exact_cohort: theo lượt xem khách cùng năm sinh & giới tính
+    - gender_peers: mở rộng cùng giới tính khi nhóm tuổi chưa có dữ liệu
+    - popular_fallback: hiển thị SP phổ biến khi chưa có lượt xem để suy luận
     """
     if not current_user:
-        return {"products": []}
-    products = get_products_viewed_by_same_age_gender(db, current_user.id, limit=limit)
+        return {"products": [], "cohort_mode": "requires_login"}
+    products, cohort_mode = get_products_viewed_by_same_age_gender(db, current_user.id, limit=limit)
     products_list = []
     for p in products:
-        if hasattr(p, "__dict__"):
-            d = {k: v for k, v in p.__dict__.items() if not k.startswith("_")}
-            products_list.append(d)
-        else:
-            products_list.append(p)
-    return {"products": products_list}
+        try:
+            products_list.append(ProductSchema.model_validate(p).model_dump())
+        except Exception:
+            if hasattr(p, "__dict__"):
+                d = {k: v for k, v in p.__dict__.items() if not k.startswith("_")}
+                products_list.append(d)
+            else:
+                products_list.append(p)
+    return {"products": products_list, "cohort_mode": cohort_mode}
 
 
 @router.get("/products/same-shop-as-recent-views", response_model=dict)
 def get_products_same_shop_as_recent_views_endpoint(
+    response: Response,
     limit: int = 60,
     offset: int = 0,
     seed: Optional[int] = None,
@@ -108,11 +118,13 @@ def get_products_same_shop_as_recent_views_endpoint(
     x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
     """
-    Sản phẩm cùng shop_name với 8 sản phẩm khách xem gần nhất.
-    Phân trang: limit (mặc định 60), offset, seed (từ lần gọi đầu để load thêm giữ thứ tự).
-    Trả về: { products, total, seed }.
-    Khách: cần header X-Guest-Session-Id và đã xem sản phẩm trong phiên.
+    Sản phẩm cùng shop_name (Excel / import → Product.shop_name) với các shop của tối đa 8 SP xem gần nhất.
+    Không gửi seed: mỗi lần tạo seed mới ⇒ thứ tự khác nhau mỗi lần tải.
+
+    Phân trang: limit (mặc định 60), offset, seed («Xem thêm» giữ cùng thứ tự).
+    Khách: X-Guest-Session-Id và đã có lượt xem trong phiên.
     """
+    response.headers["Cache-Control"] = "private, no-store"
     sid = (x_guest_session_id or "").strip()
     if current_user:
         products, total, returned_seed = get_products_same_shop_as_recent_views(
@@ -131,11 +143,14 @@ def get_products_same_shop_as_recent_views_endpoint(
         return {"products": [], "total": 0, "seed": None}
     products_list = []
     for p in products:
-        if hasattr(p, "__dict__"):
-            d = {k: v for k, v in p.__dict__.items() if not k.startswith("_")}
-            products_list.append(d)
-        else:
-            products_list.append(p)
+        try:
+            products_list.append(ProductSchema.model_validate(p).model_dump())
+        except Exception:
+            if hasattr(p, "__dict__"):
+                d = {k: v for k, v in p.__dict__.items() if not k.startswith("_")}
+                products_list.append(d)
+            else:
+                products_list.append(p)
     return {"products": products_list, "total": total, "seed": returned_seed}
 
 

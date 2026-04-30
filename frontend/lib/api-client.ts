@@ -15,6 +15,7 @@ import {
   AddressCreateInput,
   AddressUpdateInput,
   NanoaiSearchResponse,
+  SameAgeGenderCohortMode,
 } from '@/types/api';
 
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
@@ -325,12 +326,18 @@ class ApiClient {
     return this.fetch<any[]>(`/user-behavior/products/viewed?limit=${limit}`);
   }
 
-  /** Sản phẩm mà khách cùng tuổi và cùng giới tính đã xem (nhóm B,C,E,F từ A,D 23 nữ). */
-  async getProductsViewedBySameAgeGender(limit = 24): Promise<Product[]> {
-    const res = await this.fetch<{ products?: Product[] }>(
+  /** Đề xuất theo nhóm tuổi/giới (cần đăng nhập + ngày sinh & giới tính trong hồ sơ). */
+  async getProductsViewedBySameAgeGender(limit = 24): Promise<{
+    products: Product[];
+    cohort_mode: SameAgeGenderCohortMode;
+  }> {
+    const res = await this.fetch<{ products?: Product[]; cohort_mode?: SameAgeGenderCohortMode }>(
       `/user-behavior/products/viewed-by-same-age-gender?limit=${limit}`
-    ).catch(() => ({ products: [] }));
-    return res?.products ?? [];
+    ).catch(() => ({ products: [], cohort_mode: 'requires_login' as SameAgeGenderCohortMode }));
+    return {
+      products: res?.products ?? [],
+      cohort_mode: res?.cohort_mode ?? 'exact_cohort',
+    };
   }
 
   /**

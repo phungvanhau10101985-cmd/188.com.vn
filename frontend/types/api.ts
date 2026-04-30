@@ -172,6 +172,14 @@ export interface ProductListResponse {
   ai_processed?: boolean;
 }
 
+/** API /user-behavior/products/viewed-by-same-age-gender */
+export type SameAgeGenderCohortMode =
+  | 'requires_login'
+  | 'profile_incomplete'
+  | 'exact_cohort'
+  | 'gender_peers'
+  | 'popular_fallback';
+
 /** Danh mục cấp 3 (cột AD) */
 export interface CategoryLevel3 {
   name: string;

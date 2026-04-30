@@ -9,7 +9,7 @@ import random
 from sqlalchemy.orm import Session
 from sqlalchemy import extract, func, or_
 from datetime import datetime, date
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from app.models.user import (
     User, UserProductView, UserFavorite, UserCategoryView,
     UserBrandView, UserSearchHistory, UserShopInteraction
@@ -249,42 +249,81 @@ def get_user_viewed_products(db: Session, user_id: int, limit: int = 20) -> List
 
 def get_products_viewed_by_same_age_gender(
     db: Session, user_id: int, limit: int = 24
-) -> List[Product]:
+) -> Tuple[List[Product], str]:
     """
-    Sản phẩm mà khách cùng tuổi (cùng năm sinh) và cùng giới tính đã xem.
-    Ví dụ: khách A 23 nữ xem B,C; khách D 23 nữ xem E,F → nhóm B,C,E,F.
-    Bao gồm cả sản phẩm bạn đã xem (bạn cũng thuộc nhóm cùng tuổi cùng giới tính).
+    Gợi ý theo hành vi nhóm cùng tuổi + giới (ưu tiên), có fallback.
+
+    Trả về (products, cohort_mode):
+    - profile_incomplete: chưa có ngày sinh hoặc giới tính
+    - exact_cohort: từ lượt xem của user cùng năm sinh và cùng giới tính (is_active)
+    - gender_peers: chưa đủ lượt xem nhóm tuổi — mở rộng cùng giới tính
+    - popular_fallback: chưa có lượt xem để suy luận — SP phổ biến (purchases)
+
+    Luôn trả cohort_mode để frontend hiển thị giải thích phù hợp.
     """
     user = get_user(db, user_id)
     if not user or not user.date_of_birth or not user.gender:
-        return []
+        return [], "profile_incomplete"
+
     birth_year = user.date_of_birth.year
     gender = user.gender
-    same_group = (
-        db.query(User.id)
+
+    def _product_ids_from_views(peer_ids: List[int]) -> List[int]:
+        if not peer_ids:
+            return []
+        rows = (
+            db.query(UserProductView.product_id, func.count(UserProductView.id).label("cnt"))
+            .filter(UserProductView.user_id.in_(peer_ids))
+            .group_by(UserProductView.product_id)
+            .order_by(func.count(UserProductView.id).desc())
+            .limit(limit * 2)
+            .all()
+        )
+        return [r[0] for r in rows]
+
+    def _hydrate_ordered(product_ids: List[int]) -> List[Product]:
+        if not product_ids:
+            return []
+        rows = (
+            db.query(Product)
+            .filter(Product.id.in_(product_ids), Product.is_active == True)  # noqa: E712
+            .all()
+        )
+        order_map = {pid: i for i, pid in enumerate(product_ids)}
+        rows.sort(key=lambda p: order_map.get(p.id, 999))
+        return rows[:limit]
+
+    same_year_gender_ids = [
+        r[0]
+        for r in db.query(User.id)
+        .filter(User.is_active == True)  # noqa: E712
         .filter(User.gender == gender)
         .filter(extract("year", User.date_of_birth) == birth_year)
+        .all()
+    ]
+    product_ids = _product_ids_from_views(same_year_gender_ids)
+    if product_ids:
+        return _hydrate_ordered(product_ids), "exact_cohort"
+
+    gender_peer_ids = [
+        r[0]
+        for r in db.query(User.id)
+        .filter(User.is_active == True)  # noqa: E712
+        .filter(User.gender == gender)
+        .all()
+    ]
+    product_ids = _product_ids_from_views(gender_peer_ids)
+    if product_ids:
+        return _hydrate_ordered(product_ids), "gender_peers"
+
+    popular = (
+        db.query(Product)
+        .filter(Product.is_active == True)  # noqa: E712
+        .order_by(Product.purchases.desc().nullslast(), Product.id)
+        .limit(limit)
+        .all()
     )
-    same_group_ids = [r[0] for r in same_group.all()]
-    if not same_group_ids:
-        return []
-    subq = (
-        db.query(UserProductView.product_id, func.count(UserProductView.id).label("cnt"))
-        .filter(UserProductView.user_id.in_(same_group_ids))
-        .group_by(UserProductView.product_id)
-        .order_by(func.count(UserProductView.id).desc())
-        .limit(limit * 2)
-    )
-    product_ids = [r[0] for r in subq.all()]
-    if not product_ids:
-        return []
-    products = db.query(Product).filter(
-        Product.id.in_(product_ids),
-        Product.is_active == True,
-    ).all()
-    order_map = {pid: i for i, pid in enumerate(product_ids)}
-    products.sort(key=lambda p: order_map.get(p.id, 999))
-    return products[:limit]
+    return popular, "popular_fallback"
 
 
 def get_products_same_shop_as_recent_views(
@@ -296,9 +335,9 @@ def get_products_same_shop_as_recent_views(
     guest_session_id: Optional[str] = None,
 ) -> tuple[List[Product], int, Optional[int]]:
     """
-    Sản phẩm cùng shop_name với 8 sản phẩm khách xem gần nhất.
-    Trả về (danh_sach_slice, total, seed). Dùng seed để pagination giữ thứ tự random ổn định.
-    Ưu tiên user_id; nếu không có thì dùng guest_session_id (bảng guest_product_views).
+    Sản phẩm cùng `shop_name` (tên shop từ import Excel → DB) với các shop của tối đa 8 sản phẩm xem gần nhất.
+    Trả về (danh_sách_slice, total, seed). Không gửi `seed`: random mới mỗi lần; có `seed` + offset: pagination ổn định.
+    Ưu tiên user_id; nếu không có thì guest_session_id (bảng guest_product_views).
     """
     recent_product_ids: List[int] = []
     if user_id is not None:
@@ -342,12 +381,10 @@ def get_products_same_shop_as_recent_views(
         return [], 0, None
     total = len(products)
     products = list(products)
-    if seed is not None:
-        random.seed(seed)
-    else:
+    if seed is None:
         seed = random.randint(0, 2**31 - 1)
-        random.seed(seed)
-    random.shuffle(products)
+    rng = random.Random(seed)
+    rng.shuffle(products)
     page = products[offset : offset + limit]
     return page, total, seed
 

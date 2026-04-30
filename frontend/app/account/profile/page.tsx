@@ -162,6 +162,9 @@ export default function AccountProfilePage() {
               onChange={(e) => setDob(e.target.value)}
               className="w-full rounded-lg border border-gray-200 px-3 py-2 text-gray-900 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
             />
+            <p className="mt-1.5 text-xs text-gray-500">
+              Khi đã lưu cả ngày sinh và giới tính, trang chủ sẽ gợi ý sản phẩm theo nhóm tuổi và giới tính trên trang chủ.
+            </p>
           </div>
 
           <div>
