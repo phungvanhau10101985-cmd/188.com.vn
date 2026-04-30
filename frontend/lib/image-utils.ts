@@ -2,10 +2,9 @@
 /**
  * Image Utility for Long-term Management
  * Features:
- * - CDN support with image optimization
+ * - CDN URLs: serve originals (no edge w/h/q/fit params)
  * - Multiple fallback strategies
  * - Local placeholder generation
- * - Performance optimization
  */
 
 import { getCdnPublicBase } from '@/lib/site-config';
@@ -28,17 +27,14 @@ const generateLocalPlaceholder = (width: number = 200, height: number = 200, tex
   `)}`;
 };
 
-// Image optimization parameters
-const getOptimizedImageUrl = (url: string, width: number = 400, height: number = 400, quality: number = 80): string => {
+// CDN: trả về URL gốc (không w/h/q/fit/auto=format) để không resize/nén ở edge.
+const getOptimizedImageUrl = (url: string, width: number = 400, height: number = 400, _quality?: number): string => {
   if (!url) return generateLocalPlaceholder(width, height);
-  
-  // Nếu đang dùng CDN của chúng ta, thêm optimization parameters
+
   if (url.includes(CDN_CONFIG.baseUrl)) {
-    return `${url}?w=${width}&h=${height}&q=${quality}&fit=crop&auto=format`;
+    return url;
   }
-  
-  // Nếu là external URL, xử lý protocol và trả về nguyên bản
-  // (Sau này có thể tích hợp với image proxy service)
+
   return url;
 };
 
@@ -55,7 +51,6 @@ export const getOptimizedImage = (
   const { 
     width = 400, 
     height = 400, 
-    quality = 80,
     fallbackStrategy = 'local'
   } = options;
 
@@ -83,7 +78,7 @@ export const getOptimizedImage = (
 
   // Case 4: Return optimized URL
   try {
-    return getOptimizedImageUrl(processedUrl, width, height, quality);
+    return getOptimizedImageUrl(processedUrl, width, height);
   } catch (error) {
     console.error('Error processing image URL:', error);
     return getFallbackImage(fallbackStrategy, width, height);

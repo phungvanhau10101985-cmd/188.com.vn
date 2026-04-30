@@ -95,32 +95,34 @@ export default function FavoritesPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Sản phẩm yêu thích</h1>
-          <p className="text-gray-600 mt-1">Danh sách sản phẩm bạn đã thích ({items.length})</p>
+      <div className="max-w-7xl mx-auto px-3 pt-3 pb-6 md:px-4 md:py-8">
+        <div className="mb-4 md:mb-6">
+          <h1 className="text-lg font-bold tracking-tight text-gray-900 md:text-2xl">Sản phẩm yêu thích</h1>
+          <p className="mt-0.5 text-sm text-gray-600 md:mt-1 md:text-base">
+            Đã thích ({items.length})
+          </p>
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">
+          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-700 md:mb-4 md:px-4 md:py-3 md:text-sm">
             {error}
           </div>
         )}
 
         {loading ? (
-          <div className="py-12 text-center text-gray-500">Đang tải...</div>
+          <div className="py-8 text-center text-gray-500 md:py-12">Đang tải...</div>
         ) : items.length === 0 ? (
-          <div className="bg-white rounded-xl shadow border border-gray-100 p-12 text-center">
+          <div className="rounded-xl border border-gray-100 bg-white p-8 text-center shadow md:p-12">
             <p className="text-gray-500 mb-4">Bạn chưa thích sản phẩm nào.</p>
             <Link
               href="/"
-              className="inline-block px-5 py-2.5 bg-[#ea580c] text-white font-medium rounded-lg hover:bg-[#c2410c]"
+              className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-[#ea580c] px-5 py-2.5 font-medium text-white hover:bg-[#c2410c] md:min-h-0"
             >
               Khám phá sản phẩm
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">
             {items.map((item) => {
               const data = item.product_data || {};
               const name = data.name || `Sản phẩm #${item.product_id}`;
@@ -137,22 +139,22 @@ export default function FavoritesPage() {
                   <Link href={href} className="block aspect-square bg-gray-100 relative">
                     <Image src={imageUrl} alt={name} fill sizes="(min-width: 1280px) 20vw, (min-width: 1024px) 25vw, (min-width: 640px) 33vw, 100vw" className="object-cover" />
                   </Link>
-                  <div className="p-4">
+                  <div className="p-3 md:p-4">
                     <Link href={href}>
-                      <h3 className="font-medium text-gray-900 line-clamp-2 hover:text-[#ea580c]">
+                      <h3 className="text-sm font-medium leading-snug text-gray-900 line-clamp-2 hover:text-[#ea580c] md:text-base">
                         {name}
                       </h3>
                     </Link>
                     {data.brand_name && (
-                      <p className="text-sm text-gray-500 mt-0.5">{data.brand_name}</p>
+                      <p className="mt-0.5 text-xs text-gray-500 md:text-sm">{data.brand_name}</p>
                     )}
-                    <p className="text-lg font-bold text-[#ea580c] mt-2">
+                    <p className="mt-2 text-base font-bold text-[#ea580c] md:text-lg">
                       {formatVnd(price)}
                     </p>
-                    <div className="mt-3 flex gap-2">
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                       <Link
                         href={href}
-                        className="flex-1 text-center py-2 px-3 bg-gray-100 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-200"
+                        className="flex-1 rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-medium text-gray-800 hover:bg-gray-200 min-h-[44px] flex items-center justify-center md:min-h-0"
                       >
                         Xem chi tiết
                       </Link>
@@ -160,7 +162,7 @@ export default function FavoritesPage() {
                         type="button"
                         onClick={() => handleRemove(item.product_id, item.id)}
                         disabled={removingId === item.id}
-                        className="py-2 px-3 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50"
+                        className="rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 min-h-[44px] md:min-h-0"
                       >
                         {removingId === item.id ? 'Đang xóa...' : 'Bỏ thích'}
                       </button>

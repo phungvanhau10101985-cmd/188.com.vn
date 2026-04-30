@@ -36,7 +36,7 @@ export const validateAndOptimizeImageUrl = (
   
   return optimizeImageUrl(url, {
     width: options?.width || 600,
-    quality: options?.quality || 80,
+    quality: options?.quality,
     ...options
   });
 };
