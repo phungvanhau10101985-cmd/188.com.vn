@@ -591,19 +591,24 @@ export default function AdminProductsPage() {
             </div>
           ) : null}
           <div className="mt-4 pt-4 border-t border-gray-100 space-y-2 text-sm text-gray-700">
+            <p className="text-xs text-gray-600 leading-snug">
+              <strong className="font-medium text-gray-800">Nguồn cấp kiểu URL:</strong> mỗi đường link dưới đây là{' '}
+              <strong className="font-medium text-gray-800">địa chỉ file TSV nằm trên máy chủ</strong>, mở được qua Internet.
+              Google / Meta / TikTok <strong className="font-medium text-gray-800">tự kéo file qua HTTP(S) theo lịch</strong> — bạn{' '}
+              <strong className="font-medium text-gray-800">không</strong> tải file về máy rồi upload tay. Chỉ cần dán URL vào mục
+              nguồn cấp dữ liệu (scheduled fetch / URL máy chủ). Mở link trong trình duyệt chỉ để kiểm tra nhanh nội dung.
+            </p>
             {feedUrlIsNonPublic ? (
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 text-xs leading-snug">
-                Google, Meta và TikTok chỉ tải được nguồn cấp qua URL <strong className="font-semibold">HTTPS công khai</strong> (domain thật).
-                Link <code className="text-[11px]">localhost</code> chỉ để thử trên máy bạn. Trên production hãy đặt{' '}
+                Các nền tảng chỉ truy cập được URL <strong className="font-semibold">HTTPS công khai</strong> (domain thật trên mạng), không phải{' '}
+                <code className="text-[11px]">localhost</code>. Trên production hãy đặt{' '}
                 <code className="text-[11px]">NEXT_PUBLIC_SITE_URL</code> hoặc{' '}
                 <code className="text-[11px]">NEXT_PUBLIC_CATALOG_FEED_API_BASE_URL</code> trỏ tới base{' '}
-                <code className="text-[11px]">…/api/v1</code> công khai, rồi dán URL hiển thị bên
-                dưới vào các nền tảng.
+                <code className="text-[11px]">…/api/v1</code> công khai, rồi dán các URL dưới đây vào cấu hình nguồn cấp.
               </p>
             ) : (
               <p className="text-xs text-gray-500 leading-snug">
-                Nguồn cấp theo lịch: dán các URL dưới đây vào Merchant Center / Commerce Manager / TikTok Ads —
-                họ cần URL HTTPS có thể truy cập từ Internet (không phải máy cục bộ).
+                Dán nguyên URL (kèm <code className="text-[11px]">https://</code>) vào Merchant Center / Commerce Manager / TikTok Ads — họ tải file trực tiếp từ địa chỉ đó.
               </p>
             )}
             <p>
@@ -616,7 +621,7 @@ export default function AdminProductsPage() {
               >
                 {feedMerchantCenterTsv}
               </a>
-              <span className="text-gray-500"> — Nguồn dữ liệu · URL máy chủ · TSV (tab).</span>
+              <span className="text-gray-500"> — Nguồn dữ liệu URL máy chủ · file TSV online (tab), không phải upload file tải về.</span>
             </p>
             <p>
               <span className="font-medium text-gray-800">Meta (Facebook / Instagram) catalogue</span>{' '}
@@ -628,7 +633,7 @@ export default function AdminProductsPage() {
               >
                 {feedMetaCatalogTsv}
               </a>
-              <span className="text-gray-500"> — Commerce Manager · Scheduled data feed · cột theo catalogue Meta (`fb_product_category` chỉnh `.env`).</span>
+              <span className="text-gray-500"> — Commerce Manager · Data feed theo lịch (scheduled) · URL trỏ file trên mạng · cột theo catalogue Meta (`fb_product_category` trong `.env`).</span>
             </p>
             <p>
               <span className="font-medium text-gray-800">TikTok catalogue</span>{' '}
@@ -640,7 +645,7 @@ export default function AdminProductsPage() {
               >
                 {feedTiktokCatalogTsv}
               </a>
-              <span className="text-gray-500"> — Ads Manager · Data feed schedule · ID mục là `sku_id` (= product_id).</span>
+              <span className="text-gray-500"> — Ads Manager · Lịch tải feed qua URL · file TSV online · ID mục là `sku_id` (= product_id).</span>
             </p>
           </div>
         </div>
