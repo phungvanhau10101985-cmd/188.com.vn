@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { apiClient } from '@/lib/api-client';
 import { useCart } from '@/features/cart/hooks/useCart';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -345,6 +346,19 @@ export default function ProductDetailClient({
             <div className="grid grid-cols-[minmax(12rem,17.33rem)_minmax(0,1fr)_9.33rem] items-center gap-2 md:gap-3 xl:grid-cols-[minmax(13.33rem,21.33rem)_minmax(0,1fr)_9.33rem]">
               <div className={`min-w-0 ${isStickyPinned ? '' : 'pointer-events-none opacity-0'}`}>
                 <div className="flex min-w-0 items-center gap-2">
+                  <Link
+                    href="/"
+                    className="flex shrink-0 items-center rounded-md py-0.5 hover:bg-white/10 transition-colors"
+                    aria-label="Về trang chủ 188.com.vn"
+                  >
+                    <Image
+                      src="https://188comvn.b-cdn.net/logo%20head%20188.png"
+                      alt="188.com.vn"
+                      width={140}
+                      height={35}
+                      className="h-7 w-auto max-w-[6.5rem] md:max-w-[8rem] object-contain object-left"
+                    />
+                  </Link>
                   <div
                     className="relative"
                     onMouseEnter={handleMenuEnter}

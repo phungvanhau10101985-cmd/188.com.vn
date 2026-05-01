@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
@@ -256,8 +257,21 @@ export default function Navigation({
         {...(!showStickyBar ? { inert: true as const } : {})}
       >
         <div className="max-w-7xl mx-auto px-3">
-          <div className="grid grid-cols-[224px_1fr_224px] items-center gap-3 py-1.5">
-            <div className="flex items-center gap-3">
+          <div className="grid grid-cols-[auto_1fr_224px] items-center gap-3 py-1.5">
+            <div className="flex min-w-0 items-center gap-2">
+              <Link
+                href="/"
+                className="flex shrink-0 items-center rounded-md py-0.5 hover:bg-white/10 transition-colors"
+                aria-label="Về trang chủ 188.com.vn"
+              >
+                <Image
+                  src="https://188comvn.b-cdn.net/logo%20head%20188.png"
+                  alt="188.com.vn"
+                  width={140}
+                  height={35}
+                  className="h-7 w-auto max-w-[7rem] sm:max-w-[8.5rem] object-contain object-left"
+                />
+              </Link>
               <div
                 className="relative"
                 onMouseEnter={handleStickyMenuEnter}
