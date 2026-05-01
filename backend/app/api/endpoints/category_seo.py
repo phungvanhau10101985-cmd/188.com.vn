@@ -1436,6 +1436,9 @@ def get_final_mappings(db: Session = Depends(get_db)):
                 "to_subcategory": m.to_subcategory,
                 "to_sub_subcategory": m.to_sub_subcategory,
                 "apply_to_future_imports": bool(getattr(m, "apply_to_future_imports", True)),
+                "restrict_product_ids": crud_product.restrict_product_ids_list_for_api(
+                    getattr(m, "restrict_product_ids", None)
+                ),
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in mappings
@@ -1448,6 +1451,7 @@ def create_final_mapping(
     payload: dict = Body(...),
     db: Session = Depends(get_db),
 ):
+    rj = crud_product.canonical_restrict_product_ids_json(payload.get("restrict_product_ids"))
     rule = CategoryFinalMapping(
         from_category=payload.get("from_category"),
         from_subcategory=payload.get("from_subcategory") or "",
@@ -1456,15 +1460,18 @@ def create_final_mapping(
         to_subcategory=payload.get("to_subcategory") or "",
         to_sub_subcategory=payload.get("to_sub_subcategory") or "",
         apply_to_future_imports=False,
+        restrict_product_ids=rj,
     )
-    existing = db.query(CategoryFinalMapping).filter(
+    q = db.query(CategoryFinalMapping).filter(
         CategoryFinalMapping.from_category == rule.from_category,
         CategoryFinalMapping.from_subcategory == rule.from_subcategory,
         CategoryFinalMapping.from_sub_subcategory == rule.from_sub_subcategory,
-    ).first()
-    if existing:
-        db.delete(existing)
-        db.commit()
+    )
+    for ex in q.all():
+        ex_r = crud_product.canonical_restrict_product_ids_json(getattr(ex, "restrict_product_ids", None))
+        if ex_r == rj:
+            db.delete(ex)
+    db.commit()
     db.add(rule)
     db.commit()
     db.refresh(rule)
@@ -1490,10 +1497,17 @@ def update_final_mapping(
         "to_subcategory",
         "to_sub_subcategory",
         "apply_to_future_imports",
+        "restrict_product_ids",
     ]:
         if field in payload:
             if field == "apply_to_future_imports":
                 setattr(mapping, field, bool(payload[field]))
+            elif field == "restrict_product_ids":
+                setattr(
+                    mapping,
+                    field,
+                    crud_product.canonical_restrict_product_ids_json(payload[field]),
+                )
             else:
                 setattr(mapping, field, payload[field] or "")
     db.commit()
@@ -1541,6 +1555,9 @@ def export_final_mappings(db: Session = Depends(get_db)):
                 "to_subcategory": m.to_subcategory,
                 "to_sub_subcategory": m.to_sub_subcategory,
                 "apply_to_future_imports": bool(getattr(m, "apply_to_future_imports", True)),
+                "restrict_product_ids": crud_product.restrict_product_ids_list_for_api(
+                    getattr(m, "restrict_product_ids", None)
+                ),
             }
             for m in mappings
         ]
@@ -1567,6 +1584,7 @@ def import_final_mappings(
             to_subcategory=r.get("to_subcategory") or "",
             to_sub_subcategory=r.get("to_sub_subcategory") or "",
             apply_to_future_imports=bool(r.get("apply_to_future_imports", True)),
+            restrict_product_ids=crud_product.canonical_restrict_product_ids_json(r.get("restrict_product_ids")),
         )
         db.add(mapping)
         created += 1

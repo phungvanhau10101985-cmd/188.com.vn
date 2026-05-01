@@ -451,6 +451,58 @@ def get_category_final_mappings_for_runtime(db: Session) -> List[CategoryFinalMa
     )
 
 
+def canonical_restrict_product_ids_json(payload: Any) -> Optional[str]:
+    """Chuẩn hoá danh sách product_id (API) → JSON string lưu DB; None = không giới hạn."""
+    if payload is None:
+        return None
+    raw: Any = payload
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return None
+        try:
+            raw = json.loads(s)
+        except Exception:
+            return None
+    if not isinstance(raw, (list, tuple)):
+        return None
+    ids = sorted({str(x).strip() for x in raw if str(x).strip()})
+    if not ids:
+        return None
+    return json.dumps(ids, ensure_ascii=False)
+
+
+def restrict_product_ids_set_from_value(stored: Any) -> Optional[Set[str]]:
+    """Đọc cột DB / chuỗi JSON → tập id, hoặc None nếu không giới hạn."""
+    if stored is None:
+        return None
+    if isinstance(stored, str) and not stored.strip():
+        return None
+    raw: Any = stored
+    if isinstance(stored, str):
+        try:
+            raw = json.loads(stored)
+        except Exception:
+            return None
+    if not isinstance(raw, (list, tuple)):
+        return None
+    ids = {str(x).strip() for x in raw if str(x).strip()}
+    if not ids:
+        return None
+    return ids
+
+
+def final_mapping_has_product_restrict(m: CategoryFinalMapping) -> bool:
+    return restrict_product_ids_set_from_value(getattr(m, "restrict_product_ids", None)) is not None
+
+
+def restrict_product_ids_list_for_api(stored: Any) -> List[str]:
+    s = restrict_product_ids_set_from_value(stored)
+    if not s:
+        return []
+    return sorted(s)
+
+
 def apply_category_final_mapping_to_product(
     product_data: Dict[str, Any],
     mappings: List[CategoryFinalMapping],
@@ -486,8 +538,14 @@ def apply_category_final_mapping_to_product(
         from_c2 = _norm_name(m.from_subcategory)
         from_c3 = _norm_name(m.from_sub_subcategory)
 
+        rset = restrict_product_ids_set_from_value(getattr(m, "restrict_product_ids", None))
+
         # Match đủ 3 cấp
         if n_category == from_c1 and n_subcategory == from_c2 and n_sub_subcategory == from_c3:
+            if rset is not None:
+                pid = str(product_data.get("product_id") or "").strip()
+                if pid not in rset:
+                    continue
             category = _keep_or_value(m.to_category, category)
             subcategory = _keep_or_value(m.to_subcategory, subcategory)
             sub_subcategory = _keep_or_value(m.to_sub_subcategory, sub_subcategory)
@@ -495,6 +553,10 @@ def apply_category_final_mapping_to_product(
 
         # Match 2 cấp (wildcard cấp 3)
         if n_category == from_c1 and n_subcategory == from_c2 and from_c3 == "":
+            if rset is not None:
+                pid = str(product_data.get("product_id") or "").strip()
+                if pid not in rset:
+                    continue
             category = _keep_or_value(m.to_category, category)
             subcategory = _keep_or_value(m.to_subcategory, subcategory)
             # giữ nguyên cấp 3 hiện tại nếu mapping không set cấp 3
@@ -519,8 +581,13 @@ def batch_apply_final_mapping_to_products(db: Session, mapping: CategoryFinalMap
         return 0
     mappings_one = [mapping]
     updated = 0
-    for p in db.query(Product).all():
+    restrict = restrict_product_ids_set_from_value(getattr(mapping, "restrict_product_ids", None))
+    q = db.query(Product)
+    if restrict is not None:
+        q = q.filter(Product.product_id.in_(restrict))
+    for p in q.all():
         orig = {
+            "product_id": p.product_id,
             "category": p.category,
             "subcategory": p.subcategory,
             "sub_subcategory": p.sub_subcategory,
@@ -1244,6 +1311,8 @@ def get_category_tree_from_products(
     try:
         final_mappings = list(get_category_final_mappings_for_runtime(db))
         for m in final_mappings:
+            if final_mapping_has_product_restrict(m):
+                continue
             from_c1 = _norm_map_name(m.from_category)
             from_c2 = _norm_map_name(m.from_subcategory)
             from_c3 = _norm_map_name(m.from_sub_subcategory)

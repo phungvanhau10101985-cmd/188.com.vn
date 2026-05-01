@@ -7,6 +7,8 @@ import {
   ProductReviewItem,
   Category, 
   CategoryLevel1,
+  CategoryLevel2,
+  CategoryLevel3,
   CategoryByPath,
   Cart,
   ProductSearchParams,
@@ -22,6 +24,41 @@ import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
 import { getGuestSessionId } from '@/lib/guest-session';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+/** Node từ GET /categories/tree-v2 (taxonomy DB). */
+interface TaxonomyTreeV2Node {
+  name: string;
+  slug?: string;
+  children?: TaxonomyTreeV2Node[];
+}
+
+function taxonomyTreeV2ToCategoryLevel1(raw: unknown): CategoryLevel1[] {
+  if (!Array.isArray(raw)) return [];
+  const mapL3 = (n: TaxonomyTreeV2Node): CategoryLevel3 => ({
+    name: String(n?.name ?? '').trim(),
+    slug: n?.slug != null && String(n.slug).trim() ? String(n.slug).trim() : undefined,
+  });
+  const mapL2 = (n: TaxonomyTreeV2Node): CategoryLevel2 => ({
+    name: String(n?.name ?? '').trim(),
+    slug: n?.slug != null && String(n.slug).trim() ? String(n.slug).trim() : undefined,
+    children: Array.isArray(n?.children)
+      ? n.children
+          .filter((c) => String(c?.name ?? '').trim().length > 0)
+          .map(mapL3)
+      : [],
+  });
+  return (raw as TaxonomyTreeV2Node[])
+    .filter((c) => String(c?.name ?? '').trim().length > 0)
+    .map((c1) => ({
+      name: String(c1?.name ?? '').trim(),
+      slug: c1?.slug != null && String(c1.slug).trim() ? String(c1.slug).trim() : undefined,
+      children: Array.isArray(c1?.children)
+        ? c1.children
+            .filter((c) => String(c?.name ?? '').trim().length > 0)
+            .map(mapL2)
+        : [],
+    }));
+}
 
 /** Giới hạn mỗi lần gọi text-search NanoAI (khớp backend `le=100`). */
 export const NANOAI_TEXT_SEARCH_LIMIT = 100;
@@ -193,6 +230,17 @@ class ApiClient {
     if (Array.isArray(data)) return data;
     if (data && Array.isArray((data as { data?: CategoryLevel1[] }).data)) return (data as { data: CategoryLevel1[] }).data;
     return [];
+  }
+
+  /**
+   * Cây 3 cấp từ bảng `categories` (sau import taxonomy tại /admin/taxonomy).
+   * Dùng cho admin mapping / menu chuẩn; slug khớp URL taxonomy.
+   */
+  async getCategoryTreeV2(options?: { isActiveOnly?: boolean }): Promise<CategoryLevel1[]> {
+    const sp = new URLSearchParams();
+    sp.set('is_active_only', options?.isActiveOnly === false ? 'false' : 'true');
+    const raw = await this.fetch<unknown>(`/categories/tree-v2?${sp.toString()}`);
+    return taxonomyTreeV2ToCategoryLevel1(raw);
   }
 
   /** Resolve path slugs → thông tin danh mục (SEO). level2, level3 optional. */

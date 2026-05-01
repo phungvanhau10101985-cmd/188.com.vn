@@ -17,9 +17,21 @@ interface TaxonomyInfo {
   products: { total: number; linked_to_cat3: number };
 }
 
+interface UpsertCounts {
+  inserted: number;
+  updated: number;
+}
+
 interface ImportSummary {
   ok: boolean;
-  summary: { cat1: number; cat2: number; cat3: number; clusters: number };
+  summary: {
+    categories: {
+      '1': UpsertCounts;
+      '2': UpsertCounts;
+      '3': UpsertCounts;
+    };
+    clusters: UpsertCounts & { in_database_after: number };
+  };
   errors: {
     seo_clusters: string[];
     categories: string[];
@@ -462,10 +474,27 @@ export default function TaxonomyAdminPage() {
           {importResult ? (
             <div className="mt-4 space-y-3">
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <Stat label="Cat1 xử lý (thêm/cập nhật)" value={importResult.summary.cat1} />
-                <Stat label="Cat2 xử lý (thêm/cập nhật)" value={importResult.summary.cat2} />
-                <Stat label="Cat3 xử lý (thêm/cập nhật)" value={importResult.summary.cat3} />
-                <Stat label="Cluster xử lý (thêm/cập nhật)" value={importResult.summary.clusters} />
+                <StatUpsert
+                  label="Cat1 (theo file)"
+                  inserted={importResult.summary.categories['1'].inserted}
+                  updated={importResult.summary.categories['1'].updated}
+                />
+                <StatUpsert
+                  label="Cat2 (theo file)"
+                  inserted={importResult.summary.categories['2'].inserted}
+                  updated={importResult.summary.categories['2'].updated}
+                />
+                <StatUpsert
+                  label="Cat3 (theo file)"
+                  inserted={importResult.summary.categories['3'].inserted}
+                  updated={importResult.summary.categories['3'].updated}
+                />
+                <StatUpsert
+                  label="Cluster (dòng trong file)"
+                  inserted={importResult.summary.clusters.inserted}
+                  updated={importResult.summary.clusters.updated}
+                  hint={`Tổng cluster trong DB sau import: ${importResult.summary.clusters.in_database_after}`}
+                />
               </div>
               <div className="text-xs text-gray-500">Thời gian xử lý: {importResult.elapsed_ms} ms</div>
               {totalErrors > 0 ? (
@@ -751,10 +780,27 @@ export default function TaxonomyAdminPage() {
           {manualResult ? (
             <div className="mt-4 space-y-3">
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <Stat label="Cat1 xử lý (thêm/cập nhật)" value={manualResult.summary.cat1} />
-                <Stat label="Cat2 xử lý (thêm/cập nhật)" value={manualResult.summary.cat2} />
-                <Stat label="Cat3 xử lý (thêm/cập nhật)" value={manualResult.summary.cat3} />
-                <Stat label="Cluster (tổng map DB)" value={manualResult.summary.clusters} />
+                <StatUpsert
+                  label="Cat1 (theo file)"
+                  inserted={manualResult.summary.categories['1'].inserted}
+                  updated={manualResult.summary.categories['1'].updated}
+                />
+                <StatUpsert
+                  label="Cat2 (theo file)"
+                  inserted={manualResult.summary.categories['2'].inserted}
+                  updated={manualResult.summary.categories['2'].updated}
+                />
+                <StatUpsert
+                  label="Cat3 (theo file)"
+                  inserted={manualResult.summary.categories['3'].inserted}
+                  updated={manualResult.summary.categories['3'].updated}
+                />
+                <StatUpsert
+                  label="Cluster (dòng trong file)"
+                  inserted={manualResult.summary.clusters.inserted}
+                  updated={manualResult.summary.clusters.updated}
+                  hint={`Tổng cluster trong DB: ${manualResult.summary.clusters.in_database_after}`}
+                />
               </div>
               <div className="text-xs text-gray-500">Thời gian: {manualResult.elapsed_ms} ms</div>
               {totalManualErrors > 0 ? (
@@ -805,6 +851,31 @@ function Stat({
     <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
       <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
       <div className="mt-1 text-xl font-semibold text-gray-900">{value}</div>
+      {hint ? <div className="mt-0.5 text-xs text-gray-500">{hint}</div> : null}
+    </div>
+  );
+}
+
+function StatUpsert({
+  label,
+  inserted,
+  updated,
+  hint,
+}: {
+  label: string;
+  inserted: number;
+  updated: number;
+  hint?: string;
+}) {
+  const total = inserted + updated;
+  return (
+    <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+      <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm">
+        <span className="text-emerald-700 font-semibold">+ Thêm: {inserted}</span>
+        <span className="text-amber-800 font-semibold">⟲ Cập nhật: {updated}</span>
+      </div>
+      <div className="mt-1 text-xs text-gray-600">Tổng dòng xử lý: {total}</div>
       {hint ? <div className="mt-0.5 text-xs text-gray-500">{hint}</div> : null}
     </div>
   );

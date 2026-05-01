@@ -17,7 +17,11 @@ import type { CategoryLevel1, CategoryLevel3 } from '@/types/api';
 /** Phân tách cặp l2/l3 trong key multi-select */
 const FROM_L2_L3_SEP = '\x1f';
 
-/** Mọi từ (cách bằng khoảng trắng) đều phải có trong nhãn — thứ tự không quan trọng */
+function parseFromL2L3Key(key: string): { l2: string; l3: string } | null {
+  const i = key.indexOf(FROM_L2_L3_SEP);
+  if (i <= 0) return null;
+  return { l2: key.slice(0, i), l3: key.slice(i + FROM_L2_L3_SEP.length) };
+}
 function labelMatchesTokenSearch(label: string, searchRaw: string): boolean {
   const tokens = searchRaw
     .trim()
@@ -40,6 +44,8 @@ type MappingItem = {
   to_sub_subcategory?: string | null;
   /** false = chỉ batch khi admin tạo/sửa; true = vẫn áp khi import Excel / cây danh mục */
   apply_to_future_imports?: boolean | null;
+  /** Chỉ khi có phần tử: map giới hạn các product_id đó; rỗng = map mọi SP khớp nguồn cấp 3 */
+  restrict_product_ids?: string[] | null;
   created_at?: string | null;
 };
 
@@ -291,19 +297,30 @@ export default function AdminDanhMucSeoPage() {
   const [mappingSourceL3Multi, setMappingSourceL3Multi] = useState<string[]>([]);
   const [mappingSourceL2Search, setMappingSourceL2Search] = useState('');
   const [mappingSourceL3Search, setMappingSourceL3Search] = useState('');
+  /** Theo key l2\x1fl3: danh sách product_id giới hạn (không có key / mảng rỗng = map cả nhánh L3) */
+  const [mappingL3RestrictProductIds, setMappingL3RestrictProductIds] = useState<Record<string, string[]>>({});
+  const [mappingL3RestrictOpen, setMappingL3RestrictOpen] = useState<Record<string, boolean>>({});
+  const [l3BranchProducts, setL3BranchProducts] = useState<
+    Record<string, { loading: boolean; items: { product_id: string; name: string }[] }>
+  >({});
+  const [mappingEditRestrictProductIds, setMappingEditRestrictProductIds] = useState<string[]>([]);
+  const [mappingEditBranchProducts, setMappingEditBranchProducts] = useState<
+    { product_id: string; name: string }[]
+  >([]);
+  const [mappingEditBranchProductsLoading, setMappingEditBranchProductsLoading] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
       const [treeData, redirectData] = await Promise.all([
-        apiClient.getCategoryTreeFromProducts(),
+        apiClient.getCategoryTreeV2({ isActiveOnly: false }),
         apiClient.getCategorySeoRedirects(),
       ]);
       setTree(Array.isArray(treeData) ? treeData : []);
       setRedirects(redirectData.redirects || []);
     } catch {
-      setError('Không tải được danh mục');
+      setError('Không tải được cây taxonomy (/categories/tree-v2). Kiểm tra đã import taxonomy tại /admin/taxonomy.');
     } finally {
       setLoading(false);
     }
@@ -384,7 +401,8 @@ export default function AdminDanhMucSeoPage() {
   /** Danh sách cấp 2 nguồn sau khi lọc từ khóa (giống logic cấp 3) */
   const level2OptionsFilteredForDisplay = useMemo(() => {
     if (!mappingForm.from_category) return [] as string[];
-    const opts = getLevel2Options(mappingForm.from_category);
+    const cat = tree.find((c) => c.name === mappingForm.from_category);
+    const opts = cat?.children?.map((c) => c.name).filter(Boolean) || [];
     if (!mappingSourceL2Search.trim()) return opts;
     return opts.filter((sub) => labelMatchesTokenSearch(sub, mappingSourceL2Search));
   }, [tree, mappingForm.from_category, mappingSourceL2Search]);
@@ -433,6 +451,128 @@ export default function AdminDanhMucSeoPage() {
       })
     );
   }, [mappingSourceL2Multi, mappingEditId]);
+
+  /** Giữ state giới hạn SP đồng bộ với các nhánh L3 đang tick */
+  useEffect(() => {
+    if (mappingEditId) return;
+    const allowed = new Set(mappingSourceL3Multi);
+    setMappingL3RestrictProductIds((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        if (!allowed.has(k)) delete next[k];
+      }
+      return next;
+    });
+    setMappingL3RestrictOpen((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        if (!allowed.has(k)) delete next[k];
+      }
+      return next;
+    });
+    setL3BranchProducts((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        if (!allowed.has(k)) delete next[k];
+      }
+      return next;
+    });
+  }, [mappingSourceL3Multi, mappingEditId]);
+
+  async function loadBranchProductsForL3Key(l3Key: string) {
+    const parsed = parseFromL2L3Key(l3Key);
+    if (!parsed || !mappingForm.from_category.trim()) return;
+    setL3BranchProducts((prev) => ({
+      ...prev,
+      [l3Key]: { loading: true, items: prev[l3Key]?.items ?? [] },
+    }));
+    try {
+      const res = await apiClient.getProducts({
+        category: mappingForm.from_category.trim(),
+        subcategory: parsed.l2,
+        sub_subcategory: parsed.l3,
+        limit: 500,
+      });
+      const items = (res.products ?? []).map((p) => ({
+        product_id: String(p.product_id ?? '').trim(),
+        name: String((p as { name?: string }).name ?? '').trim() || String(p.product_id ?? ''),
+      }));
+      setL3BranchProducts((prev) => ({ ...prev, [l3Key]: { loading: false, items } }));
+    } catch {
+      setL3BranchProducts((prev) => ({ ...prev, [l3Key]: { loading: false, items: [] } }));
+    }
+  }
+
+  function toggleL3RestrictPanel(l3Key: string) {
+    setMappingL3RestrictOpen((prev) => {
+      const nextOpen = !prev[l3Key];
+      if (nextOpen) {
+        const cur = l3BranchProducts[l3Key];
+        if (!cur?.items?.length && !cur?.loading) {
+          void loadBranchProductsForL3Key(l3Key);
+        }
+      }
+      return { ...prev, [l3Key]: nextOpen };
+    });
+  }
+
+  function toggleMappingL3RestrictProduct(l3Key: string, productId: string) {
+    const pid = productId.trim();
+    if (!pid) return;
+    setMappingL3RestrictProductIds((prev) => {
+      const cur = prev[l3Key] ?? [];
+      const nextIds = cur.includes(pid) ? cur.filter((x) => x !== pid) : [...cur, pid];
+      const next = { ...prev };
+      if (nextIds.length === 0) delete next[l3Key];
+      else next[l3Key] = nextIds;
+      return next;
+    });
+  }
+
+  function clearMappingL3RestrictForKey(l3Key: string) {
+    setMappingL3RestrictProductIds((prev) => {
+      const next = { ...prev };
+      delete next[l3Key];
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (!mappingEditId || !mappingForm.from_category?.trim() || !mappingForm.from_subcategory?.trim()) {
+      setMappingEditBranchProducts([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setMappingEditBranchProductsLoading(true);
+      try {
+        const res = await apiClient.getProducts({
+          category: mappingForm.from_category.trim(),
+          subcategory: mappingForm.from_subcategory.trim(),
+          sub_subcategory: (mappingForm.from_sub_subcategory ?? '').trim(),
+          limit: 500,
+        });
+        if (cancelled) return;
+        const items = (res.products ?? []).map((p) => ({
+          product_id: String(p.product_id ?? '').trim(),
+          name: String((p as { name?: string }).name ?? '').trim() || String(p.product_id ?? ''),
+        }));
+        setMappingEditBranchProducts(items);
+      } catch {
+        if (!cancelled) setMappingEditBranchProducts([]);
+      } finally {
+        if (!cancelled) setMappingEditBranchProductsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    mappingEditId,
+    mappingForm.from_category,
+    mappingForm.from_subcategory,
+    mappingForm.from_sub_subcategory,
+  ]);
 
   function toggleMappingSourceL2(name: string) {
     setMappingSourceL2Multi((prev) =>
@@ -608,7 +748,11 @@ export default function AdminDanhMucSeoPage() {
       });
 
       if (mappingEditId) {
-        const payload = buildPayload(mappingForm.from_subcategory, mappingForm.from_sub_subcategory);
+        const payload = {
+          ...buildPayload(mappingForm.from_subcategory, mappingForm.from_sub_subcategory),
+          restrict_product_ids:
+            mappingEditRestrictProductIds.length > 0 ? mappingEditRestrictProductIds : null,
+        };
         const res = await apiClient.updateFinalMapping(mappingEditId, payload);
         const n = res.products_updated ?? 0;
         setSuccessMessage(`✅ Đã cập nhật mapping. ${n} sản phẩm khớp nguồn đã chuyển sang đích.`);
@@ -647,7 +791,14 @@ export default function AdminDanhMucSeoPage() {
         let created = 0;
         let productsUpdated = 0;
         for (const row of uniq) {
-          const res = await apiClient.createFinalMapping(buildPayload(row.fs, row.fss));
+          const l3Key =
+            row.fss.trim() !== '' ? `${row.fs}${FROM_L2_L3_SEP}${row.fss}` : '';
+          const picked = l3Key ? mappingL3RestrictProductIds[l3Key] : undefined;
+          const payload = {
+            ...buildPayload(row.fs, row.fss),
+            ...(picked && picked.length > 0 ? { restrict_product_ids: picked } : {}),
+          };
+          const res = await apiClient.createFinalMapping(payload);
           created += 1;
           productsUpdated += res.products_updated ?? 0;
         }
@@ -669,6 +820,11 @@ export default function AdminDanhMucSeoPage() {
       setMappingSourceL2Search('');
       setMappingSourceL3Search('');
       setMappingEditId(null);
+      setMappingL3RestrictProductIds({});
+      setMappingL3RestrictOpen({});
+      setL3BranchProducts({});
+      setMappingEditRestrictProductIds([]);
+      setMappingEditBranchProducts([]);
       await loadMappings();
       await loadData();
     } catch (err: any) {
@@ -693,6 +849,9 @@ export default function AdminDanhMucSeoPage() {
       to_sub_subcategory: mapping.to_sub_subcategory || '',
       apply_to_future_imports: Boolean(mapping.apply_to_future_imports ?? true),
     });
+    const rp = mapping.restrict_product_ids;
+    setMappingEditRestrictProductIds(Array.isArray(rp) && rp.length > 0 ? [...rp] : []);
+    setMappingEditBranchProducts([]);
   };
 
   const handleDeleteMapping = async (id: number) => {
@@ -842,7 +1001,10 @@ export default function AdminDanhMucSeoPage() {
     <AdminLayout>
       <div className="p-6 max-w-7xl">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Quản lý danh mục SEO</h1>
-        <p className="text-gray-600 text-sm mb-4">Sitemap · sinh SEO danh mục (Gemini) · mapping nguồn → đích.</p>
+        <p className="text-gray-600 text-sm mb-4">
+          Sitemap · sinh SEO danh mục (Gemini) · mapping nguồn → đích (cây chọn từ{' '}
+          <strong>taxonomy</strong> / <code className="text-xs">/categories/tree-v2</code>).
+        </p>
 
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50/90 px-4 py-3">
           <div className="max-w-xl text-sm text-gray-700">
@@ -1441,6 +1603,15 @@ export default function AdminDanhMucSeoPage() {
 
             {activeTab === 'rules' && (
               <div className="space-y-6">
+                {!loading && tree.length === 0 ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                    Chưa có danh mục trong taxonomy. Import tại{' '}
+                    <Link href="/admin/taxonomy" className="font-medium text-[#ea580c] underline">
+                      /admin/taxonomy
+                    </Link>{' '}
+                    rồi bấm làm mới trang.
+                  </div>
+                ) : null}
                 <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
                   <div className="flex flex-wrap items-center gap-3 mb-4">
                     <button
@@ -1468,6 +1639,7 @@ export default function AdminDanhMucSeoPage() {
                           <th className="text-left px-3 py-2">ID</th>
                           <th className="text-left px-3 py-2">Từ</th>
                           <th className="text-left px-3 py-2">Đến</th>
+                          <th className="text-left px-3 py-2 whitespace-nowrap">Sản phẩm</th>
                           <th className="text-left px-3 py-2 whitespace-nowrap">Áp import/cây</th>
                           <th className="text-left px-3 py-2">Thao tác</th>
                         </tr>
@@ -1508,6 +1680,15 @@ export default function AdminDanhMucSeoPage() {
                                 )}
                               </div>
                             </td>
+                            <td className="px-3 py-2 align-top text-xs text-gray-700 whitespace-nowrap">
+                              {r.restrict_product_ids?.length ? (
+                                <span title={r.restrict_product_ids.join(', ')}>
+                                  {r.restrict_product_ids.length} SP cụ thể
+                                </span>
+                              ) : (
+                                'Tất cả trong nhánh'
+                              )}
+                            </td>
                             <td className="px-3 py-2 align-top">
                               {(r.apply_to_future_imports ?? true) ? (
                                 <span className="inline-flex rounded px-1.5 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800">
@@ -1540,7 +1721,7 @@ export default function AdminDanhMucSeoPage() {
                         })}
                         {mappings.length === 0 && !mappingsLoading && (
                           <tr>
-                            <td className="px-3 py-3 text-gray-500" colSpan={5}>
+                            <td className="px-3 py-3 text-gray-500" colSpan={6}>
                               Chưa có mapping
                             </td>
                           </tr>
@@ -1556,7 +1737,18 @@ export default function AdminDanhMucSeoPage() {
                   </h3>
                   {!mappingEditId && (
                     <p className="text-xs text-gray-500 mb-4">
-                      Nguồn: chọn cấp 2 + chỉ tick những **cấp 3** muốn map; sản phẩm thuộc cùng cấp 2 nhưng **không** tick vẫn giữ danh mục cũ. Mỗi nhánh đã tick tạo một mapping; backend cập nhật **một lần** các sản phẩm hiện có khớp 3 cột nguồn sang đích (có thể chọn **cấp 1 đích** khác nguồn). Sản phẩm đăng sau hoặc import Excel **không** tự áp lại rule này. Không dùng “đồng bộ” kiểu gộp cả cấp 2.
+                      Cây <strong>Nguồn / Đích</strong> lấy từ <strong>taxonomy</strong> (bảng{' '}
+                      <code>categories</code>, sau import tại{' '}
+                      <Link href="/admin/taxonomy" className="text-[#ea580c] underline">
+                        /admin/taxonomy
+                      </Link>
+                      ). Chuỗi gửi lên là <strong>tên hiển thị</strong> — cần khớp cột danh mục trên sản phẩm để batch cập nhật
+                      đúng. Nguồn: chọn cấp 2 + chỉ tick <strong>cấp 3</strong> muốn map; sản phẩm cùng cấp 2 nhưng{' '}
+                      <strong>không</strong> tick vẫn giữ danh mục cũ. Ở mỗi nhánh cấp 3 đã tick, có thể (tuỳ chọn) tick
+                      thêm <strong>sản phẩm cụ thể</strong> — không chọn SP nào thì map <strong>toàn bộ</strong> sản phẩm
+                      trong nhánh đó; có chọn thì chỉ các mã đó được map. Mỗi nhánh đã tick tạo một mapping; backend cập nhật{' '}
+                      <strong>một lần</strong> các sản phẩm hiện có khớp nguồn sang đích. Sản phẩm đăng sau hoặc import
+                      Excel <strong>không</strong> tự áp lại rule này.
                     </p>
                   )}
                   <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -1582,6 +1774,9 @@ export default function AdminDanhMucSeoPage() {
                             setMappingSourceL3Multi([]);
                             setMappingSourceL2Search('');
                             setMappingSourceL3Search('');
+                            setMappingL3RestrictProductIds({});
+                            setMappingL3RestrictOpen({});
+                            setL3BranchProducts({});
                           }}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                         >
@@ -1716,6 +1911,56 @@ export default function AdminDanhMucSeoPage() {
                                 </option>
                               ))}
                             </select>
+                            {mappingForm.from_sub_subcategory ? (
+                              <div className="mt-3 border border-gray-200 rounded-lg p-2 bg-gray-50/80">
+                                <div className="text-xs text-gray-600 mb-1.5">
+                                  Giới hạn sản phẩm (tuỳ chọn — không tick dòng nào = map toàn bộ SP trong cấp 3 nguồn)
+                                </div>
+                                {mappingEditBranchProductsLoading ? (
+                                  <p className="text-xs text-gray-500">Đang tải danh sách…</p>
+                                ) : mappingEditBranchProducts.length === 0 ? (
+                                  <p className="text-xs text-gray-500">Không có sản phẩm trong nhánh hoặc chưa khớp lọc.</p>
+                                ) : (
+                                  <>
+                                    <div className="max-h-40 overflow-y-auto space-y-1 pr-1">
+                                      {mappingEditBranchProducts.map((p) => (
+                                        <label
+                                          key={p.product_id}
+                                          className="flex items-start gap-2 text-xs cursor-pointer"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            className="mt-0.5 shrink-0"
+                                            checked={mappingEditRestrictProductIds.includes(p.product_id)}
+                                            onChange={() =>
+                                              setMappingEditRestrictProductIds((prev) =>
+                                                prev.includes(p.product_id)
+                                                  ? prev.filter((x) => x !== p.product_id)
+                                                  : [...prev, p.product_id]
+                                              )
+                                            }
+                                          />
+                                          <span className="leading-snug">
+                                            <span className="font-mono text-gray-600">{p.product_id}</span>
+                                            {' · '}
+                                            {p.name}
+                                          </span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                    {mappingEditRestrictProductIds.length > 0 && (
+                                      <button
+                                        type="button"
+                                        className="mt-2 text-xs text-amber-700 hover:underline"
+                                        onClick={() => setMappingEditRestrictProductIds([])}
+                                      >
+                                        Bỏ chọn tất cả (map cả nhánh)
+                                      </button>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            ) : null}
                           </>
                         ) : (
                           <>
@@ -1743,17 +1988,91 @@ export default function AdminDanhMucSeoPage() {
                               ) : level3PairsFilteredForDisplay.length === 0 ? (
                                 <p className="text-xs text-gray-400">Không có danh mục khớp từ khóa</p>
                               ) : (
-                                level3PairsFilteredForDisplay.map(({ key, label }) => (
-                                  <label key={key} className="flex items-start gap-2 text-sm cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      className="mt-0.5 shrink-0"
-                                      checked={mappingSourceL3Multi.includes(key)}
-                                      onChange={() => toggleMappingSourceL3(key)}
-                                    />
-                                    <span className="leading-snug">{label}</span>
-                                  </label>
-                                ))
+                                level3PairsFilteredForDisplay.map(({ key, label }) => {
+                                  const restricted = mappingL3RestrictProductIds[key];
+                                  const nPicked = restricted?.length ?? 0;
+                                  const panelOpen = mappingL3RestrictOpen[key];
+                                  const branch = l3BranchProducts[key];
+                                  const l3Checked = mappingSourceL3Multi.includes(key);
+                                  return (
+                                    <div key={key} className="rounded-md border border-gray-100 p-1.5 space-y-1 bg-white">
+                                      <label className="flex items-start gap-2 text-sm cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          className="mt-0.5 shrink-0"
+                                          checked={l3Checked}
+                                          onChange={() => toggleMappingSourceL3(key)}
+                                        />
+                                        <span className="leading-snug flex-1">
+                                          {label}
+                                          {nPicked > 0 ? (
+                                            <span className="ml-1 text-xs font-medium text-amber-800">
+                                              ({nPicked} SP)
+                                            </span>
+                                          ) : null}
+                                        </span>
+                                      </label>
+                                      {l3Checked ? (
+                                        <div className="pl-6 space-y-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => toggleL3RestrictPanel(key)}
+                                            className="text-xs text-[#ea580c] hover:underline"
+                                          >
+                                            {panelOpen
+                                              ? 'Ẩn danh sách SP'
+                                              : nPicked > 0
+                                                ? 'Sửa SP giới hạn…'
+                                                : 'Giới hạn theo sản phẩm (tuỳ chọn)…'}
+                                          </button>
+                                          {panelOpen ? (
+                                            <div className="border border-gray-200 rounded-md p-2 bg-white max-h-36 overflow-y-auto">
+                                              {branch?.loading ? (
+                                                <p className="text-xs text-gray-500">Đang tải…</p>
+                                              ) : !branch?.items?.length ? (
+                                                <p className="text-xs text-gray-500">
+                                                  Không có sản phẩm hoặc lỗi tải.
+                                                </p>
+                                              ) : (
+                                                <>
+                                                  {branch.items.map((p) => (
+                                                    <label
+                                                      key={p.product_id}
+                                                      className="flex items-start gap-2 text-xs cursor-pointer py-0.5"
+                                                    >
+                                                      <input
+                                                        type="checkbox"
+                                                        className="mt-0.5 shrink-0"
+                                                        checked={!!restricted?.includes(p.product_id)}
+                                                        onChange={() =>
+                                                          toggleMappingL3RestrictProduct(key, p.product_id)
+                                                        }
+                                                      />
+                                                      <span className="leading-snug">
+                                                        <span className="font-mono text-gray-600">{p.product_id}</span>
+                                                        {' · '}
+                                                        {p.name}
+                                                      </span>
+                                                    </label>
+                                                  ))}
+                                                  {nPicked > 0 ? (
+                                                    <button
+                                                      type="button"
+                                                      className="mt-1 block text-xs text-amber-700 hover:underline"
+                                                      onClick={() => clearMappingL3RestrictForKey(key)}
+                                                    >
+                                                      Map cả nhánh (bỏ giới hạn)
+                                                    </button>
+                                                  ) : null}
+                                                </>
+                                              )}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  );
+                                })
                               )}
                             </div>
                           </>
@@ -1824,6 +2143,8 @@ export default function AdminDanhMucSeoPage() {
                             to_sub_subcategory: '',
                             apply_to_future_imports: false,
                           });
+                          setMappingEditRestrictProductIds([]);
+                          setMappingEditBranchProducts([]);
                         }}
                         className="px-4 py-2 rounded-lg border border-gray-300"
                       >

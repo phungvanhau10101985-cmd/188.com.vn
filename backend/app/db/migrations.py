@@ -19,6 +19,7 @@ from app.models.email_trusted_device import EmailTrustedDevice
 from app.models.bank_account import BankAccount
 from app.models.site_embed_code import SiteEmbedCode
 from app.models.category_seo import CategorySeoGeminiTarget, CategorySeoSettings
+from app.models.category_final_mapping import CategoryFinalMapping
 from app.models.guest_behavior import GuestProductView, GuestFavorite, GuestSearchHistory
 from app.db.session import engine
 from app.core.config import settings
@@ -494,6 +495,8 @@ class MigrationManager:
         results['site_embed_codes_sync'] = self._sync_table_columns("site_embed_codes", SiteEmbedCode)
         # 17. category_final_mappings.apply_to_future_imports (mapping form admin = one-shot; import/cây chỉ dùng rule bật cờ)
         results['category_final_mappings_apply_future'] = self.migrate_category_final_mappings_apply_future_imports()
+        # 18. category_final_mappings.restrict_product_ids (tuỳ chọn: chỉ map một số product_id)
+        results['category_final_mappings_sync'] = self._sync_table_columns("category_final_mappings", CategoryFinalMapping)
 
         return results
 

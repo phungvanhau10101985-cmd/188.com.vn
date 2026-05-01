@@ -303,10 +303,11 @@ def _parse_upload(file_bytes: bytes) -> Dict[str, pd.DataFrame]:
     return sheets
 
 
-def _upsert_clusters(db: Session, df: pd.DataFrame) -> Tuple[Dict[str, int], List[str]]:
-    """Upsert SeoCluster theo external_id. Trả map external_id → db_id và list lỗi."""
+def _upsert_clusters(db: Session, df: pd.DataFrame) -> Tuple[Dict[str, int], List[str], Dict[str, int]]:
+    """Upsert SeoCluster theo external_id. Trả map external_id → db_id, lỗi, và đếm inserted/updated (chỉ dòng xử lý được trong sheet)."""
     errors: List[str] = []
     ext_to_id: Dict[str, int] = {}
+    counts = {"inserted": 0, "updated": 0}
 
     # Map các cluster hiện có
     existing = {c.external_id: c for c in db.query(SeoCluster).all()}
@@ -331,6 +332,9 @@ def _upsert_clusters(db: Session, df: pd.DataFrame) -> Tuple[Dict[str, int], Lis
         if c is None:
             c = SeoCluster(external_id=ext_id)
             db.add(c)
+            counts["inserted"] += 1
+        else:
+            counts["updated"] += 1
         c.slug = slug
         c.name = name
         c.canonical_path = canonical_path
@@ -343,15 +347,15 @@ def _upsert_clusters(db: Session, df: pd.DataFrame) -> Tuple[Dict[str, int], Lis
     for ext_id, c in existing.items():
         ext_to_id[ext_id] = c.id
     db.commit()
-    return ext_to_id, errors
+    return ext_to_id, errors, counts
 
 
 def _insert_categories(
     db: Session, df: pd.DataFrame, cluster_ext_to_id: Dict[str, int]
-) -> Tuple[Dict[str, int], Dict[str, int], List[str]]:
+) -> Tuple[Dict[str, int], Dict[str, Dict[str, int]], List[str]]:
     """
     Insert/upsert Category theo external_id, sắp xếp theo level 1 → 2 → 3 để parent_id sẵn sàng.
-    Trả: (cat_ext_to_id, summary_by_level, errors).
+    Trả: (cat_ext_to_id, {"inserted": {1:..,2:..,3:..}, "updated": {..}}, errors).
     """
     errors: List[str] = []
 
@@ -363,7 +367,8 @@ def _insert_categories(
     # Map ext_id → db_id (load các cat đã có nếu có)
     existing = {c.external_id: c for c in db.query(Category).all() if c.external_id}
     cat_ext_to_id: Dict[str, int] = {ext: c.id for ext, c in existing.items()}
-    summary: Dict[str, int] = {1: 0, 2: 0, 3: 0}
+    inserted: Dict[int, int] = {1: 0, 2: 0, 3: 0}
+    updated: Dict[int, int] = {1: 0, 2: 0, 3: 0}
 
     for idx, row in df.iterrows():
         ext_id = str(row.get("id") or "").strip()
@@ -406,6 +411,9 @@ def _insert_categories(
         if c is None:
             c = Category(external_id=ext_id)
             db.add(c)
+            inserted[level] = inserted.get(level, 0) + 1
+        else:
+            updated[level] = updated.get(level, 0) + 1
         c.parent_id = parent_db_id
         c.level = level
         c.name = name
@@ -419,10 +427,9 @@ def _insert_categories(
         db.flush()  # cần id ngay để cấp dưới có parent
         cat_ext_to_id[ext_id] = c.id
         existing[ext_id] = c
-        summary[level] = summary.get(level, 0) + 1
 
     db.commit()
-    return cat_ext_to_id, summary, errors
+    return cat_ext_to_id, {"inserted": inserted, "updated": updated}, errors
 
 
 def _validate_paths(
@@ -448,8 +455,8 @@ def execute_taxonomy_sheets(db: Session, sheets: Dict[str, pd.DataFrame]) -> Dic
     df_paths = sheets["category_paths"]
     df_meta = sheets["meta"]
 
-    cluster_ext_to_id, e_clusters = _upsert_clusters(db, df_clusters)
-    cat_ext_to_id, summary_lvl, e_cats = _insert_categories(db, df_cats, cluster_ext_to_id)
+    cluster_ext_to_id, e_clusters, cluster_counts = _upsert_clusters(db, df_clusters)
+    cat_ext_to_id, cat_counts, e_cats = _insert_categories(db, df_cats, cluster_ext_to_id)
     e_paths = _validate_paths(df_paths, cat_ext_to_id, cluster_ext_to_id)
 
     ttl_cache.invalidate_all()
@@ -462,14 +469,31 @@ def execute_taxonomy_sheets(db: Session, sheets: Dict[str, pd.DataFrame]) -> Dic
             if k:
                 meta_kv[k] = v
 
+    ins = cat_counts["inserted"]
+    upd = cat_counts["updated"]
     elapsed_ms = int((time.time() - started) * 1000)
     return {
         "ok": True,
         "summary": {
-            "cat1": summary_lvl.get(1, 0),
-            "cat2": summary_lvl.get(2, 0),
-            "cat3": summary_lvl.get(3, 0),
-            "clusters": len(cluster_ext_to_id),
+            "categories": {
+                "1": {
+                    "inserted": int(ins.get(1, 0)),
+                    "updated": int(upd.get(1, 0)),
+                },
+                "2": {
+                    "inserted": int(ins.get(2, 0)),
+                    "updated": int(upd.get(2, 0)),
+                },
+                "3": {
+                    "inserted": int(ins.get(3, 0)),
+                    "updated": int(upd.get(3, 0)),
+                },
+            },
+            "clusters": {
+                "inserted": int(cluster_counts["inserted"]),
+                "updated": int(cluster_counts["updated"]),
+                "in_database_after": len(cluster_ext_to_id),
+            },
         },
         "errors": {
             "seo_clusters": e_clusters,
