@@ -7,15 +7,16 @@ import { formatPrice } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { colorLabelForCart, colorVariantKeyPart, colorEntryImageUrl } from '@/lib/product-color-variant';
 
 /** Số tồn hiển thị (ảo) random 1–3 cho mỗi phiên bản. */
 function getRandomDisplayStock(): number {
   return Math.floor(Math.random() * 3) + 1;
 }
 
-/** Key cho từng biến thể (màu + size). */
-function getVariantKey(color: string, size: string): string {
-  const c = color || '';
+/** Key cho từng biến thể (màu theo chỉ số + size). */
+function getVariantKey(colorPart: string, size: string): string {
+  const c = colorPart || '';
   const s = size || '';
   if (c && s) return `${c}|${s}`;
   if (c) return c;
@@ -23,12 +24,13 @@ function getVariantKey(color: string, size: string): string {
   return 'default';
 }
 
-/** Danh sách key cho tất cả biến thể (màu × size hoặc chỉ màu / chỉ size). */
+/** Danh sách key cho tất cả biến thể — màu dùng c0,c1,… để không gộp khi trùng tên. */
 function getAllVariantKeys(colors: ProductColor[], sizes: string[]): string[] {
+  const colorParts = colors.map((_, i) => colorVariantKeyPart(colors.length, i));
   if (colors.length > 0 && sizes.length > 0) {
-    return colors.flatMap((c) => sizes.map((s) => `${c.name}|${s}`));
+    return colorParts.flatMap((cp) => sizes.map((s) => `${cp}|${s}`));
   }
-  if (colors.length > 0) return colors.map((c) => c.name);
+  if (colors.length > 0) return colorParts;
   if (sizes.length > 0) return sizes.map((s) => s);
   return ['default'];
 }
@@ -59,7 +61,8 @@ export default function ProductVariantModal({
   setDisplayStockByVariant: setDisplayStockByVariantProp,
 }: ProductVariantModalProps) {
   const [selectedSize, setSelectedSize] = useState('');
-  const [selectedColor, setSelectedColor] = useState('');
+  /** Chỉ số vào `product.colors`; luôn phân biệt từng ô dù trùng `name`. */
+  const [selectedColorIndex, setSelectedColorIndex] = useState(-1);
   const [quantity, setQuantity] = useState(1);
   const [confirmImageIndex, setConfirmImageIndex] = useState(0);
   const [displayStockByVariantLocal, setDisplayStockByVariantLocal] = useState<Record<string, number>>({});
@@ -79,7 +82,15 @@ export default function ProductVariantModal({
     }
   }, [isAuthenticated, isOpen]);
 
-  const variantKey = getVariantKey(selectedColor, selectedSize);
+  const colorPart =
+    colors.length > 0 && selectedColorIndex >= 0
+      ? colorVariantKeyPart(colors.length, selectedColorIndex)
+      : '';
+  const variantKey = getVariantKey(colorPart, selectedSize);
+  const cartColorLabel =
+    selectedColorIndex >= 0 && colors.length > 0
+      ? colorLabelForCart(colors, selectedColorIndex)
+      : '';
   const fullKey = `${product.id}_${variantKey}`;
   const displayStockForVariant = available
     ? Math.max(1, displayStockByVariant[fullKey] ?? 1)
@@ -99,14 +110,15 @@ export default function ProductVariantModal({
     ...(product.main_image ? [product.main_image] : []),
     ...(product.images?.filter((img) => img !== product.main_image) || []),
   ];
-  const mainDisplayImage = colors.length > 0 && selectedColor
-    ? colors.find((c) => c.name === selectedColor)?.img || images[confirmImageIndex] || product.main_image
-    : images[confirmImageIndex] || product.main_image;
+  const mainDisplayImage =
+    selectedColorIndex >= 0 && colors[selectedColorIndex]
+      ? colorEntryImageUrl(colors[selectedColorIndex]) || images[confirmImageIndex] || product.main_image
+      : images[confirmImageIndex] || product.main_image;
 
   useEffect(() => {
     if (isOpen) {
       setSelectedSize(sizes[0] || '');
-      setSelectedColor(colors[0]?.name || '');
+      setSelectedColorIndex(colors.length > 0 ? 0 : -1);
       setQuantity(1);
       setConfirmImageIndex(0);
       const keys = getAllVariantKeys(colors, sizes);
@@ -127,7 +139,7 @@ export default function ProductVariantModal({
 
   useEffect(() => {
     setQuantity(1);
-  }, [selectedColor, selectedSize]);
+  }, [selectedColorIndex, selectedSize]);
 
   useEffect(() => {
     setQuantity((q) => Math.min(q, maxQty));
@@ -139,9 +151,9 @@ export default function ProductVariantModal({
       ...prev,
       [fullKey]: Math.max(0, (prev[fullKey] ?? 0) - qty),
     }));
-    onAddToCart(product, qty, selectedSize || undefined, selectedColor || undefined);
+    onAddToCart(product, qty, selectedSize || undefined, cartColorLabel || undefined);
     onClose();
-  }, [fullKey, quantity, maxQty, product, selectedSize, selectedColor, onAddToCart, onClose, setDisplayStockByVariant]);
+  }, [fullKey, quantity, maxQty, product, selectedSize, cartColorLabel, onAddToCart, onClose, setDisplayStockByVariant]);
 
   const handleConfirmBuyNow = useCallback(() => {
     const qty = Math.min(Math.max(1, quantity), maxQty);
@@ -149,9 +161,9 @@ export default function ProductVariantModal({
       ...prev,
       [fullKey]: Math.max(0, (prev[fullKey] ?? 0) - qty),
     }));
-    onBuyNow(product, qty, selectedSize || undefined, selectedColor || undefined);
+    onBuyNow(product, qty, selectedSize || undefined, cartColorLabel || undefined);
     onClose();
-  }, [fullKey, quantity, maxQty, product, selectedSize, selectedColor, onBuyNow, onClose, setDisplayStockByVariant]);
+  }, [fullKey, quantity, maxQty, product, selectedSize, cartColorLabel, onBuyNow, onClose, setDisplayStockByVariant]);
 
   if (!isOpen) return null;
 
@@ -225,21 +237,23 @@ export default function ProductVariantModal({
                 <div className="mt-2">
                   <p className="text-xs font-semibold text-gray-900 mb-1.5">MÀU</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {colors.map((color) => (
+                    {colors.map((color, colorIndex) => {
+                      const swatch = colorEntryImageUrl(color);
+                      return (
                       <button
-                        key={color.name}
+                        key={`color-${colorIndex}-${swatch || 'n'}`}
                         type="button"
-                        onClick={() => setSelectedColor(color.name)}
+                        onClick={() => setSelectedColorIndex(colorIndex)}
                         className={`flex items-center gap-1.5 rounded-xl border-2 p-1.5 transition-all ${
-                          selectedColor === color.name
+                          selectedColorIndex === colorIndex
                             ? 'border-[#ea580c] bg-orange-50'
                             : 'border-gray-200 hover:border-gray-300'
                         }`}
                       >
-                        {color.img ? (
+                        {swatch ? (
                           <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200 relative">
                             <Image
-                              src={getOptimizedImage(color.img, { width: 64, height: 64 })}
+                              src={getOptimizedImage(swatch, { width: 64, height: 64 })}
                               alt=""
                               width={32}
                               height={32}
@@ -253,7 +267,8 @@ export default function ProductVariantModal({
                           {color.name}
                         </span>
                       </button>
-                    ))}
+                    );
+                    })}
                   </div>
                 </div>
               )}
@@ -361,21 +376,23 @@ export default function ProductVariantModal({
                 <div>
                   <p className="text-[11px] font-semibold text-gray-900 mb-1.5">MÀU</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {colors.map((color) => (
+                    {colors.map((color, colorIndex) => {
+                      const swatch = colorEntryImageUrl(color);
+                      return (
                       <button
-                        key={color.name}
+                        key={`color-m-${colorIndex}-${swatch || 'n'}`}
                         type="button"
-                        onClick={() => setSelectedColor(color.name)}
+                        onClick={() => setSelectedColorIndex(colorIndex)}
                         className={`flex items-center gap-1.5 rounded-lg border p-1 pr-2 transition-all ${
-                          selectedColor === color.name
+                          selectedColorIndex === colorIndex
                             ? 'border-[#ea580c] bg-orange-50 ring-1 ring-[#ea580c]'
                             : 'border-gray-200 hover:border-gray-300'
                         }`}
                       >
-                        {color.img ? (
+                        {swatch ? (
                           <div className="w-9 h-9 rounded overflow-hidden flex-shrink-0 border border-gray-200 relative">
                             <Image
-                              src={getOptimizedImage(color.img, { width: 72, height: 72 })}
+                              src={getOptimizedImage(swatch, { width: 72, height: 72 })}
                               alt=""
                               width={36}
                               height={36}
@@ -389,7 +406,8 @@ export default function ProductVariantModal({
                           {color.name}
                         </span>
                       </button>
-                    ))}
+                    );
+                    })}
                   </div>
                 </div>
               )}

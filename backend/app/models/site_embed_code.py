@@ -8,7 +8,7 @@ class SiteEmbedCode(Base):
     __tablename__ = "site_embed_codes"
 
     id = Column(Integer, primary_key=True, index=True)
-    platform = Column(String(32), nullable=False, index=True)  # google | facebook | tiktok | zalo | other
+    platform = Column(String(32), nullable=False, index=True)  # google | facebook | tiktok | zalo | nanoai | other
     category = Column(String(64), nullable=False, default="custom")  # ga4, gtm, pixel, verification, ...
     title = Column(String(255), nullable=False)
     placement = Column(String(32), nullable=False)  # head | body_open | body_close

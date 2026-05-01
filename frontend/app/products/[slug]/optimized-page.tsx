@@ -8,6 +8,7 @@ import { apiClient } from '@/lib/api-client';
 import { formatPrice, getDiscountPercentage, validateImageUrl, truncateText } from '@/lib/utils';
 import type { Product, SimpleProductResponse } from '@/types/api';
 import { useCart } from '@/features/cart/hooks/useCart';
+import { cartLineMainImage } from '@/lib/product-color-variant';
 
 // Import product detail components
 import ProductGallery from '@/components/product-detail/ProductGallery';
@@ -101,20 +102,23 @@ export default function ProductDetailPage() {
   const handleAddToCart = useCallback(
     async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
       try {
+        const lineImg = cartLineMainImage(p, selectedColor);
         await addToCart({
           product_id: p.id,
           quantity,
           selected_size: selectedSize,
           selected_color: selectedColor,
+          line_image_url: lineImg,
           product_data: {
             id: p.id,
             product_id: p.product_id,
             name: p.name,
             price: p.price,
-            main_image: p.main_image,
+            main_image: lineImg,
             brand_name: p.brand_name,
             available: p.available,
             original_price: p.original_price,
+            slug: p.slug,
           },
         });
       } catch (err: unknown) {

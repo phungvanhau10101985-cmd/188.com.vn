@@ -9,6 +9,7 @@ const PLATFORM_LABEL: Record<string, string> = {
   facebook: 'Facebook / Meta',
   tiktok: 'TikTok',
   zalo: 'Zalo',
+  nanoai: 'NanoAI',
   other: 'Khác',
 };
 
@@ -47,10 +48,13 @@ const ID_HINT: Record<string, Record<string, string>> = {
     chat: 'Chỉ nhập OA ID (Official Account ID, thường là chữ số dài).',
     other: 'Nếu cần iframe/script tùy biến, bật dán full HTML bên dưới.',
   },
+  nanoai: {
+    embed: 'Dán mã nhúng (script/widget) từ bảng điều khiển NanoAI — vị trí chèn theo “Vị trí chèn” bên dưới.',
+  },
 };
 
 function platformOrder(p: string): number {
-  const i = ['google', 'facebook', 'tiktok', 'zalo', 'other'].indexOf(p.toLowerCase());
+  const i = ['google', 'facebook', 'tiktok', 'zalo', 'nanoai', 'other'].indexOf(p.toLowerCase());
   return i === -1 ? 99 : i;
 }
 
@@ -91,6 +95,7 @@ type FieldKind = 'id' | 'capi' | 'html';
 function classifyField(platform: string, category: string, contentSnap: string, useFullHtml?: boolean): FieldKind {
   const p = (platform || '').toLowerCase();
   const c = (category || '').toLowerCase();
+  if (p === 'nanoai') return 'html';
   if ((p === 'facebook' || p === 'tiktok') && c === 'capi_token') return 'capi';
   if (useFullHtml || looksHtml(contentSnap || '')) return 'html';
 
@@ -380,6 +385,7 @@ export default function AdminEmbedCodesPage() {
                   <option value="facebook">Facebook / Meta</option>
                   <option value="tiktok">TikTok</option>
                   <option value="zalo">Zalo</option>
+                  <option value="nanoai">NanoAI</option>
                   <option value="other">Khác</option>
                 </select>
               </div>

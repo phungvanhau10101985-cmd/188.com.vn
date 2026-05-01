@@ -35,7 +35,7 @@ class CartItem(Base):
     product_data = Column(JSON, nullable=False)  # notnull=1
     quantity = Column(Integer, default=1, nullable=False)
     selected_size = Column(String(50), nullable=True)
-    selected_color = Column(String(50), nullable=True)
+    selected_color = Column(String(200), nullable=True)
     unit_price = Column(Float, nullable=False)  # notnull=1
     total_price = Column(Float, nullable=False)  # notnull=1
     added_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -8,6 +8,7 @@ import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { formatPrice, getDiscountPercentage, displayableBrandOrOrigin } from '@/lib/utils';
 import VariantSelector from '@/components/product-detail/VariantSelector';
+import { colorLabelForCart } from '@/lib/product-color-variant';
 import ProductActions from './ProductActions';
 import ProductQAReviewCards from '../ProductQAReviewCards/ProductQAReviewCards';
 import ProductVariantModal from '../ProductVariantModal/ProductVariantModal';
@@ -36,7 +37,7 @@ export default function ProductInfo({
   isFavorited = false
 }: ProductInfoProps) {
   const [selectedSize, setSelectedSize] = useState('');
-  const [selectedColor, setSelectedColor] = useState('');
+  const [selectedColorIndex, setSelectedColorIndex] = useState(-1);
   const [quantity, setQuantity] = useState(1);
   const actionsRef = useRef<HTMLDivElement | null>(null);
   const [showStickyActions, setShowStickyActions] = useState(false);
@@ -59,6 +60,17 @@ export default function ProductInfo({
   const loyaltyDiscountAmount = (product.price * loyaltyDiscountPercent) / 100;
   const loyaltyTierName = loyaltyStatus?.current_tier?.name || 'L0';
 
+  const colorList = product.colors || [];
+  const selectedColorForCart =
+    selectedColorIndex >= 0 && colorList[selectedColorIndex]
+      ? colorLabelForCart(colorList, selectedColorIndex)
+      : '';
+
+  useEffect(() => {
+    const n = colorList.length;
+    setSelectedColorIndex(n > 0 ? 0 : -1);
+  }, [product.id, colorList.length]);
+
   useEffect(() => {
     if (!actionsRef.current) return;
     const observer = new IntersectionObserver(
@@ -71,8 +83,8 @@ export default function ProductInfo({
     return () => observer.disconnect();
   }, []);
 
-  const handleColorChange = (colorName: string, colorImage?: string) => {
-    setSelectedColor(colorName);
+  const handleColorChange = (colorIndex: number, _colorName: string, colorImage?: string) => {
+    setSelectedColorIndex(colorIndex);
     onColorImageChange?.(colorImage || null);
   };
 
@@ -97,6 +109,13 @@ export default function ProductInfo({
           <p className="text-sm text-gray-600 mb-2">Thương hiệu: {displayableBrandOrOrigin(product.brand_name)}</p>
         )}
         
+        <p className="text-xs text-gray-500 mb-2">
+          Mã SP:{' '}
+          <span className="copy-code-product font-mono text-gray-700">
+            {product.code?.trim() || product.product_id || '—'}
+          </span>
+        </p>
+
         <div className="flex items-center space-x-3 mb-2 text-sm">
           <div className="flex items-center space-x-1">
             <span className="text-yellow-400 text-base">★</span>
@@ -133,9 +152,9 @@ export default function ProductInfo({
       {/* Variant Selectors */}
       <VariantSelector
         sizes={product.sizes || []}
-        colors={product.colors || []}
+        colors={colorList}
         selectedSize={selectedSize}
-        selectedColor={selectedColor}
+        selectedColorIndex={selectedColorIndex}
         onSizeChange={setSelectedSize}
         onColorChange={handleColorChange}
       />
@@ -180,7 +199,7 @@ export default function ProductInfo({
           product={product}
           quantity={quantity}
           selectedSize={selectedSize}
-          selectedColor={selectedColor}
+          selectedColor={selectedColorForCart}
           available={available}
           onAddToCart={onAddToCart}
           onToggleFavorite={onToggleFavorite}

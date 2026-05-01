@@ -82,6 +82,9 @@ export default function MobileHeader({
   const isFavoritesPage =
     pathname === '/favorites' || (pathname != null && pathname.replace(/\/$/, '') === '/favorites');
 
+  const isCartPage =
+    pathname === '/cart' || (pathname != null && pathname.replace(/\/$/, '') === '/cart');
+
   const activeRelatedTab = parseRelatedTabFromSearch(searchParams.get('rt'));
 
   const setRelatedTab = (id: ProductRelatedTabId) => {
@@ -196,10 +199,15 @@ export default function MobileHeader({
   const compactHomeChrome = isHome && !showHeaderBack;
   /** Trang chi tiết SP, đã xem, khu cá nhân, hoặc yêu thích: chrome gọn. */
   const compactChrome =
-    compactHomeChrome || isProductDetailPage || isDaXemPage || isAccountPage || isFavoritesPage;
+    compactHomeChrome ||
+    isProductDetailPage ||
+    isDaXemPage ||
+    isAccountPage ||
+    isFavoritesPage ||
+    isCartPage;
   /** Hàng nút + ô tìm: co chỗ cho ô tìm dài hơn. */
   const tightToolbar =
-    isProductDetailPage || isDaXemPage || isAccountPage || isFavoritesPage;
+    isProductDetailPage || isDaXemPage || isAccountPage || isFavoritesPage || isCartPage;
 
   const chipClass =
     'flex-shrink-0 text-[11px] leading-tight font-medium text-white px-2 py-1 rounded-full bg-white/18 hover:bg-white/28 whitespace-nowrap border border-white/25 shadow-sm active:scale-[0.98] transition-transform';
@@ -241,14 +249,23 @@ export default function MobileHeader({
                 width={200}
                 height={40}
                 className={`w-auto object-contain block ${compactChrome ? 'h-8' : 'h-10 sm:h-11'}`}
-                priority={compactHomeChrome && !isProductDetailPage && !isDaXemPage && !isAccountPage && !isFavoritesPage}
+                priority={
+                  compactHomeChrome &&
+                  !isProductDetailPage &&
+                  !isDaXemPage &&
+                  !isAccountPage &&
+                  !isFavoritesPage &&
+                  !isCartPage
+                }
               />
             </Link>
           </div>
 
           {/* Danh mục + ô tìm kiếm (pill) + icon nhanh */}
           <div
-            className={`flex items-center gap-1 relative z-10 pt-0.5 ${tightToolbar ? 'gap-1' : 'gap-1.5'} ${isDaXemPage || isAccountPage || isFavoritesPage ? 'pb-1' : ''}`}
+            className={`flex items-center gap-1 relative z-10 pt-0.5 ${tightToolbar ? 'gap-1' : 'gap-1.5'} ${
+              isDaXemPage || isAccountPage || isFavoritesPage || isCartPage ? 'pb-1' : ''
+            }`}
           >
             {showHeaderBack && (
               <button
@@ -351,16 +368,18 @@ export default function MobileHeader({
               </Link>
             )}
 
-            <Link href="/cart" className={`${tightToolbar ? iconBtnCondensed : iconBtn} relative`} aria-label="Giỏ hàng" title="Giỏ hàng">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-              {cartItemsCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 bg-white text-[#ea580c] rounded-full min-w-[14px] h-3.5 text-[9px] flex items-center justify-center font-bold px-0.5 leading-none">
-                  {cartItemsCount > 99 ? '99+' : cartItemsCount}
-                </span>
-              )}
-            </Link>
+            {!isCartPage && (
+              <Link href="/cart" className={`${tightToolbar ? iconBtnCondensed : iconBtn} relative`} aria-label="Giỏ hàng" title="Giỏ hàng">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+                {cartItemsCount > 0 && (
+                  <span className="absolute -right-px -top-px bg-white text-[#ea580c] rounded-full min-w-[11px] h-3 px-0.5 text-[7px] sm:text-[8px] flex items-center justify-center font-semibold leading-none shadow-sm ring-1 ring-black/5">
+                    {cartItemsCount > 99 ? '99+' : cartItemsCount}
+                  </span>
+                )}
+              </Link>
+            )}
           </div>
 
           {/* Trang chi tiết SP: danh mục SP liên quan trong vùng cam — không để khoảng trống; các trang khác: gợi ý từ khóa */}
@@ -389,7 +408,7 @@ export default function MobileHeader({
                 </button>
               ))}
             </div>
-          ) : isDaXemPage || isAccountPage || isFavoritesPage ? null : (
+          ) : isDaXemPage || isAccountPage || isFavoritesPage || isCartPage ? null : (
             <div
               className="flex items-center gap-1 mt-1 pb-1 overflow-x-auto scrollbar-hide min-h-[26px] -mx-0.5 px-0.5"
               role="navigation"

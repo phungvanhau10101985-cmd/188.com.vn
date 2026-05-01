@@ -44,8 +44,8 @@ export default function ProductGallery({ product, selectedImageUrl, onSelectImag
   const effectiveImageUrl = selectedImageUrl && selectedImageUrl.trim() ? selectedImageUrl : displayImageUrl;
 
   return (
-    <div className="space-y-2">
-      {/* Khung ảnh/video chính */}
+    <div className="space-y-2 image_list">
+      {/* Khung ảnh/video chính — class image_list để NanoAI widget có thể quét ảnh nếu không dùng data-ctx */}
       <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
         {isShowingVideo && parsedVideo ? (
           parsedVideo.kind === 'youtube' ? (

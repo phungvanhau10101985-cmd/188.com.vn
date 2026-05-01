@@ -1,9 +1,10 @@
 // frontend/components/product-detail/ProductInfo.tsx - FILE FIX
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Product } from '@/types/api';
 import { formatPrice, getDiscountPercentage } from '@/lib/utils';
+import { colorLabelForCart } from '@/lib/product-color-variant';
 import VariantSelector from './VariantSelector';
 
 interface ProductInfoProps {
@@ -14,19 +15,30 @@ interface ProductInfoProps {
 
 export default function ProductInfo({ product, onAddToCart, onAddToFavorite }: ProductInfoProps) {
   const [selectedSize, setSelectedSize] = useState<string>(product.sizes?.[0] || '');
-  const [selectedColor, setSelectedColor] = useState<string>(product.colors?.[0]?.name || '');
+  const [selectedColorIndex, setSelectedColorIndex] = useState(-1);
   const [quantity, setQuantity] = useState(1);
   const [isFavorite, setIsFavorite] = useState(false);
+
+  const colorList = product.colors || [];
+  const selectedColorForCart =
+    selectedColorIndex >= 0 && colorList[selectedColorIndex]
+      ? colorLabelForCart(colorList, selectedColorIndex)
+      : '';
+
+  useEffect(() => {
+    const n = colorList.length;
+    setSelectedColorIndex(n > 0 ? 0 : -1);
+  }, [product.id, colorList.length]);
 
   const available = (product.available || 0) > 0;
   const hasDiscount = product.original_price && product.original_price > product.price;
 
   const handleAddToCart = () => {
-    onAddToCart(product, quantity, selectedSize, selectedColor);
+    onAddToCart(product, quantity, selectedSize, selectedColorForCart);
   };
 
   const handleBuyNow = () => {
-    onAddToCart(product, quantity, selectedSize, selectedColor);
+    onAddToCart(product, quantity, selectedSize, selectedColorForCart);
     // Redirect to checkout page
     window.location.href = '/checkout';
   };
@@ -97,11 +109,11 @@ export default function ProductInfo({ product, onAddToCart, onAddToFavorite }: P
       {/* Variant Selectors */}
       <VariantSelector
         sizes={product.sizes || []}
-        colors={product.colors || []}
+        colors={colorList}
         selectedSize={selectedSize}
-        selectedColor={selectedColor}
+        selectedColorIndex={selectedColorIndex}
         onSizeChange={setSelectedSize}
-        onColorChange={setSelectedColor}
+        onColorChange={(colorIndex) => setSelectedColorIndex(colorIndex)}
       />
 
       {/* Quantity Selector */}

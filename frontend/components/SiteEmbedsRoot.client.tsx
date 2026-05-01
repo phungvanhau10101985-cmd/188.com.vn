@@ -3,27 +3,66 @@
 import { useEffect, useRef } from 'react';
 import type { PublicSiteEmbeds } from '@/lib/site-embeds-public';
 
-function appendFragment(target: ParentNode, html: string) {
+/**
+ * Script chèn qua innerHTML / createContextualFragment không được trình duyệt thực thi.
+ * Tách script → tạo thẻ mới bằng createElement và copy toàn bộ attribute + src/text.
+ */
+function cloneExecutableScript(old: HTMLScriptElement): HTMLScriptElement {
+  const nu = document.createElement('script');
+  for (let i = 0; i < old.attributes.length; i++) {
+    const a = old.attributes[i];
+    if (a) nu.setAttribute(a.name, a.value);
+  }
+  if (!old.getAttribute('src') && old.textContent != null && old.textContent !== '') {
+    nu.textContent = old.textContent;
+  }
+  return nu;
+}
+
+/**
+ * Parse một đoạn HTML (có thể nhiều node gốc) vào target; script được thực thi.
+ */
+function injectHtml(target: ParentNode, html: string, mode: 'append' | 'prepend') {
   const s = html.trim();
   if (!s) return;
   try {
-    const range = document.createRange();
-    target.appendChild(range.createContextualFragment(s));
+    const doc = new DOMParser().parseFromString(`<body>${s}</body>`, 'text/html');
+    if (doc.querySelector('parsererror')) {
+      throw new Error('parse');
+    }
+    const nodes = Array.from(doc.body.childNodes);
+    const run = (node: Node) => {
+      if (node.nodeName === 'SCRIPT') {
+        const el = cloneExecutableScript(node as HTMLScriptElement);
+        if (mode === 'append') target.appendChild(el);
+        else target.insertBefore(el, target.firstChild);
+        return;
+      }
+      const imported = document.importNode(node, true);
+      if (mode === 'append') target.appendChild(imported);
+      else target.insertBefore(imported, target.firstChild);
+    };
+    if (mode === 'prepend') {
+      for (let i = nodes.length - 1; i >= 0; i--) run(nodes[i]!);
+    } else {
+      for (let i = 0; i < nodes.length; i++) run(nodes[i]!);
+    }
   } catch {
-    /* HTML không hợp lệ — bỏ qua */
+    try {
+      const range = document.createRange();
+      target.appendChild(range.createContextualFragment(s));
+    } catch {
+      /* HTML không hợp lệ — bỏ qua */
+    }
   }
 }
 
+function appendFragment(target: ParentNode, html: string) {
+  injectHtml(target, html, 'append');
+}
+
 function prependBodyFragment(html: string) {
-  const s = html.trim();
-  if (!s) return;
-  try {
-    const range = document.createRange();
-    const frag = range.createContextualFragment(s);
-    document.body.insertBefore(frag, document.body.firstChild);
-  } catch {
-    /* noop */
-  }
+  injectHtml(document.body, html, 'prepend');
 }
 
 /**

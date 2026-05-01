@@ -428,7 +428,7 @@ export default function Navigation({
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                     </svg>
                     {favoriteCount > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 bg-white text-[#ea580c] rounded-full min-w-[16px] h-4 text-[10px] flex items-center justify-center font-bold leading-none">
+                      <span className="absolute -right-px -top-px bg-white text-[#ea580c] rounded-full min-w-[11px] h-3 px-0.5 text-[7px] sm:text-[8px] flex items-center justify-center font-semibold leading-none shadow-sm ring-1 ring-black/5">
                         {favoriteCount}
                       </span>
                     )}
@@ -441,7 +441,7 @@ export default function Navigation({
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
                     </svg>
                     {displayCartCount > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 bg-white text-[#ea580c] rounded-full min-w-[16px] h-4 text-[10px] flex items-center justify-center font-bold leading-none">
+                      <span className="absolute -right-px -top-px bg-white text-[#ea580c] rounded-full min-w-[11px] h-3 px-0.5 text-[7px] sm:text-[8px] flex items-center justify-center font-semibold leading-none shadow-sm ring-1 ring-black/5">
                         {displayCartCount}
                       </span>
                     )}

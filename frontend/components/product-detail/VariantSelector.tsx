@@ -2,21 +2,23 @@
 'use client';
 
 import { ProductColor } from '@/types/api';
+import { colorLabelForCart, colorEntryImageUrl } from '@/lib/product-color-variant';
 
 interface VariantSelectorProps {
   sizes: string[];
   colors: ProductColor[];
   selectedSize: string;
-  selectedColor: string;
+  /** Chỉ số trong `colors`; -1 = chưa chọn. */
+  selectedColorIndex: number;
   onSizeChange: (size: string) => void;
-  onColorChange: (color: string, colorImage?: string) => void;
+  onColorChange: (colorIndex: number, colorName: string, colorImage?: string) => void;
 }
 
 export default function VariantSelector({
   sizes,
   colors,
   selectedSize,
-  selectedColor,
+  selectedColorIndex,
   onSizeChange,
   onColorChange,
 }: VariantSelectorProps) {
@@ -59,33 +61,42 @@ export default function VariantSelector({
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium text-gray-900">Màu sắc và phân loại như ảnh:</span>
             <span className="text-xs text-gray-500">
-              Đã chọn: <span className="font-medium text-gray-900">{selectedColor}</span>
+              Đã chọn:{' '}
+              <span className="font-medium text-gray-900">
+                {selectedColorIndex >= 0 && colors[selectedColorIndex]
+                  ? colorLabelForCart(colors, selectedColorIndex)
+                  : '—'}
+              </span>
             </span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {colors.map((color, index) => (
+            {colors.map((color, index) => {
+              const swatch = colorEntryImageUrl(color);
+              return (
               <button
                 key={index}
-                onClick={() => onColorChange(color.name, color.img)}
+                type="button"
+                onClick={() => onColorChange(index, color.name, swatch || undefined)}
                 className={`flex items-center space-x-1.5 px-3 py-2 border-2 rounded-lg text-sm font-medium transition-all ${
-                  selectedColor === color.name
+                  selectedColorIndex === index
                     ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-sm'
                     : 'border-gray-300 text-gray-700 hover:border-gray-400 hover:shadow-sm'
                 }`}
               >
-                {color.img && (
-                  <div 
+                {swatch ? (
+                  <div
                     className="w-6 h-6 rounded-full border border-gray-300"
-                    style={{ 
-                      backgroundImage: `url(${color.img})`,
+                    style={{
+                      backgroundImage: `url(${swatch})`,
                       backgroundSize: 'cover',
-                      backgroundPosition: 'center'
+                      backgroundPosition: 'center',
                     }}
                   />
-                )}
-                <span>{color.name}</span>
+                ) : null}
+                <span>{colorLabelForCart(colors, index)}</span>
               </button>
-            ))}
+            );
+            })}
           </div>
         </div>
       )}

@@ -66,6 +66,8 @@ export interface Product {
   meta_keywords?: string;
   /** Cột AK: Thông tin sản phẩm (JSON: product_info, specifications, variants, target_audience, market_info) */
   product_info?: ProductInfoJSON | string | null;
+  /** UUID kho partner / Open Catalog (nếu backend trả về) — NanoAI chat ctx_inventory */
+  inventory_id?: string | null;
 }
 
 /** Biến thể màu từ NanoAI (schema partner): tên + ảnh nguyên bản. */

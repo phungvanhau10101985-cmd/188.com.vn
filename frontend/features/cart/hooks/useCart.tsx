@@ -11,14 +11,15 @@ import {
   AddToCartRequest, 
   UpdateCartItemRequest,
   GuestCartItem,
-  CartState 
+  CartState,
+  CartLineRef,
 } from '../types/cart';
 
 interface CartContextType extends CartState {
   // Cart actions
   addToCart: (itemData: AddToCartRequest) => Promise<void>;
-  updateCartItem: (productId: number, updateData: UpdateCartItemRequest) => Promise<void>;
-  removeFromCart: (productId: number) => Promise<void>;
+  updateCartItem: (lineRef: CartLineRef, updateData: UpdateCartItemRequest) => Promise<void>;
+  removeFromCart: (lineRef: CartLineRef) => Promise<void>;
   clearCart: () => Promise<void>;
   
   // Guest cart management
@@ -40,6 +41,43 @@ interface CartContextType extends CartState {
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 const GUEST_CART_KEY = 'guest_cart';
+
+/** `id` ổn định cho React key / hiển thị — không đổi khi refresh giỏ khách. */
+function stableGuestLineDisplayId(
+  product_id: number,
+  selected_size?: string,
+  selected_color?: string
+): number {
+  const s = `${product_id}\0${selected_size ?? ''}\0${selected_color ?? ''}`;
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) || product_id;
+}
+
+function guestLineMatches(item: GuestCartItem, ref: CartLineRef): boolean {
+  return (
+    item.product_id === ref.product_id &&
+    (item.selected_size ?? '') === (ref.selected_size ?? '') &&
+    (item.selected_color ?? '') === (ref.selected_color ?? '')
+  );
+}
+
+function mapGuestItemsToCartItems(guestItems: GuestCartItem[]): CartItem[] {
+  return guestItems.map((item) => ({
+    id: stableGuestLineDisplayId(item.product_id, item.selected_size, item.selected_color),
+    product_id: item.product_id,
+    quantity: item.quantity,
+    selected_size: item.selected_size,
+    selected_color: item.selected_color,
+    product_data: item.product_data,
+    unit_price: item.unit_price,
+    total_price: item.unit_price * item.quantity,
+    added_at: item.added_at,
+  }));
+}
 
 export function CartProvider({ children }: { children: ReactNode }) {
   const [cartState, setCartState] = useState<CartState>({
@@ -84,12 +122,16 @@ export function CartProvider({ children }: { children: ReactNode }) {
               item.selected_color === itemData.selected_color
     );
 
+    const pd = { ...(itemData.product_data || {}) };
+    const line = (itemData.line_image_url || '').trim();
+    if (line) (pd as { main_image?: string }).main_image = line;
+
     const newItem: GuestCartItem = {
       product_id: itemData.product_id,
       quantity: itemData.quantity,
       selected_size: itemData.selected_size,
       selected_color: itemData.selected_color,
-      product_data: itemData.product_data || {},
+      product_data: pd,
       unit_price: itemData.product_data?.price || 0,
       added_at: new Date().toISOString(),
     };
@@ -112,17 +154,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         user_id: 0,
         total_items: guestItems.reduce((sum, item) => sum + item.quantity, 0),
         total_price: guestItems.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0),
-        items: guestItems.map(item => ({
-          id: Math.random(), // Temporary ID for guest items
-          product_id: item.product_id,
-          quantity: item.quantity,
-          selected_size: item.selected_size,
-          selected_color: item.selected_color,
-          product_data: item.product_data,
-          unit_price: item.unit_price,
-          total_price: item.unit_price * item.quantity,
-          added_at: item.added_at,
-        })),
+        items: mapGuestItemsToCartItems(guestItems),
         created_at: new Date().toISOString(),
       },
     }));
@@ -153,17 +185,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
           user_id: 0,
           total_items: guestItems.reduce((sum, item) => sum + item.quantity, 0),
           total_price: guestItems.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0),
-          items: guestItems.map(item => ({
-            id: Math.random(),
-            product_id: item.product_id,
-            quantity: item.quantity,
-            selected_size: item.selected_size,
-            selected_color: item.selected_color,
-            product_data: item.product_data,
-            unit_price: item.unit_price,
-            total_price: item.unit_price * item.quantity,
-            added_at: item.added_at,
-          })),
+          items: mapGuestItemsToCartItems(guestItems),
           created_at: new Date().toISOString(),
         } : null,
         isLoading: false,
@@ -177,20 +199,28 @@ export function CartProvider({ children }: { children: ReactNode }) {
       const cart = await cartAPI.getCart();
       // Đảm bảo cart.items luôn là mảng (API có thể trả items: undefined)
       const normalizedCart = cart ? { ...cart, items: Array.isArray(cart.items) ? cart.items : [] } : null;
-      const enrichedCart = normalizedCart ? {
+      const sortedItems = normalizedCart
+        ? [...normalizedCart.items].sort((a: any, b: any) => Number(a?.id ?? 0) - Number(b?.id ?? 0))
+        : [];
+      const enrichedCart = normalizedCart
+        ? {
         ...normalizedCart,
-        items: normalizedCart.items.map((item: any) => ({
-          ...item,
-          product_data: {
-            id: item.product_id,
-            product_id: item.product_data?.product_id ?? item.product_code,
-            name: item.product_data?.name ?? item.product_name,
-            price: item.product_data?.price ?? item.product_price,
-            main_image: item.product_data?.main_image ?? item.product_image,
-            deposit_require: item.product_data?.deposit_require ?? item.requires_deposit,
-            ...item.product_data,
-          },
-        })),
+        items: sortedItems.map((item: any) => {
+          const fromApi =
+            item.product_data && typeof item.product_data === 'object' ? { ...item.product_data } : {};
+          return {
+            ...item,
+            product_data: {
+              ...fromApi,
+              id: item.product_id,
+              product_id: fromApi.product_id ?? item.product_code,
+              name: fromApi.name ?? item.product_name,
+              price: fromApi.price ?? item.product_price,
+              main_image: fromApi.main_image || item.product_image,
+              deposit_require: fromApi.deposit_require ?? item.requires_deposit,
+            },
+          };
+        }),
       } : null;
       setCartState(prev => ({ ...prev, cart: enrichedCart, isLoading: false }));
     } catch (error: any) {
@@ -232,57 +262,59 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateCartItem = async (productId: number, updateData: UpdateCartItemRequest) => {
+  const updateCartItem = async (lineRef: CartLineRef, updateData: UpdateCartItemRequest) => {
     if (!isAuthenticated) {
-      // Update guest cart
       const guestItems = getGuestCart();
-      const itemIndex = guestItems.findIndex(item => item.product_id === productId);
-      
+      const itemIndex = guestItems.findIndex((item) => guestLineMatches(item, lineRef));
+
       if (itemIndex >= 0) {
         guestItems[itemIndex].quantity = updateData.quantity;
-        guestItems[itemIndex].selected_size = updateData.selected_size;
-        guestItems[itemIndex].selected_color = updateData.selected_color;
+        if (updateData.selected_size !== undefined) {
+          guestItems[itemIndex].selected_size = updateData.selected_size;
+        }
+        if (updateData.selected_color !== undefined) {
+          guestItems[itemIndex].selected_color = updateData.selected_color;
+        }
         saveGuestCart(guestItems);
-        await refreshCart(); // Refresh local state
+        await refreshCart();
       }
       return;
     }
 
-    setCartState(prev => ({ ...prev, isLoading: true, error: null }));
-    
+    setCartState((prev) => ({ ...prev, isLoading: true, error: null }));
+
     try {
-      await cartAPI.updateCartItem(productId, updateData);
+      await cartAPI.updateCartItem(lineRef.id, updateData);
       await refreshCart();
     } catch (error: any) {
-      setCartState(prev => ({ 
-        ...prev, 
+      setCartState((prev) => ({
+        ...prev,
         error: error.message || 'Failed to update cart item',
-        isLoading: false 
+        isLoading: false,
       }));
       throw error;
     }
   };
 
-  const removeFromCart = async (productId: number) => {
+  const removeFromCart = async (lineRef: CartLineRef) => {
     if (!isAuthenticated) {
-      // Remove from guest cart
-      const guestItems = getGuestCart().filter(item => item.product_id !== productId);
+      const guestItems = getGuestCart().filter((item) => !guestLineMatches(item, lineRef));
       saveGuestCart(guestItems);
-      await refreshCart(); // Refresh local state
+      await refreshCart();
       return;
     }
 
-    setCartState(prev => ({ ...prev, isLoading: true, error: null }));
-    
+    setCartState((prev) => ({ ...prev, isLoading: true, error: null }));
+
     try {
-      await cartAPI.removeFromCart(productId);
+      await cartAPI.removeFromCart(lineRef.id);
       await refreshCart();
-      trackEvent('remove_from_cart', { product_id: productId });
+      trackEvent('remove_from_cart', { product_id: lineRef.product_id });
     } catch (error: any) {
-      setCartState(prev => ({ 
-        ...prev, 
+      setCartState((prev) => ({
+        ...prev,
         error: error.message || 'Failed to remove item from cart',
-        isLoading: false 
+        isLoading: false,
       }));
       throw error;
     }

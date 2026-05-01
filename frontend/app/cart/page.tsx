@@ -14,6 +14,8 @@ import { getOptimizedImage } from '@/lib/image-utils';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { shouldRedirectToDepositAfterCreate } from '@/lib/order-deposit';
+import type { CartLineRef } from '@/features/cart/types/cart';
+import CartEmptySameShopSection from '@/components/cart/CartEmptySameShopSection';
 
 function formatAddressLine(addr: UserAddress): string {
   const parts = [addr.street_address];
@@ -80,17 +82,33 @@ export default function CartPage() {
     ? formatAddressLine(selectedAddress)
     : '';
 
-  // Backend dùng cart_item id (item.id), guest cart dùng product_id
-  const getItemId = (item: { id: number; product_id: number }) =>
-    isAuthenticated ? item.id : item.product_id;
+  const cartLineRef = (item: {
+    id: number;
+    product_id: number;
+    selected_size?: string;
+    selected_color?: string;
+  }): CartLineRef => ({
+    id: item.id,
+    product_id: item.product_id,
+    selected_size: item.selected_size,
+    selected_color: item.selected_color,
+  });
 
-  const handleQuantityChange = async (item: { id: number; product_id: number }, newQuantity: number) => {
+  const handleQuantityChange = async (
+    item: { id: number; product_id: number; selected_size?: string; selected_color?: string },
+    newQuantity: number
+  ) => {
     if (newQuantity < 1) return;
-    await updateCartItem(getItemId(item), { quantity: newQuantity });
+    await updateCartItem(cartLineRef(item), { quantity: newQuantity });
   };
 
-  const handleRemoveItem = async (item: { id: number; product_id: number }) => {
-    await removeFromCart(getItemId(item));
+  const handleRemoveItem = async (item: {
+    id: number;
+    product_id: number;
+    selected_size?: string;
+    selected_color?: string;
+  }) => {
+    await removeFromCart(cartLineRef(item));
   };
 
   const handleClearCart = async () => {
@@ -226,17 +244,17 @@ export default function CartPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 py-8">
-        <div className="max-w-4xl mx-auto px-4">
+      <div className="min-h-screen bg-gray-50">
+        <div className="mx-auto max-w-7xl px-3 pb-5 pt-2 sm:px-3 md:px-4 md:py-8 md:pb-6 md:pt-3">
           <div className="animate-pulse">
-            <div className="h-8 bg-gray-200 rounded w-1/4 mb-8"></div>
+            <div className="mb-3 h-5 max-w-[8rem] rounded-md bg-gray-200 sm:h-6 md:mb-8 md:h-8 md:max-w-[12rem]" />
             {[...Array(3)].map((_, i) => (
-              <div key={i} className="bg-white rounded-lg shadow-sm p-6 mb-4">
-                <div className="flex space-x-4">
-                  <div className="w-24 h-24 bg-gray-200 rounded"></div>
-                  <div className="flex-1 space-y-3">
-                    <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-                    <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+              <div key={i} className="mb-3 rounded-xl border border-gray-100 bg-white p-4 shadow-sm md:mb-4 md:rounded-lg md:p-6">
+                <div className="flex gap-4">
+                  <div className="h-20 w-20 shrink-0 rounded-lg bg-gray-200 md:h-24 md:w-24" />
+                  <div className="min-w-0 flex-1 space-y-2 md:space-y-3">
+                    <div className="h-4 rounded bg-gray-200 md:w-3/4" />
+                    <div className="h-4 rounded bg-gray-200 md:w-1/2" />
                   </div>
                 </div>
               </div>
@@ -249,44 +267,57 @@ export default function CartPage() {
 
   if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) {
     return (
-      <div className="min-h-screen bg-gray-50 py-16">
-        <div className="max-w-2xl mx-auto px-4 text-center">
-          <div className="bg-white rounded-2xl shadow-sm p-12">
-            <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
+      <div className="min-h-screen bg-gray-50">
+        <div className="mx-auto max-w-7xl px-3 pb-8 pt-2 sm:px-3 md:px-4 md:py-12 md:pb-6 md:pt-3">
+          <div className="mx-auto max-w-2xl text-center">
+            <div className="rounded-2xl border border-gray-100 bg-white p-8 shadow-sm sm:p-10 md:p-12">
+              <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-gray-100 md:mb-6 md:h-24 md:w-24">
+                <svg className="h-10 w-10 text-gray-400 md:h-12 md:w-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+              </div>
+              <h1 className="mb-2 text-base font-bold tracking-tight text-gray-900 sm:text-lg md:mb-4 md:text-2xl">
+                Giỏ hàng trống
+              </h1>
+              <p className="mb-6 text-xs text-gray-600 sm:text-sm md:mb-8 md:text-base">
+                Bạn chưa có sản phẩm nào trong giỏ hàng.
+              </p>
+              <Link
+                href="/"
+                className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-[#ea580c] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#c2410c] md:min-h-0 md:px-6 md:py-3 md:text-base"
+              >
+                Tiếp tục mua sắm
+              </Link>
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-4">Giỏ hàng trống</h1>
-            <p className="text-gray-600 mb-8">Bạn chưa có sản phẩm nào trong giỏ hàng.</p>
-            <Link 
-              href="/"
-              className="inline-flex items-center px-6 py-3 bg-[#ea580c] text-white font-semibold rounded-lg hover:bg-[#c2410c] transition-colors"
-            >
-              Tiếp tục mua sắm
-            </Link>
           </div>
+          <CartEmptySameShopSection />
         </div>
       </div>
     );
   }
 
   return (
-    <>
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Giỏ hàng</h1>
-          <p className="text-sm text-gray-500">Bạn đang có {(cart?.items ?? []).length} sản phẩm</p>
+    <div className="min-h-screen bg-gray-50">
+      <div className="mx-auto max-w-7xl px-3 pb-5 pt-2 sm:px-3 md:px-4 md:py-8 md:pb-6 md:pt-3">
+        <div className="mb-3 flex flex-col gap-3 md:mb-6 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-base font-bold tracking-tight text-gray-900 sm:text-lg md:text-2xl">
+              Giỏ hàng
+            </h1>
+            <p className="mt-0.5 text-xs text-gray-600 sm:text-sm md:mt-1 md:text-base">
+              {(cart?.items ?? []).length} sản phẩm
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleClearCart}
+            className="inline-flex items-center gap-2 self-start text-sm font-medium text-red-600 hover:text-red-700 md:self-auto"
+          >
+            Xóa tất cả
+          </button>
         </div>
-        <button
-          onClick={handleClearCart}
-          className="self-start md:self-auto inline-flex items-center gap-2 text-red-600 hover:text-red-700 text-sm font-medium"
-        >
-          Xóa tất cả
-        </button>
-      </div>
 
-      <div className="space-y-6">
+        <div className="space-y-4 md:space-y-6">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
             {error}
@@ -347,8 +378,9 @@ export default function CartPage() {
               {(cart?.items ?? []).map((item) => {
                 const price = item.unit_price ?? item.product_data?.price ?? 0;
                 const lineTotal = price * item.quantity;
+                const lineKey = `${item.product_id}-${item.selected_size ?? ''}-${item.selected_color ?? ''}-${item.id}`;
                 return (
-                  <div key={item.id} className="px-3 md:px-5 py-3 md:py-4">
+                  <div key={lineKey} className="px-3 md:px-5 py-3 md:py-4">
                     <div className="grid grid-cols-1 md:grid-cols-[1fr_120px_120px_120px_40px] gap-3 items-center">
                       <div className="flex gap-4 items-center">
                         <button
@@ -478,6 +510,7 @@ export default function CartPage() {
             </div>
           </div>
         </div>
+      </div>
       </div>
 
       {showAddAddress && (
@@ -618,6 +651,6 @@ export default function CartPage() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

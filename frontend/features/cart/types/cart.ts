@@ -6,6 +6,10 @@ export interface CartItem {
   quantity: number;
   selected_size?: string;
   selected_color?: string;
+  selected_color_name?: string;
+  product_name?: string;
+  product_price?: number;
+  product_image?: string;
   product_data?: {
     id?: number;
     product_id?: string;
@@ -52,6 +56,8 @@ export interface AddToCartRequest {
   quantity: number;
   selected_size?: string;
   selected_color?: string;
+  /** URL ảnh đúng biến thể — backend ưu tiên để không phụ thuộc khớp chuỗi màu. */
+  line_image_url?: string;
   product_data?: any;
 }
 
@@ -76,4 +82,12 @@ export interface CartMigrationResponse {
   migrated_items: number;
   total_items: number;
   cart: Cart;
+}
+
+/** Một dòng giỏ — API: `id` = cart_items.id; khách: `id` băm ổn định + product_id/size/color để tìm đúng dòng. */
+export interface CartLineRef {
+  id: number;
+  product_id: number;
+  selected_size?: string;
+  selected_color?: string;
 }

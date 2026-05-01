@@ -110,6 +110,7 @@ export default function ProductDetailMobile({
           )}
         </h1>
 
+        <div className="image_list mb-2">
         {/* Main media: chỉ hiển thị video khi có video_url; video luôn ở index 0, sau đó mới ảnh */}
         <div className="relative rounded-xl overflow-hidden bg-gray-100 mb-2">
           <div className="aspect-[4/5] max-h-[70vh] relative">
@@ -176,10 +177,6 @@ export default function ProductDetailMobile({
             )}
           </div>
         </div>
-        {productCode && (
-          <p className="text-xs text-gray-600 mt-1.5 px-1">#{productCode}</p>
-        )}
-
         {/* Thumbnail dưới khung ảnh chính: chỉ hiển thị nút video khi có video_url; video luôn đầu tiên */}
         {mediaCount > 1 && (
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-2 -mx-4 px-4">
@@ -233,9 +230,12 @@ export default function ProductDetailMobile({
           </div>
         )}
 
-        {/* Mã sp */}
+        </div>
+
         {productCode && (
-          <p className="text-xs text-gray-600 mb-2">Mã sp: {productCode}</p>
+          <p className="text-xs text-gray-600 mb-2">
+            Mã sp: <span className="copy-code-product">{productCode}</span>
+          </p>
         )}
 
         {/* Giá + giá gốc, giảm giá, trả góp */}

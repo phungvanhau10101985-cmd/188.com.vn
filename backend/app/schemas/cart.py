@@ -10,7 +10,16 @@ class CartItemBase(BaseModel):
     selected_color_name: Optional[str] = Field(None, description="Tên màu")
 
 class CartItemCreate(CartItemBase):
-    pass  # Không cần product_data nữa
+    product_data: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Snapshot từ client (main_image theo biến thể, slug, …)",
+    )
+    line_image_url: Optional[str] = Field(
+        None,
+        max_length=2000,
+        description="URL ảnh đúng biến thể — ưu tiên khi lưu giỏ",
+    )
+
 
 class CartItemUpdate(BaseModel):
     quantity: int = Field(..., ge=1, le=100, description="Số lượng mới")
@@ -19,6 +28,7 @@ class CartItemUpdate(BaseModel):
     selected_color_name: Optional[str] = None
 
 class CartItemResponse(CartItemBase):
+    selected_color_name: Optional[str] = None
     id: int
     cart_id: Optional[int] = None  # Có thể là None hoặc user_id
     user_id: int
@@ -26,6 +36,7 @@ class CartItemResponse(CartItemBase):
     product_name: str
     product_price: float
     product_image: Optional[str] = None
+    product_data: Optional[Dict[str, Any]] = None
     requires_deposit: bool = False
     created_at: Optional[datetime] = None  # SQLite/server_default có thể trả None
     updated_at: Optional[datetime] = None

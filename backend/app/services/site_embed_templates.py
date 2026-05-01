@@ -255,6 +255,12 @@ def expand_row(row: SiteEmbedCode) -> List[PlacementHtml]:
             return expand_tiktok_pixel(raw)
         return []
 
+    if plat == "nanoai":
+        # Widget/chat NanoAI — dán nguyên script/snippet từ bảng điều khiển (vị trí theo placement trong DB).
+        if raw:
+            return [(_pla(row), raw)]
+        return []
+
     if plat == "other":
         if looks_like_pasted_html(raw):
             return [(_pla(row), raw)]
