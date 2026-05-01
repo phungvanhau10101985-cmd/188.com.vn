@@ -136,8 +136,10 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const initialCategoryTree = await getCategoryTreeForLayout();
-  const siteEmbeds = await fetchPublicSiteEmbeds();
+  const [initialCategoryTree, siteEmbeds] = await Promise.all([
+    getCategoryTreeForLayout(),
+    fetchPublicSiteEmbeds(),
+  ]);
   return (
     <html
       lang="vi"

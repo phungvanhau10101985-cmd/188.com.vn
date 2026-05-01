@@ -58,8 +58,8 @@ export default function Navigation({
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [tree, setTree] = useState<CategoryLevel1[]>(initialCategoryTree ?? []);
-  const [loading, setLoading] = useState(initialCategoryTree?.length === 0);
+  const [tree, setTree] = useState<CategoryLevel1[]>(() => initialCategoryTree ?? []);
+  const [loading, setLoading] = useState(() => (initialCategoryTree?.length ?? 0) === 0);
   const [isScrolled, setIsScrolled] = useState(false);
   const [openLevel1, setOpenLevel1] = useState<string | null>(null);
   const [stickySearchTerm, setStickySearchTerm] = useState('');
@@ -101,23 +101,31 @@ export default function Navigation({
     return selectedFilter;
   }, [pathname, tree, selectedFilter]);
 
-  const fetchTree = useCallback(async () => {
-    const hadData = tree.length > 0;
-    if (!hadData) setLoading(true);
-    try {
-      const data = await apiClient.getCategoryTreeFromProducts();
-      setTree(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error('Error fetching category tree:', error);
-      setTree([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [tree.length]);
+  useEffect(() => {
+    const next = initialCategoryTree ?? [];
+    setTree(next);
+    if (next.length > 0) setLoading(false);
+  }, [initialCategoryTree]);
 
   useEffect(() => {
-    fetchTree();
-  }, [fetchTree]);
+    if ((initialCategoryTree?.length ?? 0) > 0) return;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const data = await apiClient.getCategoryTreeFromProducts();
+        if (!cancelled) setTree(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error('Error fetching category tree:', error);
+        if (!cancelled) setTree([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialCategoryTree]);
 
   useEffect(() => {
     if (pathname === '/') {

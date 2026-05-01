@@ -59,21 +59,20 @@ export default async function CategoryPage({ params, searchParams }: Props) {
   if (level2) pathSegments.push(level2);
   if (level3) pathSegments.push(level3);
 
-  const { products, total, total_pages, page: currentPage } = await getProductsByCategory(
-    level1,
-    level2,
-    level3,
-    {
-      limit: PAGE_SIZE,
-      skip,
-    },
-    info
-  );
+  // Song song hóa: giảm chờ tuyến tính; Next vẫn SSR đầy đủ HTML + metadata (layout generateMetadata).
+  const [{ products, total, total_pages, page: currentPage }, seoData, categoryTree] = await Promise.all([
+    getProductsByCategory(
+      level1,
+      level2,
+      level3,
+      { limit: PAGE_SIZE, skip },
+      info,
+    ),
+    getCategorySeoData(level1, level2, level3),
+    getCategoryTreeForLayout(),
+  ]);
 
-  const seoData = await getCategorySeoData(level1, level2, level3);
   const seoBody = seoData?.seo_body ?? null;
-
-  const categoryTree = await getCategoryTreeForLayout();
   const internalLinkMap = buildInternalLinkMap(categoryTree, pathSegments);
 
   return (

@@ -117,6 +117,7 @@ export async function getCategoryByPathForSeo(
     const res = await fetch(url, {
       next: { revalidate: REVALIDATE_CATEGORY, tags: [CACHE_TAG_CATEGORY_SEO] },
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(LAYOUT_FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -143,6 +144,7 @@ export async function getCategorySeoData(
     const res = await fetch(url, {
       next: { revalidate: REVALIDATE_SEO_DATA, tags: [CACHE_TAG_CATEGORY_SEO] },
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(LAYOUT_FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -190,6 +192,7 @@ export async function getProductsByCategory(
     const res = await fetch(url, {
       next: { revalidate: REVALIDATE_CATEGORY, tags: [CACHE_TAG_CATEGORY_SEO] },
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(LAYOUT_FETCH_TIMEOUT_MS),
     });
     if (!res.ok) {
       return { products: [], total: 0, total_pages: 0, page: 1, category, subcategory, sub_subcategory };
