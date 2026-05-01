@@ -72,7 +72,7 @@ export default function CategoryListPage({ categoryTree }: CategoryListPageProps
       {/* Mobile: header cam + list danh mục, mũi tên sổ cấp 2/3, bấm chữ mới vào trang */}
       <div className="md:hidden min-h-screen bg-white pb-16">
         {/* Tiêu đề trang: back/search nằm ở MobileHeader global — tránh hai lớp header cam khi cuộn */}
-        <div className="px-4 py-3 border-b border-gray-100 bg-white">
+        <div className="px-4 py-2.5 md:py-3 border-b border-gray-100 bg-white">
           <h1 className="text-center text-base font-bold text-gray-900">Danh mục sản phẩm</h1>
         </div>
 

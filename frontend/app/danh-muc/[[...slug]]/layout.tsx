@@ -14,10 +14,38 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = params;
   const [level1, level2, level3] = slug || [];
   if (!level1) {
+    const canonical = `${SITE_URL}/danh-muc`;
+    const description =
+      'Khám phá danh mục sản phẩm thời trang nam nữ và nhiều mặt hàng khác tại 188.com.vn — xem là thích.';
     return {
-      title: "Danh mục sản phẩm",
-      description: "Khám phá danh mục sản phẩm thời trang nam nữ và nhiều mặt hàng khác tại 188.com.vn.",
+      title: 'Danh mục sản phẩm',
+      description,
       robots: { index: true, follow: true },
+      alternates: { canonical },
+      openGraph: {
+        type: 'website',
+        locale: 'vi_VN',
+        url: canonical,
+        siteName: '188.COM.VN',
+        title: 'Danh mục sản phẩm',
+        description,
+        images: [{ url: DEFAULT_OG_IMAGE, width: 1200, height: 630, alt: 'Danh mục 188.COM.VN' }],
+      },
+      twitter: {
+        card: 'summary_large_image',
+        title: 'Danh mục sản phẩm | 188.COM.VN',
+        description,
+        images: [DEFAULT_OG_IMAGE],
+      },
+      appleWebApp: {
+        capable: true,
+        title: '188 — Danh mục',
+      },
+      formatDetection: {
+        telephone: false,
+        email: false,
+        address: false,
+      },
     };
   }
 
@@ -25,8 +53,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const info = await getCategorySeoData(level1, level2, level3);
   if (!info) {
     return {
-      title: "Danh mục không tồn tại",
+      title: 'Danh mục không tồn tại',
       robots: { index: false, follow: true },
+      formatDetection: {
+        telephone: false,
+        email: false,
+        address: false,
+      },
     };
   }
 
@@ -54,6 +87,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       }))
     : [{ url: DEFAULT_OG_IMAGE, width: 1200, height: 630, alt: info.full_name }];
 
+  const appleTitle =
+    info.full_name.length > 32 ? `${info.full_name.slice(0, 31)}…` : info.full_name;
+
   return {
     title,
     description,
@@ -72,6 +108,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       title,
       description: description.slice(0, 200),
       images: info.images && info.images.length > 0 ? [info.images[0]] : [DEFAULT_OG_IMAGE],
+    },
+    appleWebApp: {
+      capable: true,
+      title: appleTitle,
+    },
+    formatDetection: {
+      telephone: false,
+      email: false,
+      address: false,
     },
     robots: {
       index: true,

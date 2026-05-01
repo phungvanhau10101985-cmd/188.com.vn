@@ -58,7 +58,7 @@ export default function CategoryPageClient({
   const h1Text = `${leafName} mới nhất ${monthLabel} | ${total} sản phẩm`;
 
   return (
-    <main className="max-w-7xl mx-auto px-4 py-6" role="main" aria-label={fullName}>
+    <main className="max-w-7xl mx-auto px-4 pt-4 pb-6 md:py-6" role="main" aria-label={fullName}>
       <nav className="text-sm text-gray-500 mb-4" aria-label="Breadcrumb">
         <Link href="/" className="hover:text-[#ea580c]">Trang chủ</Link>
         {breadcrumbNames.map((name, i) => (
