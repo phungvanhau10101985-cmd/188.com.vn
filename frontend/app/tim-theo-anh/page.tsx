@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { apiClient, NANOAI_IMAGE_SEARCH_LIMIT } from '@/lib/api-client';
 import { consumePendingImageFile, NANOAI_PENDING_IMAGE_EVENT } from '@/lib/nanoai-pending-image';
 import NanoaiSimilarProductCard from '@/components/NanoaiSimilarProductCard';
-import type { NanoaiSearchProduct, NanoaiSearchResponse } from '@/types/api';
+import type { NanoaiSearchProduct } from '@/types/api';
 import { useLazyRevealList } from '@/hooks/useLazyRevealList';
 import { imageUrlToFile, looksLikeHttpUrl } from '@/lib/image-from-url';
 import {
@@ -31,6 +31,9 @@ export default function TimTheoAnhPage() {
   const [softMessage, setSoftMessage] = useState<string | null>(null);
   const [products, setProducts] = useState<NanoaiSearchProduct[]>([]);
   const [imageUrlInput, setImageUrlInput] = useState('');
+
+  const lastAutoFetchedUrlRef = useRef<string | null>(null);
+  const linkSearchBusyRef = useRef(false);
 
   const runSearch = useCallback(async (file: File) => {
     setLoading(true);
@@ -106,30 +109,60 @@ export default function TimTheoAnhPage() {
     await runSearch(f);
   };
 
-  const onFetchFromLink = useCallback(async () => {
+  const fetchFromUrlString = useCallback(
+    async (rawInput: string) => {
+      if (linkSearchBusyRef.current) return;
+      const raw = rawInput.trim();
+      if (!raw) {
+        setError('Nhập hoặc dán link ảnh (https://…).');
+        return;
+      }
+      if (!looksLikeHttpUrl(raw)) {
+        setError('Link cần bắt đầu bằng http:// hoặc https://');
+        return;
+      }
+      setError(null);
+      linkSearchBusyRef.current = true;
+      try {
+        const file = await imageUrlToFile(raw);
+        await runSearch(file);
+        lastAutoFetchedUrlRef.current = raw;
+      } catch (e) {
+        lastAutoFetchedUrlRef.current = null;
+        setError(
+          e instanceof Error
+            ? e.message
+            : 'Không tải được ảnh từ link (CORS hoặc link không hợp lệ).'
+        );
+      } finally {
+        linkSearchBusyRef.current = false;
+      }
+    },
+    [runSearch]
+  );
+
+  /** Gõ / dán link vào ô: sau ~0,5s mà chuỗi là URL hợp lệ thì tự tải ảnh và tìm (như chọn file). */
+  useEffect(() => {
     const raw = imageUrlInput.trim();
     if (!raw) {
-      setError('Nhập hoặc dán link ảnh (https://…).');
+      lastAutoFetchedUrlRef.current = null;
       return;
     }
-    if (!looksLikeHttpUrl(raw)) {
-      setError('Link cần bắt đầu bằng http:// hoặc https://');
-      return;
-    }
-    setError(null);
-    try {
-      const file = await imageUrlToFile(raw);
-      await runSearch(file);
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : 'Không tải được ảnh từ link (CORS hoặc link không hợp lệ).'
-      );
-    }
-  }, [imageUrlInput, runSearch]);
+    if (!looksLikeHttpUrl(raw)) return;
+    if (raw === lastAutoFetchedUrlRef.current) return;
 
-  /** Chỉ dán ảnh toàn trang (link dùng ô riêng). */
+    const id = window.setTimeout(() => {
+      const latest = imageUrlInput.trim();
+      if (latest !== raw) return;
+      if (!looksLikeHttpUrl(latest)) return;
+      if (latest === lastAutoFetchedUrlRef.current) return;
+      void fetchFromUrlString(latest);
+    }, 520);
+
+    return () => window.clearTimeout(id);
+  }, [imageUrlInput, fetchFromUrlString]);
+
+  /** Dán ảnh (file) toàn trang; dán link chỉ trong ô URL (onChange + debounce). */
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const cd = e.clipboardData;
@@ -178,7 +211,16 @@ export default function TimTheoAnhPage() {
   });
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-3 md:py-4">
+    <div className="max-w-7xl mx-auto px-3 pt-2 pb-4 sm:px-4 md:py-4">
+      <header className="mb-2 md:mb-3">
+        <h1 className="text-[15px] sm:text-base font-bold text-gray-900 leading-snug tracking-tight">
+          Tìm theo ảnh
+        </h1>
+        <p className="text-[11px] text-gray-500 mt-0.5 leading-snug md:hidden">
+          Tải ảnh, dán link vào ô bên dưới hoặc dán ảnh (Ctrl+V) — hệ thống tự tìm khi link hợp lệ
+        </p>
+      </header>
+
       <input
         id={timAnhFileInputId}
         type="file"
@@ -188,7 +230,8 @@ export default function TimTheoAnhPage() {
         onChange={onFileSelected}
       />
 
-      <div className="flex flex-wrap items-center gap-2 gap-y-2 mb-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-y-2 mb-3">
+        <div className="flex items-center gap-2 shrink-0">
         <div
           className="w-14 h-14 sm:w-16 sm:h-16 rounded-md border border-gray-200 bg-gray-50 overflow-hidden flex-shrink-0 flex items-center justify-center"
           onDragOver={(e) => e.preventDefault()}
@@ -205,20 +248,21 @@ export default function TimTheoAnhPage() {
 
         <label
           htmlFor={timAnhFileInputId}
-          className={`text-sm font-medium px-3 py-1.5 rounded-md bg-[#ea580c] text-white hover:bg-orange-600 cursor-pointer inline-flex items-center justify-center ${
+          className={`min-h-[44px] sm:min-h-0 text-sm font-medium px-3 py-2 rounded-md bg-[#ea580c] text-white hover:bg-orange-600 cursor-pointer inline-flex items-center justify-center ${
             loading ? 'opacity-50 pointer-events-none' : ''
           }`}
         >
           Tải ảnh
         </label>
+        </div>
 
-        <div className="flex flex-1 min-w-[min(100%,12rem)] max-w-xl items-center gap-1.5">
+        <div className="flex flex-1 min-w-0 w-full sm:min-w-[min(100%,12rem)] sm:max-w-xl">
           <input
             ref={urlInputRef}
             type="url"
             inputMode="url"
             autoComplete="off"
-            placeholder="Dán link ảnh https://… hoặc Ctrl+V ảnh"
+            placeholder="Dán link ảnh https://… — tự tìm sau khi dán"
             value={imageUrlInput}
             onChange={(e) => {
               setImageUrlInput(e.target.value);
@@ -227,19 +271,12 @@ export default function TimTheoAnhPage() {
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
-                void onFetchFromLink();
+                lastAutoFetchedUrlRef.current = null;
+                void fetchFromUrlString(imageUrlInput);
               }
             }}
-            className="flex-1 min-w-0 text-sm py-1.5 px-2 rounded-md border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-[#ea580c] focus:border-[#ea580c]"
+            className="flex-1 min-w-0 w-full min-h-[44px] sm:min-h-0 text-sm py-2 px-2.5 rounded-md border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#ea580c]/30 focus:border-[#ea580c]"
           />
-          <button
-            type="button"
-            onClick={() => void onFetchFromLink()}
-            disabled={loading}
-            className="text-sm font-medium px-2.5 py-1.5 rounded-md border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 disabled:opacity-50 flex-shrink-0"
-          >
-            Mở
-          </button>
         </div>
       </div>
 

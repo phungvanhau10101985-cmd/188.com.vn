@@ -23,6 +23,7 @@ import { persistRelatedFiltersFromProduct } from '@/lib/product-related-tabs';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
+import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
 
@@ -196,7 +197,11 @@ export default function ProductDetailClient({
   const handleStickySearch = (e: React.FormEvent) => {
     e.preventDefault();
     const term = stickySearchTerm.trim();
-    router.push(term ? `/?q=${encodeURIComponent(term)}` : '/');
+    if (!term) {
+      router.push('/');
+      return;
+    }
+    navigateProductTextSearch(router, term, categoryTree);
   };
 
   const handleMenuEnter = () => {

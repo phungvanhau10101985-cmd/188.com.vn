@@ -578,7 +578,7 @@ export default function HomePageClient({
               {isSearching ? (
                 <>
                   Từ khóa: <span className="font-medium text-gray-900">&quot;{qFromUrl}&quot;</span> —{' '}
-                  {filteredProducts.length} sản phẩm trong kho
+                  {totalProducts} sản phẩm trong kho
                   {nanoaiTextProducts.length > 0 && (
                     <span className="text-gray-700">
                       {' '}
@@ -592,7 +592,7 @@ export default function HomePageClient({
                 </>
               ) : (
                 <>
-                  {filteredProducts.length} sản phẩm
+                  {totalProducts} sản phẩm
                 </>
               )}
             </p>

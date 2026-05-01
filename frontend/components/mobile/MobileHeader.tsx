@@ -85,6 +85,10 @@ export default function MobileHeader({
   const isCartPage =
     pathname === '/cart' || (pathname != null && pathname.replace(/\/$/, '') === '/cart');
 
+  const isTimTheoAnhPage =
+    pathname === '/tim-theo-anh' ||
+    (pathname != null && pathname.replace(/\/$/, '') === '/tim-theo-anh');
+
   const activeRelatedTab = parseRelatedTabFromSearch(searchParams.get('rt'));
 
   const setRelatedTab = (id: ProductRelatedTabId) => {
@@ -204,10 +208,16 @@ export default function MobileHeader({
     isDaXemPage ||
     isAccountPage ||
     isFavoritesPage ||
-    isCartPage;
+    isCartPage ||
+    isTimTheoAnhPage;
   /** Hàng nút + ô tìm: co chỗ cho ô tìm dài hơn. */
   const tightToolbar =
-    isProductDetailPage || isDaXemPage || isAccountPage || isFavoritesPage || isCartPage;
+    isProductDetailPage ||
+    isDaXemPage ||
+    isAccountPage ||
+    isFavoritesPage ||
+    isCartPage ||
+    isTimTheoAnhPage;
 
   const chipClass =
     'flex-shrink-0 text-[11px] leading-tight font-medium text-white px-2 py-1 rounded-full bg-white/18 hover:bg-white/28 whitespace-nowrap border border-white/25 shadow-sm active:scale-[0.98] transition-transform';
@@ -255,7 +265,8 @@ export default function MobileHeader({
                   !isDaXemPage &&
                   !isAccountPage &&
                   !isFavoritesPage &&
-                  !isCartPage
+                  !isCartPage &&
+                  !isTimTheoAnhPage
                 }
               />
             </Link>
@@ -264,7 +275,9 @@ export default function MobileHeader({
           {/* Danh mục + ô tìm kiếm (pill) + icon nhanh */}
           <div
             className={`flex items-center gap-1 relative z-10 pt-0.5 ${tightToolbar ? 'gap-1' : 'gap-1.5'} ${
-              isDaXemPage || isAccountPage || isFavoritesPage || isCartPage ? 'pb-1' : ''
+              isDaXemPage || isAccountPage || isFavoritesPage || isCartPage || isTimTheoAnhPage
+                ? 'pb-1'
+                : ''
             }`}
           >
             {showHeaderBack && (
@@ -408,7 +421,7 @@ export default function MobileHeader({
                 </button>
               ))}
             </div>
-          ) : isDaXemPage || isAccountPage || isFavoritesPage || isCartPage ? null : (
+          ) : isDaXemPage || isAccountPage || isFavoritesPage || isCartPage || isTimTheoAnhPage ? null : (
             <div
               className="flex items-center gap-1 mt-1 pb-1 overflow-x-auto scrollbar-hide min-h-[26px] -mx-0.5 px-0.5"
               role="navigation"

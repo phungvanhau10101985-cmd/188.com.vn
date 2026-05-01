@@ -5,7 +5,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } fr
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
-import { generateSlug } from '@/lib/utils';
+import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
@@ -200,30 +200,7 @@ export default function Navigation({
       router.push('/');
       return;
     }
-    const target = generateSlug(raw);
-    for (const c1 of tree) {
-      const slug1 = generateSlug(c1.slug || c1.name);
-      if (target === slug1) {
-        router.push(`/danh-muc/${encodeURIComponent(slug1)}`);
-        return;
-      }
-      for (const c2 of (c1.children || [])) {
-        const slug2 = generateSlug(c2.slug || c2.name);
-        if (target === slug2) {
-          router.push(`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`);
-          return;
-        }
-        for (const c3 of (c2.children || [])) {
-          const name3 = (c3 as any)?.name ?? String(c3);
-          const slug3 = generateSlug((c3 as any)?.slug ?? name3);
-          if (target === slug3) {
-            router.push(`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`);
-            return;
-          }
-        }
-      }
-    }
-    router.push(`/?q=${encodeURIComponent(raw)}`);
+    navigateProductTextSearch(router, raw, tree);
   };
 
   const basePill =
