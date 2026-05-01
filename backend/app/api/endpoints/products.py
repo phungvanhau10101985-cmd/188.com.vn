@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from app.db.session import get_db
 from app import crud
+from app.crud import product_search_cache as product_search_cache_crud
 from app.models.search_mapping import SearchMapping, SearchMappingType
 from app.utils.vietnamese import normalize_for_search_no_accent
 from difflib import SequenceMatcher
@@ -184,6 +185,30 @@ def read_products(
     """
     try:
         response.headers["Cache-Control"] = "public, max-age=60"
+        raw_q = (q or "").strip()
+        pid = (product_id or "").strip()
+        cache_key = None
+        if raw_q and not pid:
+            norm_q = crud.product._normalize_search_key(raw_q)
+            cache_key = product_search_cache_crud.build_cache_key(
+                norm_q=norm_q,
+                skip=skip,
+                limit=limit,
+                category=category,
+                subcategory=subcategory,
+                sub_subcategory=sub_subcategory,
+                shop_name=shop_name,
+                shop_id=shop_id,
+                pro_lower_price=pro_lower_price,
+                pro_high_price=pro_high_price,
+                min_price=min_price,
+                max_price=max_price,
+                is_active=is_active,
+            )
+            cached = product_search_cache_crud.get_cached_result(db, cache_key)
+            if cached is not None:
+                return cached
+
         result = crud.product.get_products(
             db, skip=skip, limit=limit,
             category=category, subcategory=subcategory, sub_subcategory=sub_subcategory,
@@ -202,6 +227,12 @@ def read_products(
                 except Exception:
                     products_list.append(product)
             result["products"] = products_list
+
+        if cache_key and raw_q and not pid and not result.get("redirect_path") and not result.get("error"):
+            try:
+                product_search_cache_crud.set_cached_result(db, cache_key, result)
+            except Exception:
+                pass
         
         return result
     except Exception as e:

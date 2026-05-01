@@ -122,6 +122,10 @@ export default function CartEmptySameShopSection() {
     }
   };
 
+  if (!sameShopLoading && sameShopTotal <= 0) {
+    return null;
+  }
+
   return (
     <section className="mt-8 md:mt-10 text-left" aria-label="Sản phẩm cùng shop bạn vừa xem">
       <h2 className="text-base font-bold text-gray-900 mb-2 border-b-2 border-[#ea580c] pb-1 w-fit">
@@ -145,7 +149,7 @@ export default function CartEmptySameShopSection() {
               </div>
             ))}
           </div>
-        ) : sameShopProducts.length > 0 ? (
+        ) : (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
               {sameShopProducts.map((product, index) => (
@@ -174,7 +178,7 @@ export default function CartEmptySameShopSection() {
               </>
             )}
           </>
-        ) : null}
+        )}
       </div>
     </section>
   );

@@ -18,6 +18,11 @@ import { formatPrice } from '@/lib/utils';
 import type { Product, ProductListResponse, NanoaiSearchProduct, SameAgeGenderCohortMode } from '@/types/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
+import {
+  readSearchResultCache,
+  searchRequestCacheFingerprint,
+  writeSearchResultCache,
+} from '@/lib/search-result-cache';
 
 function favoritePayloadFromProduct(p: Product): Record<string, unknown> {
   return {
@@ -191,6 +196,32 @@ export default function HomePageClient({
       max_price: parseNumberParam(maxPriceFromUrl),
     };
 
+    const fetchSearchPage = async (skip: number, limit: number): Promise<ProductListResponse> => {
+      const fp = searchRequestCacheFingerprint({
+        q: qFromUrl,
+        is_active: true,
+        shop_id: shopIdFromUrl,
+        shop_name: shopNameFromUrl,
+        pro_lower_price: proLowerFromUrl,
+        pro_high_price: proHighFromUrl,
+        min_price: parseNumberParam(minPriceFromUrl),
+        max_price: parseNumberParam(maxPriceFromUrl),
+        skip,
+        limit,
+      });
+      const hit = readSearchResultCache(fp);
+      if (hit) return hit;
+      const response = await apiClient.getProducts({
+        ...searchApiParams,
+        limit,
+        skip,
+      });
+      if (!cancelled && !response.redirect_path) {
+        writeSearchResultCache(fp, response);
+      }
+      return response;
+    };
+
     (async () => {
       try {
         setError(null);
@@ -198,11 +229,7 @@ export default function HomePageClient({
         setLoading(true);
 
         if (currentPage !== 1) {
-          const response = await apiClient.getProducts({
-            ...searchApiParams,
-            limit: PAGE_SIZE,
-            skip: (currentPage - 1) * PAGE_SIZE,
-          });
+          const response = await fetchSearchPage((currentPage - 1) * PAGE_SIZE, PAGE_SIZE);
           if (cancelled) return;
           if (response.redirect_path) {
             window.location.assign(response.redirect_path);
@@ -228,11 +255,7 @@ export default function HomePageClient({
           return;
         }
 
-        const first = await apiClient.getProducts({
-          ...searchApiParams,
-          limit: SEARCH_INITIAL_LIMIT,
-          skip: 0,
-        });
+        const first = await fetchSearchPage(0, SEARCH_INITIAL_LIMIT);
         if (cancelled) return;
         if (first.redirect_path) {
           window.location.assign(first.redirect_path);
@@ -299,11 +322,10 @@ export default function HomePageClient({
         ) {
           setSearchCatalogAppending(true);
           try {
-            const more = await apiClient.getProducts({
-              ...searchApiParams,
-              limit: wantOnFirstScreen - firstList.length,
-              skip: firstList.length,
-            });
+            const more = await fetchSearchPage(
+              firstList.length,
+              wantOnFirstScreen - firstList.length,
+            );
             if (cancelled) return;
             if (!more.redirect_path && (more.products?.length ?? 0) > 0) {
               setProducts((prev) => [...prev, ...(more.products ?? [])]);
@@ -521,6 +543,8 @@ export default function HomePageClient({
   const [sameShopLoading, setSameShopLoading] = useState(false);
   const [sameShopLoadMoreLoading, setSameShopLoadMoreLoading] = useState(false);
   const sameShopHasMore = sameShopProducts.length < sameShopTotal && sameShopTotal > 0;
+  /** Chỉ hiện khối khi đã xác định có lượt xem + có SP cùng shop (tránh skeleton khi khách mới). */
+  const showSameShopSection = !sameShopLoading && sameShopTotal > 0;
   const lastSearchTrackedRef = useRef<string>('');
   const lastFilterTrackedRef = useRef<string>('');
 
@@ -845,8 +869,8 @@ export default function HomePageClient({
           </div>
         )}
 
-        {/* Cùng shop_name (Excel cột H) với shop của tối đa 8 SP xem gần; random mỗi lần mở khi không gửi seed */}
-        {!hasFilterParams && (
+        {/* Cùng shop — chỉ khi khách đã xem SP và API có gợi ý (total > 0). */}
+        {!hasFilterParams && showSameShopSection && (
           <section className="mb-8" id="san-pham-cung-shop">
           <h2 className="text-base font-bold text-gray-900 mb-2 border-b-2 border-[#ea580c] pb-1 w-fit">
             SẢN PHẨM CÙNG SHOP BẠN VỪA XEM
@@ -856,49 +880,32 @@ export default function HomePageClient({
             được trộn ngẫu nhiên mỗi lần mở trang chủ.
           </p>
           <div className="mt-4 min-h-[min(28rem,75vh)]">
-            {sameShopLoading ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                {[...Array(12)].map((_, i) => (
-                  <div key={i} className="bg-white rounded-xl border border-gray-100 overflow-hidden animate-pulse">
-                    <div className="aspect-square bg-gray-100" />
-                    <div className="p-3 space-y-2">
-                      <div className="h-3 bg-gray-100 rounded w-3/4" />
-                      <div className="h-3 bg-gray-100 rounded w-full" />
-                      <div className="h-4 bg-gray-100 rounded w-2/5" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : sameShopProducts.length > 0 ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
+              {sameShopProducts.map((product, index) => (
+                <SimpleProductCard
+                  key={product.id}
+                  product={product}
+                  onFavorite={handleFavorite}
+                  isFavorited={favoriteIds.has(product.id)}
+                  priority={index < 4}
+                />
+              ))}
+            </div>
+            {sameShopHasMore && (
               <>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {sameShopProducts.map((product, index) => (
-                    <SimpleProductCard
-                      key={product.id}
-                      product={product}
-                      onFavorite={handleFavorite}
-                      isFavorited={favoriteIds.has(product.id)}
-                      priority={index < 4}
-                    />
-                  ))}
+                <div ref={sameShopSentinelRef} className="h-4 w-full" aria-hidden />
+                <div className="flex justify-center py-6">
+                  <button
+                    type="button"
+                    onClick={loadMoreSameShop}
+                    disabled={sameShopLoadMoreLoading}
+                    className="bg-[#ea580c] hover:bg-[#c2410c] disabled:opacity-60 text-white px-6 py-2.5 rounded-xl font-medium transition-colors text-sm shadow-sm"
+                  >
+                    {sameShopLoadMoreLoading ? 'Đang tải...' : 'Xem thêm'}
+                  </button>
                 </div>
-                {sameShopHasMore && (
-                  <>
-                    <div ref={sameShopSentinelRef} className="h-4 w-full" aria-hidden />
-                    <div className="flex justify-center py-6">
-                      <button
-                        type="button"
-                        onClick={loadMoreSameShop}
-                        disabled={sameShopLoadMoreLoading}
-                        className="bg-[#ea580c] hover:bg-[#c2410c] disabled:opacity-60 text-white px-6 py-2.5 rounded-xl font-medium transition-colors text-sm shadow-sm"
-                      >
-                        {sameShopLoadMoreLoading ? 'Đang tải...' : 'Xem thêm'}
-                      </button>
-                    </div>
-                  </>
-                )}
               </>
-            ) : null}
+            )}
           </div>
           </section>
         )}

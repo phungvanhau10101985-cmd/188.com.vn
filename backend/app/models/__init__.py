@@ -103,6 +103,9 @@ try:
 except ImportError:
     print("ℹ️  SearchQueryMapping model not available")
 
+from app.models.product_search_cache import ProductSearchCache
+print("✅ ProductSearchCache model loaded")
+
 # 9. Search mappings/logs
 try:
     from app.models.search_mapping import SearchMapping, SearchMappingType
@@ -161,6 +164,7 @@ __all__ = [
     "CategoryTransformRule",
     "CategoryFinalMapping",
     "SearchQueryMapping",
+    "ProductSearchCache",
     "SearchMapping",
     "SearchMappingType",
     "SearchLog",
