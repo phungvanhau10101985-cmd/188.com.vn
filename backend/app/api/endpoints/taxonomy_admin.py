@@ -7,8 +7,12 @@ Admin endpoint quản lý taxonomy (cây danh mục + SEO cluster) qua file Exce
   sau đó `assets/taxonomy_import_template.xlsx` (mẫu đủ cột + vài dòng minh họa),
   cuối cùng sinh workbook trong code (cùng schema).
 
-Yêu cầu Bearer admin (Depends(get_current_admin)). Idempotent: import có thể chạy lại nhiều lần,
-upsert theo `external_id` (cột `id` trong Excel).
+Yêu cầu Bearer admin (Depends(get_current_admin)).
+
+Import là **upsert / hợp nhất** theo cột `id` (chuỗi, lưu DB là `external_id`):
+- **Đã có** `id` đó → **cập nhật** slug, tên, full_slug, cha, cluster, seo_index, v.v. theo file;
+- **Chưa có** → **thêm mới**.
+- Có thể chạy lại nhiều lần an toàn; không xóa dòng chỉ vì thiếu trong file.
 """
 from __future__ import annotations
 
@@ -16,10 +20,11 @@ import io
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -29,6 +34,7 @@ from app.core.security import get_current_admin
 from app.db.session import get_db
 from app.models.category import Category
 from app.models.seo_cluster import SeoCluster
+from app.utils.slug import create_slug as slugify_text
 from app.utils.ttl_cache import cache as ttl_cache
 
 logger = logging.getLogger(__name__)
@@ -434,24 +440,9 @@ def _validate_paths(
     return errs
 
 
-@router.post("/import")
-async def import_taxonomy(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    _admin: models.AdminUser = Depends(get_current_admin),
-) -> Dict[str, Any]:
-    """
-    Upload taxonomy_import.xlsx (4 sheet) — seed cây + cluster.
-    Upsert theo external_id, an toàn re-import.
-    """
+def execute_taxonomy_sheets(db: Session, sheets: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+    """Chạy cùng pipeline với upload Excel (4 sheet)."""
     started = time.time()
-    name = (file.filename or "").lower()
-    if not name.endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Chỉ chấp nhận file .xlsx hoặc .xls")
-
-    raw = await file.read()
-    sheets = _parse_upload(raw)
-
     df_clusters = sheets["seo_clusters"]
     df_cats = sheets["categories"]
     df_paths = sheets["category_paths"]
@@ -461,7 +452,6 @@ async def import_taxonomy(
     cat_ext_to_id, summary_lvl, e_cats = _insert_categories(db, df_cats, cluster_ext_to_id)
     e_paths = _validate_paths(df_paths, cat_ext_to_id, cluster_ext_to_id)
 
-    # Reset cache để menu/cluster công khai cập nhật ngay
     ttl_cache.invalidate_all()
 
     meta_kv: Dict[str, str] = {}
@@ -489,6 +479,345 @@ async def import_taxonomy(
         "meta": meta_kv,
         "elapsed_ms": elapsed_ms,
     }
+
+
+@router.post("/import")
+async def import_taxonomy(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _admin: models.AdminUser = Depends(get_current_admin),
+) -> Dict[str, Any]:
+    """
+    Upload taxonomy_import.xlsx (4 sheet).
+
+    **Upsert theo cột `id` (external_id):** dòng đã có trong DB → cập nhật theo file;
+    dòng chưa có → thêm mới. Có thể import lặp lại; không xóa nhánh chỉ vì không
+    nằm trong file.
+    """
+    name = (file.filename or "").lower()
+    if not name.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Chỉ chấp nhận file .xlsx hoặc .xls")
+
+    raw = await file.read()
+    sheets = _parse_upload(raw)
+    return execute_taxonomy_sheets(db, sheets)
+
+
+class TaxonomyManualUpsertIn(BaseModel):
+    """Giống một dòng nhánh đủ 3 cấp + cluster trong file import."""
+
+    cat1_existing_external_id: Optional[str] = Field(None, description="Cấp 1 đã có trong DB (external_id)")
+    cat1_name: Optional[str] = None
+    cat1_slug: Optional[str] = None
+
+    cat2_existing_external_id: Optional[str] = Field(None, description="Cấp 2 đã có — bắt buộc kèm cấp 1 đã có")
+    cat2_name: Optional[str] = None
+    cat2_slug: Optional[str] = None
+
+    cat3_name: str
+    cat3_slug: Optional[str] = None
+
+    cluster_existing_external_id: Optional[str] = None
+    cluster_name: Optional[str] = None
+    cluster_slug: Optional[str] = None
+    cluster_index_policy: Literal["index", "noindex"] = "index"
+
+    cat3_seo_index: Literal["index", "noindex"] = "noindex"
+    cat3_sort_order: int = 0
+    is_active: bool = True
+
+
+def _norm_slug(user_slug: Optional[str], name: str) -> str:
+    base = (user_slug or "").strip()
+    return slugify_text(base if base else (name or "").strip())
+
+
+def _category_row(
+    ext_id: str,
+    parent_ext: str,
+    level: int,
+    name: str,
+    slug: str,
+    full_slug: str,
+    *,
+    sort_order: int,
+    is_active: bool,
+    seo_index_lit: str,
+    cluster_ext: str,
+) -> Dict[str, Any]:
+    return {
+        "id": ext_id,
+        "parent_id": parent_ext,
+        "level": level,
+        "name": name,
+        "slug": slug,
+        "full_slug": full_slug,
+        "sort_order": sort_order,
+        "is_active": "1" if is_active else "0",
+        "seo_index": seo_index_lit,
+        "seo_cluster_id": cluster_ext,
+    }
+
+
+def _build_manual_taxonomy_sheets(db: Session, body: TaxonomyManualUpsertIn) -> Dict[str, pd.DataFrame]:
+    cat_cols = [
+        "id",
+        "parent_id",
+        "level",
+        "name",
+        "slug",
+        "full_slug",
+        "sort_order",
+        "is_active",
+        "seo_index",
+        "seo_cluster_id",
+    ]
+    cluster_cols = ["id", "slug", "name", "canonical_path", "index_policy", "source", "notes"]
+
+    cat1_rows: List[Dict[str, Any]] = []
+    cat2_rows: List[Dict[str, Any]] = []
+
+    if body.cat1_existing_external_id:
+        c1e = body.cat1_existing_external_id.strip()
+        c1 = db.query(Category).filter(Category.external_id == c1e).first()
+        if not c1 or c1.level != 1:
+            raise HTTPException(status_code=400, detail="Cấp 1 (external_id) không tồn tại hoặc không phải level 1")
+        cat1_ext = (c1.external_id or "").strip()
+        if not cat1_ext:
+            raise HTTPException(
+                status_code=400,
+                detail="Danh mục cấp 1 đã chọn chưa có external_id — cập nhật qua import Excel hoặc DB trước.",
+            )
+        cat1_name = c1.name
+        cat1_slug = c1.slug
+    else:
+        if not (body.cat1_name or "").strip():
+            raise HTTPException(status_code=400, detail="Thiếu tên cấp 1 hoặc chọn cấp 1 có sẵn")
+        cat1_name = body.cat1_name.strip()
+        cat1_slug = _norm_slug(body.cat1_slug, cat1_name)
+        if not cat1_slug:
+            raise HTTPException(status_code=400, detail="Slug cấp 1 không hợp lệ")
+        cat1_ext = f"cat1__{cat1_slug}"
+        cat1_rows.append(
+            _category_row(
+                cat1_ext,
+                "",
+                1,
+                cat1_name,
+                cat1_slug,
+                cat1_slug,
+                sort_order=0,
+                is_active=body.is_active,
+                seo_index_lit="index",
+                cluster_ext="",
+            )
+        )
+
+    if body.cat2_existing_external_id:
+        if not body.cat1_existing_external_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Chọn cấp 2 có sẵn thì phải chọn cấp 1 có sẵn (không tạo cấp 1 mới + cấp 2 cũ)",
+            )
+        c2e = body.cat2_existing_external_id.strip()
+        c2 = db.query(Category).filter(Category.external_id == c2e).first()
+        if not c2 or c2.level != 2:
+            raise HTTPException(status_code=400, detail="Cấp 2 không tồn tại hoặc không phải level 2")
+        if c2.parent_id != c1.id:
+            raise HTTPException(status_code=400, detail="Cấp 2 không thuộc cấp 1 đã chọn")
+        cat2_ext = (c2.external_id or "").strip()
+        if not cat2_ext:
+            raise HTTPException(
+                status_code=400,
+                detail="Danh mục cấp 2 đã chọn chưa có external_id — cập nhật qua import Excel hoặc DB trước.",
+            )
+        cat2_name = c2.name
+        cat2_slug = c2.slug
+    else:
+        if not (body.cat2_name or "").strip():
+            raise HTTPException(status_code=400, detail="Thiếu tên cấp 2 hoặc chọn cấp 2 có sẵn")
+        cat2_name = body.cat2_name.strip()
+        cat2_slug = _norm_slug(body.cat2_slug, cat2_name)
+        if not cat2_slug:
+            raise HTTPException(status_code=400, detail="Slug cấp 2 không hợp lệ")
+        cat2_ext = f"cat2__{cat1_slug}__{cat2_slug}"
+        cat2_rows.append(
+            _category_row(
+                cat2_ext,
+                cat1_ext,
+                2,
+                cat2_name,
+                cat2_slug,
+                f"{cat1_slug}/{cat2_slug}",
+                sort_order=0,
+                is_active=body.is_active,
+                seo_index_lit="index",
+                cluster_ext="",
+            )
+        )
+
+    c3name = body.cat3_name.strip()
+    if not c3name:
+        raise HTTPException(status_code=400, detail="Thiếu tên cấp 3")
+    cat3_slug = _norm_slug(body.cat3_slug, c3name)
+    if not cat3_slug:
+        raise HTTPException(status_code=400, detail="Slug cấp 3 không hợp lệ")
+    cat3_ext = f"cat3__{cat1_slug}__{cat2_slug}__{cat3_slug}"
+
+    cluster_rows: List[Dict[str, Any]] = []
+    if body.cluster_existing_external_id:
+        cl_e = body.cluster_existing_external_id.strip()
+        cl = db.query(SeoCluster).filter(SeoCluster.external_id == cl_e).first()
+        if not cl:
+            raise HTTPException(status_code=400, detail="SEO cluster (external_id) không tồn tại")
+        cluster_ext = (cl.external_id or "").strip()
+        if not cluster_ext:
+            raise HTTPException(
+                status_code=400,
+                detail="Cluster đã chọn chưa có external_id — cập nhật qua import trước.",
+            )
+        cluster_slug = cl.slug
+    else:
+        if not (body.cluster_name or "").strip():
+            raise HTTPException(status_code=400, detail="Thiếu tên cluster hoặc chọn cluster có sẵn")
+        cname = body.cluster_name.strip()
+        cluster_slug = _norm_slug(body.cluster_slug, cname)
+        if not cluster_slug:
+            raise HTTPException(status_code=400, detail="Slug cluster không hợp lệ")
+        cluster_ext = f"cluster__{cluster_slug}"
+        cluster_rows.append(
+            {
+                "id": cluster_ext,
+                "slug": cluster_slug,
+                "name": cname,
+                "canonical_path": f"/c/{cluster_slug}",
+                "index_policy": body.cluster_index_policy,
+                "source": "manual_taxonomy_form",
+                "notes": "",
+            }
+        )
+
+    cat3_row = _category_row(
+        cat3_ext,
+        cat2_ext,
+        3,
+        c3name,
+        cat3_slug,
+        f"{cat1_slug}/{cat2_slug}/{cat3_slug}",
+        sort_order=body.cat3_sort_order,
+        is_active=body.is_active,
+        seo_index_lit=body.cat3_seo_index,
+        cluster_ext=cluster_ext,
+    )
+
+    all_cat_rows = cat1_rows + cat2_rows + [cat3_row]
+    path_row = {
+        "cat1_id": cat1_ext,
+        "cat1_name": cat1_name,
+        "cat1_slug": cat1_slug,
+        "cat2_id": cat2_ext,
+        "cat2_name": cat2_name,
+        "cat2_slug": cat2_slug,
+        "cat3_id": cat3_ext,
+        "cat3_name": c3name,
+        "cat3_slug": cat3_slug,
+        "full_slug": f"{cat1_slug}/{cat2_slug}/{cat3_slug}",
+        "seo_cluster_id": cluster_ext,
+        "seo_cluster_slug": cluster_slug,
+    }
+
+    df_cats = pd.DataFrame(all_cat_rows)[cat_cols]
+    df_clusters = pd.DataFrame(cluster_rows)[cluster_cols] if cluster_rows else pd.DataFrame(columns=cluster_cols)
+    df_paths = pd.DataFrame([path_row])[list(TAXONOMY_TEMPLATE_CATEGORY_PATH_COLUMNS)]
+    df_meta = pd.DataFrame([{"key": "manual_form", "value": cat3_ext}])
+
+    return {
+        "categories": df_cats,
+        "seo_clusters": df_clusters,
+        "category_paths": df_paths,
+        "meta": df_meta,
+    }
+
+
+@router.get("/form-tree")
+def taxonomy_form_tree(
+    db: Session = Depends(get_db),
+    _admin: models.AdminUser = Depends(get_current_admin),
+) -> Dict[str, Any]:
+    """Cây categories kèm external_id — chọn trên form thủ công."""
+
+    def _sort_children(nodes: List[Dict[str, Any]]) -> None:
+        nodes.sort(key=lambda n: (int(n.get("sort_order") or 0), str(n.get("name") or ""), int(n.get("db_id") or 0)))
+        for n in nodes:
+            _sort_children(n.get("children") or [])
+
+    rows = (
+        db.query(Category)
+        .order_by(Category.level, Category.sort_order, Category.id)
+        .all()
+    )
+    by_id: Dict[int, Dict[str, Any]] = {}
+    for c in rows:
+        by_id[c.id] = {
+            "db_id": c.id,
+            "external_id": c.external_id,
+            "parent_id": c.parent_id,
+            "level": c.level,
+            "name": c.name,
+            "slug": c.slug,
+            "full_slug": c.full_slug,
+            "sort_order": c.sort_order,
+            "seo_index": c.seo_index,
+            "children": [],
+        }
+    roots: List[Dict[str, Any]] = []
+    for node in by_id.values():
+        pid = node["parent_id"]
+        if pid and pid in by_id:
+            by_id[pid]["children"].append(node)
+        elif node["level"] == 1:
+            roots.append(node)
+    _sort_children(roots)
+    return {"tree": roots}
+
+
+@router.get("/clusters-list")
+def taxonomy_clusters_list(
+    db: Session = Depends(get_db),
+    _admin: models.AdminUser = Depends(get_current_admin),
+) -> Dict[str, Any]:
+    rows = db.query(SeoCluster).order_by(SeoCluster.slug).all()
+    return {
+        "clusters": [
+            {
+                "external_id": r.external_id,
+                "slug": r.slug,
+                "name": r.name,
+                "index_policy": r.index_policy,
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.post("/manual-upsert")
+def taxonomy_manual_upsert(
+    body: TaxonomyManualUpsertIn,
+    db: Session = Depends(get_db),
+    _admin: models.AdminUser = Depends(get_current_admin),
+) -> Dict[str, Any]:
+    """
+    Thêm / cập nhật một nhánh cat1–cat3 + cluster — **cùng upsert** như Excel:
+    `id`/`external_id` đã có thì cập nhật, chưa có thì tạo mới.
+    """
+    sheets = _build_manual_taxonomy_sheets(db, body)
+    sheets_out = {
+        "seo_clusters": sheets["seo_clusters"],
+        "categories": sheets["categories"],
+        "category_paths": sheets["category_paths"],
+        "meta": sheets["meta"],
+    }
+    return execute_taxonomy_sheets(db, sheets_out)
 
 
 # ---------- SAMPLE FILE ----------
