@@ -27,6 +27,10 @@ from app.crud import product as crud_product
 from app.crud.product import category_field_equals_ci
 from app.core.config import settings
 from app.services.category_seo_service import generate_category_seo_body
+from app.utils.taxonomy_mapping_path import (
+    validate_final_mapping_row_paths,
+    validate_taxonomy_chain_by_names,
+)
 from app.services.category_seo_analyzer import (
     scan_and_create_mappings,
     get_all_approved_redirects,
@@ -1462,6 +1466,30 @@ def create_final_mapping(
         apply_to_future_imports=False,
         restrict_product_ids=rj,
     )
+    if not (rule.from_sub_subcategory or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Nguồn (final mapping): cần tên cấp 3 khớp taxonomy (map từng nhánh cấp 3, không hỗ trợ wildcard qua endpoint này).",
+        )
+    validate_taxonomy_chain_by_names(
+        db,
+        rule.from_category,
+        rule.from_subcategory,
+        rule.from_sub_subcategory,
+        path_label="Nguồn (final mapping)",
+    )
+    if not (rule.to_sub_subcategory or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Đích mapping: cần đủ tên cấp 3 khớp taxonomy (cấp 2 phải thuộc cấp 1, cấp 3 thuộc cấp 2).",
+        )
+    validate_taxonomy_chain_by_names(
+        db,
+        rule.to_category,
+        rule.to_subcategory,
+        rule.to_sub_subcategory,
+        path_label="Đích (final mapping)",
+    )
     q = db.query(CategoryFinalMapping).filter(
         CategoryFinalMapping.from_category == rule.from_category,
         CategoryFinalMapping.from_subcategory == rule.from_subcategory,
@@ -1510,6 +1538,26 @@ def update_final_mapping(
                 )
             else:
                 setattr(mapping, field, payload[field] or "")
+    if (mapping.from_sub_subcategory or "").strip():
+        validate_taxonomy_chain_by_names(
+            db,
+            mapping.from_category,
+            mapping.from_subcategory,
+            mapping.from_sub_subcategory,
+            path_label="Nguồn (final mapping)",
+        )
+    if not (mapping.to_sub_subcategory or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Đích mapping: cần đủ tên cấp 3 khớp taxonomy (cấp 2 thuộc cấp 1, cấp 3 thuộc cấp 2).",
+        )
+    validate_taxonomy_chain_by_names(
+        db,
+        mapping.to_category,
+        mapping.to_subcategory,
+        mapping.to_sub_subcategory,
+        path_label="Đích (final mapping)",
+    )
     db.commit()
     products_updated = crud_product.batch_apply_final_mapping_to_products(db, mapping)
     db.commit()
@@ -1596,6 +1644,8 @@ def import_final_mappings(
         db.query(CategoryFinalMapping).delete()
         db.commit()
     created = 0
+    for idx_off, r in enumerate(items):
+        validate_final_mapping_row_paths(db, r if isinstance(r, dict) else {}, row_index=idx_off + 1)
     for r in items:
         mapping = CategoryFinalMapping(
             from_category=r.get("from_category"),

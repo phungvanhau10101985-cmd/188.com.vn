@@ -365,39 +365,6 @@ export default function AdminDanhMucSeoPage() {
     return map;
   }, [tree]);
 
-  const level3ByLevel1 = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const c1 of tree) {
-      const set = new Set<string>();
-      for (const c2 of c1.children || []) {
-        for (const c3 of c2.children || []) {
-          const name =
-            typeof c3 === 'object' && c3 !== null && 'name' in c3 ? c3.name : String(c3);
-          if (name) set.add(name);
-        }
-      }
-      map.set(c1.name, Array.from(set).sort());
-    }
-    return map;
-  }, [tree]);
-
-  const combinedLevel23ByLevel1 = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const c1 of tree) {
-      const set = new Set<string>();
-      for (const c2 of c1.children || []) {
-        if (c2?.name) set.add(c2.name);
-        for (const c3 of c2.children || []) {
-          const name =
-            typeof c3 === 'object' && c3 !== null && 'name' in c3 ? c3.name : String(c3);
-          if (name) set.add(name);
-        }
-      }
-      map.set(c1.name, Array.from(set).sort());
-    }
-    return map;
-  }, [tree]);
-
   function getLevel2Categories(categoryName: string) {
     const cat = tree.find((c) => c.name === categoryName);
     return cat?.children?.map((c) => c.name) || [];
@@ -1812,7 +1779,8 @@ export default function AdminDanhMucSeoPage() {
                       <Link href="/admin/taxonomy" className="text-[#ea580c] underline">
                         /admin/taxonomy
                       </Link>
-                      ). Cột <strong>Nguồn</strong> chỉ hiển thị nhánh cấp 1–3 có <strong>ít nhất một sản phẩm
+                      ). Cột đích cấp 2–3 chỉ chọn được nhánh con đúng cấp (không gõ tay) — backend cũng từ chối nếu
+                      tổ hợp không tồn tại hoặc cấp 2 không thuộc cấp 1 / cấp 3 không thuộc cấp 2. Cột <strong>Nguồn</strong> chỉ hiển thị nhánh cấp 1–3 có <strong>ít nhất một sản phẩm
                       active</strong> (theo đúng tên cột danh mục trên sản phẩm); cột <strong>Đích</strong> vẫn dùng
                       đầy đủ taxonomy. Chuỗi gửi lên là <strong>tên hiển thị</strong> — cần khớp cột danh mục trên sản phẩm để batch cập nhật
                       đúng. Nguồn: chọn cấp 2 + chỉ tick <strong>cấp 3</strong> muốn map; sản phẩm cùng cấp 2 nhưng{' '}
@@ -1948,9 +1916,7 @@ export default function AdminDanhMucSeoPage() {
                       </div>
                       <div className="px-3 py-2 border-t border-gray-200">
                         <div className="text-xs text-gray-500 mb-1">Cấp 2</div>
-                        <input
-                          type="text"
-                          list="mapping-to-subcategory-list"
+                        <select
                           value={mappingForm.to_subcategory}
                           onChange={(e) =>
                             setMappingForm({
@@ -1959,14 +1925,16 @@ export default function AdminDanhMucSeoPage() {
                               to_sub_subcategory: '',
                             })
                           }
-                          placeholder="Gõ hoặc chọn cấp 2"
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                        />
-                        <datalist id="mapping-to-subcategory-list">
-                          {(combinedLevel23ByLevel1.get(mappingForm.to_category) || []).map((sub) => (
-                            <option key={sub} value={sub} />
+                          disabled={!mappingForm.to_category}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                        >
+                          <option value="">-- Chọn cấp 2 (theo taxonomy) --</option>
+                          {(level2ByLevel1.get(mappingForm.to_category) || []).map((sub) => (
+                            <option key={sub} value={sub}>
+                              {sub}
+                            </option>
                           ))}
-                        </datalist>
+                        </select>
                       </div>
                       <div className="px-3 py-2 border-r border-gray-200 border-t border-gray-200">
                         {mappingEditId ? (
@@ -2159,19 +2127,21 @@ export default function AdminDanhMucSeoPage() {
                       </div>
                       <div className="px-3 py-2 border-t border-gray-200">
                         <div className="text-xs text-gray-500 mb-1">Cấp 3</div>
-                        <input
-                          type="text"
-                          list="mapping-to-subsubcategory-list"
+                        <select
                           value={mappingForm.to_sub_subcategory}
-                          onChange={(e) => setMappingForm({ ...mappingForm, to_sub_subcategory: e.target.value })}
-                          placeholder="Gõ hoặc chọn cấp 3"
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                        />
-                        <datalist id="mapping-to-subsubcategory-list">
-                          {(combinedLevel23ByLevel1.get(mappingForm.to_category) || []).map((sub) => (
-                            <option key={sub} value={sub} />
+                          onChange={(e) =>
+                            setMappingForm({ ...mappingForm, to_sub_subcategory: e.target.value })
+                          }
+                          disabled={!mappingForm.to_category || !mappingForm.to_subcategory}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                        >
+                          <option value="">-- Chọn cấp 3 (con của cấp 2 đã chọn) --</option>
+                          {getLevel3Categories(mappingForm.to_category, mappingForm.to_subcategory).map((sub) => (
+                            <option key={sub} value={sub}>
+                              {sub}
+                            </option>
                           ))}
-                        </datalist>
+                        </select>
                       </div>
                     </div>
                   </div>
