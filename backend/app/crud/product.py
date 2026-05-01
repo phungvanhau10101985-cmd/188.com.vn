@@ -1,6 +1,6 @@
 # backend/app/crud/product.py - COMPLETE FIXED VERSION
 from sqlalchemy.orm import Session
-from sqlalchemy import func as sql_func
+from sqlalchemy import and_, func as sql_func, or_
 from typing import List, Optional, Dict, Any, Set
 from app.models.product import Product
 from app.models.search_mapping import SearchMapping, SearchMappingType
@@ -1096,25 +1096,52 @@ def get_products(
     product_id: Optional[str] = None
 ):
     query = db.query(Product)
-    
-    if category and str(category).strip():
-        ce = category_field_equals_ci(Product.category, category)
-        if ce is not None:
-            query = query.filter(ce)
-    if subcategory and str(subcategory).strip():
-        subcat_group = get_subcategory_group_for_query(category or "", subcategory)
+
+    cat_s = (category or "").strip() if category else ""
+    sub_s = (subcategory or "").strip() if subcategory else ""
+    subsub_s = (sub_subcategory or "").strip() if sub_subcategory else ""
+
+    triple_combined = False
+    if cat_s and sub_s and subsub_s:
+        ce = category_field_equals_ci(Product.category, cat_s)
+        subcat_group = get_subcategory_group_for_query(cat_s, sub_s)
         if subcat_group:
-            ine = subcategory_field_in_ci(Product.subcategory, subcat_group)
-            if ine is not None:
-                query = query.filter(ine)
+            se = subcategory_field_in_ci(Product.subcategory, subcat_group)
         else:
-            se = category_field_equals_ci(Product.subcategory, subcategory)
-            if se is not None:
-                query = query.filter(se)
-    if sub_subcategory and str(sub_subcategory).strip():
-        sse = category_field_equals_ci(Product.sub_subcategory, sub_subcategory)
-        if sse is not None:
-            query = query.filter(sse)
+            se = category_field_equals_ci(Product.subcategory, sub_s)
+        sse = category_field_equals_ci(Product.sub_subcategory, subsub_s)
+        if ce is not None and se is not None and sse is not None:
+            triple_idx = _build_cat3_triple_name_lookup(db)
+            tkey = f"{cat_s.lower()}\x1f{sub_s.lower()}\x1f{subsub_s.lower()}"
+            tid = triple_idx.get(tkey)
+            if tid is not None:
+                text_ok = and_(ce, se, sse)
+                query = query.filter(
+                    or_(Product.category_id == tid, and_(Product.category_id.is_(None), text_ok))
+                )
+            else:
+                query = query.filter(ce).filter(se).filter(sse)
+            triple_combined = True
+
+    if not triple_combined:
+        if cat_s:
+            ce = category_field_equals_ci(Product.category, cat_s)
+            if ce is not None:
+                query = query.filter(ce)
+        if sub_s:
+            subcat_group = get_subcategory_group_for_query(cat_s or "", sub_s)
+            if subcat_group:
+                ine = subcategory_field_in_ci(Product.subcategory, subcat_group)
+                if ine is not None:
+                    query = query.filter(ine)
+            else:
+                se = category_field_equals_ci(Product.subcategory, sub_s)
+                if se is not None:
+                    query = query.filter(se)
+        if subsub_s:
+            sse = category_field_equals_ci(Product.sub_subcategory, subsub_s)
+            if sse is not None:
+                query = query.filter(sse)
     if shop_name:
         query = query.filter(Product.shop_name.ilike(f"%{shop_name.strip()}%"))
     if shop_id:
@@ -1303,6 +1330,8 @@ def count_products_for_category_path(
     name2: Optional[str] = None,
     name3: Optional[str] = None,
     is_active: bool = True,
+    *,
+    cat3_by_triple: Optional[Dict[str, int]] = None,
 ) -> int:
     """
     Đếm sản phẩm active khớp đường danh mục (cùng logic filter với get_category_by_path).
@@ -1334,21 +1363,43 @@ def count_products_for_category_path(
                 q = q.filter(_e2)
         return q.count()
     name3 = str(name3).strip()
-    q = db.query(Product).filter(Product.is_active == is_active)
     _ca = category_field_equals_ci(Product.category, name1)
     _ss = category_field_equals_ci(Product.sub_subcategory, name3)
-    if _ca is not None:
-        q = q.filter(_ca)
-    if _ss is not None:
-        q = q.filter(_ss)
+    _sb = None
+    _inq = None
     if subcat_group:
         _inq = subcategory_field_in_ci(Product.subcategory, subcat_group)
-        if _inq is not None:
-            q = q.filter(_inq)
     else:
         _sb = category_field_equals_ci(Product.subcategory, name2)
-        if _sb is not None:
-            q = q.filter(_sb)
+
+    sub_pred = _inq if subcat_group else _sb
+    text_parts = [p for p in (_ca, sub_pred, _ss) if p is not None]
+
+    idx = cat3_by_triple if cat3_by_triple is not None else _build_cat3_triple_name_lookup(db)
+    key = f"{name1.lower()}\x1f{name2.lower()}\x1f{name3.lower()}"
+    cid = idx.get(key)
+
+    # Có taxonomy cat3: FK là nguồn sự thật (giống `/c/`). Text chỉ áp khi category_id NULL.
+    # → Nhánh nguồn sau map (SP đã đổi FK) không còn bị đếm nhờ text cũ; nhánh đích vẫn nhận SP lệch chữ.
+    if cid is not None and text_parts:
+        text_match = and_(*text_parts)
+        return (
+            db.query(Product)
+            .filter(
+                Product.is_active == is_active,
+                or_(Product.category_id == cid, and_(Product.category_id.is_(None), text_match)),
+            )
+            .count()
+        )
+    if cid is not None:
+        return (
+            db.query(Product)
+            .filter(Product.is_active == is_active, Product.category_id == cid)
+            .count()
+        )
+    q = db.query(Product).filter(Product.is_active == is_active)
+    for p in text_parts:
+        q = q.filter(p)
     return q.count()
 
 
@@ -1380,6 +1431,7 @@ def prune_category_tree_empty_branches(
         return f"{s.lower()}|{slug_fn(s).lower()}"
 
     out: List[Dict[str, Any]] = []
+    triple_idx = _build_cat3_triple_name_lookup(db)
     for c1 in tree:
         name1 = (c1.get("name") or "").strip()
         if not name1:
@@ -1397,7 +1449,9 @@ def prune_category_tree_empty_branches(
                 n3s = (str(n3) if n3 is not None else "").strip()
                 if not n3s:
                     continue
-                cnt = count_products_for_category_path(db, name1, name2, n3s, is_active)
+                cnt = count_products_for_category_path(
+                    db, name1, name2, n3s, is_active, cat3_by_triple=triple_idx
+                )
                 if _l3_meets_menu_min(cnt):
                     pruned_l3.append(c3)
             seen_l3: Set[str] = set()
@@ -1576,6 +1630,40 @@ def get_category_tree_from_products(
         tss = (m.to_sub_subcategory or "").strip()
         if tc and ts and tss:
             _merge_distinct_row_into_tree(tc, ts, tss)
+
+    # Nhánh taxonomy theo FK: SP có category_id đúng cat3 nhưng cột AB/AC/AD chưa khớp → menu /danh-muc vẫn có link.
+    try:
+        from app.models.category import Category as _CatModel
+
+        cat_by_id = {r.id: r for r in db.query(_CatModel).all()}
+        fk_rows = (
+            db.query(Product.category_id)
+            .filter(
+                Product.category_id.isnot(None),
+                Product.is_active == is_active,
+            )
+            .distinct()
+            .all()
+        )
+        for (cid,) in fk_rows:
+            if not cid:
+                continue
+            c3 = cat_by_id.get(cid)
+            if not c3 or c3.level != 3:
+                continue
+            c2 = cat_by_id.get(c3.parent_id)
+            if not c2 or c2.level != 2:
+                continue
+            c1 = cat_by_id.get(c2.parent_id)
+            if not c1 or c1.level != 1:
+                continue
+            n1 = (c1.name or "").strip()
+            n2 = (c2.name or "").strip()
+            n3 = (c3.name or "").strip()
+            if n1 and n2 and n3:
+                _merge_distinct_row_into_tree(n1, n2, n3)
+    except Exception:
+        pass
 
     result: List[Dict[str, Any]] = []
     for name, node in sorted(tree.items(), key=lambda x: x[0]):
