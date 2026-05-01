@@ -1039,6 +1039,19 @@ class ApiClient {
     return this.fetch(`/category-seo/mappings-final/apply`, { method: 'POST' });
   }
 
+  /** Gán lại category_id (FK cat3) từ 3 cột tên — cluster `/c/<slug>` đếm SP theo FK */
+  async resyncFinalMappingProductCategoryIds(isActiveOnly = true): Promise<{
+    status: string;
+    products_updated: number;
+  }> {
+    const sp = new URLSearchParams();
+    if (!isActiveOnly) sp.set('is_active_only', 'false');
+    const q = sp.toString();
+    return this.fetch(`/category-seo/mappings-final/resync-product-category-ids${q ? `?${q}` : ''}`, {
+      method: 'POST',
+    });
+  }
+
   /** Export mapping */
   async exportFinalMappings(): Promise<{ mappings: any[] }> {
     return this.fetch(`/category-seo/mappings-final/export`);

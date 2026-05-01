@@ -912,6 +912,27 @@ export default function AdminDanhMucSeoPage() {
     }
   };
 
+  const handleResyncProductCategoryIds = async () => {
+    if (
+      !confirm(
+        'Gán lại category_id (taxonomy cat3) từ 3 cột tên trên mỗi sản phẩm? Cần cho trang /c/<slug> hiển thị đúng SP (cluster đếm theo FK, không theo chuỗi).'
+      )
+    )
+      return;
+    setProcessing(true);
+    setError(null);
+    try {
+      const result = await apiClient.resyncFinalMappingProductCategoryIds(true);
+      const n = result.products_updated ?? 0;
+      setSuccessMessage(`✅ Đã đồng bộ category_id cho ${n} sản phẩm (active). Làm mới trang cluster nếu vẫn cache.`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Lỗi đồng bộ category_id';
+      setError(msg);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const handleExportMappings = async () => {
     const result = await apiClient.exportFinalMappings();
     setMappingJson(JSON.stringify(result, null, 2));
@@ -1665,6 +1686,15 @@ export default function AdminDanhMucSeoPage() {
                       className="px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                     >
                       Đồng bộ mapping cho sản phẩm cũ (chỉ nhánh có cấp 3 nguồn trong mapping; không reset toàn bộ SP)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleResyncProductCategoryIds}
+                      disabled={processing}
+                      className="px-3 py-2 text-sm font-medium rounded-lg border border-amber-200 bg-amber-50 text-amber-950 hover:bg-amber-100 disabled:opacity-50"
+                      title="Trang /c/<slug> lọc theo category_id; sau khi map chuỗi mà cluster vẫn 0 SP thì bấm đây"
+                    >
+                      Đồng bộ category_id ↔ tên 3 cấp (cho trang /c/)
                     </button>
                   </div>
 

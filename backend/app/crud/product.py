@@ -568,6 +568,130 @@ def apply_category_final_mapping_to_product(
     return product_data
 
 
+def _row_matches_single_final_mapping_source(product_data: Dict[str, Any], m: CategoryFinalMapping) -> bool:
+    """Khớp nguồn đủ 3 cấp + restrict (cùng chuẩn hoá slugify như apply_category_final_mapping_to_product)."""
+    if not product_data:
+        return False
+
+    def _norm(val: Any) -> str:
+        text = re.sub(r"\s+", " ", (val or "")).strip().lower()
+        if not text:
+            return ""
+        try:
+            return slugify_vietnamese(text)
+        except Exception:
+            return re.sub(r"\s+", " ", text).strip()
+
+    n1 = _norm(product_data.get("category"))
+    n2 = _norm(product_data.get("subcategory"))
+    n3 = _norm(product_data.get("sub_subcategory"))
+    f1 = _norm(m.from_category)
+    f2 = _norm(m.from_subcategory)
+    f3 = _norm(m.from_sub_subcategory)
+    if n1 != f1 or n2 != f2 or n3 != f3:
+        return False
+    rset = restrict_product_ids_set_from_value(getattr(m, "restrict_product_ids", None))
+    if rset is not None:
+        pid = str(product_data.get("product_id") or "").strip()
+        if pid not in rset:
+            return False
+    return True
+
+
+def _norm_triple_cat_values(c1: Any, c2: Any, c3: Any) -> tuple:
+    def _norm(val: Any) -> str:
+        text = re.sub(r"\s+", " ", (val or "")).strip().lower()
+        if not text:
+            return ""
+        try:
+            return slugify_vietnamese(text)
+        except Exception:
+            return re.sub(r"\s+", " ", text).strip()
+
+    return (_norm(c1), _norm(c2), _norm(c3))
+
+
+def _product_in_scope_for_final_mapping_batch(p: Product, m: CategoryFinalMapping) -> bool:
+    """
+    SP có cần xử lý batch mapping: đang ở nguồn; hoặc raw_* còn nguồn; hoặc (có restrict + pid + đã ở đích).
+    """
+    cur = {
+        "product_id": p.product_id,
+        "category": p.category,
+        "subcategory": p.subcategory,
+        "sub_subcategory": p.sub_subcategory,
+    }
+    if _row_matches_single_final_mapping_source(cur, m):
+        return True
+    r1 = (getattr(p, "raw_category", None) or "").strip()
+    r2 = (getattr(p, "raw_subcategory", None) or "").strip()
+    r3 = (getattr(p, "raw_sub_subcategory", None) or "").strip()
+    if r1 and r2 and r3:
+        raw_d = {"product_id": p.product_id, "category": r1, "subcategory": r2, "sub_subcategory": r3}
+        if _row_matches_single_final_mapping_source(raw_d, m):
+            return True
+    rset = restrict_product_ids_set_from_value(getattr(m, "restrict_product_ids", None))
+    if rset is not None and (p.product_id or "").strip() in rset:
+        t_cur = _norm_triple_cat_values(p.category, p.subcategory, p.sub_subcategory)
+        t_to = _norm_triple_cat_values(m.to_category, m.to_subcategory, m.to_sub_subcategory)
+        if t_cur == t_to:
+            return True
+    t_cur = _norm_triple_cat_values(p.category, p.subcategory, p.sub_subcategory)
+    t_to = _norm_triple_cat_values(m.to_category, m.to_subcategory, m.to_sub_subcategory)
+    if t_cur == t_to and p.category_id is None:
+        return True
+    return False
+
+
+def _build_cat3_triple_name_lookup(db: Session) -> Dict[str, int]:
+    """Tên hiển thị c1\\x1fc2\\x1fc3 (chữ thường) → id Category cấp 3."""
+    from app.models.category import Category as _Cat
+
+    rows = db.query(_Cat.id, _Cat.parent_id, _Cat.level, _Cat.name).all()
+    by_id = {r.id: r for r in rows}
+    out: Dict[str, int] = {}
+    for r in rows:
+        if r.level != 3:
+            continue
+        c3n = (r.name or "").strip()
+        if not c3n:
+            continue
+        p2 = by_id.get(r.parent_id)
+        if not p2 or p2.level != 2:
+            continue
+        p1 = by_id.get(p2.parent_id)
+        if not p1 or p1.level != 1:
+            continue
+        c1n = (p1.name or "").strip()
+        c2n = (p2.name or "").strip()
+        if not c1n or not c2n:
+            continue
+        out[f"{c1n.lower()}\x1f{c2n.lower()}\x1f{c3n.lower()}"] = r.id
+    return out
+
+
+def _sync_product_category_id_from_taxonomy(
+    p: Product,
+    triple_idx: Dict[str, int],
+    cat3_idx: Dict[str, Dict[str, int]],
+) -> None:
+    """Gán `product.category_id` theo taxonomy để /c/<cluster> và API cluster đếm đúng."""
+    c1 = (p.category or "").strip()
+    c2 = (p.subcategory or "").strip()
+    c3 = (p.sub_subcategory or "").strip()
+    if not c1 or not c2 or not c3:
+        p.category_id = None
+        return
+    key = f"{c1.lower()}\x1f{c2.lower()}\x1f{c3.lower()}"
+    cid = triple_idx.get(key)
+    if cid is None:
+        cid = _resolve_category_id_from_row(
+            {"category": p.category, "subcategory": p.subcategory, "sub_subcategory": p.sub_subcategory},
+            cat3_idx,
+        )
+    p.category_id = cid
+
+
 def batch_apply_final_mapping_to_products(db: Session, mapping: CategoryFinalMapping) -> int:
     """
     Gán trực tiếp category / subcategory / sub_subcategory trên `products` khớp *nguồn* của một CategoryFinalMapping.
@@ -576,6 +700,9 @@ def batch_apply_final_mapping_to_products(db: Session, mapping: CategoryFinalMap
     Mapping kiểu wildcard cấp 3 rỗng không đụng DB để không gộp nhầm toàn bộ L3 dưới một L2.
 
     Khớp nguồn dùng cùng logic slug như `apply_category_final_mapping_to_product`.
+
+    Đồng bộ thêm `category_id` (FK → categories cat3) để trang landing `/c/<cluster_slug>` đếm SP đúng —
+    API cluster dùng `product.category_id IN cat3_ids`, không quét theo chuỗi 3 cột.
     """
     if not (mapping.from_sub_subcategory or "").strip():
         return 0
@@ -585,6 +712,8 @@ def batch_apply_final_mapping_to_products(db: Session, mapping: CategoryFinalMap
     q = db.query(Product)
     if restrict is not None:
         q = q.filter(Product.product_id.in_(restrict))
+    triple_idx = _build_cat3_triple_name_lookup(db)
+    cat3_idx = _build_cat3_lookup_indexes(db)
     for p in q.all():
         orig = {
             "product_id": p.product_id,
@@ -592,17 +721,56 @@ def batch_apply_final_mapping_to_products(db: Session, mapping: CategoryFinalMap
             "subcategory": p.subcategory,
             "sub_subcategory": p.sub_subcategory,
         }
+        if not _product_in_scope_for_final_mapping_batch(p, mapping):
+            continue
         new_d = apply_category_final_mapping_to_product(dict(orig), mappings_one)
-        if (
+        str_changed = (
             (orig.get("category") or "").strip() != (new_d.get("category") or "").strip()
             or (orig.get("subcategory") or "").strip() != (new_d.get("subcategory") or "").strip()
             or (orig.get("sub_subcategory") or "").strip() != (new_d.get("sub_subcategory") or "").strip()
-        ):
+        )
+        if str_changed:
             p.category = new_d.get("category")
             p.subcategory = new_d.get("subcategory")
             p.sub_subcategory = new_d.get("sub_subcategory")
+        old_cid = p.category_id
+        _sync_product_category_id_from_taxonomy(p, triple_idx, cat3_idx)
+        if str_changed or p.category_id != old_cid:
             updated += 1
+    if updated > 0:
+        try:
+            from app.utils.ttl_cache import cache as ttl_cache
+
+            ttl_cache.invalidate_all()
+        except Exception:
+            pass
     return updated
+
+
+def resync_all_product_category_ids_from_display_path(db: Session, is_active_only: bool = True) -> int:
+    """
+    Gán lại `product.category_id` từ (category, subcategory, sub_subcategory) cho mọi SP.
+    Dùng khi đã đúng 3 chuỗi (vd sau mapping) nhưng `/c/<cluster_slug>` vẫn 0 do thiếu/ sai FK.
+    """
+    triple_idx = _build_cat3_triple_name_lookup(db)
+    cat3_idx = _build_cat3_lookup_indexes(db)
+    q = db.query(Product)
+    if is_active_only:
+        q = q.filter(Product.is_active.is_(True))
+    n = 0
+    for p in q.all():
+        old = p.category_id
+        _sync_product_category_id_from_taxonomy(p, triple_idx, cat3_idx)
+        if p.category_id != old:
+            n += 1
+    if n > 0:
+        try:
+            from app.utils.ttl_cache import cache as ttl_cache
+
+            ttl_cache.invalidate_all()
+        except Exception:
+            pass
+    return n
 
 
 def excel_row_to_product(row: Dict) -> Dict:
@@ -1189,12 +1357,17 @@ def prune_category_tree_empty_branches(
     tree: List[Dict[str, Any]],
     is_active: bool,
 ) -> List[Dict[str, Any]]:
-    """Ẩn nhánh có quá ít SP active (mặc định ≤10 SP không vào menu): chỉ giữ cấp có count > CATEGORY_MENU_MIN_PRODUCT_COUNT."""
+    """Ẩn nhánh theo số SP active: cấp 3 đạt ngưỡng CATEGORY_MENU_MIN_PRODUCT_COUNT mới giữ; cấp 2 chỉ giữ khi còn ít nhất một cấp 3 đạt ngưỡng (không giữ L2 chỉ vì tổng SP cả L2 lớn)."""
     try:
         min_kept = max(0, int(getattr(settings, "CATEGORY_MENU_MIN_PRODUCT_COUNT", 0)))
     except (TypeError, ValueError):
         min_kept = 0
     slug_fn = slugify_vietnamese if SLUG_AVAILABLE else (lambda x: (x or "").lower().replace(" ", "-"))
+
+    def _l3_meets_menu_min(count: int) -> bool:
+        if min_kept <= 0:
+            return count > 0
+        return count >= min_kept
 
     def _l3_sig(c3: Any) -> str:
         """Chữ ký dedupe trong một cột cấp 2 (trùng tên cấp 3 do lỗi merge)."""
@@ -1224,7 +1397,8 @@ def prune_category_tree_empty_branches(
                 n3s = (str(n3) if n3 is not None else "").strip()
                 if not n3s:
                     continue
-                if count_products_for_category_path(db, name1, name2, n3s, is_active) > min_kept:
+                cnt = count_products_for_category_path(db, name1, name2, n3s, is_active)
+                if _l3_meets_menu_min(cnt):
                     pruned_l3.append(c3)
             seen_l3: Set[str] = set()
             dedup_l3: List[Any] = []
@@ -1235,10 +1409,10 @@ def prune_category_tree_empty_branches(
                 seen_l3.add(sig)
                 dedup_l3.append(c3)
             pruned_l3 = dedup_l3
-            keep_l2 = bool(pruned_l3) or count_products_for_category_path(db, name1, name2, None, is_active) > min_kept
+            keep_l2 = bool(pruned_l3)
             if keep_l2:
                 pruned_l2.append({**c2, "children": pruned_l3})
-        keep_l1 = bool(pruned_l2) or count_products_for_category_path(db, name1, None, None, is_active) > min_kept
+        keep_l1 = bool(pruned_l2)
         if keep_l1:
             out.append({**c1, "children": pruned_l2})
     return out
@@ -1296,8 +1470,9 @@ def get_category_tree_from_products(
     - Cấp 3 (AD): Product.sub_subcategory
     Đồng thời áp category_final_mappings để hiển thị nhánh đích; và merge các nhánh đích đủ 3 cấp
     từ bảng mapping vào cây (để menu có đường dẫn đích đã khai báo).
-    Nếu hide_empty_branches=True: bỏ nhánh không đủ sản phẩm active (menu web): mặc định cần
-    count > CATEGORY_MENU_MIN_PRODUCT_COUNT (10 → ẩn nhánh ≤10 SP).
+    Nếu hide_empty_branches=True: menu web chỉ giữ cấp 3 có đủ SP active (mặc định
+    CATEGORY_MENU_MIN_PRODUCT_COUNT=10 → cần ≥10 SP trên đúng nhánh L3); cấp 2 / 1 chỉ hiện
+    khi còn ít nhất một nhánh con đạt ngưỡng — không giữ L2 “trơ” chỉ vì tổng SP cả cấp 2 lớn.
     hide_empty_branches=False: dùng cho dọn DB / resolve đường đầy đủ trước khi đếm SP.
     Trả về danh sách nested: [{ name, slug, children: [{ name, slug, children: [{ name, slug }] }] }]
     """

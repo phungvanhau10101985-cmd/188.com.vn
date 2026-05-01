@@ -1542,6 +1542,21 @@ def apply_final_mappings(db: Session = Depends(get_db)):
     return {"status": "success", "updated": total_updates}
 
 
+@router.post("/mappings-final/resync-product-category-ids")
+def resync_product_category_ids_for_clusters(
+    is_active_only: bool = Query(True),
+    db: Session = Depends(get_db),
+):
+    """
+    Đồng bộ `products.category_id` (FK → cat3 taxonomy) từ 3 cột tên trên SP.
+    Trang SEO `/c/<cluster_slug>` lọc SP theo `category_id`, không theo chuỗi — sau khi map chuỗi
+    mà chưa gán FK thì cluster vẫn 0 SP.
+    """
+    n = crud_product.resync_all_product_category_ids_from_display_path(db, is_active_only=is_active_only)
+    db.commit()
+    return {"status": "success", "products_updated": n}
+
+
 @router.get("/mappings-final/export")
 def export_final_mappings(db: Session = Depends(get_db)):
     mappings = db.query(CategoryFinalMapping).order_by(CategoryFinalMapping.created_at.asc()).all()
