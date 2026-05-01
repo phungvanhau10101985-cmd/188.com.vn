@@ -217,6 +217,40 @@ class MigrationManager:
             logger.warning(f"  _create_table_if_not_exists({table_name}): {e}")
             return False
 
+    def migrate_category_final_mappings_apply_future_imports(self) -> bool:
+        """Thêm cột apply_to_future_imports: bản ghi cũ = true (giữ hành vi); mapping tạo từ form admin = false."""
+        try:
+            from app.models.category_final_mapping import CategoryFinalMapping as CFM
+
+            inspector = inspect(engine)
+            if "category_final_mappings" not in inspector.get_table_names():
+                return True
+            cols = {c["name"] for c in inspector.get_columns("category_final_mappings")}
+            if "apply_to_future_imports" in cols:
+                return True
+            with engine.connect() as conn:
+                if IS_POSTGRESQL:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE category_final_mappings "
+                            "ADD COLUMN apply_to_future_imports BOOLEAN NOT NULL DEFAULT true"
+                        )
+                    )
+                else:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE category_final_mappings "
+                            "ADD COLUMN apply_to_future_imports INTEGER NOT NULL DEFAULT 1"
+                        )
+                    )
+                conn.commit()
+            logger.info("✅ category_final_mappings.apply_to_future_imports added (existing rows default ON)")
+            self._sync_table_columns("category_final_mappings", CFM)
+            return True
+        except Exception as e:
+            logger.error("migrate_category_final_mappings_apply_future_imports: %s", e)
+            return False
+
     def _seed_category_seo_settings_singleton(self) -> bool:
         """Hàng id=1 mặc định: không auto Gemini cho đến khi admin bật trong /admin."""
         try:
@@ -458,6 +492,8 @@ class MigrationManager:
         # 16. Mã nhúng site (GA4, GTM, Pixel, Zalo…)
         results['site_embed_codes'] = self._create_table_if_not_exists("site_embed_codes", SiteEmbedCode)
         results['site_embed_codes_sync'] = self._sync_table_columns("site_embed_codes", SiteEmbedCode)
+        # 17. category_final_mappings.apply_to_future_imports (mapping form admin = one-shot; import/cây chỉ dùng rule bật cờ)
+        results['category_final_mappings_apply_future'] = self.migrate_category_final_mappings_apply_future_imports()
 
         return results
 

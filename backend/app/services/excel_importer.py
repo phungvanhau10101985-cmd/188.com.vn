@@ -13,7 +13,7 @@ from app.crud.product import (
     excel_row_to_product,
     bulk_import_products,
     get_all_products_for_export,
-    get_category_final_mappings,
+    get_category_final_mappings_for_runtime,
     apply_category_final_mapping_to_product,
 )
 from app.core.config import settings
@@ -83,7 +83,7 @@ class ExcelImporter:
             errors = []
             warnings = []
             
-            mappings = get_category_final_mappings(self.db)
+            mappings = get_category_final_mappings_for_runtime(self.db)
 
             for i, (idx, row) in enumerate(df.iterrows()):
                 try:

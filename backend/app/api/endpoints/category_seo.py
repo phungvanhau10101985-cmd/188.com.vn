@@ -929,6 +929,7 @@ def swap_level2_level3(
         to_category=category,
         to_subcategory=sub_subcategory,
         to_sub_subcategory=subcategory,
+        apply_to_future_imports=True,
     ))
     db.commit()
 
@@ -995,6 +996,7 @@ def rename_category(
             to_category=category,
             to_subcategory=new_name,
             to_sub_subcategory="",
+            apply_to_future_imports=True,
         ))
         db.commit()
         return {
@@ -1043,6 +1045,7 @@ def rename_category(
         to_category=category,
         to_subcategory=subcategory,
         to_sub_subcategory=new_name,
+        apply_to_future_imports=True,
     ))
     db.commit()
     return {
@@ -1432,6 +1435,7 @@ def get_final_mappings(db: Session = Depends(get_db)):
                 "to_category": m.to_category,
                 "to_subcategory": m.to_subcategory,
                 "to_sub_subcategory": m.to_sub_subcategory,
+                "apply_to_future_imports": bool(getattr(m, "apply_to_future_imports", True)),
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in mappings
@@ -1451,6 +1455,7 @@ def create_final_mapping(
         to_category=payload.get("to_category"),
         to_subcategory=payload.get("to_subcategory") or "",
         to_sub_subcategory=payload.get("to_sub_subcategory") or "",
+        apply_to_future_imports=False,
     )
     existing = db.query(CategoryFinalMapping).filter(
         CategoryFinalMapping.from_category == rule.from_category,
@@ -1484,9 +1489,13 @@ def update_final_mapping(
         "to_category",
         "to_subcategory",
         "to_sub_subcategory",
+        "apply_to_future_imports",
     ]:
         if field in payload:
-            setattr(mapping, field, payload[field] or "")
+            if field == "apply_to_future_imports":
+                setattr(mapping, field, bool(payload[field]))
+            else:
+                setattr(mapping, field, payload[field] or "")
     db.commit()
     products_updated = crud_product.batch_apply_final_mapping_to_products(db, mapping)
     db.commit()
@@ -1531,6 +1540,7 @@ def export_final_mappings(db: Session = Depends(get_db)):
                 "to_category": m.to_category,
                 "to_subcategory": m.to_subcategory,
                 "to_sub_subcategory": m.to_sub_subcategory,
+                "apply_to_future_imports": bool(getattr(m, "apply_to_future_imports", True)),
             }
             for m in mappings
         ]
@@ -1556,6 +1566,7 @@ def import_final_mappings(
             to_category=r.get("to_category"),
             to_subcategory=r.get("to_subcategory") or "",
             to_sub_subcategory=r.get("to_sub_subcategory") or "",
+            apply_to_future_imports=bool(r.get("apply_to_future_imports", True)),
         )
         db.add(mapping)
         created += 1
@@ -1626,6 +1637,7 @@ def merge_level2_categories(
             to_category=category,
             to_subcategory=final_target,
             to_sub_subcategory="",
+            apply_to_future_imports=True,
         ))
     db.commit()
     
@@ -1699,6 +1711,7 @@ def merge_level3_categories(
             to_category=category,
             to_subcategory=subcategory,
             to_sub_subcategory=final_target,
+            apply_to_future_imports=True,
         ))
     db.commit()
     

@@ -38,6 +38,8 @@ type MappingItem = {
   to_category?: string | null;
   to_subcategory?: string | null;
   to_sub_subcategory?: string | null;
+  /** false = chỉ batch khi admin tạo/sửa; true = vẫn áp khi import Excel / cây danh mục */
+  apply_to_future_imports?: boolean | null;
   created_at?: string | null;
 };
 
@@ -279,6 +281,7 @@ export default function AdminDanhMucSeoPage() {
     to_category: '',
     to_subcategory: '',
     to_sub_subcategory: '',
+    apply_to_future_imports: false,
   });
   const [mappingEditId, setMappingEditId] = useState<number | null>(null);
   const [mappingJson, setMappingJson] = useState('');
@@ -659,6 +662,7 @@ export default function AdminDanhMucSeoPage() {
         to_category: '',
         to_subcategory: '',
         to_sub_subcategory: '',
+        apply_to_future_imports: false,
       });
       setMappingSourceL2Multi([]);
       setMappingSourceL3Multi([]);
@@ -687,6 +691,7 @@ export default function AdminDanhMucSeoPage() {
       to_category: mapping.to_category || '',
       to_subcategory: mapping.to_subcategory || '',
       to_sub_subcategory: mapping.to_sub_subcategory || '',
+      apply_to_future_imports: Boolean(mapping.apply_to_future_imports ?? true),
     });
   };
 
@@ -1463,6 +1468,7 @@ export default function AdminDanhMucSeoPage() {
                           <th className="text-left px-3 py-2">ID</th>
                           <th className="text-left px-3 py-2">Từ</th>
                           <th className="text-left px-3 py-2">Đến</th>
+                          <th className="text-left px-3 py-2 whitespace-nowrap">Áp import/cây</th>
                           <th className="text-left px-3 py-2">Thao tác</th>
                         </tr>
                       </thead>
@@ -1502,6 +1508,17 @@ export default function AdminDanhMucSeoPage() {
                                 )}
                               </div>
                             </td>
+                            <td className="px-3 py-2 align-top">
+                              {(r.apply_to_future_imports ?? true) ? (
+                                <span className="inline-flex rounded px-1.5 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800">
+                                  Có
+                                </span>
+                              ) : (
+                                <span className="inline-flex rounded px-1.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-600">
+                                  Không
+                                </span>
+                              )}
+                            </td>
                             <td className="px-3 py-2 space-x-2">
                               <button
                                 type="button"
@@ -1523,7 +1540,7 @@ export default function AdminDanhMucSeoPage() {
                         })}
                         {mappings.length === 0 && !mappingsLoading && (
                           <tr>
-                            <td className="px-3 py-3 text-gray-500" colSpan={4}>
+                            <td className="px-3 py-3 text-gray-500" colSpan={5}>
                               Chưa có mapping
                             </td>
                           </tr>
@@ -1539,7 +1556,7 @@ export default function AdminDanhMucSeoPage() {
                   </h3>
                   {!mappingEditId && (
                     <p className="text-xs text-gray-500 mb-4">
-                      Nguồn: chọn cấp 2 + chỉ tick những **cấp 3** muốn map; sản phẩm thuộc cùng cấp 2 nhưng **không** tick vẫn giữ danh mục cũ. Mỗi nhánh đã tick tạo một mapping; backend cập nhật **đúng** SP khớp 3 cột nguồn sang đích. Không dùng “đồng bộ” kiểu gộp cả cấp 2.
+                      Nguồn: chọn cấp 2 + chỉ tick những **cấp 3** muốn map; sản phẩm thuộc cùng cấp 2 nhưng **không** tick vẫn giữ danh mục cũ. Mỗi nhánh đã tick tạo một mapping; backend cập nhật **một lần** các sản phẩm hiện có khớp 3 cột nguồn sang đích (có thể chọn **cấp 1 đích** khác nguồn). Sản phẩm đăng sau hoặc import Excel **không** tự áp lại rule này. Không dùng “đồng bộ” kiểu gộp cả cấp 2.
                     </p>
                   )}
                   <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -1588,10 +1605,14 @@ export default function AdminDanhMucSeoPage() {
                               to_sub_subcategory: '',
                             })
                           }
-                        disabled
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                         >
-                        <option value="">{mappingForm.to_category || '-- Chọn cấp 1 --'}</option>
+                          <option value="">-- Chọn cấp 1 đích --</option>
+                          {level1Categories.map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div className="px-3 py-2 border-r border-gray-200 border-t border-gray-200">
@@ -1756,6 +1777,26 @@ export default function AdminDanhMucSeoPage() {
                       </div>
                     </div>
                   </div>
+                  {mappingEditId && (
+                    <div className="mt-4 rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2.5 text-sm">
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="mt-1 shrink-0"
+                          checked={mappingForm.apply_to_future_imports}
+                          onChange={(e) =>
+                            setMappingForm({ ...mappingForm, apply_to_future_imports: e.target.checked })
+                          }
+                        />
+                        <span>
+                          <span className="font-medium text-gray-800">Áp dụng cho import Excel và cây danh mục</span>
+                          <span className="block text-xs text-gray-600 mt-0.5">
+                            Bật: rule vẫn remap khi import và trên cây. Tắt: mapping một lần / chỉ khi đồng bộ tay (mặc định form «Tạo mapping»).
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+                  )}
                   <div className="mt-4 flex gap-2">
                     <button
                       type="button"
@@ -1781,6 +1822,7 @@ export default function AdminDanhMucSeoPage() {
                             to_category: '',
                             to_subcategory: '',
                             to_sub_subcategory: '',
+                            apply_to_future_imports: false,
                           });
                         }}
                         className="px-4 py-2 rounded-lg border border-gray-300"

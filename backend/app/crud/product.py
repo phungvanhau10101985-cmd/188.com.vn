@@ -441,8 +441,14 @@ def apply_category_transform_rules_to_product(
     return product_data
 
 
-def get_category_final_mappings(db: Session) -> List[CategoryFinalMapping]:
-    return db.query(CategoryFinalMapping).order_by(CategoryFinalMapping.created_at.asc()).all()
+def get_category_final_mappings_for_runtime(db: Session) -> List[CategoryFinalMapping]:
+    """Chỉ mapping được đánh dấu áp cho import/cây danh mục (hành vi cũ / import JSON)."""
+    return (
+        db.query(CategoryFinalMapping)
+        .filter(CategoryFinalMapping.apply_to_future_imports.is_(True))
+        .order_by(CategoryFinalMapping.created_at.asc())
+        .all()
+    )
 
 
 def apply_category_final_mapping_to_product(
@@ -1236,7 +1242,7 @@ def get_category_tree_from_products(
     mapping_lookup: Dict[tuple, CategoryFinalMapping] = {}
     final_mappings: List[CategoryFinalMapping] = []
     try:
-        final_mappings = list(get_category_final_mappings(db))
+        final_mappings = list(get_category_final_mappings_for_runtime(db))
         for m in final_mappings:
             from_c1 = _norm_map_name(m.from_category)
             from_c2 = _norm_map_name(m.from_subcategory)
