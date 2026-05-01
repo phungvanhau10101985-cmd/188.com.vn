@@ -243,6 +243,18 @@ class ApiClient {
     return taxonomyTreeV2ToCategoryLevel1(raw);
   }
 
+  /** Nhánh c1/c2/c3 có ≥1 SP (khóa \\x1f). Dùng lọc cột Nguồn khi tạo mapping. */
+  async getProductCategoryBranchKeys(options?: { isActiveOnly?: boolean }): Promise<{
+    level2_keys: string[];
+    level3_keys: string[];
+  }> {
+    const sp = new URLSearchParams();
+    if (options?.isActiveOnly === false) sp.set('is_active', 'false');
+    return this.fetch<{ level2_keys: string[]; level3_keys: string[] }>(
+      `/categories/product-branch-keys?${sp.toString()}`
+    );
+  }
+
   /** Resolve path slugs → thông tin danh mục (SEO). level2, level3 optional. */
   async getCategoryByPath(
     level1: string,

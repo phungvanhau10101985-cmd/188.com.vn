@@ -308,17 +308,28 @@ export default function AdminDanhMucSeoPage() {
     { product_id: string; name: string }[]
   >([]);
   const [mappingEditBranchProductsLoading, setMappingEditBranchProductsLoading] = useState(false);
+  /** Nhánh có ≥1 SP active (khóa c1\\x1fc2 và c1\\x1fc2\\x1fc3); rỗng = chưa tải hoặc không lọc */
+  const [productBranchL2Keys, setProductBranchL2Keys] = useState<Set<string>>(() => new Set());
+  const [productBranchL3Keys, setProductBranchL3Keys] = useState<Set<string>>(() => new Set());
 
   const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [treeData, redirectData] = await Promise.all([
+      const [treeData, redirectData, branchKeysRes] = await Promise.all([
         apiClient.getCategoryTreeV2({ isActiveOnly: false }),
         apiClient.getCategorySeoRedirects(),
+        apiClient.getProductCategoryBranchKeys({ isActiveOnly: true }).catch(() => null),
       ]);
       setTree(Array.isArray(treeData) ? treeData : []);
       setRedirects(redirectData.redirects || []);
+      if (branchKeysRes && Array.isArray(branchKeysRes.level2_keys) && branchKeysRes.level2_keys.length > 0) {
+        setProductBranchL2Keys(new Set(branchKeysRes.level2_keys));
+        setProductBranchL3Keys(new Set(branchKeysRes.level3_keys ?? []));
+      } else {
+        setProductBranchL2Keys(new Set());
+        setProductBranchL3Keys(new Set());
+      }
     } catch {
       setError('Không tải được cây taxonomy (/categories/tree-v2). Kiểm tra đã import taxonomy tại /admin/taxonomy.');
     } finally {
@@ -335,6 +346,16 @@ export default function AdminDanhMucSeoPage() {
   }, []);
 
   const level1Categories = useMemo(() => tree.map((c) => c.name), [tree]);
+  /** Cấp 1 nguồn: chỉ danh mục có ít nhất một nhánh cấp 2 đang có SP (khi đã tải được khóa từ API). */
+  const mappingSourceLevel1Options = useMemo(() => {
+    if (productBranchL2Keys.size === 0) return level1Categories;
+    const has = new Set<string>();
+    for (const k of productBranchL2Keys) {
+      const i = k.indexOf(FROM_L2_L3_SEP);
+      if (i > 0) has.add(k.slice(0, i));
+    }
+    return level1Categories.filter((n) => has.has(n));
+  }, [level1Categories, productBranchL2Keys]);
   const level2ByLevel1 = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const c1 of tree) {
@@ -390,22 +411,33 @@ export default function AdminDanhMucSeoPage() {
     );
   }
 
-  function getLevel2Options(categoryName: string) {
-    return getLevel2Categories(categoryName);
+  function getMappingSourceLevel2Options(categoryName: string) {
+    const all = getLevel2Categories(categoryName);
+    if (productBranchL2Keys.size === 0) return all;
+    const c1 = categoryName;
+    return all.filter((sub) => productBranchL2Keys.has(`${c1}${FROM_L2_L3_SEP}${sub}`));
   }
 
-  function getLevel3Options(categoryName: string, subcategoryName: string) {
-    return getLevel3Categories(categoryName, subcategoryName);
+  function getMappingSourceLevel3Options(categoryName: string, subcategoryName: string) {
+    const all = getLevel3Categories(categoryName, subcategoryName);
+    if (productBranchL3Keys.size === 0) return all;
+    const c1 = categoryName;
+    const c2 = subcategoryName;
+    return all.filter((n3) => productBranchL3Keys.has(`${c1}${FROM_L2_L3_SEP}${c2}${FROM_L2_L3_SEP}${n3}`));
   }
 
   /** Danh sách cấp 2 nguồn sau khi lọc từ khóa (giống logic cấp 3) */
   const level2OptionsFilteredForDisplay = useMemo(() => {
     if (!mappingForm.from_category) return [] as string[];
     const cat = tree.find((c) => c.name === mappingForm.from_category);
-    const opts = cat?.children?.map((c) => c.name).filter(Boolean) || [];
+    let opts = cat?.children?.map((c) => c.name).filter(Boolean) || [];
+    if (productBranchL2Keys.size > 0) {
+      const c1 = mappingForm.from_category;
+      opts = opts.filter((sub) => productBranchL2Keys.has(`${c1}${FROM_L2_L3_SEP}${sub}`));
+    }
     if (!mappingSourceL2Search.trim()) return opts;
     return opts.filter((sub) => labelMatchesTokenSearch(sub, mappingSourceL2Search));
-  }, [tree, mappingForm.from_category, mappingSourceL2Search]);
+  }, [tree, mappingForm.from_category, mappingSourceL2Search, productBranchL2Keys]);
 
   /** Cặp (cấp 2 › cấp 3): chỉ các nhánh thuộc các cấp 2 nguồn đã chọn */
   const level3PairsUnderFromCategory = useMemo(() => {
@@ -423,12 +455,16 @@ export default function AdminDanhMucSeoPage() {
         const n3 =
           typeof c3 === 'object' && c3 !== null && 'name' in c3 ? (c3 as CategoryLevel3).name : String(c3);
         if (!String(n3).trim()) continue;
+        if (productBranchL3Keys.size > 0) {
+          const l3k = `${catName}${FROM_L2_L3_SEP}${l2}${FROM_L2_L3_SEP}${n3}`;
+          if (!productBranchL3Keys.has(l3k)) continue;
+        }
         const key = `${l2}${FROM_L2_L3_SEP}${n3}`;
         out.push({ key, label: `${l2} › ${n3}` });
       }
     }
     return out.sort((a, b) => a.label.localeCompare(b.label, 'vi'));
-  }, [tree, mappingForm.from_category, mappingSourceL2Multi]);
+  }, [tree, mappingForm.from_category, mappingSourceL2Multi, productBranchL3Keys]);
 
   /** Danh sách cấp 3 hiển thị sau khi lọc từ khóa */
   const level3PairsFilteredForDisplay = useMemo(() => {
@@ -1742,7 +1778,9 @@ export default function AdminDanhMucSeoPage() {
                       <Link href="/admin/taxonomy" className="text-[#ea580c] underline">
                         /admin/taxonomy
                       </Link>
-                      ). Chuỗi gửi lên là <strong>tên hiển thị</strong> — cần khớp cột danh mục trên sản phẩm để batch cập nhật
+                      ). Cột <strong>Nguồn</strong> chỉ hiển thị nhánh cấp 1–3 có <strong>ít nhất một sản phẩm
+                      active</strong> (theo đúng tên cột danh mục trên sản phẩm); cột <strong>Đích</strong> vẫn dùng
+                      đầy đủ taxonomy. Chuỗi gửi lên là <strong>tên hiển thị</strong> — cần khớp cột danh mục trên sản phẩm để batch cập nhật
                       đúng. Nguồn: chọn cấp 2 + chỉ tick <strong>cấp 3</strong> muốn map; sản phẩm cùng cấp 2 nhưng{' '}
                       <strong>không</strong> tick vẫn giữ danh mục cũ. Ở mỗi nhánh cấp 3 đã tick, có thể (tuỳ chọn) tick
                       thêm <strong>sản phẩm cụ thể</strong> — không chọn SP nào thì map <strong>toàn bộ</strong> sản phẩm
@@ -1781,7 +1819,7 @@ export default function AdminDanhMucSeoPage() {
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                         >
                           <option value="">-- Chọn cấp 1 --</option>
-                          {level1Categories.map((cat) => (
+                          {mappingSourceLevel1Options.map((cat) => (
                             <option key={cat} value={cat}>
                               {cat}
                             </option>
@@ -1827,7 +1865,7 @@ export default function AdminDanhMucSeoPage() {
                             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                           >
                             <option value="">-- Chọn cấp 2 --</option>
-                            {getLevel2Options(mappingForm.from_category).map((sub) => (
+                            {getMappingSourceLevel2Options(mappingForm.from_category).map((sub) => (
                               <option key={sub} value={sub}>
                                 {sub}
                               </option>
@@ -1851,8 +1889,10 @@ export default function AdminDanhMucSeoPage() {
                             <div className="max-h-52 overflow-y-auto border border-gray-200 rounded-lg p-2 space-y-1.5 bg-white">
                               {!mappingForm.from_category ? (
                                 <p className="text-xs text-gray-400">Chọn cấp 1 trước</p>
-                              ) : getLevel2Options(mappingForm.from_category).length === 0 ? (
-                                <p className="text-xs text-gray-400">Không có cấp 2</p>
+                              ) : getMappingSourceLevel2Options(mappingForm.from_category).length === 0 ? (
+                                <p className="text-xs text-gray-400">
+                                  Không có cấp 2 có sản phẩm (hoặc chưa khớp taxonomy)
+                                </p>
                               ) : level2OptionsFilteredForDisplay.length === 0 ? (
                                 <p className="text-xs text-gray-400">Không có danh mục khớp từ khóa</p>
                               ) : (
@@ -1905,7 +1945,10 @@ export default function AdminDanhMucSeoPage() {
                               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                             >
                               <option value="">-- Chọn cấp 3 --</option>
-                              {getLevel3Options(mappingForm.from_category, mappingForm.from_subcategory).map((sub) => (
+                              {getMappingSourceLevel3Options(
+                                mappingForm.from_category,
+                                mappingForm.from_subcategory
+                              ).map((sub) => (
                                 <option key={sub} value={sub}>
                                   {sub}
                                 </option>
@@ -1984,7 +2027,9 @@ export default function AdminDanhMucSeoPage() {
                                   Chọn ít nhất một danh mục cấp 2 — chỉ hiển thị cấp 3 thuộc các cấp 2 đã chọn
                                 </p>
                               ) : level3PairsUnderFromCategory.length === 0 ? (
-                                <p className="text-xs text-gray-400">Không có cấp 3 trong các cấp 2 đã chọn</p>
+                                <p className="text-xs text-gray-400">
+                                  Không có cấp 3 có sản phẩm trong các cấp 2 đã chọn (hoặc chưa khớp tên taxonomy)
+                                </p>
                               ) : level3PairsFilteredForDisplay.length === 0 ? (
                                 <p className="text-xs text-gray-400">Không có danh mục khớp từ khóa</p>
                               ) : (

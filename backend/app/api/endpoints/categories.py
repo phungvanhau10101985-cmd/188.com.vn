@@ -94,6 +94,18 @@ def read_category_tree_v2(is_active_only: bool = True):
     return ttl_cache.get_or_fetch(key, _TREE_V2_TTL, lambda: _fetch_category_tree_v2(is_active_only))
 
 
+@router.get("/product-branch-keys")
+def read_product_category_branch_keys(
+    is_active: bool = Query(True, description="Chỉ đếm sản phẩm đang active"),
+    db: Session = Depends(get_db),
+):
+    """
+    Các nhánh (c1/c2/c3) có ít nhất một sản phẩm — dùng lọc UI chọn nguồn mapping.
+    Khóa tách bằng U+001F (\\x1f) giống admin /admin/danh-muc-seo.
+    """
+    return crud_product.get_product_category_branch_keys(db, is_active=is_active)
+
+
 @router.get("/from-products/by-path")
 def read_category_by_path(
     level1: str = Query(..., description="Slug danh mục cấp 1"),

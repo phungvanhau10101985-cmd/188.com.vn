@@ -1101,6 +1101,34 @@ def get_products(
     }
 
 
+def get_product_category_branch_keys(db: Session, is_active: bool = True) -> Dict[str, List[str]]:
+    """
+    Nhánh có ít nhất một sản phẩm (chuỗi khớp cột category / subcategory / sub_subcategory).
+    - level2_keys: "c1\\x1fc2"
+    - level3_keys: "c1\\x1fc2\\x1fc3" (chỉ khi cấp 3 không rỗng)
+    """
+    sep = "\x1f"
+    q = db.query(Product.category, Product.subcategory, Product.sub_subcategory)
+    if is_active:
+        q = q.filter(Product.is_active.is_(True))
+    q = q.filter(
+        Product.category.isnot(None),
+        sql_func.trim(Product.category) != "",
+    )
+    level2: Set[str] = set()
+    level3: Set[str] = set()
+    for cat, sub, subsub in q.distinct().all():
+        c1 = (cat or "").strip()
+        c2 = (sub or "").strip()
+        c3 = (subsub or "").strip()
+        if not c1 or not c2:
+            continue
+        level2.add(f"{c1}{sep}{c2}")
+        if c3:
+            level3.add(f"{c1}{sep}{c2}{sep}{c3}")
+    return {"level2_keys": sorted(level2), "level3_keys": sorted(level3)}
+
+
 def count_products_for_category_path(
     db: Session,
     name1: str,
