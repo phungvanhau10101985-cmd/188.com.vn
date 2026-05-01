@@ -109,6 +109,9 @@ export default function HomePageClient({
   const pageFromUrl = Number(searchParams.get('page') || 1);
   const currentPage = Number.isFinite(pageFromUrl) && pageFromUrl > 0 ? pageFromUrl : 1;
   const PAGE_SIZE = 48;
+  /** Tìm kiếm trang 1: hiện trước N SP, sau đó gọi tiếp để đủ một “trang” (PAGE_SIZE). */
+  const SEARCH_INITIAL_LIMIT = 12;
+  const [searchCatalogAppending, setSearchCatalogAppending] = useState(false);
 
   const fetchProducts = useCallback(async (filters?: any) => {
     try {
@@ -165,23 +168,42 @@ export default function HomePageClient({
 
   useEffect(() => {
     setSearchTerm(qFromUrl);
-    if (qFromUrl.trim()) {
-      (async () => {
-        try {
-          setLoading(true);
-          setError(null);
+    if (!qFromUrl.trim()) {
+      setSearchCatalogAppending(false);
+      setSearchSuggestions([]);
+      setSuggestedCategories([]);
+      setNanoaiTextProducts([]);
+      setNanoaiTextLoading(false);
+      setNanoaiTextError(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const searchApiParams = {
+      q: qFromUrl,
+      is_active: true as const,
+      shop_id: shopIdFromUrl,
+      shop_name: shopNameFromUrl,
+      pro_lower_price: proLowerFromUrl,
+      pro_high_price: proHighFromUrl,
+      min_price: parseNumberParam(minPriceFromUrl),
+      max_price: parseNumberParam(maxPriceFromUrl),
+    };
+
+    (async () => {
+      try {
+        setError(null);
+        setSearchCatalogAppending(false);
+        setLoading(true);
+
+        if (currentPage !== 1) {
           const response = await apiClient.getProducts({
-            q: qFromUrl,
+            ...searchApiParams,
             limit: PAGE_SIZE,
             skip: (currentPage - 1) * PAGE_SIZE,
-            is_active: true,
-            shop_id: shopIdFromUrl,
-            shop_name: shopNameFromUrl,
-            pro_lower_price: proLowerFromUrl,
-            pro_high_price: proHighFromUrl,
-            min_price: parseNumberParam(minPriceFromUrl),
-            max_price: parseNumberParam(maxPriceFromUrl),
           });
+          if (cancelled) return;
           if (response.redirect_path) {
             window.location.assign(response.redirect_path);
             return;
@@ -195,42 +217,104 @@ export default function HomePageClient({
             apiClient.addSearchHistory(response.applied_query).catch(() => {});
           }
           if (typeof window !== 'undefined') {
-            const payload = {
-              term: qFromUrl.trim(),
-              suggestions: latestSuggestions,
-            };
-            localStorage.setItem('latest_search_suggestions', JSON.stringify(payload));
+            localStorage.setItem(
+              'latest_search_suggestions',
+              JSON.stringify({ term: qFromUrl.trim(), suggestions: latestSuggestions }),
+            );
           }
+          setNanoaiTextProducts([]);
+          setNanoaiTextLoading(false);
+          setNanoaiTextError(null);
+          return;
+        }
 
-          const catalogTotal = response.total ?? 0;
-          if (
-            qFromUrl.trim().length >= 2 &&
-            currentPage === 1 &&
-            catalogTotal === 0
-          ) {
+        const first = await apiClient.getProducts({
+          ...searchApiParams,
+          limit: SEARCH_INITIAL_LIMIT,
+          skip: 0,
+        });
+        if (cancelled) return;
+        if (first.redirect_path) {
+          window.location.assign(first.redirect_path);
+          return;
+        }
+
+        const catalogTotal = first.total ?? 0;
+        const firstList = first.products ?? [];
+        const latestSuggestions = catalogTotal === 0 ? (first.suggested_queries ?? []) : [];
+
+        setProducts(firstList);
+        setTotalProducts(catalogTotal);
+        setSuggestedCategories(first.suggested_categories ?? []);
+        setSearchSuggestions(latestSuggestions);
+
+        if (catalogTotal > 0 && first.applied_query && first.applied_query.trim()) {
+          apiClient.addSearchHistory(first.applied_query).catch(() => {});
+        }
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(
+            'latest_search_suggestions',
+            JSON.stringify({ term: qFromUrl.trim(), suggestions: latestSuggestions }),
+          );
+        }
+
+        if (catalogTotal === 0) {
+          setNanoaiTextProducts([]);
+          setNanoaiTextError(null);
+          if (qFromUrl.trim().length >= 2 && currentPage === 1) {
             setNanoaiTextLoading(true);
-            setNanoaiTextProducts([]);
-            setNanoaiTextError(null);
             try {
               const nano = await apiClient.nanoaiTextSearch(qFromUrl.trim(), NANOAI_TEXT_SEARCH_LIMIT);
+              if (cancelled) return;
               const list = Array.isArray(nano.products) ? nano.products : [];
               setNanoaiTextProducts(list);
               if (nano.error && list.length === 0) {
                 setNanoaiTextError(nano.error);
               }
             } catch {
-              setNanoaiTextProducts([]);
-              setNanoaiTextError(null);
+              if (!cancelled) {
+                setNanoaiTextProducts([]);
+                setNanoaiTextError(null);
+              }
             } finally {
-              setNanoaiTextLoading(false);
+              if (!cancelled) setNanoaiTextLoading(false);
             }
           } else {
-            setNanoaiTextProducts([]);
             setNanoaiTextLoading(false);
-            setNanoaiTextError(null);
           }
-        } catch (err) {
-          console.error('Search error:', err);
+          return;
+        }
+
+        setNanoaiTextProducts([]);
+        setNanoaiTextLoading(false);
+        setNanoaiTextError(null);
+
+        setLoading(false);
+
+        const wantOnFirstScreen = Math.min(PAGE_SIZE, catalogTotal);
+        if (
+          firstList.length === SEARCH_INITIAL_LIMIT &&
+          catalogTotal > firstList.length &&
+          wantOnFirstScreen > firstList.length
+        ) {
+          setSearchCatalogAppending(true);
+          try {
+            const more = await apiClient.getProducts({
+              ...searchApiParams,
+              limit: wantOnFirstScreen - firstList.length,
+              skip: firstList.length,
+            });
+            if (cancelled) return;
+            if (!more.redirect_path && (more.products?.length ?? 0) > 0) {
+              setProducts((prev) => [...prev, ...(more.products ?? [])]);
+            }
+          } finally {
+            setSearchCatalogAppending(false);
+          }
+        }
+      } catch (err) {
+        console.error('Search error:', err);
+        if (!cancelled) {
           setError('Lỗi tìm kiếm sản phẩm');
           setProducts([]);
           setTotalProducts(0);
@@ -239,17 +323,18 @@ export default function HomePageClient({
           setNanoaiTextProducts([]);
           setNanoaiTextLoading(false);
           setNanoaiTextError(null);
-        } finally {
+        }
+      } finally {
+        if (!cancelled) {
           setLoading(false);
         }
-      })();
-    } else {
-      setSearchSuggestions([]);
-      setSuggestedCategories([]);
-      setNanoaiTextProducts([]);
-      setNanoaiTextLoading(false);
-      setNanoaiTextError(null);
-    }
+        setSearchCatalogAppending(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [qFromUrl, shopIdFromUrl, shopNameFromUrl, proLowerFromUrl, proHighFromUrl, minPriceFromUrl, maxPriceFromUrl, currentPage]);
 
   useEffect(() => {
@@ -611,6 +696,7 @@ export default function HomePageClient({
                   ))}
                 </div>
               ) : filteredProducts.length > 0 ? (
+                <>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
                   {filteredProducts.map((product, index) => (
                     <SimpleProductCard
@@ -622,6 +708,16 @@ export default function HomePageClient({
                     />
                   ))}
                 </div>
+                {isSearching && currentPage === 1 && searchCatalogAppending && (
+                  <p className="mt-4 flex items-center justify-center gap-2 text-sm text-gray-600" aria-live="polite">
+                    <span
+                      className="inline-block w-4 h-4 border-2 border-[#ea580c] border-t-transparent rounded-full animate-spin"
+                      aria-hidden
+                    />
+                    Đang tải thêm sản phẩm…
+                  </p>
+                )}
+                </>
               ) : (
                 <div className="space-y-6">
                   {isSearching && nanoaiTextLoading && (
