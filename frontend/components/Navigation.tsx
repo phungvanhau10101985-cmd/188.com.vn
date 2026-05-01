@@ -12,6 +12,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { useCart } from '@/features/cart/hooks/useCart';
 import type { CategoryLevel1, CategoryLevel2 } from '@/types/api';
+import { categorySegmentForUrl } from '@/lib/category-url';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 
 export interface CategoryFilter {
@@ -307,7 +308,8 @@ export default function Navigation({
                           <div className="text-xs text-gray-500">Chưa có danh mục.</div>
                         )}
                         {tree.map((level1) => {
-                          const slug1 = level1.slug || level1.name;
+                          const slug1 =
+                            categorySegmentForUrl(level1.slug) || categorySegmentForUrl(level1.name);
                           const isActive = openLevel1 === level1.name;
                           return (
                             <Link
@@ -331,8 +333,10 @@ export default function Navigation({
                       {openCategory && (
                         <div className="grid grid-cols-2 gap-3">
                           {openCategory.children.map((level2) => {
-                            const slug1 = openCategory.slug || openCategory.name;
-                            const slug2 = level2.slug || level2.name;
+                            const slug1 =
+                              categorySegmentForUrl(openCategory.slug) || categorySegmentForUrl(openCategory.name);
+                            const slug2 =
+                              categorySegmentForUrl(level2.slug) || categorySegmentForUrl(level2.name);
                             return (
                               <div
                                 key={level2ReactKey(slug1, slug2, level2.name)}
@@ -348,11 +352,14 @@ export default function Navigation({
                                   <div className="mt-1 flex flex-col gap-1">
                                     {level2.children.map((level3) => {
                                       const name3 = typeof level3 === 'object' && level3 !== null && 'name' in level3 ? (level3 as { name: string }).name : String(level3);
-                                      const slug3 = typeof level3 === 'object' && level3 !== null && 'slug' in level3 ? (level3 as { slug?: string }).slug : name3;
+                                      const slug3 =
+                                        (typeof level3 === 'object' && level3 !== null && 'slug' in level3
+                                          ? categorySegmentForUrl((level3 as { slug?: string }).slug)
+                                          : '') || categorySegmentForUrl(name3);
                                       return (
                                         <Link
                                           key={level3ReactKey(slug2, slug3 || undefined, name3)}
-                                          href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3 || name3)}`}
+                                          href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
                                           className="text-[11px] text-gray-600 hover:text-[#ea580c] truncate"
                                         >
                                           {name3}
@@ -466,7 +473,8 @@ export default function Navigation({
               Danh mục
             </span>
             {tree.map((level1) => {
-              const slug1 = level1.slug || level1.name;
+              const slug1 =
+                categorySegmentForUrl(level1.slug) || categorySegmentForUrl(level1.name);
               const isL1Active = effectiveFilter.category === level1.name;
               const isOpen = openLevel1 === level1.name;
               const hasChildren = level1.children && level1.children.length > 0;
@@ -547,8 +555,10 @@ export default function Navigation({
           >
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-1.5">
               {openCategory.children.map((level2: CategoryLevel2) => {
-                const slug2 = level2.slug || level2.name;
-                const slug1 = openCategory.slug || openCategory.name;
+                const slug2 =
+                  categorySegmentForUrl(level2.slug) || categorySegmentForUrl(level2.name);
+                const slug1 =
+                  categorySegmentForUrl(openCategory.slug) || categorySegmentForUrl(openCategory.name);
                 const isL2Active =
                   effectiveFilter.subcategory === level2.name &&
                   effectiveFilter.category === openCategory.name;
@@ -577,7 +587,10 @@ export default function Navigation({
                       <div className="px-3 pb-2 pt-0 flex flex-wrap gap-1">
                         {level2.children!.map((level3) => {
                           const name3 = typeof level3 === 'object' && level3 !== null && 'name' in level3 ? (level3 as { name: string }).name : String(level3);
-                          const slug3 = typeof level3 === 'object' && level3 !== null && 'slug' in level3 ? (level3 as { slug?: string }).slug : name3;
+                          const slug3 =
+                            (typeof level3 === 'object' && level3 !== null && 'slug' in level3
+                              ? categorySegmentForUrl((level3 as { slug?: string }).slug)
+                              : '') || categorySegmentForUrl(name3);
                           const isL3Active =
                             effectiveFilter.sub_subcategory === name3 &&
                             effectiveFilter.subcategory === level2.name &&
@@ -585,7 +598,7 @@ export default function Navigation({
                           return (
                             <Link
                               key={level3ReactKey(slug2, slug3 || undefined, name3)}
-                              href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3 || name3)}`}
+                              href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
                               onClick={() => setOpenLevel1(null)}
                               className={`inline-block text-[11px] px-2 py-1 rounded ${
                                 isL3Active

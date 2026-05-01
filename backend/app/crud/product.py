@@ -1321,6 +1321,29 @@ def get_category_tree_from_products(
     return result
 
 
+# Cùng key/TTL với GET /categories/from-products — by-path phải dùng đúng cây menu đã cache,
+# tránh lệch (menu còn mà trang /danh-muc/... báo không tồn tại).
+_CATEGORY_MENU_TREE_TTL_SEC = 60.0
+_CATEGORY_MENU_TREE_KEY_ACTIVE = "category_tree_v1:from_products:active=true"
+_CATEGORY_MENU_TREE_KEY_ALL = "category_tree_v1:from_products:active=false"
+
+
+def _build_menu_tree_session(is_active: bool) -> List[Dict[str, Any]]:
+    from app.db.session import SessionLocal
+    db = SessionLocal()
+    try:
+        return get_category_tree_from_products(db, is_active=is_active, hide_empty_branches=True)
+    finally:
+        db.close()
+
+
+def get_cached_menu_category_tree(is_active: bool = True) -> List[Dict[str, Any]]:
+    """Cây danh mục trên menu (đã lọc theo CATEGORY_MENU_MIN_PRODUCT_COUNT). Cache process 60s, đồng bộ với from-products."""
+    from app.utils.ttl_cache import cache as ttl_cache
+    key = _CATEGORY_MENU_TREE_KEY_ACTIVE if is_active else _CATEGORY_MENU_TREE_KEY_ALL
+    return ttl_cache.get_or_fetch(key, _CATEGORY_MENU_TREE_TTL_SEC, lambda: _build_menu_tree_session(is_active))
+
+
 def get_category_by_path(
     db: Session,
     level1_slug: str,
@@ -1336,7 +1359,7 @@ def get_category_by_path(
     level2_slug = _normalize_category_url_slug(level2_slug)
     level3_slug = _normalize_category_url_slug(level3_slug)
 
-    tree = get_category_tree_from_products(db, is_active=is_active, hide_empty_branches=True)
+    tree = get_cached_menu_category_tree(is_active)
     bc = resolve_category_breadcrumb_names_from_tree(tree, level1_slug, level2_slug, level3_slug)
     if not bc:
         return None
