@@ -12,6 +12,7 @@ const ADMIN_LINKS = [
   { href: '/admin/danh-muc-seo', label: 'Tổng hợp danh mục SEO' },
   { href: '/admin/taxonomy', label: 'Cây danh mục (taxonomy)' },
   { href: '/admin/search-mappings', label: 'Từ khóa mapping' },
+  { href: '/admin/search-cache', label: 'Cache & thống kê tìm kiếm' },
   { href: '/admin/members', label: 'Quản lý thành viên' },
   { href: '/admin/loyalty', label: 'Cấu hình thành viên' },
   { href: '/admin/bank-accounts', label: 'Cấu hình nạp tiền' },

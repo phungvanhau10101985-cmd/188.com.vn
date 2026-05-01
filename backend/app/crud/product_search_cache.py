@@ -8,8 +8,9 @@ import hashlib
 import json
 import random
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.product_search_cache import ProductSearchCache
@@ -109,3 +110,59 @@ def set_cached_result(
         db.commit()
     except Exception:
         db.rollback()
+
+
+def count_cache_by_state(db: Session) -> Tuple[int, int, int]:
+    """(tổng, còn hạn, hết hạn)."""
+    now = datetime.now(timezone.utc)
+    total = int(db.query(func.count(ProductSearchCache.cache_key)).scalar() or 0)
+    active = int(
+        db.query(func.count(ProductSearchCache.cache_key))
+        .filter(ProductSearchCache.expires_at > now)
+        .scalar()
+        or 0
+    )
+    expired = int(
+        db.query(func.count(ProductSearchCache.cache_key))
+        .filter(ProductSearchCache.expires_at <= now)
+        .scalar()
+        or 0
+    )
+    return total, active, expired
+
+
+def list_cache_rows_admin(db: Session, skip: int, limit: int) -> List[ProductSearchCache]:
+    return (
+        db.query(ProductSearchCache)
+        .order_by(ProductSearchCache.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+def clear_product_search_cache(db: Session, *, expired_only: bool) -> int:
+    """Xóa hàng cache; trả về số dòng đã xóa."""
+    now = datetime.now(timezone.utc)
+    q = db.query(ProductSearchCache)
+    if expired_only:
+        q = q.filter(ProductSearchCache.expires_at <= now)
+    deleted = q.delete(synchronize_session=False)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return int(deleted or 0)
+
+
+def hint_from_cached_json(response_json: str) -> Optional[str]:
+    try:
+        d = json.loads(response_json)
+        if isinstance(d, dict):
+            h = d.get("normalized_query") or d.get("applied_query")
+            if h and str(h).strip():
+                return str(h).strip()[:500]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return None

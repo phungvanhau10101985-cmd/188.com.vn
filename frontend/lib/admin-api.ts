@@ -502,6 +502,56 @@ export const adminSearchMappingAPI = {
     }),
 };
 
+export interface SearchKeywordStatItem {
+  keyword: string;
+  search_count: number;
+  avg_result_count: number;
+  ai_processed_count: number;
+}
+
+export interface SearchKeywordStatsResponse {
+  days: number;
+  total_distinct_keywords: number;
+  items: SearchKeywordStatItem[];
+}
+
+export interface ProductSearchCacheRowItem {
+  cache_key: string;
+  expires_at: string;
+  created_at: string | null;
+  response_size_bytes: number;
+  hint_query: string | null;
+}
+
+export interface ProductSearchCacheListResponse {
+  total_rows: number;
+  active_rows: number;
+  expired_rows: number;
+  items: ProductSearchCacheRowItem[];
+}
+
+export const adminSearchCacheAPI = {
+  getKeywordStats: (params?: { days?: number; skip?: number; limit?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.days != null) sp.set('days', String(params.days));
+    sp.set('skip', String(params?.skip ?? 0));
+    sp.set('limit', String(params?.limit ?? 100));
+    return fetchAdmin<SearchKeywordStatsResponse>(`/admin/search-analytics/keywords?${sp.toString()}`);
+  },
+
+  getProductCache: (params?: { skip?: number; limit?: number }) => {
+    const sp = new URLSearchParams();
+    sp.set('skip', String(params?.skip ?? 0));
+    sp.set('limit', String(params?.limit ?? 50));
+    return fetchAdmin<ProductSearchCacheListResponse>(`/admin/product-search-cache?${sp.toString()}`);
+  },
+
+  clearProductCache: (scope: 'expired' | 'all') =>
+    fetchAdmin<{ deleted: number; scope: string }>(`/admin/product-search-cache?scope=${scope}`, {
+      method: 'DELETE',
+    }),
+};
+
 export const adminOrderAPI = {
   getAllOrders: (params?: { status?: string; limit?: number; skip?: number }) => {
     const sp = new URLSearchParams();

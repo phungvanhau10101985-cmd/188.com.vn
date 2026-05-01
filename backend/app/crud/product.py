@@ -1088,7 +1088,11 @@ def prune_category_tree_empty_branches(
     tree: List[Dict[str, Any]],
     is_active: bool,
 ) -> List[Dict[str, Any]]:
-    """Ẩn nhánh không có sản phẩm: chỉ giữ cấp có ít nhất một SP active (menu /from-products)."""
+    """Ẩn nhánh có quá ít SP active (mặc định ≤10 SP không vào menu): chỉ giữ cấp có count > CATEGORY_MENU_MIN_PRODUCT_COUNT."""
+    try:
+        min_kept = max(0, int(getattr(settings, "CATEGORY_MENU_MIN_PRODUCT_COUNT", 0)))
+    except (TypeError, ValueError):
+        min_kept = 0
     slug_fn = slugify_vietnamese if SLUG_AVAILABLE else (lambda x: (x or "").lower().replace(" ", "-"))
 
     def _l3_sig(c3: Any) -> str:
@@ -1119,7 +1123,7 @@ def prune_category_tree_empty_branches(
                 n3s = (str(n3) if n3 is not None else "").strip()
                 if not n3s:
                     continue
-                if count_products_for_category_path(db, name1, name2, n3s, is_active) > 0:
+                if count_products_for_category_path(db, name1, name2, n3s, is_active) > min_kept:
                     pruned_l3.append(c3)
             seen_l3: Set[str] = set()
             dedup_l3: List[Any] = []
@@ -1130,10 +1134,10 @@ def prune_category_tree_empty_branches(
                 seen_l3.add(sig)
                 dedup_l3.append(c3)
             pruned_l3 = dedup_l3
-            keep_l2 = bool(pruned_l3) or count_products_for_category_path(db, name1, name2, None, is_active) > 0
+            keep_l2 = bool(pruned_l3) or count_products_for_category_path(db, name1, name2, None, is_active) > min_kept
             if keep_l2:
                 pruned_l2.append({**c2, "children": pruned_l3})
-        keep_l1 = bool(pruned_l2) or count_products_for_category_path(db, name1, None, None, is_active) > 0
+        keep_l1 = bool(pruned_l2) or count_products_for_category_path(db, name1, None, None, is_active) > min_kept
         if keep_l1:
             out.append({**c1, "children": pruned_l2})
     return out
@@ -1191,7 +1195,8 @@ def get_category_tree_from_products(
     - Cấp 3 (AD): Product.sub_subcategory
     Đồng thời áp category_final_mappings để hiển thị nhánh đích; và merge các nhánh đích đủ 3 cấp
     từ bảng mapping vào cây (để menu có đường dẫn đích đã khai báo).
-    Nếu hide_empty_branches=True: bỏ nhánh không có sản phẩm active (menu web).
+    Nếu hide_empty_branches=True: bỏ nhánh không đủ sản phẩm active (menu web): mặc định cần
+    count > CATEGORY_MENU_MIN_PRODUCT_COUNT (10 → ẩn nhánh ≤10 SP).
     hide_empty_branches=False: dùng cho dọn DB / resolve đường đầy đủ trước khi đếm SP.
     Trả về danh sách nested: [{ name, slug, children: [{ name, slug, children: [{ name, slug }] }] }]
     """

@@ -1,7 +1,9 @@
 # backend/app/api/endpoints/admin.py
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import case, func
 from typing import List, Optional
 from app.db.session import get_db
 from app import crud, models
@@ -10,6 +12,15 @@ from app.schemas.admin import AdminLogin, AdminTokenResponse
 from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate, BankAccountResponse
 from app.schemas.user import UserResponse, UserAdminUpdate, AdminUsersListResponse
 from app.schemas.search_mapping import SearchMappingListResponse, SearchMappingResponse, SearchMappingCreateRequest
+from app.schemas.search_cache_admin import (
+    ClearProductSearchCacheResponse,
+    ProductSearchCacheListResponse,
+    ProductSearchCacheRowItem,
+    SearchKeywordStatItem,
+    SearchKeywordStatsResponse,
+)
+from app.crud import product_search_cache as product_search_cache_crud
+from app.models.search_log import SearchLog
 from app.schemas.site_embed_code import (
     SiteEmbedCodeAdminItem,
     SiteEmbedCodeCreate,
@@ -231,6 +242,108 @@ def admin_delete_search_mapping(
         raise HTTPException(status_code=404, detail="Không tìm thấy mapping")
     db.delete(mapping)
     db.commit()
+
+
+# ========== THỐNG KÊ TÌM KIẾM + CACHE GET /products/?q=... ==========
+@router.get("/search-analytics/keywords", response_model=SearchKeywordStatsResponse)
+def admin_search_keyword_stats(
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(get_current_admin),
+    days: int = Query(30, ge=1, le=366, description="Chỉ tính log trong N ngày gần đây"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """
+    Từ khóa được tìm nhiều (theo bảng search_logs — mỗi lần gọi get_products có q thường ghi 1 dòng).
+    """
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    base_filter = SearchLog.created_at >= since
+
+    total_distinct = (
+        db.query(func.count(func.distinct(SearchLog.keyword)))
+        .filter(base_filter)
+        .scalar()
+        or 0
+    )
+
+    ai_sum = func.coalesce(
+        func.sum(case((SearchLog.ai_processed.is_(True), 1), else_=0)), 0
+    )
+    rows = (
+        db.query(
+            SearchLog.keyword,
+            func.count(SearchLog.id).label("cnt"),
+            func.avg(SearchLog.result_count).label("avg_res"),
+            ai_sum.label("ai_cnt"),
+        )
+        .filter(base_filter)
+        .group_by(SearchLog.keyword)
+        .order_by(func.count(SearchLog.id).desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+    items = [
+        SearchKeywordStatItem(
+            keyword=r[0],
+            search_count=int(r[1] or 0),
+            avg_result_count=float(r[2] or 0),
+            ai_processed_count=int(r[3] or 0),
+        )
+        for r in rows
+    ]
+    return SearchKeywordStatsResponse(
+        days=days,
+        total_distinct_keywords=int(total_distinct),
+        items=items,
+    )
+
+
+@router.get("/product-search-cache", response_model=ProductSearchCacheListResponse)
+def admin_list_product_search_cache(
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(get_current_admin),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Danh sách cache JSON (khóa là hash; cột gợi ý lấy từ normalized_query/applied_query trong JSON nếu có)."""
+    total_rows, active_rows, expired_rows = product_search_cache_crud.count_cache_by_state(db)
+    rows = product_search_cache_crud.list_cache_rows_admin(db, skip=skip, limit=limit)
+    items = []
+    for row in rows:
+        body = row.response_json or ""
+        items.append(
+            ProductSearchCacheRowItem(
+                cache_key=row.cache_key,
+                expires_at=row.expires_at,
+                created_at=row.created_at,
+                response_size_bytes=len(body.encode("utf-8")),
+                hint_query=product_search_cache_crud.hint_from_cached_json(body),
+            )
+        )
+    return ProductSearchCacheListResponse(
+        total_rows=total_rows,
+        active_rows=active_rows,
+        expired_rows=expired_rows,
+        items=items,
+    )
+
+
+@router.delete("/product-search-cache", response_model=ClearProductSearchCacheResponse)
+def admin_clear_product_search_cache(
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(get_current_admin),
+    scope: str = Query(
+        "expired",
+        description="expired = chỉ xóa đã hết hạn; all = xóa toàn bộ cache",
+    ),
+):
+    s = (scope or "").strip().lower()
+    if s not in ("expired", "all"):
+        raise HTTPException(status_code=400, detail='scope phải là "expired" hoặc "all"')
+    deleted = product_search_cache_crud.clear_product_search_cache(db, expired_only=(s == "expired"))
+    return ClearProductSearchCacheResponse(deleted=deleted, scope=s)
 
 
 # ========== MÃ NHÚNG (Google, Facebook, Zalo, GA4, GTM, Pixel...) ==========

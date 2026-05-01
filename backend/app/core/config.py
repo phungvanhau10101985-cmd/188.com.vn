@@ -80,6 +80,10 @@ class Settings:
         self.DATABASE_POOL_RECYCLE: int = int(os.getenv("DATABASE_POOL_RECYCLE", "3600"))
         self.DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "60"))
         
+        # Cây danh mục /menu (GET /categories/from-products): chỉ giữ nhánh có số SP active **lớn hơn** ngưỡng này.
+        # 0 = hành vi cũ (ẩn nhánh 0 SP). Mặc định 10 → hiển thị khi có ≥11 SP; ≤10 SP thì ẩn khỏi menu/sitemap dùng cây này.
+        self.CATEGORY_MENU_MIN_PRODUCT_COUNT: int = int(os.getenv("CATEGORY_MENU_MIN_PRODUCT_COUNT", "10"))
+        
         # ========================
         # SECURITY CONFIGURATION
         # ========================
