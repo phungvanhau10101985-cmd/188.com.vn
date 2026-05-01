@@ -52,35 +52,40 @@ export default function AccountPage() {
 
   return (
     <>
-      {/* Mobile layout */}
+      {/* Mobile layout — chỉ md:hidden; desktop giữ khối hidden md:block bên dưới */}
       <div className="md:hidden bg-white">
-        <div className="px-4 py-3 border-b border-gray-200">
-          <h1 className="text-lg font-bold text-gray-900">{user?.full_name || 'Tài khoản'}</h1>
-          <Link href="/account/profile" className="text-xs text-blue-600 font-medium">
-            Chỉnh sửa thông tin cá nhân
+        <div className="px-4 pb-3 pt-1 border-b border-gray-100">
+          <h1 className="text-base font-bold leading-tight text-gray-900">{user?.full_name || 'Tài khoản'}</h1>
+          {user?.phone ? (
+            <p className="mt-0.5 text-xs tabular-nums text-gray-500">{user.phone}</p>
+          ) : null}
+          <Link
+            href="/account/profile"
+            className="mt-2 inline-flex min-h-[40px] items-center text-xs font-semibold text-[#ea580c] active:opacity-80"
+          >
+            Chỉnh sửa thông tin cá nhân →
           </Link>
         </div>
 
-        {/* Tabs quản lý đơn hàng */}
-        <div className="px-2 py-1.5 border-b border-gray-200">
-          <div className="grid grid-cols-6 gap-1 mb-1">
+        {/* Tabs đơn hàng — cuộn ngang, tránh lưới 6 cột quá chật */}
+        <div className="border-b border-gray-100 bg-gray-50/80 px-2 py-2">
+          <p className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Đơn hàng</p>
+          <div
+            className="flex snap-x snap-mandatory gap-2 overflow-x-auto pb-1 scrollbar-hide -mx-1 px-1"
+            role="navigation"
+            aria-label="Lối tắt trạng thái đơn hàng"
+          >
             {tabWithCounts.map((t) => (
               <Link
                 key={t.key}
                 href={t.key === 'all' ? '/account/orders' : `/account/orders?tab=${encodeURIComponent(t.key)}`}
-                className="text-[11px] font-medium border-b-2 border-transparent text-gray-600 text-center leading-tight hover:text-gray-900 min-h-[28px] pt-2"
+                className="flex min-h-[44px] shrink-0 snap-start items-center gap-1.5 rounded-xl border border-gray-200/90 bg-white px-3 py-2 text-left shadow-sm ring-1 ring-black/[0.03] active:scale-[0.98] transition-transform"
               >
-                {t.label}
-              </Link>
-            ))}
-          </div>
-          <div className="grid grid-cols-6 gap-1">
-            {tabWithCounts.map((t) => (
-              <div key={t.key} className="flex justify-center">
-                <span className="inline-flex items-center justify-center min-w-[18px] h-4 px-1 rounded-full bg-orange-500 text-white text-[10px] font-bold">
+                <span className="max-w-[6.5rem] text-xs font-medium leading-tight text-gray-900">{t.label}</span>
+                <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-[#ea580c] px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
                   {t.count}
                 </span>
-              </div>
+              </Link>
             ))}
           </div>
         </div>

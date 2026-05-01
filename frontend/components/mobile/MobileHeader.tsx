@@ -74,6 +74,14 @@ export default function MobileHeader({
     pathname.startsWith('/products/') &&
     pathname.split('/').filter(Boolean).length === 2;
 
+  const isDaXemPage =
+    pathname === '/da-xem' || (pathname != null && pathname.replace(/\/$/, '') === '/da-xem');
+
+  const isAccountPage = Boolean(pathname?.startsWith('/account'));
+
+  const isFavoritesPage =
+    pathname === '/favorites' || (pathname != null && pathname.replace(/\/$/, '') === '/favorites');
+
   const activeRelatedTab = parseRelatedTabFromSearch(searchParams.get('rt'));
 
   const setRelatedTab = (id: ProductRelatedTabId) => {
@@ -186,8 +194,12 @@ export default function MobileHeader({
 
   /** Trang chủ không nút Back — header gọn: logo nhỏ hơn một chút, thanh search pill một khối. */
   const compactHomeChrome = isHome && !showHeaderBack;
-  /** Trang chi tiết SP: có Back + ví dụ nhiều icon — chrome gọn hơn, logo như trang chủ compact. */
-  const compactChrome = compactHomeChrome || isProductDetailPage;
+  /** Trang chi tiết SP, đã xem, khu cá nhân, hoặc yêu thích: chrome gọn. */
+  const compactChrome =
+    compactHomeChrome || isProductDetailPage || isDaXemPage || isAccountPage || isFavoritesPage;
+  /** Hàng nút + ô tìm: co chỗ cho ô tìm dài hơn. */
+  const tightToolbar =
+    isProductDetailPage || isDaXemPage || isAccountPage || isFavoritesPage;
 
   const chipClass =
     'flex-shrink-0 text-[11px] leading-tight font-medium text-white px-2 py-1 rounded-full bg-white/18 hover:bg-white/28 whitespace-nowrap border border-white/25 shadow-sm active:scale-[0.98] transition-transform';
@@ -229,18 +241,20 @@ export default function MobileHeader({
                 width={200}
                 height={40}
                 className={`w-auto object-contain block ${compactChrome ? 'h-8' : 'h-10 sm:h-11'}`}
-                priority={compactHomeChrome && !isProductDetailPage}
+                priority={compactHomeChrome && !isProductDetailPage && !isDaXemPage && !isAccountPage && !isFavoritesPage}
               />
             </Link>
           </div>
 
           {/* Danh mục + ô tìm kiếm (pill) + icon nhanh */}
-          <div className={`flex items-center gap-1 relative z-10 pt-0.5 ${isProductDetailPage ? 'gap-1' : 'gap-1.5'}`}>
+          <div
+            className={`flex items-center gap-1 relative z-10 pt-0.5 ${tightToolbar ? 'gap-1' : 'gap-1.5'} ${isDaXemPage || isAccountPage || isFavoritesPage ? 'pb-1' : ''}`}
+          >
             {showHeaderBack && (
               <button
                 type="button"
                 onClick={() => router.back()}
-                className={isProductDetailPage ? iconBtnCondensed : iconBtn}
+                className={tightToolbar ? iconBtnCondensed : iconBtn}
                 aria-label="Quay lại"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -252,7 +266,7 @@ export default function MobileHeader({
             <button
               type="button"
               onClick={() => setCategoryPanelOpen((o) => !o)}
-              className={`${isProductDetailPage ? iconBtnCondensed : iconBtn} ${categoryPanelOpen ? '!bg-white/35 ring-1 ring-white/40' : ''}`}
+              className={`${tightToolbar ? iconBtnCondensed : iconBtn} ${categoryPanelOpen ? '!bg-white/35 ring-1 ring-white/40' : ''}`}
               aria-label="Danh mục"
               aria-expanded={categoryPanelOpen}
             >
@@ -263,7 +277,7 @@ export default function MobileHeader({
 
             <form
               onSubmit={handleSearch}
-              className={`flex-1 min-w-0 flex items-stretch rounded-xl bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] overflow-hidden touch-manipulation ${isProductDetailPage ? 'h-10 min-h-[40px]' : 'h-11'}`}
+              className={`flex-1 min-w-0 flex items-stretch rounded-xl bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] overflow-hidden touch-manipulation ${tightToolbar ? 'h-10 min-h-[40px]' : 'h-11'}`}
             >
               <input
                 id={mobileImageInputId}
@@ -286,19 +300,19 @@ export default function MobileHeader({
                   placeholder={
                     compactHomeChrome
                       ? 'Tìm trên 188.COM.VN…'
-                      : isProductDetailPage
+                      : tightToolbar
                         ? 'Tìm trên 188…'
                         : 'Tìm sản phẩm…'
                   }
                   autoComplete="off"
                   enterKeyHint="search"
-                  className={`flex-1 min-w-0 h-full bg-transparent border-0 text-gray-900 placeholder:text-gray-500 focus:ring-0 focus:outline-none ${isProductDetailPage ? 'text-sm' : 'text-[15px]'}`}
+                  className={`flex-1 min-w-0 h-full bg-transparent border-0 text-gray-900 placeholder:text-gray-500 focus:ring-0 focus:outline-none ${tightToolbar ? 'text-sm' : 'text-[15px]'}`}
                 />
               </div>
               <div className="flex shrink-0 self-stretch divide-x divide-gray-200/90 border-l border-gray-100">
                 <label
                   htmlFor={mobileImageInputId}
-                  className={`flex items-center justify-center text-gray-500 hover:text-[#ea580c] hover:bg-orange-50/90 active:bg-orange-100 cursor-pointer transition-colors ${isProductDetailPage ? 'w-10 min-h-[40px]' : 'w-11 min-h-[44px]'}`}
+                  className={`flex items-center justify-center text-gray-500 hover:text-[#ea580c] hover:bg-orange-50/90 active:bg-orange-100 cursor-pointer transition-colors ${tightToolbar ? 'w-10 min-h-[40px]' : 'w-11 min-h-[44px]'}`}
                   aria-label="Tìm bằng ảnh"
                   title="Tìm theo ảnh (NanoAI)"
                 >
@@ -309,7 +323,7 @@ export default function MobileHeader({
                 </label>
                 <button
                   type="submit"
-                  className={`flex items-center justify-center bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-orange-800 transition-colors ${isProductDetailPage ? 'w-10 min-h-[40px]' : 'w-11 min-h-[44px]'}`}
+                  className={`flex items-center justify-center bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-orange-800 transition-colors ${tightToolbar ? 'w-10 min-h-[40px]' : 'w-11 min-h-[44px]'}`}
                   aria-label="Tìm trên 188"
                 >
                   <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -319,12 +333,14 @@ export default function MobileHeader({
               </div>
             </form>
 
-            <Link href="/da-xem" className={isProductDetailPage ? iconBtnCondensed : iconBtn} aria-label="Đã xem" title="Đã xem">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-              </svg>
-            </Link>
+            {!isDaXemPage && (
+              <Link href="/da-xem" className={tightToolbar ? iconBtnCondensed : iconBtn} aria-label="Đã xem" title="Đã xem">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+              </Link>
+            )}
 
             {/* Trang chủ: thanh nút thoáng — thông báo đã có ở bottom nav */}
             {isAuthenticated && !compactChrome && (
@@ -335,7 +351,7 @@ export default function MobileHeader({
               </Link>
             )}
 
-            <Link href="/cart" className={`${isProductDetailPage ? iconBtnCondensed : iconBtn} relative`} aria-label="Giỏ hàng" title="Giỏ hàng">
+            <Link href="/cart" className={`${tightToolbar ? iconBtnCondensed : iconBtn} relative`} aria-label="Giỏ hàng" title="Giỏ hàng">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
               </svg>
@@ -373,7 +389,7 @@ export default function MobileHeader({
                 </button>
               ))}
             </div>
-          ) : (
+          ) : isDaXemPage || isAccountPage || isFavoritesPage ? null : (
             <div
               className="flex items-center gap-1 mt-1 pb-1 overflow-x-auto scrollbar-hide min-h-[26px] -mx-0.5 px-0.5"
               role="navigation"

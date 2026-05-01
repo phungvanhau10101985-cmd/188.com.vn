@@ -749,15 +749,15 @@ export default function HomePageClient({
           </div>
         )}
 
-        {/* Cùng shop_name (Excel cột H) với shop của tối đa 8 SP xem gần; random khi không gửi seed */}
+        {/* Cùng shop_name (Excel cột H) với shop của tối đa 8 SP xem gần; random mỗi lần mở khi không gửi seed */}
         {!hasFilterParams && (
           <section className="mb-8" id="san-pham-cung-shop">
           <h2 className="text-base font-bold text-gray-900 mb-2 border-b-2 border-[#ea580c] pb-1 w-fit">
             SẢN PHẨM CÙNG SHOP BẠN VỪA XEM
           </h2>
           <p className="text-sm text-gray-600 mt-1">
-            Gợi ý từ shop (shop_name trong dữ liệu import) của các sản phẩm bạn vừa xem — thứ tự xáo ngẫu
-            nhiên mỗi lần tải trang chủ.
+            Gợi ý từ shop (shop_name trong dữ liệu import) dựa trên tối đa 8 sản phẩm bạn xem gần nhất — thứ tự
+            được trộn ngẫu nhiên mỗi lần mở trang chủ.
           </p>
           <div className="mt-4 min-h-[min(28rem,75vh)]">
             {sameShopLoading ? (

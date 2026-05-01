@@ -69,17 +69,17 @@ export default function DaXemPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-3 pt-3 pb-6 md:px-4 md:py-8">
-        <div className="mb-4 md:mb-6">
-          <h1 className="text-lg font-bold tracking-tight text-gray-900 md:text-2xl">
+      <div className="max-w-7xl mx-auto px-3 pb-5 pt-2 sm:px-3 md:px-4 md:py-8 md:pb-6 md:pt-3">
+        <div className="mb-3 md:mb-6">
+          <h1 className="text-base font-bold tracking-tight text-gray-900 sm:text-lg md:text-2xl">
             Sản phẩm đã xem
           </h1>
-          <p className="mt-0.5 text-sm text-gray-600 md:mt-1 md:text-base">
+          <p className="mt-0.5 text-xs text-gray-600 sm:text-sm md:mt-1 md:text-base">
             Đã xem gần đây ({items.length})
           </p>
           {/* Mobile: gọn — mở rộng khi cần; desktop: luôn hiện đủ */}
-          <details className="mt-2 rounded-lg border border-gray-200 bg-white open:[&_summary_svg]:rotate-180 md:hidden">
-            <summary className="cursor-pointer list-none px-3 py-2.5 text-sm font-medium text-gray-800 [&::-webkit-details-marker]:hidden">
+          <details className="mt-1.5 rounded-lg border border-gray-200 bg-white open:[&_summary_svg]:rotate-180 md:hidden">
+            <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-gray-800 [&::-webkit-details-marker]:hidden">
               <span className="flex items-center justify-between gap-2">
                 Lưu ý đồng bộ danh sách
                 <svg className="h-4 w-4 shrink-0 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -97,20 +97,35 @@ export default function DaXemPage() {
         </div>
 
         {loading ? (
-          <div className="py-8 text-center text-gray-500 md:py-12">Đang tải...</div>
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-2 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">
+            {[...Array(6)].map((_, i) => (
+              <div
+                key={i}
+                className="overflow-hidden rounded-lg border border-gray-100 bg-white shadow-sm md:rounded-xl"
+                aria-hidden
+              >
+                <div className="aspect-square animate-pulse bg-gray-200" />
+                <div className="space-y-2 p-2.5 sm:p-3 md:p-4">
+                  <div className="h-3.5 animate-pulse rounded bg-gray-200 sm:h-4 md:h-5" />
+                  <div className="h-3 w-1/2 animate-pulse rounded bg-gray-200" />
+                  <div className="h-4 w-2/5 animate-pulse rounded bg-gray-200 md:h-5" />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : items.length === 0 ? (
-          <div className="rounded-xl border border-gray-100 bg-white p-8 text-center shadow md:p-12">
-            <p className="text-gray-500 mb-4">Bạn chưa xem sản phẩm nào.</p>
+          <div className="rounded-xl border border-gray-100 bg-white p-6 text-center shadow sm:p-8 md:p-12">
+            <p className="mb-3 text-sm text-gray-500 md:mb-4 md:text-base">Bạn chưa xem sản phẩm nào.</p>
             <Link
               href="/"
-              className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-[#ea580c] px-5 py-2.5 font-medium text-white hover:bg-[#c2410c] md:min-h-0"
+              className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-[#ea580c] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#c2410c] md:min-h-0 md:text-base"
             >
               Khám phá sản phẩm
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">
-            {items.map((item) => {
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-2 sm:gap-3 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">
+            {items.map((item, index) => {
               const data = item.product_data || {};
               const name = data.name || `Sản phẩm #${item.product_id}`;
               const price = data.price ?? 0;
@@ -119,33 +134,42 @@ export default function DaXemPage() {
               const imageUrl = getOptimizedImage(data.main_image, { fallbackStrategy: 'local' });
 
               return (
-                <div
+                <article
                   key={item.id}
-                  className="bg-white rounded-xl shadow border border-gray-100 overflow-hidden hover:shadow-md transition-shadow"
+                  className="overflow-hidden rounded-lg border border-gray-100 bg-white shadow-sm transition-shadow hover:shadow-md md:rounded-xl md:shadow"
                 >
-                  <Link href={href} className="block aspect-square bg-gray-100 relative">
-                    <Image src={imageUrl} alt={name} fill sizes="(min-width: 1280px) 20vw, (min-width: 1024px) 25vw, (min-width: 640px) 33vw, 100vw" className="object-cover" />
+                  <Link href={href} className="relative block aspect-square bg-gray-100" aria-label={`Xem ${name}`}>
+                    <Image
+                      src={imageUrl}
+                      alt=""
+                      fill
+                      priority={index === 0}
+                      sizes="(max-width: 767px) 46vw, (min-width: 1280px) 20vw, (min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw"
+                      className="object-cover"
+                    />
                   </Link>
-                  <div className="p-3 md:p-4">
-                    <Link href={href}>
-                      <h3 className="text-sm font-medium leading-snug text-gray-900 line-clamp-2 hover:text-[#ea580c] md:text-base">
+                  <div className="flex flex-col p-2.5 sm:p-3 md:p-4">
+                    <Link href={href} className="min-h-0 flex-1">
+                      <h2 className="line-clamp-2 text-xs font-medium leading-snug text-gray-900 hover:text-[#ea580c] sm:text-sm md:text-base">
                         {name}
-                      </h3>
+                      </h2>
                     </Link>
                     {data.brand_name && (
-                      <p className="mt-0.5 text-xs text-gray-500 md:text-sm">{data.brand_name}</p>
+                      <p className="mt-0.5 line-clamp-1 text-[11px] text-gray-500 sm:text-xs md:text-sm">
+                        {data.brand_name}
+                      </p>
                     )}
-                    <p className="mt-2 text-base font-bold text-[#ea580c] md:text-lg">
+                    <p className="mt-1.5 break-words text-sm font-bold tabular-nums text-[#ea580c] sm:mt-2 md:text-lg">
                       {formatVnd(price)}
                     </p>
                     <Link
                       href={href}
-                      className="mt-3 flex min-h-[44px] w-full items-center justify-center rounded-lg bg-[#ea580c] px-3 py-2 text-center text-sm font-medium text-white hover:bg-orange-600 md:min-h-0"
+                      className="mt-2 inline-flex min-h-[44px] items-center justify-center rounded-md text-xs font-semibold text-[#ea580c] underline decoration-[#ea580c]/50 underline-offset-2 hover:decoration-[#ea580c] md:mt-3 md:min-h-0 md:w-full md:rounded-lg md:bg-[#ea580c] md:px-3 md:py-2 md:text-center md:text-sm md:font-medium md:text-white md:no-underline md:hover:bg-orange-600"
                     >
                       Xem chi tiết
                     </Link>
                   </div>
-                </div>
+                </article>
               );
             })}
           </div>

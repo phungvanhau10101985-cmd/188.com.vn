@@ -12,6 +12,11 @@ interface DesktopImageSearchPopoverProps {
   panelZClass?: string;
   /** Mount sau lazy-load: mở panel ngay (giữ UX một lần bấm máy ảnh). */
   initialOpen?: boolean;
+  /**
+   * overlay-right: nút tuyệt đối trong ô input (Header / Navigation).
+   * inline-end: nút xếp flex cạnh kính lúp — tránh ô hẹp bị pr-24 nuốt hết, hai icon nằm hai đầu.
+   */
+  triggerPosition?: 'overlay-right' | 'inline-end';
 }
 
 /**
@@ -22,6 +27,7 @@ export default function DesktopImageSearchPopover({
   triggerButtonClassName = 'text-gray-500 hover:text-[#ea580c] p-1 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ea580c]/40',
   panelZClass = 'z-[100]',
   initialOpen = false,
+  triggerPosition = 'overlay-right',
 }: DesktopImageSearchPopoverProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -151,7 +157,14 @@ export default function DesktopImageSearchPopover({
         aria-hidden
         onChange={onFileChange}
       />
-      <div ref={anchorRef} className="absolute right-11 top-1/2 -translate-y-1/2">
+      <div
+        ref={anchorRef}
+        className={
+          triggerPosition === 'inline-end'
+            ? 'relative inline-flex shrink-0 items-center'
+            : 'absolute right-11 top-1/2 -translate-y-1/2'
+        }
+      >
         <button
           type="button"
           onClick={() => {

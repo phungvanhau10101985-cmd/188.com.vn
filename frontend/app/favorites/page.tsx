@@ -95,25 +95,27 @@ export default function FavoritesPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-3 pt-3 pb-6 md:px-4 md:py-8">
-        <div className="mb-4 md:mb-6">
-          <h1 className="text-lg font-bold tracking-tight text-gray-900 md:text-2xl">Sản phẩm yêu thích</h1>
-          <p className="mt-0.5 text-sm text-gray-600 md:mt-1 md:text-base">
+      <div className="max-w-7xl mx-auto px-3 pb-5 pt-2 sm:px-3 md:px-4 md:py-8 md:pb-6 md:pt-3">
+        <div className="mb-3 md:mb-6">
+          <h1 className="text-base font-bold tracking-tight text-gray-900 sm:text-lg md:text-2xl">
+            Sản phẩm yêu thích
+          </h1>
+          <p className="mt-0.5 text-xs text-gray-600 sm:text-sm md:mt-1 md:text-base">
             Đã thích ({items.length})
           </p>
         </div>
 
         {error && (
-          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-700 md:mb-4 md:px-4 md:py-3 md:text-sm">
+          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 md:mb-4 md:px-4 md:py-3 md:text-sm">
             {error}
           </div>
         )}
 
         {loading ? (
-          <div className="py-8 text-center text-gray-500 md:py-12">Đang tải...</div>
+          <div className="py-6 text-center text-sm text-gray-500 md:py-12 md:text-base">Đang tải...</div>
         ) : items.length === 0 ? (
-          <div className="rounded-xl border border-gray-100 bg-white p-8 text-center shadow md:p-12">
-            <p className="text-gray-500 mb-4">Bạn chưa thích sản phẩm nào.</p>
+          <div className="rounded-xl border border-gray-100 bg-white p-6 text-center shadow sm:p-8 md:p-12">
+            <p className="mb-3 text-sm text-gray-500 md:mb-4 md:text-base">Bạn chưa thích sản phẩm nào.</p>
             <Link
               href="/"
               className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-[#ea580c] px-5 py-2.5 font-medium text-white hover:bg-[#c2410c] md:min-h-0"

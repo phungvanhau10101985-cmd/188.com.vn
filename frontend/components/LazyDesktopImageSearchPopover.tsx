@@ -3,24 +3,15 @@
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 
-const DesktopImageSearchPopover = dynamic(
-  () => import('@/components/DesktopImageSearchPopover'),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="absolute right-11 top-1/2 -translate-y-1/2">
-        <span
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-black/[0.06]"
-          aria-hidden
-        />
-      </div>
-    ),
-  }
-);
+const DesktopImageSearchPopover = dynamic(() => import('@/components/DesktopImageSearchPopover'), {
+  ssr: false,
+  loading: () => null,
+});
 
 type Props = {
   triggerButtonClassName?: string;
   panelZClass?: string;
+  triggerPosition?: 'overlay-right' | 'inline-end';
 };
 
 const DEFAULT_TRIGGER =
@@ -33,8 +24,13 @@ const DEFAULT_TRIGGER =
 export default function LazyDesktopImageSearchPopover({
   triggerButtonClassName = DEFAULT_TRIGGER,
   panelZClass,
+  triggerPosition = 'overlay-right',
 }: Props) {
   const [active, setActive] = useState(false);
+  const triggerWrapClass =
+    triggerPosition === 'inline-end'
+      ? 'relative inline-flex shrink-0 items-center'
+      : 'absolute right-11 top-1/2 -translate-y-1/2';
 
   useEffect(() => {
     const w = typeof window !== 'undefined' ? window : null;
@@ -55,7 +51,7 @@ export default function LazyDesktopImageSearchPopover({
 
   if (!active) {
     return (
-      <div className="absolute right-11 top-1/2 -translate-y-1/2">
+      <div className={triggerWrapClass}>
         <button
           type="button"
           onClick={() => setActive(true)}
@@ -83,6 +79,7 @@ export default function LazyDesktopImageSearchPopover({
     <DesktopImageSearchPopover
       triggerButtonClassName={triggerButtonClassName}
       panelZClass={panelZClass}
+      triggerPosition={triggerPosition}
       initialOpen
     />
   );

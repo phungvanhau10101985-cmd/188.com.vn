@@ -22,6 +22,7 @@ import { trackEvent } from '@/lib/analytics';
 import { persistRelatedFiltersFromProduct } from '@/lib/product-related-tabs';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
+import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
 
 interface ProductDetailClientProps {
   initialProduct: Product;
@@ -309,9 +310,9 @@ export default function ProductDetailClient({
           className={`sticky top-0 left-0 right-0 z-[30] backdrop-blur border-b border-gray-100 ${isStickyPinned ? 'bg-[#ea580c]' : 'bg-white/95'}`}
         >
           <div className="max-w-7xl mx-auto px-4 py-0">
-            <div className="grid grid-cols-[224px_1fr_224px] items-center gap-3">
-              <div className={`${isStickyPinned ? '' : 'pointer-events-none opacity-0'}`}>
-                <div className="flex items-center gap-3">
+            <div className="grid grid-cols-[minmax(12rem,17.33rem)_minmax(0,1fr)_9.33rem] items-center gap-2 md:gap-3 xl:grid-cols-[minmax(13.33rem,21.33rem)_minmax(0,1fr)_9.33rem]">
+              <div className={`min-w-0 ${isStickyPinned ? '' : 'pointer-events-none opacity-0'}`}>
+                <div className="flex min-w-0 items-center gap-2">
                   <div
                     className="relative"
                     onMouseEnter={handleMenuEnter}
@@ -401,22 +402,36 @@ export default function ProductDetailClient({
                       </div>
                     )}
                   </div>
-                  <form onSubmit={handleStickySearch} className="flex-shrink-0 ml-6">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={stickySearchTerm}
-                        onChange={(e) => setStickySearchTerm(e.target.value)}
-                        placeholder="Tìm kiếm..."
-                        className="w-40 pl-3 pr-9 py-2 text-xs rounded-lg border-0 bg-white focus:outline-none focus:ring-2 focus:ring-orange-200"
+                  <form
+                    onSubmit={handleStickySearch}
+                    className="relative ml-2 flex w-full min-w-[8rem] flex-1 items-stretch overflow-hidden rounded-lg bg-white focus-within:ring-2 focus-within:ring-orange-200 lg:ml-3"
+                  >
+                    <input
+                      type="text"
+                      value={stickySearchTerm}
+                      onChange={(e) => setStickySearchTerm(e.target.value)}
+                      placeholder="Tìm kiếm..."
+                      autoComplete="off"
+                      className="min-w-0 flex-1 border-0 bg-transparent py-1.5 pl-2.5 pr-1.5 text-xs text-gray-800 placeholder:text-gray-500 focus:outline-none focus:ring-0"
+                    />
+                    <div className="flex shrink-0 items-center gap-0.5 border-l border-gray-100/80 bg-white px-1">
+                      <LazyDesktopImageSearchPopover
+                        panelZClass="z-[110]"
+                        triggerPosition="inline-end"
+                        triggerButtonClassName="text-gray-500 hover:text-[#ea580c] p-0.5 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ea580c]/40 [&_svg]:h-4 [&_svg]:w-4"
                       />
                       <button
                         type="submit"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-[#ea580c]"
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-500 hover:text-[#ea580c]"
                         aria-label="Tìm kiếm"
                       >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                          />
                         </svg>
                       </button>
                     </div>
@@ -460,10 +475,10 @@ export default function ProductDetailClient({
               </div>
 
               <div className={`justify-self-end ${isStickyPinned ? '' : 'pointer-events-none opacity-0'}`}>
-                <div className="flex items-center gap-6 px-3 h-[32px]">
+                <div className="flex h-5 items-center gap-4 px-2">
                   <Link href="/da-xem" className="flex items-center text-white/90 hover:text-white transition-colors group">
-                    <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                       </svg>
@@ -472,16 +487,16 @@ export default function ProductDetailClient({
 
                   {isAuthenticated ? (
                     <Link href="/account" className="flex items-center text-white/90 hover:text-white transition-colors group">
-                      <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
-                        <span className="text-white font-semibold text-sm">
+                      <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                        <span className="text-white font-semibold text-[11px]">
                           {user?.full_name?.charAt(0) || 'U'}
                         </span>
                       </div>
                     </Link>
                   ) : (
                     <Link href={loginHref} className="flex items-center text-white/90 hover:text-white transition-colors group">
-                      <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                         </svg>
                       </div>
@@ -489,8 +504,8 @@ export default function ProductDetailClient({
                   )}
 
                   <Link href="/favorites" className="flex items-center text-white/90 hover:text-white transition-colors group relative">
-                    <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors relative">
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors relative">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                       </svg>
                       {favoriteCount > 0 && (
@@ -502,8 +517,8 @@ export default function ProductDetailClient({
                   </Link>
 
                   <Link href="/cart" className="flex items-center text-white/90 hover:text-white transition-colors group relative">
-                    <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors relative">
-                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors relative">
+                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
                       </svg>
                       {displayCartCount > 0 && (
