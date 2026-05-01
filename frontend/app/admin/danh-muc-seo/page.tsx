@@ -906,7 +906,10 @@ export default function AdminDanhMucSeoPage() {
     setProcessing(true);
     try {
       const result = await apiClient.applyFinalMappings();
-      setSuccessMessage(`✅ Đã cập nhật ${result.updated} sản phẩm`);
+      const rs = result.category_ids_resynced ?? 0;
+      setSuccessMessage(
+        `✅ Đã cập nhật ${result.updated} sản phẩm theo mapping; đồng bộ category_id (cho /c/) cho ${rs} sản phẩm.`
+      );
     } finally {
       setProcessing(false);
     }
@@ -950,8 +953,9 @@ export default function AdminDanhMucSeoPage() {
     try {
       const res = await apiClient.importFinalMappings({ mappings: parsed.mappings || [], replace: mappingReplace });
       const pu = res.products_updated ?? 0;
+      const rs = res.category_ids_resynced ?? 0;
       setSuccessMessage(
-        `✅ Import xong (${res.created} mapping${pu ? `; ${pu} sản phẩm khớp nguồn cấp 3 đã cập nhật` : ''}).`
+        `✅ Import xong (${res.created} mapping${pu ? `; ${pu} SP đã map chuỗi` : ''}${rs ? `; ${rs} SP gán category_id` : ''}).`
       );
       await loadMappings();
     } finally {

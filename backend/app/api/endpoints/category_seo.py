@@ -1538,8 +1538,14 @@ def apply_final_mappings(db: Session = Depends(get_db)):
     total_updates = 0
     for m in mappings:
         total_updates += crud_product.batch_apply_final_mapping_to_products(db, m)
+    # Landing `/c/<slug>` lọc SP theo category_id; đồng bộ FK toàn bộ SP active khỏi lệch chuỗi/mapping cũ.
+    category_ids_resynced = crud_product.resync_all_product_category_ids_from_display_path(db, is_active_only=True)
     db.commit()
-    return {"status": "success", "updated": total_updates}
+    return {
+        "status": "success",
+        "updated": total_updates,
+        "category_ids_resynced": category_ids_resynced,
+    }
 
 
 @router.post("/mappings-final/resync-product-category-ids")
@@ -1607,8 +1613,15 @@ def import_final_mappings(
     products_updated = 0
     for m in db.query(CategoryFinalMapping).order_by(CategoryFinalMapping.id.asc()).all():
         products_updated += crud_product.batch_apply_final_mapping_to_products(db, m)
+    category_ids_resynced = crud_product.resync_all_product_category_ids_from_display_path(db, is_active_only=True)
     db.commit()
-    return {"status": "success", "created": created, "replaced": replace, "products_updated": products_updated}
+    return {
+        "status": "success",
+        "created": created,
+        "replaced": replace,
+        "products_updated": products_updated,
+        "category_ids_resynced": category_ids_resynced,
+    }
 
 
 @router.post("/merge-level2")

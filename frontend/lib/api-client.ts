@@ -1035,7 +1035,11 @@ class ApiClient {
   }
 
   /** Áp dụng mapping cho sản phẩm cũ */
-  async applyFinalMappings(): Promise<{ status: string; updated: number }> {
+  async applyFinalMappings(): Promise<{
+    status: string;
+    updated: number;
+    category_ids_resynced?: number;
+  }> {
     return this.fetch(`/category-seo/mappings-final/apply`, { method: 'POST' });
   }
 
@@ -1063,6 +1067,7 @@ class ApiClient {
     created: number;
     replaced: boolean;
     products_updated?: number;
+    category_ids_resynced?: number;
   }> {
     const query = new URLSearchParams();
     if (payload.replace) query.append('replace', 'true');
