@@ -18,6 +18,25 @@ import { trackEvent } from '@/lib/analytics';
 import ProductVariantModal from '@/app/products/[slug]/components/ProductVariantModal/ProductVariantModal';
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
 
+const FEED_SOUND_SESSION_KEY = '188-shop-video-feed-sound-on';
+
+function readPersistedFeedSound(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return sessionStorage.getItem(FEED_SOUND_SESSION_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function persistFeedSound(on: boolean) {
+  try {
+    sessionStorage.setItem(FEED_SOUND_SESSION_KEY, on ? '1' : '0');
+  } catch {
+    /* private mode / quota */
+  }
+}
+
 function productHref(p: Product): string {
   const s = (p.slug || '').trim();
   if (s) return `/products/${encodeURIComponent(s)}`;
@@ -278,7 +297,7 @@ export default function ShopVideoFeedClient() {
   const [favoriteBusyId, setFavoriteBusyId] = useState<number | null>(null);
   const [variantModalProduct, setVariantModalProduct] = useState<Product | null>(null);
   const [displayStockByVariant, setDisplayStockByVariant] = useState<Record<string, number>>({});
-  /** Tiếng chỉ cho slide đang xem; nút loa render trên overlay (z-35) */
+  /** Tiếng: giữ khi vuốt sang clip khác; đọc/ghi session để không phải bật lại mỗi video */
   const [feedSoundOn, setFeedSoundOn] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -286,8 +305,16 @@ export default function ShopVideoFeedClient() {
   const emptyPageFetchAttempts = useRef(0);
 
   useEffect(() => {
-    setFeedSoundOn(false);
-  }, [activeIndex]);
+    if (readPersistedFeedSound()) setFeedSoundOn(true);
+  }, []);
+
+  const toggleFeedSound = useCallback(() => {
+    setFeedSoundOn((v) => {
+      const next = !v;
+      persistFeedSound(next);
+      return next;
+    });
+  }, []);
 
   const fetchPage = useCallback(
     async (offset: number, nextSeed: number | undefined, append: boolean) => {
@@ -623,7 +650,7 @@ export default function ShopVideoFeedClient() {
               />
             </div>
             {index === activeIndex ? (
-              <FeedSoundToggle soundOn={feedSoundOn} onToggle={() => setFeedSoundOn((v) => !v)} />
+              <FeedSoundToggle soundOn={feedSoundOn} onToggle={toggleFeedSound} />
             ) : null}
             <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-30 bg-gradient-to-t from-black via-black/92 to-transparent p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-16">
               <div className="pointer-events-auto">

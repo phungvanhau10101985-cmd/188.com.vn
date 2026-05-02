@@ -10,6 +10,7 @@ import Navigation from '@/components/Navigation';
 import MobileHeader from '@/components/mobile/MobileHeader';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import BackToTopButton from '@/components/BackToTopButton';
+import FloatingShopVideoFeedButton from '@/components/FloatingShopVideoFeedButton';
 import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 
 const CartAddedPopup = dynamic(() => import('@/components/CartAddedPopup'), { ssr: false });
@@ -237,10 +238,13 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       {/* Footer: hiển thị cả mobile và desktop */}
       {!isShopVideoFeedPage && <Footer />}
       {!isShopVideoFeedPage && <BackToTopButton />}
-      <PwaInstallPrompt />
-      <CartAddedPopup />
       {/* Mobile: Bottom nav - ẩn trên trang auth để dropdown chọn tháng không bị che, kéo được tháng 12 */}
       {showMobileBottomNav && <MobileBottomNav notificationCount={0} />}
+      {!isAuthPage && !isShopVideoFeedPage && !pathname?.startsWith('/admin') && (
+        <FloatingShopVideoFeedButton />
+      )}
+      <PwaInstallPrompt />
+      <CartAddedPopup />
       {!isAuthPage && <BirthGenderSalePromptModal />}
     </div>
   );

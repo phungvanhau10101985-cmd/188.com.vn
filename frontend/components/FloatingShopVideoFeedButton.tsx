@@ -1,0 +1,61 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useDraggableFloatingOffset } from '@/hooks/useDraggableFloatingOffset';
+
+const VIDEO_FEED_HREF = '/luot-video-cung-shop';
+
+function pathNorm(p: string | null | undefined): string {
+  if (p == null) return '/';
+  const t = p.replace(/\/$/, '').trim();
+  return t === '' ? '/' : t;
+}
+
+/**
+ * Icon nổi cố định viewport → vào feed lướt video (desktop + mobile).
+ * Ẩn trên trang feed và trang đăng nhập; tránh chồng bottom nav mobile.
+ */
+export default function FloatingShopVideoFeedButton() {
+  const pathname = usePathname();
+  const { dragStyle, onPointerDown, onClickCapture, cursorClass } = useDraggableFloatingOffset(
+    '188-fab-video-offset',
+    true
+  );
+  const norm = pathNorm(pathname);
+
+  if (norm === VIDEO_FEED_HREF || pathname?.startsWith('/auth/') || pathname?.startsWith('/admin')) {
+    return null;
+  }
+
+  const isProductDetail = Boolean(pathname?.match(/^\/products\/[^/]+$/));
+  /** Giống AppShell `showMobileBottomNav` — chỉ mobile có thanh dưới (Desktop nav ẩn md:hidden) */
+  const reserveMobileBottom =
+    !pathname?.startsWith('/auth/') && !isProductDetail && norm !== VIDEO_FEED_HREF;
+
+  /** Không dùng arbitrary `max(...)` có dấu phẩy — Tailwind có thể bỏ qua → mất `bottom`, nút “biến mất” */
+  /** Cạnh trái để không chồng BackToTopButton (phải). */
+  const positionClass = reserveMobileBottom
+    ? 'bottom-28 left-4 md:bottom-10 md:left-8'
+    : 'bottom-8 left-4 md:bottom-10 md:left-8';
+
+  return (
+    <Link
+      data-188-video-fab
+      href={VIDEO_FEED_HREF}
+      prefetch={false}
+      draggable={false}
+      onDragStart={(e) => e.preventDefault()}
+      style={dragStyle}
+      onPointerDown={onPointerDown}
+      onClickCapture={onClickCapture}
+      className={`fixed z-[70] flex h-14 w-14 pointer-events-auto items-center justify-center rounded-full bg-gradient-to-br from-[#ea580c] to-[#c2410c] text-white shadow-[0_4px_14px_rgba(234,88,12,0.45)] ring-2 ring-white transition hover:scale-[1.06] hover:shadow-xl active:scale-[0.97] md:h-[3.75rem] md:w-[3.75rem] ${positionClass} ${cursorClass}`}
+      aria-label="Lướt xem video shop"
+      title="Lướt xem video shop"
+    >
+      <svg className="h-7 w-7 md:h-8 md:w-8 drop-shadow-sm" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        <path d="M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z" />
+      </svg>
+    </Link>
+  );
+}

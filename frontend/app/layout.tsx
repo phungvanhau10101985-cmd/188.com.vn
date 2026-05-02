@@ -8,6 +8,7 @@ import { CartProvider } from "@/features/cart/hooks/useCart";
 import { FavoriteProvider } from "@/features/favorites/hooks/useFavorites";
 import AppShell from "@/components/AppShell";
 import SiteEmbedsRoot from "@/components/SiteEmbedsRoot";
+import DraggableThirdPartyFloaters from "@/components/DraggableThirdPartyFloaters";
 import AnalyticsTracker from "@/components/AnalyticsTracker";
 import { fetchPublicSiteEmbeds } from "@/lib/site-embeds-public";
 import { ToastProvider } from "@/components/ToastProvider";
@@ -148,6 +149,7 @@ export default async function RootLayout({
     >
       <body className="antialiased font-sans bg-[#fafafa] text-gray-900 min-h-screen" suppressHydrationWarning>
         <SiteEmbedsRoot embeds={siteEmbeds} />
+        <DraggableThirdPartyFloaters />
         {/* Global Providers + Header/Footer xuyên suốt */}
         <ToastProvider>
           <AuthProvider>
