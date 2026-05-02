@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -17,6 +17,7 @@ import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/
 import { trackEvent } from '@/lib/analytics';
 import ProductVariantModal from '@/app/products/[slug]/components/ProductVariantModal/ProductVariantModal';
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
+import { SHOP_VIDEO_START_SLUG_PARAM } from '@/lib/shop-video-feed';
 
 const FEED_SOUND_SESSION_KEY = '188-shop-video-feed-sound-on';
 
@@ -279,6 +280,11 @@ export default function ShopVideoFeedClient() {
       ? Number(seedFromUrl)
       : undefined;
 
+  const startSlugForFeed = useMemo(() => {
+    const raw = searchParams.get(SHOP_VIDEO_START_SLUG_PARAM)?.trim();
+    return raw && raw !== '' ? raw : undefined;
+  }, [searchParams]);
+
   const [products, setProducts] = useState<Product[]>([]);
   const [total, setTotal] = useState(0);
   const [seed, setSeed] = useState<number | null>(parsedSeed ?? null);
@@ -303,6 +309,8 @@ export default function ShopVideoFeedClient() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const emptyPageFetchAttempts = useRef(0);
+  /** Cuộn về slide 0 khi mở feed kèm start_slug (chỉ một lần sau mỗi lần đổi query). */
+  const didApplyStartSlugScroll = useRef(false);
 
   useEffect(() => {
     if (readPersistedFeedSound()) setFeedSoundOn(true);
@@ -317,10 +325,27 @@ export default function ShopVideoFeedClient() {
   }, []);
 
   const fetchPage = useCallback(
-    async (offset: number, nextSeed: number | undefined, append: boolean) => {
+    async (
+      offset: number,
+      nextSeed: number | undefined,
+      append: boolean,
+      opts?: { startSlug?: string }
+    ) => {
       const res = await apiClient.getProductsSameShopAsRecentViews(15, offset, nextSeed ?? null, true);
       const rawBatch = res.products || [];
-      const playable = rawBatch.filter((p) => hasPlayableVideoLink(p.video_link));
+      let playable = rawBatch.filter((p) => hasPlayableVideoLink(p.video_link));
+
+      if (!append && opts?.startSlug) {
+        try {
+          const sp = await apiClient.getProductBySlug(opts.startSlug);
+          if (sp && hasPlayableVideoLink(sp.video_link)) {
+            playable = [sp, ...playable.filter((p) => p.id !== sp.id)];
+          }
+        } catch {
+          /* slug không hợp lệ / lỗi mạng — dùng feed mặc định */
+        }
+      }
+
       if (append) {
         setProducts((prev) => {
           const seen = new Set(prev.map((p) => p.id));
@@ -343,7 +368,7 @@ export default function ShopVideoFeedClient() {
     setError(null);
     setApiOffset(0);
     emptyPageFetchAttempts.current = 0;
-    fetchPage(0, parsedSeed, false)
+    fetchPage(0, parsedSeed, false, startSlugForFeed ? { startSlug: startSlugForFeed } : undefined)
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Không tải được danh sách video');
       })
@@ -353,7 +378,20 @@ export default function ShopVideoFeedClient() {
     return () => {
       cancelled = true;
     };
-  }, [parsedSeed, fetchPage]);
+  }, [parsedSeed, startSlugForFeed, fetchPage]);
+
+  useEffect(() => {
+    didApplyStartSlugScroll.current = false;
+  }, [startSlugForFeed, parsedSeed]);
+
+  useLayoutEffect(() => {
+    if (loading || !startSlugForFeed || products.length === 0) return;
+    if (didApplyStartSlugScroll.current) return;
+    didApplyStartSlugScroll.current = true;
+    const root = scrollRef.current;
+    if (root) root.scrollTop = 0;
+    setActiveIndex(0);
+  }, [loading, startSlugForFeed, products.length]);
 
   useEffect(() => {
     if (!isAuthenticated) {

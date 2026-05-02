@@ -1,6 +1,11 @@
 'use client';
 
 import { useEffect } from 'react';
+import {
+  FLOAT_EMBED_SYNC_END,
+  FLOAT_EMBED_SYNC_MOVE,
+  type FloatEmbedSyncMoveDetail,
+} from '@/lib/floating-drag-sync';
 import { clampMeasure } from '@/hooks/useDraggableFloatingOffset';
 
 const DRAG_THRESHOLD_PX = 12;
@@ -212,6 +217,23 @@ function reclampAllAttached() {
   });
 }
 
+function onEmbedSyncMove(ev: Event) {
+  const d = (ev as CustomEvent<FloatEmbedSyncMoveDetail>).detail;
+  if (!d || (d.dx === 0 && d.dy === 0)) return;
+  document.querySelectorAll<HTMLElement>('[data-draggable188-attached="1"]').forEach((node) => {
+    const s = dragStates.get(node);
+    if (!s) return;
+    const next = clampMeasure(node, s.x + d.dx, s.y + d.dy);
+    s.x = next.x;
+    s.y = next.y;
+    applyTransform(node, next.x, next.y);
+  });
+}
+
+function onEmbedSyncEnd() {
+  reclampAllAttached();
+}
+
 /**
  * Gắn kéo-thả cho các nút nổi bên thứ ba (chat widget, v.v.) đã inject vào DOM.
  * Heuristic: fixed, gần mép ngang + vùng đáy màn, z-index cao — không đụng nút video/data-skip.
@@ -242,8 +264,13 @@ export default function DraggableThirdPartyFloaters() {
     };
     window.addEventListener('resize', onResize, { passive: true });
 
+    window.addEventListener(FLOAT_EMBED_SYNC_MOVE, onEmbedSyncMove);
+    window.addEventListener(FLOAT_EMBED_SYNC_END, onEmbedSyncEnd);
+
     return () => {
       mo.disconnect();
+      window.removeEventListener(FLOAT_EMBED_SYNC_MOVE, onEmbedSyncMove);
+      window.removeEventListener(FLOAT_EMBED_SYNC_END, onEmbedSyncEnd);
       if (scanTimer) clearTimeout(scanTimer);
       window.removeEventListener('resize', onResize);
       if (resizeTimer) clearTimeout(resizeTimer);

@@ -1,6 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  FLOAT_EMBED_SYNC_END,
+  FLOAT_EMBED_SYNC_MOVE,
+} from '@/lib/floating-drag-sync';
 
 const DRAG_THRESHOLD_PX = 12;
 
@@ -24,8 +28,14 @@ export function clampMeasure(el: HTMLElement, x: number, y: number): FloatingOff
 
 /**
  * FAB / nút nổi: kéo = translate3d, nhấn nhanh = click Link vẫn chạy (sau ngưỡng kéo thì chặn click).
+ * `syncParallelEmbedFloaters`: kéo FAB video → launcher chat mã nhúng dịch theo (cùng delta sau clamp).
  */
-export function useDraggableFloatingOffset(storageKey: string, enabled: boolean) {
+export function useDraggableFloatingOffset(
+  storageKey: string,
+  enabled: boolean,
+  options?: { syncParallelEmbedFloaters?: boolean }
+) {
+  const syncParallelEmbedFloaters = Boolean(options?.syncParallelEmbedFloaters);
   const [translate, setTranslate] = useState<FloatingOffset>({ x: 0, y: 0 });
   const latestRef = useRef<FloatingOffset>({ x: 0, y: 0 });
 
@@ -67,19 +77,35 @@ export function useDraggableFloatingOffset(storageKey: string, enabled: boolean)
     [storageKey]
   );
 
-  const onPointerMove = useCallback((e: PointerEvent) => {
-    const s = sessionRef.current;
-    if (!s.active) return;
-    const dx = e.clientX - s.startClientX;
-    const dy = e.clientY - s.startClientY;
-    if (Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX) dragMovedRef.current = true;
-    if (!dragMovedRef.current) return;
-    const raw = { x: s.originX + dx, y: s.originY + dy };
-    const el = targetRef.current;
-    const next = el ? clampMeasure(el, raw.x, raw.y) : raw;
-    latestRef.current = next;
-    setTranslate(next);
-  }, []);
+  const onPointerMove = useCallback(
+    (e: PointerEvent) => {
+      const s = sessionRef.current;
+      if (!s.active) return;
+      const dx = e.clientX - s.startClientX;
+      const dy = e.clientY - s.startClientY;
+      if (Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX) dragMovedRef.current = true;
+      if (!dragMovedRef.current) return;
+      const raw = { x: s.originX + dx, y: s.originY + dy };
+      const el = targetRef.current;
+      const prev = latestRef.current;
+      const next = el ? clampMeasure(el, raw.x, raw.y) : raw;
+      const adx = next.x - prev.x;
+      const ady = next.y - prev.y;
+      latestRef.current = next;
+      setTranslate(next);
+      if (
+        syncParallelEmbedFloaters &&
+        (adx !== 0 || ady !== 0)
+      ) {
+        window.dispatchEvent(
+          new CustomEvent(FLOAT_EMBED_SYNC_MOVE, {
+            detail: { dx: adx, dy: ady },
+          })
+        );
+      }
+    },
+    [syncParallelEmbedFloaters]
+  );
 
   const endDrag = useCallback(
     (e: PointerEvent | null) => {
@@ -97,6 +123,9 @@ export function useDraggableFloatingOffset(storageKey: string, enabled: boolean)
         setTranslate(final);
         persist(final);
         e?.preventDefault();
+        if (syncParallelEmbedFloaters) {
+          window.dispatchEvent(new CustomEvent(FLOAT_EMBED_SYNC_END));
+        }
       }
       const el = targetRef.current;
       const pid = sessionRef.current.pointerId;
@@ -109,7 +138,7 @@ export function useDraggableFloatingOffset(storageKey: string, enabled: boolean)
         }
       }
     },
-    [onPointerMove, persist]
+    [onPointerMove, persist, syncParallelEmbedFloaters]
   );
 
   const onPointerDown = useCallback(

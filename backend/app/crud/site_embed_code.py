@@ -79,6 +79,14 @@ _DEFAULT_ROWS: tuple = (
     ("facebook", "chat", "Meta — Chat Plugin (Facebook)", "body_close", "Chỉ nhập Page ID (số).", 80),
     (
         "nanoai",
+        "try_on",
+        "NanoAI — Nút thử đồ (try-on widget)",
+        "body_close",
+        "Dán thẻ script nanoai-try-on-widget.js từ NanoAI (data-try-on-url, data-shop-name, …). Có thể dùng cùng trang với chat; trang SP sẽ tự thêm data-ctx-*.",
+        83,
+    ),
+    (
+        "nanoai",
         "embed",
         "NanoAI — Chat / widget nhúng",
         "body_close",

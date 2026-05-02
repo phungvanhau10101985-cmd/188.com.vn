@@ -2,9 +2,10 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/lib/api-client';
+import { SHOP_VIDEO_FEED_PATH, shopVideoFeedHrefFromPathname } from '@/lib/shop-video-feed';
 
 interface MobileBottomNavProps {
   notificationCount?: number;
@@ -21,7 +22,7 @@ const navItems = [
   { href: '/da-xem', label: 'Đã xem', icon: 'recent' as const },
   { href: '/account/notifications', label: 'Thông báo', icon: 'bell' as const, badgeKey: 'notification' as const },
   {
-    href: '/luot-video-cung-shop',
+    href: SHOP_VIDEO_FEED_PATH,
     label: 'Lướt xem',
     labelBottom: 'video',
     icon: 'video' as const,
@@ -32,6 +33,7 @@ const navItems = [
 export default function MobileBottomNav({ notificationCount: initialNotifCount = 0 }: MobileBottomNavProps) {
   const pathname = usePathname();
   const pathKey = pathNorm(pathname);
+  const shopVideoFeedHref = useMemo(() => shopVideoFeedHrefFromPathname(pathname), [pathname]);
   const { isAuthenticated } = useAuth();
   const [unreadNotifCount, setUnreadNotifCount] = useState(initialNotifCount);
 
@@ -70,10 +72,13 @@ export default function MobileBottomNav({ notificationCount: initialNotifCount =
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 safe-area-pb shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
       <div className="flex items-center justify-around h-[60px] px-1">
         {navItems.map((item) => {
+          const resolvedHref = item.icon === 'video' ? shopVideoFeedHref : item.href;
           const isActive =
             item.href === '/'
               ? pathKey === '/'
-              : pathKey === pathNorm(item.href) || pathKey.startsWith(`${pathNorm(item.href)}/`);
+              : item.icon === 'video'
+                ? pathKey === SHOP_VIDEO_FEED_PATH
+                : pathKey === pathNorm(item.href) || pathKey.startsWith(`${pathNorm(item.href)}/`);
           const badgeCount = item.badgeKey ? getBadgeCount(item) : 0;
           const showBadge = badgeCount > 0;
 
@@ -82,7 +87,7 @@ export default function MobileBottomNav({ notificationCount: initialNotifCount =
           }`;
 
           return (
-            <Link key={item.href} href={item.href} className={className}>
+            <Link key={item.href} href={resolvedHref} className={className}>
               <span className="relative inline-flex items-center justify-center">
                 {item.icon === 'home' && (
                   <svg className="w-6 h-6" fill={isActive ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">

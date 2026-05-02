@@ -10,17 +10,18 @@ const ATTR = {
   inventory: 'data-ctx-inventory',
 } as const;
 
-function findNanoAiLoaderScript(): HTMLScriptElement | null {
-  if (typeof document === 'undefined') return null;
+function findNanoAiContextScripts(): HTMLScriptElement[] {
+  const out: HTMLScriptElement[] = [];
   const list = document.querySelectorAll('script[src]');
+  const re = /nanoai-chat-widget|nanoai-try-on-widget|nanoai\.vn\/embed/i;
   for (let i = 0; i < list.length; i++) {
     const el = list[i];
     const src = el.getAttribute('src') || '';
-    if (/nanoai-chat-widget|nanoai\.vn\/embed/i.test(src)) {
-      return el as HTMLScriptElement;
+    if (re.test(src)) {
+      out.push(el as HTMLScriptElement);
     }
   }
-  return null;
+  return out;
 }
 
 function absolutizeUrl(raw: string, origin: string): string {
@@ -51,7 +52,7 @@ export type NanoAiProductPageContextProps = {
 };
 
 /**
- * Gắn data-ctx-* lên thẻ script load NanoAI (cùng mục admin / site embeds) để iframe chat nhận ctx_sku, ctx_image, …
+ * Gắn data-ctx-* lên các thẻ script NanoAI (chat + thử đồ) từ admin — iframe nhận ctx_sku, ctx_image, …
  */
 export default function NanoAiProductPageContext({
   sku,
@@ -70,20 +71,20 @@ export default function NanoAiProductPageContext({
     const absImg2 = secondaryImageUrl ? absolutizeUrl(secondaryImageUrl, origin) : '';
 
     const apply = (): boolean => {
-      const script = findNanoAiLoaderScript();
-      if (!script) return false;
-      setOrRemove(script, ATTR.sku, sku || null);
-      setOrRemove(script, ATTR.image, absImg || null);
-      setOrRemove(script, ATTR.image2, absImg2 || null);
-      setOrRemove(script, ATTR.productUrl, absProduct || null);
-      setOrRemove(script, ATTR.inventory, inventoryId ?? null);
+      const scripts = findNanoAiContextScripts();
+      if (scripts.length === 0) return false;
+      for (const script of scripts) {
+        setOrRemove(script, ATTR.sku, sku || null);
+        setOrRemove(script, ATTR.image, absImg || null);
+        setOrRemove(script, ATTR.image2, absImg2 || null);
+        setOrRemove(script, ATTR.productUrl, absProduct || null);
+        setOrRemove(script, ATTR.inventory, inventoryId ?? null);
+      }
       return true;
     };
 
     if (apply()) {
-      return () => {
-        cancelled = true;
-      };
+      return undefined;
     }
 
     const tid = window.setInterval(() => {
@@ -102,5 +103,14 @@ export default function NanoAiProductPageContext({
     };
   }, [sku, primaryImageUrl, secondaryImageUrl, productPath, inventoryId]);
 
-  return <span id="copy-code-product" hidden>{sku}</span>;
+  return (
+    <>
+      <span id="copy-code-product" hidden>
+        {sku}
+      </span>
+      <span id="nanoai-ctx-sku" hidden>
+        {sku}
+      </span>
+    </>
+  );
 }
