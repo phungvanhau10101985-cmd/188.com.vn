@@ -13,6 +13,11 @@ const nextConfig = {
       {
         source: "/:path*",
         headers: [
+          /** YouTube embed (lỗi 153) cần Referer hợp lệ — tránh same-origin / no-referrer từ proxy */
+          {
+            key: "Referrer-Policy",
+            value: "strict-origin-when-cross-origin",
+          },
           {
             key: "Permissions-Policy",
             value:

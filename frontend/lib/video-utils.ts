@@ -60,16 +60,20 @@ export function hasVideoLink(link: string | undefined | null): boolean {
 }
 
 /**
- * Origin site cho tham số ?origin= của player YouTube (iframe API / giảm lỗi từ chối embed).
- * Ưu tiên NEXT_PUBLIC_SITE_URL (SSR/build); fallback window hoặc domain production.
+ * Origin site cho tham số ?origin= của player YouTube.
+ * Trên trình duyệt **ưu tiên `window.location.origin`** để khớp trang đang mở — tránh lỗi 153 khi
+ * `NEXT_PUBLIC_SITE_URL` trỏ production nhưng đang xem localhost/staging (YouTube so khớp origin).
+ * SSR: dùng env rồi fallback domain production.
  */
 export function getSiteOriginForEmbed(): string {
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
   const fromEnv =
     (typeof process !== "undefined" &&
       process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "")) ||
     "";
   if (fromEnv) return fromEnv;
-  if (typeof window !== "undefined") return window.location.origin;
   return "https://188.com.vn";
 }
 
