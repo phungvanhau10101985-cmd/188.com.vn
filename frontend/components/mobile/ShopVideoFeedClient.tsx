@@ -28,7 +28,7 @@ function hasPlayableVideoLink(link: string | undefined | null): boolean {
   return parseVideoLink(link) != null;
 }
 
-/** Nút 🔊/🔇 — đặt phía trên vùng overlay sản phẩm */
+/** Nút 🔊/🔇 — đặt trong section, z cao hơn overlay sản phẩm để touch không bị chặn */
 function FeedSoundToggle({ soundOn, onToggle }: { soundOn: boolean; onToggle: () => void }) {
   return (
     <button
@@ -37,7 +37,8 @@ function FeedSoundToggle({ soundOn, onToggle }: { soundOn: boolean; onToggle: ()
         e.stopPropagation();
         onToggle();
       }}
-      className="absolute right-3 bottom-[calc(7.5rem+env(safe-area-inset-bottom,0px))] z-20 flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-white ring-1 ring-white/35 backdrop-blur-sm shadow-lg active:scale-95"
+      onPointerDown={(e) => e.stopPropagation()}
+      className="pointer-events-auto absolute right-3 bottom-[calc(7.5rem+env(safe-area-inset-bottom,0px))] z-[35] flex h-11 w-11 touch-manipulation items-center justify-center rounded-full bg-black/60 text-white ring-1 ring-white/40 backdrop-blur-sm shadow-lg active:scale-95"
       aria-label={soundOn ? 'Tắt tiếng' : 'Bật tiếng'}
       title={soundOn ? 'Tắt tiếng' : 'Bật tiếng'}
     >
@@ -180,14 +181,18 @@ function VideoFeedProductBar({
   );
 }
 
-function VideoPane({ product, isActive }: { product: Product; isActive: boolean }) {
+function VideoPane({
+  product,
+  isActive,
+  soundOn,
+}: {
+  product: Product;
+  isActive: boolean;
+  /** Âm thanh chỉ áp dụng slide đang active — state giữ ở parent để nút loa nằm trên overlay */
+  soundOn: boolean;
+}) {
   const parsed = parseVideoLink(product.video_link);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [soundOn, setSoundOn] = useState(false);
-
-  useEffect(() => {
-    if (!isActive) setSoundOn(false);
-  }, [isActive]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -227,7 +232,6 @@ function VideoPane({ product, isActive }: { product: Product; isActive: boolean 
           allowFullScreen
           referrerPolicy="strict-origin-when-cross-origin"
         />
-        {isActive ? <FeedSoundToggle soundOn={soundOn} onToggle={() => setSoundOn((v) => !v)} /> : null}
       </div>
     );
   }
@@ -243,7 +247,6 @@ function VideoPane({ product, isActive }: { product: Product; isActive: boolean 
         muted={!isActive || !soundOn}
         controls={isActive}
       />
-      {isActive ? <FeedSoundToggle soundOn={soundOn} onToggle={() => setSoundOn((v) => !v)} /> : null}
     </div>
   );
 }
@@ -275,10 +278,16 @@ export default function ShopVideoFeedClient() {
   const [favoriteBusyId, setFavoriteBusyId] = useState<number | null>(null);
   const [variantModalProduct, setVariantModalProduct] = useState<Product | null>(null);
   const [displayStockByVariant, setDisplayStockByVariant] = useState<Record<string, number>>({});
+  /** Tiếng chỉ cho slide đang xem; nút loa render trên overlay (z-35) */
+  const [feedSoundOn, setFeedSoundOn] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const emptyPageFetchAttempts = useRef(0);
+
+  useEffect(() => {
+    setFeedSoundOn(false);
+  }, [activeIndex]);
 
   const fetchPage = useCallback(
     async (offset: number, nextSeed: number | undefined, append: boolean) => {
@@ -606,9 +615,16 @@ export default function ShopVideoFeedClient() {
             className="relative h-full min-h-full shrink-0 snap-start snap-always bg-black border-b border-white/10 box-border overflow-hidden"
             aria-label={product.name}
           >
-            <div className="absolute inset-0 min-h-0 overflow-hidden bg-black">
-              <VideoPane product={product} isActive={index === activeIndex} />
+            <div className="absolute inset-0 z-0 min-h-0 overflow-hidden bg-black">
+              <VideoPane
+                product={product}
+                isActive={index === activeIndex}
+                soundOn={index === activeIndex ? feedSoundOn : false}
+              />
             </div>
+            {index === activeIndex ? (
+              <FeedSoundToggle soundOn={feedSoundOn} onToggle={() => setFeedSoundOn((v) => !v)} />
+            ) : null}
             <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-30 bg-gradient-to-t from-black via-black/92 to-transparent p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-16">
               <div className="pointer-events-auto">
                 <VideoFeedProductBar
