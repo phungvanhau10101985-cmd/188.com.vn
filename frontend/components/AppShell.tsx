@@ -240,7 +240,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       <PwaInstallPrompt />
       <CartAddedPopup />
       {/* Mobile: Bottom nav - ẩn trên trang auth để dropdown chọn tháng không bị che, kéo được tháng 12 */}
-      {showMobileBottomNav && <MobileBottomNav notificationCount={0} favoriteCount={favoriteCount} />}
+      {showMobileBottomNav && <MobileBottomNav notificationCount={0} />}
       {!isAuthPage && <BirthGenderSalePromptModal />}
     </div>
   );

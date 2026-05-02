@@ -8,7 +8,6 @@ import { apiClient } from '@/lib/api-client';
 
 interface MobileBottomNavProps {
   notificationCount?: number;
-  favoriteCount?: number;
 }
 
 function pathNorm(p: string | null): string {
@@ -21,11 +20,16 @@ const navItems = [
   /** Hành vi xem lại SP trong phiên — trang được dùng nhiều trên TMĐT */
   { href: '/da-xem', label: 'Đã xem', icon: 'recent' as const },
   { href: '/account/notifications', label: 'Thông báo', icon: 'bell' as const, badgeKey: 'notification' as const },
-  { href: '/favorites', label: 'Yêu thích', icon: 'heart' as const, badgeKey: 'favorite' as const },
+  {
+    href: '/luot-video-cung-shop',
+    label: 'Lướt xem',
+    labelBottom: 'video',
+    icon: 'video' as const,
+  },
   { href: '/account', label: 'Cá nhân', icon: 'profile' as const },
 ];
 
-export default function MobileBottomNav({ notificationCount: initialNotifCount = 0, favoriteCount = 0 }: MobileBottomNavProps) {
+export default function MobileBottomNav({ notificationCount: initialNotifCount = 0 }: MobileBottomNavProps) {
   const pathname = usePathname();
   const pathKey = pathNorm(pathname);
   const { isAuthenticated } = useAuth();
@@ -59,7 +63,6 @@ export default function MobileBottomNav({ notificationCount: initialNotifCount =
 
   const getBadgeCount = (item: (typeof navItems)[number]) => {
     if (item.badgeKey === 'notification') return unreadNotifCount;
-    if (item.badgeKey === 'favorite') return favoriteCount;
     return 0;
   };
 
@@ -103,17 +106,15 @@ export default function MobileBottomNav({ notificationCount: initialNotifCount =
                     )}
                   </>
                 )}
-                {item.icon === 'heart' && (
-                  <>
-                    <svg className="w-6 h-6" fill={isActive ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                    </svg>
-                    {showBadge && (
-                      <span className="absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full px-0.5 border-2 border-white">
-                        {badgeCount > 99 ? '99+' : badgeCount}
-                      </span>
-                    )}
-                  </>
+                {item.icon === 'video' && (
+                  <svg className="w-6 h-6" fill={isActive ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z"
+                    />
+                  </svg>
                 )}
                 {item.icon === 'profile' && (
                   <svg className="w-6 h-6" fill={isActive ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
@@ -121,7 +122,14 @@ export default function MobileBottomNav({ notificationCount: initialNotifCount =
                   </svg>
                 )}
               </span>
-              <span className="text-[10px] font-medium truncate w-full text-center leading-none">{item.label}</span>
+              {'labelBottom' in item && item.labelBottom ? (
+                <span className="text-[9px] font-medium w-full text-center leading-tight">
+                  <span className="block">{item.label}</span>
+                  <span className="block">{item.labelBottom}</span>
+                </span>
+              ) : (
+                <span className="text-[10px] font-medium truncate w-full text-center leading-none">{item.label}</span>
+              )}
             </Link>
           );
         })}

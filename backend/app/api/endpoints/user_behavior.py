@@ -124,7 +124,7 @@ def get_products_same_shop_as_recent_views_endpoint(
 
     Phân trang: limit (mặc định 60), offset, seed («Xem thêm» giữ cùng thứ tự).
     Khách: X-Guest-Session-Id và đã có lượt xem trong phiên.
-    require_video=true: chỉ SP có video_link (gợi ý lướt video).
+    require_video=true: chỉ SP có video phát được (YouTube / `.mp4`), không chỉ cột video_link rỗng.
     """
     response.headers["Cache-Control"] = "private, no-store"
     sid = (x_guest_session_id or "").strip()

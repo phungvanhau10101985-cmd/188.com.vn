@@ -16,6 +16,7 @@ from app.models.user import (
 )
 from app.models.product import Product
 from app.core.email_identity import identity_email
+from app.utils.video_link import is_playable_product_video_link
 from app.schemas.user import (
     UserCreate, UserUpdate, UserAdminUpdate, ProductViewCreate, FavoriteCreate,
     CategoryViewCreate, BrandViewCreate, SearchHistoryCreate, ShopInteractionCreate
@@ -338,7 +339,7 @@ def get_products_same_shop_as_recent_views(
     """
     Sản phẩm cùng `shop_name` (tên shop từ import Excel → DB) với các shop của tối đa 8 sản phẩm xem gần nhất.
     Trả về (danh_sách_slice, total, seed). Không gửi `seed`: random mới mỗi lần; có `seed` + offset: pagination ổn định.
-    `require_video`: chỉ sản phẩm có `video_link` không rỗng (lướt video cùng shop).
+    `require_video`: chỉ SP có link video phát được (YouTube watch/embed/short hoặc URL chứa `.mp4`), khớp frontend.
     Ưu tiên user_id; nếu không có thì guest_session_id (bảng guest_product_views).
     """
     recent_product_ids: List[int] = []
@@ -382,7 +383,7 @@ def get_products_same_shop_as_recent_views(
     if not products:
         return [], 0, None
     if require_video:
-        products = [p for p in products if (getattr(p, "video_link", None) or "").strip()]
+        products = [p for p in products if is_playable_product_video_link(getattr(p, "video_link", None))]
     if not products:
         return [], 0, None
     total = len(products)
