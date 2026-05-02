@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useId, useMemo } from 'react';
+import { useState, useEffect, useRef, useId, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -26,6 +26,14 @@ function slugOf(s: string | undefined): string {
 function capitalizeFirst(s: string): string {
   if (!s || !s.length) return s;
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+function isMobileCategoryPanelHistoryState(state: unknown): boolean {
+  return (
+    typeof state === 'object' &&
+    state !== null &&
+    (state as Record<string, unknown>).mobileCategoryPanel === true
+  );
 }
 
 interface MobileHeaderProps {
@@ -54,6 +62,7 @@ export default function MobileHeader({
   const [openL2, setOpenL2] = useState<Set<string>>(new Set());
   const panelRef = useRef<HTMLDivElement>(null);
   const mobileImageInputId = useId();
+  const categoryPanelId = useId();
 
   const isHome = pathname === '/';
 
@@ -118,6 +127,33 @@ export default function MobileHeader({
       setSearchTerm(q);
     }
   }, [isHome, searchParams]);
+
+  /** Vuốt/nút back: nghe popstate khi panel mở */
+  useEffect(() => {
+    if (!categoryPanelOpen) return undefined;
+    const onPopState = () => {
+      setCategoryPanelOpen(false);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+    };
+  }, [categoryPanelOpen]);
+
+  const openCategoryPanel = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.history.pushState({ mobileCategoryPanel: true }, '', window.location.href);
+    }
+    setCategoryPanelOpen(true);
+  }, []);
+
+  const closeCategoryPanel = useCallback(() => {
+    if (typeof window !== 'undefined' && isMobileCategoryPanelHistoryState(window.history.state)) {
+      window.history.back();
+    } else {
+      setCategoryPanelOpen(false);
+    }
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -184,9 +220,14 @@ export default function MobileHeader({
   };
 
   const closePanelAndGo = (href: string) => {
-    setCategoryPanelOpen(false);
     setOpenL1(new Set());
     setOpenL2(new Set());
+    const hadPanelHistory =
+      typeof window !== 'undefined' && isMobileCategoryPanelHistoryState(window.history.state);
+    setCategoryPanelOpen(false);
+    if (hadPanelHistory) {
+      window.history.back();
+    }
     router.push(href);
   };
 
@@ -230,10 +271,10 @@ export default function MobileHeader({
     'flex-shrink-0 text-[11px] leading-tight font-medium text-white px-2 py-1 rounded-full bg-white/18 hover:bg-white/28 whitespace-nowrap border border-white/25 shadow-sm active:scale-[0.98] transition-transform';
 
   const iconBtn =
-    'flex-shrink-0 min-w-[44px] min-h-[44px] w-11 h-11 shrink-0 flex items-center justify-center text-white rounded-xl bg-white/15 hover:bg-white/25 active:bg-white/35 transition-colors backdrop-blur-[2px]';
+    'flex-shrink-0 min-w-[44px] min-h-[44px] w-11 h-11 shrink-0 flex items-center justify-center text-white rounded-xl bg-white/22 hover:bg-white/32 active:bg-white/42 transition-colors backdrop-blur-[2px] shadow-sm shadow-black/10';
   /** Trang chi tiết: không dùng 44×44 để chừng chỗ cho ô tìm (vẫn đạt tap target ~40px). */
   const iconBtnCondensed =
-    'flex-shrink-0 min-w-[40px] min-h-[40px] w-10 h-10 shrink-0 flex items-center justify-center text-white rounded-lg bg-white/15 hover:bg-white/25 active:bg-white/35 transition-colors backdrop-blur-[2px]';
+    'flex-shrink-0 min-w-[40px] min-h-[40px] w-10 h-10 shrink-0 flex items-center justify-center text-white rounded-lg bg-white/22 hover:bg-white/32 active:bg-white/42 transition-colors backdrop-blur-[2px] shadow-sm shadow-black/10';
 
   return (
     <div
@@ -308,14 +349,22 @@ export default function MobileHeader({
 
             <button
               type="button"
-              onClick={() => setCategoryPanelOpen((o) => !o)}
-              className={`${tightToolbar ? iconBtnCondensed : iconBtn} ${categoryPanelOpen ? '!bg-white/35 ring-1 ring-white/40' : ''}`}
-              aria-label="Danh mục"
+              onClick={() => (categoryPanelOpen ? closeCategoryPanel() : openCategoryPanel())}
+              className={`${tightToolbar ? iconBtnCondensed : iconBtn} ${categoryPanelOpen ? '!bg-white/45 ring-2 ring-white/55' : ''}`}
+              aria-label={categoryPanelOpen ? 'Đóng danh mục' : 'Mở danh mục'}
               aria-expanded={categoryPanelOpen}
+              aria-controls={categoryPanelOpen ? categoryPanelId : undefined}
+              title={categoryPanelOpen ? 'Đóng danh mục' : 'Danh mục'}
             >
-              <svg className="w-[22px] h-[22px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
+              {categoryPanelOpen ? (
+                <svg className="w-[22px] h-[22px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.25} aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                <svg className="w-[22px] h-[22px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.25} aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
             </button>
 
             <form
@@ -376,12 +425,21 @@ export default function MobileHeader({
               </div>
             </form>
 
-            {!isDaXemPage && (
-              <Link href="/da-xem" className={tightToolbar ? iconBtnCondensed : iconBtn} aria-label="Đã xem" title="Đã xem">
+            {!isFavoritesPage && (
+              <Link
+                href="/favorites"
+                className={`${tightToolbar ? iconBtnCondensed : iconBtn} relative`}
+                aria-label="Sản phẩm yêu thích"
+                title="Sản phẩm yêu thích"
+              >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                 </svg>
+                {favoriteItemsCount > 0 && (
+                  <span className="absolute -right-px -top-px bg-white text-[#ea580c] rounded-full min-w-[11px] h-3 px-0.5 text-[7px] sm:text-[8px] flex items-center justify-center font-semibold leading-none shadow-sm ring-1 ring-black/5">
+                    {favoriteItemsCount > 99 ? '99+' : favoriteItemsCount}
+                  </span>
+                )}
               </Link>
             )}
 
@@ -479,7 +537,7 @@ export default function MobileHeader({
                   })}
                 {searchStripContent.mode === 'fallback' && (
                   <>
-                    <button type="button" onClick={() => setCategoryPanelOpen(true)} className={chipClass}>
+                    <button type="button" onClick={() => openCategoryPanel()} className={chipClass}>
                       Danh mục
                     </button>
                     <Link href="/tim-theo-anh" className={chipClass}>
@@ -502,9 +560,12 @@ export default function MobileHeader({
             type="button"
             aria-label="Đóng"
             className="fixed inset-0 bg-black/40 z-40"
-            onClick={() => setCategoryPanelOpen(false)}
+            onClick={() => closeCategoryPanel()}
           />
-          <div className="absolute left-0 right-0 top-full z-50 max-h-[70vh] overflow-y-auto bg-white shadow-xl rounded-b-lg border-t border-gray-200 transition-all duration-200">
+          <div
+            id={categoryPanelId}
+            className="absolute left-0 right-0 top-full z-50 max-h-[70vh] overflow-y-auto bg-white shadow-xl rounded-b-lg border-t border-gray-200 transition-all duration-200"
+          >
             <nav className="py-2" aria-label="Danh mục sản phẩm">
               {list.map((cat) => {
                 const slug1 = cat.slug || slugOf(cat.name);
