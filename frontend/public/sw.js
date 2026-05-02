@@ -33,7 +33,7 @@ self.addEventListener("push", (event) => {
     /* dùng mặc định */
   }
   const title = data.title || "188.COM.VN";
-  const iconUrl = `${self.location.origin}/app-icon-square.png`;
+  const iconUrl = "https://188comvn.b-cdn.net/site/20260502/logo_1x1_0584d3f73e4a.png";
   const options = {
     body: data.body || "",
     icon: iconUrl,

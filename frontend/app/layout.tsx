@@ -96,8 +96,8 @@ export const metadata: Metadata = {
     images: [
       {
         url: APP_WEB_ICON_URL,
-        width: 512,
-        height: 512,
+        width: 536,
+        height: 536,
         alt: "188.COM.VN",
       },
     ],
@@ -119,7 +119,7 @@ export const metadata: Metadata = {
       "max-snippet": -1,
     },
   },
-  // Icon vuông /app-icon-square.png (+ favicon.png, app/icon.png đồng bộ)
+  // Logo web app / favicon — APP_WEB_ICON_URL (CDN + favicon.png / app/icon.png đồng bộ)
   icons: {
     icon: [{ url: APP_WEB_ICON_URL, type: "image/png" }],
     apple: [{ url: APP_WEB_ICON_URL, sizes: "180x180", type: "image/png" }],
