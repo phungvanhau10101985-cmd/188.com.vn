@@ -129,6 +129,35 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     };
   }, [isAuthenticated, pathname]);
 
+  /** Đăng nhập/đăng xuất qua event: refetch vì `user` trong LS đổi trước khi React cập nhật isAuthenticated (vd. logout). */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onAuthSession = () => {
+      const authed = !!localStorage.getItem('user');
+      if (!authed) {
+        setViewedProductsCount(0);
+        try {
+          const raw = localStorage.getItem('latest_search_suggestions');
+          const parsed = raw ? JSON.parse(raw) : null;
+          setSuggestions(Array.isArray(parsed?.suggestions) ? parsed.suggestions : []);
+        } catch {
+          setSuggestions([]);
+        }
+        return;
+      }
+      apiClient
+        .getSearchSuggestions(12)
+        .then((r) => setSuggestions(r.suggestions || []))
+        .catch(() => setSuggestions([]));
+      apiClient
+        .getViewedProducts(99)
+        .then((list) => setViewedProductsCount(Array.isArray(list) ? list.length : 0))
+        .catch(() => setViewedProductsCount(0));
+    };
+    window.addEventListener('188-auth-session-changed', onAuthSession);
+    return () => window.removeEventListener('188-auth-session-changed', onAuthSession);
+  }, []);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (isProductDetailPage || keepDesktopHeaderPinned) {

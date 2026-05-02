@@ -67,13 +67,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const applyTokenSession = async (result: Token, nextPath?: string | null) => {
     localStorage.setItem('access_token', result.access_token);
     localStorage.setItem('user', JSON.stringify(result.user));
+    /** Gộp phiên khách trước khi bật isAuthenticated — tránh refetch yêu thích/đã xem chạy trước khi merge xong. */
+    await mergeGuestBehavior();
     setAuthState({
       user: result.user,
       token: result.access_token,
       isAuthenticated: true,
       isLoading: false
     });
-    await mergeGuestBehavior();
     markFreshLoginSession();
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('188-auth-session-changed'));
@@ -86,14 +87,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setSessionFromEmailAuth = async (user: UserResponse, nextPath?: string) => {
     localStorage.removeItem('access_token');
     localStorage.setItem('user', JSON.stringify(user));
+    await mergeGuestBehavior();
     setAuthState({
       user,
       token: null,
       isAuthenticated: true,
       isLoading: false,
     });
-    await mergeGuestBehavior();
     markFreshLoginSession();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('188-auth-session-changed'));
+    }
     const dest =
       nextPath && nextPath.startsWith('/') && !nextPath.startsWith('//')
         ? nextPath

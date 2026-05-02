@@ -28,6 +28,15 @@ export function FavoriteProvider({ children }: { children: ReactNode }) {
     refreshFavorites();
   }, [refreshFavorites, isAuthenticated]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onAuth = () => {
+      void refreshFavorites();
+    };
+    window.addEventListener('188-auth-session-changed', onAuth);
+    return () => window.removeEventListener('188-auth-session-changed', onAuth);
+  }, [refreshFavorites]);
+
   return (
     <FavoriteContext.Provider value={{ favoriteCount, refreshFavorites }}>
       {children}

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { apiClient } from '@/lib/api-client';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 
@@ -29,6 +30,7 @@ function formatVnd(n: number) {
 
 export default function FavoritesPage() {
   const { refreshFavorites } = useFavorites();
+  const { isAuthenticated } = useAuth();
   const { pushToast } = useToast();
   const [items, setItems] = useState<FavoriteItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,6 +38,7 @@ export default function FavoritesPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     apiClient
       .getFavorites()
@@ -68,15 +71,23 @@ export default function FavoritesPage() {
             }
           })
         );
+        if (cancelled) return;
         setItems(enriched);
         setError(null);
+        void refreshFavorites();
       })
       .catch((e) => {
+        if (cancelled) return;
         setItems([]);
         setError((e as Error)?.message || 'Không thể tải danh sách yêu thích');
       })
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, refreshFavorites]);
 
   const handleRemove = async (productId: number, favoriteId: number) => {
     setRemovingId(favoriteId);

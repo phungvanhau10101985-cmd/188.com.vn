@@ -103,6 +103,20 @@ export default function ProductInfo({
       ? colorLabelForCart(colorList, selectedColorIndex)
       : '';
 
+  const hasSizes = (product.sizes?.length ?? 0) > 0;
+  const hasColors = colorList.length > 0;
+  /** Bắt buộc chọn size/màu khi SP khai báo — tránh thêm giỏ khi size còn trống */
+  const variantsComplete =
+    (!hasSizes || selectedSize.trim() !== '') &&
+    (!hasColors || selectedColorForCart.trim() !== '');
+  const variantSelectionHint = !variantsComplete
+    ? hasSizes && !selectedSize.trim()
+      ? 'Vui lòng chọn kích thước'
+      : hasColors && !selectedColorForCart.trim()
+        ? 'Vui lòng chọn màu sắc'
+        : 'Vui lòng chọn biến thể'
+    : undefined;
+
   useEffect(() => {
     const n = colorList.length;
     setSelectedColorIndex(n > 0 ? 0 : -1);
@@ -238,6 +252,8 @@ export default function ProductInfo({
           selectedSize={selectedSize}
           selectedColor={selectedColorForCart}
           available={available}
+          variantsComplete={variantsComplete}
+          variantSelectionHint={variantSelectionHint}
           onAddToCart={onAddToCart}
           onToggleFavorite={onToggleFavorite}
           onBuyNow={onBuyNow}

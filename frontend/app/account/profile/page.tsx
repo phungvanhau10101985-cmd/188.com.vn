@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ToastProvider';
@@ -26,18 +26,62 @@ function normalizeUserFromApi(raw: Record<string, unknown>): UserResponse {
 
 function dobInputValue(user: UserResponse | null): string {
   const d = user?.date_of_birth;
-  if (!d || typeof d !== 'string') return '';
-  return d.slice(0, 10);
+  if (d == null) return '';
+  if (typeof d === 'string') return d.slice(0, 10);
+  return String(d).slice(0, 10);
+}
+
+function applyUserToForm(
+  u: UserResponse | null | undefined,
+  setters: {
+    setFullName: (v: string) => void;
+    setGender: (v: 'male' | 'female' | 'other' | '') => void;
+    setDob: (v: string) => void;
+    setAddress: (v: string) => void;
+  },
+) {
+  if (!u) return;
+  setters.setFullName(u.full_name ?? '');
+  const g = u.gender;
+  setters.setGender(g === 'male' || g === 'female' || g === 'other' ? g : '');
+  setters.setDob(dobInputValue(u));
+  setters.setAddress(u.address ?? '');
 }
 
 export default function AccountProfilePage() {
-  const { user, updateUser } = useAuth();
+  const { user, updateUser, isAuthenticated, isLoading } = useAuth();
   const { pushToast } = useToast();
   const [fullName, setFullName] = useState('');
   const [gender, setGender] = useState<'male' | 'female' | 'other' | ''>('');
   const [dob, setDob] = useState('');
   const [address, setAddress] = useState('');
   const [loading, setLoading] = useState(false);
+  const profileSyncStarted = useRef(false);
+
+  /** Một lần khi vào trang: lấy hồ sơ từ server — tránh lệch giữa thiết bị do chỉ tin localStorage sau đăng nhập. */
+  useEffect(() => {
+    if (isLoading || !isAuthenticated || profileSyncStarted.current) return;
+    profileSyncStarted.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await apiClient.getProfile();
+        if (cancelled) return;
+        const normalized = normalizeUserFromApi(raw as Record<string, unknown>);
+        updateUser(normalized);
+        applyUserToForm(normalized, { setFullName, setGender, setDob, setAddress });
+      } catch {
+        profileSyncStarted.current = false;
+        if (!cancelled && user) {
+          applyUserToForm(user, { setFullName, setGender, setDob, setAddress });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chỉ sync sau khi auth sẵn sàng
+  }, [isLoading, isAuthenticated]);
 
   useEffect(() => {
     if (!user) return;

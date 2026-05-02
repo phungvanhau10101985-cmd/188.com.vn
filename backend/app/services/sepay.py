@@ -261,6 +261,81 @@ def extract_order_code_from_content(content: str) -> Optional[str]:
     return None
 
 
+def _compact_alnum_upper(s: str) -> str:
+    """Chuẩn hoá để đối chiếu khi NH/SePay chèn dấu chấm, khoảng đặc biệt (QR vẫn đúng nhưng chuỗi raw khác)."""
+    return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
+
+
+def _dh_numeric_in_content_refers_order(norm_c: str, order_id: int) -> bool:
+    """DH002 và DH2 là cùng id=2; trước đây chỉ so `DH{id}` nên DH002 không khớp."""
+    try:
+        oid = int(order_id)
+    except (TypeError, ValueError):
+        return False
+    for m in re.finditer(r"DH(\d+)", norm_c, re.IGNORECASE):
+        try:
+            if int(m.group(1)) == oid:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _sepay_code_matches_resolved_order(data: Dict[str, Any], order: Order) -> bool:
+    """Trường `code` từ SePay (cùng pipeline nhận diện với QR) khớp đơn đã resolve."""
+    raw = _pick(data, "code")
+    if raw is None or not str(raw).strip():
+        return False
+    s = str(raw).strip()
+    oc = (order.order_code or "").strip()
+    if oc and s.replace(" ", "").upper() == oc.replace(" ", "").upper():
+        return True
+    if oc and _compact_alnum_upper(s) == _compact_alnum_upper(oc):
+        return True
+    m = re.match(r"^DH(\d+)$", s, re.IGNORECASE)
+    if m:
+        try:
+            return int(m.group(1)) == order.id
+        except ValueError:
+            return False
+    return False
+
+
+def _transfer_content_matches_order(
+    db: Session,
+    data: Dict[str, Any],
+    text_blob: str,
+    order: Order,
+) -> bool:
+    """
+    Đối chiếu nội dung CK/SMS với đơn. QR quét đúng vẫn có thể bị từ chối nếu chỉ so chuỗi quá hẹp
+    (vd. DH2 không là substring của DH002; SePay gửi `code` khớp id nhưng SMS dài không chứa order_code ORD...).
+    """
+    expected_content = build_transfer_content_for_order(order)
+    norm_c = text_blob.upper().replace(" ", "")
+    norm_e = expected_content.upper().replace(" ", "")
+    oc = (order.order_code or "").upper().replace(" ", "")
+    id_ref = f"DH{order.id}".upper()
+
+    if norm_e in norm_c or (oc and oc in norm_c) or (id_ref in norm_c):
+        return True
+    # So khớp lỏng: bỏ ký tự không phải A–Z/0–9 (vd. "SEVQR. ORD…", NBSP)
+    blob_a = _compact_alnum_upper(text_blob)
+    exp_a = _compact_alnum_upper(expected_content)
+    if exp_a and exp_a in blob_a:
+        return True
+    if oc and _compact_alnum_upper(oc) in blob_a:
+        return True
+    if _dh_numeric_in_content_refers_order(norm_c, order.id):
+        return True
+    if _dh_numeric_in_content_refers_order(blob_a, order.id):
+        return True
+    if _sepay_code_matches_resolved_order(data, order):
+        return True
+    o_from_text = resolve_order_from_sepay_transfer_content(db, text_blob)
+    return bool(o_from_text and o_from_text.id == order.id)
+
+
 def _amount_equal(a: Decimal, b: Decimal) -> bool:
     return abs(a - b) <= Decimal("1")
 
@@ -320,16 +395,16 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
     if not order.requires_deposit:
         return False, "no_deposit_required", None
 
-    expected_content = build_transfer_content_for_order(order)
-    norm_c = text_blob.upper().replace(" ", "")
-    norm_e = expected_content.upper().replace(" ", "")
-    oc = order.order_code.upper().replace(" ", "")
-    id_ref = f"DH{order.id}".upper()
-    if (
-        norm_e not in norm_c
-        and oc not in norm_c
-        and id_ref not in norm_c
-    ):
+    if not _transfer_content_matches_order(db, data, text_blob, order):
+        exp_c = build_transfer_content_for_order(order)
+        logger.warning(
+            "SePay content_mismatch order_id=%s order_code=%s expected=%r compact_expected=%s compact_blob=%s",
+            order.id,
+            order.order_code,
+            exp_c,
+            _compact_alnum_upper(exp_c),
+            _compact_alnum_upper(text_blob)[:200],
+        )
         return False, "content_mismatch", None
 
     dep = Decimal(str(order.deposit_amount))

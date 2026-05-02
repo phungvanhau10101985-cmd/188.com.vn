@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { apiClient } from '@/lib/api-client';
 import { getOptimizedImage } from '@/lib/image-utils';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 
 interface ViewedItem {
   id: number;
@@ -26,10 +27,12 @@ function formatVnd(n: number) {
 }
 
 export default function DaXemPage() {
+  const { isAuthenticated } = useAuth();
   const [items, setItems] = useState<ViewedItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     apiClient
       .getViewedProducts(24)
@@ -64,8 +67,13 @@ export default function DaXemPage() {
         setItems(enriched);
       })
       .catch(() => setItems([]))
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
 
   return (
     <div className="min-h-screen bg-gray-50">

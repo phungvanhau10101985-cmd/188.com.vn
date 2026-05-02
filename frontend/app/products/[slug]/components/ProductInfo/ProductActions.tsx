@@ -9,6 +9,10 @@ interface ProductActionsProps {
   selectedSize: string;
   selectedColor: string;
   available: boolean;
+  /** false khi SP có size/màu nhưng khách chưa chọn đủ — chặn thêm giỏ / mua ngay */
+  variantsComplete?: boolean;
+  /** Gợi ý khi hover (ví dụ chưa chọn size) */
+  variantSelectionHint?: string;
   onAddToCart: (product: Product, quantity: number, selectedSize?: string, selectedColor?: string) => void;
   onToggleFavorite: (product: Product) => void;
   onBuyNow: (product: Product, quantity: number, selectedSize?: string, selectedColor?: string) => void;
@@ -22,12 +26,16 @@ export default function ProductActions({
   selectedSize,
   selectedColor,
   available,
+  variantsComplete = true,
+  variantSelectionHint,
   onAddToCart,
   onToggleFavorite,
   onBuyNow,
   isCartLoading = false,
   isFavorited = false
 }: ProductActionsProps) {
+  const canPurchase = available && !isCartLoading && variantsComplete;
+  const blockHint = !variantsComplete ? variantSelectionHint : undefined;
 
   const handleAddToCart = () => {
     onAddToCart(product, quantity, selectedSize, selectedColor);
@@ -44,10 +52,12 @@ export default function ProductActions({
   return (
     <div className="flex flex-col sm:flex-row gap-2 pt-3">
       <button
+        type="button"
         onClick={handleAddToCart}
-        disabled={!available || isCartLoading}
+        disabled={!canPurchase}
+        title={blockHint}
         className={`flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all flex items-center justify-center space-x-2 group ${
-          available && !isCartLoading
+          canPurchase
             ? 'bg-gray-500 hover:bg-gray-600 text-white shadow hover:shadow-md'
             : 'bg-gray-300 text-gray-500 cursor-not-allowed'
         } ${isCartLoading ? 'opacity-70' : ''}`}
@@ -59,10 +69,12 @@ export default function ProductActions({
       </button>
       
       <button
+        type="button"
         onClick={handleBuyNow}
-        disabled={!available || isCartLoading}
+        disabled={!canPurchase}
+        title={blockHint}
         className={`flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
-          available && !isCartLoading
+          canPurchase
             ? 'bg-[#ea580c] hover:bg-[#c2410c] text-white shadow hover:shadow-md'
             : 'bg-gray-300 text-gray-500 cursor-not-allowed'
         } ${isCartLoading ? 'opacity-70' : ''}`}
