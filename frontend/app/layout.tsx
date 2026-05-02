@@ -14,6 +14,7 @@ import { fetchPublicSiteEmbeds } from "@/lib/site-embeds-public";
 import { ToastProvider } from "@/components/ToastProvider";
 import PwaPushRegister from "@/components/PwaPushRegister";
 import { getCategoryTreeForLayout } from "@/lib/category-seo";
+import { APP_WEB_ICON_URL } from "@/lib/app-web-icon";
 
 /** Origin cho metadata (OG, icons). Luôn có scheme — `new URL("188.com.vn")` throw → SSR 500 / trắng trang nếu env prod thiếu https:// */
 function normalizeAbsoluteSiteUrl(raw: string): string {
@@ -94,10 +95,10 @@ export const metadata: Metadata = {
     description: "Thời trang nam nữ và đa dạng sản phẩm — chính hãng, giao hàng toàn quốc",
     images: [
       {
-        url: "https://188comvn.b-cdn.net/logo188.png",
-        width: 400,
-        height: 120,
-        alt: "188.COM.VN - XEM LÀ THÍCH",
+        url: APP_WEB_ICON_URL,
+        width: 512,
+        height: 512,
+        alt: "188.COM.VN",
       },
     ],
   },
@@ -105,7 +106,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "188.COM.VN - Nền tảng TMĐT số 1",
     description: "Thời trang nam nữ và đa dạng sản phẩm — chính hãng, giao hàng toàn quốc",
-    images: ["https://188comvn.b-cdn.net/logo188.png"],
+    images: [APP_WEB_ICON_URL],
   },
   robots: {
     index: true,
@@ -118,10 +119,15 @@ export const metadata: Metadata = {
       "max-snippet": -1,
     },
   },
-  // Icon từ app/icon.png — Next tự thêm <link rel="icon">; /favicon.ico → rewrite sang /favicon.png trong next.config
+  // Icon: app/icon.png + favicon.png (đồng bộ logo); metadata bổ sung OG/PWA dùng CDN.
+  icons: {
+    icon: [{ url: APP_WEB_ICON_URL, type: "image/png" }],
+    apple: [{ url: APP_WEB_ICON_URL, sizes: "180x180", type: "image/png" }],
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
+    title: "188.COM.VN",
   },
   other: {
     "mobile-web-app-capable": "yes",

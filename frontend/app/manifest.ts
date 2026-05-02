@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { APP_WEB_ICON_URL } from "@/lib/app-web-icon";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
@@ -16,13 +17,13 @@ export default function manifest(): MetadataRoute.Manifest {
     categories: ["shopping", "fashion"],
     icons: [
       {
-        src: "https://188comvn.b-cdn.net/logo188.png",
+        src: APP_WEB_ICON_URL,
         sizes: "192x192",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "https://188comvn.b-cdn.net/logo188.png",
+        src: APP_WEB_ICON_URL,
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",

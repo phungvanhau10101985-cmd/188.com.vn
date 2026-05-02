@@ -35,8 +35,8 @@ self.addEventListener("push", (event) => {
   const title = data.title || "188.COM.VN";
   const options = {
     body: data.body || "",
-    icon: "https://188comvn.b-cdn.net/logo188.png",
-    badge: "https://188comvn.b-cdn.net/logo188.png",
+    icon: "https://nanoai.b-cdn.net/results/ef34291c-0b83-49c1-b390-4ab50df32e9d/logo_1777722718273.png",
+    badge: "https://nanoai.b-cdn.net/results/ef34291c-0b83-49c1-b390-4ab50df32e9d/logo_1777722718273.png",
     data: { url: data.url || "/account/notifications" },
   };
   event.waitUntil(
