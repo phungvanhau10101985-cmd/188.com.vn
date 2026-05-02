@@ -10,6 +10,7 @@ import Navigation from '@/components/Navigation';
 import MobileHeader from '@/components/mobile/MobileHeader';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import BackToTopButton from '@/components/BackToTopButton';
+import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 
 const CartAddedPopup = dynamic(() => import('@/components/CartAddedPopup'), { ssr: false });
 const BirthGenderSalePromptModal = dynamic(
@@ -229,6 +230,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       {/* Footer: hiển thị cả mobile và desktop */}
       <Footer />
       <BackToTopButton />
+      <PwaInstallPrompt />
       <CartAddedPopup />
       {/* Mobile: Bottom nav - ẩn trên trang auth để dropdown chọn tháng không bị che, kéo được tháng 12 */}
       {showMobileBottomNav && <MobileBottomNav notificationCount={0} favoriteCount={favoriteCount} />}

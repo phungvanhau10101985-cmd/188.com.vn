@@ -75,6 +75,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     await mergeGuestBehavior();
     markFreshLoginSession();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('188-auth-session-changed'));
+    }
     const fromApi =
       nextPath && nextPath.startsWith('/') && !nextPath.startsWith('//') ? nextPath : null;
     router.push(fromApi ?? getLoginRedirectFromUrl());
@@ -119,6 +122,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('user');
+    try {
+      sessionStorage.removeItem('188_auto_push_prompt_v1');
+    } catch {
+      /* noop */
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('188-auth-session-changed'));
+    }
     // Cookie JWT httpOnly chỉ backend mới xoá được; phiên client được xoá ở đây.
 
     setAuthState({
@@ -136,6 +147,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       returnPath.startsWith('/') && !returnPath.startsWith('//') ? returnPath : '/account';
     localStorage.removeItem('access_token');
     localStorage.removeItem('user');
+    try {
+      sessionStorage.removeItem('188_auto_push_prompt_v1');
+    } catch {
+      /* noop */
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('188-auth-session-changed'));
+    }
     setAuthState({
       user: null,
       token: null,

@@ -44,6 +44,15 @@ export default function MobileBottomNav({ notificationCount: initialNotifCount =
     }
   }, [isAuthenticated]);
 
+  useEffect(() => {
+    const onRefresh = () => {
+      if (!isAuthenticated) return;
+      apiClient.getUnreadNotificationCount().then(setUnreadNotifCount).catch(() => {});
+    };
+    window.addEventListener('188-notifications-refresh', onRefresh);
+    return () => window.removeEventListener('188-notifications-refresh', onRefresh);
+  }, [isAuthenticated]);
+
   const getBadgeCount = (item: (typeof navItems)[number]) => {
     if (item.badgeKey === 'notification') return unreadNotifCount;
     if (item.badgeKey === 'favorite') return favoriteCount;

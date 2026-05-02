@@ -1,22 +1,19 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { apiClient } from "@/lib/api-client";
+import { useEffect } from "react";
+import {
+  syncPushSubscription,
+  requestPermissionAndSyncPush,
+  dispatchNotificationsRefresh,
+} from "@/lib/web-push-subscribe";
 
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = atob(base64);
-  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
-}
+const SESSION_AUTO_PROMPT_KEY = "188_auto_push_prompt_v1";
 
 /**
- * Đăng ký service worker (PWA) + Web Push (khi đã đăng nhập, có VAPID trên server).
- * iOS: PWA cài màn hình chính có từ 16.4+; thông báo đẩy phụ thuộc Apple/Safari.
+ * Đăng ký service worker + đồng bộ Web Push khi khách đã đăng nhập và đã cho phép thông báo.
+ * Một lần mỗi phiên: gợi ý hệ thống xin quyền (nếu đang default).
  */
 export default function PwaPushRegister() {
-  const done = useRef(false);
-
   useEffect(() => {
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
 
@@ -32,64 +29,66 @@ export default function PwaPushRegister() {
     if (ric) idleId = ric(() => regSw(), { timeout: 6000 });
     else swTimeoutId = setTimeout(regSw, 400);
 
-    const tryPush = async () => {
-      if (done.current) return;
+    const onSwMessage = (event: MessageEvent) => {
+      if (event.data?.type === "NOTIFICATIONS_REFRESH") {
+        dispatchNotificationsRefresh();
+      }
+    };
+    navigator.serviceWorker.addEventListener("message", onSwMessage);
+
+    const runGrantedSync = () => {
       const token = localStorage.getItem("access_token");
       if (!token) return;
-      if (!("PushManager" in window)) return;
-
-      const perm = await Notification.requestPermission();
-      if (perm !== "granted") return;
-
-      let vapid: { public_key: string };
-      try {
-        vapid = await apiClient.getPushVapidKey();
-      } catch {
-        return;
-      }
-      if (!vapid?.public_key) return;
-
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapid.public_key) as unknown as BufferSource,
-      });
-      const j = sub.toJSON();
-      if (!j.endpoint || !j.keys?.p256dh || !j.keys?.auth) return;
-
-      try {
-        await apiClient.registerPushSubscription({
-          endpoint: j.endpoint,
-          keys: { p256dh: j.keys.p256dh, auth: j.keys.auth },
-          user_agent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
-        });
-        done.current = true;
-      } catch (e) {
-        console.warn("[PWA] push subscribe:", e);
-      }
+      if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+      syncPushSubscription().catch(() => {});
     };
 
-    const t = setTimeout(tryPush, 2000);
+    /** Một lần / phiên: xin quyền tự động sau vài giây (sau khi vào site đã đăng nhập) */
+    const maybeAutoPromptPermission = async () => {
+      if (!localStorage.getItem("access_token")) return;
+      if (typeof Notification === "undefined") return;
+      if (Notification.permission !== "default") return;
+      if (sessionStorage.getItem(SESSION_AUTO_PROMPT_KEY)) return;
+      sessionStorage.setItem(SESSION_AUTO_PROMPT_KEY, "1");
+      await requestPermissionAndSyncPush();
+    };
+
+    const tSync = setTimeout(runGrantedSync, 2500);
+    const tPrompt = setTimeout(maybeAutoPromptPermission, 8000);
+
     const onStorage = (e: StorageEvent) => {
-      if (e.key === "access_token" && e.newValue) tryPush();
+      if (e.key === "access_token" && e.newValue) {
+        runGrantedSync();
+        setTimeout(maybeAutoPromptPermission, 1500);
+      }
+      if (e.key === "access_token" && !e.newValue) {
+        sessionStorage.removeItem(SESSION_AUTO_PROMPT_KEY);
+      }
     };
     window.addEventListener("storage", onStorage);
+
+    const onAuthSession = () => {
+      runGrantedSync();
+      setTimeout(maybeAutoPromptPermission, 1200);
+    };
+    window.addEventListener("188-auth-session-changed", onAuthSession);
+
     const onVis = () => {
-      if (document.visibilityState === "visible") tryPush();
+      if (document.visibilityState === "visible") runGrantedSync();
     };
     document.addEventListener("visibilitychange", onVis);
-    let n = 0;
-    const iv = setInterval(() => {
-      n += 1;
-      tryPush();
-      if (n >= 24) clearInterval(iv);
-    }, 5000);
+
+    const iv = setInterval(runGrantedSync, 90000);
+
     return () => {
       if (idleId != null && w.cancelIdleCallback) w.cancelIdleCallback(idleId);
       if (swTimeoutId != null) clearTimeout(swTimeoutId);
-      clearTimeout(t);
+      navigator.serviceWorker.removeEventListener("message", onSwMessage);
+      clearTimeout(tSync);
+      clearTimeout(tPrompt);
       clearInterval(iv);
       window.removeEventListener("storage", onStorage);
+      window.removeEventListener("188-auth-session-changed", onAuthSession);
       document.removeEventListener("visibilitychange", onVis);
     };
   }, []);

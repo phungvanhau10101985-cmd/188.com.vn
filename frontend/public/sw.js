@@ -39,7 +39,23 @@ self.addEventListener("push", (event) => {
     badge: "https://188comvn.b-cdn.net/logo188.png",
     data: { url: data.url || "/account/notifications" },
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    (async () => {
+      try {
+        const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        clients.forEach((c) => {
+          try {
+            c.postMessage({ type: "NOTIFICATIONS_REFRESH" });
+          } catch (e) {
+            /* noop */
+          }
+        });
+      } catch (e) {
+        /* noop */
+      }
+      await self.registration.showNotification(title, options);
+    })()
+  );
 });
 
 self.addEventListener("notificationclick", (event) => {

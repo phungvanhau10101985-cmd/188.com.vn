@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import Link from 'next/link';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
+import PushNotificationsCard from './PushNotificationsCard';
 
 export default function MyNotificationsPage() {
   const loginHref = useLoginRedirectHref();
@@ -60,7 +61,7 @@ export default function MyNotificationsPage() {
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-3xl">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold text-gray-900">Thông báo của tôi</h1>
         {notifications.some(n => !n.is_read) && (
           <button 
@@ -71,6 +72,8 @@ export default function MyNotificationsPage() {
           </button>
         )}
       </div>
+
+      <PushNotificationsCard />
 
       {loading ? (
         <div className="text-center py-8 text-gray-500">Đang tải thông báo...</div>
