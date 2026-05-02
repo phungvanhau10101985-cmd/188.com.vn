@@ -11,37 +11,41 @@ interface MobileBottomNavProps {
   favoriteCount?: number;
 }
 
+function pathNorm(p: string | null): string {
+  if (p == null) return '';
+  return p.replace(/\/$/, '') || '/';
+}
+
 const navItems = [
-  { href: '/', label: 'Trang chủ', icon: 'home' },
-  { href: '/info/lien-he', label: 'Liên hệ', icon: 'contact' },
-  { href: '/account/notifications', label: 'Thông báo', icon: 'bell', badgeKey: 'notification' },
-  { href: '/favorites', label: 'Yêu thích', icon: 'heart', badgeKey: 'favorite' },
-  { href: '/account', label: 'Cá nhân', icon: 'profile' },
+  { href: '/', label: 'Trang chủ', icon: 'home' as const },
+  /** Hành vi xem lại SP trong phiên — trang được dùng nhiều trên TMĐT */
+  { href: '/da-xem', label: 'Đã xem', icon: 'recent' as const },
+  { href: '/account/notifications', label: 'Thông báo', icon: 'bell' as const, badgeKey: 'notification' as const },
+  { href: '/favorites', label: 'Yêu thích', icon: 'heart' as const, badgeKey: 'favorite' as const },
+  { href: '/account', label: 'Cá nhân', icon: 'profile' as const },
 ];
 
 export default function MobileBottomNav({ notificationCount: initialNotifCount = 0, favoriteCount = 0 }: MobileBottomNavProps) {
   const pathname = usePathname();
+  const pathKey = pathNorm(pathname);
   const { isAuthenticated } = useAuth();
   const [unreadNotifCount, setUnreadNotifCount] = useState(initialNotifCount);
 
   useEffect(() => {
     if (isAuthenticated) {
-      // Fetch immediately
-      apiClient.getUnreadNotificationCount()
+      apiClient
+        .getUnreadNotificationCount()
         .then(setUnreadNotifCount)
         .catch(() => setUnreadNotifCount(0));
-        
-      // Poll every minute
+
       const interval = setInterval(() => {
-        apiClient.getUnreadNotificationCount()
-          .then(setUnreadNotifCount)
-          .catch(() => {});
+        apiClient.getUnreadNotificationCount().then(setUnreadNotifCount).catch(() => {});
       }, 60000);
-      
+
       return () => clearInterval(interval);
-    } else {
-      setUnreadNotifCount(0);
     }
+    setUnreadNotifCount(0);
+    return undefined;
   }, [isAuthenticated]);
 
   useEffect(() => {
@@ -63,27 +67,28 @@ export default function MobileBottomNav({ notificationCount: initialNotifCount =
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 safe-area-pb shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
       <div className="flex items-center justify-around h-[60px] px-1">
         {navItems.map((item) => {
-          const isActive = item.href === '/' ? pathname === '/' : pathname?.startsWith(item.href);
+          const isActive =
+            item.href === '/'
+              ? pathKey === '/'
+              : pathKey === pathNorm(item.href) || pathKey.startsWith(`${pathNorm(item.href)}/`);
           const badgeCount = item.badgeKey ? getBadgeCount(item) : 0;
           const showBadge = badgeCount > 0;
 
+          const className = `flex flex-col items-center justify-center flex-1 h-full min-w-0 gap-1 transition-colors ${
+            isActive ? 'text-[#ea580c]' : 'text-gray-500 hover:text-gray-900'
+          }`;
+
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex flex-col items-center justify-center flex-1 h-full min-w-0 gap-1 transition-colors ${
-                isActive ? 'text-[#ea580c]' : 'text-gray-500 hover:text-gray-900'
-              }`}
-            >
+            <Link key={item.href} href={item.href} className={className}>
               <span className="relative inline-flex items-center justify-center">
                 {item.icon === 'home' && (
                   <svg className="w-6 h-6" fill={isActive ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
                   </svg>
                 )}
-                {item.icon === 'contact' && (
+                {item.icon === 'recent' && (
                   <svg className="w-6 h-6" fill={isActive ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 )}
                 {item.icon === 'bell' && (
