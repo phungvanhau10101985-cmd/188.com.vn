@@ -185,15 +185,33 @@ function isLikelyNanoAiMessagingIframe(f: HTMLIFrameElement, chatBase: string): 
   return false;
 }
 
+/** Iframe đang thực sự hiển thị (widget đóng thường để iframe trong DOM nhưng display:none). */
+function isMessagingIframeVisiblyOpen(f: HTMLIFrameElement): boolean {
+  const r = f.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return false;
+  let el: Element | null = f;
+  for (let d = 0; d < 24 && el; d++, el = el.parentElement) {
+    const st = window.getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) return false;
+  }
+  return true;
+}
+
 /**
  * Gán src iframe = URL có `open_try_on=1` + ctx_* — widget mặc định hay mở khung chat không query này.
- * @returns số iframe đã gán (thường 1).
+ * `onlyVisible`: chỉ iframe đang mở (tránh patch iframe ẩn sau khi user đóng panel rồi return sớm — lần sau không mở lại được).
  */
-export function applyTryOnUrlToNanoAiMessagingIframes(targetUrl: string, chatBase: string): number {
+export function applyTryOnUrlToNanoAiMessagingIframes(
+  targetUrl: string,
+  chatBase: string,
+  opts?: { onlyVisible?: boolean }
+): number {
   if (typeof document === 'undefined') return 0;
+  const onlyVisible = opts?.onlyVisible ?? false;
   let n = 0;
   for (const f of collectIframesDeep(document)) {
     if (!isLikelyNanoAiMessagingIframe(f, chatBase)) continue;
+    if (onlyVisible && !isMessagingIframeVisiblyOpen(f)) continue;
     try {
       f.src = targetUrl;
       n++;
@@ -227,27 +245,32 @@ export async function openNanoAiTryOnEmbed(ctx: NanoAiTryOnCtx): Promise<NanoAiT
   syncNanoAiLoaderScriptProductContext(ctx);
   dispatchNanoAiEmbedOpenTryOnSignals();
 
-  let sawPatch = false;
-  const patch = (): boolean => {
-    const k = applyTryOnUrlToNanoAiMessagingIframes(targetUrl, base);
-    if (k > 0) sawPatch = true;
-    return sawPatch;
-  };
+  const patchAll = () => applyTryOnUrlToNanoAiMessagingIframes(targetUrl, base);
+  const patchVisible = () =>
+    applyTryOnUrlToNanoAiMessagingIframes(targetUrl, base, { onlyVisible: true });
 
-  if (patch()) return { ok: true, mode: 'launcher' };
+  /** Đã mở panel: có ít nhất một iframe messaging nhìn thấy được. */
+  const tryOnFrameIsOpen = (): boolean => patchVisible() > 0;
+
+  if (tryOnFrameIsOpen()) {
+    patchAll();
+    return { ok: true, mode: 'launcher' };
+  }
 
   const clickedOnce = clickNanoAiChatLauncher();
 
   for (let i = 0; i < 40; i++) {
     await delay(80);
-    if (patch()) return { ok: true, mode: 'launcher' };
+    patchAll();
+    if (tryOnFrameIsOpen()) return { ok: true, mode: 'launcher' };
     if (i === 10 || i === 22) clickNanoAiChatLauncher();
   }
 
   if (!clickedOnce) {
     for (let i = 0; i < 14; i++) {
       await delay(100);
-      if (patch()) return { ok: true, mode: 'launcher' };
+      patchAll();
+      if (tryOnFrameIsOpen()) return { ok: true, mode: 'launcher' };
     }
   }
 
