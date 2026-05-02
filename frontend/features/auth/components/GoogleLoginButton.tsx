@@ -17,9 +17,11 @@ export default function GoogleLoginButton({ onCredential, onError }: GoogleLogin
   const buttonRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID?.trim();
     if (!clientId) {
-      onError?.('Thiếu GOOGLE_CLIENT_ID. Vui lòng cấu hình để đăng nhập Gmail.');
+      onError?.(
+        'Thiếu NEXT_PUBLIC_GOOGLE_CLIENT_ID ở frontend (.env.local). Phải cùng giá trị với GOOGLE_CLIENT_ID trên backend — sau đó khởi động lại Next.',
+      );
       return;
     }
 
