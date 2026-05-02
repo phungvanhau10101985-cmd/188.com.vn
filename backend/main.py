@@ -137,8 +137,10 @@ def init_database_tables():
         try:
             from app.db.session import SessionLocal
             from app.crud.site_embed_code import ensure_default_embed_codes, deactivate_nanoai_try_on_embeds
+            from app.crud import shop_video_fab as shop_video_fab_crud
             _s = SessionLocal()
             try:
+                shop_video_fab_crud.get_or_create_singleton(_s)
                 n = ensure_default_embed_codes(_s)
                 tn = deactivate_nanoai_try_on_embeds(_s)
                 if n:
@@ -167,6 +169,7 @@ def load_api_routes():
         ("bank_accounts", "/bank-accounts", "bank-accounts"),
         ("admin", "/admin", "admin"),
         ("embed_codes", "/embed-codes", "embed-codes"),
+        ("shop_video_fab", "/shop-video-fab", "shop-video-fab"),
         ("categories", "/categories", "categories"),
         ("category_seo", "/category-seo", "category-seo"),
         ("taxonomy_admin", "/taxonomy", "taxonomy-admin"),

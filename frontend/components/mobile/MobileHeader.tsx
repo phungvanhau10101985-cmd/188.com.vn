@@ -38,7 +38,8 @@ function isMobileCategoryPanelHistoryState(state: unknown): boolean {
 
 interface MobileHeaderProps {
   cartItemsCount: number;
-  favoriteItemsCount: number;
+  /** Số SP đã xem (đăng nhập) — badge nút đồng hồ /da-xem */
+  viewedProductsCount: number;
   suggestions: string[];
   onSuggestionClick: (term: string) => void;
   initialCategoryTree?: CategoryLevel1[];
@@ -46,7 +47,7 @@ interface MobileHeaderProps {
 
 export default function MobileHeader({
   cartItemsCount,
-  favoriteItemsCount,
+  viewedProductsCount,
   suggestions,
   onSuggestionClick,
   initialCategoryTree = [],
@@ -276,6 +277,12 @@ export default function MobileHeader({
   const iconBtnCondensed =
     'flex-shrink-0 min-w-[40px] min-h-[40px] w-10 h-10 shrink-0 flex items-center justify-center text-white rounded-lg bg-white/22 hover:bg-white/32 active:bg-white/42 transition-colors backdrop-blur-[2px] shadow-sm shadow-black/10';
 
+  /** Badge số trên icon header — chữ rất nhỏ, vòng elipse gọn */
+  const headerCountBadge =
+    'absolute z-[1] h-[13px] min-w-[13px] px-[2px] -top-px -right-px flex items-center justify-center rounded-full bg-white text-[#ea580c] text-[7px] font-bold tabular-nums leading-none tracking-tight shadow-[0_1px_3px_rgba(0,0,0,0.18)] ring-[0.5px] ring-white/80';
+
+  const headerGlyphClass = 'w-[22px] h-[22px] shrink-0 text-white';
+
   return (
     <div
       ref={panelRef}
@@ -425,20 +432,18 @@ export default function MobileHeader({
               </div>
             </form>
 
-            {!isFavoritesPage && (
+            {!isDaXemPage && (
               <Link
-                href="/favorites"
-                className={`${tightToolbar ? iconBtnCondensed : iconBtn} relative`}
-                aria-label="Sản phẩm yêu thích"
-                title="Sản phẩm yêu thích"
+                href="/da-xem"
+                className={`relative overflow-visible ${tightToolbar ? iconBtnCondensed : iconBtn}`}
+                aria-label="Sản phẩm đã xem"
+                title="Sản phẩm đã xem"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                <svg className={headerGlyphClass} fill="none" stroke="currentColor" strokeWidth={1.85} viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                {favoriteItemsCount > 0 && (
-                  <span className="absolute -right-px -top-px bg-white text-[#ea580c] rounded-full min-w-[11px] h-3 px-0.5 text-[7px] sm:text-[8px] flex items-center justify-center font-semibold leading-none shadow-sm ring-1 ring-black/5">
-                    {favoriteItemsCount > 99 ? '99+' : favoriteItemsCount}
-                  </span>
+                {viewedProductsCount > 0 && (
+                  <span className={headerCountBadge}>{viewedProductsCount > 99 ? '99+' : viewedProductsCount}</span>
                 )}
               </Link>
             )}
@@ -453,14 +458,16 @@ export default function MobileHeader({
             )}
 
             {!isCartPage && (
-              <Link href="/cart" className={`${tightToolbar ? iconBtnCondensed : iconBtn} relative`} aria-label="Giỏ hàng" title="Giỏ hàng">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+              <Link href="/cart" className={`relative overflow-visible ${tightToolbar ? iconBtnCondensed : iconBtn}`} aria-label="Giỏ hàng" title="Giỏ hàng">
+                <svg className={headerGlyphClass} fill="none" stroke="currentColor" strokeWidth={1.85} viewBox="0 0 24 24" aria-hidden>
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
+                  />
                 </svg>
                 {cartItemsCount > 0 && (
-                  <span className="absolute -right-px -top-px bg-white text-[#ea580c] rounded-full min-w-[11px] h-3 px-0.5 text-[7px] sm:text-[8px] flex items-center justify-center font-semibold leading-none shadow-sm ring-1 ring-black/5">
-                    {cartItemsCount > 99 ? '99+' : cartItemsCount}
-                  </span>
+                  <span className={headerCountBadge}>{cartItemsCount > 99 ? '99+' : cartItemsCount}</span>
                 )}
               </Link>
             )}

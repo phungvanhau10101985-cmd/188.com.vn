@@ -15,6 +15,46 @@ export type NanoAiTryOnCtx = {
 /** Nguồn ctx_* khi mở từ feed video — khớp docs NanoAI `ctx_source`. */
 export const NANO_AI_CTX_SOURCE_VIDEO_FEED = 'shop_video_feed';
 
+/** Nguồn ctx_* khi mở từ trang chi tiết sản phẩm (sticky bar). */
+export const NANO_AI_CTX_SOURCE_PRODUCT_PDP = 'product_detail';
+
+/** Nguồn ctx_* khi mở thử đồ từ tab trên trang chủ (không gắn SP cụ thể). */
+export const NANO_AI_CTX_SOURCE_SHOP_HOME = 'shop_home';
+
+/** Chuẩn hóa SP 188 → payload thử đồ NanoAI (hosted). */
+export function buildNanoAiTryOnCtxFrom188Product(p: {
+  id: number;
+  code?: string | null;
+  product_id?: string | null;
+  slug?: string | null;
+  main_image?: string | null;
+  images?: string[] | null;
+  inventory_id?: string | null;
+}): NanoAiTryOnCtx {
+  const sku = (String(p.code ?? '').trim() || String(p.product_id ?? '').trim() || String(p.id)).trim();
+  const ordered = [p.main_image, ...(p.images || [])].filter(Boolean) as string[];
+  const uniq = [...new Set(ordered)];
+  const primary = uniq[0] || '';
+  const secondary = uniq.find((u) => u !== primary) || null;
+  const slugPart = String(p.slug ?? '').trim() || String(p.product_id ?? '').trim();
+  return {
+    sku,
+    primaryImageUrl: primary,
+    secondaryImageUrl: secondary,
+    productPath: `/products/${slugPart}`,
+    inventoryId: p.inventory_id ?? null,
+  };
+}
+
+/** Thử đồ từ tab bottom nav trên trang chủ — không ngữ cảnh SP cụ thể. */
+export const NANO_AI_TRY_ON_HOME_CTX: NanoAiTryOnCtx = {
+  sku: '',
+  primaryImageUrl: '',
+  secondaryImageUrl: null,
+  productPath: '/',
+  inventoryId: null,
+};
+
 function absolutizeUrl(raw: string, origin: string): string {
   const t = raw.trim();
   if (!t) return '';
@@ -234,12 +274,15 @@ function delay(ms: number): Promise<void> {
  * Popup trên shop + đúng luồng thử đồ: ép iframe messaging dùng URL có `open_try_on=1` và ctx,
  * đồng thời mở launcher nếu khung đang đóng. Chỉ bấm launcher không đủ — iframe vẫn tải chat mặc định.
  */
-export async function openNanoAiTryOnEmbed(ctx: NanoAiTryOnCtx): Promise<NanoAiTryOnEmbedOpenResult> {
+export async function openNanoAiTryOnEmbed(
+  ctx: NanoAiTryOnCtx,
+  ctxSource: string = NANO_AI_CTX_SOURCE_VIDEO_FEED
+): Promise<NanoAiTryOnEmbedOpenResult> {
   if (typeof window === 'undefined') return { ok: false, reason: 'no_chat_config' };
   const base = resolveNanoAiHostedChatBaseUrl();
   if (!base) return { ok: false, reason: 'no_chat_config' };
 
-  const targetUrl = buildNanoAiTryOnHostedUrl(ctx);
+  const targetUrl = buildNanoAiTryOnHostedUrl(ctx, ctxSource);
   if (!targetUrl) return { ok: false, reason: 'no_chat_config' };
 
   syncNanoAiLoaderScriptProductContext(ctx);

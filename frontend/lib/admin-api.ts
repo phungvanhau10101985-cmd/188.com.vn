@@ -638,6 +638,24 @@ export const adminSiteEmbedAPI = {
   delete: (id: number) => fetchAdmin<void>(`/admin/site-embed-codes/${id}`, { method: 'DELETE' }),
 };
 
+/** Vị trí FAB «lướt video» (đồng bộ với GET public `/shop-video-fab/public`). */
+export interface ShopVideoFabSettings {
+  right_mobile_px: number;
+  bottom_mobile_px_no_nav: number;
+  bottom_mobile_px_with_nav: number;
+  right_desktop_px: number;
+  bottom_desktop_px: number;
+}
+
+export const adminShopVideoFabAPI = {
+  get: () => fetchAdmin<ShopVideoFabSettings>('/admin/shop-video-fab-settings'),
+  update: (data: ShopVideoFabSettings) =>
+    fetchAdmin<ShopVideoFabSettings>('/admin/shop-video-fab-settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+};
+
 export const adminBankAPI = {
   getAll: () => fetchAdmin<BankAccountAdmin[]>('/admin/bank-accounts/all'),
   create: (data: {

@@ -17,6 +17,7 @@ const ADMIN_LINKS = [
   { href: '/admin/loyalty', label: 'Cấu hình thành viên' },
   { href: '/admin/bank-accounts', label: 'Cấu hình nạp tiền' },
   { href: '/admin/chat-embeds', label: 'Nhúng chat: NanoAI, Zalo, Facebook' },
+  { href: '/admin/shop-video-fab', label: 'Vị trí nút lướt video' },
   { href: '/admin/embed-codes', label: 'Mã nhúng (GA, FB, TikTok…)' },
   { href: '/admin/notifications', label: 'Quản lý thông báo' },
 ];

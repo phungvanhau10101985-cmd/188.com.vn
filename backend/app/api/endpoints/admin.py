@@ -27,6 +27,8 @@ from app.schemas.site_embed_code import (
     SiteEmbedCodeUpdate,
 )
 from app.crud import site_embed_code as embed_crud
+from app.crud import shop_video_fab as shop_video_fab_crud
+from app.schemas.shop_video_fab import ShopVideoFabPublicOut, ShopVideoFabAdminUpdate
 from app.core.security import create_admin_token, get_current_admin
 from app.core.config import settings
 
@@ -390,3 +392,25 @@ def admin_delete_site_embed_code(
     ok = embed_crud.delete_embed_code(db, embed_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Không tìm thấy mã nhúng")
+
+
+# ========== Vị trí nút lướt video shop (FAB) ==========
+@router.get("/shop-video-fab-settings", response_model=ShopVideoFabPublicOut)
+def admin_get_shop_video_fab_settings(
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(get_current_admin),
+):
+    row = shop_video_fab_crud.get_or_create_singleton(db)
+    return shop_video_fab_crud.row_to_public_out(row)
+
+
+@router.put("/shop-video-fab-settings", response_model=ShopVideoFabPublicOut)
+def admin_put_shop_video_fab_settings(
+    data: ShopVideoFabAdminUpdate,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(get_current_admin),
+):
+    if not data.model_dump(exclude_unset=True):
+        row = shop_video_fab_crud.get_or_create_singleton(db)
+        return shop_video_fab_crud.row_to_public_out(row)
+    return shop_video_fab_crud.update_singleton(db, data)

@@ -38,6 +38,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   const { isAuthenticated } = useAuth();
   const { getCartItemCount } = useCart();
   const { favoriteCount } = useFavorites();
+  const [viewedProductsCount, setViewedProductsCount] = useState(0);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [headerVisible, setHeaderVisible] = useState(true);
 
@@ -108,6 +109,25 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       setSuggestions([]);
     }
   }, [isAuthenticated, qFromUrl]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setViewedProductsCount(0);
+      return;
+    }
+    let cancelled = false;
+    apiClient
+      .getViewedProducts(99)
+      .then((list) => {
+        if (!cancelled) setViewedProductsCount(Array.isArray(list) ? list.length : 0);
+      })
+      .catch(() => {
+        if (!cancelled) setViewedProductsCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, pathname]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -222,7 +242,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       {!isAuthPage && !isShopVideoFeedPage && (
         <MobileHeader
           cartItemsCount={getCartItemCount()}
-          favoriteItemsCount={favoriteCount}
+          viewedProductsCount={viewedProductsCount}
           suggestions={suggestions}
           onSuggestionClick={handleSuggestionClick}
           initialCategoryTree={initialCategoryTree}

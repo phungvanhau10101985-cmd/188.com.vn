@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import type { Product } from '@/types/api';
@@ -17,6 +17,11 @@ import ProductQASection from './components/ProductQASection/ProductQASection';
 import ProductReviewSection from './components/ProductReviewSection/ProductReviewSection';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
+import {
+  openNanoAiTryOnEmbed,
+  buildNanoAiTryOnCtxFrom188Product,
+  NANO_AI_CTX_SOURCE_PRODUCT_PDP,
+} from '@/lib/nanoai-hosted-chat';
 
 function formatLikeCount(n: unknown): string {
   const v = Math.max(0, Math.floor(Number(n)) || 0);
@@ -78,6 +83,35 @@ export default function ProductDetailMobile({
   const loyaltyTierName = loyaltyStatus?.current_tier?.name || 'L0';
 
   const openVariantModal = () => setVariantModalOpen(true);
+
+  const handleNanoAiTryOn = useCallback(async () => {
+    const ctx = buildNanoAiTryOnCtxFrom188Product(product);
+    const result = await openNanoAiTryOnEmbed(ctx, NANO_AI_CTX_SOURCE_PRODUCT_PDP);
+    if (!result.ok) {
+      if (result.reason === 'no_chat_config') {
+        pushToast({
+          title: 'Chưa mở được thử đồ',
+          description:
+            'Kiểm tra mã nhúng NanoAI (data-chat-url trên script) hoặc biến NEXT_PUBLIC_NANOAI_CHAT_URL trong frontend.',
+          variant: 'info',
+          durationMs: 4200,
+        });
+      } else {
+        pushToast({
+          title: 'Chưa mở được khung chat',
+          description: 'Bấm biểu tượng chat NanoAI góc màn hình — ngữ cảnh sản phẩm đã được gửi kèm.',
+          variant: 'info',
+          durationMs: 4200,
+        });
+      }
+      return;
+    }
+    trackEvent('nanoai_try_on_open', {
+      product_id: product.id,
+      source: 'product_detail_mobile',
+      mode: result.mode,
+    });
+  }, [product, pushToast]);
 
   const images = [
     ...(product.main_image ? [product.main_image] : []),
@@ -337,7 +371,7 @@ export default function ProductDetailMobile({
         </div>
       </div>
 
-      {/* Sticky bottom bar: Trang · Đã xem · Thích | THÊM GIỎ | MUA HÀNG */}
+      {/* Sticky bottom bar: Trang · Thử đồ · Thích | THÊM GIỎ | MUA HÀNG */}
       <div className="fixed bottom-0 left-0 right-0 z-30 bg-gray-100 border-t border-gray-200 safe-area-pb md:hidden">
         {/* Loyalty Discount Message */}
         {isAuthenticated && loyaltyDiscountAmount > 0 && (
@@ -366,19 +400,24 @@ export default function ProductDetailMobile({
                 <span className="text-[10px] text-gray-600">chủ</span>
               </span>
             </Link>
-            <Link
-              href="/da-xem"
-              className="flex w-12 flex-none flex-col items-center justify-center gap-px py-0 text-gray-600 active:opacity-70"
-              aria-label="Sản phẩm đã xem"
+            <button
+              type="button"
+              onClick={() => void handleNanoAiTryOn()}
+              className="flex w-12 flex-none flex-col items-center justify-center gap-px py-0 text-[#ea580c] active:opacity-70"
+              aria-label="Thử đồ với NanoAI"
             >
-              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
+                />
               </svg>
               <span className="flex flex-col items-center gap-0 leading-none">
-                <span className="text-[10px] text-gray-600">Đã</span>
-                <span className="text-[10px] text-gray-600">xem</span>
+                <span className="text-[10px] font-medium text-[#ea580c]">Thử</span>
+                <span className="text-[10px] font-medium text-[#ea580c]">đồ</span>
               </span>
-            </Link>
+            </button>
             <button
               type="button"
               onClick={() => onToggleFavorite(product)}

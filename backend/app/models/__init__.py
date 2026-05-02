@@ -69,6 +69,10 @@ print("✅ BankAccount model loaded")
 from app.models.site_embed_code import SiteEmbedCode
 print("✅ SiteEmbedCode model loaded")
 
+# 6b3. Vị trí nút nổi lướt video shop (singleton)
+from app.models.shop_video_fab_setting import ShopVideoFabSetting
+print("✅ ShopVideoFabSetting model loaded")
+
 # 6c. Product questions (câu hỏi câu trả lời sản phẩm)
 from app.models.product_question import ProductQuestion, ProductQuestionUsefulVote
 print("✅ ProductQuestion model loaded")
@@ -156,6 +160,7 @@ __all__ = [
     "Payment",
     "BankAccount",
     "SiteEmbedCode",
+    "ShopVideoFabSetting",
     "CategorySeoMapping",
     "CategorySeoDictionary",
     "CategorySeoMeta",

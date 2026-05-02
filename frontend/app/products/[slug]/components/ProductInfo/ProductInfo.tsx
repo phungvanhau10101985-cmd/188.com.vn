@@ -1,7 +1,7 @@
 // frontend/app/products/[slug]/components/ProductInfo/ProductInfo.tsx - ĐÃ SỬA LỖI PROPS
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
@@ -12,6 +12,13 @@ import { colorLabelForCart } from '@/lib/product-color-variant';
 import ProductActions from './ProductActions';
 import ProductQAReviewCards from '../ProductQAReviewCards/ProductQAReviewCards';
 import ProductVariantModal from '../ProductVariantModal/ProductVariantModal';
+import { useToast } from '@/components/ToastProvider';
+import { trackEvent } from '@/lib/analytics';
+import {
+  openNanoAiTryOnEmbed,
+  buildNanoAiTryOnCtxFrom188Product,
+  NANO_AI_CTX_SOURCE_PRODUCT_PDP,
+} from '@/lib/nanoai-hosted-chat';
 
 interface ProductInfoProps {
   product: Product;
@@ -45,7 +52,37 @@ export default function ProductInfo({
   const [variantModalAction, setVariantModalAction] = useState<'add' | 'buy' | 'both'>('both');
   const [displayStockByVariant, setDisplayStockByVariant] = useState<Record<string, number>>({});
   const { isAuthenticated } = useAuth();
+  const { pushToast } = useToast();
   const [loyaltyStatus, setLoyaltyStatus] = useState<any>(null);
+
+  const handleNanoAiTryOn = useCallback(async () => {
+    const ctx = buildNanoAiTryOnCtxFrom188Product(product);
+    const result = await openNanoAiTryOnEmbed(ctx, NANO_AI_CTX_SOURCE_PRODUCT_PDP);
+    if (!result.ok) {
+      if (result.reason === 'no_chat_config') {
+        pushToast({
+          title: 'Chưa mở được thử đồ',
+          description:
+            'Kiểm tra mã nhúng NanoAI (data-chat-url trên script) hoặc biến NEXT_PUBLIC_NANOAI_CHAT_URL trong frontend.',
+          variant: 'info',
+          durationMs: 4200,
+        });
+      } else {
+        pushToast({
+          title: 'Chưa mở được khung chat',
+          description: 'Bấm biểu tượng chat NanoAI góc màn hình — ngữ cảnh sản phẩm đã được gửi kèm.',
+          variant: 'info',
+          durationMs: 4200,
+        });
+      }
+      return;
+    }
+    trackEvent('nanoai_try_on_open', {
+      product_id: product.id,
+      source: 'product_detail_desktop_sticky',
+      mode: result.mode,
+    });
+  }, [product, pushToast]);
 
   const available = (product.available || 0) > 0;
   const hasDiscount = product.original_price && product.original_price > product.price;
@@ -281,12 +318,22 @@ export default function ProductInfo({
                   <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
                   <span className="text-[11px]">Trang chủ</span>
                   </Link>
-                  <Link href="/da-xem" className="flex flex-col items-center justify-center flex-shrink-0 w-14 text-gray-600" aria-label="Sản phẩm đã xem">
-                    <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <button
+                    type="button"
+                    onClick={() => void handleNanoAiTryOn()}
+                    className="flex flex-col items-center justify-center flex-shrink-0 w-14 text-[#ea580c] hover:opacity-90 active:opacity-75"
+                    aria-label="Thử đồ với NanoAI"
+                  >
+                    <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
+                      />
                     </svg>
-                    <span className="text-[11px]">Đã xem</span>
-                  </Link>
+                    <span className="text-[11px] font-medium">Thử đồ</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => onToggleFavorite(product)}
