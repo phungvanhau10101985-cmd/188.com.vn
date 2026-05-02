@@ -209,6 +209,12 @@ def get_sepay_deposit_info(
 
     transfer_content = sepay_svc.build_transfer_content_for_order(order)
     amount = Decimal(str(order.deposit_amount))
+    crud.payment.upsert_pending_sepay_deposit_payment(
+        db,
+        order_id=order.id,
+        transfer_content=transfer_content,
+        amount=amount,
+    )
     enabled = sepay_svc.sepay_configured_for_qr()
     qr_url = None
     if enabled:

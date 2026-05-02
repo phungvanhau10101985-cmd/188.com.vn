@@ -10,7 +10,7 @@ import logging
 import re
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 from urllib.parse import parse_qsl, urlencode
 
 from fastapi import Request
@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.crud import order as crud_order
 from app.crud import payment as crud_payment
-from app.models.order import DepositType, Order, OrderStatus, PaymentMethod, PaymentStatus
+from app.models.order import DepositType, Order, OrderStatus, Payment, PaymentMethod, PaymentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -340,6 +340,127 @@ def _amount_equal(a: Decimal, b: Decimal) -> bool:
     return abs(a - b) <= Decimal("1")
 
 
+def ledger_transfer_content_key(raw: Optional[str]) -> str:
+    """
+    Khóa đối chiếu nội dung CK (luồng B): ưu tiên cụm SEVQR + mã trong SMS dài.
+    """
+    if not raw:
+        return ""
+    t = " ".join(str(raw).split()).strip().upper()
+    m = re.search(r"SEVQR\s+[A-Z0-9][A-Z0-9\-]*", t, re.IGNORECASE)
+    if m:
+        return " ".join(m.group(0).split()).upper()
+    return t
+
+
+def _webhook_transfer_content_keys(text_blob: str) -> Set[str]:
+    out: Set[str] = set()
+    k = ledger_transfer_content_key(text_blob)
+    if k:
+        out.add(k)
+    full = " ".join(text_blob.split()).strip().upper()
+    if full:
+        out.add(full)
+        fk = ledger_transfer_content_key(full)
+        if fk:
+            out.add(fk)
+    return {x for x in out if x}
+
+
+def _find_matching_pending_sepay_deposit(
+    db: Session,
+    text_blob: str,
+    amount: Decimal,
+) -> Optional[Payment]:
+    """
+    Tìm Payment deposit_sepay đang PENDING (đã tạo khi GET sepay-deposit-info) khớp số tiền + nội dung.
+    """
+    keys_w = _webhook_transfer_content_keys(text_blob)
+    blob_compact = _compact_alnum_upper(text_blob)
+
+    rows = (
+        db.query(Payment)
+        .filter(
+            Payment.payment_type == "deposit_sepay",
+            Payment.payment_status == PaymentStatus.PENDING,
+        )
+        .order_by(Payment.id.desc())
+        .all()
+    )
+    for p in rows:
+        if (p.transaction_code or "").strip():
+            continue
+        if not _amount_equal(Decimal(str(p.amount)), amount):
+            continue
+        order = crud_order.get_order(db, p.order_id)
+        if not order:
+            continue
+        st = getattr(order.status, "value", order.status)
+        if st != OrderStatus.WAITING_DEPOSIT.value or not order.requires_deposit:
+            continue
+
+        pk = ledger_transfer_content_key(p.transfer_content)
+        if pk:
+            if keys_w and pk in keys_w:
+                return p
+        p_comp = _compact_alnum_upper(p.transfer_content or "")
+        if p_comp and len(p_comp) >= 6 and p_comp in blob_compact:
+            return p
+    return None
+
+
+def _finalize_sepay_deposit_success(
+    db: Session,
+    order: Order,
+    amount: Decimal,
+    sepay_id_str: str,
+    reference: str,
+    data: Dict[str, Any],
+    pending_payment: Optional[Payment],
+) -> None:
+    if pending_payment:
+        pending_payment.payment_status = PaymentStatus.PAID
+        pending_payment.transaction_code = sepay_id_str
+        pending_payment.transfer_date = datetime.now()
+        pending_payment.payment_gateway_data = {
+            "source": "sepay",
+            "reference": reference,
+            "payload": data,
+        }
+        pending_payment.confirmed_at = datetime.now()
+    else:
+        crud_payment.create_payment(
+            db=db,
+            order_id=order.id,
+            amount=amount,
+            payment_method=PaymentMethod.BANK_TRANSFER.value,
+            payment_type="deposit_sepay",
+            transaction_code=sepay_id_str,
+            payment_status=PaymentStatus.PAID,
+            payment_gateway_data={
+                "source": "sepay",
+                "reference": reference,
+                "payload": data,
+            },
+        )
+
+    order.deposit_paid = amount
+    order.deposit_paid_at = datetime.now()
+    order.remaining_amount = Decimal(str(order.total_amount)) - amount
+
+    dt = order.deposit_type
+    dt_val = dt.value if hasattr(dt, "value") else dt
+    if dt_val == DepositType.PERCENT_100.value:
+        order.payment_status = PaymentStatus.PAID
+        order.status = OrderStatus.CONFIRMED
+        order.confirmed_at = datetime.now()
+    else:
+        order.payment_status = PaymentStatus.DEPOSIT_PAID
+        order.status = OrderStatus.DEPOSIT_PAID
+
+    db.commit()
+
+
 def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bool, str, Optional[int]]:
     """
     Xử lý payload webhook SePay (tiền vào).
@@ -375,6 +496,24 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
         logger.info("SePay webhook account mismatch: %s vs %s", acc_in, expected_acc)
         return False, "account_mismatch", None
 
+    # --- Luồng B: khớp bản ghi Payment PENDING đã tạo khi GET sepay-deposit-info (ổn định hơn parse SMS) ---
+    pending = _find_matching_pending_sepay_deposit(db, text_blob, amount)
+    if pending:
+        order = crud_order.get_order(db, pending.order_id)
+        if not order:
+            return False, "order_not_found", None
+        status_val = getattr(order.status, "value", order.status)
+        if status_val != OrderStatus.WAITING_DEPOSIT.value:
+            return False, "order_not_waiting_deposit", None
+        if not order.requires_deposit:
+            return False, "no_deposit_required", None
+        dep = Decimal(str(order.deposit_amount))
+        if not _amount_equal(amount, dep):
+            return False, "amount_mismatch", None
+        _finalize_sepay_deposit_success(db, order, amount, sepay_id_str, reference, data, pending)
+        return True, "ok", order.id
+
+    # --- Legacy: không có pending (khách chưa mở API cọc sau khi deploy / QR cũ) ---
     sepay_code = _pick(data, "code")
     code_looks_order = bool(
         sepay_code is not None
@@ -411,35 +550,5 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
     if not _amount_equal(amount, dep):
         return False, "amount_mismatch", None
 
-    crud_payment.create_payment(
-        db=db,
-        order_id=order.id,
-        amount=amount,
-        payment_method=PaymentMethod.BANK_TRANSFER.value,
-        payment_type="deposit_sepay",
-        transaction_code=sepay_id_str,
-        payment_status=PaymentStatus.PAID,
-        payment_gateway_data={
-            "source": "sepay",
-            "reference": reference,
-            "payload": data,
-        },
-    )
-
-    order.deposit_paid = amount
-    order.deposit_paid_at = datetime.now()
-    order.remaining_amount = Decimal(str(order.total_amount)) - amount
-
-    dt = order.deposit_type
-    dt_val = dt.value if hasattr(dt, "value") else dt
-    if dt_val == DepositType.PERCENT_100.value:
-        order.payment_status = PaymentStatus.PAID
-        order.status = OrderStatus.CONFIRMED
-        order.confirmed_at = datetime.now()
-    else:
-        order.payment_status = PaymentStatus.DEPOSIT_PAID
-        order.status = OrderStatus.DEPOSIT_PAID
-
-    oid = order.id
-    db.commit()
-    return True, "ok", oid
+    _finalize_sepay_deposit_success(db, order, amount, sepay_id_str, reference, data, None)
+    return True, "ok", order.id

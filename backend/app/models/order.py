@@ -156,6 +156,8 @@ class Payment(Base):
     bank_name = Column(String(100))
     account_number = Column(String(50))
     account_name = Column(String(255))
+    # Nội dung CK khớp QR SePay (pending → webhook đối chiếu trực tiếp, không suy đoán từ SMS)
+    transfer_content = Column(Text, nullable=True)
     transaction_code = Column(String(100))
     transfer_date = Column(DateTime(timezone=True))
     

@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 from sqlalchemy import inspect, text
 from app.db.base import Base
 from app.models.product import Product
-from app.models.order import Order, OrderItem, OrderStatus, DepositType, PaymentMethod, PaymentStatus
+from app.models.order import Order, OrderItem, OrderStatus, DepositType, PaymentMethod, PaymentStatus, Payment
 from app.models.product_question import ProductQuestion, ProductQuestionUsefulVote
 from app.models.product_review import ProductReview, ProductReviewUsefulVote
 from app.models.search_mapping import SearchMapping
@@ -495,7 +495,9 @@ class MigrationManager:
         results['site_embed_codes_sync'] = self._sync_table_columns("site_embed_codes", SiteEmbedCode)
         # 17. category_final_mappings.apply_to_future_imports (mapping form admin = one-shot; import/cây chỉ dùng rule bật cờ)
         results['category_final_mappings_apply_future'] = self.migrate_category_final_mappings_apply_future_imports()
-        # 18. category_final_mappings.restrict_product_ids (tuỳ chọn: chỉ map một số product_id)
+        # 18. Payments: transfer_content (SePay luồng B — pending khớp webhook)
+        results['payments_sync_columns'] = self._sync_table_columns("payments", Payment)
+        # 19. category_final_mappings.restrict_product_ids (tuỳ chọn: chỉ map một số product_id)
         results['category_final_mappings_sync'] = self._sync_table_columns("category_final_mappings", CategoryFinalMapping)
 
         return results
