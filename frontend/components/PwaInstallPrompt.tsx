@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 
-const STORAGE_KEY = "188_pwa_install_dismissed_at";
-const COOLDOWN_DAYS = 14;
-/** Đợi người dùng làm quen trang trước khi gợi ý cài */
-const SHOW_AFTER_MS = 22000;
+/** Số lần mở/chuyển trang (route khác trong phiên) trước khi gợi ý cài app */
+const PAGES_BEFORE_PROMPT = 10;
+const NAV_COUNT_KEY = "188_pwa_install_nav_count";
+/** Tránh đếm trùng khi F5 cùng URL — so trong sessionStorage */
+const SESSION_LAST_PATH_KEY = "188_pwa_install_session_last_path";
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -33,22 +34,25 @@ function isLikelyInAppBrowser(): boolean {
   return /FBAN|FBAV|FB_IAB|Instagram|Line\//i.test(ua);
 }
 
-function dismissedRecently(): boolean {
+/** Đếm +1 mỗi khi pathname đổi (khác URL đã ghi trong phiên); F5 cùng URL không tăng. */
+function bumpNavCountForPath(pathname: string): number {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return false;
-    const t = Number(raw);
-    if (!Number.isFinite(t)) return false;
-    const elapsed = Date.now() - t;
-    return elapsed < COOLDOWN_DAYS * 86400000;
+    const last = sessionStorage.getItem(SESSION_LAST_PATH_KEY);
+    if (last === pathname) {
+      return parseInt(localStorage.getItem(NAV_COUNT_KEY) || "0", 10) || 0;
+    }
+    sessionStorage.setItem(SESSION_LAST_PATH_KEY, pathname);
+    const next = (parseInt(localStorage.getItem(NAV_COUNT_KEY) || "0", 10) || 0) + 1;
+    localStorage.setItem(NAV_COUNT_KEY, String(next));
+    return next;
   } catch {
-    return false;
+    return 0;
   }
 }
 
-function persistDismiss() {
+function resetNavCount(): void {
   try {
-    localStorage.setItem(STORAGE_KEY, String(Date.now()));
+    localStorage.setItem(NAV_COUNT_KEY, "0");
   } catch {
     /* noop */
   }
@@ -56,46 +60,78 @@ function persistDismiss() {
 
 export default function PwaInstallPrompt() {
   const pathname = usePathname();
-  const [gateOpen, setGateOpen] = useState(false);
+  const [navCount, setNavCount] = useState(0);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [visible, setVisible] = useState(false);
   const [installing, setInstalling] = useState(false);
 
   const dismiss = useCallback(() => {
-    persistDismiss();
+    resetNavCount();
+    setNavCount(0);
     setVisible(false);
   }, []);
+
+  /** Đồng bộ bộ đếm từ storage khi mount (tab đã có lịch sử) */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const v = parseInt(localStorage.getItem(NAV_COUNT_KEY) || "0", 10);
+      if (Number.isFinite(v)) setNavCount(v);
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  /** Mỗi lần đổi route → tăng đếm */
+  useEffect(() => {
+    if (typeof window === "undefined" || pathname == null) return;
+
+    const n = bumpNavCountForPath(pathname);
+    setNavCount(n);
+  }, [pathname]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (isStandaloneDisplay()) return;
     if (isLikelyInAppBrowser()) return;
-    if (dismissedRecently()) return;
 
     const onBip = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e as BeforeInstallPromptEvent);
-      setGateOpen(true);
     };
     window.addEventListener("beforeinstallprompt", onBip);
-
-    const t = window.setTimeout(() => setGateOpen(true), SHOW_AFTER_MS);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onBip);
-      window.clearTimeout(t);
-    };
+    return () => window.removeEventListener("beforeinstallprompt", onBip);
   }, []);
 
+  const hideOnRoute =
+    pathname != null &&
+    (pathname.startsWith("/auth") || pathname.startsWith("/admin"));
+
   useEffect(() => {
-    if (!gateOpen) return;
-    if (isStandaloneDisplay()) return;
-    if (isLikelyInAppBrowser()) return;
-    if (dismissedRecently()) return;
+    if (typeof window === "undefined") return;
+
+    if (isStandaloneDisplay()) {
+      setVisible(false);
+      return;
+    }
+    if (isLikelyInAppBrowser()) {
+      setVisible(false);
+      return;
+    }
+    if (hideOnRoute) {
+      setVisible(false);
+      return;
+    }
+    if (navCount < PAGES_BEFORE_PROMPT) {
+      setVisible(false);
+      return;
+    }
 
     const showChromeInstall = deferredPrompt != null;
     const showIosSteps = isIOS();
     if (showChromeInstall || showIosSteps) setVisible(true);
-  }, [gateOpen, deferredPrompt]);
+    else setVisible(false);
+  }, [navCount, deferredPrompt, hideOnRoute]);
 
   const handleInstallClick = async () => {
     if (!deferredPrompt) return;
@@ -111,10 +147,6 @@ export default function PwaInstallPrompt() {
       dismiss();
     }
   };
-
-  const hideOnRoute =
-    pathname != null &&
-    (pathname.startsWith("/auth") || pathname.startsWith("/admin"));
 
   if (hideOnRoute || !visible) return null;
 
