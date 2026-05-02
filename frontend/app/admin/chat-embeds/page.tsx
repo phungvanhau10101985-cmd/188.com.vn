@@ -5,17 +5,7 @@ import Link from 'next/link';
 import AdminLayout from '@/components/admin/AdminLayout';
 import { adminSiteEmbedAPI, type SiteEmbedCodeAdmin } from '@/lib/admin-api';
 
-const NANO_TRY_ON_PRESET = {
-  platform: 'nanoai',
-  category: 'try_on',
-  title: 'NanoAI — Nút thử đồ (try-on widget)',
-  placement: 'body_close' as const,
-  sort_order: 83,
-  hint:
-    'Dán thẻ script nanoai-try-on-widget.js (data-try-on-url, data-shop-name, data-label, …). Trang chi tiết SP tự gắn data-ctx-*.',
-};
-
-const NANO_CHAT_PRESET = {
+const NANO_PRESET = {
   platform: 'nanoai',
   category: 'embed',
   title: 'NanoAI — Chat / widget nhúng',
@@ -43,9 +33,6 @@ const FB_CHAT_PRESET = {
 };
 
 function pickRows(list: SiteEmbedCodeAdmin[]) {
-  const nanoTryOn = list.find(
-    (r) => r.platform?.toLowerCase() === 'nanoai' && r.category?.toLowerCase() === 'try_on',
-  );
   const nano = list.find(
     (r) => r.platform?.toLowerCase() === 'nanoai' && r.category?.toLowerCase() === 'embed',
   );
@@ -55,16 +42,12 @@ function pickRows(list: SiteEmbedCodeAdmin[]) {
   const fbChat = list.find(
     (r) => r.platform?.toLowerCase() === 'facebook' && r.category?.toLowerCase() === 'chat',
   );
-  return { nanoTryOn, nano, zalo, fbChat };
+  return { nano, zalo, fbChat };
 }
 
 export default function AdminChatEmbedsPage() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
-
-  const [nanoTryOnId, setNanoTryOnId] = useState<number | null>(null);
-  const [nanoTryOnContent, setNanoTryOnContent] = useState('');
-  const [nanoTryOnActive, setNanoTryOnActive] = useState(true);
 
   const [nanoId, setNanoId] = useState<number | null>(null);
   const [nanoContent, setNanoContent] = useState('');
@@ -89,10 +72,7 @@ export default function AdminChatEmbedsPage() {
     setLoading(true);
     try {
       const list = await adminSiteEmbedAPI.getAll();
-      const { nanoTryOn, nano, zalo, fbChat } = pickRows(list);
-      setNanoTryOnId(nanoTryOn?.id ?? null);
-      setNanoTryOnContent(nanoTryOn?.content ?? '');
-      setNanoTryOnActive(nanoTryOn?.is_active ?? true);
+      const { nano, zalo, fbChat } = pickRows(list);
       setNanoId(nano?.id ?? null);
       setNanoContent(nano?.content ?? '');
       setNanoActive(nano?.is_active ?? true);
@@ -114,36 +94,6 @@ export default function AdminChatEmbedsPage() {
     void load();
   }, [load]);
 
-  const saveNanoTryOn = async () => {
-    if (nanoTryOnActive && !(nanoTryOnContent || '').trim()) {
-      showToast('err', 'Đang bật thử đồ NanoAI: cần dán script hoặc tắt mục.');
-      return;
-    }
-    setSaving('nanoTryOn');
-    try {
-      if (nanoTryOnId != null) {
-        await adminSiteEmbedAPI.update(nanoTryOnId, {
-          content: nanoTryOnContent,
-          is_active: nanoTryOnActive,
-          placement: 'body_close',
-        });
-      } else {
-        const row = await adminSiteEmbedAPI.create({
-          ...NANO_TRY_ON_PRESET,
-          content: nanoTryOnContent,
-          is_active: nanoTryOnActive,
-        });
-        setNanoTryOnId(row.id);
-      }
-      showToast('ok', 'Đã lưu mã nhúng thử đồ NanoAI');
-      await load();
-    } catch (err) {
-      showToast('err', (err as Error)?.message || 'Lỗi lưu');
-    } finally {
-      setSaving(null);
-    }
-  };
-
   const saveNano = async () => {
     if (nanoActive && !(nanoContent || '').trim()) {
       showToast('err', 'Đang bật NanoAI: cần dán mã nhúng hoặc tắt mục.');
@@ -159,7 +109,7 @@ export default function AdminChatEmbedsPage() {
         });
       } else {
         const row = await adminSiteEmbedAPI.create({
-          ...NANO_CHAT_PRESET,
+          ...NANO_PRESET,
           content: nanoContent,
           is_active: nanoActive,
         });
@@ -237,20 +187,19 @@ export default function AdminChatEmbedsPage() {
   return (
     <AdminLayout>
       <div className="p-6 max-w-3xl">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">
-          Nhúng chat &amp; thử đồ NanoAI, Zalo, Facebook
-        </h1>
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">Nhúng chat: NanoAI, Zalo, Facebook</h1>
         <p className="text-gray-600 mb-4 text-sm leading-relaxed">
-          NanoAI: một ô cho widget chat, một ô cho nút thử đồ — có thể bật cả hai. Trang chi tiết sản phẩm tự gắn{' '}
+          NanoAI: trang chi tiết sản phẩm tự gắn{' '}
           <code className="text-xs bg-gray-100 px-1 rounded">data-ctx-sku</code>,{' '}
           <code className="text-xs bg-gray-100 px-1 rounded">data-ctx-image</code>,{' '}
-          <code className="text-xs bg-gray-100 px-1 rounded">data-ctx-inventory</code>… lên cả hai script khi khách xem SP.
+          <code className="text-xs bg-gray-100 px-1 rounded">data-ctx-inventory</code>… lên script chat khi khách xem SP.
           Các mã được chèn cuối trang (trước khi đóng <code className="text-xs bg-gray-100 px-1 rounded">&lt;body&gt;</code>),
           cùng hệ thống với{' '}
           <Link href="/admin/embed-codes" className="text-[#ea580c] font-medium hover:underline">
             Mã nhúng đầy đủ
           </Link>
-          . Sau khi lưu, khách xem site sẽ thấy widget tương ứng khi mục đang bật.
+          . Nếu trước đây đã lưu script thử đồ NanoAI, hãy vào đó để tắt hoặc xóa dòng đó — trang này chỉ còn cấu hình chat.
+          Sau khi lưu, khách xem site sẽ thấy widget tương ứng khi mục đang bật.
         </p>
 
         {toast && (
@@ -267,41 +216,6 @@ export default function AdminChatEmbedsPage() {
           <p className="text-gray-500">Đang tải...</p>
         ) : (
           <div className="space-y-6">
-            <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-              <h2 className="text-lg font-semibold text-gray-900 mb-1">NanoAI — Nút thử đồ (try-on)</h2>
-              <p className="text-xs text-gray-500 mb-3 leading-relaxed">
-                Dán script <code className="bg-gray-100 px-1 rounded">nanoai-try-on-widget.js</code> từ NanoAI (
-                <code className="bg-gray-100 px-1 rounded">data-try-on-url</code>,{' '}
-                <code className="bg-gray-100 px-1 rounded">data-shop-name</code>,{' '}
-                <code className="bg-gray-100 px-1 rounded">data-label</code>,{' '}
-                <code className="bg-gray-100 px-1 rounded">defer</code>…). Mode{' '}
-                <code className="bg-gray-100 px-1 rounded">inline</code> / floating do script quyết định. Optional:{' '}
-                <code className="bg-gray-100 px-1 rounded">data-widget-id</code> khác nhau nếu nhúng nhiều widget.
-              </p>
-              <textarea
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono min-h-[120px] mb-3"
-                placeholder='<script src="https://HOST/embed/nanoai-try-on-widget.js" data-try-on-url="https://HOST/messaging/p/shop-slug" defer></script>'
-                value={nanoTryOnContent}
-                onChange={(e) => setNanoTryOnContent(e.target.value)}
-              />
-              <label className="flex items-center gap-2 text-sm mb-3">
-                <input
-                  type="checkbox"
-                  checked={nanoTryOnActive}
-                  onChange={(e) => setNanoTryOnActive(e.target.checked)}
-                />
-                Đang bật hiển thị trên site
-              </label>
-              <button
-                type="button"
-                onClick={() => void saveNanoTryOn()}
-                disabled={saving === 'nanoTryOn'}
-                className="px-4 py-2 rounded-lg bg-[#c2410c] text-white text-sm font-medium hover:bg-[#9a3412] disabled:opacity-60"
-              >
-                {saving === 'nanoTryOn' ? 'Đang lưu...' : 'Lưu thử đồ NanoAI'}
-              </button>
-            </section>
-
             <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
               <h2 className="text-lg font-semibold text-gray-900 mb-1">Mã nhúng chat NanoAI</h2>
               <p className="text-xs text-gray-500 mb-3">

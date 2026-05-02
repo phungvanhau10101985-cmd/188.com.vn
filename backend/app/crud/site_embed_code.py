@@ -79,14 +79,6 @@ _DEFAULT_ROWS: tuple = (
     ("facebook", "chat", "Meta — Chat Plugin (Facebook)", "body_close", "Chỉ nhập Page ID (số).", 80),
     (
         "nanoai",
-        "try_on",
-        "NanoAI — Nút thử đồ (try-on widget)",
-        "body_close",
-        "Dán thẻ script nanoai-try-on-widget.js từ NanoAI (data-try-on-url, data-shop-name, …). Có thể dùng cùng trang với chat; trang SP sẽ tự thêm data-ctx-*.",
-        83,
-    ),
-    (
-        "nanoai",
         "embed",
         "NanoAI — Chat / widget nhúng",
         "body_close",
@@ -154,6 +146,27 @@ def _merge_missing_embed_presets(db: Session) -> int:
             )
         )
         n += 1
+    if n:
+        db.commit()
+    return n
+
+
+def deactivate_nanoai_try_on_embeds(db: Session) -> int:
+    """Tắt và xóa snippet các dòng nanoai/try_on (mục admin đã gỡ)."""
+    rows = (
+        db.query(SiteEmbedCode)
+        .filter(
+            SiteEmbedCode.platform == "nanoai",
+            SiteEmbedCode.category == "try_on",
+        )
+        .all()
+    )
+    n = 0
+    for row in rows:
+        if row.is_active or (row.content or "").strip():
+            row.is_active = False
+            row.content = ""
+            n += 1
     if n:
         db.commit()
     return n

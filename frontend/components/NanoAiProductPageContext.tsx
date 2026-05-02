@@ -13,7 +13,7 @@ const ATTR = {
 function findNanoAiContextScripts(): HTMLScriptElement[] {
   const out: HTMLScriptElement[] = [];
   const list = document.querySelectorAll('script[src]');
-  const re = /nanoai-chat-widget|nanoai-try-on-widget|nanoai\.vn\/embed/i;
+  const re = /nanoai-chat-widget|nanoai\.vn\/embed/i;
   for (let i = 0; i < list.length; i++) {
     const el = list[i];
     const src = el.getAttribute('src') || '';
@@ -52,7 +52,7 @@ export type NanoAiProductPageContextProps = {
 };
 
 /**
- * Gắn data-ctx-* lên các thẻ script NanoAI (chat + thử đồ) từ admin — iframe nhận ctx_sku, ctx_image, …
+ * Gắn data-ctx-* lên thẻ script chat NanoAI (admin / site embeds) — iframe nhận ctx_sku, ctx_image, …
  */
 export default function NanoAiProductPageContext({
   sku,

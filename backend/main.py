@@ -136,12 +136,15 @@ def init_database_tables():
                 raise
         try:
             from app.db.session import SessionLocal
-            from app.crud.site_embed_code import ensure_default_embed_codes
+            from app.crud.site_embed_code import ensure_default_embed_codes, deactivate_nanoai_try_on_embeds
             _s = SessionLocal()
             try:
                 n = ensure_default_embed_codes(_s)
+                tn = deactivate_nanoai_try_on_embeds(_s)
                 if n:
                     print(f"✅ Seeded {n} site embed placeholders (Google/Facebook/Zalo…)")
+                if tn:
+                    print(f"✅ Disabled {tn} NanoAI try-on embed row(s)")
             finally:
                 _s.close()
         except Exception as seed_err:

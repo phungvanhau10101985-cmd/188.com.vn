@@ -18,6 +18,7 @@ import { trackEvent } from '@/lib/analytics';
 import ProductVariantModal from '@/app/products/[slug]/components/ProductVariantModal/ProductVariantModal';
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
 import { SHOP_VIDEO_START_SLUG_PARAM } from '@/lib/shop-video-feed';
+import { openNanoAiTryOnHosted } from '@/lib/nanoai-hosted-chat';
 
 const FEED_SOUND_SESSION_KEY = '188-shop-video-feed-sound-on';
 
@@ -89,6 +90,7 @@ function VideoFeedProductBar({
   canAddToCart,
   onOpenCartModal,
   onToggleFavorite,
+  onTryOn,
 }: {
   product: Product;
   href: string;
@@ -99,6 +101,8 @@ function VideoFeedProductBar({
   canAddToCart: boolean;
   onOpenCartModal: () => void;
   onToggleFavorite: () => void;
+  /** Mở thử đồ NanoAI (hosted) — cạnh dòng đánh giá */
+  onTryOn?: () => void;
 }) {
   const sold = product.purchases != null && product.purchases > 0 ? formatSoldCount(product.purchases) : '';
   const reviewTotal = product.rating_total ?? 0;
@@ -113,8 +117,8 @@ function VideoFeedProductBar({
         <p className="text-[11px] text-white/65 mb-1.5 truncate">{product.shop_name}</p>
       ) : null}
 
-      {(sold || showReviews) && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] mb-2">
+      {(sold || showReviews || onTryOn) && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] mb-2">
           {sold ? (
             <span className="font-medium text-white tabular-nums drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]">
               Đã bán {sold}
@@ -130,6 +134,19 @@ function VideoFeedProductBar({
                 <span className="text-white/85">({reviewTotal.toLocaleString('vi-VN')} đánh giá)</span>
               ) : null}
             </span>
+          ) : null}
+          {onTryOn ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onTryOn();
+              }}
+              className="shrink-0 rounded-full border border-[#fdba74]/90 bg-[#ea580c] px-2.5 py-1 text-[11px] font-semibold text-white shadow-[0_1px_6px_rgba(0,0,0,0.35)] hover:bg-[#c2410c] active:scale-[0.97]"
+              aria-label="Thử đồ với NanoAI"
+            >
+              Thử đồ
+            </button>
           ) : null}
         </div>
       )}
@@ -526,6 +543,36 @@ export default function ShopVideoFeedClient() {
     }
   }
 
+  const handleTryOnProduct = useCallback(
+    (p: Product) => {
+      const sku = (p.code?.trim() || p.product_id || String(p.id)).trim();
+      const ordered = [p.main_image, ...(p.images || [])].filter(Boolean) as string[];
+      const uniq = [...new Set(ordered)];
+      const primary = uniq[0] || '';
+      const secondary = uniq.find((u) => u !== primary) || null;
+      const path = `/products/${(p.slug || '').trim() || p.product_id}`;
+      const ok = openNanoAiTryOnHosted({
+        sku,
+        primaryImageUrl: primary,
+        secondaryImageUrl: secondary,
+        productPath: path,
+        inventoryId: p.inventory_id ?? null,
+      });
+      if (!ok) {
+        pushToast({
+          title: 'Chưa mở được thử đồ',
+          description:
+            'Kiểm tra mã nhúng NanoAI (data-chat-url trên script) hoặc biến NEXT_PUBLIC_NANOAI_CHAT_URL trong frontend.',
+          variant: 'info',
+          durationMs: 4200,
+        });
+        return;
+      }
+      trackEvent('nanoai_try_on_open', { product_id: p.id, source: 'shop_video_feed' });
+    },
+    [pushToast]
+  );
+
   const loadMore = useCallback(async () => {
     if (!hasMore || loadingMore || seed == null) return;
     setLoadingMore(true);
@@ -701,6 +748,7 @@ export default function ShopVideoFeedClient() {
                   canAddToCart={(product.available ?? 0) > 0}
                   onOpenCartModal={() => openCartVariantModal(product)}
                   onToggleFavorite={() => void handleToggleFavorite(product)}
+                  onTryOn={() => handleTryOnProduct(product)}
                 />
               </div>
             </div>
