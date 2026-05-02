@@ -332,7 +332,7 @@ export default function ProductDetailMobile({
         </div>
       </div>
 
-      {/* Sticky bottom bar: Trang chủ, Đã xem, Thích | THÊM GIỎ | MUA HÀNG */}
+      {/* Sticky bottom bar: Trang · Đã xem · Thích | THÊM GIỎ | MUA HÀNG */}
       <div className="fixed bottom-0 left-0 right-0 z-30 bg-gray-100 border-t border-gray-200 safe-area-pb md:hidden">
         {/* Loyalty Discount Message */}
         {isAuthenticated && loyaltyDiscountAmount > 0 && (
@@ -343,26 +343,51 @@ export default function ProductDetailMobile({
             </span>
           </div>
         )}
-        <div className="flex items-center h-14 px-2 gap-2">
-          <Link href="/" className="flex flex-col items-center justify-center flex-shrink-0 w-12 text-gray-600">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
-            <span className="text-[10px]">Trang chủ</span>
-          </Link>
-          <Link href="/da-xem" className="flex flex-col items-center justify-center flex-shrink-0 w-12 text-gray-600" aria-label="Sản phẩm đã xem">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            <span className="text-[10px]">Đã xem</span>
-          </Link>
-          <button
-            type="button"
-            onClick={() => onToggleFavorite(product)}
-            className={`flex flex-col items-center justify-center flex-shrink-0 w-12 ${
-              isFavorited ? 'text-red-500' : 'text-gray-600'
-            }`}
+        <div className="flex items-center gap-2 px-2 py-1.5 min-h-[3.75rem]">
+          <nav
+            className="flex shrink-0 items-stretch gap-0.5 border-r border-gray-300 pr-2 mr-0.5"
+            aria-label="Lối tắt"
           >
-            <svg className="w-6 h-6" fill={isFavorited ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
-            <span className="text-[10px]">Thích {product.likes ?? 0}</span>
-          </button>
-          <div className="flex-1 flex gap-2 justify-end">
+            <Link
+              href="/"
+              className="flex w-[3.75rem] flex-none flex-col items-center justify-between gap-0 rounded-lg px-0.5 py-1 text-gray-600 active:bg-gray-200/70 min-h-[52px]"
+            >
+              <svg className="w-6 h-6 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+              </svg>
+              <span className="flex min-h-[2.25rem] w-full items-center justify-center text-center text-[10px] leading-none text-gray-600">
+                Trang
+              </span>
+            </Link>
+            <Link
+              href="/da-xem"
+              className="flex w-[3.75rem] flex-none flex-col items-center justify-between gap-0 rounded-lg px-0.5 py-1 text-gray-600 active:bg-gray-200/70 min-h-[52px]"
+              aria-label="Sản phẩm đã xem"
+            >
+              <svg className="w-6 h-6 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="flex min-h-[2.25rem] w-full items-center justify-center text-center text-[10px] leading-none text-gray-600">
+                Đã xem
+              </span>
+            </Link>
+            <button
+              type="button"
+              onClick={() => onToggleFavorite(product)}
+              className={`flex w-[3.75rem] flex-none flex-col items-center justify-between gap-0 rounded-lg px-0.5 py-1 min-h-[52px] active:bg-gray-200/70 ${
+                isFavorited ? 'text-red-500' : 'text-gray-600'
+              }`}
+            >
+              <svg className="w-6 h-6 shrink-0" fill={isFavorited ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+              </svg>
+              <span className="flex min-h-[2.25rem] w-full flex-col items-center justify-center gap-0 text-center text-[10px] leading-none tabular-nums">
+                <span>Thích</span>
+                <span className="text-[9px] font-medium opacity-80">{product.likes ?? 0}</span>
+              </span>
+            </button>
+          </nav>
+          <div className="flex flex-1 gap-2 justify-end min-w-0">
             <button
               type="button"
               onClick={openVariantModal}

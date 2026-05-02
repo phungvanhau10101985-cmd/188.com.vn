@@ -77,15 +77,21 @@ export function getSiteOriginForEmbed(): string {
  * URL nhúng YouTube (privacy-enhanced nocookie + origin + playsinline).
  * Dùng cho iframe src — không dùng link watch trực tiếp.
  */
-export function buildYoutubeEmbedSrc(videoId: string): string {
+export function buildYoutubeEmbedSrc(
+  videoId: string,
+  options?: { autoplay?: boolean; muted?: boolean }
+): string {
   const id = encodeURIComponent(videoId);
   const origin = getSiteOriginForEmbed();
+  const autoplay = options?.autoplay ? '1' : '0';
+  const muted = options?.muted ? '1' : '0';
   const q = new URLSearchParams({
-    autoplay: "0",
-    rel: "0",
-    modestbranding: "1",
-    playsinline: "1",
-    enablejsapi: "1",
+    autoplay,
+    mute: muted,
+    rel: '0',
+    modestbranding: '1',
+    playsinline: '1',
+    enablejsapi: '1',
     origin,
   });
   return `https://www.youtube-nocookie.com/embed/${id}?${q.toString()}`;

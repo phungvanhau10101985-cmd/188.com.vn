@@ -409,14 +409,16 @@ class ApiClient {
     return this.fetch<ProductListResponse>(`/user-behavior/products/home-feed?${params}`);
   }
 
-  /** Sản phẩm cùng shop với 8 sản phẩm xem gần nhất; phân trang: limit, offset, seed. */
+  /** Sản phẩm cùng shop với 8 sản phẩm xem gần nhất; phân trang: limit, offset, seed. requireVideo: chỉ SP có video_link. */
   async getProductsSameShopAsRecentViews(
     limit = 60,
     offset = 0,
-    seed?: number | null
+    seed?: number | null,
+    requireVideo = false
   ): Promise<{ products: Product[]; total: number; seed: number | null }> {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (seed != null) params.set('seed', String(seed));
+    if (requireVideo) params.set('require_video', 'true');
     const res = await this.fetch<{ products?: Product[]; total?: number; seed?: number | null }>(
       `/user-behavior/products/same-shop-as-recent-views?${params}`
     ).catch(() => ({ products: [], total: 0, seed: null }));

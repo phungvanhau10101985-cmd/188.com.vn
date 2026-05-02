@@ -43,6 +43,8 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   const qFromUrl = searchParams.get('q') ?? '';
   const isAuthPage = pathname?.startsWith('/auth/');
   const isProductDetailPage = pathname?.match(/^\/products\/[^/]+$/);
+  const pathNorm = pathname != null ? pathname.replace(/\/$/, '') || '/' : '/';
+  const isShopVideoFeedPage = pathNorm === '/luot-video-cung-shop';
 
   /** Trang chủ có query lọc/tìm, hoặc trang /info/* — cố định header + nav desktop khi cuộn */
   const keepDesktopHeaderPinned = useMemo(() => {
@@ -155,11 +157,11 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     router.push('/?' + params.toString());
   };
 
-  const showMobileBottomNav = !isAuthPage && !isProductDetailPage;
+  const showMobileBottomNav = !isAuthPage && !isProductDetailPage && !isShopVideoFeedPage;
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
-      {/* Desktop: Header + Navigation */}
+      {!isShopVideoFeedPage && (
       <div className="hidden md:block">
       {keepDesktopHeaderPinned ? (
         <>
@@ -214,8 +216,9 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
         </>
       )}
       </div>
+      )}
       {/* Mobile: header site — ẩn trang /auth/* (đồng bộ bottom nav, form đăng nhập đỡ chật) */}
-      {!isAuthPage && (
+      {!isAuthPage && !isShopVideoFeedPage && (
         <MobileHeader
           cartItemsCount={getCartItemCount()}
           favoriteItemsCount={favoriteCount}
@@ -225,11 +228,15 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
         />
       )}
 
-      <main className={`flex-1 md:pb-0 ${showMobileBottomNav ? 'pb-16' : ''}`}>{children}</main>
+      <main
+        className={`flex-1 md:pb-0 ${showMobileBottomNav ? 'pb-16' : ''} ${isShopVideoFeedPage ? 'bg-black' : ''}`}
+      >
+        {children}
+      </main>
 
       {/* Footer: hiển thị cả mobile và desktop */}
-      <Footer />
-      <BackToTopButton />
+      {!isShopVideoFeedPage && <Footer />}
+      {!isShopVideoFeedPage && <BackToTopButton />}
       <PwaInstallPrompt />
       <CartAddedPopup />
       {/* Mobile: Bottom nav - ẩn trên trang auth để dropdown chọn tháng không bị che, kéo được tháng 12 */}

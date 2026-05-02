@@ -333,10 +333,12 @@ def get_products_same_shop_as_recent_views(
     offset: int = 0,
     seed: Optional[int] = None,
     guest_session_id: Optional[str] = None,
+    require_video: bool = False,
 ) -> tuple[List[Product], int, Optional[int]]:
     """
     Sản phẩm cùng `shop_name` (tên shop từ import Excel → DB) với các shop của tối đa 8 sản phẩm xem gần nhất.
     Trả về (danh_sách_slice, total, seed). Không gửi `seed`: random mới mỗi lần; có `seed` + offset: pagination ổn định.
+    `require_video`: chỉ sản phẩm có `video_link` không rỗng (lướt video cùng shop).
     Ưu tiên user_id; nếu không có thì guest_session_id (bảng guest_product_views).
     """
     recent_product_ids: List[int] = []
@@ -377,6 +379,10 @@ def get_products_same_shop_as_recent_views(
         )
         .all()
     )
+    if not products:
+        return [], 0, None
+    if require_video:
+        products = [p for p in products if (getattr(p, "video_link", None) or "").strip()]
     if not products:
         return [], 0, None
     total = len(products)

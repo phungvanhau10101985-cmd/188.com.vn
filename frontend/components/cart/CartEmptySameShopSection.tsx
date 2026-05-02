@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { SimpleProductCard } from '@/components/ProductCard';
 import { apiClient } from '@/lib/api-client';
@@ -128,9 +129,26 @@ export default function CartEmptySameShopSection() {
 
   return (
     <section className="mt-8 md:mt-10 text-left" aria-label="Sản phẩm cùng shop bạn vừa xem">
-      <h2 className="text-base font-bold text-gray-900 mb-2 border-b-2 border-[#ea580c] pb-1 w-fit">
-        SẢN PHẨM CÙNG SHOP BẠN VỪA XEM
-      </h2>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3 mb-2">
+        <h2 className="text-base font-bold text-gray-900 border-b-2 border-[#ea580c] pb-1 w-fit shrink-0">
+          SẢN PHẨM CÙNG SHOP BẠN VỪA XEM
+        </h2>
+        {!sameShopLoading && (
+          <Link
+            href={
+              sameShopSeed != null
+                ? `/luot-video-cung-shop?seed=${sameShopSeed}`
+                : '/luot-video-cung-shop'
+            }
+            className="inline-flex items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-[#ea580c] to-orange-600 text-white text-xs font-semibold px-3.5 py-2 shadow-md shrink-0 self-start sm:self-center min-h-[40px] active:scale-[0.98] transition-transform"
+          >
+            <svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path d="M8 5v14l11-7z" />
+            </svg>
+            Lướt video
+          </Link>
+        )}
+      </div>
       <p className="text-sm text-gray-600 mt-1">
         Gợi ý từ shop (shop_name trong dữ liệu import) dựa trên tối đa 8 sản phẩm bạn xem gần nhất — thứ tự
         được trộn ngẫu nhiên mỗi lần mở trang.

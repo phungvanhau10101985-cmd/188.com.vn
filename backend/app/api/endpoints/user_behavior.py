@@ -113,6 +113,7 @@ def get_products_same_shop_as_recent_views_endpoint(
     limit: int = 60,
     offset: int = 0,
     seed: Optional[int] = None,
+    require_video: bool = False,
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
     x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
@@ -123,12 +124,13 @@ def get_products_same_shop_as_recent_views_endpoint(
 
     Phân trang: limit (mặc định 60), offset, seed («Xem thêm» giữ cùng thứ tự).
     Khách: X-Guest-Session-Id và đã có lượt xem trong phiên.
+    require_video=true: chỉ SP có video_link (gợi ý lướt video).
     """
     response.headers["Cache-Control"] = "private, no-store"
     sid = (x_guest_session_id or "").strip()
     if current_user:
         products, total, returned_seed = get_products_same_shop_as_recent_views(
-            db, user_id=current_user.id, limit=limit, offset=offset, seed=seed
+            db, user_id=current_user.id, limit=limit, offset=offset, seed=seed, require_video=require_video
         )
     elif sid:
         products, total, returned_seed = get_products_same_shop_as_recent_views(
@@ -138,6 +140,7 @@ def get_products_same_shop_as_recent_views_endpoint(
             offset=offset,
             seed=seed,
             guest_session_id=sid,
+            require_video=require_video,
         )
     else:
         return {"products": [], "total": 0, "seed": None}

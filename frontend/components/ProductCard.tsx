@@ -7,6 +7,22 @@ import { useState } from 'react';
 import { Product } from '@/types/api';
 import { formatPrice, getDiscountPercentage, truncateText } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
+import { hasVideoLink } from '@/lib/video-utils';
+
+function ProductVideoBadge({ videoLink }: { videoLink?: string | null }) {
+  if (!hasVideoLink(videoLink)) return null;
+  return (
+    <div
+      className="absolute bottom-2 left-2 z-[1] flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white shadow-md ring-1 ring-white/35 pointer-events-none"
+      title="Có video"
+    >
+      <span className="sr-only">Sản phẩm có video</span>
+      <svg className="h-3.5 w-3.5 translate-x-[1px]" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path d="M8 5v14l11-7z" />
+      </svg>
+    </div>
+  );
+}
 
 interface ProductCardProps {
   product: Product;
@@ -162,6 +178,8 @@ export default function ProductCard({
             -{getDiscountPercentage(product.original_price!, product.price)}%
           </div>
         )}
+
+        {!imageError && <ProductVideoBadge videoLink={product.video_link} />}
 
         {/* Action Buttons */}
         <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 space-y-1">
@@ -324,7 +342,7 @@ export const SimpleProductCard = ({
         <button
           type="button"
           onClick={handleFavorite}
-          className={`absolute top-1 right-1 min-w-[44px] min-h-[44px] w-11 h-11 -mt-1 -mr-1 rounded-full flex items-center justify-center text-xs transition-all ${
+          className={`absolute top-1 right-1 min-w-[44px] min-h-[44px] w-11 h-11 -mt-1 -mr-1 rounded-full flex items-center justify-center text-xs transition-all z-[2] ${
             isFavorited
               ? 'bg-red-500 text-white shadow'
               : 'bg-white bg-opacity-90 text-gray-600 hover:bg-red-500 hover:text-white'
@@ -333,6 +351,8 @@ export const SimpleProductCard = ({
         >
           {isFavorited ? '❤️' : '🤍'}
         </button>
+
+        {!imageError && <ProductVideoBadge videoLink={product.video_link} />}
       </div>
 
       {/* Product Info */}
