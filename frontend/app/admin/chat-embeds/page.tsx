@@ -189,16 +189,24 @@ export default function AdminChatEmbedsPage() {
       <div className="p-6 max-w-3xl">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Nhúng chat: NanoAI, Zalo, Facebook</h1>
         <p className="text-gray-600 mb-4 text-sm leading-relaxed">
-          NanoAI: trang chi tiết sản phẩm tự gắn{' '}
+          NanoAI: trang chi tiết sản phẩm và &quot;Lướt video cùng shop&quot; tự đặt{' '}
+          <code className="text-xs bg-gray-100 px-1 rounded">data-primary=&quot;try_on&quot;</code> trên script (
+          ưu tiên thử đồ); các trang khác vẫn chat mặc định. Trang chi tiết còn gắn{' '}
           <code className="text-xs bg-gray-100 px-1 rounded">data-ctx-sku</code>,{' '}
           <code className="text-xs bg-gray-100 px-1 rounded">data-ctx-image</code>,{' '}
-          <code className="text-xs bg-gray-100 px-1 rounded">data-ctx-inventory</code>… lên script chat khi khách xem SP.
-          Các mã được chèn cuối trang (trước khi đóng <code className="text-xs bg-gray-100 px-1 rounded">&lt;body&gt;</code>),
-          cùng hệ thống với{' '}
+          <code className="text-xs bg-gray-100 px-1 rounded">data-ctx-inventory</code>… lên script khi khách xem SP.
+          Kiểm tra script có{' '}
+          <code className="text-xs bg-gray-100 px-1 rounded">data-chat-url</code> đúng{' '}
+          <code className="text-xs bg-gray-100 px-1 rounded">…/messaging/p/SLUG?embed=1</code> — popup trên shop = widget
+          hoặc iframe trên domain shop, không chỉ link mở tab NanoAI. Có thể thêm{' '}
+          <code className="text-xs bg-gray-100 px-1 rounded">?v=YYYYMMDD</code> vào{' '}
+          <code className="text-xs bg-gray-100 px-1 rounded">nanoai-chat-widget.js</code> để xả cache CDN.
+          Mã chèn cuối trang (trước khi đóng{' '}
+          <code className="text-xs bg-gray-100 px-1 rounded">&lt;body&gt;</code>), cùng hệ thống với{' '}
           <Link href="/admin/embed-codes" className="text-[#ea580c] font-medium hover:underline">
             Mã nhúng đầy đủ
           </Link>
-          . Nếu trước đây đã lưu script thử đồ NanoAI, hãy vào đó để tắt hoặc xóa dòng đó — trang này chỉ còn cấu hình chat.
+          . Nếu trước đây đã lưu script thử đồ NanoAI riêng, vào đó để tắt hoặc xóa — trang này chỉ còn cấu hình chat.
           Sau khi lưu, khách xem site sẽ thấy widget tương ứng khi mục đang bật.
         </p>
 
@@ -219,7 +227,12 @@ export default function AdminChatEmbedsPage() {
             <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
               <h2 className="text-lg font-semibold text-gray-900 mb-1">Mã nhúng chat NanoAI</h2>
               <p className="text-xs text-gray-500 mb-3">
-                Dán nguyên đoạn script/widget do NanoAI cung cấp (có thể gồm nhiều thẻ).
+                Dán nguyên đoạn script/widget do NanoAI cung cấp (có thể gồm nhiều thẻ). Hai widget khác nhau: một{' '}
+                <code className="text-[11px] bg-gray-100 px-0.5 rounded">data-widget-id</code> +{' '}
+                <code className="text-[11px] bg-gray-100 px-0.5 rounded">data-primary=&quot;chat&quot;</code> trang chủ,
+                một cho PDP{' '}
+                <code className="text-[11px] bg-gray-100 px-0.5 rounded">data-primary=&quot;try_on&quot;</code> — site 188 đã
+                tự set try_on trên PDP và lướt video nếu chỉ dùng một script.
               </p>
               <textarea
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono min-h-[140px] mb-3"

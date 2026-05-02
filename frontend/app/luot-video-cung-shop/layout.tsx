@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import NanoAiEmbedRouteMode from '@/components/NanoAiEmbedRouteMode';
 
 export const metadata: Metadata = {
   title: 'Lướt video cùng shop',
@@ -8,5 +9,10 @@ export const metadata: Metadata = {
 };
 
 export default function LuotVideoCungShopLayout({ children }: { children: React.ReactNode }) {
-  return children;
+  return (
+    <>
+      <NanoAiEmbedRouteMode primary="try_on" tryOnLabel="Thử đồ" />
+      {children}
+    </>
+  );
 }

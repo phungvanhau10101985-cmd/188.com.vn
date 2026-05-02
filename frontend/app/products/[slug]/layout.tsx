@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import NanoAiEmbedRouteMode from "@/components/NanoAiEmbedRouteMode";
 import {
   getProductBySlugForSeo,
   buildProductJsonLd,
@@ -166,6 +167,7 @@ export default async function ProductLayout({ params, children }: Props) {
 
   return (
     <>
+      <NanoAiEmbedRouteMode primary="try_on" tryOnLabel="Thử đồ" />
       {productJsonLd && (
         <script
           type="application/ld+json"

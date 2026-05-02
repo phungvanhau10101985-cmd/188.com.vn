@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { findNanoAiChatLoaderScripts } from '@/lib/nanoai-hosted-chat';
 
 const ATTR = {
   sku: 'data-ctx-sku',
@@ -9,20 +10,6 @@ const ATTR = {
   productUrl: 'data-ctx-product-url',
   inventory: 'data-ctx-inventory',
 } as const;
-
-function findNanoAiContextScripts(): HTMLScriptElement[] {
-  const out: HTMLScriptElement[] = [];
-  const list = document.querySelectorAll('script[src]');
-  const re = /nanoai-chat-widget|nanoai\.vn\/embed/i;
-  for (let i = 0; i < list.length; i++) {
-    const el = list[i];
-    const src = el.getAttribute('src') || '';
-    if (re.test(src)) {
-      out.push(el as HTMLScriptElement);
-    }
-  }
-  return out;
-}
 
 function absolutizeUrl(raw: string, origin: string): string {
   const t = raw.trim();
@@ -71,7 +58,7 @@ export default function NanoAiProductPageContext({
     const absImg2 = secondaryImageUrl ? absolutizeUrl(secondaryImageUrl, origin) : '';
 
     const apply = (): boolean => {
-      const scripts = findNanoAiContextScripts();
+      const scripts = findNanoAiChatLoaderScripts();
       if (scripts.length === 0) return false;
       for (const script of scripts) {
         setOrRemove(script, ATTR.sku, sku || null);

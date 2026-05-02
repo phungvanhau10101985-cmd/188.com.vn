@@ -18,7 +18,7 @@ import { trackEvent } from '@/lib/analytics';
 import ProductVariantModal from '@/app/products/[slug]/components/ProductVariantModal/ProductVariantModal';
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
 import { SHOP_VIDEO_START_SLUG_PARAM } from '@/lib/shop-video-feed';
-import { openNanoAiTryOnHosted } from '@/lib/nanoai-hosted-chat';
+import { openNanoAiTryOnEmbed } from '@/lib/nanoai-hosted-chat';
 
 const FEED_SOUND_SESSION_KEY = '188-shop-video-feed-sound-on';
 
@@ -545,30 +545,46 @@ export default function ShopVideoFeedClient() {
 
   const handleTryOnProduct = useCallback(
     (p: Product) => {
-      const sku = (p.code?.trim() || p.product_id || String(p.id)).trim();
-      const ordered = [p.main_image, ...(p.images || [])].filter(Boolean) as string[];
-      const uniq = [...new Set(ordered)];
-      const primary = uniq[0] || '';
-      const secondary = uniq.find((u) => u !== primary) || null;
-      const path = `/products/${(p.slug || '').trim() || p.product_id}`;
-      const ok = openNanoAiTryOnHosted({
-        sku,
-        primaryImageUrl: primary,
-        secondaryImageUrl: secondary,
-        productPath: path,
-        inventoryId: p.inventory_id ?? null,
-      });
-      if (!ok) {
-        pushToast({
-          title: 'Chưa mở được thử đồ',
-          description:
-            'Kiểm tra mã nhúng NanoAI (data-chat-url trên script) hoặc biến NEXT_PUBLIC_NANOAI_CHAT_URL trong frontend.',
-          variant: 'info',
-          durationMs: 4200,
+      void (async () => {
+        const sku = (p.code?.trim() || p.product_id || String(p.id)).trim();
+        const ordered = [p.main_image, ...(p.images || [])].filter(Boolean) as string[];
+        const uniq = [...new Set(ordered)];
+        const primary = uniq[0] || '';
+        const secondary = uniq.find((u) => u !== primary) || null;
+        const path = `/products/${(p.slug || '').trim() || p.product_id}`;
+        const result = await openNanoAiTryOnEmbed({
+          sku,
+          primaryImageUrl: primary,
+          secondaryImageUrl: secondary,
+          productPath: path,
+          inventoryId: p.inventory_id ?? null,
         });
-        return;
-      }
-      trackEvent('nanoai_try_on_open', { product_id: p.id, source: 'shop_video_feed' });
+        if (!result.ok) {
+          if (result.reason === 'no_chat_config') {
+            pushToast({
+              title: 'Chưa mở được thử đồ',
+              description:
+                'Kiểm tra mã nhúng NanoAI (data-chat-url trên script) hoặc biến NEXT_PUBLIC_NANOAI_CHAT_URL trong frontend.',
+              variant: 'info',
+              durationMs: 4200,
+            });
+          } else {
+            pushToast({
+              title: 'Chưa mở được khung chat',
+              description:
+                'Bấm biểu tượng chat NanoAI góc màn hình — ngữ cảnh sản phẩm đã được gửi kèm.',
+              variant: 'info',
+              durationMs: 4200,
+            });
+          }
+          return;
+        }
+        trackEvent('nanoai_try_on_open', {
+          product_id: p.id,
+          source: 'shop_video_feed',
+          mode: result.mode,
+        });
+      })();
     },
     [pushToast]
   );
