@@ -1,3 +1,6 @@
-/** Ảnh đại diện web app / PWA / OG — CDN NanoAI (logo shop). */
-export const APP_WEB_ICON_URL =
-  "https://nanoai.b-cdn.net/results/ef34291c-0b83-49c1-b390-4ab50df32e9d/logo_1777722718273.png";
+/**
+ * Icon vuông 512×512 (logo 188 căn giữa nền trắng) — favicon, PWA, Apple touch, OG/Twitter.
+ * File: `public/app-icon-square.png` (đồng bộ copy vào `favicon.png` + `app/icon.png`).
+ * Tạo lại: `python` script trong repo hoặc chỉnh tay ảnh rồi thay 3 file trên.
+ */
+export const APP_WEB_ICON_URL = "/app-icon-square.png";

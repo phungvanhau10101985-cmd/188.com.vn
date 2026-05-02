@@ -1,7 +1,11 @@
 # backend/app/api/endpoints/admin.py
 from datetime import datetime, timedelta, timezone
+import mimetypes
+import re
+import uuid
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 from sqlalchemy import case, func
 from typing import List, Optional
@@ -29,6 +33,8 @@ from app.schemas.site_embed_code import (
 from app.crud import site_embed_code as embed_crud
 from app.crud import shop_video_fab as shop_video_fab_crud
 from app.schemas.shop_video_fab import ShopVideoFabPublicOut, ShopVideoFabAdminUpdate
+from app.schemas.bunny_admin import BunnyCdnStatusOut, BunnyCdnUploadOut
+from app.services.bunny_storage import build_public_object_url, upload_file_to_zone
 from app.core.security import create_admin_token, get_current_admin
 from app.core.config import settings
 
@@ -38,6 +44,16 @@ FIRST_ADMIN_HINT = (
     "Trên server, trong thư mục backend: python create_first_admin.py — "
     "sau đó đăng nhập username admin, mật khẩu admin123 (đổi sau khi vào được)."
 )
+
+_BUNNY_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+_BUNNY_UPLOAD_MAX_BYTES = 15 * 1024 * 1024
+
+
+def _bunny_safe_subfolder(raw: str) -> str:
+    t = (raw or "").strip().lower().replace("\\", "/")
+    t = re.sub(r"[^a-z0-9/_-]", "", t)
+    parts = [p for p in t.split("/") if p and p not in (".", "..")]
+    return "/".join(parts[:8])
 
 
 @router.get("/check-setup")
@@ -414,3 +430,71 @@ def admin_put_shop_video_fab_settings(
         row = shop_video_fab_crud.get_or_create_singleton(db)
         return shop_video_fab_crud.row_to_public_out(row)
     return shop_video_fab_crud.update_singleton(db, data)
+
+
+# ========== Bunny CDN — đăng ảnh lên Storage Zone ==========
+@router.get("/bunny-cdn/status", response_model=BunnyCdnStatusOut)
+def admin_bunny_cdn_status(current_admin: models.AdminUser = Depends(get_current_admin)):
+    z = (settings.BUNNY_STORAGE_ZONE_NAME or "").strip()
+    k = (settings.BUNNY_STORAGE_ACCESS_KEY or "").strip()
+    base = (settings.BUNNY_CDN_PUBLIC_BASE or "").strip()
+    return BunnyCdnStatusOut(
+        configured=bool(z and k and base),
+        cdn_public_base=base,
+        upload_path_prefix=(settings.BUNNY_UPLOAD_PATH_PREFIX or "").strip(),
+    )
+
+
+@router.post("/bunny-cdn/upload", response_model=BunnyCdnUploadOut)
+async def admin_bunny_cdn_upload(
+    file: UploadFile = File(...),
+    subfolder: str = Form(""),
+    current_admin: models.AdminUser = Depends(get_current_admin),
+):
+    zone = (settings.BUNNY_STORAGE_ZONE_NAME or "").strip()
+    key = (settings.BUNNY_STORAGE_ACCESS_KEY or "").strip()
+    cdn_base = (settings.BUNNY_CDN_PUBLIC_BASE or "").strip()
+    if not zone or not key or not cdn_base:
+        raise HTTPException(
+            status_code=503,
+            detail="Chưa cấu hình Bunny: BUNNY_STORAGE_ZONE_NAME, BUNNY_STORAGE_ACCESS_KEY, BUNNY_CDN_PUBLIC_BASE trong .env backend.",
+        )
+    raw = await file.read()
+    if len(raw) > _BUNNY_UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Ảnh quá lớn (tối đa 15MB)")
+    orig_name = file.filename or "image.png"
+    ext = Path(orig_name).suffix.lower()
+    if ext not in _BUNNY_IMAGE_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail="Chỉ chấp nhận ảnh: JPG, JPEG, PNG, GIF, WEBP",
+        )
+    folder = _bunny_safe_subfolder(subfolder)
+    prefix = (settings.BUNNY_UPLOAD_PATH_PREFIX or "site").strip().strip("/") or "site"
+    day = datetime.now(timezone.utc).strftime("%Y%m%d")
+    unique = uuid.uuid4().hex[:12]
+    stem = Path(orig_name).stem.lower()
+    stem_safe = re.sub(r"[^a-z0-9._-]", "_", stem)[:80] or "image"
+    fname = f"{stem_safe}_{unique}{ext}"
+    parts = [prefix]
+    if folder:
+        parts.append(folder)
+    parts.extend([day, fname])
+    remote = "/".join(parts)
+    ct = file.content_type or mimetypes.guess_type(fname)[0] or "application/octet-stream"
+    try:
+        upload_file_to_zone(
+            zone_name=zone,
+            access_key=key,
+            remote_path=remote,
+            data=raw,
+            content_type=ct,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    url = build_public_object_url(cdn_base, remote)
+    if not url:
+        raise HTTPException(status_code=500, detail="Không tạo được URL public")
+    return BunnyCdnUploadOut(public_url=url, remote_path=remote, bytes=len(raw))

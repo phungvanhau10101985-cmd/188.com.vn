@@ -656,6 +656,50 @@ export const adminShopVideoFabAPI = {
     }),
 };
 
+export interface BunnyCdnStatus {
+  configured: boolean;
+  cdn_public_base: string;
+  upload_path_prefix: string;
+}
+
+export interface BunnyCdnUploadResult {
+  public_url: string;
+  remote_path: string;
+  bytes: number;
+}
+
+export const adminBunnyCdnAPI = {
+  getStatus: () => fetchAdmin<BunnyCdnStatus>('/admin/bunny-cdn/status'),
+
+  upload: async (file: File, subfolder?: string): Promise<BunnyCdnUploadResult> => {
+    const token =
+      typeof window !== 'undefined' ? localStorage.getItem('admin_token') : null;
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const url = `${getApiBaseUrl()}/admin/bunny-cdn/upload`;
+    const form = new FormData();
+    form.append('file', file);
+    const sf = (subfolder ?? '').trim();
+    if (sf) form.append('subfolder', sf);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+      body: form,
+    });
+    if (res.status === 401) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('admin_token');
+        window.location.href = '/admin/login';
+      }
+      throw new Error('Phiên đăng nhập hết hạn');
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || `Lỗi ${res.status}`);
+    }
+    return res.json();
+  },
+};
+
 export const adminBankAPI = {
   getAll: () => fetchAdmin<BankAccountAdmin[]>('/admin/bank-accounts/all'),
   create: (data: {

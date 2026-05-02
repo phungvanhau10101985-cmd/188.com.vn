@@ -33,10 +33,11 @@ self.addEventListener("push", (event) => {
     /* dùng mặc định */
   }
   const title = data.title || "188.COM.VN";
+  const iconUrl = `${self.location.origin}/app-icon-square.png`;
   const options = {
     body: data.body || "",
-    icon: "https://nanoai.b-cdn.net/results/ef34291c-0b83-49c1-b390-4ab50df32e9d/logo_1777722718273.png",
-    badge: "https://nanoai.b-cdn.net/results/ef34291c-0b83-49c1-b390-4ab50df32e9d/logo_1777722718273.png",
+    icon: iconUrl,
+    badge: iconUrl,
     data: { url: data.url || "/account/notifications" },
   };
   event.waitUntil(

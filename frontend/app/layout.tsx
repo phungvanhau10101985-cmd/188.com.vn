@@ -119,7 +119,7 @@ export const metadata: Metadata = {
       "max-snippet": -1,
     },
   },
-  // Icon: app/icon.png + favicon.png (đồng bộ logo); metadata bổ sung OG/PWA dùng CDN.
+  // Icon vuông /app-icon-square.png (+ favicon.png, app/icon.png đồng bộ)
   icons: {
     icon: [{ url: APP_WEB_ICON_URL, type: "image/png" }],
     apple: [{ url: APP_WEB_ICON_URL, sizes: "180x180", type: "image/png" }],

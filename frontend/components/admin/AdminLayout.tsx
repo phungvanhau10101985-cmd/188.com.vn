@@ -19,6 +19,7 @@ const ADMIN_LINKS = [
   { href: '/admin/chat-embeds', label: 'Nhúng chat: NanoAI, Zalo, Facebook' },
   { href: '/admin/shop-video-fab', label: 'Vị trí nút lướt video' },
   { href: '/admin/embed-codes', label: 'Mã nhúng (GA, FB, TikTok…)' },
+  { href: '/admin/bunny-cdn', label: 'Đăng ảnh Bunny CDN' },
   { href: '/admin/notifications', label: 'Quản lý thông báo' },
 ];
 
