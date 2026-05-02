@@ -42,6 +42,7 @@ export default function AccountLayout({
     { href: '/vi-dien-tu', label: 'Ví điện tử', icon: '💳' },
     { href: '/thanh-vien', label: 'Thành viên thân quen', icon: '👥' },
     { href: '/account/notifications', label: 'Trung tâm thông báo', icon: '🔔' },
+    { href: '/account/install-app', label: 'Cài đặt app', icon: '📲' },
     { href: '/tai-khoan-ngan-hang', label: 'Tài khoản ngân hàng', icon: '🏦' },
     { href: '/nhan-tin', label: 'Nhắn tin', icon: '💬' },
     { href: '/favorites', label: 'Sản phẩm yêu thích', icon: '❤️' },

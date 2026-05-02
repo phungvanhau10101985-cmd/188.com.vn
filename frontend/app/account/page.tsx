@@ -116,10 +116,14 @@ export default function AccountPage() {
             <span>👥 Thành viên thân quen</span>
             <span className="text-gray-400">›</span>
           </button>
-          <button onClick={notReady} className="w-full flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
+          <Link href="/account/notifications" className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
             <span>🔔 Trung tâm thông báo</span>
             <span className="text-gray-400">›</span>
-          </button>
+          </Link>
+          <Link href="/account/install-app" className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
+            <span>📲 Cài đặt app</span>
+            <span className="text-gray-400">›</span>
+          </Link>
           <button onClick={notReady} className="w-full flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
             <span>🏦 Tài khoản ngân hàng</span>
             <span className="text-gray-400">›</span>
