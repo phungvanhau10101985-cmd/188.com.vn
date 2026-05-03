@@ -231,13 +231,15 @@ def parse_webhook_payload(raw_body: bytes, content_type: str) -> Dict[str, Any]:
     if "application/json" in ct or text.strip().startswith("{"):
         try:
             return json.loads(text) if text.strip() else {}
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.warning("SePay webhook JSON parse failed: %s; body_prefix=%r", e, text[:300])
             return {}
     if "application/x-www-form-urlencoded" in ct:
         return dict(parse_qsl(text, keep_blank_values=True))
     try:
         return json.loads(text) if text.strip() else {}
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.warning("SePay webhook payload parse failed: %s; body_prefix=%r", e, text[:300])
         return {}
 
 
@@ -498,6 +500,20 @@ def _finalize_sepay_deposit_success(
     db.commit()
 
 
+def _latest_pending_sepay_deposit_for_order(db: Session, order_id: int) -> Optional[Payment]:
+    return (
+        db.query(Payment)
+        .filter(
+            Payment.order_id == order_id,
+            Payment.payment_type == "deposit_sepay",
+            Payment.payment_status == PaymentStatus.PENDING,
+            or_(Payment.transaction_code.is_(None), Payment.transaction_code == ""),
+        )
+        .order_by(Payment.id.desc())
+        .first()
+    )
+
+
 def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bool, str, Optional[int]]:
     """
     Xử lý payload webhook SePay (tiền vào).
@@ -532,6 +548,35 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
     if expected_acc and acc_in and acc_in != expected_acc:
         logger.info("SePay webhook account mismatch: %s vs %s", acc_in, expected_acc)
         return False, "account_mismatch", None
+
+    # Fast path: SePay đã gửi code/content rõ ràng (vd. DH008) và số tiền đúng cọc của đơn.
+    # Không bắt buộc đã có pending, để tránh fail khi khách chuyển ngay sau khi tạo đơn hoặc pending bị lệch.
+    direct_order = resolve_order_from_sepay_payload(db, data, text_blob)
+    if direct_order:
+        direct_status = getattr(direct_order.status, "value", direct_order.status)
+        if direct_status == OrderStatus.WAITING_DEPOSIT.value and direct_order.requires_deposit:
+            dep = Decimal(str(direct_order.deposit_amount))
+            if _amount_equal(amount, dep) and _transfer_content_matches_order(db, data, text_blob, direct_order):
+                direct_pending = _latest_pending_sepay_deposit_for_order(db, direct_order.id)
+                if direct_pending and not _amount_equal(amount, Decimal(str(direct_pending.amount))):
+                    direct_pending = None
+                logger.info(
+                    "SePay direct match order_id=%s order_code=%s amount=%s pending_id=%s",
+                    direct_order.id,
+                    direct_order.order_code,
+                    amount,
+                    getattr(direct_pending, "id", None),
+                )
+                _finalize_sepay_deposit_success(
+                    db,
+                    direct_order,
+                    amount,
+                    sepay_id_str,
+                    reference,
+                    data,
+                    direct_pending,
+                )
+                return True, "ok", direct_order.id
 
     # --- Luồng B: khớp bản ghi Payment PENDING đã tạo khi GET sepay-deposit-info (ổn định hơn parse SMS) ---
     pending = _find_matching_pending_sepay_deposit(db, text_blob, amount, data)
@@ -570,6 +615,14 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
 
     order = resolve_order_from_sepay_payload(db, data, text_blob)
     if not order:
+        logger.warning(
+            "SePay order_not_found code=%r amount=%s content_prefix=%r desc_prefix=%r keys=%s",
+            sepay_code,
+            amount,
+            raw_content[:180],
+            raw_desc[:180],
+            sorted(str(k) for k in data.keys())[:20],
+        )
         return False, "order_not_found", None
 
     status_val = getattr(order.status, "value", order.status)
@@ -598,17 +651,7 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
 
     # Legacy: đơn + nội dung OK nhưng orders.deposit_amount lệch số tiền thực chuyển — thường do sửa đơn sau khi
     # đã GET sepay-deposit-info / QR. Nếu vẫn có dòng PENDING cùng đơn khớp transferAmount, ghi nhận theo pending.
-    loose_pending = (
-        db.query(Payment)
-        .filter(
-            Payment.order_id == order.id,
-            Payment.payment_type == "deposit_sepay",
-            Payment.payment_status == PaymentStatus.PENDING,
-            or_(Payment.transaction_code.is_(None), Payment.transaction_code == ""),
-        )
-        .order_by(Payment.id.desc())
-        .first()
-    )
+    loose_pending = _latest_pending_sepay_deposit_for_order(db, order.id)
     if loose_pending and _amount_equal(amount, Decimal(str(loose_pending.amount))):
         if not _amount_equal(amount, dep):
             logger.warning(
