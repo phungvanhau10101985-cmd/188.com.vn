@@ -544,9 +544,17 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
             return False, "order_not_waiting_deposit", None
         if not order.requires_deposit:
             return False, "no_deposit_required", None
+        # Đã khớp pending ↔ transferAmount ở _find_matching; QR/DB payment lúc GET sepay-deposit-info
+        # là “hợp đồng” với khách. Nếu orders.deposit_amount đổi sau đó, vẫn chấp nhận và log cảnh báo.
         dep = Decimal(str(order.deposit_amount))
         if not _amount_equal(amount, dep):
-            return False, "amount_mismatch", None
+            logger.warning(
+                "SePay: webhook amount %s matches pending payment_id=%s but order.deposit_amount=%s (order_id=%s); accepting per pending QR",
+                amount,
+                pending.id,
+                dep,
+                order.id,
+            )
         _finalize_sepay_deposit_success(db, order, amount, sepay_id_str, reference, data, pending)
         return True, "ok", order.id
 
