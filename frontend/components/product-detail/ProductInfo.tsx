@@ -9,11 +9,13 @@ import VariantSelector from './VariantSelector';
 
 interface ProductInfoProps {
   product: Product;
-  onAddToCart: (product: Product, quantity: number, selectedSize?: string, selectedColor?: string) => void;
+  onAddToCart: (product: Product, quantity: number, selectedSize?: string, selectedColor?: string) => void | Promise<void>;
   onAddToFavorite: (product: Product) => void;
+  /** Mua ngay — không hiện popup « vào giỏ »; parent xử lý chuyển trang sau khi thêm giỏ xong. */
+  onBuyNow?: (product: Product, quantity: number, selectedSize?: string, selectedColor?: string) => Promise<void>;
 }
 
-export default function ProductInfo({ product, onAddToCart, onAddToFavorite }: ProductInfoProps) {
+export default function ProductInfo({ product, onAddToCart, onAddToFavorite, onBuyNow }: ProductInfoProps) {
   const [selectedSize, setSelectedSize] = useState<string>(product.sizes?.[0] || '');
   const [selectedColorIndex, setSelectedColorIndex] = useState(-1);
   const [quantity, setQuantity] = useState(1);
@@ -37,9 +39,12 @@ export default function ProductInfo({ product, onAddToCart, onAddToFavorite }: P
     onAddToCart(product, quantity, selectedSize, selectedColorForCart);
   };
 
-  const handleBuyNow = () => {
-    onAddToCart(product, quantity, selectedSize, selectedColorForCart);
-    // Redirect to checkout page
+  const handleBuyNow = async () => {
+    if (onBuyNow) {
+      await onBuyNow(product, quantity, selectedSize, selectedColorForCart);
+      return;
+    }
+    await Promise.resolve(onAddToCart(product, quantity, selectedSize, selectedColorForCart));
     window.location.href = '/checkout';
   };
 

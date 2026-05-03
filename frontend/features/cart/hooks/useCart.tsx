@@ -15,15 +15,20 @@ import {
   CartLineRef,
 } from '../types/cart';
 
+/** Tuỳ chọn khi thêm giỏ — ví dụ « Mua ngay » không hiện popup hỏi vào giỏ / mua tiếp. */
+export type AddToCartOptions = {
+  skipAddedPopup?: boolean;
+};
+
 interface CartContextType extends CartState {
   // Cart actions
-  addToCart: (itemData: AddToCartRequest) => Promise<void>;
+  addToCart: (itemData: AddToCartRequest, options?: AddToCartOptions) => Promise<void>;
   updateCartItem: (lineRef: CartLineRef, updateData: UpdateCartItemRequest) => Promise<void>;
   removeFromCart: (lineRef: CartLineRef) => Promise<void>;
   clearCart: () => Promise<void>;
   
   // Guest cart management
-  addToGuestCart: (itemData: AddToCartRequest) => void;
+  addToGuestCart: (itemData: AddToCartRequest, options?: AddToCartOptions) => void;
   getGuestCart: () => GuestCartItem[];
   clearGuestCart: () => void;
   
@@ -112,7 +117,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addToGuestCart = (itemData: AddToCartRequest) => {
+  const addToGuestCart = (itemData: AddToCartRequest, options?: AddToCartOptions) => {
     const guestItems = getGuestCart();
     
     // Check if item already exists
@@ -158,8 +163,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
         created_at: new Date().toISOString(),
       },
     }));
-    setLastAddedItem(itemData);
-    setShowAddToCartPopup(true);
+    if (!options?.skipAddedPopup) {
+      setLastAddedItem(itemData);
+      setShowAddToCartPopup(true);
+    }
     trackEvent('add_to_cart', {
       product_id: itemData.product_id,
       quantity: itemData.quantity,
@@ -233,9 +240,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addToCart = async (itemData: AddToCartRequest) => {
+  const addToCart = async (itemData: AddToCartRequest, options?: AddToCartOptions) => {
     if (!isAuthenticated) {
-      addToGuestCart(itemData);
+      addToGuestCart(itemData, options);
       return;
     }
 
@@ -245,8 +252,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
       await cartAPI.addToCart(itemData);
       // Backend trả về 1 item; luôn refresh full cart để cart.items là mảng
       await refreshCart();
-      setLastAddedItem(itemData);
-      setShowAddToCartPopup(true);
+      if (!options?.skipAddedPopup) {
+        setLastAddedItem(itemData);
+        setShowAddToCartPopup(true);
+      }
       trackEvent('add_to_cart', {
         product_id: itemData.product_id,
         quantity: itemData.quantity,

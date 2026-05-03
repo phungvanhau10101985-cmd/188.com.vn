@@ -128,6 +128,39 @@ export default function ProductDetailPage() {
     [addToCart]
   );
 
+  const handleBuyNow = useCallback(
+    async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
+      try {
+        const lineImg = cartLineMainImage(p, selectedColor);
+        await addToCart(
+          {
+            product_id: p.id,
+            quantity,
+            selected_size: selectedSize,
+            selected_color: selectedColor,
+            line_image_url: lineImg,
+            product_data: {
+              id: p.id,
+              product_id: p.product_id,
+              name: p.name,
+              price: p.price,
+              main_image: lineImg,
+              brand_name: p.brand_name,
+              available: p.available,
+              original_price: p.original_price,
+              slug: p.slug,
+            },
+          },
+          { skipAddedPopup: true }
+        );
+        router.push('/checkout');
+      } catch (err: unknown) {
+        alert(err instanceof Error ? err.message : 'Không thể thêm vào giỏ hàng');
+      }
+    },
+    [addToCart, router]
+  );
+
   const handleAddToFavorite = useCallback(
     async (p: Product) => {
       try {
@@ -270,7 +303,7 @@ export default function ProductDetailPage() {
 
           {/* Product Info */}
           <div>
-            <ProductInfo product={product} onAddToCart={handleAddToCart} onAddToFavorite={handleAddToFavorite} />
+            <ProductInfo product={product} onAddToCart={handleAddToCart} onAddToFavorite={handleAddToFavorite} onBuyNow={handleBuyNow} />
           </div>
         </div>
 

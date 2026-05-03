@@ -18,11 +18,15 @@ function formatVnd(n: number) {
 
 export default function CheckoutPage() {
   const router = useRouter();
-  const { cart, clearCart } = useCart();
+  const { cart, clearCart, hideAddToCartPopup } = useCart();
   const { isAuthenticated, user } = useAuth();
   const { pushToast } = useToast();
   const cartItems = useMemo<CartItem[]>(() => cart?.items ?? [], [cart?.items]);
   const totalPrice = useMemo(() => cart?.total_price ?? 0, [cart?.total_price]);
+
+  useEffect(() => {
+    hideAddToCartPopup();
+  }, [hideAddToCartPopup]);
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [requiresDeposit, setRequiresDeposit] = useState(false);
