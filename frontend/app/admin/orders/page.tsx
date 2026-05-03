@@ -2,30 +2,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { adminOrderAPI, type PaymentRecord } from '@/lib/admin-api';
-
-interface OrderItem {
-  id: number;
-  product_name: string;
-  quantity: number;
-  unit_price: number;
-  total_price: number;
-}
-
-interface Order {
-  id: number;
-  order_code: string;
-  customer_name: string;
-  customer_phone: string;
-  total_amount: number;
-  status: string;
-  payment_status: string;
-  requires_deposit: boolean;
-  deposit_amount: number;
-  deposit_paid: number;
-  created_at: string;
-  items: OrderItem[];
-}
+import { adminOrderAPI, type AdminOrder, type PaymentRecord } from '@/lib/admin-api';
+import { cdnUrl } from '@/lib/cdn-url';
 
 const STATUS_TEXTS: Record<string, string> = {
   pending: 'Chờ xác nhận',
@@ -51,14 +29,46 @@ function formatDate(s: string) {
   return d.toLocaleDateString('vi-VN') + ' ' + d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 }
 
-function formatVnd(n: number) {
-  return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
+function formatVnd(n: number | string) {
+  const x = typeof n === 'string' ? parseFloat(n) : n;
+  const v = Number.isFinite(x) ? x : 0;
+  return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(v);
+}
+
+/** Link SP public: ưu tiên NEXT_PUBLIC_SITE_URL để admin localhost vẫn mở đúng shop. */
+function shopOrigin(): string {
+  const env = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, '');
+  if (env) return env;
+  if (typeof window !== 'undefined') return window.location.origin;
+  return 'https://188.com.vn';
+}
+
+function orderItemImageUrl(src: string | null | undefined): string {
+  if (!src?.trim()) return cdnUrl('/images/placeholder-product.jpg');
+  const s = src.trim();
+  if (/^https?:\/\//i.test(s)) return s;
+  return cdnUrl(s.startsWith('/') ? s : `/${s}`);
+}
+
+function productPublicUrl(slug: string | null | undefined): string | null {
+  if (!slug?.trim()) return null;
+  return `${shopOrigin()}/products/${encodeURIComponent(slug.trim())}`;
+}
+
+function colorDisplay(item: {
+  selected_color_name?: string | null;
+  selected_color?: string | null;
+}): string | null {
+  const name = item.selected_color_name?.trim();
+  const code = item.selected_color?.trim();
+  if (name && code && name !== code) return `${name} (${code})`;
+  return name || code || null;
 }
 
 export default function AdminOrdersPage() {
   const [loading, setLoading] = useState(false);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [filteredOrders, setFilteredOrders] = useState<AdminOrder[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [statusCounts, setStatusCounts] = useState<any>(null); // Số đơn theo trạng thái (period=all) cho tab
   const [activeTab, setActiveTab] = useState('all');
@@ -66,7 +76,7 @@ export default function AdminOrdersPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('');
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<AdminOrder | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [orderPayments, setOrderPayments] = useState<PaymentRecord[]>([]);
@@ -138,7 +148,7 @@ export default function AdminOrdersPage() {
     setFilteredOrders(result);
   }, [orders, search, statusFilter, paymentFilter]);
 
-  const openPaymentModal = async (order: Order) => {
+  const openPaymentModal = async (order: AdminOrder) => {
     setSelectedOrder(order);
     setPaymentOpen(true);
     setOrderPayments([]);
@@ -401,14 +411,15 @@ export default function AdminOrdersPage() {
         {/* Modal chi tiết đơn */}
         {detailOpen && selectedOrder && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setDetailOpen(false)}>
-            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
               <h2 className="text-xl font-bold mb-4">Chi tiết đơn hàng</h2>
-              <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                 <div>
-                  <p className="text-gray-500 text-sm">Mã đơn</p>
-                  <p className="font-semibold">{selectedOrder.order_code}</p>
-                  <p className="text-sm text-gray-600">{formatDate(selectedOrder.created_at)}</p>
-                  <p className="font-semibold text-red-600">{formatVnd(selectedOrder.total_amount)}</p>
+                  <p className="text-gray-500 text-sm">Mã đơn (hiển thị khách)</p>
+                  <p className="font-semibold text-lg tracking-wide">{selectedOrder.order_code}</p>
+                  <p className="text-xs text-gray-500 mt-1">ID đơn nội bộ: #{selectedOrder.id}</p>
+                  <p className="text-sm text-gray-600 mt-2">{formatDate(selectedOrder.created_at)}</p>
+                  <p className="font-semibold text-red-600 mt-1">{formatVnd(selectedOrder.total_amount)}</p>
                 </div>
                 <div>
                   <p className="text-gray-500 text-sm">Khách hàng</p>
@@ -422,26 +433,67 @@ export default function AdminOrdersPage() {
                   <p className="font-medium text-yellow-800">Đặt cọc: Cần {formatVnd(selectedOrder.deposit_amount)} — Đã cọc {formatVnd(selectedOrder.deposit_paid)}</p>
                 </div>
               )}
-              <div className="mb-4">
+              <div className="mb-4 overflow-x-auto">
                 <h3 className="font-semibold mb-2">Sản phẩm</h3>
-                <table className="w-full text-sm">
+                <table className="w-full text-sm min-w-[520px]">
                   <thead>
                     <tr className="border-b">
-                      <th className="text-left py-2">Sản phẩm</th>
-                      <th className="text-right py-2">SL</th>
-                      <th className="text-right py-2">Đơn giá</th>
-                      <th className="text-right py-2">Thành tiền</th>
+                      <th className="text-left py-2 w-[76px] font-medium text-gray-600">Ảnh</th>
+                      <th className="text-left py-2 font-medium text-gray-600">Sản phẩm</th>
+                      <th className="text-right py-2 font-medium text-gray-600 whitespace-nowrap">SL</th>
+                      <th className="text-right py-2 font-medium text-gray-600 whitespace-nowrap">Đơn giá</th>
+                      <th className="text-right py-2 font-medium text-gray-600 whitespace-nowrap">Thành tiền</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(selectedOrder.items || []).map((item) => (
-                      <tr key={item.id} className="border-b">
-                        <td className="py-2">{item.product_name}</td>
-                        <td className="text-right">{item.quantity}</td>
-                        <td className="text-right">{formatVnd(item.unit_price)}</td>
-                        <td className="text-right">{formatVnd(item.total_price)}</td>
-                      </tr>
-                    ))}
+                    {(selectedOrder.items || []).map((item) => {
+                      const href = productPublicUrl(item.product_slug);
+                      const color = colorDisplay(item);
+                      const size = item.selected_size?.trim();
+                      return (
+                        <tr key={item.id} className="border-b align-top">
+                          <td className="py-2 pr-2">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={orderItemImageUrl(item.product_image)}
+                              alt=""
+                              className="w-14 h-14 rounded-lg object-cover border border-gray-100 bg-gray-50"
+                              width={56}
+                              height={56}
+                            />
+                          </td>
+                          <td className="py-2 min-w-0 pr-2">
+                            <div className="font-medium text-gray-900 leading-snug">
+                              {href ? (
+                                <a href={href} target="_blank" rel="noopener noreferrer" className="text-[#ea580c] hover:underline">
+                                  {item.product_name}
+                                </a>
+                              ) : (
+                                item.product_name
+                              )}
+                            </div>
+                            <div className="mt-1.5 space-y-0.5 text-xs text-gray-600">
+                              {item.product_id != null ? <p>Mã SP (ID): {item.product_id}</p> : null}
+                              {color ? <p>Màu: {color}</p> : null}
+                              {size ? <p>Size: {size}</p> : null}
+                              {href ? (
+                                <p className="truncate" title={href}>
+                                  <span className="text-gray-500">Link: </span>
+                                  <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline break-all">
+                                    {href.replace(/^https?:\/\//, '')}
+                                  </a>
+                                </p>
+                              ) : (
+                                <p className="text-gray-400 italic">Không có slug — không tạo link trang SP</p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2 text-right whitespace-nowrap">{item.quantity}</td>
+                          <td className="py-2 text-right whitespace-nowrap">{formatVnd(item.unit_price)}</td>
+                          <td className="py-2 text-right whitespace-nowrap font-medium">{formatVnd(item.total_price)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

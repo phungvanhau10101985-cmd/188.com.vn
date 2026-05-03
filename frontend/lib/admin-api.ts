@@ -145,10 +145,16 @@ async function fetchAdmin<T>(
 
 export interface AdminOrderItem {
   id: number;
+  product_id?: number;
+  product_slug?: string | null;
   product_name: string;
+  product_image?: string | null;
   quantity: number;
   unit_price: number;
   total_price: number;
+  selected_size?: string | null;
+  selected_color?: string | null;
+  selected_color_name?: string | null;
 }
 
 export interface AdminOrder {
