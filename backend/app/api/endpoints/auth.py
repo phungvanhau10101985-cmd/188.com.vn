@@ -12,19 +12,23 @@ import requests
 
 from app.db.session import get_db
 from app.core.config import settings
-from app.core.security import create_access_token, get_current_user
+from app.core.security import create_access_token, get_current_user, create_admin_token
 from app.schemas.user import (
     UserCreate, UserResponse, UserLogin, Token,
     UserUpdate, DateOfBirthResponse, SendRegisterOtpRequest, ForgotDateOfBirthRequest,
     GoogleLoginRequest, SendEmailOtpRequest, VerifyEmailOtpRequest,
     TryTrustedDeviceRequest, TryTrustedDeviceResponse,
 )
+from app.schemas.admin import AdminTokenResponse
+from app.models.admin import AdminUser
 from app.core.email_identity import identity_email
 from app.crud.user import (
     get_user_by_phone, create_user, update_user,
     update_last_login, get_user_by_email
 )
+from app import crud as app_crud
 from app.services.email_service import send_account_email, send_login_otp_email
+from app.services.user_public_response import user_response_with_linked_admin
 from app.models.user import User
 from app.models.user_trusted_device import UserTrustedDevice
 from app.api.endpoints.auth_email import router as auth_email_router
@@ -254,7 +258,11 @@ def try_trusted_device_login(body: TryTrustedDeviceRequest, db: Session = Depend
         expires_delta=timedelta(minutes=minutes),
     )
     return TryTrustedDeviceResponse(
-        ok=True, require_otp=False, access_token=access_token, token_type="bearer", user=user
+        ok=True,
+        require_otp=False,
+        access_token=access_token,
+        token_type="bearer",
+        user=user_response_with_linked_admin(db, user),
     )
 
 
@@ -349,7 +357,11 @@ def verify_email_login_otp(
         expires_delta=timedelta(minutes=minutes),
     )
     _register_trusted_device(db, user.id, body.device_id)
-    return {"access_token": access_token, "token_type": "bearer", "user": user}
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user_response_with_linked_admin(db, user),
+    }
 
 
 @router.post("/google", response_model=Token)
@@ -432,7 +444,11 @@ def google_login(
         data={"sub": email, "user_id": user.id},
         expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer", "user": user}
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user_response_with_linked_admin(db, user),
+    }
 
 @router.post("/send-forgot-dob-otp")
 def send_forgot_dob_otp(body: SendRegisterOtpRequest, db: Session = Depends(get_db)):
@@ -445,10 +461,43 @@ def forgot_date_of_birth(body: ForgotDateOfBirthRequest, db: Session = Depends(g
     """Deprecated: quên ngày sinh không còn hỗ trợ."""
     raise HTTPException(status_code=410, detail="Chức năng này không còn hỗ trợ. Vui lòng đăng nhập Gmail.")
 
+@router.post("/admin-session-token", response_model=AdminTokenResponse)
+def issue_admin_token_for_linked_customer(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Khách đã đăng nhập có admin_users.linked_user_id → cấp JWT admin (giống đăng nhập /admin/login).
+    """
+    admin_row = (
+        db.query(AdminUser)
+        .filter(
+            AdminUser.linked_user_id == current_user.id,
+            AdminUser.is_active.is_(True),
+        )
+        .first()
+    )
+    if not admin_row:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tài khoản không được gán quyền quản trị.",
+        )
+    app_crud.update_admin_last_login(db, admin_row.id)
+    token = create_admin_token(admin_row.id)
+    role_value = admin_row.role.value if hasattr(admin_row.role, "value") else str(admin_row.role)
+    return AdminTokenResponse(
+        access_token=token,
+        token_type="bearer",
+        admin_id=admin_row.id,
+        username=admin_row.username,
+        role=role_value,
+    )
+
+
 @router.get("/me", response_model=UserResponse)
-def get_current_user_info(current_user: User = Depends(get_current_user)):
+def get_current_user_info(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Lấy thông tin user hiện tại"""
-    return current_user
+    return user_response_with_linked_admin(db, current_user)
 
 @router.put("/me", response_model=UserResponse)
 def update_current_user_info(
@@ -471,4 +520,4 @@ def update_current_user_info(
             "Cập nhật thông tin tài khoản",
             "Thông tin tài khoản của bạn đã được cập nhật.",
         )
-    return updated_user
+    return user_response_with_linked_admin(db, updated_user)

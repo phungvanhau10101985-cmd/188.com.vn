@@ -48,6 +48,31 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   const pathNorm = pathname != null ? pathname.replace(/\/$/, '') || '/' : '/';
   const isShopVideoFeedPage = pathNorm === '/luot-video-cung-shop';
 
+  /** Quay về trang chủ từ route khác: luôn cuộn đầu trang (tránh BF cache / khôi phục scroll cũ xuống cuối). */
+  const prevPathnameForHomeScrollRef = useRef<string | null>(null);
+  const pathSegIsHome = (p: string | null | undefined) => {
+    if (p == null || p === '') return false;
+    return (p.replace(/\/$/, '') || '/') === '/';
+  };
+  useLayoutEffect(() => {
+    const prev = prevPathnameForHomeScrollRef.current;
+    prevPathnameForHomeScrollRef.current = pathname ?? '';
+
+    const nowHome = pathSegIsHome(pathname ?? null);
+    const wasHome = pathSegIsHome(prev);
+
+    if (nowHome && prev != null && !wasHome) {
+      window.scrollTo(0, 0);
+      const root = document.scrollingElement;
+      if (root) root.scrollTop = 0;
+      requestAnimationFrame(() => {
+        window.scrollTo(0, 0);
+        const r = document.scrollingElement;
+        if (r) r.scrollTop = 0;
+      });
+    }
+  }, [pathname]);
+
   /** Trang chủ có query lọc/tìm, hoặc trang /info/* — cố định header + nav desktop khi cuộn */
   const keepDesktopHeaderPinned = useMemo(() => {
     if (pathname?.startsWith('/info')) return true;

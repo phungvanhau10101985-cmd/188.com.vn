@@ -1,7 +1,7 @@
 // frontend/features/auth/hooks/useAuth.tsx - FIXED VERSION
 'use client';
 
-import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
+import { useState, useEffect, useCallback, createContext, useContext, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { UserResponse, AuthState, Token } from '../types/auth';
 import { authAPI } from '../api/auth-api';
@@ -170,13 +170,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  const updateUser = (userData: Partial<UserResponse>) => {
-    if (authState.user) {
-      const updatedUser = { ...authState.user, ...userData };
-      setAuthState(prev => ({ ...prev, user: updatedUser }));
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-    }
-  };
+  const updateUser = useCallback((userData: Partial<UserResponse>) => {
+    setAuthState((prev) => {
+      if (!prev.user) return prev;
+      const updatedUser = { ...prev.user, ...userData };
+      try {
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      } catch {
+        /* noop */
+      }
+      return { ...prev, user: updatedUser };
+    });
+  }, []);
 
   const value: AuthContextType = {
     ...authState,

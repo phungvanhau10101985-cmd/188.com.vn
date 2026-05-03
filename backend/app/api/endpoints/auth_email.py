@@ -35,6 +35,7 @@ from app.schemas.auth_email import (
 )
 from app.schemas.user import UserCreate, UserResponse
 from app.services.email_service import send_account_email, send_login_magic_link_email, send_login_otp_email
+from app.services.user_public_response import user_response_with_linked_admin
 
 router = APIRouter()
 
@@ -119,8 +120,8 @@ def _set_auth_cookie(response: Response, token: str) -> None:
     )
 
 
-def _user_response(user: User) -> UserResponse:
-    return UserResponse.model_validate(user)
+def _user_response(db: Session, user: User) -> UserResponse:
+    return user_response_with_linked_admin(db, user)
 
 
 def _check_smtp() -> None:
@@ -170,7 +171,7 @@ def _auto_login_if_prior_email_challenge_consumed(
     return EmailAuthRequestResponse(
         auto_signed_in=True,
         next=next_path,
-        user=_user_response(user),
+        user=_user_response(db, user),
         access_token=token,
         token_type="bearer",
     )
@@ -228,7 +229,7 @@ def _try_trusted_auto_login(
     return EmailAuthRequestResponse(
         auto_signed_in=True,
         next=next_path,
-        user=_user_response(user),
+        user=_user_response(db, user),
         access_token=token,
         token_type="bearer",
     )
@@ -449,7 +450,7 @@ def email_auth_verify_otp(
     return EmailAuthVerifyResponse(
         auto_signed_in=True,
         next=_safe_next(body.next),
-        user=_user_response(user),
+        user=_user_response(db, user),
         access_token=token,
         token_type="bearer",
     )

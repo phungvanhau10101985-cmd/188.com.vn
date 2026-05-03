@@ -28,6 +28,8 @@ export interface UserResponse extends UserBase {
   created_at: string;
   updated_at?: string;
   last_login?: string;
+  /** Backend: có admin_users.linked_user_id → vào admin qua menu */
+  has_linked_admin?: boolean;
 }
 
 export interface Token {

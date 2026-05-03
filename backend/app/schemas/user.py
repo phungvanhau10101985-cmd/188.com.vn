@@ -84,6 +84,8 @@ class UserResponse(BaseModel):
     created_at: Optional[datetime] = None  # DB có thể trả None (server_default)
     updated_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
+    # True khi có admin_users.linked_user_id trùng users.id — vào admin qua menu Cá nhân
+    has_linked_admin: bool = False
     
     class Config:
         from_attributes = True

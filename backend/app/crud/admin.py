@@ -63,6 +63,7 @@ class AdminCRUD:
             full_name=data.full_name,
             phone=data.phone,
             role=role_enum,
+            linked_user_id=data.linked_user_id,
         )
         db.add(u)
         db.commit()

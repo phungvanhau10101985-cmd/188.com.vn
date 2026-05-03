@@ -1,5 +1,5 @@
 # backend/app/models/admin.py - BASIC ADMIN MODEL
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import enum
@@ -24,11 +24,15 @@ class AdminUser(Base):
     role = Column(Enum(AdminRole), default=AdminRole.ADMIN)
     is_active = Column(Boolean, default=True)
     last_login = Column(DateTime(timezone=True))
+
+    # Khách có quyền quản trị: phiên đăng nhập khách → đổi lấy JWT admin (không dùng mật khẩu admin riêng).
+    linked_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # ========== RELATIONSHIPS ==========
+    linked_user = relationship("User", foreign_keys=[linked_user_id])
     orders_managed = relationship("Order", back_populates="admin_manager", cascade="all, delete-orphan")
     payments_confirmed = relationship("Payment", back_populates="admin_confirmer", cascade="all, delete-orphan")
     # ===================================

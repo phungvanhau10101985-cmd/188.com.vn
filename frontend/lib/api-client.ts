@@ -581,6 +581,20 @@ class ApiClient {
     return this.fetch('/auth/me');
   }
 
+  /** Phiên khách đã đăng nhập + admin được liên kết → JWT admin (lưu vào admin_token). */
+  async exchangeLinkedAdminSession(): Promise<{
+    access_token: string;
+    token_type: string;
+    admin_id: number;
+    username: string;
+    role: string;
+  }> {
+    return this.fetch('/auth/admin-session-token', {
+      method: 'POST',
+      body: '{}',
+    });
+  }
+
   // ADDRESSES (Sổ địa chỉ)
   async getAddresses(): Promise<UserAddress[]> {
     return this.fetch<UserAddress[]>('/addresses/');

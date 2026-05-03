@@ -33,11 +33,15 @@ self.addEventListener("push", (event) => {
     /* dùng mặc định */
   }
   const title = data.title || "188.COM.VN";
-  const iconUrl = "https://188comvn.b-cdn.net/site/20260502/logo_1x1_0584d3f73e4a.png";
+  /** Logo đầy màu cho khay thông báo (không dùng làm badge Android — xem comment dưới). */
+  const iconUrl =
+    data.icon ||
+    "https://188comvn.b-cdn.net/site/20260502/logo_1x1_0584d3f73e4a.png";
   const options = {
     body: data.body || "",
     icon: iconUrl,
-    badge: iconUrl,
+    // Không đặt `badge`: Android đưa badge lên status bar dạng silhouette đơn sắc.
+    // Gán logo màu/CDN vào badge → thường thành ô vuông trắng nhỏ.
     data: { url: data.url || "/account/notifications" },
   };
   event.waitUntil(

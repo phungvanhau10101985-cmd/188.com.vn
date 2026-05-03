@@ -2,7 +2,9 @@
 
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import type { UserResponse } from '@/features/auth/types/auth';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ToastProvider';
 import AccountSessionActions from '@/components/account/AccountSessionActions';
@@ -28,9 +30,11 @@ function matchTab(order: OrderLite, tab: (typeof ORDER_TABS)[0]): boolean {
 }
 
 export default function AccountPage() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, updateUser } = useAuth();
   const { pushToast } = useToast();
+  const router = useRouter();
   const [orders, setOrders] = useState<OrderLite[]>([]);
+  const [adminNavBusy, setAdminNavBusy] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -38,8 +42,30 @@ export default function AccountPage() {
         .getOrders({ limit: 200 })
         .then((data) => setOrders(Array.isArray(data) ? data : []))
         .catch(() => setOrders([]));
+      apiClient
+        .getProfile()
+        .then((profile: UserResponse) => {
+          if (profile && typeof profile.id === 'number') updateUser(profile);
+        })
+        .catch(() => {});
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, updateUser]);
+
+  const openAdminPanel = useCallback(async () => {
+    setAdminNavBusy(true);
+    try {
+      const data = await apiClient.exchangeLinkedAdminSession();
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('admin_token', data.access_token);
+      }
+      router.push('/admin/orders');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Không lấy được phiên quản trị.';
+      pushToast({ title: 'Không vào được quản trị', description: msg, variant: 'error', durationMs: 3500 });
+    } finally {
+      setAdminNavBusy(false);
+    }
+  }, [pushToast, router]);
 
   const tabWithCounts = useMemo(() => {
     return ORDER_TABS.map((t) => {
@@ -108,6 +134,17 @@ export default function AccountPage() {
             <span>📍 Sổ địa chỉ</span>
             <span className="text-gray-400">›</span>
           </Link>
+          {user?.has_linked_admin ? (
+            <button
+              type="button"
+              disabled={adminNavBusy}
+              onClick={() => void openAdminPanel()}
+              className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-[#ea580c] disabled:opacity-60"
+            >
+              <span>⚙️ Quản trị web</span>
+              <span className="text-gray-400">›</span>
+            </button>
+          ) : null}
           <button onClick={notReady} className="w-full flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
             <span>💳 Ví điện tử</span>
             <span className="text-gray-400">›</span>
@@ -172,13 +209,25 @@ export default function AccountPage() {
               <dd className="font-medium text-gray-900">{user?.email ?? '—'}</dd>
             </div>
           </dl>
-          <div className="mt-6">
+          <div className="mt-6 space-y-3">
             <Link
               href="/account/addresses"
               className="inline-flex items-center text-blue-600 font-medium hover:text-blue-700"
             >
               Quản lý sổ địa chỉ →
             </Link>
+            {user?.has_linked_admin ? (
+              <div>
+                <button
+                  type="button"
+                  disabled={adminNavBusy}
+                  onClick={() => void openAdminPanel()}
+                  className="inline-flex items-center rounded-lg border border-[#ea580c] px-4 py-2 text-sm font-semibold text-[#ea580c] hover:bg-orange-50 disabled:opacity-60 transition-colors"
+                >
+                  Quản trị web
+                </button>
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-6 pt-6 border-t border-gray-100">
