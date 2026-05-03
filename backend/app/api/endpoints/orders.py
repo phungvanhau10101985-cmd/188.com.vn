@@ -9,7 +9,7 @@ from app.db.session import get_db
 from app import crud, models, schemas
 from app.crud import loyalty as crud_loyalty
 from app.models.order import OrderStatus as OrderStatusEnum, DepositType as DepositTypeEnum, PaymentStatus as PaymentStatusEnum
-from app.core.security import get_current_user, get_current_user_optional, get_current_admin
+from app.core.security import get_current_user, get_current_user_optional, require_module_permission
 from app.core.config import settings
 from app.services.email_service import send_order_email, send_deposit_confirmed_email_task
 from app.services import sepay as sepay_svc
@@ -365,7 +365,7 @@ def read_order(
 @router.get("/admin/all", response_model=List[schemas.AdminOrderResponse])
 def admin_get_orders(
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(get_current_admin),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     status: Optional[str] = None,
@@ -377,9 +377,6 @@ def admin_get_orders(
     """
     Admin: Get all orders with filters
     """
-    if current_admin.role not in [models.AdminRole.SUPER_ADMIN, models.AdminRole.ADMIN, models.AdminRole.ORDER_MANAGER]:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    
     return crud.order.get_orders_admin(
         db=db,
         skip=skip,
@@ -394,15 +391,12 @@ def admin_get_orders(
 @router.get("/admin/stats", response_model=schemas.AdminOrderStats)
 def admin_order_stats(
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(get_current_admin),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
     period: str = Query("today", pattern="^(today|week|month|year|all)$")
 ):
     """
     Admin: Get order statistics
     """
-    if current_admin.role not in [models.AdminRole.SUPER_ADMIN, models.AdminRole.ADMIN, models.AdminRole.ORDER_MANAGER]:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    
     return crud.order.get_order_stats(db, period=period)
 
 @router.put("/admin/{order_id}", response_model=schemas.AdminOrderResponse)
@@ -411,14 +405,11 @@ def admin_update_order(
     order_update: schemas.OrderUpdate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(get_current_admin)
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
 ):
     """
     Admin: Update order status
     """
-    if current_admin.role not in [models.AdminRole.SUPER_ADMIN, models.AdminRole.ADMIN, models.AdminRole.ORDER_MANAGER]:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    
     order = crud.order.admin_update_order(
         db=db,
         order_id=order_id,
@@ -445,14 +436,11 @@ def admin_confirm_deposit(
     payment_data: schemas.PaymentConfirm,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(get_current_admin)
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
 ):
     """
     Admin: Confirm deposit payment
     """
-    if current_admin.role not in [models.AdminRole.SUPER_ADMIN, models.AdminRole.ADMIN, models.AdminRole.ORDER_MANAGER]:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    
     # 1. Confirm payment
     payment = crud.payment.confirm_payment(
         db=db,
@@ -505,14 +493,12 @@ def admin_confirm_deposit_manual(
     background_tasks: BackgroundTasks,
     body: dict = Body(default={}),
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(get_current_admin)
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
 ):
     """
     Admin: Xác nhận cọc khi chưa có giao dịch trong hệ thống (khách đã chuyển khoản nhưng không gửi form).
     Body: { "confirmation_note": "..." } (tùy chọn)
     """
-    if current_admin.role not in [models.AdminRole.SUPER_ADMIN, models.AdminRole.ADMIN, models.AdminRole.ORDER_MANAGER]:
-        raise HTTPException(status_code=403, detail="Not authorized")
     order = crud.order.get_order(db, order_id=order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -543,14 +529,11 @@ def admin_confirm_deposit_manual(
 def admin_get_order_payments(
     order_id: int,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(get_current_admin)
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
 ):
     """
     Admin: Get payments for order
     """
-    if current_admin.role not in [models.AdminRole.SUPER_ADMIN, models.AdminRole.ADMIN, models.AdminRole.ORDER_MANAGER]:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    
     order = crud.order.get_order(db, order_id=order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")

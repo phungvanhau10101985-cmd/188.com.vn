@@ -115,13 +115,16 @@ async function fetchAdmin<T>(
     if (res.status === 401) {
       if (typeof window !== 'undefined') {
         localStorage.removeItem('admin_token');
+        localStorage.removeItem('admin_role');
+        localStorage.removeItem('admin_modules');
         window.location.href = '/admin/login';
       }
       throw new Error('Phiên đăng nhập hết hạn');
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || `Lỗi ${res.status}`);
+      const msg = formatFastApiDetail((err as { detail?: unknown }).detail) || `Lỗi ${res.status}`;
+      throw new Error(msg);
     }
     if (res.status === 204) return {} as T;
     return res.json();
@@ -688,6 +691,8 @@ export const adminBunnyCdnAPI = {
     if (res.status === 401) {
       if (typeof window !== 'undefined') {
         localStorage.removeItem('admin_token');
+        localStorage.removeItem('admin_role');
+        localStorage.removeItem('admin_modules');
         window.location.href = '/admin/login';
       }
       throw new Error('Phiên đăng nhập hết hạn');
@@ -732,12 +737,76 @@ export interface AdminMember {
   created_at?: string | null;
   updated_at?: string | null;
   last_login?: string | null;
+  has_linked_admin?: boolean;
+  linked_admin_role?: string | null;
+  linked_admin_username?: string | null;
+  linked_admin_modules?: string[] | null;
 }
 
 export interface AdminMembersResponse {
   items: AdminMember[];
   total: number;
 }
+
+export type LinkedStaffRoleOption =
+  | 'none'
+  | 'order_manager'
+  | 'admin'
+  | 'product_manager'
+  | 'content_manager';
+
+export interface AdminStaffAccountRow {
+  id: number;
+  username: string;
+  email: string;
+  full_name?: string | null;
+  phone?: string | null;
+  role: string;
+  is_active: boolean;
+  linked_user_id?: number | null;
+  modules: string[];
+  uses_custom_modules: boolean;
+}
+
+export type StaffPermissionsModulesMode = 'unchanged' | 'preset' | 'custom';
+
+export const adminStaffAPI = {
+  list: () => fetchAdmin<{ items: AdminStaffAccountRow[] }>('/admin/admin-users'),
+  patchPermissions: (
+    id: number,
+    body: {
+      role?: string;
+      modules_mode: StaffPermissionsModulesMode;
+      modules?: string[];
+    },
+  ) =>
+    fetchAdmin<AdminStaffAccountRow>(`/admin/admin-users/${id}/permissions`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+};
+
+export interface StaffRolePresetCrudFlags {
+  view: boolean;
+  create: boolean;
+  update: boolean;
+  delete: boolean;
+}
+
+export interface StaffRolePresetItem {
+  role: string;
+  modules: string[];
+  module_crud: Record<string, StaffRolePresetCrudFlags>;
+}
+
+export const adminStaffRolePresetsAPI = {
+  list: () => fetchAdmin<{ items: StaffRolePresetItem[] }>('/admin/staff-role-presets'),
+  put: (role: string, body: { modules: string[]; module_crud: Record<string, StaffRolePresetCrudFlags> }) =>
+    fetchAdmin<StaffRolePresetItem>(`/admin/staff-role-presets/${encodeURIComponent(role)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+};
 
 export const adminMemberAPI = {
   getMembers: (params?: { skip?: number; limit?: number; keyword?: string }) => {
@@ -750,6 +819,17 @@ export const adminMemberAPI = {
   getMember: (id: number) => fetchAdmin<AdminMember>(`/admin/users/${id}`),
   updateMember: (id: number, data: { is_active?: boolean; full_name?: string; email?: string; address?: string }) =>
     fetchAdmin<AdminMember>(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  setLinkedStaff: (
+    id: number,
+    staff_role: LinkedStaffRoleOption,
+    modules?: string[],
+  ) =>
+    fetchAdmin<AdminMember>(`/admin/users/${id}/linked-staff`, {
+      method: 'PATCH',
+      body: JSON.stringify(
+        modules === undefined ? { staff_role } : { staff_role, modules },
+      ),
+    }),
 };
 
 export interface ProductQuestionAdmin {
@@ -956,7 +1036,16 @@ export const adminLoyaltyAPI = {
     fetchAdmin<void>(`/loyalty/tiers/${id}`, { method: 'DELETE' }),
 };
 
-export async function adminLogin(username: string, password: string) {
+export interface AdminLoginResponse {
+  access_token: string;
+  token_type?: string;
+  admin_id?: number;
+  username?: string;
+  role: string;
+  modules?: string[] | null;
+}
+
+export async function adminLogin(username: string, password: string): Promise<AdminLoginResponse> {
   const res = await fetch(`${getApiBaseUrl()}/admin/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...ngrokFetchHeaders() },

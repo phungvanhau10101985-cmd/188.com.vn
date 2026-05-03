@@ -7,7 +7,7 @@ Admin endpoint quản lý taxonomy (cây danh mục + SEO cluster) qua file Exce
   sau đó `assets/taxonomy_import_template.xlsx` (mẫu đủ cột + vài dòng minh họa),
   cuối cùng sinh workbook trong code (cùng schema).
 
-Yêu cầu Bearer admin (Depends(get_current_admin)).
+Yêu cầu Bearer admin (Depends(require_module_permission("taxonomy"))).
 
 Import là **upsert / hợp nhất** theo cột `id` (chuỗi, lưu DB là `external_id`):
 - **Đã có** `id` đó → **cập nhật** slug, tên, full_slug, cha, cluster, seo_index, v.v. theo file;
@@ -30,7 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app import models
-from app.core.security import get_current_admin
+from app.core.security import require_module_permission
 from app.db.session import get_db
 from app.models.category import Category
 from app.models.seo_cluster import SeoCluster
@@ -509,7 +509,7 @@ def execute_taxonomy_sheets(db: Session, sheets: Dict[str, pd.DataFrame]) -> Dic
 async def import_taxonomy(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    _admin: models.AdminUser = Depends(get_current_admin),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
 ) -> Dict[str, Any]:
     """
     Upload taxonomy_import.xlsx (4 sheet).
@@ -766,7 +766,7 @@ def _build_manual_taxonomy_sheets(db: Session, body: TaxonomyManualUpsertIn) -> 
 @router.get("/form-tree")
 def taxonomy_form_tree(
     db: Session = Depends(get_db),
-    _admin: models.AdminUser = Depends(get_current_admin),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
 ) -> Dict[str, Any]:
     """Cây categories kèm external_id — chọn trên form thủ công."""
 
@@ -808,7 +808,7 @@ def taxonomy_form_tree(
 @router.get("/clusters-list")
 def taxonomy_clusters_list(
     db: Session = Depends(get_db),
-    _admin: models.AdminUser = Depends(get_current_admin),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
 ) -> Dict[str, Any]:
     rows = db.query(SeoCluster).order_by(SeoCluster.slug).all()
     return {
@@ -828,7 +828,7 @@ def taxonomy_clusters_list(
 def taxonomy_manual_upsert(
     body: TaxonomyManualUpsertIn,
     db: Session = Depends(get_db),
-    _admin: models.AdminUser = Depends(get_current_admin),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
 ) -> Dict[str, Any]:
     """
     Thêm / cập nhật một nhánh cat1–cat3 + cluster — **cùng upsert** như Excel:
@@ -851,7 +851,7 @@ def download_sample_taxonomy_file(
         False,
         description="true: bỏ qua temp_uploads/taxonomy_import.xlsx — chỉ trả mẫu đủ cột (assets hoặc sinh trong code)",
     ),
-    _admin: models.AdminUser = Depends(get_current_admin),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
 ):
     """Mặc định: taxonomy đầy đủ trong temp_uploads → assets mẫu cột → sinh trong code. blank_template=1: chỉ (assets → sinh)."""
     paths_primary = ()
@@ -879,7 +879,7 @@ def download_sample_taxonomy_file(
 @router.get("/info")
 def taxonomy_info(
     db: Session = Depends(get_db),
-    _admin: models.AdminUser = Depends(get_current_admin),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
 ) -> Dict[str, Any]:
     """Tổng quan trạng thái hiện tại: số cat1/2/3, số cluster, số sản phẩm."""
     cat1 = db.query(Category).filter(Category.level == 1).count()

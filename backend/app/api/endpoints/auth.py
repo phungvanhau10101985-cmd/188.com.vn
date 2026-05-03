@@ -21,6 +21,7 @@ from app.schemas.user import (
 )
 from app.schemas.admin import AdminTokenResponse
 from app.models.admin import AdminUser
+from app.core.admin_permissions import effective_module_keys
 from app.core.email_identity import identity_email
 from app.crud.user import (
     get_user_by_phone, create_user, update_user,
@@ -483,6 +484,7 @@ def issue_admin_token_for_linked_customer(
             detail="Tài khoản không được gán quyền quản trị.",
         )
     app_crud.update_admin_last_login(db, admin_row.id)
+    db.refresh(admin_row)
     token = create_admin_token(admin_row.id)
     role_value = admin_row.role.value if hasattr(admin_row.role, "value") else str(admin_row.role)
     return AdminTokenResponse(
@@ -491,6 +493,7 @@ def issue_admin_token_for_linked_customer(
         admin_id=admin_row.id,
         username=admin_row.username,
         role=role_value,
+        modules=effective_module_keys(admin_row, db),
     )
 
 

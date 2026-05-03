@@ -4,13 +4,16 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
+import LinkedAdminNavButton from '@/components/account/LinkedAdminNavButton';
+import { apiClient } from '@/lib/api-client';
+import type { UserResponse } from '@/features/auth/types/auth';
 
 export default function AccountLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, updateUser, user } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -19,6 +22,21 @@ export default function AccountLayout({
       router.push('/auth/login?redirect=' + encodeURIComponent(pathname || '/account'));
     }
   }, [isAuthenticated, isLoading, router, pathname]);
+
+  /** Làm mới quyền liên kết admin sau khi quản trị gán — tránh localStorage user cũ thiếu has_linked_admin */
+  useEffect(() => {
+    if (!isAuthenticated || isLoading) return;
+    let cancelled = false;
+    apiClient
+      .getProfile()
+      .then((profile: UserResponse) => {
+        if (!cancelled && profile && typeof profile.id === 'number') updateUser(profile);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, isLoading, pathname, updateUser]);
 
   if (isLoading) {
     return (
@@ -72,9 +90,19 @@ export default function AccountLayout({
                   </Link>
                 );
               })}
+              {user?.has_linked_admin ? (
+                <div className="border-t border-gray-100 bg-orange-50/30">
+                  <LinkedAdminNavButton />
+                </div>
+              ) : null}
             </nav>
           </aside>
           <main className="flex-1 min-w-0">
+            {user?.has_linked_admin ? (
+              <div className="mb-4 md:hidden">
+                <LinkedAdminNavButton variant="banner" />
+              </div>
+            ) : null}
             {children}
           </main>
         </div>

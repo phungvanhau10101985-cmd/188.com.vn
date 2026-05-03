@@ -1,5 +1,5 @@
 # backend/app/models/admin.py - BASIC ADMIN MODEL
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, ForeignKey, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import enum
@@ -27,6 +27,9 @@ class AdminUser(Base):
 
     # Khách có quyền quản trị: phiên đăng nhập khách → đổi lấy JWT admin (không dùng mật khẩu admin riêng).
     linked_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
+
+    # Quyền từng mục (danh sách chuỗi — xem ALLOWED_MODULE_KEYS). null = chỉ dùng preset theo role.
+    granular_permissions = Column(JSON, nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -39,3 +42,14 @@ class AdminUser(Base):
     
     def __repr__(self):
         return f"<AdminUser {self.username}>"
+
+
+class AdminStaffRolePreset(Base):
+    """Preset mục menu + CRUD mặc định cho NV (order/product/content manager). Super_admin chỉnh qua API."""
+
+    __tablename__ = "admin_staff_role_presets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    role = Column(String(32), unique=True, nullable=False, index=True)
+    modules = Column(JSON, nullable=False)
+    module_crud = Column(JSON, nullable=False)

@@ -588,6 +588,7 @@ class ApiClient {
     admin_id: number;
     username: string;
     role: string;
+    modules?: string[] | null;
   }> {
     return this.fetch('/auth/admin-session-token', {
       method: 'POST',

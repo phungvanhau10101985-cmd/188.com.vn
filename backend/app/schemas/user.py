@@ -86,7 +86,11 @@ class UserResponse(BaseModel):
     last_login: Optional[datetime] = None
     # True khi có admin_users.linked_user_id trùng users.id — vào admin qua menu Cá nhân
     has_linked_admin: bool = False
-    
+    # Chi tiết liên kết (admin panel / auth/me khi có quyền)
+    linked_admin_role: Optional[str] = None
+    linked_admin_username: Optional[str] = None
+    linked_admin_modules: Optional[List[str]] = None
+
     class Config:
         from_attributes = True
 

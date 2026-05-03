@@ -30,6 +30,10 @@ export interface UserResponse extends UserBase {
   last_login?: string;
   /** Backend: có admin_users.linked_user_id → vào admin qua menu */
   has_linked_admin?: boolean;
+  linked_admin_role?: string | null;
+  linked_admin_username?: string | null;
+  /** Quyền mục khi có admin liên kết (granular hoặc preset). */
+  linked_admin_modules?: string[] | null;
 }
 
 export interface Token {

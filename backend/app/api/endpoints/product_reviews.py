@@ -23,7 +23,8 @@ from app.schemas.product_review import (
     ProductReviewSubmit,
     UsefulToggleResponse,
 )
-from app.core.security import get_current_admin, get_current_user, get_current_user_optional
+from app.core.admin_permissions import admin_allowed_operation
+from app.core.security import get_current_user, get_current_user_optional, require_module_permission
 
 router = APIRouter()
 
@@ -141,7 +142,7 @@ def admin_list_reviews(
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin),
+    current_admin: AdminUser = Depends(require_module_permission("product_reviews")),
 ):
     """
     Danh sách đánh giá (admin).
@@ -179,7 +180,7 @@ def admin_list_reviews(
 def admin_create_review(
     data: ProductReviewCreate,
     db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin),
+    current_admin: AdminUser = Depends(require_module_permission("product_reviews")),
 ):
     return crud.product_review.create_review(db, data)
 
@@ -189,7 +190,7 @@ def admin_update_review(
     review_id: int,
     data: ProductReviewUpdate,
     db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin),
+    current_admin: AdminUser = Depends(require_module_permission("product_reviews")),
 ):
     obj = crud.product_review.update_review(db, review_id, data)
     if not obj:
@@ -201,8 +202,10 @@ def admin_update_review(
 def admin_delete_review(
     review_id: int,
     db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin),
+    current_admin: AdminUser = Depends(require_module_permission("product_reviews")),
 ):
+    if not admin_allowed_operation(current_admin, db, "product_reviews", "delete"):
+        raise HTTPException(status_code=403, detail="Không được phép xóa đánh giá với quyền hiện tại.")
     ok = crud.product_review.delete_review(db, review_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Đánh giá không tồn tại")
@@ -246,7 +249,7 @@ REVIEW_EXCEL_COLUMN_MAP = {
 
 @router.get("/admin/export/sample")
 def admin_download_sample_excel(
-    current_admin: AdminUser = Depends(get_current_admin),
+    current_admin: AdminUser = Depends(require_module_permission("product_reviews")),
 ):
     """Tải file Excel mẫu để import đánh giá sản phẩm."""
     df = pd.DataFrame(
@@ -279,7 +282,7 @@ def admin_download_sample_excel(
 async def admin_import_excel(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin),
+    current_admin: AdminUser = Depends(require_module_permission("product_reviews")),
 ):
     """Import đánh giá sản phẩm từ Excel. Cột: user_name, star, title, content, reply_name, reply_content, useful, group, img_fake (ảnh JSON)."""
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):

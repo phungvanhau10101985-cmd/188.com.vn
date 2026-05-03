@@ -4,11 +4,12 @@ import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { adminLogin } from '@/lib/admin-api';
+import { defaultAdminHome, setStoredAdminModules } from '@/lib/admin-role';
 
 export default function AdminLoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get('redirect') || '/admin/orders';
+  const redirectParam = searchParams.get('redirect');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -33,8 +34,11 @@ export default function AdminLoginPage() {
       const data = await adminLogin(username, password);
       if (typeof window !== 'undefined') {
         localStorage.setItem('admin_token', data.access_token);
+        localStorage.setItem('admin_role', data.role || '');
+        setStoredAdminModules(data.modules ?? undefined);
       }
-      router.push(redirect);
+      const dest = (redirectParam && redirectParam.trim()) || defaultAdminHome();
+      router.push(dest);
     } catch (err: any) {
       setError(err.message || 'Đăng nhập thất bại');
     } finally {

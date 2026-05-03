@@ -23,7 +23,8 @@ from app.schemas.product_question import (
     ProductQuestionReplyCreate,
     UsefulToggleResponse,
 )
-from app.core.security import get_current_admin, get_current_user, get_current_user_optional
+from app.core.admin_permissions import admin_allowed_operation
+from app.core.security import get_current_user, get_current_user_optional, require_module_permission
 
 router = APIRouter()
 
@@ -136,7 +137,7 @@ def admin_list_questions(
     sort_by: str = Query("id", description="Sắp xếp theo"),
     sort_desc: bool = Query(True, description="Giảm dần"),
     db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin),
+    current_admin: AdminUser = Depends(require_module_permission("product_questions")),
 ):
     """Danh sách tất cả câu hỏi (admin)."""
     from app.models.product import Product
@@ -172,7 +173,7 @@ def admin_list_questions(
 def admin_get_question(
     question_id: int,
     db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin),
+    current_admin: AdminUser = Depends(require_module_permission("product_questions")),
 ):
     q = crud.product_question.get_question(db, question_id)
     if not q:
@@ -184,7 +185,7 @@ def admin_get_question(
 def admin_create_question(
     data: ProductQuestionCreate,
     db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin),
+    current_admin: AdminUser = Depends(require_module_permission("product_questions")),
 ):
     return crud.product_question.create_question(db, data)
 
@@ -194,7 +195,7 @@ def admin_update_question(
     question_id: int,
     data: ProductQuestionUpdate,
     db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin),
+    current_admin: AdminUser = Depends(require_module_permission("product_questions")),
 ):
     obj = crud.product_question.update_question(db, question_id, data)
     if not obj:
@@ -206,8 +207,10 @@ def admin_update_question(
 def admin_delete_question(
     question_id: int,
     db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin),
+    current_admin: AdminUser = Depends(require_module_permission("product_questions")),
 ):
+    if not admin_allowed_operation(current_admin, db, "product_questions", "delete"):
+        raise HTTPException(status_code=403, detail="Không được phép xóa câu hỏi với quyền hiện tại.")
     ok = crud.product_question.delete_question(db, question_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Câu hỏi không tồn tại")
@@ -268,7 +271,7 @@ SAMPLE_EXCEL_COLUMNS = [
 
 @router.get("/admin/export/sample")
 def admin_download_sample_excel(
-    current_admin: AdminUser = Depends(get_current_admin),
+    current_admin: AdminUser = Depends(require_module_permission("product_questions")),
 ):
     """Tải file Excel mẫu để import câu hỏi."""
     df = pd.DataFrame(
@@ -308,7 +311,7 @@ def admin_download_sample_excel(
 async def admin_import_excel(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin),
+    current_admin: AdminUser = Depends(require_module_permission("product_questions")),
 ):
     """
     Import câu hỏi từ Excel.

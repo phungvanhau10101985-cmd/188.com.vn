@@ -50,7 +50,7 @@ print("✅ Cart models loaded")
 
 # 5. Import Admin (nếu có)
 try:
-    from app.models.admin import AdminUser, AdminRole
+    from app.models.admin import AdminUser, AdminRole, AdminStaffRolePreset
     print("✅ AdminUser model loaded")
 except ImportError:
     AdminUser = None  # type: ignore[misc, assignment]

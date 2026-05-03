@@ -21,6 +21,7 @@ from app.models.site_embed_code import SiteEmbedCode
 from app.models.category_seo import CategorySeoGeminiTarget, CategorySeoSettings
 from app.models.category_final_mapping import CategoryFinalMapping
 from app.models.guest_behavior import GuestProductView, GuestFavorite, GuestSearchHistory
+from app.models.admin import AdminUser
 from app.db.session import engine
 from app.core.config import settings
 import os
@@ -144,9 +145,11 @@ class MigrationManager:
     def _dialect_type_for_column(self, col) -> str:
         """Map SQLAlchemy column to database-specific type for ALTER TABLE."""
         from sqlalchemy import Integer, String, Text, Boolean, DateTime, Numeric
-        from sqlalchemy.types import Enum as EnumType
+        from sqlalchemy.types import Enum as EnumType, JSON as SA_JSON_TYPE
         t = type(col.type)
         default_empty = "" if not getattr(col, "nullable", True) else " DEFAULT NULL"
+        if isinstance(col.type, SA_JSON_TYPE) or type(col.type).__name__ in ("JSON", "JSONB"):
+            return ("JSONB" + default_empty) if IS_POSTGRESQL else ("TEXT" + default_empty)
         if t == Integer:
             return "INTEGER DEFAULT 0" if not getattr(col, "nullable", True) else "INTEGER DEFAULT NULL"
         if t == Boolean:
@@ -427,6 +430,29 @@ class MigrationManager:
             logger.error("❌ migrate_category_seo_meta_seo_body failed: %s", e)
             return False
 
+    def migrate_admin_users_linked_user_unique_index(self) -> bool:
+        """Unique index linked_user_id — tương đương scripts/add_admin_linked_user_id.sql (không cần psql sau deploy)."""
+        try:
+            inspector = inspect(engine)
+            if "admin_users" not in inspector.get_table_names():
+                return True
+            col_names = {c["name"] for c in inspector.get_columns("admin_users")}
+            if "linked_user_id" not in col_names:
+                return True
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS ix_admin_users_linked_user_id "
+                        "ON admin_users(linked_user_id)"
+                    )
+                )
+                conn.commit()
+            logger.info("✅ ix_admin_users_linked_user_id ensured (IF NOT EXISTS)")
+            return True
+        except Exception as e:
+            logger.warning("migrate_admin_users_linked_user_unique_index: %s", e)
+            return True
+
     def migrate_all_tables(self) -> Dict[str, bool]:
         """Chạy tất cả migrations cần thiết"""
         results = {}
@@ -486,6 +512,9 @@ class MigrationManager:
         )
         # 14. bank_accounts: mã NH + URL mẫu QR SePay/VietQR
         results['bank_accounts_sync_columns'] = self._sync_table_columns("bank_accounts", BankAccount)
+        # 14b. admin_users: linked_user_id, granular_permissions (+ sync cột khác theo model); index unique linked_user_id
+        results['admin_users_sync_columns'] = self._sync_table_columns("admin_users", AdminUser)
+        results['admin_users_linked_unique_index'] = self.migrate_admin_users_linked_user_unique_index()
         # 15. Hành vi khách (phiên trình duyệt), gộp vào user khi đăng nhập
         results['guest_product_views'] = self._create_table_if_not_exists("guest_product_views", GuestProductView)
         results['guest_favorites'] = self._create_table_if_not_exists("guest_favorites", GuestFavorite)

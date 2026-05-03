@@ -1,6 +1,6 @@
 # backend/app/core/security.py - FIXED VERSION
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Literal, Optional
 import bcrypt
 from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, Request, status
@@ -11,7 +11,10 @@ from app.db.session import get_db
 from app.core.config import settings
 from app import crud
 from app.models.user import User
-from app.models.admin import AdminUser
+from app.models.admin import AdminUser, AdminRole
+from app.core.admin_permissions import admin_allowed_operation, http_method_to_admin_crud_need
+
+_PRIVILEGED_ADMIN_ROLES = frozenset({AdminRole.SUPER_ADMIN, AdminRole.ADMIN})
 
 # Dùng bcrypt trực tiếp (tránh lỗi passlib + bcrypt 4.1+)
 def get_password_hash(password: str) -> str:
@@ -227,6 +230,52 @@ def get_current_admin(
         )
     
     return admin
+
+
+def require_privileged_admin(
+    admin: AdminUser = Depends(get_current_admin),
+) -> AdminUser:
+    """Chỉ super_admin / admin — cấu hình hệ thống, thành viên, ngân hàng, gán quyền."""
+    if admin.role not in _PRIVILEGED_ADMIN_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ quản trị viên chính (super_admin/admin) được thực hiện thao tác này.",
+        )
+    return admin
+
+
+def require_super_admin(admin: AdminUser = Depends(get_current_admin)) -> AdminUser:
+    """Chỉ super_admin — chỉnh preset vai trò NV, tài khoản super_admin…"""
+    if admin.role != AdminRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ super_admin được thực hiện thao tác này.",
+        )
+    return admin
+
+
+def require_module_permission(
+    module_key: str,
+    *,
+    need: Optional[Literal["view", "create", "update", "delete"]] = None,
+):
+    """Kiểm tra quyền mục theo preset/granular; thao tác suy từ HTTP method nếu không chỉ định."""
+
+    def dep(
+        request: Request,
+        admin: AdminUser = Depends(get_current_admin),
+        db: Session = Depends(get_db),
+    ) -> AdminUser:
+        op = need if need is not None else http_method_to_admin_crud_need(request.method)
+        if not admin_allowed_operation(admin, db, module_key, op):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Không có quyền thao tác « {module_key} » ({op}).",
+            )
+        return admin
+
+    return dep
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create JWT token for regular users"""

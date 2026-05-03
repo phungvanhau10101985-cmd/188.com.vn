@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import type { UserResponse } from '@/features/auth/types/auth';
 import { apiClient } from '@/lib/api-client';
+import { defaultAdminHome, setStoredAdminModules } from '@/lib/admin-role';
 import { useToast } from '@/components/ToastProvider';
 import AccountSessionActions from '@/components/account/AccountSessionActions';
 
@@ -57,8 +58,10 @@ export default function AccountPage() {
       const data = await apiClient.exchangeLinkedAdminSession();
       if (typeof window !== 'undefined') {
         localStorage.setItem('admin_token', data.access_token);
+        localStorage.setItem('admin_role', data.role || '');
+        setStoredAdminModules(data.modules ?? undefined);
       }
-      router.push('/admin/orders');
+      router.push(defaultAdminHome());
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Không lấy được phiên quản trị.';
       pushToast({ title: 'Không vào được quản trị', description: msg, variant: 'error', durationMs: 3500 });

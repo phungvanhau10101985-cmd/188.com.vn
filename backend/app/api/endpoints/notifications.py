@@ -2,9 +2,10 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.core.security import get_current_user, get_current_admin
+from app.core.security import get_current_user, require_module_permission
 from app.models.user import User
 from app.models.notification import Notification
+from app.models.admin import AdminUser
 from app.schemas.notification import NotificationResponse, NotificationImportResponse, NotificationCreate
 from app.crud import notification as crud_notification
 from app.crud import user as crud_user
@@ -56,7 +57,7 @@ def mark_all_as_read(
 async def import_notifications(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_admin: User = Depends(get_current_admin)
+    current_admin: AdminUser = Depends(require_module_permission("notifications"))
 ):
     if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
         raise HTTPException(status_code=400, detail="Invalid file format. Please upload Excel or CSV file.")

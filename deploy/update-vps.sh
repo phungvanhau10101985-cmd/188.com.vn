@@ -117,7 +117,7 @@ pip install -r "${BACKEND}/requirements.txt"
 
 cd "${BACKEND}"
 if [[ "${DEPLOY_SKIP_DB_INIT:-0}" != "1" ]]; then
-  echo "==> Database: tạo DB (PostgreSQL) + bảng mới + migrations (trước khi build frontend)"
+  echo "==> Database: PostgreSQL (tạo DB nếu bật) + init_database_tables (create_all + migrations: admin_users, orders, …)"
   ensure_postgres_database_for_deploy
   # Chỉ áp strict cho subprocess này — không để vào .env/server (tránh uvicorn exit khi lỗi DB)
   DEPLOY_STRICT_DB_INIT="${DEPLOY_STRICT_DB_INIT:-1}" \

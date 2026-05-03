@@ -12,6 +12,8 @@ from app.utils.vietnamese import normalize_for_search_no_accent
 from difflib import SequenceMatcher
 import json
 from app.schemas.product import Product, ProductCreate, ProductUpdate
+from app.models.admin import AdminUser
+from app.core.security import require_module_permission
 
 router = APIRouter()
 
@@ -242,7 +244,8 @@ def read_products(
 @router.post("/", response_model=Product)
 def create_product(
     product: ProductCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
 ):
     """
     Create new product
@@ -266,7 +269,8 @@ def read_product(
 def update_product(
     product_id: str,
     product_update: ProductUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
 ):
     """
     Update product (product_id = Excel column A / product_id string)
@@ -282,7 +286,8 @@ def update_product(
 @router.delete("/{product_id}", response_model=Product)
 def delete_product(
     product_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
 ):
     """
     Delete product (product_id = Excel column A / product_id string)

@@ -4,8 +4,9 @@ from sqlalchemy.orm import Session
 from decimal import Decimal
 
 from app.db.session import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_module_permission
 from app.models.user import User
+from app.models.admin import AdminUser
 from app.schemas.loyalty import LoyaltyTier, LoyaltyTierCreate, LoyaltyTierUpdate, UserLoyaltyStatus
 from app.crud import loyalty as crud_loyalty
 
@@ -67,7 +68,7 @@ def get_loyalty_tiers(
 def create_loyalty_tier(
     tier_in: LoyaltyTierCreate,
     db: Session = Depends(get_db),
-    # current_user: User = Depends(get_current_active_superuser) # TODO: Add admin check
+    _: AdminUser = Depends(require_module_permission("loyalty")),
 ) -> Any:
     """
     Tạo hạng thành viên mới (Admin).
@@ -79,7 +80,7 @@ def update_loyalty_tier(
     tier_id: int,
     tier_in: LoyaltyTierUpdate,
     db: Session = Depends(get_db),
-    # current_user: User = Depends(get_current_active_superuser) # TODO: Add admin check
+    _: AdminUser = Depends(require_module_permission("loyalty")),
 ) -> Any:
     """
     Cập nhật hạng thành viên (Admin).
@@ -93,7 +94,7 @@ def update_loyalty_tier(
 def delete_loyalty_tier(
     tier_id: int,
     db: Session = Depends(get_db),
-    # current_user: User = Depends(get_current_active_superuser) # TODO: Add admin check
+    _: AdminUser = Depends(require_module_permission("loyalty")),
 ) -> Any:
     """
     Xóa hạng thành viên (Admin).
