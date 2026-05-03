@@ -80,7 +80,7 @@ export default function Footer() {
               <Link href="/info/gioi-thieu" className="block text-gray-700 hover:text-gray-900 transition-colors">Giới thiệu</Link>
             </div>
             <a
-              href="https://online.gov.vn/Home/WebDetails/137314"
+              href="http://online.gov.vn/Home/WebDetails/137314"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#ea580c] text-white font-medium shadow-md hover:bg-orange-600 hover:shadow-lg transition-all focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2 text-sm mt-4"
