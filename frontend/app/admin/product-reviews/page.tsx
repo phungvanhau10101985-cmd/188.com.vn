@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import AdminLayout from '@/components/admin/AdminLayout';
 import { adminProductReviewsAPI, type ProductReviewAdmin, type ProductReviewsListResponse } from '@/lib/admin-api';
 import ViewReviewModal from './components/ViewReviewModal';
 
@@ -123,7 +122,7 @@ export default function AdminProductReviewsPage() {
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
   return (
-    <AdminLayout>
+      <>
       <div className="p-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-6">Quản lý đánh giá sản phẩm</h1>
 
@@ -391,6 +390,6 @@ export default function AdminProductReviewsPage() {
           onClose={() => setViewModal(null)}
         />
       )}
-    </AdminLayout>
+      </>
   );
 }

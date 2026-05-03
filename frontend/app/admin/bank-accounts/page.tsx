@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import AdminLayout from '@/components/admin/AdminLayout';
 import { adminBankAPI, type BankAccountAdmin } from '@/lib/admin-api';
 import { DEFAULT_SEPAY_QR_TEMPLATE } from '@/lib/deposit-qr';
 
@@ -128,7 +127,6 @@ export default function AdminBankAccountsPage() {
   };
 
   return (
-    <AdminLayout>
       <div className="p-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Cấu hình nạp tiền / đặt cọc</h1>
         <p className="text-gray-600 mb-6 max-w-3xl">
@@ -348,6 +346,5 @@ export default function AdminBankAccountsPage() {
           </div>
         )}
       </div>
-    </AdminLayout>
   );
 }

@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import AdminLayout from '@/components/admin/AdminLayout';
 import {
   adminBunnyCdnAPI,
   type BunnyCdnStatus,
@@ -69,7 +68,6 @@ export default function AdminBunnyCdnPage() {
   };
 
   return (
-    <AdminLayout>
       <div className="p-6 max-w-2xl">
         <h1 className="text-xl font-bold text-gray-900 mb-2">Đăng ảnh lên Bunny CDN</h1>
         <p className="text-sm text-gray-600 mb-4">
@@ -167,6 +165,5 @@ export default function AdminBunnyCdnPage() {
           </div>
         )}
       </div>
-    </AdminLayout>
   );
 }

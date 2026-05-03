@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import AdminLayout from '@/components/admin/AdminLayout';
 import { adminSiteEmbedAPI, type SiteEmbedCodeAdmin } from '@/lib/admin-api';
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -251,7 +250,7 @@ export default function AdminEmbedCodesPage() {
   const hint = hintLine(form.platform, form.category);
 
   return (
-    <AdminLayout>
+      <>
       <div className="p-6 max-w-5xl">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Mã nhúng và thẻ quảng cáo</h1>
         <p className="text-gray-600 mb-3">
@@ -519,6 +518,6 @@ export default function AdminEmbedCodesPage() {
           </div>
         </div>
       )}
-    </AdminLayout>
+      </>
   );
 }

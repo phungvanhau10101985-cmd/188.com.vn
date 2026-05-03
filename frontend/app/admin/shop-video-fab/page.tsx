@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import AdminLayout from '@/components/admin/AdminLayout';
 import {
   adminShopVideoFabAPI,
   type ShopVideoFabSettings,
@@ -63,7 +62,6 @@ export default function AdminShopVideoFabPage() {
   };
 
   return (
-    <AdminLayout>
       <div className="p-6 max-w-xl">
         <h1 className="text-xl font-bold text-gray-900 mb-2">Vị trí nút lướt xem video</h1>
         <p className="text-sm text-gray-600 mb-4">
@@ -156,6 +154,5 @@ export default function AdminShopVideoFabPage() {
           </div>
         )}
       </div>
-    </AdminLayout>
   );
 }

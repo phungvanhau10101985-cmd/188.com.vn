@@ -2,7 +2,6 @@
 
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import AdminLayout from '@/components/admin/AdminLayout';
 import {
   adminStaffAPI,
   adminStaffRolePresetsAPI,
@@ -249,15 +248,10 @@ export default function StaffAccessPage() {
   };
 
   if (!allowed) {
-    return (
-      <AdminLayout>
-        <div className="p-8 text-gray-600 text-sm">Đang kiểm tra quyền…</div>
-      </AdminLayout>
-    );
+    return <div className="p-8 text-gray-600 text-sm">Đang kiểm tra quyền…</div>;
   }
 
   return (
-    <AdminLayout>
       <div className="p-6 max-w-[100rem] mx-auto">
         {toast ? (
           <div
@@ -564,6 +558,5 @@ export default function StaffAccessPage() {
           </div>
         </section>
       </div>
-    </AdminLayout>
   );
 }

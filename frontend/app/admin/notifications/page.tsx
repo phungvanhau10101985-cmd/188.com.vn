@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { apiClient } from '@/lib/api-client';
-import AdminLayout from '@/components/admin/AdminLayout';
 
 export default function AdminNotificationsPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -33,7 +32,6 @@ export default function AdminNotificationsPage() {
   };
 
   return (
-    <AdminLayout>
       <div className="container mx-auto px-4 py-8">
         <h1 className="text-2xl font-bold mb-6">Quản lý Thông báo</h1>
         
@@ -115,6 +113,5 @@ export default function AdminNotificationsPage() {
           )}
         </div>
       </div>
-    </AdminLayout>
   );
 }

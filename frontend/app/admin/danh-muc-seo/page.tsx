@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import AdminLayout from '@/components/admin/AdminLayout';
 import { apiClient } from '@/lib/api-client';
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
 import {
@@ -1026,7 +1025,6 @@ export default function AdminDanhMucSeoPage() {
   };
 
   return (
-    <AdminLayout>
       <div className="p-6 max-w-7xl">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Quản lý danh mục SEO</h1>
         <p className="text-gray-600 text-sm mb-4">
@@ -2242,6 +2240,5 @@ export default function AdminDanhMucSeoPage() {
           </>
         )}
       </div>
-    </AdminLayout>
   );
 }

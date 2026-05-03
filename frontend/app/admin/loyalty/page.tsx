@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import AdminLayout from '@/components/admin/AdminLayout';
+import { useState, useEffect, useCallback } from 'react';
 import { adminLoyaltyAPI, AdminLoyaltyTier } from '@/lib/admin-api';
 
 export default function AdminLoyaltyPage() {
@@ -16,7 +15,7 @@ export default function AdminLoyaltyPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const fetchTiers = async () => {
+  const fetchTiers = useCallback(async () => {
     setLoading(true);
     try {
       const data = await adminLoyaltyAPI.getTiers();
@@ -26,11 +25,11 @@ export default function AdminLoyaltyPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchTiers();
-  }, []);
+    void fetchTiers();
+  }, [fetchTiers]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,7 +79,6 @@ export default function AdminLoyaltyPage() {
   };
 
   return (
-    <AdminLayout>
       <div className="p-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-6">Cấu hình hạng thành viên</h1>
 
@@ -224,6 +222,5 @@ export default function AdminLoyaltyPage() {
           </div>
         )}
       </div>
-    </AdminLayout>
   );
 }

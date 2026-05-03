@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import AdminLayout from '@/components/admin/AdminLayout';
 import { apiClient } from '@/lib/api-client';
 import type { CategoryLevel1, CategoryLevel2, CategoryLevel3 } from '@/types/api';
 
@@ -288,7 +287,6 @@ export default function AdminDanhMucSeoPage() {
   }, [flat, search]);
 
   return (
-    <AdminLayout>
       <div className="p-6 max-w-7xl">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Quản lý danh mục SEO</h1>
         <p className="text-gray-600 text-sm mb-4">
@@ -568,6 +566,5 @@ export default function AdminDanhMucSeoPage() {
           </>
         )}
       </div>
-    </AdminLayout>
   );
 }

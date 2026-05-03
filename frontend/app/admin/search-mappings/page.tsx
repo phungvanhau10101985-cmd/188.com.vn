@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import AdminLayout from '@/components/admin/AdminLayout';
 import {
   adminSearchMappingAPI,
   type AdminSearchMapping,
@@ -100,7 +99,6 @@ export default function AdminSearchMappingsPage() {
   const items = useMemo(() => data?.items || [], [data?.items]);
 
   return (
-    <AdminLayout>
       <div className="p-6">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Danh sách từ khóa mapping</h1>
@@ -280,6 +278,5 @@ export default function AdminSearchMappingsPage() {
           </div>
         </div>
       </div>
-    </AdminLayout>
   );
 }

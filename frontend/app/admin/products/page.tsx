@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import AdminLayout from '@/components/admin/AdminLayout';
 import {
   adminProductAPI,
   type AdminImportExcelJob,
@@ -443,7 +442,6 @@ export default function AdminProductsPage() {
   };
 
   return (
-    <AdminLayout>
       <div className="p-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-6">Quản lý sản phẩm</h1>
 
@@ -869,6 +867,5 @@ export default function AdminProductsPage() {
           </div>
         )}
       </div>
-    </AdminLayout>
   );
 }

@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import AdminLayout from '@/components/admin/AdminLayout';
 import { adminSiteEmbedAPI, type SiteEmbedCodeAdmin } from '@/lib/admin-api';
 
 const NANO_PRESET = {
@@ -185,7 +184,6 @@ export default function AdminChatEmbedsPage() {
   };
 
   return (
-    <AdminLayout>
       <div className="p-6 max-w-3xl">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Nhúng chat: NanoAI, Zalo, Facebook</h1>
         <p className="text-gray-600 mb-4 text-sm leading-relaxed">
@@ -320,6 +318,5 @@ export default function AdminChatEmbedsPage() {
           </div>
         )}
       </div>
-    </AdminLayout>
   );
 }

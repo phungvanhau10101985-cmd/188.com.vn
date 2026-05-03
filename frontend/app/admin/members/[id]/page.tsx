@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useParams } from 'next/navigation';
-import AdminLayout from '@/components/admin/AdminLayout';
 import { adminMemberAPI, type AdminMember } from '@/lib/admin-api';
 
 function formatDateTime(s: string | null | undefined) {
@@ -86,7 +85,6 @@ export default function AdminMemberDetailPage() {
   };
 
   return (
-    <AdminLayout>
       <div className="p-6 max-w-3xl">
         {toast && (
           <div
@@ -187,7 +185,6 @@ export default function AdminMemberDetailPage() {
           </div>
         )}
       </div>
-    </AdminLayout>
   );
 }
 

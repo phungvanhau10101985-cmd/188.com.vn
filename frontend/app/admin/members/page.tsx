@@ -2,7 +2,6 @@
 
 import { Fragment, useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import AdminLayout from '@/components/admin/AdminLayout';
 import {
   adminMemberAPI,
   adminStaffRolePresetsAPI,
@@ -213,7 +212,6 @@ export default function AdminMembersPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <AdminLayout>
       <div className="p-6">
         {toast && (
           <div
@@ -464,6 +462,5 @@ export default function AdminMembersPage() {
           )}
         </div>
       </div>
-    </AdminLayout>
   );
 }

@@ -3,7 +3,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { adminOrderAPI, type PaymentRecord } from '@/lib/admin-api';
-import AdminLayout from '@/components/admin/AdminLayout';
 
 interface OrderItem {
   id: number;
@@ -212,7 +211,6 @@ export default function AdminOrdersPage() {
   ];
 
   return (
-    <AdminLayout>
       <div className="p-6">
         {toast && (
           <div
@@ -541,6 +539,5 @@ export default function AdminOrdersPage() {
           </div>
         )}
       </div>
-    </AdminLayout>
   );
 }

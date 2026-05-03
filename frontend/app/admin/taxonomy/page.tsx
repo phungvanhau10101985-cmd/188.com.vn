@@ -8,7 +8,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import AdminLayout from '@/components/admin/AdminLayout';
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
 
 interface TaxonomyInfo {
@@ -365,7 +364,6 @@ export default function TaxonomyAdminPage() {
     (manualResult?.errors.category_paths.length ?? 0);
 
   return (
-    <AdminLayout>
       <div className="space-y-6 p-4 sm:p-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Cây danh mục (taxonomy)</h1>
@@ -834,7 +832,6 @@ export default function TaxonomyAdminPage() {
           ) : null}
         </section>
       </div>
-    </AdminLayout>
   );
 }
 

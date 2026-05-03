@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import AdminLayout from '@/components/admin/AdminLayout';
 import {
   adminProductQuestionsAPI,
   type ProductQuestionAdmin,
@@ -216,7 +215,6 @@ export default function AdminProductQuestionsPage() {
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
   return (
-    <AdminLayout>
       <div className="p-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-6">
           Tất cả Câu hỏi Câu trả lời sản phẩm
@@ -543,6 +541,5 @@ export default function AdminProductQuestionsPage() {
           )}
         </div>
       </div>
-    </AdminLayout>
   );
 }

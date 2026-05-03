@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import AdminLayout from '@/components/admin/AdminLayout';
 import {
   adminSearchCacheAPI,
   type ProductSearchCacheListResponse,
@@ -107,7 +106,6 @@ export default function AdminSearchCachePage() {
   };
 
   return (
-    <AdminLayout>
       <div className="p-6 max-w-6xl">
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
           <div>
@@ -319,6 +317,5 @@ export default function AdminSearchCachePage() {
           )}
         </section>
       </div>
-    </AdminLayout>
   );
 }
