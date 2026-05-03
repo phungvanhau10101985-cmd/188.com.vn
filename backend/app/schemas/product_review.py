@@ -39,6 +39,7 @@ class ProductReviewUpdate(BaseModel):
 
 class ProductReviewResponse(ProductReviewBase):
     id: int
+    user_id: Optional[int] = None
     reply_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

@@ -6,6 +6,7 @@ import { apiClient } from '@/lib/api-client';
 import { getOptimizedImage } from '@/lib/image-utils';
 import type { ProductReviewAdmin } from '@/lib/admin-api';
 import type { Product, ProductReviewItem } from '@/types/api';
+import VerifiedPurchaserBadge from '@/app/products/[slug]/components/VerifiedPurchaserBadge';
 
 function formatDate(s: string | null | undefined) {
   if (!s) return '';
@@ -90,6 +91,7 @@ export default function ViewReviewModal({ productSlug, selectedReview, onClose }
       group: selectedReview.group,
       product_id: selectedReview.product_id,
       useful: selectedReview.useful ?? 0,
+      user_id: selectedReview.user_id,
       display_created_at: selectedReview.created_at ?? undefined,
       reply_name: selectedReview.reply_name,
       reply_content: selectedReview.reply_content,
@@ -110,8 +112,11 @@ export default function ViewReviewModal({ productSlug, selectedReview, onClose }
       )}
       <div className="flex items-start justify-between gap-2">
         <div>
-          <span className="font-medium text-gray-900">{r.user_name || 'Khách'}</span>
-          <span className="ml-2 text-xs text-gray-500">
+          <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0">
+            <span className="font-medium text-gray-900">{r.user_name || 'Khách'}</span>
+            {r.user_id != null && <VerifiedPurchaserBadge compact />}
+          </span>
+          <span className="ml-0 block mt-0.5 text-xs text-gray-500">
             {formatDate(r.display_created_at ?? r.created_at)}
           </span>
         </div>
@@ -218,6 +223,7 @@ export default function ViewReviewModal({ productSlug, selectedReview, onClose }
                     group: selectedReview.group,
                     product_id: selectedReview.product_id,
                     useful: selectedReview.useful ?? 0,
+                    user_id: selectedReview.user_id,
                     display_created_at: selectedReview.created_at ?? undefined,
                     reply_name: selectedReview.reply_name,
                     reply_content: selectedReview.reply_content,

@@ -12,17 +12,18 @@ const COL_WIDTHS_STORAGE_KEY = 'admin_product_questions_column_widths';
 
 const COLUMN_KEYS = [
   'stt', 'user_name', 'content', 'created_at', 'group', 'product_id', 'updated_at', 'is_active',
+  'useful',
   'reply_admin_name', 'reply_admin_content', 'reply_admin_at', 'reply_user_one_id', 'reply_user_one_name',
   'reply_user_one_content', 'reply_user_one_at', 'reply_user_two_id', 'reply_user_two_name',
-  'reply_user_two_content', 'reply_user_two_at', 'useful', 'reply_count', 'actions',
+  'reply_user_two_content', 'reply_user_two_at', 'reply_count', 'actions',
 ] as const;
 
 const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   stt: 44, user_name: 110, content: 140, created_at: 115, group: 52, product_id: 56, updated_at: 115,
-  is_active: 88, reply_admin_name: 120, reply_admin_content: 150, reply_admin_at: 115,
+  is_active: 88, useful: 88, reply_admin_name: 120, reply_admin_content: 150, reply_admin_at: 115,
   reply_user_one_id: 72, reply_user_one_name: 90, reply_user_one_content: 110, reply_user_one_at: 115,
   reply_user_two_id: 72, reply_user_two_name: 90, reply_user_two_content: 110, reply_user_two_at: 115,
-  useful: 72, reply_count: 78, actions: 100,
+  reply_count: 78, actions: 100,
 };
 
 function loadColumnWidths(): Record<string, number> {
@@ -337,6 +338,7 @@ export default function AdminProductQuestionsPage() {
                       ['product_id', 'ID SP'],
                       ['updated_at', 'Thời gian\nupdate'],
                       ['is_active', 'Kích hoạt'],
+                      ['useful', 'Lượt thấy\nhữu ích'],
                       ['reply_admin_name', 'Tên Admin\ntrả lời'],
                       ['reply_admin_content', 'Nội dung admin\ntrả lời'],
                       ['reply_admin_at', 'Thời gian\nadmin TL'],
@@ -348,7 +350,6 @@ export default function AdminProductQuestionsPage() {
                       ['reply_user_two_name', 'Tên user 2'],
                       ['reply_user_two_content', 'Nội dung\nuser 2'],
                       ['reply_user_two_at', 'Thời gian\nuser 2'],
-                      ['useful', 'Số lượt\nhữu ích'],
                       ['reply_count', 'Số TL'],
                       ['actions', 'Chức năng'],
                     ].map(([key, label]) => (
@@ -402,6 +403,18 @@ export default function AdminProductQuestionsPage() {
                           <option value="1">Hiển thị</option>
                           <option value="0">Ẩn</option>
                         </select>
+                      </td>
+                      <td className="py-2 px-2 overflow-hidden">
+                        <input
+                          type="number"
+                          min={0}
+                          value={Math.max(0, Number(getRowVal(q, 'useful') ?? q.useful ?? 0) || 0)}
+                          onChange={(e) => setRowVal(q.id, 'useful', Math.max(0, parseInt(e.target.value, 10) || 0))}
+                          onBlur={() => handleSaveRow(q)}
+                          className="rounded border border-gray-300 px-1 py-0.5 text-xs w-full max-w-[72px]"
+                          title="Số hiển thị bên cửa hàng (không khớp tự động với số tài khoản đã bấm hữu ích)"
+                          aria-label="Lượt thấy hữu ích"
+                        />
                       </td>
                       <td className="py-2 px-2 overflow-hidden">
                         <input
@@ -468,16 +481,6 @@ export default function AdminProductQuestionsPage() {
                         />
                       </td>
                       <td className="py-2 px-2 text-gray-600 whitespace-nowrap overflow-hidden">{ formatDate(q.reply_user_two_at) }</td>
-                      <td className="py-2 px-2 overflow-hidden">
-                        <input
-                          type="number"
-                          min={0}
-                          value={Math.max(0, Number(getRowVal(q, 'useful') ?? q.useful ?? 0) || 0)}
-                          onChange={(e) => setRowVal(q.id, 'useful', Math.max(0, parseInt(e.target.value, 10) || 0))}
-                          onBlur={() => handleSaveRow(q)}
-                          className="rounded border border-gray-300 px-1 py-0.5 text-xs w-full max-w-[64px]"
-                        />
-                      </td>
                       <td className="py-2 px-2 overflow-hidden">{ q.reply_count } (2=khóa)</td>
                       <td className="py-2 px-2 whitespace-nowrap overflow-hidden">
                         {!q.is_imported && (q.product_slug || q.product_id) && (

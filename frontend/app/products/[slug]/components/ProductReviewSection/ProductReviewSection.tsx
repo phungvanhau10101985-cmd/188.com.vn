@@ -10,6 +10,7 @@ import { formatPrice } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
 import ProductReviewFormModal from '../ProductReviewFormModal/ProductReviewFormModal';
 import { useToast } from '@/components/ToastProvider';
+import VerifiedPurchaserBadge from '../VerifiedPurchaserBadge';
 
 interface ProductReviewSectionProps {
   product: Product;
@@ -147,13 +148,16 @@ export default function ProductReviewSection({
     <div className="space-y-4">
       {list.map((r) => (
         <div key={r.id} className="bg-gray-50 rounded-lg p-4 space-y-2">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <span className="font-medium text-gray-900">{r.user_name || 'Khách'}</span>
-              <span className="ml-2 text-xs text-gray-500">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+              <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0">
+                <span className="font-medium text-gray-900">{r.user_name || 'Khách'}</span>
+                {r.user_id != null && <VerifiedPurchaserBadge compact />}
+              </span>
+              <span className="block text-xs text-gray-500 mt-0.5">
                 {formatDate(r.display_created_at ?? r.created_at)}
               </span>
-            </div>
+              </div>
             <StarRating star={r.star || 5} />
           </div>
           {r.title && <p className="text-sm font-medium text-amber-600">{r.title}</p>}

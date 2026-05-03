@@ -115,6 +115,8 @@ export interface ProductInfoJSON {
 
 export interface ProductReviewItem {
   id: number;
+  /** Khách đăng nhập đánh giá sau khi mua — có id thì hiển thị tích xanh đã mua */
+  user_id?: number | null;
   user_name: string;
   star: number;
   title: string;
@@ -153,9 +155,12 @@ export interface ProductQuestionItem {
   reply_user_one_name?: string;
   reply_user_one_content?: string;
   reply_user_one_at?: string | null;
+  /** Trả lời từ tài khoản đã mua (API reply) */
+  reply_user_one_id?: number | null;
   reply_user_two_name?: string;
   reply_user_two_content?: string;
   reply_user_two_at?: string | null;
+  reply_user_two_id?: number | null;
   reply_count: number;
   is_active: boolean;
   created_at?: string | null;

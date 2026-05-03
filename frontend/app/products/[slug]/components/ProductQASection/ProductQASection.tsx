@@ -11,6 +11,7 @@ import { formatPrice } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { buildAuthLoginHrefFromParts } from '@/lib/auth-redirect';
 import { useToast } from '@/components/ToastProvider';
+import VerifiedPurchaserBadge from '../VerifiedPurchaserBadge';
 
 interface ProductQASectionProps {
   product: Product;
@@ -198,16 +199,28 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
             )}
             {q.reply_user_one_content && (
               <div className="pl-4 border-l-2 border-gray-200 text-sm text-gray-600">
-                <p className="font-medium text-gray-800">
-                  {q.reply_user_one_name} trả lời: {formatDate(q.display_reply_user_one_at ?? q.reply_user_one_at)}
+                <p className="font-medium text-gray-800 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                  <span className="inline-flex items-center gap-1">
+                    {q.reply_user_one_name}
+                    {q.reply_user_one_id != null && <VerifiedPurchaserBadge compact />}
+                  </span>
+                  <span>
+                    trả lời: {formatDate(q.display_reply_user_one_at ?? q.reply_user_one_at)}
+                  </span>
                 </p>
                 <p>{q.reply_user_one_content}</p>
               </div>
             )}
             {q.reply_user_two_content && (
               <div className="pl-4 border-l-2 border-gray-200 text-sm text-gray-600">
-                <p className="font-medium text-gray-800">
-                  {q.reply_user_two_name} trả lời: {formatDate(q.display_reply_user_two_at ?? q.reply_user_two_at)}
+                <p className="font-medium text-gray-800 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                  <span className="inline-flex items-center gap-1">
+                    {q.reply_user_two_name}
+                    {q.reply_user_two_id != null && <VerifiedPurchaserBadge compact />}
+                  </span>
+                  <span>
+                    trả lời: {formatDate(q.display_reply_user_two_at ?? q.reply_user_two_at)}
+                  </span>
                 </p>
                 <p>{q.reply_user_two_content}</p>
               </div>

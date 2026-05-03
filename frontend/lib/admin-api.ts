@@ -947,6 +947,7 @@ export const adminProductQuestionsAPI = {
 
 export interface ProductReviewAdmin {
   id: number;
+  user_id?: number | null;
   user_name: string;
   star: number;
   title: string;

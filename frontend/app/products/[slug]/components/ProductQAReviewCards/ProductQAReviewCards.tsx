@@ -7,6 +7,7 @@ import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import ProductReviewFormModal from '../ProductReviewFormModal/ProductReviewFormModal';
 import { useToast } from '@/components/ToastProvider';
+import VerifiedPurchaserBadge from '../VerifiedPurchaserBadge';
 
 function formatQaDate(s: string | null | undefined) {
   if (!s) return '';
@@ -19,17 +20,6 @@ function formatQaDate(s: string | null | undefined) {
   } catch {
     return s;
   }
-}
-
-function PurchasedBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 text-emerald-600 text-xs font-medium whitespace-nowrap" title="Đã mua hàng ở 188.com.vn">
-      <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-        <path fillRule="evenodd" d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm3.5 8.09l-4 4-2.5-2.5 1.06-1.06L11.5 12.5l2.94-2.94L15.5 10.09z" clipRule="evenodd" />
-      </svg>
-      Đã mua hàng ở 188.com.vn
-    </span>
-  );
 }
 
 interface ProductQAReviewCardsProps {
@@ -194,7 +184,9 @@ export default function ProductQAReviewCards({
                 <div className="flex items-start justify-between gap-2 flex-wrap">
                   <div className="min-w-0 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                     <span className="font-semibold text-gray-900 text-sm">{sampleReview.user_name || 'Khách'}:</span>
-                    <PurchasedBadge />
+                    {sampleReview.user_id != null && sampleReview.user_id !== undefined && (
+                      <VerifiedPurchaserBadge compact />
+                    )}
                     <span className="text-xs text-gray-500">{formatQaDate(sampleReview.display_created_at ?? sampleReview.created_at)}</span>
                   </div>
                   <span className="flex text-amber-400 text-sm shrink-0" aria-label={`${sampleReview.star || 5} sao`}>
@@ -317,16 +309,28 @@ export default function ProductQAReviewCards({
                 )}
                 {sampleQuestion.reply_user_one_content && (
                   <div className="pl-2 border-l-2 border-gray-200 bg-gray-50 rounded-r py-1 pr-1.5">
-                    <p className="text-xs font-medium text-gray-700 leading-tight">
-                      {sampleQuestion.reply_user_one_name} trả lời: <PurchasedBadge /> <span className="text-gray-500">· {formatQaDate(sampleQuestion.display_reply_user_one_at ?? sampleQuestion.reply_user_one_at)}</span>
+                    <p className="text-xs font-semibold text-gray-800 flex flex-wrap items-center gap-x-1 gap-y-0.5">
+                      <span className="inline-flex items-center gap-1">
+                        {sampleQuestion.reply_user_one_name}
+                        {sampleQuestion.reply_user_one_id != null && <VerifiedPurchaserBadge compact />}
+                      </span>
+                      <span className="font-normal text-gray-500">
+                        trả lời · {formatQaDate(sampleQuestion.display_reply_user_one_at ?? sampleQuestion.reply_user_one_at)}
+                      </span>
                     </p>
                     <p className="text-xs text-gray-600 leading-snug mt-0.5">{sampleQuestion.reply_user_one_content}</p>
                   </div>
                 )}
                 {sampleQuestion.reply_user_two_content && (
                   <div className="pl-2 border-l-2 border-gray-200 bg-gray-50 rounded-r py-1 pr-1.5">
-                    <p className="text-xs font-medium text-gray-700 leading-tight">
-                      {sampleQuestion.reply_user_two_name} trả lời: <PurchasedBadge /> <span className="text-gray-500">· {formatQaDate(sampleQuestion.display_reply_user_two_at ?? sampleQuestion.reply_user_two_at)}</span>
+                    <p className="text-xs font-semibold text-gray-800 flex flex-wrap items-center gap-x-1 gap-y-0.5">
+                      <span className="inline-flex items-center gap-1">
+                        {sampleQuestion.reply_user_two_name}
+                        {sampleQuestion.reply_user_two_id != null && <VerifiedPurchaserBadge compact />}
+                      </span>
+                      <span className="font-normal text-gray-500">
+                        trả lời · {formatQaDate(sampleQuestion.display_reply_user_two_at ?? sampleQuestion.reply_user_two_at)}
+                      </span>
                     </p>
                     <p className="text-xs text-gray-600 leading-snug mt-0.5">{sampleQuestion.reply_user_two_content}</p>
                   </div>
