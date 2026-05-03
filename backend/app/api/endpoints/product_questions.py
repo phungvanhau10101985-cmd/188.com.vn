@@ -39,7 +39,7 @@ def _serialize_shop_question(
     """Cùng display_timeline với đánh giá: merge_imported_display_created_at + các lượt trả lời."""
     upd: dict = {"user_has_voted": user_has_voted}
     merge_imported_display_created_at(q, upd, now)
-    merge_question_reply_display_times(q, upd)
+    merge_question_reply_display_times(q, upd, now)
     return ProductQuestionResponse.model_validate(q).model_copy(update=upd)
 
 

@@ -40,7 +40,7 @@ def _serialize_shop_review(
     """Giống _serialize_shop_question: import + luồng phản hồi trong display_timeline."""
     upd = {"user_has_voted": user_has_voted, "is_current_user": is_current_user}
     merge_imported_display_created_at(r, upd, now)
-    merge_review_reply_display_times(r, upd)
+    merge_review_reply_display_times(r, upd, now)
     return ProductReviewResponse.model_validate(r).model_copy(update=upd)
 
 
