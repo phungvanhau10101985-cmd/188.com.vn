@@ -25,9 +25,23 @@ from app.schemas.product_review import (
 )
 from app.core.admin_permissions import admin_allowed_operation
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission
-from app.utils.display_timeline import imported_display_days_ago, reply_display_at
+from app.utils.display_timeline import merge_imported_display_created_at, merge_review_reply_display_times
 
 router = APIRouter()
+
+
+def _serialize_shop_review(
+    r,
+    *,
+    now: datetime,
+    user_has_voted: bool,
+    is_current_user: bool,
+) -> ProductReviewResponse:
+    """Giống _serialize_shop_question: import + luồng phản hồi trong display_timeline."""
+    upd = {"user_has_voted": user_has_voted, "is_current_user": is_current_user}
+    merge_imported_display_created_at(r, upd, now)
+    merge_review_reply_display_times(r, upd)
+    return ProductReviewResponse.model_validate(r).model_copy(update=upd)
 
 
 @router.get("/user-reviewed-ids")
@@ -82,19 +96,14 @@ def get_reviews_for_product(
     result = []
     for r in items:
         is_mine = bool(current_user and getattr(r, "user_id", None) == current_user.id)
-        update = {"user_has_voted": r.id in voted_ids, "is_current_user": is_mine}
-        if getattr(r, "is_imported", False):
-            days_ago = imported_display_days_ago(r.id)
-            update["display_created_at"] = now - timedelta(days=days_ago)
-        review_shown = update.get("display_created_at") or getattr(r, "created_at", None)
-        if (getattr(r, "reply_content", None) or "").strip():
-            update["display_reply_at"] = reply_display_at(
-                getattr(r, "reply_at", None),
-                review_shown,
-                r.id,
-                1,
+        result.append(
+            _serialize_shop_review(
+                r,
+                now=now,
+                user_has_voted=r.id in voted_ids,
+                is_current_user=is_mine,
             )
-        result.append(ProductReviewResponse.model_validate(r).model_copy(update=update))
+        )
     # Đánh giá của khách đang xem (is_current_user) lên trên nhất, còn lại giữ thứ tự useful/created
     result.sort(key=lambda x: (not (x.is_current_user or False), -(x.useful or 0)))
     return result
@@ -128,7 +137,9 @@ def submit_review(
     )
     # Khi khách đánh giá 1 sản phẩm trong đơn → cập nhật đơn sang "đã đánh giá"
     crud.order.mark_order_completed_if_reviewed(db, current_user.id, data.product_id)
-    return review
+    now = datetime.now(timezone.utc)
+    voted_ids = crud.product_review.get_user_voted_review_ids(db, current_user.id, [review.id])
+    return _serialize_shop_review(review, now=now, user_has_voted=review.id in voted_ids, is_current_user=True)
 
 
 @router.post("/useful/{review_id}/toggle", response_model=UsefulToggleResponse)

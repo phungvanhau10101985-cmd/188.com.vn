@@ -25,7 +25,7 @@ from app.schemas.product_question import (
 )
 from app.core.admin_permissions import admin_allowed_operation
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission
-from app.utils.display_timeline import imported_display_days_ago, merge_question_reply_display_times
+from app.utils.display_timeline import merge_imported_display_created_at, merge_question_reply_display_times
 
 router = APIRouter()
 
@@ -36,10 +36,9 @@ def _serialize_shop_question(
     now: datetime,
     user_has_voted: bool,
 ) -> ProductQuestionResponse:
-    """Thời gian hiển thị đồng bộ giữa đặt hỏi / trả lời và list for-product."""
+    """Cùng display_timeline với đánh giá: merge_imported_display_created_at + các lượt trả lời."""
     upd: dict = {"user_has_voted": user_has_voted}
-    if getattr(q, "is_imported", False):
-        upd["display_created_at"] = now - timedelta(days=imported_display_days_ago(q.id))
+    merge_imported_display_created_at(q, upd, now)
     merge_question_reply_display_times(q, upd)
     return ProductQuestionResponse.model_validate(q).model_copy(update=upd)
 

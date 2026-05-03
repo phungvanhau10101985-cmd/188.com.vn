@@ -18,6 +18,15 @@ def imported_display_days_ago(entity_id: int, span: int = 20) -> int:
     return (abs(int(entity_id)) % span) + 1
 
 
+def merge_imported_display_created_at(obj: Any, update: dict, now: datetime) -> None:
+    """
+    Import (đánh giá / hỏi đáp): thời gian hiển thị chủ đề = now − imported_display_days_ago(id).
+    """
+    if not getattr(obj, "is_imported", False):
+        return
+    update["display_created_at"] = now - timedelta(days=imported_display_days_ago(int(obj.id)))
+
+
 def reply_display_at(
     reply_at: Optional[datetime],
     question_or_review_shown_at: Optional[datetime],
@@ -25,8 +34,8 @@ def reply_display_at(
     seq: int = 0,
 ) -> Optional[datetime]:
     """
-    Thời điểm trả lời hiển thị: luôn sau thời điểm câu hỏi/đánh giá hiển thị.
-    Nếu DB đã có reply_at hợp lý (sau mốc) thì giữ nguyên.
+    Thời điểm trả lời hiển thị: luôn sau thời điểm đánh giá / câu hỏi hiển thị.
+    Nếu DB đã có timestamp hợp lý (sau mốc) thì giữ nguyên.
     """
     floor = to_utc_aware(question_or_review_shown_at)
     if floor is None:
@@ -38,9 +47,24 @@ def reply_display_at(
     return floor + timedelta(hours=offset_hours)
 
 
+def merge_review_reply_display_times(obj: Any, update: dict) -> None:
+    """
+    Một luồng phản hồi (shop trả đánh giá): seq=1 — cùng công thức như admin trả lời trong Hỏi đáp.
+    """
+    if not (getattr(obj, "reply_content", None) or "").strip():
+        return
+    shown = update.get("display_created_at") or getattr(obj, "created_at", None)
+    update["display_reply_at"] = reply_display_at(
+        getattr(obj, "reply_at", None),
+        shown,
+        int(obj.id),
+        1,
+    )
+
+
 def merge_question_reply_display_times(obj: Any, update: dict) -> None:
     """
-    Bổ sung display_reply_*_at cho ProductQuestion ORM + dict update đã có display_created_at (tuỳ chọn).
+    Nhiều lượt trả lời (admin → user1 → user2); mỗi lượt cùng công thức reply_display_at, seq lần lượt.
     """
     shown = update.get("display_created_at") or getattr(obj, "created_at", None)
     shown_aware = to_utc_aware(shown)
