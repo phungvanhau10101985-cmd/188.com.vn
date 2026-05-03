@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional, Set, Tuple
 from urllib.parse import parse_qsl, urlencode
 
 from fastapi import Request
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -592,8 +592,32 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
         return False, "content_mismatch", None
 
     dep = Decimal(str(order.deposit_amount))
-    if not _amount_equal(amount, dep):
-        return False, "amount_mismatch", None
+    if _amount_equal(amount, dep):
+        _finalize_sepay_deposit_success(db, order, amount, sepay_id_str, reference, data, None)
+        return True, "ok", order.id
 
-    _finalize_sepay_deposit_success(db, order, amount, sepay_id_str, reference, data, None)
-    return True, "ok", order.id
+    # Legacy: đơn + nội dung OK nhưng orders.deposit_amount lệch số tiền thực chuyển — thường do sửa đơn sau khi
+    # đã GET sepay-deposit-info / QR. Nếu vẫn có dòng PENDING cùng đơn khớp transferAmount, ghi nhận theo pending.
+    loose_pending = (
+        db.query(Payment)
+        .filter(
+            Payment.order_id == order.id,
+            Payment.payment_type == "deposit_sepay",
+            Payment.payment_status == PaymentStatus.PENDING,
+            or_(Payment.transaction_code.is_(None), Payment.transaction_code == ""),
+        )
+        .order_by(Payment.id.desc())
+        .first()
+    )
+    if loose_pending and _amount_equal(amount, Decimal(str(loose_pending.amount))):
+        if not _amount_equal(amount, dep):
+            logger.warning(
+                "SePay legacy: amount matches pending payment_id=%s, order.deposit_amount=%s differs (order_id=%s)",
+                loose_pending.id,
+                dep,
+                order.id,
+            )
+        _finalize_sepay_deposit_success(db, order, amount, sepay_id_str, reference, data, loose_pending)
+        return True, "ok", order.id
+
+    return False, "amount_mismatch", None
