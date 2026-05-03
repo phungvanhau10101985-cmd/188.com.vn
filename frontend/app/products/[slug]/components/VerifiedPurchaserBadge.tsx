@@ -1,41 +1,51 @@
 'use client';
 
 /**
- * Tích xanh: chỉ khách có account và đã mua đủ điều kiện mới được gửi trả lời (reply_user_*_id).
+ * Khiên xanh + “Đã mua hàng”: đánh giá (user_id); hỏi đáp — reply_user_* hoặc QA import buyer
+ * (`qaSlotShowsVerifiedPurchaserBadge`, `reviewShowsVerifiedPurchaserBadge`).
  */
 export default function VerifiedPurchaserBadge({
   compact = false,
 }: {
-  /** Chỉ icon + tooltip — gọn trong dòng có tên + ngày */
+  /** Gọn cho dòng cạnh tên (vẫn hiện đủ “Đã mua hàng”) */
   compact?: boolean;
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 text-sky-600 ${compact ? 'text-[11px] font-semibold leading-none' : 'text-xs font-medium'} whitespace-nowrap`}
-      title="Người dùng xác nhận đã mua hàng tại 188.com.vn"
+      className={`inline-flex items-center gap-1 shrink-0 ${compact ? 'gap-0.5' : 'gap-1.5'}`}
+      title="Đã xác nhận mua hàng tại 188.com.vn"
       role="img"
       aria-label="Đã mua hàng tại 188.com.vn"
     >
       <svg
-        className="h-4 w-4 shrink-0 -translate-y-[0.5px]"
+        className={`shrink-0 ${compact ? 'h-3.5 w-3.5' : 'h-[18px] w-[18px]'}`}
         viewBox="0 0 24 24"
         aria-hidden
       >
-        <circle cx="12" cy="12" r="10.5" fill="#0284c7" />
         <path
-          d="M7.75 12.25 10.4 14.85 15.95 9.05"
+          fill="#16a34a"
+          d="M12 2 4 5v6.09c0 5.05 3.41 9.76 8.05 11.01.13.04.26.06.4.06.14 0 .27-.02.4-.06 4.64-1.25 8.05-5.96 8.05-11.01V5l-8-3z"
+        />
+        <path
+          fill="#22c55e"
+          d="M12 3.54 5.5 6.02v4.78c0 4.14 2.86 8.18 6.5 9.85 3.64-1.67 6.5-5.71 6.5-9.85V6.02L12 3.54z"
+        />
+        <path
           fill="none"
           stroke="#fff"
-          strokeWidth="2.1"
+          strokeWidth="1.85"
           strokeLinecap="round"
           strokeLinejoin="round"
+          d="M9.2 11.9 11.4 14.1 15.9 8.6"
         />
       </svg>
-      {!compact && (
-        <>
-          Đã mua tại 188.com.vn
-        </>
-      )}
+      <span
+        className={`font-semibold text-green-700 leading-tight whitespace-nowrap ${
+          compact ? 'text-[10px]' : 'text-xs'
+        }`}
+      >
+        Đã mua hàng
+      </span>
     </span>
   );
 }

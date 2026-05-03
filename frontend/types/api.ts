@@ -163,8 +163,12 @@ export interface ProductQuestionItem {
   reply_user_two_id?: number | null;
   reply_count: number;
   is_active: boolean;
+  /** Câu hỏi import Excel — cho phép hiển thị tích xanh cạnh buyer reply có nội dung */
+  is_imported?: boolean;
   created_at?: string | null;
   updated_at?: string | null;
+  /** True khi khách đang xem là người hỏi (API chỉ đánh dấu cho chính họ) */
+  is_my_question?: boolean;
 }
 
 export interface ProductListResponse {

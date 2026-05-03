@@ -7,6 +7,7 @@ import { getOptimizedImage } from '@/lib/image-utils';
 import type { ProductReviewAdmin } from '@/lib/admin-api';
 import type { Product, ProductReviewItem } from '@/types/api';
 import VerifiedPurchaserBadge from '@/app/products/[slug]/components/VerifiedPurchaserBadge';
+import { reviewShowsVerifiedPurchaserBadge } from '@/lib/product-qa-verified-display';
 
 function formatDate(s: string | null | undefined) {
   if (!s) return '';
@@ -97,6 +98,7 @@ export default function ViewReviewModal({ productSlug, selectedReview, onClose }
       reply_content: selectedReview.reply_content,
       reply_at: selectedReview.reply_at ?? undefined,
       images: selectedReview.images,
+      is_imported: selectedReview.is_imported,
     });
   }
 
@@ -114,7 +116,7 @@ export default function ViewReviewModal({ productSlug, selectedReview, onClose }
         <div>
           <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0">
             <span className="font-medium text-gray-900">{r.user_name || 'Khách'}</span>
-            {r.user_id != null && <VerifiedPurchaserBadge compact />}
+            {reviewShowsVerifiedPurchaserBadge(r) && <VerifiedPurchaserBadge compact />}
           </span>
           <span className="ml-0 block mt-0.5 text-xs text-gray-500">
             {formatDate(r.display_created_at ?? r.created_at)}
@@ -229,6 +231,7 @@ export default function ViewReviewModal({ productSlug, selectedReview, onClose }
                     reply_content: selectedReview.reply_content,
                     reply_at: selectedReview.reply_at ?? undefined,
                     images: selectedReview.images,
+                    is_imported: selectedReview.is_imported,
                   },
                   true
                 )}

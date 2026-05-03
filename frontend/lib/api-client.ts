@@ -475,10 +475,17 @@ class ApiClient {
   }
 
   // PRODUCT QUESTIONS (câu hỏi câu trả lời sản phẩm)
-  async getProductQuestions(productId: number): Promise<ProductQuestionItem[]> {
-    return this.fetch<ProductQuestionItem[]>(
-      `/product-questions/for-product?product_id=${productId}&limit=100`
-    );
+  async getProductQuestions(
+    productId: number,
+    opts?: { highlightQuestionId?: number | null }
+  ): Promise<ProductQuestionItem[]> {
+    const sp = new URLSearchParams();
+    sp.set('product_id', String(productId));
+    sp.set('limit', '200');
+    if (opts?.highlightQuestionId != null && opts.highlightQuestionId > 0) {
+      sp.set('highlight_question_id', String(opts.highlightQuestionId));
+    }
+    return this.fetch<ProductQuestionItem[]>(`/product-questions/for-product?${sp.toString()}`);
   }
 
   async askProductQuestion(productId: number, content: string): Promise<ProductQuestionItem> {

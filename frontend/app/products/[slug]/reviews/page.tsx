@@ -12,6 +12,7 @@ import { getOptimizedImage as getOptImg } from '@/lib/image-utils';
 import ProductReviewFormModal from '../components/ProductReviewFormModal/ProductReviewFormModal';
 import { useToast } from '@/components/ToastProvider';
 import VerifiedPurchaserBadge from '../components/VerifiedPurchaserBadge';
+import { reviewShowsVerifiedPurchaserBadge } from '@/lib/product-qa-verified-display';
 
 function formatDate(s: string | null | undefined) {
   if (!s) return '';
@@ -155,7 +156,7 @@ export default function ProductReviewsPage() {
             <div className="min-w-0">
               <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0">
                 <span className="font-semibold text-gray-900">{r.user_name || 'Khách'}</span>
-                {r.user_id != null && <VerifiedPurchaserBadge compact />}
+                {reviewShowsVerifiedPurchaserBadge(r) && <VerifiedPurchaserBadge compact />}
               </span>
               <span className="block text-xs text-gray-500 mt-0.5">{formatDate(r.display_created_at ?? r.created_at)}</span>
             </div>

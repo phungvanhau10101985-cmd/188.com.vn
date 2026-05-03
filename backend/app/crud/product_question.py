@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from app.models.product_question import ProductQuestion, ProductQuestionUsefulVote
 from app.models.product import Product
-from app.schemas.product_question import ProductQuestionCreate, ProductQuestionUpdate, ProductQuestionAskCreate
+from app.schemas.product_question import ProductQuestionCreate, ProductQuestionUpdate
 
 
 def get_question(db: Session, question_id: int) -> Optional[ProductQuestion]:
@@ -146,11 +146,49 @@ def get_questions_for_product(
     return q.limit(limit).all()
 
 
+def get_shop_questions_by_ask_user_for_product(
+    db: Session,
+    *,
+    product_db_id: int,
+    ask_user_id: int,
+) -> List[ProductQuestion]:
+    """Toàn bộ câu hỏi trên SP do user `/ask` (ask_user_id) — không cắt theo «top useful»."""
+    return (
+        db.query(ProductQuestion)
+        .filter(
+            ProductQuestion.is_active == True,
+            ProductQuestion.product_id == product_db_id,
+            ProductQuestion.ask_user_id == ask_user_id,
+        )
+        .order_by(ProductQuestion.created_at.desc())
+        .all()
+    )
+
+
+def list_shop_questions_legacy_null_ask_user_for_product(
+    db: Session,
+    *,
+    product_db_id: int,
+) -> List[ProductQuestion]:
+    """Câu khách có product_id (group=0) chưa gắn ask_user_id — chỉnh client-side theo alias tên."""
+    return (
+        db.query(ProductQuestion)
+        .filter(
+            ProductQuestion.is_active == True,
+            ProductQuestion.product_id == product_db_id,
+            ProductQuestion.group == 0,
+            ProductQuestion.ask_user_id.is_(None),
+        )
+        .all()
+    )
+
+
 def create_customer_question(
     db: Session,
     product_id: int,
     content: str,
     user_name: str,
+    ask_user_id: int,
 ) -> ProductQuestion:
     """
     Khách đăng nhập đặt câu hỏi: lưu theo product_id, group=0.
@@ -160,6 +198,7 @@ def create_customer_question(
         content=content,
         group=0,
         product_id=product_id,
+        ask_user_id=ask_user_id,
         useful=0,
         reply_count=0,
         is_active=True,

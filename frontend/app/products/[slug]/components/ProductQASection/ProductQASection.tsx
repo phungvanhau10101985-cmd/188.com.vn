@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
@@ -12,6 +12,7 @@ import { getOptimizedImage } from '@/lib/image-utils';
 import { buildAuthLoginHrefFromParts } from '@/lib/auth-redirect';
 import { useToast } from '@/components/ToastProvider';
 import VerifiedPurchaserBadge from '../VerifiedPurchaserBadge';
+import { qaSlotShowsVerifiedPurchaserBadge } from '@/lib/product-qa-verified-display';
 
 interface ProductQASectionProps {
   product: Product;
@@ -41,7 +42,11 @@ function formatDate(s: string | null | undefined) {
 export default function ProductQASection({ product, embedded, modalOnly, modalOpen: modalOpenProp, onModalClose, onModalOpen }: ProductQASectionProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { isAuthenticated } = useAuth();
+  /** Tránh effect #question-* phụ thuộc callback parent (inline) → chạy lại và mở lại popup sau khi đóng */
+  const onModalOpenRef = useRef(onModalOpen);
+  onModalOpenRef.current = onModalOpen;
+
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { pushToast } = useToast();
   const [questions, setQuestions] = useState<ProductQuestionItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,6 +58,13 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
   const [modalOpenLocal, setModalOpenLocal] = useState(false);
   const modalOpen = modalOnly ? (modalOpenProp ?? false) : modalOpenLocal;
   const setModalOpen = useCallback((open: boolean) => {
+    if (!open && typeof window !== 'undefined') {
+      const hash = window.location.hash;
+      if (/^#question-\d+$/.test(hash)) {
+        const { pathname: p, search } = window.location;
+        window.history.replaceState(null, '', `${p}${search || ''}`);
+      }
+    }
     if (modalOnly) {
       if (open) onModalOpen?.();
       else onModalClose?.();
@@ -62,9 +74,24 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
   }, [modalOnly, onModalClose, onModalOpen]);
 
   useEffect(() => {
+    const hashOpens =
+      typeof window !== 'undefined' && /^#question-\d+$/.test(window.location.hash);
+    if (modalOnly && !modalOpen && !hashOpens) {
+      setLoading(false);
+      return;
+    }
+    if (authLoading) return;
+
     let cancelled = false;
+    setLoading(true);
+    const m =
+      typeof window !== 'undefined' ? window.location.hash.match(/^#question-(\d+)$/) : null;
+    const highlightQuestionId =
+      m && m[1] ? Number.parseInt(m[1], 10) : undefined;
+    const highlightOpt =
+      highlightQuestionId != null && highlightQuestionId > 0 ? { highlightQuestionId } : undefined;
     apiClient
-      .getProductQuestions(product.id)
+      .getProductQuestions(product.id, highlightOpt)
       .then((list) => {
         if (!cancelled) setQuestions(Array.isArray(list) ? list : []);
       })
@@ -77,27 +104,32 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
     return () => {
       cancelled = true;
     };
-  }, [product.id]);
+  }, [product.id, modalOnly, modalOpen, isAuthenticated, user?.id, authLoading]);
 
-  // Khi URL có #question-123 (từ nút "Xem câu hỏi" ở admin): mở popup và cuộn tới câu hỏi
+  // Khi URL có #question-123 (từ nút "Xem câu hỏi" ở admin): mở popup và cuộn tới câu hỏi.
+  // Không gọi setModalOpen(true) trong effect: nó thay đổi mỗi render → effect lặp → không đóng được popup.
   useEffect(() => {
     if (loading || questions.length === 0) return;
     const hash = typeof window !== 'undefined' ? window.location.hash : '';
     const match = hash.match(/^#question-(\d+)$/);
     if (!match) return;
-    setModalOpen(true);
+    if (modalOnly) {
+      onModalOpenRef.current?.();
+    } else {
+      setModalOpenLocal(true);
+    }
     const questionId = match[1];
     const scrollToQuestion = () => {
       const el = document.getElementById(`question-${questionId}`);
       if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         el.classList.add('ring-2', 'ring-[#ea580c]', 'ring-offset-2');
         setTimeout(() => el.classList.remove('ring-2', 'ring-[#ea580c]', 'ring-offset-2'), 2000);
       }
     };
     const t = setTimeout(scrollToQuestion, 200);
     return () => clearTimeout(t);
-  }, [loading, questions.length, setModalOpen]);
+  }, [loading, questions.length, modalOnly]);
 
   // Đóng popup khi bấm Escape
   useEffect(() => {
@@ -119,8 +151,9 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
     }
     setSubmitting(true);
     try {
-      const newQ = await apiClient.askProductQuestion(product.id, content);
-      setQuestions((prev) => [newQ, ...prev]);
+      await apiClient.askProductQuestion(product.id, content);
+      const refreshed = await apiClient.getProductQuestions(product.id);
+      setQuestions(Array.isArray(refreshed) ? refreshed : []);
       setAskContent('');
     } catch (err) {
       pushToast({ title: 'Gửi câu hỏi thất bại', description: (err as Error)?.message || 'Vui lòng thử lại', variant: 'error', durationMs: 3000 });
@@ -202,7 +235,7 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
                 <p className="font-medium text-gray-800 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                   <span className="inline-flex items-center gap-1">
                     {q.reply_user_one_name}
-                    {q.reply_user_one_id != null && <VerifiedPurchaserBadge compact />}
+                    {qaSlotShowsVerifiedPurchaserBadge(q, 1) && <VerifiedPurchaserBadge compact />}
                   </span>
                   <span>
                     trả lời: {formatDate(q.display_reply_user_one_at ?? q.reply_user_one_at)}
@@ -216,7 +249,7 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
                 <p className="font-medium text-gray-800 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                   <span className="inline-flex items-center gap-1">
                     {q.reply_user_two_name}
-                    {q.reply_user_two_id != null && <VerifiedPurchaserBadge compact />}
+                    {qaSlotShowsVerifiedPurchaserBadge(q, 2) && <VerifiedPurchaserBadge compact />}
                   </span>
                   <span>
                     trả lời: {formatDate(q.display_reply_user_two_at ?? q.reply_user_two_at)}
@@ -300,7 +333,7 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
   const askLoginHref = buildAuthLoginHrefFromParts(pathname, searchParams, '#qa');
 
   const askForm = (
-    <div className="mt-6">
+    <div className="mb-4 pb-4 border-b border-gray-100">
       <p className="text-sm font-medium text-gray-700 mb-2">Đặt câu hỏi của bạn</p>
       {isAuthenticated ? (
         <form onSubmit={handleSubmitQuestion} className="flex flex-col sm:flex-row gap-2">
@@ -358,7 +391,8 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
       {!modalOnly && (
         <div id="qa" className={`scroll-mt-4 ${embedded ? 'py-0' : 'border-t border-gray-100 p-6'}`}>
           <h3 className="font-semibold text-gray-900 mb-4">
-            Hỏi người bán và hỏi người đã mua: Có {loading ? '...' : questions.length} câu hỏi và trả lời
+            Hỏi người bán và hỏi người đã mua: Có{' '}
+            {product.question_total != null ? product.question_total : loading ? '...' : questions.length} câu hỏi và trả lời
           </h3>
           <button
             type="button"
@@ -400,6 +434,7 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
             </div>
             <div className="overflow-y-auto flex-1 p-4">
               {productInfoBlock}
+              {askForm}
               {loading ? (
                 <div className="py-8 text-center text-gray-500">Đang tải câu hỏi...</div>
               ) : questions.length === 0 ? (
@@ -409,7 +444,6 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
               ) : (
                 renderQuestionList(questions)
               )}
-              {!loading && askForm}
             </div>
           </div>
         </div>

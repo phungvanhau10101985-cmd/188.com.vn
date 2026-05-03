@@ -30,6 +30,8 @@ class ProductQuestion(Base):
     group = Column(Integer, default=0)
     # ID sản phẩm (NULL = câu hỏi theo nhóm; set = câu hỏi của khách cho sản phẩm đó)
     product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True)
+    # User đăng nhập đặt câu hỏi qua /ask (import Excel: NULL)
+    ask_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     useful = Column(Integer, default=0)  # Số lượt bình chọn hữu ích
 
     # Admin trả lời

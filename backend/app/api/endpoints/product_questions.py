@@ -30,14 +30,122 @@ from app.utils.display_timeline import merge_imported_display_created_at, merge_
 router = APIRouter()
 
 
+def _dt_sort_key(dt) -> float:
+    """Sort key descending: newer first."""
+    if dt is None:
+        return 0.0
+    try:
+        return dt.timestamp()
+    except (AttributeError, OSError):
+        return 0.0
+
+
+def _norm_qa_display_name(raw: Optional[str]) -> str:
+    if not raw:
+        return ""
+    return " ".join(str(raw).strip().lower().split())
+
+
+def _viewer_qa_aliases(viewer: User) -> List[str]:
+    """Tên hiển thị khi khách đặt câu hỏi (full_name / phone) — khớp bản legacy chưa có ask_user_id."""
+    seen = set()
+    out: List[str] = []
+    for val in (
+        getattr(viewer, "full_name", None),
+        getattr(viewer, "phone", None),
+    ):
+        n = _norm_qa_display_name(val)
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+
+def _legacy_shop_customer_row(prod_db_id: Optional[int], q) -> bool:
+    """Câu của khách trên SP: luồng create_customer_question dùng group=0 và product_id set."""
+    if prod_db_id is None:
+        return False
+    return (
+        getattr(q, "product_id", None) == prod_db_id
+        and int(getattr(q, "group", 0) or 0) == 0
+        and bool((getattr(q, "user_name", None) or "").strip())
+    )
+
+
+def _question_owned_by_viewer_shop(
+    q,
+    *,
+    viewer: Optional[User],
+    prod_db_id: Optional[int],
+    alias_set: frozenset,
+) -> bool:
+    """Câu hỏi do chính viewer đặt (/ask): ưu tiên ask_user_id; fallback tên+kênh khách legacy."""
+    if viewer is None:
+        return False
+    vid = getattr(viewer, "id", None)
+    au = getattr(q, "ask_user_id", None)
+    if au is not None:
+        if prod_db_id is not None and getattr(q, "product_id", None) != prod_db_id:
+            return False
+        return vid is not None and int(au) == int(vid)
+    if vid is None or not alias_set:
+        return False
+    if not _legacy_shop_customer_row(prod_db_id, q):
+        return False
+    return _norm_qa_display_name(getattr(q, "user_name", None)) in alias_set
+
+
+def _reorder_questions_shop_list(
+    items_list: List,
+    *,
+    highlight_question_id: Optional[int],
+    viewer: Optional[User],
+    prod_db_id: Optional[int],
+):
+    """
+    Thứ tự hiển thị trên trang sản phẩm:
+    1) Câu deep-link #question-{id} (nếu có trong payload và được yêu cầu)
+    2) Các câu do chính viewer đặt (ask_user_id), mới nhất trước — chỉ khi có đăng nhập
+    3) Phần còn lại giữ đúng thứ tự gốc (useful DESC, …)
+    """
+    if not items_list:
+        return items_list
+    placed: set = set()
+    out: List = []
+    alias_fz = frozenset(_viewer_qa_aliases(viewer)) if viewer is not None else frozenset()
+    if highlight_question_id is not None:
+        for q in items_list:
+            if q.id == highlight_question_id:
+                out.append(q)
+                placed.add(q.id)
+                break
+    if viewer is not None:
+        mine = [
+            q
+            for q in items_list
+            if q.id not in placed
+            and _question_owned_by_viewer_shop(q, viewer=viewer, prod_db_id=prod_db_id, alias_set=alias_fz)
+        ]
+        mine.sort(key=lambda q: (-_dt_sort_key(q.created_at), -q.id))
+        for q in mine:
+            out.append(q)
+            placed.add(q.id)
+    for q in items_list:
+        if q.id not in placed:
+            out.append(q)
+            placed.add(q.id)
+    return out
+
+
 def _serialize_shop_question(
     q,
     *,
     now: datetime,
     user_has_voted: bool,
+    is_my_question: bool = False,
 ) -> ProductQuestionResponse:
     """Cùng display_timeline với đánh giá: merge_imported_display_created_at + các lượt trả lời."""
-    upd: dict = {"user_has_voted": user_has_voted}
+    upd: dict = {"user_has_voted": user_has_voted, "is_my_question": is_my_question}
     merge_imported_display_created_at(q, upd, now)
     merge_question_reply_display_times(q, upd, now)
     return ProductQuestionResponse.model_validate(q).model_copy(update=upd)
@@ -48,6 +156,10 @@ def _serialize_shop_question(
 def get_questions_for_product(
     product_id: int = Query(..., description="ID sản phẩm (database id)"),
     limit: int = Query(100, le=200),
+    highlight_question_id: Optional[int] = Query(
+        None,
+        description="Deeplink #question-{id}: nếu chưa trong top «limit», gộp câu hỏi hợp lệ vào đầu danh sách.",
+    ),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
@@ -59,18 +171,67 @@ def get_questions_for_product(
     if not product:
         raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại")
     group_question = getattr(product, "group_question", 0) or 0
-    items = crud.product_question.get_questions_for_product(
-        db, product_db_id=product_id, group_question=group_question, limit=limit
+    prod_db_id = getattr(product, "id", None)
+    items_list = list(
+        crud.product_question.get_questions_for_product(
+            db, product_db_id=product_id, group_question=group_question, limit=limit
+        )
     )
-    question_ids = [q.id for q in items]
+    ids_in = {q.id for q in items_list}
+    if current_user is not None:
+        for mq in crud.product_question.get_shop_questions_by_ask_user_for_product(
+            db, product_db_id=product_id, ask_user_id=int(current_user.id)
+        ):
+            if mq.id not in ids_in:
+                items_list.append(mq)
+                ids_in.add(mq.id)
+        alias_norm = {_norm_qa_display_name(x) for x in _viewer_qa_aliases(current_user) if x}
+        if alias_norm:
+            for row in crud.product_question.list_shop_questions_legacy_null_ask_user_for_product(
+                db, product_db_id=product_id
+            ):
+                if row.id in ids_in:
+                    continue
+                if _norm_qa_display_name(getattr(row, "user_name", None)) in alias_norm:
+                    items_list.append(row)
+                    ids_in.add(row.id)
+    if highlight_question_id is not None:
+        ids_in = {q.id for q in items_list}
+        if highlight_question_id not in ids_in:
+            extra = crud.product_question.get_question(db, highlight_question_id)
+            if (
+                extra is not None
+                and bool(getattr(extra, "is_active", True))
+                and prod_db_id is not None
+                and (
+                    (extra.group == group_question and getattr(extra, "product_id", None) is None)
+                    or getattr(extra, "product_id", None) == prod_db_id
+                )
+            ):
+                items_list = [extra] + items_list
+    items_list = _reorder_questions_shop_list(
+        items_list,
+        highlight_question_id=highlight_question_id,
+        viewer=current_user,
+        prod_db_id=prod_db_id,
+    )
+    question_ids = [q.id for q in items_list]
     voted_ids = (
         crud.product_question.get_user_voted_question_ids(db, current_user.id, question_ids)
         if current_user else set()
     )
     now = datetime.now(timezone.utc)
+    alias_fz = frozenset(_viewer_qa_aliases(current_user)) if current_user is not None else frozenset()
     return [
-        _serialize_shop_question(q, now=now, user_has_voted=q.id in voted_ids)
-        for q in items
+        _serialize_shop_question(
+            q,
+            now=now,
+            user_has_voted=q.id in voted_ids,
+            is_my_question=_question_owned_by_viewer_shop(
+                q, viewer=current_user, prod_db_id=prod_db_id, alias_set=alias_fz
+            ),
+        )
+        for q in items_list
     ]
 
 
@@ -86,11 +247,17 @@ def ask_question(
         raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại")
     user_name = getattr(current_user, "full_name", None) or getattr(current_user, "phone", None) or "Khách"
     obj = crud.product_question.create_customer_question(
-        db, product_id=data.product_id, content=data.content.strip(), user_name=user_name or "Khách"
+        db,
+        product_id=data.product_id,
+        content=data.content.strip(),
+        user_name=user_name or "Khách",
+        ask_user_id=current_user.id,
     )
     now = datetime.now(timezone.utc)
     voted_ids = crud.product_question.get_user_voted_question_ids(db, current_user.id, [obj.id])
-    return _serialize_shop_question(obj, now=now, user_has_voted=obj.id in voted_ids)
+    return _serialize_shop_question(
+        obj, now=now, user_has_voted=obj.id in voted_ids, is_my_question=True
+    )
 
 
 @router.post("/useful/{question_id}/toggle", response_model=UsefulToggleResponse)
@@ -138,7 +305,16 @@ def reply_to_question(
         raise HTTPException(status_code=400, detail="Không thể thêm trả lời")
     now = datetime.now(timezone.utc)
     voted_ids = crud.product_question.get_user_voted_question_ids(db, current_user.id, [updated.id])
-    return _serialize_shop_question(updated, now=now, user_has_voted=updated.id in voted_ids)
+    alias_fz = frozenset(_viewer_qa_aliases(current_user))
+    is_my = _question_owned_by_viewer_shop(
+        updated,
+        viewer=current_user,
+        prod_db_id=getattr(updated, "product_id", None),
+        alias_set=alias_fz,
+    )
+    return _serialize_shop_question(
+        updated, now=now, user_has_voted=updated.id in voted_ids, is_my_question=is_my
+    )
 
 
 # ========== ADMIN ==========

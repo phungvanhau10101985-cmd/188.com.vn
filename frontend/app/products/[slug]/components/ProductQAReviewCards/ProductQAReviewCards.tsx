@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Product } from '@/types/api';
 import type { ProductQuestionItem, ProductReviewItem } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
@@ -8,6 +8,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import ProductReviewFormModal from '../ProductReviewFormModal/ProductReviewFormModal';
 import { useToast } from '@/components/ToastProvider';
 import VerifiedPurchaserBadge from '../VerifiedPurchaserBadge';
+import { qaSlotShowsVerifiedPurchaserBadge, reviewShowsVerifiedPurchaserBadge } from '@/lib/product-qa-verified-display';
 
 function formatQaDate(s: string | null | undefined) {
   if (!s) return '';
@@ -45,7 +46,7 @@ export default function ProductQAReviewCards({
   const [reviewFormOpen, setReviewFormOpen] = useState(false);
   const [canReview, setCanReview] = useState(false);
   const [hasReviewed, setHasReviewed] = useState(false);
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { pushToast } = useToast();
 
   useEffect(() => {
@@ -78,6 +79,7 @@ export default function ProductQAReviewCards({
   };
 
   useEffect(() => {
+    if (authLoading) return;
     let cancelled = false;
     apiClient
       .getProductQuestions(product.id)
@@ -94,7 +96,7 @@ export default function ProductQAReviewCards({
         }
       });
     return () => { cancelled = true; };
-  }, [product.id]);
+  }, [product.id, isAuthenticated, user?.id, authLoading]);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,9 +153,40 @@ export default function ProductQAReviewCards({
     }
   };
 
+  const openQaModalToReply = useCallback(
+    (questionId: number) => {
+      if (typeof window !== 'undefined') {
+        const { pathname, search } = window.location;
+        const q = search || '';
+        window.history.replaceState(null, '', `${pathname}${q}#question-${questionId}`);
+      }
+      if (onOpenQA) {
+        onOpenQA();
+      } else {
+        window.location.assign(`/products/${product.slug}#question-${questionId}`);
+      }
+    },
+    [onOpenQA, product.slug]
+  );
+
+  const handleReplyOutside = useCallback(
+    (questionId: number) => {
+      if (!isAuthenticated) {
+        pushToast({ title: 'Vui lòng đăng nhập để trả lời', variant: 'info', durationMs: 2500 });
+        return;
+      }
+      openQaModalToReply(questionId);
+    },
+    [isAuthenticated, openQaModalToReply, pushToast]
+  );
+
   const containerClass = layout === 'stack'
     ? 'flex flex-col gap-3 sm:gap-4 border-t border-gray-200 pt-4 mt-4'
     : 'grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 border-t border-gray-200 pt-4 mt-4';
+
+  /** Số hiển thị theo Excel/import (`rating_total`/`question_total`); nếu không có trong SP thì theo API. */
+  const displayReviewTotal = product.rating_total != null ? product.rating_total : reviewCount;
+  const displayQuestionTotal = product.question_total != null ? product.question_total : questionCount;
 
   return (
     <div className={containerClass}>
@@ -167,7 +200,7 @@ export default function ProductQAReviewCards({
               </span>
               <div className="min-w-0">
                 <h2 className="font-semibold text-gray-900 text-sm truncate">Đánh giá từ khách hàng</h2>
-                <p className="text-xs text-gray-500">{reviewCount > 0 ? reviewCount : (product.rating_total ?? 0)} đánh giá</p>
+                <p className="text-xs text-gray-500">{displayReviewTotal} đánh giá</p>
               </div>
             </div>
             <div className="flex items-center gap-1 shrink-0 rounded-lg bg-amber-50 px-2 py-0.5">
@@ -184,7 +217,7 @@ export default function ProductQAReviewCards({
                 <div className="flex items-start justify-between gap-2 flex-wrap">
                   <div className="min-w-0 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                     <span className="font-semibold text-gray-900 text-sm">{sampleReview.user_name || 'Khách'}:</span>
-                    {sampleReview.user_id != null && sampleReview.user_id !== undefined && (
+                    {reviewShowsVerifiedPurchaserBadge(sampleReview) && (
                       <VerifiedPurchaserBadge compact />
                     )}
                     <span className="text-xs text-gray-500">{formatQaDate(sampleReview.display_created_at ?? sampleReview.created_at)}</span>
@@ -284,7 +317,7 @@ export default function ProductQAReviewCards({
             </span>
             <div className="min-w-0">
               <h2 className="font-semibold text-gray-900 text-sm truncate">Hỏi đáp về sản phẩm</h2>
-              <p className="text-xs text-gray-500">{questionCount > 0 ? questionCount : (product.question_total ?? 0)} câu hỏi và trả lời</p>
+              <p className="text-xs text-gray-500">{displayQuestionTotal} câu hỏi và trả lời</p>
             </div>
           </div>
         </header>
@@ -312,7 +345,7 @@ export default function ProductQAReviewCards({
                     <p className="text-xs font-semibold text-gray-800 flex flex-wrap items-center gap-x-1 gap-y-0.5">
                       <span className="inline-flex items-center gap-1">
                         {sampleQuestion.reply_user_one_name}
-                        {sampleQuestion.reply_user_one_id != null && <VerifiedPurchaserBadge compact />}
+                        {qaSlotShowsVerifiedPurchaserBadge(sampleQuestion, 1) && <VerifiedPurchaserBadge compact />}
                       </span>
                       <span className="font-normal text-gray-500">
                         trả lời · {formatQaDate(sampleQuestion.display_reply_user_one_at ?? sampleQuestion.reply_user_one_at)}
@@ -326,7 +359,7 @@ export default function ProductQAReviewCards({
                     <p className="text-xs font-semibold text-gray-800 flex flex-wrap items-center gap-x-1 gap-y-0.5">
                       <span className="inline-flex items-center gap-1">
                         {sampleQuestion.reply_user_two_name}
-                        {sampleQuestion.reply_user_two_id != null && <VerifiedPurchaserBadge compact />}
+                        {qaSlotShowsVerifiedPurchaserBadge(sampleQuestion, 2) && <VerifiedPurchaserBadge compact />}
                       </span>
                       <span className="font-normal text-gray-500">
                         trả lời · {formatQaDate(sampleQuestion.display_reply_user_two_at ?? sampleQuestion.reply_user_two_at)}
@@ -338,6 +371,16 @@ export default function ProductQAReviewCards({
                 <div className="flex items-center gap-2 flex-wrap pt-0.5">
                   {sampleQuestion.useful > 0 && (
                     <span className="text-xs text-gray-500">{sampleQuestion.useful} người thấy hữu ích</span>
+                  )}
+                  {(sampleQuestion.reply_count ?? 0) < 2 && (
+                    <button
+                      type="button"
+                      onClick={() => handleReplyOutside(sampleQuestion.id)}
+                      className="text-xs font-medium text-[#ea580c] hover:underline"
+                      title="Mở trang câu hỏi để trả lời"
+                    >
+                      Trả lời (chỉ người đã mua hàng)
+                    </button>
                   )}
                   <button
                     type="button"

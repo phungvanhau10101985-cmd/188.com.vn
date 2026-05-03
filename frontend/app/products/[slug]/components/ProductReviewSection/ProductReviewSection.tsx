@@ -11,6 +11,7 @@ import { getOptimizedImage } from '@/lib/image-utils';
 import ProductReviewFormModal from '../ProductReviewFormModal/ProductReviewFormModal';
 import { useToast } from '@/components/ToastProvider';
 import VerifiedPurchaserBadge from '../VerifiedPurchaserBadge';
+import { reviewShowsVerifiedPurchaserBadge } from '@/lib/product-qa-verified-display';
 
 interface ProductReviewSectionProps {
   product: Product;
@@ -152,7 +153,7 @@ export default function ProductReviewSection({
               <div>
               <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0">
                 <span className="font-medium text-gray-900">{r.user_name || 'Khách'}</span>
-                {r.user_id != null && <VerifiedPurchaserBadge compact />}
+                {reviewShowsVerifiedPurchaserBadge(r) && <VerifiedPurchaserBadge compact />}
               </span>
               <span className="block text-xs text-gray-500 mt-0.5">
                 {formatDate(r.display_created_at ?? r.created_at)}

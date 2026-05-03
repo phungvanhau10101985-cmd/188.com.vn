@@ -1,5 +1,5 @@
 # backend/app/schemas/product_question.py
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
@@ -47,6 +47,8 @@ class ProductQuestionUpdate(BaseModel):
 
 
 class ProductQuestionResponse(ProductQuestionBase):
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
+
     id: int
     reply_admin_at: Optional[datetime] = None
     reply_user_one_id: Optional[int] = None
@@ -62,9 +64,7 @@ class ProductQuestionResponse(ProductQuestionBase):
     display_reply_user_two_at: Optional[datetime] = None
     product_slug: Optional[str] = None  # Slug sản phẩm (khi product_id có) để link "Xem câu hỏi"
     user_has_voted: Optional[bool] = None  # True nếu user hiện tại đã bấm hữu ích (chỉ khi có auth)
-
-    class Config:
-        from_attributes = True
+    is_my_question: bool = False  # True nếu khách đang xem là người hỏi (ask_user_id); không trả raw ask_user_id
 
 
 class UsefulToggleResponse(BaseModel):
