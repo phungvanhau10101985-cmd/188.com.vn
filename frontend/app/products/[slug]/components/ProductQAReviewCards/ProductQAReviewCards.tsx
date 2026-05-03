@@ -208,7 +208,7 @@ export default function ProductQAReviewCards({
                 {sampleReview.reply_content && (
                   <div className="pl-2.5 border-l-2 border-[#ea580c] bg-orange-50/60 rounded-r py-1.5 pr-2">
                     <p className="text-xs font-semibold text-gray-800">
-                      {sampleReview.reply_name || '188.COM.VN'} <span className="font-normal text-gray-500">· {formatQaDate(sampleReview.reply_at)}</span>
+                      {sampleReview.reply_name || '188.COM.VN'} <span className="font-normal text-gray-500">· {formatQaDate(sampleReview.display_reply_at ?? sampleReview.reply_at)}</span>
                     </p>
                     <p className="text-xs text-gray-700 leading-snug mt-0.5">{sampleReview.reply_content}</p>
                   </div>
@@ -310,7 +310,7 @@ export default function ProductQAReviewCards({
                 {sampleQuestion.reply_admin_content && (
                   <div className="pl-2 border-l-2 border-[#ea580c] bg-orange-50/60 rounded-r py-1 pr-1.5">
                     <p className="text-xs font-semibold text-gray-800">
-                      {sampleQuestion.reply_admin_name || '188.COM.VN'} <span className="font-normal text-gray-500">· {formatQaDate(sampleQuestion.reply_admin_at)}</span>
+                      {sampleQuestion.reply_admin_name || '188.COM.VN'} <span className="font-normal text-gray-500">· {formatQaDate(sampleQuestion.display_reply_admin_at ?? sampleQuestion.reply_admin_at)}</span>
                     </p>
                     <p className="text-xs text-gray-700 leading-snug mt-0.5">{sampleQuestion.reply_admin_content}</p>
                   </div>
@@ -318,7 +318,7 @@ export default function ProductQAReviewCards({
                 {sampleQuestion.reply_user_one_content && (
                   <div className="pl-2 border-l-2 border-gray-200 bg-gray-50 rounded-r py-1 pr-1.5">
                     <p className="text-xs font-medium text-gray-700 leading-tight">
-                      {sampleQuestion.reply_user_one_name} trả lời: <PurchasedBadge /> <span className="text-gray-500">· {formatQaDate(sampleQuestion.reply_user_one_at)}</span>
+                      {sampleQuestion.reply_user_one_name} trả lời: <PurchasedBadge /> <span className="text-gray-500">· {formatQaDate(sampleQuestion.display_reply_user_one_at ?? sampleQuestion.reply_user_one_at)}</span>
                     </p>
                     <p className="text-xs text-gray-600 leading-snug mt-0.5">{sampleQuestion.reply_user_one_content}</p>
                   </div>
@@ -326,7 +326,7 @@ export default function ProductQAReviewCards({
                 {sampleQuestion.reply_user_two_content && (
                   <div className="pl-2 border-l-2 border-gray-200 bg-gray-50 rounded-r py-1 pr-1.5">
                     <p className="text-xs font-medium text-gray-700 leading-tight">
-                      {sampleQuestion.reply_user_two_name} trả lời: <PurchasedBadge /> <span className="text-gray-500">· {formatQaDate(sampleQuestion.reply_user_two_at)}</span>
+                      {sampleQuestion.reply_user_two_name} trả lời: <PurchasedBadge /> <span className="text-gray-500">· {formatQaDate(sampleQuestion.display_reply_user_two_at ?? sampleQuestion.reply_user_two_at)}</span>
                     </p>
                     <p className="text-xs text-gray-600 leading-snug mt-0.5">{sampleQuestion.reply_user_two_content}</p>
                   </div>

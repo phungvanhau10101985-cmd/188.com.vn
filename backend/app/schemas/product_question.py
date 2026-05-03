@@ -56,7 +56,10 @@ class ProductQuestionResponse(ProductQuestionBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     is_imported: bool = False
-    display_created_at: Optional[datetime] = None  # Khi is_imported: thời gian ngẫu nhiên 1-20 ngày trước
+    display_created_at: Optional[datetime] = None  # Khi is_imported: đồng nhất timeline hiển thị
+    display_reply_admin_at: Optional[datetime] = None
+    display_reply_user_one_at: Optional[datetime] = None
+    display_reply_user_two_at: Optional[datetime] = None
     product_slug: Optional[str] = None  # Slug sản phẩm (khi product_id có) để link "Xem câu hỏi"
     user_has_voted: Optional[bool] = None  # True nếu user hiện tại đã bấm hữu ích (chỉ khi có auth)
 

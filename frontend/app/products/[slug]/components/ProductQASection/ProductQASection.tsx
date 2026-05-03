@@ -191,7 +191,7 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
             {q.reply_admin_content && (
               <div className="pl-4 border-l-2 border-orange-200 text-sm text-gray-600">
                 <p className="font-medium text-gray-800">
-                  {q.reply_admin_name || '188.COM.VN'} trả lời: {formatDate(q.reply_admin_at)}
+                  {q.reply_admin_name || '188.COM.VN'} trả lời: {formatDate(q.display_reply_admin_at ?? q.reply_admin_at)}
                 </p>
                 <p>{q.reply_admin_content}</p>
               </div>
@@ -199,7 +199,7 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
             {q.reply_user_one_content && (
               <div className="pl-4 border-l-2 border-gray-200 text-sm text-gray-600">
                 <p className="font-medium text-gray-800">
-                  {q.reply_user_one_name} trả lời: {formatDate(q.reply_user_one_at)}
+                  {q.reply_user_one_name} trả lời: {formatDate(q.display_reply_user_one_at ?? q.reply_user_one_at)}
                 </p>
                 <p>{q.reply_user_one_content}</p>
               </div>
@@ -207,7 +207,7 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
             {q.reply_user_two_content && (
               <div className="pl-4 border-l-2 border-gray-200 text-sm text-gray-600">
                 <p className="font-medium text-gray-800">
-                  {q.reply_user_two_name} trả lời: {formatDate(q.reply_user_two_at)}
+                  {q.reply_user_two_name} trả lời: {formatDate(q.display_reply_user_two_at ?? q.reply_user_two_at)}
                 </p>
                 <p>{q.reply_user_two_content}</p>
               </div>

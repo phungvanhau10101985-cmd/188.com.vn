@@ -44,6 +44,7 @@ class ProductReviewResponse(ProductReviewBase):
     updated_at: Optional[datetime] = None
     is_imported: bool = False
     display_created_at: Optional[datetime] = None
+    display_reply_at: Optional[datetime] = None
     user_has_voted: Optional[bool] = None
     product_slug: Optional[str] = None  # Slug sản phẩm (khách đánh giá) để link Xem sản phẩm
     is_current_user: Optional[bool] = None  # True nếu là đánh giá của user đang đăng nhập (để hiển thị lên đầu)

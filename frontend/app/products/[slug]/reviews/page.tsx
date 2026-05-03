@@ -162,7 +162,7 @@ export default function ProductReviewsPage() {
           {r.reply_content && (
             <div className="pl-3 border-l-2 border-[#ea580c] bg-orange-50/50 rounded-r py-2 pr-2 mt-2">
               <p className="text-xs font-semibold text-gray-800">
-                {r.reply_name || '188.COM.VN'} · {formatDate(r.reply_at)}
+                {r.reply_name || '188.COM.VN'} · {formatDate(r.display_reply_at ?? r.reply_at)}
               </p>
               <p className="text-sm text-gray-700 mt-0.5">{r.reply_content}</p>
             </div>

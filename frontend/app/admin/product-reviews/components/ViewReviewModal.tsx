@@ -137,7 +137,7 @@ export default function ViewReviewModal({ productSlug, selectedReview, onClose }
       {r.reply_content && (
         <div className="pl-4 border-l-2 border-orange-200 text-sm text-gray-600 mt-2">
           <p className="font-medium text-gray-800">
-            {r.reply_name || '188.COM.VN'} phản hồi: {formatDate(r.reply_at)}
+            {r.reply_name || '188.COM.VN'} phản hồi: {formatDate(r.display_reply_at ?? r.reply_at)}
           </p>
           <p>{r.reply_content}</p>
         </div>

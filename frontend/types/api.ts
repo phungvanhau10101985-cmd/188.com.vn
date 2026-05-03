@@ -124,6 +124,7 @@ export interface ProductReviewItem {
   useful: number;
   user_has_voted?: boolean;
   display_created_at?: string | null;
+  display_reply_at?: string | null;
   reply_name?: string;
   reply_content?: string;
   reply_at?: string | null;
@@ -143,6 +144,9 @@ export interface ProductQuestionItem {
   useful: number;
   user_has_voted?: boolean;
   display_created_at?: string | null;
+  display_reply_admin_at?: string | null;
+  display_reply_user_one_at?: string | null;
+  display_reply_user_two_at?: string | null;
   reply_admin_name?: string;
   reply_admin_content?: string;
   reply_admin_at?: string | null;

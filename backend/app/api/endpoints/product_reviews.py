@@ -25,6 +25,7 @@ from app.schemas.product_review import (
 )
 from app.core.admin_permissions import admin_allowed_operation
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission
+from app.utils.display_timeline import imported_display_days_ago, reply_display_at
 
 router = APIRouter()
 
@@ -83,8 +84,16 @@ def get_reviews_for_product(
         is_mine = bool(current_user and getattr(r, "user_id", None) == current_user.id)
         update = {"user_has_voted": r.id in voted_ids, "is_current_user": is_mine}
         if getattr(r, "is_imported", False):
-            days_ago = random.randint(1, 20)
+            days_ago = imported_display_days_ago(r.id)
             update["display_created_at"] = now - timedelta(days=days_ago)
+        review_shown = update.get("display_created_at") or getattr(r, "created_at", None)
+        if (getattr(r, "reply_content", None) or "").strip():
+            update["display_reply_at"] = reply_display_at(
+                getattr(r, "reply_at", None),
+                review_shown,
+                r.id,
+                1,
+            )
         result.append(ProductReviewResponse.model_validate(r).model_copy(update=update))
     # Đánh giá của khách đang xem (is_current_user) lên trên nhất, còn lại giữ thứ tự useful/created
     result.sort(key=lambda x: (not (x.is_current_user or False), -(x.useful or 0)))

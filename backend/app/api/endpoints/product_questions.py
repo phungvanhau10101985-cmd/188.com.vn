@@ -25,8 +25,23 @@ from app.schemas.product_question import (
 )
 from app.core.admin_permissions import admin_allowed_operation
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission
+from app.utils.display_timeline import imported_display_days_ago, merge_question_reply_display_times
 
 router = APIRouter()
+
+
+def _serialize_shop_question(
+    q,
+    *,
+    now: datetime,
+    user_has_voted: bool,
+) -> ProductQuestionResponse:
+    """Thời gian hiển thị đồng bộ giữa đặt hỏi / trả lời và list for-product."""
+    upd: dict = {"user_has_voted": user_has_voted}
+    if getattr(q, "is_imported", False):
+        upd["display_created_at"] = now - timedelta(days=imported_display_days_ago(q.id))
+    merge_question_reply_display_times(q, upd)
+    return ProductQuestionResponse.model_validate(q).model_copy(update=upd)
 
 
 # ========== PUBLIC: cho trang chi tiết sản phẩm ==========
@@ -54,14 +69,10 @@ def get_questions_for_product(
         if current_user else set()
     )
     now = datetime.now(timezone.utc)
-    result = []
-    for q in items:
-        update = {"user_has_voted": q.id in voted_ids}
-        if getattr(q, "is_imported", False):
-            days_ago = random.randint(1, 20)
-            update["display_created_at"] = now - timedelta(days=days_ago)
-        result.append(ProductQuestionResponse.model_validate(q).model_copy(update=update))
-    return result
+    return [
+        _serialize_shop_question(q, now=now, user_has_voted=q.id in voted_ids)
+        for q in items
+    ]
 
 
 @router.post("/ask", response_model=ProductQuestionResponse)
@@ -75,9 +86,12 @@ def ask_question(
     if not product:
         raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại")
     user_name = getattr(current_user, "full_name", None) or getattr(current_user, "phone", None) or "Khách"
-    return crud.product_question.create_customer_question(
+    obj = crud.product_question.create_customer_question(
         db, product_id=data.product_id, content=data.content.strip(), user_name=user_name or "Khách"
     )
+    now = datetime.now(timezone.utc)
+    voted_ids = crud.product_question.get_user_voted_question_ids(db, current_user.id, [obj.id])
+    return _serialize_shop_question(obj, now=now, user_has_voted=obj.id in voted_ids)
 
 
 @router.post("/useful/{question_id}/toggle", response_model=UsefulToggleResponse)
@@ -123,7 +137,9 @@ def reply_to_question(
     )
     if not updated:
         raise HTTPException(status_code=400, detail="Không thể thêm trả lời")
-    return updated
+    now = datetime.now(timezone.utc)
+    voted_ids = crud.product_question.get_user_voted_question_ids(db, current_user.id, [updated.id])
+    return _serialize_shop_question(updated, now=now, user_has_voted=updated.id in voted_ids)
 
 
 # ========== ADMIN ==========
@@ -217,8 +233,7 @@ def admin_delete_question(
     return {"message": "Đã xóa"}
 
 
-# Excel columns: user_name, content, group, useful, reply_admin_name, reply_admin_content,
-# reply_user_one_name, reply_user_one_conte, reply_user_two_name, reply_user_two_conte
+# Excel columns: khớp Cau-hoi-chuan.xlsx + alias tiếng Việt và typo reply_user_*_conte
 EXCEL_COLUMN_MAP = {
     "user_name": "user_name",
     "Tên người hỏi": "user_name",
@@ -248,24 +263,18 @@ EXCEL_COLUMN_MAP = {
 }
 
 
-# Cột mẫu cho file Excel (tiếng Việt)
+# Mẫu export: khớp cấu trúc `Cau-hoi-chuan.xlsx` — 10 cột tiếng Anh (import vẫn nhận tên tiếng Việt qua EXCEL_COLUMN_MAP).
 SAMPLE_EXCEL_COLUMNS = [
-    "Tên người hỏi",
-    "Nội dung",
-    "Nhóm",
-    "Hữu ích",
-    "Tên admin trả lời",
-    "Nội dung admin trả lời",
-    "Thời gian admin trả lời",
-    "ID user one trả lời",
-    "Tên user 1 trả lời",
-    "Nội dung user 1 trả lời",
-    "Thời gian user 1 trả lời",
-    "ID user two trả lời",
-    "Tên user 2 trả lời",
-    "Nội dung user 2 trả lời",
-    "Thời gian user 2 trả lời",
-    "Số câu trả lời (0=cho trả lời, 2=khóa)",
+    "user_name",
+    "content",
+    "group",
+    "useful",
+    "reply_admin_name",
+    "reply_admin_content",
+    "reply_user_one_name",
+    "reply_user_one_content",
+    "reply_user_two_name",
+    "reply_user_two_content",
 ]
 
 
@@ -277,23 +286,17 @@ def admin_download_sample_excel(
     df = pd.DataFrame(
         [
             {
-                "Tên người hỏi": "Nguyễn Văn A",
-                "Nội dung": "Sản phẩm này còn hàng không?",
-                "Nhóm": 0,
-                "Hữu ích": 0,
-                "Tên admin trả lời": "",
-                "Nội dung admin trả lời": "",
-                "Thời gian admin trả lời": "",
-                "ID user one trả lời": "",
-                "Tên user 1 trả lời": "",
-                "Nội dung user 1 trả lời": "",
-                "Thời gian user 1 trả lời": "",
-                "ID user two trả lời": "",
-                "Tên user 2 trả lời": "",
-                "Nội dung user 2 trả lời": "",
-                "Thời gian user 2 trả lời": "",
-                "Số câu trả lời (0=cho trả lời, 2=khóa)": 0,
-            }
+                "user_name": "Nguyễn Văn A",
+                "content": "Đặt hàng thì khoảng bao lâu nhận được hàng?",
+                "group": 0,
+                "useful": 0,
+                "reply_admin_name": "188.COM.VN",
+                "reply_admin_content": "Kho gửi khoảng 10-12 ngày anh nhận được hàng.",
+                "reply_user_one_name": "",
+                "reply_user_one_content": "",
+                "reply_user_two_name": "",
+                "reply_user_two_content": "",
+            },
         ],
         columns=SAMPLE_EXCEL_COLUMNS,
     )
@@ -314,9 +317,11 @@ async def admin_import_excel(
     current_admin: AdminUser = Depends(require_module_permission("product_questions")),
 ):
     """
-    Import câu hỏi từ Excel.
-    Cấu trúc: user_name, content, group, useful, reply_admin_name, reply_admin_content,
-    reply_user_one_name, reply_user_one_conte, reply_user_two_name, reply_user_two_conte
+    Import câu hỏi từ Excel (cột chuẩn như file mẫu / `Cau-hoi-chuan.xlsx`):
+    user_name, content, group, useful, reply_admin_name, reply_admin_content,
+    reply_user_one_name, reply_user_one_content,
+    reply_user_two_name, reply_user_two_content
+    và tuỳ chọn: reply_count (0–2; cột tiếng Việt trong EXCEL_COLUMN_MAP).
     """
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file Excel (.xlsx, .xls)")

@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { adminOrderAPI, type AdminOrder, type PaymentRecord } from '@/lib/admin-api';
-import { cdnUrl } from '@/lib/cdn-url';
+import { cdnUrl, normalizeRemoteImageUrlForDisplay } from '@/lib/cdn-url';
 
 const STATUS_TEXTS: Record<string, string> = {
   pending: 'Chờ xác nhận',
@@ -45,7 +45,7 @@ function shopOrigin(): string {
 
 function orderItemImageUrl(src: string | null | undefined): string {
   if (!src?.trim()) return cdnUrl('/images/placeholder-product.jpg');
-  const s = src.trim();
+  const s = normalizeRemoteImageUrlForDisplay(src);
   if (/^https?:\/\//i.test(s)) return s;
   return cdnUrl(s.startsWith('/') ? s : `/${s}`);
 }
