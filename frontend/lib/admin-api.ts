@@ -989,6 +989,11 @@ export const adminProductReviewsAPI = {
   delete: (id: number) =>
     fetchAdmin<{ message: string }>(`/product-reviews/admin/${id}`, { method: 'DELETE' }),
 
+  deleteAll: () =>
+    fetchAdmin<{ message: string; deleted: number }>('/product-reviews/admin/delete-all', {
+      method: 'DELETE',
+    }),
+
   importExcel: async (file: File) => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');

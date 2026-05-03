@@ -180,3 +180,11 @@ def delete_review(db: Session, review_id: int) -> bool:
     db.delete(obj)
     db.commit()
     return True
+
+
+def delete_all_reviews(db: Session) -> int:
+    """Xóa mọi bản ghi đánh giá và vote liên quan (an toàn cho SQLite không CASCADE bulk delete)."""
+    db.query(ProductReviewUsefulVote).delete(synchronize_session=False)
+    count = db.query(ProductReview).delete(synchronize_session=False)
+    db.commit()
+    return count

@@ -198,6 +198,18 @@ def admin_update_review(
     return obj
 
 
+@router.delete("/admin/delete-all")
+def admin_delete_all_reviews(
+    db: Session = Depends(get_db),
+    current_admin: AdminUser = Depends(require_module_permission("product_reviews")),
+):
+    """Xóa toàn bộ đánh giá sản phẩm."""
+    if not admin_allowed_operation(current_admin, db, "product_reviews", "delete"):
+        raise HTTPException(status_code=403, detail="Không được phép xóa đánh giá với quyền hiện tại.")
+    deleted = crud.product_review.delete_all_reviews(db)
+    return {"message": "Đã xóa toàn bộ đánh giá", "deleted": deleted}
+
+
 @router.delete("/admin/{review_id}")
 def admin_delete_review(
     review_id: int,

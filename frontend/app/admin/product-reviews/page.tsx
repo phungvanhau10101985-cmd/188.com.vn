@@ -25,6 +25,7 @@ export default function AdminProductReviewsPage() {
   const [savingId, setSavingId] = useState<number | null>(null);
   const [rowEdit, setRowEdit] = useState<Record<number, Partial<ProductReviewAdmin>>>({});
   const [viewModal, setViewModal] = useState<ProductReviewAdmin | null>(null);
+  const [deletingAll, setDeletingAll] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const showToast = (type: 'ok' | 'err', msg: string) => {
@@ -32,11 +33,12 @@ export default function AdminProductReviewsPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const fetchList = useCallback(async () => {
+  const fetchList = useCallback(async (pageOverride?: number) => {
+    const p = typeof pageOverride === 'number' ? pageOverride : page;
     setLoading(true);
     try {
       const res = await adminProductReviewsAPI.getList({
-        skip: (page - 1) * PAGE_SIZE,
+        skip: (p - 1) * PAGE_SIZE,
         limit: PAGE_SIZE,
       });
       setData(res);
@@ -77,6 +79,29 @@ export default function AdminProductReviewsPage() {
       fetchList();
     } catch {
       showToast('err', 'Xóa thất bại');
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    const total = data?.total ?? 0;
+    if (total <= 0) return;
+    if (
+      !confirm(
+        `Bạn có chắc muốn xóa HẾT ${total} đánh giá? Thao tác này không thể hoàn tác.`
+      )
+    ) {
+      return;
+    }
+    setDeletingAll(true);
+    try {
+      const res = await adminProductReviewsAPI.deleteAll();
+      showToast('ok', `Đã xóa ${res.deleted} đánh giá`);
+      setPage(1);
+      await fetchList(1);
+    } catch {
+      showToast('err', 'Xóa hết thất bại');
+    } finally {
+      setDeletingAll(false);
     }
   };
 
@@ -175,6 +200,14 @@ export default function AdminProductReviewsPage() {
 
         <div className="mb-2 flex items-center justify-between flex-wrap gap-2">
           <span className="text-sm text-gray-600">Tổng số bản ghi: {data?.total ?? 0}</span>
+          <button
+            type="button"
+            onClick={handleDeleteAll}
+            disabled={deletingAll || !data || data.total <= 0}
+            className="text-sm px-3 py-1.5 rounded-lg border border-red-300 text-red-700 bg-red-50 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {deletingAll ? 'Đang xóa...' : 'Xóa hết đánh giá'}
+          </button>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
