@@ -963,8 +963,9 @@ export async function adminLogin(username: string, password: string) {
     body: JSON.stringify({ username, password }),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Đăng nhập thất bại' }));
-    throw new Error(err.detail || 'Đăng nhập thất bại');
+    const err = await res.json().catch(() => ({}));
+    const msg = formatFastApiDetail((err as { detail?: unknown }).detail) || 'Đăng nhập thất bại';
+    throw new Error(msg);
   }
   return res.json();
 }
