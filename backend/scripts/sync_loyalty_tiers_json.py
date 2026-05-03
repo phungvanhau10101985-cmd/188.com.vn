@@ -24,7 +24,7 @@ import json
 import os
 import sys
 from decimal import Decimal
-from typing import Any, List
+from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -58,6 +58,16 @@ def cmd_export(path: str | None) -> None:
 
 
 def cmd_import(path: str, *, dry_run: bool) -> None:
+    path = os.path.abspath(path)
+    if not os.path.isfile(path):
+        raise SystemExit(
+            f"Không thấy file: {path}\n"
+            f"Thư mục hiện tại (cwd): {os.getcwd()}\n"
+            "— Export trên máy local rồi copy JSON lên VPS, ví dụ:\n"
+            "  scp loyalty_tiers.json root@nanoai:/var/www/188.com.vn/backend/\n"
+            "— Hoặc chỉ đường dẫn đầy đủ:\n"
+            "  python scripts/sync_loyalty_tiers_json.py import /root/loyalty_tiers.json"
+        )
     with open(path, encoding="utf-8") as f:
         raw = json.load(f)
     if not isinstance(raw, list):
