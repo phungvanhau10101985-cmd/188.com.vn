@@ -371,9 +371,11 @@ def _find_matching_pending_sepay_deposit(
     db: Session,
     text_blob: str,
     amount: Decimal,
+    data: Dict[str, Any],
 ) -> Optional[Payment]:
     """
     Tìm Payment deposit_sepay đang PENDING (đã tạo khi GET sepay-deposit-info) khớp số tiền + nội dung.
+    Fallback: trường ``code`` của SePay (DHxxx) + order_id + amount — tránh lệch do chuẩn hóa SMS dài.
     """
     keys_w = _webhook_transfer_content_keys(text_blob)
     blob_compact = _compact_alnum_upper(text_blob)
@@ -406,6 +408,41 @@ def _find_matching_pending_sepay_deposit(
         p_comp = _compact_alnum_upper(p.transfer_content or "")
         if p_comp and len(p_comp) >= 6 and p_comp in blob_compact:
             return p
+
+    # SePay: code DH{n} → cùng order id; pending đã tạo từ sepay-deposit-info + đúng amount
+    raw_code = _pick(data, "code")
+    if raw_code is not None and str(raw_code).strip():
+        m = re.match(r"^DH(\d+)$", str(raw_code).strip(), re.IGNORECASE)
+        if m:
+            try:
+                oid = int(m.group(1))
+            except ValueError:
+                oid = 0
+            if oid > 0:
+                p2 = (
+                    db.query(Payment)
+                    .filter(
+                        Payment.order_id == oid,
+                        Payment.payment_type == "deposit_sepay",
+                        Payment.payment_status == PaymentStatus.PENDING,
+                    )
+                    .order_by(Payment.id.desc())
+                    .first()
+                )
+                if p2 and not (p2.transaction_code or "").strip():
+                    if _amount_equal(Decimal(str(p2.amount)), amount):
+                        order2 = crud_order.get_order(db, oid)
+                        if (
+                            order2
+                            and getattr(order2.status, "value", order2.status) == OrderStatus.WAITING_DEPOSIT.value
+                            and order2.requires_deposit
+                        ):
+                            logger.info(
+                                "SePay pending matched by webhook code order_id=%s payment_id=%s",
+                                oid,
+                                p2.id,
+                            )
+                            return p2
     return None
 
 
@@ -497,7 +534,7 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
         return False, "account_mismatch", None
 
     # --- Luồng B: khớp bản ghi Payment PENDING đã tạo khi GET sepay-deposit-info (ổn định hơn parse SMS) ---
-    pending = _find_matching_pending_sepay_deposit(db, text_blob, amount)
+    pending = _find_matching_pending_sepay_deposit(db, text_blob, amount, data)
     if pending:
         order = crud_order.get_order(db, pending.order_id)
         if not order:
