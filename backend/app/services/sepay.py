@@ -178,13 +178,36 @@ def verify_webhook(request: Request, raw_body: bytes) -> bool:
         auth_raw = (request.headers.get("authorization") or request.headers.get("Authorization") or "").strip()
         auth = " ".join(auth_raw.split())
         expected = " ".join(f"Apikey {api_key}".split())
-        if hmac.compare_digest(auth, expected) or auth.lower() == expected.lower():
+        bearer_expected = " ".join(f"Bearer {api_key}".split())
+        raw_header_key = (
+            request.headers.get("x-api-key")
+            or request.headers.get("X-Api-Key")
+            or request.headers.get("x-sepay-api-key")
+            or request.headers.get("X-Sepay-Api-Key")
+            or ""
+        ).strip()
+        query_key = (
+            request.query_params.get("token")
+            or request.query_params.get("api_key")
+            or request.query_params.get("apikey")
+            or ""
+        ).strip()
+        if (
+            hmac.compare_digest(auth, expected)
+            or auth.lower() == expected.lower()
+            or hmac.compare_digest(auth, bearer_expected)
+            or auth.lower() == bearer_expected.lower()
+            or hmac.compare_digest(auth, api_key)
+            or hmac.compare_digest(raw_header_key, api_key)
+            or hmac.compare_digest(query_key, api_key)
+        ):
             return True
         logger.warning(
-            "SePay webhook: Authorization không khớp SEPAY_WEBHOOK_API_KEY (có header=%s)",
+            "SePay webhook: API key không khớp (authorization=%s, x-api-key=%s, query_token=%s); sẽ thử phương án xác thực khác nếu bật",
             bool(auth),
+            bool(raw_header_key),
+            bool(query_key),
         )
-        return False
 
     sig = request.headers.get("x-sepay-signature") or request.headers.get("X-Sepay-Signature")
     if secret and sig and raw_body:

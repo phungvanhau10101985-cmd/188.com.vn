@@ -45,7 +45,7 @@ function applyResponseHeaders(from: Response, to: NextResponse): void {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const url = `${backendBase()}/api/v1/sepay/webhook`;
+  const url = `${backendBase()}/api/v1/sepay/webhook${req.nextUrl.search || ''}`;
   const body = await req.arrayBuffer();
   const headers = forwardRequestHeaders(req, { omitContentLength: true });
 
