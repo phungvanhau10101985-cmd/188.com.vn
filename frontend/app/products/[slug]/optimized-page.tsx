@@ -8,10 +8,11 @@ import { apiClient } from '@/lib/api-client';
 import { formatPrice, getDiscountPercentage, validateImageUrl, truncateText } from '@/lib/utils';
 import type { Product, SimpleProductResponse } from '@/types/api';
 import { useCart } from '@/features/cart/hooks/useCart';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { useToast } from '@/components/ToastProvider';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
-import { isCartRequiresLoginError } from '@/features/cart/cart-errors';
+import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
 
 // Import product detail components
 import ProductGallery from '@/components/product-detail/ProductGallery';
@@ -33,6 +34,7 @@ export default function ProductDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { pushToast } = useToast();
+  const { isAuthenticated } = useAuth();
   const slug = params.slug as string;
   
   const [product, setProduct] = useState<Product | null>(null);
@@ -105,94 +107,118 @@ export default function ProductDetailPage() {
 
   const handleAddToCart = useCallback(
     async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
-      try {
-        const lineImg = cartLineMainImage(p, selectedColor);
-        await addToCart({
-          product_id: p.id,
-          quantity,
-          selected_size: selectedSize,
-          selected_color: selectedColor,
-          line_image_url: lineImg,
-          product_data: {
-            id: p.id,
-            product_id: p.product_id,
-            name: p.name,
-            price: p.price,
-            main_image: lineImg,
-            brand_name: p.brand_name,
-            available: p.available,
-            original_price: p.original_price,
-            slug: p.slug,
-          },
+      const lineImg = cartLineMainImage(p, selectedColor);
+      const payload = {
+        product_id: p.id,
+        quantity,
+        selected_size: selectedSize,
+        selected_color: selectedColor,
+        line_image_url: lineImg,
+        product_data: {
+          id: p.id,
+          product_id: p.product_id,
+          name: p.name,
+          price: p.price,
+          main_image: lineImg,
+          brand_name: p.brand_name,
+          available: p.available,
+          original_price: p.original_price,
+          slug: p.slug,
+        },
+      };
+      if (!isAuthenticated) {
+        queuePendingCartAfterLogin(payload);
+        pushToast({
+          title: 'Đăng nhập để thêm giỏ',
+          description: 'Sau đăng nhập bạn sẽ được chuyển tới giỏ hàng với sản phẩm đã chọn.',
+          variant: 'info',
+          durationMs: 3200,
         });
+        router.push(buildAuthLoginHrefFromFullPath('/cart'));
+        return;
+      }
+      try {
+        await addToCart(payload);
+        pushToast({ title: 'Đã thêm vào giỏ hàng', variant: 'success', durationMs: 2000 });
       } catch (err: unknown) {
-        if (isCartRequiresLoginError(err)) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes('Authentication required') || message.includes('401')) {
           pushToast({
-            title: 'Cần đăng nhập',
-            description: err.message,
+            title: 'Vui lòng đăng nhập lại',
+            description: 'Phiên đăng nhập đã hết hạn.',
             variant: 'info',
             durationMs: 2600,
           });
           router.push(buildAuthLoginHrefFromFullPath(getBrowserReturnLocation()));
-          return;
+        } else {
+          pushToast({
+            title: 'Không thể thêm vào giỏ hàng',
+            description: message,
+            variant: 'error',
+            durationMs: 3000,
+          });
         }
-        pushToast({
-          title: 'Không thể thêm vào giỏ hàng',
-          description: err instanceof Error ? err.message : 'Vui lòng thử lại',
-          variant: 'error',
-          durationMs: 3000,
-        });
       }
     },
-    [addToCart, router, pushToast]
+    [addToCart, router, pushToast, isAuthenticated]
   );
 
   const handleBuyNow = useCallback(
     async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
+      const lineImg = cartLineMainImage(p, selectedColor);
+      const payload = {
+        product_id: p.id,
+        quantity,
+        selected_size: selectedSize,
+        selected_color: selectedColor,
+        line_image_url: lineImg,
+        product_data: {
+          id: p.id,
+          product_id: p.product_id,
+          name: p.name,
+          price: p.price,
+          main_image: lineImg,
+          brand_name: p.brand_name,
+          available: p.available,
+          original_price: p.original_price,
+          slug: p.slug,
+        },
+      };
+      if (!isAuthenticated) {
+        queuePendingCartAfterLogin(payload);
+        pushToast({
+          title: 'Đăng nhập để mua hàng',
+          description: 'Sau đăng nhập bạn sẽ được chuyển tới giỏ hàng với sản phẩm đã chọn.',
+          variant: 'info',
+          durationMs: 3200,
+        });
+        router.push(buildAuthLoginHrefFromFullPath('/cart'));
+        return;
+      }
       try {
-        const lineImg = cartLineMainImage(p, selectedColor);
-        await addToCart(
-          {
-            product_id: p.id,
-            quantity,
-            selected_size: selectedSize,
-            selected_color: selectedColor,
-            line_image_url: lineImg,
-            product_data: {
-              id: p.id,
-              product_id: p.product_id,
-              name: p.name,
-              price: p.price,
-              main_image: lineImg,
-              brand_name: p.brand_name,
-              available: p.available,
-              original_price: p.original_price,
-              slug: p.slug,
-            },
-          },
-          { skipAddedPopup: true }
-        );
+        await addToCart(payload, { skipAddedPopup: true });
         router.push('/checkout');
       } catch (err: unknown) {
-        if (isCartRequiresLoginError(err)) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes('Authentication required') || message.includes('401')) {
           pushToast({
-            title: 'Cần đăng nhập',
-            description: err.message,
+            title: 'Vui lòng đăng nhập lại',
+            description: 'Phiên đăng nhập đã hết hạn.',
             variant: 'info',
             durationMs: 2600,
           });
           router.push(buildAuthLoginHrefFromFullPath(getBrowserReturnLocation()));
-          return;
+        } else {
+          pushToast({
+            title: 'Không thể mua ngay',
+            description: message,
+            variant: 'error',
+            durationMs: 3000,
+          });
         }
-        pushToast({
-          title: 'Không thể mua ngay',
-          description: err instanceof Error ? err.message : 'Vui lòng thử lại',
-          variant: 'error',
-          durationMs: 3000,
-        });
       }
     },
-    [addToCart, router, pushToast]
+    [addToCart, router, pushToast, isAuthenticated]
   );
 
   const handleAddToFavorite = useCallback(

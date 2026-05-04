@@ -185,12 +185,14 @@ export async function getProductsByCategory(
       skip: String(skip),
       is_active: "true",
       category: category || level1,
+      order_random: "true",
     });
     if (subcategory) params.set("subcategory", subcategory);
     if (sub_subcategory) params.set("sub_subcategory", sub_subcategory);
     const url = `${API_BASE}/products/?${params.toString()}`;
+    /** Không cache ISR/CDN: mỗi lần mở danh mục gọi API mới để thứ tự random thay đổi. */
     const res = await fetch(url, {
-      next: { revalidate: REVALIDATE_CATEGORY, tags: [CACHE_TAG_CATEGORY_SEO] },
+      cache: "no-store",
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(LAYOUT_FETCH_TIMEOUT_MS),
     });

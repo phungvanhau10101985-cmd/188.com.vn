@@ -6,8 +6,8 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { cartAPI } from '../api/cart-api';
 import { trackEvent } from '@/lib/analytics';
 import { CartRequiresLoginError } from '../cart-errors';
+import { readPendingCartAfterLogin, clearPendingCartAfterLogin } from '../pending-cart-session';
 import type {
-  Cart,
   AddToCartRequest,
   UpdateCartItemRequest,
   CartState,
@@ -55,6 +55,34 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const enrichCart = (cart: Awaited<ReturnType<typeof cartAPI.getCart>>) => {
+    const normalizedCart = cart ? { ...cart, items: Array.isArray(cart.items) ? cart.items : [] } : null;
+    const sortedItems = normalizedCart
+      ? [...normalizedCart.items].sort((a: any, b: any) => Number(a?.id ?? 0) - Number(b?.id ?? 0))
+      : [];
+    return normalizedCart
+      ? {
+          ...normalizedCart,
+          items: sortedItems.map((item: any) => {
+            const fromApi =
+              item.product_data && typeof item.product_data === 'object' ? { ...item.product_data } : {};
+            return {
+              ...item,
+              product_data: {
+                ...fromApi,
+                id: item.product_id,
+                product_id: fromApi.product_id ?? item.product_code,
+                name: fromApi.name ?? item.product_name,
+                price: fromApi.price ?? item.product_price,
+                main_image: fromApi.main_image || item.product_image,
+                deposit_require: fromApi.deposit_require ?? item.requires_deposit,
+              },
+            };
+          }),
+        }
+      : null;
+  };
+
   const refreshCart = async () => {
     if (!isAuthenticated) {
       discardLegacyGuestCart();
@@ -71,32 +99,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
     try {
       const cart = await cartAPI.getCart();
-      const normalizedCart = cart ? { ...cart, items: Array.isArray(cart.items) ? cart.items : [] } : null;
-      const sortedItems = normalizedCart
-        ? [...normalizedCart.items].sort((a: any, b: any) => Number(a?.id ?? 0) - Number(b?.id ?? 0))
-        : [];
-      const enrichedCart = normalizedCart
-        ? {
-            ...normalizedCart,
-            items: sortedItems.map((item: any) => {
-              const fromApi =
-                item.product_data && typeof item.product_data === 'object' ? { ...item.product_data } : {};
-              return {
-                ...item,
-                product_data: {
-                  ...fromApi,
-                  id: item.product_id,
-                  product_id: fromApi.product_id ?? item.product_code,
-                  name: fromApi.name ?? item.product_name,
-                  price: fromApi.price ?? item.product_price,
-                  main_image: fromApi.main_image || item.product_image,
-                  deposit_require: fromApi.deposit_require ?? item.requires_deposit,
-                },
-              };
-            }),
-          }
-        : null;
-      setCartState((prev) => ({ ...prev, cart: enrichedCart, isLoading: false }));
+      setCartState((prev) => ({ ...prev, cart: enrichCart(cart), isLoading: false }));
     } catch (error: any) {
       console.error('Failed to fetch cart:', error);
       setCartState((prev) => ({
@@ -202,7 +205,55 @@ export function CartProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    refreshCart();
+    if (!isAuthenticated) {
+      discardLegacyGuestCart();
+      setCartState((prev) => ({
+        ...prev,
+        cart: null,
+        isLoading: false,
+        error: null,
+      }));
+      return;
+    }
+
+    let cancelled = false;
+
+    const load = async () => {
+      setCartState((prev) => ({ ...prev, isLoading: true, error: null }));
+      try {
+        const pending = readPendingCartAfterLogin();
+        if (pending.length > 0) {
+          for (const item of pending) {
+            if (cancelled) return;
+            await cartAPI.addToCart(item);
+          }
+          if (!cancelled) clearPendingCartAfterLogin();
+        }
+        if (cancelled) return;
+        const cart = await cartAPI.getCart();
+        if (cancelled) return;
+        setCartState((prev) => ({
+          ...prev,
+          cart: enrichCart(cart),
+          isLoading: false,
+          error: null,
+        }));
+      } catch (error: any) {
+        console.error('Failed to load cart:', error);
+        if (!cancelled) {
+          setCartState((prev) => ({
+            ...prev,
+            error: error.message || 'Failed to load cart',
+            isLoading: false,
+          }));
+        }
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [isAuthenticated]);
 
   const value: CartContextType = {

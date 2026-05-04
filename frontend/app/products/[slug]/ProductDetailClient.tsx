@@ -23,7 +23,7 @@ import { trackEvent } from '@/lib/analytics';
 import { persistRelatedFiltersFromProduct } from '@/lib/product-related-tabs';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
-import { isCartRequiresLoginError } from '@/features/cart/cart-errors';
+import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
@@ -129,39 +129,42 @@ export default function ProductDetailClient({
   }, [product?.id]);
 
   const handleAddToCart = async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
-    try {
-      const lineImg = cartLineMainImage(p, selectedColor);
-      await addToCart({
-        product_id: p.id,
-        quantity,
-        selected_size: selectedSize,
-        selected_color: selectedColor,
-        line_image_url: lineImg,
-        product_data: {
-          id: p.id,
-          product_id: p.product_id,
-          name: p.name,
-          price: p.price,
-          main_image: lineImg,
-          brand_name: p.brand_name,
-          available: p.available,
-          original_price: p.original_price,
-          slug: p.slug,
-        },
+    const lineImg = cartLineMainImage(p, selectedColor);
+    const payload = {
+      product_id: p.id,
+      quantity,
+      selected_size: selectedSize,
+      selected_color: selectedColor,
+      line_image_url: lineImg,
+      product_data: {
+        id: p.id,
+        product_id: p.product_id,
+        name: p.name,
+        price: p.price,
+        main_image: lineImg,
+        brand_name: p.brand_name,
+        available: p.available,
+        original_price: p.original_price,
+        slug: p.slug,
+      },
+    };
+    if (!isAuthenticated) {
+      queuePendingCartAfterLogin(payload);
+      pushToast({
+        title: 'Đăng nhập để thêm giỏ',
+        description: 'Sau đăng nhập bạn sẽ được chuyển tới giỏ hàng với sản phẩm đã chọn.',
+        variant: 'info',
+        durationMs: 3200,
       });
+      router.push(buildAuthLoginHrefFromFullPath('/cart'));
+      trackEvent('add_to_cart_click', { product_id: p.id, quantity, status: 'requires_login' });
+      return;
+    }
+    try {
+      await addToCart(payload);
       pushToast({ title: 'Đã thêm vào giỏ hàng', variant: 'success', durationMs: 2000 });
       trackEvent('add_to_cart_click', { product_id: p.id, quantity });
     } catch (err: unknown) {
-      if (isCartRequiresLoginError(err)) {
-        pushToast({
-          title: 'Cần đăng nhập',
-          description: err.message,
-          variant: 'info',
-          durationMs: 2600,
-        });
-        router.push(buildAuthLoginHrefFromFullPath(getBrowserReturnLocation()));
-        return;
-      }
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes('Authentication required') || message.includes('401')) {
         pushToast({ title: 'Vui lòng đăng nhập lại', description: 'Phiên đăng nhập đã hết hạn.', variant: 'info', durationMs: 2500 });
@@ -234,42 +237,42 @@ export default function ProductDetailClient({
   const displayCartCount = getCartItemCount();
 
   const handleBuyNow = async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
+    const lineImg = cartLineMainImage(p, selectedColor);
+    const payload = {
+      product_id: p.id,
+      quantity,
+      selected_size: selectedSize,
+      selected_color: selectedColor,
+      line_image_url: lineImg,
+      product_data: {
+        id: p.id,
+        product_id: p.product_id,
+        name: p.name,
+        price: p.price,
+        main_image: lineImg,
+        brand_name: p.brand_name,
+        available: p.available,
+        original_price: p.original_price,
+        slug: p.slug,
+      },
+    };
+    if (!isAuthenticated) {
+      queuePendingCartAfterLogin(payload);
+      pushToast({
+        title: 'Đăng nhập để mua hàng',
+        description: 'Sau đăng nhập bạn sẽ được chuyển tới giỏ hàng với sản phẩm đã chọn.',
+        variant: 'info',
+        durationMs: 3200,
+      });
+      router.push(buildAuthLoginHrefFromFullPath('/cart'));
+      trackEvent('buy_now', { product_id: p.id, quantity, status: 'requires_login' });
+      return;
+    }
     try {
-      const lineImg = cartLineMainImage(p, selectedColor);
-      await addToCart(
-        {
-          product_id: p.id,
-          quantity,
-          selected_size: selectedSize,
-          selected_color: selectedColor,
-          line_image_url: lineImg,
-          product_data: {
-            id: p.id,
-            product_id: p.product_id,
-            name: p.name,
-            price: p.price,
-            main_image: lineImg,
-            brand_name: p.brand_name,
-            available: p.available,
-            original_price: p.original_price,
-            slug: p.slug,
-          },
-        },
-        { skipAddedPopup: true }
-      );
+      await addToCart(payload, { skipAddedPopup: true });
       trackEvent('buy_now', { product_id: p.id, quantity });
       router.push('/checkout');
     } catch (err: unknown) {
-      if (isCartRequiresLoginError(err)) {
-        pushToast({
-          title: 'Cần đăng nhập',
-          description: err.message,
-          variant: 'info',
-          durationMs: 2600,
-        });
-        router.push(buildAuthLoginHrefFromFullPath(getBrowserReturnLocation()));
-        return;
-      }
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes('Authentication required') || message.includes('401')) {
         pushToast({ title: 'Vui lòng đăng nhập lại', description: 'Phiên đăng nhập đã hết hạn.', variant: 'info', durationMs: 2500 });

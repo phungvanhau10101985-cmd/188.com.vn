@@ -1093,7 +1093,9 @@ def get_products(
     max_price: Optional[float] = None,
     is_active: Optional[bool] = None,
     q: Optional[str] = None,
-    product_id: Optional[str] = None
+    product_id: Optional[str] = None,
+    *,
+    order_random: bool = False,
 ):
     query = db.query(Product)
 
@@ -1279,7 +1281,10 @@ def get_products(
             _log_search(db, raw_query, total, ai_processed=ai_processed)
     if not (q and q.strip()):
         total = query.count()
-        products = query.order_by(Product.id).offset(skip).limit(limit).all()
+        if order_random:
+            products = query.order_by(sql_func.random()).offset(skip).limit(limit).all()
+        else:
+            products = query.order_by(Product.id).offset(skip).limit(limit).all()
     
     return {
         "total": total,

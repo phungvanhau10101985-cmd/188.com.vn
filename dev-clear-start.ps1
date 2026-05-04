@@ -3,6 +3,8 @@
   Xoá cache, rồi khởi động local: backend (uvicorn), frontend (Next.js), ngrok.
   Cấu hình cổng ở biến bên dưới (mặc định: backend 8001, frontend 3001 — trùng deploy/update-vps.sh + NEXT_PUBLIC_API_BASE_URL).
 
+  Giải phóng cổng: chỉ LISTEN trên hai port trên (Get-NetTCPConnection); và chỉ dừng ngrok.exe khi dòng lệnh có forward tới đúng port frontend (vd ngrok http 3001). Không dừng ngrok tunnel khác cổng.
+
   Cách chạy:
     powershell -ExecutionPolicy Bypass -File .\dev-clear-start.ps1
     .\dev-clear-start.ps1 -KillAllNode    # tat moi node.exe — than trong
@@ -40,11 +42,33 @@ function Stop-ProcessOnPort([int]$Port) {
         if ($procId -and $procId -ne 0) {
             try {
                 Stop-Process -Id $procId -Force -ErrorAction Stop
-                Write-Host ("  Da dung process PID {0} (port {1})" -f $procId, $Port)
+                Write-Host ("  Da dung process PID {0} (chi port LISTEN {1})" -f $procId, $Port)
             } catch {
                 $errText = if ($null -ne $_.Exception) { $_.Exception.Message } else { $_.ToString() }
                 Write-Host ("  Khong the dung PID {0} - {1}" -f $procId, $errText) -ForegroundColor Yellow
             }
+        }
+    }
+}
+
+# Chi dung ngrok forward toi dung local port (vd ngrok http 3001). Khong dong tunnel khac port.
+function Stop-NgrokForwardingLocalPort([int]$LocalPort) {
+    try {
+        $procs = Get-CimInstance Win32_Process -Filter "Name = 'ngrok.exe'" -ErrorAction SilentlyContinue
+    } catch { return }
+    if (-not $procs) { return }
+    $esc = [regex]::Escape([string]$LocalPort)
+    # Vi du CLI: ngrok http 3001  |  ngrok.exe http 3001 --region=...
+    $rx = "(?i)\s$esc(?:\s|$|[`"])"
+    foreach ($p in @($procs)) {
+        $cmd = [string]$p.CommandLine
+        if ([string]::IsNullOrWhiteSpace($cmd)) { continue }
+        if ($cmd -notmatch $rx) { continue }
+        try {
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop
+            Write-Host ("  Da dung ngrok.exe PID {0} (forward toi localhost:{1})" -f $p.ProcessId, $LocalPort)
+        } catch {
+            Write-Host ("  Khong the dung ngrok PID {0}" -f $p.ProcessId) -ForegroundColor Yellow
         }
     }
 }
@@ -170,11 +194,10 @@ function Remove-DirIfExists([string]$Path, [string]$Label) {
 }
 
 # ===========================================================================
-Write-Step "Dang giai phong port $BackendPort, $FrontendPort va dung ngrok cu..."
+Write-Step "Giai phong chi port du an (LISTEN $BackendPort, $FrontendPort) + ngrok gan port $FrontendPort..."
 Stop-ProcessOnPort -Port $BackendPort
 Stop-ProcessOnPort -Port $FrontendPort
-$ng = Get-Process -Name "ngrok" -ErrorAction SilentlyContinue
-if ($ng) { $ng | Stop-Process -Force; Write-Host "  Da dung ngrok.exe" }
+Stop-NgrokForwardingLocalPort -LocalPort $FrontendPort
 
 Write-Step "Dung node.exe lien quan thu muc frontend (giai phong lock .next)..."
 if ($KillAllNode) {

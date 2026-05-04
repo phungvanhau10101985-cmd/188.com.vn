@@ -14,7 +14,7 @@ import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { useToast } from '@/components/ToastProvider';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
-import { isCartRequiresLoginError } from '@/features/cart/cart-errors';
+import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
 import { trackEvent } from '@/lib/analytics';
 import ProductVariantModal from '@/app/products/[slug]/components/ProductVariantModal/ProductVariantModal';
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
@@ -441,39 +441,42 @@ export default function ShopVideoFeedClient() {
 
   const handleVariantModalAddToCart = useCallback(
     async (p: Product, qty: number, selectedSize?: string, selectedColor?: string) => {
-      try {
-        const lineImg = cartLineMainImage(p, selectedColor);
-        await addToCart({
-          product_id: p.id,
-          quantity: qty,
-          selected_size: selectedSize,
-          selected_color: selectedColor,
-          line_image_url: lineImg,
-          product_data: {
-            id: p.id,
-            product_id: p.product_id,
-            name: p.name,
-            price: p.price,
-            main_image: lineImg,
-            brand_name: p.brand_name,
-            available: p.available,
-            original_price: p.original_price,
-            slug: p.slug,
-          },
+      const lineImg = cartLineMainImage(p, selectedColor);
+      const payload = {
+        product_id: p.id,
+        quantity: qty,
+        selected_size: selectedSize,
+        selected_color: selectedColor,
+        line_image_url: lineImg,
+        product_data: {
+          id: p.id,
+          product_id: p.product_id,
+          name: p.name,
+          price: p.price,
+          main_image: lineImg,
+          brand_name: p.brand_name,
+          available: p.available,
+          original_price: p.original_price,
+          slug: p.slug,
+        },
+      };
+      if (!isAuthenticated) {
+        queuePendingCartAfterLogin(payload);
+        pushToast({
+          title: 'Đăng nhập để thêm giỏ',
+          description: 'Sau đăng nhập bạn sẽ được chuyển tới giỏ hàng với sản phẩm đã chọn.',
+          variant: 'info',
+          durationMs: 3200,
         });
+        router.push(buildAuthLoginHrefFromFullPath('/cart'));
+        trackEvent('add_to_cart_click', { product_id: p.id, quantity: qty, source: 'shop_video_feed', status: 'requires_login' });
+        return;
+      }
+      try {
+        await addToCart(payload);
         pushToast({ title: 'Đã thêm vào giỏ hàng', variant: 'success', durationMs: 2000 });
         trackEvent('add_to_cart_click', { product_id: p.id, quantity: qty, source: 'shop_video_feed' });
       } catch (err: unknown) {
-        if (isCartRequiresLoginError(err)) {
-          pushToast({
-            title: 'Cần đăng nhập',
-            description: err.message,
-            variant: 'info',
-            durationMs: 2600,
-          });
-          router.push(buildAuthLoginHrefFromFullPath(getBrowserReturnLocation()));
-          return;
-        }
         const message = err instanceof Error ? err.message : String(err);
         if (message.includes('Authentication required') || message.includes('401')) {
           pushToast({
@@ -488,7 +491,7 @@ export default function ShopVideoFeedClient() {
         }
       }
     },
-    [addToCart, pushToast, router]
+    [addToCart, pushToast, router, isAuthenticated]
   );
 
   const handleVariantModalBuyNow = useCallback((_p: Product, _qty: number, _size?: string, _color?: string) => {}, []);

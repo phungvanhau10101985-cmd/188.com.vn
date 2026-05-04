@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================
 REM  dev-clear-start.bat — DEV LOCAL 188.com.vn
-REM  - Tat process cu (8001 / 3001 / ngrok) + xoa cache .next, __pycache__
+REM  - Giai phong LISTEN tren port backend/frontend (mac dinh 8001 + 3001); chi tat ngrok neu CLI forward dung port frontend
 REM  - Khoi dong backend uvicorn (8001) + Next (3001) + ngrok (neu co)
 REM
 REM  Cach dung:

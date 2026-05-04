@@ -180,15 +180,19 @@ def read_products(
     max_price: Optional[float] = Query(None, ge=0),
     is_active: Optional[bool] = True,
     q: Optional[str] = Query(None, description="Tìm theo tên, mã, danh mục, vật liệu, kiểu dáng, màu sắc, dịp, tính năng, size (từ khóa rời rạc)"),
-    product_id: Optional[str] = Query(None, description="Tìm theo ID sản phẩm (Excel)")
+    product_id: Optional[str] = Query(None, description="Tìm theo ID sản phẩm (Excel)"),
+    order_random: bool = Query(False, description="Trộn ngẫu nhiên (chỉ áp dụng khi không có q); phân trang theo random không ổn định giữa các lần tải"),
 ):
     """
     Get products with filtering and search (by name, by product_id)
     """
     try:
-        response.headers["Cache-Control"] = "public, max-age=60"
         raw_q = (q or "").strip()
         pid = (product_id or "").strip()
+        if order_random and not raw_q and not pid:
+            response.headers["Cache-Control"] = "private, no-store"
+        else:
+            response.headers["Cache-Control"] = "public, max-age=60"
         cache_key = None
         if raw_q and not pid:
             norm_q = crud.product._normalize_search_key(raw_q)
@@ -217,7 +221,8 @@ def read_products(
             shop_name=shop_name, shop_id=shop_id,
             pro_lower_price=pro_lower_price, pro_high_price=pro_high_price,
             min_price=min_price, max_price=max_price, is_active=is_active,
-            q=q, product_id=product_id
+            q=q, product_id=product_id,
+            order_random=order_random,
         )
         
         # Convert SQLAlchemy objects to dicts
