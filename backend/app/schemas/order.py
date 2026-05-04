@@ -86,6 +86,7 @@ class OrderUpdate(BaseModel):
     shipping_provider: Optional[str] = None
     estimated_delivery: Optional[datetime] = None
     cancelled_reason: Optional[str] = None
+    staff_consultation_contacted: Optional[bool] = None
 
 class OrderResponse(BaseModel):
     """Order response for users"""
@@ -159,6 +160,7 @@ class AdminOrderResponse(OrderResponse):
     admin_notes: Optional[str]
     cancelled_reason: Optional[str]
     updated_at: Optional[datetime]
+    staff_consultation_contacted: bool = False
     
     class Config:
         from_attributes = True

@@ -82,6 +82,8 @@ class Order(Base):
     admin_notes = Column(Text)
     cancelled_reason = Column(Text)
     processed_by = Column(Integer, ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True)
+    # Nhân viên chốt đơn đã liên hệ tư vấn khách
+    staff_consultation_contacted = Column(Boolean, default=False, nullable=False)
     
     # Timestamps
     deposit_paid_at = Column(DateTime(timezone=True))

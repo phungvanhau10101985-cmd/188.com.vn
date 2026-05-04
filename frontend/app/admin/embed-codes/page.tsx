@@ -139,13 +139,22 @@ export default function AdminEmbedCodesPage() {
     }
   }, []);
 
+  /** Ẩn mục NanoAI try_on (đã bỏ khỏi preset; có thể còn bản ghi DB cũ cho đến khi API xóa khi start). */
+  const listForDisplay = useMemo(
+    () =>
+      list.filter(
+        (row) => !(row.platform?.toLowerCase() === 'nanoai' && row.category?.toLowerCase() === 'try_on'),
+      ),
+    [list],
+  );
+
   useEffect(() => {
     load();
   }, [load]);
 
   const grouped = useMemo(() => {
     const buckets = new Map<string, SiteEmbedCodeAdmin[]>();
-    for (const row of list) {
+    for (const row of listForDisplay) {
       const k = row.platform?.toLowerCase() || 'other';
       const arr = buckets.get(k) ?? [];
       arr.push(row);
@@ -155,7 +164,7 @@ export default function AdminEmbedCodesPage() {
       arr.sort((a, b) => (a.sort_order !== b.sort_order ? a.sort_order - b.sort_order : a.id - b.id));
     }
     return [...buckets.entries()].sort(([a], [b]) => platformOrder(a) - platformOrder(b));
-  }, [list]);
+  }, [listForDisplay]);
 
   const openAdd = () => {
     setEditingId(null);
@@ -292,7 +301,7 @@ export default function AdminEmbedCodesPage() {
 
         {loading ? (
           <p className="text-gray-500">Đang tải...</p>
-        ) : list.length === 0 ? (
+        ) : listForDisplay.length === 0 ? (
           <p className="text-gray-500">Chưa có dữ liệu. Nhấn &quot;Thêm mục&quot; hoặc khởi động lại API để tạo mẫu.</p>
         ) : (
           <div className="space-y-8">

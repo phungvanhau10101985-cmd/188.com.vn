@@ -146,7 +146,7 @@ def init_database_tables():
                 if n:
                     print(f"✅ Seeded {n} site embed placeholders (Google/Facebook/Zalo…)")
                 if tn:
-                    print(f"✅ Disabled {tn} NanoAI try-on embed row(s)")
+                    print(f"✅ Removed {tn} NanoAI try-on embed row(s)")
             finally:
                 _s.close()
         except Exception as seed_err:

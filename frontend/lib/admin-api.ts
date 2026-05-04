@@ -152,6 +152,7 @@ export interface AdminOrderItem {
   quantity: number;
   unit_price: number;
   total_price: number;
+  requires_deposit?: boolean;
   selected_size?: string | null;
   selected_color?: string | null;
   selected_color_name?: string | null;
@@ -166,6 +167,8 @@ export interface AdminOrder {
   total_amount: number;
   status: string;
   payment_status: string;
+  /** Nhân viên đã liên hệ tư vấn */
+  staff_consultation_contacted?: boolean;
   requires_deposit: boolean;
   deposit_amount: number;
   deposit_paid: number;
@@ -576,7 +579,7 @@ export const adminOrderAPI = {
   getStats: (period: 'today' | 'week' | 'month' | 'year' | 'all' = 'today') =>
     fetchAdmin<AdminOrderStats>(`/orders/admin/stats?period=${period}`),
 
-  updateOrder: (orderId: number, data: { status?: string }) =>
+  updateOrder: (orderId: number, data: { status?: string; staff_consultation_contacted?: boolean }) =>
     fetchAdmin<AdminOrder>(`/orders/admin/${orderId}`, {
       method: 'PUT',
       body: JSON.stringify(data),

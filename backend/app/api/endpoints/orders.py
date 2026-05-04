@@ -14,6 +14,54 @@ from app.core.config import settings
 from app.services.email_service import send_order_email, send_deposit_confirmed_email_task
 from app.services import sepay as sepay_svc
 
+
+def _dec(v) -> Decimal:
+    """Chuẩn hóa Numeric/Decimal/str về Decimal (0 nếu rỗng)."""
+    if v is None:
+        return Decimal("0")
+    return Decimal(str(v))
+
+
+def _admin_expected_deposit_rows(order: models.Order) -> bool:
+    """Đơn cần cọc theo cờ Order hoặc theo ít nhất một dòng hàng có requires_deposit (dữ liệu lệch cờ)."""
+    if getattr(order, "requires_deposit", False):
+        return True
+    for row in getattr(order, "items", None) or []:
+        if getattr(row, "requires_deposit", False):
+            return True
+    return False
+
+
+def resolve_order_deposit_due(order: models.Order) -> Decimal:
+    """
+    Số tiền cọc cần thu: khớp logic khách hàng FE / admin FE — ưu tiên deposit_amount lưu;
+    nếu bằng 0 nhưng đơn thuộc trường hợp cần cọc thì suy từ % / deposit_type / mặc định 30%.
+    """
+    stored = _dec(getattr(order, "deposit_amount", None))
+    if stored > 0:
+        return stored.quantize(Decimal("0.01"))
+
+    if not _admin_expected_deposit_rows(order):
+        return Decimal("0")
+
+    total = _dec(order.total_amount)
+    if total <= 0:
+        return Decimal("0")
+
+    dt = getattr(order.deposit_type, "value", order.deposit_type)
+    pct = int(getattr(order, "deposit_percentage", None) or 0)
+
+    if dt == DepositTypeEnum.PERCENT_100.value or pct == 100:
+        return total.quantize(Decimal("0.01"))
+    if dt == DepositTypeEnum.PERCENT_30.value or pct == 30:
+        return (total * Decimal("0.3")).quantize(Decimal("0.01"))
+
+    status_val = getattr(order.status, "value", order.status)
+    if status_val == OrderStatusEnum.WAITING_DEPOSIT.value:
+        return (total * Decimal("0.3")).quantize(Decimal("0.01"))
+    return Decimal("0")
+
+
 router = APIRouter()
 
 # ========== USER ORDER ENDPOINTS ==========
@@ -414,6 +462,12 @@ def admin_update_order(
     """
     Admin: Update order status
     """
+    order_before = crud.order.get_order(db, order_id=order_id)
+    if not order_before:
+        raise HTTPException(status_code=404, detail="Order not found")
+    old_status_val = getattr(order_before.status, "value", order_before.status)
+    update_payload = order_update.model_dump(exclude_unset=True)
+
     order = crud.order.admin_update_order(
         db=db,
         order_id=order_id,
@@ -423,15 +477,17 @@ def admin_update_order(
     
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
-    recipient = order.customer_email or (order.user.email if order.user else None)
-    if recipient:
-        background_tasks.add_task(
-            send_order_email,
-            recipient,
-            f"Cập nhật trạng thái đơn {order.order_code}",
-            f"Đơn hàng của bạn đã được cập nhật trạng thái: {order.status}.",
-        )
+
+    new_status_val = getattr(order.status, "value", order.status)
+    if update_payload.get("status") is not None and str(new_status_val) != str(old_status_val):
+        recipient = order.customer_email or (order.user.email if order.user else None)
+        if recipient:
+            background_tasks.add_task(
+                send_order_email,
+                recipient,
+                f"Cập nhật trạng thái đơn {order.order_code}",
+                f"Đơn hàng của bạn đã được cập nhật trạng thái: {order.status}.",
+            )
     return order
 
 @router.post("/admin/{order_id}/confirm-deposit", response_model=schemas.AdminOrderResponse)
@@ -509,11 +565,26 @@ def admin_confirm_deposit_manual(
     status_val = getattr(order.status, "value", order.status)
     if status_val != OrderStatusEnum.WAITING_DEPOSIT.value:
         raise HTTPException(status_code=400, detail="Chỉ xác nhận được đơn đang chờ đặt cọc")
-    if not order.requires_deposit or not order.deposit_amount:
+    amount_due = resolve_order_deposit_due(order)
+    if not _admin_expected_deposit_rows(order) and _dec(order.deposit_amount) <= 0:
         raise HTTPException(status_code=400, detail="Đơn không yêu cầu cọc")
-    order.deposit_paid = order.deposit_amount
+    if amount_due <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Không xác định được số tiền cọc — kiểm tra tổng đơn hoặc cập nhật loại / % đặt cọc",
+        )
+
+    stored_amt = _dec(order.deposit_amount)
+    dt_val = getattr(order.deposit_type, "value", order.deposit_type)
+    if stored_amt != amount_due:
+        order.deposit_amount = amount_due
+        if dt_val in (None, DepositTypeEnum.NONE.value, "", "none"):
+            order.deposit_type = DepositTypeEnum.PERCENT_30
+            order.deposit_percentage = 30
+
+    order.deposit_paid = amount_due
     order.deposit_paid_at = datetime.now()
-    order.remaining_amount = order.total_amount - order.deposit_paid
+    order.remaining_amount = (_dec(order.total_amount) - amount_due).quantize(Decimal("0.01"))
     if order.deposit_type == DepositTypeEnum.PERCENT_100:
         order.payment_status = PaymentStatusEnum.PAID
         order.status = OrderStatusEnum.CONFIRMED

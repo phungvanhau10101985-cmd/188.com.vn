@@ -152,7 +152,7 @@ def _merge_missing_embed_presets(db: Session) -> int:
 
 
 def deactivate_nanoai_try_on_embeds(db: Session) -> int:
-    """Tắt và xóa snippet các dòng nanoai/try_on (mục admin đã gỡ)."""
+    """Xóa dòng nanoai/try_on — không còn script riêng; PDP/video dùng chung embed chat + data-primary."""
     rows = (
         db.query(SiteEmbedCode)
         .filter(
@@ -161,12 +161,9 @@ def deactivate_nanoai_try_on_embeds(db: Session) -> int:
         )
         .all()
     )
-    n = 0
+    n = len(rows)
     for row in rows:
-        if row.is_active or (row.content or "").strip():
-            row.is_active = False
-            row.content = ""
-            n += 1
+        db.delete(row)
     if n:
         db.commit()
     return n

@@ -44,13 +44,20 @@ function parseMoney(value: unknown): number {
   return Number.isFinite(x) ? x : 0;
 }
 
+/** Đơn có nghiệp vụ đặt cọc (cờ đơn hoặc có dòng SP cọc — tránh cờ và dòng không khớp). */
+function adminOrderExpectsDeposit(order: AdminOrder): boolean {
+  if (order.requires_deposit) return true;
+  return (order.items || []).some((i) => i.requires_deposit);
+}
+
 /**
- * Tiền cọc cần thu: dùng giá trị lưu DB; nếu bằng 0 nhưng đơn vẫn cần cọc thì suy từ % / loại cọc / mặc định 30% (đơn lỗi hoặc dữ liệu cũ).
+ * Tiền cọc cần thu: ưu tiên deposit_amount; không suy luận nếu không xác định là đơn cần cọc
+ * (tránh hiển thị sai khi chỉ sót số trong DB).
  */
 function depositRequiredDisplay(order: AdminOrder): number {
   const stored = parseMoney(order.deposit_amount);
   if (stored > 0) return stored;
-  if (!order.requires_deposit) return 0;
+  if (!adminOrderExpectsDeposit(order)) return 0;
   const total = parseMoney(order.total_amount);
   if (order.deposit_percentage === 100) return total;
   if (order.deposit_percentage === 30) return Math.round(total * 0.3);
@@ -58,6 +65,32 @@ function depositRequiredDisplay(order: AdminOrder): number {
   if (order.deposit_type === 'percent_30') return Math.round(total * 0.3);
   if (order.status === 'waiting_deposit' && total > 0) return Math.round(total * 0.3);
   return 0;
+}
+
+/**
+ * Số tiền khách phải trả khi nhận hàng (COD sau cọc / khi không cọc là cả đơn).
+ */
+function amountDueOnDelivery(order: AdminOrder): number {
+  const total = parseMoney(order.total_amount);
+  const paidDeposit = parseMoney(order.deposit_paid);
+  const apiRemain = parseMoney(order.remaining_amount);
+  const needDeposit = depositRequiredDisplay(order);
+
+  if (!adminOrderExpectsDeposit(order)) {
+    if (apiRemain > 0) return Math.max(0, Math.round(apiRemain));
+    return Math.max(0, Math.round(total));
+  }
+
+  if (paidDeposit <= 0) {
+    return Math.max(0, Math.round(total - needDeposit));
+  }
+
+  if (apiRemain > 0 || paidDeposit >= needDeposit || order.status !== 'waiting_deposit') {
+    const r = apiRemain > 0 ? apiRemain : total - paidDeposit;
+    return Math.max(0, Math.round(r));
+  }
+
+  return Math.max(0, Math.round(total - paidDeposit));
 }
 
 /** Link SP public: ưu tiên NEXT_PUBLIC_SITE_URL để admin localhost vẫn mở đúng shop. */
@@ -107,6 +140,7 @@ export default function AdminOrdersPage() {
   const [orderPayments, setOrderPayments] = useState<PaymentRecord[]>([]);
   const [paymentNote, setPaymentNote] = useState('');
   const [loadingPayments, setLoadingPayments] = useState(false);
+  const [consultSavingId, setConsultSavingId] = useState<number | null>(null);
 
   const showToast = (type: 'ok' | 'err', msg: string) => {
     setToast({ type, msg });
@@ -249,6 +283,21 @@ export default function AdminOrdersPage() {
     }
   };
 
+  const handleConsultationToggle = async (order: AdminOrder, checked: boolean) => {
+    setConsultSavingId(order.id);
+    try {
+      const updated = await adminOrderAPI.updateOrder(order.id, { staff_consultation_contacted: checked });
+      const flag = !!updated.staff_consultation_contacted;
+      setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, staff_consultation_contacted: flag } : o)));
+      setSelectedOrder((cur) => (cur?.id === order.id ? { ...cur, staff_consultation_contacted: flag } : cur));
+      showToast('ok', checked ? 'Đã đánh dấu đã liên hệ tư vấn' : 'Đã bỏ đánh dấu');
+    } catch (err: unknown) {
+      showToast('err', err instanceof Error ? err.message : 'Không cập nhật được cờ tư vấn');
+    } finally {
+      setConsultSavingId(null);
+    }
+  };
+
   const tabs = [
     { key: 'all', label: 'Tất cả', countKey: 'total_orders' as const },
     { key: 'waiting_deposit', label: 'Chờ đặt cọc', countKey: 'waiting_deposit_orders' as const },
@@ -371,10 +420,17 @@ export default function AdminOrdersPage() {
                 <thead className="bg-gray-50 border-b">
                   <tr>
                     <th className="p-3 font-medium">Mã đơn</th>
+                    <th
+                      className="p-3 font-medium text-center w-28"
+                      title="Nhân viên chốt đơn đã liên hệ tư vấn khách"
+                    >
+                      Đã liên hệ tư vấn
+                    </th>
                     <th className="p-3 font-medium">Khách hàng</th>
                     <th className="p-3 font-medium">Tổng tiền</th>
-                    <th className="p-3 font-medium">Đặt cọc</th>
-                    <th className="p-3 font-medium">Trạng thái</th>
+                    <th className="p-3 font-medium min-w-[8.5rem] max-w-[11rem] leading-snug align-bottom" title="Tổng đơn trừ cọc đã đặt — hoặc theo remaining_amount từ hệ thống">
+                      Số tiền cần thanh toán khi nhận hàng
+                    </th>
                     <th className="p-3 font-medium">Thanh toán</th>
                     <th className="p-3 font-medium">Ngày đặt</th>
                     <th className="p-3 font-medium">Thao tác</th>
@@ -384,13 +440,24 @@ export default function AdminOrdersPage() {
                   {filteredOrders.map((order) => (
                     <tr key={order.id} className="border-b hover:bg-gray-50">
                       <td className="p-3 font-mono text-sm">{order.order_code}</td>
+                      <td className="p-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={!!order.staff_consultation_contacted}
+                          disabled={consultSavingId === order.id}
+                          onChange={(e) => void handleConsultationToggle(order, e.target.checked)}
+                          className="h-4 w-4 rounded border-gray-300 text-[#ea580c] focus:ring-[#ea580c] cursor-pointer disabled:opacity-50"
+                          title="Nhân viên chốt đơn đã liên hệ tư vấn khách"
+                          aria-label={`Đã liên hệ tư vấn — đơn ${order.order_code}`}
+                        />
+                      </td>
                       <td className="p-3">
                         <div className="font-medium">{order.customer_name}</div>
                         <div className="text-gray-500 text-sm">{order.customer_phone}</div>
                       </td>
                       <td className="p-3 font-semibold">{formatVnd(order.total_amount)}</td>
                       <td className="p-3 text-sm">
-                        {order.requires_deposit ? (
+                        {depositRequiredDisplay(order) > 0 || adminOrderExpectsDeposit(order) ? (
                           <>
                             Cần: {formatVnd(depositRequiredDisplay(order))}
                             <br />
@@ -399,6 +466,9 @@ export default function AdminOrdersPage() {
                         ) : (
                           <span className="text-green-600">Không cần cọc</span>
                         )}
+                      </td>
+                      <td className="p-3 text-sm whitespace-nowrap font-semibold tabular-nums text-gray-900">
+                        {formatVnd(amountDueOnDelivery(order))}
                       </td>
                       <td className="p-3">
                         <span className="px-2 py-1 rounded text-sm bg-gray-100">
@@ -426,7 +496,7 @@ export default function AdminOrdersPage() {
                           >
                             Chi tiết
                           </button>
-                          {order.status === 'waiting_deposit' && (
+                          {order.status === 'waiting_deposit' && depositRequiredDisplay(order) > 0 && (
                             <button
                               onClick={() => openPaymentModal(order)}
                               className="px-2 py-1 bg-[#ea580c] text-white rounded text-sm hover:bg-[#c2410c]"
@@ -473,8 +543,17 @@ export default function AdminOrdersPage() {
                   <p className="text-gray-500 text-sm">Mã đơn (hiển thị khách)</p>
                   <p className="font-semibold text-lg tracking-wide">{selectedOrder.order_code}</p>
                   <p className="text-xs text-gray-500 mt-1">ID đơn nội bộ: #{selectedOrder.id}</p>
+                  <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm text-gray-800">
+                    <input
+                      type="checkbox"
+                      checked={!!selectedOrder.staff_consultation_contacted}
+                      disabled={consultSavingId === selectedOrder.id}
+                      onChange={(e) => void handleConsultationToggle(selectedOrder, e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300 text-[#ea580c] focus:ring-[#ea580c] cursor-pointer disabled:opacity-50"
+                    />
+                    <span title="Nhân viên chốt đơn đã liên hệ tư vấn khách">Đã liên hệ tư vấn khách</span>
+                  </label>
                   <p className="text-sm text-gray-600 mt-2">{formatDate(selectedOrder.created_at)}</p>
-                  <p className="font-semibold text-red-600 mt-1">{formatVnd(selectedOrder.total_amount)}</p>
                 </div>
                 <div className="min-w-0">
                   <p className="text-gray-500 text-sm">Khách hàng</p>
@@ -509,14 +588,39 @@ export default function AdminOrdersPage() {
                   <p className="text-sm mt-2">{STATUS_TEXTS[selectedOrder.status]} / {PAYMENT_TEXTS[selectedOrder.payment_status] || selectedOrder.payment_status}</p>
                 </div>
               </div>
-              {selectedOrder.requires_deposit && (
-                <div className="p-4 bg-yellow-50 rounded-lg mb-4">
-                  <p className="font-medium text-yellow-800">
-                    Đặt cọc: Cần {formatVnd(depositRequiredDisplay(selectedOrder))} — Đã cọc{' '}
-                    {formatVnd(parseMoney(selectedOrder.deposit_paid))}
-                  </p>
-                </div>
-              )}
+              <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-4 mb-4">
+                <p className="text-sm font-semibold text-amber-900 mb-3">Thanh toán</p>
+                <dl className="grid gap-2 text-sm">
+                  <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
+                    <dt className="text-gray-600">Tổng đơn</dt>
+                    <dd className="font-semibold text-gray-900 tabular-nums">{formatVnd(parseMoney(selectedOrder.total_amount))}</dd>
+                  </div>
+                  {adminOrderExpectsDeposit(selectedOrder) ? (
+                    <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 items-baseline">
+                      <dt className="text-gray-600 shrink-0">Đặt cọc</dt>
+                      <dd className="font-medium text-gray-900 text-right tabular-nums">
+                        <span>Cần: {formatVnd(depositRequiredDisplay(selectedOrder))}</span>
+                        <span className="text-gray-400 font-normal mx-1.5">·</span>
+                        <span>Đã cọc: {formatVnd(parseMoney(selectedOrder.deposit_paid))}</span>
+                      </dd>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
+                      <dt className="text-gray-600">Đặt cọc</dt>
+                      <dd className="text-green-700 font-medium">Không</dd>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 border-t border-amber-200/80 pt-2 mt-1 items-baseline">
+                    <dt className="text-gray-800 font-medium shrink-0">
+                      Số tiền thanh toán khi nhận hàng
+                      {adminOrderExpectsDeposit(selectedOrder) && (
+                        <span className="text-gray-500 font-normal hidden sm:inline"> (sau cọc)</span>
+                      )}
+                    </dt>
+                    <dd className="font-semibold text-red-700 tabular-nums">{formatVnd(amountDueOnDelivery(selectedOrder))}</dd>
+                  </div>
+                </dl>
+              </div>
               <div className="mb-4 overflow-x-auto">
                 <h3 className="font-semibold mb-2">Sản phẩm</h3>
                 <table className="w-full text-sm min-w-[560px]">
@@ -582,7 +686,7 @@ export default function AdminOrdersPage() {
                 </table>
               </div>
               <div className="flex flex-wrap gap-2 pt-4 border-t">
-                {selectedOrder.status === 'waiting_deposit' && (
+                {selectedOrder.status === 'waiting_deposit' && depositRequiredDisplay(selectedOrder) > 0 && (
                   <button onClick={() => { setDetailOpen(false); openPaymentModal(selectedOrder); }} className="px-4 py-2 bg-[#ea580c] text-white rounded-lg hover:bg-[#c2410c]">
                     Xác nhận cọc
                   </button>
