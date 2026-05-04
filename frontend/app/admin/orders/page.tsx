@@ -411,9 +411,25 @@ export default function AdminOrdersPage() {
         {/* Modal chi tiết đơn */}
         {detailOpen && selectedOrder && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setDetailOpen(false)}>
-            <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
-              <h2 className="text-xl font-bold mb-4">Chi tiết đơn hàng</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div
+              className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 bg-white px-6 py-4">
+                <h2 className="min-w-0 flex-1 text-xl font-bold leading-tight text-gray-900 pr-2">Chi tiết đơn hàng</h2>
+                <button
+                  type="button"
+                  aria-label="Đóng"
+                  onClick={() => setDetailOpen(false)}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-300"
+                >
+                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                 <div>
                   <p className="text-gray-500 text-sm">Mã đơn (hiển thị khách)</p>
                   <p className="font-semibold text-lg tracking-wide">{selectedOrder.order_code}</p>
@@ -421,11 +437,17 @@ export default function AdminOrdersPage() {
                   <p className="text-sm text-gray-600 mt-2">{formatDate(selectedOrder.created_at)}</p>
                   <p className="font-semibold text-red-600 mt-1">{formatVnd(selectedOrder.total_amount)}</p>
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className="text-gray-500 text-sm">Khách hàng</p>
                   <p className="font-medium">{selectedOrder.customer_name}</p>
                   <p className="text-sm">{selectedOrder.customer_phone}</p>
-                  <p className="text-sm mt-1">{STATUS_TEXTS[selectedOrder.status]} / {PAYMENT_TEXTS[selectedOrder.payment_status] || selectedOrder.payment_status}</p>
+                  <p className="text-gray-500 text-sm mt-2">Địa chỉ nhận hàng</p>
+                  <p className="text-sm text-gray-800 mt-0.5 whitespace-pre-wrap break-words">
+                    {selectedOrder.customer_address?.trim() || (
+                      <span className="text-gray-400 italic">Chưa có địa chỉ</span>
+                    )}
+                  </p>
+                  <p className="text-sm mt-2">{STATUS_TEXTS[selectedOrder.status]} / {PAYMENT_TEXTS[selectedOrder.payment_status] || selectedOrder.payment_status}</p>
                 </div>
               </div>
               {selectedOrder.requires_deposit && (
@@ -435,10 +457,10 @@ export default function AdminOrdersPage() {
               )}
               <div className="mb-4 overflow-x-auto">
                 <h3 className="font-semibold mb-2">Sản phẩm</h3>
-                <table className="w-full text-sm min-w-[520px]">
+                <table className="w-full text-sm min-w-[560px]">
                   <thead>
                     <tr className="border-b">
-                      <th className="text-left py-2 w-[76px] font-medium text-gray-600">Ảnh</th>
+                      <th className="text-left py-2 w-[140px] min-w-[140px] font-medium text-gray-600">Ảnh</th>
                       <th className="text-left py-2 font-medium text-gray-600">Sản phẩm</th>
                       <th className="text-right py-2 font-medium text-gray-600 whitespace-nowrap">SL</th>
                       <th className="text-right py-2 font-medium text-gray-600 whitespace-nowrap">Đơn giá</th>
@@ -452,14 +474,14 @@ export default function AdminOrdersPage() {
                       const size = item.selected_size?.trim();
                       return (
                         <tr key={item.id} className="border-b align-top">
-                          <td className="py-2 pr-2">
+                          <td className="py-2 pr-2 align-middle">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={orderItemImageUrl(item.product_image)}
                               alt=""
-                              className="w-14 h-14 rounded-lg object-cover border border-gray-100 bg-gray-50"
-                              width={56}
-                              height={56}
+                              className="block w-32 h-32 shrink-0 aspect-square rounded-lg object-cover border border-gray-100 bg-gray-50"
+                              width={128}
+                              height={128}
                             />
                           </td>
                           <td className="py-2 min-w-0 pr-2">
@@ -526,6 +548,7 @@ export default function AdminOrdersPage() {
                 <button onClick={() => setDetailOpen(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">
                   Đóng
                 </button>
+              </div>
               </div>
             </div>
           </div>
