@@ -51,6 +51,7 @@ export default function DaXemPage() {
                 product_data: {
                   ...data,
                   id: product.id,
+                  code: product.code,
                   product_id: product.product_id,
                   name: product.name,
                   price: product.price,

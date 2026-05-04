@@ -90,6 +90,8 @@ def facebook_capi_send_event(
     }
     if payload.event_id:
         evt["event_id"] = payload.event_id.strip()[:128]
+    if payload.event_source_url and payload.event_source_url.strip():
+        evt["event_source_url"] = payload.event_source_url.strip()[:2048]
     if payload.custom_data:
         evt["custom_data"] = payload.custom_data
     if payload.user_data:

@@ -125,7 +125,8 @@ def expand_facebook_pixel(pixel_id: str) -> List[PlacementHtml]:
     pid = re.sub(r"\D", "", (pixel_id or "").strip())
     if not pid:
         return []
-    # pixel id chỉ số — tránh inject
+    # Chỉ init — PageView gửi từ SPA (frontend AnalyticsTracker + CAPI) để tránh 2× PageView
+    # (snippet chuẩn Meta có PageView inline + tracker đều bắn → cảnh báo Meta Pixel Helper).
     snippet = (
         "<script>"
         "!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?"
@@ -134,7 +135,6 @@ def expand_facebook_pixel(pixel_id: str) -> List[PlacementHtml]:
         "t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}"
         "(window, document,'script','https://connect.facebook.net/en_US/fbevents.js');"
         f"fbq('init', '{pid}');"
-        "fbq('track', 'PageView');"
         "</script>"
         f'<noscript><img height="1" width="1" style="display:none" '
         f'src="https://www.facebook.com/tr?id={pid}&ev=PageView&noscript=1" /></noscript>'

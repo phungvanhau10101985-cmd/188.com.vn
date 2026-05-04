@@ -268,9 +268,10 @@ export default function AdminEmbedCodesPage() {
           Tokens Conversion API Facebook / TikTok chỉ máy chủ, không trong HTML public.
         </p>
         <p className="text-gray-500 text-sm mb-4">
-          API máy chủ Meta (Conversion API — cần <code>FACEBOOK_CAPI_INGEST_SECRET</code> trên backend):{' '}
-          <span className="font-mono text-xs">POST /api/v1/embed-codes/facebook/capi/send-event</span> với{' '}
-          <span className="font-mono">Authorization: Bearer {'<bí_mật>'}</span>.
+          Conversion API Meta: trình duyệt gửi <span className="font-mono text-xs">POST /api/facebook-capi</span> (Next.js, không lộ token) → backend{' '}
+          <span className="font-mono text-xs">POST /api/v1/embed-codes/facebook/capi/send-event</span>. Cần cùng một{' '}
+          <code>FACEBOOK_CAPI_INGEST_SECRET</code> trên <strong>backend</strong> và <strong>frontend (server Next)</strong>, cùng Pixel + token CAPI đã bật trong bảng dưới. Header:{' '}
+          <span className="font-mono">Authorization: Bearer {'<bí_mật>'}</span> (chỉ máy chủ).
         </p>
         <div className="rounded-xl border border-amber-200 bg-amber-50 text-amber-950 text-sm px-4 py-3 mb-6">
           <p className="font-medium mb-1">Vị trí chèn sau khi dựng sẵn</p>

@@ -63,8 +63,9 @@ class FacebookCapiEventIn(BaseModel):
     """Gửi sự kiện lên Meta Conversions API từ máy chủ (cần FACEBOOK_CAPI_INGEST_SECRET + đã nhập Pixel + token trong admin)."""
 
     event_name: str = Field(..., min_length=1, max_length=128)
-    event_id: Optional[str] = Field(None, max_length=64, description="Deduplicate với browser Pixel")
+    event_id: Optional[str] = Field(None, max_length=128, description="Deduplicate với browser Pixel")
     event_time: Optional[int] = Field(None, description="Unix seconds; server gán hiện tại nếu trống")
     action_source: str = Field(default="website")
+    event_source_url: Optional[str] = Field(None, max_length=2048, description="URL trang — tham số gốc Server Event Meta")
     custom_data: Optional[dict] = None
     user_data: Optional[dict] = None

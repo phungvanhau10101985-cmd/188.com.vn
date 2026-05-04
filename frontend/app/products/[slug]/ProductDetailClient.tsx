@@ -20,6 +20,7 @@ import ProductDetailMobile from './ProductDetailMobile';
 import ErrorState from './components/ErrorState/ErrorState';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
+import { trackMetaViewContentProduct } from '@/lib/meta-pixel';
 import { persistRelatedFiltersFromProduct } from '@/lib/product-related-tabs';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
@@ -70,6 +71,11 @@ export default function ProductDetailClient({
       slug: product.slug,
     }).catch(() => {});
   }, [product?.id, product?.name, product?.price, product?.main_image, product?.brand_name, product?.slug, product?.product_id]);
+
+  useEffect(() => {
+    if (!product?.id) return;
+    trackMetaViewContentProduct(product);
+  }, [product?.id]);
 
   useEffect(() => {
     setSelectedColorImage(null);
@@ -138,6 +144,7 @@ export default function ProductDetailClient({
       line_image_url: lineImg,
       product_data: {
         id: p.id,
+        code: p.code,
         product_id: p.product_id,
         name: p.name,
         price: p.price,
@@ -246,6 +253,7 @@ export default function ProductDetailClient({
       line_image_url: lineImg,
       product_data: {
         id: p.id,
+        code: p.code,
         product_id: p.product_id,
         name: p.name,
         price: p.price,
@@ -271,7 +279,7 @@ export default function ProductDetailClient({
     try {
       await addToCart(payload, { skipAddedPopup: true });
       trackEvent('buy_now', { product_id: p.id, quantity });
-      router.push('/checkout');
+      router.push('/cart');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes('Authentication required') || message.includes('401')) {

@@ -7,6 +7,8 @@ import { apiClient } from '@/lib/api-client';
 import type { BankAccountInfo } from '@/lib/api-client';
 import { useToast } from '@/components/ToastProvider';
 import { buildQrFromTemplate } from '@/lib/deposit-qr';
+import { trackEvent } from '@/lib/analytics';
+import { trackMetaPurchase, cartItemsFromOrderLines, type OrderApiLineForMeta } from '@/lib/meta-pixel';
 
 interface Order {
   id: number;
@@ -21,6 +23,8 @@ interface Order {
   discount_amount?: number | string;
   status: string;
   requires_deposit?: boolean;
+  deposit_type?: string;
+  items?: OrderApiLineForMeta[];
 }
 
 function orderMoney(
@@ -201,6 +205,47 @@ export default function OrderDepositPage() {
     const t = (order as { deposit_type?: string }).deposit_type ?? '';
     setDepositOption(t === 'percent_100' ? '100' : '30');
   }, [order]);
+
+  useEffect(() => {
+    if (!order || !id) return;
+    if (!order.requires_deposit) return;
+    if (order.status !== 'deposit_paid' && order.status !== 'confirmed') return;
+    const rawItems = order.items;
+    if (!rawItems?.length) return;
+    const key = `purchase_tracked_order_${order.id}`;
+    try {
+      if (typeof localStorage !== 'undefined' && localStorage.getItem(key) === '1') return;
+    } catch {
+      /* private mode */
+    }
+    const cartLike = cartItemsFromOrderLines(rawItems);
+    if (!cartLike.length) return;
+    const fromOrderTotal = orderMoney(order, 'total_amount');
+    const fromLines = rawItems.reduce(
+      (s, i) => s + (typeof i.total_price === 'number' ? i.total_price : Number(i.total_price ?? 0)),
+      0
+    );
+    const value = fromOrderTotal > 0 ? fromOrderTotal : fromLines;
+    trackMetaPurchase({ items: cartLike, value, orderId: order.id });
+    trackEvent('purchase', {
+      order_id: order.id,
+      value,
+      item_count: rawItems.length,
+      product_ids: rawItems.map((i) => i.product_id),
+      items: rawItems.map((i) => ({
+        order_item_id: i.id,
+        product_id: i.product_id,
+        quantity: i.quantity,
+        unit_price: typeof i.unit_price === 'number' ? i.unit_price : Number(i.unit_price),
+      })),
+      source: 'deposit_confirmed',
+    });
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.setItem(key, '1');
+    } catch {
+      /* ignore */
+    }
+  }, [order, id]);
 
   useEffect(() => {
     if (!order) return;

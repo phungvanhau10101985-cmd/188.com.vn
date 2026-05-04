@@ -116,6 +116,7 @@ export default function ProductDetailPage() {
         line_image_url: lineImg,
         product_data: {
           id: p.id,
+          code: p.code,
           product_id: p.product_id,
           name: p.name,
           price: p.price,
@@ -174,6 +175,7 @@ export default function ProductDetailPage() {
         line_image_url: lineImg,
         product_data: {
           id: p.id,
+          code: p.code,
           product_id: p.product_id,
           name: p.name,
           price: p.price,
@@ -197,7 +199,7 @@ export default function ProductDetailPage() {
       }
       try {
         await addToCart(payload, { skipAddedPopup: true });
-        router.push('/checkout');
+        router.push('/cart');
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         if (message.includes('Authentication required') || message.includes('401')) {

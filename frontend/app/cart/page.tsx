@@ -13,6 +13,7 @@ import { VIETNAM_PROVINCES } from '@/lib/vietnam-provinces';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
+import { trackMetaOrderAwaitingDeposit, trackMetaPurchase } from '@/lib/meta-pixel';
 import { shouldRedirectToDepositAfterCreate } from '@/lib/order-deposit';
 import { buildAuthLoginHrefFromFullPath } from '@/lib/auth-redirect';
 import type { CartLineRef } from '@/features/cart/types/cart';
@@ -310,20 +311,41 @@ export default function CartPage() {
         })),
       });
 
+      const redirectDeposit = shouldRedirectToDepositAfterCreate(order as { requires_deposit?: boolean; status?: string });
+      if (!redirectDeposit) {
+        trackMetaPurchase({
+          items: linesToOrder.map((i) => ({ ...i })),
+          value: selectedFinalPrice,
+          orderId: order.id,
+        });
+      } else {
+        trackMetaOrderAwaitingDeposit({
+          items: linesToOrder.map((i) => ({ ...i })),
+          value: selectedFinalPrice,
+          depositAmount: order.deposit_amount,
+          orderId: order.id,
+        });
+      }
+
       for (const item of linesToOrder) {
         await removeFromCart(cartLineRef(item));
       }
 
-      trackEvent('purchase', {
-        order_id: order.id,
-        value: selectedFinalPrice,
-        item_count: linesToOrder.length,
-      });
-      router.push(
-        shouldRedirectToDepositAfterCreate(order as { requires_deposit?: boolean; status?: string })
-          ? `/account/orders/${order.id}/deposit`
-          : `/account/orders/${order.id}`
-      );
+      if (!redirectDeposit) {
+        trackEvent('purchase', {
+          order_id: order.id,
+          value: selectedFinalPrice,
+          item_count: linesToOrder.length,
+          product_ids: linesToOrder.map((i) => i.product_id),
+        });
+      } else {
+        trackEvent('order_awaiting_deposit', {
+          order_id: order.id,
+          item_count: linesToOrder.length,
+          product_ids: linesToOrder.map((i) => i.product_id),
+        });
+      }
+      router.push(redirectDeposit ? `/account/orders/${order.id}/deposit` : `/account/orders/${order.id}`);
     } catch (err: unknown) {
       const message = (err as Error)?.message || 'Đặt hàng thất bại';
       pushToast({ title: 'Đặt hàng thất bại', description: message, variant: 'error', durationMs: 3500 });

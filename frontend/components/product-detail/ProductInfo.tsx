@@ -45,7 +45,7 @@ export default function ProductInfo({ product, onAddToCart, onAddToFavorite, onB
       return;
     }
     await Promise.resolve(onAddToCart(product, quantity, selectedSize, selectedColorForCart));
-    window.location.href = '/checkout';
+    window.location.href = '/cart';
   };
 
   const handleFavorite = () => {

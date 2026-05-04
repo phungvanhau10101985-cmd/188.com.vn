@@ -450,6 +450,7 @@ export default function ShopVideoFeedClient() {
         line_image_url: lineImg,
         product_data: {
           id: p.id,
+          code: p.code,
           product_id: p.product_id,
           name: p.name,
           price: p.price,
