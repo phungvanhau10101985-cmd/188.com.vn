@@ -428,10 +428,12 @@ export default function AdminOrdersPage() {
                     </th>
                     <th className="p-3 font-medium">Khách hàng</th>
                     <th className="p-3 font-medium">Tổng tiền</th>
-                    <th className="p-3 font-medium min-w-[8.5rem] max-w-[11rem] leading-snug align-bottom" title="Tổng đơn trừ cọc đã đặt — hoặc theo remaining_amount từ hệ thống">
+                    <th className="p-3 font-medium">Đặt cọc</th>
+                    <th className="p-3 font-medium min-w-[8.5rem] max-w-[11rem] leading-snug align-bottom" title="COD khi nhận hàng sau khi đã trừ cọc (hoặc cả đơn nếu không cọc)">
                       Số tiền cần thanh toán khi nhận hàng
                     </th>
-                    <th className="p-3 font-medium">Thanh toán</th>
+                    <th className="p-3 font-medium">Trạng thái</th>
+                    <th className="p-3 font-medium whitespace-nowrap">Thanh toán</th>
                     <th className="p-3 font-medium">Ngày đặt</th>
                     <th className="p-3 font-medium">Thao tác</th>
                   </tr>

@@ -220,17 +220,40 @@ export default function MobileHeader({
     });
   };
 
-  const closePanelAndGo = (href: string) => {
-    setOpenL1(new Set());
-    setOpenL2(new Set());
-    const hadPanelHistory =
-      typeof window !== 'undefined' && isMobileCategoryPanelHistoryState(window.history.state);
-    setCategoryPanelOpen(false);
-    if (hadPanelHistory) {
-      window.history.back();
-    }
-    router.push(href);
-  };
+  const closePanelAndGo = useCallback(
+    (href: string) => {
+      setOpenL1(new Set());
+      setOpenL2(new Set());
+      setCategoryPanelOpen(false);
+
+      const hadPanelHistory =
+        typeof window !== 'undefined' && isMobileCategoryPanelHistoryState(window.history.state);
+
+      const navigate = () => router.push(href);
+
+      if (hadPanelHistory) {
+        let finished = false;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          navigate();
+        };
+        const onPop = () => {
+          window.removeEventListener('popstate', onPop);
+          finish();
+        };
+        window.addEventListener('popstate', onPop);
+        window.history.back();
+        window.setTimeout(() => {
+          window.removeEventListener('popstate', onPop);
+          finish();
+        }, 350);
+      } else {
+        navigate();
+      }
+    },
+    [router],
+  );
 
   const list = initialCategoryTree || [];
 
@@ -286,7 +309,9 @@ export default function MobileHeader({
   return (
     <div
       ref={panelRef}
-      className="md:hidden sticky top-0 z-50 bg-[#f97316] pt-[env(safe-area-inset-top,0px)]"
+      className={`md:hidden sticky top-0 ${
+        categoryPanelOpen ? 'z-[110]' : 'z-50'
+      } bg-[#f97316] pt-[env(safe-area-inset-top,0px)]`}
     >
       <header className="bg-gradient-to-b from-[#f97316] to-[#ea580c] shadow-sm border-b border-orange-800/15">
         <div className={`px-2 sm:px-2.5 transition-[padding] duration-200 ${isScrolled ? 'pt-1 pb-1' : compactChrome ? 'pt-1 pb-1.5' : 'pt-1.5 pb-1'}`}>
@@ -566,12 +591,12 @@ export default function MobileHeader({
           <button
             type="button"
             aria-label="Đóng"
-            className="fixed inset-0 bg-black/40 z-40"
+            className="fixed inset-0 bg-black/40 z-[108] pointer-events-auto"
             onClick={() => closeCategoryPanel()}
           />
           <div
             id={categoryPanelId}
-            className="absolute left-0 right-0 top-full z-50 max-h-[70vh] overflow-y-auto bg-white shadow-xl rounded-b-lg border-t border-gray-200 transition-all duration-200"
+            className="absolute left-0 right-0 top-full z-[110] max-h-[70vh] overflow-y-auto overflow-x-hidden bg-white shadow-xl rounded-b-lg border-t border-gray-200 transition-all duration-200 touch-manipulation overscroll-contain pointer-events-auto"
           >
             <nav className="py-2" aria-label="Danh mục sản phẩm">
               {list.map((cat) => {
