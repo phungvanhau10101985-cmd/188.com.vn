@@ -35,6 +35,31 @@ function formatVnd(n: number | string) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(v);
 }
 
+/** Chuẩn hóa số tiền từ API (number, string, Decimal JSON). */
+function parseMoney(value: unknown): number {
+  if (value == null) return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const s = String(value).trim().replace(/\s/g, '').replace(/,/g, '');
+  const x = parseFloat(s);
+  return Number.isFinite(x) ? x : 0;
+}
+
+/**
+ * Tiền cọc cần thu: dùng giá trị lưu DB; nếu bằng 0 nhưng đơn vẫn cần cọc thì suy từ % / loại cọc / mặc định 30% (đơn lỗi hoặc dữ liệu cũ).
+ */
+function depositRequiredDisplay(order: AdminOrder): number {
+  const stored = parseMoney(order.deposit_amount);
+  if (stored > 0) return stored;
+  if (!order.requires_deposit) return 0;
+  const total = parseMoney(order.total_amount);
+  if (order.deposit_percentage === 100) return total;
+  if (order.deposit_percentage === 30) return Math.round(total * 0.3);
+  if (order.deposit_type === 'percent_100') return total;
+  if (order.deposit_type === 'percent_30') return Math.round(total * 0.3);
+  if (order.status === 'waiting_deposit' && total > 0) return Math.round(total * 0.3);
+  return 0;
+}
+
 /** Link SP public: ưu tiên NEXT_PUBLIC_SITE_URL để admin localhost vẫn mở đúng shop. */
 function shopOrigin(): string {
   const env = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, '');
@@ -86,6 +111,20 @@ export default function AdminOrdersPage() {
   const showToast = (type: 'ok' | 'err', msg: string) => {
     setToast({ type, msg });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const copyCustomerAddress = async (address: string | undefined | null) => {
+    const text = address?.trim();
+    if (!text) {
+      showToast('err', 'Không có địa chỉ để sao chép');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('ok', 'Đã sao chép địa chỉ');
+    } catch {
+      showToast('err', 'Không sao chép được — kiểm tra quyền trình duyệt');
+    }
   };
 
   const fetchOrders = useCallback(async () => {
@@ -353,9 +392,9 @@ export default function AdminOrdersPage() {
                       <td className="p-3 text-sm">
                         {order.requires_deposit ? (
                           <>
-                            Cần: {formatVnd(order.deposit_amount)}
+                            Cần: {formatVnd(depositRequiredDisplay(order))}
                             <br />
-                            Đã cọc: {formatVnd(order.deposit_paid)}
+                            Đã cọc: {formatVnd(parseMoney(order.deposit_paid))}
                           </>
                         ) : (
                           <span className="text-green-600">Không cần cọc</span>
@@ -441,7 +480,27 @@ export default function AdminOrdersPage() {
                   <p className="text-gray-500 text-sm">Khách hàng</p>
                   <p className="font-medium">{selectedOrder.customer_name}</p>
                   <p className="text-sm">{selectedOrder.customer_phone}</p>
-                  <p className="text-gray-500 text-sm mt-2">Địa chỉ nhận hàng</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <p className="text-gray-500 text-sm">Địa chỉ nhận hàng</p>
+                    <button
+                      type="button"
+                      onClick={() => void copyCustomerAddress(selectedOrder.customer_address)}
+                      disabled={!selectedOrder.customer_address?.trim()}
+                      title="Sao chép địa chỉ"
+                      aria-label="Sao chép địa chỉ nhận hàng"
+                      className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-0.5 text-xs font-medium text-gray-600 shadow-sm hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-45"
+                    >
+                      <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                        />
+                      </svg>
+                      Sao chép
+                    </button>
+                  </div>
                   <p className="text-sm text-gray-800 mt-0.5 whitespace-pre-wrap break-words">
                     {selectedOrder.customer_address?.trim() || (
                       <span className="text-gray-400 italic">Chưa có địa chỉ</span>
@@ -452,7 +511,10 @@ export default function AdminOrdersPage() {
               </div>
               {selectedOrder.requires_deposit && (
                 <div className="p-4 bg-yellow-50 rounded-lg mb-4">
-                  <p className="font-medium text-yellow-800">Đặt cọc: Cần {formatVnd(selectedOrder.deposit_amount)} — Đã cọc {formatVnd(selectedOrder.deposit_paid)}</p>
+                  <p className="font-medium text-yellow-800">
+                    Đặt cọc: Cần {formatVnd(depositRequiredDisplay(selectedOrder))} — Đã cọc{' '}
+                    {formatVnd(parseMoney(selectedOrder.deposit_paid))}
+                  </p>
                 </div>
               )}
               <div className="mb-4 overflow-x-auto">
@@ -559,7 +621,10 @@ export default function AdminOrdersPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setPaymentOpen(false)}>
             <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
               <h2 className="text-xl font-bold mb-4">Xác nhận đặt cọc</h2>
-              <p className="mb-2">Đơn <strong>{selectedOrder.order_code}</strong>. Số tiền cọc: <strong className="text-red-600">{formatVnd(selectedOrder.deposit_amount)}</strong></p>
+              <p className="mb-2">
+                Đơn <strong>{selectedOrder.order_code}</strong>. Số tiền cọc:{' '}
+                <strong className="text-red-600">{formatVnd(depositRequiredDisplay(selectedOrder))}</strong>
+              </p>
               {loadingPayments && <p className="text-gray-500 text-sm">Đang tải...</p>}
               {!loadingPayments && orderPayments.length === 0 && (
                 <p className="text-amber-600 text-sm mb-2">Chưa có giao dịch cọc.</p>

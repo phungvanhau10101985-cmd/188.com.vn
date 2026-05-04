@@ -81,9 +81,13 @@ def create_order(
 
         # 2. Calculate deposit
         deposit_type = order_data.deposit_type
+        # SP yêu cầu cọc nhưng client không gửi deposit_type → mặc định 30% (tránh requires_deposit=True với deposit_amount=0)
+        if requires_deposit and deposit_type is None:
+            deposit_type = schemas.DepositType.PERCENT_30
+
         deposit_amount = Decimal('0')
         deposit_percentage = 0
-        
+
         if requires_deposit and deposit_type:
             if deposit_type == schemas.DepositType.PERCENT_30:
                 deposit_percentage = 30

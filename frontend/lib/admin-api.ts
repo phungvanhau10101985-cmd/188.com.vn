@@ -169,6 +169,9 @@ export interface AdminOrder {
   requires_deposit: boolean;
   deposit_amount: number;
   deposit_paid: number;
+  deposit_percentage?: number;
+  deposit_type?: string | null;
+  remaining_amount?: number;
   created_at: string;
   items: AdminOrderItem[];
 }
