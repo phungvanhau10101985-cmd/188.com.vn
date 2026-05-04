@@ -9,6 +9,9 @@ import { formatPrice, getDiscountPercentage, validateImageUrl, truncateText } fr
 import type { Product, SimpleProductResponse } from '@/types/api';
 import { useCart } from '@/features/cart/hooks/useCart';
 import { cartLineMainImage } from '@/lib/product-color-variant';
+import { useToast } from '@/components/ToastProvider';
+import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
+import { isCartRequiresLoginError } from '@/features/cart/cart-errors';
 
 // Import product detail components
 import ProductGallery from '@/components/product-detail/ProductGallery';
@@ -29,6 +32,7 @@ function extractProductIdFromSlug(slug: string): string | null {
 export default function ProductDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { pushToast } = useToast();
   const slug = params.slug as string;
   
   const [product, setProduct] = useState<Product | null>(null);
@@ -122,10 +126,25 @@ export default function ProductDetailPage() {
           },
         });
       } catch (err: unknown) {
-        alert(err instanceof Error ? err.message : 'Không thể thêm vào giỏ hàng');
+        if (isCartRequiresLoginError(err)) {
+          pushToast({
+            title: 'Cần đăng nhập',
+            description: err.message,
+            variant: 'info',
+            durationMs: 2600,
+          });
+          router.push(buildAuthLoginHrefFromFullPath(getBrowserReturnLocation()));
+          return;
+        }
+        pushToast({
+          title: 'Không thể thêm vào giỏ hàng',
+          description: err instanceof Error ? err.message : 'Vui lòng thử lại',
+          variant: 'error',
+          durationMs: 3000,
+        });
       }
     },
-    [addToCart]
+    [addToCart, router, pushToast]
   );
 
   const handleBuyNow = useCallback(
@@ -155,10 +174,25 @@ export default function ProductDetailPage() {
         );
         router.push('/checkout');
       } catch (err: unknown) {
-        alert(err instanceof Error ? err.message : 'Không thể thêm vào giỏ hàng');
+        if (isCartRequiresLoginError(err)) {
+          pushToast({
+            title: 'Cần đăng nhập',
+            description: err.message,
+            variant: 'info',
+            durationMs: 2600,
+          });
+          router.push(buildAuthLoginHrefFromFullPath(getBrowserReturnLocation()));
+          return;
+        }
+        pushToast({
+          title: 'Không thể mua ngay',
+          description: err instanceof Error ? err.message : 'Vui lòng thử lại',
+          variant: 'error',
+          durationMs: 3000,
+        });
       }
     },
-    [addToCart, router]
+    [addToCart, router, pushToast]
   );
 
   const handleAddToFavorite = useCallback(

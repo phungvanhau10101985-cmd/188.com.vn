@@ -14,6 +14,7 @@ import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { useToast } from '@/components/ToastProvider';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
+import { isCartRequiresLoginError } from '@/features/cart/cart-errors';
 import { trackEvent } from '@/lib/analytics';
 import ProductVariantModal from '@/app/products/[slug]/components/ProductVariantModal/ProductVariantModal';
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
@@ -463,6 +464,16 @@ export default function ShopVideoFeedClient() {
         pushToast({ title: 'Đã thêm vào giỏ hàng', variant: 'success', durationMs: 2000 });
         trackEvent('add_to_cart_click', { product_id: p.id, quantity: qty, source: 'shop_video_feed' });
       } catch (err: unknown) {
+        if (isCartRequiresLoginError(err)) {
+          pushToast({
+            title: 'Cần đăng nhập',
+            description: err.message,
+            variant: 'info',
+            durationMs: 2600,
+          });
+          router.push(buildAuthLoginHrefFromFullPath(getBrowserReturnLocation()));
+          return;
+        }
         const message = err instanceof Error ? err.message : String(err);
         if (message.includes('Authentication required') || message.includes('401')) {
           pushToast({

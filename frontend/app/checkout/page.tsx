@@ -11,6 +11,7 @@ import type { CartItem } from '@/features/cart/types/cart';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { shouldRedirectToDepositAfterCreate } from '@/lib/order-deposit';
+import { buildAuthLoginHrefFromFullPath } from '@/lib/auth-redirect';
 
 function formatVnd(n: number) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
@@ -27,6 +28,12 @@ export default function CheckoutPage() {
   useEffect(() => {
     hideAddToCartPopup();
   }, [hideAddToCartPopup]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      router.replace(buildAuthLoginHrefFromFullPath('/checkout'));
+    }
+  }, [isAuthenticated, router]);
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [requiresDeposit, setRequiresDeposit] = useState(false);
@@ -129,19 +136,10 @@ export default function CheckoutPage() {
         item_count: cartItems.length,
       });
       pushToast({ title: 'Đặt hàng thành công', variant: 'success', durationMs: 2500 });
-      const code = (order as { order_code?: string }).order_code ?? String(order.id);
-      if (isAuthenticated) {
-        if (shouldRedirectToDepositAfterCreate(order as { requires_deposit?: boolean; status?: string })) {
-          router.push(`/account/orders/${order.id}/deposit`);
-        } else {
-          router.push(`/account/orders?highlight=${order.id}`);
-        }
-      } else if (shouldRedirectToDepositAfterCreate(order as { requires_deposit?: boolean; status?: string })) {
-        router.push(
-          `/checkout/complete?order_id=${order.id}&code=${encodeURIComponent(code)}&needs_deposit=1`
-        );
+      if (shouldRedirectToDepositAfterCreate(order as { requires_deposit?: boolean; status?: string })) {
+        router.push(`/account/orders/${order.id}/deposit`);
       } else {
-        router.push(`/checkout/complete?order_id=${order.id}&code=${encodeURIComponent(code)}`);
+        router.push(`/account/orders?highlight=${order.id}`);
       }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Lỗi đặt hàng';
@@ -151,6 +149,14 @@ export default function CheckoutPage() {
       setLoading(false);
     }
   };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-6">
+        <p className="text-sm text-gray-600">Đang chuyển đến đăng nhập...</p>
+      </div>
+    );
+  }
 
   if (cartItems.length === 0) {
     return (

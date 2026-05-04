@@ -14,6 +14,7 @@ import { getOptimizedImage } from '@/lib/image-utils';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { shouldRedirectToDepositAfterCreate } from '@/lib/order-deposit';
+import { buildAuthLoginHrefFromFullPath } from '@/lib/auth-redirect';
 import type { CartLineRef } from '@/features/cart/types/cart';
 import CartEmptySameShopSection from '@/components/cart/CartEmptySameShopSection';
 
@@ -63,10 +64,12 @@ export default function CartPage() {
   const prevCartLineIdsRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
-    if (isAuthenticated) {
-      apiClient.getAddresses().then(setAddresses).catch(() => setAddresses([]));
+    if (!isAuthenticated) {
+      router.replace(buildAuthLoginHrefFromFullPath('/cart'));
+      return;
     }
-  }, [isAuthenticated]);
+    apiClient.getAddresses().then(setAddresses).catch(() => setAddresses([]));
+  }, [isAuthenticated, router]);
 
   useEffect(() => {
     if (addresses.length > 0 && selectedAddressId == null) {
@@ -115,10 +118,7 @@ export default function CartPage() {
     prevCartLineIdsRef.current = currentIdSet;
   }, [cartLineIdKey]);
 
-  const selectionForTotals = useMemo(() => {
-    if (!isAuthenticated) return new Set(cartItems.map((i) => i.id));
-    return selectedItemIds;
-  }, [isAuthenticated, cartItems, selectedItemIds]);
+  const selectionForTotals = useMemo(() => selectedItemIds, [selectedItemIds]);
 
   const selectedCartItems = useMemo(
     () => cartItems.filter((i) => selectionForTotals.has(i.id)),
@@ -140,8 +140,15 @@ export default function CartPage() {
     cartItems.length > 0 && allLineIds.every((id) => selectionForTotals.has(id));
   const noneSelected = selectedCartItems.length === 0;
 
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-6">
+        <p className="text-sm text-gray-600">Đang chuyển đến đăng nhập...</p>
+      </div>
+    );
+  }
+
   const toggleLineSelected = (lineId: number) => {
-    if (!isAuthenticated) return;
     setSelectedItemIds((prev) => {
       const next = new Set(prev);
       if (next.has(lineId)) next.delete(lineId);
@@ -151,7 +158,7 @@ export default function CartPage() {
   };
 
   const toggleSelectAllLines = () => {
-    if (!isAuthenticated || cartItems.length === 0) return;
+    if (cartItems.length === 0) return;
     setSelectedItemIds(() => {
       if (allSelected) return new Set();
       return new Set(allLineIds);
@@ -254,11 +261,6 @@ export default function CartPage() {
   };
 
   const handleCheckout = async () => {
-    if (!isAuthenticated) {
-      trackEvent('begin_checkout', { status: 'guest_redirect_checkout' });
-      router.push('/checkout');
-      return;
-    }
     if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) return;
     if (!selectedAddress) {
       pushToast({ title: 'Vui lòng chọn địa chỉ giao hàng', variant: 'info', durationMs: 2500 });
@@ -347,9 +349,7 @@ export default function CartPage() {
     }
   };
 
-  const mdCartGridCols = isAuthenticated
-    ? 'md:grid-cols-[44px_minmax(0,1fr)_120px_120px_120px_40px]'
-    : 'md:grid-cols-[minmax(0,1fr)_120px_120px_120px_40px]';
+  const mdCartGridCols = 'md:grid-cols-[44px_minmax(0,1fr)_120px_120px_120px_40px]';
 
   if (isLoading) {
     return (
@@ -432,8 +432,7 @@ export default function CartPage() {
             {error}
           </div>
         )}
-        {isAuthenticated && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 md:p-6">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 md:p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Địa chỉ giao hàng</h3>
             {addresses.length === 0 ? (
               <p className="text-gray-500 text-sm mb-3">Chưa có địa chỉ. Thêm địa chỉ để thanh toán.</p>
@@ -473,24 +472,21 @@ export default function CartPage() {
               </Link>
             </div>
           </div>
-        )}
 
         <div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
             <div
               className={`hidden md:grid gap-3 px-5 py-3 text-xs font-semibold text-gray-500 uppercase bg-gray-50 ${mdCartGridCols}`}
             >
-              {isAuthenticated ? (
-                <div className="flex items-center justify-center">
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={toggleSelectAllLines}
-                    disabled={cartItems.length === 0}
-                    className="h-4 w-4 rounded border-gray-300 text-[#ea580c] focus:ring-[#ea580c]"
-                    aria-label="Chọn tất cả sản phẩm"
-                  />
-                </div>
-              ) : null}
+              <div className="flex items-center justify-center">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleSelectAllLines}
+                  disabled={cartItems.length === 0}
+                  className="h-4 w-4 rounded border-gray-300 text-[#ea580c] focus:ring-[#ea580c]"
+                  aria-label="Chọn tất cả sản phẩm"
+                />
+              </div>
               <span>Sản phẩm</span>
               <span className="text-right">Đơn giá</span>
               <span className="text-center">Số lượng</span>
@@ -507,17 +503,15 @@ export default function CartPage() {
                   <div key={lineKey} className="px-3 md:px-5 py-3 md:py-4">
                     <div className={`grid grid-cols-1 gap-3 items-center ${mdCartGridCols}`}>
                       <div className="flex gap-3 md:gap-4 items-center md:contents">
-                        {isAuthenticated ? (
-                          <div className="flex shrink-0 items-center justify-center md:flex md:justify-center md:items-center md:row-span-1">
-                            <input
-                              type="checkbox"
-                              checked={lineChecked}
-                              onChange={() => toggleLineSelected(item.id)}
-                              className="h-4 w-4 rounded border-gray-300 text-[#ea580c] focus:ring-[#ea580c]"
-                              aria-label={`Chọn ${item.product_data?.name ?? 'sản phẩm'} để đặt hàng`}
-                            />
-                          </div>
-                        ) : null}
+                        <div className="flex shrink-0 items-center justify-center md:flex md:justify-center md:items-center md:row-span-1">
+                          <input
+                            type="checkbox"
+                            checked={lineChecked}
+                            onChange={() => toggleLineSelected(item.id)}
+                            className="h-4 w-4 rounded border-gray-300 text-[#ea580c] focus:ring-[#ea580c]"
+                            aria-label={`Chọn ${item.product_data?.name ?? 'sản phẩm'} để đặt hàng`}
+                          />
+                        </div>
                         <div className="flex flex-1 gap-4 items-center min-w-0 md:col-span-1">
                           <button
                             type="button"
@@ -646,7 +640,7 @@ export default function CartPage() {
               <button
                 type="button"
                 onClick={handleCheckout}
-                disabled={isCheckingOut || (isAuthenticated && noneSelected)}
+                disabled={isCheckingOut || noneSelected}
                 className="w-full md:w-1/2 bg-[#ea580c] text-white font-semibold py-3 rounded-lg hover:bg-[#c2410c] transition-colors disabled:opacity-70"
               >
                 {isCheckingOut ? 'Đang xử lý...' : 'Đặt hàng'}

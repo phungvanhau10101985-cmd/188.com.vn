@@ -23,6 +23,7 @@ import { trackEvent } from '@/lib/analytics';
 import { persistRelatedFiltersFromProduct } from '@/lib/product-related-tabs';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
+import { isCartRequiresLoginError } from '@/features/cart/cart-errors';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
@@ -151,6 +152,16 @@ export default function ProductDetailClient({
       pushToast({ title: 'Đã thêm vào giỏ hàng', variant: 'success', durationMs: 2000 });
       trackEvent('add_to_cart_click', { product_id: p.id, quantity });
     } catch (err: unknown) {
+      if (isCartRequiresLoginError(err)) {
+        pushToast({
+          title: 'Cần đăng nhập',
+          description: err.message,
+          variant: 'info',
+          durationMs: 2600,
+        });
+        router.push(buildAuthLoginHrefFromFullPath(getBrowserReturnLocation()));
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes('Authentication required') || message.includes('401')) {
         pushToast({ title: 'Vui lòng đăng nhập lại', description: 'Phiên đăng nhập đã hết hạn.', variant: 'info', durationMs: 2500 });
@@ -249,6 +260,16 @@ export default function ProductDetailClient({
       trackEvent('buy_now', { product_id: p.id, quantity });
       router.push('/checkout');
     } catch (err: unknown) {
+      if (isCartRequiresLoginError(err)) {
+        pushToast({
+          title: 'Cần đăng nhập',
+          description: err.message,
+          variant: 'info',
+          durationMs: 2600,
+        });
+        router.push(buildAuthLoginHrefFromFullPath(getBrowserReturnLocation()));
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes('Authentication required') || message.includes('401')) {
         pushToast({ title: 'Vui lòng đăng nhập lại', description: 'Phiên đăng nhập đã hết hạn.', variant: 'info', durationMs: 2500 });
