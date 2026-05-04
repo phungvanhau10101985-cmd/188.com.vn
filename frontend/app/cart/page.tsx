@@ -325,6 +325,13 @@ export default function CartPage() {
           depositAmount: order.deposit_amount,
           orderId: order.id,
         });
+        try {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(`meta_order_awaiting_deposit_${order.id}`, '1');
+          }
+        } catch {
+          /* ignore */
+        }
       }
 
       for (const item of linesToOrder) {

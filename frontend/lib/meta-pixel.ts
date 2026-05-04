@@ -329,3 +329,46 @@ export function cartItemsFromOrderLines(lines: OrderApiLineForMeta[]): CartItem[
       };
     });
 }
+
+/**
+ * Fallback khi GET đơn không có `items` hoặc map rỗng — tránh không bắn Purchase/Pixel+CAPI sau cọc.
+ * content_ids ưu tiên `product_code` = mã đơn (vd. DH024).
+ */
+export function cartItemsFromOrderOrFallback(
+  order: {
+    id: number;
+    order_code?: string | null;
+    total_amount?: number | string | null;
+  },
+  lines?: OrderApiLineForMeta[] | null
+): CartItem[] {
+  const mapped = cartItemsFromOrderLines(lines ?? []);
+  if (mapped.length) return mapped;
+
+  const rawTot = order.total_amount;
+  const total =
+    typeof rawTot === 'number'
+      ? Number.isFinite(rawTot)
+        ? rawTot
+        : 0
+      : rawTot != null && String(rawTot).trim() !== ''
+        ? Number(rawTot)
+        : 0;
+  if (!(Number.isFinite(total) && total > 0)) return [];
+
+  const code = String(order.order_code ?? order.id ?? '').trim() || String(order.id);
+  const pid = Number(order.id);
+  const product_id = Number.isFinite(pid) && pid > 0 ? pid : 1;
+
+  return [
+    {
+      id: product_id,
+      product_id,
+      quantity: 1,
+      unit_price: total,
+      total_price: total,
+      ...(code ? { product_code: code } : {}),
+      product_data: { id: product_id, name: `Đơn ${code}`, price: total },
+    },
+  ];
+}

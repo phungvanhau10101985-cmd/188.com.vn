@@ -1,5 +1,5 @@
 # backend/app/crud/order.py - COMPLETE ORDER CRUD WITH DEPOSIT
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import and_, or_, func, desc
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
@@ -123,6 +123,17 @@ def create_order_with_deposit(
 def get_order(db: Session, order_id: int) -> Optional[Order]:
     """Get order by ID"""
     return db.query(Order).filter(Order.id == order_id).first()
+
+
+def get_order_with_items(db: Session, order_id: int) -> Optional[Order]:
+    """GET chi tiết đơn (khách/API) — eager load items để response luôn có dòng hàng."""
+    return (
+        db.query(Order)
+        .options(selectinload(Order.items))
+        .filter(Order.id == order_id)
+        .first()
+    )
+
 
 def update_order_deposit_type(
     db: Session,

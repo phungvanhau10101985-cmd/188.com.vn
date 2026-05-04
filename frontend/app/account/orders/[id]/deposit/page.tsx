@@ -8,7 +8,15 @@ import type { BankAccountInfo } from '@/lib/api-client';
 import { useToast } from '@/components/ToastProvider';
 import { buildQrFromTemplate } from '@/lib/deposit-qr';
 import { trackEvent } from '@/lib/analytics';
-import { trackMetaPurchase, cartItemsFromOrderLines, type OrderApiLineForMeta } from '@/lib/meta-pixel';
+import {
+  trackMetaOrderAwaitingDeposit,
+  trackMetaPurchase,
+  cartItemsFromOrderLines,
+  cartItemsFromOrderOrFallback,
+  type OrderApiLineForMeta,
+} from '@/lib/meta-pixel';
+
+const META_OD_AWAITING_LS = (orderId: number) => `meta_order_awaiting_deposit_${orderId}`;
 
 interface Order {
   id: number;
@@ -206,15 +214,15 @@ export default function OrderDepositPage() {
     setDepositOption(t === 'percent_100' ? '100' : '30');
   }, [order]);
 
+  /** Chờ cọc: bắn OrderAwaitingDeposit khi không đi qua giỏ (link trực tiếp); trùng luồng giỏ thì LS đã gắn — bỏ qua. */
   useEffect(() => {
     if (!order || !id) return;
-    if (!order.requires_deposit) return;
-    if (order.status !== 'deposit_paid' && order.status !== 'confirmed') return;
+    if (!order.requires_deposit || order.status !== 'waiting_deposit') return;
     const rawItems = order.items;
     if (!rawItems?.length) return;
-    const key = `purchase_tracked_order_${order.id}`;
+    const lsKey = META_OD_AWAITING_LS(order.id);
     try {
-      if (typeof localStorage !== 'undefined' && localStorage.getItem(key) === '1') return;
+      if (typeof localStorage !== 'undefined' && localStorage.getItem(lsKey) === '1') return;
     } catch {
       /* private mode */
     }
@@ -226,13 +234,63 @@ export default function OrderDepositPage() {
       0
     );
     const value = fromOrderTotal > 0 ? fromOrderTotal : fromLines;
+    trackMetaOrderAwaitingDeposit({
+      items: cartLike,
+      value,
+      depositAmount: order.deposit_amount,
+      orderId: order.id,
+    });
+    trackEvent('order_awaiting_deposit', {
+      order_id: order.id,
+      value,
+      deposit_amount: orderMoney(order, 'deposit_amount'),
+      item_count: rawItems.length,
+      product_ids: rawItems.map((i) => i.product_id),
+      source: 'deposit_page',
+    });
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.setItem(lsKey, '1');
+    } catch {
+      /* ignore */
+    }
+  }, [order, id]);
+
+  useEffect(() => {
+    if (!order || !id) return;
+    if (!order.requires_deposit) return;
+    if (order.status !== 'deposit_paid' && order.status !== 'confirmed') return;
+    const rawItems = order.items;
+    const key = `purchase_tracked_order_${order.id}`;
+    try {
+      if (typeof localStorage !== 'undefined' && localStorage.getItem(key) === '1') return;
+    } catch {
+      /* private mode */
+    }
+
+    const cartLike = cartItemsFromOrderOrFallback(order, rawItems);
+    if (!cartLike.length) return;
+
+    const fromOrderTotal = orderMoney(order, 'total_amount');
+    const fromLines =
+      rawItems?.reduce(
+        (s, i) => s + (typeof i.total_price === 'number' ? i.total_price : Number(i.total_price ?? 0)),
+        0
+      ) ?? 0;
+    const value = fromOrderTotal > 0 ? fromOrderTotal : fromLines > 0 ? fromLines : cartLike[0]!.total_price;
+
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.setItem(key, '1');
+    } catch {
+      /* ignore */
+    }
+
     trackMetaPurchase({ items: cartLike, value, orderId: order.id });
     trackEvent('purchase', {
       order_id: order.id,
       value,
-      item_count: rawItems.length,
-      product_ids: rawItems.map((i) => i.product_id),
-      items: rawItems.map((i) => ({
+      item_count: rawItems?.length ?? cartLike.reduce((n, l) => n + l.quantity, 0),
+      product_ids: (rawItems ?? []).map((i) => i.product_id).filter((p) => Number.isFinite(Number(p))),
+      items: (rawItems ?? []).map((i) => ({
         order_item_id: i.id,
         product_id: i.product_id,
         quantity: i.quantity,
@@ -240,11 +298,6 @@ export default function OrderDepositPage() {
       })),
       source: 'deposit_confirmed',
     });
-    try {
-      if (typeof localStorage !== 'undefined') localStorage.setItem(key, '1');
-    } catch {
-      /* ignore */
-    }
   }, [order, id]);
 
   useEffect(() => {

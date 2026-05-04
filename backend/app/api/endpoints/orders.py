@@ -406,7 +406,7 @@ def read_order(
     current_user: models.User = Depends(get_current_user)
 ):
     """Get order detail"""
-    order = crud.order.get_order(db, order_id=order_id)
+    order = crud.order.get_order_with_items(db, order_id=order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     if order.user_id != current_user.id:
