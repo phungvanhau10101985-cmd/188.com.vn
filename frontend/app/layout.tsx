@@ -8,9 +8,11 @@ import { CartProvider } from "@/features/cart/hooks/useCart";
 import { FavoriteProvider } from "@/features/favorites/hooks/useFavorites";
 import AppShell from "@/components/AppShell";
 import SiteEmbedsRoot from "@/components/SiteEmbedsRoot";
+import SiteEmbedsSsrScripts from "@/components/SiteEmbedsSsrScripts";
 import DraggableThirdPartyFloaters from "@/components/DraggableThirdPartyFloaters";
 import AnalyticsTracker from "@/components/AnalyticsTracker";
 import { fetchPublicSiteEmbeds } from "@/lib/site-embeds-public";
+import { partitionHeadEmbedsForSsr } from "@/lib/site-embed-head-ssr";
 import { ToastProvider } from "@/components/ToastProvider";
 import PwaPushRegister from "@/components/PwaPushRegister";
 import { getCategoryTreeForLayout } from "@/lib/category-seo";
@@ -147,14 +149,18 @@ export default async function RootLayout({
     getCategoryTreeForLayout(),
     fetchPublicSiteEmbeds(),
   ]);
+  const { ssrScripts, headClientRemainders } = partitionHeadEmbedsForSsr(siteEmbeds.head);
   return (
     <html
       lang="vi"
       className={`${inter.variable} ${robotoMono.variable}`}
       suppressHydrationWarning
     >
+      <head>
+        <SiteEmbedsSsrScripts specs={ssrScripts} />
+      </head>
       <body className="antialiased font-sans bg-[#fafafa] text-gray-900 min-h-screen" suppressHydrationWarning>
-        <SiteEmbedsRoot embeds={siteEmbeds} />
+        <SiteEmbedsRoot embeds={siteEmbeds} headClientRemainders={headClientRemainders} />
         <DraggableThirdPartyFloaters />
         {/* Global Providers + Header/Footer xuyên suốt */}
         <ToastProvider>

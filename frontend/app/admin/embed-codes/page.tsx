@@ -382,11 +382,24 @@ export default function AdminEmbedCodesPage() {
                           {headInjectPreview && (
                             <div className="mt-2 rounded-lg border border-slate-200 bg-slate-950 text-slate-100 overflow-hidden">
                               <p className="text-[11px] px-2 py-1.5 bg-slate-900 text-slate-400 border-b border-slate-800">
-                                Đoạn HTML head dựng sẵn từ mã (giống backend khi đang bật & chỉ mã)
+                                Đoạn HTML do hệ thống sinh từ mã (chuẩn gtag trỏ thẳng googletagmanager.com — khớp API{' '}
+                                <span className="font-mono text-slate-500">/embed-codes/public</span>)
                               </p>
                               <pre className="text-[11px] px-2 py-2 overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed">
                                 {headInjectPreview}
                               </pre>
+                              {row.platform?.toLowerCase() === 'google' &&
+                              ['ads', 'ga4'].includes(row.category?.toLowerCase() ?? '') ? (
+                                <p className="text-[10px] leading-relaxed px-2 py-2 bg-slate-900 text-slate-500 border-t border-slate-800">
+                                  Trên site thật, Google Tag / GTM hoặc chế độ first-party có thể không dùng đúng hai thẻ
+                                  trên mà thay bằng bootstrap nội bộ (ví dụ{' '}
+                                  <span className="font-mono text-slate-400">google_tags_first_party</span>,{' '}
+                                  <span className="font-mono text-slate-400">/pded/</span>,{' '}
+                                  <span className="font-mono text-slate-400">developer_id</span>…) — vẫn cùng AW-/G-.
+                                  Đối chiếu HTML trình duyệt nhận ở khối «Thẻ trong &lt;head&gt; trang chủ» phía trên; local
+                                  và server lệch nhau nếu khác dữ liệu API hoặc khác lớp tag phía Google.
+                                </p>
+                              ) : null}
                             </div>
                           )}
                         </div>

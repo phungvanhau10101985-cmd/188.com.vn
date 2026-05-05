@@ -77,8 +77,14 @@ function prependBodyFragment(html: string) {
  * Phải chạy **đồng bộ trong useLayoutEffect** (không defer `setTimeout`): hook con (Analytics, trang deposit)
  * dùng `useEffect` — nếu pixel inject trễ hơn, `fbq` chưa có hoặc sự kiện `188-site-embeds-ready` lệ pha với listener.
  */
-export default function SiteEmbedsRootClient({ embeds }: { embeds: PublicSiteEmbeds }) {
-  const initial = useRef(embeds);
+export default function SiteEmbedsRootClient({
+  embeds,
+  headClientRemainders,
+}: {
+  embeds: PublicSiteEmbeds;
+  headClientRemainders: string[];
+}) {
+  const initial = useRef({ embeds, headClientRemainders });
 
   useLayoutEffect(() => {
     if (typeof window === 'undefined') return;
@@ -89,13 +95,17 @@ export default function SiteEmbedsRootClient({ embeds }: { embeds: PublicSiteEmb
 
       try {
         const {
+          embeds: e,
+          headClientRemainders: remain,
+        } = initial.current;
+        const {
           head,
           body_open,
           body_close,
           googleAdsAwIds,
           googleAdsWebConversions,
           googleAdsWebConversionsLegacyPdpOnly,
-        } = initial.current;
+        } = e;
         if (googleAdsAwIds !== undefined) {
           setGoogleAdsSendToFromAdmin(googleAdsAwIds);
         } else {
@@ -109,7 +119,12 @@ export default function SiteEmbedsRootClient({ embeds }: { embeds: PublicSiteEmb
           clearGoogleAdsWebConversionsFromEmbed();
         }
 
-        head.forEach((h) => appendFragment(document.head, h));
+        const ssrHead = document.querySelector('script[data-188-ssr-head]');
+        if (ssrHead) {
+          remain.forEach((h) => appendFragment(document.head, h));
+        } else {
+          head.forEach((h) => appendFragment(document.head, h));
+        }
 
         for (let i = body_open.length - 1; i >= 0; i--) prependBodyFragment(body_open[i] ?? '');
         body_close.forEach((b) => appendFragment(document.body, b));
