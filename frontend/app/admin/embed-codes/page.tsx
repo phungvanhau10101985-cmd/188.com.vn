@@ -143,6 +143,8 @@ export default function AdminEmbedCodesPage() {
   const [editingSnapshot, setEditingSnapshot] = useState<SiteEmbedCodeAdmin | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
 
+  const [hideGoogleAdsGlobalRow, setHideGoogleAdsGlobalRow] = useState(false);
+
   const showToast = (type: 'ok' | 'err', msg: string) => {
     setToast({ type, msg });
     setTimeout(() => setToast(null), 4000);
@@ -160,13 +162,25 @@ export default function AdminEmbedCodesPage() {
     }
   }, []);
 
-  /** Ẩn mục NanoAI try_on (đã bỏ khỏi preset; có thể còn bản ghi DB cũ cho đến khi API xóa khi start). */
+  /** Ẩn mục trùng / không cần trong UI:
+   * - nanoai/try_on (đã bỏ preset)
+   * - google/ads: có thể ẩn tùy chọn (thường AW đã nạp qua GT-/GTM).
+   */
   const listForDisplay = useMemo(
     () =>
-      list.filter(
-        (row) => !(row.platform?.toLowerCase() === 'nanoai' && row.category?.toLowerCase() === 'try_on'),
-      ),
-    [list],
+      list.filter((row) => {
+        if (row.platform?.toLowerCase() === 'nanoai' && row.category?.toLowerCase() === 'try_on')
+          return false;
+        if (
+          hideGoogleAdsGlobalRow &&
+          row.platform?.toLowerCase() === 'google' &&
+          row.category?.toLowerCase() === 'ads'
+        ) {
+          return false;
+        }
+        return true;
+      }),
+    [list, hideGoogleAdsGlobalRow],
   );
 
   useEffect(() => {
@@ -305,6 +319,19 @@ export default function AdminEmbedCodesPage() {
             <li><span className="font-medium">Cuối body</span> — Zalo/Facebook Chat plugin.</li>
           </ul>
         </div>
+
+        <label className="flex items-start gap-2 text-sm text-gray-700 mb-4 cursor-pointer max-w-3xl">
+          <input
+            type="checkbox"
+            className="mt-1 rounded border-gray-300"
+            checked={hideGoogleAdsGlobalRow}
+            onChange={(e) => setHideGoogleAdsGlobalRow(e.target.checked)}
+          />
+          <span>
+            Ẩn dòng <span className="font-mono text-xs">google / ads</span> (Google Ads AW toàn cục) trong danh sách — khi AW chỉ nạp qua thẻ Google (GT-) / GTM để gọn màn hình.{' '}
+            Bản ghi vẫn trong database; nhập / API embed public không đổi. Bỏ tích khi cần sửa mã <span className="font-mono text-xs">AW-</span> trực tiếp.
+          </span>
+        </label>
 
         <button
           type="button"
