@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { adminSiteEmbedAPI, type SiteEmbedCodeAdmin } from '@/lib/admin-api';
 import { getAdminEmbedHeadPreview } from '@/lib/admin-embed-head-preview';
+import { LiveHomepageHeadTags } from '@/components/admin/LiveHomepageHeadTags';
 
 const PLATFORM_LABEL: Record<string, string> = {
   google: 'Google',
@@ -336,6 +337,7 @@ export default function AdminEmbedCodesPage() {
                 <h2 className="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-3">
                   {PLATFORM_LABEL[platform] || platform}
                 </h2>
+                {platform === 'google' && <LiveHomepageHeadTags />}
                 <div className="border border-gray-200 rounded-xl overflow-hidden bg-white divide-y divide-gray-100">
                   {rows.map((row) => {
                     const ck = classifyField(row.platform, row.category, row.content || '');
