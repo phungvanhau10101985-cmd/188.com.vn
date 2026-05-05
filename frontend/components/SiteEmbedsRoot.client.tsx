@@ -2,6 +2,12 @@
 
 import { useLayoutEffect, useRef } from 'react';
 import type { PublicSiteEmbeds } from '@/lib/site-embeds-public';
+import {
+  clearGoogleAdsSendToAdminOnlyMode,
+  setGoogleAdsSendToFromAdmin,
+  clearGoogleAdsWebConversionsFromEmbed,
+  setGoogleAdsWebConversionsFromEmbed,
+} from '@/lib/google-ads-gtag';
 
 /**
  * Script chèn qua innerHTML / createContextualFragment không được trình duyệt thực thi.
@@ -82,7 +88,26 @@ export default function SiteEmbedsRootClient({ embeds }: { embeds: PublicSiteEmb
       if (win.__188_SITE_EMBEDS__) return;
 
       try {
-        const { head, body_open, body_close } = initial.current;
+        const {
+          head,
+          body_open,
+          body_close,
+          googleAdsAwIds,
+          googleAdsWebConversions,
+          googleAdsWebConversionsLegacyPdpOnly,
+        } = initial.current;
+        if (googleAdsAwIds !== undefined) {
+          setGoogleAdsSendToFromAdmin(googleAdsAwIds);
+        } else {
+          clearGoogleAdsSendToAdminOnlyMode();
+        }
+        if (googleAdsWebConversions !== undefined) {
+          setGoogleAdsWebConversionsFromEmbed(googleAdsWebConversions, {
+            legacyPdpOnly: !!googleAdsWebConversionsLegacyPdpOnly,
+          });
+        } else {
+          clearGoogleAdsWebConversionsFromEmbed();
+        }
 
         head.forEach((h) => appendFragment(document.head, h));
 

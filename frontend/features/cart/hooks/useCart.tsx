@@ -6,6 +6,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { cartAPI } from '../api/cart-api';
 import { trackEvent } from '@/lib/analytics';
 import { trackMetaAddToCart } from '@/lib/meta-pixel';
+import { trackGoogleAdsAddToCart } from '@/lib/google-ads-gtag';
 import { CartRequiresLoginError } from '../cart-errors';
 import { readPendingCartAfterLogin, clearPendingCartAfterLogin } from '../pending-cart-session';
 import type {
@@ -131,6 +132,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         source: 'user',
       });
       trackMetaAddToCart(itemData);
+      trackGoogleAdsAddToCart(itemData);
     } catch (error: any) {
       setCartState((prev) => ({
         ...prev,

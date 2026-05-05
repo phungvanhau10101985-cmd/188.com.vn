@@ -18,6 +18,11 @@ import {
   cartItemsFromOrderOrFallback,
   type OrderApiLineForMeta,
 } from '@/lib/meta-pixel';
+import {
+  trackGoogleAdsDepositCheckoutPage,
+  trackGoogleAdsOrderAwaitingDeposit,
+  trackGoogleAdsPurchase,
+} from '@/lib/google-ads-gtag';
 
 const META_OD_AWAITING_LS = (orderId: number) => `meta_order_awaiting_deposit_${orderId}`;
 
@@ -218,6 +223,7 @@ export default function OrderDepositPage() {
 
     if (
       order?.requires_deposit &&
+      order.status === 'waiting_deposit' &&
       order.id === id &&
       depositViewPaymentTrackedForIdRef.current !== id
     ) {
@@ -233,6 +239,7 @@ export default function OrderDepositPage() {
       };
       trackMetaDepositPageView({ ...depositEvent, items: cartLike });
       trackMetaViewDepositPayment(depositEvent);
+      trackGoogleAdsDepositCheckoutPage({ items: cartLike, value, orderId: order.id });
     }
   }, [loading, id, order]);
 
@@ -279,6 +286,12 @@ export default function OrderDepositPage() {
       depositAmount: order.deposit_amount,
       orderId: order.id,
     });
+    trackGoogleAdsOrderAwaitingDeposit({
+      items: cartLike,
+      value,
+      depositAmount: order.deposit_amount,
+      orderId: order.id,
+    });
     trackEvent('order_awaiting_deposit', {
       order_id: order.id,
       value,
@@ -296,8 +309,12 @@ export default function OrderDepositPage() {
 
   useEffect(() => {
     if (!order) return;
-    const wasWaiting = prevStatusRef.current === 'waiting_deposit';
+    const prev = prevStatusRef.current;
     const nowDone = order.status === 'deposit_paid' || order.status === 'confirmed';
+    const wasWaiting = prev === 'waiting_deposit';
+    /** Vào trang khi đơn đã cọc (refresh / link): prev chưa từng là waiting trong phiên — vẫn cần bắn purchase. */
+    const landedAlreadyPaid = nowDone && (prev === null || prev === '');
+
     if (wasWaiting && nowDone) {
       pushToast({
         title: 'Đã xác nhận thanh toán cọc',
@@ -305,6 +322,9 @@ export default function OrderDepositPage() {
         variant: 'success',
         durationMs: 6000,
       });
+    }
+
+    if (nowDone && (wasWaiting || landedAlreadyPaid)) {
       const rawItems = order.items;
       const key = `purchase_tracked_order_${order.id}`;
       let alreadyTracked = false;
@@ -332,6 +352,7 @@ export default function OrderDepositPage() {
           }
 
           trackMetaPurchase({ items: cartLike, value, orderId: order.id });
+          trackGoogleAdsPurchase({ items: cartLike, value, orderId: order.id });
           trackEvent('purchase', {
             order_id: order.id,
             value,
@@ -350,6 +371,7 @@ export default function OrderDepositPage() {
         }
       }
     }
+
     prevStatusRef.current = order.status;
   }, [order, pushToast]);
 

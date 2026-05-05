@@ -25,6 +25,16 @@ const ID_HINT: Record<string, Record<string, string>> = {
     gtm: 'Chỉ nhập Container ID (ví dụ GTM-XXXXXXX). Hệ thống chèn đủ fragment head + noscript.',
     ads:
       'Mã AW-XXXXXXXX — dùng cho chuyển đổi và tiếp thị lại động Retail (Merchant Center trong Google Ads). Chỉ cần một mã đang bật nếu dùng cùng đích.',
+    ads_pdp_conversion:
+      'Nhập đúng mã AW-XXXXXXXX/label (trong snippet Google Ads là giá trị send_to). Được copy cả dòng «send_to»: \'…\' hoặc cả block gtag — hệ thống tự tách. Không dán <script>. Giá trị, sản phẩm… do trang tự gửi.',
+    ads_conversion_add_to_cart:
+      'Cùng định dạng AW-XXXXXXXX/label (send_to). Có thể dán thừa chữ send_to / ngoặc / snippet. Không dán script. Giá trị và mặt hàng do code tự gắn.',
+    ads_conversion_begin_checkout:
+      'AW-XXXXXXXX/label. Dán mã thuần hoặc dòng send_to từ Ads. Không dán script. Tổng giỏ / dòng hàng do code tự gắn.',
+    ads_conversion_deposit_page:
+      'AW-XXXXXXXX/label. Trang đặt cọc: code tự gắn giá trị, items, mã đơn nếu có.',
+    ads_conversion_purchase:
+      'AW-XXXXXXXX/label. Mua thành công / đã cọc: code tự gắn transaction_id, value, items.',
     search_console:
       'Chỉ nhập chuỗi xác minh của Google Search Console — hoặc bật "Dán full HTML/meta" nếu dán cả thẻ.',
     merchant_center:
@@ -99,7 +109,18 @@ function classifyField(platform: string, category: string, contentSnap: string, 
   if (useFullHtml || looksHtml(contentSnap || '')) return 'html';
 
   const idMatrix: Record<string, string[]> = {
-    google: ['ga4', 'gtm', 'ads', 'search_console', 'merchant_center'],
+    google: [
+      'ga4',
+      'gtm',
+      'ads',
+      'ads_pdp_conversion',
+      'ads_conversion_add_to_cart',
+      'ads_conversion_begin_checkout',
+      'ads_conversion_deposit_page',
+      'ads_conversion_purchase',
+      'search_console',
+      'merchant_center',
+    ],
     facebook: ['pixel', 'domain', 'chat'],
     tiktok: ['pixel'],
     zalo: ['chat'],
@@ -263,7 +284,10 @@ export default function AdminEmbedCodesPage() {
       <div className="p-6 max-w-5xl">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Mã nhúng và thẻ quảng cáo</h1>
         <p className="text-gray-600 mb-3">
-          GA4 / GTM / Google Ads AW- (bao gồm tiếp thị động Retail), Pixel Meta và TikTok (remarketing động catalogue), Zalo OA:{' '}
+          GA4 / GTM / AW- (Retail) / các dòng{' '}
+          <span className="font-mono text-xs">ads_pdp_conversion</span>,{' '}
+          <span className="font-mono text-xs">ads_conversion_*</span> (send_to AW-/label qua{' '}
+          <span className="font-mono text-xs">google_ads_web_conversions</span>), Pixel Meta và TikTok (remarketing động catalogue), Zalo OA:{' '}
           <strong className="font-medium">chỉ cần mã một dòng</strong> — không cần dán base code đầy đủ.
           Tokens Conversion API Facebook / TikTok chỉ máy chủ, không trong HTML public.
         </p>

@@ -4,7 +4,12 @@ from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.models.site_embed_code import SiteEmbedCode
-from app.schemas.site_embed_code import SiteEmbedCodeAdminItem, SiteEmbedCodeCreate, SiteEmbedCodeUpdate
+from app.schemas.site_embed_code import (
+    GoogleAdsWebConversions,
+    SiteEmbedCodeAdminItem,
+    SiteEmbedCodeCreate,
+    SiteEmbedCodeUpdate,
+)
 from app.services.site_embed_templates import collect_expanded_fragments
 
 
@@ -63,6 +68,46 @@ _DEFAULT_ROWS: tuple = (
     ("google", "ga4", "Google Analytics 4 — GA4 / gtag.js", "head", "Chỉ nhập Measurement ID: G-XXXX (không cần dán script).", 10),
     ("google", "gtm", "Google Tag Manager — container", "head", "Chỉ nhập Container ID: GTM-XXXX — hệ thống chèn đủ head + body.", 20),
     ("google", "ads", "Google Ads — thẻ toàn cục (Remarketing động / catalogue + chuyển đổi)", "head", "Chỉ nhập một mã AW-XXXXXXXX — dùng cho chuyển đổi và tiếp thị lại động Retail (kết nối feed Merchant Center trong Google Ads).", 30),
+    (
+        "google",
+        "ads_pdp_conversion",
+        "Google Ads — Chuyển đổi PDP (Lượt xem trang / view content)",
+        "head",
+        "Chỉ dán AW-XXXXXXXX/label (send_to trong Ads). Có thể dán thừa «send_to» hoặc snippet — hệ thống tự tách. Không script. Giá trị/SP chi tiết do site gửi.",
+        31,
+    ),
+    (
+        "google",
+        "ads_conversion_add_to_cart",
+        "Google Ads — Chuyển đổi: Thêm vào giỏ",
+        "head",
+        "AW-XXXXXXXX/label (send_to). Dán mã thuần hoặc cả dòng từ snippet; không <script>. Giá trị/SP do code gắn.",
+        32,
+    ),
+    (
+        "google",
+        "ads_conversion_begin_checkout",
+        "Google Ads — Chuyển đổi: Bắt đầu thanh toán (trang giỏ)",
+        "head",
+        "AW-XXXXXXXX/label. Trang giỏ / begin_checkout — không script; tổng giỏ do code gắn.",
+        33,
+    ),
+    (
+        "google",
+        "ads_conversion_deposit_page",
+        "Google Ads — Chuyển đổi: Trang đặt cọc",
+        "head",
+        "AW-XXXXXXXX/label. Trang cọc — không script; đơn/giá do code gắn.",
+        34,
+    ),
+    (
+        "google",
+        "ads_conversion_purchase",
+        "Google Ads — Chuyển đổi: Mua hàng thành công",
+        "head",
+        "AW-XXXXXXXX/label. Purchase/đã cọc — không script; transaction_id & items do code gắn.",
+        35,
+    ),
     ("google", "search_console", "Google Search Console — xác minh chủ sở hữu", "head", "Chỉ nhập chuỗi xác minh (content) trong Search Console — hoặc dán meta tag đầy đủ.", 40),
     (
         "google",
@@ -257,3 +302,84 @@ def collect_public_snippets(db: Session, validate_placement: bool = True):
     )
     head, body_open, body_close = collect_expanded_fragments(rows)
     return head, body_open, body_close
+
+
+_AW_TOKEN = re.compile(r"^AW-\d+$", re.I)
+_AW_IN_HTML = re.compile(r"\bAW-\d+\b", re.I)
+
+
+def get_active_google_ads_aw_ids(db: Session) -> List[str]:
+    """Các mã AW- từ dòng embed admin google/ads (đang bật), thứ tự sort_order → id."""
+    rows = (
+        db.query(SiteEmbedCode)
+        .filter(
+            SiteEmbedCode.is_active.is_(True),
+            SiteEmbedCode.platform == "google",
+            SiteEmbedCode.category == "ads",
+        )
+        .order_by(SiteEmbedCode.sort_order.asc(), SiteEmbedCode.id.asc())
+        .all()
+    )
+    out: List[str] = []
+    for row in rows:
+        raw = (row.content or "").strip()
+        if not raw:
+            continue
+        token = raw.upper().replace(" ", "")
+        if _AW_TOKEN.match(token):
+            if token not in out:
+                out.append(token)
+            continue
+        for m in _AW_IN_HTML.finditer(raw):
+            tid = m.group(0).upper()
+            if tid not in out:
+                out.append(tid)
+    return out
+
+
+_PDP_CONV_SEND_TO = re.compile(r"^AW-\d+/[A-Za-z0-9_-]+$", re.I)
+# Trích từ ô admin / dán nhầm cả dòng send_to hoặc snippet — chỉ cần AW-…/label
+_AW_CONVERSION_LABEL_IN_TEXT = re.compile(r"AW-\d+/[A-Za-z0-9_-]+", re.I)
+
+
+def _normalize_aw_conversion_label(raw: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    m = _AW_CONVERSION_LABEL_IN_TEXT.search(text)
+    if not m:
+        compact = re.sub(r"\s+", "", text)
+        m = _AW_CONVERSION_LABEL_IN_TEXT.search(compact)
+    if not m:
+        return ""
+    token = m.group(0)
+    if not _PDP_CONV_SEND_TO.match(token):
+        return ""
+    slash = token.index("/")
+    return f"{token[:slash].upper()}/{token[slash + 1:]}"
+
+
+def _get_active_conversion_send_to_for_category(db: Session, category: str) -> str:
+    row = (
+        db.query(SiteEmbedCode)
+        .filter(
+            SiteEmbedCode.is_active.is_(True),
+            SiteEmbedCode.platform == "google",
+            SiteEmbedCode.category == category,
+        )
+        .order_by(SiteEmbedCode.sort_order.asc(), SiteEmbedCode.id.asc())
+        .first()
+    )
+    if not row:
+        return ""
+    return _normalize_aw_conversion_label(row.content or "")
+
+
+def get_google_ads_web_conversions(db: Session) -> GoogleAdsWebConversions:
+    return GoogleAdsWebConversions(
+        pdp=_get_active_conversion_send_to_for_category(db, "ads_pdp_conversion"),
+        add_to_cart=_get_active_conversion_send_to_for_category(db, "ads_conversion_add_to_cart"),
+        begin_checkout=_get_active_conversion_send_to_for_category(db, "ads_conversion_begin_checkout"),
+        deposit_page=_get_active_conversion_send_to_for_category(db, "ads_conversion_deposit_page"),
+        purchase=_get_active_conversion_send_to_for_category(db, "ads_conversion_purchase"),
+    )

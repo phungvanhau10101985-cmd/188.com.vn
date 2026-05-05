@@ -21,6 +21,7 @@ import ErrorState from './components/ErrorState/ErrorState';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { trackMetaViewContentProduct } from '@/lib/meta-pixel';
+import { trackGoogleAdsViewItemProduct } from '@/lib/google-ads-gtag';
 import { persistRelatedFiltersFromProduct } from '@/lib/product-related-tabs';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
@@ -75,6 +76,7 @@ export default function ProductDetailClient({
   useEffect(() => {
     if (!product?.id) return;
     trackMetaViewContentProduct(product);
+    trackGoogleAdsViewItemProduct(product);
   }, [product?.id]);
 
   useEffect(() => {

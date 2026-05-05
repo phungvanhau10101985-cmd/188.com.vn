@@ -14,6 +14,11 @@ import { getOptimizedImage } from '@/lib/image-utils';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { trackMetaOrderAwaitingDeposit, trackMetaPurchase } from '@/lib/meta-pixel';
+import {
+  trackGoogleAdsCartPageView,
+  trackGoogleAdsOrderAwaitingDeposit,
+  trackGoogleAdsPurchase,
+} from '@/lib/google-ads-gtag';
 import { shouldRedirectToDepositAfterCreate } from '@/lib/order-deposit';
 import { buildAuthLoginHrefFromFullPath } from '@/lib/auth-redirect';
 import type { CartLineRef } from '@/features/cart/types/cart';
@@ -140,6 +145,26 @@ export default function CartPage() {
   const allSelected =
     cartItems.length > 0 && allLineIds.every((id) => selectionForTotals.has(id));
   const noneSelected = selectedCartItems.length === 0;
+
+  const cartTotalAll = useMemo(
+    () => cartItems.reduce((sum, item) => sum + cartLineTotal(item), 0),
+    [cartItems]
+  );
+
+  const cartAdsFingerprint = useMemo(
+    () =>
+      cartItems
+        .map((i) => `${i.id}:${i.quantity}:${cartLineTotal(i)}`)
+        .slice()
+        .sort()
+        .join('|'),
+    [cartItems]
+  );
+
+  useEffect(() => {
+    if (!isAuthenticated || cartItems.length === 0) return;
+    trackGoogleAdsCartPageView(cartItems, cartTotalAll);
+  }, [isAuthenticated, cartAdsFingerprint, cartTotalAll]);
 
   if (!isAuthenticated) {
     return (
@@ -318,8 +343,19 @@ export default function CartPage() {
           value: selectedFinalPrice,
           orderId: order.id,
         });
+        trackGoogleAdsPurchase({
+          items: linesToOrder.map((i) => ({ ...i })),
+          value: selectedFinalPrice,
+          orderId: order.id,
+        });
       } else {
         trackMetaOrderAwaitingDeposit({
+          items: linesToOrder.map((i) => ({ ...i })),
+          value: selectedFinalPrice,
+          depositAmount: order.deposit_amount,
+          orderId: order.id,
+        });
+        trackGoogleAdsOrderAwaitingDeposit({
           items: linesToOrder.map((i) => ({ ...i })),
           value: selectedFinalPrice,
           depositAmount: order.deposit_amount,

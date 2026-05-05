@@ -20,7 +20,7 @@ router = APIRouter()
 # Cache mã nhúng public (60s) — Next SSR layout gọi mỗi request → khi pool DB chật,
 # request xếp hàng và bùng QueuePool TimeoutError. Admin sửa embed: chờ ≤ 60s là thấy.
 _PUBLIC_EMBEDS_TTL = 60.0
-_PUBLIC_EMBEDS_CACHE_KEY = "embed_codes_v1:public"
+_PUBLIC_EMBEDS_CACHE_KEY = "embed_codes_v4:public"
 
 
 def _fetch_public_embeds() -> PublicSiteEmbedsResponse:
@@ -28,9 +28,17 @@ def _fetch_public_embeds() -> PublicSiteEmbedsResponse:
     db = SessionLocal()
     try:
         head, body_open, body_close = embed_crud.collect_public_snippets(db)
+        google_ads_aw_ids = embed_crud.get_active_google_ads_aw_ids(db)
+        google_ads_web_conversions = embed_crud.get_google_ads_web_conversions(db)
     finally:
         db.close()
-    return PublicSiteEmbedsResponse(head=head, body_open=body_open, body_close=body_close)
+    return PublicSiteEmbedsResponse(
+        head=head,
+        body_open=body_open,
+        body_close=body_close,
+        google_ads_aw_ids=google_ads_aw_ids,
+        google_ads_web_conversions=google_ads_web_conversions,
+    )
 
 
 @router.get("/public", response_model=PublicSiteEmbedsResponse)
@@ -120,4 +128,4 @@ def facebook_capi_send_event(
         raise HTTPException(status_code=r.status_code if r.status_code < 500 else 502, detail=body)
 
     return {"ok": True, "meta": body}
-
+

@@ -16,6 +16,17 @@ PlacementHtml = Tuple[str, str]
 # Không bao giờ đưa ra API /embed-codes/public (chỉ dùng máy chủ)
 INTERNAL_ONLY_CATEGORIES = frozenset({"capi_token"})
 
+# Chỉ metadata (AW-/label) — API embed trả qua google_ads_web_conversions, không chèn HTML.
+_GOOGLE_ADS_METADATA_ONLY_CATEGORIES = frozenset(
+    {
+        "ads_pdp_conversion",
+        "ads_conversion_add_to_cart",
+        "ads_conversion_begin_checkout",
+        "ads_conversion_deposit_page",
+        "ads_conversion_purchase",
+    }
+)
+
 
 def _pla(row: SiteEmbedCode) -> str:
     p = (row.placement or "head").strip().lower()
@@ -223,6 +234,8 @@ def expand_row(row: SiteEmbedCode) -> List[PlacementHtml]:
         return []
 
     if plat == "google":
+        if cat in _GOOGLE_ADS_METADATA_ONLY_CATEGORIES:
+            return []
         if cat == "ga4":
             return expand_ga4(raw)
         if cat == "gtm":

@@ -35,10 +35,23 @@ class SiteEmbedCodeResponse(SiteEmbedCodeBase):
         from_attributes = True
 
 
+class GoogleAdsWebConversions(BaseModel):
+    """send_to đầy đủ AW-xxxx/label từ admin — gtag('event','conversion')."""
+
+    pdp: str = ""
+    add_to_cart: str = ""
+    begin_checkout: str = ""
+    deposit_page: str = ""
+    purchase: str = ""
+
+
 class PublicSiteEmbedsResponse(BaseModel):
     head: List[str]
     body_open: List[str]
     body_close: List[str]
+    #: Chỉ từ mã nhúng admin (google/ads đang bật) — frontend dùng làm đích duy nhất cho gtag send_to.
+    google_ads_aw_ids: List[str] = Field(default_factory=list)
+    google_ads_web_conversions: GoogleAdsWebConversions = Field(default_factory=GoogleAdsWebConversions)
 
 
 class SiteEmbedCodeAdminItem(BaseModel):

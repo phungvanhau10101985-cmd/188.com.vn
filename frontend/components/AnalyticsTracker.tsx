@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { trackEvent } from '@/lib/analytics';
 import { trackMetaPageView } from '@/lib/meta-pixel';
+import { trackGoogleAdsRouteRetail } from '@/lib/google-ads-gtag';
 
 export default function AnalyticsTracker() {
   const pathname = usePathname();
@@ -21,6 +22,7 @@ export default function AnalyticsTracker() {
       title: typeof document !== 'undefined' ? document.title : '',
     });
     trackMetaPageView(path);
+    trackGoogleAdsRouteRetail(path);
   }, [pathname, searchKey]);
 
   return null;
