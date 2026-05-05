@@ -232,7 +232,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     router.push('/?' + params.toString());
   };
 
-  const showMobileBottomNav = !isAuthPage && !isProductDetailPage && !isShopVideoFeedPage;
+  const showMobileBottomNav = !isProductDetailPage && !isShopVideoFeedPage;
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
@@ -292,8 +292,8 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       )}
       </div>
       )}
-      {/* Mobile: header site — ẩn trang /auth/* (đồng bộ bottom nav, form đăng nhập đỡ chật) */}
-      {!isAuthPage && !isShopVideoFeedPage && (
+      {/* Mobile: header site — gồm /auth/* để đồng bộ với bottom nav */}
+      {!isShopVideoFeedPage && (
         <MobileHeader
           cartItemsCount={getCartItemCount()}
           viewedProductsCount={viewedProductsCount}
@@ -312,7 +312,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       {/* Footer: hiển thị cả mobile và desktop */}
       {!isShopVideoFeedPage && <Footer />}
       {!isShopVideoFeedPage && <BackToTopButton />}
-      {/* Mobile: Bottom nav - ẩn trên trang auth để dropdown chọn tháng không bị che, kéo được tháng 12 */}
+      {/* Mobile: Bottom nav — hiển thị trên /auth/* để điều hướng giống các trang khác */}
       {showMobileBottomNav && <MobileBottomNav notificationCount={0} />}
       {!isAuthPage && !isShopVideoFeedPage && !pathname?.startsWith('/admin') && (
         <FloatingShopVideoFeedButton />

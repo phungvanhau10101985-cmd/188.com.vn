@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import type { PublicSiteEmbeds } from '@/lib/site-embeds-public';
 
 /**
@@ -66,42 +66,36 @@ function prependBodyFragment(html: string) {
 }
 
 /**
- * Client-only: chèn mã embed vào head/body sau hydrate (tránh lỗi hooks/React kép khi SSR).
+ * Client-only: chèn mã embed vào head/body sau khi React gắn root (layout effect = trước paint).
+ *
+ * Phải chạy **đồng bộ trong useLayoutEffect** (không defer `setTimeout`): hook con (Analytics, trang deposit)
+ * dùng `useEffect` — nếu pixel inject trễ hơn, `fbq` chưa có hoặc sự kiện `188-site-embeds-ready` lệ pha với listener.
  */
 export default function SiteEmbedsRootClient({ embeds }: { embeds: PublicSiteEmbeds }) {
   const initial = useRef(embeds);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return;
+
     const inject = () => {
-      const win = typeof window !== "undefined" ? (window as Window & { __188_SITE_EMBEDS__?: boolean }) : null;
-      if (!win || win.__188_SITE_EMBEDS__) return;
+      const win = window as Window & { __188_SITE_EMBEDS__?: boolean };
+      if (win.__188_SITE_EMBEDS__) return;
 
       try {
         const { head, body_open, body_close } = initial.current;
 
         head.forEach((h) => appendFragment(document.head, h));
 
-        for (let i = body_open.length - 1; i >= 0; i--) prependBodyFragment(body_open[i] ?? "");
+        for (let i = body_open.length - 1; i >= 0; i--) prependBodyFragment(body_open[i] ?? '');
         body_close.forEach((b) => appendFragment(document.body, b));
         win.__188_SITE_EMBEDS__ = true;
+        window.dispatchEvent(new Event('188-site-embeds-ready'));
       } catch (err) {
-        console.warn("[SiteEmbeds] inject failed", err);
+        console.warn('[SiteEmbeds] inject failed', err);
       }
     };
 
-    if (typeof window === "undefined") return;
-
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-    /**
-     * Meta Pixel / GA cần `fbq` sớm — `requestIdleCallback` có thể trễ nhiều giây khi main thread bận,
-     * Pixel Helper báo «chưa kích hoạt gần đây». Chạy ngay sau hydrate (microtask) + hủy khi unmount.
-     */
-    timeoutId = setTimeout(inject, 0);
-
-    return () => {
-      if (timeoutId != null) clearTimeout(timeoutId);
-    };
+    inject();
   }, []);
 
   return null;

@@ -141,7 +141,7 @@ export default function ChinhSachGiaoHangPage() {
             <br />
             Đại diện Hộ Kinh Doanh Phùng Văn Hậu
           </p>
-          <p className="mt-4 text-sm text-zinc-500">© 2018 – 2026 188.COM.VN. Tất cả các quyền được bảo lưu.</p>
+          <p className="mt-4 text-sm text-zinc-500">© 2018 – nay 188.COM.VN. Tất cả các quyền được bảo lưu.</p>
         </section>
       </div>
 

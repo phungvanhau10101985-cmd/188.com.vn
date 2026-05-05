@@ -26,7 +26,7 @@ export default function InfoPageLayout({ children, title }: InfoPageLayoutProps)
                   Thông tin & Chính sách
                 </h2>
               </div>
-              <ul className="p-2 max-h-[min(70vh,28rem)] overflow-y-auto overscroll-contain lg:max-h-none">
+              <ul className="p-2 max-h-none overflow-visible lg:max-h-[min(70vh,28rem)] lg:overflow-y-auto lg:overscroll-contain">
                 {INFO_PAGES.map(({ slug, title: t }) => {
                   const href = `/info/${slug}`;
                   const isActive = pathname === href;

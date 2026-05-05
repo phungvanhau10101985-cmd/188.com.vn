@@ -143,7 +143,7 @@ export default function Footer() {
         <div className="max-w-7xl mx-auto px-4 py-4 md:py-5">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="text-gray-600 text-sm">
-              © {new Date().getFullYear()} 188.com.vn. Bảo lưu mọi quyền.
+              © 2018 – nay 188.com.vn. Bảo lưu mọi quyền.
             </div>
             <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
               <span>Thanh toán: 💳 🏦 📱</span>

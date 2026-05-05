@@ -140,6 +140,14 @@ class OrderItem(Base):
     def product_slug(self):
         return self.product.slug if self.product else None
 
+    @property
+    def product_code(self):
+        return self.product.product_id if self.product else None
+
+    @property
+    def product_sku(self):
+        return self.product.code if self.product else None
+
 class Payment(Base):
     __tablename__ = "payments"
     

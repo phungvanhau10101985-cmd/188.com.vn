@@ -9,8 +9,11 @@ import { useToast } from '@/components/ToastProvider';
 import { buildQrFromTemplate } from '@/lib/deposit-qr';
 import { trackEvent } from '@/lib/analytics';
 import {
+  trackMetaDepositPageView,
   trackMetaOrderAwaitingDeposit,
   trackMetaPurchase,
+  trackMetaPageView,
+  trackMetaViewDepositPayment,
   cartItemsFromOrderLines,
   cartItemsFromOrderOrFallback,
   type OrderApiLineForMeta,
@@ -111,6 +114,9 @@ export default function OrderDepositPage() {
   } | null>(null);
   const { pushToast } = useToast();
   const prevStatusRef = useRef<string | null>(null);
+  /** Tách ref: lần render `order` null vẫn bắn PageView; không được chặn ViewDepositPayment khi đơn load xong. */
+  const depositPageViewTrackedForIdRef = useRef<number | null>(null);
+  const depositViewPaymentTrackedForIdRef = useRef<number | null>(null);
   const [qrDownloading, setQrDownloading] = useState(false);
 
   const formatVnd = (n: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
@@ -189,6 +195,8 @@ export default function OrderDepositPage() {
 
   useEffect(() => {
     if (!id) return;
+    depositPageViewTrackedForIdRef.current = null;
+    depositViewPaymentTrackedForIdRef.current = null;
     setLoading(true);
     apiClient
       .getOrder(id)
@@ -196,6 +204,37 @@ export default function OrderDepositPage() {
       .catch(() => setOrder(null))
       .finally(() => setLoading(false));
   }, [id]);
+
+  /** Pixel: PageView + ViewDepositPayment sau khi load (fbq đã có nhờ SiteEmbeds useLayoutEffect). */
+  useEffect(() => {
+    if (loading || !Number.isFinite(id) || id <= 0) return;
+    if (order != null && order.id !== id) return;
+
+    if (typeof window !== 'undefined' && depositPageViewTrackedForIdRef.current !== id) {
+      depositPageViewTrackedForIdRef.current = id;
+      const path = `${window.location.pathname}${window.location.search}`;
+      trackMetaPageView(path, { skipDedupe: true });
+    }
+
+    if (
+      order?.requires_deposit &&
+      order.id === id &&
+      depositViewPaymentTrackedForIdRef.current !== id
+    ) {
+      depositViewPaymentTrackedForIdRef.current = id;
+      const cartLike = cartItemsFromOrderOrFallback(order, order.items);
+      const value = orderMoney(order, 'total_amount');
+      const depositEvent = {
+        orderId: order.id,
+        orderCode: order.order_code,
+        value,
+        depositAmount: orderMoney(order, 'deposit_amount'),
+        orderStatus: order.status,
+      };
+      trackMetaDepositPageView({ ...depositEvent, items: cartLike });
+      trackMetaViewDepositPayment(depositEvent);
+    }
+  }, [loading, id, order]);
 
   useEffect(() => {
     if (!id || !order || order.status !== 'waiting_deposit' || !order.requires_deposit) {
@@ -256,51 +295,6 @@ export default function OrderDepositPage() {
   }, [order, id]);
 
   useEffect(() => {
-    if (!order || !id) return;
-    if (!order.requires_deposit) return;
-    if (order.status !== 'deposit_paid' && order.status !== 'confirmed') return;
-    const rawItems = order.items;
-    const key = `purchase_tracked_order_${order.id}`;
-    try {
-      if (typeof localStorage !== 'undefined' && localStorage.getItem(key) === '1') return;
-    } catch {
-      /* private mode */
-    }
-
-    const cartLike = cartItemsFromOrderOrFallback(order, rawItems);
-    if (!cartLike.length) return;
-
-    const fromOrderTotal = orderMoney(order, 'total_amount');
-    const fromLines =
-      rawItems?.reduce(
-        (s, i) => s + (typeof i.total_price === 'number' ? i.total_price : Number(i.total_price ?? 0)),
-        0
-      ) ?? 0;
-    const value = fromOrderTotal > 0 ? fromOrderTotal : fromLines > 0 ? fromLines : cartLike[0]!.total_price;
-
-    try {
-      if (typeof localStorage !== 'undefined') localStorage.setItem(key, '1');
-    } catch {
-      /* ignore */
-    }
-
-    trackMetaPurchase({ items: cartLike, value, orderId: order.id });
-    trackEvent('purchase', {
-      order_id: order.id,
-      value,
-      item_count: rawItems?.length ?? cartLike.reduce((n, l) => n + l.quantity, 0),
-      product_ids: (rawItems ?? []).map((i) => i.product_id).filter((p) => Number.isFinite(Number(p))),
-      items: (rawItems ?? []).map((i) => ({
-        order_item_id: i.id,
-        product_id: i.product_id,
-        quantity: i.quantity,
-        unit_price: typeof i.unit_price === 'number' ? i.unit_price : Number(i.unit_price),
-      })),
-      source: 'deposit_confirmed',
-    });
-  }, [order, id]);
-
-  useEffect(() => {
     if (!order) return;
     const wasWaiting = prevStatusRef.current === 'waiting_deposit';
     const nowDone = order.status === 'deposit_paid' || order.status === 'confirmed';
@@ -311,6 +305,50 @@ export default function OrderDepositPage() {
         variant: 'success',
         durationMs: 6000,
       });
+      const rawItems = order.items;
+      const key = `purchase_tracked_order_${order.id}`;
+      let alreadyTracked = false;
+      try {
+        alreadyTracked = typeof localStorage !== 'undefined' && localStorage.getItem(key) === '1';
+      } catch {
+        /* private mode */
+      }
+
+      if (!alreadyTracked) {
+        const cartLike = cartItemsFromOrderOrFallback(order, rawItems);
+        if (cartLike.length) {
+          const fromOrderTotal = orderMoney(order, 'total_amount');
+          const fromLines =
+            rawItems?.reduce(
+              (s, i) => s + (typeof i.total_price === 'number' ? i.total_price : Number(i.total_price ?? 0)),
+              0
+            ) ?? 0;
+          const value = fromOrderTotal > 0 ? fromOrderTotal : fromLines > 0 ? fromLines : cartLike[0]!.total_price;
+
+          try {
+            if (typeof localStorage !== 'undefined') localStorage.setItem(key, '1');
+          } catch {
+            /* ignore */
+          }
+
+          trackMetaPurchase({ items: cartLike, value, orderId: order.id });
+          trackEvent('purchase', {
+            order_id: order.id,
+            value,
+            item_count: rawItems?.length ?? cartLike.reduce((n, l) => n + l.quantity, 0),
+            product_ids: (rawItems ?? []).map((i) => i.product_id).filter((p) => Number.isFinite(Number(p))),
+            items: (rawItems ?? []).map((i) => ({
+              order_item_id: i.id,
+              product_id: i.product_id,
+              product_code: i.product_code,
+              product_sku: i.product_sku,
+              quantity: i.quantity,
+              unit_price: typeof i.unit_price === 'number' ? i.unit_price : Number(i.unit_price),
+            })),
+            source: 'deposit_confirmed',
+          });
+        }
+      }
     }
     prevStatusRef.current = order.status;
   }, [order, pushToast]);

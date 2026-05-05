@@ -48,6 +48,8 @@ class OrderItemResponse(BaseModel):
     id: int
     product_id: int
     product_slug: Optional[str] = None
+    product_code: Optional[str] = None
+    product_sku: Optional[str] = None
     product_name: str
     product_image: Optional[str]
     unit_price: Decimal

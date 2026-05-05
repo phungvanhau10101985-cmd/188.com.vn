@@ -99,6 +99,8 @@ export default function MobileHeader({
     pathname === '/tim-theo-anh' ||
     (pathname != null && pathname.replace(/\/$/, '') === '/tim-theo-anh');
 
+  const isAuthPage = Boolean(pathname?.startsWith('/auth/'));
+
   /** /danh-muc/c1/... — danh sách SP theo danh mục; /danh-muc tệp (mobile thường redirect về /). */
   const pathNorm = pathname != null ? pathname.replace(/\/$/, '') : '';
   const isDanhMucListingPage =
@@ -280,7 +282,8 @@ export default function MobileHeader({
     isFavoritesPage ||
     isCartPage ||
     isTimTheoAnhPage ||
-    isDanhMucListingPage;
+    isDanhMucListingPage ||
+    isAuthPage;
   /** Hàng nút + ô tìm: co chỗ cho ô tìm dài hơn. */
   const tightToolbar =
     isProductDetailPage ||
@@ -289,7 +292,8 @@ export default function MobileHeader({
     isFavoritesPage ||
     isCartPage ||
     isTimTheoAnhPage ||
-    isDanhMucListingPage;
+    isDanhMucListingPage ||
+    isAuthPage;
 
   const chipClass =
     'flex-shrink-0 text-[11px] leading-tight font-medium text-white px-2 py-1 rounded-full bg-white/18 hover:bg-white/28 whitespace-nowrap border border-white/25 shadow-sm active:scale-[0.98] transition-transform';
@@ -347,7 +351,8 @@ export default function MobileHeader({
                   !isFavoritesPage &&
                   !isCartPage &&
                   !isTimTheoAnhPage &&
-                  !isDanhMucListingPage
+                  !isDanhMucListingPage &&
+                  !isAuthPage
                 }
               />
             </Link>
@@ -361,7 +366,8 @@ export default function MobileHeader({
               isFavoritesPage ||
               isCartPage ||
               isTimTheoAnhPage ||
-              isDanhMucListingPage
+              isDanhMucListingPage ||
+              isAuthPage
                 ? 'pb-1'
                 : ''
             }`}

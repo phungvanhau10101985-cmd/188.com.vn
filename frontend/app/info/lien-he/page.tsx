@@ -134,7 +134,7 @@ export default function LienHePage() {
             https://188.com.vn
           </a>
         </p>
-        <p className="text-zinc-500">© 2018 – 2025 188.COM.VN. All rights reserved.</p>
+        <p className="text-zinc-500">© 2018 – nay 188.COM.VN. Tất cả các quyền được bảo lưu.</p>
       </div>
 
       <div className="mt-8 p-4 bg-orange-50 border border-orange-100 rounded-xl text-zinc-700 text-sm">

@@ -43,22 +43,36 @@ function getFbq(): FbqFn | undefined {
   return typeof fbq === 'function' ? fbq : undefined;
 }
 
-/** Đợi fbq sau khi script Pixel chèn (hydrate). */
+/** Đợi fbq sau khi script Pixel chèn (embed động hoặc chunk Meta). */
 function whenFbqReady(run: () => void): void {
   if (typeof window === 'undefined') return;
   if (getFbq()) {
     run();
     return;
   }
+  let done = false;
+  const fire = () => {
+    if (done) return;
+    const fbq = getFbq();
+    if (!fbq) return;
+    done = true;
+    run();
+  };
+  const onEmbeds = () => fire();
+  window.addEventListener('188-site-embeds-ready', onEmbeds);
   let ticks = 0;
-  const max = 40;
+  const max = 200;
   const id = window.setInterval(() => {
+    fire();
+    if (done) {
+      window.clearInterval(id);
+      window.removeEventListener('188-site-embeds-ready', onEmbeds);
+      return;
+    }
     ticks += 1;
-    if (getFbq()) {
+    if (ticks >= max) {
       window.clearInterval(id);
-      run();
-    } else if (ticks >= max) {
-      window.clearInterval(id);
+      window.removeEventListener('188-site-embeds-ready', onEmbeds);
     }
   }, 100);
 }
@@ -187,19 +201,83 @@ let lastPageViewRouteKey: string | null = null;
 let lastPageViewAtMs = 0;
 const PAGE_VIEW_DEDUPE_MS = 2500;
 
-export function trackMetaPageView(routeKey?: string): void {
+export function trackMetaPageView(
+  routeKey?: string,
+  opts?: { skipDedupe?: boolean }
+): void {
   const key =
     (routeKey != null && String(routeKey).trim()) ||
     (typeof window !== 'undefined' ? `${window.location.pathname}${window.location.search}` : '') ||
     '/';
   const now = Date.now();
-  if (lastPageViewRouteKey === key && now - lastPageViewAtMs < PAGE_VIEW_DEDUPE_MS) {
+  if (
+    !opts?.skipDedupe &&
+    lastPageViewRouteKey === key &&
+    now - lastPageViewAtMs < PAGE_VIEW_DEDUPE_MS
+  ) {
     return;
   }
   lastPageViewRouteKey = key;
   lastPageViewAtMs = now;
   /** Chỉ Pixel — gửi thêm CAPI PageView khiến Pixel Helper thường báo 2× PageView (browser + server). */
   firePixelAndCapi('PageView', {}, { sendCapi: false });
+}
+
+/** Trang thanh toán cọc — bắn sau khi có đơn (Pixel thường đã load; tránh lỡ PageView sớm từ router). */
+export function trackMetaViewDepositPayment(params: {
+  orderId: number;
+  orderCode?: string | null;
+  value?: number;
+  depositAmount?: number;
+  orderStatus: string;
+}): void {
+  const { orderId, orderCode, value, depositAmount, orderStatus } = params;
+  const customData: Record<string, unknown> = {
+    order_id: String(orderId),
+    order_status: orderStatus,
+    currency: META_PIXEL_CURRENCY,
+    ...(orderCode != null && String(orderCode).trim() ? { content_name: String(orderCode).trim() } : {}),
+    ...(value != null && Number.isFinite(value) && value > 0 ? { value } : {}),
+    ...(depositAmount != null && Number.isFinite(depositAmount) && depositAmount > 0
+      ? { deposit_amount: depositAmount }
+      : {}),
+  };
+  firePixelAndCapi('ViewDepositPayment', customData, { mode: 'custom' });
+}
+
+/** Custom event dễ đọc trong Meta: khách đã vào trang thanh toán cọc. */
+export function trackMetaDepositPageView(params: {
+  orderId: number;
+  orderCode?: string | null;
+  value?: number;
+  depositAmount?: number;
+  orderStatus: string;
+  items?: CartItem[];
+}): void {
+  const { orderId, orderCode, value, depositAmount, orderStatus, items } = params;
+  const orderData: Record<string, unknown> = {
+    order_id: String(orderId),
+    order_status: orderStatus,
+    currency: META_PIXEL_CURRENCY,
+    ...(orderCode != null && String(orderCode).trim() ? { content_name: String(orderCode).trim() } : {}),
+    ...(value != null && Number.isFinite(value) && value > 0 ? { value } : {}),
+    ...(depositAmount != null && Number.isFinite(depositAmount) && depositAmount > 0
+      ? { deposit_amount: depositAmount }
+      : {}),
+  };
+  const customData =
+    items?.length && value != null && Number.isFinite(value)
+      ? cartMetaCustomData({
+          items,
+          value,
+          orderId,
+          extra: {
+            ...orderData,
+            deposit_page: true,
+          },
+        })
+      : orderData;
+  firePixelAndCapi('DepositPageView', customData, { mode: 'custom' });
 }
 
 export function trackMetaViewContentProduct(product: Product): void {
@@ -292,6 +370,7 @@ export type OrderApiLineForMeta = {
   product_id: number;
   product_name?: string;
   product_code?: string;
+  product_sku?: string;
   quantity: number;
   unit_price: number | string;
   total_price?: number | string;
@@ -314,15 +393,19 @@ export function cartItemsFromOrderLines(lines: OrderApiLineForMeta[]): CartItem[
       const u = Number.isFinite(unit) ? unit : 0;
       const t = Number.isFinite(total) ? total : 0;
       const pid = Number(line.product_id);
+      const productCode = line.product_code != null ? String(line.product_code).trim() : '';
+      const productSku = line.product_sku != null ? String(line.product_sku).trim() : '';
       return {
         id: line.id,
         product_id: pid,
         quantity: line.quantity,
         unit_price: u,
         total_price: t,
-        ...(line.product_code ? { product_code: line.product_code } : {}),
+        ...(productSku ? { product_code: productSku } : productCode ? { product_code: productCode } : {}),
         product_data: {
           id: pid,
+          ...(productCode ? { product_id: productCode } : {}),
+          ...(productSku ? { code: productSku } : {}),
           name: line.product_name,
           price: u,
         },
