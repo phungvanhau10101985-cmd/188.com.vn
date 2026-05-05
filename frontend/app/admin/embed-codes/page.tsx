@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { adminSiteEmbedAPI, type SiteEmbedCodeAdmin } from '@/lib/admin-api';
+import { getAdminEmbedHeadPreview } from '@/lib/admin-embed-head-preview';
 
 const PLATFORM_LABEL: Record<string, string> = {
   google: 'Google',
@@ -342,6 +343,8 @@ export default function AdminEmbedCodesPage() {
                       ['facebook', 'tiktok'].includes(row.platform?.toLowerCase() ?? '') &&
                       row.category?.toLowerCase() === 'capi_token' &&
                       row.secret_configured;
+                    const headInjectPreview =
+                      !capiMasked && ck === 'id' ? getAdminEmbedHeadPreview(row) : null;
                     return (
                       <div key={row.id} className="px-4 py-3 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                         <div className="min-w-0 flex-1">
@@ -369,9 +372,21 @@ export default function AdminEmbedCodesPage() {
                               ? 'Token Conversion API đã lưu (không hiển thị)'
                               : (row.content || '').trim()
                                 ? `${(row.content || '').trim().slice(0, 140)}${(row.content || '').trim().length > 140 ? '…' : ''}`
-                                : 'Chưa nhập — không hiển thị / không gửi CAPI'}
+                                : ck === 'id'
+                                  ? 'Chưa nhập — nhấn «Sửa» để nhập mã một dòng (G-/AW-/GTM-…).'
+                                  : 'Chưa nhập — không hiển thị / không gửi CAPI'}
                           </p>
                           {row.hint && <p className="text-xs text-slate-500 mt-1">{row.hint}</p>}
+                          {headInjectPreview && (
+                            <div className="mt-2 rounded-lg border border-slate-200 bg-slate-950 text-slate-100 overflow-hidden">
+                              <p className="text-[11px] px-2 py-1.5 bg-slate-900 text-slate-400 border-b border-slate-800">
+                                Đoạn HTML head dựng sẵn từ mã (giống backend khi đang bật & chỉ mã)
+                              </p>
+                              <pre className="text-[11px] px-2 py-2 overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed">
+                                {headInjectPreview}
+                              </pre>
+                            </div>
+                          )}
                         </div>
                         <div className="flex gap-3 shrink-0">
                           <button type="button" onClick={() => openEdit(row)} className="text-blue-600 hover:underline text-sm">
