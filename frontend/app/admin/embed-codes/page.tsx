@@ -142,7 +142,6 @@ export default function AdminEmbedCodesPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingSnapshot, setEditingSnapshot] = useState<SiteEmbedCodeAdmin | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
-
   const [hideGoogleAdsGlobalRow, setHideGoogleAdsGlobalRow] = useState(false);
 
   const showToast = (type: 'ok' | 'err', msg: string) => {
@@ -162,9 +161,9 @@ export default function AdminEmbedCodesPage() {
     }
   }, []);
 
-  /** Ẩn mục trùng / không cần trong UI:
-   * - nanoai/try_on (đã bỏ preset)
-   * - google/ads: có thể ẩn tùy chọn (thường AW đã nạp qua GT-/GTM).
+  /** Ẩn mục:
+   * - nanoai/try_on (preset đã bỏ)
+   * - google/ads: tùy chọn (ô bên dưới) — chỉ ẩn UI; DB & embed public không đổi
    */
   const listForDisplay = useMemo(
     () =>
@@ -302,7 +301,7 @@ export default function AdminEmbedCodesPage() {
           <span className="font-mono text-xs">ads_pdp_conversion</span>,{' '}
           <span className="font-mono text-xs">ads_conversion_*</span> (send_to AW-/label qua{' '}
           <span className="font-mono text-xs">google_ads_web_conversions</span>), Pixel Meta và TikTok (remarketing động catalogue), Zalo OA:{' '}
-          <strong className="font-medium">chỉ cần mã một dòng</strong> — không cần dán base code đầy đủ.
+          <strong className="font-medium">chỉ cần mã một dòng</strong> — không cần dán base code đầy đủ; backend dựng thẻ gtag trong head (trang thật có thể thêm bước Google Tag / GTM — trong danh sách chỉ hiện mã đã lưu, không xem nguyên HTML).
           Tokens Conversion API Facebook / TikTok chỉ máy chủ, không trong HTML public.
         </p>
         <p className="text-gray-500 text-sm mb-4">
@@ -328,8 +327,7 @@ export default function AdminEmbedCodesPage() {
             onChange={(e) => setHideGoogleAdsGlobalRow(e.target.checked)}
           />
           <span>
-            Ẩn dòng <span className="font-mono text-xs">google / ads</span> (Google Ads AW toàn cục) trong danh sách — khi AW chỉ nạp qua thẻ Google (GT-) / GTM để gọn màn hình.{' '}
-            Bản ghi vẫn trong database; nhập / API embed public không đổi. Bỏ tích khi cần sửa mã <span className="font-mono text-xs">AW-</span> trực tiếp.
+            Ẩn dòng <span className="font-mono text-xs">google / ads</span> (thẻ AW toàn cục) — gọn danh sách khi AW chỉ cần qua GT-/GTM. Bản ghi vẫn trong DB; site vẫn chèn như cũ. Bỏ tích khi cần sửa ô <span className="font-mono text-xs">AW-</span>.
           </span>
         </label>
 
