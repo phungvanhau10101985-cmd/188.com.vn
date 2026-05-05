@@ -48,10 +48,28 @@ def looks_like_pasted_html(s: str) -> bool:
 
 
 def _norm_ga4_measurement_id(s: str) -> str | None:
-    u = (s or "").strip().upper().replace(" ", "")
-    if re.match(r"^G-[A-Z0-9]+$", u):
-        return u
+    """
+    Measurement ID GA4: G- + chữ số (chuẩn Google). Cho phép dán kèm chữ («Mã đo lường: G-XXX…»)
+    hoặc một dòng gtag — trích token G- đầu tiên hợp lệ. Ít nhất 4 ký tự sau G- (tránh G-1 giả).
+    """
+    if not (s or "").strip():
+        return None
+    # Bỏ khoảng trắng / xuống dòng gộp (không bỏ dấu gạch trong mã G-)
+    compact = re.sub(r"\s+", "", (s or "").strip().upper())
+    if re.match(r"^G-[A-Z0-9]{4,}$", compact):
+        return compact
+    m = re.search(r"\b(G-[A-Z0-9]{4,})\b", compact)
+    if m:
+        return m.group(1)
     return None
+
+
+def _normalize_google_embed_category(cat: str) -> str:
+    """Cho phép alias nhẹ — tránh dòng preset «ga4» bị đổi tay thành từ khóa khác không khớp expansion."""
+    c = (cat or "").strip().lower()
+    if c in ("ga-4", "google_analytics_4", "google-analytics-4", "google_analytics4", "g-analytics"):
+        return "ga4"
+    return c
 
 
 def _norm_gtm(s: str) -> str | None:
@@ -219,12 +237,19 @@ def expand_row(row: SiteEmbedCode) -> List[PlacementHtml]:
     """
     Trả về danh sách (placement, html). Một dòng có thể tách thành nhiều fragment (vd: GTM head + body).
     """
-    cat = (row.category or "").strip().lower()
+    cat = _normalize_google_embed_category((row.category or "").strip().lower())
     if cat in INTERNAL_ONLY_CATEGORIES:
         return []
 
     plat = (row.platform or "").lower().strip()
     raw = (row.content or "").strip()
+
+    # GA4: nếu admin dán nguyên snippet <script>… gtag… nhưng category vẫn là ga4,
+    # trích G-… để dựng lại snippet chuẩn (tránh lệch / thiếu thẻ so với token).
+    if plat == "google" and cat == "ga4" and raw and looks_like_pasted_html(raw):
+        maybe_id = _norm_ga4_measurement_id(raw)
+        if maybe_id:
+            return expand_ga4(maybe_id)
 
     # Dán full code — giữ một fragment theo đúng placement trong DB
     if raw and looks_like_pasted_html(raw):

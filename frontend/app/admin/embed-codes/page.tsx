@@ -23,7 +23,8 @@ const PLACEMENT_LABEL: Record<string, string> = {
 /** Người dùng chỉ nhập một mã/ID — backend dựng sẵn HTML/JS */
 const ID_HINT: Record<string, Record<string, string>> = {
   google: {
-    ga4: 'Chỉ nhập Measurement ID (ví dụ G-XXXXXXXXXX). Không dán nguyên đoạn <script>.',
+    ga4:
+      'Measurement ID bắt đầu bằng G- (không dùng UA- Universal Analytics). Có thể chỉ nhập G-XXX, dán kèm nhãn hoặc snippet gtag — hệ thống trích mã.',
     gtm: 'Chỉ nhập Container ID (ví dụ GTM-XXXXXXX). Hệ thống chèn đủ fragment head + noscript.',
     ads:
       'Mã AW-XXXXXXXX — dùng cho chuyển đổi và tiếp thị lại động Retail (Merchant Center trong Google Ads). Chỉ cần một mã đang bật nếu dùng cùng đích.',
@@ -140,6 +141,8 @@ export default function AdminEmbedCodesPage() {
   const [list, setList] = useState<SiteEmbedCodeAdmin[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
+  /** Mặc định ẩn preview HTML; bật theo từng dòng khi cần đối chiếu. */
+  const [expandedHeadPreviewId, setExpandedHeadPreviewId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingSnapshot, setEditingSnapshot] = useState<SiteEmbedCodeAdmin | null>(null);
@@ -380,26 +383,42 @@ export default function AdminEmbedCodesPage() {
                           </p>
                           {row.hint && <p className="text-xs text-slate-500 mt-1">{row.hint}</p>}
                           {headInjectPreview && (
-                            <div className="mt-2 rounded-lg border border-slate-200 bg-slate-950 text-slate-100 overflow-hidden">
-                              <p className="text-[11px] px-2 py-1.5 bg-slate-900 text-slate-400 border-b border-slate-800">
-                                Đoạn HTML do hệ thống sinh từ mã (chuẩn gtag trỏ thẳng googletagmanager.com — khớp API{' '}
-                                <span className="font-mono text-slate-500">/embed-codes/public</span>)
-                              </p>
-                              <pre className="text-[11px] px-2 py-2 overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed">
-                                {headInjectPreview}
-                              </pre>
-                              {row.platform?.toLowerCase() === 'google' &&
-                              ['ads', 'ga4'].includes(row.category?.toLowerCase() ?? '') ? (
-                                <p className="text-[10px] leading-relaxed px-2 py-2 bg-slate-900 text-slate-500 border-t border-slate-800">
-                                  Trên site thật, Google Tag / GTM hoặc chế độ first-party có thể không dùng đúng hai thẻ
-                                  trên mà thay bằng bootstrap nội bộ (ví dụ{' '}
-                                  <span className="font-mono text-slate-400">google_tags_first_party</span>,{' '}
-                                  <span className="font-mono text-slate-400">/pded/</span>,{' '}
-                                  <span className="font-mono text-slate-400">developer_id</span>…) — vẫn cùng AW-/G-.
-                                  Đối chiếu HTML trình duyệt nhận ở khối «Thẻ trong &lt;head&gt; trang chủ» phía trên; local
-                                  và server lệch nhau nếu khác dữ liệu API hoặc khác lớp tag phía Google.
-                                </p>
-                              ) : null}
+                            <div className="mt-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedHeadPreviewId((id) => (id === row.id ? null : row.id))
+                                }
+                                className="text-xs text-blue-600 hover:underline font-medium"
+                                aria-expanded={expandedHeadPreviewId === row.id}
+                              >
+                                {expandedHeadPreviewId === row.id
+                                  ? 'Ẩn đoạn HTML xem trước'
+                                  : 'Hiện đoạn HTML do hệ thống sinh (đối chiếu API)'}
+                              </button>
+                              {expandedHeadPreviewId === row.id && (
+                                <div className="mt-2 rounded-lg border border-slate-200 bg-slate-950 text-slate-100 overflow-hidden">
+                                  <p className="text-[11px] px-2 py-1.5 bg-slate-900 text-slate-400 border-b border-slate-800">
+                                    Đoạn HTML do hệ thống sinh từ mã (chuẩn gtag trỏ thẳng googletagmanager.com — khớp API{' '}
+                                    <span className="font-mono text-slate-500">/embed-codes/public</span>)
+                                  </p>
+                                  <pre className="text-[11px] px-2 py-2 overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed">
+                                    {headInjectPreview}
+                                  </pre>
+                                  {row.platform?.toLowerCase() === 'google' &&
+                                  ['ads', 'ga4'].includes(row.category?.toLowerCase() ?? '') ? (
+                                    <p className="text-[10px] leading-relaxed px-2 py-2 bg-slate-900 text-slate-500 border-t border-slate-800">
+                                      Trên site thật, Google Tag / GTM hoặc chế độ first-party có thể không dùng đúng hai thẻ
+                                      trên mà thay bằng bootstrap nội bộ (ví dụ{' '}
+                                      <span className="font-mono text-slate-400">google_tags_first_party</span>,{' '}
+                                      <span className="font-mono text-slate-400">/pded/</span>,{' '}
+                                      <span className="font-mono text-slate-400">developer_id</span>…) — vẫn cùng AW-/G-.
+                                      Đối chiếu HTML trình duyệt nhận ở khối «Thẻ trong &lt;head&gt; trang chủ» phía trên; local
+                                      và server lệch nhau nếu khác dữ liệu API hoặc khác lớp tag phía Google.
+                                    </p>
+                                  ) : null}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>

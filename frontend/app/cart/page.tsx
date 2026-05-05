@@ -18,6 +18,7 @@ import {
   trackGoogleAdsCartPageView,
   trackGoogleAdsOrderAwaitingDeposit,
   trackGoogleAdsPurchase,
+  peekGoogleAdsConversionsFingerprint,
 } from '@/lib/google-ads-gtag';
 import { shouldRedirectToDepositAfterCreate } from '@/lib/order-deposit';
 import { buildAuthLoginHrefFromFullPath } from '@/lib/auth-redirect';
@@ -151,15 +152,14 @@ export default function CartPage() {
     [cartItems]
   );
 
-  const cartAdsFingerprint = useMemo(
-    () =>
-      cartItems
-        .map((i) => `${i.id}:${i.quantity}:${cartLineTotal(i)}`)
-        .slice()
-        .sort()
-        .join('|'),
-    [cartItems]
-  );
+  const cartAdsFingerprint = useMemo(() => {
+    const convCfg = peekGoogleAdsConversionsFingerprint();
+    return `${convCfg}|${cartItems
+      .map((i) => `${i.id}:${i.quantity}:${cartLineTotal(i)}`)
+      .slice()
+      .sort()
+      .join('|')}`;
+  }, [cartItems]);
 
   useEffect(() => {
     if (!isAuthenticated || cartItems.length === 0) return;

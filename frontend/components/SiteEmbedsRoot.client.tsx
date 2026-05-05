@@ -84,7 +84,32 @@ export default function SiteEmbedsRootClient({
   embeds: PublicSiteEmbeds;
   headClientRemainders: string[];
 }) {
+  /**
+   * Đồng bộ mỗi lần render (sau khi RSC trả embeds mới) — **trước** effect của trang con (cart, deposit).
+   * Trước đây chỉ đọc `embeds` lần mount → sai sau client nav / khi admin vừa lưu send_to AW-/label.
+   */
+  if (typeof window !== 'undefined') {
+    const {
+      googleAdsAwIds,
+      googleAdsWebConversions,
+      googleAdsWebConversionsLegacyPdpOnly,
+    } = embeds;
+    if (googleAdsAwIds !== undefined) {
+      setGoogleAdsSendToFromAdmin(googleAdsAwIds);
+    } else {
+      clearGoogleAdsSendToAdminOnlyMode();
+    }
+    if (googleAdsWebConversions !== undefined) {
+      setGoogleAdsWebConversionsFromEmbed(googleAdsWebConversions, {
+        legacyPdpOnly: !!googleAdsWebConversionsLegacyPdpOnly,
+      });
+    } else {
+      clearGoogleAdsWebConversionsFromEmbed();
+    }
+  }
+
   const initial = useRef({ embeds, headClientRemainders });
+  initial.current = { embeds, headClientRemainders };
 
   useLayoutEffect(() => {
     if (typeof window === 'undefined') return;
@@ -98,26 +123,7 @@ export default function SiteEmbedsRootClient({
           embeds: e,
           headClientRemainders: remain,
         } = initial.current;
-        const {
-          head,
-          body_open,
-          body_close,
-          googleAdsAwIds,
-          googleAdsWebConversions,
-          googleAdsWebConversionsLegacyPdpOnly,
-        } = e;
-        if (googleAdsAwIds !== undefined) {
-          setGoogleAdsSendToFromAdmin(googleAdsAwIds);
-        } else {
-          clearGoogleAdsSendToAdminOnlyMode();
-        }
-        if (googleAdsWebConversions !== undefined) {
-          setGoogleAdsWebConversionsFromEmbed(googleAdsWebConversions, {
-            legacyPdpOnly: !!googleAdsWebConversionsLegacyPdpOnly,
-          });
-        } else {
-          clearGoogleAdsWebConversionsFromEmbed();
-        }
+        const { head, body_open, body_close } = e;
 
         const ssrHead = document.querySelector('script[data-188-ssr-head]');
         if (ssrHead) {

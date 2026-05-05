@@ -17,6 +17,8 @@ export function LiveHomepageHeadTags() {
   const [ok, setOk] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Mặc định ẩn khối &lt;script&gt; dài; mở khi cần đối chiếu «Xem nguồn». */
+  const [showScripts, setShowScripts] = useState(false);
 
   useEffect(() => {
     const base = homepageBaseUrl();
@@ -98,14 +100,30 @@ export function LiveHomepageHeadTags() {
 
   return (
     <div className="mb-4 rounded-lg border border-emerald-200 bg-white overflow-hidden shadow-sm">
-      <p className="text-xs font-medium px-3 py-2 bg-emerald-50 text-emerald-950 border-b border-emerald-100">
-        Thẻ trong &lt;head&gt; trang chủ (đọc tự động từ{' '}
-        <span className="font-mono">{homepageBaseUrl()}/</span>
-        ) — đối chiếu khi «Xem nguồn trang»
-      </p>
-      <pre className="text-[11px] px-3 py-2 overflow-x-auto whitespace-pre-wrap font-mono text-slate-800 max-h-96 overflow-y-auto bg-slate-950 text-slate-100">
-        {ok}
-      </pre>
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-emerald-50 text-emerald-950 border-b border-emerald-100">
+        <p className="text-xs font-medium">
+          Thẻ trong &lt;head&gt; trang chủ (đọc tự động từ{' '}
+          <span className="font-mono">{homepageBaseUrl()}/</span>
+          ) — đối chiếu khi «Xem nguồn trang»
+        </p>
+        <button
+          type="button"
+          onClick={() => setShowScripts((v) => !v)}
+          className="text-xs text-emerald-800 hover:underline font-medium shrink-0"
+          aria-expanded={showScripts}
+        >
+          {showScripts ? 'Ẩn mã script' : 'Hiện mã script'}
+        </button>
+      </div>
+      {showScripts ? (
+        <pre className="text-[11px] px-3 py-2 overflow-x-auto whitespace-pre-wrap font-mono text-slate-800 max-h-96 overflow-y-auto bg-slate-950 text-slate-100">
+          {ok}
+        </pre>
+      ) : (
+        <p className="text-[11px] px-3 py-2 text-slate-600 bg-white">
+          Đã phát hiện script liên quan trong &lt;head&gt;. Nhấn «Hiện mã script» để xem nội dung đầy đủ.
+        </p>
+      )}
     </div>
   );
 }

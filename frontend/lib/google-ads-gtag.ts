@@ -4,7 +4,14 @@
  * Google Ads — gtag: tiếp thị lại động (Retail) + sự kiện GA4-style.
  * `send_to`: ưu tiên danh sách AW- do API embed công khai trả về (chỉ mã admin google/ads).
  * API cũ không có trường đó → tạm dùng NEXT_PUBLIC_GOOGLE_ADS_AW_ID + quét script AW- trên DOM (không khuyến nghị).
- * Chuyển đổi AW-/label: admin các mục google/ads_*_conversion hoặc biến NEXT_PUBLIC_GOOGLE_ADS_*_CONVERSION_SEND_TO khi API chưa có object.
+ * Chuyển đổi AW-/label (gtag conversion) — khớp admin + NEXT_PUBLIC_*:
+ * | Key API / env | Loại site_embed_codes | Nơi bắn |
+ * |---------------|------------------------|---------|
+ * | pdp | ads_pdp_conversion | PDP — trackGoogleAdsViewItemProduct |
+ * | add_to_cart | ads_conversion_add_to_cart | useCart → trackGoogleAdsAddToCart |
+ * | begin_checkout | ads_conversion_begin_checkout | /cart — trackGoogleAdsCartPageView |
+ * | deposit_page | ads_conversion_deposit_page | /account/orders/[id]/deposit — trackGoogleAdsDepositCheckoutPage |
+ * | purchase | ads_conversion_purchase | /cart checkout + deposit (COD) — trackGoogleAdsPurchase |
  */
 import type { AddToCartRequest } from '@/features/cart/types/cart';
 import type { CartItem } from '@/features/cart/types/cart';
@@ -162,12 +169,35 @@ function conversionSendToFor(key: GoogleAdsWebConversionKey): string | null {
   }
   if (webConversionsFromApi) {
     const raw = webConversionsRaw[key];
-    if (!raw) return null;
-    return parseFullSendTo(raw);
+    const parsed = raw ? parseFullSendTo(raw) : null;
+    if (parsed) return parsed;
+    /** API trả object nhưng từng key trống → dùng NEXT_PUBLIC_* cho bước đó (admin có thể vừa lưu, cache chưa kịp). */
+    const envRaw = CONVERSION_ENV[key]?.trim();
+    if (!envRaw) return null;
+    return parseFullSendTo(envRaw);
   }
   const envRaw = CONVERSION_ENV[key]?.trim();
   if (!envRaw) return null;
   return parseFullSendTo(envRaw);
+}
+
+/** Thứ tự ổn định — dùng chuỗi fingerprint cấu hình (admin + env). */
+const CONVERSION_KEYS_ORDER: GoogleAdsWebConversionKey[] = [
+  'pdp',
+  'add_to_cart',
+  'begin_checkout',
+  'deposit_page',
+  'purchase',
+];
+
+/** Chuỗi ổn định theo mọi send_to đã resolve — khi admin/env đổi, component phụ thuộc nên re-fire tracking. */
+export function peekGoogleAdsConversionsFingerprint(): string {
+  return CONVERSION_KEYS_ORDER.map((k) => `${k}:${peekGoogleAdsConversionSendTo(k) ?? ''}`).join('|');
+}
+
+/** Cho fingerprint / debug: giá trị send_to thực tế sau API+env (không log bí mật khác). */
+export function peekGoogleAdsConversionSendTo(key: GoogleAdsWebConversionKey): string | null {
+  return conversionSendToFor(key);
 }
 
 function fireGoogleAdsConversion(
@@ -356,7 +386,8 @@ const VIEW_ITEM_DEDUPE_MS = 2500;
 
 function viewItemFingerprint(product: Product, primaryId: string, value: number): string {
   const sheetId = (product.product_id || '').trim() || String(product.id);
-  return `${sheetId}|${primaryId}|${value}|${product.name ?? ''}`;
+  const pdpConv = conversionSendToFor('pdp') ?? '';
+  return `${pdpConv}|${sheetId}|${primaryId}|${value}|${product.name ?? ''}`;
 }
 
 function shouldDedupe(ts: number, lastKey: string, key: string, lastAt: number, windowMs: number): boolean {
@@ -474,7 +505,8 @@ export function trackGoogleAdsAddToCart(item: AddToCartRequest): void {
 /** Trang giỏ: ecomm cart + danh sách id (toàn bộ dòng, không chỉ dòng đã chọn). */
 export function trackGoogleAdsCartPageView(lines: CartItem[], totalValue: number): void {
   if (!lines.length) return;
-  const fp = `${lines.map((l) => `${l.id}:${l.quantity}`).join(',')}|${totalValue}`;
+  const convCfg = peekGoogleAdsConversionsFingerprint();
+  const fp = `${convCfg}|${lines.map((l) => `${l.id}:${l.quantity}`).join(',')}|${totalValue}`;
   const now = Date.now();
   if (shouldDedupe(now, lastCartRetailFp, fp, lastCartRetailAtMs, CART_RETAIL_DEDUPE_MS)) {
     return;

@@ -22,6 +22,7 @@ import {
   trackGoogleAdsDepositCheckoutPage,
   trackGoogleAdsOrderAwaitingDeposit,
   trackGoogleAdsPurchase,
+  peekGoogleAdsConversionSendTo,
 } from '@/lib/google-ads-gtag';
 
 const META_OD_AWAITING_LS = (orderId: number) => `meta_order_awaiting_deposit_${orderId}`;
@@ -122,6 +123,8 @@ export default function OrderDepositPage() {
   /** Tách ref: lần render `order` null vẫn bắn PageView; không được chặn ViewDepositPayment khi đơn load xong. */
   const depositPageViewTrackedForIdRef = useRef<number | null>(null);
   const depositViewPaymentTrackedForIdRef = useRef<number | null>(null);
+  /** Chuyển đổi Ads «trang cọc» — có thể bắn lại khi admin thêm send_to sau khi đã load trang (key id+label). */
+  const googleDepositCheckoutTrackedKeyRef = useRef<string>('');
   const [qrDownloading, setQrDownloading] = useState(false);
 
   const formatVnd = (n: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
@@ -202,6 +205,7 @@ export default function OrderDepositPage() {
     if (!id) return;
     depositPageViewTrackedForIdRef.current = null;
     depositViewPaymentTrackedForIdRef.current = null;
+    googleDepositCheckoutTrackedKeyRef.current = '';
     setLoading(true);
     apiClient
       .getOrder(id)
@@ -210,7 +214,10 @@ export default function OrderDepositPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  const depositPageConversionSendTo = peekGoogleAdsConversionSendTo('deposit_page') ?? '';
+
   /** Pixel: PageView + ViewDepositPayment sau khi load (fbq đã có nhờ SiteEmbeds useLayoutEffect). */
+  /** Google Ads conversion «trang cọc»: tách khóa id+send_to — bắn lại khi admin bổ sung mã sau khi mở trang. */
   useEffect(() => {
     if (loading || !Number.isFinite(id) || id <= 0) return;
     if (order != null && order.id !== id) return;
@@ -239,9 +246,22 @@ export default function OrderDepositPage() {
       };
       trackMetaDepositPageView({ ...depositEvent, items: cartLike });
       trackMetaViewDepositPayment(depositEvent);
-      trackGoogleAdsDepositCheckoutPage({ items: cartLike, value, orderId: order.id });
     }
-  }, [loading, id, order]);
+
+    if (
+      order?.requires_deposit &&
+      order.status === 'waiting_deposit' &&
+      order.id === id
+    ) {
+      const cartLike = cartItemsFromOrderOrFallback(order, order.items);
+      const value = orderMoney(order, 'total_amount');
+      const gKey = `${id}|${depositPageConversionSendTo}`;
+      if (googleDepositCheckoutTrackedKeyRef.current !== gKey) {
+        googleDepositCheckoutTrackedKeyRef.current = gKey;
+        trackGoogleAdsDepositCheckoutPage({ items: cartLike, value, orderId: order.id });
+      }
+    }
+  }, [loading, id, order, depositPageConversionSendTo]);
 
   useEffect(() => {
     if (!id || !order || order.status !== 'waiting_deposit' || !order.requires_deposit) {

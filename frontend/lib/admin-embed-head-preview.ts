@@ -15,8 +15,10 @@ function normAwId(raw: string): string | null {
 }
 
 function normGa4Id(raw: string): string | null {
-  const u = raw.trim().toUpperCase().replace(/\s/g, '');
-  return /^G-[A-Z0-9]+$/.test(u) ? u : null;
+  const compact = raw.trim().toUpperCase().replace(/\s+/g, '');
+  if (/^G-[A-Z0-9]{4,}$/.test(compact)) return compact;
+  const m = compact.match(/\b(G-[A-Z0-9]{4,})\b/);
+  return m?.[1] ?? null;
 }
 
 function normGtmId(raw: string): string | null {
@@ -43,12 +45,18 @@ gtag('config', '${id}');
 </script>`;
 }
 
+function normalizeGoogleCategory(raw: string): string {
+  const x = raw.toLowerCase();
+  if (['ga-4', 'google_analytics_4', 'google-analytics-4', 'google_analytics4', 'g-analytics'].includes(x)) return 'ga4';
+  return x;
+}
+
 /**
  * Trả text xem trước hoặc null nếu không có mã hợp lệ / không dựng từ preset.
  */
 export function getAdminEmbedHeadPreview(row: AdminEmbedRowLike): string | null {
   const p = (row.platform || '').toLowerCase();
-  const c = (row.category || '').toLowerCase();
+  const c = normalizeGoogleCategory(row.category || '');
   const content = (row.content || '').trim();
   if (!content || p !== 'google') return null;
 

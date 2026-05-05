@@ -21,7 +21,7 @@ import ErrorState from './components/ErrorState/ErrorState';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { trackMetaViewContentProduct } from '@/lib/meta-pixel';
-import { trackGoogleAdsViewItemProduct } from '@/lib/google-ads-gtag';
+import { trackGoogleAdsViewItemProduct, peekGoogleAdsConversionsFingerprint } from '@/lib/google-ads-gtag';
 import { persistRelatedFiltersFromProduct } from '@/lib/product-related-tabs';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
@@ -59,6 +59,8 @@ export default function ProductDetailClient({
   const loginHref = useLoginRedirectHref();
   const { pushToast } = useToast();
 
+  const adsConvCfgFp = peekGoogleAdsConversionsFingerprint();
+
   /** Đã xem: lưu theo phiên khách (header X-Guest-Session-Id) hoặc tài khoản — merge khi đăng nhập */
   useEffect(() => {
     if (!product?.id) return;
@@ -77,7 +79,7 @@ export default function ProductDetailClient({
     if (!product?.id) return;
     trackMetaViewContentProduct(product);
     trackGoogleAdsViewItemProduct(product);
-  }, [product?.id]);
+  }, [product?.id, adsConvCfgFp]);
 
   useEffect(() => {
     setSelectedColorImage(null);
