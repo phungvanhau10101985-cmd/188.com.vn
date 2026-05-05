@@ -23,6 +23,26 @@ function parseScriptOpenAttrs(attrRaw: string): {
   return { src: srcM?.[1], async, defer };
 }
 
+function looksLikeInlineJavascript(fragment: string): boolean {
+  return /\b(window\.dataLayer|function\s+gtag\s*\(|gtag\s*\(|fbq\s*\(|!function\s*\()/i.test(fragment);
+}
+
+function collectGtagConfigIds(fragment: string): string[] {
+  const ids: string[] = [];
+  const re = /gtag\s*\(\s*['"]config['"]\s*,\s*['"]((?:G|AW)-[A-Z0-9]+)['"]/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(fragment)) !== null) {
+    const id = m[1]?.toUpperCase();
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function gtagLoaderId(src: string): string | null {
+  const m = /googletagmanager\.com\/gtag\/js\?[^"']*\bid=((?:G|AW)-[A-Z0-9]+)/i.exec(src);
+  return m?.[1]?.toUpperCase() ?? null;
+}
+
 /**
  * Trích lần lượt mọi &lt;script&gt;…&lt;/script&gt; và phần HTML còn lại (meta, link, …).
  */
@@ -30,6 +50,10 @@ function splitOneFragment(fragment: string): { scripts: SsrHeadScriptSpec[]; res
   const scripts: SsrHeadScriptSpec[] = [];
   let rest = '';
   let pos = fragment.trim();
+
+  if (pos && !/<[a-z][\s\S]*>/i.test(pos) && looksLikeInlineJavascript(pos)) {
+    return { scripts: [{ async: false, defer: false, inline: pos }], rest: '' };
+  }
 
   while (pos.length) {
     const m = pos.match(/^<script(\s[^>]*)?>([\s\S]*?)<\/script>/i);
@@ -66,11 +90,35 @@ export type PartitionedHeadEmbeds = {
 export function partitionHeadEmbedsForSsr(fragments: string[]): PartitionedHeadEmbeds {
   const ssrScripts: SsrHeadScriptSpec[] = [];
   const headClientRemainders: string[] = [];
+  const gtagConfigIds: string[] = [];
 
   for (const raw of fragments) {
     const { scripts, rest } = splitOneFragment(raw);
     ssrScripts.push(...scripts);
+    for (const script of scripts) {
+      if (script.inline) {
+        for (const id of collectGtagConfigIds(script.inline)) {
+          if (!gtagConfigIds.includes(id)) gtagConfigIds.push(id);
+        }
+      }
+    }
     if (rest) headClientRemainders.push(rest);
+  }
+
+  const loadedGtagIds = new Set(
+    ssrScripts
+      .map((s) => (s.src ? gtagLoaderId(s.src) : null))
+      .filter((id): id is string => Boolean(id))
+  );
+  const missingGtagLoaders = gtagConfigIds
+    .filter((id) => !loadedGtagIds.has(id))
+    .map((id) => ({
+      src: `https://www.googletagmanager.com/gtag/js?id=${id}`,
+      async: true,
+      defer: false,
+    }));
+  if (missingGtagLoaders.length) {
+    ssrScripts.unshift(...missingGtagLoaders);
   }
 
   return { ssrScripts, headClientRemainders };
