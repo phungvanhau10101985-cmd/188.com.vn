@@ -122,6 +122,19 @@ class Settings:
         )
         self.BUNNY_WEB_PUBLIC_PREFIX: str = os.getenv("BUNNY_WEB_PUBLIC_PREFIX", "").strip().strip("/")
 
+        # 1688 import — Playwright dùng cookie đăng nhập để đọc trang detail ổn định hơn request thường.
+        self.IMPORT_1688_ENABLED: bool = os.getenv("IMPORT_1688_ENABLED", "True").strip().lower() in ("1", "true", "yes")
+        self.IMPORT_1688_COOKIE_JSON: str = os.getenv("IMPORT_1688_COOKIE_JSON", "").strip()
+        self.IMPORT_1688_COOKIE_FILE: str = os.getenv("IMPORT_1688_COOKIE_FILE", "").strip()
+        self.IMPORT_1688_TIMEOUT_MS: int = int(os.getenv("IMPORT_1688_TIMEOUT_MS", "45000"))
+        self.IMPORT_1688_USER_AGENT: str = (
+            os.getenv("IMPORT_1688_USER_AGENT", "").strip()
+            or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "KHTML, like Gecko Chrome/124.0.0.0 Safari/537.36"
+        )
+        self.IMPORT_1688_MAX_IMAGES: int = int(os.getenv("IMPORT_1688_MAX_IMAGES", "24"))
+        self.IMPORT_1688_DOWNLOAD_IMAGES: bool = os.getenv("IMPORT_1688_DOWNLOAD_IMAGES", "True").strip().lower() in ("1", "true", "yes")
+
         # Feed TSV Google Merchant Center — GET /api/v1/import-export/export/merchant-center-feed.tsv (công khai)
         self.MERCHANT_FEED_CURRENCY: str = os.getenv("MERCHANT_FEED_CURRENCY", "VND").strip() or "VND"
         _merch_feed_img_base = os.getenv("MERCHANT_FEED_IMAGE_BASE_URL", "").strip().rstrip("/")
@@ -199,6 +212,26 @@ class Settings:
         self.DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
         self.DEEPSEEK_API_URL: str = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
         self.DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        # Import từ link 1688/Hibox: gán danh mục 3 cấp bằng DeepSeek theo tên SP + taxonomy trong DB
+        self.IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED: bool = os.getenv(
+            "IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.IMPORT_LINK_DEEPSEEK_TAXONOMY_FORCE: bool = os.getenv(
+            "IMPORT_LINK_DEEPSEEK_TAXONOMY_FORCE", ""
+        ).strip().lower() in ("1", "true", "yes", "on")
+        # Fallback DeepSeek khi luật từ-khóa không gán được group_rating (whitelist).
+        self.IMPORT_LINK_DEEPSEEK_GROUPS_FALLBACK_ENABLED: bool = os.getenv(
+            "IMPORT_LINK_DEEPSEEK_GROUPS_FALLBACK_ENABLED", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.IMPORT_LINK_GEMINI_IMAGE_GENDER_ENABLED: bool = os.getenv(
+            "IMPORT_LINK_GEMINI_IMAGE_GENDER_ENABLED", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.EXCEL_VARIANT_COLORS_DEEPSEEK_TRANSLATE: bool = os.getenv(
+            "EXCEL_VARIANT_COLORS_DEEPSEEK_TRANSLATE", ""
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.EXCEL_VARIANT_COLORS_DEEPSEEK_FORCE_ALL: bool = os.getenv(
+            "EXCEL_VARIANT_COLORS_DEEPSEEK_FORCE_ALL", "True"
+        ).strip().lower() in ("1", "true", "yes", "on")
         # Đổi tên từ DEEPSEEK_SEARCH_CORRECTION_ENABLED -> AI_SEARCH_CORRECTION_ENABLED cho đúng bản chất (dùng Gemini)
         # Vẫn giữ fallback đọc biến cũ để tương thích ngược
         self.AI_SEARCH_CORRECTION_ENABLED: bool = (

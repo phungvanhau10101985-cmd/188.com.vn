@@ -21,6 +21,9 @@ print("✅ Category model loaded")
 from app.models.product import Product
 print("✅ Product model loaded")
 
+from app.models.product_import_draft import ProductImportDraft
+print("✅ ProductImportDraft model loaded")
+
 # 3. Import User (không phụ thuộc)
 from app.models.user import User, UserProductView, UserFavorite
 print("✅ User models loaded")
@@ -137,6 +140,7 @@ __all__ = [
     "SeoCluster",
     "Category",
     "Product",
+    "ProductImportDraft",
     "ProductQuestion",
     "ProductQuestionUsefulVote",
     "ProductReview",

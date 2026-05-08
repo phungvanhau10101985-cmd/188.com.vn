@@ -15,6 +15,12 @@ import json
 import time
 from datetime import datetime
 from app.core.config import settings
+from app.services.alicdn_urls import normalize_excel_product_image_urls
+from app.services.import_hibox_scraper import canonicalize_hibox_placeholder_product_id
+from app.services.product_internal_sku import (
+    ensure_unique_internal_product_code,
+    sync_internal_code_into_product_info,
+)
 from app.utils.vietnamese import (
     normalize_for_search_no_accent,
     VIETNAMESE_ACCENT_MAP,
@@ -240,6 +246,47 @@ def safe_bool(value) -> bool:
         return bool(int(float(value)))
     except:
         return False
+
+
+def deposit_require_to_excel_int(raw: Any, *, default: int = 1) -> int:
+    """
+    Quy chuẩn cột Excel «Cần đặt cọc» / draft JSON: 1 = cần cọc, 0 = không.
+    Nhận bool/int/str — khớp file mẫu (số), tránh true/false trong luồng trao đổi file/link.
+    """
+    if raw is None:
+        return default
+    if isinstance(raw, float) and math.isnan(raw):
+        return default
+    if isinstance(raw, str):
+        s = raw.strip().lower()
+        if s == "":
+            return default
+        if s in ("0", "false", "no", "off", "f"):
+            return 0
+        if s in ("1", "true", "yes", "on", "t"):
+            return 1
+        try:
+            return 1 if int(float(s)) != 0 else 0
+        except Exception:
+            return default
+    if raw is False:
+        return 0
+    if raw is True:
+        return 1
+    try:
+        return 1 if int(float(raw)) != 0 else 0
+    except Exception:
+        return default
+
+
+def deposit_require_to_bool(raw: Any, *, default: bool = True) -> bool:
+    """Chuyển sang bool cho ORM / ProductCreate."""
+    return deposit_require_to_excel_int(raw, default=1 if default else 0) == 1
+
+
+def deposit_require_from_excel_cell(raw: Any) -> bool:
+    """Import Excel: ô trống/NaN → cần cọc; chỉ tắt khi ghi rõ 0/false."""
+    return deposit_require_to_bool(raw, default=True)
 
 # ---------- Nhóm danh mục cùng ý định SEO (aggregation) ----------
 # Khi khách vào danh mục "Giày boot Nam" thì hiển thị tất cả sản phẩm có subcategory
@@ -848,8 +895,8 @@ def excel_row_to_product(row: Dict) -> Dict:
             'rating_total': safe_int(row.get('reviews_count', 0)),
             'question_total': safe_int(row.get('questions_count', 0)),
             'rating_point': safe_float(row.get('rating_score', 0.0)),
-            'available': safe_int(row.get('stock_quantity', 0)),
-            'deposit_require': safe_bool(row.get('deposit_required', 0)),
+            'available': safe_int(row.get('stock_quantity', 500)),
+            'deposit_require': deposit_require_from_excel_cell(row.get("deposit_required")),
             'category': str(row.get('Main Category', '')).strip(),
             'subcategory': str(row.get('Subcategory', '')).strip(),
             'sub_subcategory': str(row.get('Sub-subcategory', '')).strip(),
@@ -876,6 +923,8 @@ def excel_row_to_product(row: Dict) -> Dict:
             'is_active': True,
             'created_at': datetime.now()
         }
+
+        normalize_excel_product_image_urls(product_data)
         
         # Debug log để kiểm tra
         logger.debug(f"✅ Converted: {product_id}")
@@ -941,7 +990,7 @@ def product_to_excel_row(product: Product) -> Dict:
             'questions_count': product.question_total or 0,
             'rating_score': product.rating_point or 0.0,
             'stock_quantity': product.available or 0,
-            'deposit_required': 1 if product.deposit_require else 0,
+            'deposit_required': deposit_require_to_excel_int(product.deposit_require, default=0),
             'Main Category': product.category or '',
             'Subcategory': product.subcategory or '',
             'Sub-subcategory': product.sub_subcategory or '',
@@ -1163,7 +1212,8 @@ def get_products(
     if is_active is not None:
         query = query.filter(Product.is_active == is_active)
     if product_id:
-        query = query.filter(Product.product_id == product_id.strip())
+        pid_term = product_id.strip()
+        query = query.filter(or_(Product.product_id == pid_term, Product.code == pid_term))
     total = 0
     products = []
     applied_query = None
@@ -2096,11 +2146,20 @@ def ensure_category_seo_body(
 
 
 def create_product(db: Session, product: ProductCreate):
-    # Đảm bảo có slug
-    if not product.slug:
-        product.slug = generate_consistent_slug(product.name, product.product_id)
-    
-    db_product = Product(**product.dict())
+    data = product.model_dump() if hasattr(product, "model_dump") else product.dict()
+    batch_reserved: Set[str] = set()
+    data["code"] = ensure_unique_internal_product_code(
+        db,
+        data.get("code"),
+        exclude_product_id=None,
+        batch_reserved=batch_reserved,
+    )
+    data["product_info"] = sync_internal_code_into_product_info(data.get("product_info"), data["code"])
+    canonicalize_hibox_placeholder_product_id(data)
+    if not data.get("slug"):
+        data["slug"] = generate_consistent_slug(data["name"], data["product_id"])
+
+    db_product = Product(**data)
     db.add(db_product)
     db.commit()
     db.refresh(db_product)
@@ -2114,7 +2173,32 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
         
         if 'name' in update_data and 'slug' not in update_data:
             update_data['slug'] = generate_consistent_slug(update_data['name'], db_product.product_id)
-        
+
+        if "code" in update_data:
+            batch_reserved: Set[str] = set()
+            update_data["code"] = ensure_unique_internal_product_code(
+                db,
+                update_data.get("code"),
+                exclude_product_id=db_product.id,
+                batch_reserved=batch_reserved,
+            )
+            pi_src = update_data["product_info"] if "product_info" in update_data else db_product.product_info
+            update_data["product_info"] = sync_internal_code_into_product_info(
+                pi_src, update_data["code"]
+            )
+            probe = {
+                "product_id": (
+                    update_data["product_id"]
+                    if "product_id" in update_data
+                    else db_product.product_id
+                ),
+                "code": update_data["code"],
+            }
+            before_pid = probe["product_id"]
+            canonicalize_hibox_placeholder_product_id(probe)
+            if probe["product_id"] != before_pid:
+                update_data["product_id"] = probe["product_id"]
+
         for field, value in update_data.items():
             if hasattr(db_product, field):
                 setattr(db_product, field, value)
@@ -2410,6 +2494,8 @@ def bulk_import_products(
     cat3_idx = _build_cat3_lookup_indexes(db)
     unmatched_cat3: List[str] = []
 
+    sku_batch_reserved: Set[str] = set()
+
     for idx, product_data in enumerate(products_data):
         try:
             product_id = product_data.get('product_id')
@@ -2440,7 +2526,18 @@ def bulk_import_products(
                 )
 
             existing = db.query(Product).filter(Product.product_id == product_id).first()
-            
+
+            product_data["code"] = ensure_unique_internal_product_code(
+                db,
+                product_data.get("code"),
+                exclude_product_id=existing.id if existing else None,
+                batch_reserved=sku_batch_reserved,
+            )
+            product_data["product_info"] = sync_internal_code_into_product_info(
+                product_data.get("product_info"), product_data["code"]
+            )
+            canonicalize_hibox_placeholder_product_id(product_data)
+
             if existing:
                 # Update existing product
                 for key, value in product_data.items():

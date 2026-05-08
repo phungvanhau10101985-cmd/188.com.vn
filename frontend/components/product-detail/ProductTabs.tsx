@@ -28,6 +28,30 @@ const SECTION_LABELS: Record<string, string> = {
   market_info: '5. Thông tin thị trường',
 };
 const FIELD_LABELS: Record<string, string> = {
+  sku: 'Mã hàng (SKU)',
+  name: 'Tên sản phẩm',
+  brand: 'Thương hiệu',
+  origin: 'Xuất xứ',
+  category: 'Danh mục',
+  level_1: 'Cấp 1',
+  level_2: 'Cấp 2',
+  level_3: 'Cấp 3',
+  upper_material: 'Chất liệu mặt trên',
+  lining_material: 'Chất liệu lót trong',
+  outsole_material: 'Chất liệu đế ngoài',
+  weight_grams: 'Trọng lượng (gram)',
+  weight_note_vi: 'Trọng lượng',
+  style: 'Kiểu dáng',
+  occasion: 'Dịp',
+  heel_height: 'Chiều cao gót / đế',
+  thong_so_kich_thuoc_vi: 'Kích thước & form',
+  hibox_specs_excerpt: 'Thông số gốc (Hibox)',
+  material_vi: 'Chất liệu (đầy đủ)',
+  colors: 'Màu sắc',
+  sizes: 'Kích cỡ',
+  stock: 'Tồn kho',
+  season: 'Mùa',
+  lead_time_days: 'Thời gian chuẩn bị hàng',
   ma_hang: 'Mã hàng',
   ten_san_pham: 'Tên sản phẩm',
   thuong_hieu: 'Thương hiệu',
@@ -56,6 +80,61 @@ const FIELD_LABELS: Record<string, string> = {
   thoi_gian_chuan_bi_hang: 'Thời gian chuẩn bị hàng',
   khu_vuc_ban_hang_chinh: 'Khu vực bán hàng chính',
 };
+
+/** Không hiển thị trong tab (giữ trong JSON cho scraper/admin). */
+const VARIANT_TECH_KEYS = new Set(['color_swatches', 'pairs', 'source', 'slug']);
+
+/** Ưu tiên chất liệu & kích thước/form trong «Thông số kỹ thuật». */
+const SPEC_WEB_PRIORITY_KEYS = [
+  'upper_material',
+  'lining_material',
+  'outsole_material',
+  'heel_height',
+  'thong_so_kich_thuoc_vi',
+  'weight_note_vi',
+  'weight_grams',
+  'style',
+  'occasion',
+];
+
+/** Sizes / colors trước các khóa khác trong «Phân loại». */
+const VARIANT_DISPLAY_PRIORITY = ['sizes', 'colors'];
+
+function orderSpecificationEntries(entries: [string, unknown][]): [string, unknown][] {
+  const priority = new Map(SPEC_WEB_PRIORITY_KEYS.map((k, i) => [k, i]));
+  const hasViDims = entries.some(([k, v]) => {
+    if (k !== 'thong_so_kich_thuoc_vi') return false;
+    if (v === undefined || v === null) return false;
+    return !isPlaceholderScalar(String(v));
+  });
+  let e = entries;
+  if (hasViDims) {
+    e = e.filter(([k]) => k !== 'hibox_specs_excerpt');
+  }
+  return [...e].sort(([ka], [kb]) => {
+    const da = ka === 'hibox_specs_excerpt' ? 200 : priority.has(ka) ? priority.get(ka)! : 50;
+    const db = kb === 'hibox_specs_excerpt' ? 200 : priority.has(kb) ? priority.get(kb)! : 50;
+    if (da !== db) return da - db;
+    return ka.localeCompare(kb);
+  });
+}
+
+function orderVariantEntries(entries: [string, unknown][]): [string, unknown][] {
+  const pr = new Map(VARIANT_DISPLAY_PRIORITY.map((k, i) => [k, i]));
+  return [...entries].sort(([a], [b]) => (pr.get(a) ?? 99) - (pr.get(b) ?? 99));
+}
+
+function isPlaceholderScalar(val: unknown): boolean {
+  if (val === null || val === undefined) return true;
+  if (typeof val === 'number' && Number.isNaN(val)) return true;
+  if (typeof val === 'string') {
+    const t = val.trim();
+    if (!t) return true;
+    const low = t.toLowerCase();
+    return low === 'nan' || low === 'none' || low === 'null' || low === 'undefined';
+  }
+  return false;
+}
 
 function formatLabel(key: string, useMap: 'section' | 'field' | 'auto' = 'auto'): string {
   const k = key.trim();
@@ -94,7 +173,7 @@ function ProductInfoTab({ product }: { product: Product }) {
   const SpecRow = ({ label, value }: { label: string; value: string | number | boolean }) => (
     <div className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-x-3 py-1 border-b border-gray-100 text-xs items-baseline">
       <span className="text-gray-600 shrink-0">{label}</span>
-      <span className="font-medium text-gray-900 break-words min-w-0">{String(value)}</span>
+      <span className="font-medium text-gray-900 break-words min-w-0 whitespace-pre-line">{String(value)}</span>
     </div>
   );
 
@@ -109,8 +188,21 @@ function ProductInfoTab({ product }: { product: Product }) {
   const renderValue = (val: unknown): React.ReactNode => {
     if (val === undefined || val === null) return null;
     if (typeof val === 'boolean') return val ? 'Có' : 'Không';
-    if (typeof val === 'number' || typeof val === 'string') return String(val);
-    if (Array.isArray(val)) return val.map((v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v))).join(', ');
+    if (typeof val === 'number') {
+      if (Number.isNaN(val)) return null;
+      return String(val);
+    }
+    if (typeof val === 'string') {
+      if (isPlaceholderScalar(val)) return null;
+      return val.trim();
+    }
+    if (Array.isArray(val)) {
+      const parts = val
+        .map((v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)))
+        .filter((s) => !isPlaceholderScalar(s));
+      if (parts.length === 0) return null;
+      return parts.join(', ');
+    }
     if (typeof val === 'object') {
       const entries = Object.entries(val as Record<string, unknown>);
       if (entries.length === 0) return null;
@@ -142,7 +234,14 @@ function ProductInfoTab({ product }: { product: Product }) {
           if (sectionVal === undefined || sectionVal === null) return null;
           const title = formatLabel(sectionKey, 'section');
           if (typeof sectionVal === 'object' && !Array.isArray(sectionVal)) {
-            const entries = Object.entries(sectionVal as Record<string, unknown>);
+            let entries = Object.entries(sectionVal as Record<string, unknown>);
+            if (sectionKey === 'variants') {
+              entries = entries.filter(([k]) => !VARIANT_TECH_KEYS.has(k));
+              entries = orderVariantEntries(entries);
+            }
+            if (sectionKey === 'specifications') {
+              entries = orderSpecificationEntries(entries);
+            }
             if (entries.length === 0) return null;
             return (
               <Section key={sectionKey} title={title}>

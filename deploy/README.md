@@ -2,6 +2,7 @@
 
 ## 1. Trên máy dev (trước khi đưa lên VPS)
 
+- **Cài đặt & chạy local:** [HUONG_DAN_CAI_DAT.md](../HUONG_DAN_CAI_DAT.md) (API 8001, Next 3001, `dev-clear-start.bat`).
 - **Database:** `pg_dump` PostgreSQL (nếu cần giữ dữ liệu thật) hoặc để app tạo bảng rỗng trên VPS.
 - **File:** ảnh sản phẩm đã trên Bunny/CDN; không cần copy `backend/app/static` nếu URL trong DB trỏ CDN.
 - **Env:** chuẩn bị `backend/.env` và `frontend/.env.local` production (không commit).

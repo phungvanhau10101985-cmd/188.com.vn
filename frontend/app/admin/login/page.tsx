@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { adminLogin } from '@/lib/admin-api';
 import { defaultAdminHome, setStoredAdminModules } from '@/lib/admin-role';
+import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -17,8 +18,9 @@ export default function AdminLoginPage() {
   const [setupHint, setSetupHint] = useState<string | null>(null);
 
   useEffect(() => {
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1';
-    fetch(`${apiBase}/admin/check-setup`)
+    fetch(`${getApiBaseUrl()}/admin/check-setup`, {
+      headers: ngrokFetchHeaders(),
+    })
       .then((r) => r.json())
       .then((d: { admin_exists?: boolean; hint?: string }) => {
         if (d.admin_exists === false && d.hint) setSetupHint(d.hint);

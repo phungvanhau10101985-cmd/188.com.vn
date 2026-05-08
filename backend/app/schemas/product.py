@@ -82,7 +82,7 @@ class ProductBase(BaseModel):
     rating_point: float = Field(0.0, description="25: rating_score")
     
     # Cột 26: stock_quantity
-    available: int = Field(0, description="26: stock_quantity")
+    available: int = Field(500, description="26: stock_quantity")
     
     # Cột 27: deposit_required
     deposit_require: bool = Field(False, description="27: deposit_required")

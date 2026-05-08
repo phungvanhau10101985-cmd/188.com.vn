@@ -1,11 +1,15 @@
 # backend/app/api/endpoints/admin.py
 from datetime import datetime, timedelta, timezone
+import json
 import mimetypes
+import os
 import re
+import time
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import case, func
 from typing import List, Optional
@@ -62,6 +66,123 @@ from app.core.admin_permissions import (
 
 router = APIRouter()
 
+
+def _restart_process_later() -> None:
+    time.sleep(0.8)
+    os._exit(0)
+
+
+class Import1688CookieSettingsIn(BaseModel):
+    cookie_text: str
+
+
+def _backend_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _import_1688_cookie_file() -> Path:
+    return _backend_root() / "1688-cookies.json"
+
+
+def _import_1688_env_local_file() -> Path:
+    return _backend_root() / ".env.local"
+
+
+def _cookie_items_from_text(cookie_text: str) -> list[dict]:
+    text = (cookie_text or "").strip()
+    if not text:
+        return []
+    if text.lstrip().startswith(("[", "{")):
+        data = json.loads(text)
+        cookies = data.get("cookies") if isinstance(data, dict) else data
+        if not isinstance(cookies, list):
+            raise ValueError("JSON cookie phải là list hoặc object có key cookies.")
+        out = []
+        for item in cookies:
+            if not isinstance(item, dict) or not item.get("name"):
+                continue
+            c = dict(item)
+            c["name"] = str(c.get("name") or "").strip()
+            c["value"] = str(c.get("value") or "")
+            c.setdefault("domain", ".1688.com")
+            c.setdefault("path", "/")
+            same_site = c.get("sameSite")
+            if same_site is not None:
+                normalized = str(same_site).strip().lower().replace("-", "_")
+                same_site_map = {
+                    "strict": "Strict",
+                    "lax": "Lax",
+                    "none": "None",
+                    "no_restriction": "None",
+                }
+                if normalized in same_site_map:
+                    c["sameSite"] = same_site_map[normalized]
+                else:
+                    c.pop("sameSite", None)
+            out.append(c)
+        return out
+    out = []
+    for part in text.split(";"):
+        if "=" not in part:
+            continue
+        name, value = part.split("=", 1)
+        name = name.strip()
+        if name:
+            out.append({"name": name, "value": value.strip(), "domain": ".1688.com", "path": "/"})
+    return out
+
+
+def _read_import_1688_cookie_items() -> list[dict]:
+    raw = (getattr(settings, "IMPORT_1688_COOKIE_JSON", "") or "").strip()
+    cookie_file = (getattr(settings, "IMPORT_1688_COOKIE_FILE", "") or "").strip()
+    try:
+        if raw:
+            return _cookie_items_from_text(raw)
+        if cookie_file:
+            path = Path(cookie_file)
+            if not path.is_absolute():
+                path = _backend_root() / path
+            if path.exists():
+                return _cookie_items_from_text(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    return []
+
+
+def _upsert_import_1688_env_local(values: dict[str, str]) -> None:
+    path = _import_1688_env_local_file()
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    lines = existing.splitlines()
+    handled = set()
+    next_lines = []
+    for line in lines:
+        replaced = False
+        for key, value in values.items():
+            if re.match(rf"^\s*{re.escape(key)}\s*=", line):
+                next_lines.append(f"{key}={value}")
+                handled.add(key)
+                replaced = True
+                break
+        if not replaced:
+            next_lines.append(line)
+    for key, value in values.items():
+        if key not in handled:
+            next_lines.append(f"{key}={value}")
+    path.write_text("\n".join(next_lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _import_1688_cookie_settings_out(message: str | None = None) -> dict:
+    cookies = _read_import_1688_cookie_items()
+    names = [str(c.get("name") or "") for c in cookies if c.get("name")]
+    return {
+        "enabled": bool(getattr(settings, "IMPORT_1688_ENABLED", True)),
+        "cookie_file": (getattr(settings, "IMPORT_1688_COOKIE_FILE", "") or None),
+        "has_cookie": bool(cookies),
+        "cookie_count": len(cookies),
+        "cookie_names": names[:30],
+        "message": message,
+    }
+
 FIRST_ADMIN_HINT = (
     "Trên server, trong thư mục backend: python create_first_admin.py — "
     "sau đó đăng nhập username admin, mật khẩu admin123 (đổi sau khi vào được)."
@@ -86,6 +207,56 @@ def admin_check_setup(db: Session = Depends(get_db)):
         "admin_exists": count > 0,
         "hint": FIRST_ADMIN_HINT if count == 0 else None,
     }
+
+
+@router.post("/restart-api")
+def admin_restart_api(
+    background_tasks: BackgroundTasks,
+    _: AdminUser = Depends(require_privileged_admin),
+):
+    """Fallback endpoint restart API cho trang cấu hình 1688."""
+    background_tasks.add_task(_restart_process_later)
+    return {
+        "success": True,
+        "message": "API sẽ tự thoát trong giây lát. PM2/systemd/Docker cần tự khởi động lại process.",
+    }
+
+
+@router.get("/import-1688-cookie")
+def admin_get_import_1688_cookie_settings(
+    _: AdminUser = Depends(require_privileged_admin),
+):
+    """Fallback endpoint đọc cấu hình cookie 1688 khi router import-1688 chưa được load."""
+    return _import_1688_cookie_settings_out()
+
+
+@router.put("/import-1688-cookie")
+def admin_save_import_1688_cookie_settings(
+    payload: Import1688CookieSettingsIn,
+    _: AdminUser = Depends(require_privileged_admin),
+):
+    """Fallback endpoint lưu cookie 1688 khi router import-1688 chưa được load."""
+    try:
+        cookies = _cookie_items_from_text(payload.cookie_text)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Cookie không hợp lệ: {exc}") from exc
+    if not cookies:
+        raise HTTPException(status_code=400, detail="Cookie trống hoặc không đọc được name=value.")
+
+    cookie_file = _import_1688_cookie_file()
+    cookie_file.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding="utf-8")
+    _upsert_import_1688_env_local(
+        {
+            "IMPORT_1688_COOKIE_FILE": cookie_file.name,
+            "IMPORT_1688_COOKIE_JSON": "",
+            "IMPORT_1688_ENABLED": "true",
+        }
+    )
+    settings.IMPORT_1688_COOKIE_FILE = cookie_file.name
+    settings.IMPORT_1688_COOKIE_JSON = ""
+    settings.IMPORT_1688_ENABLED = True
+    return _import_1688_cookie_settings_out("Đã lưu cookie 1688.")
+
 
 @router.post("/login", response_model=AdminTokenResponse)
 def admin_login(login_data: AdminLogin, db: Session = Depends(get_db)):

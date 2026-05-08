@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from app.api.endpoints import (
     auth, products, categories, cart, 
     debug, fallback, filters, 
-    import_export, user_behavior, analytics,
+    import_export, import_1688, user_behavior, analytics,
     orders, category_seo, loyalty,
     notifications, push, nanoai_search
 )
@@ -23,6 +23,7 @@ api_router.include_router(debug.router, prefix="/debug", tags=["debug"])
 api_router.include_router(fallback.router, prefix="/fallback", tags=["fallback"])
 api_router.include_router(filters.router, prefix="/filters", tags=["filters"])
 api_router.include_router(import_export.router, prefix="/import-export", tags=["import-export"])
+api_router.include_router(import_1688.router, prefix="/import-1688", tags=["import-1688"])
 api_router.include_router(user_behavior.router, prefix="/user-behavior", tags=["user-behavior"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(nanoai_search.router, prefix="/nanoai", tags=["nanoai"])

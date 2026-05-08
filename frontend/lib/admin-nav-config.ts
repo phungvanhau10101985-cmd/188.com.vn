@@ -10,6 +10,8 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     items: [
       { href: '/admin/orders', label: 'Đơn hàng' },
       { href: '/admin/products', label: 'Sản phẩm' },
+      { href: '/admin/products#import-1688', label: 'Import 1688' },
+      { href: '/admin/import-1688', label: 'Cookie 1688', privilegedOnly: true },
       { href: '/admin/product-questions', label: 'Hỏi đáp sản phẩm' },
       { href: '/admin/product-reviews', label: 'Đánh giá sản phẩm' },
     ],

@@ -180,11 +180,11 @@ def read_products(
     max_price: Optional[float] = Query(None, ge=0),
     is_active: Optional[bool] = True,
     q: Optional[str] = Query(None, description="Tìm theo tên, mã, danh mục, vật liệu, kiểu dáng, màu sắc, dịp, tính năng, size (từ khóa rời rạc)"),
-    product_id: Optional[str] = Query(None, description="Tìm theo ID sản phẩm (Excel)"),
+    product_id: Optional[str] = Query(None, description="Tìm theo ID sản phẩm (Excel) hoặc mã SKU (cột code)"),
     order_random: bool = Query(False, description="Trộn ngẫu nhiên (chỉ áp dụng khi không có q); phân trang theo random không ổn định giữa các lần tải"),
 ):
     """
-    Get products with filtering and search (by name, by product_id)
+    Get products with filtering and search (by name; the product_id filter matches Excel id or SKU code).
     """
     try:
         raw_q = (q or "").strip()

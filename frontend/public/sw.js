@@ -13,6 +13,16 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET" || !event.request.url.startsWith("http")) {
     return;
   }
+  // Chỉ xử lý request cùng origin (shell PWA). Gọi API khác cổng/host (vd. localhost:8001)
+  // qua SW dễ fetch().catch → trả 503 "Offline" và che lỗi/CORS thật.
+  try {
+    const reqUrl = new URL(event.request.url);
+    if (reqUrl.origin !== self.location.origin) {
+      return;
+    }
+  } catch (e) {
+    return;
+  }
   event.respondWith(
     fetch(event.request).catch(async () => {
       const cached = await caches.match("/offline");

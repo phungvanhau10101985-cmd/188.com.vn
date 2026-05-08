@@ -8,6 +8,7 @@ from typing import List, Dict, Any
 from sqlalchemy import inspect, text
 from app.db.base import Base
 from app.models.product import Product
+from app.models.product_import_draft import ProductImportDraft
 from app.models.order import Order, OrderItem, OrderStatus, DepositType, PaymentMethod, PaymentStatus, Payment
 from app.models.product_question import ProductQuestion, ProductQuestionUsefulVote
 from app.models.product_review import ProductReview, ProductReviewUsefulVote
@@ -481,6 +482,12 @@ class MigrationManager:
         results['product_reviews_sync_columns'] = self._sync_table_columns("product_reviews", ProductReview)
         # 8. Bảng products (thêm cột product_info, ...)
         results['products_sync_columns'] = self._sync_table_columns("products", Product)
+        results['product_import_drafts_create'] = self._create_table_if_not_exists(
+            "product_import_drafts", ProductImportDraft
+        )
+        results['product_import_drafts_sync'] = self._sync_table_columns(
+            "product_import_drafts", ProductImportDraft
+        )
         # 9. category_seo_meta.seo_body (đoạn văn SEO 150-300 từ)
         results['category_seo_meta_seo_body'] = self.migrate_category_seo_meta_seo_body()
         results['category_seo_gemini_targets_create'] = self._create_table_if_not_exists(

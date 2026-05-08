@@ -8,6 +8,14 @@ import {
 export const ADMIN_ROLE_STORAGE_KEY = 'admin_role';
 export const ADMIN_MODULES_STORAGE_KEY = 'admin_modules';
 
+function expandAdminNavPrefixes(hrefs: string[]): string[] {
+  const out = new Set(hrefs);
+  if (out.has('/admin/products')) {
+    out.add('/admin/import-1688');
+  }
+  return [...out];
+}
+
 export function getStoredAdminRole(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(ADMIN_ROLE_STORAGE_KEY);
@@ -60,6 +68,7 @@ export function adminNavPrefixesForRole(role: string | null): string[] | null {
   if (r === 'product_manager')
     return [
       '/admin/products',
+      '/admin/import-1688',
       '/admin/taxonomy',
       '/admin/search-mappings',
       '/admin/search-cache',
@@ -80,9 +89,10 @@ export function adminNavPrefixesForRole(role: string | null): string[] | null {
 export function getEffectiveNavPrefixesFor(role: string | null, modules: string[] | null): string[] | null {
   if (modules && modules.length > 0) {
     const hrefs = [...new Set(modules.map((k) => ADMIN_MODULE_NAV[k]).filter(Boolean))];
-    if (hrefs.length > 0) return hrefs;
+    if (hrefs.length > 0) return expandAdminNavPrefixes(hrefs);
   }
-  return adminNavPrefixesForRole(role);
+  const rolePrefixes = adminNavPrefixesForRole(role);
+  return rolePrefixes ? expandAdminNavPrefixes(rolePrefixes) : null;
 }
 
 /** href được phép: ưu tiên modules lưu trong localStorage, không có thì theo role. */

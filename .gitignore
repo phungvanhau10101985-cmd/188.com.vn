@@ -6,6 +6,10 @@
 .venv/
 venv/
 
+# Cookie thử scrape (đừng commit)
+**/backend/.tmp_otdemo_cookies.json
+.tmp_otdemo_cookies.json
+
 # Env (giữ *.env.example trong repo)
 .env
 .env.*

@@ -26,6 +26,7 @@ export default function robots(): MetadataRoute.Robots {
           "/auth/",
           "/checkout/",
           "/cart",
+          "/luot-video-cung-shop",
         ],
       },
     ],

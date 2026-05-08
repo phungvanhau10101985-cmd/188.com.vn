@@ -17,6 +17,7 @@ from app.crud.product import (
     apply_category_final_mapping_to_product,
 )
 from app.core.config import settings
+from app.utils.product_synthetic_engagement import synthetic_engagement_counts
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,19 @@ class ExcelImporter:
                     logger.error(traceback.format_exc())
             
             logger.info(f"📊 ĐÃ CHUẨN BỊ: {len(products_data)} sản phẩm hợp lệ, {len(errors)} lỗi")
-            
+
+            if products_data:
+                try:
+                    from app.services.variant_color_translate import (
+                        apply_deepseek_translations_to_variant_colors,
+                        variant_color_deepseek_translate_effective,
+                    )
+
+                    if variant_color_deepseek_translate_effective():
+                        apply_deepseek_translations_to_variant_colors(products_data)
+                except Exception as exc:
+                    logger.warning("Dịch tên Variant (DeepSeek) bỏ qua do lỗi: %s", exc)
+
             if products_data:
                 logger.info("🔄 ĐANG IMPORT VÀO DATABASE...")
                 result = bulk_import_products(
@@ -337,6 +350,7 @@ class ExcelImporter:
                 workbook = writer.book
                 worksheet = writer.sheets['Products']
                 
+                worksheet.insert_rows(2)
                 for col_idx, col_name in enumerate(available_columns, 1):
                     viet_name = vietnamese_headers.get(col_name, col_name)
                     worksheet.cell(row=2, column=col_idx, value=viet_name)
@@ -392,6 +406,7 @@ class ExcelImporter:
                 "target_audience": {"gender": "Nam", "age_range": "18-40", "style": "Công sở"},
                 "market_info": {"season": "Quanh năm", "lead_time_days": "1-3 ngày", "main_sales_regions": ["Việt Nam"]}
             }, ensure_ascii=False)
+            _eng = synthetic_engagement_counts()
             sample_data = [{
                 'id': 'A746204251298a188b0038',
                 'sku': 'B0038',
@@ -413,11 +428,11 @@ class ExcelImporter:
                 'product_url': 'https://188.com.vn/product/B0038',
                 'video_url': 'https://cloud.video.taobao.com/play/u/3577759700/p/1/e/6/t/1/375400310804.mp4',
                 'main_image': '//img.alicdn.com/img/ibank/O1CN017R3Bf62LWeizFVWog_!!3577759700-0-cib.jpg',
-                'likes_count': 100,
-                'purchases_count': 81,
-                'reviews_count': 72,
-                'questions_count': 90,
-                'rating_score': 4.9,
+                'likes_count': _eng["likes"],
+                'purchases_count': _eng["purchases"],
+                'reviews_count': _eng["rating_total"],
+                'questions_count': _eng["question_total"],
+                'rating_score': _eng["rating_point"],
                 'stock_quantity': 500,
                 'deposit_required': 1,
                 'Main Category': 'Giày dép Nam',
@@ -445,6 +460,7 @@ class ExcelImporter:
                 worksheet = writer.sheets['Products']
                 
                 # 37 cột import: A-AK (không Slug)
+                worksheet.insert_rows(2)
                 vietnamese_headers = [
                     'Id sản phẩm', 'Mã sản phẩm', 'Xuất xứ', 'Thương hiệu', 'Tên',
                     'Mô tả sản phẩm', 'Giá', 'Tên shop', 'Shop id', 'Sp giá thấp hơn',
@@ -474,14 +490,14 @@ class ExcelImporter:
                     worksheet.column_dimensions[column_letter].width = adjusted_width
             
             logger.info(f"✅ Tạo template mẫu thành công: {filepath}")
-            logger.info("📋 Cấu trúc: 37 cột (A-AK), cột AK = Thông tin sản phẩm (JSON). Slug tự tạo khi import.")
+            logger.info("📋 Cấu trúc: 37 cột (A-AK), «Cần đặt cọc» mẫu = 1, AK = product_info JSON; slug tự tạo khi import.")
             
             return {
                 "success": True,
                 "filename": "sample_import_template.xlsx",
                 "filepath": filepath,
                 "download_url": "/static/templates/sample_import_template.xlsx",
-                "note": "Template có 37 cột (A-AK). Cột AK = Thông tin sản phẩm (JSON). Slug tự tạo khi import."
+                "note": "Template có 37 cột (A-AK). Mặc định «Cần đặt cọc» = 1 (SP phải đặt cọc). Đặt 0 nếu không cần cọc.",
             }
             
         except Exception as e:

@@ -2,6 +2,8 @@
 
 Chỉ **bạn** mới làm được các bước dưới (tạo file .env, chọn server, mua domain). Phần code đã được chỉnh để build chạy được; bạn chỉ cần làm đúng từng bước.
 
+**Chạy dev trên máy (cài Python/Node, cổng 8001/3001):** xem **[HUONG_DAN_CAI_DAT.md](./HUONG_DAN_CAI_DAT.md)**.
+
 ---
 
 ## Phần 1: Những việc BẠN cần làm (không thể làm thay)

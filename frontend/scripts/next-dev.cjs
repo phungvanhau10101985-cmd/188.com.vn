@@ -25,7 +25,12 @@ const nextCli = resolveNextCli();
 const result = spawnSync(process.execPath, [nextCli, 'dev', '-p', '3001'], {
   cwd: root,
   stdio: 'inherit',
-  env: { ...process.env, PORT: '3001' },
+  env: {
+    ...process.env,
+    PORT: '3001',
+    API_INTERNAL_ORIGIN: process.env.API_INTERNAL_ORIGIN || 'http://127.0.0.1:8001',
+    NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1',
+  },
 });
 
 process.exit(result.status === null ? 1 : result.status);

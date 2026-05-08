@@ -3,7 +3,7 @@
  *
  * - Trang HTTPS (ngrok, production) không dùng `http://localhost` từ env — trình duyệt chặn
  *   (mixed content) → "Failed to fetch". Khi đó dùng cùng host + `/api/v1` (Next rewrite → FastAPI).
- * - `next dev` + HTTP localhost: cùng origin `/api/v1` hoặc fallback localhost:8001.
+ * - Localhost HTTP: backend mặc định cổng 8001 (`SERVER_PORT` / `dev-clear-start.ps1`). Đặt NEXT_PUBLIC/API_INTERNAL cho đúng nếu dùng cổng khác.
  * - Tắt rewrite: NEXT_PUBLIC_API_NEXT_PROXY=0; nếu gọi thẳng API, NEXT_PUBLIC_API_BASE_URL phải là HTTPS công khai.
  */
 function stripTrailingSlash(url: string): string {
@@ -33,9 +33,6 @@ export function getApiBaseUrl(): string {
   }
 
   const proxyOff = process.env.NEXT_PUBLIC_API_NEXT_PROXY === '0';
-  const useSameOriginByEnv =
-    !proxyOff &&
-    (process.env.NODE_ENV === 'development' || process.env.NEXT_PUBLIC_API_NEXT_PROXY === '1');
 
   if (typeof window !== 'undefined') {
     const httpsPage = window.location.protocol === 'https:';
@@ -43,10 +40,7 @@ export function getApiBaseUrl(): string {
     if (httpsPage) {
       return `${window.location.origin}/api/v1`;
     }
-    // HTTP (localhost dev): cùng origin hoặc gọi thẳng cổng backend
-    if (!proxyOff && useSameOriginByEnv) {
-      return `${window.location.origin}/api/v1`;
-    }
+    // HTTP localhost: gọi thẳng backend local (đồng bộ SERVER_PORT / dev-clear-start — thường 8001).
     return 'http://localhost:8001/api/v1';
   }
 
@@ -55,6 +49,25 @@ export function getApiBaseUrl(): string {
     return `${internal}/api/v1`;
   }
   return 'http://127.0.0.1:8001/api/v1';
+}
+
+/**
+ * Origin của FastAPI (không có /api/v1) để ghép `/static/templates/...`.
+ * Khi `getApiBaseUrl()` là URL tuyệt đối (http://localhost:8001/api/v1) → origin đúng cổng backend.
+ */
+export function getBackendOriginUrl(): string {
+  const api = getApiBaseUrl();
+  if (typeof window === 'undefined') {
+    return '';
+  }
+  try {
+    if (api.startsWith('http://') || api.startsWith('https://')) {
+      return new URL(api).origin;
+    }
+  } catch {
+    /* fall through */
+  }
+  return window.location.origin;
 }
 
 /**

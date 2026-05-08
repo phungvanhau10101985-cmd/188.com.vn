@@ -1,36 +1,37 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+This is a [Next.js](https://nextjs.org) project (188.com.vn storefront + admin).
 
-## Getting Started
+**Cài đặt đầy đủ (backend + frontend + cổng, Playwright, Windows `dev-clear-start.bat`):** xem **[HUONG_DAN_CAI_DAT.md](../HUONG_DAN_CAI_DAT.md)** ở thư mục gốc repo.
 
-First, run the development server:
+## Chạy dev (frontend)
+
+Đảm bảo API FastAPI đã chạy (mặc định **http://127.0.0.1:8001**). Trong thư mục `frontend/`:
+
+```bash
+npm install
+npm run dev
+```
+
+Lệnh `dev` ép cổng **3001** (`scripts/next-dev.cjs`). Mở [http://localhost:3001](http://localhost:3001).
+
+Tùy chọn: `cp .env.local.example .env.local` (Windows: `copy`) — xem mẫu cho `API_INTERNAL_ORIGIN` / ngrok.
+
+## Generic Next.js
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# or yarn dev / pnpm dev / bun dev
 ```
 
-Open [http://localhost:3001](http://localhost:3001) with your browser to see the result.
+Chỉnh `app/page.tsx` — trang tự reload khi sửa.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Dự án dùng [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) để tối ưu font.
 
 ## Learn More
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- [Next.js Documentation](https://nextjs.org/docs)
+- [Learn Next.js](https://nextjs.org/learn)
+- [Next.js GitHub](https://github.com/vercel/next.js)
 
 ## Deploy on Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Xem [Next.js deploying](https://nextjs.org/docs/app/building-your-application/deploying). **Production 188.com.vn** thường dùng VPS + Nginx — [HUONG_DAN_DEPLOY.md](../HUONG_DAN_DEPLOY.md).

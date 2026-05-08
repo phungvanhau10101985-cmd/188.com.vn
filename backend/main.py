@@ -177,6 +177,7 @@ def load_api_routes():
         ("cart", "/cart", "cart"),
         ("orders", "/orders", "orders"),
         ("import_export", "/import-export", "import-export"),  # ĐẶC BIỆT DEBUG
+        ("import_1688", "/import-1688", "import-1688"),
         ("user_behavior", "/user-behavior", "user-behavior"),
         ("analytics", "/analytics", "analytics"),
         ("nanoai_search", "/nanoai", "nanoai"),

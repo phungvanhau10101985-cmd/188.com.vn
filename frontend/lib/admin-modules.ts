@@ -5,6 +5,7 @@
 export const ADMIN_MODULE_NAV: Record<string, string> = {
   orders: '/admin/orders',
   products: '/admin/products',
+  import_1688: '/admin/import-1688',
   taxonomy: '/admin/taxonomy',
   search_mappings: '/admin/search-mappings',
   search_cache: '/admin/search-cache',
@@ -26,6 +27,7 @@ export const ADMIN_MODULE_NAV: Record<string, string> = {
 export const ADMIN_MODULE_ORDER: string[] = [
   'orders',
   'products',
+  'import_1688',
   'taxonomy',
   'search_mappings',
   'search_cache',
@@ -49,6 +51,7 @@ export const ADMIN_MODULE_KEYS_ASSIGNABLE = ADMIN_MODULE_ORDER.filter((k) => k !
 export const ADMIN_MODULE_LABELS: Record<string, string> = {
   orders: 'Đơn hàng',
   products: 'Sản phẩm',
+  import_1688: 'Cookie / Import 1688',
   taxonomy: 'Cây danh mục',
   search_mappings: 'Từ khóa mapping',
   search_cache: 'Cache & thống kê tìm kiếm',
@@ -74,7 +77,7 @@ export function presetModuleKeysForStaffRole(
     case 'order_manager':
       return ['orders'];
     case 'product_manager':
-      return ['products', 'taxonomy', 'search_mappings', 'search_cache', 'category_seo', 'bunny_cdn'];
+      return ['products', 'import_1688', 'taxonomy', 'search_mappings', 'search_cache', 'category_seo', 'bunny_cdn'];
     case 'content_manager':
       return ['product_questions', 'product_reviews', 'category_seo', 'embed_codes', 'chat_embeds'];
     case 'admin':

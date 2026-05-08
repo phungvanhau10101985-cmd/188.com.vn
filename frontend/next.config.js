@@ -5,11 +5,29 @@ const path = require("path");
 const nextConfig = {
   // Trình duyệt mặc định GET /favicon.ico — không có file .ico thì trả về favicon.png (200).
   async rewrites() {
-    return [{ source: "/favicon.ico", destination: "/favicon.png" }];
+    const apiOrigin = (process.env.API_INTERNAL_ORIGIN || "http://127.0.0.1:8001").replace(/\/$/, "");
+    return [
+      { source: "/favicon.ico", destination: "/favicon.png" },
+      { source: "/api/:path*", destination: `${apiOrigin}/api/:path*` },
+    ];
   },
   /** Cho phép iframe YouTube (fullscreen, autoplay trong iframe). Không đặt CSP cứng ở đây để tránh vỡ GA/GTM/FB từ admin embed-codes. */
   async headers() {
+    const videoFeedRobots = [
+      {
+        key: "X-Robots-Tag",
+        value: "noindex, nofollow, noarchive, noimageindex",
+      },
+    ];
     return [
+      {
+        source: "/luot-video-cung-shop",
+        headers: videoFeedRobots,
+      },
+      {
+        source: "/luot-video-cung-shop/:path*",
+        headers: videoFeedRobots,
+      },
       {
         source: "/:path*",
         headers: [

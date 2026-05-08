@@ -41,7 +41,7 @@ export function formatImportFetchFailureMessage(
         apiHost !== ''
       ) {
         corsHint =
-          'Rất hay gặp: admin chạy trên localhost nhưng API trỏ domain production → trình duyệt chặn CORS → Failed to fetch. Cách xử lý: (1) Trên VPS: thêm http://localhost:3001,http://127.0.0.1:3001 vào BACKEND_CORS_ORIGINS trong .env backend rồi restart pm2; hoặc (2) dev full local: NEXT_PUBLIC_API_BASE_URL=http://localhost:8001/api/v1 và chạy FastAPI cổng 8001.';
+          'Rất hay gặp: admin chạy trên localhost nhưng API trỏ domain production → trình duyệt chặn CORS → Failed to fetch. Cách xử lý: (1) Trên VPS: thêm http://localhost:3001,http://127.0.0.1:3001 vào BACKEND_CORS_ORIGINS trong .env backend rồi restart pm2; hoặc (2) dev full local: NEXT_PUBLIC_API_BASE_URL=http://localhost:8001/api/v1 (cùng SERVER_PORT backend / dev-clear-start) và có thể đặt API_INTERNAL_ORIGIN=http://127.0.0.1:8001 cho Next rewrite.';
       }
     } catch {
       /* ignore URL parse */
@@ -65,7 +65,7 @@ function getAdminToken(): string | null {
   return localStorage.getItem('admin_token');
 }
 
-/** Chuỗi thân thiện từ FastAPI detail (chuỗi | mảng validation) */
+/** Chuỗi thân thiện từ FastAPI detail (chuỗi | mảng validation | object { message }) */
 function formatFastApiDetail(detail: unknown): string {
   if (detail == null || detail === '') return '';
   if (typeof detail === 'string') return detail;
@@ -80,6 +80,15 @@ function formatFastApiDetail(detail: unknown): string {
       )
       .filter(Boolean)
       .join('; ');
+  if (typeof detail === 'object' && detail !== null) {
+    const o = detail as Record<string, unknown>;
+    if (typeof o.message === 'string') return o.message;
+    try {
+      return JSON.stringify(o, null, 2);
+    } catch {
+      return String(detail);
+    }
+  }
   return String(detail);
 }
 
@@ -124,7 +133,13 @@ async function fetchAdmin<T>(
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
       const msg = formatFastApiDetail((err as { detail?: unknown }).detail) || `Lỗi ${res.status}`;
-      throw new Error(msg);
+      const statusHint =
+        res.status === 422
+          ? '[422] Body JSON cần dạng: {"url":"https://..." , "download_images":true}. '
+          : res.status === 404
+            ? `[404 ${url}] `
+            : '';
+      throw new Error(statusHint + msg);
     }
     if (res.status === 204) return {} as T;
     return res.json();
@@ -258,6 +273,83 @@ export interface AdminImportExcelJob {
   errors?: string[] | null;
   warnings?: string[] | null;
   total_rows?: number | null;
+}
+
+export interface AdminImport1688Draft {
+  id: number;
+  job_id: string;
+  source: string;
+  source_url: string;
+  source_offer_id?: string | null;
+  status: string;
+  phase?: string | null;
+  message?: string | null;
+  percent?: number | null;
+  raw_payload?: Record<string, unknown> | null;
+  product_data?: Partial<AdminProduct> & Record<string, unknown>;
+  errors?: string[];
+  warnings?: string[];
+  published_product_id?: string | null;
+  created_at?: string;
+  updated_at?: string | null;
+  finished_at?: string | null;
+}
+
+export interface AdminImport1688Job {
+  job_id: string;
+  status: 'queued' | 'running' | 'done' | 'error' | 'published' | string;
+  phase?: string | null;
+  message?: string | null;
+  percent?: number | null;
+  draft_id?: number | null;
+  product_data?: Partial<AdminProduct> & Record<string, unknown>;
+  errors?: string[];
+  warnings?: string[];
+  published_product_id?: string | null;
+  created_at?: string;
+  finished_at?: string | null;
+}
+
+export interface AdminImport1688ExcelBatchStart {
+  batch_token: string;
+  total: number;
+  draft_ids: number[];
+  job_ids: string[];
+  skipped: string[];
+}
+
+export interface AdminImport1688BatchStatusItem {
+  draft_id: number;
+  job_id: string;
+  excel_row?: number | null;
+  status: string;
+  phase?: string | null;
+  message?: string | null;
+}
+
+export interface AdminImport1688BatchStatus {
+  batch_token: string;
+  total: number;
+  completed: number;
+  failed: number;
+  pending: number;
+  items: AdminImport1688BatchStatusItem[];
+}
+
+export interface AdminImport1688DraftListResponse {
+  items: AdminImport1688Draft[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface AdminImport1688CookieSettings {
+  enabled: boolean;
+  cookie_file?: string | null;
+  has_cookie: boolean;
+  cookie_count: number;
+  cookie_names: string[];
+  message?: string | null;
 }
 
 export interface AdminSearchMapping {
@@ -454,6 +546,161 @@ export const adminProductAPI = {
     }
   },
 
+  startImport1688: (url: string, downloadImages = true, source?: '1688' | 'hibox') =>
+    fetchAdmin<{ job_id: string; draft_id: number; message?: string; poll_url?: string }>(
+      '/import-1688/jobs',
+      {
+        method: 'POST',
+        body: JSON.stringify({ url, download_images: downloadImages, source }),
+        timeoutMs: 60_000,
+      },
+    ),
+
+  getImport1688Job: (jobId: string) =>
+    fetchAdmin<AdminImport1688Job>(`/import-1688/jobs/${encodeURIComponent(jobId)}`, {
+      timeoutMs: 60_000,
+    }),
+
+  getImport1688Draft: (draftId: number) =>
+    fetchAdmin<AdminImport1688Draft>(`/import-1688/drafts/${draftId}`, {
+      timeoutMs: 60_000,
+    }),
+
+  updateImport1688Draft: (draftId: number, productData: Partial<AdminProduct> & Record<string, unknown>) =>
+    fetchAdmin<AdminImport1688Draft>(`/import-1688/drafts/${draftId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ product_data: productData }),
+      timeoutMs: 60_000,
+    }),
+
+  publishImport1688Draft: (draftId: number) =>
+    fetchAdmin<{ success: boolean; action: 'created' | 'updated'; product_id: string; slug?: string }>(
+      `/import-1688/drafts/${draftId}/publish`,
+      { method: 'POST', timeoutMs: 120_000 },
+    ),
+
+  exportImport1688DraftExcel: async (draftId: number) => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const url = `${getApiBaseUrl()}/import-1688/drafts/${draftId}/export-excel`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Export draft 1688 thất bại');
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition');
+    const match = disposition?.match(/filename="?([^";]+)"?/);
+    const filename = match ? match[1] : `import_1688_draft_${draftId}.xlsx`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  },
+
+  uploadImport1688ExcelBatch: async (file: File): Promise<AdminImport1688ExcelBatchStart> => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const form = new FormData();
+    form.append('file', file);
+    const url = `${getApiBaseUrl()}/import-1688/jobs/batch-from-excel`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+      body: form,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(formatFastApiDetail(body?.detail ?? body) || 'Upload batch import link thất bại');
+    }
+    return body as AdminImport1688ExcelBatchStart;
+  },
+
+  getImport1688ExcelBatchStatus: (batchToken: string) =>
+    fetchAdmin<AdminImport1688BatchStatus>(
+      `/import-1688/jobs/batch-excel/${encodeURIComponent(batchToken)}/status`,
+      { timeoutMs: 60_000 },
+    ),
+
+  listImport1688Drafts: (params?: { status?: string; limit?: number; offset?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.limit != null) qs.set('limit', String(params.limit));
+    if (params?.offset != null) qs.set('offset', String(params.offset));
+    const tail = qs.toString() ? `?${qs.toString()}` : '';
+    return fetchAdmin<AdminImport1688DraftListResponse>(`/import-1688/drafts${tail}`, { timeoutMs: 60_000 });
+  },
+
+  exportImport1688DraftsExcelBulk: async (draftIds: number[]) => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const url = `${getApiBaseUrl()}/import-1688/drafts/export-excel-bulk`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...ngrokFetchHeaders(),
+      },
+      body: JSON.stringify({ draft_ids: draftIds }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail(errBody?.detail ?? errBody) || 'Export gộp draft thất bại');
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition');
+    const match = disposition?.match(/filename="?([^";]+)"?/);
+    const filename = match ? match[1] : 'import_1688_drafts_bulk.xlsx';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  },
+
+  getImport1688CookieSettings: () =>
+    fetchAdmin<AdminImport1688CookieSettings>('/import-1688/settings/cookie', {
+      timeoutMs: 60_000,
+    }).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/\b404\b|not found/i.test(msg)) throw err;
+      return fetchAdmin<AdminImport1688CookieSettings>('/admin/import-1688-cookie', {
+        timeoutMs: 60_000,
+      });
+    }),
+
+  saveImport1688CookieSettings: (cookieText: string) =>
+    fetchAdmin<AdminImport1688CookieSettings>('/import-1688/settings/cookie', {
+      method: 'PUT',
+      body: JSON.stringify({ cookie_text: cookieText }),
+      timeoutMs: 60_000,
+    }).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/\b404\b|not found/i.test(msg)) throw err;
+      return fetchAdmin<AdminImport1688CookieSettings>('/admin/import-1688-cookie', {
+        method: 'PUT',
+        body: JSON.stringify({ cookie_text: cookieText }),
+        timeoutMs: 60_000,
+      });
+    }),
+
+  restartBackendApi: () =>
+    fetchAdmin<{ success: boolean; message: string }>('/import-1688/settings/restart-api', {
+      method: 'POST',
+      timeoutMs: 30_000,
+    }).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/\b404\b|not found/i.test(msg)) throw err;
+      return fetchAdmin<{ success: boolean; message: string }>('/admin/restart-api', {
+        method: 'POST',
+        timeoutMs: 30_000,
+      });
+    }),
+
   exportExcel: async () => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
@@ -483,7 +730,7 @@ export const adminProductAPI = {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || 'Tải file mẫu thất bại');
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Tải file mẫu thất bại');
     }
     const blob = await res.blob();
     const disposition = res.headers.get('Content-Disposition');
@@ -928,7 +1175,7 @@ export const adminProductQuestionsAPI = {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || 'Import thất bại');
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Import thất bại');
     }
     return res.json();
   },
@@ -1014,7 +1261,7 @@ export const adminProductReviewsAPI = {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || 'Import thất bại');
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Import thất bại');
     }
     return res.json();
   },

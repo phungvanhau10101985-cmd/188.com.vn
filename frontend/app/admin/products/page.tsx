@@ -3,11 +3,14 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   adminProductAPI,
+  type AdminImport1688Draft,
+  type AdminImport1688Job,
   type AdminImportExcelJob,
   type AdminProduct,
   type AdminProductsResponse,
 } from '@/lib/admin-api';
 import { getCatalogFeedApiBaseUrl, isNonPublicCatalogFeedBase } from '@/lib/api-base';
+import { ImportDraftExcelCompare } from '@/components/admin/ImportDraftExcelCompare';
 
 const PAGE_SIZE = 100;
 
@@ -77,6 +80,46 @@ function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
   };
 }
 
+/** Chuẩn hoá khớp backend: câu có URL, markdown, hoặc hibox.mn/v/… không có https */
+function resolveImportLinkUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/^[\uFEFF\u200b-\u200d\u2060]+/, '');
+  const httpMatch = trimmed.match(/\bhttps?:\/\/[^\s\]\)<>'"]+/i);
+  if (httpMatch) return httpMatch[0].replace(/[,.;:"'”’)\]]+$/u, '').trim();
+
+  const bareMatch = trimmed.match(
+    /\b(?:www\.)?(?:[\w.-]+\.)*hibox\.mn(?::\d+)?(?:\/[a-z]{2,5})?\/v\/[^\s\]\)<>'",]+/i,
+  );
+  if (bareMatch) {
+    const frag = bareMatch[0];
+    return /^https?:\/\//i.test(frag) ? frag : `https://${frag.replace(/^\/+/, '')}`;
+  }
+  return trimmed;
+}
+
+/** Hibox không dùng CDN 1688 — backend sẽ bỏ bước tải ảnh Bunny khi client gửi download_images: false. */
+function isHiboxProductUrl(raw: string): boolean {
+  try {
+    const resolved = resolveImportLinkUrl(raw);
+    const absolute = /^[a-z][a-z0-9+.-]*:/i.test(resolved)
+      ? resolved
+      : `https://${resolved.replace(/^\/+/, '')}`;
+    const u = new URL(absolute);
+    let host = u.hostname.replace(/^www\./i, '').toLowerCase();
+    host = host.endsWith('.') ? host.slice(0, -1) : host;
+    if (host === 'hibox.mn' || host.endsWith('.hibox.mn')) return true;
+    if (host === 'taobao1688.kz') {
+      const id =
+        u.searchParams.get('id')?.trim() ||
+        u.searchParams.get('item_id')?.trim() ||
+        u.searchParams.get('itemId')?.trim();
+      return Boolean(id && /^[a-zA-Z0-9][\w.-]{1,220}$/.test(id));
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export default function AdminProductsPage() {
   const [data, setData] = useState<AdminProductsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -103,12 +146,29 @@ export default function AdminProductsPage() {
     title: string;
     body: string;
   } | null>(null);
+  const [import1688Url, setImport1688Url] = useState('');
+  const [importing1688, setImporting1688] = useState(false);
+  const [import1688Progress, setImport1688Progress] = useState<{
+    message: string;
+    percent: number | null;
+    phase?: string | null;
+    warn?: string | null;
+  } | null>(null);
+  const [import1688Draft, setImport1688Draft] = useState<AdminImport1688Draft | null>(null);
+  const [publishing1688, setPublishing1688] = useState(false);
+  const [exporting1688Draft, setExporting1688Draft] = useState(false);
+  const [excelBatchBusy, setExcelBatchBusy] = useState(false);
+  const [excelBatchTrackToken, setExcelBatchTrackToken] = useState<string | null>(null);
+  const [excelBatchHint, setExcelBatchHint] = useState<string | null>(null);
+  const [lastExcelBatchDraftIds, setLastExcelBatchDraftIds] = useState<number[]>([]);
+  const [bulkExport1688Busy, setBulkExport1688Busy] = useState(false);
   /** Cờ huỷ theo dõi (job vẫn chạy ở server). */
   const cancelTrackRef = useRef(false);
   const [exporting, setExporting] = useState(false);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const excelBatch1688InputRef = useRef<HTMLInputElement>(null);
 
   const [editing, setEditing] = useState<{ productId: string; field: string; value: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -215,6 +275,234 @@ export default function AdminProductsPage() {
     },
     [],
   );
+
+  const pollImport1688Job = useCallback(async (jobId: string): Promise<AdminImport1688Job> => {
+    let lastJob: AdminImport1688Job | null = null;
+    for (let pollIdx = 0; ; pollIdx += 1) {
+      try {
+        const job = await adminProductAPI.getImport1688Job(jobId);
+        lastJob = job;
+        setImport1688Progress({
+          message: job.message || 'Đang xử lý link 1688…',
+          percent: job.percent ?? null,
+          phase: job.phase || null,
+          warn: job.warnings?.[0] || null,
+        });
+        if (job.status === 'done' || job.status === 'error' || job.status === 'published') return job;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setImport1688Progress((prev) => ({
+          message: prev?.message || 'Đang chờ server…',
+          percent: prev?.percent ?? null,
+          phase: prev?.phase ?? null,
+          warn: msg.slice(0, 180),
+        }));
+        if (pollIdx > 25) {
+          if (lastJob) return lastJob;
+          throw err;
+        }
+      }
+      const delayMs = pollIdx <= 4 ? 1000 : 3000;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }, []);
+
+  const handleImport1688 = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const url = resolveImportLinkUrl(import1688Url);
+    if (!url) {
+      showToast('err', 'Vui lòng dán link sản phẩm (1688 hoặc Hibox)');
+      return;
+    }
+    const fromHibox = isHiboxProductUrl(url);
+    setImporting1688(true);
+    setImport1688Draft(null);
+    setImport1688Progress({
+      message: fromHibox ? 'Đang gửi link Hibox lên server…' : 'Đang gửi link 1688 lên server…',
+      percent: null,
+    });
+    try {
+      // Giữ URL ảnh gốc trong draft/export; không tự tải ảnh về Bunny ở luồng import link.
+      const started = await adminProductAPI.startImport1688(url, false, fromHibox ? 'hibox' : '1688');
+      setImport1688Progress({
+        message: fromHibox ? 'Đã nhận link, đang mở trang Hibox…' : 'Đã nhận link, đang mở trang 1688…',
+        percent: null,
+      });
+      const job = await pollImport1688Job(started.job_id);
+      if (job.status === 'error') {
+        const body = [...(job.errors || []), ...(job.warnings || [])].filter(Boolean).join('\n');
+        setImportDetailPanel({
+          variant: 'err',
+          title: fromHibox ? 'Import Hibox thất bại' : 'Import 1688 thất bại',
+          body: body || job.message || 'Không đọc được dữ liệu từ link.',
+        });
+        showToast('err', job.message || (fromHibox ? 'Import Hibox thất bại' : 'Import 1688 thất bại'), 8000);
+        return;
+      }
+      const draftId = job.draft_id ?? started.draft_id;
+      const draft = await adminProductAPI.getImport1688Draft(draftId);
+      setImport1688Draft(draft);
+      const warnText = draft.warnings?.length ? ` Có ${draft.warnings.length} cảnh báo cần kiểm tra.` : '';
+      showToast('ok', `Đã tạo draft từ ${fromHibox ? 'Hibox' : '1688'}.${warnText}`, 6000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : fromHibox ? 'Import Hibox thất bại' : 'Import 1688 thất bại';
+      setImportDetailPanel({
+        variant: 'err',
+        title: fromHibox ? 'Không thể import Hibox' : 'Không thể import 1688',
+        body: msg,
+      });
+      showToast('err', msg, 9000);
+    } finally {
+      setImporting1688(false);
+      setImport1688Progress(null);
+    }
+  };
+
+  const updateImport1688ProductField = (field: string, value: string | number | boolean) => {
+    setImport1688Draft((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        product_data: {
+          ...(prev.product_data || {}),
+          [field]: value,
+        },
+      };
+    });
+  };
+
+  const saveImport1688Draft = async () => {
+    if (!import1688Draft?.id || !import1688Draft.product_data) return;
+    const saved = await adminProductAPI.updateImport1688Draft(import1688Draft.id, import1688Draft.product_data);
+    setImport1688Draft(saved);
+  };
+
+  const handlePublishImport1688 = async () => {
+    if (!import1688Draft?.id || !import1688Draft.product_data) return;
+    setPublishing1688(true);
+    try {
+      await saveImport1688Draft();
+      const res = await adminProductAPI.publishImport1688Draft(import1688Draft.id);
+      showToast('ok', `${res.action === 'created' ? 'Đã tạo' : 'Đã cập nhật'} sản phẩm ${res.product_id}`, 6000);
+      setImport1688Draft(null);
+      setImport1688Url('');
+      fetchProducts();
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Đăng sản phẩm thất bại', 9000);
+    } finally {
+      setPublishing1688(false);
+    }
+  };
+
+  const handleExportImport1688Draft = async () => {
+    if (!import1688Draft?.id || !import1688Draft.product_data) return;
+    setExporting1688Draft(true);
+    try {
+      await saveImport1688Draft();
+      await adminProductAPI.exportImport1688DraftExcel(import1688Draft.id);
+      showToast('ok', 'Đã tải Excel draft 1688');
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Export draft 1688 thất bại', 8000);
+    } finally {
+      setExporting1688Draft(false);
+    }
+  };
+
+  useEffect(() => {
+    const token = excelBatchTrackToken;
+    if (!token) return undefined;
+    let cancelled = false;
+    let iv: ReturnType<typeof setInterval> | null = null;
+    let pollBusy = false;
+
+    const stopInterval = () => {
+      if (iv != null) {
+        clearInterval(iv);
+        iv = null;
+      }
+    };
+
+    const tick = async () => {
+      if (pollBusy) return;
+      pollBusy = true;
+      try {
+        const st = await adminProductAPI.getImport1688ExcelBatchStatus(token);
+        if (cancelled) return;
+        const msg = `Batch (tuần tự): đã xong ${st.completed}/${st.total}${
+          st.failed ? ` • lỗi ${st.failed}` : ''
+        } • chờ ${st.pending}`;
+        setExcelBatchHint(msg);
+        if (st.pending <= 0) {
+          stopInterval();
+          setExcelBatchTrackToken(null);
+          showToast('ok', `Batch xong: ${st.completed} draft, ${st.failed} lỗi.`, 7000);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setExcelBatchHint(err instanceof Error ? err.message : 'Không poll được trạng thái batch');
+        }
+      } finally {
+        pollBusy = false;
+      }
+    };
+
+    void tick();
+    iv = setInterval(() => void tick(), 3500);
+
+    return () => {
+      cancelled = true;
+      stopInterval();
+    };
+  }, [excelBatchTrackToken]);
+
+  const handleExcelBatch1688Pick = () => {
+    excelBatch1688InputRef.current?.click();
+  };
+
+  const handleExcelBatch1688Change = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    setExcelBatchBusy(true);
+    setExcelBatchHint('Đang tải file và tạo draft cho từng dòng…');
+    try {
+      const res = await adminProductAPI.uploadImport1688ExcelBatch(file);
+      setLastExcelBatchDraftIds(res.draft_ids ?? []);
+      if (res.skipped?.length) {
+        const head = res.skipped.slice(0, 4).join(' — ');
+        showToast(
+          'err',
+          `${head}${res.skipped.length > 4 ? '…' : ''} (${res.skipped.length} dòng bỏ qua)`,
+          14000,
+        );
+      }
+      setExcelBatchTrackToken(res.batch_token);
+      showToast('ok', `Đã nhận ${res.total} link. Server xử lý tuần tự (có thể vài phút).`, 6000);
+    } catch (err) {
+      setExcelBatchHint(null);
+      showToast('err', err instanceof Error ? err.message : 'Upload batch thất bại', 10000);
+    } finally {
+      setExcelBatchBusy(false);
+    }
+  };
+
+  const handleExportLastExcelBatch = async () => {
+    const ids = lastExcelBatchDraftIds.filter((x) => typeof x === 'number' && x > 0);
+    if (!ids.length) {
+      showToast('err', 'Chưa có draft từ batch Excel. Hãy chạy import file trước.', 6000);
+      return;
+    }
+    setBulkExport1688Busy(true);
+    try {
+      await adminProductAPI.exportImport1688DraftsExcelBulk(ids);
+      showToast('ok', 'Đã tải Excel gộp các draft (chỉ dòng đã có dữ liệu).', 8000);
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Export gộp thất bại', 10000);
+    } finally {
+      setBulkExport1688Busy(false);
+    }
+  };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -459,12 +747,12 @@ export default function AdminProductsPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ID sản phẩm</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ID hoặc SKU</label>
               <input
                 type="text"
                 value={searchId}
                 onChange={(e) => setSearchId(e.target.value)}
-                placeholder="Tìm theo ID..."
+                placeholder="ID sản phẩm hoặc mã SKU..."
                 className="w-48 rounded-lg border border-gray-300 px-3 py-2 text-sm"
               />
             </div>
@@ -588,6 +876,261 @@ export default function AdminProductsPage() {
               </pre>
             </div>
           ) : null}
+          <div id="import-1688" className="mt-4 scroll-mt-24 rounded-xl border border-orange-100 bg-orange-50/50 p-4">
+            <form onSubmit={handleImport1688} className="flex flex-col lg:flex-row gap-3 lg:items-end">
+              <div className="flex-1">
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <label className="block text-sm font-semibold text-gray-800">Import từ link (1688 / Hibox)</label>
+                  <a
+                    href="/admin/import-1688"
+                    className="rounded-full border border-orange-200 bg-white px-2.5 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100"
+                  >
+                    Nhập cookie 1688
+                  </a>
+                </div>
+                <input
+                  type="url"
+                  value={import1688Url}
+                  onChange={(e) => setImport1688Url(e.target.value)}
+                  placeholder="1688, hibox.mn/v/… hoặc taobao1688.kz/item?id=…"
+                  className="w-full rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                />
+                <p className="mt-1 text-xs text-gray-600">
+                  1688: Playwright + cookie trong `.env` (ảnh CDN có thể tải về Bunny). Hibox: không cần cookie; ảnh giữ URL gốc. Luôn có bước
+                  draft trước khi đăng hoặc export Excel khớp cột import.
+                </p>
+              </div>
+              <button
+                type="submit"
+                disabled={importing1688 || !import1688Url.trim()}
+                className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-medium disabled:opacity-70"
+              >
+                {importing1688 ? 'Đang lấy dữ liệu...' : 'Lấy dữ liệu'}
+              </button>
+            </form>
+            <input
+              ref={excelBatch1688InputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={handleExcelBatch1688Change}
+            />
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:gap-x-3 sm:gap-y-2">
+              <button
+                type="button"
+                onClick={handleExcelBatch1688Pick}
+                disabled={excelBatchBusy}
+                className="rounded-lg border border-orange-300 bg-white px-3 py-2 text-left text-sm font-medium text-orange-900 hover:bg-orange-100 disabled:opacity-70"
+              >
+                {excelBatchBusy
+                  ? 'Đang upload…'
+                  : 'Import file Excel (cột link F từ dòng 2; shop / giá từ cùng dòng vào nháp)'}
+              </button>
+              <button
+                type="button"
+                onClick={handleExportLastExcelBatch}
+                disabled={
+                  bulkExport1688Busy || !lastExcelBatchDraftIds.some((id) => typeof id === 'number' && id > 0)
+                }
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-70"
+              >
+                {bulkExport1688Busy ? 'Đang tải…' : 'Export Excel các draft của batch vừa upload'}
+              </button>
+            </div>
+            {excelBatchHint ? <p className="mt-1 text-xs text-gray-700">{excelBatchHint}</p> : null}
+
+            {importing1688 && import1688Progress ? (
+              <div className="mt-3 rounded-lg border border-orange-200 bg-white p-3">
+                <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
+                  {import1688Progress.percent != null ? (
+                    <div
+                      className="h-full rounded-full bg-orange-600 transition-[width] duration-300 ease-out"
+                      style={{ width: `${Math.min(100, import1688Progress.percent)}%` }}
+                    />
+                  ) : (
+                    <div className="h-full w-full bg-orange-500/70 animate-pulse rounded-full" />
+                  )}
+                </div>
+                <p className="mt-2 text-xs text-gray-700">{import1688Progress.message}</p>
+                {import1688Progress.phase ? <p className="text-[11px] text-gray-500">{import1688Progress.phase}</p> : null}
+                {import1688Progress.warn ? <p className="mt-1 text-[11px] text-amber-700">{import1688Progress.warn}</p> : null}
+              </div>
+            ) : null}
+
+            {import1688Draft?.product_data ? (
+              <div className="mt-4 rounded-xl border border-orange-200 bg-white p-4">
+                <div className="flex flex-col lg:flex-row gap-4">
+                  <div className="w-full lg:w-40 shrink-0">
+                    {import1688Draft.product_data.main_image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={String(import1688Draft.product_data.main_image)}
+                        alt={String(import1688Draft.product_data.name || 'Ảnh sản phẩm 1688')}
+                        className="h-40 w-full object-cover rounded-lg border border-gray-200 bg-gray-50"
+                      />
+                    ) : (
+                      <div className="h-40 rounded-lg border border-dashed border-gray-300 bg-gray-50 flex items-center justify-center text-xs text-gray-500">
+                        Chưa có ảnh
+                      </div>
+                    )}
+                    <p className="mt-2 text-xs text-gray-500">
+                      {(import1688Draft.product_data.images as string[] | undefined)?.length || 0} ảnh
+                    </p>
+                  </div>
+                  <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Tên sản phẩm</label>
+                      <input
+                        value={String(import1688Draft.product_data.name || '')}
+                        onChange={(e) => updateImport1688ProductField('name', e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">ID sản phẩm</label>
+                      <input
+                        value={String(import1688Draft.product_data.product_id || '')}
+                        onChange={(e) => updateImport1688ProductField('product_id', e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Giá</label>
+                      <input
+                        type="number"
+                        value={Number(import1688Draft.product_data.price || 0)}
+                        onChange={(e) => updateImport1688ProductField('price', Number(e.target.value) || 0)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Shop</label>
+                      <input
+                        value={String(import1688Draft.product_data.shop_name || '')}
+                        onChange={(e) => updateImport1688ProductField('shop_name', e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Mã SKU (cột sku)</label>
+                      <input
+                        value={String(import1688Draft.product_data.code ?? '')}
+                        onChange={(e) => updateImport1688ProductField('code', e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Shop ID</label>
+                      <input
+                        value={String(import1688Draft.product_data.shop_id ?? '')}
+                        onChange={(e) => updateImport1688ProductField('shop_id', e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Xuất xứ</label>
+                      <input
+                        value={String(import1688Draft.product_data.origin ?? '')}
+                        onChange={(e) => updateImport1688ProductField('origin', e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Link nguồn (product_url)</label>
+                      <input
+                        value={String(import1688Draft.product_data.link_default ?? '')}
+                        onChange={(e) => updateImport1688ProductField('link_default', e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-xs"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Link video (video_url)</label>
+                      <input
+                        value={String(import1688Draft.product_data.video_link ?? '')}
+                        onChange={(e) => updateImport1688ProductField('video_link', e.target.value)}
+                        placeholder="https://cloud.video.taobao.com/…mp4"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Danh mục cấp 1</label>
+                      <input
+                        value={String(import1688Draft.product_data.category ?? '')}
+                        onChange={(e) => updateImport1688ProductField('category', e.target.value)}
+                        placeholder="VD: Thời trang nữ"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Danh mục cấp 2</label>
+                      <input
+                        value={String(import1688Draft.product_data.subcategory ?? '')}
+                        onChange={(e) => updateImport1688ProductField('subcategory', e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Danh mục cấp 3</label>
+                      <input
+                        value={String(import1688Draft.product_data.sub_subcategory ?? '')}
+                        onChange={(e) => updateImport1688ProductField('sub_subcategory', e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Mô tả</label>
+                      <textarea
+                        value={String(import1688Draft.product_data.description || '')}
+                        onChange={(e) => updateImport1688ProductField('description', e.target.value)}
+                        rows={3}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <ImportDraftExcelCompare productData={import1688Draft.product_data as Record<string, unknown>} />
+                {import1688Draft.warnings?.length ? (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    {import1688Draft.warnings.slice(0, 4).map((w) => (
+                      <p key={w}>{w}</p>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="mt-4 flex flex-wrap gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={saveImport1688Draft}
+                    className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50"
+                  >
+                    Lưu nháp
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExportImport1688Draft}
+                    disabled={exporting1688Draft}
+                    className="px-4 py-2 rounded-lg bg-amber-500 text-white text-sm font-medium hover:bg-amber-600 disabled:opacity-70"
+                  >
+                    {exporting1688Draft ? 'Đang export...' : 'Export Excel'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setImport1688Draft(null)}
+                    className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50"
+                  >
+                    Đóng
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handlePublishImport1688}
+                    disabled={publishing1688}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-70"
+                  >
+                    {publishing1688 ? 'Đang đăng...' : 'Đăng ngay'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
           <div className="mt-4 pt-4 border-t border-gray-100 space-y-2 text-sm text-gray-700">
             <p className="text-xs text-gray-600 leading-snug">
               <strong className="font-medium text-gray-800">Nguồn cấp kiểu URL:</strong> mỗi đường link dưới đây là{' '}

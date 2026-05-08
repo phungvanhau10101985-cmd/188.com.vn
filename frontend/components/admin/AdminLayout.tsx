@@ -13,23 +13,25 @@ import {
 } from '@/lib/admin-role';
 import { ADMIN_NAV_GROUPS, type AdminNavGroup } from '@/lib/admin-nav-config';
 
+function adminNavPathFromHref(href: string): string {
+  return href.split('#')[0]?.split('?')[0] || href;
+}
+
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [clearingCache, setClearingCache] = useState(false);
   const [cacheMessage, setCacheMessage] = useState<string | null>(null);
-  const [adminRole, setAdminRole] = useState<string | null>(() =>
-    typeof window !== 'undefined' ? getStoredAdminRole() : null,
-  );
-  const [adminModules, setAdminModules] = useState<string[] | null>(() =>
-    typeof window !== 'undefined' ? getStoredAdminModules() : null,
-  );
+  const [hydrated, setHydrated] = useState(false);
+  const [adminRole, setAdminRole] = useState<string | null>(null);
+  const [adminModules, setAdminModules] = useState<string[] | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     setAdminRole(getStoredAdminRole());
     setAdminModules(getStoredAdminModules());
+    setHydrated(true);
   }, [pathname]);
 
   useEffect(() => {
@@ -46,25 +48,27 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   }, [sidebarOpen]);
 
   const visibleGroups = useMemo(() => {
+    if (!hydrated) return [];
     const filterItem = (l: AdminNavGroup['items'][number]) => {
       if (l.privilegedOnly && !isPrivilegedAdminRole(adminRole)) return false;
       const prefixes = getEffectiveNavPrefixesFor(adminRole, adminModules);
       if (!prefixes) return true;
-      return prefixes.some((p) => l.href === p || l.href.startsWith(`${p}/`));
+      const hrefPath = adminNavPathFromHref(l.href);
+      return prefixes.some((p) => hrefPath === p || hrefPath.startsWith(`${p}/`));
     };
 
     return ADMIN_NAV_GROUPS.map((g) => ({
       ...g,
       items: g.items.filter(filterItem),
     })).filter((g) => g.items.length > 0);
-  }, [adminRole, adminModules]);
+  }, [hydrated, adminRole, adminModules]);
 
   const adminHomeHref = useMemo(
     () => defaultAdminHomeFromState((adminRole || '').trim() || null, adminModules),
     [adminRole, adminModules],
   );
 
-  const showClearCacheButton = adminRole === null || isPrivilegedAdminRole(adminRole);
+  const showClearCacheButton = hydrated && (adminRole === null || isPrivilegedAdminRole(adminRole));
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -120,7 +124,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </p>
         <div className="space-y-0.5">
           {group.items.map(({ href, label }) => {
-            const active = pathname === href || pathname.startsWith(`${href}/`);
+            const hrefPath = adminNavPathFromHref(href);
+            const active = pathname === hrefPath || pathname.startsWith(`${hrefPath}/`);
             return (
               <Link
                 key={href}
@@ -158,7 +163,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </button>
       </div>
       <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 py-3 lg:py-2">
-        {renderNavLinks()}
+        {hydrated ? renderNavLinks() : <p className="px-3 py-2 text-sm text-slate-400">Đang tải menu...</p>}
       </nav>
       <div className="border-t border-slate-700 p-2 shrink-0 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         <button

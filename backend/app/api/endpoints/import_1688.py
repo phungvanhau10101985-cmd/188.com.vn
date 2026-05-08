@@ -1,0 +1,1123 @@
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import traceback
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import pandas as pd
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
+from sqlalchemy.orm import Session
+
+from pydantic import BaseModel
+
+from app.core.config import settings
+from app.core.security import require_module_permission, require_privileged_admin
+from app.crud import product as product_crud
+from app.crud import product_import_draft as draft_crud
+from app.db.session import SessionLocal, get_db
+from app.models.admin import AdminUser
+from app.schemas.import_1688 import (
+    Import1688BatchStatusItem,
+    Import1688BatchStatusOut,
+    Import1688DraftIdsBody,
+    Import1688DraftListOut,
+    Import1688ExcelBatchOut,
+    Import1688JobCreate,
+    Import1688JobOut,
+    ProductImportDraftOut,
+    ProductImportDraftUpdate,
+)
+from app.schemas.product import ProductCreate, ProductUpdate
+from app.services.import_link_deepseek_taxonomy import apply_deepseek_taxonomy_to_product_data
+from app.services.product_rating_question_groups import apply_import_rating_question_groups_to_product_data
+from app.services.product_info_web_compact import compact_product_info_for_web
+from app.services.product_internal_sku import (
+    ensure_unique_internal_product_code,
+    sync_internal_code_into_product_info,
+)
+from app.services.import_1688_images import ingest_1688_images
+from app.services.import_hibox_scraper import (
+    ImportHiboxError,
+    build_canonical_product_id_from_hibox_slug,
+    canonicalize_hibox_placeholder_product_id,
+    extract_hibox_1688_offer_digits,
+    extract_hibox_slug,
+    hibox_canonical_scrape_url,
+    hibox_slug_is_1688_offer,
+    is_hibox_import_url,
+    normalize_product_import_url,
+    scrape_hibox_for_import,
+)
+from app.services.import_1688_scraper import (
+    Import1688Error,
+    build_canonical_1688_product_id,
+    extract_1688_numeric_offer_id,
+    extract_offer_id,
+    scrape_1688_product,
+)
+from app.services.import_link_excel_batch import merge_import_excel_overlay_into_product_data, parse_link_import_excel
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+
+def _import_static_uploads() -> Path:
+    return Path(__file__).resolve().parents[2] / "static" / "uploads"
+
+
+def _batch_meta_json_path(batch_token: str) -> Path:
+    d = _import_static_uploads() / "import_batches"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{batch_token}.json"
+
+
+def _infer_import_source_for_url(norm_url: str, requested_source: Optional[str] = None) -> Tuple[str, str]:
+    """Trả (external_id, source). Raises ValueError nếu không phải 1688/Hibox."""
+    req = (requested_source or "").strip().lower()
+    force_hibox = req in {"hibox", "hi-box", "hi_box"} or "hibox.mn" in norm_url.lower()
+    if force_hibox or is_hibox_import_url(norm_url):
+        return (extract_hibox_slug(norm_url) or "hibox_import"), "hibox"
+    offer_id = extract_offer_id(norm_url)
+    if offer_id:
+        return offer_id, "1688"
+    raise ValueError("unsupported_import_link")
+
+
+def _excel_export_columns_and_vi_headers() -> Tuple[List[str], List[str]]:
+    columns = [
+        "id",
+        "sku",
+        "origin",
+        "brand",
+        "name",
+        "pro_content",
+        "price",
+        "shop_name",
+        "shop_id",
+        "pro_lower_price",
+        "pro_high_price",
+        "rating_group_id",
+        "question_group_id",
+        "sizes",
+        "Variant",
+        "gallery_images",
+        "carousel_images_1688",
+        "color_swatch_images_1688",
+        "detail_images",
+        "detail_block_images_1688",
+        "product_url",
+        "video_url",
+        "main_image",
+        "likes_count",
+        "purchases_count",
+        "reviews_count",
+        "questions_count",
+        "rating_score",
+        "stock_quantity",
+        "deposit_required",
+        "Main Category",
+        "Subcategory",
+        "Sub-subcategory",
+        "Material",
+        "Style",
+        "Color",
+        "Occasion",
+        "Features",
+        "Weight",
+        "product_info",
+        "Slug",
+    ]
+    vietnamese_headers = [
+        "Id sản phẩm",
+        "Mã sản phẩm",
+        "Xuất xứ",
+        "Thương hiệu",
+        "Tên",
+        "Mô tả sản phẩm",
+        "Giá",
+        "Tên shop",
+        "Shop id",
+        "Sp giá thấp hơn",
+        "Sp giá cao hơn",
+        "Nhóm đánh giá",
+        "Nhóm câu hỏi",
+        "Size",
+        "Biến thể",
+        "Thư viện ảnh",
+        "Ảnh carousel 1688",
+        "Ảnh màu 1688",
+        "Nội dung",
+        "Ảnh block mô tả 1688",
+        "Link mặc định",
+        "Link Video",
+        "Link img",
+        "Thích",
+        "Mua",
+        "Lượt đánh giá",
+        "Lượt hỏi",
+        "Điểm đánh giá",
+        "Số lượng có thể mua",
+        "Cần đặt cọc",
+        "Danh mục cấp 1",
+        "Danh mục cấp 2",
+        "Danh mục cấp 3",
+        "Chất liệu",
+        "Kiểu dáng",
+        "màu sắc",
+        "Dịp",
+        "Tính năng",
+        "Trọng lượng",
+        "Thông tin sản phẩm",
+        "Slug",
+    ]
+    return columns, vietnamese_headers
+
+
+def _merge_excel_overlay_for_job(db: Session, job_id: str, product_data: Dict[str, Any]) -> None:
+    d = draft_crud.get_by_job_id(db, job_id)
+    ov = getattr(d, "excel_overlays", None) if d else None
+    merge_import_excel_overlay_into_product_data(product_data, ov)
+
+
+def _run_import_1688_chain_from_meta(meta_path_str: str) -> None:
+    p = Path(meta_path_str)
+    if not p.is_file():
+        logger.warning("import batch meta không tồn tại: %s", meta_path_str)
+        return
+    try:
+        meta = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("import batch meta lỗi đọc: %s — %s", meta_path_str, exc)
+        return
+    job_ids = meta.get("job_ids") or []
+    for jid in job_ids:
+        if isinstance(jid, str) and jid.strip():
+            _run_import_1688_job(jid.strip(), False)
+
+
+def _apply_deepseek_taxonomy_after_scrape(db: Session, product_data: Dict[str, Any], warnings: List[str]) -> None:
+    try:
+        warnings.extend(apply_deepseek_taxonomy_to_product_data(db, product_data))
+    except Exception as exc:
+        logger.warning("import link DeepSeek taxonomy: %s", exc)
+        warnings.append(f"deepseek_taxonomy: lỗi không mong đợi — {type(exc).__name__}: {exc}")
+    apply_import_rating_question_groups_to_product_data(product_data, warnings)
+
+
+@router.get("/debug/classify-url")
+def debug_classify_import_url(
+    url: str = Query(..., min_length=1, max_length=4096, description="URL dán thử (1688 hoặc Hibox)"),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """
+    Không tạo job — chỉ trả kết quả chuẩn hóa + nhận dạng để debug 400 Bad Request.
+    Mở trong trình duyệt (đã đăng nhập admin) hoặc gọi có Bearer token.
+    """
+    raw = url.strip()
+    normalized = normalize_product_import_url(raw)
+    hibox = is_hibox_import_url(normalized)
+    slug = extract_hibox_slug(normalized) if hibox else None
+    hibox_scrape = hibox_canonical_scrape_url(normalized) if hibox else None
+    oid = extract_offer_id(normalized)
+    short = len(normalized) < 10
+    accepted = (not short) and (hibox or bool(oid))
+    return {
+        "received_length": len(raw),
+        "normalized": normalized,
+        "normalized_length": len(normalized),
+        "is_hibox": hibox,
+        "hibox_slug": slug,
+        "hibox_canonical_scrape_url": hibox_scrape,
+        "offer_id_1688": oid,
+        "would_accept_for_post_jobs": accepted,
+        "reject_reason": (
+            "url_too_short"
+            if short
+            else ("ok" if accepted else "unsupported_import_link")
+        ),
+    }
+
+
+class Import1688CookieSettingsIn(BaseModel):
+    cookie_text: str
+
+
+class Import1688CookieSettingsOut(BaseModel):
+    enabled: bool
+    cookie_file: str | None = None
+    has_cookie: bool
+    cookie_count: int
+    cookie_names: List[str] = []
+    message: str | None = None
+
+
+def _backend_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _default_cookie_file() -> Path:
+    return _backend_root() / "1688-cookies.json"
+
+
+def _env_local_file() -> Path:
+    return _backend_root() / ".env.local"
+
+
+def _cookie_items_from_text(cookie_text: str) -> List[Dict[str, Any]]:
+    text = (cookie_text or "").strip()
+    if not text:
+        return []
+    if text.lstrip().startswith(("[", "{")):
+        data = json.loads(text)
+        cookies = data.get("cookies") if isinstance(data, dict) else data
+        if not isinstance(cookies, list):
+            raise ValueError("JSON cookie phải là list hoặc object có key cookies.")
+        out = []
+        for item in cookies:
+            if not isinstance(item, dict) or not item.get("name"):
+                continue
+            c = dict(item)
+            c["name"] = str(c.get("name") or "").strip()
+            c["value"] = str(c.get("value") or "")
+            c.setdefault("domain", ".1688.com")
+            c.setdefault("path", "/")
+            same_site = c.get("sameSite")
+            if same_site is not None:
+                normalized = str(same_site).strip().lower().replace("-", "_")
+                same_site_map = {
+                    "strict": "Strict",
+                    "lax": "Lax",
+                    "none": "None",
+                    "no_restriction": "None",
+                }
+                if normalized in same_site_map:
+                    c["sameSite"] = same_site_map[normalized]
+                else:
+                    c.pop("sameSite", None)
+            out.append(c)
+        return out
+    out = []
+    for part in text.split(";"):
+        if "=" not in part:
+            continue
+        name, value = part.split("=", 1)
+        name = name.strip()
+        if name:
+            out.append({"name": name, "value": value.strip(), "domain": ".1688.com", "path": "/"})
+    return out
+
+
+def _read_cookie_items() -> List[Dict[str, Any]]:
+    raw = (getattr(settings, "IMPORT_1688_COOKIE_JSON", "") or "").strip()
+    cookie_file = (getattr(settings, "IMPORT_1688_COOKIE_FILE", "") or "").strip()
+    if raw:
+        try:
+            return _cookie_items_from_text(raw)
+        except Exception:
+            return []
+    if cookie_file:
+        path = Path(cookie_file)
+        if not path.is_absolute():
+            path = _backend_root() / path
+        if path.exists():
+            try:
+                return _cookie_items_from_text(path.read_text(encoding="utf-8"))
+            except Exception:
+                return []
+    return []
+
+
+def _upsert_env_local(values: Dict[str, str]) -> None:
+    path = _env_local_file()
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    lines = existing.splitlines()
+    handled = set()
+    next_lines = []
+    for line in lines:
+        replaced = False
+        for key, value in values.items():
+            if re.match(rf"^\s*{re.escape(key)}\s*=", line):
+                next_lines.append(f"{key}={value}")
+                handled.add(key)
+                replaced = True
+                break
+        if not replaced:
+            next_lines.append(line)
+    for key, value in values.items():
+        if key not in handled:
+            next_lines.append(f"{key}={value}")
+    path.write_text("\n".join(next_lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _cookie_settings_out(message: str | None = None) -> Import1688CookieSettingsOut:
+    cookies = _read_cookie_items()
+    names = [str(c.get("name") or "") for c in cookies if c.get("name")]
+    return Import1688CookieSettingsOut(
+        enabled=bool(getattr(settings, "IMPORT_1688_ENABLED", True)),
+        cookie_file=(getattr(settings, "IMPORT_1688_COOKIE_FILE", "") or None),
+        has_cookie=bool(cookies),
+        cookie_count=len(cookies),
+        cookie_names=names[:30],
+        message=message,
+    )
+
+
+def _restart_process_later() -> None:
+    import os as _os
+    import time as _time
+
+    _time.sleep(0.8)
+    _os._exit(0)
+
+
+def _to_job_out(draft) -> Import1688JobOut:
+    return Import1688JobOut(
+        job_id=draft.job_id,
+        status=draft.status,
+        phase=draft.phase,
+        message=draft.message,
+        percent=draft.percent,
+        draft_id=draft.id,
+        product_data=draft.product_data,
+        errors=draft.errors or [],
+        warnings=draft.warnings or [],
+        published_product_id=draft.published_product_id,
+        created_at=draft.created_at,
+        finished_at=draft.finished_at,
+    )
+
+
+@router.get("/settings/cookie", response_model=Import1688CookieSettingsOut)
+def get_import_1688_cookie_settings(
+    _: AdminUser = Depends(require_privileged_admin),
+):
+    return _cookie_settings_out()
+
+
+@router.put("/settings/cookie", response_model=Import1688CookieSettingsOut)
+def save_import_1688_cookie_settings(
+    payload: Import1688CookieSettingsIn,
+    _: AdminUser = Depends(require_privileged_admin),
+):
+    try:
+        cookies = _cookie_items_from_text(payload.cookie_text)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Cookie không hợp lệ: {exc}") from exc
+    if not cookies:
+        raise HTTPException(status_code=400, detail="Cookie trống hoặc không đọc được name=value.")
+
+    cookie_file = _default_cookie_file()
+    cookie_file.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding="utf-8")
+    _upsert_env_local(
+        {
+            "IMPORT_1688_COOKIE_FILE": cookie_file.name,
+            "IMPORT_1688_COOKIE_JSON": "",
+            "IMPORT_1688_ENABLED": "true",
+        }
+    )
+
+    # Cập nhật ngay trong tiến trình hiện tại; restart vẫn hữu ích để đồng bộ mọi worker/process.
+    settings.IMPORT_1688_COOKIE_FILE = cookie_file.name
+    settings.IMPORT_1688_COOKIE_JSON = ""
+    settings.IMPORT_1688_ENABLED = True
+    return _cookie_settings_out("Đã lưu cookie 1688. Có thể import ngay hoặc restart API để đồng bộ process.")
+
+
+@router.post("/settings/restart-api")
+def restart_import_1688_api(
+    background_tasks: BackgroundTasks,
+    _: AdminUser = Depends(require_privileged_admin),
+):
+    background_tasks.add_task(_restart_process_later)
+    return {
+        "success": True,
+        "message": "API sẽ tự thoát trong giây lát. PM2/systemd/Docker cần tự khởi động lại process.",
+    }
+
+
+def _coerce_colors_for_create(colors: Any) -> List[Dict[str, Any]]:
+    """ProductCreate.colors là List[Dict]; Excel/import thường là list[str] hoặc list[dict]."""
+    if not colors:
+        return []
+    out: List[Dict[str, Any]] = []
+    for c in colors:
+        if isinstance(c, dict):
+            d = dict(c)
+            d.pop("label", None)
+            out.append(d)
+        elif c is None:
+            continue
+        else:
+            s = str(c).strip()
+            if s:
+                out.append({"name": s})
+    return out
+
+
+def _publish_payload(product_data: Dict[str, Any]) -> Dict[str, Any]:
+    allowed = set(ProductCreate.model_fields.keys())
+    payload = {k: v for k, v in (product_data or {}).items() if k in allowed}
+    payload.setdefault("is_active", True)
+    payload.setdefault("features", [])
+    payload.setdefault("sizes", [])
+    payload.setdefault("colors", [])
+    payload.setdefault("images", [])
+    payload.setdefault("gallery", [])
+    payload.setdefault("price", 0)
+    payload.setdefault("available", 500)
+    required_missing = [k for k in ("product_id", "name") if not payload.get(k)]
+    if required_missing:
+        raise HTTPException(status_code=400, detail=f"Draft thiếu trường bắt buộc: {', '.join(required_missing)}")
+    payload["colors"] = _coerce_colors_for_create(payload.get("colors"))
+    # Khớp nghiệp vụ + cột Excel mẫu (=1): lưu DB dạng bool; draft/export dùng số 1/0.
+    payload["deposit_require"] = True
+    return payload
+
+
+def _assign_internal_sku_to_import_product_data(db: Session, product_data: Dict[str, Any]) -> None:
+    """
+    SKU đăng web là [A-Z][0-9]{4}, không phải slug Hibox (vd abb-922386436529).
+    Đồng bộ vào product_info.product_info.sku để tab AK không hiển thị nhầm slug.
+    """
+    sku = ensure_unique_internal_product_code(
+        db,
+        product_data.get("code"),
+        exclude_product_id=None,
+        batch_reserved=None,
+    )
+    product_data["code"] = sku
+    product_data["product_info"] = sync_internal_code_into_product_info(
+        product_data.get("product_info"), sku
+    )
+    canonicalize_hibox_placeholder_product_id(product_data)
+    compact_product_info_for_web(product_data)
+
+
+def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
+    def j(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        return json.dumps(value, ensure_ascii=False)
+
+    return {
+        "id": product_data.get("product_id", ""),
+        "sku": product_data.get("code", ""),
+        "origin": product_data.get("origin", ""),
+        "brand": product_data.get("brand_name", ""),
+        "name": product_data.get("name", ""),
+        "pro_content": (product_data.get("description") or ""),
+        "price": product_data.get("price", 0),
+        "shop_name": product_data.get("shop_name", ""),
+        "shop_id": "",
+        "pro_lower_price": product_data.get("pro_lower_price", ""),
+        "pro_high_price": product_data.get("pro_high_price", ""),
+        "rating_group_id": product_data.get("group_rating", 0),
+        "question_group_id": product_data.get("group_question", 0),
+        "sizes": j(product_data.get("sizes", [])),
+        "Variant": j(product_data.get("colors", [])),
+        "gallery_images": j(product_data.get("images", [])),
+        "carousel_images_1688": j(product_data.get("carousel_images_1688", [])),
+        "color_swatch_images_1688": j(product_data.get("color_swatch_images_1688", [])),
+        "detail_images": j(product_data.get("gallery", [])),
+        "detail_block_images_1688": j(product_data.get("detail_block_images_1688", [])),
+        "product_url": product_data.get("link_default", ""),
+        "video_url": product_data.get("video_link", ""),
+        "main_image": product_data.get("main_image", ""),
+        "likes_count": product_data.get("likes", 0),
+        "purchases_count": product_data.get("purchases", 0),
+        "reviews_count": product_data.get("rating_total", 0),
+        "questions_count": product_data.get("question_total", 0),
+        "rating_score": product_data.get("rating_point", 0),
+        "stock_quantity": product_data.get("available", 500),
+        "deposit_required": product_crud.deposit_require_to_excel_int(
+            product_data.get("deposit_require"), default=1
+        ),
+        "Main Category": product_data.get("category", ""),
+        "Subcategory": product_data.get("subcategory", ""),
+        "Sub-subcategory": product_data.get("sub_subcategory", ""),
+        "Material": (product_data.get("material") or ""),
+        "Style": product_data.get("style", ""),
+        "Color": product_data.get("color", ""),
+        "Occasion": product_data.get("occasion", ""),
+        "Features": j(product_data.get("features", [])),
+        "Weight": product_data.get("weight", ""),
+        "product_info": j(product_data.get("product_info", {})),
+        "Slug": product_data.get("slug", ""),
+    }
+
+
+def _run_import_1688_job(job_id: str, download_images: bool) -> None:
+    db = SessionLocal()
+    try:
+        draft = draft_crud.get_by_job_id(db, job_id)
+        if not draft:
+            return
+        norm_url = normalize_product_import_url(draft.source_url or "")
+        saved_source = (draft.source or "1688").strip().lower()
+        if saved_source == "hibox" or "hibox.mn" in norm_url.lower() or is_hibox_import_url(norm_url):
+            source = "hibox"
+        else:
+            source = saved_source
+
+        if source == "hibox":
+            draft_crud.mark_running(db, draft, "scraping", "Đang mở trang Hibox bằng Playwright...", 15)
+            raw_payload, product_data, warnings = scrape_hibox_for_import(draft.source_url)
+            _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
+            _assign_internal_sku_to_import_product_data(db, product_data)
+            draft = draft_crud.get_by_job_id(db, job_id)
+            if not draft:
+                return
+            _merge_excel_overlay_for_job(db, job_id, product_data)
+            draft_crud.mark_done(
+                db,
+                draft,
+                raw_payload=raw_payload,
+                product_data=product_data,
+                warnings=warnings,
+                success_message="Đã tạo bản nháp từ link Hibox.",
+            )
+            return
+
+        draft_crud.mark_running(db, draft, "scraping", "Đang mở link 1688 bằng Playwright...", 15)
+        raw_payload, product_data, warnings = scrape_1688_product(draft.source_url)
+        _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
+
+        draft = draft_crud.get_by_job_id(db, job_id)
+        if not draft:
+            return
+        if download_images:
+            draft_crud.mark_running(db, draft, "images", "Đang tải ảnh sản phẩm về CDN...", 70)
+            product_data, image_warnings = ingest_1688_images(product_data, draft.source_offer_id)
+            warnings.extend(image_warnings)
+
+        _assign_internal_sku_to_import_product_data(db, product_data)
+        draft = draft_crud.get_by_job_id(db, job_id)
+        if not draft:
+            return
+        _merge_excel_overlay_for_job(db, job_id, product_data)
+        draft_crud.mark_done(
+            db,
+            draft,
+            raw_payload=raw_payload,
+            product_data=product_data,
+            warnings=warnings,
+            success_message="Đã tạo bản nháp từ link 1688.",
+        )
+    except ImportHiboxError as exc:
+        draft = draft_crud.get_by_job_id(db, job_id)
+        if draft:
+            draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
+    except Import1688Error as exc:
+        draft = draft_crud.get_by_job_id(db, job_id)
+        if draft:
+            draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
+    except Exception as exc:
+        draft = draft_crud.get_by_job_id(db, job_id)
+        tb_lines = [ln for ln in traceback.format_exc().splitlines() if ln.strip()][-30:]
+        if draft:
+            draft_crud.mark_error(
+                db,
+                draft,
+                message=f"Import draft thất bại: {exc}",
+                errors=[f"{type(exc).__name__}: {exc}", *tb_lines],
+            )
+    finally:
+        db.close()
+
+
+@router.post("/jobs")
+def create_import_1688_job(
+    payload: Import1688JobCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(require_module_permission("products")),
+):
+    source_url = normalize_product_import_url(payload.url.strip())
+    if len(source_url) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason": "url_too_short",
+                "message": "URL quá ngắn hoặc rỗng sau khi chuẩn hóa. Dán lại đúng link đầy đủ.",
+                "normalized_length": len(source_url),
+            },
+        )
+
+    try:
+        ext_id, src = _infer_import_source_for_url(source_url, payload.source)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason": "unsupported_import_link",
+                "message": (
+                    "Không nhận dạng được link là 1688 (offerId) hay Hibox / mirror taobao1688.kz (id=…)."
+                ),
+                "normalized_length": len(source_url),
+                "normalized_preview": source_url[:200],
+                "hints": (
+                    "1688: có offer/xxxxxxxx.html hoặc ?offerId=. "
+                    "Hibox: https://hibox.mn/v/{mã}. Mirror: https://taobao1688.kz/item?id={mã}. "
+                    "Nếu đúng là Hibox mà vẫn báo lỗi: API đang chạy có thể là bản cũ — restart backend và kiểm tra "
+                    "bạn không gọi nhầm instance (hay gặp: Next dev ép cổng khác SERVER_PORT — xem frontend/.env.local (API_INTERNAL_ORIGIN, NEXT_PUBLIC_API_BASE_URL) và restart Next + backend."
+                ),
+            },
+        )
+    job_id = str(uuid.uuid4())
+    draft = draft_crud.create_draft(
+        db,
+        job_id=job_id,
+        source_url=source_url,
+        source_offer_id=ext_id,
+        created_by=getattr(admin, "id", None),
+        source=src,
+    )
+    # Import từ link cần giữ URL ảnh gốc để admin kiểm tra/export đúng nguồn.
+    # Không tự tải ảnh về Bunny trong luồng draft này.
+    background_tasks.add_task(_run_import_1688_job, job_id, False)
+    return JSONResponse(
+        status_code=202,
+        content={
+            "job_id": job_id,
+            "draft_id": draft.id,
+            "message": "Đã nhận link. Dùng GET /import-1688/jobs/{job_id} để theo dõi.",
+            "poll_url": f"/api/v1/import-1688/jobs/{job_id}",
+        },
+    )
+
+
+@router.post("/jobs/batch-from-excel", response_model=Import1688ExcelBatchOut)
+async def create_import_jobs_batch_from_excel(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(require_module_permission("products")),
+):
+    """
+    File .xlsx: link cột **F** (dòng 2+), và (nếu có) «Shop name», «Giá thấp hơn», «Giá cao hơn»,
+    cột **Giá** ngoài cùng bên phải (ưu tiên). Tất cả lưu **draft**, xử lý **tuần tự**.
+    """
+    name = (file.filename or "").lower()
+    if not name.endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file .xlsx / .xlsm")
+
+    uploads = _import_static_uploads()
+    uploads.mkdir(parents=True, exist_ok=True)
+    tmp_name = f"excel_batch_upload_{uuid.uuid4().hex}.xlsx"
+    tmp_path = uploads / tmp_name
+    try:
+        raw = await file.read()
+        if not raw:
+            raise HTTPException(status_code=400, detail="File rỗng")
+        tmp_path.write_bytes(raw)
+        parsed, pskip = parse_link_import_excel(tmp_path)
+        skips = list(pskip)
+
+        draft_ids: List[int] = []
+        job_ids: List[str] = []
+
+        for it in parsed:
+            url_norm = normalize_product_import_url(it["url"])
+            if len(url_norm) < 10:
+                skips.append(f"Dòng {it.get('excel_row')}: URL quá ngắn.")
+                continue
+            try:
+                ext_id, src = _infer_import_source_for_url(url_norm, None)
+            except ValueError:
+                skips.append(f"Dòng {it.get('excel_row')}: link không nhận dạng 1688/Hibox.")
+                continue
+            overlays = dict(it.get("overlays") or {})
+            overlays["_excel_row"] = int(it["excel_row"])
+            jid = str(uuid.uuid4())
+            draft = draft_crud.create_draft(
+                db,
+                job_id=jid,
+                source_url=url_norm,
+                source_offer_id=ext_id,
+                created_by=getattr(admin, "id", None),
+                source=src,
+                excel_overlays=overlays,
+            )
+            draft_ids.append(draft.id)
+            job_ids.append(jid)
+
+        batch_token = uuid.uuid4().hex
+        meta_path = _batch_meta_json_path(batch_token)
+        meta_path.write_text(
+            json.dumps(
+                {
+                    "job_ids": job_ids,
+                    "draft_ids": draft_ids,
+                    "skipped": skips[-80:],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        if job_ids:
+            background_tasks.add_task(_run_import_1688_chain_from_meta, str(meta_path.absolute()))
+
+        return Import1688ExcelBatchOut(
+            batch_token=batch_token,
+            total=len(job_ids),
+            draft_ids=draft_ids,
+            job_ids=job_ids,
+            skipped=skips[:120],
+        )
+    finally:
+        try:
+            if tmp_path.is_file():
+                tmp_path.unlink()
+        except Exception:
+            pass
+
+
+@router.get("/jobs/batch-excel/{batch_token}/status", response_model=Import1688BatchStatusOut)
+def batch_excel_job_status(
+    batch_token: str,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    meta_path = _batch_meta_json_path(batch_token)
+    if not meta_path.is_file():
+        raise HTTPException(status_code=404, detail="Không tìm thấy batch hoặc token hết hiệu lực.")
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Meta batch hỏng: {exc}") from exc
+
+    draft_ids = [int(x) for x in (meta.get("draft_ids") or []) if x is not None]
+    items_out: List[Import1688BatchStatusItem] = []
+    completed = 0
+    failed = 0
+    pending = 0
+    for did in draft_ids:
+        draft = draft_crud.get_by_id(db, did)
+        if not draft:
+            continue
+        st = (draft.status or "").lower()
+        if st in {"done", "published"}:
+            completed += 1
+        elif st == "error":
+            failed += 1
+        else:
+            pending += 1
+        xr = None
+        ov = getattr(draft, "excel_overlays", None)
+        if isinstance(ov, dict) and ov.get("_excel_row") is not None:
+            try:
+                xr = int(ov["_excel_row"])
+            except (TypeError, ValueError):
+                xr = None
+        items_out.append(
+            Import1688BatchStatusItem(
+                draft_id=draft.id,
+                job_id=draft.job_id,
+                excel_row=xr,
+                status=draft.status,
+                phase=draft.phase,
+                message=draft.message,
+            )
+        )
+    return Import1688BatchStatusOut(
+        batch_token=batch_token,
+        total=len(draft_ids),
+        completed=completed,
+        failed=failed,
+        pending=pending,
+        items=items_out,
+    )
+
+
+@router.get("/drafts", response_model=Import1688DraftListOut)
+def list_import_1688_drafts(
+    status: Optional[str] = Query(None, description="Lọc theo status queued|running|done|error|published"),
+    limit: int = Query(40, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    status_norm = (status or "").strip()
+    rows, total = draft_crud.list_drafts(
+        db, status=(status_norm or None), limit=limit, offset=offset
+    )
+    return Import1688DraftListOut(
+        items=[ProductImportDraftOut.model_validate(r) for r in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post("/drafts/export-excel-bulk")
+def export_import_1688_drafts_bulk(
+    payload: Import1688DraftIdsBody,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    rows_data: List[Dict[str, Any]] = []
+    for did in sorted(set(payload.draft_ids)):
+        draft = draft_crud.get_by_id(db, did)
+        if not draft:
+            raise HTTPException(status_code=404, detail=f"Không có draft id={did}.")
+        if not draft.product_data:
+            continue
+        rows_data.append(_excel_row_from_product(dict(draft.product_data)))
+
+    if not rows_data:
+        raise HTTPException(
+            status_code=400,
+            detail="Không có draft nào trong danh sách đã có dữ liệu để export (chờ job done).",
+        )
+
+    columns, vietnamese_headers = _excel_export_columns_and_vi_headers()
+    df = pd.DataFrame(rows_data, columns=columns)
+    export_dir = os.path.join("app", "static", "uploads")
+    os.makedirs(export_dir, exist_ok=True)
+    filename = f"import_1688_drafts_bulk_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filepath = os.path.join(export_dir, filename)
+    with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Products", index=False, startrow=0)
+        ws = writer.sheets["Products"]
+        ws.insert_rows(2)
+        for idx, header in enumerate(vietnamese_headers, 1):
+            ws.cell(row=2, column=idx, value=header)
+    return FileResponse(
+        filepath,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=filename,
+    )
+
+
+@router.get("/jobs/{job_id}", response_model=Import1688JobOut)
+def get_import_1688_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    draft = draft_crud.get_by_job_id(db, job_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Không tìm thấy job import 1688.")
+    return _to_job_out(draft)
+
+
+@router.get("/drafts/{draft_id}", response_model=ProductImportDraftOut)
+def get_import_1688_draft(
+    draft_id: int,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    draft = draft_crud.get_by_id(db, draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Không tìm thấy draft.")
+    return draft
+
+
+@router.put("/drafts/{draft_id}", response_model=ProductImportDraftOut)
+def update_import_1688_draft(
+    draft_id: int,
+    payload: ProductImportDraftUpdate,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    draft = draft_crud.get_by_id(db, draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Không tìm thấy draft.")
+    pd = dict(payload.product_data or {})
+    compact_product_info_for_web(pd)
+    return draft_crud.update_draft(db, draft, product_data=pd, status="done", message="Đã cập nhật draft.")
+
+
+@router.post("/drafts/{draft_id}/publish")
+def publish_import_1688_draft(
+    draft_id: int,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    draft = draft_crud.get_by_id(db, draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Không tìm thấy draft.")
+    payload = _publish_payload(draft.product_data or {})
+
+    src = (draft.source or "").strip().lower()
+    norm_url = normalize_product_import_url(draft.source_url or "")
+
+    existing = None
+    if getattr(draft, "published_product_id", None):
+        existing = product_crud.get_product_by_product_id(db, draft.published_product_id)
+    if existing is None:
+        existing = product_crud.get_product_by_product_id(db, payload["product_id"])
+
+    exclude_id = existing.id if existing else None
+    sku_reserved: set[str] = set()
+    sku_code = ensure_unique_internal_product_code(
+        db,
+        payload.get("code"),
+        exclude_product_id=exclude_id,
+        batch_reserved=sku_reserved,
+    )
+    payload["code"] = sku_code
+    payload["product_info"] = sync_internal_code_into_product_info(payload.get("product_info"), sku_code)
+
+    canonical_pid = ""
+
+    if src == "1688":
+        oid = extract_1688_numeric_offer_id(norm_url, draft.source_offer_id)
+        if not oid:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "reason": "import_publish_missing_1688_offer_id",
+                    "message": (
+                        "Không trích được mã offer 1688 (chuỗi chữ số) từ link. "
+                        "Cần URL dạng …/offer/<số>.html hoặc ?offerId=<số>."
+                    ),
+                    "normalized_url_preview": norm_url[:240],
+                },
+            )
+        if existing is None:
+            existing = product_crud.get_product_by_product_id(db, f"1688_{oid}")
+        try:
+            canonical_pid = build_canonical_1688_product_id(oid, sku_code)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"reason": "invalid_internal_product_id", "message": str(exc)},
+            ) from exc
+
+    elif src == "hibox":
+        hid = (extract_hibox_slug(norm_url) or "").strip()
+        if not hid:
+            hid = (draft.source_offer_id or "").strip()
+        if not hid or hid == "hibox_import":
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "reason": "import_publish_missing_hibox_item_id",
+                    "message": (
+                        "Không trích được mã sản phẩm Hibox (đoạn sau /v/ hoặc ?id= mirror). "
+                        "Slug «abb-<số>» = cửa hàng 1688; slug chỉ chữ số = Taobao."
+                    ),
+                    "normalized_url_preview": norm_url[:240],
+                    "source_offer_id": draft.source_offer_id,
+                },
+            )
+        if existing is None:
+            existing = product_crud.get_product_by_product_id(db, f"hibox_{hid}")
+        try:
+            canonical_pid = build_canonical_product_id_from_hibox_slug(hid, sku_code)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"reason": "invalid_internal_product_id", "message": str(exc)},
+            ) from exc
+
+        if existing is None:
+            existing = product_crud.get_product_by_product_id(db, canonical_pid)
+        if existing is None:
+            oid1688 = extract_hibox_1688_offer_digits(hid)
+            if oid1688:
+                existing = product_crud.get_product_by_product_id(db, f"1688_{oid1688}")
+        if existing is None:
+            existing = product_crud.get_product_by_product_id(db, f"hibox_{hid}")
+        if existing is None and hibox_slug_is_1688_offer(hid):
+            legacy_pid = f"T{hid}a188{sku_code.strip().upper()}"
+            existing = product_crud.get_product_by_product_id(db, legacy_pid)
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason": "import_publish_unknown_source",
+                "message": f"Nguồn draft không hỗ trợ đăng với quy tắc mã hiện tại: {src}",
+                "draft_source": src,
+            },
+        )
+
+    payload["product_id"] = canonical_pid
+
+    compact_product_info_for_web(payload)
+
+    if existing is None:
+        existing = product_crud.get_product_by_product_id(db, canonical_pid)
+
+    if existing:
+        product = product_crud.update_product(db, existing.id, ProductUpdate(**payload))
+        action = "updated"
+    else:
+        product = product_crud.create_product(db, ProductCreate(**payload))
+        action = "created"
+    old_cid = product.category_id
+    triple_idx = product_crud._build_cat3_triple_name_lookup(db)
+    cat3_idx = product_crud._build_cat3_lookup_indexes(db)
+    product_crud._sync_product_category_id_from_taxonomy(product, triple_idx, cat3_idx)
+    db.commit()
+    db.refresh(product)
+    if product.category_id != old_cid:
+        try:
+            from app.utils.ttl_cache import cache as ttl_cache
+
+            ttl_cache.invalidate_all()
+        except Exception:
+            pass
+
+    merged_pd = dict(draft.product_data or {})
+    merged_pd["product_id"] = canonical_pid
+    merged_pd["code"] = sku_code
+    merged_pd["product_info"] = sync_internal_code_into_product_info(
+        merged_pd.get("product_info"), sku_code
+    )
+    compact_product_info_for_web(merged_pd)
+    merged_pd["deposit_require"] = 1
+
+    draft_crud.update_draft(
+        db,
+        draft,
+        status="published",
+        phase="published",
+        message="Đã đăng sản phẩm.",
+        published_product_id=product.product_id,
+        product_data=merged_pd,
+        finished_at=datetime.now(),
+    )
+    return {"success": True, "action": action, "product_id": product.product_id, "slug": product.slug}
+
+
+@router.get("/drafts/{draft_id}/export-excel")
+def export_import_1688_draft_excel(
+    draft_id: int,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    draft = draft_crud.get_by_id(db, draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Không tìm thấy draft.")
+    if not draft.product_data:
+        raise HTTPException(status_code=400, detail="Draft chưa có dữ liệu sản phẩm để export.")
+    columns, vietnamese_headers = _excel_export_columns_and_vi_headers()
+    df = pd.DataFrame([_excel_row_from_product(draft.product_data)], columns=columns)
+    export_dir = os.path.join("app", "static", "uploads")
+    os.makedirs(export_dir, exist_ok=True)
+    filename = f"import_1688_draft_{draft.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filepath = os.path.join(export_dir, filename)
+    with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Products", index=False, startrow=0)
+        ws = writer.sheets["Products"]
+        # Dòng 1: tiếng Anh | Dòng 2: nhãn tiếng Việt | Dòng 3+: dữ liệu (_try_read_method_1 skiprows=[1])
+        ws.insert_rows(2)
+        for idx, header in enumerate(vietnamese_headers, 1):
+            ws.cell(row=2, column=idx, value=header)
+    return FileResponse(
+        filepath,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=filename,
+    )

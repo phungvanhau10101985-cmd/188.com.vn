@@ -21,6 +21,15 @@ function absoluteImage(img: string | undefined): string {
   return SITE_URL + "/" + img;
 }
 
+/**
+ * Giảm khả năng Google hiển thị preview video trong SERP (max-video-preview).
+ * Không ngăn bot tải URL .mp4 trực tiếp trên CDN nếu URL vẫn public trong HTML.
+ */
+function seoBlockBotVideoSerpPreview(): boolean {
+  const v = process.env.SEO_BLOCK_BOT_VIDEO_PREVIEW?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 type Props = { params: { slug: string }; children: React.ReactNode };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -45,6 +54,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const description = truncateDescriptionAtSentence(rawDesc, 160);
   const canonical = `${SITE_URL}/products/${product.slug}`;
   const image = absoluteImage(product.main_image) || absoluteImage(product.images?.[0]);
+  const blockVideoSerp = seoBlockBotVideoSerpPreview();
 
   return {
     title,
@@ -85,7 +95,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         follow: true,
         "max-image-preview": "large",
         "max-snippet": -1,
-        "max-video-preview": -1,
+        /** 0 = không preview video trong kết quả tìm kiếm (khi SEO_BLOCK_BOT_VIDEO_PREVIEW=bật). */
+        "max-video-preview": blockVideoSerp ? 0 : -1,
       },
     },
     other: {

@@ -36,7 +36,7 @@ class Product(Base):
     rating_total = Column(Integer, default=0)
     question_total = Column(Integer, default=0)
     rating_point = Column(Float, default=0.0)
-    available = Column(Integer, default=0)
+    available = Column(Integer, default=500)  # Cột AA — Số lượng có thể mua (mặc định nghiệp vụ)
     deposit_require = Column(Boolean, default=False)  # Cột AA
     category = Column(String(100))  # Tên category (string từ Excel)
     subcategory = Column(String(100))
