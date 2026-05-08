@@ -1,5 +1,7 @@
 """
 Đọc file Excel danh sách link: URL mặc định cột F (dòng 2+), thông tin shop/giá nhận từ tiêu đề (G–K…) và từ khối cố định **L–O** → xuất vào cột **H–K** của file kết quả.
+
+`shop_id` (cột I trên file import sản phẩm đầy đủ) lấy cùng giá trị ô với **Style** (cột AI / tiêu đề «Style» | «Kiểu dáng») khi ô đó có dữ liệu — áp sau shop_id ô riêng và khối L–O.
 """
 from __future__ import annotations
 
@@ -14,6 +16,8 @@ _ws_re = re.compile(r"\s+")
 
 DEFAULT_LINK_COLUMN_1BASED = 6  # F
 _FALLBACK_LINK_COLUMN = 3  # C «Link sp»
+# Template 37 cột (A–AK): Style = cột AI (35) — dùng khi sheet rộng nhưng không có dòng tiêu đề khớp
+STYLE_COLUMN_1BASED_FALLBACK = 35
 # Cột L–O (12–15) trên file nguồn → cột H–K trên Excel kết quả (shop_name, shop_id, pro_lower_price, pro_high_price)
 SOURCE_COL_BLOCK_LO_EXTRA_SHOP: Tuple[Tuple[int, str], ...] = (
     (12, "shop_name"),
@@ -131,11 +135,13 @@ def _resolve_overlay_columns(
     Optional[int],
     Optional[int],
     Optional[int],
+    Optional[int],
 ]:
     """
-    shop / pro_lower / pro_high / price — hỗ trợ 1 hoặc 2 dòng tiêu đề:
+    shop / shop_id / pro_lower / pro_high / price / style — hỗ trợ 1 hoặc 2 dòng tiêu đề:
     - Row1: shop_name, price, pro_lower_price, …
     - Row2: Tên shop, Giá, Sp giá thấp hơn, …
+    Cột Style dùng để đồng bộ giá trị shop_id (file mẫu: cột AI).
     """
     mc = max(1, _max_header_cols(header_row1, header_row2))
 
@@ -168,6 +174,10 @@ def _resolve_overlay_columns(
         _norm_header(x) for x in ("shop_id", "Shop id", "shop id")
     )
     shop_id_col = _first_col_matching_labels(header_row1, header_row2, mc, shop_id_needles)
+    style_needles = frozenset(
+        _norm_header(x) for x in ("Style", "style", "Kiểu dáng", "kiểu dáng")
+    )
+    style_col = _first_col_matching_labels(header_row1, header_row2, mc, style_needles)
     lower_col = _first_col_matching_labels(header_row1, header_row2, mc, lower_needles)
     upper_col = _first_col_matching_labels(header_row1, header_row2, mc, upper_needles)
 
@@ -198,6 +208,10 @@ def _resolve_overlay_columns(
         shop_id_col = _hdr_col(header_row1, "shop id", "Shop id") or _hdr_col(
             header_row2, "shop id", "Shop id"
         )
+    if style_col is None:
+        style_col = _hdr_col(header_row1, "Style", "style", "Kiểu dáng") or _hdr_col(
+            header_row2, "Style", "style", "Kiểu dáng"
+        )
     if lower_col is None:
         lower_col = _hdr_col(header_row1, "Giá thấp hơn", "SP giá thấp hơn", "Sp giá thấp hơn") or _hdr_col(
             header_row2, "Giá thấp hơn", "SP giá thấp hơn", "Sp giá thấp hơn"
@@ -212,7 +226,7 @@ def _resolve_overlay_columns(
         merged = sorted({*g1, *g2} - exclude_price)
         price_col = max(merged) if merged else None
 
-    return shop_col, shop_id_col, lower_col, upper_col, price_col
+    return shop_col, shop_id_col, lower_col, upper_col, price_col, style_col
 
 
 def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], List[str]]:
@@ -220,6 +234,7 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
     Trả ([{excel_row, url, overlays}], skip_messages).
 
     overlays: shop_name, shop_id, pro_lower_price, pro_high_price, price (chỉ các trường có giá trị).
+    shop_id lấy trùng ô **Style** (tiêu đề hoặc cột AI) nếu ô đó có dữ liệu.
     """
     p = Path(path)
     skip: List[str] = []
@@ -238,7 +253,9 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
         ):
             return [], ["Dòng tiêu đề trống hoặc không đọc được."]
 
-        shop_col, shop_id_col, lower_col, upper_col, price_col = _resolve_overlay_columns(header, header2)
+        shop_col, shop_id_col, lower_col, upper_col, price_col, style_col = _resolve_overlay_columns(
+            header, header2
+        )
 
         data_iter = ws.iter_rows(
             min_row=DATA_FIRST_ROW,
@@ -297,6 +314,15 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
                 if cell_v is None or str(cell_v).strip() == "":
                     continue
                 overlays[fld] = _cell_str(cell_v)
+
+            # shop_id trùng nguồn với cột Style (template A–AK: AI) khi có giá trị
+            st_v: Optional[Any] = None
+            if style_col:
+                st_v = coord(style_col)
+            if (st_v is None or str(st_v).strip() == "") and len(cells) >= STYLE_COLUMN_1BASED_FALLBACK:
+                st_v = coord(STYLE_COLUMN_1BASED_FALLBACK)
+            if st_v is not None and str(st_v).strip() != "":
+                overlays["shop_id"] = _cell_str(st_v)
 
             out.append({"excel_row": excel_row, "url": url.strip(), "overlays": overlays})
 
