@@ -66,6 +66,7 @@ def merge_import_excel_overlay_into_product_data(
 ) -> None:
     """Ghi đè shop + giá từ Excel (ưu tiên sau scrape). Khóa `_...` là meta (vd. _excel_row), không ảnh hưởng merge."""
     if not overlay or not isinstance(overlay, dict):
+        _fill_shop_id_from_style_if_empty(product_data)
         return
     if (sn := overlay.get("shop_name")) is not None and str(sn).strip():
         product_data["shop_name"] = str(sn).strip()
@@ -80,6 +81,19 @@ def merge_import_excel_overlay_into_product_data(
         product_data["price"] = num
     if (sid := overlay.get("shop_id")) is not None and str(sid).strip():
         product_data["shop_id"] = str(sid).strip()
+    if (sk := overlay.get("_sync_style_kieu_dang")) is not None and str(sk).strip():
+        product_data["style"] = str(sk).strip()
+    _fill_shop_id_from_style_if_empty(product_data)
+
+
+def _fill_shop_id_from_style_if_empty(product_data: Dict[str, Any]) -> None:
+    """Khi không có shop_id (hoặc rỗng) sau overlay, dùng style từ scrape/taxonomy."""
+    cur = str(product_data.get("shop_id") or "").strip()
+    if cur:
+        return
+    sty = product_data.get("style")
+    if isinstance(sty, str) and sty.strip():
+        product_data["shop_id"] = sty.strip()
 
 
 def _hdr_col(header_cells: Tuple[Any, ...], *needles: str) -> Optional[int]:
@@ -322,7 +336,10 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
             if (st_v is None or str(st_v).strip() == "") and len(cells) >= STYLE_COLUMN_1BASED_FALLBACK:
                 st_v = coord(STYLE_COLUMN_1BASED_FALLBACK)
             if st_v is not None and str(st_v).strip() != "":
-                overlays["shop_id"] = _cell_str(st_v)
+                sv = _cell_str(st_v)
+                overlays["shop_id"] = sv
+                # Ghi vào product_data.style khi merge overlay (cột Kiểu dáng Excel = shop_id)
+                overlays["_sync_style_kieu_dang"] = sv
 
             out.append({"excel_row": excel_row, "url": url.strip(), "overlays": overlays})
 

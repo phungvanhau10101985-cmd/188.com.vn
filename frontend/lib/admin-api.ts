@@ -336,6 +336,29 @@ export interface AdminImport1688BatchStatus {
   items: AdminImport1688BatchStatusItem[];
 }
 
+/** Một đợt Excel (aggregate), không chứa từng dòng chi tiết. */
+export interface AdminImport1688ExcelBatchSummary {
+  batch_token: string;
+  created_at?: string | null;
+  total_links: number;
+  completed: number;
+  failed: number;
+  pending: number;
+  skipped_lines: number;
+}
+
+export interface AdminImport1688ExcelBatchListResponse {
+  items: AdminImport1688ExcelBatchSummary[];
+  limit: number;
+}
+
+export interface AdminImport1688ExcelBatchDeleteResponse {
+  success: boolean;
+  batch_token: string;
+  draft_ids_deleted: number[];
+  meta_removed: boolean;
+}
+
 export interface AdminImport1688DraftListResponse {
   items: AdminImport1688Draft[];
   total: number;
@@ -566,6 +589,12 @@ export const adminProductAPI = {
       timeoutMs: 60_000,
     }),
 
+  deleteImport1688Draft: (draftId: number) =>
+    fetchAdmin<{ success: boolean; draft_id: number }>(`/import-1688/drafts/${draftId}`, {
+      method: 'DELETE',
+      timeoutMs: 60_000,
+    }),
+
   updateImport1688Draft: (draftId: number, productData: Partial<AdminProduct> & Record<string, unknown>) =>
     fetchAdmin<AdminImport1688Draft>(`/import-1688/drafts/${draftId}`, {
       method: 'PUT',
@@ -623,6 +652,19 @@ export const adminProductAPI = {
     fetchAdmin<AdminImport1688BatchStatus>(
       `/import-1688/jobs/batch-excel/${encodeURIComponent(batchToken)}/status`,
       { timeoutMs: 60_000 },
+    ),
+
+  listImport1688ExcelBatches: (params?: { limit?: number }) => {
+    const tail = typeof params?.limit === 'number' ? `?limit=${params.limit}` : '';
+    return fetchAdmin<AdminImport1688ExcelBatchListResponse>(`/import-1688/jobs/excel-batches${tail}`, {
+      timeoutMs: 60_000,
+    });
+  },
+
+  deleteImport1688ExcelBatch: (batchToken: string) =>
+    fetchAdmin<AdminImport1688ExcelBatchDeleteResponse>(
+      `/import-1688/jobs/excel-batches/${encodeURIComponent(batchToken)}`,
+      { method: 'DELETE', timeoutMs: 120_000 },
     ),
 
   listImport1688Drafts: (params?: { status?: string; limit?: number; offset?: number }) => {

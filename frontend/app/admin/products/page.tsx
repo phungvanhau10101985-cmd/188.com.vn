@@ -4,6 +4,8 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   adminProductAPI,
   type AdminImport1688Draft,
+  type AdminImport1688ExcelBatchSummary,
+  type AdminImport1688BatchStatus,
   type AdminImport1688Job,
   type AdminImportExcelJob,
   type AdminProduct,
@@ -162,6 +164,18 @@ export default function AdminProductsPage() {
   const [excelBatchHint, setExcelBatchHint] = useState<string | null>(null);
   const [lastExcelBatchDraftIds, setLastExcelBatchDraftIds] = useState<number[]>([]);
   const [bulkExport1688Busy, setBulkExport1688Busy] = useState(false);
+  const [importDraftsPanelOpen, setImportDraftsPanelOpen] = useState(false);
+  const [importDraftsLoading, setImportDraftsLoading] = useState(false);
+  const [importDraftsError, setImportDraftsError] = useState<string | null>(null);
+  const [importExcelBatches, setImportExcelBatches] = useState<AdminImport1688ExcelBatchSummary[]>([]);
+  const [importDraftsFilter, setImportDraftsFilter] = useState<'finished' | 'all'>('finished');
+  const [expandedImportBatchToken, setExpandedImportBatchToken] = useState<string | null>(null);
+  const [importBatchDetail, setImportBatchDetail] = useState<AdminImport1688BatchStatus | null>(null);
+  const [importBatchDetailLoading, setImportBatchDetailLoading] = useState(false);
+  const [importDraftDeleteTarget, setImportDraftDeleteTarget] = useState<{ id: number } | null>(null);
+  const [importDraftDeleting, setImportDraftDeleting] = useState(false);
+  const [importBatchDeleteTarget, setImportBatchDeleteTarget] = useState<string | null>(null);
+  const [importBatchDeleting, setImportBatchDeleting] = useState(false);
   /** Cờ huỷ theo dõi (job vẫn chạy ở server). */
   const cancelTrackRef = useRef(false);
   const [exporting, setExporting] = useState(false);
@@ -455,6 +469,180 @@ export default function AdminProductsPage() {
     };
   }, [excelBatchTrackToken]);
 
+  useEffect(() => {
+    if (!importDraftDeleteTarget) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !importDraftDeleting && !importBatchDeleting) {
+        setImportDraftDeleteTarget(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [importDraftDeleteTarget, importDraftDeleting, importBatchDeleting]);
+
+  useEffect(() => {
+    if (!importBatchDeleteTarget) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !importBatchDeleting && !importDraftDeleting) {
+        setImportBatchDeleteTarget(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [importBatchDeleteTarget, importBatchDeleting, importDraftDeleting]);
+
+  useEffect(() => {
+    setImportBatchDetail(null);
+    if (!expandedImportBatchToken) {
+      setImportBatchDetailLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setImportBatchDetailLoading(true);
+    void adminProductAPI
+      .getImport1688ExcelBatchStatus(expandedImportBatchToken)
+      .then((st) => {
+        if (!cancelled) setImportBatchDetail(st);
+      })
+      .catch((err) => {
+        if (!cancelled) setImportBatchDetail(null);
+        setImportDraftsError(
+          err instanceof Error ? err.message : 'Không tải được chi tiết đợt import Excel',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setImportBatchDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expandedImportBatchToken]);
+
+  const loadImportExcelBatchesList = useCallback(async () => {
+    setImportDraftsLoading(true);
+    setImportDraftsError(null);
+    try {
+      const res = await adminProductAPI.listImport1688ExcelBatches({ limit: 48 });
+      setImportExcelBatches(res.items);
+    } catch (e) {
+      setImportDraftsError(e instanceof Error ? e.message : 'Không tải được danh sách đợt import Excel');
+      setImportExcelBatches([]);
+    } finally {
+      setImportDraftsLoading(false);
+    }
+  }, []);
+
+  const toggleImportDraftsPanel = () => {
+    setImportDraftsPanelOpen((open) => {
+      const next = !open;
+      if (!next) {
+        setExpandedImportBatchToken(null);
+      }
+      if (next) void loadImportExcelBatchesList();
+      return next;
+    });
+  };
+
+  const handleOpenStoredImportDraft = async (id: number) => {
+    try {
+      const d = await adminProductAPI.getImport1688Draft(id);
+      setImport1688Draft(d);
+      if (!d.product_data) {
+        showToast(
+          'err',
+          `Nháp #${id}: ${(d.message || d.errors?.[0] || 'Chưa có dữ liệu sản phẩm').slice(0, 180)}`,
+          10000,
+        );
+      } else {
+        showToast('ok', `Đã mở nháp #${id} — chỉnh sửa bên dưới.`, 5000);
+      }
+      window.setTimeout(() => {
+        document.getElementById('import-1688')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 120);
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Không mở được nháp', 9000);
+    }
+  };
+
+  const handleExportExcelBatchByToken = async (batchToken: string) => {
+    setBulkExport1688Busy(true);
+    try {
+      const st = await adminProductAPI.getImport1688ExcelBatchStatus(batchToken);
+      const ids = st.items.map((x) => x.draft_id).filter((id) => typeof id === 'number' && id > 0);
+      if (!ids.length) {
+        showToast('err', 'Đợt này chưa có bản nháp nào để export (đợi hoặc kiểm tra lỗi).', 7000);
+        return;
+      }
+      await adminProductAPI.exportImport1688DraftsExcelBulk(ids);
+      showToast('ok', `Đã tải Excel gộp (${ids.length} nháp, chỉ dòng có dữ liệu).`, 8000);
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Export gộp thất bại', 10000);
+    } finally {
+      setBulkExport1688Busy(false);
+    }
+  };
+
+  const confirmDeleteImportDraft = async () => {
+    if (!importDraftDeleteTarget || importDraftDeleting) return;
+    setImportDraftDeleting(true);
+    try {
+      await adminProductAPI.deleteImport1688Draft(importDraftDeleteTarget.id);
+      const removedId = importDraftDeleteTarget.id;
+      setImportDraftDeleteTarget(null);
+      setLastExcelBatchDraftIds((ids) => ids.filter((x) => x !== removedId));
+      setImport1688Draft((cur) => (cur?.id === removedId ? null : cur));
+      showToast('ok', `Đã xóa nháp #${removedId}.`, 5000);
+      await loadImportExcelBatchesList();
+      if (expandedImportBatchToken) {
+        try {
+          const st = await adminProductAPI.getImport1688ExcelBatchStatus(expandedImportBatchToken);
+          setImportBatchDetail(st);
+        } catch {
+          /* meta hoặc batch có thể không còn */
+        }
+      }
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Xóa nháp thất bại', 9000);
+    } finally {
+      setImportDraftDeleting(false);
+    }
+  };
+
+  const confirmDeleteImportExcelBatch = async () => {
+    if (!importBatchDeleteTarget || importBatchDeleting) return;
+    setImportBatchDeleting(true);
+    try {
+      const res = await adminProductAPI.deleteImport1688ExcelBatch(importBatchDeleteTarget);
+      const removed = new Set(res.draft_ids_deleted);
+      const tok = res.batch_token;
+      setImportBatchDeleteTarget(null);
+      setImportExcelBatches((items) => items.filter((b) => b.batch_token !== tok));
+      if (expandedImportBatchToken === tok) {
+        setExpandedImportBatchToken(null);
+        setImportBatchDetail(null);
+      }
+      if (excelBatchTrackToken === tok) {
+        setExcelBatchTrackToken(null);
+      }
+      setLastExcelBatchDraftIds((ids) => ids.filter((x) => !removed.has(x)));
+      setImport1688Draft((cur) => (cur && removed.has(cur.id) ? null : cur));
+      showToast('ok', `Đã xóa đợt import và ${res.draft_ids_deleted.length} bản nháp liên quan.`, 6000);
+      if (!res.meta_removed) {
+        showToast('err', 'Nháp đã xóa nhưng file meta server chưa gỡ — hãy «Làm mới» hoặc báo ops.', 10000);
+        void loadImportExcelBatchesList();
+      }
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Xóa đợt import thất bại', 10000);
+    } finally {
+      setImportBatchDeleting(false);
+    }
+  };
+
+  const importBatchesFiltered = useMemo(() => {
+    if (importDraftsFilter !== 'finished') return importExcelBatches;
+    return importExcelBatches.filter((b) => b.pending === 0);
+  }, [importExcelBatches, importDraftsFilter]);
+
   const handleExcelBatch1688Pick = () => {
     excelBatch1688InputRef.current?.click();
   };
@@ -485,6 +673,7 @@ export default function AdminProductsPage() {
     } finally {
       setExcelBatchBusy(false);
     }
+    void loadImportExcelBatchesList();
   };
 
   const handleExportLastExcelBatch = async () => {
@@ -897,7 +1086,9 @@ export default function AdminProductsPage() {
                 />
                 <p className="mt-1 text-xs text-gray-600">
                   1688: Playwright + cookie trong `.env` (ảnh CDN có thể tải về Bunny). Hibox: không cần cookie; ảnh giữ URL gốc. Luôn có bước
-                  draft trước khi đăng hoặc export Excel khớp cột import.
+                  draft trước khi đăng hoặc export Excel khớp cột import. File Excel link: ô{' '}
+                  <strong>Kiểu dáng / Style</strong> (hoặc cột AI đủ rộng) đồng bộ vào{' '}
+                  <strong>Shop ID</strong> và trường kiểu dáng trong nháp.
                 </p>
               </div>
               <button
@@ -928,6 +1119,14 @@ export default function AdminProductsPage() {
               </button>
               <button
                 type="button"
+                onClick={() => toggleImportDraftsPanel()}
+                aria-expanded={importDraftsPanelOpen}
+                className="rounded-lg border border-sky-300 bg-white px-3 py-2 text-sm font-medium text-sky-900 hover:bg-sky-50"
+              >
+                {importDraftsPanelOpen ? 'Ẩn danh sách' : 'Các đợt import Excel (theo batch)'}
+              </button>
+              <button
+                type="button"
                 onClick={handleExportLastExcelBatch}
                 disabled={
                   bulkExport1688Busy || !lastExcelBatchDraftIds.some((id) => typeof id === 'number' && id > 0)
@@ -938,6 +1137,258 @@ export default function AdminProductsPage() {
               </button>
             </div>
             {excelBatchHint ? <p className="mt-1 text-xs text-gray-700">{excelBatchHint}</p> : null}
+
+            {importDraftsPanelOpen ? (
+              <div
+                className="mt-3 rounded-xl border border-sky-200 bg-white p-3 shadow-sm"
+                role="region"
+                aria-label="Các đợt import Excel"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <p className="text-sm font-medium text-gray-800">
+                    Mỗi dòng là <strong className="font-medium">một lần upload file Excel link</strong> (một đợt).
+                    <span className="text-xs font-normal text-gray-600 block sm:inline sm:ml-1">
+                      — mở rộng để xem từng link/nháp. Import từng link không tạo đợt; chỉ Excel batch hiện ở đây.
+                    </span>
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="text-xs text-gray-600 whitespace-nowrap">Lọc:</label>
+                    <select
+                      value={importDraftsFilter}
+                      onChange={(e) =>
+                        setImportDraftsFilter(e.target.value === 'all' ? 'all' : 'finished')
+                      }
+                      className="rounded-lg border border-gray-300 px-2 py-1 text-xs"
+                    >
+                      <option value="finished">Đợt đã xử lý xong (không còn link đang chạy)</option>
+                      <option value="all">Mọi đợt</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => void loadImportExcelBatchesList()}
+                      disabled={importDraftsLoading}
+                      className="rounded-lg border border-gray-300 bg-gray-50 px-2 py-1 text-xs font-medium hover:bg-gray-100 disabled:opacity-60"
+                    >
+                      {importDraftsLoading ? 'Đang tải…' : 'Làm mới'}
+                    </button>
+                  </div>
+                </div>
+                {importDraftsError ? (
+                  <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                    {importDraftsError}{' '}
+                    <button
+                      type="button"
+                      onClick={() => void loadImportExcelBatchesList()}
+                      className="ml-2 underline font-medium"
+                    >
+                      Thử lại
+                    </button>
+                  </div>
+                ) : null}
+                {importDraftsLoading && importExcelBatches.length === 0 ? (
+                  <p className="text-sm text-gray-600">Đang tải danh sách đợt…</p>
+                ) : importBatchesFiltered.length === 0 ? (
+                  <p className="text-sm text-gray-600">
+                    Chưa có đợt import Excel nào trên máy chủ này (hoặc không khớp lọc). Upload file Excel link để tạo
+                    đợt mới.
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-[min(32rem,55vh)] overflow-y-auto pr-1">
+                    {importBatchesFiltered.map((batch) => {
+                      const open = expandedImportBatchToken === batch.batch_token;
+                      const when = batch.created_at
+                        ? String(batch.created_at).replace('T', ' ').replace('+00:00', ' UTC').slice(0, 19)
+                        : '—';
+                      const shortTok =
+                        batch.batch_token.length > 14
+                          ? `${batch.batch_token.slice(0, 12)}…`
+                          : batch.batch_token;
+                      return (
+                        <div
+                          key={batch.batch_token}
+                          className="rounded-lg border border-gray-200 bg-gray-50/80 overflow-hidden"
+                        >
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-3 py-2.5">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedImportBatchToken(open ? null : batch.batch_token)
+                                  }
+                                  className="text-left text-sm font-semibold text-gray-900 hover:text-sky-800"
+                                  aria-expanded={open}
+                                >
+                                  <span className="inline-block w-4 text-gray-500">{open ? '▼' : '▶'}</span>{' '}
+                                  Đợt <span className="font-mono text-xs" title={batch.batch_token}>
+                                    {shortTok}
+                                  </span>
+                                </button>
+                                {batch.pending > 0 ? (
+                                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-900">
+                                    Còn {batch.pending} đang chạy
+                                  </span>
+                                ) : (
+                                  <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] font-medium text-emerald-900">
+                                    Xong
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-1 text-[11px] text-gray-600">
+                                {when} · {batch.total_links} link · đã OK {batch.completed} · lỗi{' '}
+                                {batch.failed}
+                                {batch.skipped_lines > 0
+                                  ? ` · ${batch.skipped_lines} dòng bỏ qua khi nhận file`
+                                  : ''}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void handleExportExcelBatchByToken(batch.batch_token)
+                                }
+                                disabled={bulkExport1688Busy || importBatchDeleting}
+                                className="rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-50 disabled:opacity-60"
+                              >
+                                {bulkExport1688Busy ? 'Đang tải…' : 'Export Excel đợt này'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setImportDraftDeleteTarget(null);
+                                  setImportBatchDeleteTarget(batch.batch_token);
+                                }}
+                                disabled={
+                                  bulkExport1688Busy || importBatchDeleting || importDraftDeleting
+                                }
+                                className="rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
+                              >
+                                Xóa đợt
+                              </button>
+                            </div>
+                          </div>
+                          {open ? (
+                            <div className="border-t border-gray-200 bg-white px-2 py-2">
+                              {importBatchDetailLoading ? (
+                                <p className="text-xs text-gray-600 px-2 py-3">
+                                  Đang tải chi tiết từng link…
+                                </p>
+                              ) : importBatchDetail && importBatchDetail.batch_token === batch.batch_token ? (
+                                importBatchDetail.items.length === 0 ? (
+                                  <p className="text-xs text-gray-600 px-2 py-2">
+                                    Không còn bản nháp nào trong đợt (đã xóa hết khỏi DB hoặc dữ liệu lệch).
+                                  </p>
+                                ) : (
+                                  <div className="overflow-x-auto max-h-[min(20rem,40vh)] overflow-y-auto rounded border border-gray-100">
+                                    <table className="min-w-full text-xs">
+                                      <thead className="bg-gray-50 sticky top-0 z-10 border-b border-gray-200">
+                                        <tr>
+                                          <th className="px-2 py-2 text-left font-semibold text-gray-700">
+                                            Draft #
+                                          </th>
+                                          <th className="px-2 py-2 text-left font-semibold text-gray-700">
+                                            Dòng Excel
+                                          </th>
+                                          <th className="px-2 py-2 text-left font-semibold text-gray-700">
+                                            Trạng thái
+                                          </th>
+                                          <th className="px-2 py-2 text-left font-semibold text-gray-700">
+                                            Ghi chú
+                                          </th>
+                                          <th className="px-2 py-2 text-right font-semibold text-gray-700">
+                                            Thao tác
+                                          </th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-gray-100">
+                                        {importBatchDetail.items.map((row) => {
+                                          const st = String(row.status || '').toLowerCase();
+                                          const stCls =
+                                            st === 'done' || st === 'published'
+                                              ? 'bg-emerald-100 text-emerald-900'
+                                              : st === 'error'
+                                                ? 'bg-red-100 text-red-900'
+                                                : st === 'running' || st === 'queued'
+                                                  ? 'bg-amber-100 text-amber-900'
+                                                  : 'bg-gray-100 text-gray-800';
+                                          const msg = row.message || '';
+                                          return (
+                                            <tr key={row.draft_id}>
+                                              <td className="px-2 py-2 font-mono text-gray-800 tabular-nums">
+                                                {row.draft_id}
+                                              </td>
+                                              <td className="px-2 py-2 text-gray-700 tabular-nums">
+                                                {row.excel_row != null ? row.excel_row : '—'}
+                                              </td>
+                                              <td className="px-2 py-2 whitespace-nowrap">
+                                                <span
+                                                  className={`rounded px-1.5 py-0.5 font-medium ${stCls}`}
+                                                >
+                                                  {row.status}
+                                                </span>
+                                              </td>
+                                              <td
+                                                className="px-2 py-2 text-gray-700 max-w-[18rem] sm:max-w-md break-words"
+                                                title={msg}
+                                              >
+                                                {msg
+                                                  ? msg.length > 160
+                                                    ? `${msg.slice(0, 158)}…`
+                                                    : msg
+                                                  : '—'}
+                                              </td>
+                                              <td className="px-2 py-2 text-right whitespace-nowrap">
+                                                <span className="inline-flex gap-3 justify-end">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                      void handleOpenStoredImportDraft(row.draft_id)
+                                                    }
+                                                    className="text-sky-700 hover:underline font-medium"
+                                                  >
+                                                    Mở
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                      setImportBatchDeleteTarget(null);
+                                                      setImportDraftDeleteTarget({ id: row.draft_id });
+                                                    }}
+                                                    className="text-red-700 hover:underline font-medium"
+                                                    aria-label={`Xóa nháp import #${row.draft_id}`}
+                                                  >
+                                                    Xóa
+                                                  </button>
+                                                </span>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )
+                              ) : (
+                                <p className="text-xs text-gray-600 px-2 py-2">
+                                  Không tải được chi tiết. Thử Thu gọn và mở lại đợt.
+                                </p>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <p className="mt-2 text-[11px] text-gray-500 leading-snug">
+                  Danh sách theo file meta trên server (<code className="text-[10px]">uploads/import_batches</code>).
+                  Mỗi lần làm mới tải tối đa 48 đợt mới nhất
+                  {importExcelBatches.length > 0 ? ` (đang hiển thị ${importExcelBatches.length})` : ''}. Nếu deploy server mới
+                  mà không copy thư mục đó, lịch sử đợt có thể trống dù bản nháp vẫn còn trong database.
+                </p>
+              </div>
+            ) : null}
 
             {importing1688 && import1688Progress ? (
               <div className="mt-3 rounded-lg border border-orange-200 bg-white p-3">
@@ -1020,7 +1471,9 @@ export default function AdminProductsPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">Shop ID</label>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Shop ID <span className="text-gray-500 font-normal">(Excel: ô Kiểu dáng / Style)</span>
+                      </label>
                       <input
                         value={String(import1688Draft.product_data.shop_id ?? '')}
                         onChange={(e) => updateImport1688ProductField('shop_id', e.target.value)}
@@ -1127,6 +1580,102 @@ export default function AdminProductsPage() {
                   >
                     {publishing1688 ? 'Đang đăng...' : 'Đăng ngay'}
                   </button>
+                </div>
+              </div>
+            ) : null}
+
+            {importDraftDeleteTarget ? (
+              <div
+                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+                role="presentation"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget && !importDraftDeleting && !importBatchDeleting)
+                    setImportDraftDeleteTarget(null);
+                }}
+              >
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="import-draft-delete-title"
+                  className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-5 shadow-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 id="import-draft-delete-title" className="text-base font-semibold text-gray-900">
+                    Xóa nháp import?
+                  </h3>
+                  <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                    Nháp <span className="font-mono">#{importDraftDeleteTarget.id}</span> sẽ bị xóa{' '}
+                    <strong className="font-medium text-gray-800">vĩnh viễn</strong>. Thao tác này không hoàn tác.
+                  </p>
+                  <div className="mt-5 flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => !importDraftDeleting && setImportDraftDeleteTarget(null)}
+                      disabled={importDraftDeleting}
+                      className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void confirmDeleteImportDraft()}
+                      disabled={importDraftDeleting}
+                      className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                    >
+                      {importDraftDeleting ? 'Đang xóa…' : 'Xóa'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {importBatchDeleteTarget ? (
+              <div
+                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+                role="presentation"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget && !importBatchDeleting && !importDraftDeleting)
+                    setImportBatchDeleteTarget(null);
+                }}
+              >
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="import-batch-delete-title"
+                  className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-5 shadow-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 id="import-batch-delete-title" className="text-base font-semibold text-gray-900">
+                    Xóa cả đợt import Excel?
+                  </h3>
+                  <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                    Đợt{' '}
+                    <span className="font-mono text-xs break-all" title={importBatchDeleteTarget}>
+                      {importBatchDeleteTarget.length > 20
+                        ? `${importBatchDeleteTarget.slice(0, 18)}…`
+                        : importBatchDeleteTarget}
+                    </span>
+                    : file meta trên server và <strong className="font-medium text-gray-800">tất cả bản nháp</strong>{' '}
+                    trong đợt sẽ bị xóa vĩnh viễn. Không hoàn tác.
+                  </p>
+                  <div className="mt-5 flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => !importBatchDeleting && setImportBatchDeleteTarget(null)}
+                      disabled={importBatchDeleting}
+                      className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void confirmDeleteImportExcelBatch()}
+                      disabled={importBatchDeleting}
+                      className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                    >
+                      {importBatchDeleting ? 'Đang xóa…' : 'Xóa đợt'}
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : null}

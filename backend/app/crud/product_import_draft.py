@@ -130,3 +130,14 @@ def mark_error(
         warnings=warnings or [],
         finished_at=datetime.now(),
     )
+
+
+def delete_draft_by_id(db: Session, draft_id: int) -> bool:
+    """Xóa bản nháp theo id. Trả False nếu không tìm thấy."""
+    row = db.query(ProductImportDraft).filter(ProductImportDraft.id == draft_id).first()
+    if not row:
+        return False
+    db.delete(row)
+    db.commit()
+    return True
+

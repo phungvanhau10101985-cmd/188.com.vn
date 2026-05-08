@@ -78,6 +78,30 @@ class Import1688BatchStatusOut(BaseModel):
     items: List[Import1688BatchStatusItem] = Field(default_factory=list)
 
 
+class Import1688ExcelBatchSummaryOut(BaseModel):
+    """Một đợt upload Excel (theo file meta trên disk)."""
+
+    batch_token: str
+    created_at: Optional[str] = None
+    total_links: int = 0
+    completed: int = 0
+    failed: int = 0
+    pending: int = 0
+    skipped_lines: int = 0
+
+
+class Import1688ExcelBatchListOut(BaseModel):
+    items: List[Import1688ExcelBatchSummaryOut] = Field(default_factory=list)
+    limit: int
+
+
+class Import1688ExcelBatchDeleteOut(BaseModel):
+    success: bool = True
+    batch_token: str
+    draft_ids_deleted: List[int] = Field(default_factory=list)
+    meta_removed: bool = False
+
+
 class Import1688DraftListOut(BaseModel):
     items: List[ProductImportDraftOut]
     total: int

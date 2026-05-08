@@ -6,7 +6,7 @@ import os
 import re
 import traceback
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -23,12 +23,16 @@ from app.crud import product as product_crud
 from app.crud import product_import_draft as draft_crud
 from app.db.session import SessionLocal, get_db
 from app.models.admin import AdminUser
+from app.models.product_import_draft import ProductImportDraft
 from app.schemas.import_1688 import (
     Import1688BatchStatusItem,
     Import1688BatchStatusOut,
     Import1688DraftIdsBody,
     Import1688DraftListOut,
+    Import1688ExcelBatchDeleteOut,
+    Import1688ExcelBatchListOut,
     Import1688ExcelBatchOut,
+    Import1688ExcelBatchSummaryOut,
     Import1688JobCreate,
     Import1688JobOut,
     ProductImportDraftOut,
@@ -76,6 +80,69 @@ def _batch_meta_json_path(batch_token: str) -> Path:
     d = _import_static_uploads() / "import_batches"
     d.mkdir(parents=True, exist_ok=True)
     return d / f"{batch_token}.json"
+
+
+def _safe_batch_token_param(raw: str) -> str:
+    t = (raw or "").strip().lower()
+    if not re.fullmatch(r"[a-f0-9]{8,128}", t):
+        raise HTTPException(status_code=400, detail="batch_token không hợp lệ.")
+    return t
+
+
+def _batch_status_out_for_draft_ids(db: Session, batch_token: str, draft_ids: List[int]) -> Import1688BatchStatusOut:
+    """Tổng hợp trạng thái đợt theo thứ tự draft_ids trong meta (1 truy vấn IN)."""
+    ids = [int(x) for x in draft_ids if x is not None]
+    if not ids:
+        return Import1688BatchStatusOut(
+            batch_token=batch_token,
+            total=0,
+            completed=0,
+            failed=0,
+            pending=0,
+            items=[],
+        )
+    rows = db.query(ProductImportDraft).filter(ProductImportDraft.id.in_(ids)).all()
+    by_id = {r.id: r for r in rows}
+    items_out: List[Import1688BatchStatusItem] = []
+    completed = 0
+    failed = 0
+    pending = 0
+    for did in ids:
+        draft = by_id.get(did)
+        if not draft:
+            continue
+        st = (draft.status or "").lower()
+        if st in {"done", "published"}:
+            completed += 1
+        elif st == "error":
+            failed += 1
+        else:
+            pending += 1
+        xr = None
+        ov = getattr(draft, "excel_overlays", None)
+        if isinstance(ov, dict) and ov.get("_excel_row") is not None:
+            try:
+                xr = int(ov["_excel_row"])
+            except (TypeError, ValueError):
+                xr = None
+        items_out.append(
+            Import1688BatchStatusItem(
+                draft_id=draft.id,
+                job_id=draft.job_id,
+                excel_row=xr,
+                status=draft.status,
+                phase=draft.phase,
+                message=draft.message,
+            )
+        )
+    return Import1688BatchStatusOut(
+        batch_token=batch_token,
+        total=len(ids),
+        completed=completed,
+        failed=failed,
+        pending=pending,
+        items=items_out,
+    )
 
 
 def _infer_import_source_for_url(norm_url: str, requested_source: Optional[str] = None) -> Tuple[str, str]:
@@ -517,7 +584,7 @@ def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
         "pro_content": (product_data.get("description") or ""),
         "price": product_data.get("price", 0),
         "shop_name": product_data.get("shop_name", ""),
-        "shop_id": "",
+        "shop_id": (product_data.get("shop_id") or product_data.get("style") or ""),
         "pro_lower_price": product_data.get("pro_lower_price", ""),
         "pro_high_price": product_data.get("pro_high_price", ""),
         "rating_group_id": product_data.get("group_rating", 0),
@@ -722,6 +789,7 @@ async def create_import_jobs_batch_from_excel(
         parsed, pskip = parse_link_import_excel(tmp_path)
         skips = list(pskip)
 
+        batch_token = uuid.uuid4().hex
         draft_ids: List[int] = []
         job_ids: List[str] = []
 
@@ -737,6 +805,7 @@ async def create_import_jobs_batch_from_excel(
                 continue
             overlays = dict(it.get("overlays") or {})
             overlays["_excel_row"] = int(it["excel_row"])
+            overlays["_batch_token"] = batch_token
             jid = str(uuid.uuid4())
             draft = draft_crud.create_draft(
                 db,
@@ -750,11 +819,11 @@ async def create_import_jobs_batch_from_excel(
             draft_ids.append(draft.id)
             job_ids.append(jid)
 
-        batch_token = uuid.uuid4().hex
         meta_path = _batch_meta_json_path(batch_token)
         meta_path.write_text(
             json.dumps(
                 {
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                     "job_ids": job_ids,
                     "draft_ids": draft_ids,
                     "skipped": skips[-80:],
@@ -781,6 +850,88 @@ async def create_import_jobs_batch_from_excel(
             pass
 
 
+@router.get("/jobs/excel-batches", response_model=Import1688ExcelBatchListOut)
+def list_excel_import_batches(
+    limit: int = Query(40, ge=1, le=120),
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Danh sách các đợt import Excel (theo file meta), mới nhất trước."""
+    d = _import_static_uploads() / "import_batches"
+    if not d.is_dir():
+        return Import1688ExcelBatchListOut(items=[], limit=limit)
+    files = sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
+    summaries: List[Import1688ExcelBatchSummaryOut] = []
+    for fp in files:
+        token = fp.stem
+        try:
+            meta = json.loads(fp.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        draft_ids = [int(x) for x in (meta.get("draft_ids") or []) if x is not None]
+        skipped = meta.get("skipped")
+        skipped_n = len(skipped) if isinstance(skipped, list) else 0
+        st = _batch_status_out_for_draft_ids(db, token, draft_ids)
+        ca_raw = meta.get("created_at")
+        created_at_out: Optional[str] = None
+        if isinstance(ca_raw, str) and ca_raw.strip():
+            created_at_out = ca_raw.strip()
+        else:
+            try:
+                created_at_out = datetime.fromtimestamp(fp.stat().st_mtime, tz=timezone.utc).isoformat()
+            except OSError:
+                created_at_out = None
+        summaries.append(
+            Import1688ExcelBatchSummaryOut(
+                batch_token=token,
+                created_at=created_at_out,
+                total_links=st.total,
+                completed=st.completed,
+                failed=st.failed,
+                pending=st.pending,
+                skipped_lines=skipped_n,
+            ),
+        )
+    return Import1688ExcelBatchListOut(items=summaries, limit=limit)
+
+
+@router.delete("/jobs/excel-batches/{batch_token}", response_model=Import1688ExcelBatchDeleteOut)
+def delete_excel_import_batch(
+    batch_token: str,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Xóa file meta đợt và toàn bộ bản nháp (draft) liệt kê trong meta."""
+    tid = _safe_batch_token_param(batch_token)
+    meta_path = _batch_meta_json_path(tid)
+    if not meta_path.is_file():
+        raise HTTPException(status_code=404, detail="Không tìm thấy đợt import (file meta).")
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Meta batch hỏng: {exc}") from exc
+
+    draft_ids = [int(x) for x in (meta.get("draft_ids") or []) if x is not None]
+    deleted_ids: List[int] = []
+    for did in draft_ids:
+        if draft_crud.delete_draft_by_id(db, did):
+            deleted_ids.append(did)
+
+    meta_removed = False
+    try:
+        meta_path.unlink()
+        meta_removed = True
+    except OSError:
+        logger.warning("Không xóa được file meta batch: %s", meta_path)
+
+    return Import1688ExcelBatchDeleteOut(
+        success=True,
+        batch_token=tid,
+        draft_ids_deleted=deleted_ids,
+        meta_removed=meta_removed,
+    )
+
+
 @router.get("/jobs/batch-excel/{batch_token}/status", response_model=Import1688BatchStatusOut)
 def batch_excel_job_status(
     batch_token: str,
@@ -796,46 +947,7 @@ def batch_excel_job_status(
         raise HTTPException(status_code=400, detail=f"Meta batch hỏng: {exc}") from exc
 
     draft_ids = [int(x) for x in (meta.get("draft_ids") or []) if x is not None]
-    items_out: List[Import1688BatchStatusItem] = []
-    completed = 0
-    failed = 0
-    pending = 0
-    for did in draft_ids:
-        draft = draft_crud.get_by_id(db, did)
-        if not draft:
-            continue
-        st = (draft.status or "").lower()
-        if st in {"done", "published"}:
-            completed += 1
-        elif st == "error":
-            failed += 1
-        else:
-            pending += 1
-        xr = None
-        ov = getattr(draft, "excel_overlays", None)
-        if isinstance(ov, dict) and ov.get("_excel_row") is not None:
-            try:
-                xr = int(ov["_excel_row"])
-            except (TypeError, ValueError):
-                xr = None
-        items_out.append(
-            Import1688BatchStatusItem(
-                draft_id=draft.id,
-                job_id=draft.job_id,
-                excel_row=xr,
-                status=draft.status,
-                phase=draft.phase,
-                message=draft.message,
-            )
-        )
-    return Import1688BatchStatusOut(
-        batch_token=batch_token,
-        total=len(draft_ids),
-        completed=completed,
-        failed=failed,
-        pending=pending,
-        items=items_out,
-    )
+    return _batch_status_out_for_draft_ids(db, batch_token, draft_ids)
 
 
 @router.get("/drafts", response_model=Import1688DraftListOut)
@@ -935,6 +1047,18 @@ def update_import_1688_draft(
     pd = dict(payload.product_data or {})
     compact_product_info_for_web(pd)
     return draft_crud.update_draft(db, draft, product_data=pd, status="done", message="Đã cập nhật draft.")
+
+
+@router.delete("/drafts/{draft_id}")
+def delete_import_1688_draft(
+    draft_id: int,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    ok = draft_crud.delete_draft_by_id(db, draft_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Không tìm thấy draft.")
+    return {"success": True, "draft_id": draft_id}
 
 
 @router.post("/drafts/{draft_id}/publish")
