@@ -102,6 +102,14 @@ class Import1688ExcelBatchDeleteOut(BaseModel):
     meta_removed: bool = False
 
 
+class Import1688BatchResumeOut(BaseModel):
+    """POST resume batch — có thể không còn pending hoặc đã xếp hàng chạy tiếp."""
+
+    success: bool = True
+    message: str = ""
+    pending: int = 0
+
+
 class Import1688DraftListOut(BaseModel):
     items: List[ProductImportDraftOut]
     total: int

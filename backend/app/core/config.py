@@ -134,6 +134,10 @@ class Settings:
         )
         self.IMPORT_1688_MAX_IMAGES: int = int(os.getenv("IMPORT_1688_MAX_IMAGES", "24"))
         self.IMPORT_1688_DOWNLOAD_IMAGES: bool = os.getenv("IMPORT_1688_DOWNLOAD_IMAGES", "True").strip().lower() in ("1", "true", "yes")
+        # Sau restart API: tự quét file meta import_batches/*.json và nối chạy tiếp link chưa xong (default tắt).
+        self.IMPORT_1688_BATCH_RESUME_ON_STARTUP: bool = os.getenv(
+            "IMPORT_1688_BATCH_RESUME_ON_STARTUP", ""
+        ).strip().lower() in ("1", "true", "yes")
 
         # Feed TSV Google Merchant Center — GET /api/v1/import-export/export/merchant-center-feed.tsv (công khai)
         self.MERCHANT_FEED_CURRENCY: str = os.getenv("MERCHANT_FEED_CURRENCY", "VND").strip() or "VND"
@@ -219,9 +223,15 @@ class Settings:
         self.IMPORT_LINK_DEEPSEEK_TAXONOMY_FORCE: bool = os.getenv(
             "IMPORT_LINK_DEEPSEEK_TAXONOMY_FORCE", ""
         ).strip().lower() in ("1", "true", "yes", "on")
-        # Fallback DeepSeek khi luật từ-khóa không gán được group_rating (whitelist).
+        # Fallback AI khi luật từ-khóa không gán được group_rating (whitelist).
         self.IMPORT_LINK_DEEPSEEK_GROUPS_FALLBACK_ENABLED: bool = os.getenv(
             "IMPORT_LINK_DEEPSEEK_GROUPS_FALLBACK_ENABLED", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.IMPORT_LINK_GEMINI_GROUPS_FALLBACK_ENABLED: bool = os.getenv(
+            "IMPORT_LINK_GEMINI_GROUPS_FALLBACK_ENABLED", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.IMPORT_LINK_GEMINI_TAXONOMY_FALLBACK_ENABLED: bool = os.getenv(
+            "IMPORT_LINK_GEMINI_TAXONOMY_FALLBACK_ENABLED", "true"
         ).strip().lower() in ("1", "true", "yes", "on")
         self.IMPORT_LINK_GEMINI_IMAGE_GENDER_ENABLED: bool = os.getenv(
             "IMPORT_LINK_GEMINI_IMAGE_GENDER_ENABLED", "true"

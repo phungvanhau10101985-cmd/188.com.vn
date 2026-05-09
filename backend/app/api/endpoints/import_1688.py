@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import threading
 import traceback
 import uuid
 from datetime import datetime, timezone
@@ -25,6 +26,7 @@ from app.db.session import SessionLocal, get_db
 from app.models.admin import AdminUser
 from app.models.product_import_draft import ProductImportDraft
 from app.schemas.import_1688 import (
+    Import1688BatchResumeOut,
     Import1688BatchStatusItem,
     Import1688BatchStatusOut,
     Import1688DraftIdsBody,
@@ -70,6 +72,15 @@ from app.services.import_link_excel_batch import merge_import_excel_overlay_into
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Tránh hai luồng cùng chạy một batch (bấm «Chạy tiếp» hai lần hoặc startup + thủ công).
+_batch_chain_lock = threading.Lock()
+_batch_tokens_running: set[str] = set()
+
+
+def _draft_import_status_terminal(status: Optional[str]) -> bool:
+    s = (status or "").lower().strip()
+    return s in {"done", "published", "error"}
 
 
 def _import_static_uploads() -> Path:
@@ -158,6 +169,10 @@ def _infer_import_source_for_url(norm_url: str, requested_source: Optional[str] 
 
 
 def _excel_export_columns_and_vi_headers() -> Tuple[List[str], List[str]]:
+    """
+    Trùng thứ tự 37 cột với `sample_import_template.xlsx` / `ExcelImporter.create_sample_template`
+    (gallery_images → detail_images liên tiếp; không Slug; không cột ảnh nguồn 1688 riêng).
+    """
     columns = [
         "id",
         "sku",
@@ -175,10 +190,7 @@ def _excel_export_columns_and_vi_headers() -> Tuple[List[str], List[str]]:
         "sizes",
         "Variant",
         "gallery_images",
-        "carousel_images_1688",
-        "color_swatch_images_1688",
         "detail_images",
-        "detail_block_images_1688",
         "product_url",
         "video_url",
         "main_image",
@@ -199,7 +211,6 @@ def _excel_export_columns_and_vi_headers() -> Tuple[List[str], List[str]]:
         "Features",
         "Weight",
         "product_info",
-        "Slug",
     ]
     vietnamese_headers = [
         "Id sản phẩm",
@@ -218,10 +229,7 @@ def _excel_export_columns_and_vi_headers() -> Tuple[List[str], List[str]]:
         "Size",
         "Biến thể",
         "Thư viện ảnh",
-        "Ảnh carousel 1688",
-        "Ảnh màu 1688",
         "Nội dung",
-        "Ảnh block mô tả 1688",
         "Link mặc định",
         "Link Video",
         "Link img",
@@ -242,7 +250,6 @@ def _excel_export_columns_and_vi_headers() -> Tuple[List[str], List[str]]:
         "Tính năng",
         "Trọng lượng",
         "Thông tin sản phẩm",
-        "Slug",
     ]
     return columns, vietnamese_headers
 
@@ -254,19 +261,92 @@ def _merge_excel_overlay_for_job(db: Session, job_id: str, product_data: Dict[st
 
 
 def _run_import_1688_chain_from_meta(meta_path_str: str) -> None:
+    """
+    Chạy tuần tự job trong file meta.
+    Bỏ qua draft đã done / published / error — dùng sau restart hoặc «Chạy tiếp».
+    """
     p = Path(meta_path_str)
     if not p.is_file():
         logger.warning("import batch meta không tồn tại: %s", meta_path_str)
         return
+    token = p.stem
+    with _batch_chain_lock:
+        if token in _batch_tokens_running:
+            logger.info("import batch chain đang chạy — bỏ qua lần gọi trùng: %s…", token[:12])
+            return
+        _batch_tokens_running.add(token)
     try:
-        meta = json.loads(p.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.warning("import batch meta lỗi đọc: %s — %s", meta_path_str, exc)
+        try:
+            meta = json.loads(p.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("import batch meta lỗi đọc: %s — %s", meta_path_str, exc)
+            return
+        job_ids = meta.get("job_ids") or []
+        for jid in job_ids:
+            if not (isinstance(jid, str) and jid.strip()):
+                continue
+            jid = jid.strip()
+            db = SessionLocal()
+            try:
+                draft = draft_crud.get_by_job_id(db, jid)
+                if draft is not None and _draft_import_status_terminal(draft.status):
+                    continue
+            finally:
+                db.close()
+            try:
+                _run_import_1688_job(jid, False)
+            except Exception:
+                logger.exception(
+                    "import batch chain: job lỗi không mong đợi (tiếp tục các job sau): job_id=%s…",
+                    (jid[:16] if jid else ""),
+                )
+    finally:
+        with _batch_chain_lock:
+            _batch_tokens_running.discard(token)
+
+
+def _resume_all_batches_pending_after_startup() -> None:
+    """Quét mọi file meta; chạy tiếp batch còn pending (sau delay — gọi từ thread daemon)."""
+    import time
+
+    time.sleep(2.5)
+    base = _import_static_uploads() / "import_batches"
+    if not base.is_dir():
         return
-    job_ids = meta.get("job_ids") or []
-    for jid in job_ids:
-        if isinstance(jid, str) and jid.strip():
-            _run_import_1688_job(jid.strip(), False)
+    for fp in sorted(base.glob("*.json"), key=lambda p: p.stat().st_mtime):
+        db = SessionLocal()
+        try:
+            try:
+                meta = json.loads(fp.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            draft_ids = [int(x) for x in (meta.get("draft_ids") or []) if x is not None]
+            st = _batch_status_out_for_draft_ids(db, fp.stem, draft_ids)
+        finally:
+            db.close()
+        if st.pending <= 0:
+            continue
+        try:
+            logger.info(
+                "IMPORT_1688_BATCH_RESUME_ON_STARTUP: token=%s… pending=%s",
+                fp.stem[:12],
+                st.pending,
+            )
+            _run_import_1688_chain_from_meta(str(fp.resolve()))
+        except Exception:
+            logger.exception("batch resume on startup failed: %s", fp)
+
+
+def start_import_batch_resume_daemon_if_enabled() -> None:
+    """Gọi từ main.startup khi IMPORT_1688_BATCH_RESUME_ON_STARTUP=true."""
+    if not getattr(settings, "IMPORT_1688_BATCH_RESUME_ON_STARTUP", False):
+        return
+    t = threading.Thread(
+        target=_resume_all_batches_pending_after_startup,
+        daemon=True,
+        name="import1688-batch-resume-startup",
+    )
+    t.start()
 
 
 def _apply_deepseek_taxonomy_after_scrape(db: Session, product_data: Dict[str, Any], warnings: List[str]) -> None:
@@ -575,16 +655,27 @@ def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
             return value
         return json.dumps(value, ensure_ascii=False)
 
+    def _style_cell_from_pd(pd: Dict[str, Any]) -> str:
+        v = pd.get("style", "")
+        if v is None:
+            return ""
+        return str(v).strip() if not isinstance(v, str) else v.strip()
+
+    style_cell = _style_cell_from_pd(product_data)
+
+    # Cột Excel trùng mẫu import 37 cột (A–AK): không export carousel/swatch/block 1688 hay Slug —
+    # ảnh nguồn vẫn nằm trong product_data / JSON khi cần đối chiếu.
+    # Shop id (cột I) trùng ô Kiểu dáng / Style (cột AI) — lấy theo trường `style`.
     return {
         "id": product_data.get("product_id", ""),
         "sku": product_data.get("code", ""),
-        "origin": product_data.get("origin", ""),
-        "brand": product_data.get("brand_name", ""),
+        "origin": "",
+        "brand": "",
         "name": product_data.get("name", ""),
         "pro_content": (product_data.get("description") or ""),
         "price": product_data.get("price", 0),
         "shop_name": product_data.get("shop_name", ""),
-        "shop_id": (product_data.get("shop_id") or product_data.get("style") or ""),
+        "shop_id": style_cell,
         "pro_lower_price": product_data.get("pro_lower_price", ""),
         "pro_high_price": product_data.get("pro_high_price", ""),
         "rating_group_id": product_data.get("group_rating", 0),
@@ -592,10 +683,7 @@ def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
         "sizes": j(product_data.get("sizes", [])),
         "Variant": j(product_data.get("colors", [])),
         "gallery_images": j(product_data.get("images", [])),
-        "carousel_images_1688": j(product_data.get("carousel_images_1688", [])),
-        "color_swatch_images_1688": j(product_data.get("color_swatch_images_1688", [])),
         "detail_images": j(product_data.get("gallery", [])),
-        "detail_block_images_1688": j(product_data.get("detail_block_images_1688", [])),
         "product_url": product_data.get("link_default", ""),
         "video_url": product_data.get("video_link", ""),
         "main_image": product_data.get("main_image", ""),
@@ -612,13 +700,12 @@ def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
         "Subcategory": product_data.get("subcategory", ""),
         "Sub-subcategory": product_data.get("sub_subcategory", ""),
         "Material": (product_data.get("material") or ""),
-        "Style": product_data.get("style", ""),
+        "Style": style_cell,
         "Color": product_data.get("color", ""),
         "Occasion": product_data.get("occasion", ""),
         "Features": j(product_data.get("features", [])),
         "Weight": product_data.get("weight", ""),
         "product_info": j(product_data.get("product_info", {})),
-        "Slug": product_data.get("slug", ""),
     }
 
 
@@ -932,13 +1019,56 @@ def delete_excel_import_batch(
     )
 
 
+@router.post("/jobs/excel-batches/{batch_token}/resume", response_model=Import1688BatchResumeOut)
+def resume_excel_import_batch_chain(
+    batch_token: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """
+    Chạy tiếp các link trong đợt upload Excel còn queued/running (sau restart hoặc lỗi tạm).
+    Draft đã done / published / error được bỏ qua.
+    """
+    tid = _safe_batch_token_param(batch_token)
+    meta_path = _batch_meta_json_path(tid)
+    if not meta_path.is_file():
+        raise HTTPException(status_code=404, detail="Không tìm thấy đợt import (file meta).")
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Meta batch hỏng: {exc}") from exc
+    draft_ids = [int(x) for x in (meta.get("draft_ids") or []) if x is not None]
+    st = _batch_status_out_for_draft_ids(db, tid, draft_ids)
+    if st.pending <= 0:
+        return Import1688BatchResumeOut(
+            success=True,
+            message="Không còn link chờ xử lý (mọi draft đã xong hoặc lỗi).",
+            pending=0,
+        )
+    with _batch_chain_lock:
+        if tid in _batch_tokens_running:
+            return Import1688BatchResumeOut(
+                success=True,
+                message="Đợt này đang chạy trên server — chờ vài giây rồi làm mới.",
+                pending=st.pending,
+            )
+    background_tasks.add_task(_run_import_1688_chain_from_meta, str(meta_path.resolve()))
+    return Import1688BatchResumeOut(
+        success=True,
+        message=f"Đã xếp hàng chạy tiếp {st.pending} link chưa hoàn thành.",
+        pending=st.pending,
+    )
+
+
 @router.get("/jobs/batch-excel/{batch_token}/status", response_model=Import1688BatchStatusOut)
 def batch_excel_job_status(
     batch_token: str,
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("products")),
 ):
-    meta_path = _batch_meta_json_path(batch_token)
+    tid = _safe_batch_token_param(batch_token)
+    meta_path = _batch_meta_json_path(tid)
     if not meta_path.is_file():
         raise HTTPException(status_code=404, detail="Không tìm thấy batch hoặc token hết hiệu lực.")
     try:
@@ -947,7 +1077,7 @@ def batch_excel_job_status(
         raise HTTPException(status_code=400, detail=f"Meta batch hỏng: {exc}") from exc
 
     draft_ids = [int(x) for x in (meta.get("draft_ids") or []) if x is not None]
-    return _batch_status_out_for_draft_ids(db, batch_token, draft_ids)
+    return _batch_status_out_for_draft_ids(db, tid, draft_ids)
 
 
 @router.get("/drafts", response_model=Import1688DraftListOut)

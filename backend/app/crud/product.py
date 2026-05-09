@@ -869,6 +869,8 @@ def excel_row_to_product(row: Dict) -> Dict:
                 features_list = [str(item) for item in features_value]
         
         # 36 CỘT EXCEL MAPPING - ĐÃ FIX
+        # Cột Shop id (I) đồng bộ với cột Style (AI): nguồn là ô Style.
+        style_cell = str(row.get('Style', '')).strip()
         product_data = {
             'product_id': product_id,
             'code': str(row.get('sku', '')).strip(),
@@ -878,7 +880,7 @@ def excel_row_to_product(row: Dict) -> Dict:
             'description': str(row.get('pro_content', '')).strip(),
             'price': safe_float(row.get('price', 0)),
             'shop_name': str(row.get('shop_name', '')).strip(),
-            'shop_id': str(row.get('shop_id', '')).strip(),
+            'shop_id': style_cell,
             'pro_lower_price': str(row.get('pro_lower_price', '')).strip(),
             'pro_high_price': str(row.get('pro_high_price', '')).strip(),
             'group_rating': safe_int(row.get('rating_group_id', 0)),
@@ -904,7 +906,7 @@ def excel_row_to_product(row: Dict) -> Dict:
             'raw_subcategory': str(row.get('Subcategory', '')).strip(),
             'raw_sub_subcategory': str(row.get('Sub-subcategory', '')).strip(),
             'material': str(row.get('Material', '')).strip(),
-            'style': str(row.get('Style', '')).strip(),
+            'style': style_cell,
             # FIX: Cột Color -> color (đúng mapping)
             'color': str(row.get('Color', '')).strip(),
             # FIX: Cột Occasion -> occasion (đúng mapping)
@@ -963,16 +965,18 @@ def product_to_excel_row(product: Product) -> Dict:
                     features_export = str(product.features)
         
         # 37 CỘT EXPORT MAPPING - ĐÃ FIX
+        # Cột Shop id = cột Style (cùng product.style).
+        _style_out = (product.style or "").strip() if isinstance(product.style, str) else (str(product.style).strip() if product.style is not None else "")
         excel_row = {
             'id': product.product_id or '',
             'sku': product.code or '',
-            'origin': product.origin or '',
-            'brand': product.brand_name or '',
+            'origin': '',
+            'brand': '',
             'name': product.name or '',
             'pro_content': product.description or '',
             'price': product.price or 0,
             'shop_name': product.shop_name or '',
-            'shop_id': product.shop_id or '',
+            'shop_id': _style_out,
             'pro_lower_price': product.pro_lower_price or '',
             'pro_high_price': product.pro_high_price or '',
             'rating_group_id': product.group_rating or 0,
@@ -995,7 +999,7 @@ def product_to_excel_row(product: Product) -> Dict:
             'Subcategory': product.subcategory or '',
             'Sub-subcategory': product.sub_subcategory or '',
             'Material': product.material or '',
-            'Style': product.style or '',
+            'Style': _style_out,
             # FIX: Cột 33: Color -> Color (đúng vị trí)
             'Color': product.color or '',
             # FIX: Cột 34: Occasion -> Occasion (đúng vị trí)

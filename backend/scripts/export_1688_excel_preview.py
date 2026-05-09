@@ -6,7 +6,10 @@ from datetime import datetime
 
 import pandas as pd
 
-from app.api.endpoints.import_1688 import _excel_row_from_product
+from app.api.endpoints.import_1688 import (
+    _excel_export_columns_and_vi_headers,
+    _excel_row_from_product,
+)
 from app.services.import_1688_scraper import scrape_1688_product
 
 DEFAULT_URL = "https://detail.1688.com/offer/920080333655.html?offerId=920080333655"
@@ -25,93 +28,7 @@ def main() -> None:
     url = (sys.argv[1] if len(sys.argv) > 1 else DEFAULT_URL).strip()
     _, product_data, warnings = scrape_1688_product(url)
 
-    columns = [
-        "id",
-        "sku",
-        "origin",
-        "brand",
-        "name",
-        "pro_content",
-        "price",
-        "shop_name",
-        "shop_id",
-        "pro_lower_price",
-        "pro_high_price",
-        "rating_group_id",
-        "question_group_id",
-        "sizes",
-        "Variant",
-        "gallery_images",
-        "carousel_images_1688",
-        "color_swatch_images_1688",
-        "detail_images",
-        "detail_block_images_1688",
-        "product_url",
-        "video_url",
-        "main_image",
-        "likes_count",
-        "purchases_count",
-        "reviews_count",
-        "questions_count",
-        "rating_score",
-        "stock_quantity",
-        "deposit_required",
-        "Main Category",
-        "Subcategory",
-        "Sub-subcategory",
-        "Material",
-        "Style",
-        "Color",
-        "Occasion",
-        "Features",
-        "Weight",
-        "product_info",
-        "Slug",
-    ]
-    vietnamese_headers = [
-        "Id sản phẩm",
-        "Mã sản phẩm",
-        "Xuất xứ",
-        "Thương hiệu",
-        "Tên",
-        "Mô tả sản phẩm",
-        "Giá",
-        "Tên shop",
-        "Shop id",
-        "Sp giá thấp hơn",
-        "Sp giá cao hơn",
-        "Nhóm đánh giá",
-        "Nhóm câu hỏi",
-        "Size",
-        "Tên màu / biến thể",
-        "Ảnh thư viện (gộp carousel+swatch, dùng import)",
-        "Ảnh carousel vuốt ngang",
-        "Ảnh mẫu màu (swatch)",
-        "Gallery chi tiết (mô tả + bổ sung, import)",
-        "Ảnh khối mô tả 1688 (chỉ DOM)",
-        "Link mặc định",
-        "Link Video",
-        "Link img",
-        "Thích",
-        "Mua",
-        "Lượt đánh giá",
-        "Lượt hỏi",
-        "Điểm đánh giá",
-        "Số lượng có thể mua",
-        "Cần đặt cọc",
-        "Danh mục cấp 1",
-        "Danh mục cấp 2",
-        "Danh mục cấp 3",
-        "Chất liệu",
-        "Kiểu dáng",
-        "màu sắc",
-        "Dịp",
-        "Tính năng",
-        "Trọng lượng",
-        "Thông tin sản phẩm",
-        "Slug",
-    ]
-
+    columns, vietnamese_headers = _excel_export_columns_and_vi_headers()
     row = _excel_row_from_product(product_data)
     df = pd.DataFrame([row], columns=columns)
 
@@ -132,10 +49,7 @@ def main() -> None:
     print("\n=== Preview (dòng 1 = key EN, dòng 2 = tiêu đề VN trong Excel) ===\n")
     image_cols = (
         "gallery_images",
-        "carousel_images_1688",
-        "color_swatch_images_1688",
         "detail_images",
-        "detail_block_images_1688",
         "product_info",
     )
     for col_key, vn in zip(columns, vietnamese_headers):

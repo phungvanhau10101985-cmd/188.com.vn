@@ -329,6 +329,16 @@ async def startup_event():
     print("   GET    /api/v1/import-export/download/sample       (file mẫu import — UI admin)")
     print("   GET    /api/v1/import-export/download/latest-export")
     
+    try:
+        from app.api.endpoints.import_1688 import start_import_batch_resume_daemon_if_enabled
+
+        start_import_batch_resume_daemon_if_enabled()
+        from app.core.config import settings as _irs
+        if getattr(_irs, "IMPORT_1688_BATCH_RESUME_ON_STARTUP", False):
+            print("   📎 IMPORT_1688_BATCH_RESUME_ON_STARTUP: sẽ quét batch Excel link còn pending sau ~3s (thread daemon).")
+    except Exception as _e_ir:
+        print(f"   ⚠️  import_1688 batch resume startup: {_e_ir}")
+
     from app.core.config import settings as _startup_settings
     _db_url = (_startup_settings.DATABASE_URL or "").lower()
     if _db_url.startswith("postgresql"):

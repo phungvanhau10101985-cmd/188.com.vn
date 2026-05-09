@@ -175,13 +175,13 @@ export default function AdminProductsPage() {
   const [excelBatchBusy, setExcelBatchBusy] = useState(false);
   const [excelBatchTrackToken, setExcelBatchTrackToken] = useState<string | null>(null);
   const [excelBatchHint, setExcelBatchHint] = useState<string | null>(null);
-  const [lastExcelBatchDraftIds, setLastExcelBatchDraftIds] = useState<number[]>([]);
   const [bulkExport1688Busy, setBulkExport1688Busy] = useState(false);
+  const [resumeBatchBusy, setResumeBatchBusy] = useState(false);
   const [importDraftsPanelOpen, setImportDraftsPanelOpen] = useState(false);
   const [importDraftsLoading, setImportDraftsLoading] = useState(false);
   const [importDraftsError, setImportDraftsError] = useState<string | null>(null);
   const [importExcelBatches, setImportExcelBatches] = useState<AdminImport1688ExcelBatchSummary[]>([]);
-  const [importDraftsFilter, setImportDraftsFilter] = useState<'finished' | 'all'>('finished');
+  const [importDraftsFilter, setImportDraftsFilter] = useState<'finished' | 'all'>('all');
   const [expandedImportBatchToken, setExpandedImportBatchToken] = useState<string | null>(null);
   const [importBatchDetail, setImportBatchDetail] = useState<AdminImport1688BatchStatus | null>(null);
   const [importBatchDetailLoading, setImportBatchDetailLoading] = useState(false);
@@ -631,6 +631,27 @@ export default function AdminProductsPage() {
     }
   };
 
+  const handleResumeExcelBatch = async (batchToken: string) => {
+    setResumeBatchBusy(true);
+    try {
+      const r = await adminProductAPI.resumeImport1688ExcelBatch(batchToken);
+      showToast('ok', r.message, 6500);
+      await loadImportExcelBatchesList();
+      if (expandedImportBatchToken === batchToken) {
+        try {
+          const st = await adminProductAPI.getImport1688ExcelBatchStatus(batchToken);
+          setImportBatchDetail(st);
+        } catch {
+          /* noop */
+        }
+      }
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Chạy tiếp đợt thất bại', 9000);
+    } finally {
+      setResumeBatchBusy(false);
+    }
+  };
+
   const confirmDeleteImportDraft = async () => {
     if (!importDraftDeleteTarget || importDraftDeleting) return;
     setImportDraftDeleting(true);
@@ -638,7 +659,6 @@ export default function AdminProductsPage() {
       await adminProductAPI.deleteImport1688Draft(importDraftDeleteTarget.id);
       const removedId = importDraftDeleteTarget.id;
       setImportDraftDeleteTarget(null);
-      setLastExcelBatchDraftIds((ids) => ids.filter((x) => x !== removedId));
       setImport1688Draft((cur) => (cur?.id === removedId ? null : cur));
       showToast('ok', `Đã xóa nháp #${removedId}.`, 5000);
       await loadImportExcelBatchesList();
@@ -682,7 +702,6 @@ export default function AdminProductsPage() {
       } catch {
         /* noop */
       }
-      setLastExcelBatchDraftIds((ids) => ids.filter((x) => !removed.has(x)));
       setImport1688Draft((cur) => (cur && removed.has(cur.id) ? null : cur));
       showToast('ok', `Đã xóa đợt import và ${res.draft_ids_deleted.length} bản nháp liên quan.`, 6000);
       if (!res.meta_removed) {
@@ -714,7 +733,6 @@ export default function AdminProductsPage() {
     setExcelBatchHint('Đang tải file và tạo draft cho từng dòng…');
     try {
       const res = await adminProductAPI.uploadImport1688ExcelBatch(file);
-      setLastExcelBatchDraftIds(res.draft_ids ?? []);
       if (res.skipped?.length) {
         const head = res.skipped.slice(0, 4).join(' — ');
         showToast(
@@ -740,23 +758,6 @@ export default function AdminProductsPage() {
       setExcelBatchBusy(false);
     }
     void loadImportExcelBatchesList();
-  };
-
-  const handleExportLastExcelBatch = async () => {
-    const ids = lastExcelBatchDraftIds.filter((x) => typeof x === 'number' && x > 0);
-    if (!ids.length) {
-      showToast('err', 'Chưa có draft từ batch Excel. Hãy chạy import file trước.', 6000);
-      return;
-    }
-    setBulkExport1688Busy(true);
-    try {
-      await adminProductAPI.exportImport1688DraftsExcelBulk(ids);
-      showToast('ok', 'Đã tải Excel gộp các draft (chỉ dòng đã có dữ liệu).', 8000);
-    } catch (err) {
-      showToast('err', err instanceof Error ? err.message : 'Export gộp thất bại', 10000);
-    } finally {
-      setBulkExport1688Busy(false);
-    }
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1326,16 +1327,6 @@ export default function AdminProductsPage() {
               >
                 {importDraftsPanelOpen ? 'Ẩn danh sách' : 'Các đợt import Excel (theo batch)'}
               </button>
-              <button
-                type="button"
-                onClick={handleExportLastExcelBatch}
-                disabled={
-                  bulkExport1688Busy || !lastExcelBatchDraftIds.some((id) => typeof id === 'number' && id > 0)
-                }
-                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-70"
-              >
-                {bulkExport1688Busy ? 'Đang tải…' : 'Export Excel các draft của batch vừa upload'}
-              </button>
             </div>
             {excelBatchHint ? <p className="mt-1 text-xs text-gray-700">{excelBatchHint}</p> : null}
             {excelBatchTrackToken ? (
@@ -1354,7 +1345,8 @@ export default function AdminProductsPage() {
                   <p className="text-sm font-medium text-gray-800">
                     Mỗi dòng là <strong className="font-medium">một lần upload file Excel link</strong> (một đợt).
                     <span className="text-xs font-normal text-gray-600 block sm:inline sm:ml-1">
-                      — mở rộng để xem từng link/nháp. Import từng link không tạo đợt; chỉ Excel batch hiện ở đây.
+                      — mở rộng để xem từng link/nháp. Còn link chưa xử lý: bấm «Chạy tiếp». Sau restart server có thể bật
+                      IMPORT_1688_BATCH_RESUME_ON_STARTUP trên backend.
                     </span>
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
@@ -1449,12 +1441,24 @@ export default function AdminProductsPage() {
                               </p>
                             </div>
                             <div className="flex flex-wrap gap-2 shrink-0">
+                              {batch.pending > 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleResumeExcelBatch(batch.batch_token)}
+                                  disabled={
+                                    resumeBatchBusy || bulkExport1688Busy || importBatchDeleting
+                                  }
+                                  className="rounded-lg border border-emerald-300 bg-white px-2.5 py-1.5 text-xs font-medium text-emerald-900 hover:bg-emerald-50 disabled:opacity-60"
+                                >
+                                  {resumeBatchBusy ? 'Đang xếp hàng…' : 'Chạy tiếp'}
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 onClick={() =>
                                   void handleExportExcelBatchByToken(batch.batch_token)
                                 }
-                                disabled={bulkExport1688Busy || importBatchDeleting}
+                                disabled={bulkExport1688Busy || resumeBatchBusy || importBatchDeleting}
                                 className="rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-50 disabled:opacity-60"
                               >
                                 {bulkExport1688Busy ? 'Đang tải…' : 'Export Excel đợt này'}
@@ -1466,7 +1470,10 @@ export default function AdminProductsPage() {
                                   setImportBatchDeleteTarget(batch.batch_token);
                                 }}
                                 disabled={
-                                  bulkExport1688Busy || importBatchDeleting || importDraftDeleting
+                                  bulkExport1688Busy ||
+                                  resumeBatchBusy ||
+                                  importBatchDeleting ||
+                                  importDraftDeleting
                                 }
                                 className="rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
                               >

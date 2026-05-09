@@ -23,8 +23,11 @@ logger = logging.getLogger(__name__)
 _TIMEOUT_SEC = 90
 _MAX_BLOCK_CHARS = 112_000
 _MAX_CONTEXT_CHARS = 9000
+_GEMINI_TIMEOUT_SEC = 55
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
 _CJK_RE = re.compile(r"[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]")
+_NON_VI_SOURCE_RE = re.compile(r"[\u0400-\u052f\u1800-\u18af]")
 
 
 def _norm_label(text: str) -> str:
@@ -133,6 +136,27 @@ def build_taxonomy_context_blob(product_data: Dict[str, Any]) -> str:
     d = (product_data.get("description") or "").strip()
     if d:
         parts.append(d)
+    for key in (
+        "category",
+        "subcategory",
+        "sub_subcategory",
+        "raw_category",
+        "raw_subcategory",
+        "raw_sub_subcategory",
+        "material",
+        "style",
+        "color",
+        "occasion",
+        "features",
+        "weight",
+    ):
+        val = product_data.get(key)
+        if val is None:
+            continue
+        text = json.dumps(val, ensure_ascii=False) if isinstance(val, (list, dict)) else str(val)
+        text = _scrub_placeholder_str(text)
+        if text:
+            parts.append(f"{key}: {text}")
     pi = product_data.get("product_info")
     if isinstance(pi, dict):
         spec = pi.get("specifications")
@@ -140,6 +164,10 @@ def build_taxonomy_context_blob(product_data: Dict[str, Any]) -> str:
             ex = (spec.get("hibox_specs_excerpt") or "").strip()
             if ex and ex not in d:
                 parts.append(ex)
+        for key in ("product_info", "variants", "market_info"):
+            obj = pi.get(key)
+            if isinstance(obj, (dict, list)) and obj:
+                parts.append(f"product_info.{key}: {json.dumps(obj, ensure_ascii=False)[:3000]}")
     blob = "\n\n".join(parts).strip()
     return blob[:_MAX_CONTEXT_CHARS]
 
@@ -201,6 +229,16 @@ def _scrub_cjk(text: str) -> str:
     if not s:
         return ""
     return _CJK_RE.sub(" ", s).strip()
+
+
+def _looks_untranslated_non_vi(text: str, source_name: str = "") -> bool:
+    t = (text or "").strip()
+    if not t:
+        return True
+    if _NON_VI_SOURCE_RE.search(t):
+        return True
+    src = (source_name or "").strip()
+    return bool(src and t.casefold() == src.casefold() and _NON_VI_SOURCE_RE.search(src))
 
 
 def _scrub_placeholder_str(text: str) -> str:
@@ -389,6 +427,208 @@ def _resolve_triple_only_from_taxonomy(
             return t
     k = _norm_triple_key(n1, n2, n3)
     return snap_index.get(k)
+
+
+_TRANSLATE_ONLY_SYSTEM_VI = """Bạn dịch / viết lại tin đăng sản phẩm thương mại điện tử sang tiếng Việt tự nhiên.
+Đầu ra: DUY NHẤT một JSON (không markdown), không ký tự tiếng Trung/Nhật/Hàn trong giá trị string.
+"""
+
+
+def translate_product_listing_deepseek_only(
+    product_name: str,
+    supplier_description: str,
+    *,
+    context_text: str = "",
+    description_only: bool = False,
+) -> Tuple[str, str, List[str]]:
+    """
+    Gọi DeepSeek chỉ để có tên + mô tả tiếng Việt (không phân loại taxonomy).
+    Dùng khi đã có danh mục sẵn, hoặc taxonomy lỗi / thiếu giới nhưng vẫn cần cột name + description Việt.
+    """
+    warnings: List[str] = []
+    key = (settings.DEEPSEEK_API_KEY or "").strip()
+    if not key:
+        warnings.append("deepseek_listing_translate: thiếu DEEPSEEK_API_KEY.")
+        return "", "", warnings
+    if not settings.IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED:
+        return "", "", warnings
+
+    name = (product_name or "").strip()
+    desc = (supplier_description or "").strip()
+    blob = (context_text or "").strip()[:_MAX_CONTEXT_CHARS]
+    if not name and not desc and not blob:
+        warnings.append("deepseek_listing_translate: không có tên hay mô tả để dịch.")
+        return "", "", warnings
+
+    if description_only:
+        user_prompt = (
+            "NHIỆM VỤ: Chỉ viết MO_TA_VI (không đổi tên).\n"
+            "- Trả JSON đúng 2 key: ten_tieng_viet và mo_ta_vi.\n"
+            '- ten_tieng_viet: luôn chuỗi rỗng "".\n'
+            "- mo_ta_vi: mô tả đăng bán tiếng Việt 350–1200 ký tự, 2–5 đoạn, \\n giữa đoạn; không HTML;\n"
+            "  không spam từ khóa; dựa trên TÊN + MÔ TẢ / NGỮ CẢNH bên dưới.\n\n"
+            f"TÊN SẢN PHẨM (đã có bản Việt ở hệ thống — không trả trong JSON):\n{name}\n\n"
+            f"MÔ TẢ / THÔNG SỐ NGUỒN:\n{(desc + chr(10) + blob).strip()}\n\n"
+            'Trả về: {"ten_tieng_viet":"","mo_ta_vi":"..."}'
+        )
+    else:
+        user_prompt = (
+            "NHIỆM VỤ: Tên và mô tả tiếng Việt cho đăng bán.\n"
+            '- ten_tieng_viet: tên SP tiếng Việt tự nhiên ≤220 ký tự (không liệt kê hết size/màu ở cuối).\n'
+            "- mo_ta_vi: plain text tiếng Việt 350–1200 ký tự, 2–5 đoạn, \\n giữa đoạn; không HTML.\n"
+            "- KHÔNG để tiếng Trung/Nhật/Hàn trong JSON.\n\n"
+            "NGỮ CẢNH (có thể tiếng nước ngoài):\n"
+            f"{blob}\n\n"
+            f"TÊN NGUỒN:\n{name}\n\n"
+            f"MÔ TẢ NGUỒN:\n{desc}\n\n"
+            'Trả về JSON: {"ten_tieng_viet":"...","mo_ta_vi":"..."}'
+        )
+
+    url = (settings.DEEPSEEK_API_URL or "").strip() or "https://api.deepseek.com/v1/chat/completions"
+    model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-chat"
+
+    try:
+        resp = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={
+                "model": model,
+                "temperature": 0.2,
+                "messages": [
+                    {"role": "system", "content": _TRANSLATE_ONLY_SYSTEM_VI.strip()},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "max_tokens": 4096,
+            },
+            timeout=_TIMEOUT_SEC,
+        )
+    except requests.RequestException as exc:
+        warnings.append(f"deepseek_listing_translate: lỗi mạng: {exc}")
+        return "", "", warnings
+
+    if not resp.ok:
+        warnings.append(f"deepseek_listing_translate: HTTP {resp.status_code} {resp.text[:400]}")
+        return "", "", warnings
+
+    try:
+        body = resp.json()
+        content = (body.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+        parsed = _extract_json_object(content)
+    except (json.JSONDecodeError, TypeError, ValueError, IndexError, KeyError) as exc:
+        warnings.append(f"deepseek_listing_translate: không đọc JSON: {exc}")
+        return "", "", warnings
+
+    tv = _scrub_cjk(str(parsed.get("ten_tieng_viet") or "")).strip()
+    if len(tv) > 220:
+        tv = tv[:220].strip()
+    mt_raw = str(parsed.get("mo_ta_vi") or "").strip()
+    mt_vi = _scrub_cjk(mt_raw).strip()
+    mt_vi = re.sub(r"[ \t]+\n", "\n", mt_vi)
+    mt_vi = re.sub(r"\n{3,}", "\n\n", mt_vi).strip()
+    if len(mt_vi) > 12000:
+        mt_vi = mt_vi[:12000].strip()
+
+    if description_only:
+        tv = ""
+    if not tv and not description_only and name:
+        tv = _scrub_cjk(name).strip()[:220] or name[:220].strip()
+    if description_only and not mt_vi:
+        warnings.append("deepseek_listing_translate: mo_ta_vi rỗng sau description_only.")
+
+    return tv, mt_vi, warnings
+
+
+def _gemini_generate_json(prompt: str, *, max_tokens: int, warnings: List[str], label: str) -> Optional[Dict[str, Any]]:
+    if not getattr(settings, "IMPORT_LINK_GEMINI_TAXONOMY_FALLBACK_ENABLED", True):
+        return None
+    api_key = (getattr(settings, "GEMINI_API_KEY", "") or "").strip()
+    if not api_key or len(api_key) < 10:
+        warnings.append(f"{label}: thiếu GEMINI_API_KEY.")
+        return None
+    model = (getattr(settings, "GEMINI_MODEL", "") or "gemini-2.5-flash").strip()
+    url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.15},
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=_GEMINI_TIMEOUT_SEC)
+        resp.raise_for_status()
+        data = resp.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            block = data.get("promptFeedback") or data.get("error") or {}
+            warnings.append(f"{label}: Gemini không có candidates — {str(block)[:400]}")
+            return None
+        parts = (candidates[0].get("content") or {}).get("parts") or []
+        content = "".join(str(p.get("text") or "") for p in parts if isinstance(p, dict)).strip()
+        return _extract_json_object(content)
+    except requests.RequestException as exc:
+        warnings.append(f"{label}: lỗi gọi Gemini: {exc}")
+    except Exception as exc:
+        warnings.append(f"{label}: không đọc JSON từ Gemini — {exc}")
+    return None
+
+
+def translate_product_listing_gemini_only(
+    product_name: str,
+    supplier_description: str,
+    *,
+    context_text: str = "",
+    description_only: bool = False,
+) -> Tuple[str, str, List[str]]:
+    """
+    Fallback Gemini 2.5 Flash để có tên/mô tả tiếng Việt khi DeepSeek rỗng hoặc giữ nguyên tên ngoại ngữ.
+    """
+    warnings: List[str] = []
+    name = (product_name or "").strip()
+    desc = (supplier_description or "").strip()
+    blob = (context_text or "").strip()[:_MAX_CONTEXT_CHARS]
+    if not name and not desc and not blob:
+        return "", "", warnings
+
+    if description_only:
+        prompt = (
+            "Bạn viết mô tả sản phẩm TMĐT bằng tiếng Việt.\n"
+            "Chỉ trả JSON thuần đúng 2 key: ten_tieng_viet và mo_ta_vi.\n"
+            'ten_tieng_viet luôn là "".\n'
+            "mo_ta_vi: plain text tiếng Việt 350-1200 ký tự, 2-5 đoạn, không HTML, không markdown.\n\n"
+            f"TÊN SẢN PHẨM:\n{name}\n\n"
+            f"MÔ TẢ / NGỮ CẢNH NGUỒN:\n{(desc + chr(10) + blob).strip()}\n\n"
+            'Trả về: {"ten_tieng_viet":"","mo_ta_vi":"..."}'
+        )
+    else:
+        prompt = (
+            "Bạn dịch/viết lại tin đăng sản phẩm TMĐT sang tiếng Việt tự nhiên.\n"
+            "Nguồn có thể là tiếng Mông Cổ, Trung, Nga, Anh hoặc ngôn ngữ khác.\n"
+            "Chỉ trả JSON thuần đúng 2 key: ten_tieng_viet và mo_ta_vi.\n"
+            "ten_tieng_viet: tên sản phẩm tiếng Việt tự nhiên <=220 ký tự, không giữ nguyên chữ Cyrillic/Mông Cổ.\n"
+            "mo_ta_vi: plain text tiếng Việt 350-1200 ký tự, 2-5 đoạn, không HTML, không markdown.\n\n"
+            f"NGỮ CẢNH:\n{blob}\n\n"
+            f"TÊN NGUỒN:\n{name}\n\n"
+            f"MÔ TẢ NGUỒN:\n{desc}\n\n"
+            'Trả về JSON: {"ten_tieng_viet":"...","mo_ta_vi":"..."}'
+        )
+
+    parsed = _gemini_generate_json(prompt, max_tokens=4096, warnings=warnings, label="gemini_listing_translate")
+    if not parsed:
+        return "", "", warnings
+
+    tv = _scrub_cjk(str(parsed.get("ten_tieng_viet") or "")).strip()
+    if description_only:
+        tv = ""
+    if len(tv) > 220:
+        tv = tv[:220].strip()
+    if not description_only and _looks_untranslated_non_vi(tv, name):
+        warnings.append("gemini_listing_translate: ten_tieng_viet rỗng hoặc còn chữ ngoại ngữ — bỏ qua tên.")
+        tv = ""
+
+    mt_vi = _scrub_cjk(str(parsed.get("mo_ta_vi") or "")).strip()
+    mt_vi = re.sub(r"[ \t]+\n", "\n", mt_vi)
+    mt_vi = re.sub(r"\n{3,}", "\n\n", mt_vi).strip()
+    if len(mt_vi) > 12000:
+        mt_vi = mt_vi[:12000].strip()
+    return tv, mt_vi, warnings
 
 
 def classify_product_taxonomy_deepseek(
@@ -601,6 +841,121 @@ def classify_product_taxonomy_deepseek(
     if len(ts_vi) > 900:
         ts_vi = ts_vi[:900].strip()
     out["thong_so_kich_thuoc_vi"] = ts_vi
+    return out, warnings
+
+
+def classify_product_taxonomy_gemini(
+    db: Session,
+    product_name: str,
+    *,
+    context_text: str = "",
+    supplier_gender_hint: Optional[str] = None,
+) -> Tuple[Optional[Dict[str, str]], List[str]]:
+    """
+    Fallback Gemini 2.5 Flash: chọn bộ cat1/cat2/cat3 có sẵn + tên/mô tả Việt.
+    """
+    warnings: List[str] = []
+    if not getattr(settings, "IMPORT_LINK_GEMINI_TAXONOMY_FALLBACK_ENABLED", True):
+        return None, warnings
+
+    name = (product_name or "").strip()
+    if not name:
+        return None, warnings
+
+    triples = load_active_category_triples(db)
+    if not triples:
+        return None, warnings
+
+    blob_ctx = (context_text or "").strip()[:_MAX_CONTEXT_CHARS]
+    gender_hint_eff = supplier_gender_hint
+    if gender_hint_eff is None:
+        gender_hint_eff = infer_supplier_gender_hint(f"{name}\n{blob_ctx}")
+
+    triples_use, fb = filter_triples_by_gender_hint(triples, gender_hint_eff)
+    if fb:
+        warnings.append("gemini_taxonomy: gợi ý giới tính không khớp taxonomy — phân loại không lọc giới.")
+
+    block, truncated = _build_taxonomy_prompt_block(triples_use)
+    if truncated:
+        warnings.append("gemini_taxonomy: bảng danh mục quá dài — đã cắt bớt phần cuối trong prompt.")
+
+    gender_lines = ""
+    if gender_hint_eff == "female":
+        gender_lines = "\nRÀNG BUỘC GIỚI: sản phẩm dành NỮ; không chọn cat1 kết thúc bằng « Nam ».\n"
+    elif gender_hint_eff == "male":
+        gender_lines = "\nRÀNG BUỘC GIỚI: sản phẩm dành NAM; không chọn cat1 kết thúc bằng « Nữ ».\n"
+
+    prompt = (
+        "Bạn là chuyên gia phân loại sản phẩm TMĐT Việt Nam.\n"
+        "Nguồn có thể là tiếng Mông Cổ, Trung, Nga, Anh hoặc ngôn ngữ khác.\n"
+        "Chọn đúng một bộ cat1/cat2/cat3 SAO CHÉP NGUYÊN VĂN từ BẢNG DANH MỤC, không tạo danh mục mới.\n"
+        "Đồng thời tạo tên/mô tả tiếng Việt tự nhiên; không giữ nguyên chữ Cyrillic/Mông Cổ trong tên Việt.\n\n"
+        + _TAXONOMY_CLASSIFICATION_RULES_VI.strip()
+        + "\n\n"
+        f"BẢNG DANH MỤC:\n{block}\n\n"
+        f"{gender_lines}"
+        f"NGỮ CẢNH / THÔNG SỐ:\n{blob_ctx}\n\n"
+        f"TÊN SẢN PHẨM:\n{name}\n\n"
+        "Trả về DUY NHẤT một JSON đủ 14 key:\n"
+        '{"cat1":"...","cat2":"...","cat3":"...","khach_hang":"...","ten_tieng_viet":"...","chat_lieu_vi":"","mo_ta_vi":"...",'
+        '"thuong_hieu_vi":"","xuat_xu_vi":"","phong_cach_vi":"","dip_vi":"","trong_luong_vi":"","chieu_cao_got_vi":"",'
+        '"thong_so_kich_thuoc_vi":""}'
+    )
+
+    parsed = _gemini_generate_json(prompt, max_tokens=4096, warnings=warnings, label="gemini_taxonomy")
+    if not parsed:
+        return None, warnings
+
+    c1 = str(parsed.get("cat1") or "").strip()
+    c2 = str(parsed.get("cat2") or "").strip()
+    c3 = str(parsed.get("cat3") or "").strip()
+    if not (c1 and c2 and c3):
+        warnings.append("gemini_taxonomy: model trả thiếu cat1/cat2/cat3.")
+        return None, warnings
+    if _CJK_RE.search(c1 + c2 + c3):
+        warnings.append("gemini_taxonomy: cat1–cat3 chứa ký tự CJK — bỏ qua.")
+        return None, warnings
+
+    canon = _resolve_triple_only_from_taxonomy(c1, c2, c3, triples_use, _build_snap_index(triples_use))
+    if not canon:
+        warnings.append(
+            f"gemini_taxonomy: bộ «{c1} / {c2} / {c3}» không trùng nhánh taxonomy hiện có."
+        )
+        return None, warnings
+    if _violates_gender_hint(gender_hint_eff, canon.get("cat1") or ""):
+        warnings.append("gemini_taxonomy: kết quả mâu thuẫn giới tính đã suy ra — bỏ qua.")
+        return None, warnings
+
+    tv_raw = _scrub_cjk(str(parsed.get("ten_tieng_viet") or "")).strip()
+    if _looks_untranslated_non_vi(tv_raw, name):
+        warnings.append("gemini_taxonomy: ten_tieng_viet rỗng hoặc còn chữ ngoại ngữ.")
+        tv_raw = ""
+    if len(tv_raw) > 220:
+        tv_raw = tv_raw[:220].strip()
+
+    mt_vi = _scrub_cjk(str(parsed.get("mo_ta_vi") or "")).strip()
+    mt_vi = re.sub(r"[ \t]+\n", "\n", mt_vi)
+    mt_vi = re.sub(r"\n{3,}", "\n\n", mt_vi).strip()
+    if len(mt_vi) > 12000:
+        mt_vi = mt_vi[:12000].strip()
+
+    out: Dict[str, str] = dict(canon)
+    kh_raw = _scrub_cjk(str(parsed.get("khach_hang") or "")).strip()
+    if kh_raw:
+        out["khach_hang"] = kh_raw
+    out["ten_tieng_viet"] = tv_raw
+    out["chat_lieu_vi"] = _clip_vi_field(str(parsed.get("chat_lieu_vi") or ""), 100)
+    out["mo_ta_vi"] = mt_vi
+    out["thuong_hieu_vi"] = _clip_vi_field(str(parsed.get("thuong_hieu_vi") or ""), 120)
+    out["xuat_xu_vi"] = _clip_vi_field(str(parsed.get("xuat_xu_vi") or ""), 80)
+    out["phong_cach_vi"] = _clip_vi_field(str(parsed.get("phong_cach_vi") or ""), 120)
+    out["dip_vi"] = _clip_vi_field(str(parsed.get("dip_vi") or ""), 120)
+    out["trong_luong_vi"] = _clip_vi_field(str(parsed.get("trong_luong_vi") or ""), 80)
+    out["chieu_cao_got_vi"] = _clip_vi_field(str(parsed.get("chieu_cao_got_vi") or ""), 80)
+    ts_vi = _scrub_cjk(str(parsed.get("thong_so_kich_thuoc_vi") or "")).strip()
+    ts_vi = re.sub(r"[ \t]+\n", "\n", ts_vi)
+    ts_vi = re.sub(r"\n{4,}", "\n\n\n", ts_vi).strip()
+    out["thong_so_kich_thuoc_vi"] = ts_vi[:900].strip() if len(ts_vi) > 900 else ts_vi
     return out, warnings
 
 
@@ -906,6 +1261,27 @@ def _merge_excel_web_listing_blocks(product_data: Dict[str, Any], triple: Dict[s
         pi["market_info"] = mk
 
 
+def _apply_vi_listing_from_strings(
+    product_data: Dict[str, Any],
+    ten_vi: str,
+    mo_ta_vi: str,
+    *,
+    merge_name: bool = True,
+    merge_desc: bool = True,
+) -> None:
+    """Ghi `name` + `description` (cột E/F) từ chuỗi tiếng Việt đã có; bỏ qua merge nếu chuỗi rỗng."""
+    if merge_desc and (mo_ta_vi or "").strip():
+        _merge_description_vi(product_data, mo_ta_vi)
+    if merge_name and (ten_vi or "").strip():
+        tn = (ten_vi or "").strip()
+        labs = collect_variant_color_labels(product_data)
+        disp_vi = append_colors_suffix_to_vi_name(tn, labs)
+        _merge_vietnamese_display_into_product_info(product_data, tn, disp_vi)
+        vi_display = (disp_vi or tn).strip()
+        if vi_display:
+            product_data["name"] = vi_display[:500]
+
+
 def _should_skip_existing(product_data: Dict[str, Any]) -> bool:
     if getattr(settings, "IMPORT_LINK_DEEPSEEK_TAXONOMY_FORCE", False):
         return False
@@ -943,22 +1319,49 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
     **chỉ khi** bộ ba trùng đúng một nhánh taxonomy đã có trong DB — không bao giờ tạo danh mục mới.
 
     Nếu taxonomy có cả nhánh Nam/Nữ cho cùng loại cat1 mà text không cho biết giới tính → gọi Gemini (ảnh đại diện).
-    Không xác định được giới → ghi lỗi vào product_info.import_taxonomy_meta và không gán danh mục.
+    Không xác định được giới → ghi lỗi taxonomy **vẫn gọi** DeepSeek dịch tên+mô tả (cột E/F).
+
+    Đã có đủ bộ ba category sẵn → không phân loại lại nhưng vẫn dịch tên+mô tả.
+    taxonomy lỗi / không nhánh hoặc `mo_ta_vi` trống từ bước phân loại → bổ sung lần gọi chỉ để có mô tả Việt.
     """
     warnings: List[str] = []
-    if _should_skip_existing(product_data):
-        return warnings
     if not settings.IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED:
         return warnings
 
     name = (product_data.get("name") or "").strip()
+    desc_src = (product_data.get("description") or "").strip()
     ctx = build_taxonomy_context_blob(product_data)
+
+    if _should_skip_existing(product_data):
+        tv, mv, tw = translate_product_listing_deepseek_only(name, desc_src, context_text=ctx)
+        warnings.extend(tw)
+        if _looks_untranslated_non_vi(tv, name):
+            tv_g, mv_g, tw_g = translate_product_listing_gemini_only(name, desc_src, context_text=ctx)
+            warnings.extend(tw_g)
+            tv = tv_g or ""
+            mv = mv_g or mv
+        if tv or mv:
+            _apply_vi_listing_from_strings(product_data, tv, mv)
+            warnings.append(
+                "deepseek_taxonomy: giữ nguyên danh mục đã có — đã cập nhật tên/mô tả tiếng Việt (nếu API trả được)."
+            )
+        return warnings
 
     triples = load_active_category_triples(db)
     if not triples:
         warnings.append(
             "deepseek_taxonomy: chưa có nhánh cat3 active trong bảng categories — import taxonomy_import.xlsx trước."
         )
+        tv_nt, mv_nt, tw_nt = translate_product_listing_deepseek_only(name, desc_src, context_text=ctx)
+        warnings.extend(tw_nt)
+        if _looks_untranslated_non_vi(tv_nt, name):
+            tv_g, mv_g, tw_g = translate_product_listing_gemini_only(name, desc_src, context_text=ctx)
+            warnings.extend(tw_g)
+            tv_nt = tv_g or ""
+            mv_nt = mv_g or mv_nt
+        if tv_nt or mv_nt:
+            _apply_vi_listing_from_strings(product_data, tv_nt, mv_nt)
+            warnings.append("gemini_listing_translate: đã fallback tên/mô tả Việt dù chưa có taxonomy.")
         return warnings
 
     needs_gender = taxonomy_has_ambiguous_gender_cat1(triples)
@@ -990,6 +1393,18 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
             )
             record_import_taxonomy_error(product_data, msg)
             warnings.append(f"deepseek_taxonomy: {msg}")
+            tv_f, mv_f, tw_f = translate_product_listing_deepseek_only(name, desc_src, context_text=ctx)
+            warnings.extend(tw_f)
+            if _looks_untranslated_non_vi(tv_f, name):
+                tv_g, mv_g, tw_g = translate_product_listing_gemini_only(name, desc_src, context_text=ctx)
+                warnings.extend(tw_g)
+                tv_f = tv_g or ""
+                mv_f = mv_g or mv_f
+            if tv_f or mv_f:
+                _apply_vi_listing_from_strings(product_data, tv_f, mv_f)
+                warnings.append(
+                    "deepseek_listing_translate: đã dịch tên/mô tả nhưng không gán danh mục — cần giới tính để chọn nhánh Nam/Nữ."
+                )
             return warnings
 
     triple, tw = classify_product_taxonomy_deepseek(
@@ -1000,10 +1415,41 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
     )
     warnings.extend(tw)
     if not triple:
+        triple_g, tw_g = classify_product_taxonomy_gemini(
+            db,
+            name,
+            context_text=ctx,
+            supplier_gender_hint=merged_hint,
+        )
+        warnings.extend(tw_g)
+        if triple_g:
+            triple = triple_g
+            warnings.append("gemini_taxonomy: đã fallback gán danh mục + tên/mô tả tiếng Việt.")
+
+    if not triple:
+        tv_x, mv_x, tw_x = translate_product_listing_deepseek_only(name, desc_src, context_text=ctx)
+        warnings.extend(tw_x)
+        if _looks_untranslated_non_vi(tv_x, name):
+            tv_g, mv_g, tw_g = translate_product_listing_gemini_only(name, desc_src, context_text=ctx)
+            warnings.extend(tw_g)
+            tv_x = tv_g or ""
+            mv_x = mv_g or mv_x
+        if tv_x or mv_x:
+            _apply_vi_listing_from_strings(product_data, tv_x, mv_x)
+            warnings.append(
+                "deepseek_listing_translate: taxonomy không gán được nhánh — chỉ cập nhật tên/mô tả tiếng Việt nếu có."
+            )
         return warnings
 
     khach = (triple.get("khach_hang") or "").strip() or None
     ten_vi = (triple.get("ten_tieng_viet") or "").strip()
+    if _looks_untranslated_non_vi(ten_vi, name):
+        tv_g, mv_g, tw_g = translate_product_listing_gemini_only(name, desc_src, context_text=ctx)
+        warnings.extend(tw_g)
+        if tv_g:
+            ten_vi = tv_g
+        if mv_g and not str(triple.get("mo_ta_vi") or "").strip():
+            triple["mo_ta_vi"] = mv_g
 
     product_data.pop("taxonomy_import_error", None)
 
@@ -1026,7 +1472,8 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
 
     _merge_product_info_categories(product_data, triple["cat1"], triple["cat2"], triple["cat3"], khach)
     _merge_material_vi(product_data, str(triple.get("chat_lieu_vi") or ""))
-    _merge_description_vi(product_data, str(triple.get("mo_ta_vi") or ""))
+    mo_from_classify = str(triple.get("mo_ta_vi") or "")
+    _merge_description_vi(product_data, mo_from_classify)
     if ten_vi:
         labs = collect_variant_color_labels(product_data)
         disp_vi = append_colors_suffix_to_vi_name(ten_vi, labs)
@@ -1035,5 +1482,18 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
         vi_display = (disp_vi or ten_vi).strip()
         if vi_display:
             product_data["name"] = vi_display[:500]
+    if not mo_from_classify.strip():
+        desc_left = (product_data.get("description") or "").strip()
+        nm_for_desc = (product_data.get("name") or name).strip()
+        if desc_left:
+            _td, md_fb, tw_fb = translate_product_listing_deepseek_only(
+                nm_for_desc,
+                desc_left,
+                context_text=ctx,
+                description_only=True,
+            )
+            warnings.extend(tw_fb)
+            if md_fb:
+                _merge_description_vi(product_data, md_fb)
     _merge_excel_web_listing_blocks(product_data, triple)
     return warnings

@@ -359,6 +359,12 @@ export interface AdminImport1688ExcelBatchDeleteResponse {
   meta_removed: boolean;
 }
 
+export interface AdminImport1688BatchResumeResponse {
+  success: boolean;
+  message: string;
+  pending: number;
+}
+
 export interface AdminImport1688DraftListResponse {
   items: AdminImport1688Draft[];
   total: number;
@@ -665,6 +671,12 @@ export const adminProductAPI = {
     fetchAdmin<AdminImport1688ExcelBatchDeleteResponse>(
       `/import-1688/jobs/excel-batches/${encodeURIComponent(batchToken)}`,
       { method: 'DELETE', timeoutMs: 120_000 },
+    ),
+
+  resumeImport1688ExcelBatch: (batchToken: string) =>
+    fetchAdmin<AdminImport1688BatchResumeResponse>(
+      `/import-1688/jobs/excel-batches/${encodeURIComponent(batchToken)}/resume`,
+      { method: 'POST', timeoutMs: 120_000 },
     ),
 
   listImport1688Drafts: (params?: { status?: string; limit?: number; offset?: number }) => {

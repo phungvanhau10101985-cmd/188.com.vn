@@ -12,8 +12,9 @@ cho luồng import link — suy luận từ tên hiển thị + taxonomy đầy 
       IF(find("nữ", BH2)>0, 88, "")),
       99)
 
-- Fallback: nếu không gán được nhóm đánh giá (rating) bằng luật và bật IMPORT_LINK_DEEPSEEK_GROUPS_FALLBACK_ENABLED
-  + có DEEPSEEK_API_KEY → gọi DeepSeek một lần chọn mã trong whitelist (có thể chỉnh luôn question nếu model trả được).
+- Fallback: nếu không gán được nhóm đánh giá (rating) bằng luật:
+  gọi Gemini 2.5 Flash trước (IMPORT_LINK_GEMINI_GROUPS_FALLBACK_ENABLED + GEMINI_API_KEY),
+  rồi mới thử DeepSeek nếu Gemini không trả mã hợp lệ.
 """
 from __future__ import annotations
 
@@ -206,6 +207,12 @@ def build_import_rating_context_text(product_data: Dict[str, Any]) -> str:
         "raw_subcategory",
         "raw_sub_subcategory",
         "name",
+        "material",
+        "style",
+        "color",
+        "occasion",
+        "features",
+        "weight",
     ):
         add(product_data.get(key))
 
@@ -302,8 +309,8 @@ def apply_import_rating_question_groups_to_product_data(
     warnings: Optional[List[str]] = None,
 ) -> None:
     """
-    Gán group_rating / group_question (rule-first). Nếu group_rating == 0 và DeepSeek được bật,
-    fallback một lần (whitelist).
+    Gán group_rating / group_question (rule-first). Nếu group_rating == 0,
+    fallback AI một lần theo whitelist (Gemini trước, DeepSeek dự phòng).
     """
     if not isinstance(product_data, dict):
         return
@@ -312,6 +319,21 @@ def apply_import_rating_question_groups_to_product_data(
     ctx = build_import_rating_context_text(product_data)
     rid = infer_rating_group_id_from_text(ctx)
     qid = infer_question_group_id_from_product_name(pname)
+
+    if rid == 0:
+        try:
+            from app.services.import_link_gemini_groups import gemini_fallback_import_groups
+
+            dr, dq, fw = gemini_fallback_import_groups(ctx, pname)
+            if warnings is not None:
+                warnings.extend(fw)
+            if dr is not None:
+                rid = dr
+            if dq is not None:
+                qid = dq
+        except Exception as exc:
+            if warnings is not None:
+                warnings.append(f"gemini_groups: lỗi không mong đợi — {type(exc).__name__}: {exc}")
 
     if rid == 0:
         try:
