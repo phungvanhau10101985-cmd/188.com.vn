@@ -19,6 +19,19 @@ const PAGE_SIZE = 100;
 /** Lưu job_id đang chạy để khôi phục khi reload trang giữa chừng. */
 const IMPORT_JOB_STORAGE_KEY = 'admin:products:import_excel:job';
 
+/** Theo dõi batch Excel link 1688 (server xử lý tuần tự) sau khi đóng / mở lại tab. */
+const ADMIN_1688_EXCEL_BATCH_TOKEN_KEY = 'admin:products:import_1688_excel_batch_token';
+
+/** Theo dõi một job import từng link 1688/Hibox sau khi reload. */
+const ADMIN_1688_LINK_JOB_KEY = 'admin:products:import_1688_link_job';
+
+type Stored1688LinkJob = {
+  job_id: string;
+  draft_id?: number;
+  started_at: number;
+  source: '1688' | 'hibox';
+};
+
 /** Nội dung panel + toast sau khi poll job import xong */
 function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
   panel: { variant: 'err' | 'warn' | 'ok'; title: string; body: string } | null;
@@ -329,6 +342,11 @@ export default function AdminProductsPage() {
       return;
     }
     const fromHibox = isHiboxProductUrl(url);
+    try {
+      localStorage.removeItem(ADMIN_1688_LINK_JOB_KEY);
+    } catch {
+      /* noop */
+    }
     setImporting1688(true);
     setImport1688Draft(null);
     setImport1688Progress({
@@ -338,6 +356,17 @@ export default function AdminProductsPage() {
     try {
       // Giữ URL ảnh gốc trong draft/export; không tự tải ảnh về Bunny ở luồng import link.
       const started = await adminProductAPI.startImport1688(url, false, fromHibox ? 'hibox' : '1688');
+      try {
+        const payload: Stored1688LinkJob = {
+          job_id: started.job_id,
+          draft_id: started.draft_id,
+          started_at: Date.now(),
+          source: fromHibox ? 'hibox' : '1688',
+        };
+        localStorage.setItem(ADMIN_1688_LINK_JOB_KEY, JSON.stringify(payload));
+      } catch {
+        /* noop */
+      }
       setImport1688Progress({
         message: fromHibox ? 'Đã nhận link, đang mở trang Hibox…' : 'Đã nhận link, đang mở trang 1688…',
         percent: null,
@@ -367,6 +396,11 @@ export default function AdminProductsPage() {
       });
       showToast('err', msg, 9000);
     } finally {
+      try {
+        localStorage.removeItem(ADMIN_1688_LINK_JOB_KEY);
+      } catch {
+        /* noop */
+      }
       setImporting1688(false);
       setImport1688Progress(null);
     }
@@ -449,11 +483,26 @@ export default function AdminProductsPage() {
         if (st.pending <= 0) {
           stopInterval();
           setExcelBatchTrackToken(null);
+          try {
+            localStorage.removeItem(ADMIN_1688_EXCEL_BATCH_TOKEN_KEY);
+          } catch {
+            /* noop */
+          }
           showToast('ok', `Batch xong: ${st.completed} draft, ${st.failed} lỗi.`, 7000);
         }
       } catch (err) {
         if (!cancelled) {
-          setExcelBatchHint(err instanceof Error ? err.message : 'Không poll được trạng thái batch');
+          const m = err instanceof Error ? err.message : String(err);
+          setExcelBatchHint(m || 'Không poll được trạng thái batch');
+          if (/\b404\b|Không tìm thấy batch/i.test(m)) {
+            try {
+              localStorage.removeItem(ADMIN_1688_EXCEL_BATCH_TOKEN_KEY);
+            } catch {
+              /* noop */
+            }
+            setExcelBatchTrackToken(null);
+            stopInterval();
+          }
         }
       } finally {
         pollBusy = false;
@@ -624,6 +673,15 @@ export default function AdminProductsPage() {
       if (excelBatchTrackToken === tok) {
         setExcelBatchTrackToken(null);
       }
+      try {
+        const rawLs = localStorage.getItem(ADMIN_1688_EXCEL_BATCH_TOKEN_KEY);
+        const parsedLs = rawLs ? (JSON.parse(rawLs) as { batch_token?: string }) : null;
+        if (parsedLs?.batch_token === tok) {
+          localStorage.removeItem(ADMIN_1688_EXCEL_BATCH_TOKEN_KEY);
+        }
+      } catch {
+        /* noop */
+      }
       setLastExcelBatchDraftIds((ids) => ids.filter((x) => !removed.has(x)));
       setImport1688Draft((cur) => (cur && removed.has(cur.id) ? null : cur));
       showToast('ok', `Đã xóa đợt import và ${res.draft_ids_deleted.length} bản nháp liên quan.`, 6000);
@@ -666,6 +724,14 @@ export default function AdminProductsPage() {
         );
       }
       setExcelBatchTrackToken(res.batch_token);
+      try {
+        localStorage.setItem(
+          ADMIN_1688_EXCEL_BATCH_TOKEN_KEY,
+          JSON.stringify({ batch_token: res.batch_token, started_at: Date.now() }),
+        );
+      } catch {
+        /* noop */
+      }
       showToast('ok', `Đã nhận ${res.total} link. Server xử lý tuần tự (có thể vài phút).`, 6000);
     } catch (err) {
       setExcelBatchHint(null);
@@ -808,6 +874,141 @@ export default function AdminProductsPage() {
         if (!cancelled) {
           setImporting(false);
           setImportProgress(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      type StoredBatch = { batch_token?: string; started_at?: number };
+      let s: StoredBatch | null = null;
+      try {
+        const raw = localStorage.getItem(ADMIN_1688_EXCEL_BATCH_TOKEN_KEY);
+        s = raw ? (JSON.parse(raw) as StoredBatch) : null;
+      } catch {
+        s = null;
+      }
+      if (!s?.batch_token?.trim()) return;
+      const maxAgeMs = 48 * 60 * 60 * 1000;
+      if (s.started_at && Date.now() - s.started_at > maxAgeMs) {
+        try {
+          localStorage.removeItem(ADMIN_1688_EXCEL_BATCH_TOKEN_KEY);
+        } catch {
+          /* noop */
+        }
+        return;
+      }
+      const tok = s.batch_token.trim();
+      try {
+        const st = await adminProductAPI.getImport1688ExcelBatchStatus(tok);
+        if (cancelled) return;
+        if (st.pending <= 0) {
+          try {
+            localStorage.removeItem(ADMIN_1688_EXCEL_BATCH_TOKEN_KEY);
+          } catch {
+            /* noop */
+          }
+          return;
+        }
+        setExcelBatchTrackToken(tok);
+        showToast(
+          'ok',
+          `Đang có batch link chạy dở — tiếp tục hiển thị tiến độ (${st.completed}/${st.total} xong · ${st.failed} lỗi · ${st.pending} đang chờ).`,
+          6000,
+        );
+      } catch {
+        try {
+          localStorage.removeItem(ADMIN_1688_EXCEL_BATCH_TOKEN_KEY);
+        } catch {
+          /* noop */
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let saved: Stored1688LinkJob | null = null;
+      try {
+        const raw = localStorage.getItem(ADMIN_1688_LINK_JOB_KEY);
+        saved = raw ? (JSON.parse(raw) as Stored1688LinkJob) : null;
+      } catch {
+        saved = null;
+      }
+      if (!saved?.job_id) return;
+      const maxAgeMs = 2 * 60 * 60 * 1000;
+      if (saved.started_at && Date.now() - saved.started_at > maxAgeMs) {
+        try {
+          localStorage.removeItem(ADMIN_1688_LINK_JOB_KEY);
+        } catch {
+          /* noop */
+        }
+        return;
+      }
+      const fromHibox = saved.source === 'hibox';
+      setImporting1688(true);
+      setImport1688Progress({
+        message: fromHibox
+          ? 'Khôi phục theo dõi import Hibox (job đã gửi trước đó)…'
+          : 'Khôi phục theo dõi import 1688 (job đã gửi trước đó)…',
+        percent: null,
+      });
+      try {
+        const job = await pollImport1688Job(saved.job_id);
+        if (cancelled) return;
+        try {
+          localStorage.removeItem(ADMIN_1688_LINK_JOB_KEY);
+        } catch {
+          /* noop */
+        }
+        if (job.status === 'error') {
+          const body = [...(job.errors || []), ...(job.warnings || [])].filter(Boolean).join('\n');
+          setImportDetailPanel({
+            variant: 'err',
+            title: fromHibox ? 'Import Hibox thất bại' : 'Import 1688 thất bại',
+            body: body || job.message || 'Không đọc được dữ liệu từ link.',
+          });
+          showToast('err', job.message || (fromHibox ? 'Import Hibox thất bại' : 'Import 1688 thất bại'), 8000);
+          return;
+        }
+        const draftId = job.draft_id ?? saved.draft_id;
+        if (draftId == null || draftId <= 0) {
+          showToast('err', 'Job xong nhưng không xác định được nháp (draft_id).', 8000);
+          return;
+        }
+        const draft = await adminProductAPI.getImport1688Draft(draftId);
+        if (cancelled) return;
+        setImport1688Draft(draft);
+        const warnText = draft.warnings?.length ? ` Có ${draft.warnings.length} cảnh báo cần kiểm tra.` : '';
+        showToast('ok', `Đã tạo draft từ ${fromHibox ? 'Hibox' : '1688'}.${warnText}`, 6000);
+      } catch (err) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : fromHibox ? 'Import Hibox thất bại' : 'Import 1688 thất bại';
+        setImportDetailPanel({
+          variant: 'err',
+          title: fromHibox ? 'Không khôi phục được import Hibox' : 'Không khôi phục được import 1688',
+          body: msg,
+        });
+        showToast('err', msg, 9000);
+        try {
+          localStorage.removeItem(ADMIN_1688_LINK_JOB_KEY);
+        } catch {
+          /* noop */
+        }
+      } finally {
+        if (!cancelled) {
+          setImporting1688(false);
+          setImport1688Progress(null);
         }
       }
     })();
@@ -1137,6 +1338,11 @@ export default function AdminProductsPage() {
               </button>
             </div>
             {excelBatchHint ? <p className="mt-1 text-xs text-gray-700">{excelBatchHint}</p> : null}
+            {excelBatchTrackToken ? (
+              <p className="mt-0.5 text-[11px] text-gray-500 leading-snug">
+                Tiến độ batch được lưu trên trình duyệt: đóng tab / mở lại trang quản trị vẫn thấy phần đã xong và còn chờ (không quá ~48h; nếu xóa đợt hoặc hết file meta thì hết dữ liệu theo dõi).
+              </p>
+            ) : null}
 
             {importDraftsPanelOpen ? (
               <div
@@ -1405,6 +1611,9 @@ export default function AdminProductsPage() {
                 <p className="mt-2 text-xs text-gray-700">{import1688Progress.message}</p>
                 {import1688Progress.phase ? <p className="text-[11px] text-gray-500">{import1688Progress.phase}</p> : null}
                 {import1688Progress.warn ? <p className="mt-1 text-[11px] text-amber-700">{import1688Progress.warn}</p> : null}
+                <p className="mt-2 text-[11px] text-gray-500 leading-snug">
+                  Job được lưu trên trình duyệt (khoảng 2 giờ): đóng tab rồi mở lại trang này sẽ tự tiếp tục kiểm tra tiến độ cho đến khi xong hoặc lỗi.
+                </p>
               </div>
             ) : null}
 
