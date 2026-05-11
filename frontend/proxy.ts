@@ -1,11 +1,11 @@
 /**
- * Middleware: redirect 301 cho danh mục trùng ý định tìm kiếm (SEO).
+ * Proxy: redirect 301 cho danh mục trùng ý định tìm kiếm (SEO).
  * Gọi API backend để kiểm tra path có cần redirect về trang canonical không.
- * Google/bot nhận 301 ngay từ server → không index URL trùng.
+ * Google/bot nhận 301 ngay từ server -> không index URL trùng.
  */
 /**
  * Dùng đường cụ thể thay vì next/server vì một số phiên bản/webpack resolve
- * next/dist/server/web/exports/next-response (không có file) → Module not found.
+ * next/dist/server/web/exports/next-response (không có file) -> Module not found.
  */
 import type { NextRequest } from "next/dist/server/web/spec-extension/request";
 import { NextResponse } from "next/dist/server/web/spec-extension/response";
@@ -15,7 +15,7 @@ const API_BASE =
 
 const CANON_HOST = "188.com.vn";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const host = request.headers.get("host")?.split(":")[0]?.toLowerCase();
   // Một canonical (apex): tránh xen kẽ www và apex làm fetch RSC bị CORS giữa hai origin.
   if (host === "www.188.com.vn") {
@@ -47,7 +47,7 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(dest, 301);
     }
   } catch {
-    // API lỗi: không redirect, để trang load bình thường (client sẽ check lại)
+    // API lỗi: không redirect, để trang load bình thường (client sẽ check lại).
   }
   return NextResponse.next();
 }

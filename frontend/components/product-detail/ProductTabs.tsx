@@ -14,6 +14,9 @@ interface ProductTabsProps {
   product: Product;
 }
 
+/** Khóa đoạn thông số gốc từ NCC — ưu tiên thấp khi đã có bản VI; giữ khóa legacy trong DB cũ. */
+const SUPPLIER_RAW_SPEC_KEYS = ['supplier_specs_excerpt', 'hibox_specs_excerpt'] as const;
+
 /** Map key (snake_case) sang nhãn tiếng Việt cho định dạng cột AK */
 const SECTION_LABELS: Record<string, string> = {
   thong_tin_san_pham: '1. Thông tin sản phẩm',
@@ -45,7 +48,8 @@ const FIELD_LABELS: Record<string, string> = {
   occasion: 'Dịp',
   heel_height: 'Chiều cao gót / đế',
   thong_so_kich_thuoc_vi: 'Kích thước & form',
-  hibox_specs_excerpt: 'Thông số gốc (Hibox)',
+  supplier_specs_excerpt: 'Thông số gốc (NCC)',
+  hibox_specs_excerpt: 'Thông số gốc (NCC)',
   material_vi: 'Chất liệu (đầy đủ)',
   colors: 'Màu sắc',
   sizes: 'Kích cỡ',
@@ -109,11 +113,16 @@ function orderSpecificationEntries(entries: [string, unknown][]): [string, unkno
   });
   let e = entries;
   if (hasViDims) {
-    e = e.filter(([k]) => k !== 'hibox_specs_excerpt');
+    e = e.filter(([k]) => !(SUPPLIER_RAW_SPEC_KEYS as readonly string[]).includes(k));
   }
+  const specSortRank = (k: string) => {
+    if ((SUPPLIER_RAW_SPEC_KEYS as readonly string[]).includes(k)) return 200;
+    if (priority.has(k)) return priority.get(k)!;
+    return 50;
+  };
   return [...e].sort(([ka], [kb]) => {
-    const da = ka === 'hibox_specs_excerpt' ? 200 : priority.has(ka) ? priority.get(ka)! : 50;
-    const db = kb === 'hibox_specs_excerpt' ? 200 : priority.has(kb) ? priority.get(kb)! : 50;
+    const da = specSortRank(ka);
+    const db = specSortRank(kb);
     if (da !== db) return da - db;
     return ka.localeCompare(kb);
   });

@@ -116,6 +116,13 @@ class ProductBase(BaseModel):
     
     # Cột AK (37): Thông tin sản phẩm (JSON) - DB/ORM có thể trả về dict hoặc chuỗi JSON
     product_info: Optional[Union[Dict[str, Any], str]] = Field(None, description="AK: Thông tin sản phẩm (JSON)")
+    image_localization_status: Optional[str] = Field(
+        "pending",
+        description="Trạng thái bản địa hóa ảnh: pending, processing, localized, failed, skipped",
+    )
+    image_localization_language: Optional[str] = Field(None, description="Ngôn ngữ bản địa hóa ảnh gần nhất")
+    image_localized_at: Optional[datetime] = Field(None, description="Thời điểm hoàn tất bản địa hóa ảnh")
+    image_localization_error: Optional[str] = Field(None, description="Lỗi bản địa hóa ảnh gần nhất")
     
     # Cột AL (38): Slug (export only; import auto-generated)
     slug: Optional[str] = Field(None, description="AL: Slug (auto-generated khi import)")
@@ -168,6 +175,10 @@ class ProductUpdate(BaseModel):
     features: Optional[List[str]] = None
     weight: Optional[str] = None
     product_info: Optional[Dict[str, Any]] = None
+    image_localization_status: Optional[str] = None
+    image_localization_language: Optional[str] = None
+    image_localized_at: Optional[datetime] = None
+    image_localization_error: Optional[str] = None
     slug: Optional[str] = None
     is_active: Optional[bool] = None
     meta_title: Optional[str] = None

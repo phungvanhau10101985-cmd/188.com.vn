@@ -126,26 +126,33 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
   return res;
 }
 
-type Ctx = { params: { path?: string[] } };
+type Ctx = { params: Promise<{ path?: string[] }> };
 
 export async function GET(req: NextRequest, ctx: Ctx) {
-  return proxy(req, ctx.params.path ?? []);
+  const params = await ctx.params;
+  return proxy(req, params.path ?? []);
 }
 export async function POST(req: NextRequest, ctx: Ctx) {
-  return proxy(req, ctx.params.path ?? []);
+  const params = await ctx.params;
+  return proxy(req, params.path ?? []);
 }
 export async function PUT(req: NextRequest, ctx: Ctx) {
-  return proxy(req, ctx.params.path ?? []);
+  const params = await ctx.params;
+  return proxy(req, params.path ?? []);
 }
 export async function PATCH(req: NextRequest, ctx: Ctx) {
-  return proxy(req, ctx.params.path ?? []);
+  const params = await ctx.params;
+  return proxy(req, params.path ?? []);
 }
 export async function DELETE(req: NextRequest, ctx: Ctx) {
-  return proxy(req, ctx.params.path ?? []);
+  const params = await ctx.params;
+  return proxy(req, params.path ?? []);
 }
 export async function HEAD(req: NextRequest, ctx: Ctx) {
-  return proxy(req, ctx.params.path ?? []);
+  const params = await ctx.params;
+  return proxy(req, params.path ?? []);
 }
 export async function OPTIONS(req: NextRequest, ctx: Ctx) {
-  return proxy(req, ctx.params.path ?? []);
+  const params = await ctx.params;
+  return proxy(req, params.path ?? []);
 }

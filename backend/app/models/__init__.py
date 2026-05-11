@@ -21,6 +21,9 @@ print("✅ Category model loaded")
 from app.models.product import Product
 print("✅ Product model loaded")
 
+from app.models.internal_sku_export import InternalSkuExport
+print("✅ InternalSkuExport model loaded")
+
 from app.models.product_import_draft import ProductImportDraft
 print("✅ ProductImportDraft model loaded")
 
@@ -140,6 +143,7 @@ __all__ = [
     "SeoCluster",
     "Category",
     "Product",
+    "InternalSkuExport",
     "ProductImportDraft",
     "ProductQuestion",
     "ProductQuestionUsefulVote",

@@ -51,24 +51,37 @@ def _truthy(val: Any) -> bool:
     return True
 
 
+def _should_compact_hibox_style_product_info(pi: Dict[str, Any]) -> bool:
+    """Nhận diện bản scrape catalog liệt kê ₮ — không phụ thuộc nhãn tên miền trong JSON."""
+    inner_chk = pi.get("product_info")
+    if isinstance(inner_chk, dict):
+        if str(inner_chk.get("source") or "").lower() == "hibox":
+            return True
+    var_chk = pi.get("variants")
+    if isinstance(var_chk, dict):
+        if str(var_chk.get("source") or "").lower() == "hibox":
+            return True
+    mk = pi.get("market_info")
+    if isinstance(mk, dict) and str(mk.get("currency") or "").strip().upper() == "MNT":
+        return True
+    return False
+
+
 def compact_product_info_for_web(product_data: Dict[str, Any]) -> None:
     """
     Mutate `product_data['product_info']` thành cấu trúc gọn cho PDP.
 
-    Chỉ áp dụng khi JSON có dấu hiệu import **Hibox** (`product_info.source` / `variants.source`),
+    Chỉ áp dụng khi payload khớp kiểu import catalog MNT (`_should_compact_hibox_style_product_info`),
     để không làm mất cấu trúc cột AK do Excel nhập tay.
 
-    Không giữ `hibox_specs_excerpt`, `import_taxonomy_meta`, `pairs`, `color_swatches`, …
+    Không giữ `supplier_specs_excerpt` / `hibox_specs_excerpt`, `import_taxonomy_meta`,
+    `pairs`, `color_swatches`, …
     """
     pi = product_data.get("product_info")
     if not isinstance(pi, dict):
         return
 
-    inner_chk = pi.get("product_info")
-    var_chk = pi.get("variants")
-    src_inner = str(inner_chk.get("source") if isinstance(inner_chk, dict) else "").lower()
-    src_var = str(var_chk.get("source") if isinstance(var_chk, dict) else "").lower()
-    if src_inner != "hibox" and src_var != "hibox":
+    if not _should_compact_hibox_style_product_info(pi):
         return
 
     slim_inner: Dict[str, Any] = {}

@@ -65,8 +65,11 @@ export default function Navigation({
   const [openLevel1, setOpenLevel1] = useState<string | null>(null);
   const [stickySearchTerm, setStickySearchTerm] = useState('');
   const [stickyMenuOpen, setStickyMenuOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const stickyMenuCloseTimerRef = useRef<number | null>(null);
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
+  const authReady = mounted && !isLoading;
+  const showAuthenticatedActions = authReady && isAuthenticated;
   const loginHref = useLoginRedirectHref();
   const { favoriteCount } = useFavorites();
   const { getCartItemCount } = useCart();
@@ -77,6 +80,10 @@ export default function Navigation({
   const pillsScrollRef = useRef<HTMLDivElement>(null);
   const level1WrapRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const [megaPlacement, setMegaPlacement] = useState<{ left: number; width: number } | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Khi đang ở /danh-muc/... thì highlight theo slug (resolve từ tree)
   const effectiveFilter = useMemo(() => {
@@ -263,7 +270,7 @@ export default function Navigation({
           showStickyBar ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'
         }`}
         aria-hidden={!showStickyBar}
-        inert={!showStickyBar ? ('' as unknown as boolean) : undefined}
+        inert={!showStickyBar ? true : undefined}
       >
         <div className="max-w-7xl mx-auto px-3">
           <div className="grid grid-cols-[auto_1fr_224px] items-center gap-3 py-1.5">
@@ -410,7 +417,7 @@ export default function Navigation({
                   </div>
                 </Link>
 
-                {isAuthenticated ? (
+                {showAuthenticatedActions ? (
                   <Link href="/account" className="flex items-center text-white/90 hover:text-white transition-colors group">
                     <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
                       <span className="text-white font-semibold text-sm">

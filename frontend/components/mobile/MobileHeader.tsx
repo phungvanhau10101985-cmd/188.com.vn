@@ -55,7 +55,10 @@ export default function MobileHeader({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
+  const [mounted, setMounted] = useState(false);
+  const authReady = mounted && !isLoading;
+  const showAuthenticatedActions = authReady && isAuthenticated;
   const [searchTerm, setSearchTerm] = useState('');
   const [isScrolled, setIsScrolled] = useState(false);
   const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
@@ -66,6 +69,10 @@ export default function MobileHeader({
   const categoryPanelId = useId();
 
   const isHome = pathname === '/';
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   /** Trang chủ có filter từ tab SP liên quan — vẫn hiện nút quay lại (về trang chi tiết / trước đó) */
   const hasHomeRelatedListingFilters =
@@ -343,17 +350,7 @@ export default function MobileHeader({
                 width={200}
                 height={40}
                 className={`w-auto object-contain block ${compactChrome ? 'h-8' : 'h-10 sm:h-11'}`}
-                priority={
-                  compactHomeChrome &&
-                  !isProductDetailPage &&
-                  !isDaXemPage &&
-                  !isAccountPage &&
-                  !isFavoritesPage &&
-                  !isCartPage &&
-                  !isTimTheoAnhPage &&
-                  !isDanhMucListingPage &&
-                  !isAuthPage
-                }
+                priority={!isScrolled}
               />
             </Link>
           </div>
@@ -480,7 +477,7 @@ export default function MobileHeader({
             )}
 
             {/* Trang chủ: thanh nút thoáng — thông báo đã có ở bottom nav */}
-            {isAuthenticated && !compactChrome && (
+            {showAuthenticatedActions && !compactChrome && (
               <Link href="/account/notifications" className={`${iconBtn} relative`} aria-label="Thông báo" title="Thông báo">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />

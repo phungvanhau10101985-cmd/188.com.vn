@@ -54,7 +54,8 @@ export default function ProductDetailClient({
   const stickyBarRef = useRef<HTMLDivElement>(null);
   const menuCloseTimerRef = useRef<number | null>(null);
   const { addToCart, isLoading: cartLoading, getCartItemCount } = useCart();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, isLoading: authLoading } = useAuth();
+  const [accountNavReady, setAccountNavReady] = useState(false);
   const { refreshFavorites, favoriteCount } = useFavorites();
   const loginHref = useLoginRedirectHref();
   const { pushToast } = useToast();
@@ -80,6 +81,10 @@ export default function ProductDetailClient({
     trackMetaViewContentProduct(product);
     trackGoogleAdsViewItemProduct(product);
   }, [product?.id, adsConvCfgFp]);
+
+  useEffect(() => {
+    setAccountNavReady(true);
+  }, []);
 
   useEffect(() => {
     setSelectedColorImage(null);
@@ -569,22 +574,32 @@ export default function ProductDetailClient({
                     </div>
                   </Link>
 
-                  {isAuthenticated ? (
-                    <Link href="/account" className="flex items-center text-white/90 hover:text-white transition-colors group">
-                      <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
-                        <span className="text-white font-semibold text-[11px]">
-                          {user?.full_name?.charAt(0) || 'U'}
-                        </span>
-                      </div>
-                    </Link>
+                  {accountNavReady && !authLoading ? (
+                    isAuthenticated ? (
+                      <Link href="/account" className="flex items-center text-white/90 hover:text-white transition-colors group">
+                        <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                          <span className="text-white font-semibold text-[11px]">
+                            {user?.full_name?.charAt(0) || 'U'}
+                          </span>
+                        </div>
+                      </Link>
+                    ) : (
+                      <Link href={loginHref} className="flex items-center text-white/90 hover:text-white transition-colors group">
+                        <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                          </svg>
+                        </div>
+                      </Link>
+                    )
                   ) : (
-                    <Link href={loginHref} className="flex items-center text-white/90 hover:text-white transition-colors group">
-                      <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
-                      </div>
-                    </Link>
+                    <div
+                      className="flex h-5 items-center text-white/90"
+                      aria-busy="true"
+                      aria-label="Đang kiểm tra đăng nhập"
+                    >
+                      <div className="h-5 w-5 shrink-0 rounded-full bg-white/15" />
+                    </div>
                   )}
 
                   <Link href="/favorites" className="flex items-center text-white/90 hover:text-white transition-colors group relative">

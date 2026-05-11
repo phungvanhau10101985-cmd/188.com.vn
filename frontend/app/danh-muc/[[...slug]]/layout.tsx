@@ -6,12 +6,12 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_DOM
 const DEFAULT_OG_IMAGE = absolutePublicAssetUrl("/images/og-default.jpg");
 
 type Props = {
-  params: { slug?: string[] };
+  params: Promise<{ slug?: string[] }>;
   children: React.ReactNode;
 };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { slug } = params;
+  const { slug } = await params;
   const [level1, level2, level3] = slug || [];
   if (!level1) {
     const canonical = `${SITE_URL}/danh-muc`;
@@ -132,7 +132,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function CategoryLayout({ params, children }: Props) {
-  const { slug } = params;
+  const { slug } = await params;
   const [level1, level2, level3] = slug || [];
   if (!level1) {
     return <>{children}</>;

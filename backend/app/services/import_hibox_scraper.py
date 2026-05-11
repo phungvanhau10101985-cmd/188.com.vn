@@ -372,7 +372,7 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
     desc_short = (row.get("description") or "").strip()
     specs_text = (row.get("specs_text") or "").strip()
     if specs_text and len(specs_text) > 80:
-        desc_block = f"{desc_short}\n\n--- Thông số (Hibox) ---\n{specs_text[:12000]}".strip()
+        desc_block = f"{desc_short}\n\n--- Thông số ---\n{specs_text[:12000]}".strip()
     else:
         desc_block = desc_short
 
@@ -449,7 +449,7 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
     except Exception:
         pass
 
-    variants: Dict[str, Any] = {"source": "hibox", "slug": slug, "pairs": pair_objs}
+    variants: Dict[str, Any] = {"pairs": pair_objs}
     supply_plat = "1688" if hibox_slug_is_1688_offer(slug) else "taobao"
     supply_link = supply_product_link_default_for_hibox_slug(slug)
     variants["supply_platform"] = supply_plat
@@ -462,19 +462,15 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
 
     product_info = {
         "product_info": {
-            "source": "hibox",
-            "hibox_supply_platform": supply_plat,
-            "source_slug": slug,
-            "source_url": source_url,
             "name_original": title,
             "sku_ui": row.get("code_ui") or "",
-            "hibox_supplier_sku_scraped": scraped_page_sku or None,
+            "listing_sku_hint": scraped_page_sku or None,
         },
         "market_info": {
             "currency": "MNT",
-            "note": "Giá theo giao diện Hibox (có thể là ₮).",
+            "note": "Giá hiển thị theo trang nguồn (đơn vị có thể là ₮).",
         },
-        "specifications": {"hibox_specs_excerpt": specs_text[:4000] if specs_text else ""},
+        "specifications": {"supplier_specs_excerpt": specs_text[:4000] if specs_text else ""},
         "variants": variants,
     }
 

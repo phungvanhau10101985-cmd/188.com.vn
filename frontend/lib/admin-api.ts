@@ -41,7 +41,7 @@ export function formatImportFetchFailureMessage(
         apiHost !== ''
       ) {
         corsHint =
-          'Rất hay gặp: admin chạy trên localhost nhưng API trỏ domain production → trình duyệt chặn CORS → Failed to fetch. Cách xử lý: (1) Trên VPS: thêm http://localhost:3001,http://127.0.0.1:3001 vào BACKEND_CORS_ORIGINS trong .env backend rồi restart pm2; hoặc (2) dev full local: NEXT_PUBLIC_API_BASE_URL=http://localhost:8001/api/v1 (cùng SERVER_PORT backend / dev-clear-start) và có thể đặt API_INTERNAL_ORIGIN=http://127.0.0.1:8001 cho Next rewrite.';
+          'Rất hay gặp: admin localhost nhưng API trỏ domain production → CORS → Failed to fetch; hoặc dev gọi thẳng :8001 mà backend chưa chạy. Cách xử lý: (1) VPS: thêm http://localhost:3001 vào BACKEND_CORS_ORIGINS và restart backend; (2) dev local: để Next proxy (getApiBaseUrl() mặc định là cùng host /api/v1) và chạy FastAPI cổng 8001 để rewrite hoạt động; (3) nếu cần gọi trực tiếp :8001: NEXT_PUBLIC_API_NEXT_PROXY=0 và NEXT_PUBLIC_API_BASE_URL=http://localhost:8001/api/v1.';
       }
     } catch {
       /* ignore URL parse */
@@ -232,6 +232,10 @@ export interface AdminProduct {
   is_active?: boolean;
   deposit_require?: boolean;
   description?: string;
+  image_localization_status?: string | null;
+  image_localization_language?: string | null;
+  image_localized_at?: string | null;
+  image_localization_error?: string | null;
   [key: string]: unknown;
 }
 
@@ -241,6 +245,119 @@ export interface AdminProductsResponse {
   page: number;
   size: number;
   total_pages: number;
+}
+
+export interface AdminImageLocalizationJob {
+  job_id: string;
+  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled';
+  phase?: string;
+  message?: string;
+  current?: number;
+  total?: number | null;
+  done?: number;
+  failed?: number;
+  skipped?: number;
+  percent?: number | null;
+  language?: string;
+  gemini_mode?: 'web' | 'api' | 'openai';
+  gemini_image_model?: string;
+  gemini_image_size?: string;
+  openai_image_model?: string;
+  openai_image_quality?: string;
+  openai_image_size?: string;
+  inference_tier?: 'standard' | 'flex';
+  allow_ai_image_models?: boolean | null;
+  local_image_only?: boolean;
+  playwright_headless_requested?: boolean | null;
+  playwright_headless_effective?: boolean;
+  current_product_id?: string;
+  recent_results?: Array<{
+    product_id: string;
+    status: string;
+    message?: string;
+    processed_images?: number;
+  }>;
+}
+
+export interface AdminImageLocalizationSummary {
+  pending: number;
+  localized: number;
+  failed: number;
+  processing: number;
+}
+
+export interface AdminImageLocalizationReportItem {
+  original_url: string;
+  final_url?: string | null;
+  status: string;
+  category: string;
+  label_vi: string;
+  message: string;
+  /** Phần có cấu trúc từ DB (vd. split_parts sau ảnh dài). */
+  detail?: Record<string, unknown> | null;
+  bucket?: string | null;
+  index?: number | null;
+}
+
+export interface AdminImageLocalizationReportSummary {
+  total: number;
+  deleted: number;
+  error: number;
+  ai_image: number;
+  local_draw: number;
+  local_pipeline: number;
+  processed_other: number;
+  kept_cdn: number;
+  kept_other: number;
+  unknown: number;
+}
+
+export interface AdminImageLocalizationProductReport {
+  product_id: string;
+  db_status?: string | null;
+  db_language?: string | null;
+  db_error?: string | null;
+  report_language?: string | null;
+  report_processed_at?: string | null;
+  has_report: boolean;
+  summary: AdminImageLocalizationReportSummary;
+  items: AdminImageLocalizationReportItem[];
+}
+
+export interface AdminGeminiAuthBranch {
+  ready: boolean;
+  cookie_configured?: boolean;
+  cookie_count?: number;
+  cookies_all_expired?: boolean;
+  cookie_expiry_known_for_all?: boolean;
+  cookie_deploy_block_reason?: string | null;
+  requires_cookie_or_login_marker_for_headless?: boolean;
+  profile_marker?: boolean;
+  profile_logged_in_marker?: boolean;
+  profile_path?: string;
+  key_configured?: boolean;
+  model?: string;
+  inference_tier?: string;
+  openai_flex_is_economy_preset?: boolean;
+  /** Backend đã bỏ preset Flex/OpenAI tiết kiệm */
+  openai_flex_removed?: boolean;
+}
+
+export interface AdminGeminiAuthStatus {
+  default_gemini_mode: 'web' | 'api' | 'openai';
+  image_model: string;
+  openai_image_model: string;
+  gemini_api_image_sizes?: string[];
+  openai_image_qualities?: string[];
+  openai_image_sizes?: string[];
+  inference_tier_options?: string[];
+  inference_tier_notes?: Record<string, string>;
+  playwright_headless?: boolean;
+  playwright_browser_visible?: boolean;
+  deploy_browser_help?: string;
+  web: AdminGeminiAuthBranch;
+  api: AdminGeminiAuthBranch;
+  openai: AdminGeminiAuthBranch;
 }
 
 /** Trạng thái import Excel async (GET .../import/excel/job/{id}) */
@@ -495,13 +612,24 @@ function postImportExcelAsyncMultipart(
 /** Timeout danh sách SP admin — tránh treo "Đang tải..." khi API/pool DB chờ quá lâu */
 const ADMIN_PRODUCTS_LIST_TIMEOUT_MS = 120_000;
 
+export type AdminProductListSort = 'default' | 'views_desc' | 'newest' | 'oldest';
+
 export const adminProductAPI = {
-  getProducts: (params?: { skip?: number; limit?: number; q?: string; product_id?: string }) => {
+  getProducts: (
+    params?: {
+      skip?: number;
+      limit?: number;
+      q?: string;
+      product_id?: string;
+      sort?: AdminProductListSort;
+    },
+  ) => {
     const sp = new URLSearchParams();
     sp.set('skip', String(params?.skip ?? 0));
     sp.set('limit', String(params?.limit ?? 100));
     if (params?.q) sp.set('q', params.q);
     if (params?.product_id) sp.set('product_id', params.product_id);
+    if (params?.sort && params.sort !== 'default') sp.set('sort', params.sort);
     return fetchAdmin<AdminProductsResponse>(`/products/?${sp.toString()}`, {
       timeoutMs: ADMIN_PRODUCTS_LIST_TIMEOUT_MS,
     });
@@ -515,6 +643,77 @@ export const adminProductAPI = {
 
   deleteProduct: (productId: string) =>
     fetchAdmin<AdminProduct>(`/products/${encodeURIComponent(productId)}`, { method: 'DELETE' }),
+
+  saveGeminiImageLocalizationCookie: (cookie: string) =>
+    fetchAdmin<{ success: boolean; cookie_count: number }>('/image-localization/settings/gemini-cookie', {
+      method: 'POST',
+      body: JSON.stringify({ cookie }),
+      timeoutMs: 60_000,
+    }),
+
+  getGeminiImageLocalizationAuth: (language = 'vi') =>
+    fetchAdmin<AdminGeminiAuthStatus>(
+      `/image-localization/settings/gemini-auth?language=${encodeURIComponent(language)}`,
+      { timeoutMs: 60_000 },
+    ),
+
+  getImageLocalizationSummary: () =>
+    fetchAdmin<AdminImageLocalizationSummary>('/image-localization/summary', { timeoutMs: 60_000 }),
+
+  getImageLocalizationProductReport: (productId: string) =>
+    fetchAdmin<AdminImageLocalizationProductReport>(
+      `/image-localization/products/${encodeURIComponent(productId)}/report`,
+      { timeoutMs: 60_000 },
+    ),
+
+  startImageLocalization: (payload: {
+    language: string;
+    force?: boolean;
+    dry_run?: boolean;
+    product_ids?: string[];
+    limit?: number;
+    gemini_mode?: 'web' | 'api' | 'openai';
+    /** false = chỉ DeepSeek + vẽ, không Gemini/GPT ảnh cho cả batch */
+    allow_ai_image_models?: boolean | null;
+    playwright_headless?: boolean | null;
+    gemini_image_model?: string;
+    gemini_image_size?: string;
+    openai_image_model?: string;
+    openai_image_quality?: string;
+    openai_image_size?: string;
+    inference_tier?: 'standard';
+  }) =>
+    fetchAdmin<{ job_id: string; status: string }>('/image-localization/jobs', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 60_000,
+    }),
+
+  getImageLocalizationJob: (jobId: string) =>
+    fetchAdmin<AdminImageLocalizationJob>(`/image-localization/jobs/${encodeURIComponent(jobId)}`, {
+      timeoutMs: 60_000,
+    }),
+
+  cancelImageLocalizationJob: (jobId: string) =>
+    fetchAdmin<AdminImageLocalizationJob>(`/image-localization/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      method: 'POST',
+      timeoutMs: 60_000,
+    }),
+
+  bulkMarkImageLocalizationLocalized: (payload: {
+    language?: string;
+    dry_run?: boolean;
+    only_queue?: boolean;
+    include_skipped?: boolean;
+  }) =>
+    fetchAdmin<{ updated: number; would_update: number; dry_run: boolean; language: string }>(
+      '/image-localization/bulk-mark-localized',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        timeoutMs: 120_000,
+      },
+    ),
 
   importExcel: async (file: File, overwrite = false) => {
     const token = getAdminToken();
@@ -773,6 +972,41 @@ export const adminProductAPI = {
     a.click();
     URL.revokeObjectURL(a.href);
   },
+
+  /** Excel một cột sku: mã chưa có trên SP và chưa từng export (đã ghi nhận ở server). */
+  exportUnusedInternalSkus: async (count: number) => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const sp = new URLSearchParams();
+    sp.set('count', String(Math.max(1, Math.min(10_000, Math.floor(count)))));
+    const url = `${getApiBaseUrl()}/products/export-unused-internal-skus?${sp.toString()}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Export SKU trống thất bại');
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition');
+    const match = disposition?.match(/filename="?([^";]+)"?/);
+    const filename = match ? match[1] : `internal_skus_unused_${Date.now()}.xlsx`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  },
+
+  getUnusedInternalSkuStats: () =>
+    fetchAdmin<{
+      total_space: number;
+      available: number;
+      used_on_products: number;
+      exported_reserved: number;
+      blocked_distinct: number;
+    }>('/products/export-unused-internal-skus/available-count'),
 
   /** Tải file Excel mẫu để import sản phẩm (36 cột) */
   downloadSampleTemplate: async () => {

@@ -45,7 +45,7 @@ from app.services.import_link_deepseek_taxonomy import apply_deepseek_taxonomy_t
 from app.services.product_rating_question_groups import apply_import_rating_question_groups_to_product_data
 from app.services.product_info_web_compact import compact_product_info_for_web
 from app.services.product_internal_sku import (
-    ensure_unique_internal_product_code,
+    ensure_import_link_internal_product_code,
     sync_internal_code_into_product_info,
 )
 from app.services.import_1688_images import ingest_1688_images
@@ -631,9 +631,10 @@ def _publish_payload(product_data: Dict[str, Any]) -> Dict[str, Any]:
 def _assign_internal_sku_to_import_product_data(db: Session, product_data: Dict[str, Any]) -> None:
     """
     SKU đăng web là [A-Z][0-9]{4}, không phải slug Hibox (vd abb-922386436529).
-    Đồng bộ vào product_info.product_info.sku để tab AK không hiển thị nhầm slug.
+    Chỉ dùng mã đã xuất (bảng internal_sku_exports), không được trùng code sản phẩm trong DB —
+    đồng bộ vào product_info.product_info.sku để tab AK không hiển thị nhầm slug.
     """
-    sku = ensure_unique_internal_product_code(
+    sku = ensure_import_link_internal_product_code(
         db,
         product_data.get("code"),
         exclude_product_id=None,
@@ -726,11 +727,8 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             draft_crud.mark_running(db, draft, "scraping", "Đang mở trang Hibox bằng Playwright...", 15)
             raw_payload, product_data, warnings = scrape_hibox_for_import(draft.source_url)
             _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
-            _assign_internal_sku_to_import_product_data(db, product_data)
-            draft = draft_crud.get_by_job_id(db, job_id)
-            if not draft:
-                return
             _merge_excel_overlay_for_job(db, job_id, product_data)
+            _assign_internal_sku_to_import_product_data(db, product_data)
             draft_crud.mark_done(
                 db,
                 draft,
@@ -753,11 +751,11 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             product_data, image_warnings = ingest_1688_images(product_data, draft.source_offer_id)
             warnings.extend(image_warnings)
 
+        _merge_excel_overlay_for_job(db, job_id, product_data)
         _assign_internal_sku_to_import_product_data(db, product_data)
         draft = draft_crud.get_by_job_id(db, job_id)
         if not draft:
             return
-        _merge_excel_overlay_for_job(db, job_id, product_data)
         draft_crud.mark_done(
             db,
             draft,
@@ -771,6 +769,10 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
         if draft:
             draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
     except Import1688Error as exc:
+        draft = draft_crud.get_by_job_id(db, job_id)
+        if draft:
+            draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
+    except (ValueError, RuntimeError) as exc:
         draft = draft_crud.get_by_job_id(db, job_id)
         if draft:
             draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
@@ -857,8 +859,8 @@ async def create_import_jobs_batch_from_excel(
     admin: AdminUser = Depends(require_module_permission("products")),
 ):
     """
-    File .xlsx: link cột **F** (dòng 2+), và (nếu có) «Shop name», «Giá thấp hơn», «Giá cao hơn»,
-    cột **Giá** ngoài cùng bên phải (ưu tiên). Tất cả lưu **draft**, xử lý **tuần tự**.
+    File .xlsx: link cột **F** (dòng 2+), **mã SKU** tùy chọn cột **B**; shop / giá thấp-cao từ tiêu đề + khối **L–O**;
+    **giá bán (cột G bảng xuất)** lấy **cột Q** trên file import (không dùng cột G file nguồn).
     """
     name = (file.filename or "").lower()
     if not name.endswith((".xlsx", ".xlsm")):
@@ -1213,12 +1215,18 @@ def publish_import_1688_draft(
 
     exclude_id = existing.id if existing else None
     sku_reserved: set[str] = set()
-    sku_code = ensure_unique_internal_product_code(
-        db,
-        payload.get("code"),
-        exclude_product_id=exclude_id,
-        batch_reserved=sku_reserved,
-    )
+    try:
+        sku_code = ensure_import_link_internal_product_code(
+            db,
+            payload.get("code"),
+            exclude_product_id=exclude_id,
+            batch_reserved=sku_reserved,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     payload["code"] = sku_code
     payload["product_info"] = sync_internal_code_into_product_info(payload.get("product_info"), sku_code)
 

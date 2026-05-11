@@ -131,7 +131,7 @@ def _violates_gender_hint(hint: Optional[str], cat1: str) -> bool:
 
 
 def build_taxonomy_context_blob(product_data: Dict[str, Any]) -> str:
-    """Gom mô tả + excerpt thông số Hibox để đưa vào prompt (không chỉ dựa vào title)."""
+    """Gom mô tả + excerpt thông số NCC để đưa vào prompt (không chỉ dựa vào title)."""
     parts: List[str] = []
     d = (product_data.get("description") or "").strip()
     if d:
@@ -161,7 +161,7 @@ def build_taxonomy_context_blob(product_data: Dict[str, Any]) -> str:
     if isinstance(pi, dict):
         spec = pi.get("specifications")
         if isinstance(spec, dict):
-            ex = (spec.get("hibox_specs_excerpt") or "").strip()
+            ex = (spec.get("supplier_specs_excerpt") or spec.get("hibox_specs_excerpt") or "").strip()
             if ex and ex not in d:
                 parts.append(ex)
         for key in ("product_info", "variants", "market_info"):
@@ -184,7 +184,7 @@ def _gender_root_slug(cat1: str) -> str:
 def taxonomy_has_ambiguous_gender_cat1(triples: List[Dict[str, str]]) -> bool:
     """
     True nếu taxonomy có **cùng một loại** cat1 (ví dụ Giày dép) với cả bản Nam và Nữ —
-    khi đó bắt buộc biết giới trước khi gán DeepSeek (text hoặc ảnh Gemini).
+    khi có hint giới tính thì lọc trước, nếu không DeepSeek tự chọn từ toàn bộ taxonomy.
     """
     roots: Dict[str, set] = defaultdict(set)
     for t in triples:
@@ -213,7 +213,7 @@ def pick_product_hero_image_url(product_data: Dict[str, Any]) -> str:
 
 
 def record_import_taxonomy_error(product_data: Dict[str, Any], message: str) -> None:
-    """Ghi lỗi phân loại taxonomy (thiếu giới tính / Gemini không kết luận) — admin đọc draft + warnings."""
+    """Ghi lỗi phân loại taxonomy — admin đọc draft + warnings."""
     product_data["taxonomy_import_error"] = message
     pi = product_data.get("product_info")
     if isinstance(pi, dict):
@@ -644,7 +644,7 @@ def classify_product_taxonomy_deepseek(
     thuong_hieu_vi, xuat_xu_vi, phong_cach_vi, dip_vi, trong_luong_vi, chieu_cao_got_vi, thong_so_kich_thuoc_vi (tiếng Việt, không CJK).
 
     context_text: mô tả + thông số (vd Hibox) — để đọc giới tính «Холбогдох Хүйс» / Эмэгтэй, không chỉ title.
-    supplier_gender_hint: nếu apply đã suy ra (text hoặc Gemini ảnh), truyền vào để không đọc lại sai thứ tự.
+    supplier_gender_hint: nếu apply đã suy ra từ text/thông số, truyền vào để không đọc lại sai thứ tự.
         None = suy từ text trong classify như cũ.
     """
     warnings: List[str] = []
@@ -1318,11 +1318,11 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
     Điền category / subcategory / sub_subcategory (+ slug_seo = full_slug cat3) vào product_data
     **chỉ khi** bộ ba trùng đúng một nhánh taxonomy đã có trong DB — không bao giờ tạo danh mục mới.
 
-    Nếu taxonomy có cả nhánh Nam/Nữ cho cùng loại cat1 mà text không cho biết giới tính → gọi Gemini (ảnh đại diện).
-    Không xác định được giới → ghi lỗi taxonomy **vẫn gọi** DeepSeek dịch tên+mô tả (cột E/F).
+    Nếu taxonomy có cả nhánh Nam/Nữ cho cùng loại cat1 mà text không cho biết giới tính,
+    vẫn để DeepSeek tự chọn từ toàn bộ taxonomy — không fallback sang Gemini.
 
     Đã có đủ bộ ba category sẵn → không phân loại lại nhưng vẫn dịch tên+mô tả.
-    taxonomy lỗi / không nhánh hoặc `mo_ta_vi` trống từ bước phân loại → bổ sung lần gọi chỉ để có mô tả Việt.
+    taxonomy lỗi / không nhánh hoặc `mo_ta_vi` trống từ bước phân loại → bổ sung bằng DeepSeek.
     """
     warnings: List[str] = []
     if not settings.IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED:
@@ -1335,11 +1335,6 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
     if _should_skip_existing(product_data):
         tv, mv, tw = translate_product_listing_deepseek_only(name, desc_src, context_text=ctx)
         warnings.extend(tw)
-        if _looks_untranslated_non_vi(tv, name):
-            tv_g, mv_g, tw_g = translate_product_listing_gemini_only(name, desc_src, context_text=ctx)
-            warnings.extend(tw_g)
-            tv = tv_g or ""
-            mv = mv_g or mv
         if tv or mv:
             _apply_vi_listing_from_strings(product_data, tv, mv)
             warnings.append(
@@ -1354,58 +1349,20 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
         )
         tv_nt, mv_nt, tw_nt = translate_product_listing_deepseek_only(name, desc_src, context_text=ctx)
         warnings.extend(tw_nt)
-        if _looks_untranslated_non_vi(tv_nt, name):
-            tv_g, mv_g, tw_g = translate_product_listing_gemini_only(name, desc_src, context_text=ctx)
-            warnings.extend(tw_g)
-            tv_nt = tv_g or ""
-            mv_nt = mv_g or mv_nt
         if tv_nt or mv_nt:
             _apply_vi_listing_from_strings(product_data, tv_nt, mv_nt)
-            warnings.append("gemini_listing_translate: đã fallback tên/mô tả Việt dù chưa có taxonomy.")
+            warnings.append("deepseek_listing_translate: đã dịch tên/mô tả Việt dù chưa có taxonomy.")
         return warnings
 
     needs_gender = taxonomy_has_ambiguous_gender_cat1(triples)
     merged_hint: Optional[str] = None
-    gemini_err: Optional[str] = None
 
     if needs_gender:
         merged_hint = infer_supplier_gender_hint(f"{name}\n{ctx}")
         if merged_hint is None:
-            from app.services.import_link_gemini_image_gender import infer_gender_from_product_image_gemini
-
-            img_url = pick_product_hero_image_url(product_data)
-            if img_url:
-                gh_img, gemini_err = infer_gender_from_product_image_gemini(img_url, name)
-                if gh_img:
-                    merged_hint = gh_img
-                    pi = product_data.get("product_info")
-                    if isinstance(pi, dict):
-                        meta = pi.setdefault("import_taxonomy_meta", {})
-                        if isinstance(meta, dict):
-                            meta["gender_source"] = "gemini_vision"
-                            meta["gender_image_url"] = img_url[:500]
-            else:
-                gemini_err = "Không có ảnh đại diện (main_image / images[0]) để Gemini phân tích giới tính."
-
-        if merged_hint is None:
-            msg = gemini_err or (
-                "Taxonomy có nhánh Nam/Nữ song không xác định được giới tính từ thông số và ảnh đại diện."
+            warnings.append(
+                "deepseek_taxonomy: không có gợi ý giới tính chắc chắn — DeepSeek sẽ tự chọn nhánh từ toàn bộ taxonomy."
             )
-            record_import_taxonomy_error(product_data, msg)
-            warnings.append(f"deepseek_taxonomy: {msg}")
-            tv_f, mv_f, tw_f = translate_product_listing_deepseek_only(name, desc_src, context_text=ctx)
-            warnings.extend(tw_f)
-            if _looks_untranslated_non_vi(tv_f, name):
-                tv_g, mv_g, tw_g = translate_product_listing_gemini_only(name, desc_src, context_text=ctx)
-                warnings.extend(tw_g)
-                tv_f = tv_g or ""
-                mv_f = mv_g or mv_f
-            if tv_f or mv_f:
-                _apply_vi_listing_from_strings(product_data, tv_f, mv_f)
-                warnings.append(
-                    "deepseek_listing_translate: đã dịch tên/mô tả nhưng không gán danh mục — cần giới tính để chọn nhánh Nam/Nữ."
-                )
-            return warnings
 
     triple, tw = classify_product_taxonomy_deepseek(
         db,
@@ -1415,25 +1372,11 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
     )
     warnings.extend(tw)
     if not triple:
-        triple_g, tw_g = classify_product_taxonomy_gemini(
-            db,
-            name,
-            context_text=ctx,
-            supplier_gender_hint=merged_hint,
-        )
-        warnings.extend(tw_g)
-        if triple_g:
-            triple = triple_g
-            warnings.append("gemini_taxonomy: đã fallback gán danh mục + tên/mô tả tiếng Việt.")
+        warnings.append("deepseek_taxonomy: DeepSeek không gán được bộ taxonomy hợp lệ — không fallback sang Gemini.")
 
     if not triple:
         tv_x, mv_x, tw_x = translate_product_listing_deepseek_only(name, desc_src, context_text=ctx)
         warnings.extend(tw_x)
-        if _looks_untranslated_non_vi(tv_x, name):
-            tv_g, mv_g, tw_g = translate_product_listing_gemini_only(name, desc_src, context_text=ctx)
-            warnings.extend(tw_g)
-            tv_x = tv_g or ""
-            mv_x = mv_g or mv_x
         if tv_x or mv_x:
             _apply_vi_listing_from_strings(product_data, tv_x, mv_x)
             warnings.append(
@@ -1444,12 +1387,7 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
     khach = (triple.get("khach_hang") or "").strip() or None
     ten_vi = (triple.get("ten_tieng_viet") or "").strip()
     if _looks_untranslated_non_vi(ten_vi, name):
-        tv_g, mv_g, tw_g = translate_product_listing_gemini_only(name, desc_src, context_text=ctx)
-        warnings.extend(tw_g)
-        if tv_g:
-            ten_vi = tv_g
-        if mv_g and not str(triple.get("mo_ta_vi") or "").strip():
-            triple["mo_ta_vi"] = mv_g
+        warnings.append("deepseek_taxonomy: ten_tieng_viet rỗng hoặc còn chữ ngoại ngữ — giữ nguyên kết quả DeepSeek, không fallback Gemini.")
 
     product_data.pop("taxonomy_import_error", None)
 

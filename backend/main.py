@@ -178,6 +178,7 @@ def load_api_routes():
         ("orders", "/orders", "orders"),
         ("import_export", "/import-export", "import-export"),  # ĐẶC BIỆT DEBUG
         ("import_1688", "/import-1688", "import-1688"),
+        ("image_localization", "/image-localization", "image-localization"),
         ("user_behavior", "/user-behavior", "user-behavior"),
         ("analytics", "/analytics", "analytics"),
         ("nanoai_search", "/nanoai", "nanoai"),
@@ -302,58 +303,6 @@ def load_api_routes():
     print(f"{'='*50}\n")
     return loaded, failed
 
-@app.on_event("startup")
-async def startup_event():
-    print("\n" + "="*60)
-    print("🚀 188.com.vn API Server Starting...")
-    print("="*60)
-    
-    # Initialize database
-    init_database_tables()
-    
-    # Load routes với debug
-    loaded_routes, failed_routes = load_api_routes()
-    
-    # Hiển thị import/export endpoints đặc biệt
-    print("🔍 IMPORT/EXPORT ENDPOINTS (if loaded):")
-    for name, path in loaded_routes:
-        if "import-export" in name or "import" in name or "export" in name:
-            print(f"   📤 {path}")
-    
-    print("\n📌 IMPORTANT ENDPOINTS TO TEST:")
-    print("   POST   /api/v1/import-export/import/excel          (đồng bộ, cần Bearer admin)")
-    print("   POST   /api/v1/import-export/import/excel/async    (202 + job_id)")
-    print("   GET    /api/v1/import-export/import/excel/job/{job_id}")
-    print("   GET    /api/v1/import-export/export/excel")
-    print("   GET    /api/v1/import-export/export/sample")
-    print("   GET    /api/v1/import-export/download/sample       (file mẫu import — UI admin)")
-    print("   GET    /api/v1/import-export/download/latest-export")
-    
-    try:
-        from app.api.endpoints.import_1688 import start_import_batch_resume_daemon_if_enabled
-
-        start_import_batch_resume_daemon_if_enabled()
-        from app.core.config import settings as _irs
-        if getattr(_irs, "IMPORT_1688_BATCH_RESUME_ON_STARTUP", False):
-            print("   📎 IMPORT_1688_BATCH_RESUME_ON_STARTUP: sẽ quét batch Excel link còn pending sau ~3s (thread daemon).")
-    except Exception as _e_ir:
-        print(f"   ⚠️  import_1688 batch resume startup: {_e_ir}")
-
-    from app.core.config import settings as _startup_settings
-    _db_url = (_startup_settings.DATABASE_URL or "").lower()
-    if _db_url.startswith("postgresql"):
-        _db_quick = "PostgreSQL (DATABASE_URL)"
-    elif _db_url.startswith("sqlite"):
-        _db_quick = "SQLite (DATABASE_URL)"
-    else:
-        _db_quick = "Configured via DATABASE_URL"
-
-    _p = _startup_settings.SERVER_PORT
-    print("\n📌 QUICK ACCESS:")
-    print(f"   📄 API Documentation: http://localhost:{_p}/docs")
-    print(f"   📊 Database: {_db_quick}")
-    print(f"   🏃 Server: http://localhost:{_p}")
-    print("="*60)
 
 # ========== BASIC ROUTES ==========
 @app.get("/")
@@ -382,7 +331,8 @@ async def api_root():
             {"cart": "/api/v1/cart"},
             {"orders": "/api/v1/orders"},
             {"import-export": "/api/v1/import-export"},
-            {"user-behavior": "/api/v1/user-behavior"}
+            {"user-behavior": "/api/v1/user-behavior"},
+            {"push": "/api/v1/push"},
         ]
     }
 
@@ -416,6 +366,64 @@ async def test_import_endpoint():
         "import_endpoint": "POST /api/v1/import-export/import/excel",
         "note": "Use this to verify endpoint exists"
     }
+
+# Đăng ký router /api/v1/* ngay khi import module (không chờ startup) để luôn có
+# GET /api/v1/user-behavior/search/suggestions, /api/v1/push/vapid-public-key, v.v.
+API_LOADED_ROUTES, API_FAILED_ROUTES = load_api_routes()
+
+
+@app.on_event("startup")
+async def startup_event():
+    print("\n" + "="*60)
+    print("🚀 188.com.vn API Server Starting...")
+    print("="*60)
+
+    init_database_tables()
+
+    print("🔍 IMPORT/EXPORT ENDPOINTS (if loaded):")
+    for name, path in API_LOADED_ROUTES:
+        if "import-export" in name or "import" in name or "export" in name:
+            print(f"   📤 {path}")
+
+    print("\n📌 IMPORTANT ENDPOINTS TO TEST:")
+    print("   POST   /api/v1/import-export/import/excel          (đồng bộ, cần Bearer admin)")
+    print("   POST   /api/v1/import-export/import/excel/async    (202 + job_id)")
+    print("   GET    /api/v1/import-export/import/excel/job/{job_id}")
+    print("   GET    /api/v1/import-export/export/excel")
+    print("   GET    /api/v1/import-export/export/sample")
+    print("   GET    /api/v1/import-export/download/sample       (file mẫu import — UI admin)")
+    print("   GET    /api/v1/import-export/download/latest-export")
+
+    try:
+        from app.api.endpoints.import_1688 import start_import_batch_resume_daemon_if_enabled
+
+        start_import_batch_resume_daemon_if_enabled()
+        from app.core.config import settings as _irs
+        if getattr(_irs, "IMPORT_1688_BATCH_RESUME_ON_STARTUP", False):
+            print("   📎 IMPORT_1688_BATCH_RESUME_ON_STARTUP: sẽ quét batch Excel link còn pending sau ~3s (thread daemon).")
+    except Exception as _e_ir:
+        print(f"   ⚠️  import_1688 batch resume startup: {_e_ir}")
+
+    from app.core.config import settings as _startup_settings
+    _db_url = (_startup_settings.DATABASE_URL or "").lower()
+    if _db_url.startswith("postgresql"):
+        _db_quick = "PostgreSQL (DATABASE_URL)"
+    elif _db_url.startswith("sqlite"):
+        _db_quick = "SQLite (DATABASE_URL)"
+    else:
+        _db_quick = "Configured via DATABASE_URL"
+
+    _p = _startup_settings.SERVER_PORT
+    print("\n📌 QUICK ACCESS:")
+    print(f"   📄 API Documentation: http://localhost:{_p}/docs")
+    print(f"   📊 Database: {_db_quick}")
+    print(f"   🏃 Server: http://localhost:{_p}")
+    if API_FAILED_ROUTES:
+        print(f"\n⚠️  ROUTERS KHÔNG LOAD được ({len(API_FAILED_ROUTES)}) — kiểm tra log phía trên:")
+        for name, err in API_FAILED_ROUTES[:12]:
+            print(f"   ❌ {name}: {err[:120]}")
+    print("="*60)
+
 
 # ========== ERROR HANDLING ==========
 @app.exception_handler(404)

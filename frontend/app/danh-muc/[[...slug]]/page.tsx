@@ -10,13 +10,13 @@ import type { Product } from '@/types/api';
 const PAGE_SIZE = 96;
 
 type Props = {
-  params: { slug?: string[] };
-  searchParams: { page?: string };
+  params: Promise<{ slug?: string[] }>;
+  searchParams: Promise<{ page?: string }>;
 };
 
 export default async function CategoryPage({ params, searchParams }: Props) {
-  const { slug } = params;
-  const { page: pageParam } = searchParams;
+  const { slug } = await params;
+  const { page: pageParam } = await searchParams;
   const [level1, level2, level3] = slug || [];
 
   // Cat3 (URL có 3 segments): theo plan SEO mới, mỗi cat3 đã gom về 1 SEO cluster.

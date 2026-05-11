@@ -31,9 +31,10 @@ function homeHasListingFilters(
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Record<string, string | string[] | undefined>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const pageRaw = spGet(searchParams, "page");
+  const resolvedSearchParams = await searchParams;
+  const pageRaw = spGet(resolvedSearchParams, "page");
   const currentPage = Math.max(
     1,
     Math.min(9999, parseInt(pageRaw || "1", 10) || 1)
@@ -41,7 +42,7 @@ export default async function HomePage({
   const PAGE_SIZE = 48;
   const skip = (currentPage - 1) * PAGE_SIZE;
 
-  const initialPlainHome = homeHasListingFilters(searchParams)
+  const initialPlainHome = homeHasListingFilters(resolvedSearchParams)
     ? null
     : await getInitialHomeProductList(skip, PAGE_SIZE);
 

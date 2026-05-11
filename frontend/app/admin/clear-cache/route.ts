@@ -9,7 +9,7 @@ import { CACHE_TAG_CATEGORY_SEO } from "@/lib/category-seo";
  */
 export async function POST() {
   try {
-    revalidateTag(CACHE_TAG_CATEGORY_SEO);
+    revalidateTag(CACHE_TAG_CATEGORY_SEO, "max");
     return NextResponse.json({
       ok: true,
       message: "Đã xóa sạch cache danh mục và sản phẩm.",

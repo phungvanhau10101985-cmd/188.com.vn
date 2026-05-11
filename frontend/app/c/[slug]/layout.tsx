@@ -8,12 +8,12 @@ const SITE_URL =
   "https://188.com.vn";
 
 type Props = {
-  params: { slug: string };
+  params: Promise<{ slug: string }>;
   children: React.ReactNode;
 };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { slug } = params;
+  const { slug } = await params;
   const cluster = await getSeoClusterDetail(slug);
   if (!cluster) {
     return {

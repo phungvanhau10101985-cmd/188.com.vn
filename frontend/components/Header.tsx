@@ -26,14 +26,21 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
   const [accountOpen, setAccountOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [mounted, setMounted] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const loginHref = useLoginRedirectHref();
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, isLoading, logout } = useAuth();
+  const authReady = mounted && !isLoading;
+  const showAuthenticatedActions = authReady && isAuthenticated;
   const isProductDetailPage = Boolean(pathname?.match(/^\/products\/[^/]+$/));
 
   useEffect(() => {
-    if (isAuthenticated) {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (showAuthenticatedActions) {
       apiClient.getUnreadNotificationCount()
         .then(setUnreadNotifications)
         .catch(() => setUnreadNotifications(0));
@@ -48,7 +55,7 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
     } else {
       setUnreadNotifications(0);
     }
-  }, [isAuthenticated]);
+  }, [showAuthenticatedActions]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -64,7 +71,7 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
   }, [initialSearchTerm, qFromUrl]);
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (showAuthenticatedActions) {
       apiClient.getSearchSuggestions(12)
         .then((r) => setSuggestions(r.suggestions || []))
         .catch(() => setSuggestions([]));
@@ -78,7 +85,7 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
     } catch {
       setSuggestions([]);
     }
-  }, [isAuthenticated, qFromUrl]);
+  }, [showAuthenticatedActions, qFromUrl]);
   const { getCartItemCount } = useCart();
 
   const handleSearch = (e: React.FormEvent) => {
@@ -151,6 +158,7 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
               alt="188.com.vn - XEM LÀ THÍCH"
               width={320}
               height={80}
+              priority
               className="h-full max-h-20 w-auto object-contain transform group-hover:scale-[1.02] transition-transform duration-200"
             />
           </Link>
@@ -174,7 +182,7 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
             </Link>
 
             {/* Notifications */}
-            {isAuthenticated && (
+            {showAuthenticatedActions && (
               <Link href="/account/notifications" className="flex flex-col items-center space-y-0.5 text-white/90 hover:text-white transition-colors group relative">
                 <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors relative">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -191,7 +199,7 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
             )}
 
             {/* Account */}
-            {isAuthenticated ? (
+            {showAuthenticatedActions ? (
               <Link href="/account" className="flex flex-col items-center space-y-1 text-white/90 hover:text-white transition-colors group">
                 <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
                   <span className="text-white font-semibold text-sm">

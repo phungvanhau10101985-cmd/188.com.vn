@@ -8,8 +8,13 @@ import {
   type AdminImport1688BatchStatus,
   type AdminImport1688Job,
   type AdminImportExcelJob,
+  type AdminImageLocalizationJob,
+  type AdminImageLocalizationSummary,
+  type AdminImageLocalizationProductReport,
+  type AdminGeminiAuthStatus,
   type AdminProduct,
   type AdminProductsResponse,
+  type AdminProductListSort,
 } from '@/lib/admin-api';
 import { getCatalogFeedApiBaseUrl, isNonPublicCatalogFeedBase } from '@/lib/api-base';
 import { ImportDraftExcelCompare } from '@/components/admin/ImportDraftExcelCompare';
@@ -24,6 +29,98 @@ const ADMIN_1688_EXCEL_BATCH_TOKEN_KEY = 'admin:products:import_1688_excel_batch
 
 /** Theo dõi một job import từng link 1688/Hibox sau khi reload. */
 const ADMIN_1688_LINK_JOB_KEY = 'admin:products:import_1688_link_job';
+
+/** Theo dõi job bản địa hóa ảnh sau khi reload tab. */
+const IMAGE_LOCALIZATION_JOB_KEY = 'admin:products:image_localization_job';
+
+/** Model Gemini API: ảnh hưởng “hiểu” prompt, dịch chữ và giữ layout. imageSize chỉ là độ nét đầu ra. */
+const IMAGE_LOC_GEMINI_MODEL_PRESETS: { id: string; label: string; model: string }[] = [
+  { id: 'server', label: 'Theo backend (.env) — để trống ô Model', model: '' },
+  {
+    id: 'pro',
+    label: 'Gemini 3 Pro Image — chữ đúng & bố cục chuẩn (pipeline mặc định)',
+    model: 'gemini-3-pro-image-preview',
+  },
+];
+
+function resolveGeminiApiModelPresetId(modelTrimmed: string): string {
+  if (!modelTrimmed) return 'server';
+  const hit = IMAGE_LOC_GEMINI_MODEL_PRESETS.find((p) => p.model && p.model === modelTrimmed);
+  return hit ? hit.id : 'custom';
+}
+
+const IMAGE_LOC_OPENAI_MODEL_PRESETS: { id: string; label: string; model: string }[] = [
+  { id: 'server', label: 'Theo backend (.env) — để trống ô Model', model: '' },
+  { id: 'gpt2', label: 'gpt-image-2 — mặc định OpenAI', model: 'gpt-image-2' },
+];
+
+function resolveOpenaiImageModelPresetId(modelTrimmed: string): string {
+  if (!modelTrimmed) return 'server';
+  const hit = IMAGE_LOC_OPENAI_MODEL_PRESETS.find((p) => p.model && p.model === modelTrimmed);
+  return hit ? hit.id : 'custom';
+}
+
+/** Gợi ý combo chất lượng + cỡ ảnh GPT Image (có thể chỉnh lại tay sau đó). */
+const IMAGE_LOC_OPENAI_OUTPUT_PRESETS: { id: string; label: string; quality: string; size: string }[] = [
+  { id: '', label: 'Không ép preset — chỉnh quality/size bên dưới', quality: '', size: '' },
+  {
+    id: 'hq_catalog',
+    label: 'Ưu tiên dịch nghĩa & chi tiết — high + auto (khuyến nghị)',
+    quality: 'high',
+    size: 'auto',
+  },
+  {
+    id: 'hq_wide',
+    label: 'Banner ngang lớn — high + 1792×1024',
+    quality: 'high',
+    size: '1792x1024',
+  },
+  {
+    id: 'hq_portrait',
+    label: 'Dọc / catalogue — high + 1024×1536',
+    quality: 'high',
+    size: '1024x1536',
+  },
+];
+
+function resolveOpenaiOutputPresetId(quality: string, size: string): string {
+  const q = quality.trim().toLowerCase();
+  const s = size.trim().toLowerCase();
+  const hit = IMAGE_LOC_OPENAI_OUTPUT_PRESETS.find(
+    (p) => p.id && p.quality === q && p.size === s,
+  );
+  return hit?.id ?? '__custom';
+}
+
+/** Giữ lựa chọn «Sắp xếp» sau khi reload trang. */
+const ADMIN_PRODUCTS_LIST_SORT_KEY = 'admin:products:list_sort';
+const ADMIN_PRODUCTS_LIST_SORT_VALUES: readonly AdminProductListSort[] = [
+  'default',
+  'views_desc',
+  'newest',
+  'oldest',
+];
+
+function parseStoredProductListSort(raw: string | null): AdminProductListSort | null {
+  if (!raw) return null;
+  return ADMIN_PRODUCTS_LIST_SORT_VALUES.includes(raw as AdminProductListSort)
+    ? (raw as AdminProductListSort)
+    : null;
+}
+
+/** Origin storefront: ưu tiên NEXT_PUBLIC_SITE_URL để admin chạy localhost vẫn mở đúng shop. */
+function adminPublicShopOrigin(): string {
+  const env = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, '');
+  if (env) return env;
+  if (typeof window !== 'undefined') return window.location.origin;
+  return 'https://188.com.vn';
+}
+
+function adminProductPublicUrl(slug: string | null | undefined): string | null {
+  const s = typeof slug === 'string' ? slug.trim() : '';
+  if (!s) return null;
+  return `${adminPublicShopOrigin()}/products/${encodeURIComponent(s)}`;
+}
 
 type Stored1688LinkJob = {
   job_id: string;
@@ -142,6 +239,9 @@ export default function AdminProductsPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [searchName, setSearchName] = useState('');
   const [searchId, setSearchId] = useState('');
+  const [listSort, setListSort] = useState<AdminProductListSort>('default');
+  /** Chỉ fetch sau khi đọc localStorage để không bị sort mặc định một nhịp rồi đổi. */
+  const [listSortReady, setListSortReady] = useState(false);
   const [page, setPage] = useState(1);
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -177,21 +277,70 @@ export default function AdminProductsPage() {
   const [excelBatchHint, setExcelBatchHint] = useState<string | null>(null);
   const [bulkExport1688Busy, setBulkExport1688Busy] = useState(false);
   const [resumeBatchBusy, setResumeBatchBusy] = useState(false);
-  const [importDraftsPanelOpen, setImportDraftsPanelOpen] = useState(false);
+  /** Tab trong khối Import 1688 — tách luồng để giao diện không chồng chéo. */
+  const [import1688SectionTab, setImport1688SectionTab] = useState<'link' | 'excel' | 'history'>('link');
   const [importDraftsLoading, setImportDraftsLoading] = useState(false);
   const [importDraftsError, setImportDraftsError] = useState<string | null>(null);
   const [importExcelBatches, setImportExcelBatches] = useState<AdminImport1688ExcelBatchSummary[]>([]);
   const [importDraftsFilter, setImportDraftsFilter] = useState<'finished' | 'all'>('all');
   const [expandedImportBatchToken, setExpandedImportBatchToken] = useState<string | null>(null);
+  const expandedImportBatchTokenRef = useRef<string | null>(null);
+  expandedImportBatchTokenRef.current = expandedImportBatchToken;
+  const excelBatchTrackTokenRef = useRef<string | null>(null);
+  excelBatchTrackTokenRef.current = excelBatchTrackToken;
+  const importExcelBatchesRef = useRef<AdminImport1688ExcelBatchSummary[]>([]);
+  importExcelBatchesRef.current = importExcelBatches;
   const [importBatchDetail, setImportBatchDetail] = useState<AdminImport1688BatchStatus | null>(null);
   const [importBatchDetailLoading, setImportBatchDetailLoading] = useState(false);
   const [importDraftDeleteTarget, setImportDraftDeleteTarget] = useState<{ id: number } | null>(null);
   const [importDraftDeleting, setImportDraftDeleting] = useState(false);
   const [importBatchDeleteTarget, setImportBatchDeleteTarget] = useState<string | null>(null);
   const [importBatchDeleting, setImportBatchDeleting] = useState(false);
+  const [imageLocalizationLanguage, setImageLocalizationLanguage] = useState('vi');
+  const [imageLocalizationGeminiMode, setImageLocalizationGeminiMode] = useState<
+    'web' | 'api' | 'openai' | 'local_only'
+  >('local_only');
+  const [imageLocalizationGeminiApiModel, setImageLocalizationGeminiApiModel] = useState('');
+  const [imageLocalizationGeminiImageSize, setImageLocalizationGeminiImageSize] = useState('');
+  const [imageLocalizationOpenaiModel, setImageLocalizationOpenaiModel] = useState('');
+  const [imageLocalizationOpenaiQuality, setImageLocalizationOpenaiQuality] = useState('high');
+  const [imageLocalizationOpenaiSize, setImageLocalizationOpenaiSize] = useState('auto');
+  const [imageLocalizationCookie, setImageLocalizationCookie] = useState('');
+  const [imageLocalizationForce, setImageLocalizationForce] = useState(false);
+  const [imageLocalizationPlaywrightHeadless, setImageLocalizationPlaywrightHeadless] = useState(true);
+  const imageLocalizationPlaywrightSyncedRef = useRef(false);
+  const [imageLocalizationSelectedOnly, setImageLocalizationSelectedOnly] = useState(false);
+  const [imageLocalizationSavingCookie, setImageLocalizationSavingCookie] = useState(false);
+  const [imageLocalizationRunning, setImageLocalizationRunning] = useState(false);
+  const [imageLocalizationJob, setImageLocalizationJob] = useState<AdminImageLocalizationJob | null>(null);
+  const [imageLocalizationSummary, setImageLocalizationSummary] = useState<AdminImageLocalizationSummary | null>(null);
+  const [geminiAuthStatus, setGeminiAuthStatus] = useState<AdminGeminiAuthStatus | null>(null);
+  const [imageLocalizationError, setImageLocalizationError] = useState<string | null>(null);
+  const [imageLocReportOpen, setImageLocReportOpen] = useState(false);
+  const [imageLocReportLoading, setImageLocReportLoading] = useState(false);
+  const [imageLocReportData, setImageLocReportData] = useState<AdminImageLocalizationProductReport | null>(null);
+  const [imageLocReportError, setImageLocReportError] = useState<string | null>(null);
+  const [imageLocReportProductId, setImageLocReportProductId] = useState<string | null>(null);
+  const [imageBulkMarkScope, setImageBulkMarkScope] = useState<'queue' | 'all_no_skipped' | 'all_with_skipped'>(
+    'all_no_skipped',
+  );
+  const [imageBulkMarkAgree, setImageBulkMarkAgree] = useState(false);
+  const [imageBulkMarkBusy, setImageBulkMarkBusy] = useState(false);
+  const [imageBulkMarkPreviewCount, setImageBulkMarkPreviewCount] = useState<number | null>(null);
   /** Cờ huỷ theo dõi (job vẫn chạy ở server). */
   const cancelTrackRef = useRef(false);
   const [exporting, setExporting] = useState(false);
+  const [exportingUnusedSkus, setExportingUnusedSkus] = useState(false);
+  const [unusedSkuExportCount, setUnusedSkuExportCount] = useState(100);
+  const [unusedSkuStats, setUnusedSkuStats] = useState<{
+    total_space: number;
+    available: number;
+    used_on_products: number;
+    exported_reserved: number;
+    blocked_distinct: number;
+  } | null>(null);
+  const [unusedSkuStatsLoading, setUnusedSkuStatsLoading] = useState(false);
+  const [unusedSkuStatsError, setUnusedSkuStatsError] = useState<string | null>(null);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -202,6 +351,36 @@ export default function AdminProductsPage() {
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
 
   const catalogFeedBase = useMemo(() => getCatalogFeedApiBaseUrl(), []);
+  const imageLocalizationHeadlessNeedsSavedCookie =
+    imageLocalizationGeminiMode === 'web' &&
+    imageLocalizationPlaywrightHeadless &&
+    Boolean(geminiAuthStatus?.web?.requires_cookie_or_login_marker_for_headless);
+
+  const imageLocalizationGeminiReady = useMemo(() => {
+    if (imageLocalizationGeminiMode === 'local_only') return true;
+    if (!geminiAuthStatus) return false;
+    if (imageLocalizationGeminiMode === 'api') return Boolean(geminiAuthStatus.api?.ready);
+    if (imageLocalizationGeminiMode === 'openai') return Boolean(geminiAuthStatus.openai?.ready);
+    if (!geminiAuthStatus.web?.ready) return false;
+    if (imageLocalizationHeadlessNeedsSavedCookie) return false;
+    return true;
+  }, [geminiAuthStatus, imageLocalizationGeminiMode, imageLocalizationHeadlessNeedsSavedCookie]);
+
+  const geminiApiModelPresetSelectValue = useMemo(() => {
+    const id = resolveGeminiApiModelPresetId(imageLocalizationGeminiApiModel.trim());
+    return id === 'custom' ? 'custom' : id;
+  }, [imageLocalizationGeminiApiModel]);
+
+  const openaiImageModelPresetSelectValue = useMemo(() => {
+    const id = resolveOpenaiImageModelPresetId(imageLocalizationOpenaiModel.trim());
+    return id === 'custom' ? 'custom' : id;
+  }, [imageLocalizationOpenaiModel]);
+
+  const openaiOutputPresetSelectValue = useMemo(
+    () =>
+      resolveOpenaiOutputPresetId(imageLocalizationOpenaiQuality, imageLocalizationOpenaiSize),
+    [imageLocalizationOpenaiQuality, imageLocalizationOpenaiSize],
+  );
   const feedMerchantCenterTsv = `${catalogFeedBase}/import-export/export/merchant-center-feed.tsv`;
   const feedMetaCatalogTsv = `${catalogFeedBase}/import-export/export/meta-catalog-feed.tsv`;
   const feedTiktokCatalogTsv = `${catalogFeedBase}/import-export/export/tiktok-catalog-feed.tsv`;
@@ -212,6 +391,31 @@ export default function AdminProductsPage() {
     setTimeout(() => setToast(null), persistMs ?? 3000);
   };
 
+  const openImageLocReport = useCallback(async (productId: string) => {
+    setImageLocReportOpen(true);
+    setImageLocReportProductId(productId);
+    setImageLocReportData(null);
+    setImageLocReportError(null);
+    setImageLocReportLoading(true);
+    try {
+      const r = await adminProductAPI.getImageLocalizationProductReport(productId);
+      setImageLocReportData(r);
+    } catch (e) {
+      setImageLocReportError(e instanceof Error ? e.message : 'Không tải được báo cáo');
+    } finally {
+      setImageLocReportLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!imageLocReportOpen) return;
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setImageLocReportOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [imageLocReportOpen]);
+
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
@@ -221,6 +425,7 @@ export default function AdminProductsPage() {
         limit: PAGE_SIZE,
         q: searchName.trim() || undefined,
         product_id: searchId.trim() || undefined,
+        sort: listSort,
       });
       setData(res);
     } catch (e) {
@@ -232,11 +437,41 @@ export default function AdminProductsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, searchName, searchId]);
+  }, [page, searchName, searchId, listSort]);
 
   useEffect(() => {
+    try {
+      const parsed = parseStoredProductListSort(localStorage.getItem(ADMIN_PRODUCTS_LIST_SORT_KEY));
+      if (parsed) setListSort(parsed);
+    } catch {
+      /* bỏ qua private mode / quota */
+    } finally {
+      setListSortReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!listSortReady) return;
     fetchProducts();
-  }, [fetchProducts]);
+  }, [listSortReady, fetchProducts]);
+
+  const loadUnusedInternalSkuStats = useCallback(async () => {
+    setUnusedSkuStatsLoading(true);
+    setUnusedSkuStatsError(null);
+    try {
+      const s = await adminProductAPI.getUnusedInternalSkuStats();
+      setUnusedSkuStats(s);
+    } catch (e) {
+      setUnusedSkuStats(null);
+      setUnusedSkuStatsError(e instanceof Error ? e.message : 'Không tải được số mã SKU');
+    } finally {
+      setUnusedSkuStatsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadUnusedInternalSkuStats();
+  }, [loadUnusedInternalSkuStats]);
 
   useEffect(() => {
     setSelectedProductIds(new Set());
@@ -333,6 +568,209 @@ export default function AdminProductsPage() {
       await new Promise((r) => setTimeout(r, delayMs));
     }
   }, []);
+
+  const loadImageLocalizationSummary = useCallback(async () => {
+    try {
+      const [summary, auth] = await Promise.all([
+        adminProductAPI.getImageLocalizationSummary(),
+        adminProductAPI.getGeminiImageLocalizationAuth(imageLocalizationLanguage),
+      ]);
+      setImageLocalizationSummary(summary);
+      setGeminiAuthStatus(auth);
+    } catch (err) {
+      setImageLocalizationError(err instanceof Error ? err.message : 'Không tải được trạng thái bản địa hóa ảnh');
+    }
+  }, [imageLocalizationLanguage]);
+
+  const pollImageLocalizationJob = useCallback(async (jobId: string): Promise<AdminImageLocalizationJob> => {
+    for (let pollIdx = 0; ; pollIdx += 1) {
+      const job = await adminProductAPI.getImageLocalizationJob(jobId);
+      setImageLocalizationJob(job);
+      if (job.status === 'done' || job.status === 'error' || job.status === 'cancelled') return job;
+      const delayMs = pollIdx <= 5 ? 1200 : Math.min(8000, 2500 + pollIdx * 350);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }, []);
+
+  const handleSaveGeminiCookie = async () => {
+    const cookie = imageLocalizationCookie.trim();
+    if (!cookie) {
+      showToast('err', 'Vui lòng dán cookie Gemini');
+      return;
+    }
+    setImageLocalizationSavingCookie(true);
+    setImageLocalizationError(null);
+    try {
+      const res = await adminProductAPI.saveGeminiImageLocalizationCookie(cookie);
+      setImageLocalizationCookie('');
+      showToast('ok', `Đã lưu ${res.cookie_count} cookie Gemini`);
+      await loadImageLocalizationSummary();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Không lưu được cookie Gemini';
+      setImageLocalizationError(msg);
+      showToast('err', msg, 9000);
+    } finally {
+      setImageLocalizationSavingCookie(false);
+    }
+  };
+
+  const bulkMarkScopePayload = () => {
+    if (imageBulkMarkScope === 'queue') return { only_queue: true, include_skipped: false };
+    if (imageBulkMarkScope === 'all_no_skipped') return { only_queue: false, include_skipped: false };
+    return { only_queue: false, include_skipped: true };
+  };
+
+  const handleBulkMarkImageLocalizationPreview = async () => {
+    setImageLocalizationError(null);
+    setImageBulkMarkBusy(true);
+    try {
+      const res = await adminProductAPI.bulkMarkImageLocalizationLocalized({
+        language: imageLocalizationLanguage,
+        dry_run: true,
+        ...bulkMarkScopePayload(),
+      });
+      setImageBulkMarkPreviewCount(res.would_update);
+      showToast('ok', `Xem trước: sẽ cập nhật ${res.would_update} dòng (ngôn ngữ ${res.language}).`, 8000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Không xem trước được';
+      setImageLocalizationError(msg);
+      showToast('err', msg, 9000);
+    } finally {
+      setImageBulkMarkBusy(false);
+    }
+  };
+
+  const handleBulkMarkImageLocalizationApply = async () => {
+    if (!imageBulkMarkAgree) {
+      showToast('err', 'Vui lòng tick xác nhận trước khi ghi DB.', 6000);
+      return;
+    }
+    setImageLocalizationError(null);
+    setImageBulkMarkBusy(true);
+    try {
+      const res = await adminProductAPI.bulkMarkImageLocalizationLocalized({
+        language: imageLocalizationLanguage,
+        dry_run: false,
+        ...bulkMarkScopePayload(),
+      });
+      setImageBulkMarkPreviewCount(res.would_update);
+      showToast('ok', `Đã cập nhật ${res.updated} sản phẩm → localized (${res.language}).`, 10000);
+      setImageBulkMarkAgree(false);
+      await loadImageLocalizationSummary();
+      void fetchProducts();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Không cập nhật được DB';
+      setImageLocalizationError(msg);
+      showToast('err', msg, 9000);
+    } finally {
+      setImageBulkMarkBusy(false);
+    }
+  };
+
+  const handleStartImageLocalization = async () => {
+    setImageLocalizationError(null);
+    setImageLocalizationRunning(true);
+    try {
+      const productIds =
+        imageLocalizationSelectedOnly && selectedProductIds.size > 0 ? Array.from(selectedProductIds) : undefined;
+      const started = await adminProductAPI.startImageLocalization({
+        language: imageLocalizationLanguage,
+        force: imageLocalizationForce,
+        product_ids: productIds,
+        gemini_mode: imageLocalizationGeminiMode === 'local_only' ? 'web' : imageLocalizationGeminiMode,
+        allow_ai_image_models: imageLocalizationGeminiMode === 'local_only' ? false : null,
+        ...(imageLocalizationGeminiMode === 'api' && {
+          gemini_image_model: imageLocalizationGeminiApiModel.trim() || undefined,
+          gemini_image_size: imageLocalizationGeminiImageSize.trim() || undefined,
+        }),
+        ...(imageLocalizationGeminiMode === 'openai' && {
+          openai_image_model: imageLocalizationOpenaiModel.trim() || undefined,
+          openai_image_quality: imageLocalizationOpenaiQuality.trim() || undefined,
+          openai_image_size: imageLocalizationOpenaiSize.trim() || undefined,
+        }),
+        ...(imageLocalizationGeminiMode === 'web' && {
+          playwright_headless: imageLocalizationPlaywrightHeadless,
+        }),
+      });
+      localStorage.setItem(IMAGE_LOCALIZATION_JOB_KEY, started.job_id);
+      setImageLocalizationJob({
+        job_id: started.job_id,
+        status: 'queued',
+        message: 'Đã xếp hàng bản địa hóa ảnh.',
+      });
+      const job = await pollImageLocalizationJob(started.job_id);
+      if (job.status === 'done') {
+        showToast('ok', job.message || 'Đã hoàn tất bản địa hóa ảnh', 8000);
+        fetchProducts();
+        await loadImageLocalizationSummary();
+      } else if (job.status === 'cancelled') {
+        showToast('ok', 'Đã hủy job bản địa hóa ảnh');
+      } else {
+        showToast('err', job.message || 'Bản địa hóa ảnh thất bại', 9000);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Không chạy được bản địa hóa ảnh';
+      setImageLocalizationError(msg);
+      showToast('err', msg, 9000);
+    } finally {
+      setImageLocalizationRunning(false);
+      localStorage.removeItem(IMAGE_LOCALIZATION_JOB_KEY);
+    }
+  };
+
+  const handleCancelImageLocalization = async () => {
+    if (!imageLocalizationJob?.job_id) return;
+    try {
+      const job = await adminProductAPI.cancelImageLocalizationJob(imageLocalizationJob.job_id);
+      setImageLocalizationJob(job);
+      showToast('ok', 'Đang hủy job sau ảnh hiện tại');
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Không hủy được job', 8000);
+    }
+  };
+
+  useEffect(() => {
+    if (
+      geminiAuthStatus &&
+      typeof geminiAuthStatus.playwright_headless === 'boolean' &&
+      !imageLocalizationPlaywrightSyncedRef.current
+    ) {
+      setImageLocalizationPlaywrightHeadless(Boolean(geminiAuthStatus.playwright_headless));
+      imageLocalizationPlaywrightSyncedRef.current = true;
+    }
+  }, [geminiAuthStatus]);
+
+  useEffect(() => {
+    void loadImageLocalizationSummary();
+  }, [loadImageLocalizationSummary]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const jobId = localStorage.getItem(IMAGE_LOCALIZATION_JOB_KEY);
+    if (!jobId) return undefined;
+    setImageLocalizationRunning(true);
+    void pollImageLocalizationJob(jobId)
+      .then((job) => {
+        if (cancelled) return;
+        if (job.status === 'done') {
+          showToast('ok', job.message || 'Đã hoàn tất bản địa hóa ảnh', 8000);
+          fetchProducts();
+          void loadImageLocalizationSummary();
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setImageLocalizationError(err instanceof Error ? err.message : 'Không theo dõi được job ảnh');
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setImageLocalizationRunning(false);
+          localStorage.removeItem(IMAGE_LOCALIZATION_JOB_KEY);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchProducts, loadImageLocalizationSummary, pollImageLocalizationJob]);
 
   const handleImport1688 = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -457,68 +895,6 @@ export default function AdminProductsPage() {
   };
 
   useEffect(() => {
-    const token = excelBatchTrackToken;
-    if (!token) return undefined;
-    let cancelled = false;
-    let iv: ReturnType<typeof setInterval> | null = null;
-    let pollBusy = false;
-
-    const stopInterval = () => {
-      if (iv != null) {
-        clearInterval(iv);
-        iv = null;
-      }
-    };
-
-    const tick = async () => {
-      if (pollBusy) return;
-      pollBusy = true;
-      try {
-        const st = await adminProductAPI.getImport1688ExcelBatchStatus(token);
-        if (cancelled) return;
-        const msg = `Batch (tuần tự): đã xong ${st.completed}/${st.total}${
-          st.failed ? ` • lỗi ${st.failed}` : ''
-        } • chờ ${st.pending}`;
-        setExcelBatchHint(msg);
-        if (st.pending <= 0) {
-          stopInterval();
-          setExcelBatchTrackToken(null);
-          try {
-            localStorage.removeItem(ADMIN_1688_EXCEL_BATCH_TOKEN_KEY);
-          } catch {
-            /* noop */
-          }
-          showToast('ok', `Batch xong: ${st.completed} draft, ${st.failed} lỗi.`, 7000);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          const m = err instanceof Error ? err.message : String(err);
-          setExcelBatchHint(m || 'Không poll được trạng thái batch');
-          if (/\b404\b|Không tìm thấy batch/i.test(m)) {
-            try {
-              localStorage.removeItem(ADMIN_1688_EXCEL_BATCH_TOKEN_KEY);
-            } catch {
-              /* noop */
-            }
-            setExcelBatchTrackToken(null);
-            stopInterval();
-          }
-        }
-      } finally {
-        pollBusy = false;
-      }
-    };
-
-    void tick();
-    iv = setInterval(() => void tick(), 3500);
-
-    return () => {
-      cancelled = true;
-      stopInterval();
-    };
-  }, [excelBatchTrackToken]);
-
-  useEffect(() => {
     if (!importDraftDeleteTarget) return undefined;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !importDraftDeleting && !importBatchDeleting) {
@@ -567,8 +943,11 @@ export default function AdminProductsPage() {
     };
   }, [expandedImportBatchToken]);
 
-  const loadImportExcelBatchesList = useCallback(async () => {
-    setImportDraftsLoading(true);
+  const loadImportExcelBatchesList = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    if (!silent) {
+      setImportDraftsLoading(true);
+    }
     setImportDraftsError(null);
     try {
       const res = await adminProductAPI.listImport1688ExcelBatches({ limit: 48 });
@@ -577,20 +956,106 @@ export default function AdminProductsPage() {
       setImportDraftsError(e instanceof Error ? e.message : 'Không tải được danh sách đợt import Excel');
       setImportExcelBatches([]);
     } finally {
-      setImportDraftsLoading(false);
+      if (!silent) {
+        setImportDraftsLoading(false);
+      }
     }
   }, []);
 
-  const toggleImportDraftsPanel = () => {
-    setImportDraftsPanelOpen((open) => {
-      const next = !open;
-      if (!next) {
-        setExpandedImportBatchToken(null);
+  useEffect(() => {
+    const token = excelBatchTrackToken;
+    if (!token) return undefined;
+    let cancelled = false;
+    let iv: ReturnType<typeof setInterval> | null = null;
+    let pollBusy = false;
+
+    const stopInterval = () => {
+      if (iv != null) {
+        clearInterval(iv);
+        iv = null;
       }
-      if (next) void loadImportExcelBatchesList();
-      return next;
-    });
-  };
+    };
+
+    const tick = async () => {
+      if (pollBusy) return;
+      pollBusy = true;
+      try {
+        const st = await adminProductAPI.getImport1688ExcelBatchStatus(token);
+        if (cancelled) return;
+        const msg = `Batch (tuần tự): đã xong ${st.completed}/${st.total}${
+          st.failed ? ` • lỗi ${st.failed}` : ''
+        } • chờ ${st.pending}`;
+        setExcelBatchHint(msg);
+        if (st.pending <= 0) {
+          stopInterval();
+          setExcelBatchTrackToken(null);
+          setExcelBatchHint(null);
+          try {
+            localStorage.removeItem(ADMIN_1688_EXCEL_BATCH_TOKEN_KEY);
+          } catch {
+            /* noop */
+          }
+          void loadImportExcelBatchesList({ silent: true });
+          const openTok = expandedImportBatchTokenRef.current;
+          if (openTok === token) {
+            void adminProductAPI
+              .getImport1688ExcelBatchStatus(token)
+              .then((d) => setImportBatchDetail(d))
+              .catch(() => {});
+          }
+          showToast(
+            'ok',
+            `Đợt import Excel đã xong: ${st.completed} thành công, ${st.failed} lỗi. Danh sách đợt đã được làm mới.`,
+            10_000,
+          );
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const m = err instanceof Error ? err.message : String(err);
+          setExcelBatchHint(m || 'Không poll được trạng thái batch');
+          if (/\b404\b|Không tìm thấy batch/i.test(m)) {
+            try {
+              localStorage.removeItem(ADMIN_1688_EXCEL_BATCH_TOKEN_KEY);
+            } catch {
+              /* noop */
+            }
+            setExcelBatchTrackToken(null);
+            stopInterval();
+          }
+        }
+      } finally {
+        pollBusy = false;
+      }
+    };
+
+    void tick();
+    iv = setInterval(() => void tick(), 3500);
+
+    return () => {
+      cancelled = true;
+      stopInterval();
+    };
+  }, [excelBatchTrackToken, loadImportExcelBatchesList]);
+
+  useEffect(() => {
+    if (import1688SectionTab !== 'history') return undefined;
+    const tick = () => {
+      const rows = importExcelBatchesRef.current;
+      const anyPending = rows.some((b) => b.pending > 0);
+      if (!anyPending && !excelBatchTrackTokenRef.current?.trim()) return;
+      void loadImportExcelBatchesList({ silent: true });
+      const exp = expandedImportBatchTokenRef.current;
+      if (exp) {
+        void adminProductAPI
+          .getImport1688ExcelBatchStatus(exp)
+          .then((d) => setImportBatchDetail(d))
+          .catch(() => {});
+      }
+    };
+    const iv = setInterval(() => void tick(), 4500);
+    void tick();
+    return () => clearInterval(iv);
+  }, [import1688SectionTab, loadImportExcelBatchesList]);
 
   const handleOpenStoredImportDraft = async (id: number) => {
     try {
@@ -606,7 +1071,10 @@ export default function AdminProductsPage() {
         showToast('ok', `Đã mở nháp #${id} — chỉnh sửa bên dưới.`, 5000);
       }
       window.setTimeout(() => {
-        document.getElementById('import-1688')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const goDraft = Boolean(d.product_data);
+        document
+          .getElementById(goDraft ? 'import-1688-draft' : 'import-1688')
+          ?.scrollIntoView({ behavior: 'smooth', block: goDraft ? 'nearest' : 'start' });
       }, 120);
     } catch (err) {
       showToast('err', err instanceof Error ? err.message : 'Không mở được nháp', 9000);
@@ -720,6 +1188,18 @@ export default function AdminProductsPage() {
     return importExcelBatches.filter((b) => b.pending === 0);
   }, [importExcelBatches, importDraftsFilter]);
 
+  useEffect(() => {
+    if (import1688SectionTab !== 'history') {
+      setExpandedImportBatchToken(null);
+    }
+  }, [import1688SectionTab]);
+
+  useEffect(() => {
+    if (import1688SectionTab === 'history') {
+      void loadImportExcelBatchesList();
+    }
+  }, [import1688SectionTab, loadImportExcelBatchesList]);
+
   const handleExcelBatch1688Pick = () => {
     excelBatch1688InputRef.current?.click();
   };
@@ -751,6 +1231,7 @@ export default function AdminProductsPage() {
         /* noop */
       }
       showToast('ok', `Đã nhận ${res.total} link. Server xử lý tuần tự (có thể vài phút).`, 6000);
+      setImport1688SectionTab('history');
     } catch (err) {
       setExcelBatchHint(null);
       showToast('err', err instanceof Error ? err.message : 'Upload batch thất bại', 10000);
@@ -1031,6 +1512,27 @@ export default function AdminProductsPage() {
     }
   };
 
+  const handleExportUnusedInternalSkus = async () => {
+    const maxAllowed =
+      unusedSkuStats != null ? Math.min(10_000, Math.max(0, unusedSkuStats.available)) : 10_000;
+    if (maxAllowed < 1) {
+      showToast('err', 'Không còn mã SKU trống để xuất.');
+      return;
+    }
+    const raw = Math.max(1, Math.floor(Number(unusedSkuExportCount) || 0));
+    const n = Math.min(maxAllowed, Math.min(10_000, raw));
+    setExportingUnusedSkus(true);
+    try {
+      await adminProductAPI.exportUnusedInternalSkus(n);
+      showToast('ok', `Đã tải ${n} mã SKU trống (một cột). Các mã này đã được đánh dấu đã export.`, 7000);
+      await loadUnusedInternalSkuStats();
+    } catch (e) {
+      showToast('err', e instanceof Error ? e.message : 'Export mã SKU trống thất bại');
+    } finally {
+      setExportingUnusedSkus(false);
+    }
+  };
+
   const handleDownloadTemplate = async () => {
     setDownloadingTemplate(true);
     try {
@@ -1081,6 +1583,11 @@ export default function AdminProductsPage() {
   };
 
   const totalPages = data?.total_pages ?? 1;
+  const unusedSkuExportMax = useMemo(
+    () =>
+      unusedSkuStats != null ? Math.min(10_000, Math.max(0, unusedSkuStats.available)) : 10_000,
+    [unusedSkuStats],
+  );
   const currentPageIds = useMemo(() => (data?.products || []).map((p) => p.product_id), [data?.products]);
   const allSelectedOnPage = currentPageIds.length > 0 && currentPageIds.every((id) => selectedProductIds.has(id));
 
@@ -1146,6 +1653,32 @@ export default function AdminProductsPage() {
                 placeholder="ID sản phẩm hoặc mã SKU..."
                 className="w-48 rounded-lg border border-gray-300 px-3 py-2 text-sm"
               />
+            </div>
+            <div>
+              <label htmlFor="admin-products-sort" className="block text-sm font-medium text-gray-700 mb-1">
+                Sắp xếp
+              </label>
+              <select
+                id="admin-products-sort"
+                value={listSort}
+                onChange={(e) => {
+                  const v = e.target.value as AdminProductListSort;
+                  setListSort(v);
+                  setPage(1);
+                  try {
+                    localStorage.setItem(ADMIN_PRODUCTS_LIST_SORT_KEY, v);
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+                className="w-52 rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
+                aria-label="Sắp xếp danh sách sản phẩm"
+              >
+                <option value="default">ID sản phẩm (mặc định)</option>
+                <option value="views_desc">Nhiều lượt xem nhất</option>
+                <option value="newest">Từ mới đến cũ</option>
+                <option value="oldest">Từ cũ đến mới</option>
+              </select>
             </div>
             <button type="submit" className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 text-sm font-medium">
               Tìm kiếm
@@ -1241,6 +1774,60 @@ export default function AdminProductsPage() {
             >
               {exporting ? 'Đang export...' : 'Export Excel'}
             </button>
+            <div className="flex flex-wrap items-end gap-2 border-l border-gray-200 pl-3 ml-1">
+              <div>
+                <label htmlFor="admin-unused-sku-count" className="block text-sm font-medium text-gray-700 mb-1">
+                  Số lượng mã SKU cần export
+                </label>
+                <div className="flex flex-col gap-1">
+                  <input
+                    id="admin-unused-sku-count"
+                    type="number"
+                    min={1}
+                    max={Math.max(1, unusedSkuExportMax)}
+                    value={unusedSkuExportCount}
+                    onChange={(e) =>
+                      setUnusedSkuExportCount(Math.max(1, parseInt(e.target.value, 10) || 1))
+                    }
+                    className="w-28 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    aria-label="Số lượng mã SKU trống cần export"
+                    disabled={unusedSkuStatsLoading || unusedSkuExportMax < 1}
+                  />
+                  {unusedSkuStatsError ? (
+                    <p className="text-xs text-red-600 max-w-[14rem]">
+                      {unusedSkuStatsError}{' '}
+                      <button
+                        type="button"
+                        onClick={() => void loadUnusedInternalSkuStats()}
+                        className="underline font-medium text-red-700"
+                      >
+                        Thử lại
+                      </button>
+                    </p>
+                  ) : unusedSkuStats ? (
+                    <p className="text-[11px] text-gray-600 max-w-[16rem] leading-snug">
+                      Còn{' '}
+                      <strong className="text-gray-800">
+                        {unusedSkuStats.available.toLocaleString('vi-VN')}
+                      </strong>{' '}
+                      mã có thể xuất (tối đa {Math.min(10_000, unusedSkuExportMax).toLocaleString('vi-VN')} mã
+                      /lần{unusedSkuStatsLoading ? ' · đang cập nhật…' : ''}).
+                    </p>
+                  ) : unusedSkuStatsLoading ? (
+                    <p className="text-[11px] text-gray-500">Đang tải số mã…</p>
+                  ) : null}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleExportUnusedInternalSkus()}
+                disabled={exportingUnusedSkus || unusedSkuExportMax < 1}
+                className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 text-sm font-medium disabled:opacity-70 mb-0"
+                title="Mã định dạng A0001–Z9999 (không phát hành dạng X0000): chưa có trong sản phẩm và chưa từng xuất; sau khi tải, các mã được ghi nhận để không trùng lần sau."
+              >
+                {exportingUnusedSkus ? 'Đang tạo file...' : 'Tải SKU trống'}
+              </button>
+            </div>
           </form>
           {importDetailPanel ? (
             <div
@@ -1267,89 +1854,231 @@ export default function AdminProductsPage() {
               </pre>
             </div>
           ) : null}
-          <div id="import-1688" className="mt-4 scroll-mt-24 rounded-xl border border-orange-100 bg-orange-50/50 p-4">
-            <form onSubmit={handleImport1688} className="flex flex-col lg:flex-row gap-3 lg:items-end">
-              <div className="flex-1">
-                <div className="mb-1 flex flex-wrap items-center gap-2">
-                  <label className="block text-sm font-semibold text-gray-800">Import từ link (1688 / Hibox)</label>
-                  <a
-                    href="/admin/import-1688"
-                    className="rounded-full border border-orange-200 bg-white px-2.5 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100"
-                  >
-                    Nhập cookie 1688
-                  </a>
-                </div>
-                <input
-                  type="url"
-                  value={import1688Url}
-                  onChange={(e) => setImport1688Url(e.target.value)}
-                  placeholder="1688, hibox.mn/v/… hoặc taobao1688.kz/item?id=…"
-                  className="w-full rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-                />
-                <p className="mt-1 text-xs text-gray-600">
-                  1688: Playwright + cookie trong `.env` (ảnh CDN có thể tải về Bunny). Hibox: không cần cookie; ảnh giữ URL gốc. Luôn có bước
-                  draft trước khi đăng hoặc export Excel khớp cột import. File Excel link: ô{' '}
-                  <strong>Kiểu dáng / Style</strong> (hoặc cột AI đủ rộng) đồng bộ vào{' '}
-                  <strong>Shop ID</strong> và trường kiểu dáng trong nháp.
-                </p>
-              </div>
-              <button
-                type="submit"
-                disabled={importing1688 || !import1688Url.trim()}
-                className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-medium disabled:opacity-70"
-              >
-                {importing1688 ? 'Đang lấy dữ liệu...' : 'Lấy dữ liệu'}
-              </button>
-            </form>
-            <input
-              ref={excelBatch1688InputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              onChange={handleExcelBatch1688Change}
-            />
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:gap-x-3 sm:gap-y-2">
-              <button
-                type="button"
-                onClick={handleExcelBatch1688Pick}
-                disabled={excelBatchBusy}
-                className="rounded-lg border border-orange-300 bg-white px-3 py-2 text-left text-sm font-medium text-orange-900 hover:bg-orange-100 disabled:opacity-70"
-              >
-                {excelBatchBusy
-                  ? 'Đang upload…'
-                  : 'Import file Excel (cột link F từ dòng 2; shop / giá từ cùng dòng vào nháp)'}
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleImportDraftsPanel()}
-                aria-expanded={importDraftsPanelOpen}
-                className="rounded-lg border border-sky-300 bg-white px-3 py-2 text-sm font-medium text-sky-900 hover:bg-sky-50"
-              >
-                {importDraftsPanelOpen ? 'Ẩn danh sách' : 'Các đợt import Excel (theo batch)'}
-              </button>
-            </div>
-            {excelBatchHint ? <p className="mt-1 text-xs text-gray-700">{excelBatchHint}</p> : null}
-            {excelBatchTrackToken ? (
-              <p className="mt-0.5 text-[11px] text-gray-500 leading-snug">
-                Tiến độ batch được lưu trên trình duyệt: đóng tab / mở lại trang quản trị vẫn thấy phần đã xong và còn chờ (không quá ~48h; nếu xóa đợt hoặc hết file meta thì hết dữ liệu theo dõi).
-              </p>
-            ) : null}
-
-            {importDraftsPanelOpen ? (
-              <div
-                className="mt-3 rounded-xl border border-sky-200 bg-white p-3 shadow-sm"
-                role="region"
-                aria-label="Các đợt import Excel"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                  <p className="text-sm font-medium text-gray-800">
-                    Mỗi dòng là <strong className="font-medium">một lần upload file Excel link</strong> (một đợt).
-                    <span className="text-xs font-normal text-gray-600 block sm:inline sm:ml-1">
-                      — mở rộng để xem từng link/nháp. Còn link chưa xử lý: bấm «Chạy tiếp». Sau restart server có thể bật
-                      IMPORT_1688_BATCH_RESUME_ON_STARTUP trên backend.
-                    </span>
+          <section
+            id="import-1688"
+            aria-labelledby="import-1688-heading"
+            className="mt-6 scroll-mt-24 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/5"
+          >
+            <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-4 sm:px-5">
+              <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <h2 id="import-1688-heading" className="text-lg font-semibold tracking-tight text-slate-900">
+                    Import 1688 và Hibox
+                  </h2>
+                  <p className="mt-1 max-w-2xl text-sm text-slate-600">
+                    Một URL hoặc Excel nhiều dòng → bản nháp. Luôn kiểm tra nháp trước khi đăng hoặc xuất Excel.
                   </p>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <span className="inline-flex items-center rounded-md border border-orange-200/80 bg-orange-50/90 px-2 py-0.5 text-[11px] font-medium text-orange-950">
+                      1688 · cookie Playwright
+                    </span>
+                    <span className="inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-950">
+                      Hibox · không cần cookie
+                    </span>
+                  </div>
+                </div>
+                <a
+                  href="/admin/import-1688"
+                  className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
+                >
+                  Cấu hình cookie 1688
+                </a>
+              </header>
+
+              <div className="mt-4" role="tablist" aria-label="Chế độ import 1688 / Hibox">
+                <div className="flex flex-wrap gap-1 rounded-xl bg-slate-100/95 p-1">
+                  <button
+                    type="button"
+                    role="tab"
+                    id="import-1688-tab-link"
+                    aria-selected={import1688SectionTab === 'link'}
+                    aria-controls="import-1688-panel-link"
+                    onClick={() => setImport1688SectionTab('link')}
+                    className={`inline-flex min-h-[40px] flex-1 items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-1 sm:flex-none sm:min-w-[7.5rem] ${
+                      import1688SectionTab === 'link'
+                        ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/80'
+                        : 'text-slate-600 hover:bg-white/80 hover:text-slate-900'
+                    }`}
+                  >
+                    Một link
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    id="import-1688-tab-excel"
+                    aria-selected={import1688SectionTab === 'excel'}
+                    aria-controls="import-1688-panel-excel"
+                    onClick={() => setImport1688SectionTab('excel')}
+                    className={`inline-flex min-h-[40px] flex-1 items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-1 sm:flex-none sm:min-w-[7.5rem] ${
+                      import1688SectionTab === 'excel'
+                        ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/80'
+                        : 'text-slate-600 hover:bg-white/80 hover:text-slate-900'
+                    }`}
+                  >
+                    Excel hàng loạt
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    id="import-1688-tab-history"
+                    aria-selected={import1688SectionTab === 'history'}
+                    aria-controls="import-1688-panel-history"
+                    onClick={() => setImport1688SectionTab('history')}
+                    className={`inline-flex min-h-[40px] flex-1 items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-1 sm:flex-none sm:min-w-[7.5rem] ${
+                      import1688SectionTab === 'history'
+                        ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/80'
+                        : 'text-slate-600 hover:bg-white/80 hover:text-slate-900'
+                    }`}
+                  >
+                    Lịch sử đợt
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 px-4 py-4 sm:px-5 sm:py-5">
+              <input
+                ref={excelBatch1688InputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                aria-hidden
+                onChange={handleExcelBatch1688Change}
+              />
+
+              {import1688SectionTab === 'link' ? (
+                <div
+                  role="tabpanel"
+                  id="import-1688-panel-link"
+                  aria-labelledby="import-1688-tab-link"
+                  className="rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 shadow-sm sm:p-5"
+                >
+                <h3 className="text-sm font-semibold text-slate-900">Import một link</h3>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Dán địa chỉ sản phẩm (1688, hibox hoặc taobao1688.kz).
+                </p>
+                <form onSubmit={handleImport1688} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <div className="min-w-0 flex-1">
+                    <label htmlFor="admin-import-1688-url" className="sr-only">
+                      URL nguồn (1688 / Hibox)
+                    </label>
+                    <input
+                      id="admin-import-1688-url"
+                      type="url"
+                      value={import1688Url}
+                      onChange={(e) => setImport1688Url(e.target.value)}
+                      placeholder="https://detail.1688.com/… hoặc hibox.mn/v/… hoặc taobao1688.kz/…"
+                      className="w-full rounded-lg border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-orange-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-orange-300/80"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <details className="group mt-2 rounded-lg border border-gray-100 bg-gray-50/60 text-xs text-gray-600 [&_summary::-webkit-details-marker]:hidden">
+                      <summary className="cursor-pointer list-none px-2.5 py-2 font-medium text-gray-700 outline-none hover:text-gray-900 focus-visible:ring-2 focus-visible:ring-orange-300 rounded-lg">
+                        <span className="inline-flex items-center gap-1.5">
+                          <span aria-hidden className="text-orange-600 transition group-open:rotate-90">
+                            ›
+                          </span>
+                          Chi tiết: ảnh Bunny, Excel → Shop ID, luồng draft
+                        </span>
+                      </summary>
+                      <div className="border-t border-gray-100 px-3 py-2 leading-relaxed text-gray-600">
+                        <strong className="font-medium text-gray-800">1688:</strong> Playwright và cookie trong cấu hình backend (
+                        <span className="whitespace-nowrap">có thể tải ảnh lên Bunny</span>).{' '}
+                        <strong className="font-medium text-gray-800">Hibox:</strong> không cần cookie; ảnh giữ URL gốc. Luôn có bước
+                        nháp trước khi đăng hoặc export Excel khớp cột import.
+                        <span className="mt-2 block">
+                          File Excel link: ô <strong>Kiểu dáng / Style</strong> (hoặc cột AI đủ rộng) đồng bộ vào{' '}
+                          <strong>Shop ID</strong> và trường kiểu dáng trong nháp.
+                        </span>
+                      </div>
+                    </details>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={importing1688 || !import1688Url.trim()}
+                    className="min-h-[42px] shrink-0 rounded-lg bg-orange-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-orange-700 disabled:pointer-events-none disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 sm:w-auto w-full"
+                  >
+                    {importing1688 ? 'Đang lấy dữ liệu…' : 'Lấy dữ liệu'}
+                  </button>
+                </form>
+                </div>
+              ) : null}
+
+              {import1688SectionTab === 'excel' ? (
+              <div
+                role="tabpanel"
+                id="import-1688-panel-excel"
+                aria-labelledby="import-1688-tab-excel"
+                className="rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 shadow-sm sm:p-5"
+              >
+                <h3 className="text-sm font-semibold text-slate-900">Import hàng loạt từ Excel</h3>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Cột link (ví dụ cột <strong>F</strong>) từ dòng 2; giá và shop cùng dòng được đưa vào nháp.
+                </p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleExcelBatch1688Pick}
+                    disabled={excelBatchBusy}
+                    className="inline-flex flex-1 min-w-[12rem] items-center justify-center rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-orange-700 disabled:pointer-events-none disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 sm:flex-none sm:justify-start"
+                  >
+                    {excelBatchBusy ? 'Đang tải file lên…' : 'Chọn file Excel (.xlsx)'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setImport1688SectionTab('history')}
+                    className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 sm:min-h-[42px]"
+                  >
+                    Xem lịch sử đợt
+                  </button>
+                </div>
+                {excelBatchHint ? (
+                  <p className="mt-3 rounded-md border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
+                    {excelBatchHint}
+                  </p>
+                ) : null}
+                {excelBatchTrackToken ? (
+                  <p className="mt-2 text-[11px] leading-snug text-gray-500">
+                    Tiến độ batch được lưu trong trình duyệt: đóng tab rồi mở lại vẫn xem được phần đã xử lý và còn chờ (khoảng 48 giờ;
+                    xóa đợt hoặc mất file meta trên server thì không còn dữ liệu theo dõi).
+                  </p>
+                ) : null}
+              </div>
+              ) : null}
+
+            {import1688SectionTab === 'history' ? (
+              <div
+                className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm sm:p-5"
+                role="tabpanel"
+                id="import-1688-panel-history"
+                aria-labelledby="import-1688-tab-history"
+              >
+                <div className="flex flex-col gap-3 border-b border-slate-100 pb-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 max-w-xl">
+                    <h3 id="import-1688-batches-heading" className="text-sm font-semibold text-slate-900">
+                      Các đợt import Excel
+                    </h3>
+                    <p className="mt-0.5 text-xs text-slate-600 leading-relaxed">
+                      Mỗi dòng dưới đây là một lần bạn upload file. Mở rộng để xem từng link / nháp; dùng «Chạy tiếp» nếu
+                      còn link đang chờ.
+                    </p>
+                    <details className="group mt-2 text-xs text-slate-600 [&_summary::-webkit-details-marker]:hidden">
+                      <summary className="inline-flex cursor-pointer list-none items-center gap-1 font-medium text-slate-800 outline-none hover:text-slate-950 focus-visible:ring-2 focus-visible:ring-orange-400 rounded">
+                        <span aria-hidden className="text-orange-600 transition group-open:rotate-90">
+                          ›
+                        </span>
+                        Ghi chú nâng cao (resume server, thư mục meta…)
+                      </summary>
+                      <div className="mt-1.5 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 leading-relaxed">
+                        Sau khi restart backend có thể bật biến môi trường{' '}
+                        <code className="rounded bg-white px-0.5 text-[10px]">IMPORT_1688_BATCH_RESUME_ON_STARTUP</code> để tự
+                        xếp hàng lại. Danh sách dựa trên file meta trong{' '}
+                        <code className="rounded bg-white px-0.5 text-[10px]">uploads/import_batches</code>; deploy server mới
+                        không copy thư mục này thì lịch sử đợt có thể trống dù nháp vẫn trong database.
+                      </div>
+                    </details>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
                     <label className="text-xs text-gray-600 whitespace-nowrap">Lọc:</label>
                     <select
                       value={importDraftsFilter}
@@ -1584,7 +2313,7 @@ export default function AdminProductsPage() {
                                 )
                               ) : (
                                 <p className="text-xs text-gray-600 px-2 py-2">
-                                  Không tải được chi tiết. Thử Thu gọn và mở lại đợt.
+                                  Không tải được chi tiết. Thử đóng và mở lại đợt.
                                 </p>
                               )}
                             </div>
@@ -1594,17 +2323,29 @@ export default function AdminProductsPage() {
                     })}
                   </div>
                 )}
-                <p className="mt-2 text-[11px] text-gray-500 leading-snug">
-                  Danh sách theo file meta trên server (<code className="text-[10px]">uploads/import_batches</code>).
-                  Mỗi lần làm mới tải tối đa 48 đợt mới nhất
-                  {importExcelBatches.length > 0 ? ` (đang hiển thị ${importExcelBatches.length})` : ''}. Nếu deploy server mới
-                  mà không copy thư mục đó, lịch sử đợt có thể trống dù bản nháp vẫn còn trong database.
-                </p>
+                <details className="mt-3 rounded-lg border border-slate-100 bg-slate-50/60 text-[11px] text-slate-600 [&_summary::-webkit-details-marker]:hidden">
+                  <summary className="cursor-pointer list-none px-3 py-2 font-medium text-slate-700 hover:text-slate-900">
+                    Về nguồn danh sách (48 đợt, file meta trên server)
+                  </summary>
+                  <p className="border-t border-slate-100 px-3 py-2 leading-relaxed">
+                    Danh sách theo file meta trên server (<code className="text-[10px]">uploads/import_batches</code>). Mỗi lần
+                    làm mới tải tối đa 48 đợt mới nhất
+                    {importExcelBatches.length > 0 ? ` (đang hiển thị ${importExcelBatches.length})` : ''}.
+                  </p>
+                </details>
               </div>
             ) : null}
+            </div>
 
+            <div className="border-t border-slate-100 bg-slate-50/25 px-4 py-4 sm:px-5 sm:py-5 space-y-4">
             {importing1688 && import1688Progress ? (
-              <div className="mt-3 rounded-lg border border-orange-200 bg-white p-3">
+              <div
+                className="rounded-xl border border-orange-200/90 bg-white p-4 shadow-sm ring-1 ring-orange-100/60"
+                role="status"
+                aria-live="polite"
+                aria-busy="true"
+              >
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-orange-900/90">Đang xử lý</p>
                 <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
                   {import1688Progress.percent != null ? (
                     <div
@@ -1625,7 +2366,21 @@ export default function AdminProductsPage() {
             ) : null}
 
             {import1688Draft?.product_data ? (
-              <div className="mt-4 rounded-xl border border-orange-200 bg-white p-4">
+              <div
+                id="import-1688-draft"
+                className="scroll-mt-28 rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm ring-1 ring-slate-900/5 sm:p-5"
+              >
+                <div className="mb-4 flex flex-col gap-1 border-b border-gray-100 pb-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-900">Chỉnh sửa nháp</h3>
+                    <p className="text-xs text-gray-500">Kiểm tra trường trước khi đăng hoặc xuất Excel.</p>
+                  </div>
+                  {import1688Draft?.id != null ? (
+                    <span className="inline-flex rounded-md border border-gray-200 bg-gray-50 px-2 py-1 font-mono text-xs text-gray-700">
+                      Draft #{import1688Draft.id}
+                    </span>
+                  ) : null}
+                </div>
                 <div className="flex flex-col lg:flex-row gap-4">
                   <div className="w-full lg:w-40 shrink-0">
                     {import1688Draft.product_data.main_image ? (
@@ -1799,6 +2554,7 @@ export default function AdminProductsPage() {
                 </div>
               </div>
             ) : null}
+            </div>
 
             {importDraftDeleteTarget ? (
               <div
@@ -1895,7 +2651,7 @@ export default function AdminProductsPage() {
                 </div>
               </div>
             ) : null}
-          </div>
+          </section>
           <div className="mt-4 pt-4 border-t border-gray-100 space-y-2 text-sm text-gray-700">
             <p className="text-xs text-gray-600 leading-snug">
               <strong className="font-medium text-gray-800">Nguồn cấp kiểu URL:</strong> mỗi đường link dưới đây là{' '}
@@ -1956,6 +2712,558 @@ export default function AdminProductsPage() {
           </div>
         </div>
 
+        <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900">Bản địa hóa ảnh</h2>
+              <p className="mt-1 text-sm text-gray-600">
+                Xử lý ảnh cột O/P/Q/T: biến thể, thư viện ảnh, ảnh chi tiết và ảnh chính cho sản phẩm chưa bản địa hóa.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadImageLocalizationSummary()}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Làm mới trạng thái
+            </button>
+          </div>
+
+          <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-800 leading-relaxed">
+            <span className="font-semibold text-slate-900">Mặc định giao diện:</span>{' '}
+            <span className="font-medium">DeepSeek + vẽ local</span> (OCR → dịch → vẽ chữ); Gemini / GPT chỉ khi chọn chủ động — model Pro và ảnh{' '}
+            <span className="font-medium">2K hoặc 4K</span>; GPT chỉ <span className="font-medium">high/auto</span> và cỡ ảnh lớn.
+          </p>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,28rem)]">
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label className="block text-sm lg:col-span-2">
+                  <span className="mb-1 block font-medium text-gray-700">Sinh/sửa ảnh (chữ Trung → bản địa)</span>
+                  <div className="flex flex-col gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700">
+                    <label className="flex cursor-pointer items-start gap-2">
+                      <input
+                        type="radio"
+                        name="imageLocalizationGeminiMode"
+                        className="mt-1"
+                        checked={imageLocalizationGeminiMode === 'local_only'}
+                        onChange={() => setImageLocalizationGeminiMode('local_only')}
+                        disabled={imageLocalizationRunning}
+                      />
+                      <span>
+                        <span className="font-medium">Chỉ DeepSeek + vẽ local (không AI ảnh)</span>
+                        <span className="mt-0.5 block text-xs text-gray-500">
+                          OCR phát hiện chữ → DeepSeek dịch → vẽ lại chữ trên ảnh. Không gọi Gemini/GPT sinh/chỉnh cả khung (phù
+                          hợp ảnh dài / split, tránh lệch sản phẩm). Không cần cookie hay key Gemini/OpenAI cho nhánh này.
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-2">
+                      <input
+                        type="radio"
+                        name="imageLocalizationGeminiMode"
+                        className="mt-1"
+                        checked={imageLocalizationGeminiMode === 'web'}
+                        onChange={() => setImageLocalizationGeminiMode('web')}
+                        disabled={imageLocalizationRunning}
+                      />
+                      <span>
+                        <span className="font-medium">Gemini trên trình duyệt</span>
+                        <span className="mt-0.5 block text-xs text-gray-500">
+                          Playwright + cookie / profile (Nano Banana như khi dùng tay trên gemini.google.com).
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-2">
+                      <input
+                        type="radio"
+                        name="imageLocalizationGeminiMode"
+                        className="mt-1"
+                        checked={imageLocalizationGeminiMode === 'api'}
+                        onChange={() => setImageLocalizationGeminiMode('api')}
+                        disabled={imageLocalizationRunning}
+                      />
+                      <span>
+                        <span className="font-medium">Gemini API (GEMINI_API_KEY)</span>
+                        <span className="mt-0.5 block text-xs text-gray-500">
+                          Model sinh/sửa ảnh trên server (mặc định{' '}
+                          {geminiAuthStatus?.image_model || 'gemini-3-pro-image-preview'}). Không cần cookie; cần key trong backend.
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-2">
+                      <input
+                        type="radio"
+                        name="imageLocalizationGeminiMode"
+                        className="mt-1"
+                        checked={imageLocalizationGeminiMode === 'openai'}
+                        onChange={() => setImageLocalizationGeminiMode('openai')}
+                        disabled={imageLocalizationRunning}
+                      />
+                      <span>
+                        <span className="font-medium">OpenAI GPT Image (OPENAI_API_KEY)</span>
+                        <span className="mt-0.5 block text-xs text-gray-500">
+                          API <code className="text-[11px]">/v1/images/edits</code>, mặc định model{' '}
+                          {geminiAuthStatus?.openai_image_model || 'gpt-image-2'} (có thể đổi{' '}
+                          <code className="text-[11px]">IMAGE_LOCALIZATION_OPENAI_IMAGE_MODEL</code>).
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                  {imageLocalizationGeminiMode === 'web' && (
+                    <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50/90 px-3 py-2 space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                        Gemini Web — Playwright Chromium
+                      </p>
+                      <div className="flex flex-wrap gap-4 text-sm">
+                        <label className="flex cursor-pointer items-center gap-2">
+                          <input
+                            type="radio"
+                            name="imageLocPlaywrightDisplay"
+                            className="mt-0.5"
+                            checked={imageLocalizationPlaywrightHeadless}
+                            onChange={() => setImageLocalizationPlaywrightHeadless(true)}
+                            disabled={imageLocalizationRunning}
+                          />
+                          <span>
+                            <span className="font-medium text-gray-800">Ẩn trình duyệt</span>
+                            <span className="ml-1 text-xs text-gray-500">
+                              (headless — kiểu server sau khi cookie/profile ổn)
+                            </span>
+                          </span>
+                        </label>
+                        <label className="flex cursor-pointer items-center gap-2">
+                          <input
+                            type="radio"
+                            name="imageLocPlaywrightDisplay"
+                            className="mt-0.5"
+                            checked={!imageLocalizationPlaywrightHeadless}
+                            onChange={() => setImageLocalizationPlaywrightHeadless(false)}
+                            disabled={imageLocalizationRunning}
+                          />
+                          <span>
+                            <span className="font-medium text-gray-800">Hiện cửa sổ</span>
+                            <span className="ml-1 text-xs text-gray-500">
+                              (headed — màn hình hoặc RDP/VNC để xem/đăng nhập Gemini)
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+                      {imageLocalizationHeadlessNeedsSavedCookie ? (
+                        <div
+                          role="alert"
+                          className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs text-amber-950 leading-relaxed"
+                        >
+                          <span className="font-semibold">Ẩn trình duyệt:</span> backend chưa có cookie Gemini đã lưu và chưa có{' '}
+                          <code className="text-[11px]">gemini_logged_in.marker</code> — dán cookie vào ô phía dưới rồi bấm &quot;Lưu cookie
+                          Gemini&quot;, hoặc chọn <span className="font-medium">Hiện cửa sổ</span> và đăng nhập một lần để tạo marker. Sau đó mới Chạy
+                          ở chế độ ẩn.
+                        </div>
+                      ) : null}
+                      {!imageLocalizationPlaywrightHeadless ? (
+                        <p className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-2 text-xs text-sky-950 leading-relaxed">
+                          <span className="font-semibold">Hiện cửa sổ:</span> nếu có Sign in / đăng nhập, hoàn thành đăng nhập trong Chromium — backend
+                          sẽ <span className="font-medium">chờ</span> (mặc định ~15 phút qua{' '}
+                          <code className="text-[11px]">IMAGE_LOCALIZATION_GEMINI_MANUAL_LOGIN_WAIT_MS</code>) rồi tự tiếp tục. Đã đăng nhập sẵn thì chạy
+                          luôn.
+                        </p>
+                      ) : null}
+                      <p className="text-xs text-gray-500 leading-relaxed">
+                        Gửi kèm job và ghi đè <code className="text-[11px]">IMAGE_LOCALIZATION_PLAYWRIGHT_HEADLESS</code> cho lần chạy
+                        này. Lần đầu mở trang, mặc định lấy theo cấu hình server (.env).
+                      </p>
+                    </div>
+                  )}
+                  {imageLocalizationGeminiMode === 'api' && (
+                    <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Gemini API — model (chữ &amp; bố cục)</p>
+                      <label className="block text-sm">
+                        <span className="mb-1 block font-medium text-gray-700">Chọn nhanh model</span>
+                        <select
+                          value={geminiApiModelPresetSelectValue}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            if (id === 'custom') return;
+                            const row = IMAGE_LOC_GEMINI_MODEL_PRESETS.find((x) => x.id === id);
+                            setImageLocalizationGeminiApiModel(row?.model ?? '');
+                          }}
+                          disabled={imageLocalizationRunning}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        >
+                          {IMAGE_LOC_GEMINI_MODEL_PRESETS.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.label}
+                            </option>
+                          ))}
+                          <option value="custom">Tùy chỉnh… (ghi ID model trong ô dưới)</option>
+                        </select>
+                      </label>
+                      <label className="block text-sm">
+                        <span className="mb-1 block font-medium text-gray-700">
+                          Model (ID) — ưu tiên dịch &amp; layout
+                        </span>
+                        <input
+                          type="text"
+                          value={imageLocalizationGeminiApiModel}
+                          onChange={(e) => setImageLocalizationGeminiApiModel(e.target.value)}
+                          disabled={imageLocalizationRunning}
+                          placeholder={geminiAuthStatus?.image_model || 'gemini-3-pro-image-preview'}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
+                          autoComplete="off"
+                        />
+                        <span className="mt-1 block text-xs text-gray-500">
+                          Để trống = model mặc định trên server (.env). Pro Image thường cho bố cục/chữ ổn định hơn Flash cùng đời.
+                        </span>
+                      </label>
+                      <div className="rounded-lg border border-gray-100 bg-gray-50/80 p-3">
+                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Đầu ra — chỉ chất lượng / độ nét ảnh</p>
+                        <label className="mt-2 block text-sm">
+                          <span className="mb-1 block font-medium text-gray-700">Độ phân giải (imageSize)</span>
+                          <select
+                            value={imageLocalizationGeminiImageSize}
+                            onChange={(e) => setImageLocalizationGeminiImageSize(e.target.value)}
+                            disabled={imageLocalizationRunning}
+                            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                          >
+                            <option value="">Mặc định (.env IMAGE_LOCALIZATION_GEMINI_API_DEFAULT_IMAGE_SIZE)</option>
+                            {(geminiAuthStatus?.gemini_api_image_sizes ?? ['2K', '4K']).map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="mt-1 block text-xs text-gray-500">
+                            Chỉ 2K và 4K — không còn 512/1K. Luôn tier Standard Gemini (không Flex).
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                  {imageLocalizationGeminiMode === 'openai' && (
+                    <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">GPT Image — model (chữ &amp; bố cục)</p>
+                      <label className="block text-sm">
+                        <span className="mb-1 block font-medium text-gray-700">Chọn nhanh model</span>
+                        <select
+                          value={openaiImageModelPresetSelectValue}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            if (id === 'custom') return;
+                            const row = IMAGE_LOC_OPENAI_MODEL_PRESETS.find((x) => x.id === id);
+                            setImageLocalizationOpenaiModel(row?.model ?? '');
+                          }}
+                          disabled={imageLocalizationRunning}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        >
+                          {IMAGE_LOC_OPENAI_MODEL_PRESETS.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.label}
+                            </option>
+                          ))}
+                          <option value="custom">Tùy chỉnh…</option>
+                        </select>
+                      </label>
+                      <label className="block text-sm">
+                        <span className="mb-1 block font-medium text-gray-700">Model (ID)</span>
+                        <input
+                          type="text"
+                          value={imageLocalizationOpenaiModel}
+                          onChange={(e) => setImageLocalizationOpenaiModel(e.target.value)}
+                          disabled={imageLocalizationRunning}
+                          placeholder={geminiAuthStatus?.openai_image_model || 'gpt-image-2'}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
+                          autoComplete="off"
+                        />
+                        <span className="mt-1 block text-xs text-gray-500">Để trống = .env</span>
+                      </label>
+                      <div className="rounded-lg border border-gray-100 bg-gray-50/80 p-3 space-y-3">
+                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Đầu ra — chất lượng &amp; kích thước ảnh</p>
+                        <label className="block text-sm">
+                          <span className="mb-1 block font-medium text-gray-700">Gợi ý combo (có thể sửa lại hai ô dưới)</span>
+                          <select
+                            value={openaiOutputPresetSelectValue}
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              if (id === '__custom') return;
+                              const row = IMAGE_LOC_OPENAI_OUTPUT_PRESETS.find((x) => x.id === id);
+                              if (!row) {
+                                setImageLocalizationOpenaiQuality('');
+                                setImageLocalizationOpenaiSize('');
+                                return;
+                              }
+                              setImageLocalizationOpenaiQuality(row.quality);
+                              setImageLocalizationOpenaiSize(row.size);
+                            }}
+                            disabled={imageLocalizationRunning}
+                            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                          >
+                            {IMAGE_LOC_OPENAI_OUTPUT_PRESETS.map((p) => (
+                              <option key={p.id || 'none'} value={p.id || ''}>
+                                {p.label}
+                              </option>
+                            ))}
+                            <option value="__custom">
+                              Tổ hợp tùy chỉnh (chỉnh quality / size bên dưới)
+                            </option>
+                          </select>
+                        </label>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="block text-sm">
+                            <span className="mb-1 block font-medium text-gray-700">Chất lượng (quality)</span>
+                            <select
+                              value={imageLocalizationOpenaiQuality}
+                              onChange={(e) => setImageLocalizationOpenaiQuality(e.target.value)}
+                              disabled={imageLocalizationRunning}
+                              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                            >
+                              <option value="">Theo backend (.env)</option>
+                              {(geminiAuthStatus?.openai_image_qualities ?? ['high', 'auto']).map((q) => (
+                                <option key={q} value={q}>
+                                  {q}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="mt-1 block text-xs text-gray-500">Chỉ high hoặc auto — low/medium đã ngừng.</span>
+                          </label>
+                          <label className="block text-sm">
+                            <span className="mb-1 block font-medium text-gray-700">Kích thước (size)</span>
+                            <select
+                              value={imageLocalizationOpenaiSize}
+                              onChange={(e) => setImageLocalizationOpenaiSize(e.target.value)}
+                              disabled={imageLocalizationRunning}
+                              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                            >
+                              <option value="">
+                                GPT Image — mặc định auto hoặc theo ô dưới
+                              </option>
+                              {(geminiAuthStatus?.openai_image_sizes ?? [
+                                'auto',
+                                '1024x1792',
+                                '1792x1024',
+                                '1536x1024',
+                                '1024x1536',
+                              ]).map((sz) => (
+                                <option key={sz} value={sz}>
+                                  {sz}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block font-medium text-gray-700">Ngôn ngữ bản địa</span>
+                  <select
+                    value={imageLocalizationLanguage}
+                    onChange={(e) => setImageLocalizationLanguage(e.target.value)}
+                    disabled={imageLocalizationRunning}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  >
+                    <option value="vi">Tiếng Việt</option>
+                    <option value="en">English</option>
+                    <option value="th">Thai</option>
+                    <option value="id">Indonesian</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={imageLocalizationSelectedOnly}
+                    onChange={(e) => setImageLocalizationSelectedOnly(e.target.checked)}
+                    disabled={imageLocalizationRunning || selectedProductIds.size === 0}
+                  />
+                  Chỉ chạy {selectedProductIds.size} sản phẩm đang chọn
+                </label>
+                <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={imageLocalizationForce}
+                    onChange={(e) => setImageLocalizationForce(e.target.checked)}
+                    disabled={imageLocalizationRunning}
+                  />
+                  Chạy lại cả ảnh đã xử lý
+                </label>
+                <div className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600">
+                  <div>Pending: {imageLocalizationSummary?.pending ?? '—'}</div>
+                  <div>Done: {imageLocalizationSummary?.localized ?? '—'} · Error: {imageLocalizationSummary?.failed ?? '—'}</div>
+                </div>
+              </div>
+
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-gray-700">Cookie Gemini</span>
+                <textarea
+                  value={imageLocalizationCookie}
+                  onChange={(e) => setImageLocalizationCookie(e.target.value)}
+                  placeholder="Dán Cookie header hoặc JSON cookie export của Gemini..."
+                  rows={3}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
+                />
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleSaveGeminiCookie()}
+                  disabled={imageLocalizationSavingCookie || !imageLocalizationCookie.trim()}
+                  className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-60"
+                >
+                  {imageLocalizationSavingCookie ? 'Đang lưu cookie...' : 'Lưu cookie Gemini'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleStartImageLocalization()}
+                  disabled={imageLocalizationRunning || !imageLocalizationGeminiReady}
+                  className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-60"
+                >
+                  {imageLocalizationRunning ? 'Đang chạy...' : 'Chạy bản địa hóa ảnh'}
+                </button>
+                {imageLocalizationRunning ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleCancelImageLocalization()}
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Hủy sau ảnh hiện tại
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="rounded-lg border border-amber-200 bg-amber-50/90 p-3 space-y-2">
+                <p className="text-sm font-medium text-amber-950">Đánh dấu DB: đã bản địa hóa ảnh</p>
+                <p className="text-xs text-amber-900/90">
+                  Khi ảnh đã xử lý xong nhưng DB vẫn báo chưa <code className="text-[11px]">localized</code>. Chọn một phạm vi rồi
+                  xem trước / áp dụng.
+                </p>
+                <label className="block text-sm text-amber-950">
+                  <span className="mb-1 block font-medium">Phạm vi cập nhật</span>
+                  <select
+                    value={imageBulkMarkScope}
+                    onChange={(e) => {
+                      const v = e.target.value as 'queue' | 'all_no_skipped' | 'all_with_skipped';
+                      setImageBulkMarkScope(v);
+                      setImageBulkMarkPreviewCount(null);
+                    }}
+                    disabled={imageBulkMarkBusy}
+                    className="w-full max-w-lg rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm"
+                  >
+                    <option value="all_no_skipped">Mọi sản phẩm, trừ skipped (mặc định — phù hợp “đã xử lý hết ảnh”)</option>
+                    <option value="queue">
+                      Chỉ hàng chưa xong (trống / pending / failed / processing)
+                    </option>
+                    <option value="all_with_skipped">Mọi sản phẩm kể cả skipped (không ảnh O/P/Q/T)</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-2 text-sm text-amber-950">
+                  <input
+                    type="checkbox"
+                    checked={imageBulkMarkAgree}
+                    onChange={(e) => setImageBulkMarkAgree(e.target.checked)}
+                    disabled={imageBulkMarkBusy}
+                  />
+                  Tôi hiểu thao tác ghi trực tiếp vào database
+                </label>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => void handleBulkMarkImageLocalizationPreview()}
+                    disabled={imageBulkMarkBusy}
+                    className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-950 hover:bg-amber-100 disabled:opacity-60"
+                  >
+                    {imageBulkMarkBusy ? '…' : 'Xem trước (dry run)'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleBulkMarkImageLocalizationApply()}
+                    disabled={imageBulkMarkBusy || !imageBulkMarkAgree}
+                    className="rounded-lg bg-amber-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-900 disabled:opacity-60"
+                  >
+                    {imageBulkMarkBusy ? 'Đang ghi…' : 'Áp dụng cập nhật'}
+                  </button>
+                  {imageBulkMarkPreviewCount != null ? (
+                    <span className="text-xs text-amber-900">Lần xem trước: {imageBulkMarkPreviewCount} dòng</span>
+                  ) : null}
+                </div>
+              </div>
+
+              {geminiAuthStatus ? (
+                <p className="text-xs text-gray-600">
+                  Web: {geminiAuthStatus.web?.ready ? 'sẵn sàng' : 'chưa sẵn sàng'}
+                  {geminiAuthStatus.web?.cookie_deploy_block_reason ? (
+                    <span className="text-red-600"> · {geminiAuthStatus.web.cookie_deploy_block_reason}</span>
+                  ) : null}
+                  {' · '}cookie {geminiAuthStatus.web?.cookie_count ?? 0}
+                  {' · '}Playwright{' '}
+                  {typeof geminiAuthStatus.playwright_headless === 'boolean'
+                    ? geminiAuthStatus.playwright_headless
+                      ? 'ẩn trình duyệt'
+                      : 'hiện trình duyệt'
+                    : '—'}
+                  · profile {geminiAuthStatus.web?.profile_marker ? 'có' : 'không'}
+                  {' · '}API Gemini: {geminiAuthStatus.api?.ready ? 'sẵn sàng' : 'chưa sẵn sàng'} (
+                  {geminiAuthStatus.image_model}). OpenAI: {geminiAuthStatus.openai?.ready ? 'sẵn sàng' : 'chưa sẵn sàng'}{' '}
+                  ({geminiAuthStatus.openai_image_model})
+                </p>
+              ) : null}
+              {imageLocalizationError ? (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {imageLocalizationError}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-gray-900">Tiến trình</span>
+                <span className="text-xs text-gray-500">{imageLocalizationJob?.status || 'idle'}</span>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-200">
+                {imageLocalizationJob?.percent != null ? (
+                  <div
+                    className="h-full rounded-full bg-violet-600 transition-[width] duration-300"
+                    style={{ width: `${Math.min(100, imageLocalizationJob.percent)}%` }}
+                  />
+                ) : (
+                  <div className="h-full w-full rounded-full bg-violet-400/60" />
+                )}
+              </div>
+              <p className="mt-2 whitespace-pre-wrap text-sm text-gray-700">
+                {imageLocalizationJob?.message || 'Chưa có job đang chạy.'}
+              </p>
+              {imageLocalizationJob?.gemini_mode === 'web' &&
+              typeof imageLocalizationJob.playwright_headless_effective === 'boolean' ? (
+                <p className="mt-1 text-xs text-gray-500">
+                  Playwright Chromium:{' '}
+                  <span className="font-medium text-gray-700">
+                    {imageLocalizationJob.playwright_headless_effective ? 'ẩn trình duyệt' : 'hiện cửa sổ'}
+                  </span>
+                  {imageLocalizationJob.playwright_headless_requested == null ? (
+                    <span> (mặc định server / .env)</span>
+                  ) : null}
+                </p>
+              ) : null}
+              {imageLocalizationJob?.total != null ? (
+                <p className="mt-1 text-xs text-gray-500">
+                  {imageLocalizationJob.current ?? 0}/{imageLocalizationJob.total} · xong {imageLocalizationJob.done ?? 0} · lỗi{' '}
+                  {imageLocalizationJob.failed ?? 0} · bỏ qua {imageLocalizationJob.skipped ?? 0}
+                </p>
+              ) : null}
+              {imageLocalizationJob?.recent_results?.length ? (
+                <div className="mt-3 max-h-40 space-y-1 overflow-auto rounded border border-gray-200 bg-white p-2 text-xs text-gray-600">
+                  {imageLocalizationJob.recent_results.slice(-8).map((r) => (
+                    <div key={`${r.product_id}-${r.status}-${r.message || ''}`} className="flex gap-2">
+                      <span className="font-mono text-gray-800">{r.product_id}</span>
+                      <span>{r.status}</span>
+                      {r.message ? <span className="truncate text-gray-500">{r.message}</span> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
         {/* Table */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           {loading ? (
@@ -2005,15 +3313,19 @@ export default function AdminProductsPage() {
                             />
                           </th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">ID</th>
+                          <th className="text-left py-3 px-2 font-semibold text-gray-700 w-[5.5rem]">Web</th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700">Tên</th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700 w-24">Giá</th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700 w-32">Thương hiệu</th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">Danh mục</th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700 w-20">Trạng thái</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">Ảnh</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {data.products.map((p) => (
+                        {data.products.map((p) => {
+                          const webUrl = adminProductPublicUrl(p.slug);
+                          return (
                       <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50/50">
                         <td className="py-2 px-4">
                           <input
@@ -2042,6 +3354,29 @@ export default function AdminProductsPage() {
                               {(p as AdminProduct).product_id || p.id}
                             </span>
                           )}
+                        </td>
+                        <td className="py-2 px-2 whitespace-nowrap align-middle">
+                          {webUrl ? (
+                              <a
+                                href={webUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:border-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-1"
+                                title="Mở trang sản phẩm trên web (tab mới)"
+                              >
+                                <svg className="h-3.5 w-3.5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                </svg>
+                                Xem web
+                              </a>
+                            ) : (
+                              <span
+                                className="inline-flex items-center rounded-md border border-dashed border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-400"
+                                title="Chưa có slug — không tạo được link công khai"
+                              >
+                                —
+                              </span>
+                            )}
                         </td>
                         <td className="py-2 px-4">
                           {editing?.productId === p.product_id && editing?.field === 'name' ? (
@@ -2129,8 +3464,28 @@ export default function AdminProductsPage() {
                             {p.is_active !== false ? 'Hiển thị' : 'Ẩn'}
                           </span>
                         </td>
+                        <td className="py-2 px-4">
+                          <button
+                            type="button"
+                            className={`inline font-medium hover:underline underline-offset-2 text-left ${
+                              p.image_localization_status === 'localized'
+                                ? 'text-violet-700'
+                                : p.image_localization_status === 'failed'
+                                  ? 'text-red-600'
+                                  : 'text-gray-500'
+                            }`}
+                            title={
+                              (p.image_localization_error ? `${p.image_localization_error}\n` : '') +
+                              'Bấm để xem báo cáo chi tiết từng ảnh'
+                            }
+                            onClick={() => void openImageLocReport(p.product_id)}
+                          >
+                            {p.image_localization_status || 'pending'}
+                          </button>
+                        </td>
                       </tr>
-                    ))}
+                          );
+                        })}
                   </tbody>
                 </table>
               </div>
@@ -2164,6 +3519,200 @@ export default function AdminProductsPage() {
             </>
           ) : null}
         </div>
+
+        {imageLocReportOpen && (
+          <div
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/45 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="img-loc-report-title"
+            onClick={() => setImageLocReportOpen(false)}
+          >
+            <div
+              className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] flex flex-col overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 gap-2">
+                <h2 id="img-loc-report-title" className="text-lg font-semibold text-gray-900 truncate">
+                  Báo cáo bản địa hóa ảnh — {imageLocReportProductId}
+                </h2>
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 border border-gray-200"
+                  onClick={() => setImageLocReportOpen(false)}
+                >
+                  Đóng (Esc)
+                </button>
+              </div>
+              <div className="overflow-y-auto flex-1 p-4 text-sm">
+                {imageLocReportLoading && (
+                  <p className="text-gray-600 py-6 text-center">Đang tải báo cáo…</p>
+                )}
+                {imageLocReportError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 text-red-800 px-4 py-3">
+                    {imageLocReportError}
+                  </div>
+                )}
+                {!imageLocReportLoading && imageLocReportData && (
+                  <>
+                    <div className="mb-4 flex flex-wrap gap-3 text-xs sm:text-sm text-gray-700">
+                      <span>
+                        <span className="text-gray-500">Trạng thái DB: </span>
+                        <strong>{imageLocReportData.db_status || '—'}</strong>
+                      </span>
+                      {imageLocReportData.report_processed_at && (
+                        <span>
+                          <span className="text-gray-500">Lúc chạy: </span>
+                          {imageLocReportData.report_processed_at}
+                        </span>
+                      )}
+                      {imageLocReportData.report_language && (
+                        <span>
+                          <span className="text-gray-500">Ngôn ngữ: </span>
+                          {imageLocReportData.report_language}
+                        </span>
+                      )}
+                    </div>
+                    {imageLocReportData.db_error && (
+                      <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2 text-xs">
+                        Lỗi lưu DB: {imageLocReportData.db_error}
+                      </div>
+                    )}
+                    {!imageLocReportData.has_report && (
+                      <p className="text-gray-600 border border-gray-100 rounded-lg p-4 bg-gray-50">
+                        Chưa có file báo cáo chi tiết trong{' '}
+                        <code className="text-xs bg-gray-200 px-1 rounded">product_info.image_localization</code>.
+                        Chạy job bản địa hóa ảnh ít nhất một lần (và commit DB) để lưu từng URL và trạng thái.
+                      </p>
+                    )}
+                    {imageLocReportData.has_report && (
+                      <>
+                        <div className="mb-4 flex flex-wrap gap-2">
+                          {(
+                            [
+                              ['total', 'Tổng'],
+                              ['deleted', 'Đã xóa'],
+                              ['error', 'Lỗi'],
+                              ['ai_image', 'AI ảnh'],
+                              ['local_draw', 'Vẽ local'],
+                              ['local_pipeline', 'Cắt/ghép'],
+                              ['processed_other', 'Xử lý khác'],
+                              ['kept_cdn', 'Giữ (CDN)'],
+                              ['kept_other', 'Giữ khác'],
+                              ['unknown', 'Không rõ'],
+                            ] as const
+                          ).map(([key, label]) => {
+                            const v = imageLocReportData.summary[key];
+                            if (key !== 'total' && v === 0) return null;
+                            return (
+                              <span
+                                key={key}
+                                className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800"
+                              >
+                                {label}: {v}
+                              </span>
+                            );
+                          })}
+                        </div>
+                        <div className="overflow-x-auto rounded border border-gray-200">
+                          <table className="min-w-full text-left text-xs">
+                            <thead className="bg-gray-50 text-gray-600">
+                              <tr>
+                                <th className="py-2 px-2 font-medium">Vị trí</th>
+                                <th className="py-2 px-2 font-medium">Loại</th>
+                                <th className="py-2 px-2 font-medium">Trạng thái</th>
+                                <th className="py-2 px-2 font-medium">Ảnh gốc</th>
+                                <th className="py-2 px-2 font-medium">Sau xử lý</th>
+                                <th className="py-2 px-2 font-medium">Ghi chú / lý do</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {imageLocReportData.items.map((row, idx) => (
+                                <tr key={`${row.original_url}-${idx}`} className="align-top">
+                                  <td className="py-2 px-2 whitespace-nowrap">
+                                    {row.bucket ?? '—'}
+                                    {row.index !== null && row.index !== undefined ? `[${row.index}]` : ''}
+                                  </td>
+                                  <td className="py-2 px-2 text-gray-800 max-w-[10rem]">{row.label_vi}</td>
+                                  <td className="py-2 px-2 font-mono text-[10px]">{row.status}</td>
+                                  <td className="py-2 px-2 max-w-[14rem] break-all text-blue-700">
+                                    <a
+                                      href={row.original_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="hover:underline"
+                                    >
+                                      {row.original_url.slice(0, 72)}
+                                      {row.original_url.length > 72 ? '…' : ''}
+                                    </a>
+                                  </td>
+                                  <td className="py-2 px-2 max-w-[14rem] break-all">
+                                    {row.final_url ? (
+                                      <a
+                                        href={row.final_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-violet-700 hover:underline"
+                                      >
+                                        {row.final_url.slice(0, 72)}
+                                        {row.final_url.length > 72 ? '…' : ''}
+                                      </a>
+                                    ) : (
+                                      <span className="text-gray-400">—</span>
+                                    )}
+                                  </td>
+                                  <td className="py-2 px-2 text-gray-700 max-w-xl">
+                                    <div>{row.message || '—'}</div>
+                                    {row.detail &&
+                                      Array.isArray((row.detail as { split_parts?: unknown }).split_parts) &&
+                                      (row.detail as { split_parts: { method?: string; message?: string }[] })
+                                        .split_parts.length > 0 && (
+                                        <ul className="mt-1 list-disc pl-4 text-gray-600 text-[11px] space-y-0.5">
+                                          {(
+                                            row.detail as {
+                                              split_parts: {
+                                                part_index?: number;
+                                                total_parts?: number;
+                                                method?: string;
+                                                message?: string;
+                                              }[];
+                                            }
+                                          ).split_parts
+                                            .slice()
+                                            .sort((a, b) => (a.part_index ?? 0) - (b.part_index ?? 0))
+                                            .map((p, j) => (
+                                              <li key={j}>
+                                                <span className="font-medium text-gray-700">
+                                                  Phần {(p.part_index ?? 0) + 1}/{p.total_parts ?? '?'}:
+                                                </span>{' '}
+                                                {p.method === 'ai_image'
+                                                  ? 'AI ảnh (Gemini/GPT)'
+                                                  : p.method === 'local_draw'
+                                                    ? 'OCR + DeepSeek + vẽ local'
+                                                    : p.method === 'kept'
+                                                      ? 'Giữ nguyên'
+                                                      : p.method ?? '—'}
+                                                {p.message ? (
+                                                  <span className="text-gray-500"> — {p.message}</span>
+                                                ) : null}
+                                              </li>
+                                            ))}
+                                        </ul>
+                                      )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {toast && (
           <div

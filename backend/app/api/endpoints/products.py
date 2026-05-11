@@ -1,4 +1,8 @@
 # backend/app/api/endpoints/products.py - COMPLETE FIXED VERSION WITH BOTH ENDPOINTS
+from datetime import datetime
+import io
+
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -182,6 +186,10 @@ def read_products(
     q: Optional[str] = Query(None, description="Tìm theo tên, mã, danh mục, vật liệu, kiểu dáng, màu sắc, dịp, tính năng, size (từ khóa rời rạc)"),
     product_id: Optional[str] = Query(None, description="Tìm theo ID sản phẩm (Excel) hoặc mã SKU (cột code)"),
     order_random: bool = Query(False, description="Trộn ngẫu nhiên (chỉ áp dụng khi không có q); phân trang theo random không ổn định giữa các lần tải"),
+    sort: Optional[str] = Query(
+        None,
+        description="Sắp xếp: default | views_desc | newest | oldest (bị bỏ qua khi order_random=true)",
+    ),
 ):
     """
     Get products with filtering and search (by name; the product_id filter matches Excel id or SKU code).
@@ -210,6 +218,7 @@ def read_products(
                 min_price=min_price,
                 max_price=max_price,
                 is_active=is_active,
+                sort=crud.product.normalize_product_list_sort(sort),
             )
             cached = product_search_cache_crud.get_cached_result(db, cache_key)
             if cached is not None:
@@ -223,6 +232,7 @@ def read_products(
             min_price=min_price, max_price=max_price, is_active=is_active,
             q=q, product_id=product_id,
             order_random=order_random,
+            sort=sort,
         )
         
         # Convert SQLAlchemy objects to dicts
@@ -244,6 +254,51 @@ def read_products(
         return result
     except Exception as e:
         return {"error": str(e), "status": "serialization_error"}
+
+
+@router.get("/export-unused-internal-skus/available-count", response_model=dict)
+def get_unused_internal_sku_available_count(
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Số lượng mã SKU còn có thể export (và tổng dải) — phục vụ form admin."""
+    from app.services.product_internal_sku import count_available_internal_skus_for_export
+
+    return count_available_internal_skus_for_export(db)
+
+
+@router.post("/export-unused-internal-skus")
+def export_unused_internal_skus(
+    count: int = Query(100, ge=1, le=10_000, description="Số mã SKU cần lấy (A0001–Z9999, không gồm X0000)"),
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """
+    Xuất Excel một cột `sku`: các mã chưa dùng cho sản phẩm và chưa từng export trước đó.
+    Mã được ghi vào bảng `internal_sku_exports` để không trùng ở lần export sau và không bị tự sinh trùng khi import.
+    """
+    from app.services.product_internal_sku import allocate_unused_internal_skus_for_export
+
+    try:
+        codes = allocate_unused_internal_skus_for_export(db, count)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    df = pd.DataFrame({"sku": codes})
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="sku")
+    buf.seek(0)
+    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = f"internal_skus_unused_{count}_{stamp}.xlsx"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
 
 @router.post("", response_model=Product, include_in_schema=False)
 @router.post("/", response_model=Product)

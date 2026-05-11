@@ -34,6 +34,7 @@ def build_cache_key(
     min_price: Optional[float],
     max_price: Optional[float],
     is_active: Optional[bool],
+    sort: str = "default",
 ) -> str:
     payload = {
         "q": norm_q or "",
@@ -49,6 +50,7 @@ def build_cache_key(
         "min": "" if min_price is None else float(min_price),
         "max": "" if max_price is None else float(max_price),
         "ia": True if is_active is not False else False,
+        "sort": (sort or "").strip() or "default",
     }
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]

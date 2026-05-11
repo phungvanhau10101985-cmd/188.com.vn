@@ -6,6 +6,8 @@ declare namespace NodeJS {
     NEXT_PUBLIC_SITE_URL?: string;
     NEXT_PUBLIC_DOMAIN?: string;
     NEXT_PUBLIC_API_BASE_URL?: string;
+    /** Dev: origin FastAPI chỉ để ghép `/static/...` khi API qua `/api/v1` cùng host Next (proxy). Mặc định trong code là http://127.0.0.1:8001 */
+    NEXT_PUBLIC_FASTAPI_ORIGIN?: string;
     /** Base `/api/v1` công khai cho feed TSV catalogue (Google / Meta / TikTok), ví dụ `https://api.example.com/api/v1` */
     NEXT_PUBLIC_CATALOG_FEED_API_BASE_URL?: string;
     NEXT_PUBLIC_SEPAY_CONTENT_PREFIX?: string;

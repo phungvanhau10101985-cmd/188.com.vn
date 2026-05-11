@@ -122,6 +122,101 @@ class Settings:
         )
         self.BUNNY_WEB_PUBLIC_PREFIX: str = os.getenv("BUNNY_WEB_PUBLIC_PREFIX", "").strip().strip("/")
 
+        # Bản địa hóa ảnh sản phẩm — Selenium/Gemini web profile + Bunny upload.
+        self.IMAGE_LOCALIZATION_ENABLED: bool = os.getenv(
+            "IMAGE_LOCALIZATION_ENABLED", "True"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.IMAGE_LOCALIZATION_RUNTIME_DIR: str = os.getenv(
+            "IMAGE_LOCALIZATION_RUNTIME_DIR",
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "runtime", "image_localization")),
+        ).strip()
+        self.IMAGE_LOCALIZATION_TOOL_DIR: str = os.getenv(
+            "IMAGE_LOCALIZATION_TOOL_DIR",
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "services", "image_localization_tool")),
+        ).strip()
+        self.IMAGE_LOCALIZATION_FULL_PIPELINE_ENABLED: bool = os.getenv(
+            "IMAGE_LOCALIZATION_FULL_PIPELINE_ENABLED", "True"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        # True = chỉ gọi Gemini/GPT sinh ảnh khi job có allow_ai_image_models hoặc SP có product_info.image_localization.allow_ai_models=true
+        self.IMAGE_LOCALIZATION_AI_IMAGE_EXPLICIT_ONLY: bool = os.getenv(
+            "IMAGE_LOCALIZATION_AI_IMAGE_EXPLICIT_ONLY", "false"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.IMAGE_LOCALIZATION_GCP_KEY_FILE: str = os.getenv(
+            "IMAGE_LOCALIZATION_GCP_KEY_FILE",
+            os.getenv("GOOGLE_APPLICATION_CREDENTIALS", ""),
+        ).strip()
+        self.IMAGE_LOCALIZATION_BATCH_SIZE: int = int(os.getenv("IMAGE_LOCALIZATION_BATCH_SIZE", "10") or "10")
+        self.IMAGE_LOCALIZATION_CHROME_PROFILE_PATH: str = os.getenv(
+            "IMAGE_LOCALIZATION_CHROME_PROFILE_PATH", ""
+        ).strip()
+        self.IMAGE_LOCALIZATION_GEMINI_COOKIE_FILE: str = os.getenv(
+            "IMAGE_LOCALIZATION_GEMINI_COOKIE_FILE",
+            os.path.join(self.IMAGE_LOCALIZATION_RUNTIME_DIR, "gemini_cookies.json"),
+        ).strip()
+        self.IMAGE_LOCALIZATION_PLAYWRIGHT_HEADLESS: bool = (
+            os.getenv("IMAGE_LOCALIZATION_PLAYWRIGHT_HEADLESS", "true").strip().lower()
+            not in ("0", "false", "no", "off")
+        )
+        self.IMAGE_LOCALIZATION_PLAYWRIGHT_TIMEOUT_MS: int = int(
+            os.getenv("IMAGE_LOCALIZATION_PLAYWRIGHT_TIMEOUT_MS", "180000") or "180000"
+        )
+        self.IMAGE_LOCALIZATION_GEMINI_MANUAL_LOGIN_WAIT_MS: int = int(
+            os.getenv("IMAGE_LOCALIZATION_GEMINI_MANUAL_LOGIN_WAIT_MS", "900000") or "900000"
+        )
+        self.IMAGE_LOCALIZATION_GEMINI_SKIP_JSON_COOKIES_WHEN_PROFILE_MARKER: bool = (
+            os.getenv("IMAGE_LOCALIZATION_GEMINI_SKIP_JSON_COOKIES_WHEN_PROFILE_MARKER", "false").strip().lower()
+            in ("1", "true", "yes", "on")
+        )
+        # Gemini Web headed: khi SSO mở accounts.google.com, bấm dòng TK có email này (tránh nhầm TK khác). Để trống → bấm dòng có "Signed out" hoặc mục đầu trong listbox.
+        self.IMAGE_LOCALIZATION_GOOGLE_ACCOUNT_EMAIL: str = os.getenv(
+            "IMAGE_LOCALIZATION_GOOGLE_ACCOUNT_EMAIL", ""
+        ).strip()
+        self.IMAGE_LOCALIZATION_BATCH_LIMIT: int = int(os.getenv("IMAGE_LOCALIZATION_BATCH_LIMIT", "0") or "0")
+        self.IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT: int = int(
+            os.getenv("IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT", "80") or "80"
+        )
+        # Gemini cho bản địa hóa ảnh: web (Playwright + cookie) hoặc api (GEMINI_API_KEY + model sinh/sửa ảnh).
+        # openai = OpenAI GPT Image (/v1/images/edits), dùng OPENAI_API_KEY.
+        _ilm = os.getenv("IMAGE_LOCALIZATION_GEMINI_MODE", "web").strip().lower()
+        self.IMAGE_LOCALIZATION_GEMINI_MODE: str = _ilm if _ilm in ("web", "api", "openai") else "web"
+        self.IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL: str = (
+            os.getenv("IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL", "gemini-3-pro-image-preview").strip()
+            or "gemini-3-pro-image-preview"
+        )
+        self.IMAGE_LOCALIZATION_GEMINI_API_TIMEOUT_SEC: int = int(
+            os.getenv("IMAGE_LOCALIZATION_GEMINI_API_TIMEOUT_SEC", "300") or "300"
+        )
+        self.IMAGE_LOCALIZATION_GEMINI_FLEX_TIMEOUT_SEC: int = int(
+            os.getenv("IMAGE_LOCALIZATION_GEMINI_FLEX_TIMEOUT_SEC", "900") or "900"
+        )
+        self.IMAGE_LOCALIZATION_OPENAI_IMAGE_MODEL: str = (
+            os.getenv("IMAGE_LOCALIZATION_OPENAI_IMAGE_MODEL", "gpt-image-2").strip() or "gpt-image-2"
+        )
+        self.IMAGE_LOCALIZATION_OPENAI_IMAGE_TIMEOUT_SEC: int = int(
+            os.getenv("IMAGE_LOCALIZATION_OPENAI_IMAGE_TIMEOUT_SEC", "300") or "300"
+        )
+        # Khi job không truyền gemini_image_size — ép 2K hoặc 4K (.env chỉ nhận 2K | 4K).
+        _gdef = os.getenv("IMAGE_LOCALIZATION_GEMINI_API_DEFAULT_IMAGE_SIZE", "2K").strip().upper().replace(" ", "")
+        self.IMAGE_LOCALIZATION_GEMINI_API_DEFAULT_IMAGE_SIZE: str = _gdef if _gdef in ("2K", "4K") else "2K"
+        _odef = (
+            os.getenv("IMAGE_LOCALIZATION_OPENAI_DEFAULT_IMAGE_QUALITY", "high").strip().lower()
+            or "high"
+        )
+        self.IMAGE_LOCALIZATION_OPENAI_DEFAULT_IMAGE_QUALITY: str = (
+            _odef if _odef in ("high", "auto") else "high"
+        )
+        # Vẽ local: sau khi dịch, ước lượng bbox chữ mới có đè nhau không.
+        # Để trống / off = không bỏ bước vẽ (luôn dịch + inpaint + vẽ — mặc định mới).
+        # Đặt số 0.01–0.99: chỉ giữ ảnh gốc nếu max(intersection/min_area) vượt ngưỡng (hành vi cũ ~0.01 rất nhạy).
+        _lo_abort = os.getenv("IMAGE_LOCALIZATION_LOCAL_OVERLAP_ABORT_THRESHOLD", "").strip().lower()
+        if _lo_abort in ("", "off", "false", "none", "disabled"):
+            self.IMAGE_LOCALIZATION_LOCAL_OVERLAP_ABORT_THRESHOLD: Optional[float] = None
+        else:
+            try:
+                self.IMAGE_LOCALIZATION_LOCAL_OVERLAP_ABORT_THRESHOLD = float(_lo_abort)
+            except ValueError:
+                self.IMAGE_LOCALIZATION_LOCAL_OVERLAP_ABORT_THRESHOLD = None
+
         # 1688 import — Playwright dùng cookie đăng nhập để đọc trang detail ổn định hơn request thường.
         self.IMPORT_1688_ENABLED: bool = os.getenv("IMPORT_1688_ENABLED", "True").strip().lower() in ("1", "true", "yes")
         self.IMPORT_1688_COOKIE_JSON: str = os.getenv("IMPORT_1688_COOKIE_JSON", "").strip()

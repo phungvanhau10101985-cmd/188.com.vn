@@ -1,5 +1,5 @@
 /**
- * Chạy Next dev luôn trên cổng 3001 (ép `-p 3001`).
+ * Chạy Next dev trên cổng 3001 mặc định, có thể truyền `-p <port>`.
  * Không tin PORT trong .env.local — hay gây nhầm vẫn ra 3000.
  *
  * Dùng: npm run dev   hoặc   node scripts/next-dev.cjs
@@ -21,15 +21,20 @@ function resolveNextCli() {
   return binPath;
 }
 
+const args = process.argv.slice(2);
+const portArgIdx = args.findIndex((x) => x === '-p' || x === '--port');
+const port = portArgIdx >= 0 && args[portArgIdx + 1] ? args[portArgIdx + 1] : process.env.PORT || '3001';
+const passthrough =
+  portArgIdx >= 0 ? args.filter((_, idx) => idx !== portArgIdx && idx !== portArgIdx + 1) : args;
 const nextCli = resolveNextCli();
-const result = spawnSync(process.execPath, [nextCli, 'dev', '-p', '3001'], {
+const result = spawnSync(process.execPath, [nextCli, 'dev', '-p', port, '--webpack', ...passthrough], {
   cwd: root,
   stdio: 'inherit',
   env: {
     ...process.env,
-    PORT: '3001',
+    PORT: port,
+    /** Khớp backend: `SERVER_PORT` mặc định 8001 trong `backend/app/core/config.py`. */
     API_INTERNAL_ORIGIN: process.env.API_INTERNAL_ORIGIN || 'http://127.0.0.1:8001',
-    NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1',
   },
 });
 

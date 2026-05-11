@@ -1,6 +1,6 @@
 # backend/app/crud/product.py - COMPLETE FIXED VERSION
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func as sql_func, or_
+from sqlalchemy import and_, func as sql_func, or_, select, union_all
 from typing import List, Optional, Dict, Any, Set
 from app.models.product import Product
 from app.models.search_mapping import SearchMapping, SearchMappingType
@@ -8,6 +8,8 @@ from app.models.search_log import SearchLog
 from app.models.category_seo import CategorySeoMeta, CategorySeoGeminiTarget, CategorySeoSettings
 from app.models.category_transform_rule import CategoryTransformRule
 from app.models.category_final_mapping import CategoryFinalMapping
+from app.models.guest_behavior import GuestProductView
+from app.models.user import UserProductView
 from app.schemas.product import ProductCreate, ProductUpdate
 import math
 import logging
@@ -52,6 +54,59 @@ except ImportError:
         return text.strip('-')
 
 logger = logging.getLogger(__name__)
+
+# ========== Danh sách SP: sắp xếp (admin / API) ==========
+
+
+def normalize_product_list_sort(sort: Optional[str]) -> str:
+    """Giá trị nội bộ: default | views_desc | newest | oldest."""
+    s = (sort or "").strip().lower().replace("-", "_")
+    if s in ("", "default", "id", "id_asc"):
+        return "default"
+    if s in ("views_desc", "views", "popular", "most_viewed"):
+        return "views_desc"
+    if s in ("newest", "new", "created_desc"):
+        return "newest"
+    if s in ("oldest", "created_asc"):
+        return "oldest"
+    return "default"
+
+
+def _product_view_totals_subquery():
+    """
+    Tổng lượt mở trang chi tiết (guest + đăng nhập), group theo Product.id / product_id FK.
+    """
+    guest_sq = (
+        select(
+            GuestProductView.product_id.label("product_id"),
+            sql_func.coalesce(sql_func.sum(GuestProductView.view_count), 0).label("v"),
+        ).group_by(GuestProductView.product_id)
+    )
+    user_sq = (
+        select(
+            UserProductView.product_id.label("product_id"),
+            sql_func.coalesce(sql_func.sum(UserProductView.view_count), 0).label("v"),
+        ).group_by(UserProductView.product_id)
+    )
+    parts = union_all(guest_sq, user_sq).subquery("pv_union")
+    return (
+        select(parts.c.product_id, sql_func.sum(parts.c.v).label("view_total"))
+        .group_by(parts.c.product_id)
+        .subquery("pv_totals")
+    )
+
+
+def _order_exprs_for_product_list(sort: str, view_totals_subq):
+    """Cặp/order_by expressions; view_totals_subq chỉ dùng khi sort == views_desc."""
+    if sort == "views_desc" and view_totals_subq is not None:
+        cnt = sql_func.coalesce(view_totals_subq.c.view_total, 0)
+        return [cnt.desc(), Product.id.desc()]
+    if sort == "newest":
+        return [Product.created_at.desc().nullslast(), Product.id.desc()]
+    if sort == "oldest":
+        return [Product.created_at.asc().nullslast(), Product.id.asc()]
+    return [Product.id.asc()]
+
 
 # ========== HELPER FUNCTIONS ==========
 
@@ -1084,7 +1139,15 @@ def _apply_word_mapping(words: List[str]) -> List[str]:
     return result
 
 
-def _search_products_by_words(db: Session, query, words: List[str], limit: int, skip: int):
+def _search_products_by_words(
+    db: Session,
+    query,
+    words: List[str],
+    limit: int,
+    skip: int,
+    *,
+    sort: str = "default",
+):
     """
     Tìm sản phẩm khi chuỗi tổng hợp chứa TẤT CẢ các từ (ilike).
     Chuỗi tổng hợp bao gồm: tên, mã, danh mục 1/2/3, chất liệu, kiểu dáng, màu sắc,
@@ -1119,8 +1182,13 @@ def _search_products_by_words(db: Session, query, words: List[str], limit: int, 
         if not w_norm:
             continue
         query = query.filter(search_concat_norm.ilike(f"%{w_norm}%"))
+    vt_sub = None
+    if sort == "views_desc":
+        vt_sub = _product_view_totals_subquery()
+        query = query.outerjoin(vt_sub, Product.id == vt_sub.c.product_id)
     total = query.count()
-    products = query.order_by(Product.id).offset(skip).limit(limit).all()
+    order_exprs = _order_exprs_for_product_list(sort, vt_sub)
+    products = query.order_by(*order_exprs).offset(skip).limit(limit).all()
     return total, products
 
 
@@ -1132,8 +1200,8 @@ def get_product_by_slug(db: Session, slug: str) -> Optional[Product]:
         return None
 
 def get_products(
-    db: Session, 
-    skip: int = 0, 
+    db: Session,
+    skip: int = 0,
     limit: int = 100,
     category: Optional[str] = None,
     subcategory: Optional[str] = None,
@@ -1148,9 +1216,15 @@ def get_products(
     q: Optional[str] = None,
     product_id: Optional[str] = None,
     *,
+    sort: Optional[str] = None,
     order_random: bool = False,
 ):
     query = db.query(Product)
+    has_q = bool(q and str(q).strip())
+    sort_norm = normalize_product_list_sort(sort)
+    use_random_order = bool(order_random and not has_q)
+    if use_random_order:
+        sort_norm = "default"
 
     cat_s = (category or "").strip() if category else ""
     sub_s = (subcategory or "").strip() if subcategory else ""
@@ -1267,7 +1341,9 @@ def get_products(
             mapped_normalized = normalize_search_query(mapped_query)
             mapped_words = [w.strip() for w in mapped_normalized.split() if w.strip()]
             if mapped_words:
-                total, products = _search_products_by_words(db, query, mapped_words, limit, skip)
+                total, products = _search_products_by_words(
+                    db, query, mapped_words, limit, skip, sort=sort_norm,
+                )
                 if total > 0:
                     applied_query = mapped_normalized
                     _touch_search_mapping(db, mapping)
@@ -1277,7 +1353,7 @@ def get_products(
             normalized = normalize_search_query(raw_query)
             words = [w.strip() for w in normalized.split() if w.strip()]
             if words:
-                total, products = _search_products_by_words(db, query, words, limit, skip)
+                total, products = _search_products_by_words(db, query, words, limit, skip, sort=sort_norm)
                 if total > 0:
                     applied_query = normalized
         if total > 0:
@@ -1310,7 +1386,9 @@ def get_products(
                     norm2 = normalize_search_query(corrected)
                     words2 = [w.strip() for w in norm2.split() if w.strip()]
                     if words2:
-                        total, products = _search_products_by_words(db, query, words2, limit, skip)
+                        total, products = _search_products_by_words(
+                            db, query, words2, limit, skip, sort=sort_norm,
+                        )
                         if total > 0:
                             if total >= 20:
                                 applied_query = norm2
@@ -1335,10 +1413,14 @@ def get_products(
             _log_search(db, raw_query, total, ai_processed=ai_processed)
     if not (q and q.strip()):
         total = query.count()
-        if order_random:
+        if use_random_order:
             products = query.order_by(sql_func.random()).offset(skip).limit(limit).all()
+        elif sort_norm == "views_desc":
+            vt_sub = _product_view_totals_subquery()
+            q2 = query.outerjoin(vt_sub, Product.id == vt_sub.c.product_id)
+            products = q2.order_by(*_order_exprs_for_product_list(sort_norm, vt_sub)).offset(skip).limit(limit).all()
         else:
-            products = query.order_by(Product.id).offset(skip).limit(limit).all()
+            products = query.order_by(*_order_exprs_for_product_list(sort_norm, None)).offset(skip).limit(limit).all()
     
     return {
         "total": total,

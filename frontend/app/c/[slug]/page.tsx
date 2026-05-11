@@ -12,18 +12,19 @@ import { formatPrice } from "@/lib/utils";
 const PAGE_SIZE = 48;
 
 type Props = {
-  params: { slug: string };
-  searchParams: { page?: string };
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ page?: string }>;
 };
 
 export default async function SeoClusterLandingPage({ params, searchParams }: Props) {
-  const { slug } = params;
+  const { slug } = await params;
+  const resolvedSearchParams = await searchParams;
   const cluster = await getSeoClusterDetail(slug);
   if (!cluster) {
     notFound();
   }
 
-  const page = Math.max(1, parseInt(String(searchParams.page ?? ""), 10) || 1);
+  const page = Math.max(1, parseInt(String(resolvedSearchParams.page ?? ""), 10) || 1);
   const skip = (page - 1) * PAGE_SIZE;
 
   // Trang 1 dùng products_sample đã có trong detail (đỡ 1 round-trip).

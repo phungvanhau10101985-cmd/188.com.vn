@@ -30,10 +30,10 @@ function seoBlockBotVideoSerpPreview(): boolean {
   return v === "1" || v === "true" || v === "yes";
 }
 
-type Props = { params: { slug: string }; children: React.ReactNode };
+type Props = { params: Promise<{ slug: string }>; children: React.ReactNode };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { slug } = params;
+  const { slug } = await params;
   const product = await getProductBySlugForSeo(slug);
   if (!product) {
     return {
@@ -171,7 +171,7 @@ function buildBreadcrumbJsonLd(product: {
 }
 
 export default async function ProductLayout({ params, children }: Props) {
-  const { slug } = params;
+  const { slug } = await params;
   const product = await getProductBySlugForSeo(slug);
   const productJsonLd = product ? buildProductJsonLd(product) : null;
   const breadcrumbJsonLd = product ? buildBreadcrumbJsonLd(product) : null;

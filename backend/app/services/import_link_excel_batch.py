@@ -1,7 +1,11 @@
 """
-Đọc file Excel danh sách link: URL mặc định cột F (dòng 2+), thông tin shop/giá nhận từ tiêu đề (G–K…) và từ khối cố định **L–O** → xuất vào cột **H–K** của file kết quả.
+Đọc file Excel danh sách link: URL mặc định cột F (dòng 2+), shop/giá phụ từ tiêu đề + khối **L–O** → xuất **H–K** file kết quả.
+**Cột B** («Mã sp»): nếu có giá trị thì dùng làm SKU nội bộ ([A-Z][0-9]{4]) **chỉ khi mã đã nằm trong danh sách đã xuất**
+(`internal_sku_exports`, từ bước tải SKU trống trong Admin) và chưa trùng `products.code`; ô trống → backend gán mã **đã xuất** đầu tiên còn chưa gán sản phẩm (FIFO).
 
-`shop_id` (cột I trên file import sản phẩm đầy đủ) lấy cùng giá trị ô với **Style** (cột AI / tiêu đề «Style» | «Kiểu dáng») khi ô đó có dữ liệu — áp sau shop_id ô riêng và khối L–O.
+**Giá sản phẩm (`price` → cột G bảng xuất):** luôn lấy **cột Q (17)** khi ô có giá trị — **không** dùng cột G (7) vì thường là giá khác / tham chiếu (vd. 109).
+
+`shop_id` (cột I file đầy đủ) đồng bộ với **Style** (cột AI) khi có dữ liệu — áp sau shop_id ô riêng và khối L–O.
 """
 from __future__ import annotations
 
@@ -16,8 +20,13 @@ _ws_re = re.compile(r"\s+")
 
 DEFAULT_LINK_COLUMN_1BASED = 6  # F
 _FALLBACK_LINK_COLUMN = 3  # C «Link sp»
+# Cột B: «Mã sp» — nếu có giá trị thì dùng làm SKU nội bộ (format [A-Z][0-9]{4}); không thì backend tự sinh.
+OPTIONAL_INTERNAL_SKU_COLUMN_B_1BASED = 2
 # Template 37 cột (A–AK): Style = cột AI (35) — dùng khi sheet rộng nhưng không có dòng tiêu đề khớp
 STYLE_COLUMN_1BASED_FALLBACK = 35
+# Giá bán (`price`): chỉ cột Q (17). Không bao giờ lấy cột G (7).
+PRICE_SKIP_COLUMN_G_1BASED = 7
+PRICE_EXCEL_COLUMN_Q_1BASED = 17
 # Cột L–O (12–15) trên file nguồn → cột H–K trên Excel kết quả (shop_name, shop_id, pro_lower_price, pro_high_price)
 SOURCE_COL_BLOCK_LO_EXTRA_SHOP: Tuple[Tuple[int, str], ...] = (
     (12, "shop_name"),
@@ -27,6 +36,9 @@ SOURCE_COL_BLOCK_LO_EXTRA_SHOP: Tuple[Tuple[int, str], ...] = (
 )
 DATA_FIRST_ROW = 2
 _MAX_ROWS = 500
+# openpyxl read_only có thể trả tuple hàng ngắn hơn `max_column` nội bộ → coord(17) thành None, mất giá Q.
+# Luôn đọc tối thiểu tới đây (≥ Q=17, đủ template A–AK).
+MAX_IMPORT_COL_1BASED = 40
 
 
 def _norm_header(text: Any) -> str:
@@ -64,10 +76,13 @@ def merge_import_excel_overlay_into_product_data(
     product_data: Dict[str, Any],
     overlay: Optional[Dict[str, Any]],
 ) -> None:
-    """Ghi đè shop + giá từ Excel (ưu tiên sau scrape). Khóa `_...` là meta (vd. _excel_row), không ảnh hưởng merge."""
+    """Ghi đè shop + giá + mã SKU (cột B) từ Excel. Khóa `_...` là meta (vd. _excel_row), không ảnh hưởng merge."""
     if not overlay or not isinstance(overlay, dict):
         _fill_shop_id_from_style_if_empty(product_data)
         return
+    co = overlay.get("code")
+    if co is not None and str(co).strip():
+        product_data["code"] = str(co).strip().upper()
     if (sn := overlay.get("shop_name")) is not None and str(sn).strip():
         product_data["shop_name"] = str(sn).strip()
     pl = overlay.get("pro_lower_price")
@@ -201,6 +216,8 @@ def _resolve_overlay_columns(
     for j in range(1, mc + 1):
         if j in exclude_price:
             continue
+        if j == PRICE_SKIP_COLUMN_G_1BASED:
+            continue
         lab = _labels_at(header_row1, header_row2, j)
         if "price" in lab:
             cols_price.append(j)
@@ -210,7 +227,8 @@ def _resolve_overlay_columns(
 
     price_col: Optional[int] = None
     if cols_price:
-        price_col = min(cols_price)
+        # Nhiều cột "price": lấy cột phải nhất (thường Q), không lấy G (đã loại)
+        price_col = max(cols_price)
     elif cols_gia_hdr:
         price_col = max(cols_gia_hdr)
 
@@ -237,7 +255,7 @@ def _resolve_overlay_columns(
     if price_col is None:
         g1 = _gia_columns(header_row1)
         g2 = _gia_columns(header_row2)
-        merged = sorted({*g1, *g2} - exclude_price)
+        merged = sorted({*g1, *g2} - exclude_price - {PRICE_SKIP_COLUMN_G_1BASED})
         price_col = max(merged) if merged else None
 
     return shop_col, shop_id_col, lower_col, upper_col, price_col, style_col
@@ -247,7 +265,8 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
     """
     Trả ([{excel_row, url, overlays}], skip_messages).
 
-    overlays: shop_name, shop_id, pro_lower_price, pro_high_price, price (chỉ các trường có giá trị).
+    overlays: **code** (cột **B** «Mã sp» nếu có), shop_name, shop_id, pro_lower_price, pro_high_price,
+    và **price** (chỉ khi ô **cột Q** có giá trị).
     shop_id lấy trùng ô **Style** (tiêu đề hoặc cột AI) nếu ô đó có dữ liệu.
     """
     p = Path(path)
@@ -257,7 +276,13 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
     wb = load_workbook(p, read_only=True, data_only=True)
     try:
         ws = wb.active
-        rows_hdr = ws.iter_rows(min_row=1, max_row=2, values_only=True)
+        rows_hdr = ws.iter_rows(
+            min_row=1,
+            max_row=2,
+            min_col=1,
+            max_col=MAX_IMPORT_COL_1BASED,
+            values_only=True,
+        )
         rows_pair = list(rows_hdr)
         header = tuple(rows_pair[0]) if rows_pair else ()
         header2 = tuple(rows_pair[1] if len(rows_pair) > 1 else ())
@@ -267,13 +292,15 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
         ):
             return [], ["Dòng tiêu đề trống hoặc không đọc được."]
 
-        shop_col, shop_id_col, lower_col, upper_col, price_col, style_col = _resolve_overlay_columns(
+        shop_col, shop_id_col, lower_col, upper_col, _, style_col = _resolve_overlay_columns(
             header, header2
         )
 
         data_iter = ws.iter_rows(
             min_row=DATA_FIRST_ROW,
             max_row=DATA_FIRST_ROW + _MAX_ROWS,
+            min_col=1,
+            max_col=MAX_IMPORT_COL_1BASED,
             values_only=True,
         )
         for excel_row, row in enumerate(data_iter, start=DATA_FIRST_ROW):
@@ -295,6 +322,9 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
                 continue
 
             overlays: Dict[str, Any] = {}
+            sku_b = _cell_str(coord(OPTIONAL_INTERNAL_SKU_COLUMN_B_1BASED))
+            if sku_b:
+                overlays["code"] = sku_b.upper()
             if shop_col:
                 sv = coord(shop_col)
                 if sv is not None and str(sv).strip():
@@ -311,16 +341,6 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
                 hv = coord(upper_col)
                 if hv is not None and str(hv).strip():
                     overlays["pro_high_price"] = _cell_str(hv)
-            if price_col:
-                pv = coord(price_col)
-                if pv is not None and str(pv).strip() != "":
-                    overlays["price"] = pv
-
-            # Mẫu còn có cột «Giá» nhỏ ở G (trước cột đúng) — chỉ làm fallback khi chưa có price
-            if "price" not in overlays:
-                gv = coord(7)  # G
-                if gv is not None and str(gv).strip() != "":
-                    overlays["price"] = gv
 
             # Ghi đè / bổ sung từ khối L–O (ưu tiên khi có giá trị — khớp vị trí H–K file xuất)
             for col_1b, fld in SOURCE_COL_BLOCK_LO_EXTRA_SHOP:
@@ -340,6 +360,11 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
                 overlays["shop_id"] = sv
                 # Ghi vào product_data.style khi merge overlay (cột Kiểu dáng Excel = shop_id)
                 overlays["_sync_style_kieu_dang"] = sv
+
+            # Giá điền cột G bảng kết quả: bắt buộc cột Q — ghi đè sau cùng (tránh nhầm G / price_col / scrape).
+            q_price = coord(PRICE_EXCEL_COLUMN_Q_1BASED)
+            if q_price is not None and str(q_price).strip() != "":
+                overlays["price"] = q_price
 
             out.append({"excel_row": excel_row, "url": url.strip(), "overlays": overlays})
 
