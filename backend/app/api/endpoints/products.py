@@ -328,6 +328,8 @@ def read_product(
     """
     db_product = crud.product.get_product_by_product_id(db, product_id=product_id)
     if db_product is None:
+        db_product = crud.product.get_product_by_slug(db, slug=product_id)
+    if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return _product_to_response(db, db_product)
 def update_product(
