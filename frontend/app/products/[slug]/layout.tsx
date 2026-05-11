@@ -6,6 +6,7 @@ import {
   stripHtml,
   truncateDescriptionAtSentence,
 } from "@/lib/product-seo";
+import { serializeJsonLdForScript } from "@/lib/json-ld-script";
 import { displayableBrandOrOrigin, displayableBrandWithDefault } from "@/lib/utils";
 
 const SITE_URL =
@@ -182,13 +183,13 @@ export default async function ProductLayout({ params, children }: Props) {
       {productJsonLd && (
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(productJsonLd) }}
+          dangerouslySetInnerHTML={{ __html: serializeJsonLdForScript(productJsonLd) }}
         />
       )}
       {breadcrumbJsonLd && (
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+          dangerouslySetInnerHTML={{ __html: serializeJsonLdForScript(breadcrumbJsonLd) }}
         />
       )}
       {children}

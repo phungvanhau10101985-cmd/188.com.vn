@@ -61,6 +61,7 @@ const nextConfig = {
     unoptimized: process.env.NODE_ENV === "development",
   },
   typescript: { ignoreBuildErrors: false },
+  /** Next.js 16: build mặc định dùng Turbopack — cần `next build --webpack` (xem package.json) vì alias antd ở dưới. */
   webpack: (config) => {
     const root = process.cwd();
     config.resolve.alias = {

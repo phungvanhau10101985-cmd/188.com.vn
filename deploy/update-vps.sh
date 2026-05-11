@@ -142,8 +142,8 @@ cd "${FRONTEND}"
 npm ci
 
 if [[ "${DEPLOY_SKIP_LINT:-0}" == "1" ]]; then
-  echo "==> next build (bỏ qua lint nếu Next hỗ trợ --no-lint)"
-  npx next build --no-lint 2>/dev/null || npm run build
+  echo "==> next build --webpack (Next 16 mặc định Turbopack; dự án có webpack() alias antd — bỏ qua lint nếu Next hỗ trợ --no-lint)"
+  npx next build --webpack --no-lint 2>/dev/null || npm run build
 else
   npm run build
 fi

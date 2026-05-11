@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getCategorySeoData, buildCategoryBreadcrumbJsonLd, buildCategoryCollectionJsonLd } from "@/lib/category-seo";
 import { absolutePublicAssetUrl } from "@/lib/cdn-url";
+import { serializeJsonLdForScript } from "@/lib/json-ld-script";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_DOMAIN || "https://188.com.vn";
 const DEFAULT_OG_IMAGE = absolutePublicAssetUrl("/images/og-default.jpg");
@@ -168,11 +169,11 @@ export default async function CategoryLayout({ params, children }: Props) {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonLdForScript(breadcrumbJsonLd) }}
       />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(collectionJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonLdForScript(collectionJsonLd) }}
       />
       {children}
     </>
