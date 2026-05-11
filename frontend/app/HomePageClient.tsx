@@ -128,8 +128,18 @@ export default function HomePageClient({
       let response: ProductListResponse;
 
       if (usePersonalizedHome) {
-        response = await apiClient.getPersonalizedHomeFeed(skip, PAGE_SIZE);
-        setHomeFeedPersonalized(Boolean(response.personalized));
+        try {
+          response = await apiClient.getPersonalizedHomeFeed(skip, PAGE_SIZE);
+          setHomeFeedPersonalized(Boolean(response.personalized));
+        } catch (homeFeedError) {
+          console.warn('Personalized home feed unavailable, using plain product list:', homeFeedError);
+          response = await apiClient.getProducts({
+            limit: PAGE_SIZE,
+            skip,
+            is_active: true,
+          });
+          setHomeFeedPersonalized(false);
+        }
       } else {
         setHomeFeedPersonalized(false);
         response = await apiClient.getProducts({

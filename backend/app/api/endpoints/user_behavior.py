@@ -1,5 +1,6 @@
 # backend/app/api/endpoints/user_behavior.py - COMPLETE VERSION
 import math
+import logging
 from datetime import date, datetime
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, Response
@@ -31,6 +32,7 @@ from app.crud.user import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _json_safe_for_response(val: Any) -> Any:
@@ -126,9 +128,14 @@ def get_products_viewed_by_same_age_gender_endpoint(
     """
     if not current_user:
         return {"products": [], "cohort_mode": "requires_login"}
-    products, cohort_mode = get_products_viewed_by_same_age_gender(db, current_user.id, limit=limit)
-    products_list = [_product_row_to_api_dict(p) for p in products]
-    return {"products": products_list, "cohort_mode": cohort_mode}
+    try:
+        products, cohort_mode = get_products_viewed_by_same_age_gender(db, current_user.id, limit=limit)
+        products_list = [_product_row_to_api_dict(p) for p in products]
+        return {"products": products_list, "cohort_mode": cohort_mode}
+    except Exception:
+        logger.exception("Failed to build same-age/gender recommendations")
+        db.rollback()
+        return {"products": [], "cohort_mode": "popular_fallback"}
 
 
 @router.get("/products/same-shop-as-recent-views", response_model=dict)
@@ -194,14 +201,35 @@ def get_home_feed_products(
     uid = current_user.id if current_user else None
     sid = None if uid else (x_guest_session_id or "").strip() or None
 
-    products, total, personalized = get_personalized_home_products(
-        db,
-        user_id=uid,
-        guest_session_id=sid,
-        skip=sk,
-        limit=lim,
-    )
-    products_list = [_product_row_to_api_dict(p) for p in products]
+    try:
+        products, total, personalized = get_personalized_home_products(
+            db,
+            user_id=uid,
+            guest_session_id=sid,
+            skip=sk,
+            limit=lim,
+        )
+        products_list = [_product_row_to_api_dict(p) for p in products]
+    except Exception:
+        logger.exception("Failed to build personalized home feed")
+        db.rollback()
+        try:
+            base = db.query(ProductRow).filter(ProductRow.is_active == True)  # noqa: E712
+            total = base.count()
+            products = (
+                base.order_by(ProductRow.purchases.desc().nullslast(), ProductRow.id)
+                .offset(sk)
+                .limit(lim)
+                .all()
+            )
+            products_list = [_product_row_to_api_dict(p) for p in products]
+            personalized = False
+        except Exception:
+            logger.exception("Failed to build fallback home feed")
+            db.rollback()
+            total = 0
+            products_list = []
+            personalized = False
 
     total_pages = math.ceil(total / lim) if lim > 0 else 1
     page = sk // lim + 1 if lim > 0 else 1
