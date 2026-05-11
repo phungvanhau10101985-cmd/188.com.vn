@@ -1,6 +1,7 @@
 # backend/app/api/endpoints/user_behavior.py - COMPLETE VERSION
 import math
-from typing import Optional
+from datetime import date, datetime
+from typing import Optional, Any
 from fastapi import APIRouter, Depends, HTTPException, Header, Response
 from sqlalchemy.orm import Session
 from app.db.session import get_db
@@ -15,6 +16,7 @@ from app.schemas.user import (
 )
 from app.crud import guest_behavior as guest_behavior_crud
 from app.crud.personalized_feed import get_personalized_home_products
+from app.models.product import Product as ProductRow
 from app.schemas.product import Product as ProductSchema
 from app.crud.user import (
     add_product_view_with_data, get_user_viewed_products,
@@ -29,6 +31,25 @@ from app.crud.user import (
 )
 
 router = APIRouter()
+
+
+def _product_row_to_api_dict(product: Any) -> dict:
+    """
+    ORM Product → dict trả về API. Không append trực tiếp ORM hoặc __dict__
+    (relationship `category_rel` join sẵn → không JSON-safe → 500).
+    """
+    try:
+        return ProductSchema.model_validate(product).model_dump(mode="json")
+    except Exception:
+        out: dict = {}
+        for col in ProductRow.__table__.columns:
+            val = getattr(product, col.key, None)
+            if isinstance(val, (datetime, date)):
+                out[col.key] = val.isoformat() if val is not None else None
+            else:
+                out[col.key] = val
+        return out
+
 
 # Product Views
 @router.post("/products/view", response_model=dict)
@@ -94,16 +115,7 @@ def get_products_viewed_by_same_age_gender_endpoint(
     if not current_user:
         return {"products": [], "cohort_mode": "requires_login"}
     products, cohort_mode = get_products_viewed_by_same_age_gender(db, current_user.id, limit=limit)
-    products_list = []
-    for p in products:
-        try:
-            products_list.append(ProductSchema.model_validate(p).model_dump())
-        except Exception:
-            if hasattr(p, "__dict__"):
-                d = {k: v for k, v in p.__dict__.items() if not k.startswith("_")}
-                products_list.append(d)
-            else:
-                products_list.append(p)
+    products_list = [_product_row_to_api_dict(p) for p in products]
     return {"products": products_list, "cohort_mode": cohort_mode}
 
 
@@ -144,16 +156,7 @@ def get_products_same_shop_as_recent_views_endpoint(
         )
     else:
         return {"products": [], "total": 0, "seed": None}
-    products_list = []
-    for p in products:
-        try:
-            products_list.append(ProductSchema.model_validate(p).model_dump())
-        except Exception:
-            if hasattr(p, "__dict__"):
-                d = {k: v for k, v in p.__dict__.items() if not k.startswith("_")}
-                products_list.append(d)
-            else:
-                products_list.append(p)
+    products_list = [_product_row_to_api_dict(p) for p in products]
     return {"products": products_list, "total": total, "seed": returned_seed}
 
 
@@ -183,12 +186,7 @@ def get_home_feed_products(
         skip=sk,
         limit=lim,
     )
-    products_list = []
-    for product in products:
-        try:
-            products_list.append(ProductSchema.model_validate(product).model_dump())
-        except Exception:
-            products_list.append(product)
+    products_list = [_product_row_to_api_dict(p) for p in products]
 
     total_pages = math.ceil(total / lim) if lim > 0 else 1
     page = sk // lim + 1 if lim > 0 else 1
