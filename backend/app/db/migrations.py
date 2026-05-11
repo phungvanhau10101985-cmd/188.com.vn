@@ -8,6 +8,7 @@ from typing import List, Dict, Any
 from sqlalchemy import inspect, text
 from app.db.base import Base
 from app.models.product import Product
+from app.models.category import Category
 from app.models.product_import_draft import ProductImportDraft
 from app.models.order import Order, OrderItem, OrderStatus, DepositType, PaymentMethod, PaymentStatus, Payment
 from app.models.product_question import ProductQuestion, ProductQuestionUsefulVote
@@ -480,7 +481,8 @@ class MigrationManager:
             "product_review_useful_votes", ProductReviewUsefulVote
         )
         results['product_reviews_sync_columns'] = self._sync_table_columns("product_reviews", ProductReview)
-        # 8. Bảng products (thêm cột product_info, ...)
+        # 8. Bảng categories/products (taxonomy + product metadata)
+        results['categories_sync_columns'] = self._sync_table_columns("categories", Category)
         results['products_sync_columns'] = self._sync_table_columns("products", Product)
         results['product_import_drafts_create'] = self._create_table_if_not_exists(
             "product_import_drafts", ProductImportDraft
