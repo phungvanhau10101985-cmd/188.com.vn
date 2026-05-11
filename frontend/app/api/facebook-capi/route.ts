@@ -21,6 +21,9 @@ function backendOrigin(): string {
 export async function POST(req: NextRequest) {
   const secret = (process.env.FACEBOOK_CAPI_INGEST_SECRET || '').trim();
   if (!secret) {
+    if (process.env.NODE_ENV !== 'production') {
+      return new NextResponse(null, { status: 204 });
+    }
     return NextResponse.json(
       { ok: false, detail: 'FACEBOOK_CAPI_INGEST_SECRET chưa cấu hình trên server Next.js.' },
       { status: 503 }
