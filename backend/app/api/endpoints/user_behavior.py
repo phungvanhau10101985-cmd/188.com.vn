@@ -1,7 +1,7 @@
 # backend/app/api/endpoints/user_behavior.py - COMPLETE VERSION
 import math
 from datetime import date, datetime
-from typing import Optional, Any
+from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, Response
 from sqlalchemy.orm import Session
 from app.db.session import get_db
@@ -33,13 +33,25 @@ from app.crud.user import (
 router = APIRouter()
 
 
+def _json_safe_for_response(val: Any) -> Any:
+    """Tránh float NaN/Inf làm json.dumps / client lỗi."""
+    if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+        return None
+    if isinstance(val, dict):
+        return {k: _json_safe_for_response(v) for k, v in val.items()}
+    if isinstance(val, list):
+        return [_json_safe_for_response(v) for v in val]
+    return val
+
+
 def _product_row_to_api_dict(product: Any) -> dict:
     """
     ORM Product → dict trả về API. Không append trực tiếp ORM hoặc __dict__
     (relationship `category_rel` join sẵn → không JSON-safe → 500).
     """
     try:
-        return ProductSchema.model_validate(product).model_dump(mode="json")
+        d = ProductSchema.model_validate(product).model_dump(mode="json")
+        return _json_safe_for_response(d)
     except Exception:
         out: dict = {}
         for col in ProductRow.__table__.columns:
@@ -47,7 +59,7 @@ def _product_row_to_api_dict(product: Any) -> dict:
             if isinstance(val, (datetime, date)):
                 out[col.key] = val.isoformat() if val is not None else None
             else:
-                out[col.key] = val
+                out[col.key] = _json_safe_for_response(val)
         return out
 
 
@@ -140,24 +152,27 @@ def get_products_same_shop_as_recent_views_endpoint(
     """
     response.headers["Cache-Control"] = "private, no-store"
     sid = (x_guest_session_id or "").strip()
-    if current_user:
-        products, total, returned_seed = get_products_same_shop_as_recent_views(
-            db, user_id=current_user.id, limit=limit, offset=offset, seed=seed, require_video=require_video
-        )
-    elif sid:
-        products, total, returned_seed = get_products_same_shop_as_recent_views(
-            db,
-            user_id=None,
-            limit=limit,
-            offset=offset,
-            seed=seed,
-            guest_session_id=sid,
-            require_video=require_video,
-        )
-    else:
+    try:
+        if current_user:
+            products, total, returned_seed = get_products_same_shop_as_recent_views(
+                db, user_id=current_user.id, limit=limit, offset=offset, seed=seed, require_video=require_video
+            )
+        elif sid:
+            products, total, returned_seed = get_products_same_shop_as_recent_views(
+                db,
+                user_id=None,
+                limit=limit,
+                offset=offset,
+                seed=seed,
+                guest_session_id=sid,
+                require_video=require_video,
+            )
+        else:
+            return {"products": [], "total": 0, "seed": None}
+        products_list = [_product_row_to_api_dict(p) for p in products]
+        return {"products": products_list, "total": total, "seed": returned_seed}
+    except Exception:
         return {"products": [], "total": 0, "seed": None}
-    products_list = [_product_row_to_api_dict(p) for p in products]
-    return {"products": products_list, "total": total, "seed": returned_seed}
 
 
 @router.get("/products/home-feed", response_model=dict)

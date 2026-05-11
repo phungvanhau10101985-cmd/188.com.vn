@@ -1840,7 +1840,13 @@ def _build_menu_tree_session(is_active: bool) -> List[Dict[str, Any]]:
     from app.db.session import SessionLocal
     db = SessionLocal()
     try:
-        return get_category_tree_from_products(db, is_active=is_active, hide_empty_branches=True)
+        try:
+            return get_category_tree_from_products(db, is_active=is_active, hide_empty_branches=True)
+        except Exception:
+            # Prune/đếm SP từng nhánh có thể lỗi với dữ liệu lạ; trả cây chưa prune vẫn hơn 500.
+            return get_category_tree_from_products(db, is_active=is_active, hide_empty_branches=False)
+    except Exception:
+        return []
     finally:
         db.close()
 

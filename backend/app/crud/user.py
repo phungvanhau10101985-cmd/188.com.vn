@@ -341,6 +341,7 @@ def get_products_same_shop_as_recent_views(
     Trả về (danh_sách_slice, total, seed). Không gửi `seed`: random mới mỗi lần; có `seed` + offset: pagination ổn định.
     `require_video`: chỉ SP có link video phát được (YouTube watch/embed/short hoặc URL chứa `.mp4`), khớp frontend.
     Ưu tiên user_id; nếu không có thì guest_session_id (bảng guest_product_views).
+    Khi tổng SP khớp shop vượt ngưỡng, chỉ lấy tối đa 8000 bản ghi (theo id) để xáo trộn — tránh quá tải bộ nhớ; `total` vẫn là tổng đầy đủ.
     """
     recent_product_ids: List[int] = []
     if user_id is not None:
@@ -372,14 +373,17 @@ def get_products_same_shop_as_recent_views(
     shop_names = [r[0] for r in shop_names_subq.all()]
     if not shop_names:
         return [], 0, None
-    products = (
-        db.query(Product)
-        .filter(
-            Product.shop_name.in_(shop_names),
-            Product.is_active == True,
-        )
-        .all()
+    # Tránh .all() không giới hạn — vài shop lớn → OOM / timeout → 500 trên production.
+    filt = (
+        Product.shop_name.in_(shop_names),
+        Product.is_active == True,  # noqa: E712
     )
+    total = db.query(Product).filter(*filt).count()
+    if total <= 0:
+        return [], 0, None
+    SAME_SHOP_MAX_POOL = 8000
+    q = db.query(Product).filter(*filt).order_by(Product.id)
+    products = q.limit(SAME_SHOP_MAX_POOL).all() if total > SAME_SHOP_MAX_POOL else q.all()
     if not products:
         return [], 0, None
     if require_video:
