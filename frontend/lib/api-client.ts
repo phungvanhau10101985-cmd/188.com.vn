@@ -119,6 +119,16 @@ export interface AnalyticsEventCreate {
 }
 
 class ApiClient {
+  private compactErrorText(errorText: string, status: number): string {
+    const raw = (errorText || '').trim();
+    if (!raw) return `API Error: ${status}`;
+    if (/^\s*</.test(raw)) {
+      const title = raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, ' ').trim();
+      return title || `HTTP ${status} HTML error response`;
+    }
+    return raw.length > 500 ? `${raw.slice(0, 500)}...` : raw;
+  }
+
   private async fetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = endpoint.startsWith('http') ? endpoint : `${getApiBaseUrl()}${endpoint}`;
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
@@ -167,12 +177,13 @@ class ApiClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`❌ API Error ${response.status}:`, errorText);
+        const compactErrorText = this.compactErrorText(errorText, response.status);
+        console.error(`❌ API Error ${response.status}:`, compactErrorText);
         let errorData;
         try {
           errorData = JSON.parse(errorText);
         } catch {
-          errorData = { detail: errorText || `API Error: ${response.status}` };
+          errorData = { detail: compactErrorText };
         }
         throw new Error(errorData.detail || `API Error: ${response.status}`);
       }
@@ -1169,7 +1180,7 @@ class ApiClient {
   }
 
   async getUnreadNotificationCount(): Promise<number> {
-    return this.fetch<number>('/notifications/unread-count');
+    return this.fetch<number>('/notifications/unread-count').catch(() => 0);
   }
 
   async markNotificationAsRead(id: number): Promise<any> {
@@ -1285,7 +1296,11 @@ class ApiClient {
     return this.fetch<NanoaiSearchResponse>('/nanoai/text-search', {
       method: 'POST',
       body: JSON.stringify({ q: trimmed, limit }),
-    });
+    }).catch((error) => ({
+      ok: false,
+      products: [],
+      error: error instanceof Error ? error.message : 'NanoAI tạm thời không phản hồi.',
+    }));
   }
 }
 

@@ -20,6 +20,10 @@ class TextSearchBody(BaseModel):
     limit: int = Field(50, ge=1, le=100)
 
 
+def _empty_search_response(error: str | None = None) -> dict:
+    return {"ok": error is None, "products": [], "error": error}
+
+
 def _not_configured():
     raise HTTPException(
         status_code=503,
@@ -58,10 +62,20 @@ async def image_search(
 @router.post("/text-search")
 async def text_search(body: TextSearchBody, db: Session = Depends(get_db)):
     if not nanoai.is_configured():
-        _not_configured()
-    status, resp = nanoai.post_text_search(body.q.strip(), body.limit)
+        return _empty_search_response("Tìm theo chữ NanoAI chưa cấu hình.")
+    try:
+        status, resp = nanoai.post_text_search(body.q.strip(), body.limit)
+    except Exception:
+        logger.exception("NanoAI text-search proxy failed")
+        return _empty_search_response("NanoAI tạm thời không phản hồi.")
     if status == 200:
-        return enrich_nanoai_response_body(db, resp)
+        try:
+            return enrich_nanoai_response_body(db, resp)
+        except Exception:
+            logger.exception("NanoAI text-search enrichment failed")
+            db.rollback()
+            return resp if isinstance(resp, dict) else _empty_search_response(None)
+    logger.warning("NanoAI text-search returned status %s: %s", status, resp)
     if isinstance(resp, dict):
-        return JSONResponse(content=resp, status_code=status)
-    return JSONResponse(content={"detail": str(resp)}, status_code=status)
+        return _empty_search_response(str(resp.get("error") or resp.get("detail") or "NanoAI tạm thời không phản hồi."))
+    return _empty_search_response(str(resp)[:300] if resp else "NanoAI tạm thời không phản hồi.")
