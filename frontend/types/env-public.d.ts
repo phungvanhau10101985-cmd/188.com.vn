@@ -13,6 +13,8 @@ declare namespace NodeJS {
     NEXT_PUBLIC_SEPAY_CONTENT_PREFIX?: string;
     NEXT_PUBLIC_SEPAY_CONTENT_SUFFIX_MIN_LENGTH?: string;
     NEXT_PUBLIC_SEPAY_CONTENT_SUFFIX_MAX_LENGTH?: string;
+    /** Trùng backend — route `/api/report-broken-product-media` (server-only) */
+    BROKEN_MEDIA_PURGE_SECRET?: string;
   }
 }
 

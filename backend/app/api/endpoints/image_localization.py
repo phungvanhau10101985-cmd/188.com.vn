@@ -83,21 +83,6 @@ class StartImageLocalizationPayload(BaseModel):
     )
 
 
-class BulkMarkLocalizedPayload(BaseModel):
-    """Đánh dấu hàng loạt ảnh đã bản địa hóa trong DB (sau khi xử lý thủ công / tool ngoài)."""
-
-    language: str = Field("vi", max_length=20, description="vi, en, th, id")
-    dry_run: bool = Field(False, description="True = chỉ đếm số dòng sẽ cập nhật, không ghi DB")
-    only_queue: bool = Field(
-        False,
-        description="True = chỉ các trạng thái trống/pending/failed/processing. False = mọi sản phẩm (trừ skipped nếu include_skipped=false).",
-    )
-    include_skipped: bool = Field(
-        False,
-        description="True = cập nhật cả row đang skipped (không có ảnh O/P/Q/T). Chỉ áp dụng khi only_queue=false.",
-    )
-
-
 def _resolve_gemini_mode(raw: Optional[str]) -> str:
     m = (raw or getattr(settings, "IMAGE_LOCALIZATION_GEMINI_MODE", "web") or "web").strip().lower()
     return m if m in ("web", "api", "openai") else "web"
@@ -309,45 +294,6 @@ def check_gemini_auth(
         "api": GeminiApiImageAdapter(language).check_auth(),
         "openai": OpenAiGptImageAdapter(language).check_auth(),
     }
-
-
-@router.post("/bulk-mark-localized")
-def bulk_mark_localized(
-    payload: BulkMarkLocalizedPayload,
-    db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission("products")),
-):
-    lang = (payload.language or "vi").strip()[:20] or "vi"
-    q = db.query(Product)
-
-    if payload.only_queue:
-        q = q.filter(
-            or_(
-                Product.image_localization_status.is_(None),
-                Product.image_localization_status.in_(["", "pending", "failed", "processing"]),
-            )
-        )
-    if not payload.include_skipped:
-        q = q.filter(
-            or_(
-                Product.image_localization_status.is_(None),
-                Product.image_localization_status != "skipped",
-            )
-        )
-
-    if payload.dry_run:
-        return {"updated": 0, "would_update": q.count(), "dry_run": True, "language": lang}
-
-    n = q.update(
-        {
-            Product.image_localization_status: "localized",
-            Product.image_localization_language: lang,
-            Product.image_localization_error: None,
-        },
-        synchronize_session=False,
-    )
-    db.commit()
-    return {"updated": n, "would_update": n, "dry_run": False, "language": lang}
 
 
 @router.get("/summary")

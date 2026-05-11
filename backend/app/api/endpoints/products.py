@@ -3,7 +3,7 @@ from datetime import datetime
 import io
 
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -15,9 +15,11 @@ from app.models.search_mapping import SearchMapping, SearchMappingType
 from app.utils.vietnamese import normalize_for_search_no_accent
 from difflib import SequenceMatcher
 import json
-from app.schemas.product import Product, ProductCreate, ProductUpdate
+from app.schemas.product import Product, ProductCreate, ProductUpdate, PurgeDeadMediaUrlBody
 from app.models.admin import AdminUser
 from app.core.security import require_module_permission
+from app.core.config import settings
+from app.crud import product_media_purge
 
 router = APIRouter()
 
@@ -414,3 +416,30 @@ def read_product_by_id(
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return db_product
+
+
+@router.post("/by-id/{id}/purge-dead-media-url", response_model=dict, include_in_schema=False)
+def purge_dead_media_url_by_db_id(
+    id: int,
+    body: PurgeDeadMediaUrlBody,
+    db: Session = Depends(get_db),
+    x_broken_media_purge_key: Optional[str] = Header(None, alias="X-Broken-Media-Purge-Key"),
+):
+    """
+    Xóa URL ảnh khỏi các cột media của sản phẩm **chỉ khi** HEAD/GET xác nhận 404/410 và URL thuộc bản ghi này.
+    Bảo vệ bằng `BROKEN_MEDIA_PURGE_SECRET` (header X-Broken-Media-Purge-Key) — gọi từ Next server, không public.
+    """
+    secret = (getattr(settings, "BROKEN_MEDIA_PURGE_SECRET", None) or "").strip()
+    if not secret or (x_broken_media_purge_key or "").strip() != secret:
+        raise HTTPException(status_code=404, detail="Not found")
+    p = crud.product.get_product(db, product_id=id)
+    if p is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    url = (body.url or "").strip()
+    out = product_media_purge.run_purge_dead_media_if_eligible(db, p, url)
+    if not out.get("ok"):
+        if out.get("reason") == "url_not_on_product":
+            raise HTTPException(status_code=400, detail="URL does not belong to this product")
+        raise HTTPException(status_code=400, detail="URL is still reachable or could not verify (not 404)")
+    return out
+

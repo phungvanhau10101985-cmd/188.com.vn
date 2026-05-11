@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import type { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { formatPrice, getDiscountPercentage } from '@/lib/utils';
+import { mergeProductGalleryPhotoUrls } from '@/lib/product-gallery-merge';
+import { reportUnreachableProductMedia } from '@/lib/report-broken-product-media';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { hasVideoLink, parseVideoLink, buildYoutubeEmbedSrc } from '@/lib/video-utils';
 import RelatedProducts from '@/components/product-detail/RelatedProducts';
@@ -113,17 +115,45 @@ export default function ProductDetailMobile({
     });
   }, [product, pushToast]);
 
-  const images = [
-    ...(product.main_image ? [product.main_image] : []),
-    ...(product.images?.filter((img) => img !== product.main_image) || []),
-  ];
   const hasVideo = hasVideoLink(product.video_link);
   const parsedVideo = parseVideoLink(product.video_link);
 
+  const galleryPhotoUrls = useMemo(() => mergeProductGalleryPhotoUrls(product), [product]);
+  const [brokenPhoto, setBrokenPhoto] = useState<Record<string, true>>({});
+  const markBrokenPhoto = useCallback(
+    (rawUrl: string) => {
+      const u = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+      if (!u) return;
+      reportUnreachableProductMedia(product.id, u);
+      setBrokenPhoto((prev) => (prev[u] ? prev : { ...prev, [u]: true }));
+    },
+    [product.id],
+  );
+  const visiblePhotoUrls = useMemo(
+    () => galleryPhotoUrls.filter((u) => !brokenPhoto[u]),
+    [galleryPhotoUrls, brokenPhoto],
+  );
+
+  useEffect(() => {
+    setSelectedImage((prev) => {
+      const n = visiblePhotoUrls.length;
+      if (hasVideo) {
+        if (prev === 0) return prev;
+        if (prev > n) return n >= 1 ? n : 0;
+        return prev;
+      }
+      if (n === 0) return 0;
+      if (prev >= n) return n - 1;
+      return prev;
+    });
+  }, [hasVideo, visiblePhotoUrls]);
+
   // Khi có video: index 0 = video, sau đó mới đến ảnh. Video luôn hiển thị đầu tiên.
-  const mediaCount = hasVideo ? 1 + images.length : images.length;
+  const mediaCount = hasVideo ? 1 + visiblePhotoUrls.length : visiblePhotoUrls.length;
   const isShowingVideo = hasVideo && selectedImage === 0;
-  const mainImage = isShowingVideo ? null : (images[hasVideo ? selectedImage - 1 : selectedImage] || product.main_image);
+  const mainImageRaw = isShowingVideo
+    ? null
+    : (visiblePhotoUrls[hasVideo ? selectedImage - 1 : selectedImage] ?? null);
   const videoThumb = parsedVideo?.thumbUrl ?? null;
 
   const handleCopyLink = () => {
@@ -187,16 +217,17 @@ export default function ProductDetailMobile({
                   </div>
                 </>
               )
-            ) : (
+            ) : mainImageRaw ? (
               <>
                 <Image
-                  src={getOptimizedImage(mainImage || product.main_image, { width: 600, height: 750 })}
+                  src={getOptimizedImage(mainImageRaw, { width: 600, height: 750 })}
                   alt={product.name}
                   fill
                   className="object-cover"
                   sizes="100vw"
                   priority={!isShowingVideo}
                   fetchPriority={isShowingVideo ? 'auto' : 'high'}
+                  onError={() => markBrokenPhoto(mainImageRaw)}
                 />
                 <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
                   <span className="font-medium truncate max-w-[140px]">{product.brand_name || '188 com vn'}</span>
@@ -210,6 +241,8 @@ export default function ProductDetailMobile({
                   </Link>
                 </div>
               </>
+            ) : (
+              <div className="absolute inset-0 bg-gray-200" role="img" aria-label="Không có ảnh hiển thị" />
             )}
           </div>
         </div>
@@ -235,11 +268,11 @@ export default function ProductDetailMobile({
                 </span>
               </button>
             )}
-            {images.map((img, i) => {
+            {visiblePhotoUrls.map((img, i) => {
               const mediaIndex = hasVideo ? i + 1 : i;
               return (
                 <button
-                  key={i}
+                  key={img}
                   type="button"
                   onClick={() => setSelectedImage(mediaIndex)}
                   className={`relative flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 ${
@@ -252,6 +285,7 @@ export default function ProductDetailMobile({
                     width={64}
                     height={64}
                     className="w-full h-full object-cover"
+                    onError={() => markBrokenPhoto(img)}
                   />
                 </button>
               );

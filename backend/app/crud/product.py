@@ -18,6 +18,7 @@ import time
 from datetime import datetime
 from app.core.config import settings
 from app.services.alicdn_urls import normalize_excel_product_image_urls
+from app.services.bunny_storage import delete_bunny_assets_for_product
 from app.services.import_hibox_scraper import canonicalize_hibox_placeholder_product_id
 from app.services.product_internal_sku import (
     ensure_unique_internal_product_code,
@@ -2297,6 +2298,7 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
 def delete_product(db: Session, product_id: int):
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if db_product:
+        delete_bunny_assets_for_product(db_product)
         db.delete(db_product)
         db.commit()
     return db_product

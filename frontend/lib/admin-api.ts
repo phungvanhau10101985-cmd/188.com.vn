@@ -700,21 +700,6 @@ export const adminProductAPI = {
       timeoutMs: 60_000,
     }),
 
-  bulkMarkImageLocalizationLocalized: (payload: {
-    language?: string;
-    dry_run?: boolean;
-    only_queue?: boolean;
-    include_skipped?: boolean;
-  }) =>
-    fetchAdmin<{ updated: number; would_update: number; dry_run: boolean; language: string }>(
-      '/image-localization/bulk-mark-localized',
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-        timeoutMs: 120_000,
-      },
-    ),
-
   importExcel: async (file: File, overwrite = false) => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');

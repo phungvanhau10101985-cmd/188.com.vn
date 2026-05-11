@@ -280,3 +280,9 @@ class ProductExportRequest(BaseModel):
     """Request for exporting to Excel"""
     category: Optional[str] = None
     format: str = "excel"
+
+
+class PurgeDeadMediaUrlBody(BaseModel):
+    """Body cho POST purge URL ảnh 404 — yêu cầu header X-Broken-Media-Purge-Key khớp .env."""
+
+    url: str = Field(..., min_length=8, max_length=2048, description="URL ảnh cần gỡ khỏi sản phẩm sau khi xác nhận 404")

@@ -321,12 +321,6 @@ export default function AdminProductsPage() {
   const [imageLocReportData, setImageLocReportData] = useState<AdminImageLocalizationProductReport | null>(null);
   const [imageLocReportError, setImageLocReportError] = useState<string | null>(null);
   const [imageLocReportProductId, setImageLocReportProductId] = useState<string | null>(null);
-  const [imageBulkMarkScope, setImageBulkMarkScope] = useState<'queue' | 'all_no_skipped' | 'all_with_skipped'>(
-    'all_no_skipped',
-  );
-  const [imageBulkMarkAgree, setImageBulkMarkAgree] = useState(false);
-  const [imageBulkMarkBusy, setImageBulkMarkBusy] = useState(false);
-  const [imageBulkMarkPreviewCount, setImageBulkMarkPreviewCount] = useState<number | null>(null);
   /** Cờ huỷ theo dõi (job vẫn chạy ở server). */
   const cancelTrackRef = useRef(false);
   const [exporting, setExporting] = useState(false);
@@ -611,59 +605,6 @@ export default function AdminProductsPage() {
       showToast('err', msg, 9000);
     } finally {
       setImageLocalizationSavingCookie(false);
-    }
-  };
-
-  const bulkMarkScopePayload = () => {
-    if (imageBulkMarkScope === 'queue') return { only_queue: true, include_skipped: false };
-    if (imageBulkMarkScope === 'all_no_skipped') return { only_queue: false, include_skipped: false };
-    return { only_queue: false, include_skipped: true };
-  };
-
-  const handleBulkMarkImageLocalizationPreview = async () => {
-    setImageLocalizationError(null);
-    setImageBulkMarkBusy(true);
-    try {
-      const res = await adminProductAPI.bulkMarkImageLocalizationLocalized({
-        language: imageLocalizationLanguage,
-        dry_run: true,
-        ...bulkMarkScopePayload(),
-      });
-      setImageBulkMarkPreviewCount(res.would_update);
-      showToast('ok', `Xem trước: sẽ cập nhật ${res.would_update} dòng (ngôn ngữ ${res.language}).`, 8000);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Không xem trước được';
-      setImageLocalizationError(msg);
-      showToast('err', msg, 9000);
-    } finally {
-      setImageBulkMarkBusy(false);
-    }
-  };
-
-  const handleBulkMarkImageLocalizationApply = async () => {
-    if (!imageBulkMarkAgree) {
-      showToast('err', 'Vui lòng tick xác nhận trước khi ghi DB.', 6000);
-      return;
-    }
-    setImageLocalizationError(null);
-    setImageBulkMarkBusy(true);
-    try {
-      const res = await adminProductAPI.bulkMarkImageLocalizationLocalized({
-        language: imageLocalizationLanguage,
-        dry_run: false,
-        ...bulkMarkScopePayload(),
-      });
-      setImageBulkMarkPreviewCount(res.would_update);
-      showToast('ok', `Đã cập nhật ${res.updated} sản phẩm → localized (${res.language}).`, 10000);
-      setImageBulkMarkAgree(false);
-      await loadImageLocalizationSummary();
-      void fetchProducts();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Không cập nhật được DB';
-      setImageLocalizationError(msg);
-      showToast('err', msg, 9000);
-    } finally {
-      setImageBulkMarkBusy(false);
     }
   };
 
@@ -3128,63 +3069,6 @@ export default function AdminProductsPage() {
                     Hủy sau ảnh hiện tại
                   </button>
                 ) : null}
-              </div>
-
-              <div className="rounded-lg border border-amber-200 bg-amber-50/90 p-3 space-y-2">
-                <p className="text-sm font-medium text-amber-950">Đánh dấu DB: đã bản địa hóa ảnh</p>
-                <p className="text-xs text-amber-900/90">
-                  Khi ảnh đã xử lý xong nhưng DB vẫn báo chưa <code className="text-[11px]">localized</code>. Chọn một phạm vi rồi
-                  xem trước / áp dụng.
-                </p>
-                <label className="block text-sm text-amber-950">
-                  <span className="mb-1 block font-medium">Phạm vi cập nhật</span>
-                  <select
-                    value={imageBulkMarkScope}
-                    onChange={(e) => {
-                      const v = e.target.value as 'queue' | 'all_no_skipped' | 'all_with_skipped';
-                      setImageBulkMarkScope(v);
-                      setImageBulkMarkPreviewCount(null);
-                    }}
-                    disabled={imageBulkMarkBusy}
-                    className="w-full max-w-lg rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm"
-                  >
-                    <option value="all_no_skipped">Mọi sản phẩm, trừ skipped (mặc định — phù hợp “đã xử lý hết ảnh”)</option>
-                    <option value="queue">
-                      Chỉ hàng chưa xong (trống / pending / failed / processing)
-                    </option>
-                    <option value="all_with_skipped">Mọi sản phẩm kể cả skipped (không ảnh O/P/Q/T)</option>
-                  </select>
-                </label>
-                <label className="flex items-center gap-2 text-sm text-amber-950">
-                  <input
-                    type="checkbox"
-                    checked={imageBulkMarkAgree}
-                    onChange={(e) => setImageBulkMarkAgree(e.target.checked)}
-                    disabled={imageBulkMarkBusy}
-                  />
-                  Tôi hiểu thao tác ghi trực tiếp vào database
-                </label>
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => void handleBulkMarkImageLocalizationPreview()}
-                    disabled={imageBulkMarkBusy}
-                    className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-950 hover:bg-amber-100 disabled:opacity-60"
-                  >
-                    {imageBulkMarkBusy ? '…' : 'Xem trước (dry run)'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleBulkMarkImageLocalizationApply()}
-                    disabled={imageBulkMarkBusy || !imageBulkMarkAgree}
-                    className="rounded-lg bg-amber-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-900 disabled:opacity-60"
-                  >
-                    {imageBulkMarkBusy ? 'Đang ghi…' : 'Áp dụng cập nhật'}
-                  </button>
-                  {imageBulkMarkPreviewCount != null ? (
-                    <span className="text-xs text-amber-900">Lần xem trước: {imageBulkMarkPreviewCount} dòng</span>
-                  ) : null}
-                </div>
               </div>
 
               {geminiAuthStatus ? (

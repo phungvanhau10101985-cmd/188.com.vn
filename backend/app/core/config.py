@@ -109,6 +109,8 @@ class Settings:
         # Meta Conversion API — bí mật gọi POST /embed-codes/facebook/capi/send-event (Authorization: Bearer …)
         self.FACEBOOK_GRAPH_API_VERSION: str = (os.getenv("FACEBOOK_GRAPH_API_VERSION", "v21.0").strip() or "v21.0").lstrip("/")
         self.FACEBOOK_CAPI_INGEST_SECRET: str = os.getenv("FACEBOOK_CAPI_INGEST_SECRET", "").strip()
+        # PDP: gọi từ Next (server) với header — gỡ URL ảnh 404 khỏi DB. Rỗng = tắt endpoint.
+        self.BROKEN_MEDIA_PURGE_SECRET: str = os.getenv("BROKEN_MEDIA_PURGE_SECRET", "").strip()
 
         # Bunny.net — Storage Zone API + Pull Zone (ảnh). Frontend: NEXT_PUBLIC_CDN_URL nên trùng BUNNY_CDN_PUBLIC_BASE.
         self.BUNNY_STORAGE_ZONE_NAME: str = os.getenv("BUNNY_STORAGE_ZONE_NAME", "").strip()
@@ -121,6 +123,10 @@ class Settings:
             os.getenv("BUNNY_UPLOAD_PATH_PREFIX", "site").strip().strip("/") or "site"
         )
         self.BUNNY_WEB_PUBLIC_PREFIX: str = os.getenv("BUNNY_WEB_PUBLIC_PREFIX", "").strip().strip("/")
+        self.BUNNY_DELETE_ON_PRODUCT_DELETE: bool = (
+            os.getenv("BUNNY_DELETE_ON_PRODUCT_DELETE", "true").strip().lower()
+            not in ("0", "false", "no", "off")
+        )
 
         # Bản địa hóa ảnh sản phẩm — Selenium/Gemini web profile + Bunny upload.
         self.IMAGE_LOCALIZATION_ENABLED: bool = os.getenv(
