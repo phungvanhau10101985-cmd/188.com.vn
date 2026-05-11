@@ -299,6 +299,62 @@ def ensure_runtime_dir() -> Path:
     return path
 
 
+def resolve_gcp_vision_credentials_json_path(runtime: Path) -> str:
+    """
+    Trả đường dẫn tuyệt đối tới JSON service account dùng cho Cloud Vision.
+    Tránh OCR lỗi [Errno 2] khi GCP_KEY_FILE rỗng hoặc path tương đối sai cwd trên VPS.
+    """
+    configured = (getattr(settings, "IMAGE_LOCALIZATION_GCP_KEY_FILE", None) or "").strip()
+    backend_root = Path(__file__).resolve().parents[2]
+
+    searched: List[str] = []
+    uniq_try: List[Path] = []
+
+    def enqueue(p: Path) -> None:
+        try:
+            rp = p.expanduser()
+            try:
+                rp = rp.resolve(strict=False)
+            except TypeError:
+                rp = rp.resolve()
+        except Exception:
+            return
+        s = str(rp)
+        if s not in searched:
+            searched.append(s)
+        uniq_try.append(rp)
+
+    if configured:
+        cp = Path(configured).expanduser()
+        if cp.is_file():
+            return str(cp.resolve())
+        enqueue(cp)
+        if not cp.is_absolute():
+            enqueue(backend_root / configured)
+            enqueue(Path.cwd() / configured)
+
+    for name in ("gcp-vision-service-account.json", "phungvanmanh.json"):
+        enqueue((runtime / name).resolve())
+    enqueue((runtime / "credentials" / "service-account-key.json").resolve())
+
+    for cand in uniq_try:
+        try:
+            if cand.is_file():
+                return str(cand.resolve())
+        except Exception:
+            continue
+
+    raise ImageLocalizationError(
+        "Không tìm thấy JSON service account Google Cloud Vision "
+        "(đường dẫn rỗng hoặc file không tồn tại). "
+        "Trên VPS hãy: (1) đặt IMAGE_LOCALIZATION_GCP_KEY_FILE=<đường dẫn tuyệt đối tới file .json>; "
+        "hoặc (2) sao chép service account vào "
+        f"{runtime / 'gcp-vision-service-account.json'}; "
+        "hoặc (3) đặt GOOGLE_APPLICATION_CREDENTIALS trỏ tới file đó. "
+        "File local mẫu: backend/runtime/image_localization/gcp-vision-service-account.json (không commit — gitignore)."
+    )
+
+
 def normalize_image_url(url: str) -> str:
     s = (url or "").strip()
     if s.startswith("//"):
@@ -1692,15 +1748,7 @@ class LegacyImageLocalizationPipeline:
 
         config_mod = importlib.import_module("config")
         runtime = ensure_runtime_dir()
-        gcp_key = settings.IMAGE_LOCALIZATION_GCP_KEY_FILE
-        if not gcp_key:
-            for candidate in (
-                runtime / "phungvanmanh.json",
-                runtime / "credentials" / "service-account-key.json",
-            ):
-                if candidate.exists():
-                    gcp_key = str(candidate)
-                    break
+        gcp_key = resolve_gcp_vision_credentials_json_path(runtime)
         overrides = {
             "BASE_DIR": runtime,
             "CREDENTIALS_PATH": gcp_key,

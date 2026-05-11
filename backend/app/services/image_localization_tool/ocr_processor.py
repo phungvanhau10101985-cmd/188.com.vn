@@ -10,7 +10,17 @@ from google.cloud import vision
 from config import GCP_KEY_FILE, PAID_OCR_PROVIDER, OCR_CONFIDENCE_THRESHOLD, OCR_WORD_CJK_SUPPLEMENT
 from error_handler import ErrorHandler
 
-def _iou_xyxy(a: Tuple[int, ...], b: Tuple[int, ...]) -> float:
+
+def _gcp_json_path_for_vision() -> str:
+    """Tránh from_service_account_file('') → [Errno 2] No such file or directory: ''"""
+    raw = (GCP_KEY_FILE or "").strip()
+    if not raw:
+        raise RuntimeError(
+            "Thiếu file JSON Google Cloud Vision (GCP_KEY_FILE rỗng). "
+            "Đặt IMAGE_LOCALIZATION_GCP_KEY_FILE hoặc GOOGLE_APPLICATION_CREDENTIALS trỏ tới service account, "
+            "hoặc đặt file gcp-vision-service-account.json trong thư mục runtime image localization (xem backend/.env.example)."
+        )
+    return rawdef _iou_xyxy(a: Tuple[int, ...], b: Tuple[int, ...]) -> float:
     """Intersection over union của hai bbox (x1,y1,x2,y2)."""
     if len(a) < 4 or len(b) < 4:
         return 0.0
@@ -87,7 +97,7 @@ class OCRProcessor:
     def extract_text_google_vision(self, image_bytes: bytes) -> List[Tuple[str, tuple]]:
         """OCR thường - Có retry vô tận"""
         def _do_ocr():
-            client = vision.ImageAnnotatorClient.from_service_account_file(GCP_KEY_FILE)
+            client = vision.ImageAnnotatorClient.from_service_account_file(_gcp_json_path_for_vision())
             image = vision.Image(content=image_bytes)
             image_context = vision.ImageContext(language_hints=['zh', 'vi', 'en'])
             
@@ -155,7 +165,7 @@ class OCRProcessor:
 
     def _extract_words_google_vision_raw(self, image_bytes: bytes) -> List[Tuple[str, tuple]]:
         """Chỉ lấy (text,bbox) từ text_detection annotations[1:] — không tăng counter (gọi từ merge)."""
-        client = vision.ImageAnnotatorClient.from_service_account_file(GCP_KEY_FILE)
+        client = vision.ImageAnnotatorClient.from_service_account_file(_gcp_json_path_for_vision())
         image = vision.Image(content=image_bytes)
         image_context = vision.ImageContext(language_hints=['zh', 'vi', 'en'])
         response = client.text_detection(image=image, image_context=image_context)
@@ -177,7 +187,7 @@ class OCRProcessor:
     def enhanced_ocr_extract(self, image_bytes: bytes) -> List[Tuple[str, tuple]]:
         """OCR nâng cao (Document Text Detection) - Có retry vô tận"""
         def _do_enhanced_ocr():
-            client = vision.ImageAnnotatorClient.from_service_account_file(GCP_KEY_FILE)
+            client = vision.ImageAnnotatorClient.from_service_account_file(_gcp_json_path_for_vision())
             image = vision.Image(content=image_bytes)
             image_context = vision.ImageContext(language_hints=['zh', 'vi', 'en'])
             
