@@ -20,7 +20,10 @@ def _gcp_json_path_for_vision() -> str:
             "Đặt IMAGE_LOCALIZATION_GCP_KEY_FILE hoặc GOOGLE_APPLICATION_CREDENTIALS trỏ tới service account, "
             "hoặc đặt file gcp-vision-service-account.json trong thư mục runtime image localization (xem backend/.env.example)."
         )
-    return rawdef _iou_xyxy(a: Tuple[int, ...], b: Tuple[int, ...]) -> float:
+    return raw
+
+
+def _iou_xyxy(a: Tuple[int, ...], b: Tuple[int, ...]) -> float:
     """Intersection over union của hai bbox (x1,y1,x2,y2)."""
     if len(a) < 4 or len(b) < 4:
         return 0.0
