@@ -28,7 +28,7 @@ export function normalizeProductImageUrl(raw: string | undefined | null): string
   return toAbsoluteGalleryUrl(raw);
 }
 
-/** Main + gallery + detail URLs, deduplicated — used for PDP galleries. */
+/** Thư viện ảnh PDP: main_image + cột P (images) — không gộp gallery (ảnh chi tiết / Q) để tránh strip ảnh dài trong carousel. */
 export function mergeProductGalleryPhotoUrls(product: Product): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -41,6 +41,21 @@ export function mergeProductGalleryPhotoUrls(product: Product): string[] {
   };
   add(product.main_image);
   for (const img of product.images || []) add(img);
+  return out;
+}
+
+/** Mọi URL ảnh (gồm gallery chi tiết) — dùng khi cần quét đầy đủ, không dùng cho carousel PDP. */
+export function mergeProductPhotoUrlsIncludingDetail(product: Product): string[] {
+  const base = mergeProductGalleryPhotoUrls(product);
+  const seen = new Set(base);
+  const out = [...base];
+  const add = (raw?: string | null) => {
+    const u = typeof raw === 'string' ? toAbsoluteGalleryUrl(raw) : null;
+    if (!u || !/^https?:\/\//i.test(u)) return;
+    if (seen.has(u)) return;
+    seen.add(u);
+    out.push(u);
+  };
   for (const img of product.gallery || []) add(img);
   return out;
 }
