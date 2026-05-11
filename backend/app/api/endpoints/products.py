@@ -16,12 +16,33 @@ from app.utils.vietnamese import normalize_for_search_no_accent
 from difflib import SequenceMatcher
 import json
 from app.schemas.product import Product, ProductCreate, ProductUpdate, PurgeDeadMediaUrlBody
+from app.crud.product_category_size_guide import enrich_product_payloads_with_category_size_guide
 from app.models.admin import AdminUser
 from app.core.security import require_module_permission
 from app.core.config import settings
 from app.crud import product_media_purge
 
 router = APIRouter()
+
+
+def _serialize_products_for_api(db: Session, raw_products: List) -> List:
+    paired: List = []
+    for product in raw_products:
+        try:
+            d = Product.model_validate(product).model_dump()
+            paired.append((product, d))
+        except Exception:
+            paired.append((None, product))
+    dict_rows = [(o, d) for o, d in paired if o is not None and isinstance(d, dict)]
+    if dict_rows:
+        enrich_product_payloads_with_category_size_guide(db, [t[0] for t in dict_rows], [t[1] for t in dict_rows])
+    return [entry[1] for entry in paired]
+
+
+def _product_to_response(db: Session, db_product) -> Product:
+    d = Product.model_validate(db_product).model_dump()
+    enrich_product_payloads_with_category_size_guide(db, [db_product], [d])
+    return Product(**d)
 
 @router.get("/search", response_model=dict, include_in_schema=False)
 @router.get("/search/", response_model=dict)
@@ -78,13 +99,7 @@ def search_products(
         if total > 0:
             # Serialize products
             if "products" in result:
-                products_list = []
-                for product in result["products"]:
-                    try:
-                        products_list.append(Product.model_validate(product).model_dump())
-                    except Exception:
-                        products_list.append(product)
-                result["products"] = products_list
+                result["products"] = _serialize_products_for_api(db, result["products"])
             return result
 
         # Stage 4: AI Recovery & Normalize
@@ -112,13 +127,7 @@ def search_products(
             if total2 > 0:
                 # Serialize products
                 if "products" in result2:
-                    products_list2 = []
-                    for product in result2["products"]:
-                        try:
-                            products_list2.append(Product.model_validate(product).model_dump())
-                        except Exception:
-                            products_list2.append(product)
-                    result2["products"] = products_list2
+                    result2["products"] = _serialize_products_for_api(db, result2["products"])
                 return result2
 
         # Stage 5: AI Category Suggestions (Safety Net)
@@ -239,13 +248,7 @@ def read_products(
         
         # Convert SQLAlchemy objects to dicts
         if result and "products" in result:
-            products_list = []
-            for product in result["products"]:
-                try:
-                    products_list.append(Product.model_validate(product).model_dump())
-                except Exception:
-                    products_list.append(product)
-            result["products"] = products_list
+            result["products"] = _serialize_products_for_api(db, result["products"])
 
         if cache_key and raw_q and not pid and not result.get("redirect_path") and not result.get("error"):
             try:
@@ -312,7 +315,8 @@ def create_product(
     """
     Create new product
     """
-    return crud.product.create_product(db=db, product=product)
+    created = crud.product.create_product(db=db, product=product)
+    return _product_to_response(db, created)
 
 @router.get("/{product_id}", response_model=Product)
 def read_product(
@@ -325,9 +329,7 @@ def read_product(
     db_product = crud.product.get_product_by_product_id(db, product_id=product_id)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return db_product
-
-@router.put("/{product_id}", response_model=Product)
+    return _product_to_response(db, db_product)
 def update_product(
     product_id: str,
     product_update: ProductUpdate,
@@ -343,7 +345,7 @@ def update_product(
     db_product = crud.product.update_product(db, product_id=existing.id, product_update=product_update)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return db_product
+    return _product_to_response(db, db_product)
 
 @router.delete("/{product_id}", response_model=Product)
 def delete_product(
@@ -360,7 +362,7 @@ def delete_product(
     db_product = crud.product.delete_product(db, product_id=existing.id)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return db_product
+    return _product_to_response(db, db_product)
 
 @router.get("/by-slug/{slug}", response_model=Product)
 def read_product_by_slug(
@@ -374,7 +376,7 @@ def read_product_by_slug(
     db_product = crud.product.get_product_by_slug(db, slug=slug)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return db_product
+    return _product_to_response(db, db_product)
 
 @router.get("/by-slug/", response_model=Product)
 def read_product_by_slug_query(
@@ -389,7 +391,7 @@ def read_product_by_slug_query(
     db_product = crud.product.get_product_by_slug(db, slug=slug)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return db_product
+    return _product_to_response(db, db_product)
 
 @router.get("/by-code/{product_code}", response_model=Product)
 def read_product_by_code(
@@ -402,7 +404,7 @@ def read_product_by_code(
     db_product = crud.product.get_product_by_product_id(db, product_id=product_code)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return db_product
+    return _product_to_response(db, db_product)
 
 @router.get("/by-id/{id}", response_model=Product)
 def read_product_by_id(
@@ -415,7 +417,7 @@ def read_product_by_id(
     db_product = crud.product.get_product(db, product_id=id)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return db_product
+    return _product_to_response(db, db_product)
 
 
 @router.post("/by-id/{id}/purge-dead-media-url", response_model=dict, include_in_schema=False)

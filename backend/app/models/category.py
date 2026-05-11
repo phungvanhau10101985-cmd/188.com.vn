@@ -32,6 +32,8 @@ class Category(Base):
     full_slug = Column(String(800), unique=True, index=True, nullable=False)
     description = Column(Text)
     image = Column(String(500))
+    # Ảnh infographic hướng dẫn chọn size (cat1): sinh Gemini → upload Bunny, gắn PDP theo taxonomy.
+    size_guide_image_url = Column(String(800), nullable=True)
     sort_order = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
     seo_index = Column(Boolean, default=True, nullable=False)

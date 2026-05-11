@@ -284,6 +284,10 @@ IMAGE_CLASSIFICATION = {
         '网店代理', '微商代理', '实体店代理',
         
         # 3. Thông tin công ty & bản quyền (cụm từ)
+        # 2b. Factory/company/team intro images - delete image
+        '实力工厂', '工厂', '生产车间', '车间', '制鞋团队', '设计团队',
+        '开发设计团队', '出货品质严控', '品质严控', '鞋业', '品控', '质检',
+
         '未经授权', '盗用图片', '投诉原图',
         '我公司', '本公司', '公司投诉',
         

@@ -1,6 +1,7 @@
 // frontend/app/products/[slug]/components/ProductInfo/ProductActions.tsx - ĐÃ SỬA LỖI PROPS
 'use client';
 
+import { useLayoutEffect, useState } from 'react';
 import { Product } from '@/types/api';
 
 interface ProductActionsProps {
@@ -34,7 +35,13 @@ export default function ProductActions({
   isCartLoading = false,
   isFavorited = false
 }: ProductActionsProps) {
-  const canPurchase = available && !isCartLoading && variantsComplete;
+  /** Tránh hydration mismatch: server luôn isLoading=false; client có thể còn state từ CartProvider khi soft-nav. */
+  const [uiCartLoading, setUiCartLoading] = useState(false);
+  useLayoutEffect(() => {
+    setUiCartLoading(isCartLoading);
+  }, [isCartLoading]);
+
+  const canPurchase = available && !uiCartLoading && variantsComplete;
   const blockHint = !variantsComplete ? variantSelectionHint : undefined;
 
   const handleAddToCart = () => {
@@ -60,11 +67,11 @@ export default function ProductActions({
           canPurchase
             ? 'bg-gray-500 hover:bg-gray-600 text-white shadow hover:shadow-md'
             : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-        } ${isCartLoading ? 'opacity-70' : ''}`}
+        } ${uiCartLoading ? 'opacity-70' : ''}`}
       >
         <span className="text-base group-hover:scale-105 transition-transform">🛒</span>
         <span>
-          {isCartLoading ? 'Đang thêm...' : 'Thêm Vào Giỏ'}
+          {uiCartLoading ? 'Đang thêm...' : 'Thêm Vào Giỏ'}
         </span>
       </button>
       
@@ -77,16 +84,16 @@ export default function ProductActions({
           canPurchase
             ? 'bg-[#ea580c] hover:bg-[#c2410c] text-white shadow hover:shadow-md'
             : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-        } ${isCartLoading ? 'opacity-70' : ''}`}
+        } ${uiCartLoading ? 'opacity-70' : ''}`}
       >
-        {isCartLoading ? 'Đang xử lý...' : 'Mua ngay'}
+        {uiCartLoading ? 'Đang xử lý...' : 'Mua ngay'}
       </button>
       
       <button
         onClick={handleToggleFavorite}
-        disabled={isCartLoading}
+        disabled={uiCartLoading}
         className={`w-11 h-11 border-2 rounded-lg flex items-center justify-center transition-all shrink-0 ${
-          isCartLoading 
+          uiCartLoading 
             ? 'border-gray-300 bg-gray-100 cursor-not-allowed opacity-70' 
             : isFavorited 
               ? 'border-red-400 bg-red-50 text-red-500' 

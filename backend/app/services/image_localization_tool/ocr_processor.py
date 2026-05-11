@@ -2,6 +2,7 @@
 import io
 import re
 import time
+import unicodedata
 from typing import List, Tuple, Dict, Optional
 import numpy as np
 import cv2
@@ -55,6 +56,120 @@ class OCRProcessor:
     def contains_chinese(self, text: str) -> bool:
         if not text or not isinstance(text, str): return False
         return bool(self.chinese_char_regex.search(text))
+
+    _CM_DIMENSION_COMPACT = re.compile(
+        r"^\s*\d+(?:[\.,]\d+)?[cC][mM]\s*$"
+    )
+
+    @staticmethod
+    def _union_bbox_xyxy(boxes: List[Tuple[int, int, int, int]]) -> Tuple[int, int, int, int]:
+        xs1 = min(b[0] for b in boxes)
+        ys1 = min(b[1] for b in boxes)
+        xs2 = max(b[2] for b in boxes)
+        ys2 = max(b[3] for b in boxes)
+        return xs1, ys1, xs2, ys2
+
+    def _word_bbox(self, w) -> Tuple[int, int, int, int]:
+        verts = w.bounding_box.vertices
+        xs = [v.x for v in verts]
+        ys = [v.y for v in verts]
+        return int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))
+
+    def _paragraph_has_dimension_cm(self, txt: str) -> bool:
+        if not txt:
+            return False
+        return bool(
+            re.search(r"\d+(?:[\.,]\d+)?\s*[cC][mM](?!\w)", unicodedata.normalize("NFKC", txt))
+        )
+
+    def _split_paragraph_cm_cjk(
+        self, paragraph_text: str, words: List, union_fallback: Tuple[int, int, int, int]
+    ) -> List[Tuple[str, tuple]]:
+        """
+        Tách kích thước có đơn vị cm ra bbox riêng (giữ nguyên trên ảnh);
+        phần chữ Trung chỉ che/vẽ đúng vùng CJK để không xóa 1.5cm / 7cm.
+        """
+        if (
+            not self._paragraph_has_dimension_cm(paragraph_text)
+            or not words
+        ):
+            return [(paragraph_text.strip(), union_fallback)]
+
+        ordered = []
+        for w in words:
+            t = "".join(s.text for s in w.symbols)
+            ordered.append((t, self._word_bbox(w)))
+        chunks: List[Tuple[str, str, Tuple[int, int, int, int]]] = []
+
+        def _flatten_cm_key(s: str) -> str:
+            s = unicodedata.normalize("NFKC", s)
+            return re.sub(r"[\s\u3000\r\n]+", "", s)
+
+        i = 0
+        while i < len(ordered):
+            matched = False
+            max_j = min(len(ordered), i + 16)
+            for j in range(i, max_j):
+                piece_raw = "".join(ordered[k][0] for k in range(i, j + 1))
+                cmp = _flatten_cm_key(piece_raw)
+                if cmp and self._CM_DIMENSION_COMPACT.fullmatch(cmp):
+                    bbox_u = self._union_bbox_xyxy([ordered[k][1] for k in range(i, j + 1)])
+                    chunks.append(("cm", cmp.lower().replace(",", "."), bbox_u))
+                    i = j + 1
+                    matched = True
+                    break
+            if matched:
+                continue
+            wt, wb = ordered[i]
+            wt_st = wt.strip()
+            if not wt_st:
+                i += 1
+                continue
+            if self.contains_chinese(wt):
+                chunks.append(("cjk", wt, wb))
+            elif re.fullmatch(r"[,，、。:·\-–—‧·\s\u3000]+", wt):
+                pass
+            else:
+                chunks.append(("other", wt, wb))
+            i += 1
+
+        if not chunks:
+            return [(paragraph_text.strip(), union_fallback)]
+
+        merged: List[Tuple[str, str, Tuple[int, int, int, int]]] = []
+        for kind, txt, bb in chunks:
+            if not merged:
+                merged.append((kind, txt, bb))
+                continue
+            lk, lt, lb = merged[-1]
+            if kind == "cjk" and lk == "cjk":
+                merged[-1] = ("cjk", lt + txt, self._union_bbox_xyxy([lb, bb]))
+            elif kind == "cm" and lk == "cm":
+                merged[-1] = ("cm", lt + txt, self._union_bbox_xyxy([lb, bb]))
+            else:
+                merged.append((kind, txt, bb))
+
+        out_list: List[Tuple[str, tuple]] = []
+        for kind, txt, bb in merged:
+            s = txt.strip()
+            if not s:
+                continue
+            if kind == "cm":
+                out_list.append((s, bb))
+            elif kind == "cjk":
+                out_list.append((s, bb))
+            elif kind == "other":
+                cleaned = unicodedata.normalize("NFKC", s)
+                cleaned = cleaned.replace(",", ".")
+                if self._CM_DIMENSION_COMPACT.fullmatch(cleaned.replace(" ", "")):
+                    out_list.append((cleaned.strip().lower(), bb))
+                elif self.contains_chinese(s):
+                    out_list.append((s, bb))
+
+        if not out_list:
+            return [(paragraph_text.strip(), union_fallback)]
+
+        return out_list
 
     def _filter_bad_blocks(self, results: List[Tuple[str, tuple]], image_bytes: bytes) -> List[Tuple[str, tuple]]:
         """
@@ -213,8 +328,10 @@ class OCRProcessor:
                                 continue
                             para_conf = getattr(paragraph, "confidence", None)
                             has_cjk = self.contains_chinese(paragraph_text)
+                            has_cm_dim = self._paragraph_has_dimension_cm(paragraph_text)
                             # Trước đây: bỏ cả block nếu block_conf thấp → dễ mất hẳn khối tiếng Trung nửa dưới.
-                            if not has_cjk:
+                            # Giữ paragraph có kích thước «…cm» (infographic) dù không có CJK.
+                            if not has_cjk and not has_cm_dim:
                                 if para_conf is not None and float(para_conf) < OCR_CONFIDENCE_THRESHOLD:
                                     continue
                                 if para_conf is None and block_conf < OCR_CONFIDENCE_THRESHOLD:
@@ -227,7 +344,17 @@ class OCRProcessor:
                                 continue
                             xs = [v.x for v in words_vertices]
                             ys = [v.y for v in words_vertices]
-                            results.append((paragraph_text, (min(xs), min(ys), max(xs), max(ys))))
+                            union_bbox = (min(xs), min(ys), max(xs), max(ys))
+                            split_items = self._split_paragraph_cm_cjk(
+                                paragraph_text, list(paragraph.words), union_bbox
+                            )
+                            if len(split_items) > 1:
+                                print(
+                                    f"    📐 Tách cm/CJK: {len(split_items)} cụm từ paragraph "
+                                    f"'{paragraph_text[:40]}{'…' if len(paragraph_text) > 40 else ''}'"
+                                )
+                            for st, sbb in split_items:
+                                results.append((st, sbb))
 
                 stitched_para = "".join((t or "") for t, _ in results)
                 # document.text không có CJK nhưng vẫn có thể thiếu paragraph (Vision chỉ trả «230», v.v.)

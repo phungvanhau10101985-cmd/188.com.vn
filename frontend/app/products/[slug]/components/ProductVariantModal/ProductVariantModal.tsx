@@ -8,6 +8,7 @@ import { getOptimizedImage } from '@/lib/image-utils';
 import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { colorLabelForCart, colorVariantKeyPart, colorEntryImageUrl } from '@/lib/product-color-variant';
+import ProductSizeGuideModal from '@/components/category-size-guide/ProductSizeGuideModal';
 
 /** Số tồn hiển thị (ảo) random 1–3 cho mỗi phiên bản. */
 function getRandomDisplayStock(): number {
@@ -75,6 +76,13 @@ export default function ProductVariantModal({
   const colors = useMemo(() => product.colors || ([] as ProductColor[]), [product.colors]);
   const realStock = product.available ?? 0;
   const available = realStock > 0;
+  const [sizeGuideOpen, setSizeGuideOpen] = useState(false);
+  const catLevel1Slug = product.category_level1_slug ?? null;
+  const catLevel2Slug = product.category_level2_slug ?? null;
+
+  useEffect(() => {
+    if (!isOpen) setSizeGuideOpen(false);
+  }, [isOpen]);
 
   useEffect(() => {
     if (isAuthenticated && isOpen) {
@@ -167,7 +175,18 @@ export default function ProductVariantModal({
 
   if (!isOpen) return null;
 
+  const sizeGuidePanel = (
+    <ProductSizeGuideModal
+      isOpen={sizeGuideOpen}
+      onClose={() => setSizeGuideOpen(false)}
+      categoryLevel1Slug={catLevel1Slug}
+      categoryLevel2Slug={catLevel2Slug}
+      zClassName="z-[220]"
+    />
+  );
+
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
       <div
         className="absolute inset-0 bg-black/50"
@@ -278,12 +297,13 @@ export default function ProductVariantModal({
                 <div className="mt-2">
                   <div className="flex items-center justify-between mb-1.5">
                     <p className="text-xs font-semibold text-gray-900">SIZE</p>
-                    <a
-                      href="/info/huong-dan-chon-size"
+                    <button
+                      type="button"
                       className="text-[11px] text-[#ea580c] hover:text-[#c2410c] font-medium"
+                      onClick={() => setSizeGuideOpen(true)}
                     >
                       Hướng dẫn chọn kích cỡ &gt;
-                    </a>
+                    </button>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {sizes.map((size) => (
@@ -417,12 +437,13 @@ export default function ProductVariantModal({
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <p className="text-[11px] font-semibold text-gray-900">SIZE</p>
-                    <a
-                      href="/info/huong-dan-chon-size"
+                    <button
+                      type="button"
                       className="text-[10px] text-[#ea580c] hover:text-[#c2410c] font-medium"
+                      onClick={() => setSizeGuideOpen(true)}
                     >
                       Hướng dẫn chọn size &gt;
-                    </a>
+                    </button>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {sizes.map((size) => (
@@ -512,5 +533,7 @@ export default function ProductVariantModal({
         </div>
       </div>
     </div>
+    {sizeGuidePanel}
+    </>
   );
 }

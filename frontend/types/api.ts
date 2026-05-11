@@ -68,6 +68,9 @@ export interface Product {
   product_info?: ProductInfoJSON | string | null;
   /** UUID kho partner / Open Catalog (nếu backend trả về) — NanoAI chat ctx_inventory */
   inventory_id?: string | null;
+  /** Slug danh mục taxonomy cấp 1 (slug gốc trong cây category) — trang / popup «chọn size». */
+  category_level1_slug?: string | null;
+  category_level2_slug?: string | null;
 }
 
 /** Biến thể màu từ NanoAI (schema partner): tên + ảnh nguyên bản. */

@@ -1,5 +1,6 @@
 # text_translator.py
 import re
+import unicodedata
 import requests
 import time
 from typing import List, Tuple, Dict, Optional, Any
@@ -25,7 +26,90 @@ class TextTranslator:
     def contains_chinese(self, text: str) -> bool:
         if not text or not isinstance(text, str): return False
         return bool(self.chinese_regex.search(text))
+
+    @staticmethod
+    def _is_standalone_cm_measurement(text: str) -> bool:
+        """Standalone cm measurement: redraw with the same processed group, no DeepSeek."""
+        if not text or not isinstance(text, str):
+            return False
+        t = unicodedata.normalize("NFKC", text)
+        t = re.sub(r"[\s\u3000\r\n]+", "", t)
+        return bool(re.fullmatch(r"(?:\d+(?:[\.,]\d+)?|[\.,]\d+)[cC][mM]", t))
     
+
+    def _is_size_table_keyword_text(self, text: str) -> bool:
+        if not text:
+            return False
+        t = unicodedata.normalize("NFKC", str(text)).lower()
+        keywords = [
+            "\u5c3a\u7801", "\u5c3a\u5bf8", "\u5c3a\u5bf8\u8868", "\u5c3a\u7801\u8868",
+            "\u7801\u6570", "\u89c4\u683c", "\u89c4\u683c\u8868",
+            "size", "size chart", "size table", "b\u1ea3ng size", "bang size",
+            "ch\u1ecdn size", "chon size", "size guide", "sizing",
+            "\u80f8\u56f4", "\u8170\u56f4", "\u81c0\u56f4", "\u80a9\u5bbd",
+            "\u8863\u957f", "\u8896\u957f", "\u88e4\u957f", "\u88d9\u957f",
+            "\u8eab\u9ad8", "\u4f53\u91cd", "\u811a\u957f", "\u5185\u957f",
+            "\u978b\u7801", "\u6b27\u7801", "\u5398\u7c73",
+        ]
+        return any(k in t for k in keywords)
+
+    def _is_size_token_text(self, text: str) -> bool:
+        if not text:
+            return False
+        t = unicodedata.normalize("NFKC", str(text)).strip().lower()
+        compact = re.sub(r"[\s\u3000]+", "", t)
+        if self._is_standalone_cm_measurement(compact):
+            return True
+        if re.fullmatch(r"(?:xxxs|xxs|xs|s|m|l|xl|xxl|xxxl|xxxxl|\d{2,3})(?:[-/](?:xxxs|xxs|xs|s|m|l|xl|xxl|xxxl|xxxxl|\d{2,3}))*", compact):
+            return True
+        if re.fullmatch(r"\d+(?:[\.,]\d+)?(?:cm|mm|kg|g|\u65a4)?", compact):
+            return True
+        return False
+
+    def _has_size_table_context(self, items: List[Tuple[str, tuple]]) -> bool:
+        texts = [str(text or "") for text, _ in items]
+        if any(self._is_size_table_keyword_text(text) for text in texts):
+            return True
+        size_like_count = sum(1 for text in texts if self._is_size_token_text(text))
+        has_unit = any(re.search(r"(?:cm|\u5398\u7c73|mm|kg|\u65a4)", unicodedata.normalize("NFKC", text), re.IGNORECASE) for text in texts)
+        return size_like_count >= 4 and has_unit
+
+    def _is_size_table_block(self, text: str) -> bool:
+        return self._is_size_table_keyword_text(text) or self._is_size_token_text(text)
+
+
+    def _has_factory_intro_context(self, items: List[Tuple[str, tuple]]) -> bool:
+        texts = [unicodedata.normalize("NFKC", str(text or "")).lower() for text, _ in items]
+        combined = "\n".join(texts)
+        strong_keywords = [
+            "\u5b9e\u529b\u5de5\u5382",  # factory strength / factory intro
+            "\u751f\u4ea7\u8f66\u95f4",  # production workshop
+            "\u5236\u978b\u56e2\u961f",  # shoemaking team
+            "\u8bbe\u8ba1\u56e2\u961f",  # design team
+            "\u5f00\u53d1\u8bbe\u8ba1\u56e2\u961f",  # development/design team
+            "\u51fa\u8d27\u54c1\u8d28\u4e25\u63a7",  # strict outbound quality control
+            "\u54c1\u8d28\u4e25\u63a7",  # strict quality control
+        ]
+        if any(k in combined for k in strong_keywords):
+            return True
+
+        signals = [
+            "\u5de5\u5382",  # factory
+            "\u8f66\u95f4",  # workshop
+            "\u516c\u53f8",  # company
+            "\u978b\u4e1a",  # footwear company/industry
+            "\u56e2\u961f",  # team
+            "\u8bbe\u8ba1\u5e08",  # designer
+            "\u5f00\u53d1",  # development
+            "\u751f\u4ea7\u7ebf",  # production line
+            "\u8d28\u68c0",  # quality inspection
+            "\u54c1\u63a7",  # quality control
+            "\u5458\u5de5",  # staff
+            "\u5de5\u4eba",  # worker
+        ]
+        hit_count = sum(1 for k in signals if k in combined)
+        return hit_count >= 2
+
     def remove_chinese_characters(self, text: str) -> str:
         if not text: return text
         cleaned_text = self.chinese_regex.sub('', text)
@@ -122,6 +206,7 @@ YÊU CẦU:
         
         print(f"  📝 Phân tích {len(ocr_results)} khối text để dịch...")
 
+        normalized_items = []
         for item in ocr_results:
             # FIX: Handle mixed format
             if isinstance(item, dict):
@@ -130,8 +215,23 @@ YÊU CẦU:
             else:
                 text = item[0] if len(item) > 0 else ''
                 bbox = item[1] if len(item) > 1 else []
+            if text:
+                normalized_items.append((text, bbox))
 
-            if not text: continue
+        if self._has_factory_intro_context(normalized_items):
+            print("    [FACTORY INTRO] delete image")
+            return None
+
+        size_table_context = self._has_size_table_context(normalized_items)
+        if size_table_context:
+            print("    [SIZE TABLE] delete image")
+            return None
+
+        for text, bbox in normalized_items:
+            if self._is_standalone_cm_measurement(text.strip()):
+                print(f"    [CM] group with processed text: '{text.strip()}'")
+                processed_blocks.append((text.strip(), tuple(bbox)))
+                continue
             
             if self.contains_forbidden_content(text):
                 print(f"    🔴 [CẤM] Phát hiện từ khóa: '{text}' -> XÓA ẢNH")

@@ -119,6 +119,8 @@ export default function ProductInfo({ product, onAddToCart, onAddToFavorite, onB
         selectedColorIndex={selectedColorIndex}
         onSizeChange={setSelectedSize}
         onColorChange={(colorIndex) => setSelectedColorIndex(colorIndex)}
+        categoryLevel1Slug={product.category_level1_slug ?? null}
+        categoryLevel2Slug={product.category_level2_slug ?? null}
       />
 
       {/* Quantity Selector */}

@@ -36,6 +36,12 @@ from app.models.category import Category
 from app.models.seo_cluster import SeoCluster
 from app.utils.slug import create_slug as slugify_text
 from app.utils.ttl_cache import cache as ttl_cache
+from app.services.category_size_guide_gemini import (
+    DEFAULT_SIZE_GUIDE_CAT1_SLUGS,
+    build_prompt_for_cat1_slug,
+    gemini_generate_image_from_text,
+    generate_and_upload_cat1_size_guide,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -822,6 +828,149 @@ def taxonomy_clusters_list(
             for r in rows
         ]
     }
+
+
+# ---------- Ảnh hướng dẫn chọn size (cat1) — Gemini → Bunny ----------
+
+
+class CategorySizeGuideGenerateIn(BaseModel):
+    """Sinh và gắn ảnh size guide cho cat1 slug (taxonomy)."""
+
+    slugs: Optional[List[str]] = Field(
+        None,
+        description="Danh sách slug cấp 1; để null = bộ slug mặc định (giày, thời trang, đồ lót, …).",
+    )
+    force: bool = Field(False, description="True: sinh lại dù đã có URL.")
+    gemini_image_model: Optional[str] = Field(
+        None,
+        description="Mặc định IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL (vd gemini-3-pro-image-preview).",
+    )
+    gemini_image_size: Optional[str] = Field(None, description="2K hoặc 4K.")
+
+
+class CategorySizeGuideManualUrlIn(BaseModel):
+    slug: str = Field(..., min_length=1, max_length=300, description="Slug danh mục cấp 1")
+    size_guide_image_url: str = Field(..., min_length=8, max_length=800)
+
+
+@router.get("/category-size-guide-images/status")
+def taxonomy_category_size_guide_status(
+    db: Session = Depends(get_db),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
+) -> Dict[str, Any]:
+    rows = (
+        db.query(Category.slug, Category.name, Category.size_guide_image_url)
+        .filter(Category.level == 1)
+        .order_by(Category.sort_order, Category.id)
+        .all()
+    )
+    return {
+        "categories": [
+            {
+                "slug": r.slug,
+                "name": r.name,
+                "size_guide_image_url": r.size_guide_image_url,
+                "has_image": bool(r.size_guide_image_url and str(r.size_guide_image_url).strip()),
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.post("/category-size-guide-images/generate")
+def taxonomy_category_size_guide_generate(
+    body: CategorySizeGuideGenerateIn,
+    db: Session = Depends(get_db),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
+) -> Dict[str, Any]:
+    """
+    Gọi Gemini (text → ảnh, mặc định gemini-3-pro-image-preview), upload Bunny, cập nhật `categories.size_guide_image_url`.
+    Cần GEMINI_API_KEY + cấu hình Bunny. Chạy lại an toàn (force=true để thay ảnh).
+    """
+    want = [s.strip().lower() for s in (body.slugs or list(DEFAULT_SIZE_GUIDE_CAT1_SLUGS)) if s and str(s).strip()]
+    if not want:
+        raise HTTPException(status_code=400, detail="Danh sách slug rỗng.")
+    results: List[Dict[str, Any]] = []
+    for slug in want:
+        cat = db.query(Category).filter(Category.level == 1, Category.slug == slug).first()
+        if not cat:
+            results.append({"slug": slug, "status": "skipped", "error": "Không tìm thấy cat1 trong DB."})
+            continue
+        if not body.force and cat.size_guide_image_url and str(cat.size_guide_image_url).strip():
+            results.append(
+                {
+                    "slug": slug,
+                    "status": "skipped",
+                    "url": cat.size_guide_image_url,
+                    "message": "Đã có ảnh — dùng force=true để sinh lại.",
+                }
+            )
+            continue
+        try:
+            url, _ = generate_and_upload_cat1_size_guide(
+                slug,
+                image_model=body.gemini_image_model,
+                image_size=body.gemini_image_size,
+            )
+            cat.size_guide_image_url = url
+            db.add(cat)
+            db.commit()
+            db.refresh(cat)
+            results.append({"slug": slug, "status": "ok", "url": url})
+        except Exception as exc:
+            db.rollback()
+            logger.exception("category size guide generate failed slug=%s", slug)
+            results.append({"slug": slug, "status": "error", "error": str(exc)[:500]})
+    return {"results": results}
+
+
+@router.post("/category-size-guide-images/preview-prompt")
+def taxonomy_category_size_guide_preview_prompt(
+    slug: str = Query(..., min_length=1, max_length=300),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
+) -> Dict[str, str]:
+    """Xem prompt (không gọi API) — debug nhanh."""
+    return {"slug": slug.strip().lower(), "prompt": build_prompt_for_cat1_slug(slug)}
+
+
+@router.post("/category-size-guide-images/preview-image")
+def taxonomy_category_size_guide_preview_image(
+    slug: str = Query(..., min_length=1, max_length=300),
+    gemini_image_model: Optional[str] = Query(None),
+    gemini_image_size: Optional[str] = Query(None),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
+) -> Response:
+    """
+    Sinh ảnh thử (không ghi DB, không upload Bunny) — trả raw bytes PNG/JPEG.
+    """
+    try:
+        prompt = build_prompt_for_cat1_slug(slug)
+        raw = gemini_generate_image_from_text(
+            prompt,
+            image_model=gemini_image_model,
+            image_size=gemini_image_size,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)[:800]) from exc
+    return Response(content=raw, media_type="image/png")
+
+
+@router.put("/category-size-guide-images/manual-url")
+def taxonomy_category_size_guide_manual_url(
+    body: CategorySizeGuideManualUrlIn,
+    db: Session = Depends(get_db),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
+) -> Dict[str, Any]:
+    """Gán URL ảnh có sẵn (không qua Gemini)."""
+    s = body.slug.strip().lower()
+    cat = db.query(Category).filter(Category.level == 1, Category.slug == s).first()
+    if not cat:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cat1.")
+    cat.size_guide_image_url = body.size_guide_image_url.strip()
+    db.add(cat)
+    db.commit()
+    db.refresh(cat)
+    return {"slug": s, "size_guide_image_url": cat.size_guide_image_url}
 
 
 @router.post("/manual-upsert")

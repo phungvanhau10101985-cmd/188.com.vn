@@ -208,6 +208,8 @@ export default function ProductInfo({
         selectedColorIndex={selectedColorIndex}
         onSizeChange={setSelectedSize}
         onColorChange={handleColorChange}
+        categoryLevel1Slug={product.category_level1_slug ?? null}
+        categoryLevel2Slug={product.category_level2_slug ?? null}
       />
 
       {/* Quantity Selector */}

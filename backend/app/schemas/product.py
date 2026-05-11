@@ -132,6 +132,11 @@ class ProductBase(BaseModel):
     meta_description: Optional[str] = Field(None, description="SEO: meta description")
     meta_keywords: Optional[str] = Field(None, description="SEO: meta keywords")
 
+    #: Slug danh mục cấp 1 (taxonomy) — dùng với `/info/chon-size/...` và popup chọn size.
+    category_level1_slug: Optional[str] = Field(None)
+    #: Slug segment cấp 2 trong full_slug (`cat1/cat2/...`). Một vài cặp cat1+cat2 có trang guide riêng.
+    category_level2_slug: Optional[str] = Field(None)
+
 class ProductCreate(ProductBase):
     """Schema for creating product"""
     is_active: bool = True
