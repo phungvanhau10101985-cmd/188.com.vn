@@ -3116,6 +3116,7 @@ export default function AdminProductsPage() {
                 {imageLocalizationJob?.message || 'Chưa có job đang chạy.'}
               </p>
               {imageLocalizationJob?.gemini_mode === 'web' &&
+              !imageLocalizationJob?.local_image_only &&
               typeof imageLocalizationJob.playwright_headless_effective === 'boolean' ? (
                 <p className="mt-1 text-xs text-gray-500">
                   Playwright Chromium:{' '}

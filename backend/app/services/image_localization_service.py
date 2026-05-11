@@ -1721,6 +1721,9 @@ class LegacyImageLocalizationPipeline:
             "STORAGE_ZONE_NAME": settings.BUNNY_STORAGE_ZONE_NAME,
             "BUNNY_STORAGE_HOSTNAME": "storage.bunnycdn.com",
             "BATCH_SIZE": max(1, int(getattr(settings, "IMAGE_LOCALIZATION_BATCH_SIZE", 10) or 10)),
+            "OCR_SMART_RETRY_MAX_SLOW_WAITS": max(
+                0, int(getattr(settings, "IMAGE_LOCALIZATION_OCR_MAX_SLOW_WAITS", 0) or 0)
+            ),
         }
         for key, value in overrides.items():
             setattr(config_mod, key, value)

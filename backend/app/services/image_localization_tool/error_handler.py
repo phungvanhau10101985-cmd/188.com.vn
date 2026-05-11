@@ -1,85 +1,133 @@
 # error_handler.py
 import time
-import requests
-from typing import Callable, Any, Tuple
-from datetime import datetime, timedelta
-from config import *
+from typing import Any, Callable, Tuple
+
+
+def _max_slow_waits_from_config() -> int:
+    try:
+        import config as cfg
+
+        raw = getattr(cfg, "OCR_SMART_RETRY_MAX_SLOW_WAITS", 0)
+        return max(0, int(raw))
+    except Exception:
+        return 0
+
 
 class ErrorHandler:
     """
-    Quản lý lỗi với chiến thuật KIÊN TRÌ TUYỆT ĐỐI (Infinite Retry):
-    - Nếu lỗi mạng/server: Thử lại mãi mãi (3 phút/lần) cho đến khi thành công.
-    - Nếu lỗi Fatal (Key/Tiền): Dừng chương trình.
+    Retry OCR / mạng: mặc định chờ và thử lại lâu dài.
+    Chi tiết OCR Google Vision được coi là "fatal" nếu thiếu key / không bật API — tránh chờ treo không kết thúc.
+    Override số vòng chờ tối đa: OCR_SMART_RETRY_MAX_SLOW_WAITS (inject từ FastAPI qua IMAGE_LOCALIZATION_OCR_MAX_SLOW_WAITS).
     """
-    
+
     def __init__(self):
-        # Danh sách các lỗi bắt buộc phải dừng chương trình ngay
         self.fatal_errors = {
-            'insufficient_balance': ['insufficient', 'balance', 'payment required', '402'],
-            'invalid_api_key': ['invalid api key', 'unauthorized', '401', 'authentication failed'],
-            'account_suspended': ['suspended', 'terminated', 'disabled'],
-            'quota_exceeded': ['quota exceeded', 'rate limit exceeded'] # Google Vision hết quota
+            "insufficient_balance": ["insufficient", "balance", "payment required", "402"],
+            "invalid_api_key": ["invalid api key", "unauthorized", "401", "authentication failed"],
+            "account_suspended": ["suspended", "terminated", "disabled"],
+            "quota_exceeded": ["quota exceeded", "rate limit exceeded"],
+            # Thiếu/sai GCP JSON trên VPS
+            "gcp_credentials_or_file": [
+                "could not deserialize",
+                "could not deserialize key",
+                "no such file or directory",
+                "cannot find the file specified",
+                "errno 2",
+                "errno 13",
+                "filenotfounderror",
+                "is not valid json",
+                "private key must be valid",
+                "invalid_grant",
+                "invalid json",
+                "permission denied:",
+                "failed to deserialize",
+                "credentials are invalid",
+                "could not locate credentials",
+                "default credentials were not found",
+                "credentials file",
+            ],
+            "vision_api_not_ready": [
+                "cloud vision api has not been used",
+                "access not configured",
+                "api has been disabled",
+                "billing_disabled",
+                "billing not enabled",
+                "SERVICE_DISABLED",
+            ],
         }
         self.error_stats = {}
-    
+
     def is_fatal_error(self, error_msg: str) -> Tuple[bool, str]:
-        """Kiểm tra xem lỗi có thuộc nhóm không thể cứu vãn không"""
-        error_lower = error_msg.lower()
+        error_lower = (error_msg or "").lower()
         for error_type, keywords in self.fatal_errors.items():
-            if any(keyword in error_lower for keyword in keywords):
-                return True, error_type
+            for kw in keywords:
+                if kw.lower() in error_lower:
+                    return True, error_type
         return False, ""
-    
-    def smart_retry(self, func: Callable, *args, max_immediate_retries: int = 3, 
-                   long_wait_minutes: int = 3, **kwargs) -> Any:
-        """
-        Thực hiện retry VÔ TẬN:
-        1. Chạy hàm `func`.
-        2. Nếu lỗi Fatal -> Raise Exception (Dừng tool).
-        3. Nếu lỗi thường -> Retry ngay 3 lần (5s/lần).
-        4. Nếu vẫn lỗi -> Chờ 3 phút -> Quay lại bước 1.
-        """
+
+    def smart_retry(self, func: Callable, *args, max_immediate_retries: int = 3, long_wait_minutes: int = 3, **kwargs) -> Any:
         immediate_retry_count = 0
-        
+        slow_rounds_completed = 0
+        max_slow = _max_slow_waits_from_config()
+
         while True:
             try:
                 return func(*args, **kwargs)
-                
+
             except Exception as e:
                 error_msg = str(e)
-                
-                # 1. Kiểm tra Fatal Error
+
+                try:
+                    for sub in getattr(e, "args", ()):
+                        if isinstance(sub, str) and len(sub) > len(error_msg):
+                            error_msg += " " + sub
+                except Exception:
+                    pass
+
                 is_fatal, error_type = self.is_fatal_error(error_msg)
                 if is_fatal:
                     print(f"\n❌ LỖI FATAL ({error_type}): {error_msg}")
                     print("🚫 Chương trình buộc phải DỪNG LẠI.")
                     raise e
-                
-                # 2. Logic Retry
+
                 if immediate_retry_count < max_immediate_retries:
-                    # Retry nhanh
                     immediate_retry_count += 1
                     print(f"  ⚠️ Lỗi tạm thời: {error_msg}")
                     print(f"  🔄 Thử lại ngay ({immediate_retry_count}/{max_immediate_retries}) sau 5s...")
                     time.sleep(5)
+                    continue
+
+                if max_slow and slow_rounds_completed >= max_slow:
+                    raise TimeoutError(
+                        f"OCR/Google Vision chờ đủ {max_slow} vòng ({long_wait_minutes} phút/vòng sau retry nhanh): {error_msg}. "
+                        "Trên VPS: kiểm tra IMAGE_LOCALIZATION_GCP_KEY_FILE, bật Cloud Vision API, billing GCP, egress HTTPS; "
+                        "hoặc tăng IMAGE_LOCALIZATION_OCR_MAX_SLOW_WAITS (đặt 0 trong .env = không giới hạn — như cũ)."
+                    ) from e
+
+                slow_rounds_completed += 1
+                print(f"  ⚠️ Vẫn lỗi sau {max_immediate_retries} lần thử nhanh: {error_msg}")
+                print(f"  ⏳ ĐANG CHỜ {long_wait_minutes} PHÚT để mạng/server hồi phục...")
+                if max_slow:
+                    print(
+                        f"  (OCR chờ ẩn đến slow round {slow_rounds_completed}/{max_slow}; xong {max_slow} vòng vẫn lỗi sẽ dừng)"
+                    )
                 else:
-                    # Retry chậm (Chế độ kiên trì)
-                    print(f"  ⚠️ Vẫn lỗi sau {max_immediate_retries} lần thử nhanh: {error_msg}")
-                    print(f"  ⏳ ĐANG CHỜ {long_wait_minutes} PHÚT để mạng/server hồi phục...")
-                    print(f"  (Hệ thống sẽ thử lại MÃI MÃI cho đến khi thành công, không bỏ qua ảnh này)")
-                    
-                    time.sleep(long_wait_minutes * 60)
-                    
-                    # Reset lại bộ đếm để bắt đầu chu kỳ thử mới
-                    immediate_retry_count = 0
-                    print("  🔄 Hết thời gian chờ, đang thử lại kết nối...")
-    
+                    print(
+                        "  (Mặc định không giới hạn vòng chờ OCR — có thể chờ treo nếu thiếu key/Vision; "
+                        "đặt IMAGE_LOCALIZATION_OCR_MAX_SLOW_WAITS trên server.)"
+                    )
+
+                time.sleep(long_wait_minutes * 60)
+
+                immediate_retry_count = 0
+                print("  🔄 Hết thời gian chờ, đang thử lại kết nối...")
+
     def log_error(self, service: str, error_type: str):
         if service not in self.error_stats:
             self.error_stats[service] = {}
         if error_type not in self.error_stats[service]:
             self.error_stats[service][error_type] = 0
         self.error_stats[service][error_type] += 1
-    
+
     def get_stats(self):
         return self.error_stats

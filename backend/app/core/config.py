@@ -151,6 +151,9 @@ class Settings:
             "IMAGE_LOCALIZATION_GCP_KEY_FILE",
             os.getenv("GOOGLE_APPLICATION_CREDENTIALS", ""),
         ).strip()
+        # OCR (Google Vision): error_handler.smart_retry chờ + thử vô hạn — trên VPS nên đặt số nguyên >0 để báo lỗi sau N lần chờ (mỗi lần 3 phút mặc định).
+        _ocr_slow_raw = os.getenv("IMAGE_LOCALIZATION_OCR_MAX_SLOW_WAITS", "").strip()
+        self.IMAGE_LOCALIZATION_OCR_MAX_SLOW_WAITS: int = int(_ocr_slow_raw) if _ocr_slow_raw.isdigit() else 0
         self.IMAGE_LOCALIZATION_BATCH_SIZE: int = int(os.getenv("IMAGE_LOCALIZATION_BATCH_SIZE", "10") or "10")
         self.IMAGE_LOCALIZATION_CHROME_PROFILE_PATH: str = os.getenv(
             "IMAGE_LOCALIZATION_CHROME_PROFILE_PATH", ""
