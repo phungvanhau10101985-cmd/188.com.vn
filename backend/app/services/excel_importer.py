@@ -36,7 +36,7 @@ class ExcelImporter:
         progress_callback: Optional[Callable[[str, int, Optional[int]], None]] = None,
     ) -> Dict[str, Any]:
         """
-        Import sản phẩm từ file Excel 36 cột A-AJ
+        Import sản phẩm từ file Excel ~39 cột (sau AK: tên TQ / shop TQ, row 2 nhãn VI).
         Slug được tự động tạo
         Template thường gặp: hàng 1 = tên cột (id, sku, ...), hàng 2 = nhãn tiếng Việt, dữ liệu từ hàng 3.
 
@@ -269,7 +269,7 @@ class ExcelImporter:
             
             df = pd.DataFrame(products)
             
-            # 38 CỘT EXPORT ORDER (A-AL): ... Weight (AI), product_info (AK), Slug (AL)
+            # 40 CỘT EXPORT ORDER: ... product_info (AK), chinese_name (AM), shop_name_chinese (AN), Slug (AL)
             excel_columns_order = [
                 'id', 'sku', 'origin', 'brand', 'name', 'pro_content',
                 'price', 'shop_name', 'shop_id', 'pro_lower_price', 'pro_high_price',
@@ -280,19 +280,22 @@ class ExcelImporter:
                 'Main Category', 'Subcategory', 'Sub-subcategory', 'Material',
                 'Style', 'Color', 'Occasion', 'Features', 'Weight',
                 'product_info',  # AK: Thông tin sản phẩm (JSON)
-                'Slug'           # AL
+                'chinese_name',
+                'shop_name_chinese',
+                'Slug'           # sau hai cột tiếng Trung
             ]
-            
-            available_columns = [col for col in excel_columns_order if col in df.columns]
             
             if 'product_info' not in df.columns and 'product_info' in excel_columns_order:
                 df['product_info'] = ''
-                available_columns.append('product_info')
-            if 'Slug' not in available_columns:
+            if 'chinese_name' not in df.columns:
+                df['chinese_name'] = ''
+            if 'shop_name_chinese' not in df.columns:
+                df['shop_name_chinese'] = ''
+            if 'Slug' not in df.columns:
                 logger.warning("⚠️  Không tìm thấy cột Slug trong dữ liệu, thêm cột trống")
                 df['Slug'] = ''
-                available_columns.append('Slug')
-            
+            available_columns = [col for col in excel_columns_order if col in df.columns]
+
             df = df.reindex(columns=available_columns)
             
             if not filename:
@@ -341,6 +344,8 @@ class ExcelImporter:
                 'Features': 'Tính năng',
                 'Weight': 'Trọng lượng',
                 'product_info': 'Thông tin sản phẩm',
+                'chinese_name': 'Tên tiếng trung',
+                'shop_name_chinese': 'Shop Trung Quốc',
                 'Slug': 'Slug'
             }
             
@@ -444,7 +449,9 @@ class ExcelImporter:
                 'Occasion': 'Lễ cưới, dự tiệc',
                 'Features': 'Nâng đế, tăng cao',
                 'Weight': '500g',
-                'product_info': sample_product_info  # Cột AK
+                'product_info': sample_product_info,  # Cột AK
+                'chinese_name': '商务正装皮鞋男牛津鞋真皮尖头增高',
+                'shop_name_chinese': '示例义乌商行',
             }]
             
             df = pd.DataFrame(sample_data)
@@ -459,7 +466,7 @@ class ExcelImporter:
                 workbook = writer.book
                 worksheet = writer.sheets['Products']
                 
-                # 37 cột import: A-AK (không Slug)
+                # 39 cột import: A-AK + AM-AN (tên tiếng Trung, shop TQ); không Slug
                 worksheet.insert_rows(2)
                 vietnamese_headers = [
                     'Id sản phẩm', 'Mã sản phẩm', 'Xuất xứ', 'Thương hiệu', 'Tên',
@@ -470,7 +477,9 @@ class ExcelImporter:
                     'Lượt hỏi', 'Điểm đánh giá', 'Số lượng có thể mua', 'Cần đặt cọc',
                     'Danh mục cấp 1', 'Danh mục cấp 2', 'Danh mục cấp 3', 'Chất liệu',
                     'Kiểu dáng', 'màu sắc', 'Dịp', 'Tính năng', 'Trọng lượng',
-                    'Thông tin sản phẩm'  # AK - JSON
+                    'Thông tin sản phẩm',
+                    'Tên tiếng trung',
+                    'Shop Trung Quốc',
                 ]
                 
                 for col_idx, header in enumerate(vietnamese_headers, 1):
@@ -490,14 +499,14 @@ class ExcelImporter:
                     worksheet.column_dimensions[column_letter].width = adjusted_width
             
             logger.info(f"✅ Tạo template mẫu thành công: {filepath}")
-            logger.info("📋 Cấu trúc: 37 cột (A-AK), «Cần đặt cọc» mẫu = 1, AK = product_info JSON; slug tự tạo khi import.")
-            
+            logger.info("📋 Cấu trúc: 39 cột (tới shop TQ), AK = product_info; AM-AN = tên tiếng Trung / shop Trung Quốc; slug tự tạo khi import.")
+
             return {
                 "success": True,
                 "filename": "sample_import_template.xlsx",
                 "filepath": filepath,
                 "download_url": "/static/templates/sample_import_template.xlsx",
-                "note": "Template có 37 cột (A-AK). Mặc định «Cần đặt cọc» = 1 (SP phải đặt cọc). Đặt 0 nếu không cần cọc.",
+                "note": "Template 39 cột (sau AK thêm Tên tiếng trung, Shop Trung Quốc). «Cần đặt cọc» mặc định = 1.",
             }
             
         except Exception as e:

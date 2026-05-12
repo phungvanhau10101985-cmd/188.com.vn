@@ -87,8 +87,10 @@ excel_to_db_mapping = {
     # Weight
     'Weight': 'weight',
     
-    # Cột AK: Thông tin sản phẩm (JSON)
+    # Cột AK / product_info & tiếng Trung (file đầy đủ 39+ cột)
     'product_info': 'product_info',
+    'chinese_name': 'chinese_name',
+    'shop_name_chinese': 'shop_name_chinese',
 }
 
 
@@ -856,11 +858,17 @@ async def download_latest_export():
 @router.get("/export/merchant-center-feed.tsv")
 def export_merchant_center_feed_tsv(db: Session = Depends(get_db)):
     """
-    Xuất primary feed định dạng **TSV UTF-8** (tab) theo các cột Merchant Center (đầy đủ thường dùng).
+    Xuất primary feed định dạng **TSV UTF-8** (tab) theo các cột Merchant Center.
     URL cố định, công khai — có thể dán vào Merchant Center (**Nguồn dữ liệu** → **Đường dẫn tệp**).
 
-    Tuỳ chọn trong `.env`: `MERCHANT_FEED_CURRENCY` (mặc định `VND`).
-    `MERCHANT_FEED_IMAGE_BASE_URL` có thể đặt riêng; không đặt thì dùng `BUNNY_CDN_PUBLIC_BASE` (app.core.config).
+    Cột `sale_price` / `sale_price_effective_date`: **tự động** từ `price` khi bật chương trình
+    `CATALOG_SALE_ACTIVE` + `CATALOG_SALE_DISCOUNT_PERCENT` và (tuỳ chọn) `CATALOG_SALE_START` / `CATALOG_SALE_END`.
+
+    Các trường khác (custom_label, google_product_category, gender, item_group_id, video, cogs, …)
+    lấy từ `product_info` (AK) hoặc cột sản phẩm; `google_product_category` fallback env `CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY`.
+
+    Tuỳ chọn `.env`: `MERCHANT_FEED_CURRENCY` (mặc định `VND`), `MERCHANT_FEED_IMAGE_BASE_URL`
+    (không đặt thì `BUNNY_CDN_PUBLIC_BASE` trong app.core.config).
     """
     from app.services.merchant_feed_tsv import iter_merchant_feed_lines
 
@@ -888,6 +896,8 @@ def export_merchant_center_feed_tsv(db: Session = Depends(get_db)):
 def export_meta_catalog_feed_tsv(db: Session = Depends(get_db)):
     """
     Feed **TSV UTF-8** theo các cột catalogue Meta Commerce (URL để Commerce Manager / scheduled fetch).
+    Gồm giá sale (cùng logic `CATALOG_SALE_*` như feed Google), nhóm biến thể, gender/age_group,
+    custom_label_0–4, **`video_url`** (link video), shipping weight.
     Đặt `META_FEED_FB_PRODUCT_CATEGORY` và tuỳ chọn `CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY` trong `.env` backend.
     """
     from app.services.social_catalog_feed_tsv import iter_meta_catalog_lines
@@ -924,8 +934,8 @@ def export_meta_catalog_feed_tsv(db: Session = Depends(get_db)):
 @router.get("/export/tiktok-catalog-feed.tsv")
 def export_tiktok_catalog_feed_tsv(db: Session = Depends(get_db)):
     """
-    Feed **TSV UTF-8** theo tham số catalogue TikTok (`sku_id`, `link`, `image_link`, …).
-    Tuỳ chọn `CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY` trong `.env` nếu cần một taxonomy Google cố định.
+    Feed **TSV UTF-8** catalogue TikTok (`sku_id`, `link`, `image_link`, giá sale như `CATALOG_SALE_*`, …).
+    Tuỳ chọn `CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY` trong `.env` nếu cần taxonomy Google mặc định.
     """
     from app.services.social_catalog_feed_tsv import iter_tiktok_catalog_lines
 

@@ -28,6 +28,8 @@ export interface Product {
   origin?: string;
   brand_name?: string;
   chinese_name?: string;
+  /** Tên shop Trung Quốc (Excel «Shop Trung Quốc») */
+  shop_name_chinese?: string;
   status?: string;
   created_at: string;
   updated_at?: string;

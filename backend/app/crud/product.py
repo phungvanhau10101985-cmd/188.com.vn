@@ -876,9 +876,21 @@ def resync_all_product_category_ids_from_display_path(db: Session, is_active_onl
     return n
 
 
+def _excel_str(row: Dict, *keys: str) -> str:
+    """Đọc ô Excel theo một trong các tên cột (EN hoặc header tiếng Việt trên file mẫu)."""
+    for k in keys:
+        v = row.get(k)
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s and s.lower() not in ("nan", "none", "null"):
+            return s
+    return ""
+
+
 def excel_row_to_product(row: Dict) -> Dict:
     """
-    Convert Excel row (36 columns A-AJ) to product dictionary
+    Convert Excel row (~39 cột: tới `chinese_name`, `shop_name_chinese` sau AK) to product dictionary.
     FIX: Đúng mapping các cột Color, Occasion, Features
     """
     try:
@@ -977,6 +989,8 @@ def excel_row_to_product(row: Dict) -> Dict:
                 or row.get('thong_tin_san_pham')
                 or row.get('Thong tin san pham')
             ),
+            'chinese_name': _excel_str(row, 'chinese_name', 'Tên tiếng trung'),
+            'shop_name_chinese': _excel_str(row, 'shop_name_chinese', 'Shop Trung Quốc'),
             'slug': slug_value,
             'is_active': True,
             'created_at': datetime.now()
@@ -999,7 +1013,7 @@ def excel_row_to_product(row: Dict) -> Dict:
         return {}
 
 def product_to_excel_row(product: Product) -> Dict:
-    """Convert Product to Excel row - 37 columns A-AK (with Slug as last column)"""
+    """Convert Product to Excel row — product_info (AK), chinese_name, shop_name_chinese, Slug."""
     try:
         # Đảm bảo có slug
         slug_value = product.slug
@@ -1063,9 +1077,11 @@ def product_to_excel_row(product: Product) -> Dict:
             # FIX: Cột 35: Features -> Text thường (không phải JSON)
             'Features': features_export,
             'Weight': product.weight or '',
-            # Cột AK (37): Thông tin sản phẩm (JSON)
+            # Cột AK: Thông tin sản phẩm (JSON)
             'product_info': json.dumps(product.product_info, ensure_ascii=False) if getattr(product, 'product_info', None) else '',
-            # Cột AL (38): Slug
+            'chinese_name': getattr(product, 'chinese_name', None) or '',
+            'shop_name_chinese': getattr(product, 'shop_name_chinese', None) or '',
+            # Slug (sau hai cột tiếng Trung — file đầy đủ có thể 40 cột)
             'Slug': slug_value
         }
         

@@ -83,6 +83,11 @@ const FIELD_LABELS: Record<string, string> = {
   xuat_khau_xuyen_bien_gioi: 'Xuất khẩu xuyên biên giới',
   thoi_gian_chuan_bi_hang: 'Thời gian chuẩn bị hàng',
   khu_vuc_ban_hang_chinh: 'Khu vực bán hàng chính',
+  price_vnd: 'Giá tham khảo (VND)',
+  price_vnd_display: 'Giá tham khảo (VND)',
+  excel_price_vnd_source: 'Nguồn giá VND',
+  currency: 'Tiền tệ',
+  note: 'Ghi chú',
 };
 
 /** Không hiển thị trong tab (giữ trong JSON cho scraper/admin). */

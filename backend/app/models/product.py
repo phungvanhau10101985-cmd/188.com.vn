@@ -57,6 +57,9 @@ class Product(Base):
     meta_keywords = Column(String(1000))
     # Cột AK: Thông tin sản phẩm (JSON: product_info, specifications, variants, target_audience, market_info)
     product_info = Column(JSON, nullable=True)
+    # Hai cột cuối file import (sau AK): tên tiếng Trung, shop Trung Quốc
+    chinese_name = Column(String(500), nullable=True)
+    shop_name_chinese = Column(String(200), nullable=True)
     # Theo dõi batch bản địa hóa ảnh sản phẩm (O/P/Q/T).
     image_localization_status = Column(String(50), default="pending", index=True)
     image_localization_language = Column(String(20))

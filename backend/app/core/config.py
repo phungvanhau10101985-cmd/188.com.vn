@@ -259,6 +259,22 @@ class Settings:
             os.getenv("CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY", "").strip()
         )
 
+        # Chương trình sale cho feed catalogue: giá sale = giá gốc × (1 - %), không cần cột/import
+        # Bật: CATALOG_SALE_ACTIVE=true + CATALOG_SALE_DISCOUNT_PERCENT>0. Tuỳ chọn khung ngày YYYY-MM-DD.
+        self.CATALOG_SALE_ACTIVE: bool = os.getenv("CATALOG_SALE_ACTIVE", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        _cs_pct = os.getenv("CATALOG_SALE_DISCOUNT_PERCENT", "0").strip()
+        try:
+            self.CATALOG_SALE_DISCOUNT_PERCENT: float = float(_cs_pct) if _cs_pct else 0.0
+        except ValueError:
+            self.CATALOG_SALE_DISCOUNT_PERCENT = 0.0
+        self.CATALOG_SALE_START: str = os.getenv("CATALOG_SALE_START", "").strip()
+        self.CATALOG_SALE_END: str = os.getenv("CATALOG_SALE_END", "").strip()
+
         self.EMAIL_TRUSTED_DEVICE_DAYS: int = int(os.getenv("EMAIL_TRUSTED_DEVICE_DAYS", "30"))
         self.EMAIL_AUTH_RL_EMAIL_PER_MINUTE: int = int(os.getenv("EMAIL_AUTH_RL_EMAIL_PER_MINUTE", "5"))
         self.EMAIL_AUTH_RL_IP_PER_MINUTE: int = int(os.getenv("EMAIL_AUTH_RL_IP_PER_MINUTE", "40"))

@@ -170,8 +170,7 @@ def _infer_import_source_for_url(norm_url: str, requested_source: Optional[str] 
 
 def _excel_export_columns_and_vi_headers() -> Tuple[List[str], List[str]]:
     """
-    Trùng thứ tự 37 cột với `sample_import_template.xlsx` / `ExcelImporter.create_sample_template`
-    (gallery_images → detail_images liên tiếp; không Slug; không cột ảnh nguồn 1688 riêng).
+    Trùng thứ tự với template / file 39 cột (sau `product_info` thêm tên tiếng Trung, shop Trung Quốc).
     """
     columns = [
         "id",
@@ -211,6 +210,8 @@ def _excel_export_columns_and_vi_headers() -> Tuple[List[str], List[str]]:
         "Features",
         "Weight",
         "product_info",
+        "chinese_name",
+        "shop_name_chinese",
     ]
     vietnamese_headers = [
         "Id sản phẩm",
@@ -250,6 +251,8 @@ def _excel_export_columns_and_vi_headers() -> Tuple[List[str], List[str]]:
         "Tính năng",
         "Trọng lượng",
         "Thông tin sản phẩm",
+        "Tên tiếng trung",
+        "Shop Trung Quốc",
     ]
     return columns, vietnamese_headers
 
@@ -664,7 +667,7 @@ def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
 
     style_cell = _style_cell_from_pd(product_data)
 
-    # Cột Excel trùng mẫu import 37 cột (A–AK): không export carousel/swatch/block 1688 hay Slug —
+    # Cột Excel mẫu 39 cột (sau AK: tên tiếng Trung, shop Trung Quốc) —
     # ảnh nguồn vẫn nằm trong product_data / JSON khi cần đối chiếu.
     # Shop id (cột I) trùng ô Kiểu dáng / Style (cột AI) — lấy theo trường `style`.
     return {
@@ -707,6 +710,8 @@ def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
         "Features": j(product_data.get("features", [])),
         "Weight": product_data.get("weight", ""),
         "product_info": j(product_data.get("product_info", {})),
+        "chinese_name": product_data.get("chinese_name", "") or "",
+        "shop_name_chinese": product_data.get("shop_name_chinese", "") or "",
     }
 
 

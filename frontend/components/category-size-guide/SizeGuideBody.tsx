@@ -8,29 +8,26 @@ import {
   titleForSizeGuideSlug,
 } from '@/lib/category-size-guide-meta';
 
-/** Bảng 2 cột: chiều dài chân (cm) ↔ cỡ in trên tem (chuẩn thường dùng ở shop Việt Nam). */
+/** Bảng chiều dài chân ↔ cỡ EU/VN thường gặp ở shop Việt Nam. */
 function ShoeTableMale() {
   const rows = [
-    ['23,0', '36'],
-    ['23,5', '37'],
-    ['24,0', '38'],
-    ['24,5', '39'],
-    ['25,0', '40'],
-    ['25,5', '41'],
-    ['26,0', '41–42'],
-    ['26,5', '42'],
-    ['27,0', '43'],
-    ['27,5', '43–44'],
-    ['28,0', '44'],
-    ['28,5', '45'],
-    ['29,0', '45–46'],
+    ['23,6–24,0', '38'],
+    ['24,1–24,5', '39'],
+    ['24,6–25,0', '40'],
+    ['25,1–25,5', '41'],
+    ['25,6–26,0', '42'],
+    ['26,1–26,5', '43'],
+    ['26,6–27,0', '44'],
+    ['27,1–27,5', '45'],
+    ['27,6–28,0', '46'],
+    ['28,1–28,5', '47'],
   ];
   return (
     <table className="w-full text-sm border border-gray-200 border-collapse text-left mt-3">
       <thead>
         <tr className="bg-amber-100">
           <th className="p-2 border border-gray-200">Chiều dài chân (cm)</th>
-          <th className="p-2 border border-gray-200">Cỡ giày (thường in trên tem / shop Việt Nam)</th>
+          <th className="p-2 border border-gray-200">Cỡ giày dép nam (EU/VN)</th>
         </tr>
       </thead>
       <tbody>
@@ -47,25 +44,23 @@ function ShoeTableMale() {
 
 function ShoeTableFemale() {
   const rows = [
-    ['22,0', '35'],
-    ['22,5', '36'],
-    ['23,0', '36–37'],
-    ['23,5', '37'],
-    ['24,0', '38'],
-    ['24,5', '39'],
-    ['25,0', '39–40'],
-    ['25,5', '40'],
-    ['26,0', '41'],
-    ['26,5', '41–42'],
-    ['27,0', '42'],
-    ['27,5', '43'],
+    ['21,6–22,0', '34'],
+    ['22,1–22,5', '35'],
+    ['22,6–23,0', '36'],
+    ['23,1–23,5', '37'],
+    ['23,6–24,0', '38'],
+    ['24,1–24,5', '39'],
+    ['24,6–25,0', '40'],
+    ['25,1–25,5', '41'],
+    ['25,6–26,0', '42'],
+    ['26,1–26,5', '43'],
   ];
   return (
     <table className="w-full text-sm border border-gray-200 border-collapse text-left mt-3">
       <thead>
         <tr className="bg-amber-100">
           <th className="p-2 border border-gray-200">Chiều dài chân (cm)</th>
-          <th className="p-2 border border-gray-200">Cỡ giày (tem / shop Việt Nam)</th>
+          <th className="p-2 border border-gray-200">Cỡ giày dép nữ (EU/VN)</th>
         </tr>
       </thead>
       <tbody>
@@ -153,11 +148,14 @@ function BraBandTable() {
 
 function ApparelMaleTable() {
   const rows = [
-    ['S', '92–96', '44–46', '74–79', '90–94'],
-    ['M', '97–101', '47–48', '79–82', '95–99'],
-    ['L', '102–107', '49–51', '82–86', '100–106'],
-    ['XL', '108–114', '52–54', '86–90', '107–112'],
-    ['XXL', '115–120', '55–56', '90–95', '113–118'],
+    ['S', '86–90', '41–43', '70–76', '88–94'],
+    ['M', '90–96', '43–45', '76–82', '94–100'],
+    ['L', '96–102', '45–47', '82–88', '100–106'],
+    ['XL', '102–108', '47–49', '88–94', '106–112'],
+    ['XXL', '108–114', '49–51', '94–100', '112–118'],
+    ['3XL', '114–122', '51–53', '100–108', '118–126'],
+    ['4XL', '122–130', '53–55', '108–116', '126–134'],
+    ['5XL', '130–138', '55–58', '116–126', '134–144'],
   ];
   return (
     <table className="w-full text-xs sm:text-sm border border-gray-200 border-collapse mt-3">
@@ -185,13 +183,85 @@ function ApparelMaleTable() {
   );
 }
 
+/** Gợi ý cỡ theo chiều cao & cân nặng (form ôm chuẩn Á — tham khảo; luôn ưu tiên số đo cm). */
+function ApparelMaleHeightWeightTable() {
+  const rows = [
+    ['S', '155–165', '45–55'],
+    ['M', '160–170', '55–63'],
+    ['L', '165–175', '63–72'],
+    ['XL', '170–180', '72–82'],
+    ['XXL', '175–185', '82–92'],
+    ['3XL', '178–188', '92–105'],
+    ['4XL', '180–192', '105–118'],
+    ['5XL', '185–196', '118–130'],
+  ];
+  return (
+    <table className="w-full text-xs sm:text-sm border border-gray-200 border-collapse mt-3">
+      <thead>
+        <tr className="bg-slate-50">
+          <th className="p-2 border">Cỡ</th>
+          <th className="p-2 border">Chiều cao (cm)</th>
+          <th className="p-2 border">Cân nặng (kg)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r[0]}>
+            {r.map((c, i) => (
+              <td key={`${r[0]}-${i}`} className="p-2 border border-gray-100">
+                {c}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function ApparelFemaleHeightWeightTable() {
+  const rows = [
+    ['XS', '145–155', '38–45'],
+    ['S', '150–160', '43–50'],
+    ['M', '155–165', '50–56'],
+    ['L', '158–168', '56–63'],
+    ['XL', '160–170', '63–72'],
+    ['XXL', '162–172', '72–82'],
+    ['3XL', '165–175', '82–92'],
+  ];
+  return (
+    <table className="w-full text-xs sm:text-sm border border-gray-200 border-collapse mt-3">
+      <thead>
+        <tr className="bg-slate-50">
+          <th className="p-2 border">Cỡ</th>
+          <th className="p-2 border">Chiều cao (cm)</th>
+          <th className="p-2 border">Cân nặng (kg)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r[0]}>
+            {r.map((c, i) => (
+              <td key={`${r[0]}-${i}`} className="p-2 border border-gray-100">
+                {c}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 function ApparelFemaleTable() {
   const rows = [
-    ['S', '84–88', '64–69', '90–93'],
-    ['M', '88–92', '69–74', '93–96'],
-    ['L', '92–96', '74–78', '96–100'],
-    ['XL', '96–101', '78–84', '100–106'],
-    ['XXL', '101–106', '84–92', '106–114'],
+    ['XS', '78–82', '60–66', '84–90'],
+    ['S', '82–86', '66–70', '88–94'],
+    ['M', '86–90', '70–74', '92–98'],
+    ['L', '90–95', '74–80', '96–104'],
+    ['XL', '95–101', '80–86', '102–110'],
+    ['XXL', '101–108', '86–94', '108–116'],
+    ['3XL', '108–116', '94–104', '116–126'],
   ];
   return (
     <table className="w-full text-xs sm:text-sm border border-gray-200 border-collapse mt-3">
@@ -257,8 +327,10 @@ function Note({ children }: { children: React.ReactNode }) {
   return <p className="text-xs text-gray-600 mt-3 leading-relaxed">{children}</p>;
 }
 
-function Heading({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-base font-bold text-gray-900 mt-4 first:mt-0">{children}</h2>;
+function Heading({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <h2 className={['text-base font-bold text-gray-900 mt-4 first:mt-0', className].filter(Boolean).join(' ')}>{children}</h2>
+  );
 }
 
 function GuideKidsShoes() {
@@ -313,8 +385,8 @@ function GuideHeelsFemale({ variant }: { variant: 'cao-got' | 'cuoi-tiec' }) {
     <>
       <Heading>{wedding ? 'Giày cưới & dự tiệc Nữ' : 'Giày cao gót Nữ'} — cỡ và độ ôm</Heading>
       <p className="text-sm text-gray-700 mt-2">
-        Vẫn căn vào chiều dài chân (cm) như giày bệt. Gót và mũi nhọn thường khiến cảm giác ôm cổ chân và ngón —
-        có thể cần tăng nửa hoặc một cỡ so với sneaker của bạn, đặc biệt nếu bàn ngang và gót hẹp.
+        Vẫn căn vào chiều dài chân (cm) như giày bệt. Gót và mũi nhọn thường khiến cổ chân và ngón bị ôm hơn:
+        nếu bàn chân bè, mu chân cao hoặc ít đi cao gót, nên nghiêng lớn hơn 1 size.
       </p>
       {wedding ? (
         <p className="text-sm text-gray-700 mt-2">
@@ -324,8 +396,8 @@ function GuideHeelsFemale({ variant }: { variant: 'cao-got' | 'cuoi-tiec' }) {
       ) : null}
       <ShoeTableFemale />
       <Note>
-        Độ cao gót (cm trong mô tả) ảnh hưởng lực bàn chân trước — thường chọn thoáng hơn một chút khi đế nghiêng và mũi nhọn. Luôn ưu
-        tiên bảng kích cỡ và mô tả trên từng sản phẩm tại 188.com.vn.
+        Độ cao gót (cm trong mô tả) ảnh hưởng lực bàn chân trước. Giày mũi nhọn nên chọn vừa thoáng; sandal quai mảnh
+        nếu chân gầy có thể giữ đúng size, chân bè nên tăng 1 size. Luôn ưu tiên bảng kích cỡ trên từng sản phẩm tại 188.com.vn.
       </Note>
     </>
   );
@@ -367,7 +439,8 @@ export function SizeGuideInner({ segments }: { segments: readonly string[] }) {
         </p>
         <ShoeTableMale />
         <Note>
-          Giữa hai cỡ: căn vào chiều dài cm. Form ôm có thể cần lớn hơn ~0,5 cỡ; mũi hẹp cũng dễ chật ngón — luôn ưu tiên mô tả và bảng trên trang sản phẩm.
+          Giữa hai cỡ: giày thể thao hoặc giày bít mũi nên chọn cỡ lớn hơn; dép lê/dép quai ngang có thể giữ đúng cỡ nếu
+          chân thon. Chân bè, mu chân cao hoặc thích mang tất dày nên tăng 1 size.
         </Note>
       </>
     );
@@ -379,7 +452,10 @@ export function SizeGuideInner({ segments }: { segments: readonly string[] }) {
         <Heading>Hướng dẫn chọn size giày dép nữ — 188.com.vn</Heading>
         <p className="text-sm text-gray-700 mt-2">Đo như nam: gót đến ngón dài nhất (cm).</p>
         <ShoeTableFemale />
-        <Note>Giày cao gót / mũi nhọn có thể cần cỡ thoáng hơn một chút. Tham khảo thêm các trang nhóm con tương ứng trong mục Chọn size nếu sản phẩm thuộc danh mục đó.</Note>
+        <Note>
+          Giày cao gót, mũi nhọn hoặc boot ôm nên nghiêng lớn hơn 1 size nếu ở giữa hai cỡ. Sandal/dép quai mảnh giữ đúng
+          size khi chân thon; chân bè hoặc mu cao nên tăng 1 size.
+        </Note>
       </>
     );
   }
@@ -392,7 +468,13 @@ export function SizeGuideInner({ segments }: { segments: readonly string[] }) {
           Ưu tiên đo thước dây: ngực, vai, eo, mông — so với dải (cm) của bạn rồi chọn cỡ gần nhất.
         </p>
         <ApparelMaleTable />
-        <Note>Bụng lớn hơn bảng tham khảo: có thể chọn lớn hơn một cỡ hoặc dòng co giãn.</Note>
+        <Heading className="!mt-6">Gợi ý cỡ theo chiều cao &amp; cân nặng (nam)</Heading>
+        <p className="text-sm text-gray-700 mt-2">
+          Dùng khi chưa đo được thước: dải này hợp vóc dáng nam Việt hơn. Người vai rộng / bụng lớn nên nghiêng cỡ lớn hơn
+          hoặc căn bảng cm phía trên.
+        </p>
+        <ApparelMaleHeightWeightTable />
+        <Note>Form oversize có thể giảm 1 cỡ nếu thích vừa người; form slim/ôm hoặc bụng lớn nên tăng 1 cỡ.</Note>
       </>
     );
   }
@@ -405,7 +487,13 @@ export function SizeGuideInner({ segments }: { segments: readonly string[] }) {
           Đo ngực, eo, hông (cm); chọn cỡ vừa khít nhất so với số đo của bạn.
         </p>
         <ApparelFemaleTable />
-        <Note>Đầm ôm vai–ngực trước; quần rộng ưu tiên eo và mông.</Note>
+        <Heading className="!mt-6">Gợi ý cỡ theo chiều cao &amp; cân nặng (nữ)</Heading>
+        <p className="text-sm text-gray-700 mt-2">
+          Tham khảo nhanh khi mua online theo vóc dáng nữ Việt; ngực / eo / hông khác biệt lớn so với cùng chiều cao nên
+          luôn ưu tiên bảng đo cm phía trên.
+        </p>
+        <ApparelFemaleHeightWeightTable />
+        <Note>Đầm ôm ưu tiên vai–ngực–eo; quần và chân váy ưu tiên eo và hông. Form oversize có thể giảm 1 cỡ nếu muốn gọn.</Note>
       </>
     );
   }
@@ -456,6 +544,11 @@ export function SizeGuideInner({ segments }: { segments: readonly string[] }) {
           Quần áo: đo ngực — eo — hông (cm) rồi so bảng của từng sản phẩm. Găng, mũ, bó: xem cỡ tay, chu vi đầu hoặc chiều dài dây trong mô tả.
         </p>
         <ApparelMaleTable />
+        <Heading className="!mt-6">Gợi ý cỡ theo chiều cao &amp; cân nặng (nam — tham khảo)</Heading>
+        <p className="text-sm text-gray-700 mt-2">
+          Áp dụng tương tự thời trang nam; đồ thể thao co giãn có thể trùng nhiều cỡ — ưu tiên bảng shop từng mã.
+        </p>
+        <ApparelMaleHeightWeightTable />
         <Note>Hàng co giãn ôm người có thể cần cỡ lớn hơn nếu vai rộng hoặc tay dài — đọc chi tiết từng mẫu.</Note>
       </>
     );

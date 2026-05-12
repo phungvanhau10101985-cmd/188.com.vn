@@ -2090,7 +2090,9 @@ export default function AdminProductsPage() {
               >
                 <h3 className="text-sm font-semibold text-slate-900">Import hàng loạt từ Excel</h3>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Cột link (ví dụ cột <strong>F</strong>) từ dòng 2; giá và shop cùng dòng được đưa vào nháp.
+                  Cột link (vd. <strong>F</strong>) từ dòng 2; <strong>D</strong> (Tên shop) → Shop Trung Quốc,{' '}
+                  <strong>K</strong> (Tên tiếng trung) → tên tiếng Trung; giá và shop (khối L–O…) cùng dòng vào nháp.
+                  File export đợt có thêm hai cột đó.
                 </p>
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   <button

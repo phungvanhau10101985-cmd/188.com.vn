@@ -1,6 +1,5 @@
 /**
- * Khớp backend: `import_1688.export_import_1688_draft_excel` + `_excel_row_from_product`
- * và file `sample_import_template.xlsx` (37 cột A–AK; row 1 key EN, row 2 nhãn VI).
+ * Khớp backend: `import_1688` export draft + `sample_import_template` (39 cột: đến Shop Trung Quốc).
  */
 export type DraftExcelColumnKey = (typeof DRAFT_IMPORT_EXCEL_COLUMNS)[number]['key'];
 
@@ -82,6 +81,8 @@ export const DRAFT_IMPORT_EXCEL_COLUMNS = [
     labelVi: 'Thông tin sản phẩm',
     sampleHint: '{ "product_info": {…}, "specifications": {…} }',
   },
+  { key: 'chinese_name', labelVi: 'Tên tiếng trung', sampleHint: '商务正装皮鞋男牛津鞋…' },
+  { key: 'shop_name_chinese', labelVi: 'Shop Trung Quốc', sampleHint: '义乌市××商行' },
 ] as const;
 
 function colLetter(index1Based: number): string {
@@ -174,6 +175,8 @@ export function productDataToDraftExcelRow(
     Features: j(p.features),
     Weight: String(p.weight ?? ''),
     product_info: j(p.product_info),
+    chinese_name: String((p as Record<string, unknown>).chinese_name ?? ''),
+    shop_name_chinese: String((p as Record<string, unknown>).shop_name_chinese ?? ''),
   };
 }
 

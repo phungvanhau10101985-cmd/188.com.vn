@@ -1,9 +1,9 @@
 """
-Đọc file Excel danh sách link: URL mặc định cột F (dòng 2+), shop/giá phụ từ tiêu đề + khối **L–O** → xuất **H–K** file kết quả.
+Đọc file Excel danh sách link: URL mặc định cột F (dòng 2+), **cột D** «Tên shop» → `shop_name_chinese`, **cột K** «Tên tiếng trung» → `chinese_name`; shop/giá phụ từ tiêu đề + khối **L–O** → xuất **H–K** file kết quả.
 **Cột B** («Mã sp»): nếu có giá trị thì dùng làm SKU nội bộ ([A-Z][0-9]{4]) **chỉ khi mã đã nằm trong danh sách đã xuất**
 (`internal_sku_exports`, từ bước tải SKU trống trong Admin) và chưa trùng `products.code`; ô trống → backend gán mã **đã xuất** đầu tiên còn chưa gán sản phẩm (FIFO).
 
-**Giá sản phẩm (`price` → cột G bảng xuất):** luôn lấy **cột Q (17)** khi ô có giá trị — **không** dùng cột G (7) vì thường là giá khác / tham chiếu (vd. 109).
+**Giá đặt hàng (`price`):** **cột Q (17)** nếu có giá trị. **Cột G (7):** giá VND (~tham khảo) ghép vào `product_info.market_info.price_vnd` — không dùng cho `price` — để tab AK hiển thị VND thay vì chỉ chú thích trang nguồn/₮.
 
 `shop_id` (cột I file đầy đủ) đồng bộ với **Style** (cột AI) khi có dữ liệu — áp sau shop_id ô riêng và khối L–O.
 """
@@ -27,6 +27,9 @@ STYLE_COLUMN_1BASED_FALLBACK = 35
 # Giá bán (`price`): chỉ cột Q (17). Không bao giờ lấy cột G (7).
 PRICE_SKIP_COLUMN_G_1BASED = 7
 PRICE_EXCEL_COLUMN_Q_1BASED = 17
+# Cột D / K cố định (template thường gặp): tên shop Trung Quốc, tên sản phẩm tiếng Trung — không gán `shop_name` từ ô D.
+CHINESE_SHOP_COLUMN_D_1BASED = 4
+CHINESE_PRODUCT_NAME_COLUMN_K_1BASED = 11
 # Cột L–O (12–15) trên file nguồn → cột H–K trên Excel kết quả (shop_name, shop_id, pro_lower_price, pro_high_price)
 SOURCE_COL_BLOCK_LO_EXTRA_SHOP: Tuple[Tuple[int, str], ...] = (
     (12, "shop_name"),
@@ -56,6 +59,50 @@ def _cell_str(val: Any) -> str:
     return str(val).strip()
 
 
+_VND_CELL_NOISE_RE = re.compile(
+    r"[\u00a0\s]|₫|\bVNĐ\b|\bvnd\b|đồng",
+    re.IGNORECASE,
+)
+
+
+def _parse_vnd_amount_from_excel_cell(val: Any) -> Optional[float]:
+    """Ô Excel cột G (VND): số Excel, hoặc chuỗi kiểu 1.500.000 / 79000 đ."""
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        return None
+    if isinstance(val, int):
+        return float(val)
+    if isinstance(val, float):
+        return float(val)
+    s = _VND_CELL_NOISE_RE.sub("", str(val).strip()).replace("\u2212", "-")
+    # Ô dạng «79 000 đ» — bỏ ký hiệu đ/₫ sót cuối sau khi đã bỏ noise.
+    s = re.sub(r"(?i)[\s]*(?:đ|vnđ|[₫])[\s]*$", "", s).strip()
+    if not s:
+        return None
+    if s.startswith("(") and s.endswith(")"):
+        s = "-" + s[1:-1]
+    comma_to_dot = s.replace(",", ".")
+    dot_count = comma_to_dot.count(".")
+    # Nhiều dấu . → phân hàng ngàn VI (vd. 1.500.000); một dấu . với nhóm cuối 3 chữ số → vd. "1.500"
+    if dot_count >= 2:
+        try:
+            return float(comma_to_dot.replace(".", ""))
+        except ValueError:
+            return None
+    if dot_count == 1:
+        left, right = comma_to_dot.split(".", 1)
+        if left.lstrip("-").isdigit() and right.isdigit() and len(right) == 3 and len(left.replace("-", "")) <= 3:
+            try:
+                return float(left.replace("-", "") + right) * (-1 if left.startswith("-") else 1)
+            except ValueError:
+                pass
+    try:
+        return float(comma_to_dot)
+    except ValueError:
+        return None
+
+
 def _cell_float(val: Any) -> Optional[float]:
     if val is None:
         return None
@@ -76,7 +123,7 @@ def merge_import_excel_overlay_into_product_data(
     product_data: Dict[str, Any],
     overlay: Optional[Dict[str, Any]],
 ) -> None:
-    """Ghi đè shop + giá + mã SKU (cột B) từ Excel. Khóa `_...` là meta (vd. _excel_row), không ảnh hưởng merge."""
+    """Ghi đè shop + giá + SKU (cột B) + tên TQ/shop TQ (cột D/K bulk) từ Excel. Khóa `_...` là meta, không merge."""
     if not overlay or not isinstance(overlay, dict):
         _fill_shop_id_from_style_if_empty(product_data)
         return
@@ -98,7 +145,48 @@ def merge_import_excel_overlay_into_product_data(
         product_data["shop_id"] = str(sid).strip()
     if (sk := overlay.get("_sync_style_kieu_dang")) is not None and str(sk).strip():
         product_data["style"] = str(sk).strip()
+    if (cn := overlay.get("chinese_name")) is not None and str(cn).strip():
+        product_data["chinese_name"] = str(cn).strip()
+    if (sc := overlay.get("shop_name_chinese")) is not None and str(sc).strip():
+        product_data["shop_name_chinese"] = str(sc).strip()
+    vnd_raw = overlay.get("price_display_vnd_g")
+    if vnd_raw is not None and str(vnd_raw).strip() != "":
+        _merge_excel_column_g_vnd_into_product_info(product_data, vnd_raw)
     _fill_shop_id_from_style_if_empty(product_data)
+
+
+def _merge_excel_column_g_vnd_into_product_info(product_data: Dict[str, Any], raw: Any) -> None:
+    """Gép giá VND (cột G file bulk) vào product_info.market_info; bỏ note kiểu trang nguồn / ₮."""
+    pi_any = product_data.get("product_info")
+    pi: Dict[str, Any]
+    if isinstance(pi_any, dict):
+        pi = pi_any
+    else:
+        pi = {}
+        product_data["product_info"] = pi
+    mk_any = pi.get("market_info")
+    mk: Dict[str, Any] = mk_any if isinstance(mk_any, dict) else {}
+
+    parsed = _parse_vnd_amount_from_excel_cell(raw)
+    if parsed is not None:
+        vn = round(parsed, 2)
+        if abs(vn - round(vn)) < 1e-6:
+            mk["price_vnd"] = int(round(vn))
+        else:
+            mk["price_vnd"] = vn
+        mk.pop("price_vnd_display", None)
+    else:
+        s = _cell_str(raw)
+        if not s:
+            return
+        mk["price_vnd_display"] = s
+        mk.pop("price_vnd", None)
+
+    mk.pop(
+        "note", None
+    )  # vd. «Giá hiển thị theo trang nguồn (đơn vị có thể là ₮).»
+    mk["excel_price_vnd_source"] = "Cột G (nhập Excel hàng loạt)"
+    pi["market_info"] = mk
 
 
 def _fill_shop_id_from_style_if_empty(product_data: Dict[str, Any]) -> None:
@@ -265,7 +353,9 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
     """
     Trả ([{excel_row, url, overlays}], skip_messages).
 
-    overlays: **code** (cột **B** «Mã sp» nếu có), shop_name, shop_id, pro_lower_price, pro_high_price,
+    overlays: **code** (cột **B** «Mã sp» nếu có), shop_name (không lấy từ cột D), shop_name_chinese (**cột D**),
+    chinese_name (**cột K**), shop_id, pro_lower_price, pro_high_price,
+    **price_display_vnd_g** (**cột G** — đổ vào `product_info.market_info` làm giá VND),
     và **price** (chỉ khi ô **cột Q** có giá trị).
     shop_id lấy trùng ô **Style** (tiêu đề hoặc cột AI) nếu ô đó có dữ liệu.
     """
@@ -328,7 +418,9 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
             if shop_col:
                 sv = coord(shop_col)
                 if sv is not None and str(sv).strip():
-                    overlays["shop_name"] = _cell_str(sv)
+                    # D«Tên shop» = tên shop Trung Quốc (`shop_name_chinese`), không đồng thời là shop_name VN.
+                    if shop_col != CHINESE_SHOP_COLUMN_D_1BASED:
+                        overlays["shop_name"] = _cell_str(sv)
             if shop_id_col:
                 sid_v = coord(shop_id_col)
                 if sid_v is not None and str(sid_v).strip():
@@ -361,10 +453,21 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
                 # Ghi vào product_data.style khi merge overlay (cột Kiểu dáng Excel = shop_id)
                 overlays["_sync_style_kieu_dang"] = sv
 
-            # Giá điền cột G bảng kết quả: bắt buộc cột Q — ghi đè sau cùng (tránh nhầm G / price_col / scrape).
+            # Giá đặt (`price`): chỉ cột Q (ghi đè sau cùng). Cột G: VND vào AK `market_info` (không dùng cho `price`).
             q_price = coord(PRICE_EXCEL_COLUMN_Q_1BASED)
             if q_price is not None and str(q_price).strip() != "":
                 overlays["price"] = q_price
+            g_vnd = coord(PRICE_SKIP_COLUMN_G_1BASED)
+            if g_vnd is not None and str(g_vnd).strip() != "":
+                overlays["price_display_vnd_g"] = g_vnd
+
+            # Cố định: D = Shop Trung Quốc, K = Tên tiếng Trung (khớp template cột chữ cái)
+            d_cn_shop = coord(CHINESE_SHOP_COLUMN_D_1BASED)
+            if d_cn_shop is not None and str(d_cn_shop).strip():
+                overlays["shop_name_chinese"] = _cell_str(d_cn_shop)
+            k_cn_name = coord(CHINESE_PRODUCT_NAME_COLUMN_K_1BASED)
+            if k_cn_name is not None and str(k_cn_name).strip():
+                overlays["chinese_name"] = _cell_str(k_cn_name)
 
             out.append({"excel_row": excel_row, "url": url.strip(), "overlays": overlays})
 

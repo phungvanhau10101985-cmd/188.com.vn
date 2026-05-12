@@ -131,6 +131,13 @@ def compact_product_info_for_web(product_data: Dict[str, Any]) -> None:
         note = (mk.get("note") or "").strip()
         if note:
             slim_mk["note"] = note
+        for ek in ("price_vnd", "price_vnd_display", "excel_price_vnd_source"):
+            if ek not in mk:
+                continue
+            ev = mk[ek]
+            if ev is None or (isinstance(ev, str) and not ev.strip()):
+                continue
+            slim_mk[ek] = copy.deepcopy(ev)
 
     new_pi: Dict[str, Any] = {}
     if slim_inner:

@@ -114,8 +114,11 @@ class ProductBase(BaseModel):
     # Cột 36: Weight
     weight: Optional[str] = Field(None, description="36: Weight")
     
-    # Cột AK (37): Thông tin sản phẩm (JSON) - DB/ORM có thể trả về dict hoặc chuỗi JSON
+    # Cột AK (37): Thông tin sản phẩm (JSON) - DB/ORM có trả về dict hoặc chuỗi JSON
     product_info: Optional[Union[Dict[str, Any], str]] = Field(None, description="AK: Thông tin sản phẩm (JSON)")
+    # AM-AN: sau product_info (file mẫu 39 cột — không bắt buộc Slug)
+    chinese_name: Optional[str] = Field(None, description="Tên tiếng Trung (nguồn 1688/Trung Quốc)")
+    shop_name_chinese: Optional[str] = Field(None, description="Tên shop Trung Quốc")
     image_localization_status: Optional[str] = Field(
         "pending",
         description="Trạng thái bản địa hóa ảnh: pending, processing, localized, failed, skipped",
@@ -180,6 +183,8 @@ class ProductUpdate(BaseModel):
     features: Optional[List[str]] = None
     weight: Optional[str] = None
     product_info: Optional[Dict[str, Any]] = None
+    chinese_name: Optional[str] = None
+    shop_name_chinese: Optional[str] = None
     image_localization_status: Optional[str] = None
     image_localization_language: Optional[str] = None
     image_localized_at: Optional[datetime] = None
