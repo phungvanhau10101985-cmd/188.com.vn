@@ -293,6 +293,34 @@ class ImageLocalizationError(RuntimeError):
     pass
 
 
+class ImageLocalizationFatalDependencyError(ImageLocalizationError):
+    pass
+
+
+_FATAL_DEPENDENCY_MARKERS = (
+    "IMAGE_LOCALIZATION_FATAL_DEPENDENCY",
+    "FatalDependencyError",
+    "insufficient balance",
+    "payment required",
+    "resource_exhausted",
+    "resource exhausted",
+    "quota exceeded",
+    "billing not enabled",
+    "billing_disabled",
+    "deepseek_missing_key",
+)
+
+
+def is_image_localization_fatal_dependency_error(exc: BaseException) -> bool:
+    msg = f"{exc.__class__.__name__}: {exc}"
+    return any(marker.lower() in msg.lower() for marker in _FATAL_DEPENDENCY_MARKERS)
+
+
+def _raise_if_fatal_dependency(exc: BaseException) -> None:
+    if is_image_localization_fatal_dependency_error(exc):
+        raise ImageLocalizationFatalDependencyError(str(exc)) from exc
+
+
 def ensure_runtime_dir() -> Path:
     path = Path(settings.IMAGE_LOCALIZATION_RUNTIME_DIR)
     path.mkdir(parents=True, exist_ok=True)
@@ -2195,9 +2223,50 @@ class ProductImageLocalizationService:
     def _allows_ai_image(self, product: Product) -> bool:
         return resolve_allows_ai_image_models(product, job_override=self.allow_ai_image_models_override)
 
+    def _claim_product_for_processing(self, db: Session, product: Product) -> bool:
+        status_filter = (
+            Product.image_localization_status.is_(None)
+            | (Product.image_localization_status != "processing")
+        )
+        if not self.force:
+            status_filter = (
+                Product.image_localization_status.is_(None)
+                | (Product.image_localization_status.in_(["", "pending", "failed"]))
+            )
+
+        claimed = (
+            db.query(Product)
+            .filter(Product.id == product.id)
+            .filter(status_filter)
+            .update(
+                {
+                    Product.image_localization_status: "processing",
+                    Product.image_localization_language: self.language,
+                    Product.image_localization_error: None,
+                },
+                synchronize_session=False,
+            )
+        )
+        db.commit()
+        if not claimed:
+            db.refresh(product)
+            return False
+        db.refresh(product)
+        return True
+
     def process_product(self, db: Session, product: Product, should_cancel=None) -> Dict[str, Any]:
         if should_cancel and should_cancel():
             raise ImageLocalizationError("Job đã bị hủy")
+
+        if not self._claim_product_for_processing(db, product):
+            current_status = (product.image_localization_status or "").strip() or "pending"
+            msg = (
+                "Bỏ qua vì sản phẩm đang được job bản địa hóa khác xử lý."
+                if current_status == "processing"
+                else f"Bỏ qua vì trạng thái hiện tại là {current_status}."
+            )
+            return {"status": "skipped", "processed_images": 0, "message": msg}
+
         refs = self._collect_refs(product)
         unique_urls = []
         seen = set()
@@ -2219,11 +2288,6 @@ class ProductImageLocalizationService:
         if limit:
             unique_urls = unique_urls[:limit]
 
-        product.image_localization_status = "processing"
-        product.image_localization_language = self.language
-        product.image_localization_error = None
-        db.commit()
-
         results: Dict[str, ImageProcessResult] = {}
         if settings.IMAGE_LOCALIZATION_FULL_PIPELINE_ENABLED and LegacyImageLocalizationPipeline.available():
             allow_ai = self._allows_ai_image(product)
@@ -2238,6 +2302,7 @@ class ProductImageLocalizationService:
                     should_cancel=should_cancel,
                 )
             except Exception as exc:
+                _raise_if_fatal_dependency(exc)
                 logger.exception(
                     "Full pipeline lỗi (%s), fallback từng ảnh (Gemini/GPT chỉ khi có chỉ định AI) cho %s",
                     exc,
@@ -2259,6 +2324,7 @@ class ProductImageLocalizationService:
                         image_bytes, filename = self._download(url)
                         results[url] = fallback_pl.process_single_image(product, url, image_bytes, filename)
                     except Exception as exc2:
+                        _raise_if_fatal_dependency(exc2)
                         logger.exception("Lỗi bản địa hóa ảnh %s cho product %s", url, product.product_id)
                         results[url] = ImageProcessResult(url, url, "error", str(exc2))
         else:
@@ -2271,6 +2337,7 @@ class ProductImageLocalizationService:
                 try:
                     results[url] = self._process_one(product, url)
                 except Exception as exc:
+                    _raise_if_fatal_dependency(exc)
                     logger.exception("Lỗi bản địa hóa ảnh %s cho product %s", url, product.product_id)
                     results[url] = ImageProcessResult(url, url, "error", str(exc))
 
@@ -2435,14 +2502,21 @@ class ProductImageLocalizationService:
 
 def products_pending_localization(db: Session, product_ids: Optional[Iterable[str]], force: bool, limit: int) -> List[Product]:
     query = db.query(Product)
+    pending_filter = (
+        Product.image_localization_status.is_(None)
+        | (Product.image_localization_status.in_(["", "pending", "failed"]))
+    )
     if product_ids:
         ids = [str(x).strip() for x in product_ids if str(x).strip()]
         query = query.filter(Product.product_id.in_(ids))
+        if not force:
+            query = query.filter(pending_filter)
     elif not force:
-        query = query.filter(
-            (Product.image_localization_status.is_(None))
-            | (Product.image_localization_status.in_(["", "pending", "failed"]))
-        )
+        query = query.filter(pending_filter)
+    query = query.filter(
+        (Product.image_localization_status.is_(None))
+        | (Product.image_localization_status != "processing")
+    )
     query = query.order_by(Product.id.asc())
     if limit and limit > 0:
         query = query.limit(limit)

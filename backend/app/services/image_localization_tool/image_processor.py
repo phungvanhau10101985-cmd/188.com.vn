@@ -15,7 +15,8 @@ class ImageProcessor:
         self.font_path = self._find_best_font(FONT_PATH)
         print(f"  🔤 ImageProcessor sử dụng font: {self.font_path}")
         
-        self.MIN_FONT_SIZE = 12
+        # Cỡ tối thiểu khi vẽ chữ bản địa hóa (binary search trong [_calc_box / _binary_search_font]).
+        self.MIN_FONT_SIZE = 14
         self.MAX_FONT_SIZE = 140
         self.STROKE_WIDTH_RATIO = 0.05
         # Legacy ratio; không dùng làm stride dòng nữa (xem _wrapped_block_height / _draw_text_centered).

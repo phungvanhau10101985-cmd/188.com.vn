@@ -66,16 +66,105 @@ class TextTranslator:
             return True
         return False
 
+    def _is_explicit_size_chart_title(self, text: str) -> bool:
+        if not text:
+            return False
+        t = unicodedata.normalize("NFKC", str(text)).lower()
+        compact = re.sub(r"[\s\u3000:_：\-|/]+", "", t)
+        title_keywords = [
+            "\u5c3a\u7801\u8868",  # size table
+            "\u5c3a\u5bf8\u8868",  # dimension table
+            "\u5c3a\u7801\u5bf9\u7167\u8868",
+            "\u5c3a\u5bf8\u5bf9\u7167\u8868",
+            "\u9009\u62e9\u5c3a\u7801",
+            "\u9009\u5c3a\u7801",
+            "sizechart",
+            "sizetable",
+            "sizeguide",
+            "bangsize",
+            "b\u1ea3ngsize",
+            "chonsize",
+            "ch\u1ecdnsize",
+            "huongdanchonsize",
+            "h\u01b0\u1edbngd\u1eabnch\u1ecdnsize",
+        ]
+        return any(keyword in compact for keyword in title_keywords)
+
+    def _has_product_info_guard(self, text: str) -> bool:
+        if not text:
+            return False
+        t = unicodedata.normalize("NFKC", str(text)).lower()
+        product_info_keywords = [
+            "product info", "material show", "material",
+            "\u4ea7\u54c1\u4fe1\u606f", "\u5546\u54c1\u4fe1\u606f",
+            "\u4ea7\u54c1\u53c2\u6570", "\u57fa\u672c\u53c2\u6570", "\u53c2\u6570",
+            "\u6750\u8d28", "\u6750\u6599", "\u9762\u6599", "\u76ae\u9762",
+            "\u989c\u8272", "\u8272\u53f7", "\u6b3e\u53f7", "\u578b\u53f7",
+            "\u5e2e\u9ad8", "\u5185\u589e\u9ad8", "\u5e95\u9ad8", "\u8ddf\u9ad8",
+            "kpu", "\u805a\u6c28\u916f",
+        ]
+        return any(keyword in t for keyword in product_info_keywords)
+
+    def _is_size_dimension_label(self, text: str) -> bool:
+        if not text:
+            return False
+        t = unicodedata.normalize("NFKC", str(text)).lower()
+        labels = [
+            "\u80f8\u56f4", "\u8170\u56f4", "\u81c0\u56f4", "\u80a9\u5bbd",
+            "\u8863\u957f", "\u8896\u957f", "\u88e4\u957f", "\u88d9\u957f",
+            "\u8eab\u9ad8", "\u4f53\u91cd", "\u811a\u957f", "\u5185\u957f",
+            "\u978b\u7801", "\u6b27\u7801", "\u7801\u6570",
+            "chest", "waist", "hip", "shoulder", "length", "sleeve",
+            "height", "weight", "foot length",
+        ]
+        return any(label in t for label in labels)
+
     def _has_size_table_context(self, items: List[Tuple[str, tuple]]) -> bool:
-        texts = [str(text or "") for text, _ in items]
-        if any(self._is_size_table_keyword_text(text) for text in texts):
-            return True
-        size_like_count = sum(1 for text in texts if self._is_size_token_text(text))
-        has_unit = any(re.search(r"(?:cm|\u5398\u7c73|mm|kg|\u65a4)", unicodedata.normalize("NFKC", text), re.IGNORECASE) for text in texts)
-        return size_like_count >= 4 and has_unit
+        texts = [str(text or "") for text, _ in items if str(text or "").strip()]
+        if not texts:
+            return False
+
+        combined = "\n".join(unicodedata.normalize("NFKC", text).lower() for text in texts)
+        has_explicit_title = any(self._is_explicit_size_chart_title(text) for text in texts)
+        has_product_info = any(self._has_product_info_guard(text) for text in texts)
+        size_token_count = sum(1 for text in texts if self._is_size_token_text(text))
+        size_label_count = sum(1 for text in texts if self._is_size_dimension_label(text))
+        has_unit = bool(re.search(r"(?:cm|\u5398\u7c73|mm|kg|\u65a4)", combined, re.IGNORECASE))
+        has_table_word = bool(re.search(r"(?:\u8868|\u5bf9\u7167\u8868|table|chart)", combined, re.IGNORECASE))
+        size_block_count = sum(
+            1
+            for text in texts
+            if (
+                self._is_size_token_text(text)
+                or self._is_size_dimension_label(text)
+                or self._is_explicit_size_chart_title(text)
+            )
+        )
+        size_block_ratio = size_block_count / max(1, len(texts))
+
+        # Product-info/spec images often mention cm, height, color, material, or model.
+        # Delete only when the image is clearly a dedicated size-selection table.
+        if has_product_info and not has_explicit_title:
+            return False
+
+        if has_explicit_title:
+            return (size_token_count >= 2 and has_unit) or size_label_count >= 2
+
+        return (
+            has_table_word
+            and size_token_count >= 5
+            and size_label_count >= 2
+            and has_unit
+            and size_block_ratio >= 0.75
+            and not has_product_info
+        )
 
     def _is_size_table_block(self, text: str) -> bool:
-        return self._is_size_table_keyword_text(text) or self._is_size_token_text(text)
+        return (
+            self._is_explicit_size_chart_title(text)
+            or self._is_size_dimension_label(text)
+            or self._is_size_token_text(text)
+        )
 
 
     def _has_factory_intro_context(self, items: List[Tuple[str, tuple]]) -> bool:
@@ -116,6 +205,12 @@ class TextTranslator:
         return re.sub(r'\s+', ' ', cleaned_text).strip()
     
     def call_deepseek_for_translation_single(self, text: str) -> str:
+        if not (DEEPSEEK_API_KEY or "").strip():
+            raise RuntimeError(
+                "IMAGE_LOCALIZATION_FATAL_DEPENDENCY:deepseek_missing_key: "
+                "Thiếu DEEPSEEK_API_KEY nên không thể dịch ảnh bằng DeepSeek."
+            )
+
         text_hash = hashlib.md5(text.encode()).hexdigest()
         
         if text_hash in self.translation_cache:
@@ -145,7 +240,8 @@ YÊU CẦU:
         
         def _do_request():
             r = self.session.post(DEEPSEEK_URL, headers=headers, json=payload, timeout=30)
-            r.raise_for_status()
+            if r.status_code >= 400:
+                raise RuntimeError(f"DeepSeek API lỗi HTTP {r.status_code}: {(r.text or '')[:800]}")
             if not r.content: raise Exception("API trả về response rỗng")
             try: j = r.json()
             except json.JSONDecodeError: raise Exception(f"API trả về JSON không hợp lệ")

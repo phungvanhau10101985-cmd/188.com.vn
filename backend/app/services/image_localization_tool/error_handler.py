@@ -7,10 +7,14 @@ def _max_slow_waits_from_config() -> int:
     try:
         import config as cfg
 
-        raw = getattr(cfg, "OCR_SMART_RETRY_MAX_SLOW_WAITS", 0)
-        return max(0, int(raw))
+        raw = getattr(cfg, "OCR_SMART_RETRY_MAX_SLOW_WAITS", 1)
+        return max(1, int(raw))
     except Exception:
-        return 0
+        return 1
+
+
+class FatalDependencyError(RuntimeError):
+    """A required paid dependency cannot recover by retrying this job."""
 
 
 class ErrorHandler:
@@ -22,10 +26,16 @@ class ErrorHandler:
 
     def __init__(self):
         self.fatal_errors = {
-            "insufficient_balance": ["insufficient", "balance", "payment required", "402"],
-            "invalid_api_key": ["invalid api key", "unauthorized", "401", "authentication failed"],
+            "insufficient_balance": [
+                "insufficient", "balance", "insufficient_quota", "insufficient balance",
+                "payment required", "402", "credit", "credits", "billing", "余额不足", "欠费", "账户余额",
+            ],
+            "invalid_api_key": ["invalid api key", "unauthorized", "401", "authentication failed", "permission_denied"],
             "account_suspended": ["suspended", "terminated", "disabled"],
-            "quota_exceeded": ["quota exceeded", "rate limit exceeded"],
+            "quota_exceeded": [
+                "quota exceeded", "rate limit exceeded", "resource_exhausted", "resource exhausted",
+                "quota", "429", "limit exceeded",
+            ],
             # Thiếu/sai GCP JSON trên VPS
             "gcp_credentials_or_file": [
                 "could not deserialize",
@@ -53,6 +63,7 @@ class ErrorHandler:
                 "billing_disabled",
                 "billing not enabled",
                 "SERVICE_DISABLED",
+                "consumer invalid",
             ],
         }
         self.error_stats = {}
@@ -88,7 +99,7 @@ class ErrorHandler:
                 if is_fatal:
                     print(f"\n❌ LỖI FATAL ({error_type}): {error_msg}")
                     print("🚫 Chương trình buộc phải DỪNG LẠI.")
-                    raise e
+                    raise FatalDependencyError(f"IMAGE_LOCALIZATION_FATAL_DEPENDENCY:{error_type}: {error_msg}") from e
 
                 if immediate_retry_count < max_immediate_retries:
                     immediate_retry_count += 1
@@ -98,24 +109,19 @@ class ErrorHandler:
                     continue
 
                 if max_slow and slow_rounds_completed >= max_slow:
-                    raise TimeoutError(
-                        f"OCR/Google Vision chờ đủ {max_slow} vòng ({long_wait_minutes} phút/vòng sau retry nhanh): {error_msg}. "
-                        "Trên VPS: kiểm tra IMAGE_LOCALIZATION_GCP_KEY_FILE, bật Cloud Vision API, billing GCP, egress HTTPS; "
-                        "hoặc tăng IMAGE_LOCALIZATION_OCR_MAX_SLOW_WAITS (đặt 0 trong .env = không giới hạn — như cũ)."
+                    raise FatalDependencyError(
+                        f"IMAGE_LOCALIZATION_FATAL_DEPENDENCY:retry_exhausted: "
+                        f"OCR/DeepSeek chờ đủ {max_slow} vòng ({long_wait_minutes} phút/vòng sau retry nhanh): {error_msg}. "
+                        "Kiểm tra Google Vision/DeepSeek API key, quota/billing/số dư và kết nối HTTPS rồi chạy lại."
                     ) from e
 
                 slow_rounds_completed += 1
                 print(f"  ⚠️ Vẫn lỗi sau {max_immediate_retries} lần thử nhanh: {error_msg}")
                 print(f"  ⏳ ĐANG CHỜ {long_wait_minutes} PHÚT để mạng/server hồi phục...")
-                if max_slow:
-                    print(
-                        f"  (OCR chờ ẩn đến slow round {slow_rounds_completed}/{max_slow}; xong {max_slow} vòng vẫn lỗi sẽ dừng)"
-                    )
-                else:
-                    print(
-                        "  (Mặc định không giới hạn vòng chờ OCR — có thể chờ treo nếu thiếu key/Vision; "
-                        "đặt IMAGE_LOCALIZATION_OCR_MAX_SLOW_WAITS trên server.)"
-                    )
+                print(
+                    f"  (Chờ ẩn đến slow round {slow_rounds_completed}/{max_slow}; "
+                    f"xong {max_slow} vòng vẫn lỗi sẽ dừng job)"
+                )
 
                 time.sleep(long_wait_minutes * 60)
 

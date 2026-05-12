@@ -30,8 +30,55 @@ const ADMIN_1688_EXCEL_BATCH_TOKEN_KEY = 'admin:products:import_1688_excel_batch
 /** Theo dõi một job import từng link 1688/Hibox sau khi reload. */
 const ADMIN_1688_LINK_JOB_KEY = 'admin:products:import_1688_link_job';
 
-/** Theo dõi job bản địa hóa ảnh sau khi reload tab. */
+/** Legacy: một job_id — migrate sang IMAGE_LOCALIZATION_JOBS_KEY. */
 const IMAGE_LOCALIZATION_JOB_KEY = 'admin:products:image_localization_job';
+
+/** Theo dõi nhiều job bản địa hóa ảnh song song + khôi phục khi reload tab. */
+const IMAGE_LOCALIZATION_JOBS_KEY = 'admin:products:image_localization_jobs';
+
+/** Tránh duplicate poll khi Strict Mode mount đôi (dev). */
+const resumedImageLocalizationPollSession = new Set<string>();
+
+function readStoredLocalizationJobIds(): string[] {
+  try {
+    const raw = localStorage.getItem(IMAGE_LOCALIZATION_JOBS_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw) as unknown;
+      if (Array.isArray(arr)) {
+        return [...new Set(arr.filter((x): x is string => typeof x === 'string'))];
+      }
+    }
+    const legacy = localStorage.getItem(IMAGE_LOCALIZATION_JOB_KEY);
+    return legacy ? [legacy] : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredLocalizationJobIds(ids: string[]) {
+  try {
+    const uniq = [...new Set(ids)];
+    if (uniq.length === 0) {
+      localStorage.removeItem(IMAGE_LOCALIZATION_JOBS_KEY);
+      localStorage.removeItem(IMAGE_LOCALIZATION_JOB_KEY);
+    } else {
+      localStorage.setItem(IMAGE_LOCALIZATION_JOBS_KEY, JSON.stringify(uniq));
+      localStorage.removeItem(IMAGE_LOCALIZATION_JOB_KEY);
+    }
+  } catch {
+    /* noop */
+  }
+}
+
+function addStoredLocalizationJobId(jobId: string) {
+  const cur = readStoredLocalizationJobIds();
+  if (!cur.includes(jobId)) cur.push(jobId);
+  writeStoredLocalizationJobIds(cur);
+}
+
+function removeStoredLocalizationJobId(jobId: string) {
+  writeStoredLocalizationJobIds(readStoredLocalizationJobIds().filter((id) => id !== jobId));
+}
 
 /** Model Gemini API: ảnh hưởng “hiểu” prompt, dịch chữ và giữ layout. imageSize chỉ là độ nét đầu ra. */
 const IMAGE_LOC_GEMINI_MODEL_PRESETS: { id: string; label: string; model: string }[] = [
@@ -311,8 +358,17 @@ export default function AdminProductsPage() {
   const imageLocalizationPlaywrightSyncedRef = useRef(false);
   const [imageLocalizationSelectedOnly, setImageLocalizationSelectedOnly] = useState(false);
   const [imageLocalizationSavingCookie, setImageLocalizationSavingCookie] = useState(false);
-  const [imageLocalizationRunning, setImageLocalizationRunning] = useState(false);
-  const [imageLocalizationJob, setImageLocalizationJob] = useState<AdminImageLocalizationJob | null>(null);
+  /** Đang có ít nhất một vòng poll GET job trên tab này (có thể nhiều job song song phía server). */
+  const [localizationPollActive, setLocalizationPollActive] = useState(false);
+  /** Chặn double-submit khi POST start job (ngắn). */
+  const [localizationStartBusy, setLocalizationStartBusy] = useState(false);
+  const localizationPollCountRef = useRef(0);
+  const [imageLocalizationJobsById, setImageLocalizationJobsById] = useState<
+    Record<string, AdminImageLocalizationJob>
+  >({});
+  /** Thứ tự hiển thị trong khung Tiến trình (mỗi job một card). */
+  const [localizationJobIdsOrdered, setLocalizationJobIdsOrdered] = useState<string[]>([]);
+  const localizationCompletionFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [imageLocalizationSummary, setImageLocalizationSummary] = useState<AdminImageLocalizationSummary | null>(null);
   const [geminiAuthStatus, setGeminiAuthStatus] = useState<AdminGeminiAuthStatus | null>(null);
   const [imageLocalizationError, setImageLocalizationError] = useState<string | null>(null);
@@ -576,15 +632,68 @@ export default function AdminProductsPage() {
     }
   }, [imageLocalizationLanguage]);
 
-  const pollImageLocalizationJob = useCallback(async (jobId: string): Promise<AdminImageLocalizationJob> => {
-    for (let pollIdx = 0; ; pollIdx += 1) {
-      const job = await adminProductAPI.getImageLocalizationJob(jobId);
-      setImageLocalizationJob(job);
-      if (job.status === 'done' || job.status === 'error' || job.status === 'cancelled') return job;
-      const delayMs = pollIdx <= 5 ? 1200 : Math.min(8000, 2500 + pollIdx * 350);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
+  const registerLocalizationJobId = useCallback((jobId: string) => {
+    setLocalizationJobIdsOrdered((prev) => (prev.includes(jobId) ? prev : [...prev, jobId]));
   }, []);
+
+  const scheduleLocalizationUiFlush = useCallback(() => {
+    if (localizationCompletionFlushTimerRef.current != null) return;
+    localizationCompletionFlushTimerRef.current = setTimeout(() => {
+      localizationCompletionFlushTimerRef.current = null;
+      fetchProducts();
+      void loadImageLocalizationSummary();
+    }, 450);
+  }, [fetchProducts, loadImageLocalizationSummary]);
+
+  useEffect(
+    () => () => {
+      if (localizationCompletionFlushTimerRef.current != null) {
+        clearTimeout(localizationCompletionFlushTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const bumpLocalizationPollCount = useCallback((delta: number) => {
+    localizationPollCountRef.current += delta;
+    setLocalizationPollActive(localizationPollCountRef.current > 0);
+  }, []);
+
+  const pollImageLocalizationJob = useCallback(
+    async (jobId: string): Promise<AdminImageLocalizationJob> => {
+      bumpLocalizationPollCount(1);
+      try {
+        for (let pollIdx = 0; ; pollIdx += 1) {
+          const job = await adminProductAPI.getImageLocalizationJob(jobId);
+          setImageLocalizationJobsById((prev) => ({ ...prev, [jobId]: job }));
+          if (job.status === 'done' || job.status === 'error' || job.status === 'cancelled') return job;
+          const delayMs = pollIdx <= 5 ? 1200 : Math.min(8000, 2500 + pollIdx * 350);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      } finally {
+        bumpLocalizationPollCount(-1);
+      }
+    },
+    [bumpLocalizationPollCount],
+  );
+
+  const finishLocalizationPoll = useCallback(
+    (jobId: string, job: AdminImageLocalizationJob) => {
+      removeStoredLocalizationJobId(jobId);
+      resumedImageLocalizationPollSession.delete(jobId);
+
+      const tail = (job.job_id ?? jobId).slice(0, 10);
+      if (job.status === 'done') {
+        showToast('ok', `Job ảnh ${tail}…: ${job.message || 'Đã hoàn tất'}`, 8000);
+        scheduleLocalizationUiFlush();
+      } else if (job.status === 'cancelled') {
+        showToast('ok', `Job ảnh ${tail}…: đã hủy`);
+      } else {
+        showToast('err', job.message || `Job ảnh ${tail}… thất bại`, 9000);
+      }
+    },
+    [scheduleLocalizationUiFlush],
+  );
 
   const handleSaveGeminiCookie = async () => {
     const cookie = imageLocalizationCookie.trim();
@@ -610,7 +719,8 @@ export default function AdminProductsPage() {
 
   const handleStartImageLocalization = async () => {
     setImageLocalizationError(null);
-    setImageLocalizationRunning(true);
+    setLocalizationStartBusy(true);
+    let startedJobId: string | null = null;
     try {
       const productIds =
         imageLocalizationSelectedOnly && selectedProductIds.size > 0 ? Array.from(selectedProductIds) : undefined;
@@ -633,42 +743,68 @@ export default function AdminProductsPage() {
           playwright_headless: imageLocalizationPlaywrightHeadless,
         }),
       });
-      localStorage.setItem(IMAGE_LOCALIZATION_JOB_KEY, started.job_id);
-      setImageLocalizationJob({
-        job_id: started.job_id,
-        status: 'queued',
-        message: 'Đã xếp hàng bản địa hóa ảnh.',
-      });
-      const job = await pollImageLocalizationJob(started.job_id);
-      if (job.status === 'done') {
-        showToast('ok', job.message || 'Đã hoàn tất bản địa hóa ảnh', 8000);
-        fetchProducts();
-        await loadImageLocalizationSummary();
-      } else if (job.status === 'cancelled') {
-        showToast('ok', 'Đã hủy job bản địa hóa ảnh');
-      } else {
-        showToast('err', job.message || 'Bản địa hóa ảnh thất bại', 9000);
-      }
+      startedJobId = started.job_id;
+      registerLocalizationJobId(started.job_id);
+      addStoredLocalizationJobId(started.job_id);
+      setImageLocalizationJobsById((prev) => ({
+        ...prev,
+        [started.job_id]: {
+          job_id: started.job_id,
+          status: 'queued',
+          message: 'Đã xếp hàng bản địa hóa ảnh.',
+        },
+      }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Không chạy được bản địa hóa ảnh';
       setImageLocalizationError(msg);
       showToast('err', msg, 9000);
+      return;
     } finally {
-      setImageLocalizationRunning(false);
-      localStorage.removeItem(IMAGE_LOCALIZATION_JOB_KEY);
+      setLocalizationStartBusy(false);
     }
+
+    const jid = startedJobId as string;
+    void pollImageLocalizationJob(jid)
+      .then((job) => {
+        finishLocalizationPoll(jid, job);
+      })
+      .catch((err) => {
+        setImageLocalizationError(err instanceof Error ? err.message : 'Không theo dõi được job ảnh');
+        removeStoredLocalizationJobId(jid);
+      })
+      .finally(() => {
+        resumedImageLocalizationPollSession.delete(jid);
+      });
   };
 
-  const handleCancelImageLocalization = async () => {
-    if (!imageLocalizationJob?.job_id) return;
+  const handleCancelImageLocalization = async (jobId: string) => {
     try {
-      const job = await adminProductAPI.cancelImageLocalizationJob(imageLocalizationJob.job_id);
-      setImageLocalizationJob(job);
+      const job = await adminProductAPI.cancelImageLocalizationJob(jobId);
+      setImageLocalizationJobsById((prev) => ({ ...prev, [jobId]: job }));
       showToast('ok', 'Đang hủy job sau ảnh hiện tại');
     } catch (err) {
       showToast('err', err instanceof Error ? err.message : 'Không hủy được job', 8000);
     }
   };
+
+  const localizationJobsForUi = useMemo(() => {
+    const out: AdminImageLocalizationJob[] = [];
+    for (const id of localizationJobIdsOrdered) {
+      const j = imageLocalizationJobsById[id];
+      if (j) out.push(j);
+    }
+    const rank = (s: AdminImageLocalizationJob['status']) =>
+      s === 'running' ? 0 : s === 'queued' ? 1 : s === 'error' ? 2 : s === 'cancelled' ? 3 : 4;
+    return [...out].sort((a, b) => rank(a.status) - rank(b.status));
+  }, [localizationJobIdsOrdered, imageLocalizationJobsById]);
+
+  const localizationActiveJobCount = useMemo(() => {
+    let n = 0;
+    for (const j of localizationJobsForUi) {
+      if (j.status === 'running' || j.status === 'queued') n += 1;
+    }
+    return n;
+  }, [localizationJobsForUi]);
 
   useEffect(() => {
     if (
@@ -687,31 +823,31 @@ export default function AdminProductsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    const jobId = localStorage.getItem(IMAGE_LOCALIZATION_JOB_KEY);
-    if (!jobId) return undefined;
-    setImageLocalizationRunning(true);
-    void pollImageLocalizationJob(jobId)
-      .then((job) => {
-        if (cancelled) return;
-        if (job.status === 'done') {
-          showToast('ok', job.message || 'Đã hoàn tất bản địa hóa ảnh', 8000);
-          fetchProducts();
-          void loadImageLocalizationSummary();
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setImageLocalizationError(err instanceof Error ? err.message : 'Không theo dõi được job ảnh');
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setImageLocalizationRunning(false);
-          localStorage.removeItem(IMAGE_LOCALIZATION_JOB_KEY);
-        }
-      });
+    const ids = readStoredLocalizationJobIds();
+    if (ids.length === 0) return undefined;
+    ids.forEach((jobId) => {
+      registerLocalizationJobId(jobId);
+      if (resumedImageLocalizationPollSession.has(jobId)) return;
+      resumedImageLocalizationPollSession.add(jobId);
+      void pollImageLocalizationJob(jobId)
+        .then((job) => {
+          if (cancelled) return;
+          finishLocalizationPoll(jobId, job);
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setImageLocalizationError(err instanceof Error ? err.message : 'Không theo dõi được job ảnh');
+            removeStoredLocalizationJobId(jobId);
+          }
+        })
+        .finally(() => {
+          resumedImageLocalizationPollSession.delete(jobId);
+        });
+    });
     return () => {
       cancelled = true;
     };
-  }, [fetchProducts, loadImageLocalizationSummary, pollImageLocalizationJob]);
+  }, [finishLocalizationPoll, pollImageLocalizationJob, registerLocalizationJobId]);
 
   const handleImport1688 = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2689,7 +2825,7 @@ export default function AdminProductsPage() {
                         className="mt-1"
                         checked={imageLocalizationGeminiMode === 'local_only'}
                         onChange={() => setImageLocalizationGeminiMode('local_only')}
-                        disabled={imageLocalizationRunning}
+                        disabled={localizationStartBusy}
                       />
                       <span>
                         <span className="font-medium">Chỉ DeepSeek + vẽ local (không AI ảnh)</span>
@@ -2706,7 +2842,7 @@ export default function AdminProductsPage() {
                         className="mt-1"
                         checked={imageLocalizationGeminiMode === 'web'}
                         onChange={() => setImageLocalizationGeminiMode('web')}
-                        disabled={imageLocalizationRunning}
+                        disabled={localizationStartBusy}
                       />
                       <span>
                         <span className="font-medium">Gemini trên trình duyệt</span>
@@ -2722,7 +2858,7 @@ export default function AdminProductsPage() {
                         className="mt-1"
                         checked={imageLocalizationGeminiMode === 'api'}
                         onChange={() => setImageLocalizationGeminiMode('api')}
-                        disabled={imageLocalizationRunning}
+                        disabled={localizationStartBusy}
                       />
                       <span>
                         <span className="font-medium">Gemini API (GEMINI_API_KEY)</span>
@@ -2739,7 +2875,7 @@ export default function AdminProductsPage() {
                         className="mt-1"
                         checked={imageLocalizationGeminiMode === 'openai'}
                         onChange={() => setImageLocalizationGeminiMode('openai')}
-                        disabled={imageLocalizationRunning}
+                        disabled={localizationStartBusy}
                       />
                       <span>
                         <span className="font-medium">OpenAI GPT Image (OPENAI_API_KEY)</span>
@@ -2764,7 +2900,7 @@ export default function AdminProductsPage() {
                             className="mt-0.5"
                             checked={imageLocalizationPlaywrightHeadless}
                             onChange={() => setImageLocalizationPlaywrightHeadless(true)}
-                            disabled={imageLocalizationRunning}
+                            disabled={localizationStartBusy}
                           />
                           <span>
                             <span className="font-medium text-gray-800">Ẩn trình duyệt</span>
@@ -2780,7 +2916,7 @@ export default function AdminProductsPage() {
                             className="mt-0.5"
                             checked={!imageLocalizationPlaywrightHeadless}
                             onChange={() => setImageLocalizationPlaywrightHeadless(false)}
-                            disabled={imageLocalizationRunning}
+                            disabled={localizationStartBusy}
                           />
                           <span>
                             <span className="font-medium text-gray-800">Hiện cửa sổ</span>
@@ -2828,7 +2964,7 @@ export default function AdminProductsPage() {
                             const row = IMAGE_LOC_GEMINI_MODEL_PRESETS.find((x) => x.id === id);
                             setImageLocalizationGeminiApiModel(row?.model ?? '');
                           }}
-                          disabled={imageLocalizationRunning}
+                          disabled={localizationStartBusy}
                           className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                         >
                           {IMAGE_LOC_GEMINI_MODEL_PRESETS.map((p) => (
@@ -2847,7 +2983,7 @@ export default function AdminProductsPage() {
                           type="text"
                           value={imageLocalizationGeminiApiModel}
                           onChange={(e) => setImageLocalizationGeminiApiModel(e.target.value)}
-                          disabled={imageLocalizationRunning}
+                          disabled={localizationStartBusy}
                           placeholder={geminiAuthStatus?.image_model || 'gemini-3-pro-image-preview'}
                           className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
                           autoComplete="off"
@@ -2863,7 +2999,7 @@ export default function AdminProductsPage() {
                           <select
                             value={imageLocalizationGeminiImageSize}
                             onChange={(e) => setImageLocalizationGeminiImageSize(e.target.value)}
-                            disabled={imageLocalizationRunning}
+                            disabled={localizationStartBusy}
                             className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
                           >
                             <option value="">Mặc định (.env IMAGE_LOCALIZATION_GEMINI_API_DEFAULT_IMAGE_SIZE)</option>
@@ -2893,7 +3029,7 @@ export default function AdminProductsPage() {
                             const row = IMAGE_LOC_OPENAI_MODEL_PRESETS.find((x) => x.id === id);
                             setImageLocalizationOpenaiModel(row?.model ?? '');
                           }}
-                          disabled={imageLocalizationRunning}
+                          disabled={localizationStartBusy}
                           className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                         >
                           {IMAGE_LOC_OPENAI_MODEL_PRESETS.map((p) => (
@@ -2910,7 +3046,7 @@ export default function AdminProductsPage() {
                           type="text"
                           value={imageLocalizationOpenaiModel}
                           onChange={(e) => setImageLocalizationOpenaiModel(e.target.value)}
-                          disabled={imageLocalizationRunning}
+                          disabled={localizationStartBusy}
                           placeholder={geminiAuthStatus?.openai_image_model || 'gpt-image-2'}
                           className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
                           autoComplete="off"
@@ -2935,7 +3071,7 @@ export default function AdminProductsPage() {
                               setImageLocalizationOpenaiQuality(row.quality);
                               setImageLocalizationOpenaiSize(row.size);
                             }}
-                            disabled={imageLocalizationRunning}
+                            disabled={localizationStartBusy}
                             className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
                           >
                             {IMAGE_LOC_OPENAI_OUTPUT_PRESETS.map((p) => (
@@ -2954,7 +3090,7 @@ export default function AdminProductsPage() {
                             <select
                               value={imageLocalizationOpenaiQuality}
                               onChange={(e) => setImageLocalizationOpenaiQuality(e.target.value)}
-                              disabled={imageLocalizationRunning}
+                              disabled={localizationStartBusy}
                               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
                             >
                               <option value="">Theo backend (.env)</option>
@@ -2971,7 +3107,7 @@ export default function AdminProductsPage() {
                             <select
                               value={imageLocalizationOpenaiSize}
                               onChange={(e) => setImageLocalizationOpenaiSize(e.target.value)}
-                              disabled={imageLocalizationRunning}
+                              disabled={localizationStartBusy}
                               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
                             >
                               <option value="">
@@ -3000,7 +3136,7 @@ export default function AdminProductsPage() {
                   <select
                     value={imageLocalizationLanguage}
                     onChange={(e) => setImageLocalizationLanguage(e.target.value)}
-                    disabled={imageLocalizationRunning}
+                    disabled={localizationStartBusy}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                   >
                     <option value="vi">Tiếng Việt</option>
@@ -3014,7 +3150,7 @@ export default function AdminProductsPage() {
                     type="checkbox"
                     checked={imageLocalizationSelectedOnly}
                     onChange={(e) => setImageLocalizationSelectedOnly(e.target.checked)}
-                    disabled={imageLocalizationRunning || selectedProductIds.size === 0}
+                    disabled={localizationStartBusy || selectedProductIds.size === 0}
                   />
                   Chỉ chạy {selectedProductIds.size} sản phẩm đang chọn
                 </label>
@@ -3023,7 +3159,7 @@ export default function AdminProductsPage() {
                     type="checkbox"
                     checked={imageLocalizationForce}
                     onChange={(e) => setImageLocalizationForce(e.target.checked)}
-                    disabled={imageLocalizationRunning}
+                    disabled={localizationStartBusy}
                   />
                   Chạy lại cả ảnh đã xử lý
                 </label>
@@ -3055,21 +3191,22 @@ export default function AdminProductsPage() {
                 <button
                   type="button"
                   onClick={() => void handleStartImageLocalization()}
-                  disabled={imageLocalizationRunning || !imageLocalizationGeminiReady}
+                  disabled={localizationStartBusy || !imageLocalizationGeminiReady}
                   className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-60"
                 >
-                  {imageLocalizationRunning ? 'Đang chạy...' : 'Chạy bản địa hóa ảnh'}
+                  {localizationStartBusy
+                    ? 'Đang gửi job…'
+                    : localizationPollActive
+                      ? 'Chạy thêm job ảnh'
+                      : 'Chạy bản địa hóa ảnh'}
                 </button>
-                {imageLocalizationRunning ? (
-                  <button
-                    type="button"
-                    onClick={() => void handleCancelImageLocalization()}
-                    className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                  >
-                    Hủy sau ảnh hiện tại
-                  </button>
-                ) : null}
               </div>
+              {localizationPollActive ? (
+                <p className="mt-1.5 text-xs leading-snug text-gray-600">
+                  Mỗi lần bấm chạy là một job riêng — khung Tiến trình hiển thị <strong>từng card</strong>. Hủy từng job bằng
+                  nút trong đúng card đó (không ảnh hưởng job khác).
+                </p>
+              ) : null}
 
               {geminiAuthStatus ? (
                 <p className="text-xs text-gray-600">
@@ -3100,51 +3237,149 @@ export default function AdminProductsPage() {
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-sm font-semibold text-gray-900">Tiến trình</span>
-                <span className="text-xs text-gray-500">{imageLocalizationJob?.status || 'idle'}</span>
+                <span className="text-xs text-gray-500">
+                  {localizationJobsForUi.length
+                    ? localizationActiveJobCount > 0
+                      ? `${localizationActiveJobCount} đang chạy · ${localizationJobsForUi.length} card`
+                      : `${localizationJobsForUi.length} job (đã dừng)`
+                    : localizationPollActive
+                      ? 'đang tải…'
+                      : 'idle'}
+                </span>
               </div>
-              <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-200">
-                {imageLocalizationJob?.percent != null ? (
-                  <div
-                    className="h-full rounded-full bg-violet-600 transition-[width] duration-300"
-                    style={{ width: `${Math.min(100, imageLocalizationJob.percent)}%` }}
-                  />
-                ) : (
-                  <div className="h-full w-full rounded-full bg-violet-400/60" />
-                )}
-              </div>
-              <p className="mt-2 whitespace-pre-wrap text-sm text-gray-700">
-                {imageLocalizationJob?.message || 'Chưa có job đang chạy.'}
-              </p>
-              {imageLocalizationJob?.gemini_mode === 'web' &&
-              !imageLocalizationJob?.local_image_only &&
-              typeof imageLocalizationJob.playwright_headless_effective === 'boolean' ? (
-                <p className="mt-1 text-xs text-gray-500">
-                  Playwright Chromium:{' '}
-                  <span className="font-medium text-gray-700">
-                    {imageLocalizationJob.playwright_headless_effective ? 'ẩn trình duyệt' : 'hiện cửa sổ'}
-                  </span>
-                  {imageLocalizationJob.playwright_headless_requested == null ? (
-                    <span> (mặc định server / .env)</span>
-                  ) : null}
-                </p>
-              ) : null}
-              {imageLocalizationJob?.total != null ? (
-                <p className="mt-1 text-xs text-gray-500">
-                  {imageLocalizationJob.current ?? 0}/{imageLocalizationJob.total} · xong {imageLocalizationJob.done ?? 0} · lỗi{' '}
-                  {imageLocalizationJob.failed ?? 0} · bỏ qua {imageLocalizationJob.skipped ?? 0}
-                </p>
-              ) : null}
-              {imageLocalizationJob?.recent_results?.length ? (
-                <div className="mt-3 max-h-40 space-y-1 overflow-auto rounded border border-gray-200 bg-white p-2 text-xs text-gray-600">
-                  {imageLocalizationJob.recent_results.slice(-8).map((r) => (
-                    <div key={`${r.product_id}-${r.status}-${r.message || ''}`} className="flex gap-2">
-                      <span className="font-mono text-gray-800">{r.product_id}</span>
-                      <span>{r.status}</span>
-                      {r.message ? <span className="truncate text-gray-500">{r.message}</span> : null}
+
+              {localizationJobsForUi.length === 0 ? (
+                <p className="mt-3 text-sm text-gray-600">Chưa có job đang theo dõi trên tab này.</p>
+              ) : (
+                <div className="mt-3 max-h-[min(70vh,520px)] space-y-3 overflow-auto pr-0.5">
+                  {localizationJobsForUi.map((job) => (
+                    <div
+                      key={job.job_id}
+                      className={`rounded-lg border bg-white p-2.5 shadow-sm ${
+                        job.status === 'error'
+                          ? 'border-red-200'
+                          : job.status === 'cancelled'
+                            ? 'border-gray-300'
+                            : job.status === 'done'
+                              ? 'border-emerald-200'
+                              : 'border-violet-200'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-mono text-[11px] text-gray-500" title={job.job_id}>
+                            {job.job_id}
+                          </p>
+                          <p className="text-xs font-semibold capitalize text-gray-800">{job.status}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-200">
+                        {job.percent != null ? (
+                          <div
+                            className="h-full rounded-full bg-violet-600 transition-[width] duration-300"
+                            style={{ width: `${Math.min(100, job.percent)}%` }}
+                          />
+                        ) : (
+                          <div className="h-full w-full rounded-full bg-violet-400/50" />
+                        )}
+                      </div>
+
+                      <p className="mt-2 whitespace-pre-wrap text-xs text-gray-700">{job.message || '—'}</p>
+
+                      {job.status === 'running' && job.current_product_id ? (
+                        <p className="mt-2 rounded border border-violet-100 bg-violet-50/90 px-2 py-1.5 text-xs text-violet-950">
+                          <span className="font-semibold">Đang xử lý:</span>{' '}
+                          <code className="font-mono text-[11px]">{job.current_product_id}</code>
+                        </p>
+                      ) : null}
+
+                      {job.job_queue_product_ids?.length ? (
+                        <details className="mt-2 rounded border border-gray-100 text-[11px] text-gray-700">
+                          <summary className="cursor-pointer select-none px-2 py-1 font-medium text-gray-800 hover:bg-gray-50">
+                            Danh sách SP ({job.job_queue_product_ids.length}
+                            {job.job_queue_truncated
+                              ? ` / ${job.total ?? '?'} — chỉ hiện tối đa ${job.job_queue_product_ids.length} id đầu`
+                              : ''}
+                            )
+                          </summary>
+                          <div className="max-h-28 overflow-auto border-t border-gray-50 px-2 py-1 font-mono text-[10px] leading-relaxed text-gray-600">
+                            {job.job_queue_product_ids.join(', ')}
+                          </div>
+                        </details>
+                      ) : null}
+
+                      {job.skipped_product_reports?.length ? (
+                        <div className="mt-2 rounded border border-amber-100 bg-amber-50/90 px-2 py-1.5">
+                          <p className="text-[11px] font-semibold text-amber-950">
+                            Đã bỏ qua ({job.skipped_product_reports.length})
+                          </p>
+                          <ul className="mt-1 max-h-28 space-y-1 overflow-auto text-[11px] text-amber-950">
+                            {job.skipped_product_reports.map((s, i) => (
+                              <li key={`${s.product_id}-${i}`} className="border-b border-amber-100/80 pb-1 last:border-0">
+                                <span className="font-mono font-medium">{s.product_id}</span>
+                                {s.message ? (
+                                  <span className="block whitespace-pre-wrap text-[10px] text-amber-900/90">{s.message}</span>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : job.skipped ? (
+                        <p className="mt-2 text-[11px] text-gray-500">
+                          Đã bỏ qua {job.skipped} SP — chi tiết có thể chưa được backend trả về.
+                        </p>
+                      ) : null}
+
+                      {job.gemini_mode === 'web' &&
+                      !job.local_image_only &&
+                      typeof job.playwright_headless_effective === 'boolean' ? (
+                        <p className="mt-1 text-[11px] text-gray-500">
+                          Playwright:{' '}
+                          <span className="font-medium text-gray-700">
+                            {job.playwright_headless_effective ? 'ẩn trình duyệt' : 'hiện cửa sổ'}
+                          </span>
+                          {job.playwright_headless_requested == null ? (
+                            <span> (mặc định server / .env)</span>
+                          ) : null}
+                        </p>
+                      ) : null}
+
+                      {job.total != null ? (
+                        <p className="mt-1 text-[11px] text-gray-500">
+                          {job.current ?? 0}/{job.total} · xong {job.done ?? 0} · lỗi {job.failed ?? 0} · bỏ qua{' '}
+                          {job.skipped ?? 0}
+                        </p>
+                      ) : null}
+
+                      {job.recent_results?.length ? (
+                        <div className="mt-2 max-h-32 space-y-1 overflow-auto rounded border border-gray-100 bg-gray-50/80 p-1.5 text-[11px] text-gray-600">
+                          {job.recent_results.slice(-8).map((r) => (
+                            <div key={`${r.product_id}-${r.status}-${r.message || ''}`} className="flex gap-2">
+                              <span className="font-mono text-gray-800">{r.product_id}</span>
+                              <span>{r.status}</span>
+                              {r.message ? <span className="truncate text-gray-500">{r.message}</span> : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {(job.status === 'running' || job.status === 'queued') && job.job_id ? (
+                        <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-gray-100 pt-3">
+                          <button
+                            type="button"
+                            onClick={() => void handleCancelImageLocalization(job.job_id)}
+                            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1"
+                            aria-label={`Hủy job ${job.job_id} sau ảnh đang xử lý`}
+                          >
+                            Hủy job này sau ảnh hiện tại
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </div>
-              ) : null}
+              )}
             </div>
           </div>
         </div>

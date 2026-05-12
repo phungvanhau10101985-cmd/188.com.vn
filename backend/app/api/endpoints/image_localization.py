@@ -20,6 +20,7 @@ from app.services.image_localization_service import (
     ImageLocalizationError,
     OpenAiGptImageAdapter,
     ProductImageLocalizationService,
+    is_image_localization_fatal_dependency_error,
     products_pending_localization,
     save_gemini_cookie,
 )
@@ -28,6 +29,13 @@ router = APIRouter()
 
 _jobs_lock = threading.Lock()
 _jobs: Dict[str, Dict[str, Any]] = {}
+
+# Trong một job: SP failed / exception (không phải fatal OCR–DeepSeek) đếm liên tiếp; đủ ngưỡng thì dừng job.
+IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES = 3
+
+# Giới hạn độ dài danh sách trả về client (tránh JSON job quá lớn).
+_JOB_QUEUE_IDS_MAX = 400
+_JOB_SKIPPED_REPORT_MAX = 400
 
 
 class GeminiCookiePayload(BaseModel):
@@ -125,7 +133,18 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
         limit = payload.limit or int(getattr(settings, "IMAGE_LOCALIZATION_BATCH_LIMIT", 0) or 0)
         products = products_pending_localization(db, payload.product_ids, payload.force, limit)
         total = len(products)
-        _job_update(job_id, total=total, current=0, percent=0.0)
+        queue_ids = [p.product_id for p in products]
+        queue_truncated = len(queue_ids) > _JOB_QUEUE_IDS_MAX
+        queue_preview = queue_ids[:_JOB_QUEUE_IDS_MAX]
+        _job_update(
+            job_id,
+            total=total,
+            current=0,
+            percent=0.0,
+            job_queue_product_ids=queue_preview,
+            job_queue_truncated=queue_truncated,
+            skipped_product_reports=[],
+        )
         if total == 0:
             _job_update(
                 job_id,
@@ -134,6 +153,10 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
                 message="Không còn sản phẩm cần bản địa hóa ảnh.",
                 finished_at=datetime.now(timezone.utc).isoformat(),
                 percent=100.0,
+                current_product_id=None,
+                job_queue_product_ids=[],
+                job_queue_truncated=False,
+                skipped_product_reports=[],
             )
             return
 
@@ -154,7 +177,9 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
         done = 0
         failed = 0
         skipped = 0
+        consecutive_product_failures = 0
         results: List[Dict[str, Any]] = []
+        skipped_reports: List[Dict[str, Any]] = []
 
         def should_cancel() -> bool:
             return bool(_job_get(job_id).get("cancel_requested"))
@@ -169,6 +194,9 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
                     percent=round(100.0 * (idx - 1) / total, 1),
                     message="Đã hủy job bản địa hóa ảnh.",
                     finished_at=datetime.now(timezone.utc).isoformat(),
+                    current_product_id=None,
+                    skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
+                    recent_results=results[-100:],
                 )
                 return
             _job_update(
@@ -182,20 +210,56 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
             try:
                 result = service.process_product(db, product, should_cancel=should_cancel)
                 status = result.get("status")
+                row = {
+                    "product_id": product.product_id,
+                    "status": status,
+                    "message": result.get("message"),
+                    "processed_images": result.get("processed_images", 0),
+                }
+                results.append(row)
                 if status == "failed":
                     failed += 1
+                    consecutive_product_failures += 1
+                    if consecutive_product_failures >= IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES:
+                        last_msgs = " | ".join(
+                            (r.get("message") or "")[:200]
+                            for r in results[-IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES:]
+                            if r.get("status") == "failed"
+                        )
+                        _job_update(
+                            job_id,
+                            status="error",
+                            phase="error",
+                            current=idx,
+                            done=done,
+                            failed=failed,
+                            skipped=skipped,
+                            percent=round(100.0 * idx / total, 1),
+                            message=(
+                                f"Dừng job: {IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES} "
+                                f"sản phẩm lỗi liên tiếp (đến {product.product_id}, {idx}/{total}). "
+                                f"{last_msgs[:750]}"
+                            ),
+                            finished_at=datetime.now(timezone.utc).isoformat(),
+                            recent_results=results[-100:],
+                            current_product_id=None,
+                            skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
+                        )
+                        return
                 elif status == "skipped":
                     skipped += 1
+                    consecutive_product_failures = 0
+                    skipped_reports.append(
+                        {
+                            "product_id": product.product_id,
+                            "message": (
+                                ((result.get("message") or "").strip()[:480] or None)
+                            ),
+                        }
+                    )
                 else:
                     done += 1
-                results.append(
-                    {
-                        "product_id": product.product_id,
-                        "status": status,
-                        "message": result.get("message"),
-                        "processed_images": result.get("processed_images", 0),
-                    }
-                )
+                    consecutive_product_failures = 0
             except Exception as exc:
                 failed += 1
                 db.rollback()
@@ -206,6 +270,48 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
                     fresh.image_localization_error = str(exc)[:2000]
                     db.commit()
                 results.append({"product_id": product.product_id, "status": "failed", "message": str(exc)})
+                err_tail = str(exc)[:1000]
+                if is_image_localization_fatal_dependency_error(exc):
+                    _job_update(
+                        job_id,
+                        status="error",
+                        phase="error",
+                        current=idx,
+                        done=done,
+                        failed=failed,
+                        skipped=skipped,
+                        percent=round(100.0 * idx / total, 1),
+                        message=(
+                            "Dừng bản địa hóa ảnh vì OCR/DeepSeek lỗi bắt buộc "
+                            f"(hết quota/tiền, thiếu key hoặc billing lỗi): {err_tail}"
+                        ),
+                        finished_at=datetime.now(timezone.utc).isoformat(),
+                        recent_results=results[-100:],
+                        current_product_id=None,
+                        skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
+                    )
+                    return
+                consecutive_product_failures += 1
+                if consecutive_product_failures >= IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES:
+                    _job_update(
+                        job_id,
+                        status="error",
+                        phase="error",
+                        current=idx,
+                        done=done,
+                        failed=failed,
+                        skipped=skipped,
+                        percent=round(100.0 * idx / total, 1),
+                        message=(
+                            f"Dừng job: {IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES} "
+                            f"sản phẩm lỗi liên tiếp (exception tại {product.product_id}, {idx}/{total}). {err_tail}"
+                        ),
+                        finished_at=datetime.now(timezone.utc).isoformat(),
+                        recent_results=results[-100:],
+                        current_product_id=None,
+                        skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
+                    )
+                    return
 
             _job_update(
                 job_id,
@@ -214,6 +320,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
                 skipped=skipped,
                 recent_results=results[-30:],
                 percent=round(100.0 * idx / total, 1),
+                skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
             )
 
         _job_update(
@@ -228,6 +335,8 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
             message=f"Hoàn tất: {done} xong, {failed} lỗi, {skipped} bỏ qua.",
             finished_at=datetime.now(timezone.utc).isoformat(),
             recent_results=results[-100:],
+            current_product_id=None,
+            skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
         )
     except Exception as exc:
         _job_update(
@@ -236,6 +345,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
             phase="error",
             message=str(exc),
             finished_at=datetime.now(timezone.utc).isoformat(),
+            current_product_id=None,
         )
     finally:
         try:

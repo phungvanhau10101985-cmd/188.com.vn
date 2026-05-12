@@ -270,7 +270,14 @@ export interface AdminImageLocalizationJob {
   local_image_only?: boolean;
   playwright_headless_requested?: boolean | null;
   playwright_headless_effective?: boolean;
-  current_product_id?: string;
+  current_product_id?: string | null;
+  /** Snapshot id trong lượt chạy (backend có thể cắt nếu batch rất lớn — xem job_queue_truncated). */
+  job_queue_product_ids?: string[];
+  job_queue_truncated?: boolean;
+  skipped_product_reports?: Array<{
+    product_id: string;
+    message?: string | null;
+  }>;
   recent_results?: Array<{
     product_id: string;
     status: string;
