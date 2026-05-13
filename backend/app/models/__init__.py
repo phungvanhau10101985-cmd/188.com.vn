@@ -11,132 +11,132 @@ from app.db.base import Base
 
 # 1a. Import SeoCluster trước (Category trỏ FK tới seo_clusters)
 from app.models.seo_cluster import SeoCluster
-print("✅ SeoCluster model loaded")
+print("[OK] SeoCluster model loaded")
 
 # 1b. Import Category (phụ thuộc SeoCluster qua seo_cluster_id)
 from app.models.category import Category
-print("✅ Category model loaded")
+print("[OK] Category model loaded")
 
 # 2. Import Product (phụ thuộc Category)
 from app.models.product import Product
-print("✅ Product model loaded")
+print("[OK] Product model loaded")
 
 from app.models.internal_sku_export import InternalSkuExport
-print("✅ InternalSkuExport model loaded")
+print("[OK] InternalSkuExport model loaded")
 
 from app.models.product_import_draft import ProductImportDraft
-print("✅ ProductImportDraft model loaded")
+print("[OK] ProductImportDraft model loaded")
 
 # 3. Import User (không phụ thuộc)
 from app.models.user import User, UserProductView, UserFavorite
-print("✅ User models loaded")
+print("[OK] User models loaded")
 
 from app.models.guest_behavior import GuestProductView, GuestFavorite, GuestSearchHistory
-print("✅ Guest behavior models loaded")
+print("[OK] Guest behavior models loaded")
 
 from app.models.user_trusted_device import UserTrustedDevice
-print("✅ UserTrustedDevice model loaded")
+print("[OK] UserTrustedDevice model loaded")
 from app.models.email_login_challenge import EmailLoginChallenge
 from app.models.email_trusted_device import EmailTrustedDevice
-print("✅ Email login challenge / trusted device models loaded")
+print("[OK] Email login challenge / trusted device models loaded")
 from app.models.push_subscription import UserPushSubscription
-print("✅ UserPushSubscription model loaded")
+print("[OK] UserPushSubscription model loaded")
 
 # 3a. Analytics events (phụ thuộc User)
 from app.models.analytics_event import AnalyticsEvent
-print("✅ AnalyticsEvent model loaded")
+print("[OK] AnalyticsEvent model loaded")
 
 # 3b. Import UserAddress (phụ thuộc User)
 from app.models.address import UserAddress
-print("✅ UserAddress model loaded")
+print("[OK] UserAddress model loaded")
 
 # 4. Import Cart models
 from app.models.cart import Cart, CartItem
-print("✅ Cart models loaded")
+print("[OK] Cart models loaded")
 
 # 5. Import Admin (nếu có)
 try:
     from app.models.admin import AdminUser, AdminRole, AdminStaffRolePreset
-    print("✅ AdminUser model loaded")
+    print("[OK] AdminUser model loaded")
 except ImportError:
     AdminUser = None  # type: ignore[misc, assignment]
     AdminRole = None
-    print("ℹ️  AdminUser model not available")
+    print("[INFO] AdminUser model not available")
 
 # 6. Import Order models (phụ thuộc User, Product)
 from app.models.order import Order, OrderItem, Payment
-print("✅ Order models loaded")
+print("[OK] Order models loaded")
 
 # 6b. Bank accounts (cài đặt quản trị)
 from app.models.bank_account import BankAccount
-print("✅ BankAccount model loaded")
+print("[OK] BankAccount model loaded")
 
 # 6b2. Mã nhúng site (GA, Facebook, Zalo…)
 from app.models.site_embed_code import SiteEmbedCode
-print("✅ SiteEmbedCode model loaded")
+print("[OK] SiteEmbedCode model loaded")
 
 # 6b3. Vị trí nút nổi lướt video shop (singleton)
 from app.models.shop_video_fab_setting import ShopVideoFabSetting
-print("✅ ShopVideoFabSetting model loaded")
+print("[OK] ShopVideoFabSetting model loaded")
 
 # 6c. Product questions (câu hỏi câu trả lời sản phẩm)
 from app.models.product_question import ProductQuestion, ProductQuestionUsefulVote
-print("✅ ProductQuestion model loaded")
+print("[OK] ProductQuestion model loaded")
 
 # 6d. Product reviews (đánh giá sản phẩm - chỉ admin trả lời)
 from app.models.product_review import ProductReview, ProductReviewUsefulVote
-print("✅ ProductReview model loaded")
+print("[OK] ProductReview model loaded")
 
 # 6e. Category SEO mapping (quản lý canonical/redirect cho danh mục)
 from app.models.category_seo import CategorySeoMapping, CategorySeoDictionary, CategorySeoMeta, CategorySeoGeminiTarget, CategorySeoSettings
-print("✅ CategorySeoMapping model loaded")
+print("[OK] CategorySeoMapping model loaded")
 
 # 6f. Category transform rules (lưu lịch sử chỉnh danh mục)
 from app.models.category_transform_rule import CategoryTransformRule
-print("✅ CategoryTransformRule model loaded")
+print("[OK] CategoryTransformRule model loaded")
 
 # 6g. Category final mapping (đầu -> cuối)
 from app.models.category_final_mapping import CategoryFinalMapping
-print("✅ CategoryFinalMapping model loaded")
+print("[OK] CategoryFinalMapping model loaded")
 
 # 7. Import các models user behavior còn lại
 try:
     from app.models.user import UserCategoryView, UserBrandView, UserSearchHistory, UserShopInteraction
-    print("✅ User behavior models loaded")
+    print("[OK] User behavior models loaded")
 except ImportError:
-    print("ℹ️  Some user behavior models not available")
+    print("[INFO] Some user behavior models not available")
 
 # 8. Search query mapping
 try:
     from app.models.search_query_mapping import SearchQueryMapping
-    print("✅ SearchQueryMapping model loaded")
+    print("[OK] SearchQueryMapping model loaded")
 except ImportError:
-    print("ℹ️  SearchQueryMapping model not available")
+    print("[INFO] SearchQueryMapping model not available")
 
 from app.models.product_search_cache import ProductSearchCache
-print("✅ ProductSearchCache model loaded")
+print("[OK] ProductSearchCache model loaded")
 
 # 9. Search mappings/logs
 try:
     from app.models.search_mapping import SearchMapping, SearchMappingType
     from app.models.search_log import SearchLog
-    print("✅ SearchMapping/SearchLog model loaded")
+    print("[OK] SearchMapping/SearchLog model loaded")
 except ImportError:
-    print("ℹ️  SearchMapping/SearchLog model not available")
+    print("[INFO] SearchMapping/SearchLog model not available")
 
 # 10. Loyalty
 try:
     from app.models.loyalty import LoyaltyTier
-    print("✅ LoyaltyTier model loaded")
+    print("[OK] LoyaltyTier model loaded")
 except ImportError:
-    print("ℹ️  LoyaltyTier model not available")
+    print("[INFO] LoyaltyTier model not available")
 
 # 11. Notification
 try:
     from app.models.notification import Notification
-    print("✅ Notification model loaded")
+    print("[OK] Notification model loaded")
 except ImportError:
-    print("ℹ️  Notification model not available")
+    print("[INFO] Notification model not available")
 
 # ========== TẠO DANH SÁCH ==========
 __all__ = [
@@ -195,5 +195,5 @@ except:
 __all__.append("AdminUser")
 __all__.append("AdminRole")
 
-print(f"📦 Total models loaded: {len(__all__)}")
+print(f"[INFO] Total models loaded: {len(__all__)}")
 print(f"   Models: {', '.join(sorted(__all__))}")

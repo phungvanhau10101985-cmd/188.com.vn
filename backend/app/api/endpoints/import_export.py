@@ -16,6 +16,8 @@ import logging
 import time
 
 from app.db.session import get_db
+from app.models.admin import AdminUser
+from app.core.security import require_privileged_admin
 
 logger = logging.getLogger(__name__)
 
@@ -1006,6 +1008,20 @@ async def get_import_status():
             "NEXT_PUBLIC_CDN_URL": "(frontend/.env) trùng BUNNY_CDN_PUBLIC_BASE; see frontend/lib/site-config.ts",
         },
     }
+
+@router.post("/sync/google-sheet-skus")
+def sync_google_sheet_skus(
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_privileged_admin),
+):
+    """
+    Đồng bộ tay cột mã trên Google Sheet với DB (giống luồng nền sau import/tạo/xóa SP).
+    Cần GOOGLE_SHEETS_SKU_* trong .env và quyền Editor cho service account.
+    """
+    from app.services.google_sheets_sku_sync import sync_product_skus_to_google_sheet
+
+    return sync_product_skus_to_google_sheet(db)
+
 
 @router.post("/fix/slugs")
 async def fix_all_slugs(db: Session = Depends(get_db)):

@@ -3,42 +3,42 @@ import sys
 from app.db.base import Base
 
 # Import tất cả các models
-print("✅ Loading database models...")
+print("[OK] Loading database models...")
 
 try:
     from app.models.category import Category
-    print("✅ Category model loaded")
+    print("[OK] Category model loaded")
 except ImportError as e:
-    print(f"⚠️  Error loading Category model: {e}")
+    print(f"[WARN] Error loading Category model: {e}")
 
 try:
     from app.models.product import Product
-    print("✅ Product model loaded")
+    print("[OK] Product model loaded")
 except ImportError as e:
-    print(f"⚠️  Error loading Product model: {e}")
+    print(f"[WARN] Error loading Product model: {e}")
 
 try:
     from app.models.user import User, UserProductView, UserFavorite, UserCategoryView, UserBrandView, UserSearchHistory, UserShopInteraction
-    print("✅ User models loaded")
+    print("[OK] User models loaded")
 except ImportError as e:
-    print(f"⚠️  Error loading User models: {e}")
+    print(f"[WARN] Error loading User models: {e}")
 
 try:
     from app.models.cart import Cart, CartItem
-    print("✅ Cart models loaded")
+    print("[OK] Cart models loaded")
 except ImportError as e:
-    print(f"⚠️  Error loading Cart models: {e}")
+    print(f"[WARN] Error loading Cart models: {e}")
 
 try:
     from app.models.admin import AdminUser
-    print("✅ AdminUser model loaded")
+    print("[OK] AdminUser model loaded")
 except ImportError:
-    print("ℹ️  AdminUser model not available")
+    print("[INFO] AdminUser model not available")
 
 try:
     from app.models.order import Order, OrderItem, Payment
-    print("✅ Order models loaded")
+    print("[OK] Order models loaded")
 except ImportError as e:
-    print(f"⚠️  Error loading Order models: {e}")
+    print(f"[WARN] Error loading Order models: {e}")
 
-print("📦 All models imported successfully")
+print("[OK] All models imported successfully")

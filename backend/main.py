@@ -1,7 +1,10 @@
 # backend/main.py - FIXED VERSION WITH IMPORT/EXPORT DEBUG
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.requests import Request
 from datetime import datetime
 from pathlib import Path
 import logging
@@ -90,6 +93,22 @@ _cors_kwargs = dict(
 if getattr(_settings, "BACKEND_CORS_ORIGIN_REGEX", None):
     _cors_kwargs["allow_origin_regex"] = _settings.BACKEND_CORS_ORIGIN_REGEX
 app.add_middleware(CORSMiddleware, **_cors_kwargs)
+
+
+class LastResortJsonMiddleware(BaseHTTPMiddleware):
+    """Nếu exception lọt ra ngoài ExceptionMiddleware → vẫn trả JSON (admin XHR parse được)."""
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
+        try:
+            return await call_next(request)
+        except Exception as exc:
+            log = logging.getLogger("last_resort_json")
+            log.exception("%s %s", request.method, request.url.path)
+            msg = str(exc).strip() or exc.__class__.__name__
+            return JSONResponse(status_code=500, content={"detail": msg})
+
+
+app.add_middleware(LastResortJsonMiddleware)
 
 # ========== DATABASE INITIALIZATION ==========
 def init_database_tables():
@@ -426,6 +445,20 @@ async def startup_event():
 
 
 # ========== ERROR HANDLING ==========
+logger = logging.getLogger(__name__)
+
+
+@app.exception_handler(Exception)
+async def global_unhandled_exception(request: Request, exc: Exception):
+    """
+    Mặc định uvicorn/Starlette có thể trả HTML/text cho 500 — admin XHR (import Excel) chỉ parse JSON
+    → báo 'Phản hồi không hợp lệ'. Handler này bắt phần còn lại sau HTTPException / RequestValidationError, v.v.
+    """
+    logger.exception("Unhandled exception %s %s", request.method, request.url.path)
+    msg = str(exc).strip() or exc.__class__.__name__
+    return JSONResponse(status_code=500, content={"detail": msg})
+
+
 @app.exception_handler(404)
 async def not_found_exception_handler(request, exc):
     """Custom 404 handler hiển thị available endpoints"""

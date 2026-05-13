@@ -3,9 +3,17 @@ import os
 import re
 import json
 import logging
+import sys
 from typing import List, Optional, Dict, Any, Tuple
 from dotenv import load_dotenv
 from pathlib import Path
+
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
 
 # Load .env từ thư mục backend (luôn đúng dù chạy uvicorn từ repo root hay từ backend/)
 _backend_root = Path(__file__).resolve().parents[2]
@@ -146,6 +154,10 @@ class Settings:
         # True = chỉ gọi Gemini/GPT sinh ảnh khi job có allow_ai_image_models hoặc SP có product_info.image_localization.allow_ai_models=true
         self.IMAGE_LOCALIZATION_AI_IMAGE_EXPLICIT_ONLY: bool = os.getenv(
             "IMAGE_LOCALIZATION_AI_IMAGE_EXPLICIT_ONLY", "false"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        # false = chỉ nhận job với allow_ai_image_models=false (OCR + DeepSeek + vẽ local); từ chối Gemini/GPT ảnh qua POST /jobs.
+        self.IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED: bool = os.getenv(
+            "IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED", "false"
         ).strip().lower() in ("1", "true", "yes", "on")
         self.IMAGE_LOCALIZATION_GCP_KEY_FILE: str = os.getenv(
             "IMAGE_LOCALIZATION_GCP_KEY_FILE",
@@ -450,6 +462,43 @@ class Settings:
         # GOOGLE OAUTH CONFIGURATION
         # ========================
         self.GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
+        # Đồng bộ SKU lên Google Sheet — mặc định bật; tắt: GOOGLE_SHEETS_SKU_SYNC_ENABLED=false
+        _gs_en = (os.getenv("GOOGLE_SHEETS_SKU_SYNC_ENABLED") or "true").strip().lower()
+        self.GOOGLE_SHEETS_SKU_SYNC_ENABLED: bool = _gs_en not in ("0", "false", "no", "off", "disabled")
+        self.GOOGLE_SHEETS_SKU_SPREADSHEET_ID: str = os.getenv(
+            "GOOGLE_SHEETS_SKU_SPREADSHEET_ID", ""
+        ).strip()
+        # sheetId trong URL (gid=...) của tab cần đồng bộ
+        _gid = os.getenv("GOOGLE_SHEETS_SKU_SHEET_GID", "").strip()
+        try:
+            self.GOOGLE_SHEETS_SKU_SHEET_GID: int = int(_gid) if _gid else 0
+        except ValueError:
+            self.GOOGLE_SHEETS_SKU_SHEET_GID = 0
+        # code = mã SKU nội bộ; product_id = Id sản phẩm (cột id Excel)
+        _sf = os.getenv("GOOGLE_SHEETS_SKU_SYNC_FIELD", "code").strip().lower()
+        self.GOOGLE_SHEETS_SKU_SYNC_FIELD: str = _sf if _sf in ("code", "product_id") else "code"
+        try:
+            self.GOOGLE_SHEETS_SKU_HEADER_ROWS: int = max(
+                0, int(os.getenv("GOOGLE_SHEETS_SKU_HEADER_ROWS", "1") or "1")
+            )
+        except ValueError:
+            self.GOOGLE_SHEETS_SKU_HEADER_ROWS = 1
+        self.GOOGLE_SHEETS_SKU_CREDENTIALS_PATH: str = os.getenv(
+            "GOOGLE_SHEETS_SKU_CREDENTIALS_PATH", ""
+        ).strip()
+        # Số cột ghi từ DB mỗi hàng: 1=chỉ A; 4=A–D (mã, link 1688, tên shop, giá) như sheet mẫu
+        try:
+            _n_col = int(os.getenv("GOOGLE_SHEETS_SKU_COLUMN_COUNT", "4") or "4")
+            self.GOOGLE_SHEETS_SKU_COLUMN_COUNT: int = max(1, min(_n_col, 100))
+        except ValueError:
+            self.GOOGLE_SHEETS_SKU_COLUMN_COUNT = 4
+        # Gộp nhiều lần tạo/sửa/xóa SP thành một lần đồng bộ sheet (giây). 0 = mỗi lần gọi chạy ngay.
+        try:
+            self.GOOGLE_SHEETS_SKU_SYNC_DEBOUNCE_SECONDS: int = max(
+                0, int(os.getenv("GOOGLE_SHEETS_SKU_SYNC_DEBOUNCE_SECONDS", "45") or "45")
+            )
+        except ValueError:
+            self.GOOGLE_SHEETS_SKU_SYNC_DEBOUNCE_SECONDS = 45
         
         # ========================
         # FILE UPLOAD CONFIGURATION

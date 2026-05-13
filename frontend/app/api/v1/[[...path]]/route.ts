@@ -52,8 +52,8 @@ function forwardRequestHeaders(req: NextRequest, opts?: { omitContentLength?: bo
   return out;
 }
 
-function applyResponseHeaders(from: Response, to: NextResponse): void {
-  const skip = new Set(['transfer-encoding', 'connection']);
+function applyResponseHeaders(from: Response, to: NextResponse, extraSkip?: Set<string>): void {
+  const skip = new Set(['transfer-encoding', 'connection', ...(extraSkip ?? [])]);
   from.headers.forEach((value, key) => {
     const lk = key.toLowerCase();
     if (skip.has(lk) || lk === 'set-cookie') return;
@@ -67,9 +67,10 @@ function applyResponseHeaders(from: Response, to: NextResponse): void {
 }
 
 async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse> {
-  const url = targetUrl(req, segments);
-  const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
-  const headers = forwardRequestHeaders(req, { omitContentLength: hasBody });
+  try {
+    const url = targetUrl(req, segments);
+    const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
+    const headers = forwardRequestHeaders(req, { omitContentLength: hasBody });
   // Phải xử lý redirect nội bộ: nếu upstream trả Location `http://127.0.0.1:8001/...`
   // được chuyển nguyên xuống trình duyệt (ngrok/mobile) → client nhảy tới 127.0.0.1 → lỗi & banner "offline".
   // Không follow tại Node (undici hay 502 khi Host bị override trước redirect):
@@ -84,9 +85,16 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
     init.body = await req.arrayBuffer();
   }
 
-  // Danh sách sản phẩm / tìm kiếm đôi khi vượt mặc định 30s của Node/undici → 502; tránh cắt sớm.
+  // Import Excel ~24MB: Next đệm body rồi forward; undici cần đủ thời gian (mạng chậm / VPS tải cao).
+  const contentLen = parseInt(req.headers.get('content-length') || '0', 10);
+  const pathSuffix = req.nextUrl.pathname;
+  const heavyUpload =
+    contentLen > 2 * 1024 * 1024 ||
+    (pathSuffix.includes('/import-export/import/excel') && req.method === 'POST');
+  const timeoutMs = heavyUpload ? 900_000 : 120_000;
+
   const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), 120_000);
+  const t = setTimeout(() => ac.abort(), timeoutMs);
   let upstream: Response;
   try {
     upstream = await fetch(url, { ...init, signal: ac.signal });
@@ -103,6 +111,31 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
   // Đệm toàn bộ phản hồi: truyền thẳng upstream.body vào NextResponse dễ gây
   // ReadableStream already closed / disturbed trong Next 14 + Node undici (đặc biệt Fast Refresh).
   const bodyBuf = await upstream.arrayBuffer();
+  const upstreamCt = (upstream.headers.get('content-type') || '').toLowerCase();
+  const upstreamLooksJson =
+    upstreamCt.includes('application/json') ||
+    upstreamCt.includes('application/problem+json') ||
+    upstreamCt.includes('+json');
+
+  // FastAPI/uvicorn đôi khi trả 500 dạng text "Internal Server Error" → admin parse JSON lỗi.
+  if (upstream.status >= 400 && !upstreamLooksJson) {
+    const text =
+      bodyBuf.byteLength > 0
+        ? new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(bodyBuf)).trim()
+        : '';
+    const res = NextResponse.json(
+      {
+        detail:
+          text ||
+          `HTTP ${upstream.status} từ backend (${backendBase()}), body rỗng hoặc không phải JSON. Kiểm tra log FastAPI.`,
+      },
+      { status: upstream.status },
+    );
+    applyResponseHeaders(upstream, res, new Set(['content-type', 'content-length']));
+    res.headers.set('content-type', 'application/json; charset=utf-8');
+    return res;
+  }
+
   const res = new NextResponse(bodyBuf, {
     status: upstream.status,
     statusText: upstream.statusText,
@@ -124,6 +157,15 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
   }
 
   return res;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json(
+      {
+        detail: `Lỗi proxy Next.js → backend (${backendBase()}): ${msg}`,
+      },
+      { status: 502 },
+    );
+  }
 }
 
 type Ctx = { params: Promise<{ path?: string[] }> };

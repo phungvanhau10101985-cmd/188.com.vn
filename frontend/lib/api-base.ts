@@ -5,7 +5,8 @@
  *   (mixed content) → "Failed to fetch". Khi đó dùng cùng host + `/api/v1` (Next rewrite → FastAPI).
  * - HTTP dev (mặc định): gọi cùng host Next `/api/v1` → app router proxy sang FastAPI. Trình duyệt không đụng `:8001` trực tiếp.
  * - Gọi thẳng FastAPI từ trình duyệt: NEXT_PUBLIC_API_NEXT_PROXY=0 (và có thể NEXT_PUBLIC_API_BASE_URL=http://localhost:8001/api/v1).
- * - STATIC / file backend trên dev khi đang proxy: NEXT_PUBLIC_FASTAPI_ORIGIN (mặc định logic dùng 127.0.0.1:8001 chỉ trong development).
+ * - STATIC / file backend trên dev khi đang proxy: `NEXT_PUBLIC_FASTAPI_ORIGIN` (mặc định logic dùng 127.0.0.1:8001 chỉ trong development).
+ * - Trong dev: nếu `NEXT_PUBLIC_API_BASE_URL` trỏ tới localhost:8001 trong khi trang chạy localhost:3001, bỏ qua env đó (tránh CORS → Failed to fetch) trừ khi `NEXT_PUBLIC_API_NEXT_PROXY=0`.
  */
 function stripTrailingSlash(url: string): string {
   return url.replace(/\/$/, '');
@@ -29,11 +30,33 @@ export function getApiBaseUrl(): string {
       custom = '';
     }
   }
+
+  const proxyOff = process.env.NEXT_PUBLIC_API_NEXT_PROXY === '0';
+
+  // Trang http://localhost:3001 + NEXT_PUBLIC_API_BASE_URL=http://localhost:8001/api/v1
+  // → khác origin, backend phải CORS; nếu chưa cấu hình → "Failed to fetch" (browser che lỗi CORS).
+  // Khi không ép gọi thẳng :8001, luôn dùng proxy cùng origin `/api/v1`.
+  if (custom && typeof window !== 'undefined' && !proxyOff && process.env.NODE_ENV === 'development') {
+    try {
+      const customOrigin = new URL(custom).origin;
+      if (customOrigin !== window.location.origin) {
+        const host = new URL(custom).hostname;
+        if (host === 'localhost' || host === '127.0.0.1') {
+          console.warn(
+            '[api-base] Bỏ qua NEXT_PUBLIC_API_BASE_URL trong dev (tránh CORS) — dùng cùng origin /api/v1. ' +
+              'Muốn gọi thẳng FastAPI: NEXT_PUBLIC_API_NEXT_PROXY=0 và BACKEND_CORS_ORIGINS có origin trang.',
+          );
+          custom = '';
+        }
+      }
+    } catch {
+      custom = '';
+    }
+  }
+
   if (custom) {
     return stripTrailingSlash(custom);
   }
-
-  const proxyOff = process.env.NEXT_PUBLIC_API_NEXT_PROXY === '0';
 
   if (typeof window !== 'undefined') {
     const httpsPage = window.location.protocol === 'https:';

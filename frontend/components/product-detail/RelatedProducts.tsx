@@ -91,7 +91,13 @@ function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSi
 }
 
 type FetchPlan =
-  | { ok: true; params: ProductSearchParams; sortPurchasesDesc?: boolean }
+  | {
+      ok: true;
+      params: ProductSearchParams;
+      sortPurchasesDesc?: boolean;
+      /** true khi «bán chạy» chỉ lọc theo shop_name — bỏ gọi song song nhóm cùng tên (trùng dữ liệu). */
+      skipParallelShopNameGroup?: boolean;
+    }
   | { ok: false };
 
 function buildFetchPlan(product: Product, tab: ProductRelatedTabId): FetchPlan {
@@ -104,12 +110,23 @@ function buildFetchPlan(product: Product, tab: ProductRelatedTabId): FetchPlan {
 
   switch (tab) {
     case 'bestselling':
-      if (!shopId) return { ok: false };
-      return {
-        ok: true,
-        params: { ...base, shop_id: shopId },
-        sortPurchasesDesc: true,
-      };
+      if (shopId) {
+        return {
+          ok: true,
+          params: { ...base, shop_id: shopId },
+          sortPurchasesDesc: true,
+          skipParallelShopNameGroup: false,
+        };
+      }
+      if (shopName) {
+        return {
+          ok: true,
+          params: { ...base, shop_name: shopName },
+          sortPurchasesDesc: true,
+          skipParallelShopNameGroup: true,
+        };
+      }
+      return { ok: false };
     case 'same_price':
       if (!shopName) return { ok: false };
       return { ok: true, params: { ...base, shop_name: shopName } };
@@ -150,8 +167,9 @@ async function loadRelatedProductsSnapshot(
   if (!batch) {
     batch = (async () => {
       const shopName = excelCell(currentProduct.shop_name);
+      const skipSg = Boolean(plan.skipParallelShopNameGroup);
       const fetchSameShopNameGroup =
-        relatedTab === 'bestselling' && shopName
+        relatedTab === 'bestselling' && shopName && !skipSg
           ? apiClient.getProducts({
               limit: 120,
               is_active: true,
@@ -202,10 +220,13 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   const relatedTab = parseRelatedTabFromSearch(searchParams.get('rt'));
 
   const title = useMemo(() => sectionTitle(relatedTab), [relatedTab]);
-  const fullListingHref = useMemo(
-    () => buildHomeListingHref(relatedTab, filtersFromProduct(currentProduct)),
-    [relatedTab, currentProduct]
-  );
+  const fullListingHref = useMemo(() => {
+    const f = filtersFromProduct(currentProduct);
+    if (relatedTab === 'bestselling' && !f.shop_id && f.shop_name) {
+      return buildHomeListingHref('same_price', f);
+    }
+    return buildHomeListingHref(relatedTab, f);
+  }, [relatedTab, currentProduct]);
 
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
   const [shopGroupProducts, setShopGroupProducts] = useState<Product[]>([]);

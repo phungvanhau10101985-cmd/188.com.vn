@@ -21,6 +21,22 @@ import { ImportDraftExcelCompare } from '@/components/admin/ImportDraftExcelComp
 
 const PAGE_SIZE = 100;
 
+/** Thời gian chờ (giây) khi Google Sheets trả 429 — hiển thị toast đếm ngược. */
+const GOOGLE_SHEET_RATE_LIMIT_COOLDOWN_SEC = 120;
+
+function isGoogleSheetsRateLimitMessage(message: string): boolean {
+  const m = message.trim();
+  if (!m) return false;
+  const low = m.toLowerCase();
+  return (
+    /\b429\b/.test(m) ||
+    low.includes('rate_limit_exceeded') ||
+    low.includes('quota exceeded') ||
+    low.includes('writerequestsperminute') ||
+    low.includes('write requests per minute')
+  );
+}
+
 /** Lưu job_id đang chạy để khôi phục khi reload trang giữa chừng. */
 const IMPORT_JOB_STORAGE_KEY = 'admin:products:import_excel:job';
 
@@ -381,6 +397,9 @@ export default function AdminProductsPage() {
   const cancelTrackRef = useRef(false);
   const [exporting, setExporting] = useState(false);
   const [exportingUnusedSkus, setExportingUnusedSkus] = useState(false);
+  const [googleSheetSyncing, setGoogleSheetSyncing] = useState(false);
+  /** Còn lại giây trước khi cho phép thử đồng bộ lại (quota 429). null = không giới hạn. */
+  const [googleSheetRateLimitSec, setGoogleSheetRateLimitSec] = useState<number | null>(null);
   const [unusedSkuExportCount, setUnusedSkuExportCount] = useState(100);
   const [unusedSkuStats, setUnusedSkuStats] = useState<{
     total_space: number;
@@ -401,6 +420,12 @@ export default function AdminProductsPage() {
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
 
   const catalogFeedBase = useMemo(() => getCatalogFeedApiBaseUrl(), []);
+
+  const showAdminGoogleSheetSync =
+    process.env.NEXT_PUBLIC_ADMIN_GOOGLE_SHEET_SYNC !== '0' &&
+    process.env.NEXT_PUBLIC_ADMIN_GOOGLE_SHEET_SYNC !== 'false';
+  const googleSheetsEditorUrl = (process.env.NEXT_PUBLIC_GOOGLE_SHEETS_EDITOR_URL || '').trim();
+
   const imageLocalizationHeadlessNeedsSavedCookie =
     imageLocalizationGeminiMode === 'web' &&
     imageLocalizationPlaywrightHeadless &&
@@ -415,6 +440,10 @@ export default function AdminProductsPage() {
     if (imageLocalizationHeadlessNeedsSavedCookie) return false;
     return true;
   }, [geminiAuthStatus, imageLocalizationGeminiMode, imageLocalizationHeadlessNeedsSavedCookie]);
+
+  /** Gemini Web/API và GPT Image chỉ khi backend cho phép (IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED). Chưa có auth = chưa chọn được các nhánh AI. */
+  const imageLocAiImageModesSelectable =
+    geminiAuthStatus != null && (geminiAuthStatus.ai_image_jobs_allowed ?? true);
 
   const geminiApiModelPresetSelectValue = useMemo(() => {
     const id = resolveGeminiApiModelPresetId(imageLocalizationGeminiApiModel.trim());
@@ -440,6 +469,23 @@ export default function AdminProductsPage() {
     setToast({ type, msg });
     setTimeout(() => setToast(null), persistMs ?? 3000);
   };
+
+  useEffect(() => {
+    if (googleSheetRateLimitSec === null) return;
+    if (googleSheetRateLimitSec <= 0) {
+      setToast(null);
+      setGoogleSheetRateLimitSec(null);
+      return;
+    }
+    setToast({
+      type: 'err',
+      msg: `Google Sheet: quota ghi vượt mức (429). Đếm ngược ${googleSheetRateLimitSec}s (khuyến nghị chờ ~2 phút rồi thử lại).`,
+    });
+    const t = window.setTimeout(() => {
+      setGoogleSheetRateLimitSec((s) => (s === null || s <= 1 ? 0 : s - 1));
+    }, 1000);
+    return () => window.clearTimeout(t);
+  }, [googleSheetRateLimitSec]);
 
   const openImageLocReport = useCallback(async (productId: string) => {
     setImageLocReportOpen(true);
@@ -816,6 +862,12 @@ export default function AdminProductsPage() {
       imageLocalizationPlaywrightSyncedRef.current = true;
     }
   }, [geminiAuthStatus]);
+
+  useEffect(() => {
+    if (geminiAuthStatus?.ai_image_jobs_allowed === false && imageLocalizationGeminiMode !== 'local_only') {
+      setImageLocalizationGeminiMode('local_only');
+    }
+  }, [geminiAuthStatus?.ai_image_jobs_allowed, imageLocalizationGeminiMode]);
 
   useEffect(() => {
     void loadImageLocalizationSummary();
@@ -1589,6 +1641,51 @@ export default function AdminProductsPage() {
     }
   };
 
+  const handleSyncGoogleSheet = async () => {
+    if (googleSheetRateLimitSec !== null) return;
+    setGoogleSheetSyncing(true);
+    try {
+      const r = await adminProductAPI.syncGoogleSheetSkus();
+      if (r.skipped) {
+        showToast(
+          'err',
+          r.reason === 'disabled'
+            ? 'Đồng bộ Google Sheet đang tắt trên server (kiểm tra GOOGLE_SHEETS_SKU_SYNC_ENABLED).'
+            : 'Không đồng bộ.',
+          6000,
+        );
+        return;
+      }
+      if (!r.ok) {
+        const errRaw = r.error ?? 'Đồng bộ Google Sheet thất bại';
+        if (isGoogleSheetsRateLimitMessage(errRaw)) {
+          setGoogleSheetRateLimitSec(GOOGLE_SHEET_RATE_LIMIT_COOLDOWN_SEC);
+          return;
+        }
+        showToast('err', errRaw.length > 500 ? `${errRaw.slice(0, 500)}…` : errRaw, 8000);
+        return;
+      }
+      const parts: string[] = [];
+      if (r.updated_rows != null) parts.push(`${r.updated_rows} hàng cập nhật`);
+      if (r.unchanged_rows != null) parts.push(`${r.unchanged_rows} hàng giữ nguyên`);
+      if (r.added_rows != null && r.added_rows > 0) parts.push(`+${r.added_rows} hàng mới`);
+      if (r.removed_orphan_rows != null && r.removed_orphan_rows > 0)
+        parts.push(`−${r.removed_orphan_rows} hàng thừa`);
+      if (r.removed_duplicate_rows != null && r.removed_duplicate_rows > 0)
+        parts.push(`−${r.removed_duplicate_rows} hàng trùng mã`);
+      showToast('ok', parts.length ? `Google Sheet: ${parts.join(' · ')}` : 'Đã đồng bộ Google Sheet', 7000);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Đồng bộ Google Sheet lỗi';
+      if (isGoogleSheetsRateLimitMessage(msg)) {
+        setGoogleSheetRateLimitSec(GOOGLE_SHEET_RATE_LIMIT_COOLDOWN_SEC);
+      } else {
+        showToast('err', msg, 8000);
+      }
+    } finally {
+      setGoogleSheetSyncing(false);
+    }
+  };
+
   const handleExportUnusedInternalSkus = async () => {
     const maxAllowed =
       unusedSkuStats != null ? Math.min(10_000, Math.max(0, unusedSkuStats.available)) : 10_000;
@@ -1851,6 +1948,41 @@ export default function AdminProductsPage() {
             >
               {exporting ? 'Đang export...' : 'Export Excel'}
             </button>
+            {showAdminGoogleSheetSync ? (
+              <div className="flex flex-col items-stretch gap-1 sm:items-end">
+                <button
+                  type="button"
+                  onClick={() => void handleSyncGoogleSheet()}
+                  disabled={googleSheetSyncing || googleSheetRateLimitSec !== null}
+                  className="px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 text-sm font-medium disabled:opacity-70 disabled:cursor-not-allowed"
+                  title={
+                    googleSheetRateLimitSec !== null
+                      ? 'Quota Google Sheet (429): chờ hết đếm ngược rồi thử lại.'
+                      : 'Cập nhật Google Sheet theo dữ liệu cửa hàng (cần bật đồng bộ trên server và share sheet cho service account).'
+                  }
+                  aria-busy={googleSheetSyncing}
+                  aria-label="Đồng bộ danh sách sản phẩm lên Google Sheet"
+                >
+                  {googleSheetSyncing
+                    ? 'Đang đồng bộ…'
+                    : googleSheetRateLimitSec !== null && googleSheetRateLimitSec > 0
+                      ? `Chờ ${googleSheetRateLimitSec}s (429)…`
+                      : googleSheetRateLimitSec === 0
+                        ? 'Đang mở khóa…'
+                        : 'Đồng bộ Google Sheet'}
+                </button>
+                {googleSheetsEditorUrl ? (
+                  <a
+                    href={googleSheetsEditorUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-sky-800 hover:underline text-center sm:text-right"
+                  >
+                    Mở Google Sheet
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
             <div className="flex flex-wrap items-end gap-2 border-l border-gray-200 pl-3 ml-1">
               <div>
                 <label htmlFor="admin-unused-sku-count" className="block text-sm font-medium text-gray-700 mb-1">
@@ -2808,10 +2940,26 @@ export default function AdminProductsPage() {
             </button>
           </div>
 
-          <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-800 leading-relaxed">
-            <span className="font-semibold text-slate-900">Mặc định giao diện:</span>{' '}
-            <span className="font-medium">DeepSeek + vẽ local</span> (OCR → dịch → vẽ chữ); Gemini / GPT chỉ khi chọn chủ động — model Pro và ảnh{' '}
-            <span className="font-medium">2K hoặc 4K</span>; GPT chỉ <span className="font-medium">high/auto</span> và cỡ ảnh lớn.
+          <p
+            className={
+              geminiAuthStatus?.ai_image_jobs_allowed === false
+                ? 'mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950 leading-relaxed'
+                : 'mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-800 leading-relaxed'
+            }
+          >
+            {geminiAuthStatus?.ai_image_jobs_allowed === false ? (
+              <>
+                <span className="font-semibold">Đang chỉ bật pipeline DeepSeek + vẽ local</span> (OCR → DeepSeek dịch → vẽ chữ).{' '}
+                Gemini / GPT ảnh <span className="font-medium">tạm tắt</span> trên server — bật lại bằng{' '}
+                <code className="text-[11px]">IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED=true</code> trong .env backend.
+              </>
+            ) : (
+              <>
+                <span className="font-semibold text-slate-900">Mặc định giao diện:</span>{' '}
+                <span className="font-medium">DeepSeek + vẽ local</span> (OCR → dịch → vẽ chữ); Gemini / GPT chỉ khi chọn chủ động — model Pro và ảnh{' '}
+                <span className="font-medium">2K hoặc 4K</span>; GPT chỉ <span className="font-medium">high/auto</span> và cỡ ảnh lớn.
+              </>
+            )}
           </p>
 
           <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,28rem)]">
@@ -2830,57 +2978,73 @@ export default function AdminProductsPage() {
                         disabled={localizationStartBusy}
                       />
                       <span>
-                        <span className="font-medium">Chỉ DeepSeek + vẽ local (không AI ảnh)</span>
+                        <span className="font-medium">DeepSeek + vẽ local (không AI ảnh Gemini/GPT)</span>
                         <span className="mt-0.5 block text-xs text-gray-500">
-                          OCR phát hiện chữ → DeepSeek dịch → vẽ lại chữ trên ảnh. Không gọi Gemini/GPT sinh/chỉnh cả khung (phù
-                          hợp ảnh dài / split, tránh lệch sản phẩm). Không cần cookie hay key Gemini/OpenAI cho nhánh này.
+                          OCR (Vision) → <span className="font-medium">DeepSeek</span> dịch → <span className="font-medium">vẽ local</span>{' '}
+                          chữ trên ảnh. Không gọi Gemini/GPT sinh/chỉnh cả khung (ổn với ảnh dài / split). Không cần cookie hay key
+                          Gemini/OpenAI cho nhánh này.
                         </span>
                       </span>
                     </label>
-                    <label className="flex cursor-pointer items-start gap-2">
+                    <label
+                      className={`flex items-start gap-2 ${imageLocAiImageModesSelectable ? 'cursor-pointer' : 'cursor-not-allowed opacity-55'}`}
+                    >
                       <input
                         type="radio"
                         name="imageLocalizationGeminiMode"
                         className="mt-1"
                         checked={imageLocalizationGeminiMode === 'web'}
                         onChange={() => setImageLocalizationGeminiMode('web')}
-                        disabled={localizationStartBusy}
+                        disabled={localizationStartBusy || !imageLocAiImageModesSelectable}
                       />
                       <span>
                         <span className="font-medium">Gemini trên trình duyệt</span>
+                        {geminiAuthStatus?.ai_image_jobs_allowed === false ? (
+                          <span className="ml-1 text-xs font-normal text-gray-400">(tạm tắt)</span>
+                        ) : null}
                         <span className="mt-0.5 block text-xs text-gray-500">
                           Playwright + cookie / profile (Nano Banana như khi dùng tay trên gemini.google.com).
                         </span>
                       </span>
                     </label>
-                    <label className="flex cursor-pointer items-start gap-2">
+                    <label
+                      className={`flex items-start gap-2 ${imageLocAiImageModesSelectable ? 'cursor-pointer' : 'cursor-not-allowed opacity-55'}`}
+                    >
                       <input
                         type="radio"
                         name="imageLocalizationGeminiMode"
                         className="mt-1"
                         checked={imageLocalizationGeminiMode === 'api'}
                         onChange={() => setImageLocalizationGeminiMode('api')}
-                        disabled={localizationStartBusy}
+                        disabled={localizationStartBusy || !imageLocAiImageModesSelectable}
                       />
                       <span>
                         <span className="font-medium">Gemini API (GEMINI_API_KEY)</span>
+                        {geminiAuthStatus?.ai_image_jobs_allowed === false ? (
+                          <span className="ml-1 text-xs font-normal text-gray-400">(tạm tắt)</span>
+                        ) : null}
                         <span className="mt-0.5 block text-xs text-gray-500">
                           Model sinh/sửa ảnh trên server (mặc định{' '}
                           {geminiAuthStatus?.image_model || 'gemini-3-pro-image-preview'}). Không cần cookie; cần key trong backend.
                         </span>
                       </span>
                     </label>
-                    <label className="flex cursor-pointer items-start gap-2">
+                    <label
+                      className={`flex items-start gap-2 ${imageLocAiImageModesSelectable ? 'cursor-pointer' : 'cursor-not-allowed opacity-55'}`}
+                    >
                       <input
                         type="radio"
                         name="imageLocalizationGeminiMode"
                         className="mt-1"
                         checked={imageLocalizationGeminiMode === 'openai'}
                         onChange={() => setImageLocalizationGeminiMode('openai')}
-                        disabled={localizationStartBusy}
+                        disabled={localizationStartBusy || !imageLocAiImageModesSelectable}
                       />
                       <span>
                         <span className="font-medium">OpenAI GPT Image (OPENAI_API_KEY)</span>
+                        {geminiAuthStatus?.ai_image_jobs_allowed === false ? (
+                          <span className="ml-1 text-xs font-normal text-gray-400">(tạm tắt)</span>
+                        ) : null}
                         <span className="mt-0.5 block text-xs text-gray-500">
                           API <code className="text-[11px]">/v1/images/edits</code>, mặc định model{' '}
                           {geminiAuthStatus?.openai_image_model || 'gpt-image-2'} (có thể đổi{' '}
@@ -3838,7 +4002,9 @@ export default function AdminProductsPage() {
 
         {toast && (
           <div
-            className={`fixed bottom-4 right-4 px-4 py-2 rounded-lg shadow-lg text-white text-sm ${
+            role={toast.type === 'err' ? 'alert' : 'status'}
+            aria-live={toast.type === 'err' ? 'assertive' : 'polite'}
+            className={`fixed bottom-4 right-4 max-w-md px-4 py-2 rounded-lg shadow-lg text-white text-sm ${
               toast.type === 'ok' ? 'bg-green-600' : 'bg-red-600'
             }`}
           >

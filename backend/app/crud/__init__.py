@@ -6,7 +6,7 @@ File này BẮT BUỘC để import module crud hoạt động đúng
 import os
 import sys
 
-print(f"📦 Loading CRUD module from: {os.path.dirname(__file__)}")
+print(f"[INFO] Loading CRUD module from: {os.path.dirname(__file__)}")
 
 # ========== IMPORT USER MODULE ==========
 try:
@@ -26,9 +26,9 @@ try:
         add_shop_interaction, get_user_shop_interactions,
         get_user_shop_interactions_by_type, get_user_behavior_stats
     )
-    print("  ✅ User CRUD: Loaded successfully")
+    print("  [OK] User CRUD: Loaded successfully")
 except ImportError as e:
-    print(f"  ❌ User CRUD: Import error - {e}")
+    print(f"  [ERROR] User CRUD: Import error - {e}")
     # Tạo placeholder functions để tránh crash
     def get_user(*args, **kwargs):
         raise NotImplementedError("User module not loaded")
@@ -51,9 +51,9 @@ try:
         create_category, update_category, delete_category,
         get_category_products, get_category_count
     )
-    print("  ✅ Category CRUD: Loaded successfully")
+    print("  [OK] Category CRUD: Loaded successfully")
 except ImportError:
-    print("  ⚠️  Category CRUD: Module not found (may be normal)")
+    print("  [WARN] Category CRUD: Module not found (may be normal)")
     # Placeholder functions
     def get_category(*args, **kwargs):
         raise NotImplementedError("Category module not loaded")
@@ -69,9 +69,9 @@ try:
         search_products, filter_products, get_product_count,
         get_products_by_category, get_products_by_ids
     )
-    print("  ✅ Product CRUD: Loaded successfully")
+    print("  [OK] Product CRUD: Loaded successfully")
 except ImportError:
-    print("  ⚠️  Product CRUD: Module not found (may be normal)")
+    print("  [WARN] Product CRUD: Module not found (may be normal)")
     def get_product(*args, **kwargs):
         raise NotImplementedError("Product module not loaded")
     get_product_by_slug = get_products = get_product
@@ -86,9 +86,9 @@ try:
         update_cart_item, remove_cart_item, clear_cart,
         get_cart_item_count, migrate_guest_cart
     )
-    print("  ✅ Cart CRUD: Loaded successfully")
+    print("  [OK] Cart CRUD: Loaded successfully")
 except ImportError:
-    print("  ⚠️  Cart CRUD: Module not found (may be normal)")
+    print("  [WARN] Cart CRUD: Module not found (may be normal)")
     def get_cart(*args, **kwargs):
         raise NotImplementedError("Cart module not loaded")
     get_cart_items = add_cart_item = update_cart_item = get_cart
@@ -102,9 +102,9 @@ try:
         update_order_status, cancel_order, confirm_received, update_order_deposit_type, pay_deposit,
         get_user_orders, get_order_count
     )
-    print("  ✅ Order CRUD: Loaded successfully")
+    print("  [OK] Order CRUD: Loaded successfully")
 except ImportError:
-    print("  ⚠️  Order CRUD: Module not found (may be normal)")
+    print("  [WARN] Order CRUD: Module not found (may be normal)")
     def create_order(*args, **kwargs):
         raise NotImplementedError("Order module not loaded")
     get_orders = get_order = update_order_status = create_order
@@ -128,9 +128,9 @@ try:
         get_questions_for_product,
         create_customer_question,
     )
-    print("  ✅ ProductQuestion CRUD: Loaded successfully")
+    print("  [OK] ProductQuestion CRUD: Loaded successfully")
 except ImportError as e:
-    print(f"  ⚠️  ProductQuestion CRUD: Import failed - {e}")
+    print(f"  [WARN] ProductQuestion CRUD: Import failed - {e}")
     def get_question(*args, **kwargs):
         raise NotImplementedError("ProductQuestion module not loaded")
     get_questions = get_questions_count = create_question = get_question
@@ -140,9 +140,9 @@ except ImportError as e:
 # ========== PRODUCT REVIEW MODULE ==========
 try:
     from . import product_review
-    print("  ✅ ProductReview CRUD: Loaded successfully")
+    print("  [OK] ProductReview CRUD: Loaded successfully")
 except ImportError as e:
-    print(f"  ⚠️  ProductReview CRUD: Import failed - {e}")
+    print(f"  [WARN] ProductReview CRUD: Import failed - {e}")
     product_review = None
 
 # ========== IMPORT ADMIN MODULE ==========
@@ -152,9 +152,9 @@ try:
         update_admin, delete_admin, get_admins,
         verify_admin_password, update_admin_last_login
     )
-    print("  ✅ Admin CRUD: Loaded successfully")
+    print("  [OK] Admin CRUD: Loaded successfully")
 except ImportError as e:
-    print(f"  ⚠️  Admin CRUD: Import failed - {e}")
+    print(f"  [WARN] Admin CRUD: Import failed - {e}")
     def get_admin(*args, **kwargs):
         raise NotImplementedError("Admin module not loaded")
     get_admin_by_username = create_admin = update_admin = get_admin
@@ -162,7 +162,7 @@ except ImportError as e:
     update_admin_last_login = get_admin
 
 # ========== EXPORT EVERYTHING ==========
-print("✅ CRUD module initialization complete")
+print("[OK] CRUD module initialization complete")
 
 # Export để có thể import từ app.crud
 __all__ = [

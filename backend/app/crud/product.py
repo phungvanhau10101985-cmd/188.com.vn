@@ -56,6 +56,59 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Đồng bộ Google Sheet: debounce nhiều thao tác liên tiếp → một lần gọi API (tránh vượt quota).
+_gsheets_sync_debounce_timer: Optional[threading.Timer] = None
+_gsheets_sync_debounce_lock = threading.Lock()
+
+
+def _schedule_google_sheets_sku_sync(*, immediate: bool = False) -> None:
+    """
+    Web/DB là chuẩn: sau khi dữ liệu SP đổi, sheet được cập nhật tương ứng (trong worker nền).
+
+    - immediate=False: gộp các lần gọi trong GOOGLE_SHEETS_SKU_SYNC_DEBOUNCE_SECONDS (mặc định 45s)
+      thành một lần đồng bộ — giảm số request tới Google.
+    - immediate=True: chạy đồng bộ ngay cho thao tác thủ công/đặc biệt.
+    Trong service vẫn diff từng ô với DB trước khi ghi, chỉ cập nhật hàng thực sự thay đổi.
+    """
+    if not getattr(settings, "GOOGLE_SHEETS_SKU_SYNC_ENABLED", False):
+        return
+
+    def _run() -> None:
+        global _gsheets_sync_debounce_timer
+        with _gsheets_sync_debounce_lock:
+            _gsheets_sync_debounce_timer = None
+        try:
+            from app.db.session import SessionLocal
+            from app.services.google_sheets_sku_sync import sync_product_skus_to_google_sheet
+
+            s = SessionLocal()
+            try:
+                sync_product_skus_to_google_sheet(s)
+            finally:
+                s.close()
+        except Exception as exc:
+            logger.warning("Google Sheets SKU sync (nền) lỗi: %s", exc)
+
+    debounce_sec = int(getattr(settings, "GOOGLE_SHEETS_SKU_SYNC_DEBOUNCE_SECONDS", 45) or 0)
+
+    if immediate or debounce_sec <= 0:
+        threading.Thread(target=_run, name="gsheets-sku-sync", daemon=True).start()
+        return
+
+    global _gsheets_sync_debounce_timer
+    with _gsheets_sync_debounce_lock:
+        if _gsheets_sync_debounce_timer is not None:
+            try:
+                _gsheets_sync_debounce_timer.cancel()
+            except Exception:
+                pass
+            _gsheets_sync_debounce_timer = None
+        t = threading.Timer(float(debounce_sec), _run)
+        t.daemon = True
+        _gsheets_sync_debounce_timer = t
+        t.start()
+
+
 # ========== Danh sách SP: sắp xếp (admin / API) ==========
 
 
@@ -2273,6 +2326,7 @@ def create_product(db: Session, product: ProductCreate):
     db.commit()
     db.refresh(db_product)
     _maybe_schedule_category_gemini_for_product(db, db_product)
+    _schedule_google_sheets_sku_sync()
     return db_product
 
 def update_product(db: Session, product_id: int, product_update: ProductUpdate):
@@ -2315,6 +2369,8 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
         db.commit()
         db.refresh(db_product)
         _maybe_schedule_category_gemini_for_product(db, db_product)
+        if "code" in update_data or "product_id" in update_data:
+            _schedule_google_sheets_sku_sync()
     return db_product
 
 def delete_product(db: Session, product_id: int):
@@ -2323,6 +2379,7 @@ def delete_product(db: Session, product_id: int):
         delete_bunny_assets_for_product(db_product)
         db.delete(db_product)
         db.commit()
+        _schedule_google_sheets_sku_sync()
     return db_product
 
 def get_category_gemini_auto_settings_snapshot(db: Session) -> Dict[str, Any]:
@@ -2683,6 +2740,9 @@ def bulk_import_products(
     try:
         db.commit()
         logger.info(f"💾 Final commit: {created + updated} products processed")
+        # Import Excel phải hoàn tất và trả trạng thái ổn định trước; Google Sheet sync
+        # chạy nền/debounce để lỗi quota/mạng Google không làm hỏng luồng import.
+        _schedule_google_sheets_sku_sync()
     except Exception as e:
         errors.append(f"Commit error: {str(e)}")
         db.rollback()

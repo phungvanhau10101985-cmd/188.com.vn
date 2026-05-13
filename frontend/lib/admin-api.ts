@@ -1,13 +1,21 @@
 /**
  * Admin API client - dùng admin_token (Bearer) cho các endpoint /api/v1/orders/admin/*
  */
-import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
+import { getApiBaseUrl, getBackendOriginUrl, ngrokFetchHeaders } from '@/lib/api-base';
 
 /** Grep trên trình duyệt (Console): IMPORT_EXCEL_CLIENT */
 const IMPORT_EXCEL_CLIENT_TAG = '[IMPORT_EXCEL_CLIENT]';
 
 function logImportExcelClient(stage: string, url: string, err: unknown) {
   console.warn(IMPORT_EXCEL_CLIENT_TAG, stage, url, err instanceof Error ? err.message : err);
+}
+
+function getImportExcelUploadApiBaseUrl(): string {
+  if (typeof window === 'undefined') return getApiBaseUrl();
+  if (window.location.protocol === 'http:' && process.env.NODE_ENV === 'development') {
+    return `${getBackendOriginUrl().replace(/\/$/, '')}/api/v1`;
+  }
+  return getApiBaseUrl();
 }
 
 /**
@@ -351,6 +359,8 @@ export interface AdminGeminiAuthBranch {
 }
 
 export interface AdminGeminiAuthStatus {
+  /** false = admin chỉ được pipeline OCR + DeepSeek + vẽ local (Gemini/GPT ảnh tắt trên server). */
+  ai_image_jobs_allowed?: boolean;
   default_gemini_mode: 'web' | 'api' | 'openai';
   image_model: string;
   openai_image_model: string;
@@ -583,8 +593,8 @@ function postImportExcelAsyncMultipart(
 
     xhr.onload = () => {
       cleanup();
+      const text = xhr.responseText || '';
       try {
-        const text = xhr.responseText || '';
         const data = text ? (JSON.parse(text) as { detail?: unknown; job_id?: string }) : {};
         if (xhr.status === 202 && data.job_id) {
           resolve(data as { job_id: string; message?: string; poll_url?: string });
@@ -593,7 +603,14 @@ function postImportExcelAsyncMultipart(
         const detail = formatFastApiDetail(data?.detail ?? data);
         reject(new Error(detail || `Import lỗi ${xhr.status}`));
       } catch {
-        reject(new Error(`Phản hồi không hợp lệ (${xhr.status})`));
+        const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 280);
+        reject(
+          new Error(
+            snippet
+              ? `Phản hồi không phải JSON (${xhr.status}): ${snippet}`
+              : `Phản hồi không hợp lệ (${xhr.status})`,
+          ),
+        );
       }
     };
 
@@ -620,6 +637,23 @@ function postImportExcelAsyncMultipart(
 const ADMIN_PRODUCTS_LIST_TIMEOUT_MS = 120_000;
 
 export type AdminProductListSort = 'default' | 'views_desc' | 'newest' | 'oldest';
+
+/** Kết quả POST /import-export/sync/google-sheet-skus */
+export type AdminGoogleSheetSkuSyncResult = {
+  ok: boolean;
+  skipped?: boolean;
+  reason?: string;
+  error?: string;
+  field?: string;
+  sheet_title?: string;
+  column_count?: number;
+  updated_rows?: number;
+  unchanged_rows?: number;
+  added_rows?: number;
+  removed_orphan_rows?: number;
+  removed_duplicate_rows?: number;
+  db_key_count?: number;
+};
 
 export const adminProductAPI = {
   getProducts: (
@@ -742,7 +776,7 @@ export const adminProductAPI = {
   ) => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
-    const url = `${getApiBaseUrl()}/import-export/import/excel/async?overwrite=${overwrite}`;
+    const url = `${getImportExcelUploadApiBaseUrl()}/import-export/import/excel/async?overwrite=${overwrite}`;
     console.info('[IMPORT_EXCEL_CLIENT]', 'post_async_start', {
       url,
       file: file.name,
@@ -944,6 +978,14 @@ export const adminProductAPI = {
         method: 'POST',
         timeoutMs: 30_000,
       });
+    }),
+
+  /** Đồng bộ danh sách/mã lên Google Sheet (cần cấu hình server + quyền admin). */
+  syncGoogleSheetSkus: () =>
+    fetchAdmin<AdminGoogleSheetSkuSyncResult>('/import-export/sync/google-sheet-skus', {
+      method: 'POST',
+      body: JSON.stringify({}),
+      timeoutMs: 300_000,
     }),
 
   exportExcel: async () => {

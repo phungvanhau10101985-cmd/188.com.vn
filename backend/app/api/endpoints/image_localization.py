@@ -371,7 +371,9 @@ def check_gemini_auth(
     _: AdminUser = Depends(require_module_permission("products")),
 ):
     _pw_h = bool(getattr(settings, "IMAGE_LOCALIZATION_PLAYWRIGHT_HEADLESS", True))
+    _ai_jobs_ok = bool(getattr(settings, "IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED", False))
     return {
+        "ai_image_jobs_allowed": _ai_jobs_ok,
         "default_gemini_mode": getattr(settings, "IMAGE_LOCALIZATION_GEMINI_MODE", "web"),
         "image_model": getattr(settings, "IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL", "gemini-3-pro-image-preview"),
         "gemini_api_default_image_size": getattr(
@@ -426,6 +428,15 @@ def start_job(
     payload: StartImageLocalizationPayload,
     _: AdminUser = Depends(require_module_permission("products")),
 ):
+    _ai_jobs_ok = bool(getattr(settings, "IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED", False))
+    if not _ai_jobs_ok and payload.allow_ai_image_models is not False:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Server đang giới hạn chỉ pipeline OCR + DeepSeek + vẽ local — gửi allow_ai_image_models=false. "
+                "Bật lại Gemini/GPT ảnh: IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED=true trong .env."
+            ),
+        )
     mode = _resolve_gemini_mode(payload.gemini_mode)
     tier = _resolve_inference_tier(payload.inference_tier)
     skip_ai_image = payload.allow_ai_image_models is False

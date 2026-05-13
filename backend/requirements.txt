@@ -47,4 +47,5 @@ opencv-python==4.10.0.84
 numpy==1.26.4
 Pillow==10.3.0
 google-cloud-vision==3.7.0
+google-api-python-client>=2.140.0
 psutil
