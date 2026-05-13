@@ -20,6 +20,7 @@ import ProductVariantModal from '@/app/products/[slug]/components/ProductVariant
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
 import { SHOP_VIDEO_START_SLUG_PARAM } from '@/lib/shop-video-feed';
 import { openNanoAiTryOnEmbed } from '@/lib/nanoai-hosted-chat';
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
 
 const FEED_SOUND_SESSION_KEY = '188-shop-video-feed-sound-on';
 
@@ -41,9 +42,8 @@ function persistFeedSound(on: boolean) {
 }
 
 function productHref(p: Product): string {
-  const s = (p.slug || '').trim();
-  if (s) return `/products/${encodeURIComponent(s)}`;
-  return `/products/${encodeURIComponent(p.product_id)}`;
+  const seg = productPathSlugFromApi(p.slug, p.product_id) || p.product_id;
+  return `/products/${encodeURIComponent(seg)}`;
 }
 
 function hasPlayableVideoLink(link: string | undefined | null): boolean {
@@ -566,7 +566,7 @@ export default function ShopVideoFeedClient() {
         const uniq = [...new Set(ordered)];
         const primary = uniq[0] || '';
         const secondary = uniq.find((u) => u !== primary) || null;
-        const path = `/products/${(p.slug || '').trim() || p.product_id}`;
+        const path = `/products/${productPathSlugFromApi(p.slug, p.product_id) || p.product_id}`;
         const result = await openNanoAiTryOnEmbed({
           sku,
           primaryImageUrl: primary,
@@ -667,7 +667,7 @@ export default function ShopVideoFeedClient() {
   const nanoSecondaryImage = nanoImageList.find((u) => u !== nanoPrimaryImage) || null;
   /** Khớp PDP: đường dẫn site không encode — widget/chat dùng cùng format */
   const nanoProductPath = nanoCtxProduct
-    ? `/products/${(nanoCtxProduct.slug || '').trim() || nanoCtxProduct.product_id}`
+    ? `/products/${productPathSlugFromApi(nanoCtxProduct.slug, nanoCtxProduct.product_id) || nanoCtxProduct.product_id}`
     : '';
 
   return (

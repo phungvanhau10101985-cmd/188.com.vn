@@ -28,6 +28,7 @@ import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/
 import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
 
@@ -355,7 +356,8 @@ export default function ProductDetailClient({
   const nanoSecondaryImage =
     nanoImageList.find((u) => u !== nanoPrimaryImage) || null;
   const nanoSku = (product.code?.trim() || product.product_id || String(product.id)).trim();
-  const nanoProductPath = `/products/${product.slug || slug}`;
+  const nanoSeg = productPathSlugFromApi(product.slug, product.product_id) || slug;
+  const nanoProductPath = `/products/${nanoSeg}`;
 
   return (
     <div className="min-h-screen bg-gray-50">

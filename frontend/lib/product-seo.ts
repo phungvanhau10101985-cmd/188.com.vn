@@ -4,6 +4,7 @@
  */
 import type { Product } from "@/types/api";
 import { displayableBrandWithDefault } from "@/lib/utils";
+import { productPublicPdpUrl } from "@/lib/product-path-slug";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001/api/v1";
@@ -139,6 +140,8 @@ export function buildProductJsonLd(product: ProductForSeo): object {
     `${product.name}${brandDisplay ? ` - ${brandDisplay}` : ""}. Mua tại 188.com.vn`;
   const description = stripHtml(rawDesc);
 
+  const pdpUrl = productPublicPdpUrl(product.slug, SITE_URL);
+
   return {
     "@context": "https://schema.org",
     "@type": "Product",
@@ -146,11 +149,11 @@ export function buildProductJsonLd(product: ProductForSeo): object {
     description: description.slice(0, 500),
     image: image ? [image] : undefined,
     sku: product.product_id || String(product.id),
-    url: `${SITE_URL}/products/${product.slug}`,
+    url: pdpUrl,
     brand: { "@type": "Brand", name: brandDisplay },
     offers: {
       "@type": "Offer",
-      url: `${SITE_URL}/products/${product.slug}`,
+      url: pdpUrl,
       priceCurrency: "VND",
       price: product.price,
       availability:

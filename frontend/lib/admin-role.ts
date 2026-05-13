@@ -4,6 +4,7 @@ import {
   ADMIN_MODULE_NAV,
   ADMIN_MODULE_ORDER,
 } from '@/lib/admin-modules';
+import { getPrivilegedOnlyAdminHrefs } from '@/lib/admin-nav-config';
 
 export const ADMIN_ROLE_STORAGE_KEY = 'admin_role';
 export const ADMIN_MODULES_STORAGE_KEY = 'admin_modules';
@@ -116,6 +117,12 @@ export function defaultAdminHome(): string {
 }
 
 export function isAdminPathAllowedForState(pathname: string, role: string | null, modules: string[] | null): boolean {
+  if (isPrivilegedAdminRole(role)) {
+    const privilegedPaths = getPrivilegedOnlyAdminHrefs();
+    if (privilegedPaths.some((h) => pathname === h || pathname.startsWith(`${h}/`))) {
+      return true;
+    }
+  }
   const prefixes = getEffectiveNavPrefixesFor(role, modules);
   if (!prefixes) return true;
   return prefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`));

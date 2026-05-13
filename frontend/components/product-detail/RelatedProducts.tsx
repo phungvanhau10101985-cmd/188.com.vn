@@ -16,6 +16,7 @@ import {
   buildHomeListingHref,
   type ProductRelatedTabId,
 } from '@/lib/product-related-tabs';
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
 
 interface RelatedProductsProps {
   currentProduct: Product;
@@ -24,13 +25,13 @@ interface RelatedProductsProps {
 function sectionTitle(tab: ProductRelatedTabId): string {
   switch (tab) {
     case 'bestselling':
-      return 'Sản phẩm bán chạy — cùng shop_id';
+      return 'Sản phẩm bán chạy tương tự';
     case 'same_price':
-      return 'Sản phẩm cùng shop — cùng shop_name';
+      return 'Sản phẩm cùng shop — cùng tầm giá';
     case 'lower_price':
-      return 'Sản phẩm cùng loại — cùng pro_lower_price';
+      return 'Sản phẩm cùng loại — mức giá thấp hơn';
     case 'higher_price':
-      return 'Sản phẩm cùng loại — cùng pro_high_price';
+      return 'Sản phẩm cùng loại — mức giá cao hơn';
     default:
       return 'Sản phẩm liên quan';
   }
@@ -39,22 +40,23 @@ function sectionTitle(tab: ProductRelatedTabId): string {
 function emptyHint(tab: ProductRelatedTabId): string {
   switch (tab) {
     case 'bestselling':
-      return 'Sản phẩm này chưa có shop_id — không lọc được nhóm bán chạy theo cửa hàng.';
+      return 'Sản phẩm này chưa có thông tin cửa hàng — không lọc được nhóm bán chạy.';
     case 'same_price':
-      return 'Sản phẩm này chưa có shop_name — không lọc được nhóm cùng tên shop.';
+      return 'Sản phẩm này chưa có tên cửa hàng — không lọc được nhóm cùng tầm giá.';
     case 'lower_price':
-      return 'Sản phẩm này chưa có pro_lower_price — không lọc được nhóm giá thấp.';
+      return 'Sản phẩm này chưa có nhóm giá thấp — không lọc được danh sách tương ứng.';
     case 'higher_price':
-      return 'Sản phẩm này chưa có pro_high_price — không lọc được nhóm giá cao.';
+      return 'Sản phẩm này chưa có nhóm giá cao — không lọc được danh sách tương ứng.';
     default:
       return 'Không có dữ liệu để hiển thị.';
   }
 }
 
 function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSizes: string }) {
+  const seg = productPathSlugFromApi(product.slug, product.product_id) || String(product.id);
   return (
     <Link
-      href={`/products/${product.slug || product.id}`}
+      href={`/products/${seg}`}
       className="group block bg-white rounded-lg border border-gray-200 overflow-hidden hover:shadow-md transition-all"
     >
       <div className="aspect-square bg-gray-100 overflow-hidden relative">
@@ -587,7 +589,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
         <>
           <h3 className="text-base font-bold text-gray-900 mb-2 uppercase">{title}</h3>
           <p className="text-sm text-gray-500">
-            Không có sản phẩm bán chạy khác theo shop_id trong nhóm này.
+            Không có sản phẩm bán chạy khác cùng cửa hàng trong nhóm này.
           </p>
         </>
       ) : null}

@@ -3,6 +3,8 @@
  * Base URL: thẻ script `nanoai-chat-widget.js` (`data-chat-url`) hoặc `NEXT_PUBLIC_NANOAI_CHAT_URL`.
  */
 
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
+
 export type NanoAiTryOnCtx = {
   sku: string;
   primaryImageUrl: string;
@@ -36,7 +38,10 @@ export function buildNanoAiTryOnCtxFrom188Product(p: {
   const uniq = [...new Set(ordered)];
   const primary = uniq[0] || '';
   const secondary = uniq.find((u) => u !== primary) || null;
-  const slugPart = String(p.slug ?? '').trim() || String(p.product_id ?? '').trim();
+  const slugPart =
+    productPathSlugFromApi(p.slug ?? undefined, p.product_id ?? undefined) ||
+    String(p.product_id ?? '').trim() ||
+    String(p.id);
   return {
     sku,
     primaryImageUrl: primary,

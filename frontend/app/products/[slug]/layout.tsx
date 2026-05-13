@@ -8,6 +8,7 @@ import {
 } from "@/lib/product-seo";
 import { serializeJsonLdForScript } from "@/lib/json-ld-script";
 import { displayableBrandOrOrigin, displayableBrandWithDefault } from "@/lib/utils";
+import { productPublicPdpUrl } from "@/lib/product-path-slug";
 
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ||
@@ -53,7 +54,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     product.description ||
     `${product.name}. ${brandForSeo ? `Thương hiệu ${brandForSeo}. ` : ""}Giá ${new Intl.NumberFormat("vi-VN").format(product.price)} ₫. Mua sắm tại 188.com.vn - Xem là thích.`;
   const description = truncateDescriptionAtSentence(rawDesc, 160);
-  const canonical = `${SITE_URL}/products/${product.slug}`;
+  const canonical = productPublicPdpUrl(product.slug, SITE_URL);
   const image = absoluteImage(product.main_image) || absoluteImage(product.images?.[0]);
   const blockVideoSerp = seoBlockBotVideoSerpPreview();
 
@@ -118,6 +119,7 @@ function buildBreadcrumbJsonLd(product: {
   raw_category?: string;
   raw_subcategory?: string;
 }) {
+  const pdpUrl = productPublicPdpUrl(product.slug, SITE_URL);
   const breadcrumbItems = [
     { "@type": "ListItem", position: 1, name: "Trang chủ", item: SITE_URL },
   ];
@@ -161,7 +163,7 @@ function buildBreadcrumbJsonLd(product: {
     "@type": "ListItem",
     position: position,
     name: product.name,
-    item: `${SITE_URL}/products/${product.slug}`,
+    item: pdpUrl,
   });
 
   return {

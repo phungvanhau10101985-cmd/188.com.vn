@@ -1,7 +1,12 @@
 # backend/app/schemas/product.py - COMPLETE FIXED VERSION
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, field_validator, field_serializer
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
+
+from app.utils.public_product_url import (
+    product_public_page_url,
+    slug_path_segment_from_input,
+)
 
 class ProductBase(BaseModel):
     """Base schema matching Excel columns A-AJ (36 columns)"""
@@ -95,6 +100,12 @@ class ProductBase(BaseModel):
     
     # Cột 30: Sub-subcategory
     sub_subcategory: Optional[str] = Field(None, description="30: Sub-subcategory")
+
+    # Đồng bộ ORM Product: FK danh mục + nhãn gốc trước khi mapping SEO
+    category_id: Optional[int] = Field(None, description="ID danh mục (FK bảng categories)")
+    raw_category: Optional[str] = Field(None, description="Danh mục cấp 1 gốc (trước mapping)")
+    raw_subcategory: Optional[str] = Field(None, description="Danh mục cấp 2 gốc (trước mapping)")
+    raw_sub_subcategory: Optional[str] = Field(None, description="Danh mục cấp 3 gốc (trước mapping)")
     
     # Cột 31: Material
     material: Optional[str] = Field(None, description="31: Material")
@@ -128,7 +139,15 @@ class ProductBase(BaseModel):
     image_localization_error: Optional[str] = Field(None, description="Lỗi bản địa hóa ảnh gần nhất")
     
     # Cột AL (38): Slug (export only; import auto-generated)
-    slug: Optional[str] = Field(None, description="AL: Slug (auto-generated khi import)")
+    slug: Optional[str] = Field(
+        None,
+        description="Slug URL trang SP — khi trả API là https://…/products/…; khi gửi lên có thể segment hoặc URL đầy đủ.",
+    )
+
+    @field_validator("slug", mode="before")
+    @classmethod
+    def _normalize_slug_input(cls, v: Any) -> Optional[str]:
+        return slug_path_segment_from_input(v)
 
     # SEO fields
     meta_title: Optional[str] = Field(None, description="SEO: meta title")
@@ -176,6 +195,10 @@ class ProductUpdate(BaseModel):
     category: Optional[str] = None
     subcategory: Optional[str] = None
     sub_subcategory: Optional[str] = None
+    category_id: Optional[int] = None
+    raw_category: Optional[str] = None
+    raw_subcategory: Optional[str] = None
+    raw_sub_subcategory: Optional[str] = None
     material: Optional[str] = None
     style: Optional[str] = None
     color: Optional[str] = None
@@ -194,6 +217,11 @@ class ProductUpdate(BaseModel):
     meta_title: Optional[str] = None
     meta_description: Optional[str] = None
     meta_keywords: Optional[str] = None
+
+    @field_validator("slug", mode="before")
+    @classmethod
+    def _normalize_slug_update(cls, v: Any) -> Optional[str]:
+        return slug_path_segment_from_input(v)
 
 def _build_fallback_product_info(obj: Any) -> Dict[str, Any]:
     """Khi product_info (cột AK) null, tạo object từ các cột khác để frontend hiển thị đúng tab Thông tin sản phẩm."""
@@ -280,6 +308,12 @@ class Product(ProductBase):
         if fallback:
             self.product_info = fallback
         return self
+
+    @field_serializer("slug")
+    def _serialize_slug_as_public_https_url(self, value: Optional[str]) -> Optional[str]:
+        """JSON API: slug = URL đầy đủ trang sản phẩm shop (https://…/products/…)."""
+        return product_public_page_url(value)
+
 
 class ProductImportRequest(BaseModel):
     """Request for importing Excel"""

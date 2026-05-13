@@ -51,6 +51,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     if (!hydrated) return [];
     const filterItem = (l: AdminNavGroup['items'][number]) => {
       if (l.privilegedOnly && !isPrivilegedAdminRole(adminRole)) return false;
+      // super_admin / admin: mục privilegedOnly luôn hiện (không bị «admin_modules» trong localStorage che)
+      if (l.privilegedOnly && isPrivilegedAdminRole(adminRole)) return true;
       const prefixes = getEffectiveNavPrefixesFor(adminRole, adminModules);
       if (!prefixes) return true;
       const hrefPath = adminNavPathFromHref(l.href);

@@ -9,6 +9,7 @@ import ProductReviewFormModal from '../ProductReviewFormModal/ProductReviewFormM
 import { useToast } from '@/components/ToastProvider';
 import VerifiedPurchaserBadge from '../VerifiedPurchaserBadge';
 import { qaSlotShowsVerifiedPurchaserBadge, reviewShowsVerifiedPurchaserBadge } from '@/lib/product-qa-verified-display';
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
 
 function formatQaDate(s: string | null | undefined) {
   if (!s) return '';
@@ -37,6 +38,8 @@ export default function ProductQAReviewCards({
   onOpenReviews,
   layout = 'grid',
 }: ProductQAReviewCardsProps) {
+  const pdpSeg =
+    productPathSlugFromApi(product.slug, product.product_id) || product.product_id || String(product.id);
   const [sampleQuestion, setSampleQuestion] = useState<ProductQuestionItem | null>(null);
   const [questionCount, setQuestionCount] = useState<number>(0);
   const [togglingUsefulId, setTogglingUsefulId] = useState<number | null>(null);
@@ -163,10 +166,10 @@ export default function ProductQAReviewCards({
       if (onOpenQA) {
         onOpenQA();
       } else {
-        window.location.assign(`/products/${product.slug}#question-${questionId}`);
+        window.location.assign(`/products/${pdpSeg}#question-${questionId}`);
       }
     },
-    [onOpenQA, product.slug]
+    [onOpenQA, pdpSeg]
   );
 
   const handleReplyOutside = useCallback(
@@ -262,7 +265,7 @@ export default function ProductQAReviewCards({
                     Xem tất cả đánh giá
                   </button>
                 ) : (
-                  <a href={`/products/${product.slug}#reviews`} className="flex-1 min-w-[100px] py-2 text-center rounded-lg bg-[#ea580c] text-white text-sm font-medium hover:bg-[#c2410c] transition shadow-sm">
+                  <a href={`/products/${pdpSeg}#reviews`} className="flex-1 min-w-[100px] py-2 text-center rounded-lg bg-[#ea580c] text-white text-sm font-medium hover:bg-[#c2410c] transition shadow-sm">
                     Xem tất cả đánh giá
                   </a>
                 )}
@@ -272,7 +275,7 @@ export default function ProductQAReviewCards({
                       Xem thêm đánh giá...
                     </button>
                   ) : (
-                    <a href={`/products/${product.slug}#reviews`} className="inline-block py-2 px-3 rounded-lg border border-[#ea580c] text-[#ea580c] text-sm font-medium hover:bg-orange-50 transition text-center">
+                    <a href={`/products/${pdpSeg}#reviews`} className="inline-block py-2 px-3 rounded-lg border border-[#ea580c] text-[#ea580c] text-sm font-medium hover:bg-orange-50 transition text-center">
                       Xem thêm đánh giá...
                     </a>
                   )
@@ -295,7 +298,7 @@ export default function ProductQAReviewCards({
                     Xem thêm đánh giá...
                   </button>
                 ) : (
-                  <a href={`/products/${product.slug}#reviews`} className="inline-block py-2 px-4 rounded-lg bg-[#ea580c] text-white text-sm font-medium hover:bg-[#c2410c] transition shadow-sm">
+                  <a href={`/products/${pdpSeg}#reviews`} className="inline-block py-2 px-4 rounded-lg bg-[#ea580c] text-white text-sm font-medium hover:bg-[#c2410c] transition shadow-sm">
                     Xem thêm đánh giá...
                   </a>
                 )}
@@ -402,7 +405,7 @@ export default function ProductQAReviewCards({
                     Xem thêm câu hỏi, trả lời và đặt câu hỏi...
                   </button>
                 ) : (
-                  <a href={`/products/${product.slug}#qa`} className="block w-full py-2 text-center rounded-lg bg-[#ea580c] text-white text-sm font-medium hover:bg-[#c2410c] transition shadow-sm">
+                  <a href={`/products/${pdpSeg}#qa`} className="block w-full py-2 text-center rounded-lg bg-[#ea580c] text-white text-sm font-medium hover:bg-[#c2410c] transition shadow-sm">
                     Xem thêm câu hỏi, trả lời và đặt câu hỏi...
                   </a>
                 )}
@@ -419,7 +422,7 @@ export default function ProductQAReviewCards({
                   Xem danh sách câu hỏi
                 </button>
               ) : (
-                <a href={`/products/${product.slug}#qa`} className="inline-block py-2 px-4 rounded-lg bg-[#ea580c] text-white text-sm font-medium hover:bg-[#c2410c] transition shadow-sm">
+                <a href={`/products/${pdpSeg}#qa`} className="inline-block py-2 px-4 rounded-lg bg-[#ea580c] text-white text-sm font-medium hover:bg-[#c2410c] transition shadow-sm">
                   Xem danh sách câu hỏi
                 </a>
               )}

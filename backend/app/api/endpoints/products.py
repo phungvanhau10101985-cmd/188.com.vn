@@ -177,6 +177,96 @@ def search_products(
         return {"error": str(e), "status": "serialization_error", "products": [], "total": 0}
 
 
+def _read_products_list_impl(
+    response: Response,
+    db: Session,
+    *,
+    skip: int,
+    limit: int,
+    category: Optional[str],
+    subcategory: Optional[str],
+    sub_subcategory: Optional[str],
+    shop_name: Optional[str],
+    shop_id: Optional[str],
+    pro_lower_price: Optional[str],
+    pro_high_price: Optional[str],
+    min_price: Optional[float],
+    max_price: Optional[float],
+    is_active: Optional[bool],
+    q: Optional[str],
+    product_id: Optional[str],
+    order_random: bool,
+    sort: Optional[str],
+    use_search_cache: bool,
+) -> dict:
+    raw_q = (q or "").strip()
+    pid = (product_id or "").strip()
+    if order_random and not raw_q and not pid:
+        response.headers["Cache-Control"] = "private, no-store"
+    else:
+        response.headers["Cache-Control"] = "public, max-age=60"
+    cache_key = None
+    if use_search_cache and raw_q and not pid:
+        norm_q = crud.product._normalize_search_key(raw_q)
+        cache_key = product_search_cache_crud.build_cache_key(
+            norm_q=norm_q,
+            skip=skip,
+            limit=limit,
+            category=category,
+            subcategory=subcategory,
+            sub_subcategory=sub_subcategory,
+            shop_name=shop_name,
+            shop_id=shop_id,
+            pro_lower_price=pro_lower_price,
+            pro_high_price=pro_high_price,
+            min_price=min_price,
+            max_price=max_price,
+            is_active=is_active,
+            sort=crud.product.normalize_product_list_sort(sort),
+        )
+        cached = product_search_cache_crud.get_cached_result(db, cache_key)
+        if cached is not None:
+            return cached
+
+    result = crud.product.get_products(
+        db,
+        skip=skip,
+        limit=limit,
+        category=category,
+        subcategory=subcategory,
+        sub_subcategory=sub_subcategory,
+        shop_name=shop_name,
+        shop_id=shop_id,
+        pro_lower_price=pro_lower_price,
+        pro_high_price=pro_high_price,
+        min_price=min_price,
+        max_price=max_price,
+        is_active=is_active,
+        q=q,
+        product_id=product_id,
+        order_random=order_random,
+        sort=sort,
+    )
+
+    if result and "products" in result:
+        result["products"] = _serialize_products_for_api(db, result["products"])
+
+    if (
+        use_search_cache
+        and cache_key
+        and raw_q
+        and not pid
+        and not result.get("redirect_path")
+        and not result.get("error")
+    ):
+        try:
+            product_search_cache_crud.set_cached_result(db, cache_key, result)
+        except Exception:
+            pass
+
+    return result
+
+
 @router.get("", response_model=dict, include_in_schema=False)
 @router.get("/", response_model=dict)
 def read_products(
@@ -206,57 +296,82 @@ def read_products(
     Get products with filtering and search (by name; the product_id filter matches Excel id or SKU code).
     """
     try:
-        raw_q = (q or "").strip()
-        pid = (product_id or "").strip()
-        if order_random and not raw_q and not pid:
-            response.headers["Cache-Control"] = "private, no-store"
-        else:
-            response.headers["Cache-Control"] = "public, max-age=60"
-        cache_key = None
-        if raw_q and not pid:
-            norm_q = crud.product._normalize_search_key(raw_q)
-            cache_key = product_search_cache_crud.build_cache_key(
-                norm_q=norm_q,
-                skip=skip,
-                limit=limit,
-                category=category,
-                subcategory=subcategory,
-                sub_subcategory=sub_subcategory,
-                shop_name=shop_name,
-                shop_id=shop_id,
-                pro_lower_price=pro_lower_price,
-                pro_high_price=pro_high_price,
-                min_price=min_price,
-                max_price=max_price,
-                is_active=is_active,
-                sort=crud.product.normalize_product_list_sort(sort),
-            )
-            cached = product_search_cache_crud.get_cached_result(db, cache_key)
-            if cached is not None:
-                return cached
-
-        result = crud.product.get_products(
-            db, skip=skip, limit=limit,
-            category=category, subcategory=subcategory, sub_subcategory=sub_subcategory,
-            shop_name=shop_name, shop_id=shop_id,
-            pro_lower_price=pro_lower_price, pro_high_price=pro_high_price,
-            min_price=min_price, max_price=max_price, is_active=is_active,
-            q=q, product_id=product_id,
+        return _read_products_list_impl(
+            response,
+            db,
+            skip=skip,
+            limit=limit,
+            category=category,
+            subcategory=subcategory,
+            sub_subcategory=sub_subcategory,
+            shop_name=shop_name,
+            shop_id=shop_id,
+            pro_lower_price=pro_lower_price,
+            pro_high_price=pro_high_price,
+            min_price=min_price,
+            max_price=max_price,
+            is_active=is_active,
+            q=q,
+            product_id=product_id,
             order_random=order_random,
             sort=sort,
+            use_search_cache=True,
         )
-        
-        # Convert SQLAlchemy objects to dicts
-        if result and "products" in result:
-            result["products"] = _serialize_products_for_api(db, result["products"])
+    except Exception as e:
+        return {"error": str(e), "status": "serialization_error"}
 
-        if cache_key and raw_q and not pid and not result.get("redirect_path") and not result.get("error"):
-            try:
-                product_search_cache_crud.set_cached_result(db, cache_key, result)
-            except Exception:
-                pass
-        
-        return result
+
+@router.get("/list/full", response_model=dict)
+def read_products_full_list(
+    response: Response,
+    db: Session = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    category: Optional[str] = None,
+    subcategory: Optional[str] = None,
+    sub_subcategory: Optional[str] = None,
+    shop_name: Optional[str] = Query(None, description="Lọc theo shop_name"),
+    shop_id: Optional[str] = Query(None, description="Lọc theo shop_id"),
+    pro_lower_price: Optional[str] = Query(None, description="Lọc theo nhóm giá thấp hơn (chuỗi)"),
+    pro_high_price: Optional[str] = Query(None, description="Lọc theo nhóm giá cao hơn (chuỗi)"),
+    min_price: Optional[float] = Query(None, ge=0),
+    max_price: Optional[float] = Query(None, ge=0),
+    is_active: Optional[bool] = True,
+    q: Optional[str] = Query(None, description="Tìm theo tên, mã, danh mục, vật liệu, kiểu dáng, màu sắc, dịp, tính năng, size (từ khóa rời rạc)"),
+    product_id: Optional[str] = Query(None, description="Tìm theo ID sản phẩm (Excel) hoặc mã SKU (cột code)"),
+    order_random: bool = Query(False, description="Trộn ngẫu nhiên (chỉ áp dụng khi không có q); phân trang theo random không ổn định giữa các lần tải"),
+    sort: Optional[str] = Query(
+        None,
+        description="Sắp xếp: default | views_desc | newest | oldest (bị bỏ qua khi order_random=true)",
+    ),
+):
+    """
+    Danh sách sản phẩm **đầy đủ trường** (khớp schema `Product`: mọi cột bảng `products`, gồm `category_id`,
+    `raw_category`, `raw_subcategory`, `raw_sub_subcategory`, `product_info`, SEO, bản địa hóa ảnh, v.v.).
+    Bộ lọc và phân trang giống `GET /api/v1/products/`. Không ghi/đọc cache tìm kiếm theo `q` để luôn có payload đầy đủ theo phiên bản schema hiện tại.
+    """
+    try:
+        return _read_products_list_impl(
+            response,
+            db,
+            skip=skip,
+            limit=limit,
+            category=category,
+            subcategory=subcategory,
+            sub_subcategory=sub_subcategory,
+            shop_name=shop_name,
+            shop_id=shop_id,
+            pro_lower_price=pro_lower_price,
+            pro_high_price=pro_high_price,
+            min_price=min_price,
+            max_price=max_price,
+            is_active=is_active,
+            q=q,
+            product_id=product_id,
+            order_random=order_random,
+            sort=sort,
+            use_search_cache=False,
+        )
     except Exception as e:
         return {"error": str(e), "status": "serialization_error"}
 

@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
 import { formatPrice, getProductMainImage } from '@/lib/utils';
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
 
 interface ShopSidebarProductsProps {
   currentProduct: Product;
@@ -65,7 +66,7 @@ export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProdu
           {visibleProducts.map((product) => (
             <Link
               key={product.id}
-              href={`/products/${product.slug || product.id}`}
+              href={`/products/${productPathSlugFromApi(product.slug, product.product_id) || product.id}`}
               className="flex flex-col items-center gap-2 p-3 -mt-6 first:mt-0 hover:bg-gray-50"
             >
               <div className="w-32 h-32 bg-gray-100 rounded overflow-hidden flex-shrink-0 relative">

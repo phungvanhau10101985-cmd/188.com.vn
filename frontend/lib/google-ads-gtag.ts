@@ -16,6 +16,7 @@
 import type { AddToCartRequest } from '@/features/cart/types/cart';
 import type { CartItem } from '@/features/cart/types/cart';
 import type { Product } from '@/types/api';
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import type { GoogleAdsWebConversionsPublic } from '@/lib/site-embeds-public';
 import {
   metaContentIdsForProduct,
@@ -250,8 +251,9 @@ function gtagItemFromProduct(product: Product, primaryId: string, value: number)
   if (product.brand_name?.trim()) item.item_brand = product.brand_name.trim();
   if (product.category?.trim()) item.item_category = product.category.trim();
   if (product.subcategory?.trim()) item.item_category2 = product.subcategory.trim();
-  if (typeof window !== 'undefined' && product.slug?.trim()) {
-    item.item_url = `${window.location.origin}/products/${product.slug.trim()}`;
+  if (typeof window !== 'undefined') {
+    const seg = productPathSlugFromApi(product.slug, product.product_id);
+    if (seg) item.item_url = `${window.location.origin}/products/${seg}`;
   }
   return item;
 }

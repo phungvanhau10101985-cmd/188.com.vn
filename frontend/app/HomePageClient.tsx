@@ -15,6 +15,7 @@ import { useLazyRevealList } from '@/hooks/useLazyRevealList';
 import { trackEvent } from '@/lib/analytics';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { formatPrice } from '@/lib/utils';
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import type { Product, ProductListResponse, NanoaiSearchProduct, SameAgeGenderCohortMode } from '@/types/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
@@ -1135,7 +1136,7 @@ export default function HomePageClient({
                             return (
                               <Link
                                 key={product.id}
-                                href={`/products/${product.slug || product.id}`}
+                                href={`/products/${productPathSlugFromApi(product.slug, product.product_id) || product.id}`}
                                 onClick={() => setSameAgeGenderPanelOpen(false)}
                                 className="bg-white rounded-xl border border-gray-100 overflow-hidden hover:shadow-md transition-shadow"
                               >

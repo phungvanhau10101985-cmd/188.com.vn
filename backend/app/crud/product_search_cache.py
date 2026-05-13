@@ -51,6 +51,8 @@ def build_cache_key(
         "max": "" if max_price is None else float(max_price),
         "ia": True if is_active is not False else False,
         "sort": (sort or "").strip() or "default",
+        # Bump khi thay đổi cấu trúc product trong JSON (tránh cache cũ thiếu trường).
+        "pv": 2,
     }
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]

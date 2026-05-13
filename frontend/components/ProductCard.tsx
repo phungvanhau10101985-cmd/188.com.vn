@@ -8,6 +8,7 @@ import { Product } from '@/types/api';
 import { formatPrice, getDiscountPercentage, truncateText } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { hasVideoLink } from '@/lib/video-utils';
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
 
 function ProductVideoBadge({ videoLink }: { videoLink?: string | null }) {
   if (!hasVideoLink(videoLink)) return null;
@@ -132,7 +133,10 @@ export default function ProductCard({
 
   const sizeClasses = getSizeClasses(size);
 
-  const productSlug = product.slug || product.product_id || (product.id != null ? String(product.id) : '');
+  const productSlug =
+    productPathSlugFromApi(product.slug, product.product_id) ||
+    product.product_id ||
+    (product.id != null ? String(product.id) : '');
   const productHref = productSlug ? `/products/${productSlug}` : '#';
 
   return (
@@ -313,9 +317,11 @@ export const SimpleProductCard = ({
     setImageError(true);
   };
 
+  const pathSlug = productPathSlugFromApi(product.slug, product.product_id) || product.product_id;
+
   return (
     <Link 
-      href={product.slug || product.product_id ? `/products/${product.slug || product.product_id}` : `/products/${product.id}`}
+      href={pathSlug ? `/products/${pathSlug}` : `/products/${product.id}`}
       className="product-card group bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-lg hover:border-orange-200 overflow-hidden transition-all block"
     >
       {/* Image Container */}

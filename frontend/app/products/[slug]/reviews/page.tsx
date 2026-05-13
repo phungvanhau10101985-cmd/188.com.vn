@@ -13,6 +13,7 @@ import ProductReviewFormModal from '../components/ProductReviewFormModal/Product
 import { useToast } from '@/components/ToastProvider';
 import VerifiedPurchaserBadge from '../components/VerifiedPurchaserBadge';
 import { reviewShowsVerifiedPurchaserBadge } from '@/lib/product-qa-verified-display';
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
 
 function formatDate(s: string | null | undefined) {
   if (!s) return '';
@@ -137,6 +138,8 @@ export default function ProductReviewsPage() {
     );
   }
 
+  const pdpSeg = productPathSlugFromApi(product.slug, product.product_id) || slug;
+
   const renderReviewList = (list: ProductReviewItem[], title?: string) => (
     <div className="space-y-4">
       {title && (
@@ -202,7 +205,7 @@ export default function ProductReviewsPage() {
       <nav className="text-sm text-gray-500 mb-4">
         <Link href="/" className="hover:text-[#ea580c]">Trang chủ</Link>
         <span className="mx-2">/</span>
-        <Link href={`/products/${product.slug}`} className="hover:text-[#ea580c]">{product.name}</Link>
+        <Link href={`/products/${pdpSeg}`} className="hover:text-[#ea580c]">{product.name}</Link>
         <span className="mx-2">/</span>
         <span className="text-gray-900 font-medium">Tất cả đánh giá</span>
       </nav>
@@ -212,7 +215,7 @@ export default function ProductReviewsPage() {
       {/* Product card */}
       <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl border border-gray-100 mb-6">
         <Link
-          href={`/products/${product.slug}`}
+          href={`/products/${pdpSeg}`}
           className="shrink-0 w-20 h-20 rounded-lg overflow-hidden bg-white border border-gray-200 relative"
         >
           <Image
@@ -224,14 +227,14 @@ export default function ProductReviewsPage() {
           />
         </Link>
         <div className="min-w-0 flex-1">
-          <Link href={`/products/${product.slug}`} className="font-semibold text-gray-900 hover:text-[#ea580c] line-clamp-2">
+          <Link href={`/products/${pdpSeg}`} className="font-semibold text-gray-900 hover:text-[#ea580c] line-clamp-2">
             {product.name}
           </Link>
           <p className="text-[#ea580c] font-semibold mt-0.5">{formatPrice(product.price)}</p>
         </div>
         <div className="shrink-0 flex flex-col gap-2">
           <Link
-            href={`/products/${product.slug}`}
+            href={`/products/${pdpSeg}`}
             className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50"
           >
             Xem sản phẩm

@@ -41,6 +41,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: '/admin/shop-video-fab', label: 'Nút video' },
       { href: '/admin/embed-codes', label: 'Mã nhúng analytics' },
       { href: '/admin/bunny-cdn', label: 'Ảnh Bunny CDN' },
+      { href: '/admin/api-keys', label: 'API & tích hợp', privilegedOnly: true },
     ],
   },
   {
@@ -48,3 +49,15 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     items: [{ href: '/admin/notifications', label: 'Thông báo' }],
   },
 ];
+
+/** href thật (bỏ hash/query) của các mục privilegedOnly — dùng kiểm tra quyền vào trang */
+export function getPrivilegedOnlyAdminHrefs(): string[] {
+  const out: string[] = [];
+  for (const g of ADMIN_NAV_GROUPS) {
+    for (const it of g.items) {
+      if (!it.privilegedOnly) continue;
+      out.push(it.href.split('#')[0]?.split('?')[0] || it.href);
+    }
+  }
+  return [...new Set(out)];
+}

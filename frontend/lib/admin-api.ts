@@ -1240,6 +1240,28 @@ export const adminShopVideoFabAPI = {
     }),
 };
 
+export interface AdminIntegrationKeyRow {
+  env_var: string;
+  label: string;
+  configured: boolean;
+  hint: string;
+}
+
+export interface AdminIntegrationKeyGroup {
+  title: string;
+  items: AdminIntegrationKeyRow[];
+}
+
+export interface AdminIntegrationKeysOverview {
+  groups: AdminIntegrationKeyGroup[];
+  disclaimer: string;
+}
+
+export const adminIntegrationsAPI = {
+  getApiKeysOverview: () =>
+    fetchAdmin<AdminIntegrationKeysOverview>('/admin/integrations/api-keys-overview'),
+};
+
 export interface BunnyCdnStatus {
   configured: boolean;
   cdn_public_base: string;

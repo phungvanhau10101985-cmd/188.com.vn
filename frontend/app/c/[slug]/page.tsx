@@ -8,6 +8,7 @@ import {
   type SeoClusterProductCard,
 } from "@/lib/seo-cluster";
 import { formatPrice } from "@/lib/utils";
+import { productPathSlugFromApi } from "@/lib/product-path-slug";
 
 const PAGE_SIZE = 48;
 
@@ -107,7 +108,8 @@ export default async function SeoClusterLandingPage({ params, searchParams }: Pr
 }
 
 function ClusterProductCard({ product }: { product: SeoClusterProductCard }) {
-  const href = `/products/${product.slug || product.product_id}`;
+  const seg = productPathSlugFromApi(product.slug, product.product_id) || product.product_id;
+  const href = `/products/${seg}`;
   const img = product.main_image || product.images?.[0] || "/images/og-default.jpg";
   return (
     <Link

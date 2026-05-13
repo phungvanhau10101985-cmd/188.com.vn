@@ -3,6 +3,7 @@ import { getCategoryTreeForLayout } from "@/lib/category-seo";
 import type { CategoryLevel1 } from "@/types/api";
 import { INFO_PAGES } from "@/app/info/info-pages.config";
 import { listSeoClusters } from "@/lib/seo-cluster";
+import { productPublicPdpUrl } from "@/lib/product-path-slug";
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ||
@@ -114,7 +115,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const products = await getAllProductSlugs();
   for (const p of products) {
     entries.push({
-      url: `${BASE_URL}/products/${p.slug}`,
+      url: productPublicPdpUrl(p.slug, BASE_URL),
       lastModified: p.updated_at ? new Date(p.updated_at) : now,
       changeFrequency: "weekly",
       priority: 0.7,

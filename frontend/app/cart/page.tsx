@@ -24,6 +24,7 @@ import { shouldRedirectToDepositAfterCreate } from '@/lib/order-deposit';
 import { buildAuthLoginHrefFromFullPath } from '@/lib/auth-redirect';
 import type { CartLineRef } from '@/features/cart/types/cart';
 import CartEmptySameShopSection from '@/components/cart/CartEmptySameShopSection';
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
 
 function formatAddressLine(addr: UserAddress): string {
   const parts = [addr.street_address];
@@ -399,15 +400,17 @@ export default function CartPage() {
   };
 
   const handleOpenProduct = async (item: { product_id: number; product_data?: any }) => {
-    const slug = item.product_data?.slug;
-    if (slug) {
-      router.push(`/products/${slug}`);
+    const rawSlug = item.product_data?.slug;
+    const seg = productPathSlugFromApi(rawSlug, String(item.product_id));
+    if (seg) {
+      router.push(`/products/${seg}`);
       return;
     }
     try {
       const p = await apiClient.getProductById(item.product_id);
-      if (p?.slug) {
-        router.push(`/products/${p.slug}`);
+      const seg2 = productPathSlugFromApi(p?.slug, p?.product_id);
+      if (seg2) {
+        router.push(`/products/${seg2}`);
       }
     } catch {
       // ignore

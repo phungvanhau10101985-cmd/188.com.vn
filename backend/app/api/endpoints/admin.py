@@ -49,6 +49,11 @@ from app.crud import site_embed_code as embed_crud
 from app.crud import shop_video_fab as shop_video_fab_crud
 from app.schemas.shop_video_fab import ShopVideoFabPublicOut, ShopVideoFabAdminUpdate
 from app.schemas.bunny_admin import BunnyCdnStatusOut, BunnyCdnUploadOut
+from app.schemas.integrations_admin import (
+    AdminIntegrationKeyGroup,
+    AdminIntegrationKeyRow,
+    AdminIntegrationKeysOverviewOut,
+)
 from app.services.bunny_storage import build_public_object_url, upload_file_to_zone
 from app.services.linked_admin_staff import apply_linked_staff_role
 from app.services.user_public_response import admin_panel_user_response, batch_admin_panel_user_responses
@@ -854,3 +859,137 @@ async def admin_bunny_cdn_upload(
     if not url:
         raise HTTPException(status_code=500, detail="Không tạo được URL public")
     return BunnyCdnUploadOut(public_url=url, remote_path=remote, bytes=len(raw))
+
+
+def _integration_secret_configured(val: Optional[str], min_len: int = 8) -> bool:
+    return len((val or "").strip()) >= min_len
+
+
+def _google_sheets_credentials_configured() -> bool:
+    raw = (settings.GOOGLE_SHEETS_SKU_CREDENTIALS_PATH or "").strip()
+    if not raw:
+        return False
+    p = Path(raw)
+    if p.is_file():
+        return True
+    p2 = _backend_root() / raw
+    return p2.is_file()
+
+
+@router.get("/integrations/api-keys-overview", response_model=AdminIntegrationKeysOverviewOut)
+def admin_integrations_api_keys_overview(
+    _: models.AdminUser = Depends(require_privileged_admin),
+):
+    """
+    Trạng thái cấu hình các API key / bí mật tích hợp (chỉ super_admin / admin).
+    Không bao giờ trả giá trị thật — chỉ có/không đủ cấu hình để vận hành.
+    """
+    z_bunny = (settings.BUNNY_STORAGE_ZONE_NAME or "").strip()
+    k_bunny = (settings.BUNNY_STORAGE_ACCESS_KEY or "").strip()
+    base_bunny = (settings.BUNNY_CDN_PUBLIC_BASE or "").strip()
+    bunny_ok = bool(z_bunny and k_bunny and base_bunny)
+
+    groups = [
+        AdminIntegrationKeyGroup(
+            title="AI & xử lý nội dung",
+            items=[
+                AdminIntegrationKeyRow(
+                    env_var="DEEPSEEK_API_KEY",
+                    label="DeepSeek (chat, taxonomy import, dịch variant…)",
+                    configured=_integration_secret_configured(settings.DEEPSEEK_API_KEY),
+                    hint="backend/.env",
+                ),
+                AdminIntegrationKeyRow(
+                    env_var="GEMINI_API_KEY",
+                    label="Google Gemini (SEO danh mục, gợi ý tìm kiếm, ảnh…)",
+                    configured=_integration_secret_configured(settings.GEMINI_API_KEY),
+                    hint="backend/.env",
+                ),
+                AdminIntegrationKeyRow(
+                    env_var="OPENAI_API_KEY",
+                    label="OpenAI (GPT Image — bản địa hóa ảnh)",
+                    configured=_integration_secret_configured(settings.OPENAI_API_KEY),
+                    hint="backend/.env",
+                ),
+            ],
+        ),
+        AdminIntegrationKeyGroup(
+            title="Thanh toán SePay",
+            items=[
+                AdminIntegrationKeyRow(
+                    env_var="SEPAY_WEBHOOK_API_KEY",
+                    label="Webhook — Apikey / x-api-key",
+                    configured=_integration_secret_configured(settings.SEPAY_WEBHOOK_API_KEY, min_len=6),
+                    hint="Khớp cấu hình trên SePay; có thể để trống nếu chỉ tin cậy IP.",
+                ),
+                AdminIntegrationKeyRow(
+                    env_var="SEPAY_SECRET_KEY",
+                    label="Secret merchant / ký API",
+                    configured=_integration_secret_configured(settings.SEPAY_SECRET_KEY, min_len=6),
+                    hint="backend/.env",
+                ),
+            ],
+        ),
+        AdminIntegrationKeyGroup(
+            title="Lưu trữ & CDN",
+            items=[
+                AdminIntegrationKeyRow(
+                    env_var="BUNNY_STORAGE_ACCESS_KEY",
+                    label="Bunny Storage + Pull Zone",
+                    configured=bunny_ok,
+                    hint="Cần đủ: BUNNY_STORAGE_ZONE_NAME, BUNNY_STORAGE_ACCESS_KEY, BUNNY_CDN_PUBLIC_BASE",
+                ),
+            ],
+        ),
+        AdminIntegrationKeyGroup(
+            title="Đăng nhập & OTP",
+            items=[
+                AdminIntegrationKeyRow(
+                    env_var="GOOGLE_CLIENT_ID",
+                    label="Google OAuth (đăng nhập web)",
+                    configured=_integration_secret_configured(settings.GOOGLE_CLIENT_ID, min_len=16),
+                    hint="backend/.env",
+                ),
+                AdminIntegrationKeyRow(
+                    env_var="ZALO_OA_ACCESS_TOKEN",
+                    label="Zalo OA — gửi OTP / template",
+                    configured=_integration_secret_configured(settings.ZALO_OA_ACCESS_TOKEN, min_len=24),
+                    hint="Nên cấu hình qua .env trên production.",
+                ),
+                AdminIntegrationKeyRow(
+                    env_var="FIREBASE_PRIVATE_KEY",
+                    label="Firebase Admin (private key service account)",
+                    configured=_integration_secret_configured(settings.FIREBASE_PRIVATE_KEY, min_len=64),
+                    hint="Dùng cho OTP Firebase phía server.",
+                ),
+            ],
+        ),
+        AdminIntegrationKeyGroup(
+            title="Email & công cụ",
+            items=[
+                AdminIntegrationKeyRow(
+                    env_var="SMTP_PASS",
+                    label="SMTP — mật khẩu gửi email (SMTP_PASS hoặc SMTP_PASSWORD)",
+                    configured=_integration_secret_configured(settings.SMTP_PASS, min_len=4),
+                    hint="Cần kèm SMTP_HOST, SMTP_USER và địa chỉ gửi (SMTP_FROM / SENDER_EMAIL).",
+                ),
+                AdminIntegrationKeyRow(
+                    env_var="GOOGLE_SHEETS_SKU_CREDENTIALS_PATH",
+                    label="Google Sheets — file credentials đồng bộ SKU",
+                    configured=_google_sheets_credentials_configured(),
+                    hint="Đường dẫn file JSON (tuyệt đối hoặc tương đối thư mục backend).",
+                ),
+                AdminIntegrationKeyRow(
+                    env_var="BROKEN_MEDIA_PURGE_SECRET",
+                    label="Purge ảnh 404 — header X-Broken-Media-Purge-Key",
+                    configured=_integration_secret_configured(settings.BROKEN_MEDIA_PURGE_SECRET, min_len=8),
+                    hint="Chỉ cần nếu gọi API purge từ Next/server.",
+                ),
+            ],
+        ),
+    ]
+
+    return AdminIntegrationKeysOverviewOut(
+        groups=groups,
+        disclaimer="Trang chỉ hiển thị đã cấu hình hay chưa — không đọc và không hiển thị giá trị bí mật. Sau khi sửa .env, cần khởi động lại backend.",
+    )

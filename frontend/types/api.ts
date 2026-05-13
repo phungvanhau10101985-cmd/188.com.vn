@@ -10,6 +10,7 @@ export interface Product {
   product_id: string;
   code: string;
   name: string;
+  /** Segment hoặc URL đầy đủ https://…/products/… (API trả chuẩn public). */
   slug: string;
   price: number;
   

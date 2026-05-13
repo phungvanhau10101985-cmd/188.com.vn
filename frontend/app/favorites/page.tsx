@@ -9,6 +9,7 @@ import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
 
 interface FavoriteItem {
   id: number;
@@ -141,8 +142,8 @@ export default function FavoritesPage() {
               const data = item.product_data || {};
               const name = data.name || `Sản phẩm #${item.product_id}`;
               const price = data.price ?? 0;
-              const slug = data.slug || String(item.product_id);
-              const href = `/products/${slug}`;
+              const pathSeg = productPathSlugFromApi(data.slug, String(item.product_id));
+              const href = `/products/${pathSeg}`;
               const imageUrl = getOptimizedImage(data.main_image, { fallbackStrategy: 'local' });
 
               return (
