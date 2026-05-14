@@ -241,6 +241,8 @@ export interface ProductSearchParams {
   subcategory?: string;
   shop_name?: string;
   shop_id?: string;
+  chinese_name?: string;
+  shop_name_chinese?: string;
   pro_lower_price?: string;
   pro_high_price?: string;
   gender?: string;
@@ -251,6 +253,14 @@ export interface ProductSearchParams {
   origin?: string;
   min_price?: number;
   max_price?: number;
+  /** Lọc size (JSON `sizes`) — khớp backend */
+  size?: string;
+  /** Lọc màu — khớp backend */
+  color?: string;
+  /** Lọc kiểu phổ thông tự rút từ tên/thông tin sản phẩm */
+  style_tag?: string;
+  /** Sắp xếp: default | views_desc | newest | oldest */
+  sort?: string;
   min_rating?: number;
   is_active?: boolean;
   has_deposit?: boolean;

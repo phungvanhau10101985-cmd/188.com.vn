@@ -634,8 +634,8 @@ def _publish_payload(product_data: Dict[str, Any]) -> Dict[str, Any]:
 def _assign_internal_sku_to_import_product_data(db: Session, product_data: Dict[str, Any]) -> None:
     """
     SKU đăng web là [A-Z][0-9]{4}, không phải slug Hibox (vd abb-922386436529).
-    Chỉ dùng mã đã xuất (bảng internal_sku_exports), không được trùng code sản phẩm trong DB —
-    đồng bộ vào product_info.product_info.sku để tab AK không hiển thị nhầm slug.
+    Ưu tiên mã vừa xuất file (TTL internal_sku_exports); sau TTL không bắt buộc đối chiếu file —
+    chỉ không trùng code sản phẩm khác. Đồng bộ vào product_info.product_info.sku cho tab AK.
     """
     sku = ensure_import_link_internal_product_code(
         db,
@@ -826,7 +826,7 @@ def create_import_1688_job(
                 "normalized_length": len(source_url),
                 "normalized_preview": source_url[:200],
                 "hints": (
-                    "1688: có offer/xxxxxxxx.html hoặc ?offerId=. "
+                    "1688: có offer/xxxxxxxx.html hoặc ?offerId= (mobile: detail.m.1688.com/page/index.html?offerId=). "
                     "Hibox: https://hibox.mn/v/{mã}. Mirror: https://taobao1688.kz/item?id={mã}. "
                     "Nếu đúng là Hibox mà vẫn báo lỗi: API đang chạy có thể là bản cũ — restart backend và kiểm tra "
                     "bạn không gọi nhầm instance (hay gặp: Next dev ép cổng khác SERVER_PORT — xem frontend/.env.local (API_INTERNAL_ORIGIN, NEXT_PUBLIC_API_BASE_URL) và restart Next + backend."

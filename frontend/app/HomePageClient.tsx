@@ -2,7 +2,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useLayoutEffect, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -24,6 +24,14 @@ import {
   searchRequestCacheFingerprint,
   writeSearchResultCache,
 } from '@/lib/search-result-cache';
+import {
+  cloneUrlSearchParams,
+  searchParamsToEncodedQueryString,
+  urlSearchParamsSemanticsEqual,
+  shopNameChineseFromListingUrlQuery,
+} from '@/lib/product-related-tabs';
+import CategoryProductFilters from '@/components/CategoryProductFilters';
+import type { CategoryProductFacets } from '@/lib/category-seo';
 
 function favoritePayloadFromProduct(p: Product): Record<string, unknown> {
   return {
@@ -83,8 +91,18 @@ export default function HomePageClient({
   const shopNameFromUrl = searchParams.get('shop_name') ?? undefined;
   const proLowerFromUrl = searchParams.get('pro_lower_price') ?? undefined;
   const proHighFromUrl = searchParams.get('pro_high_price') ?? undefined;
+  const shopNameChineseFromUrl = shopNameChineseFromListingUrlQuery((k) => searchParams.get(k));
+  const chineseNameFromUrl = searchParams.get('chinese_name') ?? undefined;
+  const styleFromUrl = searchParams.get('style') ?? undefined;
   const minPriceFromUrl = searchParams.get('min_price');
   const maxPriceFromUrl = searchParams.get('max_price');
+  const sizeFromUrl = searchParams.get('size') ?? undefined;
+  const colorFromUrl = searchParams.get('color') ?? undefined;
+  const styleTagFromUrl = searchParams.get('style_tag') ?? undefined;
+  const sortFromUrl = searchParams.get('sort') ?? undefined;
+  const categoryFromUrl = searchParams.get('category') ?? undefined;
+  const subcategoryFromUrl = searchParams.get('subcategory') ?? undefined;
+  const subSubcategoryFromUrl = searchParams.get('sub_subcategory') ?? undefined;
   const ssrProducts = initialPlainHome?.products ?? [];
   const ssrHasList = ssrProducts.length > 0;
   const [products, setProducts] = useState<Product[]>(ssrProducts);
@@ -112,12 +130,42 @@ export default function HomePageClient({
   );
   const nanoaiReveal = useLazyRevealList(nanoaiTextProducts, { initial: 12, step: 12 });
   const isSearching = qFromUrl.trim().length > 0;
+  const listingFacetAnchor = useMemo(() => {
+    const nn = (v?: string | null) => {
+      const t = (v ?? '').trim();
+      return Boolean(t) && t.toLowerCase() !== 'nan';
+    };
+    return (
+      nn(categoryFromUrl) ||
+      nn(subcategoryFromUrl) ||
+      nn(subSubcategoryFromUrl) ||
+      nn(shopIdFromUrl) ||
+      nn(shopNameFromUrl) ||
+      nn(shopNameChineseFromUrl) ||
+      nn(chineseNameFromUrl) ||
+      nn(styleFromUrl) ||
+      nn(proLowerFromUrl) ||
+      nn(proHighFromUrl)
+    );
+  }, [
+    categoryFromUrl,
+    subcategoryFromUrl,
+    subSubcategoryFromUrl,
+    shopIdFromUrl,
+    shopNameFromUrl,
+    shopNameChineseFromUrl,
+    chineseNameFromUrl,
+    styleFromUrl,
+    proLowerFromUrl,
+    proHighFromUrl,
+  ]);
   const pageFromUrl = Number(searchParams.get('page') || 1);
   const currentPage = Number.isFinite(pageFromUrl) && pageFromUrl > 0 ? pageFromUrl : 1;
   const PAGE_SIZE = 48;
   /** Tìm kiếm trang 1: hiện trước N SP, sau đó gọi tiếp để đủ một “trang” (PAGE_SIZE). */
   const SEARCH_INITIAL_LIMIT = 12;
   const [searchCatalogAppending, setSearchCatalogAppending] = useState(false);
+  const [searchListingFacets, setSearchListingFacets] = useState<CategoryProductFacets | null>(null);
 
   const fetchProducts = useCallback(async (filters?: any) => {
     try {
@@ -183,7 +231,68 @@ export default function HomePageClient({
   };
 
   useEffect(() => {
-    setSearchTerm(qFromUrl);
+    const qTrim = qFromUrl.trim();
+    const fetchSearchFacets = Boolean(qTrim);
+
+    if (!fetchSearchFacets && !listingFacetAnchor) {
+      setSearchListingFacets(null);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const baseArgs = {
+          category: categoryFromUrl,
+          subcategory: subcategoryFromUrl,
+          sub_subcategory: subSubcategoryFromUrl,
+          shop_id: shopIdFromUrl,
+          shop_name: shopNameFromUrl,
+          shop_name_chinese: shopNameChineseFromUrl,
+          chinese_name: chineseNameFromUrl,
+          style: styleFromUrl,
+          pro_lower_price: proLowerFromUrl,
+          pro_high_price: proHighFromUrl,
+          min_price: minPriceFromUrl,
+          max_price: maxPriceFromUrl,
+          size: sizeFromUrl,
+          color: colorFromUrl,
+          style_tag: styleTagFromUrl,
+        };
+        const f = fetchSearchFacets
+          ? await apiClient.getSearchProductFacets({ q: qTrim, ...baseArgs })
+          : await apiClient.getProductListingFacets(baseArgs);
+        if (!cancelled) setSearchListingFacets(f);
+      } catch {
+        if (!cancelled) {
+          setSearchListingFacets({ sizes: [], colors: [], style_tags: [], price_min: null, price_max: null });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    qFromUrl,
+    listingFacetAnchor,
+    categoryFromUrl,
+    subcategoryFromUrl,
+    subSubcategoryFromUrl,
+    shopIdFromUrl,
+    shopNameFromUrl,
+    shopNameChineseFromUrl,
+    chineseNameFromUrl,
+    styleFromUrl,
+    proLowerFromUrl,
+    proHighFromUrl,
+    minPriceFromUrl,
+    maxPriceFromUrl,
+    sizeFromUrl,
+    colorFromUrl,
+    styleTagFromUrl,
+  ]);
+
+  useEffect(() => {
     if (!qFromUrl.trim()) {
       setSearchCatalogAppending(false);
       setSearchSuggestions([]);
@@ -199,12 +308,22 @@ export default function HomePageClient({
     const searchApiParams = {
       q: qFromUrl,
       is_active: true as const,
+      category: categoryFromUrl,
+      subcategory: subcategoryFromUrl,
+      sub_subcategory: subSubcategoryFromUrl,
       shop_id: shopIdFromUrl,
       shop_name: shopNameFromUrl,
+      shop_name_chinese: shopNameChineseFromUrl,
+      chinese_name: chineseNameFromUrl,
+      style: styleFromUrl,
       pro_lower_price: proLowerFromUrl,
       pro_high_price: proHighFromUrl,
       min_price: parseNumberParam(minPriceFromUrl),
       max_price: parseNumberParam(maxPriceFromUrl),
+      size: sizeFromUrl,
+      color: colorFromUrl,
+      style_tag: styleTagFromUrl,
+      ...(sortFromUrl ? { sort: sortFromUrl } : {}),
     };
 
     const fetchSearchPage = async (skip: number, limit: number): Promise<ProductListResponse> => {
@@ -213,10 +332,17 @@ export default function HomePageClient({
         is_active: true,
         shop_id: shopIdFromUrl,
         shop_name: shopNameFromUrl,
+        shop_name_chinese: shopNameChineseFromUrl,
+        chinese_name: chineseNameFromUrl,
+        style: styleFromUrl,
         pro_lower_price: proLowerFromUrl,
         pro_high_price: proHighFromUrl,
         min_price: parseNumberParam(minPriceFromUrl),
         max_price: parseNumberParam(maxPriceFromUrl),
+        size: sizeFromUrl,
+        color: colorFromUrl,
+        style_tag: styleTagFromUrl,
+        sort: sortFromUrl,
         skip,
         limit,
       });
@@ -368,22 +494,55 @@ export default function HomePageClient({
     return () => {
       cancelled = true;
     };
-  }, [qFromUrl, shopIdFromUrl, shopNameFromUrl, proLowerFromUrl, proHighFromUrl, minPriceFromUrl, maxPriceFromUrl, currentPage]);
+  }, [
+    qFromUrl,
+    shopIdFromUrl,
+    shopNameFromUrl,
+    shopNameChineseFromUrl,
+    chineseNameFromUrl,
+    styleFromUrl,
+    proLowerFromUrl,
+    proHighFromUrl,
+    minPriceFromUrl,
+    maxPriceFromUrl,
+    sizeFromUrl,
+    colorFromUrl,
+    styleTagFromUrl,
+    sortFromUrl,
+    categoryFromUrl,
+    subcategoryFromUrl,
+    subSubcategoryFromUrl,
+    currentPage,
+  ]);
 
   useEffect(() => {
     const minFromUrl = parseNumberParam(minPriceFromUrl) ?? 0;
     const maxFromUrl = parseNumberParam(maxPriceFromUrl) ?? 10000000;
     if (minPriceFromUrl || maxPriceFromUrl) {
       setPriceRange([minFromUrl, maxFromUrl]);
-    } else if (shopIdFromUrl || shopNameFromUrl || proLowerFromUrl || proHighFromUrl) {
+    } else if (
+      shopIdFromUrl ||
+      shopNameFromUrl ||
+      shopNameChineseFromUrl ||
+      chineseNameFromUrl ||
+      styleFromUrl ||
+      proLowerFromUrl ||
+      proHighFromUrl
+    ) {
       setPriceRange([0, 10000000]);
     }
-  }, [shopIdFromUrl, shopNameFromUrl, proLowerFromUrl, proHighFromUrl, minPriceFromUrl, maxPriceFromUrl]);
+  }, [
+    shopIdFromUrl,
+    shopNameFromUrl,
+    shopNameChineseFromUrl,
+    chineseNameFromUrl,
+    styleFromUrl,
+    proLowerFromUrl,
+    proHighFromUrl,
+    minPriceFromUrl,
+    maxPriceFromUrl,
+  ]);
 
-  // Danh mục từ URL (thanh danh mục ở AppShell chuyển về trang chủ với ?category=...)
-  const categoryFromUrl = searchParams.get('category') ?? undefined;
-  const subcategoryFromUrl = searchParams.get('subcategory') ?? undefined;
-  const subSubcategoryFromUrl = searchParams.get('sub_subcategory') ?? undefined;
   const hasFilterParams = Boolean(
     isSearching ||
       categoryFromUrl ||
@@ -391,10 +550,17 @@ export default function HomePageClient({
       subSubcategoryFromUrl ||
       shopIdFromUrl ||
       shopNameFromUrl ||
+      shopNameChineseFromUrl ||
+      chineseNameFromUrl ||
+      styleFromUrl ||
       proLowerFromUrl ||
       proHighFromUrl ||
       minPriceFromUrl ||
-      maxPriceFromUrl
+      maxPriceFromUrl ||
+      sizeFromUrl ||
+      colorFromUrl ||
+      styleTagFromUrl ||
+      sortFromUrl
   );
 
   useEffect(() => {
@@ -404,17 +570,41 @@ export default function HomePageClient({
       subcategory: subcategoryFromUrl,
       sub_subcategory: subSubcategoryFromUrl,
     });
-    if (categoryFromUrl || subcategoryFromUrl || subSubcategoryFromUrl || shopIdFromUrl || shopNameFromUrl || proLowerFromUrl || proHighFromUrl || minPriceFromUrl || maxPriceFromUrl) {
+    if (
+      categoryFromUrl ||
+      subcategoryFromUrl ||
+      subSubcategoryFromUrl ||
+      shopIdFromUrl ||
+      shopNameFromUrl ||
+      shopNameChineseFromUrl ||
+      chineseNameFromUrl ||
+      styleFromUrl ||
+      proLowerFromUrl ||
+      proHighFromUrl ||
+      minPriceFromUrl ||
+      maxPriceFromUrl ||
+      sizeFromUrl ||
+      colorFromUrl ||
+      styleTagFromUrl ||
+      sortFromUrl
+    ) {
       fetchProducts({
         category: categoryFromUrl,
         subcategory: subcategoryFromUrl,
         sub_subcategory: subSubcategoryFromUrl,
         shop_id: shopIdFromUrl,
         shop_name: shopNameFromUrl,
+        shop_name_chinese: shopNameChineseFromUrl,
+        chinese_name: chineseNameFromUrl,
+        style: styleFromUrl,
         pro_lower_price: proLowerFromUrl,
         pro_high_price: proHighFromUrl,
         min_price: parseNumberParam(minPriceFromUrl),
         max_price: parseNumberParam(maxPriceFromUrl),
+        size: sizeFromUrl,
+        color: colorFromUrl,
+        style_tag: styleTagFromUrl,
+        ...(sortFromUrl ? { sort: sortFromUrl } : {}),
       });
       return;
     }
@@ -446,15 +636,87 @@ export default function HomePageClient({
     subSubcategoryFromUrl,
     shopIdFromUrl,
     shopNameFromUrl,
+    shopNameChineseFromUrl,
+    chineseNameFromUrl,
+    styleFromUrl,
     proLowerFromUrl,
     proHighFromUrl,
     minPriceFromUrl,
     maxPriceFromUrl,
     qFromUrl,
+    sizeFromUrl,
+    colorFromUrl,
+    styleTagFromUrl,
+    sortFromUrl,
     fetchProducts,
     user?.id,
     currentPage,
     initialPlainHome,
+  ]);
+
+  const retryHomeDataLoad = useCallback(() => {
+    if (qFromUrl.trim()) {
+      if (typeof window !== 'undefined') window.location.reload();
+      return;
+    }
+    if (
+      categoryFromUrl ||
+      subcategoryFromUrl ||
+      subSubcategoryFromUrl ||
+      shopIdFromUrl ||
+      shopNameFromUrl ||
+      shopNameChineseFromUrl ||
+      chineseNameFromUrl ||
+      styleFromUrl ||
+      proLowerFromUrl ||
+      proHighFromUrl ||
+      minPriceFromUrl ||
+      maxPriceFromUrl ||
+      sizeFromUrl ||
+      colorFromUrl ||
+      styleTagFromUrl ||
+      sortFromUrl
+    ) {
+      void fetchProducts({
+        category: categoryFromUrl,
+        subcategory: subcategoryFromUrl,
+        sub_subcategory: subSubcategoryFromUrl,
+        shop_id: shopIdFromUrl,
+        shop_name: shopNameFromUrl,
+        shop_name_chinese: shopNameChineseFromUrl,
+        chinese_name: chineseNameFromUrl,
+        style: styleFromUrl,
+        pro_lower_price: proLowerFromUrl,
+        pro_high_price: proHighFromUrl,
+        min_price: parseNumberParam(minPriceFromUrl),
+        max_price: parseNumberParam(maxPriceFromUrl),
+        size: sizeFromUrl,
+        color: colorFromUrl,
+        style_tag: styleTagFromUrl,
+        ...(sortFromUrl ? { sort: sortFromUrl } : {}),
+      });
+      return;
+    }
+    void fetchProducts();
+  }, [
+    qFromUrl,
+    categoryFromUrl,
+    subcategoryFromUrl,
+    subSubcategoryFromUrl,
+    shopIdFromUrl,
+    shopNameFromUrl,
+    shopNameChineseFromUrl,
+    chineseNameFromUrl,
+    styleFromUrl,
+    proLowerFromUrl,
+    proHighFromUrl,
+    minPriceFromUrl,
+    maxPriceFromUrl,
+    sizeFromUrl,
+    colorFromUrl,
+    styleTagFromUrl,
+    sortFromUrl,
+    fetchProducts,
   ]);
 
   useEffect(() => {
@@ -477,10 +739,17 @@ export default function HomePageClient({
       sub_subcategory: subSubcategoryFromUrl,
       shop_id: shopIdFromUrl,
       shop_name: shopNameFromUrl,
+      shop_name_chinese: shopNameChineseFromUrl,
+      chinese_name: chineseNameFromUrl,
+      style: styleFromUrl,
       pro_lower_price: proLowerFromUrl,
       pro_high_price: proHighFromUrl,
       min_price: minPriceFromUrl,
       max_price: maxPriceFromUrl,
+      size: sizeFromUrl,
+      color: colorFromUrl,
+      style_tag: styleTagFromUrl,
+      sort: sortFromUrl,
       page: currentPage,
     });
     if (lastFilterTrackedRef.current === signature) return;
@@ -491,24 +760,68 @@ export default function HomePageClient({
       sub_subcategory: subSubcategoryFromUrl,
       shop_id: shopIdFromUrl,
       shop_name: shopNameFromUrl,
+      shop_name_chinese: shopNameChineseFromUrl,
+      chinese_name: chineseNameFromUrl,
+      style: styleFromUrl,
       pro_lower_price: proLowerFromUrl,
       pro_high_price: proHighFromUrl,
       min_price: minPriceFromUrl,
       max_price: maxPriceFromUrl,
+      size: sizeFromUrl,
+      color: colorFromUrl,
+      style_tag: styleTagFromUrl,
+      sort: sortFromUrl,
       page: currentPage,
     });
-  }, [hasFilterParams, loading, categoryFromUrl, subcategoryFromUrl, subSubcategoryFromUrl, shopIdFromUrl, shopNameFromUrl, proLowerFromUrl, proHighFromUrl, minPriceFromUrl, maxPriceFromUrl, currentPage]);
+  }, [
+    hasFilterParams,
+    loading,
+    categoryFromUrl,
+    subcategoryFromUrl,
+    subSubcategoryFromUrl,
+    shopIdFromUrl,
+    shopNameFromUrl,
+    shopNameChineseFromUrl,
+    chineseNameFromUrl,
+    styleFromUrl,
+    proLowerFromUrl,
+    proHighFromUrl,
+    minPriceFromUrl,
+    maxPriceFromUrl,
+    sizeFromUrl,
+    colorFromUrl,
+    styleTagFromUrl,
+    sortFromUrl,
+    currentPage,
+  ]);
+
+  const canonicalListingQs = useMemo(
+    () => searchParamsToEncodedQueryString(cloneUrlSearchParams(searchParams)),
+    [searchParams]
+  );
+
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.location.pathname !== '/') return;
+    const curRaw = window.location.search.startsWith('?') ? window.location.search.slice(1) : '';
+    if (curRaw === canonicalListingQs) return;
+    const curSp = new URLSearchParams(curRaw);
+    const canSp = new URLSearchParams(canonicalListingQs);
+    if (!urlSearchParamsSemanticsEqual(curSp, canSp)) return;
+    router.replace(canonicalListingQs ? `/?${canonicalListingQs}` : '/', { scroll: false });
+  }, [canonicalListingQs, router, searchParams]);
 
   const totalPages = Math.max(1, Math.ceil(totalProducts / PAGE_SIZE));
   const setPage = (page: number) => {
     const next = Math.min(Math.max(1, page), totalPages);
-    const params = new URLSearchParams(searchParams?.toString());
+    const params = cloneUrlSearchParams(searchParams);
     if (next <= 1) {
       params.delete('page');
     } else {
       params.set('page', String(next));
     }
-    router.push(`/?${params.toString()}`);
+    const q = searchParamsToEncodedQueryString(params);
+    router.push(q ? `/?${q}` : '/');
   };
 
   const shouldApplyPriceFilter = Boolean(minPriceFromUrl || maxPriceFromUrl);
@@ -678,7 +991,8 @@ export default function HomePageClient({
           <div className="mb-6 bg-red-50/90 border border-red-200 rounded-xl p-4 flex items-center justify-between gap-4 shadow-sm">
             <p className="text-red-700 font-medium">{error}</p>
             <button
-              onClick={() => fetchProducts()}
+              type="button"
+              onClick={() => retryHomeDataLoad()}
               className="flex-shrink-0 bg-red-500 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-red-600 transition-colors shadow-sm"
             >
               Thử lại
@@ -691,31 +1005,54 @@ export default function HomePageClient({
 
         {hasFilterParams && (
           <section className="mb-6">
-            <h2 className="text-base font-bold text-gray-900 mb-2 border-b-2 border-[#ea580c] pb-1 w-fit">
-              KẾT QUẢ LỌC
-            </h2>
-            <p className="text-sm text-gray-600 mt-1">
-              {isSearching ? (
-                <>
-                  Từ khóa: <span className="font-medium text-gray-900">&quot;{qFromUrl}&quot;</span> —{' '}
-                  {totalProducts} sản phẩm trong kho
-                  {nanoaiTextProducts.length > 0 && (
-                    <span className="text-gray-700">
-                      {' '}
-                      · {nanoaiTextProducts.length} gợi ý từ NanoAI
-                      {nanoaiTextProducts.length >= NANOAI_TEXT_SEARCH_LIMIT ? (
-                        <span className="text-gray-500"> (tối đa {NANOAI_TEXT_SEARCH_LIMIT} mỗi lần truy vấn)</span>
-                      ) : null}
-                    </span>
+            <div className="flex flex-col gap-4 mb-4">
+              <div className="min-w-0">
+                <h2 className="text-base font-bold text-gray-900 mb-2 border-b-2 border-[#ea580c] pb-1 w-fit">
+                  KẾT QUẢ LỌC
+                </h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  {isSearching ? (
+                    <>
+                      Từ khóa: <span className="font-medium text-gray-900">&quot;{qFromUrl}&quot;</span> —{' '}
+                      {totalProducts} sản phẩm trong kho
+                      {nanoaiTextProducts.length > 0 && (
+                        <span className="text-gray-700">
+                          {' '}
+                          · {nanoaiTextProducts.length} gợi ý từ NanoAI
+                          {nanoaiTextProducts.length >= NANOAI_TEXT_SEARCH_LIMIT ? (
+                            <span className="text-gray-500"> (tối đa {NANOAI_TEXT_SEARCH_LIMIT} mỗi lần truy vấn)</span>
+                          ) : null}
+                        </span>
+                      )}
+                      {nanoaiTextLoading && <span className="text-gray-500"> · Đang tra cứu NanoAI…</span>}
+                    </>
+                  ) : (
+                    <>
+                      {totalProducts} sản phẩm
+                    </>
                   )}
-                  {nanoaiTextLoading && <span className="text-gray-500"> · Đang tra cứu NanoAI…</span>}
-                </>
-              ) : (
-                <>
-                  {totalProducts} sản phẩm
-                </>
-              )}
-            </p>
+                </p>
+              </div>
+            </div>
+            {isSearching || listingFacetAnchor ? (
+              <div className="sticky top-0 z-40 mb-4 w-full border-b border-gray-200 bg-gray-50/95 px-2 py-1.5 shadow-sm backdrop-blur sm:px-3 md:top-[var(--listing-chrome-height)]">
+                <CategoryProductFilters
+                  basePath="/"
+                  facets={
+                    searchListingFacets ?? {
+                      sizes: [],
+                      colors: [],
+                      style_tags: [],
+                      price_min: null,
+                      price_max: null,
+                    }
+                  }
+                  enableEmptyListing={isSearching}
+                  enableListingFacetShell={!isSearching && listingFacetAnchor}
+                  compact
+                />
+              </div>
+            ) : null}
             <div className="mt-4">
               {loading ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">

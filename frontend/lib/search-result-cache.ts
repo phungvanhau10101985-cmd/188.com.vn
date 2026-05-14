@@ -32,10 +32,17 @@ export function searchRequestCacheFingerprint(params: {
   is_active?: boolean;
   shop_id?: string | undefined;
   shop_name?: string | undefined;
+  shop_name_chinese?: string | undefined;
+  chinese_name?: string | undefined;
+  style?: string | undefined;
   pro_lower_price?: string | undefined;
   pro_high_price?: string | undefined;
   min_price?: number | undefined;
   max_price?: number | undefined;
+  size?: string | undefined;
+  color?: string | undefined;
+  style_tag?: string | undefined;
+  sort?: string | undefined;
   skip: number;
   limit: number;
 }): string {
@@ -44,10 +51,17 @@ export function searchRequestCacheFingerprint(params: {
     ia: params.is_active !== false ? 1 : 0,
     sid: params.shop_id ?? '',
     sn: params.shop_name ?? '',
+    stc: params.shop_name_chinese ?? '',
+    cn: params.chinese_name ?? '',
+    sty: params.style ?? '',
     pl: params.pro_lower_price ?? '',
     ph: params.pro_high_price ?? '',
     min: params.min_price ?? '',
     max: params.max_price ?? '',
+    sz: params.size ?? '',
+    cl: params.color ?? '',
+    stylet: params.style_tag ?? '',
+    so: params.sort ?? '',
     sk: params.skip,
     li: params.limit,
   };

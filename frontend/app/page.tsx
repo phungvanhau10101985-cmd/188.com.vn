@@ -1,5 +1,13 @@
+import type { Metadata } from 'next';
 import HomePageClient from "./HomePageClient";
 import { getInitialHomeProductList } from "@/lib/home-initial-feed";
+import {
+  buildHomeCanonicalWithFilters,
+  buildHomeFilterTitleParts,
+  homeHasListingFiltersFromSp,
+  homeUrlNeedsFilteredMeta,
+} from '@/lib/filtered-listing-metadata';
+import { getListingFreshnessMonthLabel } from '@/lib/listing-freshness-label';
 
 function spGet(
   sp: Record<string, string | string[] | undefined>,
@@ -14,18 +22,36 @@ function spGet(
 function homeHasListingFilters(
   sp: Record<string, string | string[] | undefined>
 ): boolean {
-  return Boolean(
-    (spGet(sp, "q") ?? "").trim() ||
-      (spGet(sp, "category") ?? "").trim() ||
-      (spGet(sp, "subcategory") ?? "").trim() ||
-      (spGet(sp, "sub_subcategory") ?? "").trim() ||
-      (spGet(sp, "shop_id") ?? "").trim() ||
-      (spGet(sp, "shop_name") ?? "").trim() ||
-      (spGet(sp, "pro_lower_price") ?? "").trim() ||
-      (spGet(sp, "pro_high_price") ?? "").trim() ||
-      (spGet(sp, "min_price") ?? "").trim() ||
-      (spGet(sp, "max_price") ?? "").trim()
-  );
+  return homeHasListingFiltersFromSp(sp);
+}
+
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}): Promise<Metadata> {
+  const sp = await searchParams;
+  if (!homeUrlNeedsFilteredMeta(sp)) return {};
+
+  const bits = buildHomeFilterTitleParts(sp);
+  let title = bits.join(' · ');
+  if (title.length > 68) title = `${title.slice(0, 65)}…`;
+
+  const month = getListingFreshnessMonthLabel();
+  const description = (
+    bits.length
+      ? `Danh sách sản phẩm đã lọc trên 188.COM.VN (${bits.slice(0, 4).join(', ')})`
+      : 'Danh sách sản phẩm đã lọc trên 188.COM.VN.'
+  ).concat(` Cập nhật ${month}.`);
+
+  const canonical = buildHomeCanonicalWithFilters(sp);
+
+  return {
+    title: title.trim() ? title : `Lọc sản phẩm`,
+    description: description.slice(0, 160),
+    alternates: { canonical },
+    robots: { index: true, follow: true },
+  };
 }
 
 export default async function HomePage({

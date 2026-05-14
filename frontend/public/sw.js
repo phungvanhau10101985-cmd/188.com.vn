@@ -20,6 +20,13 @@ self.addEventListener("fetch", (event) => {
     if (reqUrl.origin !== self.location.origin) {
       return;
     }
+    // Không bắt API / asset Next qua handler .catch → 503 "Offline": khi dev compile chậm,
+    // proxy tới FastAPI timeout, hoặc backend tạm lỗi, fetch reject sẽ bị SW giả mạo thành
+    // "Offline" và api-client báo sai (đủ thấy với GET /api/v1/push/vapid-public-key).
+    const p = reqUrl.pathname || "";
+    if (p.startsWith("/api/") || p.startsWith("/_next/")) {
+      return;
+    }
   } catch (e) {
     return;
   }

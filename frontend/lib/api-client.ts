@@ -210,6 +210,58 @@ class ApiClient {
     return this.fetch<ProductListResponse>(`/products/?${query.toString()}`);
   }
 
+  /** Facets (size/màu/giá) cho tập kết quả tìm `q` — `GET /products/search-facets`. */
+  async getSearchProductFacets(
+    params: Record<string, string | undefined | null>
+  ): Promise<import('@/lib/category-seo').CategoryProductFacets> {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && String(value).trim() !== '') {
+        query.append(key, String(value));
+      }
+    });
+    const data = await this.fetch<{
+      sizes?: unknown;
+      colors?: unknown;
+      style_tags?: unknown;
+      price_min?: unknown;
+      price_max?: unknown;
+    }>(`/products/search-facets?${query.toString()}`);
+    return {
+      sizes: Array.isArray(data.sizes) ? (data.sizes as string[]) : [],
+      colors: Array.isArray(data.colors) ? (data.colors as string[]) : [],
+      style_tags: Array.isArray(data.style_tags) ? (data.style_tags as string[]) : [],
+      price_min: typeof data.price_min === 'number' ? data.price_min : null,
+      price_max: typeof data.price_max === 'number' ? data.price_max : null,
+    };
+  }
+
+  /** Facets cho `/?style=…`, `/?category=…` (cùng loại) — `GET /products/listing-facets`, `q` tùy chọn. */
+  async getProductListingFacets(
+    params: Record<string, string | undefined | null>
+  ): Promise<import('@/lib/category-seo').CategoryProductFacets> {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && String(value).trim() !== '') {
+        query.append(key, String(value));
+      }
+    });
+    const data = await this.fetch<{
+      sizes?: unknown;
+      colors?: unknown;
+      style_tags?: unknown;
+      price_min?: unknown;
+      price_max?: unknown;
+    }>(`/products/listing-facets?${query.toString()}`);
+    return {
+      sizes: Array.isArray(data.sizes) ? (data.sizes as string[]) : [],
+      colors: Array.isArray(data.colors) ? (data.colors as string[]) : [],
+      style_tags: Array.isArray(data.style_tags) ? (data.style_tags as string[]) : [],
+      price_min: typeof data.price_min === 'number' ? data.price_min : null,
+      price_max: typeof data.price_max === 'number' ? data.price_max : null,
+    };
+  }
+
   async getProductBySlug(slug: string): Promise<Product> {
     return this.fetch<Product>(`/products/by-slug/?slug=${encodeURIComponent(slug)}`);
   }

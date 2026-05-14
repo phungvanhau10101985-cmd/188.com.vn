@@ -2,25 +2,14 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
 import ProductGrid from '@/components/ProductGrid';
-import { linkifySeoBody } from '@/lib/internal-links';
+import CategoryProductFilters from '@/components/CategoryProductFilters';
+import type { CategoryProductFacets } from '@/lib/category-seo';
+import { linkifySeoBody, type InternalLinkItem } from '@/lib/internal-links';
+import { getListingFreshnessMonthLabel } from '@/lib/listing-freshness-label';
 import type { Product } from '@/types/api';
-import type { InternalLinkItem } from '@/lib/internal-links';
-
-/** Từ ngày 20 tháng N hiển thị "tháng N+1"; trước đó hiển thị "tháng N". Tự nhảy theo tháng. */
-function getCurrentMonthLabel(): string {
-  const now = new Date();
-  let month = now.getMonth() + 1;
-  let year = now.getFullYear();
-  if (now.getDate() >= 20) {
-    month += 1;
-    if (month > 12) {
-      month = 1;
-      year += 1;
-    }
-  }
-  return `tháng ${month}/${year}`;
-}
+import { apiClient } from '@/lib/api-client';
 
 interface CategoryPageClientProps {
   breadcrumbNames: string[];
@@ -33,6 +22,15 @@ interface CategoryPageClientProps {
   seoBody: string | null;
   internalLinkMap?: InternalLinkItem[];
   error: string | null;
+  facets: CategoryProductFacets | null;
+  /** Query string hiện tại (không gồm ?) — dùng giữ bộ lọc khi phân trang. */
+  listingQueryString: string;
+}
+
+function hasNonPageFilters(listingQs: string): boolean {
+  const p = new URLSearchParams(listingQs);
+  p.delete('page');
+  return p.toString().length > 0;
 }
 
 export default function CategoryPageClient({
@@ -46,6 +44,8 @@ export default function CategoryPageClient({
   seoBody,
   internalLinkMap = [],
   error,
+  facets,
+  listingQueryString,
 }: CategoryPageClientProps) {
   const router = useRouter();
   const fullName = breadcrumbNames.join(' - ');
@@ -54,8 +54,48 @@ export default function CategoryPageClient({
   const from = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const to = Math.min(currentPage * pageSize, total);
 
-  const monthLabel = getCurrentMonthLabel();
+  const monthLabel = getListingFreshnessMonthLabel();
   const h1Text = `${leafName} mới nhất ${monthLabel} | ${total} sản phẩm`;
+  const [clientFacets, setClientFacets] = useState<CategoryProductFacets | null>(facets);
+
+  const facetParams = useMemo(() => {
+    const p = new URLSearchParams(listingQueryString);
+    return {
+      category: breadcrumbNames[0],
+      subcategory: breadcrumbNames[1],
+      sub_subcategory: breadcrumbNames[2],
+      min_price: p.get('min_price'),
+      max_price: p.get('max_price'),
+      size: p.get('size'),
+      color: p.get('color'),
+      style_tag: p.get('style_tag'),
+    };
+  }, [breadcrumbNames, listingQueryString]);
+
+  useEffect(() => {
+    if (!breadcrumbNames[0]) return;
+    let cancelled = false;
+    setClientFacets(facets);
+    apiClient
+      .getProductListingFacets(facetParams)
+      .then((next) => {
+        if (!cancelled) setClientFacets(next);
+      })
+      .catch(() => {
+        if (!cancelled) setClientFacets({ sizes: [], colors: [], style_tags: [], price_min: null, price_max: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [breadcrumbNames, facetParams, facets]);
+
+  const queryWithPage = (nextPage: number) => {
+    const p = new URLSearchParams(listingQueryString);
+    if (nextPage <= 1) p.delete('page');
+    else p.set('page', String(nextPage));
+    const q = p.toString();
+    return q ? `${basePath}?${q}` : basePath;
+  };
 
   return (
     <main className="max-w-7xl mx-auto px-4 pt-4 pb-6 md:py-6" role="main" aria-label={fullName}>
@@ -74,10 +114,18 @@ export default function CategoryPageClient({
         ))}
       </nav>
 
-      {/* H1: tên danh mục lá + mới nhất tháng X/YYYY | số sản phẩm (SEO, tự cập nhật theo ngày 20) */}
-      <h1 className="text-2xl font-bold text-gray-900 mb-4">
-        {h1Text}
-      </h1>
+      {/* H1 riêng; bộ lọc là sibling để sticky không bị giới hạn trong khối tiêu đề. */}
+      <div className="mb-4">
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900 leading-snug max-w-5xl">
+          {h1Text}
+        </h1>
+      </div>
+
+      {!error && (total > 0 || hasNonPageFilters(listingQueryString)) ? (
+        <div className="sticky top-0 z-40 mb-4 w-full border-b border-gray-200 bg-gray-50/95 px-2 py-1.5 shadow-sm backdrop-blur sm:px-3 md:top-[var(--listing-chrome-height)]">
+          <CategoryProductFilters basePath={basePath} facets={clientFacets} enableListingFacetShell compact />
+        </div>
+      ) : null}
 
       {error && (
         <div className="mb-6 bg-red-50 border border-red-200 rounded-xl p-4 flex items-center justify-between">
@@ -111,7 +159,7 @@ export default function CategoryPageClient({
             <nav className="mt-8 flex flex-wrap items-center justify-center gap-2" aria-label="Phân trang danh mục">
               {currentPage > 1 && (
                 <Link
-                  href={currentPage === 2 ? basePath : `${basePath}?page=${currentPage - 1}`}
+                  href={queryWithPage(currentPage - 1)}
                   className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 font-medium text-sm"
                 >
                   ← Trang trước
@@ -122,7 +170,7 @@ export default function CategoryPageClient({
               </span>
               {currentPage < totalPages && (
                 <Link
-                  href={`${basePath}?page=${currentPage + 1}`}
+                  href={queryWithPage(currentPage + 1)}
                   className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 font-medium text-sm"
                 >
                   Trang sau →

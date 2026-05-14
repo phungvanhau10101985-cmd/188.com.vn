@@ -95,11 +95,11 @@ const FilterBar = ({
   onSortChange: (sort: string) => void;
   onPriceFilterChange: (range: string) => void;
 }) => (
-  <div className="bg-white border-b border-gray-200 p-4 mb-6 rounded-lg shadow-sm">
-    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+  <div className="sticky top-0 z-40 mb-6 border-b border-gray-200 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur md:top-[var(--listing-chrome-height)]">
+    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
       {/* Results Info */}
       <div className="flex-1">
-        <p className="text-sm text-gray-700">
+        <p className="text-xs text-gray-700 sm:text-sm">
           <span className="font-semibold text-gray-900">{totalProducts}</span> sản phẩm
           {searchTerm && (
             <span>
@@ -115,16 +115,16 @@ const FilterBar = ({
       </div>
 
       {/* Filter Controls */}
-      <div className="flex flex-col sm:flex-row gap-3">
+      <div className="flex flex-col gap-2 sm:flex-row">
         {/* Sort Select */}
         <div className="flex items-center gap-2">
-          <label htmlFor="sort-select" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+          <label htmlFor="sort-select" className="sr-only">
             Sắp xếp:
           </label>
           <select
             id="sort-select"
             onChange={(e) => onSortChange(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+            className="h-8 rounded-md border border-gray-300 px-2 text-xs transition-colors focus:border-transparent focus:ring-2 focus:ring-blue-500"
             defaultValue="popular"
           >
             <option value="popular">Phổ biến nhất</option>
@@ -138,13 +138,13 @@ const FilterBar = ({
 
         {/* Price Filter */}
         <div className="flex items-center gap-2">
-          <label htmlFor="price-filter" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+          <label htmlFor="price-filter" className="sr-only">
             Khoảng giá:
           </label>
           <select
             id="price-filter"
             onChange={(e) => onPriceFilterChange(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+            className="h-8 rounded-md border border-gray-300 px-2 text-xs transition-colors focus:border-transparent focus:ring-2 focus:ring-blue-500"
             defaultValue="all"
           >
             <option value="all">Tất cả</option>

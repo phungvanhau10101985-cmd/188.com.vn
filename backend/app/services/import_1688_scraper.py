@@ -15,15 +15,37 @@ class Import1688Error(RuntimeError):
     pass
 
 
+def _offer_id_from_query(query: str) -> Optional[str]:
+    """Đọc offerId không phân biệt hoa thường (detail PC/Mobile thường dùng offerId=)."""
+    if not query:
+        return None
+    for key, vals in parse_qs(query).items():
+        if (key or "").lower() != "offerid":
+            continue
+        for raw in vals or []:
+            v = (raw or "").strip()
+            if v:
+                return v
+    return None
+
+
+def canonical_1688_offer_pc_url(offer_id: str) -> str:
+    """URL chi tiết PC chuẩn để scrape / cột link (khớp luồng Hibox abb-* → detail.1688)."""
+    oid = str(offer_id or "").strip()
+    if oid.isdigit():
+        return f"https://detail.1688.com/offer/{oid}.html"
+    return ""
+
+
 def extract_offer_id(url: str) -> Optional[str]:
     from app.services.import_hibox_scraper import normalize_product_import_url
 
     norm = normalize_product_import_url((url or "").strip())
     parsed = urlparse(norm)
-    qs_offer = parse_qs(parsed.query).get("offerId")
-    if qs_offer and qs_offer[0].strip():
-        return qs_offer[0].strip()
-    match = re.search(r"/offer/(\d+)\.html", parsed.path)
+    qs_offer = _offer_id_from_query(parsed.query)
+    if qs_offer:
+        return qs_offer
+    match = re.search(r"/offer/(\d+)\.html", parsed.path or "", re.I)
     if match:
         return match.group(1)
     return None
@@ -904,17 +926,24 @@ def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[
         raise Import1688Error(
             "Đây là link Hibox (hibox.mn), không phải link 1688 — không có offerId. "
             "Hãy dùng chức năng import link trên admin: URL Hibox được xử lý riêng. "
-            "Nếu cần 1688, dán đúng URL detail.1688.com có /offer/....html hoặc ?offerId=...."
+            "Nếu cần 1688, dán đúng URL detail.1688.com hoặc detail.m.1688.com có /offer/....html hoặc ?offerId=...."
         )
     offer_id = extract_offer_id(url)
     if not offer_id:
         raise Import1688Error(
             "Link 1688 không hợp lệ hoặc thiếu offerId. "
-            "Cần URL dạng detail.1688.com/offer/xxxxxxxx.html hoặc tham số ?offerId=. "
+            "Cần URL dạng detail.1688.com/offer/xxxxxxxx.html hoặc ?offerId= (kể cả detail.m.1688.com/page/... ). "
             "Link Hibox (https://hibox.mn/v/...) không dùng offerId. "
             "Nếu bạn đang dán link Hibox: admin thường gọi nhầm instance API cổng cũ (lệch NEXT_PUBLIC_API_BASE_URL / SERVER_PORT) "
             "trong khi FastAPI của bạn chạy cổng khác — xem frontend/.env.local (API_INTERNAL_ORIGIN, NEXT_PUBLIC_API_BASE_URL) và restart Next + backend."
         )
+
+    fetch_url = url
+    product_source_url = url
+    pc = canonical_1688_offer_pc_url(offer_id)
+    if pc:
+        fetch_url = pc
+        product_source_url = pc
 
     try:
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -943,7 +972,7 @@ def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[
         detail_dom_richness_after = 0
         preview_layer_urls: List[str] = []
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=settings.IMPORT_1688_TIMEOUT_MS)
+            page.goto(fetch_url, wait_until="domcontentloaded", timeout=settings.IMPORT_1688_TIMEOUT_MS)
             try:
                 page.wait_for_load_state("networkidle", timeout=min(15000, settings.IMPORT_1688_TIMEOUT_MS))
             except PlaywrightTimeoutError:
@@ -1156,7 +1185,7 @@ def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[
     if not payload.get("h1") and not payload.get("meta_title") and "login" in page_text:
         raise Import1688Error("1688 yêu cầu đăng nhập. Cập nhật IMPORT_1688_COOKIE_JSON rồi thử lại.")
 
-    product_data = normalize_1688_payload(url, offer_id, payload)
+    product_data = normalize_1688_payload(product_source_url, offer_id, payload)
     dom_rich = max(detail_dom_richness_before, detail_dom_richness_after)
     gallery_n = len(product_data.get("gallery") or [])
     structured_pre = payload.get("structured") if isinstance(payload.get("structured"), dict) else {}

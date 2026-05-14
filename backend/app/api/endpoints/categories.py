@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Any, Dict, Optional
+import logging
 from app.db.session import SessionLocal, get_db
 from app.schemas.category import Category, CategoryCreate, CategoryUpdate
 from app.crud import category as crud_category
@@ -10,6 +11,7 @@ from app.models.seo_cluster import SeoCluster
 from app.utils.ttl_cache import cache as ttl_cache
 
 router = APIRouter()
+_log = logging.getLogger(__name__)
 
 
 @router.get("/from-products", response_model=List[Any])
@@ -24,7 +26,12 @@ def read_category_tree_from_products(is_active: bool = True):
 
     Cache 60s — dùng chung implementation với resolve GET /from-products/by-path (xem crud.get_cached_menu_category_tree).
     """
-    return crud_product.get_cached_menu_category_tree(is_active)
+    try:
+        return crud_product.get_cached_menu_category_tree(is_active)
+    except Exception:
+        _log.exception("GET /categories/from-products failed (is_active=%s)", is_active)
+        # Menu trống vẫn tốt hơn 500/plain text cho SSR + Navigation
+        return []
 
 
 # ----- Tree v2: trả từ bảng `categories` (sau khi import taxonomy) -----

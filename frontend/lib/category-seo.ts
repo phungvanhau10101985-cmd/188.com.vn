@@ -12,6 +12,16 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_DOM
 /** Tránh treo SSR khi backend tắt / mạng chặn (Windows hay gặp). */
 const LAYOUT_FETCH_TIMEOUT_MS = 8000;
 
+/**
+ * GET /categories/from-products có thể lâu lúc cache lạnh (prune + đếm SP trên PostgreSQL lớn).
+ * 8s thường làm AbortSignal cắt kết nối → ECONNRESET phía server, initialCategoryTree rỗng,
+ * rồi Navigation fetch lại phía client (dễ lệch/500 khi tải cao). Giữ timeout riêng, dưới ngưỡng proxy Next (120s).
+ */
+const LAYOUT_CATEGORY_TREE_TIMEOUT_MS = Math.min(
+  110_000,
+  Math.max(15_000, parseInt(process.env.LAYOUT_CATEGORY_TREE_TIMEOUT_MS || "60000", 10) || 60000),
+);
+
 /** Trong development hoặc khi set DISABLE_CACHE=1: không cache để thấy thay đổi ngay. Production: cache 2–5 phút. */
 const isDev = process.env.NODE_ENV === "development";
 const disableCache = process.env.NEXT_PUBLIC_DISABLE_CACHE === "1" || process.env.DISABLE_CACHE === "1";
@@ -80,7 +90,7 @@ export async function getCategoryTreeForLayout(): Promise<CategoryLevel1[]> {
     const res = await fetch(url, {
       next: { revalidate: REVALIDATE_CATEGORY, tags: [CACHE_TAG_CATEGORY_SEO] },
       headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(LAYOUT_FETCH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(LAYOUT_CATEGORY_TREE_TIMEOUT_MS),
     });
     if (!res.ok) return [];
     const data = await res.json();
@@ -154,14 +164,82 @@ export async function getCategorySeoData(
   }
 }
 
+/** Giá trị lọc từ query string trang danh mục — khớp GET `/products/` (min_price, max_price, size, color, sort). */
+export type CategoryListingFilters = {
+  minPrice?: number | null;
+  maxPrice?: number | null;
+  size?: string | null;
+  color?: string | null;
+  styleTag?: string | null;
+  sort?: string | null;
+};
+
+export interface CategoryProductFacets {
+  sizes: string[];
+  colors: string[];
+  style_tags: string[];
+  price_min: number | null;
+  price_max: number | null;
+}
+
+/** Facets (size/màu/khoảng giá) trong toàn bộ SP của danh mục — dùng cho UI bộ lọc. */
+export async function getCategoryProductFacets(
+  level1: string,
+  level2?: string | null,
+  level3?: string | null,
+  resolvedInfo?: CategoryByPathInfo | null,
+  filters?: CategoryListingFilters
+): Promise<CategoryProductFacets | null> {
+  const info = resolvedInfo ?? (await getCategoryByPathForSeo(level1, level2, level3));
+  if (!info) return null;
+  const breadcrumb = info.breadcrumb_names || [];
+  const category = breadcrumb[0];
+  const subcategory = breadcrumb[1];
+  const sub_subcategory = breadcrumb[2];
+  try {
+    const params = new URLSearchParams({
+      category: category || level1.trim(),
+    });
+    if (subcategory) params.set("subcategory", subcategory);
+    if (sub_subcategory) params.set("sub_subcategory", sub_subcategory);
+    if (filters?.minPrice != null && !Number.isNaN(filters.minPrice) && filters.minPrice >= 0) {
+      params.set("min_price", String(filters.minPrice));
+    }
+    if (filters?.maxPrice != null && !Number.isNaN(filters.maxPrice) && filters.maxPrice >= 0) {
+      params.set("max_price", String(filters.maxPrice));
+    }
+    if (filters?.size?.trim()) params.set("size", filters.size.trim());
+    if (filters?.color?.trim()) params.set("color", filters.color.trim());
+    if (filters?.styleTag?.trim()) params.set("style_tag", filters.styleTag.trim());
+    const url = `${API_BASE}/products/category-facets?${params.toString()}`;
+    const res = await fetch(url, {
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(LAYOUT_FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Record<string, unknown>;
+    return {
+      sizes: Array.isArray(data.sizes) ? (data.sizes as string[]) : [],
+      colors: Array.isArray(data.colors) ? (data.colors as string[]) : [],
+      style_tags: Array.isArray(data.style_tags) ? (data.style_tags as string[]) : [],
+      price_min: typeof data.price_min === "number" ? data.price_min : null,
+      price_max: typeof data.price_max === "number" ? data.price_max : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Server-side: lấy sản phẩm theo danh mục (cho SSR). Hỗ trợ phân trang qua skip/limit.
  *  Có thể truyền sẵn info danh mục (CategoryByPathInfo) để tránh gọi API by-path lần nữa.
+ *  Khi có min/max giá, size hoặc màu: tắt order_random để phân trang ổn định; mặc định sort `newest`.
  */
 export async function getProductsByCategory(
   level1: string,
   level2?: string | null,
   level3?: string | null,
-  options: { limit?: number; skip?: number } = {},
+  options: { limit?: number; skip?: number; filters?: CategoryListingFilters } = {},
   resolvedInfo?: CategoryByPathInfo | null
 ): Promise<{
   products: unknown[];
@@ -172,23 +250,51 @@ export async function getProductsByCategory(
   subcategory?: string;
   sub_subcategory?: string;
 }> {
-  const { limit = 96, skip = 0 } = options;
+  const { limit = 96, skip = 0, filters } = options;
   const info = resolvedInfo ?? (await getCategoryByPathForSeo(level1, level2, level3));
   if (!info) return { products: [], total: 0, total_pages: 0, page: 1 };
   const breadcrumb = info.breadcrumb_names || [];
   const category = breadcrumb[0];
   const subcategory = breadcrumb[1];
   const sub_subcategory = breadcrumb[2];
+
+  const f = filters || {};
+  const hasAttrFilters =
+    (f.minPrice != null && !Number.isNaN(f.minPrice)) ||
+    (f.maxPrice != null && !Number.isNaN(f.maxPrice)) ||
+    Boolean(f.size?.trim()) ||
+    Boolean(f.color?.trim()) ||
+    Boolean(f.styleTag?.trim());
+  const sortTrim = f.sort?.trim();
+  const useDeterministicOrder = hasAttrFilters || Boolean(sortTrim);
+
   try {
     const params = new URLSearchParams({
       limit: String(limit),
       skip: String(skip),
       is_active: "true",
       category: category || level1,
-      order_random: "true",
     });
     if (subcategory) params.set("subcategory", subcategory);
     if (sub_subcategory) params.set("sub_subcategory", sub_subcategory);
+
+    if (useDeterministicOrder) {
+      params.set("order_random", "false");
+      params.set("sort", sortTrim || "newest");
+    } else {
+      params.set("order_random", "true");
+    }
+
+    if (f.minPrice != null && !Number.isNaN(f.minPrice) && f.minPrice >= 0) {
+      params.set("min_price", String(f.minPrice));
+    }
+    if (f.maxPrice != null && !Number.isNaN(f.maxPrice) && f.maxPrice >= 0) {
+      params.set("max_price", String(f.maxPrice));
+    }
+    if (f.size?.trim()) params.set("size", f.size.trim());
+    if (f.color?.trim()) params.set("color", f.color.trim());
+    if (f.styleTag?.trim()) params.set("style_tag", f.styleTag.trim());
+
     const url = `${API_BASE}/products/?${params.toString()}`;
     /** Không cache ISR/CDN: mỗi lần mở danh mục gọi API mới để thứ tự random thay đổi. */
     const res = await fetch(url, {

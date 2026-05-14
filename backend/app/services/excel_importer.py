@@ -147,13 +147,18 @@ class ExcelImporter:
                 
                 all_errors = errors + result.get("errors", [])
                 all_warnings = warnings + result.get("warnings", [])
-                
+                skipped = result.get("skipped") or []
+                skipped_count = len(skipped) if isinstance(skipped, list) else int(result.get("skipped_count") or 0)
+
                 result["errors"] = all_errors
                 result["warnings"] = all_warnings
+                result["skipped"] = skipped if isinstance(skipped, list) else []
+                result["skipped_count"] = skipped_count
                 
                 logger.info(f"📦 KẾT QUẢ IMPORT:")
                 logger.info(f"   ➕ Tạo mới: {result.get('created', 0)}")
                 logger.info(f"   🔄 Cập nhật: {result.get('updated', 0)}")
+                logger.info(f"   ⏭ Bỏ qua (trùng id/SKU kiểu a188): {skipped_count}")
                 logger.info(f"   ⚠️  Cảnh báo: {len(all_warnings)}")
                 logger.info(f"   ❌ Lỗi: {len(all_errors)}")
                 logger.info(f"   📈 Tỷ lệ thành công: {result.get('success_rate', '0%')}")
@@ -269,7 +274,7 @@ class ExcelImporter:
             
             df = pd.DataFrame(products)
             
-            # 40 CỘT EXPORT ORDER: ... product_info (AK), chinese_name (AM), shop_name_chinese (AN), Slug (AL)
+            # 40 CỘT EXPORT ORDER: ... product_info (AK), chinese_name (AL), shop_name_chinese (AM), Slug (AN)
             excel_columns_order = [
                 'id', 'sku', 'origin', 'brand', 'name', 'pro_content',
                 'price', 'shop_name', 'shop_id', 'pro_lower_price', 'pro_high_price',
@@ -466,7 +471,7 @@ class ExcelImporter:
                 workbook = writer.book
                 worksheet = writer.sheets['Products']
                 
-                # 39 cột import: A-AK + AM-AN (tên tiếng Trung, shop TQ); không Slug
+                # 39 cột import: A-AK + AL-AM (tên tiếng Trung, shop TQ); không Slug
                 worksheet.insert_rows(2)
                 vietnamese_headers = [
                     'Id sản phẩm', 'Mã sản phẩm', 'Xuất xứ', 'Thương hiệu', 'Tên',
@@ -499,7 +504,7 @@ class ExcelImporter:
                     worksheet.column_dimensions[column_letter].width = adjusted_width
             
             logger.info(f"✅ Tạo template mẫu thành công: {filepath}")
-            logger.info("📋 Cấu trúc: 39 cột (tới shop TQ), AK = product_info; AM-AN = tên tiếng Trung / shop Trung Quốc; slug tự tạo khi import.")
+            logger.info("📋 Cấu trúc: 39 cột (tới shop TQ), AK = product_info; AL = tên tiếng Trung; AM = shop Trung Quốc; slug tự tạo khi import.")
 
             return {
                 "success": True,

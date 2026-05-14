@@ -1,7 +1,7 @@
 # backend/app/crud/product.py - COMPLETE FIXED VERSION
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func as sql_func, or_, select, union_all
-from typing import List, Optional, Dict, Any, Set
+from sqlalchemy import and_, cast, func as sql_func, or_, select, String, union_all
+from typing import List, Optional, Dict, Any, Set, Tuple
 from app.models.product import Product
 from app.models.search_mapping import SearchMapping, SearchMappingType
 from app.models.search_log import SearchLog
@@ -30,6 +30,7 @@ from app.utils.vietnamese import (
     COMMON_WORD_MAPPING,
     remove_vietnamese_accents,
 )
+from app.db.session import is_sqlite
 from difflib import SequenceMatcher
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 import re
@@ -55,6 +56,52 @@ except ImportError:
         return text.strip('-')
 
 logger = logging.getLogger(__name__)
+
+# product_id kiểu nguồn 1688/Taobao: «…phần_web…» + «a188» + «SKU nội bộ» (vd A920025943011a188B0266)
+_PRODUCT_ID_A188_RE = re.compile(r"a188", re.IGNORECASE)
+
+
+def split_product_id_web_prefix_and_internal_sku(product_id: Optional[str]) -> Optional[Dict[str, str]]:
+    """
+    Phần id trước «a188» (case-insensitive, giữ casing gốc) + SKU sau đó — dùng chặn trùng offer/id nguồn và trùng SKU.
+    Trả dict: prefix (raw), prefix_key (chuẩn so sánh casefold), sku (uppercase).
+    """
+    if not product_id:
+        return None
+    raw = str(product_id).strip()
+    if not raw:
+        return None
+    m = _PRODUCT_ID_A188_RE.search(raw)
+    if not m:
+        return None
+    prefix = raw[: m.start()].strip()
+    sku_tail = raw[m.end() :].strip().upper()
+    if not prefix or not sku_tail:
+        return None
+    return {"prefix": prefix, "prefix_key": prefix.casefold(), "sku": sku_tail}
+
+
+def _bulk_import_conflict_maps_initial(db: Session) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """
+    prefix_key (phần trước a188) → product_id sở hữu,
+    sku_code upper → product_id sở hữu (theo Product.code trong DB hiện tại).
+    """
+    pref_own: Dict[str, str] = {}
+    code_own: Dict[str, str] = {}
+    for pid, code in db.query(Product.product_id, Product.code).all():
+        if not pid:
+            continue
+        seg = split_product_id_web_prefix_and_internal_sku(pid)
+        if seg:
+            k = seg["prefix_key"]
+            if k not in pref_own:
+                pref_own[k] = pid
+        if code:
+            u = str(code).strip().upper()
+            if u and u not in code_own:
+                code_own[u] = pid
+    return pref_own, code_own
+
 
 # Đồng bộ Google Sheet: debounce nhiều thao tác liên tiếp → một lần gọi API (tránh vượt quota).
 _gsheets_sync_debounce_timer: Optional[threading.Timer] = None
@@ -1160,6 +1207,68 @@ def get_product(db: Session, product_id: int):
 def get_product_by_product_id(db: Session, product_id: str):
     return db.query(Product).filter(Product.product_id == product_id).first()
 
+_LISTING_PARSER_AT_NUMERIC_ONLY = re.compile(r"^[AT]\d+$", re.IGNORECASE)
+
+
+def normalize_listing_parser_external_id(raw: Optional[str]) -> str:
+    """
+    Chuỗi id từ parse HTML listing: A/T + chỉ chữ số → chuẩn hoa A/T; còn lại chỉ strip.
+    """
+    t = (raw or "").strip()
+    if not t:
+        return ""
+    if len(t) >= 2 and t[1:].isdigit():
+        prefix = (t[0] or "").upper()
+        if prefix in ("A", "T"):
+            return f"{prefix}{t[1:]}"
+    return t
+
+
+def listing_parser_ids_existing_in_products(db: Session, candidate_external_ids: List[str]) -> Set[str]:
+    """
+    Đánh dấu id listing (vd A945… sau chuẩn hoa) là đã có trong shop nếu:
+    - `products.product_id` trùng chính xác, hoặc
+    - `product_id` bắt đầu bằng `{id}a188…` (mã nội bộ nhập Hibox/1688 kèm SKU).
+    """
+    out: Set[str] = set()
+    normalized_unique: Dict[str, str] = {}  # key chuẩn → canonical (duplicate input gộp 1 khóa)
+    for raw in candidate_external_ids:
+        n = normalize_listing_parser_external_id(raw)
+        if not n:
+            continue
+        normalized_unique.setdefault(n, n)
+
+    cands = list(normalized_unique.keys())
+    if not cands:
+        return out
+
+    found_exact_rows = db.query(Product.product_id).filter(Product.product_id.in_(cands)).all()
+    exact_db = {r[0] for r in found_exact_rows}
+    need_prefix_scan: List[str] = []
+
+    for c in cands:
+        if c in exact_db:
+            out.add(normalized_unique[c])
+        else:
+            need_prefix_scan.append(c)
+
+    like_patterns = sorted({f"{c}a188%" for c in need_prefix_scan if _LISTING_PARSER_AT_NUMERIC_ONLY.fullmatch(c)})
+    if not like_patterns:
+        return out
+
+    hit_rows = db.query(Product.product_id).filter(or_(*[Product.product_id.like(p) for p in like_patterns])).all()
+    hit_ids = [r[0] for r in hit_rows]
+
+    for c in need_prefix_scan:
+        if not _LISTING_PARSER_AT_NUMERIC_ONLY.fullmatch(c):
+            continue
+        needle = f"{c}a188"
+        if any((pid or "").startswith(needle) for pid in hit_ids):
+            out.add(normalized_unique[c])
+
+    return out
+
+
 def normalize_search_query(q: str) -> str:
     """
     Chuẩn tắc cụm từ tìm kiếm: trim, fix case (Cao lông nam đế).
@@ -1224,34 +1333,7 @@ def _search_products_by_words(
     dịp, tính năng, size, và cột AK (product_info - Thông tin sản phẩm).
     KHÔNG tìm kiếm trong mô tả sản phẩm.
     """
-    from sqlalchemy.sql import func
-    from sqlalchemy import cast, String
-    
-    # Tạo chuỗi tổng hợp từ các trường cần tìm kiếm
-    # Sử dụng COALESCE để xử lý NULL và CAST để chuyển JSON thành text
-    search_concat = func.concat(
-        func.coalesce(Product.name, ""), " ",
-        func.coalesce(Product.code, ""), " ",
-        func.coalesce(Product.category, ""), " ",
-        func.coalesce(Product.subcategory, ""), " ",
-        func.coalesce(Product.sub_subcategory, ""), " ",
-        func.coalesce(Product.material, ""), " ",
-        func.coalesce(Product.style, ""), " ",
-        func.coalesce(Product.color, ""), " ",
-        func.coalesce(Product.occasion, ""), " ",
-        # Features và sizes là JSON array, cast thành text
-        func.coalesce(cast(Product.features, String), ""), " ",
-        func.coalesce(cast(Product.sizes, String), ""), " ",
-        # Cột AK: Thông tin sản phẩm (JSON) - tìm trong toàn bộ nội dung
-        func.coalesce(cast(Product.product_info, String), "")
-    )
-    search_concat_norm = func.lower(search_concat)
-
-    for w in words:
-        w_norm = (w or "").strip().lower()
-        if not w_norm:
-            continue
-        query = query.filter(search_concat_norm.ilike(f"%{w_norm}%"))
+    query = apply_product_search_word_filters(query, words)
     vt_sub = None
     if sort == "views_desc":
         vt_sub = _product_view_totals_subquery()
@@ -1262,6 +1344,36 @@ def _search_products_by_words(
     return total, products
 
 
+def apply_product_search_word_filters(query, words: List[str]):
+    """
+    Áp lọc «tất cả từ khớp ilike» trên chuỗi tổng hợp (giống _search_products_by_words).
+    """
+    from sqlalchemy.sql import func
+    from sqlalchemy import cast, String
+
+    search_concat = func.concat(
+        func.coalesce(Product.name, ""), " ",
+        func.coalesce(Product.code, ""), " ",
+        func.coalesce(Product.category, ""), " ",
+        func.coalesce(Product.subcategory, ""), " ",
+        func.coalesce(Product.sub_subcategory, ""), " ",
+        func.coalesce(Product.material, ""), " ",
+        func.coalesce(Product.style, ""), " ",
+        func.coalesce(Product.color, ""), " ",
+        func.coalesce(Product.occasion, ""), " ",
+        func.coalesce(cast(Product.features, String), ""), " ",
+        func.coalesce(cast(Product.sizes, String), ""), " ",
+        func.coalesce(cast(Product.product_info, String), "")
+    )
+    search_concat_norm = func.lower(search_concat)
+    for w in words:
+        w_norm = (w or "").strip().lower()
+        if not w_norm:
+            continue
+        query = query.filter(search_concat_norm.ilike(f"%{w_norm}%"))
+    return query
+
+
 def get_product_by_slug(db: Session, slug: str) -> Optional[Product]:
     try:
         return db.query(Product).filter(Product.slug == slug).first()
@@ -1269,33 +1381,299 @@ def get_product_by_slug(db: Session, slug: str) -> Optional[Product]:
         logger.error(f"Database error: {str(e)}")
         return None
 
-def get_products(
-    db: Session,
-    skip: int = 0,
-    limit: int = 100,
-    category: Optional[str] = None,
-    subcategory: Optional[str] = None,
-    sub_subcategory: Optional[str] = None,
-    shop_name: Optional[str] = None,
-    shop_id: Optional[str] = None,
-    pro_lower_price: Optional[str] = None,
-    pro_high_price: Optional[str] = None,
-    min_price: Optional[float] = None,
-    max_price: Optional[float] = None,
-    is_active: Optional[bool] = None,
-    q: Optional[str] = None,
-    product_id: Optional[str] = None,
-    *,
-    sort: Optional[str] = None,
-    order_random: bool = False,
-):
-    query = db.query(Product)
-    has_q = bool(q and str(q).strip())
-    sort_norm = normalize_product_list_sort(sort)
-    use_random_order = bool(order_random and not has_q)
-    if use_random_order:
-        sort_norm = "default"
 
+# Gợi ý màu từ tên SP (ưu tiên cụm dài trước) — không accent khi so khớp.
+_NAME_COLOR_HINTS_ORDERED: List[str] = [
+    "xanh navy",
+    "xanh dương",
+    "xanh lá",
+    "xanh rêu",
+    "xanh ngọc",
+    "xanh da trời",
+    "xanh than",
+    "xanh",
+    "đen tuyền",
+    "đen",
+    "trắng ngà",
+    "trắng kem",
+    "trắng",
+    "nâu đậm",
+    "nâu nhạt",
+    "nâu",
+    "xám",
+    "be",
+    "kem",
+    "đỏ đô",
+    "đỏ",
+    "hồng",
+    "tím",
+    "vàng",
+    "cam",
+    "bạc",
+    "đồng",
+    "champagne",
+    "mận",
+    "rêu",
+    "denim",
+]
+
+_CANONICAL_COLOR_HINTS: List[Tuple[str, str]] = [
+    ("xanh navy", "Xanh"),
+    ("xanh dương", "Xanh"),
+    ("xanh lam", "Xanh"),
+    ("xanh lá", "Xanh"),
+    ("xanh rêu", "Xanh"),
+    ("xanh ngọc", "Xanh"),
+    ("xanh da trời", "Xanh"),
+    ("xanh than", "Xanh"),
+    ("xanh", "Xanh"),
+    ("đen tuyền", "Đen"),
+    ("đen", "Đen"),
+    ("trắng ngà", "Trắng"),
+    ("trắng kem", "Trắng"),
+    ("trắng", "Trắng"),
+    ("nâu đậm", "Nâu"),
+    ("nâu nhạt", "Nâu"),
+    ("đỏ đô", "Đỏ"),
+    ("đỏ", "Đỏ"),
+    ("nâu", "Nâu"),
+    ("xám", "Xám"),
+    ("ghi", "Xám"),
+    ("be", "Be"),
+    ("kem", "Kem"),
+    ("cát", "Be"),
+    ("hồng", "Hồng"),
+    ("tím", "Tím"),
+    ("vàng", "Vàng"),
+    ("cam", "Cam"),
+    ("bạc", "Bạc"),
+    ("đồng", "Đồng"),
+    ("champagne", "Champagne"),
+    ("mận", "Mận"),
+    ("rêu", "Xanh"),
+    ("denim", "Xanh"),
+]
+
+_CLOTHING_SIZE_ORDER: Dict[str, int] = {
+    "XS": 10,
+    "S": 20,
+    "M": 30,
+    "L": 40,
+    "XL": 50,
+    "XXL": 60,
+    "2XL": 60,
+    "XXXL": 70,
+    "3XL": 70,
+    "4XL": 80,
+    "5XL": 90,
+    "6XL": 100,
+    "7XL": 110,
+    "8XL": 120,
+    "FREESIZE": 130,
+}
+_CLOTHING_SIZE_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:FREE\s*SIZE|FREESIZE|[2-8]\s*XL|XXXL|XXL|XL|XS|S|M|L)(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+_NUMERIC_SIZE_RE = re.compile(r"(?<!\d)(\d{2}(?:[.,]5)?)(?!\d)")
+
+_STYLE_TAG_ALIASES: Dict[str, List[str]] = {
+    "Váy": ["váy", "đầm", "dress"],
+    "Đuôi cá": ["đuôi cá", "duoi ca", "mermaid"],
+    "Xòe": ["xòe", "xoe", "flare", "flared"],
+    "Ôm body": ["body", "ôm body", "om body", "bodycon"],
+    "Suông": ["suông", "suong"],
+    "Maxi": ["maxi"],
+    "Midi": ["midi"],
+    "Hai dây": ["hai dây", "2 dây", "spaghetti strap"],
+    "Cổ V": ["cổ v", "co v", "v-neck"],
+    "Cổ cao": ["cổ cao", "co cao", "turtleneck"],
+    "Kẻ caro": ["kẻ caro", "ke caro", "caro", "plaid", "checkered"],
+    "Kẻ sọc": ["kẻ sọc", "ke soc", "sọc", "soc", "striped"],
+    "Hoa nhí": ["hoa nhí", "hoa nhi", "floral"],
+    "Áo thun": ["áo thun", "ao thun", "t-shirt", "tee"],
+    "Áo sơ mi": ["áo sơ mi", "ao so mi", "shirt"],
+    "Áo khoác": ["áo khoác", "ao khoac", "jacket"],
+    "Polo": ["polo"],
+    "Oversize": ["oversize", "over size"],
+    "Slim fit": ["slim fit"],
+    "Quần jeans": ["quần jeans", "quan jeans", "jean", "denim"],
+    "Quần short": ["quần short", "quan short", "shorts"],
+    "Jogger": ["jogger"],
+    "Cargo": ["cargo"],
+    "Chân váy": ["chân váy", "chan vay", "skirt"],
+    "Giày lười": ["giày lười", "giay luoi", "loafer", "slip-on", "slip on"],
+    "Sneaker": ["sneaker", "giày thể thao", "giay the thao"],
+    "Sandal": ["sandal", "xăng đan", "xang dan"],
+    "Cao gót": ["cao gót", "cao got", "high heel"],
+    "Boot": ["boot", "bốt", "bốt cổ", "boot cổ"],
+    "Búp bê": ["búp bê", "bup be", "mary jane"],
+    "Oxford": ["oxford"],
+    "Derby": ["derby"],
+    "Mule": ["mule", "sục", "clog"],
+}
+_STYLE_TAG_ORDER: Dict[str, int] = {label: idx for idx, label in enumerate(_STYLE_TAG_ALIASES.keys())}
+
+
+def _canonical_size_label(raw: Any) -> str:
+    t = re.sub(r"\s+", " ", str(raw or "")).strip()
+    if not t or t.lower() in ("nan", "none", "null"):
+        return ""
+
+    m = _CLOTHING_SIZE_RE.search(t)
+    if m:
+        label = re.sub(r"\s+", "", m.group(0)).upper()
+        if label == "FREESIZE":
+            return "Freesize"
+        if label == "XXL":
+            return "2XL"
+        if label == "XXXL":
+            return "3XL"
+        return label
+
+    m = _NUMERIC_SIZE_RE.search(t)
+    if not m:
+        return ""
+    num_raw = m.group(1).replace(",", ".")
+    try:
+        value = float(num_raw)
+    except ValueError:
+        return ""
+    # Bỏ mã SKU/số mẫu như 2825; giữ các size giày/quần áo phổ biến.
+    if value < 16 or value > 60:
+        return ""
+    return str(int(value)) if value == int(value) else str(value).rstrip("0").rstrip(".")
+
+
+def _canonical_color_label(raw: Any) -> str:
+    t = re.sub(r"\s+", " ", str(raw or "")).strip()
+    if not t or t.lower() in ("nan", "none", "null"):
+        return ""
+    # Bỏ mã đầu dòng/SKU thường gặp: "2825 Màu Đen" -> "Màu Đen".
+    t = re.sub(r"^[A-Za-z]?\d+[A-Za-z0-9_-]*\s+", "", t).strip()
+    t_norm = remove_vietnamese_accents(t.lower())
+    for hint, label in _CANONICAL_COLOR_HINTS:
+        needle = remove_vietnamese_accents(hint.lower())
+        if re.search(rf"(^|[^a-z0-9]){re.escape(needle)}([^a-z0-9]|$)", t_norm):
+            return label
+    return ""
+
+
+def _text_for_style_tags(*values: Any) -> str:
+    parts: List[str] = []
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, (dict, list)):
+            try:
+                parts.append(json.dumps(value, ensure_ascii=False))
+            except Exception:
+                parts.append(str(value))
+        else:
+            parts.append(str(value))
+    return remove_vietnamese_accents(" ".join(parts).lower())
+
+
+def style_tags_from_product_row(*values: Any) -> Set[str]:
+    text = _text_for_style_tags(*values)
+    out: Set[str] = set()
+    if not text:
+        return out
+    for label, aliases in _STYLE_TAG_ALIASES.items():
+        for alias in aliases:
+            needle = remove_vietnamese_accents(alias.lower())
+            if re.search(rf"(^|[^a-z0-9]){re.escape(needle)}([^a-z0-9]|$)", text):
+                out.add(label)
+                break
+    return out
+
+
+def _pretty_color_label(s: str) -> str:
+    t = (s or "").strip()
+    if not t:
+        return ""
+    parts = t.split()
+    if not parts:
+        return ""
+    return " ".join(p[:1].upper() + p[1:].lower() if p else "" for p in parts)
+
+
+def _flatten_sizes_json(sizes_val: Any) -> List[str]:
+    out: List[str] = []
+    if sizes_val is None:
+        return out
+    if isinstance(sizes_val, list):
+        for x in sizes_val:
+            if x is None:
+                continue
+            for part in re.split(r"[,;/|]", str(x)):
+                s = _canonical_size_label(part)
+                if s:
+                    out.append(s)
+        return out
+    if isinstance(sizes_val, str) and sizes_val.strip():
+        try:
+            parsed = json.loads(sizes_val)
+            if isinstance(parsed, list):
+                return _flatten_sizes_json(parsed)
+        except Exception:
+            pass
+        for part in re.split(r"[,;/|]", sizes_val):
+            p = _canonical_size_label(part)
+            if p:
+                out.append(p)
+    return out
+
+
+def color_labels_from_product_row(
+    name: Optional[str], color_col: Optional[str], colors_json: Any
+) -> Set[str]:
+    out: Set[str] = set()
+    if colors_json is not None:
+        if isinstance(colors_json, list):
+            for c in colors_json:
+                if isinstance(c, str) and c.strip():
+                    lab = _canonical_color_label(c)
+                    if lab:
+                        out.add(lab)
+                elif isinstance(c, dict):
+                    raw = (c.get("name") or c.get("value") or "").strip()
+                    if raw:
+                        lab = _canonical_color_label(raw)
+                        if lab:
+                            out.add(lab)
+        elif isinstance(colors_json, str) and colors_json.strip():
+            try:
+                parsed = json.loads(colors_json)
+                if isinstance(parsed, list):
+                    return color_labels_from_product_row(name, color_col, parsed)
+            except Exception:
+                pass
+    cc = (color_col or "").strip()
+    if cc and cc.lower() != "nan":
+        for part in re.split(r"[,;/|]", cc):
+            lab = _canonical_color_label(part)
+            if lab:
+                out.add(lab)
+    nm = name or ""
+    nn = remove_vietnamese_accents(nm.lower())
+    for hint in _NAME_COLOR_HINTS_ORDERED:
+        needle = remove_vietnamese_accents(hint.lower())
+        if len(needle) >= 2 and needle in nn:
+            lab = _canonical_color_label(hint)
+            if lab:
+                out.add(lab)
+    return out
+
+
+def apply_product_category_filters(
+    query,
+    db: Session,
+    category: Optional[str],
+    subcategory: Optional[str],
+    sub_subcategory: Optional[str],
+):
+    """Cùng logic lọc 3 cấp như get_products (gồm category_id + nhóm subcategory)."""
     cat_s = (category or "").strip() if category else ""
     sub_s = (subcategory or "").strip() if subcategory else ""
     subsub_s = (sub_subcategory or "").strip() if sub_subcategory else ""
@@ -1341,10 +1719,575 @@ def get_products(
             sse = category_field_equals_ci(Product.sub_subcategory, subsub_s)
             if sse is not None:
                 query = query.filter(sse)
+    return query
+
+
+def _size_filter_candidates(size: str) -> List[str]:
+    raw = str(size or "").strip()
+    if not raw:
+        return []
+    candidates = [raw]
+    num = raw.replace(",", ".").replace(" ", "")
+    if re.fullmatch(r"\d+(?:\.\d+)?", num):
+        try:
+            fv = float(num)
+            normalized = str(int(fv)) if fv == int(fv) else str(fv)
+            candidates.append(normalized)
+        except Exception:
+            pass
+    seen: Set[str] = set()
+    out: List[str] = []
+    for c in candidates:
+        key = c.lower()
+        if c and key not in seen:
+            seen.add(key)
+            out.append(c)
+    return out
+
+
+def apply_product_size_filter(query, size: Optional[str]):
+    """
+    Lọc SP có size trong cột JSON `sizes`.
+
+    Ngoài `@> contains` chuẩn, bổ sung khớp «mảng/ghi dạng text» (vd. [41, 42], \"35/36/42\",
+    một phần tử chứa chuỗi nhiều size) — cùng họ dữ liệu mà `_flatten_sizes_json` dùng cho facets,
+    tránh trường hợp UI có \"42\" nhưng contains([\"42\"]) không khớp DB.
+    """
+    if not size or not str(size).strip():
+        return query
+    candidates = _size_filter_candidates(str(size))
+    if not candidates:
+        return query
+    s_raw = candidates[0]
+
+    parts: List = []
+    st = cast(Product.sizes, String)
+    if is_sqlite:
+        for candidate in candidates:
+            parts.append(Product.sizes.contains([candidate]))
+        num = s_raw.replace(",", ".").replace(" ", "")
+        if re.fullmatch(r"\d+(?:\.\d+)?", num):
+            try:
+                fv = float(num)
+                if fv == int(fv):
+                    parts.append(Product.sizes.contains([int(fv)]))
+                else:
+                    parts.append(Product.sizes.contains([fv]))
+            except Exception:
+                pass
+
+        sqlite_likes = []
+        for candidate in candidates:
+            esc = candidate.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            sqlite_likes.extend([
+                st.like(f'%"{esc}"%', escape="\\"),
+                st.like(f'%[{esc}]%', escape="\\"),
+                st.like(f'%[{esc},%', escape="\\"),
+                st.like(f'%, {esc},%', escape="\\"),
+                st.like(f'%,{esc},%', escape="\\"),
+                st.like(f'%, {esc}]%', escape="\\"),
+                st.like(f'%,{esc}]%', escape="\\"),
+                st.like(f'%/{esc}/%', escape="\\"),
+                st.like(f'%{esc}/%', escape="\\"),
+                st.like(f'%/{esc}%', escape="\\"),
+            ])
+        parts.append(or_(*sqlite_likes))
+    else:
+        regex_parts = []
+        for candidate in candidates:
+            candidate_num = candidate.replace(",", ".").replace(" ", "")
+            if re.fullmatch(r"\d+(?:\.\d+)?", candidate_num):
+                regex_parts.append(st.op("~*")(rf"(^|[^0-9.]){re.escape(candidate)}([^0-9.]|$)"))
+            else:
+                regex_parts.append(st.op("~*")(rf"(^|[^A-Za-z0-9]){re.escape(candidate)}([^A-Za-z0-9]|$)"))
+        parts.append(or_(*regex_parts))
+
+    return query.filter(or_(*parts))
+
+
+def apply_product_color_filter(query, color: Optional[str]):
+    """Khớp màu đã chọn: tên SP, cột color, JSON colors (cùng logic gợi ý facets)."""
+    if not color or not str(color).strip():
+        return query
+    c = str(color).strip()
+    like = f"%{c}%"
+    return query.filter(
+        or_(
+            Product.name.ilike(like),
+            Product.color.ilike(like),
+            cast(Product.colors, String).ilike(like),
+        )
+    )
+
+
+def apply_product_style_tag_filter(query, style_tag: Optional[str]):
+    """Lọc theo tag kiểu phổ thông tự rút từ tên / style / features / product_info."""
+    label = (style_tag or "").strip()
+    if not label:
+        return query
+    aliases = _STYLE_TAG_ALIASES.get(label, [label])
+    search_concat = sql_func.concat(
+        sql_func.coalesce(Product.name, ""), " ",
+        sql_func.coalesce(Product.category, ""), " ",
+        sql_func.coalesce(Product.subcategory, ""), " ",
+        sql_func.coalesce(Product.sub_subcategory, ""), " ",
+        sql_func.coalesce(Product.style, ""), " ",
+        sql_func.coalesce(Product.material, ""), " ",
+        sql_func.coalesce(cast(Product.features, String), ""), " ",
+        sql_func.coalesce(cast(Product.product_info, String), "")
+    )
+    text_col = sql_func.lower(search_concat)
+    conditions = []
+    for alias in aliases:
+        a = str(alias).strip()
+        if a:
+            conditions.append(text_col.ilike(f"%{a.lower()}%"))
+    return query.filter(or_(*conditions)) if conditions else query
+
+
+def _facet_str_nonempty(val: Optional[str]) -> bool:
+    s = (val or "").strip()
+    return bool(s and s.lower() != "nan")
+
+
+def _facet_listing_dimensions_present(
+    *,
+    category: Optional[str] = None,
+    subcategory: Optional[str] = None,
+    sub_subcategory: Optional[str] = None,
+    shop_name: Optional[str] = None,
+    shop_id: Optional[str] = None,
+    style: Optional[str] = None,
+    shop_name_chinese: Optional[str] = None,
+    chinese_name: Optional[str] = None,
+    pro_lower_price: Optional[str] = None,
+    pro_high_price: Optional[str] = None,
+) -> bool:
+    """Ít nhất một chiều lọc (không chỉ q) để facets listing `/` không q — tránh scan cả DB."""
+    if _facet_str_nonempty(style):
+        return True
+    if any(_facet_str_nonempty(x) for x in (category, subcategory, sub_subcategory)):
+        return True
+    if _facet_str_nonempty(shop_id):
+        return True
+    if _facet_str_nonempty(shop_name):
+        return True
+    if _facet_str_nonempty(shop_name_chinese):
+        return True
+    if _facet_str_nonempty(chinese_name):
+        return True
+    if _facet_str_nonempty(pro_lower_price):
+        return True
+    if _facet_str_nonempty(pro_high_price):
+        return True
+    return False
+
+
+def _aggregate_product_facet_rows(rows) -> Dict[str, Any]:
+    sizes_acc: Set[str] = set()
+    colors_acc: Set[str] = set()
+    style_tags_acc: Set[str] = set()
+    prices: List[float] = []
+    for row in rows:
+        sizes_val, colors_val, color_col, name, price = row[:5]
+        for sz in _flatten_sizes_json(sizes_val):
+            sizes_acc.add(sz)
+        for lab in color_labels_from_product_row(name, color_col, colors_val):
+            colors_acc.add(lab)
+        if len(row) > 5:
+            for tag in style_tags_from_product_row(name, *row[5:]):
+                style_tags_acc.add(tag)
+        try:
+            if price is not None:
+                prices.append(float(price))
+        except (TypeError, ValueError):
+            pass
+
+    def _size_sort_key(x: str) -> tuple:
+        try:
+            return (0, float(str(x).replace(",", ".")))
+        except Exception:
+            key = str(x).upper()
+            return (1, _CLOTHING_SIZE_ORDER.get(key, 999), key.lower())
+
+    return {
+        "sizes": sorted(sizes_acc, key=_size_sort_key),
+        "colors": sorted(colors_acc, key=lambda x: x.lower()),
+        "style_tags": sorted(style_tags_acc, key=lambda x: (_STYLE_TAG_ORDER.get(x, 999), x.lower())),
+        "price_min": min(prices) if prices else None,
+        "price_max": max(prices) if prices else None,
+    }
+
+
+def _filter_facet_sizes_with_product_results(base_query, sizes: List[str]) -> List[str]:
+    """
+    Dropdown size chỉ hiển thị option mà khi áp vào cùng query listing vẫn còn sản phẩm.
+    Tránh facet lấy được từ dữ liệu thô nhưng predicate lọc thực tế trả 0 kết quả.
+    """
+    valid: List[str] = []
+    for size in sizes:
+        try:
+            hit = (
+                apply_product_size_filter(base_query, size)
+                .with_entities(Product.id)
+                .limit(1)
+                .first()
+            )
+            if hit is not None:
+                valid.append(size)
+        except Exception:
+            try:
+                base_query.session.rollback()
+            except Exception:
+                pass
+            # Nếu DB dialect có lỗi ngoài ý muốn, giữ option thay vì làm mất toàn bộ bộ lọc.
+            valid.append(size)
+    return valid
+
+
+def _filter_facet_colors_with_product_results(base_query, colors: List[str]) -> List[str]:
+    """Chỉ giữ màu mà khi áp vào cùng query listing vẫn còn sản phẩm."""
+    valid: List[str] = []
+    for color in colors:
+        try:
+            hit = (
+                apply_product_color_filter(base_query, color)
+                .with_entities(Product.id)
+                .limit(1)
+                .first()
+            )
+            if hit is not None:
+                valid.append(color)
+        except Exception:
+            try:
+                base_query.session.rollback()
+            except Exception:
+                pass
+            valid.append(color)
+    return valid
+
+
+def _apply_product_price_filters(query, min_price: Optional[float], max_price: Optional[float]):
+    if min_price is not None:
+        query = query.filter(Product.price >= min_price)
+    if max_price is not None:
+        query = query.filter(Product.price <= max_price)
+    return query
+
+
+def build_dependent_product_facets(
+    query,
+    *,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    filter_size: Optional[str] = None,
+    filter_color: Optional[str] = None,
+    filter_style_tag: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Facets phụ thuộc nhau cho một base query bất kỳ:
+    - size theo màu + giá
+    - màu theo size + giá
+    - khoảng giá theo size + màu
+    """
+    facet_columns = (
+        Product.sizes, Product.colors, Product.color, Product.name, Product.price,
+        Product.style, Product.material, Product.features, Product.product_info,
+        Product.category, Product.subcategory, Product.sub_subcategory
+    )
+    if not any([min_price is not None, max_price is not None, filter_size, filter_color, filter_style_tag]):
+        facets = _aggregate_product_facet_rows(query.with_entities(*facet_columns).all())
+        return {
+            "sizes": facets["sizes"],
+            "colors": facets["colors"],
+            "style_tags": facets["style_tags"],
+            "price_min": facets["price_min"],
+            "price_max": facets["price_max"],
+        }
+
+    size_query = query
+    if filter_color:
+        size_query = apply_product_color_filter(size_query, filter_color)
+    if filter_style_tag:
+        size_query = apply_product_style_tag_filter(size_query, filter_style_tag)
+    size_query = _apply_product_price_filters(size_query, min_price, max_price)
+    size_rows = size_query.with_entities(*facet_columns).all()
+    size_facets = _aggregate_product_facet_rows(size_rows)
+
+    color_query = query
+    if filter_size:
+        color_query = apply_product_size_filter(color_query, filter_size)
+    if filter_style_tag:
+        color_query = apply_product_style_tag_filter(color_query, filter_style_tag)
+    color_query = _apply_product_price_filters(color_query, min_price, max_price)
+    color_rows = color_query.with_entities(*facet_columns).all()
+    color_facets = _aggregate_product_facet_rows(color_rows)
+
+    price_query = query
+    if filter_size:
+        price_query = apply_product_size_filter(price_query, filter_size)
+    if filter_color:
+        price_query = apply_product_color_filter(price_query, filter_color)
+    if filter_style_tag:
+        price_query = apply_product_style_tag_filter(price_query, filter_style_tag)
+    price_rows = price_query.with_entities(*facet_columns).all()
+    price_facets = _aggregate_product_facet_rows(price_rows)
+
+    style_query = query
+    if filter_size:
+        style_query = apply_product_size_filter(style_query, filter_size)
+    if filter_color:
+        style_query = apply_product_color_filter(style_query, filter_color)
+    style_query = _apply_product_price_filters(style_query, min_price, max_price)
+    style_rows = style_query.with_entities(*facet_columns).all()
+    style_facets = _aggregate_product_facet_rows(style_rows)
+
+    return {
+        "sizes": size_facets["sizes"],
+        "colors": color_facets["colors"],
+        "style_tags": style_facets["style_tags"],
+        "price_min": price_facets["price_min"],
+        "price_max": price_facets["price_max"],
+    }
+
+
+def get_category_product_facets(
+    db: Session,
+    category: Optional[str],
+    subcategory: Optional[str],
+    sub_subcategory: Optional[str],
+    *,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    filter_size: Optional[str] = None,
+    filter_color: Optional[str] = None,
+    filter_style_tag: Optional[str] = None,
+) -> Dict[str, Any]:
+    """sizes / colors distinct trong phạm vi danh mục; giá min–max (sản phẩm đang active)."""
+    return get_product_listing_facets(
+        db,
+        category=category,
+        subcategory=subcategory,
+        sub_subcategory=sub_subcategory,
+        min_price=min_price,
+        max_price=max_price,
+        filter_size=filter_size,
+        filter_color=filter_color,
+        filter_style_tag=filter_style_tag,
+        is_active=True,
+    )
+
+
+def get_product_listing_facets(
+    db: Session,
+    *,
+    q: Optional[str] = None,
+    category: Optional[str] = None,
+    subcategory: Optional[str] = None,
+    sub_subcategory: Optional[str] = None,
+    shop_name: Optional[str] = None,
+    shop_id: Optional[str] = None,
+    style: Optional[str] = None,
+    shop_name_chinese: Optional[str] = None,
+    chinese_name: Optional[str] = None,
+    pro_lower_price: Optional[str] = None,
+    pro_high_price: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    filter_size: Optional[str] = None,
+    filter_color: Optional[str] = None,
+    filter_style_tag: Optional[str] = None,
+    is_active: Optional[bool] = True,
+) -> Dict[str, Any]:
+    """
+    Size/màu/giá cho listing `GET /products/` — khớp các chiều danh mục, shop, style, nhóm Excel…
+    Không áp size/màu/min_price/max_price; khi có `q` áp lọc từ giống danh sách.
+    Không `q` thì cần _facet_listing_dimensions_present (tránh facets toàn cửa hàng).
+    """
+    empty: Dict[str, Any] = {"sizes": [], "colors": [], "style_tags": [], "price_min": None, "price_max": None}
+    raw_q = (q or "").strip()
+    words: Optional[List[str]] = None
+    if raw_q:
+        normalized = normalize_search_query(raw_q)
+        words = [w.strip() for w in normalized.split() if w.strip()]
+        if not words:
+            return empty
+    elif not _facet_listing_dimensions_present(
+        category=category,
+        subcategory=subcategory,
+        sub_subcategory=sub_subcategory,
+        shop_name=shop_name,
+        shop_id=shop_id,
+        style=style,
+        shop_name_chinese=shop_name_chinese,
+        chinese_name=chinese_name,
+        pro_lower_price=pro_lower_price,
+        pro_high_price=pro_high_price,
+    ):
+        return empty
+
+    query = db.query(Product)
+    query = apply_product_category_filters(query, db, category, subcategory, sub_subcategory)
     if shop_name:
         query = query.filter(Product.shop_name.ilike(f"%{shop_name.strip()}%"))
     if shop_id:
         query = query.filter(Product.shop_id == shop_id)
+    if style:
+        st = style.strip()
+        if st and st.lower() != "nan":
+            query = query.filter(
+                Product.style.isnot(None),
+                sql_func.lower(sql_func.trim(Product.style)) == st.lower(),
+            )
+    if shop_name_chinese:
+        sc = shop_name_chinese.strip()
+        if sc and sc.lower() != "nan":
+            query = query.filter(
+                Product.shop_name_chinese.isnot(None),
+                sql_func.lower(sql_func.trim(Product.shop_name_chinese)) == sc.lower(),
+            )
+    if chinese_name:
+        cn = chinese_name.strip()
+        if cn and cn.lower() != "nan":
+            query = query.filter(
+                Product.chinese_name.isnot(None),
+                sql_func.lower(sql_func.trim(Product.chinese_name)) == cn.lower(),
+            )
+    if pro_lower_price:
+        val = pro_lower_price.strip()
+        if val and val.lower() != "nan":
+            query = query.filter(Product.pro_lower_price.ilike(f"%{val}%"))
+    if pro_high_price:
+        val = pro_high_price.strip()
+        if val and val.lower() != "nan":
+            query = query.filter(Product.pro_high_price.ilike(f"%{val}%"))
+    if is_active is not None:
+        query = query.filter(Product.is_active == is_active)
+    if words is not None:
+        query = apply_product_search_word_filters(query, words)
+
+    return build_dependent_product_facets(
+        query,
+        min_price=min_price,
+        max_price=max_price,
+        filter_size=filter_size,
+        filter_color=filter_color,
+        filter_style_tag=filter_style_tag,
+    )
+
+
+def get_search_product_facets(
+    db: Session,
+    q: Optional[str],
+    *,
+    category: Optional[str] = None,
+    subcategory: Optional[str] = None,
+    sub_subcategory: Optional[str] = None,
+    shop_name: Optional[str] = None,
+    shop_id: Optional[str] = None,
+    style: Optional[str] = None,
+    shop_name_chinese: Optional[str] = None,
+    chinese_name: Optional[str] = None,
+    pro_lower_price: Optional[str] = None,
+    pro_high_price: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    filter_size: Optional[str] = None,
+    filter_color: Optional[str] = None,
+    filter_style_tag: Optional[str] = None,
+    is_active: Optional[bool] = True,
+) -> Dict[str, Any]:
+    """
+    Size/màu/khoảng giá trên tập SP khớp `q` (cùng logic từ rời như list tìm kiếm),
+    không áp size/màu/min/max — dùng bộ lọc trên trang chủ `/?q=`.
+    """
+    raw = (q or "").strip()
+    if not raw:
+        return {"sizes": [], "colors": [], "style_tags": [], "price_min": None, "price_max": None}
+    return get_product_listing_facets(
+        db,
+        q=q,
+        category=category,
+        subcategory=subcategory,
+        sub_subcategory=sub_subcategory,
+        shop_name=shop_name,
+        shop_id=shop_id,
+        style=style,
+        shop_name_chinese=shop_name_chinese,
+        chinese_name=chinese_name,
+        pro_lower_price=pro_lower_price,
+        pro_high_price=pro_high_price,
+        min_price=min_price,
+        max_price=max_price,
+        filter_size=filter_size,
+        filter_color=filter_color,
+        filter_style_tag=filter_style_tag,
+        is_active=is_active,
+    )
+
+
+def get_products(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    category: Optional[str] = None,
+    subcategory: Optional[str] = None,
+    sub_subcategory: Optional[str] = None,
+    shop_name: Optional[str] = None,
+    shop_id: Optional[str] = None,
+    style: Optional[str] = None,
+    shop_name_chinese: Optional[str] = None,
+    chinese_name: Optional[str] = None,
+    pro_lower_price: Optional[str] = None,
+    pro_high_price: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    is_active: Optional[bool] = None,
+    q: Optional[str] = None,
+    product_id: Optional[str] = None,
+    *,
+    sort: Optional[str] = None,
+    order_random: bool = False,
+    filter_size: Optional[str] = None,
+    filter_color: Optional[str] = None,
+    filter_style_tag: Optional[str] = None,
+):
+    query = db.query(Product)
+    has_q = bool(q and str(q).strip())
+    sort_norm = normalize_product_list_sort(sort)
+    use_random_order = bool(order_random and not has_q)
+    if use_random_order:
+        sort_norm = "default"
+
+    query = apply_product_category_filters(query, db, category, subcategory, sub_subcategory)
+    query = apply_product_size_filter(query, filter_size)
+    query = apply_product_color_filter(query, filter_color)
+    query = apply_product_style_tag_filter(query, filter_style_tag)
+    if shop_name:
+        query = query.filter(Product.shop_name.ilike(f"%{shop_name.strip()}%"))
+    if shop_id:
+        query = query.filter(Product.shop_id == shop_id)
+    if style:
+        st = style.strip()
+        if st and st.lower() != "nan":
+            query = query.filter(
+                Product.style.isnot(None),
+                sql_func.lower(sql_func.trim(Product.style)) == st.lower(),
+            )
+    if shop_name_chinese:
+        sc = shop_name_chinese.strip()
+        if sc and sc.lower() != "nan":
+            query = query.filter(
+                Product.shop_name_chinese.isnot(None),
+                sql_func.lower(sql_func.trim(Product.shop_name_chinese)) == sc.lower(),
+            )
+    if chinese_name:
+        cn = chinese_name.strip()
+        if cn and cn.lower() != "nan":
+            query = query.filter(
+                Product.chinese_name.isnot(None),
+                sql_func.lower(sql_func.trim(Product.chinese_name)) == cn.lower(),
+            )
     if pro_lower_price:
         val = pro_lower_price.strip()
         if val and val.lower() != "nan":
@@ -2642,6 +3585,7 @@ def bulk_import_products(
     updated = 0
     errors = []
     warnings = []
+    skipped: List[str] = []
 
     batch_size = max(
         1,
@@ -2663,26 +3607,86 @@ def bulk_import_products(
 
     sku_batch_reserved: Set[str] = set()
 
+    db_prefix_owner, db_code_owner = _bulk_import_conflict_maps_initial(db)
+    batch_prefix_owner: Dict[str, str] = {}
+    batch_code_owner: Dict[str, str] = {}
+
     for idx, product_data in enumerate(products_data):
-        try:
-            product_id = product_data.get('product_id')
-            if not product_id:
-                errors.append(f"Dòng {idx+1}: Thiếu product_id")
+        product_id = product_data.get("product_id")
+        if not product_id:
+            errors.append(f"Dòng {idx + 1}: Thiếu product_id")
+            continue
+
+        seg = split_product_id_web_prefix_and_internal_sku(product_id)
+        existing = db.query(Product).filter(Product.product_id == product_id).first()
+
+        if seg:
+            pk = seg["prefix_key"]
+            pref_holder = batch_prefix_owner.get(pk) or db_prefix_owner.get(pk)
+            if pref_holder and pref_holder != product_id:
+                skipped.append(
+                    f"Dòng {idx + 1} ({product_id}): Bỏ qua — phần id trước «a188» «{seg['prefix']}» "
+                    f"đã trùng với sản phẩm khác ({pref_holder})."
+                )
                 continue
-            
-            # Kiểm tra trùng slug
-            slug_value = product_data.get('slug', '')
-            if slug_value:
-                existing_slug = db.query(Product).filter(Product.slug == slug_value).first()
-                if existing_slug and existing_slug.product_id != product_id:
-                    new_slug = generate_consistent_slug(product_data.get('name', ''), product_id)
-                    product_data['slug'] = new_slug
-                    warnings.append(f"Dòng {idx+1}: Slug '{slug_value}' bị trùng, đã đổi thành '{new_slug}'")
-            
-            # Tra `category_id` (cat3.id) theo slug/full_slug/name. Không match → để None,
-            # log để admin biết cần bổ sung taxonomy hoặc đồng bộ tên Excel.
-            resolved_cat_id = _resolve_category_id_from_row(product_data, cat3_idx)
-            product_data["category_id"] = resolved_cat_id
+
+            sku_tag = seg["sku"]
+            sku_holder = batch_code_owner.get(sku_tag) or db_code_owner.get(sku_tag)
+            if sku_holder and sku_holder != product_id:
+                skipped.append(
+                    f"Dòng {idx + 1} ({product_id}): Bỏ qua — mã SKU «{sku_tag}» "
+                    f"đã được sản phẩm khác dùng ({sku_holder})."
+                )
+                continue
+
+        try:
+            row_slug_warning: Optional[str] = None
+            resolved_cat_id: Optional[int] = None
+            with db.begin_nested():
+                slug_value = product_data.get("slug", "")
+                if slug_value:
+                    existing_slug = db.query(Product).filter(Product.slug == slug_value).first()
+                    if existing_slug and existing_slug.product_id != product_id:
+                        new_slug = generate_consistent_slug(product_data.get("name", ""), product_id)
+                        product_data["slug"] = new_slug
+                        row_slug_warning = (
+                            f"Dòng {idx + 1}: Slug '{slug_value}' bị trùng, đã đổi thành '{new_slug}'"
+                        )
+
+                resolved_cat_id = _resolve_category_id_from_row(product_data, cat3_idx)
+                product_data["category_id"] = resolved_cat_id
+
+                product_data["code"] = ensure_unique_internal_product_code(
+                    db,
+                    product_data.get("code"),
+                    exclude_product_id=existing.id if existing else None,
+                    batch_reserved=sku_batch_reserved,
+                )
+                product_data["product_info"] = sync_internal_code_into_product_info(
+                    product_data.get("product_info"),
+                    product_data["code"],
+                )
+                canonicalize_hibox_placeholder_product_id(product_data)
+
+                if existing:
+                    for key, value in product_data.items():
+                        if hasattr(existing, key) and key not in ["id", "created_at"]:
+                            setattr(existing, key, value)
+                    existing.updated_at = datetime.now()
+                    row_was_update = True
+                    logger.debug("🔄 Updated product: %s", product_id)
+                else:
+                    db.add(Product(**product_data))
+                    row_was_update = False
+                    logger.debug("➕ Created product (pending flush): %s", product_id)
+
+            if row_was_update:
+                updated += 1
+            else:
+                created += 1
+
+            if row_slug_warning:
+                warnings.append(row_slug_warning)
             if resolved_cat_id is None and (
                 product_data.get("category") or product_data.get("sub_subcategory")
             ):
@@ -2692,50 +3696,30 @@ def bulk_import_products(
                     f"{product_data.get('sub_subcategory', '')}"
                 )
 
-            existing = db.query(Product).filter(Product.product_id == product_id).first()
-
-            product_data["code"] = ensure_unique_internal_product_code(
-                db,
-                product_data.get("code"),
-                exclude_product_id=existing.id if existing else None,
-                batch_reserved=sku_batch_reserved,
-            )
-            product_data["product_info"] = sync_internal_code_into_product_info(
-                product_data.get("product_info"), product_data["code"]
-            )
-            canonicalize_hibox_placeholder_product_id(product_data)
-
-            if existing:
-                # Update existing product
-                for key, value in product_data.items():
-                    if hasattr(existing, key) and key not in ['id', 'created_at']:
-                        setattr(existing, key, value)
-                existing.updated_at = datetime.now()
-                updated += 1
-                logger.debug(f"🔄 Updated product: {product_id}")
-            else:
-                # Create new product
-                db_product = Product(**product_data)
-                db.add(db_product)
-                created += 1
-                logger.debug(f"➕ Created product: {product_id}")
-            
-            # Batch commit (lô lớn hơn khi import ~30k dòng để giảm số transaction)
-            if (idx + 1) % batch_size == 0:
-                db.commit()
-                logger.info(f"💾 Batch commit: {idx + 1} products")
-
-            if progress_callback and (
-                (idx + 1) % db_tick == 0 or (idx + 1) == n_products
-            ):
-                progress_callback("database", idx + 1, n_products)
+            if seg:
+                pk = seg["prefix_key"]
+                batch_prefix_owner.setdefault(pk, product_id)
+                db_prefix_owner[pk] = product_id
+                sku_from_id = seg["sku"]
+                final_code_u = str(product_data.get("code") or "").strip().upper()
+                for key in ({sku_from_id, final_code_u} if final_code_u else {sku_from_id}):
+                    if not key:
+                        continue
+                    batch_code_owner.setdefault(key, product_id)
+                    db_code_owner[key] = product_id
 
         except Exception as e:
-            error_msg = f"Dòng {idx+1}: {str(e)}"
-            errors.append(error_msg)
-            db.rollback()
-            logger.error(f"❌ Row {idx+1} error: {e}")
-    
+            errors.append(f"Dòng {idx + 1}: {str(e)}")
+            logger.error("❌ Row %s error: %s", idx + 1, e)
+            continue
+
+        if (idx + 1) % batch_size == 0:
+            db.commit()
+            logger.info("💾 Batch commit: %s products", idx + 1)
+
+        if progress_callback and ((idx + 1) % db_tick == 0 or (idx + 1) == n_products):
+            progress_callback("database", idx + 1, n_products)
+
     # Final commit
     try:
         db.commit()
@@ -2754,6 +3738,8 @@ def bulk_import_products(
             "updated": updated,
             "errors": errors,
             "warnings": warnings,
+            "skipped": skipped,
+            "skipped_count": len(skipped),
             "total_processed": total_processed,
             "success_rate": f"{success_rate:.1f}%",
         }
@@ -2787,12 +3773,14 @@ def bulk_import_products(
 
     # Calculate success rate
     success_rate = f"{success_rate_pct:.1f}%"
-    
+
     result = {
         "created": created,
         "updated": updated,
         "errors": errors,
         "warnings": warnings,
+        "skipped": skipped,
+        "skipped_count": len(skipped),
         "total_processed": total_processed,
         "success_rate": success_rate,
     }
@@ -2800,6 +3788,7 @@ def bulk_import_products(
     logger.info(f"📦 BULK IMPORT COMPLETE:")
     logger.info(f"   ➕ Created: {created}")
     logger.info(f"   🔄 Updated: {updated}")
+    logger.info(f"   ⏭ Skipped (trùng a188/SKU): {len(skipped)}")
     logger.info(f"   ⚠️  Warnings: {len(warnings)}")
     logger.info(f"   ❌ Errors: {len(errors)}")
     logger.info(f"   📈 Success rate: {success_rate}")

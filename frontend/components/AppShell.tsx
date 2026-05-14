@@ -1,7 +1,7 @@
 // components/AppShell.tsx - Header + Navigation + Footer xuyên suốt tất cả các trang
 'use client';
 
-import { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
+import { useState, useEffect, useMemo, useRef, useLayoutEffect, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
 import { usePathname, useSearchParams, useRouter } from 'next/navigation';
 import Header from '@/components/Header';
@@ -23,6 +23,7 @@ import { useCart } from '@/features/cart/hooks/useCart';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { apiClient } from '@/lib/api-client';
 import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
+import { searchParamsToEncodedQueryString } from '@/lib/product-related-tabs';
 import type { CategoryLevel1 } from '@/types/api';
 
 interface AppShellProps {
@@ -76,6 +77,8 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   /** Trang chủ có query lọc/tìm, hoặc trang /info/* — cố định header + nav desktop khi cuộn */
   const keepDesktopHeaderPinned = useMemo(() => {
     if (pathname?.startsWith('/info')) return true;
+    if (pathname?.startsWith('/danh-muc')) return true;
+    if (pathname?.startsWith('/c/')) return true;
     const home =
       pathname === '/' ||
       pathname === '' ||
@@ -87,8 +90,15 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     if (t('shop_name')) return true;
     if (t('pro_lower_price')) return true;
     if (t('pro_high_price')) return true;
+    if (t('shop_name_chinese')) return true;
+    if (t('sxc')) return true;
+    if (t('chinese_name')) return true;
+    if (t('style')) return true;
     if (t('min_price')) return true;
     if (t('max_price')) return true;
+    if (t('size')) return true;
+    if (t('color')) return true;
+    if (t('sort')) return true;
     if (t('category')) return true;
     if (t('subcategory')) return true;
     if (t('sub_subcategory')) return true;
@@ -229,13 +239,20 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     if (category) params.set('category', category);
     if (subcategory) params.set('subcategory', subcategory);
     if (sub_subcategory) params.set('sub_subcategory', sub_subcategory);
-    router.push('/?' + params.toString());
+    router.push('/?' + searchParamsToEncodedQueryString(params));
   };
 
   const showMobileBottomNav = !isProductDetailPage && !isShopVideoFeedPage;
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
+    <div
+      className="min-h-screen flex flex-col bg-gray-50"
+      style={
+        {
+          '--listing-chrome-height': keepDesktopHeaderPinned ? `${listingChromeHeight}px` : '0px',
+        } as CSSProperties
+      }
+    >
       {!isShopVideoFeedPage && (
       <div className="hidden md:block">
       {keepDesktopHeaderPinned ? (

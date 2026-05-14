@@ -14,6 +14,8 @@ import {
   excelCell,
   filtersFromProduct,
   buildHomeListingHref,
+  listingParamsForPriceSiblingTab,
+  listingParamsSameChineseShopCat2,
   type ProductRelatedTabId,
 } from '@/lib/product-related-tabs';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
@@ -27,11 +29,11 @@ function sectionTitle(tab: ProductRelatedTabId): string {
     case 'bestselling':
       return 'Sản phẩm bán chạy tương tự';
     case 'same_price':
-      return 'Sản phẩm cùng shop — cùng tầm giá';
+      return 'Sản phẩm cùng danh mục (cấp 2) — cùng shop Trung Quốc (AM / shop_name_chinese)';
     case 'lower_price':
-      return 'Sản phẩm cùng loại — mức giá thấp hơn';
+      return 'Sản phẩm cùng danh mục (cấp 2) — giá thấp hơn (trong 300k)';
     case 'higher_price':
-      return 'Sản phẩm cùng loại — mức giá cao hơn';
+      return 'Sản phẩm cùng danh mục (cấp 2) — giá cao hơn (trong 300k)';
     default:
       return 'Sản phẩm liên quan';
   }
@@ -40,13 +42,13 @@ function sectionTitle(tab: ProductRelatedTabId): string {
 function emptyHint(tab: ProductRelatedTabId): string {
   switch (tab) {
     case 'bestselling':
-      return 'Sản phẩm này chưa có thông tin cửa hàng — không lọc được nhóm bán chạy.';
+      return 'Sản phẩm chưa có Style (cột Style / AF) — không lọc được nhóm bán chạy.';
     case 'same_price':
-      return 'Sản phẩm này chưa có tên cửa hàng — không lọc được nhóm cùng tầm giá.';
+      return 'Thiếu danh mục cấp 2 hoặc tên shop Trung Quốc (shop_name_chinese) — không lọc được nhóm này.';
     case 'lower_price':
-      return 'Sản phẩm này chưa có nhóm giá thấp — không lọc được danh sách tương ứng.';
+      return 'Thiếu danh mục cấp 2, giá hợp lệ hoặc không có khoảng giá thấp hơn — không lọc được.';
     case 'higher_price':
-      return 'Sản phẩm này chưa có nhóm giá cao — không lọc được danh sách tương ứng.';
+      return 'Thiếu danh mục cấp 2 hoặc giá hợp lệ — không lọc được nhóm giá cao hơn.';
     default:
       return 'Không có dữ liệu để hiển thị.';
   }
@@ -97,47 +99,75 @@ type FetchPlan =
       ok: true;
       params: ProductSearchParams;
       sortPurchasesDesc?: boolean;
-      /** true khi «bán chạy» chỉ lọc theo shop_name — bỏ gọi song song nhóm cùng tên (trùng dữ liệu). */
-      skipParallelShopNameGroup?: boolean;
     }
   | { ok: false };
 
-function buildFetchPlan(product: Product, tab: ProductRelatedTabId): FetchPlan {
-  const shopId = excelCell(product.shop_id);
-  const shopName = excelCell(product.shop_name);
-  const proLower = excelCell(product.pro_lower_price);
-  const proHigh = excelCell(product.pro_high_price);
+function productSearchParamsFromChineseShopCat2(product: Product): ProductSearchParams | null {
+  const sibling = listingParamsSameChineseShopCat2(product);
+  if (!sibling) return null;
+  const { category, subcategory, ...rest } = sibling;
+  return {
+    ...rest,
+    ...(category ? { category } : {}),
+    ...(subcategory ? { subcategory } : {}),
+  };
+}
 
+function buildFetchPlan(product: Product, tab: ProductRelatedTabId): FetchPlan {
   const base: ProductSearchParams = { limit: 120, is_active: true };
 
   switch (tab) {
-    case 'bestselling':
-      if (shopId) {
-        return {
-          ok: true,
-          params: { ...base, shop_id: shopId },
-          sortPurchasesDesc: true,
-          skipParallelShopNameGroup: false,
-        };
-      }
-      if (shopName) {
-        return {
-          ok: true,
-          params: { ...base, shop_name: shopName },
-          sortPurchasesDesc: true,
-          skipParallelShopNameGroup: true,
-        };
-      }
-      return { ok: false };
-    case 'same_price':
-      if (!shopName) return { ok: false };
-      return { ok: true, params: { ...base, shop_name: shopName } };
-    case 'lower_price':
-      if (!proLower) return { ok: false };
-      return { ok: true, params: { ...base, pro_lower_price: proLower } };
-    case 'higher_price':
-      if (!proHigh) return { ok: false };
-      return { ok: true, params: { ...base, pro_high_price: proHigh } };
+    case 'bestselling': {
+      const st = excelCell(product.style);
+      if (!st) return { ok: false };
+      return {
+        ok: true,
+        params: { ...base, style: st },
+        sortPurchasesDesc: true,
+      };
+    }
+    case 'same_price': {
+      const sibling = listingParamsSameChineseShopCat2(product);
+      if (!sibling) return { ok: false };
+      const { category, subcategory, ...rest } = sibling;
+      return {
+        ok: true,
+        params: {
+          ...base,
+          ...rest,
+          ...(category ? { category } : {}),
+          ...(subcategory ? { subcategory } : {}),
+        },
+      };
+    }
+    case 'lower_price': {
+      const sibling = listingParamsForPriceSiblingTab('lower_price', product);
+      if (!sibling) return { ok: false };
+      const { category, subcategory, ...rest } = sibling;
+      return {
+        ok: true,
+        params: {
+          ...base,
+          ...rest,
+          ...(category ? { category } : {}),
+          ...(subcategory ? { subcategory } : {}),
+        },
+      };
+    }
+    case 'higher_price': {
+      const sibling = listingParamsForPriceSiblingTab('higher_price', product);
+      if (!sibling) return { ok: false };
+      const { category, subcategory, ...rest } = sibling;
+      return {
+        ok: true,
+        params: {
+          ...base,
+          ...rest,
+          ...(category ? { category } : {}),
+          ...(subcategory ? { subcategory } : {}),
+        },
+      };
+    }
     default:
       return { ok: false };
   }
@@ -155,6 +185,20 @@ function relatedFetchDedupeKey(productId: number, tab: ProductRelatedTabId, plan
 
 const inflightRelatedFetches = new Map<string, Promise<RelatedFetchSnapshot>>();
 
+/** Tab bán chạy: lưới phụ cùng danh mục cấp 2 + shop Trung Quốc (`shop_name_chinese`). */
+async function loadChineseShopGroupSnapshot(currentProduct: Product): Promise<Product[]> {
+  const parallelParams = productSearchParamsFromChineseShopCat2(currentProduct);
+  if (!parallelParams) return [];
+  const shopGroupResponse = await apiClient.getProducts({
+    limit: 120,
+    is_active: true,
+    ...parallelParams,
+  });
+  let sgList = (shopGroupResponse.products || []).filter((p) => p.id !== currentProduct.id);
+  sgList = [...sgList].sort((a, b) => (b.purchases ?? 0) - (a.purchases ?? 0));
+  return sgList;
+}
+
 async function loadRelatedProductsSnapshot(
   currentProduct: Product,
   relatedTab: ProductRelatedTabId
@@ -168,29 +212,18 @@ async function loadRelatedProductsSnapshot(
   let batch = inflightRelatedFetches.get(key);
   if (!batch) {
     batch = (async () => {
-      const shopName = excelCell(currentProduct.shop_name);
-      const skipSg = Boolean(plan.skipParallelShopNameGroup);
-      const fetchSameShopNameGroup =
-        relatedTab === 'bestselling' && shopName && !skipSg
-          ? apiClient.getProducts({
-              limit: 120,
-              is_active: true,
-              shop_name: shopName,
-            })
-          : Promise.resolve({ products: [] as Product[] });
+      const shopPromise =
+        relatedTab === 'bestselling' ? loadChineseShopGroupSnapshot(currentProduct) : Promise.resolve([]);
 
-      const [response, shopGroupResponse] = await Promise.all([
+      const [response, sgList] = await Promise.all([
         apiClient.getProducts(plan.params),
-        fetchSameShopNameGroup,
+        shopPromise,
       ]);
 
       let list = (response.products || []).filter((p) => p.id !== currentProduct.id);
       if (plan.sortPurchasesDesc) {
         list = [...list].sort((a, b) => (b.purchases ?? 0) - (a.purchases ?? 0));
       }
-
-      let sgList = (shopGroupResponse.products || []).filter((p) => p.id !== currentProduct.id);
-      sgList = [...sgList].sort((a, b) => (b.purchases ?? 0) - (a.purchases ?? 0));
 
       return { relatedProducts: list, shopGroupProducts: sgList };
     })().finally(() => {
@@ -205,7 +238,7 @@ async function loadRelatedProductsSnapshot(
 const BESTSELLING_GRID_CLASS = 'grid grid-cols-2 lg:grid-cols-5 gap-4';
 const BESTSELLING_IMAGE_SIZES = '(max-width: 1023px) 50vw, (min-width: 1024px) 20vw';
 
-/** Desktop lg: 5 ô / +5; mobile: 2 ô / +2 — dùng cho «bán chạy» và «nhóm cùng shop». */
+/** Desktop lg: 5 ô / +5; mobile: 2 ô / +2 — dùng cho «bán chạy» và lưới phụ cùng shop TQ + cấp 2. */
 function relatedStripInitialVisible(len: number): number {
   if (typeof window === 'undefined') return Math.min(2, len);
   const lg = window.matchMedia('(min-width: 1024px)').matches;
@@ -224,9 +257,6 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   const title = useMemo(() => sectionTitle(relatedTab), [relatedTab]);
   const fullListingHref = useMemo(() => {
     const f = filtersFromProduct(currentProduct);
-    if (relatedTab === 'bestselling' && !f.shop_id && f.shop_name) {
-      return buildHomeListingHref('same_price', f);
-    }
     return buildHomeListingHref(relatedTab, f);
   }, [relatedTab, currentProduct]);
 
@@ -239,11 +269,14 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   const [shopGroupVisibleCount, setShopGroupVisibleCount] = useState(2);
   const [shopGroupShowAllLoading, setShopGroupShowAllLoading] = useState(false);
 
-  const shopNameFilter = useMemo(() => excelCell(currentProduct.shop_name), [currentProduct.shop_name]);
-  const sameShopGroupHref = useMemo(
-    () => buildHomeListingHref('same_price', filtersFromProduct(currentProduct)),
+  const chineseShopCat2GroupParams = useMemo(
+    () => productSearchParamsFromChineseShopCat2(currentProduct),
     [currentProduct]
   );
+
+  const sameChineseShopCat2GroupHref = useMemo(() => {
+    return buildHomeListingHref('same_price', filtersFromProduct(currentProduct));
+  }, [currentProduct]);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -257,7 +290,27 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
 
     const runFetch = async () => {
       const plan = buildFetchPlan(currentProduct, relatedTab);
+      const shopOnlyBestselling =
+        relatedTab === 'bestselling' && !!productSearchParamsFromChineseShopCat2(currentProduct);
+
       if (!plan.ok) {
+        if (shopOnlyBestselling) {
+          try {
+            setLoading(true);
+            const sgList = await loadChineseShopGroupSnapshot(currentProduct);
+            if (ac.signal.aborted) return;
+            applySnapshot([], sgList);
+          } catch (error) {
+            console.error('Error fetching related products:', error);
+            if (ac.signal.aborted) return;
+            setRelatedProducts([]);
+            setShopGroupProducts([]);
+            setShopGroupVisibleCount(relatedStripInitialVisible(0));
+          } finally {
+            if (!ac.signal.aborted) setLoading(false);
+          }
+          return;
+        }
         if (ac.signal.aborted) return;
         setRelatedProducts([]);
         setShopGroupProducts([]);
@@ -305,7 +358,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   }, [currentProduct, relatedTab]);
 
   if (loading) {
-    const showShopGroupSkeleton = relatedTab === 'bestselling' && !!shopNameFilter;
+    const showShopGroupSkeleton = relatedTab === 'bestselling' && !!chineseShopCat2GroupParams;
     return (
       <div className="border-t border-gray-200 pt-5">
         {showShopGroupSkeleton && (
@@ -359,7 +412,10 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   }
 
   const plan = buildFetchPlan(currentProduct, relatedTab);
-  if (!plan.ok) {
+  const canShowShopGroupSection = relatedTab === 'bestselling' && !!chineseShopCat2GroupParams;
+  const hasShopGroupProducts = shopGroupProducts.length > 0;
+
+  if (!plan.ok && !canShowShopGroupSection) {
     return (
       <div className="border-t border-gray-200 pt-5">
         <h3 className="text-base font-bold text-gray-900 mb-2 uppercase">{title}</h3>
@@ -368,10 +424,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
     );
   }
 
-  const showShopGroupBlock =
-    relatedTab === 'bestselling' && !!shopNameFilter && shopGroupProducts.length > 0;
-
-  if (relatedProducts.length === 0 && !showShopGroupBlock) {
+  if (plan.ok && relatedProducts.length === 0 && !canShowShopGroupSection) {
     return (
       <div className="border-t border-gray-200 pt-5">
         <h3 className="text-base font-bold text-gray-900 mb-2 uppercase">{title}</h3>
@@ -434,14 +487,14 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
 
   const handleShopGroupShowAll = async () => {
     if (shopGroupVisibleCount >= shopGroupProducts.length) return;
-    const shopName = excelCell(currentProduct.shop_name);
-    if (!shopName) return;
+    const extra = productSearchParamsFromChineseShopCat2(currentProduct);
+    if (!extra) return;
     try {
       setShopGroupShowAllLoading(true);
       const response = await apiClient.getProducts({
         limit: Math.min(500, 1000),
         is_active: true,
-        shop_name: shopName,
+        ...extra,
       });
       let list = (response.products || []).filter((x) => x.id !== currentProduct.id);
       list = [...list].sort((a, b) => (b.purchases ?? 0) - (a.purchases ?? 0));
@@ -529,9 +582,9 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
           </button>
         )}
         {shopGroupCanShowAll &&
-          (sameShopGroupHref ? (
+          (sameChineseShopCat2GroupHref ? (
             <Link
-              href={sameShopGroupHref}
+              href={sameChineseShopCat2GroupHref}
               className="inline-flex shrink-0 items-center justify-center px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-orange-600"
             >
               Xem tất cả
@@ -551,16 +604,24 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
 
   return (
     <div className="border-t border-gray-200 pt-5">
-      {showShopGroupBlock && (
-        <section className="mb-8" aria-label="Nhóm sản phẩm cùng shop">
-          <h3 className="text-base font-bold text-gray-900 mb-3 uppercase">Nhóm sản phẩm cùng shop</h3>
-          {shopGroupActionsRow ? (
-            <>
-              {shopGroupGrid}
-              {shopGroupActionsRow}
-            </>
+      {canShowShopGroupSection && (
+        <section className="mb-8" aria-label="Cùng danh mục cấp 2 và shop Trung Quốc">
+          <h3 className="text-base font-bold text-gray-900 mb-3 uppercase">
+            Cùng danh mục (cấp 2) — shop Trung Quốc
+          </h3>
+          {hasShopGroupProducts ? (
+            shopGroupActionsRow ? (
+              <>
+                {shopGroupGrid}
+                {shopGroupActionsRow}
+              </>
+            ) : (
+              shopGroupGrid
+            )
           ) : (
-            shopGroupGrid
+            <p className="text-sm text-gray-500">
+              Không có sản phẩm khác cùng danh mục cấp 2 và cùng shop Trung Quốc.
+            </p>
           )}
         </section>
       )}
@@ -585,11 +646,13 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
             </>
           )}
         </>
-      ) : relatedTab === 'bestselling' && showShopGroupBlock ? (
+      ) : relatedTab === 'bestselling' ? (
         <>
           <h3 className="text-base font-bold text-gray-900 mb-2 uppercase">{title}</h3>
           <p className="text-sm text-gray-500">
-            Không có sản phẩm bán chạy khác cùng cửa hàng trong nhóm này.
+            {!plan.ok
+              ? emptyHint(relatedTab)
+              : 'Không có sản phẩm khác cùng Style trong nhóm này.'}
           </p>
         </>
       ) : null}

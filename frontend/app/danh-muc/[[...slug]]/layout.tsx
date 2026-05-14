@@ -68,7 +68,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (level2) pathSegments.push(level2);
   if (level3) pathSegments.push(level3);
   const pathStr = pathSegments.join("/");
-  // Canonical động: base URL không có query (?sort=, ?page=) để tránh duplicate content
+  // Canonical động: base không query. Khi có ?size= / ?page= / …, `page.tsx` (generateMetadata) ghi đè canonical kèm query.
   const canonical = `${SITE_URL}/danh-muc/${pathStr}`;
 
   // Title: CHỈ trả về phần thay %s. Root layout có template "%s | 188.COM.VN" → không thêm brand

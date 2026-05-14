@@ -10,6 +10,7 @@ import json
 import re
 import secrets
 import string
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Set
 
 from sqlalchemy.orm import Session
@@ -24,6 +25,21 @@ INTERNAL_SKU_SPACE_TOTAL = len(_LETTERS) * 10_000
 _INTERNAL_SKU_DISALLOWED_ZERO_SUFFIX = {f"{ch}0000" for ch in _LETTERS}
 INTERNAL_SKU_ASSIGNABLE_TOTAL = INTERNAL_SKU_SPACE_TOTAL - len(_INTERNAL_SKU_DISALLOWED_ZERO_SUFFIX)
 _MAX_RANDOM_TRIES = 50_000
+# Phiên đặt chỗ (reserve) sau khi tải file SKU trống: không trùng lần xuất kế trong khoảng thời gian này;
+# sau thời điểm này bản ghi export cũ được xử lý như không còn và có thể xuất/trùng tương tác import như không dùng file.
+INTERNAL_SKU_EXPORT_RESERVE_DAYS = 7
+
+
+def _internal_sku_export_cutoff_utc() -> datetime:
+    return datetime.now(timezone.utc) - timedelta(days=INTERNAL_SKU_EXPORT_RESERVE_DAYS)
+
+
+def _purge_internal_sku_exports_expired(db: Session) -> None:
+    """Xóa bản ghi export quá hạn (không giữ TTL khi chỉ đọc GET): gọi từ lúc có ghi/export mới."""
+    cutoff = _internal_sku_export_cutoff_utc()
+    db.query(InternalSkuExport).filter(InternalSkuExport.exported_at < cutoff).delete(
+        synchronize_session=False
+    )
 
 
 def _is_disallowed_internal_sku_create(code: str) -> bool:
@@ -36,7 +52,13 @@ def _code_reserved_by_export(db: Session, code: str) -> bool:
     c = (code or "").strip().upper()
     if not c:
         return False
-    return db.query(InternalSkuExport.id).filter(InternalSkuExport.code == c).first() is not None
+    cutoff = _internal_sku_export_cutoff_utc()
+    return (
+        db.query(InternalSkuExport.id)
+        .filter(InternalSkuExport.code == c, InternalSkuExport.exported_at >= cutoff)
+        .first()
+        is not None
+    )
 
 
 def _internal_sku_taken_by_other_product(db: Session, code: str, exclude_product_id: Optional[int]) -> bool:
@@ -69,13 +91,23 @@ def internal_sku_codes_in_use(db: Session) -> Set[str]:
 
 
 def internal_sku_codes_exported(db: Session) -> Set[str]:
-    return {str(r[0]).strip().upper() for r in db.query(InternalSkuExport.code).all() if r[0]}
+    """Mã đang trong thời hạn đặt chỗ (reserve) sau lần xuất file gần nhất (INTERNAL_SKU_EXPORT_RESERVE_DAYS)."""
+    cutoff = _internal_sku_export_cutoff_utc()
+    return {
+        str(r[0]).strip().upper()
+        for r in db.query(InternalSkuExport.code)
+        .filter(InternalSkuExport.exported_at >= cutoff)
+        .all()
+        if r[0]
+    }
 
 
 def count_available_internal_skus_for_export(db: Session) -> dict:
     """
-    Thống kê dải A0001–Z9999 (không tính X0000): còn bao nhiêu mã có thể xuất (chưa SP, chưa export).
+    Thống kê dải A0001–Z9999 (không tính X0000): còn bao nhiêu mã có thể xuất (chưa SP, không đang trong reserve export trong INTERNAL_SKU_EXPORT_RESERVE_DAYS).
     """
+    _purge_internal_sku_exports_expired(db)
+    db.commit()
     used = internal_sku_codes_in_use(db)
     exported = internal_sku_codes_exported(db)
     blocked = used | exported
@@ -93,13 +125,15 @@ def count_available_internal_skus_for_export(db: Session) -> dict:
 def allocate_unused_internal_skus_for_export(db: Session, count: int) -> list[str]:
     """
     Lấy `count` mã đầu tiên trong dải A0001…Z9999 (bỏ qua X0000) không có trong products.code
-    và chưa từng export; ghi vào internal_sku_exports và commit.
+    và chưa trong pool export đang hiệu lực (`INTERNAL_SKU_EXPORT_RESERVE_DAYS`); ghi vào internal_sku_exports và commit.
     """
     if count < 1:
         raise ValueError("Số lượng phải >= 1")
     if count > 10_000:
         raise ValueError("Mỗi lần export tối đa 10.000 mã")
 
+    _purge_internal_sku_exports_expired(db)
+    db.flush()
     blocked = internal_sku_codes_in_use(db) | internal_sku_codes_exported(db)
     chosen: list[str] = []
     for letter in _LETTERS:
@@ -150,11 +184,20 @@ def allocate_first_unused_exported_internal_sku(
     batch_reserved: Optional[Set[str]] = None,
 ) -> str:
     """
-    Luồng import link 1688 / Hibox: lấy mã tiếp theo trong danh sách đã xuất (`internal_sku_exports`)
-    mà chưa gán cho sản phẩm (và không nằm trong `batch_reserved`).
+    Luồng import link 1688 / Hibox: purge export quá hạn trong cùng session (flush) rồi lấy mã trong
+    `internal_sku_exports` còn hiệu lực và chưa gán SP.
     """
+    _purge_internal_sku_exports_expired(db)
+    db.flush()
+
     reserved = batch_reserved if batch_reserved is not None else set()
-    ordered = db.query(InternalSkuExport.code).order_by(InternalSkuExport.id.asc()).all()
+    cutoff = _internal_sku_export_cutoff_utc()
+    ordered = (
+        db.query(InternalSkuExport.code)
+        .filter(InternalSkuExport.exported_at >= cutoff)
+        .order_by(InternalSkuExport.id.asc())
+        .all()
+    )
     for (code,) in ordered:
         c = str(code).strip().upper()
         if not INTERNAL_SKU_RE.fullmatch(c):
@@ -181,10 +224,10 @@ def ensure_import_link_internal_product_code(
     """
     SKU cho nháp / đăng từ import link (1688, Hibox, Excel batch link):
 
-    - Nếu admin nhập ô «Mã sp» đúng [A-Z][0-9]{4}: chỉ chấp nhận khi có trong bảng `internal_sku_exports`
-      và không trùng sản phẩm khác.
-    - Nếu không nhập hoặc sai định dạng (vd. mã 1688 không phải mã nội bộ): tự chọn mã đã export
-      đầu tiên còn trống (FIFO).
+    - Nếu admin nhập ô «Mã sp» đúng [A-Z][0-9]{4} và không trùng SP khác: chấp nhận nếu có trong pool
+      `internal_sku_exports` còn hiệu lực (INTERNAL_SKU_EXPORT_RESERVE_DAYS), hoặc sau khi TTL hết
+      thì có thể dùng mã trống bất kỳ trong dải nội bộ không cần đối chiếu file xuất.
+    - Ô trống: ưu tiên FIFO mã đã export còn hiệu lực và chưa gán SP; không còn thì sinh mã như luồng Excel thường.
     """
     reserved = batch_reserved if batch_reserved is not None else set()
 
@@ -199,20 +242,25 @@ def ensure_import_link_internal_product_code(
                     f"Mã SKU {cand} đã được gán cho sản phẩm trong hệ thống. "
                     "Chọn mã khác trong file đã xuất hoặc để ô Mã sp trống để nhận mã đã xuất tiếp theo."
                 )
-            if not _code_reserved_by_export(db, cand):
-                raise ValueError(
-                    f"Mã {cand} chưa nằm trong danh sách SKU đã xuất. "
-                    "Vào phần tải SKU trống trong Admin để xuất mã, rồi dùng đúng mã đó ở cột Mã sp (SKU), "
-                    "hoặc để trống để hệ thống gán một mã đã xuất chưa dùng."
-                )
+            if _code_reserved_by_export(db, cand):
+                reserved.add(cand)
+                return cand
             reserved.add(cand)
             return cand
 
-    return allocate_first_unused_exported_internal_sku(
-        db,
-        exclude_product_id=exclude_product_id,
-        batch_reserved=batch_reserved,
-    )
+    try:
+        return allocate_first_unused_exported_internal_sku(
+            db,
+            exclude_product_id=exclude_product_id,
+            batch_reserved=batch_reserved,
+        )
+    except RuntimeError:
+        return ensure_unique_internal_product_code(
+            db,
+            None,
+            exclude_product_id=exclude_product_id,
+            batch_reserved=batch_reserved,
+        )
 
 
 def ensure_unique_internal_product_code(

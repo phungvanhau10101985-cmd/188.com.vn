@@ -29,12 +29,18 @@ def build_cache_key(
     sub_subcategory: Optional[str],
     shop_name: Optional[str],
     shop_id: Optional[str],
+    style: Optional[str],
+    shop_name_chinese: Optional[str],
+    chinese_name: Optional[str],
     pro_lower_price: Optional[str],
     pro_high_price: Optional[str],
     min_price: Optional[float],
     max_price: Optional[float],
     is_active: Optional[bool],
     sort: str = "default",
+    filter_size: Optional[str] = None,
+    filter_color: Optional[str] = None,
+    filter_style_tag: Optional[str] = None,
 ) -> str:
     payload = {
         "q": norm_q or "",
@@ -45,14 +51,20 @@ def build_cache_key(
         "c3": (sub_subcategory or "").strip(),
         "sn": (shop_name or "").strip(),
         "sid": (shop_id or "").strip(),
+        "st": (style or "").strip(),
+        "stc": (shop_name_chinese or "").strip(),
+        "cn": (chinese_name or "").strip(),
         "pl": (pro_lower_price or "").strip(),
         "ph": (pro_high_price or "").strip(),
         "min": "" if min_price is None else float(min_price),
         "max": "" if max_price is None else float(max_price),
         "ia": True if is_active is not False else False,
         "sort": (sort or "").strip() or "default",
-        # Bump khi thay đổi cấu trúc product trong JSON (tránh cache cũ thiếu trường).
-        "pv": 2,
+        "sz": (filter_size or "").strip(),
+        "cl": (filter_color or "").strip(),
+        "stylet": (filter_style_tag or "").strip(),
+        # Bump khi thay đổi cấu trúc payload hoặc ngữ nghĩa filter (tránh cache cũ trả 0 sai).
+        "pv": 9,
     }
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]

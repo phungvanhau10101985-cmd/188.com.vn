@@ -15,7 +15,14 @@ from app.models.search_mapping import SearchMapping, SearchMappingType
 from app.utils.vietnamese import normalize_for_search_no_accent
 from difflib import SequenceMatcher
 import json
-from app.schemas.product import Product, ProductCreate, ProductUpdate, PurgeDeadMediaUrlBody
+from app.schemas.product import (
+    Product,
+    ProductCreate,
+    ProductUpdate,
+    PurgeDeadMediaUrlBody,
+    ListingParserIdsDbPresenceBody,
+    ListingParserIdsDbPresenceResponse,
+)
 from app.crud.product_category_size_guide import enrich_product_payloads_with_category_size_guide
 from app.models.admin import AdminUser
 from app.core.security import require_module_permission
@@ -188,6 +195,9 @@ def _read_products_list_impl(
     sub_subcategory: Optional[str],
     shop_name: Optional[str],
     shop_id: Optional[str],
+    style: Optional[str],
+    shop_name_chinese: Optional[str],
+    chinese_name: Optional[str],
     pro_lower_price: Optional[str],
     pro_high_price: Optional[str],
     min_price: Optional[float],
@@ -198,6 +208,9 @@ def _read_products_list_impl(
     order_random: bool,
     sort: Optional[str],
     use_search_cache: bool,
+    filter_size: Optional[str] = None,
+    filter_color: Optional[str] = None,
+    filter_style_tag: Optional[str] = None,
 ) -> dict:
     raw_q = (q or "").strip()
     pid = (product_id or "").strip()
@@ -217,12 +230,18 @@ def _read_products_list_impl(
             sub_subcategory=sub_subcategory,
             shop_name=shop_name,
             shop_id=shop_id,
+            style=style,
+            shop_name_chinese=shop_name_chinese,
+            chinese_name=chinese_name,
             pro_lower_price=pro_lower_price,
             pro_high_price=pro_high_price,
             min_price=min_price,
             max_price=max_price,
             is_active=is_active,
             sort=crud.product.normalize_product_list_sort(sort),
+            filter_size=filter_size,
+            filter_color=filter_color,
+            filter_style_tag=filter_style_tag,
         )
         cached = product_search_cache_crud.get_cached_result(db, cache_key)
         if cached is not None:
@@ -237,6 +256,9 @@ def _read_products_list_impl(
         sub_subcategory=sub_subcategory,
         shop_name=shop_name,
         shop_id=shop_id,
+        style=style,
+        shop_name_chinese=shop_name_chinese,
+        chinese_name=chinese_name,
         pro_lower_price=pro_lower_price,
         pro_high_price=pro_high_price,
         min_price=min_price,
@@ -246,6 +268,9 @@ def _read_products_list_impl(
         product_id=product_id,
         order_random=order_random,
         sort=sort,
+        filter_size=filter_size,
+        filter_color=filter_color,
+        filter_style_tag=filter_style_tag,
     )
 
     if result and "products" in result:
@@ -279,6 +304,9 @@ def read_products(
     sub_subcategory: Optional[str] = None,
     shop_name: Optional[str] = Query(None, description="Lọc theo shop_name"),
     shop_id: Optional[str] = Query(None, description="Lọc theo shop_id"),
+    style: Optional[str] = Query(None, description="Lọc theo Style (cột Style / AF import)"),
+    shop_name_chinese: Optional[str] = Query(None, description="Lọc theo Shop Trung Quốc (cột shop_name_chinese / AM)"),
+    chinese_name: Optional[str] = Query(None, description="Lọc theo tên shop/chuỗi Trung Quốc (cột chinese_name)"),
     pro_lower_price: Optional[str] = Query(None, description="Lọc theo nhóm giá thấp hơn (chuỗi)"),
     pro_high_price: Optional[str] = Query(None, description="Lọc theo nhóm giá cao hơn (chuỗi)"),
     min_price: Optional[float] = Query(None, ge=0),
@@ -291,6 +319,12 @@ def read_products(
         None,
         description="Sắp xếp: default | views_desc | newest | oldest (bị bỏ qua khi order_random=true)",
     ),
+    size: Optional[str] = Query(None, description="Lọc size (khớp mảng JSON `sizes` của SP)"),
+    color: Optional[str] = Query(
+        None,
+        description="Lọc màu (khớp tên SP, cột color, hoặc JSON colors — nên dùng giá trị từ category facets)",
+    ),
+    style_tag: Optional[str] = Query(None, description="Lọc kiểu phổ thông tự rút từ tên/thông tin sản phẩm"),
 ):
     """
     Get products with filtering and search (by name; the product_id filter matches Excel id or SKU code).
@@ -306,6 +340,9 @@ def read_products(
             sub_subcategory=sub_subcategory,
             shop_name=shop_name,
             shop_id=shop_id,
+            style=style,
+            shop_name_chinese=shop_name_chinese,
+            chinese_name=chinese_name,
             pro_lower_price=pro_lower_price,
             pro_high_price=pro_high_price,
             min_price=min_price,
@@ -316,6 +353,9 @@ def read_products(
             order_random=order_random,
             sort=sort,
             use_search_cache=True,
+            filter_size=size,
+            filter_color=color,
+            filter_style_tag=style_tag,
         )
     except Exception as e:
         return {"error": str(e), "status": "serialization_error"}
@@ -332,6 +372,9 @@ def read_products_full_list(
     sub_subcategory: Optional[str] = None,
     shop_name: Optional[str] = Query(None, description="Lọc theo shop_name"),
     shop_id: Optional[str] = Query(None, description="Lọc theo shop_id"),
+    style: Optional[str] = Query(None, description="Lọc theo Style (cột Style / AF import)"),
+    shop_name_chinese: Optional[str] = Query(None, description="Lọc theo Shop Trung Quốc (cột shop_name_chinese / AM)"),
+    chinese_name: Optional[str] = Query(None, description="Lọc theo tên shop/chuỗi Trung Quốc (cột chinese_name)"),
     pro_lower_price: Optional[str] = Query(None, description="Lọc theo nhóm giá thấp hơn (chuỗi)"),
     pro_high_price: Optional[str] = Query(None, description="Lọc theo nhóm giá cao hơn (chuỗi)"),
     min_price: Optional[float] = Query(None, ge=0),
@@ -344,6 +387,12 @@ def read_products_full_list(
         None,
         description="Sắp xếp: default | views_desc | newest | oldest (bị bỏ qua khi order_random=true)",
     ),
+    size: Optional[str] = Query(None, description="Lọc size (khớp mảng JSON `sizes` của SP)"),
+    color: Optional[str] = Query(
+        None,
+        description="Lọc màu (khớp tên SP, cột color, hoặc JSON colors — nên dùng giá trị từ category facets)",
+    ),
+    style_tag: Optional[str] = Query(None, description="Lọc kiểu phổ thông tự rút từ tên/thông tin sản phẩm"),
 ):
     """
     Danh sách sản phẩm **đầy đủ trường** (khớp schema `Product`: mọi cột bảng `products`, gồm `category_id`,
@@ -361,6 +410,9 @@ def read_products_full_list(
             sub_subcategory=sub_subcategory,
             shop_name=shop_name,
             shop_id=shop_id,
+            style=style,
+            shop_name_chinese=shop_name_chinese,
+            chinese_name=chinese_name,
             pro_lower_price=pro_lower_price,
             pro_high_price=pro_high_price,
             min_price=min_price,
@@ -371,9 +423,152 @@ def read_products_full_list(
             order_random=order_random,
             sort=sort,
             use_search_cache=False,
+            filter_size=size,
+            filter_color=color,
+            filter_style_tag=style_tag,
         )
     except Exception as e:
         return {"error": str(e), "status": "serialization_error"}
+
+
+@router.get("/category-facets", response_model=dict)
+def read_category_product_facets(
+    response: Response,
+    db: Session = Depends(get_db),
+    category: Optional[str] = Query(None, description="Danh mục cấp 1 (tên hiển thị)"),
+    subcategory: Optional[str] = Query(None),
+    sub_subcategory: Optional[str] = Query(None),
+    min_price: Optional[float] = Query(None, ge=0),
+    max_price: Optional[float] = Query(None, ge=0),
+    size: Optional[str] = Query(None),
+    color: Optional[str] = Query(None),
+    style_tag: Optional[str] = Query(None),
+):
+    """
+    Size / màu / khoảng giá duy nhất trong phạm vi danh mục (SP `is_active=true`),
+    dùng cho bộ lọc trang `/danh-muc/...`.
+    """
+    response.headers["Cache-Control"] = "public, max-age=120"
+    try:
+        facets = crud.product.get_category_product_facets(
+            db,
+            category=category,
+            subcategory=subcategory,
+            sub_subcategory=sub_subcategory,
+            min_price=min_price,
+            max_price=max_price,
+            filter_size=size,
+            filter_color=color,
+            filter_style_tag=style_tag,
+        )
+        return {"status": "ok", **facets}
+    except Exception as e:
+        return {"status": "error", "error": str(e), "sizes": [], "colors": [], "style_tags": [], "price_min": None, "price_max": None}
+
+
+@router.get("/search-facets", response_model=dict)
+def read_search_product_facets(
+    response: Response,
+    db: Session = Depends(get_db),
+    q: str = Query(..., min_length=1, description="Từ khóa tìm (cùng logic GET /products?q=)"),
+    category: Optional[str] = Query(None),
+    subcategory: Optional[str] = Query(None),
+    sub_subcategory: Optional[str] = Query(None),
+    shop_name: Optional[str] = Query(None),
+    shop_id: Optional[str] = Query(None),
+    style: Optional[str] = Query(None),
+    shop_name_chinese: Optional[str] = Query(None),
+    chinese_name: Optional[str] = Query(None),
+    pro_lower_price: Optional[str] = Query(None),
+    pro_high_price: Optional[str] = Query(None),
+    min_price: Optional[float] = Query(None, ge=0),
+    max_price: Optional[float] = Query(None, ge=0),
+    size: Optional[str] = Query(None),
+    color: Optional[str] = Query(None),
+    style_tag: Optional[str] = Query(None),
+    is_active: Optional[bool] = True,
+):
+    """
+    Size / màu / khoảng giá trong tập kết quả tìm theo `q` (trước lọc size/màu/giá trên UI).
+    Dùng cho trang chủ `/?q=...`.
+    """
+    response.headers["Cache-Control"] = "public, max-age=90"
+    try:
+        facets = crud.product.get_search_product_facets(
+            db,
+            q,
+            category=category,
+            subcategory=subcategory,
+            sub_subcategory=sub_subcategory,
+            shop_name=shop_name,
+            shop_id=shop_id,
+            style=style,
+            shop_name_chinese=shop_name_chinese,
+            chinese_name=chinese_name,
+            pro_lower_price=pro_lower_price,
+            pro_high_price=pro_high_price,
+            min_price=min_price,
+            max_price=max_price,
+            filter_size=size,
+            filter_color=color,
+            filter_style_tag=style_tag,
+            is_active=is_active,
+        )
+        return {"status": "ok", **facets}
+    except Exception as e:
+        return {"status": "error", "error": str(e), "sizes": [], "colors": [], "style_tags": [], "price_min": None, "price_max": None}
+
+
+@router.get("/listing-facets", response_model=dict)
+def read_product_listing_facets(
+    response: Response,
+    db: Session = Depends(get_db),
+    q: Optional[str] = Query(None, description="Nếu có — cùng logic GET /products?q= và search-facets"),
+    category: Optional[str] = Query(None),
+    subcategory: Optional[str] = Query(None),
+    sub_subcategory: Optional[str] = Query(None),
+    shop_name: Optional[str] = Query(None),
+    shop_id: Optional[str] = Query(None),
+    style: Optional[str] = Query(None),
+    shop_name_chinese: Optional[str] = Query(None),
+    chinese_name: Optional[str] = Query(None),
+    pro_lower_price: Optional[str] = Query(None),
+    pro_high_price: Optional[str] = Query(None),
+    min_price: Optional[float] = Query(None, ge=0),
+    max_price: Optional[float] = Query(None, ge=0),
+    size: Optional[str] = Query(None),
+    color: Optional[str] = Query(None),
+    style_tag: Optional[str] = Query(None),
+    is_active: Optional[bool] = True,
+):
+    """
+    Facets cho listing `/` không bắt buộc `q` — style, danh mục, shop… (không áp size/màu/min/max trong SQL).
+    """
+    response.headers["Cache-Control"] = "public, max-age=90"
+    try:
+        facets = crud.product.get_product_listing_facets(
+            db,
+            q=q,
+            category=category,
+            subcategory=subcategory,
+            sub_subcategory=sub_subcategory,
+            shop_name=shop_name,
+            shop_id=shop_id,
+            style=style,
+            shop_name_chinese=shop_name_chinese,
+            chinese_name=chinese_name,
+            pro_lower_price=pro_lower_price,
+            pro_high_price=pro_high_price,
+            min_price=min_price,
+            max_price=max_price,
+            filter_size=size,
+            filter_color=color,
+            filter_style_tag=style_tag,
+            is_active=is_active,
+        )
+        return {"status": "ok", **facets}
+    except Exception as e:
+        return {"status": "error", "error": str(e), "sizes": [], "colors": [], "style_tags": [], "price_min": None, "price_max": None}
 
 
 @router.get("/export-unused-internal-skus/available-count", response_model=dict)
@@ -381,7 +576,7 @@ def get_unused_internal_sku_available_count(
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("products")),
 ):
-    """Số lượng mã SKU còn có thể export (và tổng dải) — phục vụ form admin."""
+    """Số lượng mã SKU còn có thể export (và tổng dải). Reserve sau mỗi lần tải file hết hiệu lực sau 7 ngày."""
     from app.services.product_internal_sku import count_available_internal_skus_for_export
 
     return count_available_internal_skus_for_export(db)
@@ -394,8 +589,8 @@ def export_unused_internal_skus(
     _: AdminUser = Depends(require_module_permission("products")),
 ):
     """
-    Xuất Excel một cột `sku`: các mã chưa dùng cho sản phẩm và chưa từng export trước đó.
-    Mã được ghi vào bảng `internal_sku_exports` để không trùng ở lần export sau và không bị tự sinh trùng khi import.
+    Xuất Excel một cột `sku`: các mã chưa gán SP và không đang reserved bởi lần tải file trong 7 ngày qua.
+    Mã được ghi vào `internal_sku_exports`; sau 7 ngày bản ghi cũ được xóa — có thể xuất trùng mã và import không buộc đối chiếu file đó.
     """
     from app.services.product_internal_sku import allocate_unused_internal_skus_for_export
 
@@ -418,6 +613,28 @@ def export_unused_internal_skus(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post(
+    "/listing-parser-db-presence",
+    response_model=ListingParserIdsDbPresenceResponse,
+    include_in_schema=False,
+)
+def post_listing_parser_ids_db_presence(
+    body: ListingParserIdsDbPresenceBody,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """
+    Cho trang admin parse HTML listing: trả về những ID (A…/T… như trên bảng) đã có trong `products`
+    (trùng `product_id` hoặc có mã dạng `{id}a188…` do nhập từ Hibox/1688).
+    """
+    raw_ids = body.ids or []
+    if len(raw_ids) > 2000:
+        raise HTTPException(status_code=400, detail="Tối đa 2000 id mỗi lần gọi.")
+
+    existing_set = crud.product.listing_parser_ids_existing_in_products(db, raw_ids)
+    return ListingParserIdsDbPresenceResponse(existing_normalized=sorted(existing_set))
 
 
 @router.post("", response_model=Product, include_in_schema=False)

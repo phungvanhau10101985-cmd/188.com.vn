@@ -22,7 +22,12 @@ import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { trackMetaViewContentProduct } from '@/lib/meta-pixel';
 import { trackGoogleAdsViewItemProduct, peekGoogleAdsConversionsFingerprint } from '@/lib/google-ads-gtag';
-import { persistRelatedFiltersFromProduct } from '@/lib/product-related-tabs';
+import {
+  persistRelatedFiltersFromProduct,
+  buildHomeListingSearchParams,
+  filtersFromProduct,
+  searchParamsToEncodedQueryString,
+} from '@/lib/product-related-tabs';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
 import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
@@ -314,37 +319,15 @@ export default function ProductDetailClient({
     return Number.isFinite(parsed) ? parsed : null;
   };
 
-  const buildFilterLink = (
-    params: Record<string, string | number | undefined | null>,
-    fallbackQuery?: string
-  ) => {
-    const query: Record<string, string> = {};
-    Object.entries(params).forEach(([key, val]) => {
-      if (val === undefined || val === null || val === '') return;
-      query[key] = String(val);
-    });
-    if (Object.keys(query).length === 0 && fallbackQuery) {
-      query.q = fallbackQuery;
-    }
-    return { pathname: '/', query };
-  };
-
-  const sameCategoryParams = {
-    category: product.category || undefined,
-    subcategory: product.subcategory || undefined,
-    sub_subcategory: product.sub_subcategory || undefined,
-  };
-  const normalizeGroupValue = (value?: string | null) => {
-    if (!value) return null;
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-    if (trimmed.toLowerCase() === 'nan') return null;
-    return trimmed;
-  };
-  const lowerGroup = normalizeGroupValue(product.pro_lower_price ?? null);
-  const higherGroup = normalizeGroupValue(product.pro_high_price ?? null);
-  const shopIdGroup = normalizeGroupValue(product.shop_id ?? null);
-  const shopNameGroup = normalizeGroupValue(product.shop_name ?? null);
+  const homeListingParams = useMemo(() => {
+    const f = filtersFromProduct(product);
+    return {
+      bestselling: buildHomeListingSearchParams('bestselling', f),
+      lower: buildHomeListingSearchParams('lower_price', f),
+      same: buildHomeListingSearchParams('same_price', f),
+      higher: buildHomeListingSearchParams('higher_price', f),
+    };
+  }, [product]);
 
   const nanoImageList = useMemo(() => {
     const ordered = [product.main_image, ...(product.images || [])].filter(Boolean) as string[];
@@ -531,33 +514,33 @@ export default function ProductDetailClient({
               </div>
 
               <div className={`flex flex-wrap items-center justify-center gap-2 ${isStickyPinned ? 'bg-transparent px-2 py-1.5' : 'bg-[#ea580c] rounded-lg px-2 py-1.5'}`}>
-                {shopIdGroup && (
+                {homeListingParams.bestselling && (
                   <Link
-                    href={buildFilterLink({ shop_id: shopIdGroup })}
+                    href={`/?${searchParamsToEncodedQueryString(homeListingParams.bestselling)}`}
                     className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-white bg-white/20 hover:bg-white/30 transition-colors"
                   >
                     Sản phẩm bán chạy
                   </Link>
                 )}
-                {lowerGroup && (
+                {homeListingParams.lower && (
                   <Link
-                    href={buildFilterLink({ pro_lower_price: lowerGroup }, lowerGroup)}
+                    href={`/?${searchParamsToEncodedQueryString(homeListingParams.lower)}`}
                     className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-white bg-white/20 hover:bg-white/30 transition-colors"
                   >
                     Cùng loại giá thấp hơn
                   </Link>
                 )}
-                {shopNameGroup && (
+                {homeListingParams.same && (
                   <Link
-                    href={buildFilterLink({ shop_name: shopNameGroup })}
+                    href={`/?${searchParamsToEncodedQueryString(homeListingParams.same)}`}
                     className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-white bg-white/20 hover:bg-white/30 transition-colors"
                   >
                     Cùng loại cùng tầm giá
                   </Link>
                 )}
-                {higherGroup && (
+                {homeListingParams.higher && (
                   <Link
-                    href={buildFilterLink({ pro_high_price: higherGroup }, higherGroup)}
+                    href={`/?${searchParamsToEncodedQueryString(homeListingParams.higher)}`}
                     className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-white bg-white/20 hover:bg-white/30 transition-colors"
                   >
                     Cùng loại giá cao hơn

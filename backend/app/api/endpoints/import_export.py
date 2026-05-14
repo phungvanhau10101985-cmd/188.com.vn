@@ -265,12 +265,17 @@ def _run_import_excel_job(
         data = {
             "created": result.get("created", 0),
             "updated": result.get("updated", 0),
+            "skipped_count": int(result.get("skipped_count") or 0),
             "total_processed": result.get("total_processed", 0),
             "success_rate": result.get("success_rate", "0%"),
             "file_name": original_filename,
             "import_time": datetime.now().isoformat(),
             "auto_seo_scan": "running_in_background",
         }
+        skipped_lines = result.get("skipped") or []
+        skipped_out = []
+        if isinstance(skipped_lines, list):
+            skipped_out = [str(x) for x in skipped_lines[:200] if x is not None and str(x).strip()]
         _import_job_update(
             job_id,
             status="done",
@@ -280,10 +285,13 @@ def _run_import_excel_job(
             message=_import_progress_message("done", 0, None),
             result={
                 "success": True,
-                "message": f"Đã import {result.get('total_processed', 0)} sản phẩm.",
+                "message": f"Đã import {result.get('total_processed', 0)} dòng trong file "
+                f"({result.get('created', 0)} mới, {result.get('updated', 0)} cập nhật, "
+                f"{data['skipped_count']} bỏ qua).",
                 "data": data,
                 "warnings": result.get("warnings", [])[:50],
                 "errors": result.get("errors", [])[:150],
+                "skipped": skipped_out if skipped_out else None,
             },
         )
         threading.Thread(target=auto_scan_category_seo_safe, daemon=True).start()
@@ -524,16 +532,18 @@ async def import_excel(
         print(f"✅ IMPORT HOÀN TẤT")
         print(f"   ➕ Tạo mới: {result.get('created', 0)}")
         print(f"   🔄 Cập nhật: {result.get('updated', 0)}")
+        print(f"   ⏭ Bỏ qua: {int(result.get('skipped_count') or 0)}")
         print(f"   ⚠️  Cảnh báo: {len(result.get('warnings', []))}")
         print(f"   ❌ Lỗi: {len(result.get('errors', []))}")
         print(f"{'='*60}")
 
         logger.info(
-            "%s sync_done file=%s created=%s updated=%s total_processed=%s warnings=%s errors=%s",
+            "%s sync_done file=%s created=%s updated=%s skipped=%s total_processed=%s warnings=%s errors=%s",
             IMPORT_EXCEL_LOG_PREFIX,
             file.filename,
             result.get("created", 0),
             result.get("updated", 0),
+            int(result.get("skipped_count") or 0),
             result.get("total_processed", 0),
             len(result.get("warnings", []) or []),
             len(result.get("errors", []) or []),
@@ -545,10 +555,15 @@ async def import_excel(
         
         return {
             "success": True,
-            "message": f"Đã import {result.get('total_processed', 0)} sản phẩm. Đang tự động scan SEO danh mục...",
+            "message": (
+                f"Đã xử lý {result.get('total_processed', 0)} dòng: "
+                f"{result.get('created', 0)} mới, {result.get('updated', 0)} cập nhật, "
+                f"{int(result.get('skipped_count') or 0)} bỏ qua. Đang tự động scan SEO danh mục..."
+            ),
             "data": {
                 "created": result.get("created", 0),
                 "updated": result.get("updated", 0),
+                "skipped_count": int(result.get("skipped_count") or 0),
                 "total_processed": result.get("total_processed", 0),
                 "success_rate": result.get("success_rate", "0%"),
                 "file_name": file.filename,
@@ -557,6 +572,7 @@ async def import_excel(
             },
             "warnings": result.get("warnings", [])[:10],
             "errors": result.get("errors", [])[:20],
+            "skipped": (result.get("skipped") or [])[:100],
             "note": "File Excel có 36 cột (A-AJ), Slug được tự động tạo từ tên sản phẩm và product_id. SEO scan tự động chạy background."
         }
         

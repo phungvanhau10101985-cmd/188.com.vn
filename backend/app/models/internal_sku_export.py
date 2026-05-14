@@ -1,5 +1,5 @@
-"""Các mã SKU nội bộ ([A-Z][0-9]{4}, thực tế A0001–Z9999, không phát hành X0000) đã xuất file nhưng có thể chưa gán vào sản phẩm."""
-
+"""Mã SKU nội bộ đã tải file (reserve TTL = INTERNAL_SKU_EXPORT_RESERVE_DAYS trong product_internal_sku).
+Sau hết TTL bản ghi xóa — không còn chặn export trùng hay bắt buộc đối chiếu import."""
 from sqlalchemy import Column, DateTime, Integer, String
 from sqlalchemy.sql import func
 

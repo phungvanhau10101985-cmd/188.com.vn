@@ -9,6 +9,7 @@ import { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
 import { formatPrice, getProductMainImage } from '@/lib/utils';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import { excelCell } from '@/lib/product-related-tabs';
 
 interface ShopSidebarProductsProps {
   currentProduct: Product;
@@ -29,15 +30,17 @@ export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProdu
 
   useEffect(() => {
     let isMounted = true;
-    const fetchSameShop = async () => {
+    const fetchSameStyle = async () => {
       try {
         setLoading(true);
-        if (!currentProduct.shop_id) {
+        /** Sidebar: lọc theo cột Style (AF) — khác với nhóm «cùng shop TQ / shop_name_chinese» trên tab liên quan. */
+        const st = excelCell(currentProduct.style);
+        if (!st) {
           if (isMounted) setProducts([]);
           return;
         }
         const response = await apiClient.getProducts({
-          shop_id: currentProduct.shop_id,
+          style: st,
           limit: 40,
           is_active: true,
         });
@@ -49,11 +52,11 @@ export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProdu
         if (isMounted) setLoading(false);
       }
     };
-    fetchSameShop();
+    fetchSameStyle();
     return () => {
       isMounted = false;
     };
-  }, [currentProduct.id, currentProduct.shop_id]);
+  }, [currentProduct.id, currentProduct.style]);
 
   const visibleProducts = useMemo(() => products, [products]);
 

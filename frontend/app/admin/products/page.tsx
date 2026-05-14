@@ -219,9 +219,12 @@ function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
   const d = job.result?.data;
   const rowErrs = job.result?.errors ?? [];
   const warns = job.result?.warnings ?? [];
-  const headline = `Tạo mới ${d?.created ?? 0}, cập nhật ${d?.updated ?? 0} (${d?.success_rate ?? '—'} thành công, tổng xử lý ${d?.total_processed ?? 0}).`;
+  const skipped = job.result?.skipped ?? [];
+  const skippedFromData = typeof d?.skipped_count === 'number' ? d.skipped_count : undefined;
+  const skippedCount = skippedFromData ?? skipped.length;
+  const headline = `Tạo mới ${d?.created ?? 0}, cập nhật ${d?.updated ?? 0}, bỏ qua ${skippedCount}. Không lỗi: ${d?.success_rate ?? '—'}. Tổng dòng file: ${d?.total_processed ?? 0}.`;
 
-  if (!rowErrs.length && !warns.length) {
+  if (!rowErrs.length && !warns.length && skippedCount === 0) {
     return {
       panel: null,
       toast: { type: 'ok', msg: `Import xong: ${d?.created ?? 0} mới, ${d?.updated ?? 0} cập nhật` },
@@ -229,6 +232,15 @@ function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
   }
 
   const body: string[] = [headline];
+  if (skippedCount > 0) {
+    body.push('', `Bỏ qua — trùng phần id trước «a188» hoặc trùng SKU (${skippedCount}):`);
+    if (skipped.length) {
+      skipped.slice(0, 200).forEach((s) => body.push(typeof s === 'string' ? s : String(s)));
+      if (skipped.length > 200) body.push(`… và ${skipped.length - 200} dòng bỏ qua khác`);
+    } else {
+      body.push('(Chi tiết từng dòng không có trong phản hồi — kiểm tra log server.)');
+    }
+  }
   if (rowErrs.length) {
     body.push('', `Lỗi theo dòng (${rowErrs.length}):`);
     rowErrs.slice(0, 200).forEach((e) => body.push(typeof e === 'string' ? e : String(e)));
@@ -240,15 +252,22 @@ function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
     if (warns.length > 80) body.push(`… và ${warns.length - 80} cảnh báo khác`);
   }
 
-  const variant = rowErrs.length ? 'warn' : 'ok';
-  const toastMsg = rowErrs.length
-    ? 'Import hoàn thành nhưng có lỗi ở một số dòng — xem chi tiết phía dưới ô Import.'
-    : 'Import xong có cảnh báo — xem chi tiết phía dưới ô Import.';
+  const variant = rowErrs.length ? 'warn' : warns.length ? 'warn' : 'ok';
+  const toastMsg =
+    rowErrs.length
+      ? 'Import hoàn thành nhưng có lỗi ở một số dòng — xem chi tiết phía dưới ô Import.'
+      : skippedCount > 0
+        ? `Import xong — ${skippedCount} dòng bỏ qua (trùng id/SKU); xem báo cáo.`
+        : 'Import xong có cảnh báo — xem chi tiết phía dưới ô Import.';
 
   return {
     panel: {
       variant,
-      title: rowErrs.length ? 'Import xong nhưng còn lỗi dòng' : 'Import xong (cảnh báo)',
+      title: rowErrs.length
+        ? 'Import xong nhưng còn lỗi dòng'
+        : skippedCount > 0
+          ? 'Import xong (có dòng bỏ qua)'
+          : 'Import xong (cảnh báo)',
       body: body.join('\n'),
     },
     toast: { type: 'ok', msg: toastMsg },
@@ -1698,7 +1717,7 @@ export default function AdminProductsPage() {
     setExportingUnusedSkus(true);
     try {
       await adminProductAPI.exportUnusedInternalSkus(n);
-      showToast('ok', `Đã tải ${n} mã SKU trống (một cột). Các mã này đã được đánh dấu đã export.`, 7000);
+      showToast('ok', `Đã tải ${n} mã SKU trống (một cột). Các mã được reserve 7 ngày để lần xuất sau không trùng; sau đó không cần đối chiếu file cũ.`, 7500);
       await loadUnusedInternalSkuStats();
     } catch (e) {
       showToast('err', e instanceof Error ? e.message : 'Export mã SKU trống thất bại');
@@ -2019,8 +2038,10 @@ export default function AdminProductsPage() {
                       <strong className="text-gray-800">
                         {unusedSkuStats.available.toLocaleString('vi-VN')}
                       </strong>{' '}
-                      mã có thể xuất (tối đa {Math.min(10_000, unusedSkuExportMax).toLocaleString('vi-VN')} mã
-                      /lần{unusedSkuStatsLoading ? ' · đang cập nhật…' : ''}).
+                      mã có thể xuất (tối đa {Math.min(10_000, unusedSkuExportMax).toLocaleString('vi-VN')} mã /
+                      lần). Sau mỗi lần tải file, các mã được reserve <strong className="text-gray-800">7 ngày</strong>{' '}
+                      để lần xuất tiếp theo không trùng.
+                      {unusedSkuStatsLoading ? ' · đang cập nhật…' : ''}
                     </p>
                   ) : unusedSkuStatsLoading ? (
                     <p className="text-[11px] text-gray-500">Đang tải số mã…</p>
@@ -2032,7 +2053,7 @@ export default function AdminProductsPage() {
                 onClick={() => void handleExportUnusedInternalSkus()}
                 disabled={exportingUnusedSkus || unusedSkuExportMax < 1}
                 className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 text-sm font-medium disabled:opacity-70 mb-0"
-                title="Mã định dạng A0001–Z9999 (không phát hành dạng X0000): chưa có trong sản phẩm và chưa từng xuất; sau khi tải, các mã được ghi nhận để không trùng lần sau."
+                title="Mã A0001–Z9999 (không X0000): chỉ các mã chưa gán SP và không đang reserve sau lần tải trong 7 ngày."
               >
                 {exportingUnusedSkus ? 'Đang tạo file...' : 'Tải SKU trống'}
               </button>

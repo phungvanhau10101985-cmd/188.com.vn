@@ -330,3 +330,16 @@ class PurgeDeadMediaUrlBody(BaseModel):
     """Body cho POST purge URL ảnh 404 — yêu cầu header X-Broken-Media-Purge-Key khớp .env."""
 
     url: str = Field(..., min_length=8, max_length=2048, description="URL ảnh cần gỡ khỏi sản phẩm sau khi xác nhận 404")
+
+
+class ListingParserIdsDbPresenceBody(BaseModel):
+    """Đối chiếu id từ parse HTML listing với products.product_id (kể cả mã dạng Ax…a188SKU)."""
+
+    ids: List[str] = Field(default_factory=list, description="ID như trên bảng parse (vd A918…)")
+
+
+class ListingParserIdsDbPresenceResponse(BaseModel):
+    existing_normalized: List[str] = Field(
+        ...,
+        description="Các id sau chuẩn hoá (A|T + số) đã có trong DB",
+    )

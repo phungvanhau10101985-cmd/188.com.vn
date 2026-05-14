@@ -12,6 +12,8 @@ import {
   parseRelatedTabFromSearch,
   buildHomeListingSearchParams,
   readStoredRelatedFilters,
+  searchParamsToEncodedQueryString,
+  cloneUrlSearchParams,
   type ProductRelatedTabId,
 } from '@/lib/product-related-tabs';
 
@@ -81,7 +83,13 @@ export default function MobileHeader({
       searchParams.get('shop_id')?.trim() ||
         searchParams.get('shop_name')?.trim() ||
         searchParams.get('pro_lower_price')?.trim() ||
-        searchParams.get('pro_high_price')?.trim()
+        searchParams.get('pro_high_price')?.trim() ||
+        searchParams.get('shop_name_chinese')?.trim() ||
+        searchParams.get('sxc')?.trim() ||
+        searchParams.get('chinese_name')?.trim() ||
+        searchParams.get('style')?.trim() ||
+        searchParams.get('min_price')?.trim() ||
+        searchParams.get('max_price')?.trim()
     );
   const showHeaderBack = !isHome || hasHomeRelatedListingFilters;
 
@@ -117,17 +125,17 @@ export default function MobileHeader({
 
   const setRelatedTab = (id: ProductRelatedTabId) => {
     if (!pathname) return;
-    /** Trang chi tiết: mở trang chủ với filter (shop_id / shop_name / pro_*). Thiếu dữ liệu → chỉ đổi ?rt= như cũ */
+    /** Trang chi tiết: mở trang chủ với filter đã lưu (style / danh mục + giá / chinese_name…). Thiếu dữ liệu → chỉ đổi ?rt= */
     if (isProductDetailPage) {
       const listingParams = buildHomeListingSearchParams(id, readStoredRelatedFilters());
       if (listingParams) {
-        router.push(`/?${listingParams.toString()}`);
+        router.push(`/?${searchParamsToEncodedQueryString(listingParams)}`);
         return;
       }
     }
-    const params = new URLSearchParams(searchParams.toString());
+    const params = cloneUrlSearchParams(searchParams);
     params.set('rt', id);
-    const q = params.toString();
+    const q = searchParamsToEncodedQueryString(params);
     router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
   };
 

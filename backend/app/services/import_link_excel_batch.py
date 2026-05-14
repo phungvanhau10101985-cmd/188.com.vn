@@ -1,7 +1,6 @@
 """
 Đọc file Excel danh sách link: URL mặc định cột F (dòng 2+), **cột D** «Tên shop» → `shop_name_chinese`, **cột K** «Tên tiếng trung» → `chinese_name`; shop/giá phụ từ tiêu đề + khối **L–O** → xuất **H–K** file kết quả.
-**Cột B** («Mã sp»): nếu có giá trị thì dùng làm SKU nội bộ ([A-Z][0-9]{4]) **chỉ khi mã đã nằm trong danh sách đã xuất**
-(`internal_sku_exports`, từ bước tải SKU trống trong Admin) và chưa trùng `products.code`; ô trống → backend gán mã **đã xuất** đầu tiên còn chưa gán sản phẩm (FIFO).
+**Cột B** («Mã sp»): SKU nội bộ ([A-Z][0-9]{4}): trong TTL reserve sau xuất file (backend ~7 ngày, `internal_sku_exports`) và chưa trùng `products.code`; sau TTL có thể nhập mã trống tùy ý. Ô trống → FIFO mã đã export còn hiệu lực hoặc sinh mã như Excel thường.
 
 **Giá đặt hàng (`price`):** **cột Q (17)** nếu có giá trị. **Cột G (7):** giá VND (~tham khảo) ghép vào `product_info.market_info.price_vnd` — không dùng cho `price` — để tab AK hiển thị VND thay vì chỉ chú thích trang nguồn/₮.
 

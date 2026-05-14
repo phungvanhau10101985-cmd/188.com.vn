@@ -10,11 +10,12 @@ Cache TTL 60s (singleflight) — endpoint này được Next SSR landing gọi m
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.crud import product as product_crud
 from app.db.session import SessionLocal, get_db
 from app.models.category import Category
 from app.models.product import Product
@@ -47,6 +48,37 @@ def _serialize_product_card(p: Product) -> Dict[str, Any]:
         "available": p.available,
         "brand_name": p.brand_name,
     }
+
+
+def _cluster_cat_ids(db: Session, cluster_id: int) -> List[int]:
+    return [
+        c.id
+        for c in db.query(Category.id).filter(
+            Category.seo_cluster_id == cluster_id, Category.level == 3
+        )
+    ]
+
+
+def _apply_cluster_product_filters(
+    query,
+    *,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    size: Optional[str] = None,
+    color: Optional[str] = None,
+    style_tag: Optional[str] = None,
+):
+    if size:
+        query = product_crud.apply_product_size_filter(query, size)
+    if color:
+        query = product_crud.apply_product_color_filter(query, color)
+    if style_tag:
+        query = product_crud.apply_product_style_tag_filter(query, style_tag)
+    if min_price is not None:
+        query = query.filter(Product.price >= min_price)
+    if max_price is not None:
+        query = query.filter(Product.price <= max_price)
+    return query
 
 
 def _fetch_clusters_list() -> List[Dict[str, Any]]:
@@ -153,6 +185,12 @@ def get_seo_cluster_products(
     slug: str,
     limit: int = Query(48, ge=1, le=200),
     skip: int = Query(0, ge=0),
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    size: Optional[str] = None,
+    color: Optional[str] = None,
+    style_tag: Optional[str] = None,
+    sort: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
@@ -162,12 +200,7 @@ def get_seo_cluster_products(
     if not cluster:
         raise HTTPException(status_code=404, detail=f"SEO cluster '{slug}' không tồn tại")
 
-    cat_ids = [
-        c.id
-        for c in db.query(Category.id).filter(
-            Category.seo_cluster_id == cluster.id, Category.level == 3
-        )
-    ]
+    cat_ids = _cluster_cat_ids(db, cluster.id)
     if not cat_ids:
         return {"total": 0, "skip": skip, "limit": limit, "products": []}
 
@@ -175,9 +208,26 @@ def get_seo_cluster_products(
         db.query(Product)
         .filter(Product.category_id.in_(cat_ids), Product.is_active.is_(True))
     )
+    base = _apply_cluster_product_filters(
+        base,
+        min_price=min_price,
+        max_price=max_price,
+        size=size,
+        color=color,
+        style_tag=style_tag,
+    )
     total = base.count()
+    sort_norm = product_crud.normalize_product_list_sort(sort)
+    if sort_norm == "views_desc":
+        order_by = [Product.purchases.desc(), Product.rating_point.desc(), Product.id.desc()]
+    elif sort_norm == "newest":
+        order_by = [Product.created_at.desc().nullslast(), Product.id.desc()]
+    elif sort_norm == "oldest":
+        order_by = [Product.created_at.asc().nullslast(), Product.id.asc()]
+    else:
+        order_by = [Product.purchases.desc(), Product.rating_point.desc(), Product.id.desc()]
     products = (
-        base.order_by(Product.purchases.desc(), Product.rating_point.desc(), Product.id.desc())
+        base.order_by(*order_by)
         .offset(skip)
         .limit(limit)
         .all()
@@ -188,3 +238,37 @@ def get_seo_cluster_products(
         "limit": limit,
         "products": [_serialize_product_card(p) for p in products],
     }
+
+
+@router.get("/{slug}/facets")
+def get_seo_cluster_facets(
+    slug: str,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    size: Optional[str] = None,
+    color: Optional[str] = None,
+    style_tag: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Facets phụ thuộc nhau cho landing `/c/<slug>`."""
+    cluster = db.query(SeoCluster).filter(SeoCluster.slug == slug).first()
+    if not cluster:
+        raise HTTPException(status_code=404, detail=f"SEO cluster '{slug}' không tồn tại")
+
+    cat_ids = _cluster_cat_ids(db, cluster.id)
+    if not cat_ids:
+        return {"status": "ok", "sizes": [], "colors": [], "style_tags": [], "price_min": None, "price_max": None}
+
+    base = (
+        db.query(Product)
+        .filter(Product.category_id.in_(cat_ids), Product.is_active.is_(True))
+    )
+    facets = product_crud.build_dependent_product_facets(
+        base,
+        min_price=min_price,
+        max_price=max_price,
+        filter_size=size,
+        filter_color=color,
+        filter_style_tag=style_tag,
+    )
+    return {"status": "ok", **facets}

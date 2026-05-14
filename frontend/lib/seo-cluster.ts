@@ -66,6 +66,37 @@ export interface SeoClusterPagedProducts {
   products: SeoClusterProductCard[];
 }
 
+export interface SeoClusterListingFilters {
+  minPrice?: number | null;
+  maxPrice?: number | null;
+  size?: string | null;
+  color?: string | null;
+  styleTag?: string | null;
+  sort?: string | null;
+}
+
+export interface SeoClusterProductFacets {
+  sizes: string[];
+  colors: string[];
+  style_tags: string[];
+  price_min: number | null;
+  price_max: number | null;
+}
+
+function appendClusterFilters(params: URLSearchParams, filters?: SeoClusterListingFilters) {
+  if (!filters) return;
+  if (filters.minPrice != null && !Number.isNaN(filters.minPrice) && filters.minPrice >= 0) {
+    params.set("min_price", String(filters.minPrice));
+  }
+  if (filters.maxPrice != null && !Number.isNaN(filters.maxPrice) && filters.maxPrice >= 0) {
+    params.set("max_price", String(filters.maxPrice));
+  }
+  if (filters.size?.trim()) params.set("size", filters.size.trim());
+  if (filters.color?.trim()) params.set("color", filters.color.trim());
+  if (filters.styleTag?.trim()) params.set("style_tag", filters.styleTag.trim());
+  if (filters.sort?.trim()) params.set("sort", filters.sort.trim());
+}
+
 /** Trả null nếu cluster không tồn tại — caller dùng `notFound()`. */
 export async function getSeoClusterDetail(slug: string): Promise<SeoClusterDetail | null> {
   try {
@@ -83,20 +114,48 @@ export async function getSeoClusterDetail(slug: string): Promise<SeoClusterDetai
 
 export async function getSeoClusterProducts(
   slug: string,
-  options: { skip?: number; limit?: number } = {},
+  options: { skip?: number; limit?: number; filters?: SeoClusterListingFilters } = {},
 ): Promise<SeoClusterPagedProducts> {
   const skip = options.skip ?? 0;
   const limit = options.limit ?? 48;
   try {
-    const url = `${API_BASE}/seo-clusters/${encodeURIComponent(slug)}/products?skip=${skip}&limit=${limit}`;
+    const params = new URLSearchParams({ skip: String(skip), limit: String(limit) });
+    appendClusterFilters(params, options.filters);
+    const url = `${API_BASE}/seo-clusters/${encodeURIComponent(slug)}/products?${params.toString()}`;
     const res = await fetch(url, {
-      next: { revalidate: REVALIDATE_TTL, tags: [SEO_CLUSTER_TAG] },
+      cache: "no-store",
       headers: { "Content-Type": "application/json" },
     });
     if (!res.ok) return { total: 0, skip, limit, products: [] };
     return (await res.json()) as SeoClusterPagedProducts;
   } catch {
     return { total: 0, skip, limit, products: [] };
+  }
+}
+
+export async function getSeoClusterFacets(
+  slug: string,
+  filters?: SeoClusterListingFilters,
+): Promise<SeoClusterProductFacets | null> {
+  try {
+    const params = new URLSearchParams();
+    appendClusterFilters(params, filters);
+    const q = params.toString();
+    const res = await fetch(`${API_BASE}/seo-clusters/${encodeURIComponent(slug)}/facets${q ? `?${q}` : ""}`, {
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Record<string, unknown>;
+    return {
+      sizes: Array.isArray(data.sizes) ? (data.sizes as string[]) : [],
+      colors: Array.isArray(data.colors) ? (data.colors as string[]) : [],
+      style_tags: Array.isArray(data.style_tags) ? (data.style_tags as string[]) : [],
+      price_min: typeof data.price_min === "number" ? data.price_min : null,
+      price_max: typeof data.price_max === "number" ? data.price_max : null,
+    };
+  } catch {
+    return null;
   }
 }
 

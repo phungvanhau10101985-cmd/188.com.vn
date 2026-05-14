@@ -394,6 +394,7 @@ export interface AdminImportExcelJob {
     data?: {
       created: number;
       updated: number;
+      skipped_count?: number;
       total_processed: number;
       success_rate?: string;
       file_name?: string;
@@ -401,6 +402,8 @@ export interface AdminImportExcelJob {
     };
     warnings?: string[];
     errors?: string[];
+    /** Dòng bỏ qua (trùng id nguồn / SKU kiểu «…a188…») */
+    skipped?: string[] | null;
   } | null;
   detail?: string | null;
   /** Kèm detail khi lỗi (dòng trong file / traceback rút gọn) */
@@ -675,6 +678,13 @@ export const adminProductAPI = {
       timeoutMs: ADMIN_PRODUCTS_LIST_TIMEOUT_MS,
     });
   },
+
+  /** Đối chiếu ID parse HTML listing với `products.product_id` (Admin). */
+  listingParserDbPresence: (ids: string[]) =>
+    fetchAdmin<{ existing_normalized: string[] }>('/products/listing-parser-db-presence', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }),
 
   updateProduct: (productId: string, data: Partial<AdminProduct>) =>
     fetchAdmin<AdminProduct>(`/products/${encodeURIComponent(productId)}`, {

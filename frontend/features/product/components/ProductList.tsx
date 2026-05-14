@@ -112,52 +112,51 @@ export default function ProductList({
   return (
     <div className="container mx-auto px-4 py-8">
       {/* Header */}
-      <div className="flex justify-between items-center mb-6">
+      <div className="mb-4 flex items-center justify-between">
         <h2 className="text-2xl font-bold text-gray-800">
           Sản Phẩm {products.length > 0 && `(${products.length})`}
         </h2>
-        
-        {/* Sort Options */}
-        {showFilters && (
-          <select 
-            onChange={(e) => handleFilterChange({ sort_by: e.target.value as any })}
-            className="border border-gray-300 rounded-lg px-3 py-2"
-          >
-            <option value="created_at">Mới nhất</option>
-            <option value="price">Giá thấp đến cao</option>
-            <option value="price_desc">Giá cao đến thấp</option>
-            <option value="name">Tên A-Z</option>
-          </select>
-        )}
       </div>
 
       {/* Filters */}
       {showFilters && (
-        <div className="bg-gray-50 rounded-lg p-4 mb-6">
-          <div className="flex flex-wrap gap-4">
+        <div className="sticky top-0 z-40 mb-6 border-b border-gray-200 bg-gray-50/95 px-2 py-1.5 shadow-sm backdrop-blur md:top-[var(--listing-chrome-height)]">
+          <div className="flex flex-wrap items-end gap-2">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Khoảng giá</label>
+              <label className="sr-only">Sắp xếp</label>
+              <select
+                onChange={(e) => handleFilterChange({ sort_by: e.target.value as any })}
+                className="h-8 rounded-md border border-gray-300 px-2 text-xs"
+              >
+                <option value="created_at">Mới nhất</option>
+                <option value="price">Giá thấp đến cao</option>
+                <option value="price_desc">Giá cao đến thấp</option>
+                <option value="name">Tên A-Z</option>
+              </select>
+            </div>
+            <div>
+              <label className="sr-only">Khoảng giá</label>
               <div className="flex gap-2">
                 <input
                   type="number"
                   placeholder="Từ"
-                  className="border border-gray-300 rounded px-3 py-1 text-sm w-24"
+                  className="h-8 w-24 rounded-md border border-gray-300 px-2 text-xs"
                   onChange={(e) => handleFilterChange({ min_price: Number(e.target.value) })}
                 />
                 <input
                   type="number"
                   placeholder="Đến"
-                  className="border border-gray-300 rounded px-3 py-1 text-sm w-24"
+                  className="h-8 w-24 rounded-md border border-gray-300 px-2 text-xs"
                   onChange={(e) => handleFilterChange({ max_price: Number(e.target.value) })}
                 />
               </div>
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Tình trạng</label>
+              <label className="sr-only">Tình trạng</label>
               <select 
                 onChange={(e) => handleFilterChange({ in_stock: e.target.value === 'true' })}
-                className="border border-gray-300 rounded px-3 py-1 text-sm"
+                className="h-8 rounded-md border border-gray-300 px-2 text-xs"
               >
                 <option value="">Tất cả</option>
                 <option value="true">Còn hàng</option>

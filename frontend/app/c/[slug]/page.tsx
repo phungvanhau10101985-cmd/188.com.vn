@@ -6,16 +6,70 @@ import {
   getSeoClusterDetail,
   getSeoClusterProducts,
   type SeoClusterProductCard,
+  type SeoClusterListingFilters,
 } from "@/lib/seo-cluster";
 import { formatPrice } from "@/lib/utils";
 import { productPathSlugFromApi } from "@/lib/product-path-slug";
+import SeoClusterFiltersClient from "./SeoClusterFiltersClient";
 
 const PAGE_SIZE = 48;
 
 type Props = {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
+
+function spGet(sp: Record<string, string | string[] | undefined>, key: string): string | undefined {
+  const v = sp[key];
+  return Array.isArray(v) ? v[0] : v;
+}
+
+function parseClusterFilters(sp: Record<string, string | string[] | undefined>): {
+  page: number;
+  filters: SeoClusterListingFilters;
+} {
+  const page = Math.max(1, parseInt(String(spGet(sp, "page") ?? "1"), 10) || 1);
+  const minRaw = spGet(sp, "min_price");
+  const maxRaw = spGet(sp, "max_price");
+  const minNum = minRaw != null && minRaw.trim() !== "" ? parseFloat(minRaw) : NaN;
+  const maxNum = maxRaw != null && maxRaw.trim() !== "" ? parseFloat(maxRaw) : NaN;
+  const filters: SeoClusterListingFilters = {};
+  if (!Number.isNaN(minNum) && minNum >= 0) filters.minPrice = minNum;
+  if (!Number.isNaN(maxNum) && maxNum >= 0) filters.maxPrice = maxNum;
+  const size = spGet(sp, "size")?.trim();
+  if (size) filters.size = size;
+  const color = spGet(sp, "color")?.trim();
+  if (color) filters.color = color;
+  const styleTag = spGet(sp, "style_tag")?.trim();
+  if (styleTag) filters.styleTag = styleTag;
+  const sort = spGet(sp, "sort")?.trim();
+  if (sort) filters.sort = sort;
+  return { page, filters };
+}
+
+function serializeSearchParams(sp: Record<string, string | string[] | undefined>): string {
+  const p = new URLSearchParams();
+  for (const [key, val] of Object.entries(sp)) {
+    if (val === undefined) continue;
+    if (Array.isArray(val)) {
+      for (const v of val) if (v !== undefined) p.append(key, v);
+    } else {
+      p.set(key, val);
+    }
+  }
+  return p.toString();
+}
+
+function hasClusterFilters(filters: SeoClusterListingFilters): boolean {
+  return Boolean(
+    filters.minPrice != null ||
+      filters.maxPrice != null ||
+      filters.size ||
+      filters.color ||
+      filters.styleTag ||
+      filters.sort
+  );
+}
 
 export default async function SeoClusterLandingPage({ params, searchParams }: Props) {
   const { slug } = await params;
@@ -25,19 +79,29 @@ export default async function SeoClusterLandingPage({ params, searchParams }: Pr
     notFound();
   }
 
-  const page = Math.max(1, parseInt(String(resolvedSearchParams.page ?? ""), 10) || 1);
+  const { page, filters } = parseClusterFilters(resolvedSearchParams);
+  const listingQueryString = serializeSearchParams(resolvedSearchParams);
+  const hasFilters = hasClusterFilters(filters);
   const skip = (page - 1) * PAGE_SIZE;
 
   // Trang 1 dùng products_sample đã có trong detail (đỡ 1 round-trip).
   // Trang 2+ gọi /products?skip=&limit=.
-  const paged = page === 1 && cluster.products_sample.length >= PAGE_SIZE
+  const paged = page === 1 && !hasFilters && cluster.products_sample.length >= PAGE_SIZE
     ? null
-    : await getSeoClusterProducts(slug, { skip, limit: PAGE_SIZE });
-  const products: SeoClusterProductCard[] = page === 1
+    : await getSeoClusterProducts(slug, { skip, limit: PAGE_SIZE, filters });
+  const products: SeoClusterProductCard[] = page === 1 && !hasFilters
     ? cluster.products_sample
     : paged?.products ?? [];
-  const total = page === 1 ? cluster.product_count : paged?.total ?? cluster.product_count;
+  const total = page === 1 && !hasFilters ? cluster.product_count : paged?.total ?? cluster.product_count;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const queryWithPage = (nextPage: number) => {
+    const p = new URLSearchParams(listingQueryString);
+    if (nextPage <= 1) p.delete("page");
+    else p.set("page", String(nextPage));
+    const q = p.toString();
+    return q ? `/c/${cluster.slug}?${q}` : `/c/${cluster.slug}`;
+  };
 
   return (
     <main className="max-w-7xl mx-auto px-4 py-6">
@@ -53,6 +117,10 @@ export default async function SeoClusterLandingPage({ params, searchParams }: Pr
           Tổng {total.toLocaleString("vi-VN")} sản phẩm — landing SEO của 188.COM.VN.
         </p>
       </header>
+
+      <div className="sticky top-0 z-40 mb-5 border-b border-gray-200 bg-gray-50/95 px-2 py-1.5 shadow-sm backdrop-blur sm:px-3 md:top-[var(--listing-chrome-height)]">
+        <SeoClusterFiltersClient slug={cluster.slug} />
+      </div>
 
       {products.length === 0 ? (
         <div className="rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
@@ -88,7 +156,7 @@ export default async function SeoClusterLandingPage({ params, searchParams }: Pr
             return (
               <Link
                 key={n}
-                href={n === 1 ? `/c/${cluster.slug}` : `/c/${cluster.slug}?page=${n}`}
+                href={queryWithPage(n)}
                 className="rounded border border-gray-300 bg-white px-3 py-1 text-gray-700 hover:bg-gray-50"
               >
                 {n}
