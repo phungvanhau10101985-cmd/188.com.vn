@@ -159,6 +159,30 @@ export default function HomePageClient({
     proLowerFromUrl,
     proHighFromUrl,
   ]);
+
+  /** Fetch facets khi có listing (kể cả chỉ sort / giá / size / màu — không chỉ category). */
+  const homeFacetFetchAnchor = useMemo(
+    () =>
+      Boolean(
+        listingFacetAnchor ||
+          (minPriceFromUrl ?? '').trim() ||
+          (maxPriceFromUrl ?? '').trim() ||
+          sizeFromUrl ||
+          colorFromUrl ||
+          styleTagFromUrl ||
+          sortFromUrl
+      ),
+    [
+      listingFacetAnchor,
+      minPriceFromUrl,
+      maxPriceFromUrl,
+      sizeFromUrl,
+      colorFromUrl,
+      styleTagFromUrl,
+      sortFromUrl,
+    ]
+  );
+
   const pageFromUrl = Number(searchParams.get('page') || 1);
   const currentPage = Number.isFinite(pageFromUrl) && pageFromUrl > 0 ? pageFromUrl : 1;
   const PAGE_SIZE = 48;
@@ -234,7 +258,7 @@ export default function HomePageClient({
     const qTrim = qFromUrl.trim();
     const fetchSearchFacets = Boolean(qTrim);
 
-    if (!fetchSearchFacets && !listingFacetAnchor) {
+    if (!fetchSearchFacets && !homeFacetFetchAnchor) {
       setSearchListingFacets(null);
       return;
     }
@@ -258,6 +282,7 @@ export default function HomePageClient({
           size: sizeFromUrl,
           color: colorFromUrl,
           style_tag: styleTagFromUrl,
+          ...(sortFromUrl ? { sort: sortFromUrl } : {}),
         };
         const f = fetchSearchFacets
           ? await apiClient.getSearchProductFacets({ q: qTrim, ...baseArgs })
@@ -274,7 +299,7 @@ export default function HomePageClient({
     };
   }, [
     qFromUrl,
-    listingFacetAnchor,
+    homeFacetFetchAnchor,
     categoryFromUrl,
     subcategoryFromUrl,
     subSubcategoryFromUrl,
@@ -290,6 +315,7 @@ export default function HomePageClient({
     sizeFromUrl,
     colorFromUrl,
     styleTagFromUrl,
+    sortFromUrl,
   ]);
 
   useEffect(() => {
@@ -1034,8 +1060,7 @@ export default function HomePageClient({
                 </p>
               </div>
             </div>
-            {isSearching || listingFacetAnchor ? (
-              <div className="sticky top-0 z-40 mb-4 w-full border-b border-gray-200 bg-gray-50/95 px-2 py-1.5 shadow-sm backdrop-blur sm:px-3 md:top-[var(--listing-chrome-height)]">
+            <div className="sticky top-[var(--mobile-app-header-height)] z-40 mb-4 w-full border-b border-gray-200 bg-gray-50/95 px-1.5 py-1.5 shadow-sm backdrop-blur sm:px-3 md:top-[var(--listing-filter-sticky-top)] md:border-t-0 md:bg-gray-50 md:shadow-none md:backdrop-blur-none">
                 <CategoryProductFilters
                   basePath="/"
                   facets={
@@ -1048,11 +1073,10 @@ export default function HomePageClient({
                     }
                   }
                   enableEmptyListing={isSearching}
-                  enableListingFacetShell={!isSearching && listingFacetAnchor}
+                  enableListingFacetShell={!isSearching && hasFilterParams}
                   compact
                 />
               </div>
-            ) : null}
             <div className="mt-4">
               {loading ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">

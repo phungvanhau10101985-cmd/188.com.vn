@@ -131,7 +131,7 @@ function CategoryProductFiltersInner({
 
   return (
     <div className={compact ? "flex w-full flex-col gap-1" : "flex flex-col gap-2 sm:gap-3 w-full"} aria-label="Bộ lọc sản phẩm">
-      <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:flex-wrap sm:items-end sm:justify-start">
+      <div className={compact ? "grid grid-cols-3 gap-1.5 sm:flex sm:flex-row sm:flex-wrap sm:items-end sm:justify-start" : "grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:flex-wrap sm:items-end sm:justify-start"}>
         {facets && facets.sizes.length > 0 ? (
           <label className={compact ? "flex min-w-0 flex-col text-left" : "flex min-w-0 flex-col gap-1 text-left"}>
             <span className={compact ? "sr-only" : "text-xs font-medium text-gray-500"}>Size</span>
@@ -140,7 +140,7 @@ function CategoryProductFiltersInner({
               onChange={(e) =>
                 navigateWith({ size: e.target.value || null, page: null })
               }
-              className={compact ? "h-8 w-full rounded-md border border-gray-300 bg-white px-2 text-xs text-gray-800 sm:min-w-[110px]" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-800 sm:min-w-[120px] sm:px-3 sm:text-sm"}
+              className={compact ? "h-8 w-full min-w-0 rounded-md border border-gray-300 bg-white px-1.5 text-[11px] text-gray-800 sm:min-w-[110px] sm:px-2 sm:text-xs" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-800 sm:min-w-[120px] sm:px-3 sm:text-sm"}
               aria-label="Lọc theo size"
             >
               <option value="">Tất cả size</option>
@@ -161,7 +161,7 @@ function CategoryProductFiltersInner({
               onChange={(e) =>
                 navigateWith({ style_tag: e.target.value || null, page: null })
               }
-              className={compact ? "h-8 w-full rounded-md border border-gray-300 bg-white px-2 text-xs text-gray-800 sm:min-w-[130px] sm:max-w-[200px]" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-800 sm:min-w-[150px] sm:max-w-[220px] sm:px-3 sm:text-sm"}
+              className={compact ? "h-8 w-full min-w-0 rounded-md border border-gray-300 bg-white px-1.5 text-[11px] text-gray-800 sm:min-w-[130px] sm:max-w-[200px] sm:px-2 sm:text-xs" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-800 sm:min-w-[150px] sm:max-w-[220px] sm:px-3 sm:text-sm"}
               aria-label="Lọc theo kiểu sản phẩm"
             >
               <option value="">Tất cả kiểu</option>
@@ -182,7 +182,7 @@ function CategoryProductFiltersInner({
               onChange={(e) =>
                 navigateWith({ color: e.target.value || null, page: null })
               }
-              className={compact ? "h-8 w-full rounded-md border border-gray-300 bg-white px-2 text-xs text-gray-800 sm:min-w-[120px] sm:max-w-[190px]" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-800 sm:min-w-[140px] sm:max-w-[220px] sm:px-3 sm:text-sm"}
+              className={compact ? "h-8 w-full min-w-0 rounded-md border border-gray-300 bg-white px-1.5 text-[11px] text-gray-800 sm:min-w-[120px] sm:max-w-[190px] sm:px-2 sm:text-xs" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-800 sm:min-w-[140px] sm:max-w-[220px] sm:px-3 sm:text-sm"}
               aria-label="Lọc theo màu"
             >
               <option value="">Tất cả màu</option>
@@ -210,7 +210,7 @@ function CategoryProductFiltersInner({
             onKeyDown={(e) => {
               if (e.key === 'Enter') applyPriceFilters();
             }}
-            className={compact ? "h-8 w-full rounded-md border border-gray-300 bg-white px-2 text-xs sm:w-[120px]" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs sm:w-[140px] sm:px-3 sm:text-sm"}
+            className={compact ? "h-8 w-full min-w-0 rounded-md border border-gray-300 bg-white px-1.5 text-[11px] sm:w-[120px] sm:px-2 sm:text-xs" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs sm:w-[140px] sm:px-3 sm:text-sm"}
             aria-label="Giá tối thiểu"
           />
         </label>
@@ -230,22 +230,22 @@ function CategoryProductFiltersInner({
             onKeyDown={(e) => {
               if (e.key === 'Enter') applyPriceFilters();
             }}
-            className={compact ? "h-8 w-full rounded-md border border-gray-300 bg-white px-2 text-xs sm:w-[120px]" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs sm:w-[140px] sm:px-3 sm:text-sm"}
+            className={compact ? "h-8 w-full min-w-0 rounded-md border border-gray-300 bg-white px-1.5 text-[11px] sm:w-[120px] sm:px-2 sm:text-xs" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs sm:w-[140px] sm:px-3 sm:text-sm"}
             aria-label="Giá tối đa"
           />
         </label>
 
-        <label className={compact ? "col-span-2 flex min-w-0 flex-col text-left sm:col-span-1" : "col-span-2 flex min-w-0 flex-col gap-1 text-left sm:col-span-1"}>
+        <label className={compact ? "flex min-w-0 flex-col text-left" : "col-span-2 flex min-w-0 flex-col gap-1 text-left sm:col-span-1"}>
           <span className={compact ? "sr-only" : "text-xs font-medium text-gray-500"}>Sắp xếp</span>
           <select
             value={sort}
             onChange={(e) =>
               navigateWith({ sort: e.target.value || null, page: null })
             }
-            className={compact ? "h-8 w-full rounded-md border border-gray-300 bg-white px-2 text-xs sm:min-w-[150px]" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs sm:min-w-[160px] sm:px-3 sm:text-sm"}
+            className={compact ? "h-8 w-full min-w-0 rounded-md border border-gray-300 bg-white px-1.5 text-[11px] sm:min-w-[150px] sm:px-2 sm:text-xs" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs sm:min-w-[160px] sm:px-3 sm:text-sm"}
             aria-label="Sắp xếp danh sách"
           >
-            <option value="">Ngẫu nhiên (mặc định)</option>
+            <option value="">Ngẫu nhiên</option>
             <option value="newest">Mới nhất</option>
             <option value="oldest">Cũ nhất</option>
             <option value="views_desc">Xem nhiều</option>

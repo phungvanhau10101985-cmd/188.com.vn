@@ -95,7 +95,7 @@ const FilterBar = ({
   onSortChange: (sort: string) => void;
   onPriceFilterChange: (range: string) => void;
 }) => (
-  <div className="sticky top-0 z-40 mb-6 border-b border-gray-200 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur md:top-[var(--listing-chrome-height)]">
+  <div className="sticky top-[var(--mobile-app-header-height)] z-40 mb-6 border-b border-gray-200 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur md:top-[var(--listing-filter-sticky-top)] md:border-t-0 md:bg-white md:shadow-none md:backdrop-blur-none">
     <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
       {/* Results Info */}
       <div className="flex-1">

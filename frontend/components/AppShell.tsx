@@ -1,7 +1,7 @@
 // components/AppShell.tsx - Header + Navigation + Footer xuyên suốt tất cả các trang
 'use client';
 
-import { useState, useEffect, useMemo, useRef, useLayoutEffect, type CSSProperties } from 'react';
+import { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
 import { usePathname, useSearchParams, useRouter } from 'next/navigation';
 import Header from '@/components/Header';
@@ -25,6 +25,9 @@ import { apiClient } from '@/lib/api-client';
 import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
 import { searchParamsToEncodedQueryString } from '@/lib/product-related-tabs';
 import type { CategoryLevel1 } from '@/types/api';
+
+/** Chiều cao thanh cam mỏng (logo + tìm + icon) khi trang listing ghim header đã thu gọn — khớp offset sticky bộ lọc. */
+const DESKTOP_LISTING_THIN_CHROME_PX = 54;
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -74,7 +77,10 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     }
   }, [pathname]);
 
-  /** Trang chủ có query lọc/tìm, hoặc trang /info/* — cố định header + nav desktop khi cuộn */
+  /**
+   * Cố định khối desktop: header cam + thanh danh mục — `--listing-chrome-height` (spacer) và
+   * `--listing-filter-sticky-top` (vị trí sticky bộ lọc, có bù khi head mỏng).
+   */
   const keepDesktopHeaderPinned = useMemo(() => {
     if (pathname?.startsWith('/info')) return true;
     if (pathname?.startsWith('/danh-muc')) return true;
@@ -110,12 +116,48 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     return false;
   }, [pathname, searchParams]);
 
+  /** Trang /info: luôn full chrome; /danh-muc, /c/, tr chủ lọc: cuộn xuống → header mỏng + ẩn pill. */
+  const useListingThinOnScroll =
+    keepDesktopHeaderPinned && pathname != null && !pathname.startsWith('/info');
+
+  const [pinnedListingCompact, setPinnedListingCompact] = useState(false);
+
+  useEffect(() => {
+    if (!useListingThinOnScroll || typeof window === 'undefined') return;
+    const COMPACT_Y = 80;
+    const onScroll = () => setPinnedListingCompact(window.scrollY > COMPACT_Y);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [useListingThinOnScroll]);
+
+  useLayoutEffect(() => {
+    if (!useListingThinOnScroll) {
+      setPinnedListingCompact(false);
+      return;
+    }
+    if (typeof window === 'undefined') return;
+    setPinnedListingCompact(window.scrollY > 80);
+  }, [pathname, searchParams, useListingThinOnScroll]);
+
   /** Chiều cao khối chrome cố định — spacer đẩy main, tránh nội dung chui dưới fixed bar */
   const listingChromeRef = useRef<HTMLDivElement>(null);
   const [listingChromeHeight, setListingChromeHeight] = useState(168);
+  const [measuredThinChromePx, setMeasuredThinChromePx] = useState(0);
+
+  const reportDesktopThinChromeHeight = useCallback((px: number) => {
+    const rounded = Math.max(0, Math.ceil(px));
+    setMeasuredThinChromePx((prev) => (prev === rounded ? prev : rounded));
+  }, []);
 
   useLayoutEffect(() => {
     if (!keepDesktopHeaderPinned) return;
+    if (useListingThinOnScroll && pinnedListingCompact) {
+      const h =
+        measuredThinChromePx > 0 ? measuredThinChromePx : DESKTOP_LISTING_THIN_CHROME_PX;
+      setListingChromeHeight(h);
+      return;
+    }
     const el = listingChromeRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const apply = () => {
@@ -126,7 +168,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     const ro = new ResizeObserver(apply);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [keepDesktopHeaderPinned]);
+  }, [keepDesktopHeaderPinned, useListingThinOnScroll, pinnedListingCompact, measuredThinChromePx]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -250,6 +292,12 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       style={
         {
           '--listing-chrome-height': keepDesktopHeaderPinned ? `${listingChromeHeight}px` : '0px',
+          /** Offset sticky bộ lọc: khi head mỏng trừ vài px để bù subpixel + viền mờ (backdrop), tránh khe. */
+          '--listing-filter-sticky-top': !keepDesktopHeaderPinned
+            ? '0px'
+            : useListingThinOnScroll && pinnedListingCompact
+              ? `max(0px, calc(${listingChromeHeight}px - 3px))`
+              : `${listingChromeHeight}px`,
         } as CSSProperties
       }
     >
@@ -260,20 +308,26 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
           {/* fixed: sticky trong flex column hay gãy — luôn ghim hai thanh theo viewport */}
           <div
             ref={listingChromeRef}
-            className="fixed top-0 left-0 right-0 z-[60] bg-gray-50 shadow-md"
+            className={`fixed top-0 left-0 right-0 z-[60] bg-gray-50 ${
+              useListingThinOnScroll && pinnedListingCompact ? 'shadow-none' : 'shadow-md'
+            }`}
           >
+            <div className={useListingThinOnScroll && pinnedListingCompact ? 'hidden' : ''}>
             <Header
               onSearch={handleSuggestionClick}
               cartItemsCount={getCartItemCount()}
               favoriteItemsCount={favoriteCount}
             />
+            </div>
             <Navigation
               selectedFilter={selectedFilter}
               onCategoryChange={handleCategoryChange}
               initialCategoryTree={initialCategoryTree}
-              headerVisible={true}
+              headerVisible={useListingThinOnScroll ? !pinnedListingCompact : true}
               embedInStickyChrome
+              collapseListingCategoryBar={useListingThinOnScroll && pinnedListingCompact}
               disableStickyBar={Boolean(isProductDetailPage)}
+              onDesktopThinChromeHeight={useListingThinOnScroll ? reportDesktopThinChromeHeight : undefined}
             />
           </div>
           <div

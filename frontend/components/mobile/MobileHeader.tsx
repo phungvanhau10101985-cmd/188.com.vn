@@ -6,7 +6,6 @@ import Image from 'next/image';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import type { CategoryLevel1, CategoryLevel2, CategoryLevel3 } from '@/types/api';
 import { storePendingImageAndNavigate } from '@/lib/nanoai-pending-image';
-import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
   PRODUCT_RELATED_TABS,
   parseRelatedTabFromSearch,
@@ -57,10 +56,6 @@ export default function MobileHeader({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { isAuthenticated, isLoading } = useAuth();
-  const [mounted, setMounted] = useState(false);
-  const authReady = mounted && !isLoading;
-  const showAuthenticatedActions = authReady && isAuthenticated;
   const [searchTerm, setSearchTerm] = useState('');
   const [isScrolled, setIsScrolled] = useState(false);
   const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
@@ -72,11 +67,11 @@ export default function MobileHeader({
 
   const isHome = pathname === '/';
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const homePageStr = searchParams.get('page')?.trim() ?? '';
+  const homePageNum = homePageStr ? Number(homePageStr) : NaN;
+  const homePageGt1 = Number.isFinite(homePageNum) && homePageNum > 1;
 
-  /** Trang chủ có filter từ tab SP liên quan — vẫn hiện nút quay lại (về trang chi tiết / trước đó) */
+  /** Trang chủ có filter / listing (URL đầy đủ như category, subcategory, sxc, q…) — header mobile gọn + nút quay lại */
   const hasHomeRelatedListingFilters =
     isHome &&
     Boolean(
@@ -89,7 +84,15 @@ export default function MobileHeader({
         searchParams.get('chinese_name')?.trim() ||
         searchParams.get('style')?.trim() ||
         searchParams.get('min_price')?.trim() ||
-        searchParams.get('max_price')?.trim()
+        searchParams.get('max_price')?.trim() ||
+        searchParams.get('category')?.trim() ||
+        searchParams.get('subcategory')?.trim() ||
+        searchParams.get('sub_subcategory')?.trim() ||
+        searchParams.get('size')?.trim() ||
+        searchParams.get('color')?.trim() ||
+        searchParams.get('sort')?.trim() ||
+        searchParams.get('q')?.trim() ||
+        homePageGt1
     );
   const showHeaderBack = !isHome || hasHomeRelatedListingFilters;
 
@@ -291,6 +294,7 @@ export default function MobileHeader({
   /** Trang chi tiết SP, đã xem, khu cá nhân, hoặc yêu thích: chrome gọn. */
   const compactChrome =
     compactHomeChrome ||
+    (isHome && showHeaderBack) ||
     isProductDetailPage ||
     isDaXemPage ||
     isAccountPage ||
@@ -301,6 +305,7 @@ export default function MobileHeader({
     isAuthPage;
   /** Hàng nút + ô tìm: co chỗ cho ô tìm dài hơn. */
   const tightToolbar =
+    (isHome && showHeaderBack) ||
     isProductDetailPage ||
     isDaXemPage ||
     isAccountPage ||
@@ -365,7 +370,8 @@ export default function MobileHeader({
 
           {/* Danh mục + ô tìm kiếm (pill) + icon nhanh */}
           <div
-            className={`flex items-center gap-1 relative z-10 pt-0.5 ${tightToolbar ? 'gap-1' : 'gap-1.5'} ${
+            className={`flex items-center gap-1 relative z-10 ${compactChrome ? 'pt-0' : 'pt-0.5'} ${tightToolbar ? 'gap-1' : 'gap-1.5'} ${
+              (isHome && showHeaderBack) ||
               isDaXemPage ||
               isAccountPage ||
               isFavoritesPage ||
@@ -484,15 +490,6 @@ export default function MobileHeader({
               </Link>
             )}
 
-            {/* Trang chủ: thanh nút thoáng — thông báo đã có ở bottom nav */}
-            {showAuthenticatedActions && !compactChrome && (
-              <Link href="/account/notifications" className={`${iconBtn} relative`} aria-label="Thông báo" title="Thông báo">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                </svg>
-              </Link>
-            )}
-
             {!isCartPage && (
               <Link href="/cart" className={`relative overflow-visible ${tightToolbar ? iconBtnCondensed : iconBtn}`} aria-label="Giỏ hàng" title="Giỏ hàng">
                 <svg className={headerGlyphClass} fill="none" stroke="currentColor" strokeWidth={1.85} viewBox="0 0 24 24" aria-hidden>
@@ -542,7 +539,7 @@ export default function MobileHeader({
             isTimTheoAnhPage ||
             isDanhMucListingPage ? null : (
             <div
-              className="flex items-center gap-1 mt-1 pb-1 overflow-x-auto scrollbar-hide min-h-[26px] -mx-0.5 px-0.5"
+              className={`flex items-center gap-1 ${compactChrome ? 'mt-0.5 pb-0.5' : 'mt-1 pb-1'} overflow-x-auto scrollbar-hide min-h-[26px] -mx-0.5 px-0.5`}
               role="navigation"
               aria-label={
                 searchStripContent.mode === 'suggestions'

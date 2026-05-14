@@ -122,7 +122,7 @@ export default function CategoryPageClient({
       </div>
 
       {!error && (total > 0 || hasNonPageFilters(listingQueryString)) ? (
-        <div className="sticky top-0 z-40 mb-4 w-full border-b border-gray-200 bg-gray-50/95 px-2 py-1.5 shadow-sm backdrop-blur sm:px-3 md:top-[var(--listing-chrome-height)]">
+        <div className="sticky top-[var(--mobile-app-header-height)] z-40 mb-4 w-full border-b border-gray-200 bg-gray-50/95 px-1.5 py-1.5 shadow-sm backdrop-blur sm:px-3 md:top-[var(--listing-filter-sticky-top)] md:border-t-0 md:bg-gray-50 md:shadow-none md:backdrop-blur-none">
           <CategoryProductFilters basePath={basePath} facets={clientFacets} enableListingFacetShell compact />
         </div>
       ) : null}

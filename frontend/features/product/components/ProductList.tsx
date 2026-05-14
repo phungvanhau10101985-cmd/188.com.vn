@@ -120,7 +120,7 @@ export default function ProductList({
 
       {/* Filters */}
       {showFilters && (
-        <div className="sticky top-0 z-40 mb-6 border-b border-gray-200 bg-gray-50/95 px-2 py-1.5 shadow-sm backdrop-blur md:top-[var(--listing-chrome-height)]">
+        <div className="sticky top-[var(--mobile-app-header-height)] z-40 mb-6 border-b border-gray-200 bg-gray-50/95 px-2 py-1.5 shadow-sm backdrop-blur md:top-[var(--listing-filter-sticky-top)] md:border-t-0 md:bg-gray-50 md:shadow-none md:backdrop-blur-none">
           <div className="flex flex-wrap items-end gap-2">
             <div>
               <label className="sr-only">Sắp xếp</label>

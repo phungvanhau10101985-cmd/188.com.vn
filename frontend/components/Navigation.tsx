@@ -32,6 +32,10 @@ interface NavigationProps {
   disableStickyBar?: boolean;
   /** Đặt trong khối sticky chung với Header (AppShell) — bỏ sticky riêng của nav để head + danh mục luôn dính cùng nhau */
   embedInStickyChrome?: boolean;
+  /** Trang listing desktop: khi cuộn, ẩn hàng pill — chỉ giữ thanh cam mỏng (đồng bộ AppShell). */
+  collapseListingCategoryBar?: boolean;
+  /** Gửi chiều cao thanh cam mỏng (fixed) → AppShell đặt `--listing-chrome-height` khớp, tránh khe với bộ lọc. */
+  onDesktopThinChromeHeight?: (heightPx: number) => void;
 }
 
 function slugNorm(s: string | undefined): string {
@@ -55,6 +59,8 @@ export default function Navigation({
   headerVisible = true,
   disableStickyBar = false,
   embedInStickyChrome = false,
+  collapseListingCategoryBar = false,
+  onDesktopThinChromeHeight,
 }: NavigationProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -75,6 +81,7 @@ export default function Navigation({
   const { getCartItemCount } = useCart();
   const displayCartCount = getCartItemCount();
   const dropdownRef = useRef<HTMLElement | null>(null);
+  const thinBarOuterRef = useRef<HTMLDivElement | null>(null);
   /** Căn mega-menu theo đúng pill cấp 1 — container và từng pill (không ép full-width trái). */
   const categoryBarWrapRef = useRef<HTMLDivElement>(null);
   const pillsScrollRef = useRef<HTMLDivElement>(null);
@@ -225,16 +232,37 @@ export default function Navigation({
   const activePill = 'bg-white/20 text-white shadow-sm';
   const inactivePill = 'bg-white/20 text-white hover:bg-white/30 shadow-sm';
 
+  /** Khi thanh mỏng hiện: thanh pill danh mục không sticky để cuộn mất, trùng hành vi trang không lọc. */
+  const showStickyBar = isScrolled && !headerVisible && !disableStickyBar;
   const navLayoutClass = embedInStickyChrome
     ? 'relative'
-    : headerVisible
-      ? 'sticky top-20'
-      : 'sticky top-0';
+    : showStickyBar
+      ? 'relative'
+      : headerVisible
+        ? 'sticky top-20'
+        : 'sticky top-0';
   const stickyBarTopClass = 'top-0';
-  /** Overlay cố định đầu trang + ô tìm kiếm khi cuộn; pills luôn hiển thị song song */
-  const showStickyBar = isScrolled && !headerVisible && !disableStickyBar;
 
-  if (loading) {
+  const hideListingCategoryPills = embedInStickyChrome && collapseListingCategoryBar;
+
+  useLayoutEffect(() => {
+    if (!embedInStickyChrome || !onDesktopThinChromeHeight || !showStickyBar) return;
+    const el = thinBarOuterRef.current;
+    if (!el) return;
+    const report = () => {
+      const r = el.getBoundingClientRect();
+      const fromBox = Math.ceil(r.bottom - r.top);
+      const h = Math.max(el.offsetHeight, fromBox);
+      if (h > 0) onDesktopThinChromeHeight(h);
+    };
+    report();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [embedInStickyChrome, onDesktopThinChromeHeight, showStickyBar]);
+
+  if (loading && !hideListingCategoryPills) {
     return (
       <nav className={`bg-white/95 backdrop-blur border-b border-gray-100 ${navLayoutClass} z-40 shadow-sm`.trim()}>
         <div className="max-w-7xl mx-auto px-3">
@@ -266,7 +294,15 @@ export default function Navigation({
   return (
     <>
       <div
-        className={`fixed ${stickyBarTopClass} left-0 right-0 z-50 bg-[#ea580c] border-b border-gray-100 transition-all duration-300 ease-out ${
+        ref={(el) => {
+          thinBarOuterRef.current = el;
+          if (hideListingCategoryPills) {
+            (dropdownRef as React.MutableRefObject<HTMLElement | null>).current = el;
+          }
+        }}
+        className={`fixed ${stickyBarTopClass} left-0 right-0 z-[62] bg-[#ea580c] transition-all duration-300 ease-out ${
+          hideListingCategoryPills ? 'border-b-0' : 'border-b border-gray-100'
+        } ${
           showStickyBar ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'
         }`}
         aria-hidden={!showStickyBar}
@@ -465,6 +501,7 @@ export default function Navigation({
           </div>
         </div>
       </div>
+      {!hideListingCategoryPills && (
       <nav
         ref={dropdownRef}
         className={`${navLayoutClass} z-40 transition-all duration-300 ${
@@ -627,6 +664,7 @@ export default function Navigation({
         )}
         </div>
       </nav>
+      )}
     </>
   );
 }
