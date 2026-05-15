@@ -302,7 +302,11 @@ class ExcelImporter:
             available_columns = [col for col in excel_columns_order if col in df.columns]
 
             df = df.reindex(columns=available_columns)
-            
+            # H–K: luôn trống trên file export (tránh lệch mapping khi nguồn không qua product_to_excel_row).
+            for _blank_col in ('shop_name', 'shop_id', 'pro_lower_price', 'pro_high_price'):
+                if _blank_col in df.columns:
+                    df[_blank_col] = ''
+
             if not filename:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"export_products_{timestamp}.xlsx"
@@ -425,10 +429,10 @@ class ExcelImporter:
                 'name': 'Giày Tây Oxford Nam Da Thật Mũi Nhọn Chiều Cao Đế Khoảng 3cm Màu Đen, Nâu',
                 'pro_content': 'Giày Tây Oxford Nam Da Thật là một lựa chọn hoàn hảo thuộc dòng Giày dép Nam, đặc biệt là Giày tây Nam.',
                 'price': 2260000,
-                'shop_name': 'giày tây nam shtdc',
-                'shop_id': 'Dây buộc',
-                'pro_lower_price': 'giày dép nam G04',
-                'pro_high_price': 'giày dép nam G06',
+                'shop_name': '',
+                'shop_id': '',
+                'pro_lower_price': '',
+                'pro_high_price': '',
                 'rating_group_id': 90,
                 'question_group_id': 99,
                 'sizes': '["37", "38", "39", "40", "41", "42", "43", "44", "45", "46"]',

@@ -10,6 +10,7 @@ from app.db.base import Base
 from app.models.product import Product
 from app.models.category import Category
 from app.models.product_import_draft import ProductImportDraft
+from app.models.listing_import_queue_snapshot import ListingImportQueueRevocation, ListingImportQueueSnapshot
 from app.models.order import Order, OrderItem, OrderStatus, DepositType, PaymentMethod, PaymentStatus, Payment
 from app.models.product_question import ProductQuestion, ProductQuestionUsefulVote
 from app.models.product_review import ProductReview, ProductReviewUsefulVote
@@ -489,6 +490,18 @@ class MigrationManager:
         )
         results['product_import_drafts_sync'] = self._sync_table_columns(
             "product_import_drafts", ProductImportDraft
+        )
+        results['listing_import_queue_snapshots_create'] = self._create_table_if_not_exists(
+            "listing_import_queue_snapshots", ListingImportQueueSnapshot
+        )
+        results['listing_import_queue_snapshots_sync'] = self._sync_table_columns(
+            "listing_import_queue_snapshots", ListingImportQueueSnapshot
+        )
+        results['listing_import_queue_revocations_create'] = self._create_table_if_not_exists(
+            "listing_import_queue_revocations", ListingImportQueueRevocation
+        )
+        results['listing_import_queue_revocations_sync'] = self._sync_table_columns(
+            "listing_import_queue_revocations", ListingImportQueueRevocation
         )
         # 9. category_seo_meta.seo_body (đoạn văn SEO 150-300 từ)
         results['category_seo_meta_seo_body'] = self.migrate_category_seo_meta_seo_body()

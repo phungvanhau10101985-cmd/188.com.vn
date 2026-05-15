@@ -62,8 +62,14 @@ def _should_compact_hibox_style_product_info(pi: Dict[str, Any]) -> bool:
         if str(var_chk.get("source") or "").lower() == "hibox":
             return True
     mk = pi.get("market_info")
-    if isinstance(mk, dict) and str(mk.get("currency") or "").strip().upper() == "MNT":
-        return True
+    if isinstance(mk, dict):
+        if str(mk.get("currency") or "").strip().upper() == "MNT":
+            return True
+        # Listing Hibox sau khi quy ₮→VNĐ vẫn lưu footprint giá nguồn Hibox (draft đời cũ có thể thiếu variants.source).
+        if mk.get("hibox_display_mnt_integer") is not None:
+            return True
+        if mk.get("hibox_mnt_per_cny_used") is not None:
+            return True
     return False
 
 
@@ -71,7 +77,7 @@ def compact_product_info_for_web(product_data: Dict[str, Any]) -> None:
     """
     Mutate `product_data['product_info']` thành cấu trúc gọn cho PDP.
 
-    Chỉ áp dụng khi payload khớp kiểu import catalog MNT (`_should_compact_hibox_style_product_info`),
+    Chỉ áp dụng khi payload nhận diện là import Hibox/listing (`_should_compact_hibox_style_product_info`),
     để không làm mất cấu trúc cột AK do Excel nhập tay.
 
     Không giữ `supplier_specs_excerpt` / `hibox_specs_excerpt`, `import_taxonomy_meta`,

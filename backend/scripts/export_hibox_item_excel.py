@@ -11,6 +11,7 @@ Trang ví dụ: https://hibox.mn/v/abb-922386436529 (1688) hoặc …/v/79731720
   • Chặn request Jivo chat (hay che nút); bấm nút «САГСЛАХ» / fallback «ШУУД АВАХ» (force) để mở sheet chọn ӨНГӨ / ХЭМЖЭЕ (màu / cỡ).
   • Ảnh chọn màu (thumbnail dưới nhãn «ӨНГӨ» trong sheet cố định): color_variant_images_json, color_variant_labels_json (cùng độ dài thứ tự), color_variant_image_count.
   • Cột colors_json, sizes_json, variant_color_size_json: sheet kiểu «Мөнгө###34» hoặc DOM modal (title swatch + hàng flex-wrap cỡ áo).
+  • Modal chỉ 1 màu (flex-row gap-2 flex-wrap một chip + ảnh `justify-between items-start gap-4 p-6`…): lấy tên trong `div.p-2` của chip, ảnh màu = img hero hàng đó (//img.alicdn.com…).
   • video_url: MP4 Taobao (cloud.video.taobao.com) từ <video>/<source>, og:video hoặc HTML trang.
 
 Cần Playwright JS render (SPA); requests chỉ được shell HTML khô.
@@ -20,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
 import sys
 from datetime import datetime
@@ -93,6 +95,33 @@ def parse_hibox_variant_block(text: str) -> tuple[List[str], List[str], List[Dic
     colors = color_order
     sizes = sorted({p["size"] for p in pairs}, key=lambda x: int(x))
     return colors, sizes, pairs
+
+
+# Modal Hibox một màu kiểu «Зургийн өнгө» (màu như ảnh) — chuẩn hoá sang tiếng Việt cho Variant / Excel.
+_HIBOX_PICTURE_COLOR_LABEL_RE = re.compile(
+    r"picture\s*color|图\s*片\s*色|图色|如图所示|按图片|同色|as\s+shown",
+    re.IGNORECASE,
+)
+
+
+def _hibox_variant_sheet_is_picture_color_mode(text: str) -> bool:
+    if not (text or "").strip():
+        return False
+    t = text
+    if "Зургийн" in t and "өнгө" in t:
+        return True
+    return bool(_HIBOX_PICTURE_COLOR_LABEL_RE.search(t))
+
+
+def _hibox_normalize_color_label_for_catalog(raw: str) -> str:
+    s = (raw or "").strip()
+    if not s:
+        return s
+    if "Зургийн" in s and "өнгө" in s:
+        return "Màu như ảnh"
+    if _HIBOX_PICTURE_COLOR_LABEL_RE.search(s):
+        return "Màu như ảnh"
+    return s
 
 
 def _dedupe_urls(urls: List[str]) -> List[str]:
@@ -1066,8 +1095,84 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
         return "";
       };
 
+      /** Modal Hibox 1 màu: ảnh vuông trên cùng + một chip «cursor-pointer» chứa tên trong div.p-2. */
+      const trySingleColorModalHero = () => {
+        const wraps = [...pane.querySelectorAll("div.flex.flex-row.gap-2.flex-wrap")];
+        let tiles = [];
+        let label = "";
+        for (const w of wraps) {
+          const row = [...w.querySelectorAll(":scope > div")].filter((t) => {
+            const c = (t.getAttribute("class") || "").toString();
+            return (
+              /cursor-pointer/.test(c) &&
+              /rounded-md|rounded-lg/.test(c) &&
+              t.querySelector(":scope > div.p-2")
+            );
+          });
+          if (row.length !== 1) continue;
+          const tile = row[0];
+          let tit = (tile.getAttribute("title") || "").trim();
+          tit = tit.split(/Үлдэгдэл/i)[0].trim();
+          const p2 = tile.querySelector(":scope > div.p-2");
+          let txt = (p2 && (p2.textContent || "").trim()) || "";
+          txt = txt.replace(/\s+/g, " ").trim();
+          if (!txt || txt.length > 160) continue;
+          if (/^Хэмжээ|^ХЭМЖЭЭ|^өнгө|^ӨНГӨ|^Сонгосон$/i.test(txt)) continue;
+          label = labelFromTileTitle(txt) || labelFromTileTitle(tit) || txt;
+          if (!label) continue;
+          tiles = row;
+          break;
+        }
+        if (!label || tiles.length !== 1) return null;
+
+        const heroRows = [...pane.querySelectorAll("div.flex.justify-between.items-start")];
+        let heroUrl = "";
+        for (const hb of heroRows) {
+          const c = (hb.getAttribute("class") || "").toString();
+          if (!c.includes("gap-4")) continue;
+          if (!c.includes("p-6") && !c.includes("pb-3")) continue;
+          const img = hb.querySelector(":scope > img");
+          if (!img) continue;
+          let u =
+            img.currentSrc ||
+            img.src ||
+            img.getAttribute("data-src") ||
+            img.getAttribute("data-lazy-src") ||
+            "";
+          u = normImgUrl(u);
+          if (u.startsWith("http")) {
+            heroUrl = u;
+            break;
+          }
+        }
+        if (!heroUrl) return null;
+        return { urls: [heroUrl], labels: [label], sizes: sizesList };
+      };
+
+      const monoHero = trySingleColorModalHero();
+      if (monoHero && monoHero.urls && monoHero.urls.length) {
+        return monoHero;
+      }
+
       const collectFromSwatchTitleTiles = () => {
         const row = [];
+        const picColorLine = /Зургийн\s+өнгө|picture\s+color|图色|如图所示|按图片/i;
+        const pickFromImgRelaxed = (img, lab) => {
+          const rect = img.getBoundingClientRect();
+          if (!rect.width || !rect.height) return null;
+          if (rect.width < 28 || rect.height < 28) return null;
+          if (rect.width > 520 || rect.height > 520) return null;
+          let u =
+            img.currentSrc ||
+            img.src ||
+            img.getAttribute("data-src") ||
+            img.getAttribute("data-lazy-src") ||
+            "";
+          if (typeof u !== "string") return null;
+          u = normImgUrl(u);
+          if (!u.startsWith("http")) return null;
+          return { u, left: rect.left + rect.width / 2, top: rect.top + rect.height / 2, lab };
+        };
         const pickFromImg = (img, lab) => {
           const rect = img.getBoundingClientRect();
           if (!rect.width || !rect.height) return null;
@@ -1096,6 +1201,31 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
           if (!picked) {
             for (const img of holder.querySelectorAll("img")) {
               picked = pickFromImg(img, lab);
+              if (picked) break;
+            }
+          }
+          if (picked) row.push(picked);
+        }
+        for (const holder of pane.querySelectorAll("[title], button, [role='radio'], label")) {
+          const tit = (holder.getAttribute("title") || "").trim();
+          const txt0 = (holder.innerText || "").trim().split(/\n/)[0] || "";
+          if (!picColorLine.test(tit) && !picColorLine.test(txt0)) continue;
+          const lab = labelFromTileTitle(txt0 || tit) || txt0 || tit;
+          let picked = null;
+          if (holder.tagName === "IMG")
+            picked = pickFromImg(holder, lab) || pickFromImgRelaxed(holder, lab);
+          if (!picked) {
+            for (const img of holder.querySelectorAll("img")) {
+              picked = pickFromImg(img, lab) || pickFromImgRelaxed(img, lab);
+              if (picked) break;
+            }
+          }
+          if (!picked) {
+            const paneRect = pane.getBoundingClientRect();
+            for (const img of pane.querySelectorAll("img")) {
+              const r = img.getBoundingClientRect();
+              if (r.top > paneRect.top + 260) continue;
+              picked = pickFromImg(img, lab) || pickFromImgRelaxed(img, lab);
               if (picked) break;
             }
           }
@@ -1190,9 +1320,27 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
     color_variant_labels: List[str] = []
     variant_sheet_sizes_dom: List[str] = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context(viewport={"width": 1366, "height": 900}, locale="mn")
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+            ],
+        )
+        ctx = browser.new_context(
+            viewport={"width": 1366, "height": 900},
+            locale="mn-MN",
+            timezone_id="Asia/Ulaanbaatar",
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            ),
+        )
         ctx.route("**/*", _route_block_jivo)
+        ctx.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
+        )
         page = ctx.new_page()
 
         def _grab_variant_sheet_visual() -> tuple[List[str], List[str], List[str]]:
@@ -1230,12 +1378,26 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
             return [], [], []
 
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=90_000)
+            try:
+                page.goto(
+                    "https://www.google.com/",
+                    wait_until="domcontentloaded",
+                    timeout=45_000,
+                )
+            except Exception:
+                pass
+            page.wait_for_timeout(520 + random.randint(0, 380))
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=90_000,
+                referer="https://www.google.com/",
+            )
             try:
                 page.wait_for_load_state("networkidle", timeout=45_000)
             except Exception:
                 pass
-            page.wait_for_timeout(2200)
+            page.wait_for_timeout(1900 + random.randint(0, 450))
             try:
                 gallery_sweep_urls, gallery_swiper_slide_count = _hibox_sweep_product_gallery(page)
             except Exception:
@@ -1381,6 +1543,8 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
     desc_u = _dedupe_urls([str(x) for x in desc_imgs])
     oth_u = _dedupe_urls([str(x) for x in oth])
     gal_u = _dedupe_urls([_hibox_scheme_and_trunc(u) for u in gal_u])
+    og_image_out = _hibox_scheme_and_trunc(str(raw.get("og_image") or "").strip())
+    thumb_fallback = og_image_out or (gal_u[0] if gal_u else "")
     color_variant_urls, color_variant_labels = _dedupe_urls_lockstep(
         [_hibox_scheme_and_trunc(u) for u in color_variant_urls],
         color_variant_labels,
@@ -1401,15 +1565,30 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
             color_variant_urls = cv_f
             color_variant_labels = [str(u_to_lab.get(u, "") or "") for u in cv_f]
     main_price = str(raw.get("main_price") or "").strip()
-    colors_parse_order: List[str]
-    sizes: List[str]
-    pairs: List[Dict[str, str]]
     colors_parse_order, sizes_from_sheet, pairs_from_sheet = parse_hibox_variant_block(
         variant_sheet or "",
     )
     sizes = sizes_from_sheet or variant_sheet_sizes_dom
-    pairs: List[Dict[str, str]] = list(pairs_from_sheet)
+    pairs = list(pairs_from_sheet)
     n_img = len(color_variant_urls)
+
+    pic_mode = _hibox_variant_sheet_is_picture_color_mode(variant_sheet or "")
+    if n_img == 0 and sizes and pic_mode and thumb_fallback:
+        color_variant_urls = [thumb_fallback]
+        color_variant_labels = ["Màu như ảnh"]
+        n_img = 1
+
+    for i in range(len(color_variant_labels)):
+        color_variant_labels[i] = _hibox_normalize_color_label_for_catalog(str(color_variant_labels[i]))
+
+    if n_img == 1 and thumb_fallback and color_variant_urls:
+        lab0 = (color_variant_labels[0] if color_variant_labels else "").strip()
+        u0 = str(color_variant_urls[0] or "").lower()
+        has_modal_thumb = "alicdn.com" in u0 or "gw.alicdn.com" in u0
+        # Giữ ảnh chip/modal (thường alicdn) — chỉ fallback OG/gallery khi chưa có hoặc nhãn «Màu như ảnh».
+        if not has_modal_thumb and (lab0 == "Màu như ảnh" or pic_mode):
+            color_variant_urls[0] = thumb_fallback
+
     if n_img > 0:
         colors = []
         for i in range(n_img):
@@ -1424,15 +1603,15 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
                 else ""
             )
             lab = dom_lab or parse_lab or f"Màu {i + 1}"
+            lab = _hibox_normalize_color_label_for_catalog(lab)
             colors.append(lab)
     else:
-        colors = colors_parse_order
+        colors = [_hibox_normalize_color_label_for_catalog(str(c)) for c in colors_parse_order]
     if not pairs and colors and sizes:
         pairs = [{"color": str(c), "size": str(s)} for c in colors for s in sizes]
     specs_text = str((specs_data or {}).get("specs_text") or "")[:32000]
     spec_imgs = _dedupe_urls(list((specs_data or {}).get("specs_images") or []))
     spec_imgs = _dedupe_urls([_hibox_scheme_and_trunc(u) for u in spec_imgs])
-    og_image_out = _hibox_scheme_and_trunc(str(raw.get("og_image") or ""))
 
     link_slug = ""
     try:

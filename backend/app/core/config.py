@@ -3,6 +3,7 @@ import os
 import re
 import json
 import logging
+import math
 import sys
 from typing import List, Optional, Dict, Any, Tuple
 from dotenv import load_dotenv
@@ -256,6 +257,23 @@ class Settings:
         self.IMPORT_1688_BATCH_RESUME_ON_STARTUP: bool = os.getenv(
             "IMPORT_1688_BATCH_RESUME_ON_STARTUP", ""
         ).strip().lower() in ("1", "true", "yes")
+        # CN¥ listing → Excel batch / quy đổi Giá Tệ: VNĐ/CN¥ (mặc định khớp frontend parse HTML listing `3580`).
+        _listing_cny_rate = os.getenv("LISTING_IMPORT_VND_PER_CNY", "3580").strip().replace(",", ".")
+        try:
+            self.LISTING_IMPORT_VND_PER_CNY: float = float(_listing_cny_rate)
+            if not (math.isfinite(self.LISTING_IMPORT_VND_PER_CNY) and self.LISTING_IMPORT_VND_PER_CNY > 0):
+                raise ValueError
+        except ValueError:
+            self.LISTING_IMPORT_VND_PER_CNY = 3580.0
+
+        # Hibox UI hiển thị ₮ — quy sang ~CN¥ trước khi × hệ số IF × LISTING_IMPORT_VND_PER_CNY (khớp frontend 475).
+        _hibox_mnt_per = os.getenv("HIBOX_MNT_PER_CNY_FOR_LISTING", "475").strip().replace(",", ".")
+        try:
+            self.HIBOX_MNT_PER_CNY_FOR_LISTING: float = float(_hibox_mnt_per)
+            if not (math.isfinite(self.HIBOX_MNT_PER_CNY_FOR_LISTING) and self.HIBOX_MNT_PER_CNY_FOR_LISTING > 0):
+                raise ValueError
+        except ValueError:
+            self.HIBOX_MNT_PER_CNY_FOR_LISTING = 475.0
 
         # Feed TSV Google Merchant Center — GET /api/v1/import-export/export/merchant-center-feed.tsv (công khai)
         self.MERCHANT_FEED_CURRENCY: str = os.getenv("MERCHANT_FEED_CURRENCY", "VND").strip() or "VND"

@@ -2,6 +2,10 @@
 Chuyển trang chi tiết hibox.mn (Nuxt SPA) → product_data thống nhất với import 1688 / export Excel draft.
 Không cookie; Playwright được gọi qua scripts/export_hibox_item_excel.py.
 
+Giá (`price`, VNĐ): giá hiển thị trang Hibox là ₮ (số nối chữ số) → chia `HIBOX_MNT_PER_CNY_FOR_LISTING`
+(~CN¥) × hệ số lưới IF (`listing_cny_grid`) × `LISTING_IMPORT_VND_PER_CNY`, làm tròn lên 10.000 ₫
+(khớp batch Excel listing / `taobao-cards-html-parse.ts`).
+
 Định danh URL …/v/<slug>:
   • slug «abb-<chữ số>» (vd abb-922386436529) → nguồn **1688** → `link_default` = detail.1688.com/offer/<số>.html, origin «1688», product_id **A<số>a188<SKU>**.
   • slug khác (vd chỉ số 797317200783) → **Taobao/Tmall** → `link_default` = detail.tmall.com/item.htm?id=… (cùng kiểu với Taobao), origin «taobao», product_id **T<id>a188<SKU>**.
@@ -10,12 +14,19 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlparse
 
+from app.core.config import settings
 from app.services.alicdn_urls import truncate_alicdn_url_to_first_jpg
+from app.services.listing_cny_grid import (
+    DEFAULT_VND_PER_CNY_FOR_LISTING_ESTIMATE,
+    cny_exchange_multiplier_from_grid,
+    estimate_listing_vnd_rounded,
+)
 from app.utils.product_synthetic_engagement import synthetic_engagement_counts
 
 
@@ -35,8 +46,25 @@ _MIRROR_ITEM_ID_RE = re.compile(r"^[a-zA-Z0-9][\w.-]{1,220}$")
 # Ghép product_id khi publish: T{id}a188{SKU} — id lấy sau /v/ hoặc ?id= mirror
 _CANONICAL_HIBOX_PRODUCT_ITEM_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,220}$")
 
+# Modal một màu kiểu «Зургийн өнгө» — đồng bộ với export_hibox_item_excel (chuẩn catalogue).
+_HIBOX_PIC_COLOR_RE = re.compile(
+    r"picture\s*color|图\s*片\s*色|图色|如图所示|按图片|同色|as\s+shown",
+    re.I,
+)
+
 # …/v/abb-<offerId_1688> — cửa hàng 1688 trên Hibox (không phải Taobao).
 _HIBOX_SLUG_1688_ABB_RE = re.compile(r"(?i)^abb-(\d+)$")
+
+
+def _hibox_catalog_color_label(raw: str) -> str:
+    s = (raw or "").strip()
+    if not s:
+        return s
+    if "Зургийн" in s and "өнгө" in s:
+        return "Màu như ảnh"
+    if _HIBOX_PIC_COLOR_RE.search(s):
+        return "Màu như ảnh"
+    return s
 
 
 def extract_hibox_1688_offer_digits(slug: str) -> Optional[str]:
@@ -357,6 +385,46 @@ def _parse_display_price_integer(s: Any) -> float:
         return 0.0
 
 
+def _hibox_mnt_per_cny_for_listing() -> float:
+    """Khớp `DEFAULT_MNT_PER_CNY_FOR_HIBOX_LISTING` trên frontend (`taobao-cards-html-parse.ts`)."""
+    raw = getattr(settings, "HIBOX_MNT_PER_CNY_FOR_LISTING", None)
+    try:
+        x = float(raw) if raw is not None else 475.0
+    except (TypeError, ValueError):
+        x = 475.0
+    return x if math.isfinite(x) and x > 0 else 475.0
+
+
+def _listing_import_vnd_per_cny() -> float:
+    raw = getattr(settings, "LISTING_IMPORT_VND_PER_CNY", None)
+    try:
+        x = float(raw) if raw is not None else DEFAULT_VND_PER_CNY_FOR_LISTING_ESTIMATE
+    except (TypeError, ValueError):
+        x = DEFAULT_VND_PER_CNY_FOR_LISTING_ESTIMATE
+    return x if math.isfinite(x) and x > 0 else DEFAULT_VND_PER_CNY_FOR_LISTING_ESTIMATE
+
+
+def _hibox_price_vnd_from_display_mnt(mnt_display: float) -> tuple[float, float]:
+    """
+    ₮ (UI) → ~CN¥ × hệ_số_IF × tỷ giá → VNĐ (float, đã làm tròn lên bội 10k).
+    Trả (price_vnd, cny_approx).
+    """
+    if not math.isfinite(mnt_display) or mnt_display <= 0:
+        return 0.0, 0.0
+    mnt_per = _hibox_mnt_per_cny_for_listing()
+    if not math.isfinite(mnt_per) or mnt_per <= 0:
+        return 0.0, 0.0
+    cny_approx = float(mnt_display) / float(mnt_per)
+    if not math.isfinite(cny_approx) or cny_approx <= 0:
+        return 0.0, 0.0
+    coef = cny_exchange_multiplier_from_grid(cny_approx)
+    vnd_rate = _listing_import_vnd_per_cny()
+    vnd_i = estimate_listing_vnd_rounded(cny_approx, coef, vnd_rate)
+    if vnd_i is None or vnd_i <= 0:
+        return 0.0, cny_approx
+    return float(vnd_i), cny_approx
+
+
 def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -> Dict[str, Any]:
     """Map một dòng scrape (export_hibox_item_excel) → dict giống normalize_1688_payload."""
     gallery = [_normalize_image_url(u) for u in _jlist(row, "gallery_images_json") if u]
@@ -383,10 +451,13 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
         scraped_page_sku = (row.get("sku") or "").strip()
     link_slug = (slug or "").strip()
     excel_code = link_slug or scraped_page_sku
-    price = _parse_display_price_integer(row.get("price_listed")) or _parse_display_price_integer(
+    mnt_display = _parse_display_price_integer(row.get("price_listed")) or _parse_display_price_integer(
         row.get("price_estimate"),
     )
-    price_s = str(int(price)) if price == int(price) else str(price)
+    price_vnd, cny_approx = _hibox_price_vnd_from_display_mnt(mnt_display)
+    cny_for_excel = ""
+    if cny_approx > 0:
+        cny_for_excel = f"{cny_approx:.4f}".rstrip("0").rstrip(".")
 
     video_link = (row.get("video_url") or "").strip()
 
@@ -442,6 +513,19 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
             lab_s = str(c).strip()
             colors_out.append({"name": lab_s, "img": ""})
 
+    pic_thumb = main_image or (gallery[0] if gallery else "")
+    # Giữ nhãn gốc NCC theo từng ô swatch để map sang `pairs` (variant_color_size_json) sau khi dịch màu.
+    supplier_color_labels: List[str] = [
+        str(co.get("name") or "").strip() for co in colors_out
+    ]
+    for co in colors_out:
+        nm = str(co.get("name") or "").strip()
+        cat = _hibox_catalog_color_label(nm)
+        if cat == "Màu như ảnh":
+            co["name"] = "Màu như ảnh"
+            if not str(co.get("img") or "").strip() and pic_thumb:
+                co["img"] = pic_thumb
+
     try:
         from app.services.variant_color_translate import apply_deepseek_translations_to_color_entries
 
@@ -449,7 +533,23 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
     except Exception:
         pass
 
-    variants: Dict[str, Any] = {"pairs": pair_objs}
+    # Đồng bộ tiếng Việt (hoặc nhãn sau catalog) vào pairs + swatch — tránh lệch với cột AG / variants.colors.
+    sup_to_display: Dict[str, str] = {}
+    for sup, co in zip(supplier_color_labels, colors_out):
+        vn = str(co.get("name") or "").strip()
+        if sup and vn:
+            sup_to_display[sup] = vn
+    for po in pair_objs:
+        cr = str(po.get("color") or "").strip()
+        if cr and cr in sup_to_display:
+            po["color"] = sup_to_display[cr]
+    for i, sp in enumerate(swatch_pairs):
+        if i < len(colors_out):
+            lab = str(colors_out[i].get("name") or "").strip()
+            if lab:
+                sp["label"] = lab
+
+    variants: Dict[str, Any] = {"pairs": pair_objs, "source": "hibox"}
     supply_plat = "1688" if hibox_slug_is_1688_offer(slug) else "taobao"
     supply_link = supply_product_link_default_for_hibox_slug(slug)
     variants["supply_platform"] = supply_plat
@@ -467,8 +567,15 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
             "listing_sku_hint": scraped_page_sku or None,
         },
         "market_info": {
-            "currency": "MNT",
-            "note": "Giá hiển thị theo trang nguồn (đơn vị có thể là ₮).",
+            "currency": "VND",
+            "note": (
+                "Giá VNĐ suy từ ₮ hiển thị Hibox ÷ HIBOX_MNT_PER_CNY_FOR_LISTING (~CN¥) × hệ số IF × "
+                "LISTING_IMPORT_VND_PER_CNY (làm tròn lên 10.000 ₫), khớp batch Excel listing."
+            ),
+            "hibox_display_mnt_integer": int(mnt_display) if mnt_display else None,
+            "hibox_mnt_per_cny_used": _hibox_mnt_per_cny_for_listing(),
+            "price_cny_approx": round(cny_approx, 6) if cny_approx > 0 else None,
+            "listing_import_vnd_per_cny_used": _listing_import_vnd_per_cny(),
         },
         "specifications": {"supplier_specs_excerpt": specs_text[:4000] if specs_text else ""},
         "variants": variants,
@@ -483,11 +590,11 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
         "brand_name": None,
         "name": title[:500],
         "description": desc_block[:20000],
-        "price": float(price),
+        "price": float(price_vnd),
         "shop_name": "Hibox",
         "shop_id": slug,
-        "pro_lower_price": price_s if price else "",
-        "pro_high_price": price_s if price else "",
+        "pro_lower_price": cny_for_excel,
+        "pro_high_price": cny_for_excel,
         "group_rating": 0,
         "group_question": 0,
         "sizes": sizes,

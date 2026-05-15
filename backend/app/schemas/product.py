@@ -1,5 +1,5 @@
 # backend/app/schemas/product.py - COMPLETE FIXED VERSION
-from pydantic import BaseModel, Field, model_validator, field_validator, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 
@@ -154,13 +154,11 @@ class ProductBase(BaseModel):
     meta_description: Optional[str] = Field(None, description="SEO: meta description")
     meta_keywords: Optional[str] = Field(None, description="SEO: meta keywords")
 
-    #: Slug danh mục cấp 1 (taxonomy) — dùng với `/info/chon-size/...` và popup chọn size.
-    category_level1_slug: Optional[str] = Field(None)
-    #: Slug segment cấp 2 trong full_slug (`cat1/cat2/...`). Một vài cặp cat1+cat2 có trang guide riêng.
-    category_level2_slug: Optional[str] = Field(None)
 
 class ProductCreate(ProductBase):
     """Schema for creating product"""
+
+    model_config = ConfigDict(extra="ignore")
     is_active: bool = True
 
 class ProductUpdate(BaseModel):
@@ -273,13 +271,18 @@ def _build_fallback_product_info(obj: Any) -> Dict[str, Any]:
 
 class Product(ProductBase):
     """Complete Product schema for response"""
+
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     is_active: bool
     created_at: Optional[datetime] = None  # DB có thể trả None
     updated_at: Optional[datetime] = None
-    
-    class Config:
-        from_attributes = True
+
+    #: Slug danh mục cấp 1 — chỉ khi trả API (`enrich_product_payloads_with_category_size_guide`), không có cột ORM.
+    category_level1_slug: Optional[str] = Field(None)
+    #: Slug segment cấp 2 trong full_slug — cùng cơ chế enrich.
+    category_level2_slug: Optional[str] = Field(None)
 
     @model_validator(mode="after")
     def fill_product_info_from_columns(self):

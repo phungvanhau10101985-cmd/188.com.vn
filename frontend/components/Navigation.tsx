@@ -232,8 +232,15 @@ export default function Navigation({
   const activePill = 'bg-white/20 text-white shadow-sm';
   const inactivePill = 'bg-white/20 text-white hover:bg-white/30 shadow-sm';
 
-  /** Khi thanh mỏng hiện: thanh pill danh mục không sticky để cuộn mất, trùng hành vi trang không lọc. */
-  const showStickyBar = isScrolled && !headerVisible && !disableStickyBar;
+  /**
+   * Trang listing ghim trong AppShell (embed): ô cam mỏng bật đúng theo `collapseListingCategoryBar`
+   * (khớp pinnedListingCompact). Dùng thêm listener `isScrolled` ở đây dễ lệch pha/ngưỡng → nhấp nháy khi đổi head.
+   */
+  const showStickyBar = disableStickyBar
+    ? false
+    : embedInStickyChrome && collapseListingCategoryBar
+      ? true
+      : isScrolled && !headerVisible;
   const navLayoutClass = embedInStickyChrome
     ? 'relative'
     : showStickyBar

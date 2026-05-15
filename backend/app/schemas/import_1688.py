@@ -119,3 +119,58 @@ class Import1688DraftListOut(BaseModel):
 
 class Import1688DraftIdsBody(BaseModel):
     draft_ids: List[int] = Field(..., min_length=1, max_length=500)
+
+
+class ListingImportQueueTaskIn(BaseModel):
+    url: str = Field(..., min_length=10)
+    source: Optional[str] = "hibox"
+    label: Optional[str] = None
+
+
+class ListingImportQueueEnqueueIn(BaseModel):
+    """Thêm link vào hàng đợi server-side; xử lý tuần tự."""
+
+    queue_token: Optional[str] = None
+    items: List[ListingImportQueueTaskIn] = Field(..., min_length=1)
+
+
+class ListingImportQueueEnqueueOut(BaseModel):
+    queue_token: str
+    added: int
+    message: str
+
+
+class ListingImportQueueActionMessage(BaseModel):
+    queue_token: str
+    message: str
+
+
+class ListingImportQueueRunCounts(BaseModel):
+    total: int = 0
+    done: int = 0
+    error: int = 0
+    pending: int = 0
+    running: int = 0
+
+
+class ListingImportQueueRunSummary(BaseModel):
+    queue_token: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    run_status: str = ""
+    pause_requested: bool = False
+    stop_requested: bool = False
+    worker_alive: bool = False
+    counts: ListingImportQueueRunCounts
+
+
+class ListingImportQueueRunsOut(BaseModel):
+    items: List[ListingImportQueueRunSummary]
+    total: int
+    limit: int
+    offset: int
+
+
+class ListingImportQueueDeleteOut(BaseModel):
+    queue_token: str
+    deleted: bool = True

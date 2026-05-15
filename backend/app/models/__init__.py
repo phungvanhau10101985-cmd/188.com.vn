@@ -27,6 +27,9 @@ print("[OK] InternalSkuExport model loaded")
 from app.models.product_import_draft import ProductImportDraft
 print("[OK] ProductImportDraft model loaded")
 
+from app.models.listing_import_queue_snapshot import ListingImportQueueRevocation, ListingImportQueueSnapshot
+print("[OK] ListingImportQueueSnapshot model loaded")
+
 # 3. Import User (không phụ thuộc)
 from app.models.user import User, UserProductView, UserFavorite
 print("[OK] User models loaded")
@@ -145,6 +148,8 @@ __all__ = [
     "Product",
     "InternalSkuExport",
     "ProductImportDraft",
+    "ListingImportQueueSnapshot",
+    "ListingImportQueueRevocation",
     "ProductQuestion",
     "ProductQuestionUsefulVote",
     "ProductReview",

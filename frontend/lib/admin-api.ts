@@ -502,6 +502,74 @@ export interface AdminImport1688BatchResumeResponse {
   pending: number;
 }
 
+export interface AdminListingImportQueueCounts {
+  total: number;
+  done: number;
+  error: number;
+  pending: number;
+  running: number;
+}
+
+export interface AdminListingImportQueueItem {
+  id: string;
+  url: string;
+  source: string;
+  label?: string | null;
+  state: string;
+  job_id?: string | null;
+  draft_id?: number | null;
+  message?: string | null;
+  finished_at?: string | null;
+}
+
+export interface AdminListingImportQueueStatus {
+  queue_token: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  run_status: string;
+  pause_requested: boolean;
+  stop_requested: boolean;
+  worker_alive: boolean;
+  current_item_id?: string | null;
+  counts: AdminListingImportQueueCounts;
+  items: AdminListingImportQueueItem[];
+  can_resume: boolean;
+  can_pause: boolean;
+  can_stop: boolean;
+}
+
+export interface AdminListingImportQueueEnqueueResponse {
+  queue_token: string;
+  added: number;
+  message: string;
+}
+
+export interface AdminListingImportQueueRunCounts {
+  total: number;
+  done: number;
+  error: number;
+  pending: number;
+  running: number;
+}
+
+export interface AdminListingImportQueueRunSummary {
+  queue_token: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  run_status?: string;
+  pause_requested?: boolean;
+  stop_requested?: boolean;
+  worker_alive?: boolean;
+  counts: AdminListingImportQueueRunCounts;
+}
+
+export interface AdminListingImportQueueRunsResponse {
+  items: AdminListingImportQueueRunSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface AdminImport1688DraftListResponse {
   items: AdminImport1688Draft[];
   total: number;
@@ -820,6 +888,107 @@ export const adminProductAPI = {
       },
     ),
 
+  enqueueListingImportQueue: (params: {
+    queue_token?: string | null;
+    items: { url: string; source?: string; label?: string | null }[];
+  }) =>
+    fetchAdmin<AdminListingImportQueueEnqueueResponse>('/import-1688/listing-queue/enqueue', {
+      method: 'POST',
+      body: JSON.stringify({
+        queue_token: params.queue_token ?? undefined,
+        items: params.items,
+      }),
+      timeoutMs: 120_000,
+    }),
+
+  getListingImportQueueStatus: (queueToken: string) =>
+    fetchAdmin<AdminListingImportQueueStatus>(
+      `/import-1688/listing-queue/${encodeURIComponent(queueToken)}`,
+      { timeoutMs: 60_000 },
+    ),
+
+  pauseListingImportQueue: (queueToken: string) =>
+    fetchAdmin<{ queue_token: string; message: string }>(
+      `/import-1688/listing-queue/${encodeURIComponent(queueToken)}/pause`,
+      { method: 'POST', timeoutMs: 30_000 },
+    ),
+
+  resumeListingImportQueue: (queueToken: string) =>
+    fetchAdmin<{ queue_token: string; message: string }>(
+      `/import-1688/listing-queue/${encodeURIComponent(queueToken)}/resume`,
+      { method: 'POST', timeoutMs: 60_000 },
+    ),
+
+  stopListingImportQueue: (queueToken: string) =>
+    fetchAdmin<{ queue_token: string; message: string }>(
+      `/import-1688/listing-queue/${encodeURIComponent(queueToken)}/stop`,
+      { method: 'POST', timeoutMs: 60_000 },
+    ),
+
+  listListingImportQueueRuns: (params?: { limit?: number; offset?: number }) => {
+    const limit = params?.limit ?? 50;
+    const offset = params?.offset ?? 0;
+    const qs = `?limit=${encodeURIComponent(String(limit))}&offset=${encodeURIComponent(String(offset))}`;
+    return fetchAdmin<AdminListingImportQueueRunsResponse>(`/import-1688/listing-queue/runs${qs}`, {
+      timeoutMs: 60_000,
+    });
+  },
+
+  deleteListingImportQueueSaved: (queueToken: string) =>
+    fetchAdmin<{ queue_token: string; deleted: boolean }>(
+      `/import-1688/listing-queue/${encodeURIComponent(queueToken)}`,
+      { method: 'DELETE', timeoutMs: 30_000 },
+    ),
+
+  downloadListingImportQueueCsv: async (
+    queueToken: string,
+    options?: { finishedOnly?: boolean },
+  ) => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const finishedOnly = options?.finishedOnly === true;
+    const qs = finishedOnly ? '?finished_only=true' : '';
+    const url = `${getApiBaseUrl()}/import-1688/listing-queue/${encodeURIComponent(queueToken)}/export.csv${qs}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Tải CSV hàng đợi thất bại');
+    }
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const suffix = finishedOnly ? '_ket_qua' : '_snapshot';
+    a.download = `listing_import_queue_${queueToken.slice(0, 12)}${suffix}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  },
+
+  /** Excel mẫu nhập web — dữ liệu sản phẩm từ draft các dòng đã xong trong đợt (giống export bulk draft). */
+  downloadListingImportQueueProductsExcel: async (queueToken: string) => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const url = `${getApiBaseUrl()}/import-1688/listing-queue/${encodeURIComponent(queueToken)}/export-products.xlsx`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Tải Excel sản phẩm từ đợt thất bại');
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition');
+    let filename = `listing_queue_products_${queueToken.slice(0, 12)}.xlsx`;
+    const m = cd && /filename="?([^";]+)"?/i.exec(cd);
+    if (m?.[1]) filename = m[1].trim();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  },
+
   getImport1688Job: (jobId: string) =>
     fetchAdmin<AdminImport1688Job>(`/import-1688/jobs/${encodeURIComponent(jobId)}`, {
       timeoutMs: 60_000,
@@ -871,11 +1040,15 @@ export const adminProductAPI = {
     URL.revokeObjectURL(a.href);
   },
 
-  uploadImport1688ExcelBatch: async (file: File): Promise<AdminImport1688ExcelBatchStart> => {
+  uploadImport1688ExcelBatch: async (
+    file: File,
+    fetchTarget: 'auto' | 'hibox' | '1688' = 'auto',
+  ): Promise<AdminImport1688ExcelBatchStart> => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
     const form = new FormData();
     form.append('file', file);
+    form.append('fetch_target', fetchTarget);
     const url = `${getApiBaseUrl()}/import-1688/jobs/batch-from-excel`;
     const res = await fetch(url, {
       method: 'POST',

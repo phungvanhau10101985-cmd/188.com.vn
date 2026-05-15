@@ -532,6 +532,32 @@ def normalize_1688_payload(source_url: str, offer_id: Optional[str], payload: Di
             lower = str(lo_f)
             higher = str(hi_f) if hi_f != lo_f else str(lo_f)
 
+    dom_main_raw = structured.get("main_price_cny")
+    try:
+        if isinstance(dom_main_raw, (int, float)):
+            dom_piece = float(dom_main_raw)
+        elif isinstance(dom_main_raw, str) and str(dom_main_raw).strip():
+            dom_piece = float(str(dom_main_raw).strip())
+        else:
+            dom_piece = 0.0
+    except (TypeError, ValueError):
+        dom_piece = 0.0
+    # Giá khối OD 「1件起批」 — tránh merge SKU/script lấy nhầm mức ≥N件 thấp hơn hoặc ¥ trong body (ship…).
+    if 0 < dom_piece < 1_000_000:
+        price = dom_piece
+        band: List[float] = [dom_piece]
+        for raw in (lower, higher):
+            try:
+                v = float(str(raw).strip())
+                if 0 < v < 1_000_000:
+                    band.append(v)
+            except (TypeError, ValueError):
+                pass
+        lo_b = min(band)
+        hi_b = max(band)
+        lower = str(lo_b)
+        higher = str(hi_b) if hi_b != lo_b else str(lo_b)
+
     shop_name, shop_id = _extract_shop(payload, combined)
 
     meta_desc = (payload.get("meta_description") or "").strip()
@@ -996,7 +1022,14 @@ def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[
                   const scripts = Array.from(document.scripts)
                     .map((s) => s.textContent || '')
                     .filter(Boolean);
-                  const h1 = document.querySelector('h1')?.innerText || '';
+                  /** 1688 OD: h1 đầu tiên thường là tên shop (#shopNavigation), title SP ở #productTitle */
+                  const productTitleH1 =
+                    document.querySelector(
+                      '#productTitle h1, [data-module="od_title"] h1, .module-od-title .title-content h1'
+                    ) || null;
+                  const h1Product = (productTitleH1?.innerText || '').trim();
+                  const h1Fallback = (document.querySelector('h1')?.innerText || '').trim();
+                  const h1 = h1Product || h1Fallback;
                   const titleNodes = Array.from(document.querySelectorAll('[class*=title],[class*=Title]'))
                     .map((el) => el.innerText || '')
                     .filter((t) => t && t.length > 6)
@@ -1048,6 +1081,10 @@ def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[
                     '[class*="offer-gallery"] img',
                     '[class*="main-file-image"] img',
                     '[class*="vertical-img"] img',
+                    '#gallery .od-gallery-list img.preview-img',
+                    '#gallery img.ant-image-img.preview-img',
+                    '.od-gallery-preview .od-gallery-list img',
+                    '.module-od-picture-gallery img.preview-img',
                   ].forEach((sel) => {
                     try {
                       document.querySelectorAll(sel).forEach((img) => {
@@ -1122,11 +1159,32 @@ def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[
                   videoUrl = norm(videoUrl);
 
                   const titleCandidates = [];
+                  if (h1Product) titleCandidates.push(h1Product);
                   if (meta('og:title')) titleCandidates.push(meta('og:title'));
                   if (document.title) titleCandidates.push(document.title);
 
                   const sizeLabels = [];
                   const seenSize = new Set();
+                  const pushSize = (raw) => {
+                    const t = (raw || '').trim().split(/\\s+/)[0].trim();
+                    if (!t || t.length > 12 || seenSize.has(t)) return;
+                    seenSize.add(t);
+                    sizeLabels.push(t);
+                  };
+                  /** OD layout: hàng 尺码 — item-label là S/M/L/XL… */
+                  document.querySelectorAll('#skuSelection .feature-item').forEach((block) => {
+                    const lab = block.querySelector('.feature-item-label h3, .feature-item-label');
+                    const labelText = ((lab && lab.innerText) || '').trim();
+                    if (!/尺码/.test(labelText)) return;
+                    block.querySelectorAll('.expand-view-item span.item-label[title], .expand-view-item .item-label').forEach(
+                      (el) => {
+                        if (sizeLabels.length >= 48) return;
+                        const fromTitle = el.getAttribute && el.getAttribute('title');
+                        pushSize(fromTitle || el.innerText || '');
+                      }
+                    );
+                  });
+                  /** Giày / SKU dạng số */
                   document.querySelectorAll('button, span, div, a, li').forEach((el) => {
                     if (sizeLabels.length >= 48) return;
                     const cn = ((el.className && el.className.toString()) || '').toLowerCase();
@@ -1137,11 +1195,34 @@ def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[
                     if (!matchSku) return;
                     const t = ((el.innerText || '').trim().split(/\\s+/)[0] || '').trim();
                     if (!/^[0-9]{2,4}$/.test(t)) return;
-                    if (!seenSize.has(t)) {
-                      seenSize.add(t);
-                      sizeLabels.push(t);
-                    }
+                    pushSize(t);
                   });
+
+                  /** Giá mức 1件起批 (ưu tiên hơn ¥ ship / giảm giá khác trong body) */
+                  let main_price_cny = null;
+                  try {
+                    const roots = document.querySelectorAll(
+                      '#mainPrice .price-component, .module-od-main-price .price-component, .od-price-container-step .price-component'
+                    );
+                    roots.forEach((pc) => {
+                      if (main_price_cny != null) return;
+                      const txt = (pc.innerText || '').replace(/\\s+/g, '');
+                      if (!/1件/.test(txt)) return;
+                      const cur = pc.querySelectorAll('.price-info span.currency');
+                      if (!cur || !cur.length) return;
+                      const whole = (cur[0].textContent || '').trim().replace(/[^0-9]/g, '');
+                      let frac = '';
+                      if (cur.length > 1) {
+                        frac = (cur[1].textContent || '').trim();
+                        if (frac.startsWith('.')) frac = frac.slice(1);
+                        frac = frac.replace(/[^0-9]/g, '');
+                      }
+                      const joined = frac ? `${whole}.${frac}` : whole;
+                      const n = parseFloat(joined);
+                      if (!Number.isFinite(n) || n <= 0 || n > 1000000) return;
+                      main_price_cny = n;
+                    });
+                  } catch (e) {}
 
                   const structured = {
                     carousel_images: c1.arr,
@@ -1150,6 +1231,7 @@ def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[
                     title_candidates: titleCandidates,
                     size_labels: sizeLabels,
                     video_url: videoUrl || null,
+                    main_price_cny,
                   };
 
                   return {

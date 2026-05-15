@@ -29,13 +29,16 @@ export type ParsedTaobaoCardRow = {
   price_cny_approx: number | null;
   /** Hệ số nhân theo lưới IF Excel (theo giá nhân dân tệ). */
   cny_exchange_multiplier: number | null;
+  /** Nguồn parse đặc biệt (ảnh/shop có thể thiếu). */
+  parsed_source?: 'hibox_grid' | '1688_text_table';
+  /** Số nguyên MNT suy từ `price_raw` (nối chữ số); chỉ khi `parsed_source === 'hibox_grid'`. */
+  price_hibox_mnt_integer?: number | null;
 };
 
 const PLACEHOLDER_OSS_PATH = 'O1CN01CYtPWu1MUBqQAUK9D';
 
 /**
- * Hệ số nhân nhân dân tệ (J5 trong Excel IF) để nhân giá nhân dân tệ — theo đúng thang của bạn
- * (`<=90` đến các nấc đến `>400`).
+ * Hệ số nhân nhân dân tệ (J5 trong Excel IF) để nhân giá nhân dân tệ — sync backend `listing_cny_grid.cny_exchange_multiplier_from_grid`.
  */
 export function cnyExchangeMultiplierFromGrid(cnyPrice: number): number {
   const j = cnyPrice;
@@ -55,8 +58,71 @@ export function cnyExchangeMultiplierFromGrid(cnyPrice: number): number {
   return 2.5;
 }
 
-/** Tỷ giá mặc định (VNĐ cho 1 CN¥) khi không nhập / không hợp lệ trong UI và CSV. */
+/** Tỷ giá mặc định (VNĐ cho 1 CN¥) khi không nhập / không hợp lệ trong UI và CSV — khớp backend LISTING_IMPORT_VND_PER_CNY (3580). */
 export const DEFAULT_VND_PER_CNY_FOR_LISTING_ESTIMATE = 3580;
+
+/**
+ * Ước lượng số đơn vị MNT trên 1 CN¥ — quy đổi giá lưới Hibox (`span.currency`) sang «Giá Tệ» / lưới IF.
+ * Khớp cách đọc giá MNT trong `import_hibox_scraper._parse_display_price_integer` (nối mọi chữ số).
+ * Chỉnh hằng số này nếu ~VNĐ sau quy đổi lệch thực tế (tỷ giá MNT/CNY thay đổi).
+ */
+export const DEFAULT_MNT_PER_CNY_FOR_HIBOX_LISTING = 475;
+
+/** Bội số VNĐ sau quy đổi (làm tròn lên). Khớp `listing_cny_grid.LISTING_VND_PRICE_CEILING_STEP`. */
+export const LISTING_VND_PRICE_CEILING_STEP = 10_000;
+
+/**
+ * Giá hiển thị kiểu `78.900` / `78,900 ₮` — lấy số nguyên bằng cách nối mọi chữ số.
+ * Khớp `import_hibox_scraper._parse_display_price_integer`.
+ */
+export function parseHiboxDisplayPriceIntegerMnt(raw: string): number | null {
+  const t = String(raw ?? '')
+    .normalize('NFKC')
+    .replace(/\u00a0/g, '')
+    .trim();
+  if (!/[0-9]/.test(t)) return null;
+  const digits = t.replace(/\D/g, '');
+  if (!digits) return null;
+  let n = Number.parseInt(digits, 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const cap = 9_999_999_999;
+  if (n > cap) n = cap;
+  return n;
+}
+
+/** MNT (số nguyên hiển thị) → ~CN¥ cho pipeline lưới IF / cột Giá Tệ. */
+export function hiboxMntIntegerToApproxCny(
+  mntInteger: number,
+  mntPerOneCny: number = DEFAULT_MNT_PER_CNY_FOR_HIBOX_LISTING,
+): number | null {
+  if (!Number.isFinite(mntInteger) || mntInteger <= 0) return null;
+  if (!Number.isFinite(mntPerOneCny) || mntPerOneCny <= 0) return null;
+  const cny = mntInteger / mntPerOneCny;
+  if (!Number.isFinite(cny) || cny <= 0) return null;
+  return cny;
+}
+
+/**
+ * Áp tỷ giá ₮/CN¥ để ghi đè `price_cny_approx` và `cny_exchange_multiplier` cho dòng lưới Hibox.
+ */
+export function applyHiboxMntRateToRow(
+  r: ParsedTaobaoCardRow,
+  mntPerOneCny: number,
+): ParsedTaobaoCardRow {
+  if (r.parsed_source !== 'hibox_grid' || r.price_hibox_mnt_integer == null) {
+    return r;
+  }
+  const rate =
+    typeof mntPerOneCny === 'number' && Number.isFinite(mntPerOneCny) && mntPerOneCny > 0
+      ? mntPerOneCny
+      : DEFAULT_MNT_PER_CNY_FOR_HIBOX_LISTING;
+  const cny = hiboxMntIntegerToApproxCny(r.price_hibox_mnt_integer, rate);
+  if (cny == null) {
+    return { ...r, price_cny_approx: null, cny_exchange_multiplier: null };
+  }
+  const coef = cnyExchangeMultiplierFromGrid(cny);
+  return { ...r, price_cny_approx: cny, cny_exchange_multiplier: coef };
+}
 
 /**
  * Lấy giá nhân dân tệ (~CN¥) từ text giá trong listing — NFKC / ký hiệu ¥ / thập phân / số nguyên.
@@ -88,7 +154,7 @@ export function parseApproxCnyAmountFromPriceRaw(raw: string): number | null {
 }
 
 /**
- * ~VNĐ làm tròn = CN¥ đã bóc × hệ_số_lưới × tỷ_giá (VNĐ cho 1 CN¥).
+ * ~VNĐ = CN¥ × hệ_số_lưới × tỷ_giá, `Math.round` về nguyên, rồi làm tròn **lên** bội `LISTING_VND_PRICE_CEILING_STEP`.
  */
 export function estimateListingVndRounded(
   row: Pick<ParsedTaobaoCardRow, 'price_cny_approx' | 'cny_exchange_multiplier'>,
@@ -104,7 +170,9 @@ export function estimateListingVndRounded(
     vndPerOneCny <= 0
   )
     return null;
-  return Math.round(cny * coef * vndPerOneCny);
+  const rounded = Math.round(cny * coef * vndPerOneCny);
+  const step = LISTING_VND_PRICE_CEILING_STEP;
+  return Math.ceil(rounded / step) * step;
 }
 
 function extractTitle(titleEl: Element | null): string {
@@ -378,8 +446,8 @@ function extractItemUrl(card: Element): string {
   return href ? normalizeTaobaoHref(href) : '';
 }
 
-/** Offer id trong URL 1688 (`/offer/…`, `offerId=` …). */
-function extractOfferId1688FromHref(href: string): string | null {
+/** Offer id trong URL 1688 (`/offer/…`, `offerId=` …). Dùng khi ghép link import 1688 PC. */
+export function extractOfferId1688FromHref(href: string): string | null {
   const raw = href.trim();
   if (!raw || raw.length > 8192 || !/1688\.com/i.test(raw)) return null;
   try {
@@ -408,6 +476,124 @@ function formatListingItemIdPrefixed(numericOrEmpty: string, itemUrlAbsoluteOrEm
   if (low.includes('1688.com')) return `A${raw}`;
   if (low.includes('taobao') || low.includes('tmall')) return `T${raw}`;
   return raw;
+}
+
+function looksLikeDomHtmlSnippet(s: string): boolean {
+  return /<\s*(!DOCTYPE|html|body|div|table|a\b|span\b|img\b|section\b)/i.test(s.trim());
+}
+
+function nextNonBlankLineIndex(lines: string[], from: number): number {
+  let j = Math.max(0, from);
+  while (j < lines.length && !lines[j].trim()) j++;
+  return j;
+}
+
+/**
+ * Dòng log/export seller 1688 dạng text (vd. có «商品信息», `ID: 942397061385`, hàng tab giá, «类目»).
+ */
+function looksLike1688TextTablePaste(raw: string): boolean {
+  const t = raw.trim();
+  if (!t || t.length < 20) return false;
+  if (looksLikeDomHtmlSnippet(t)) return false;
+  const idLines = t.match(/^ID:\s*\d{6,}\s*$/gm) ?? [];
+  if (idLines.length === 0) return false;
+  if (/商品信息/.test(t) && /(?:价格|类目)/.test(t)) return true;
+  if (/\t\d+\t/.test(t)) return true;
+  return idLines.length >= 2;
+}
+
+/**
+ * Parse paste bảng text 1688 (không phải HTML): tiêu đề · `ID: offerId` · dòng tab (giá cột đầu) · dòng mục · dòng nhãn phụ.
+ */
+export function parse1688TextTablePaste(raw: string): ParsedTaobaoCardRow[] {
+  const text = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  const lines = text.split('\n');
+  const seen = new Set<string>();
+  const out: ParsedTaobaoCardRow[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const idLineTrim = lines[i].trim();
+    const idm = /^ID:\s*(\d{6,})\s*$/i.exec(idLineTrim);
+    if (!idm) continue;
+    const oid = idm[1];
+    if (seen.has(oid)) continue;
+    seen.add(oid);
+
+    let title = '';
+    for (let j = i - 1; j >= 0 && j >= i - 14; j--) {
+      const t = lines[j].trim();
+      if (!t) continue;
+      if (/^\d+$/.test(t)) continue;
+      if (/^ID:/i.test(t)) continue;
+      if (/商品信息|(?:^|[\t])价格(?:[\t]|$)|类目|标签|代发价|月成交|发货时间|上架时间/.test(t)) continue;
+      if (t.includes('\t') && t.split(/\t/).filter(Boolean).length >= 4) continue;
+      title = t;
+      break;
+    }
+
+    let price_raw = '';
+    let tabParts: string[] = [];
+    let tabIdx = nextNonBlankLineIndex(lines, i + 1);
+    if (tabIdx < lines.length && lines[tabIdx].includes('\t')) {
+      tabParts = lines[tabIdx].trim().split(/\t/).map((x) => x.trim());
+      const pickPrice = (cell: string | undefined): cell is string =>
+        !!cell && /^\d+(\.\d+)?$/.test(cell);
+      if (pickPrice(tabParts[0])) price_raw = tabParts[0];
+      else if (pickPrice(tabParts[1])) price_raw = tabParts[1];
+    }
+
+    let category = '';
+    let extraTag = '';
+    let catIdx = nextNonBlankLineIndex(lines, tabIdx + 1);
+    if (catIdx < lines.length && lines[catIdx].includes('\t')) {
+      catIdx = nextNonBlankLineIndex(lines, catIdx + 1);
+    }
+    if (catIdx < lines.length) {
+      const l = lines[catIdx].trim();
+      if (l && !l.includes('\t') && !/^ID:/i.test(l)) category = l;
+    }
+    const tagIdx = nextNonBlankLineIndex(lines, catIdx + 1);
+    if (tagIdx < lines.length && category) {
+      const l = lines[tagIdx].trim();
+      if (l && !l.includes('\t') && !/^ID:/i.test(l)) extraTag = l;
+    }
+
+    const tagBits: string[] = [];
+    if (category) tagBits.push(`类目：${category}`);
+    if (extraTag) tagBits.push(extraTag);
+    const tags = tagBits.join(' · ');
+
+    let sales_text = '';
+    if (tabParts.length > 3 && tabParts[2]) sales_text = `销量 ${tabParts[2]}`;
+
+    const item_url = `https://detail.1688.com/offer/${oid}.html`;
+    const item_id = formatListingItemIdPrefixed(oid, item_url);
+    const price_cny_approx = parseApproxCnyAmountFromPriceRaw(price_raw);
+    const cny_exchange_multiplier =
+      price_cny_approx != null ? cnyExchangeMultiplierFromGrid(price_cny_approx) : null;
+
+    out.push({
+      row: out.length + 1,
+      item_id,
+      item_url,
+      main_image_url: '',
+      title: title || `Offer ${oid}`,
+      shop_name: '',
+      shop_app_uid: '',
+      seller_nick: '',
+      tags,
+      price_raw,
+      price_link: item_url,
+      sales_text,
+      sku_thumb_urls: '',
+      sku_thumb_count: 0,
+      price_cny_approx,
+      cny_exchange_multiplier,
+      parsed_source: '1688_text_table',
+    });
+  }
+
+  return out;
 }
 
 /** Giá trị `appUid` trong link shop (store.taobao.com/…/view_shop.htm?appUid=…). */
@@ -772,6 +958,122 @@ function extractRow(card: Element, idx: number): ParsedTaobaoCardRow | null {
   };
 }
 
+/** Path `/v/abb-…` hoặc `/v/{id}` từ href tương đối hoặc absolute hibox.mn. */
+function hiboxListingPathFromHref(rawHref: string): string {
+  const t = rawHref.trim();
+  if (!t) return '';
+  try {
+    const urlStr =
+      t.startsWith('//') ? `https:${t}` : /^https?:\/\//i.test(t) ? t : `https://hibox.mn${t.startsWith('/') ? t : `/${t}`}`;
+    const u = new URL(urlStr);
+    let p = u.pathname.replace(/\/+$/, '');
+    if (!p.startsWith('/')) p = `/${p}`;
+    return p;
+  } catch {
+    if (!t.startsWith('/')) return '';
+    return t.split('?')[0].split('#')[0].replace(/\/+$/, '') || '/';
+  }
+}
+
+/** Thẻ `<a>` trỏ tới trang SP Hibox (`/v/abb-{1688}` hoặc `/v/{taobao id}`). */
+function collectHiboxGridAnchors(doc: Document): HTMLAnchorElement[] {
+  const out: HTMLAnchorElement[] = [];
+  for (const a of doc.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+    const h = (a.getAttribute('href') || '').trim();
+    if (!h || h.length > 2048) continue;
+    const path = hiboxListingPathFromHref(h);
+    if (/^\/v\/abb-\d+$/i.test(path) || /^\/v\/\d+$/i.test(path)) {
+      out.push(a);
+    }
+  }
+  return out;
+}
+
+function extractRowFromHiboxGridCard(a: HTMLAnchorElement, idx: number): ParsedTaobaoCardRow | null {
+  const rawHref = (a.getAttribute('href') || '').trim();
+  const path = hiboxListingPathFromHref(rawHref);
+
+  const abb = /^\/v\/abb-(\d+)$/i.exec(path);
+  let item_url = '';
+  let numericId = '';
+  if (abb) {
+    numericId = abb[1];
+    item_url = `https://detail.1688.com/offer/${numericId}.html`;
+  } else {
+    const tb = /^\/v\/(\d+)$/i.exec(path);
+    if (!tb) return null;
+    numericId = tb[1];
+    item_url = `https://item.taobao.com/item.htm?id=${numericId}`;
+  }
+
+  const item_id = formatListingItemIdPrefixed(numericId, item_url);
+
+  const titleDiv =
+    a.querySelector('.max-h-10.overflow-hidden.leading-5') ||
+    a.querySelector('[class*="max-h-10"][class*="overflow-hidden"][class*="leading-5"]');
+  let title = (titleDiv?.textContent || '').replace(/\s+/g, ' ').trim();
+
+  const img =
+    a.querySelector<HTMLImageElement>('img[src], img[data-src]') ||
+    a.querySelector<HTMLImageElement>('img');
+  let mainSrc =
+    img?.getAttribute('src')?.trim() ||
+    img?.getAttribute('data-src')?.trim() ||
+    img?.src?.trim() ||
+    '';
+  mainSrc = normalizeTaobaoHref(mainSrc);
+  if (!title) {
+    const alt = (img?.getAttribute('alt') || '').trim().replace(/\s+/g, ' ');
+    if (alt.length >= 3 && !/^(?:loading|1\s*x\s*1)$/i.test(alt)) title = alt;
+  }
+
+  const cur = a.querySelector('span.currency');
+  const price_raw = (cur?.textContent || '').replace(/\s+/g, '').trim();
+
+  const mntInt = parseHiboxDisplayPriceIntegerMnt(price_raw);
+  const price_cny_approx =
+    mntInt != null ? hiboxMntIntegerToApproxCny(mntInt) : parseApproxCnyAmountFromPriceRaw(price_raw);
+  const cny_exchange_multiplier =
+    price_cny_approx != null ? cnyExchangeMultiplierFromGrid(price_cny_approx) : null;
+
+  if (!item_id && !item_url && !title && !mainSrc && !price_raw) return null;
+
+  return {
+    row: idx + 1,
+    item_id,
+    item_url,
+    main_image_url: mainSrc,
+    title,
+    shop_name: '',
+    shop_app_uid: '',
+    seller_nick: '',
+    tags: '',
+    price_raw,
+    price_link: item_url,
+    sales_text: '',
+    sku_thumb_urls: '',
+    sku_thumb_count: 0,
+    price_hibox_mnt_integer: mntInt,
+    price_cny_approx,
+    cny_exchange_multiplier,
+    parsed_source: 'hibox_grid',
+  };
+}
+
+function parseHiboxListingGrid(doc: Document): ParsedTaobaoCardRow[] {
+  const anchors = collectHiboxGridAnchors(doc);
+  const seenPath = new Set<string>();
+  const rows: ParsedTaobaoCardRow[] = [];
+  for (const a of anchors) {
+    const path = hiboxListingPathFromHref((a.getAttribute('href') || '').trim()).toLowerCase();
+    if (!path || seenPath.has(path)) continue;
+    seenPath.add(path);
+    const row = extractRowFromHiboxGridCard(a, rows.length);
+    if (row) rows.push(row);
+  }
+  return rows;
+}
+
 /**
  * Chuẩn hóa snippet khi không có <!DOCTYPE>/<html>; DomParser ổn định hơn với một gốc bọc khi BOM/cắt fragment.
  */
@@ -994,13 +1296,27 @@ function collectProductCardRoots(doc: Document): Element[] {
 
 /** Một ô card sản phẩm trong listing — class CSS có hash nên chỉ khớp phần gốc. */
 export function parseTaobaoListingHtml(html: string): ParsedTaobaoCardRow[] {
+  const trimmed = html.replace(/^\uFEFF/, '');
+  if (looksLike1688TextTablePaste(trimmed)) {
+    const tableRows = parse1688TextTablePaste(trimmed);
+    if (tableRows.length > 0) return tableRows;
+  }
+
   if (typeof window === 'undefined' || typeof DOMParser === 'undefined') {
     return [];
   }
 
-  const trimmed = html.replace(/^\uFEFF/, '');
   const { html: snippet, wrapped } = coerceHtmlSnippetForParsing(trimmed);
   let doc = new DOMParser().parseFromString(snippet, 'text/html');
+
+  let hiboxRows = parseHiboxListingGrid(doc);
+  if (hiboxRows.length === 0 && wrapped) {
+    doc = new DOMParser().parseFromString(trimmed.trim(), 'text/html');
+    hiboxRows = parseHiboxListingGrid(doc);
+  }
+  if (hiboxRows.length > 0) {
+    return hiboxRows;
+  }
 
   /** Nếu đã bọc mà không tìm thấy ô — một số trình đọc được HTML «thô» tốt hơn fragment lớn. */
   let cards = collectProductCardRoots(doc);

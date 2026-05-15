@@ -22,6 +22,8 @@ from app.services.bunny_storage import delete_bunny_assets_for_product
 from app.services.import_hibox_scraper import canonicalize_hibox_placeholder_product_id
 from app.services.product_internal_sku import (
     ensure_unique_internal_product_code,
+    internal_sku_exists_on_other_product,
+    internal_sku_is_valid_format,
     sync_internal_code_into_product_info,
 )
 from app.utils.vietnamese import (
@@ -57,6 +59,9 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Trường chỉ có trên schema trả API (enrich), không phải cột ORM Product.
+_RESPONSE_ONLY_PRODUCT_KEYS = frozenset({"category_level1_slug", "category_level2_slug"})
+
 # product_id kiểu nguồn 1688/Taobao: «…phần_web…» + «a188» + «SKU nội bộ» (vd A920025943011a188B0266)
 _PRODUCT_ID_A188_RE = re.compile(r"a188", re.IGNORECASE)
 
@@ -79,6 +84,33 @@ def split_product_id_web_prefix_and_internal_sku(product_id: Optional[str]) -> O
     if not prefix or not sku_tail:
         return None
     return {"prefix": prefix, "prefix_key": prefix.casefold(), "sku": sku_tail}
+
+
+def find_conflicting_product_id_for_same_listing_source(
+    db: Session,
+    candidate_product_id: str,
+    *,
+    exclude_product_pk_ids: Optional[Set[int]] = None,
+) -> Optional[str]:
+    """
+    Trùng mã nguồn 1688/Taobao: cùng phần trước «a188» trong `product_id` (vd `A852085738630a188…`).
+    Trả `product_id` của bản ghi khác đã chiếm — dùng chặn đăng/import trùng offer/item.
+    """
+    seg = split_product_id_web_prefix_and_internal_sku(candidate_product_id)
+    if not seg:
+        return None
+    pk = seg["prefix_key"]
+    ex = exclude_product_pk_ids or set()
+    cand_norm = str(candidate_product_id).strip()
+    for row_id, pid_str in db.query(Product.id, Product.product_id).filter(Product.product_id.isnot(None)).all():
+        if row_id in ex:
+            continue
+        if str(pid_str).strip() == cand_norm:
+            continue
+        other = split_product_id_web_prefix_and_internal_sku(pid_str)
+        if other and other["prefix_key"] == pk:
+            return str(pid_str).strip()
+    return None
 
 
 def _bulk_import_conflict_maps_initial(db: Session) -> Tuple[Dict[str, str], Dict[str, str]]:
@@ -1135,7 +1167,7 @@ def product_to_excel_row(product: Product) -> Dict:
                     features_export = str(product.features)
         
         # 37 CỘT EXPORT MAPPING - ĐÃ FIX
-        # Cột Shop id = cột Style (cùng product.style).
+        # H–K (shop_name, shop_id, pro_lower_price, pro_high_price): để trống trên file Excel xuất ra.
         _style_out = (product.style or "").strip() if isinstance(product.style, str) else (str(product.style).strip() if product.style is not None else "")
         excel_row = {
             'id': product.product_id or '',
@@ -1145,10 +1177,10 @@ def product_to_excel_row(product: Product) -> Dict:
             'name': product.name or '',
             'pro_content': product.description or '',
             'price': product.price or 0,
-            'shop_name': product.shop_name or '',
-            'shop_id': _style_out,
-            'pro_lower_price': product.pro_lower_price or '',
-            'pro_high_price': product.pro_high_price or '',
+            'shop_name': '',
+            'shop_id': '',
+            'pro_lower_price': '',
+            'pro_high_price': '',
             'rating_group_id': product.group_rating or 0,
             'question_group_id': product.group_question or 0,
             'sizes': json.dumps(product.sizes or [], ensure_ascii=False),
@@ -3264,6 +3296,9 @@ def create_product(db: Session, product: ProductCreate):
     if not data.get("slug"):
         data["slug"] = generate_consistent_slug(data["name"], data["product_id"])
 
+    for k in _RESPONSE_ONLY_PRODUCT_KEYS:
+        data.pop(k, None)
+
     db_product = Product(**data)
     db.add(db_product)
     db.commit()
@@ -3639,6 +3674,35 @@ def bulk_import_products(
                 )
                 continue
 
+        else:
+            # Id không chứa «a188»: vẫn chặn trùng ô sku với SP khác (mã [A-Z][0-9]{4}).
+            code_probe = str(product_data.get("code") or "").strip().upper()
+            if internal_sku_is_valid_format(code_probe):
+                sku_holder2 = batch_code_owner.get(code_probe) or db_code_owner.get(code_probe)
+                if sku_holder2 and sku_holder2 != product_id:
+                    skipped.append(
+                        f"Dòng {idx + 1} ({product_id}): Bỏ qua — mã SKU «{code_probe}» "
+                        f"đã được sản phẩm khác dùng ({sku_holder2})."
+                    )
+                    continue
+
+        ex_pid_early = existing.id if existing else None
+        proposed_raw = product_data.get("code")
+        proposed_u = str(proposed_raw or "").strip().upper()
+        if proposed_raw is not None and str(proposed_raw).strip():
+            if internal_sku_is_valid_format(proposed_u):
+                if proposed_u in sku_batch_reserved:
+                    skipped.append(
+                        f"Dòng {idx + 1} ({product_id}): Bỏ qua — mã SKU «{proposed_u}» "
+                        "trùng trong cùng file import."
+                    )
+                    continue
+                if internal_sku_exists_on_other_product(db, proposed_u, exclude_product_id=ex_pid_early):
+                    skipped.append(
+                        f"Dòng {idx + 1} ({product_id}): Bỏ qua — mã SKU «{proposed_u}» đã có trên sản phẩm khác."
+                    )
+                    continue
+
         try:
             row_slug_warning: Optional[str] = None
             resolved_cat_id: Optional[int] = None
@@ -3676,6 +3740,8 @@ def bulk_import_products(
                     row_was_update = True
                     logger.debug("🔄 Updated product: %s", product_id)
                 else:
+                    for k in _RESPONSE_ONLY_PRODUCT_KEYS:
+                        product_data.pop(k, None)
                     db.add(Product(**product_data))
                     row_was_update = False
                     logger.debug("➕ Created product (pending flush): %s", product_id)
@@ -3707,6 +3773,10 @@ def bulk_import_products(
                         continue
                     batch_code_owner.setdefault(key, product_id)
                     db_code_owner[key] = product_id
+            elif internal_sku_is_valid_format(str(product_data.get("code") or "")):
+                code_only = str(product_data.get("code") or "").strip().upper()
+                batch_code_owner.setdefault(code_only, product_id)
+                db_code_owner[code_only] = product_id
 
         except Exception as e:
             errors.append(f"Dòng {idx + 1}: {str(e)}")

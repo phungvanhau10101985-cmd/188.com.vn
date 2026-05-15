@@ -647,6 +647,17 @@ def create_product(
     """
     Create new product
     """
+    pid = (product.product_id or "").strip()
+    if pid:
+        hit = crud.product.find_conflicting_product_id_for_same_listing_source(db, pid)
+        if hit:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Mã nguồn trong id (phần trước «a188») đã tồn tại — sản phẩm {hit}. "
+                    "Không tạo trùng offer/item 1688 hoặc Taobao."
+                ),
+            )
     created = crud.product.create_product(db=db, product=product)
     return _product_to_response(db, created)
 

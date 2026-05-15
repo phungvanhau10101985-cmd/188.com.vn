@@ -122,14 +122,27 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
 
   const [pinnedListingCompact, setPinnedListingCompact] = useState(false);
 
+  /** Ngưỡng co kéo có độ trễ: spacer đổi cao có thể kéo `scrollY` lùi về dưới ngưỡng → bật/tắt nhanh (nhấp nháy). */
+  const LISTING_COMPACT_ENTER_Y = 100;
+  const LISTING_COMPACT_EXIT_Y = 48;
+
+  const applyPinnedListingCompact = useCallback(
+    (y: number, prevCompact: boolean) =>
+      prevCompact ? y >= LISTING_COMPACT_EXIT_Y : y >= LISTING_COMPACT_ENTER_Y,
+    [],
+  );
+
   useEffect(() => {
     if (!useListingThinOnScroll || typeof window === 'undefined') return;
-    const COMPACT_Y = 80;
-    const onScroll = () => setPinnedListingCompact(window.scrollY > COMPACT_Y);
+    const onScroll = () => {
+      setPinnedListingCompact((prev) =>
+        applyPinnedListingCompact(window.scrollY, prev),
+      );
+    };
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
-  }, [useListingThinOnScroll]);
+  }, [useListingThinOnScroll, applyPinnedListingCompact]);
 
   useLayoutEffect(() => {
     if (!useListingThinOnScroll) {
@@ -137,8 +150,10 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       return;
     }
     if (typeof window === 'undefined') return;
-    setPinnedListingCompact(window.scrollY > 80);
-  }, [pathname, searchParams, useListingThinOnScroll]);
+    setPinnedListingCompact((prev) =>
+      applyPinnedListingCompact(window.scrollY, prev),
+    );
+  }, [pathname, searchParams, useListingThinOnScroll, applyPinnedListingCompact]);
 
   /** Chiều cao khối chrome cố định — spacer đẩy main, tránh nội dung chui dưới fixed bar */
   const listingChromeRef = useRef<HTMLDivElement>(null);

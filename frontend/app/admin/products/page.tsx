@@ -355,6 +355,10 @@ export default function AdminProductsPage() {
   const [publishing1688, setPublishing1688] = useState(false);
   const [exporting1688Draft, setExporting1688Draft] = useState(false);
   const [excelBatchBusy, setExcelBatchBusy] = useState(false);
+  /** File đã chọn; upload chỉ khi bấm «Chạy lấy dữ liệu». */
+  const [excelBatchFile, setExcelBatchFile] = useState<File | null>(null);
+  /** Trang Playwright mở: auto | hibox | 1688 — khớp backend `fetch_target`. */
+  const [excelBatchFetchTarget, setExcelBatchFetchTarget] = useState<'auto' | 'hibox' | '1688'>('auto');
   const [excelBatchTrackToken, setExcelBatchTrackToken] = useState<string | null>(null);
   const [excelBatchHint, setExcelBatchHint] = useState<string | null>(null);
   const [bulkExport1688Busy, setBulkExport1688Busy] = useState(false);
@@ -1352,15 +1356,26 @@ export default function AdminProductsPage() {
     excelBatch1688InputRef.current?.click();
   };
 
-  const handleExcelBatch1688Change = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleExcelBatch1688Change = (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.target;
     const file = input.files?.[0];
     input.value = '';
     if (!file) return;
+    setExcelBatchFile(file);
+    setExcelBatchHint(
+      `Đã chọn «${file.name}». Chọn trang cần lấy dữ liệu rồi bấm «Chạy lấy dữ liệu» — link sẽ được chuẩn hoá theo lựa chọn trước khi tạo nháp.`,
+    );
+  };
+
+  const handleExcelBatchRun = async () => {
+    if (!excelBatchFile) {
+      showToast('err', 'Chưa chọn file Excel (.xlsx).', 6000);
+      return;
+    }
     setExcelBatchBusy(true);
     setExcelBatchHint('Đang tải file và tạo draft cho từng dòng…');
     try {
-      const res = await adminProductAPI.uploadImport1688ExcelBatch(file);
+      const res = await adminProductAPI.uploadImport1688ExcelBatch(excelBatchFile, excelBatchFetchTarget);
       if (res.skipped?.length) {
         const head = res.skipped.slice(0, 4).join(' — ');
         showToast(
@@ -1369,6 +1384,7 @@ export default function AdminProductsPage() {
           14000,
         );
       }
+      setExcelBatchFile(null);
       setExcelBatchTrackToken(res.batch_token);
       try {
         localStorage.setItem(
@@ -2243,26 +2259,68 @@ export default function AdminProductsPage() {
               >
                 <h3 className="text-sm font-semibold text-slate-900">Import hàng loạt từ Excel</h3>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Cột link (vd. <strong>F</strong>) từ dòng 2; <strong>D</strong> (Tên shop) → Shop Trung Quốc,{' '}
-                  <strong>K</strong> (Tên tiếng trung) → tên tiếng Trung; giá và shop (khối L–O…) cùng dòng vào nháp.
-                  File export đợt có thêm hai cột đó.
+                  Chỉ nhận file <strong>.xlsx</strong> mẫu <strong>tái nhập listing</strong> (hai hàng đầu là nhãn EN/VI).
+                  Tiêu đề phải có <strong>Link</strong> (vd. Link SP / item_url) và <strong>Giá Tệ</strong> / China price.
+                  <strong>Giá bán VNĐ</strong> trên nháp luôn do backend tính: CN¥ × hệ số lưới × tỷ giá (
+                  <code className="rounded bg-white/80 px-1">LISTING_IMPORT_VND_PER_CNY</code>, mặc định 3580; hoặc cột{' '}
+                  <code className="rounded bg-white/80 px-1">vnd_per_cny_used</code>), sau đó làm tròn lên bội 10.000&nbsp;₫.
+                  Tuỳ chọn: Shop Trung Quốc / Tên tiếng Trung / «Mã sp»{' '}
+                  <span className="whitespace-nowrap">[A-Z]0001–9999</span>. Chọn file → chọn trang → bấm chạy; link không khớp
+                  trang đã chọn sẽ được đổi sang định dạng đúng trước khi tạo nháp (hoặc dòng bị bỏ qua kèm lý do).
                 </p>
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                  <button
-                    type="button"
-                    onClick={handleExcelBatch1688Pick}
-                    disabled={excelBatchBusy}
-                    className="inline-flex flex-1 min-w-[12rem] items-center justify-center rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-orange-700 disabled:pointer-events-none disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 sm:flex-none sm:justify-start"
-                  >
-                    {excelBatchBusy ? 'Đang tải file lên…' : 'Chọn file Excel (.xlsx)'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setImport1688SectionTab('history')}
-                    className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 sm:min-h-[42px]"
-                  >
-                    Xem lịch sử đợt
-                  </button>
+                <div className="mt-3 flex flex-col gap-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                    <button
+                      type="button"
+                      onClick={handleExcelBatch1688Pick}
+                      disabled={excelBatchBusy}
+                      className="inline-flex flex-1 min-w-[12rem] items-center justify-center rounded-lg border border-orange-200 bg-white px-4 py-2.5 text-sm font-semibold text-orange-800 shadow-sm hover:bg-orange-50 disabled:pointer-events-none disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 sm:flex-none sm:justify-start"
+                    >
+                      Chọn file Excel (.xlsx)
+                    </button>
+                    <div className="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-md">
+                      <label htmlFor="admin-excel-batch-fetch-target" className="text-xs font-medium text-slate-700">
+                        Lấy dữ liệu từ trang
+                      </label>
+                      <select
+                        id="admin-excel-batch-fetch-target"
+                        value={excelBatchFetchTarget}
+                        onChange={(e) =>
+                          setExcelBatchFetchTarget(e.target.value as 'auto' | 'hibox' | '1688')
+                        }
+                        disabled={excelBatchBusy}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-orange-300 focus:outline-none focus:ring-2 focus:ring-orange-300/80 disabled:opacity-60"
+                      >
+                        <option value="auto">Tự động (nhận dạng từ từng link)</option>
+                        <option value="hibox">Hibox — không cần cookie 1688</option>
+                        <option value="1688">1688 trực tiếp — cần cookie Playwright</option>
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleExcelBatchRun}
+                      disabled={excelBatchBusy || !excelBatchFile}
+                      className="inline-flex min-h-[42px] flex-1 min-w-[12rem] items-center justify-center rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-orange-700 disabled:pointer-events-none disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 sm:flex-none sm:justify-center"
+                    >
+                      {excelBatchBusy ? 'Đang chạy…' : 'Chạy lấy dữ liệu'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setImport1688SectionTab('history')}
+                      className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 sm:min-h-[42px]"
+                    >
+                      Xem lịch sử đợt
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-600" aria-live="polite">
+                    {excelBatchFile ? (
+                      <>
+                        File đã chọn: <span className="font-medium text-slate-800">{excelBatchFile.name}</span>
+                      </>
+                    ) : (
+                      <>Chưa có file — bấm «Chọn file Excel» trước.</>
+                    )}
+                  </p>
                 </div>
                 {excelBatchHint ? (
                   <p className="mt-3 rounded-md border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">

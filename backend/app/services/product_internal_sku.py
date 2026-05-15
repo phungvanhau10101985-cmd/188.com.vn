@@ -43,9 +43,28 @@ def _purge_internal_sku_exports_expired(db: Session) -> None:
 
 
 def _is_disallowed_internal_sku_create(code: str) -> bool:
-    """True nếu mã thuộc dải nội bộ nhưng không được tạo mới (hiện tại: X0000)."""
+    """True nếu mã khớp [A-Z][0-9]{4} nhưng là placeholder «…0000» (A0000–Z0000)."""
     c = (code or "").strip().upper()
     return c in _INTERNAL_SKU_DISALLOWED_ZERO_SUFFIX
+
+
+def internal_sku_is_valid_format(code: Optional[str]) -> bool:
+    """Đúng 1 chữ Latin hoa + 4 chữ số và không phải dạng *0000 (vd A0001 hợp lệ, A0000 không)."""
+    c = (code or "").strip().upper()
+    return bool(INTERNAL_SKU_RE.fullmatch(c)) and not _is_disallowed_internal_sku_create(c)
+
+
+def internal_sku_exists_on_other_product(
+    db: Session,
+    code: Optional[str],
+    *,
+    exclude_product_id: Optional[int] = None,
+) -> bool:
+    """True nếu products.code đã có SP khác dùng mã này."""
+    c = (code or "").strip().upper()
+    if not c:
+        return False
+    return _internal_sku_taken_by_other_product(db, c, exclude_product_id)
 
 
 def _code_reserved_by_export(db: Session, code: str) -> bool:
@@ -202,6 +221,8 @@ def allocate_first_unused_exported_internal_sku(
         c = str(code).strip().upper()
         if not INTERNAL_SKU_RE.fullmatch(c):
             continue
+        if _is_disallowed_internal_sku_create(c):
+            continue
         if c in reserved:
             continue
         if _internal_sku_taken_by_other_product(db, c, exclude_product_id):
@@ -224,7 +245,8 @@ def ensure_import_link_internal_product_code(
     """
     SKU cho nháp / đăng từ import link (1688, Hibox, Excel batch link):
 
-    - Nếu admin nhập ô «Mã sp» đúng [A-Z][0-9]{4} và không trùng SP khác: chấp nhận nếu có trong pool
+    - Nếu admin nhập ô «Mã sp» đúng [A-Z][0-9]{4} (trừ mã kết thúc «0000» — coi như placeholder, hệ thống bỏ qua và cấp mã khác)
+      và không trùng SP khác: chấp nhận nếu có trong pool
       `internal_sku_exports` còn hiệu lực (INTERNAL_SKU_EXPORT_RESERVE_DAYS), hoặc sau khi TTL hết
       thì có thể dùng mã trống bất kỳ trong dải nội bộ không cần đối chiếu file xuất.
     - Ô trống: ưu tiên FIFO mã đã export còn hiệu lực và chưa gán SP; không còn thì sinh mã như luồng Excel thường.
@@ -234,7 +256,7 @@ def ensure_import_link_internal_product_code(
     raw = (proposed or "").strip()
     if raw:
         cand = raw.upper()
-        if INTERNAL_SKU_RE.fullmatch(cand):
+        if INTERNAL_SKU_RE.fullmatch(cand) and not _is_disallowed_internal_sku_create(cand):
             if cand in reserved:
                 raise ValueError(f"Mã {cand} đã được dùng trong cùng thao tác lô.")
             if _internal_sku_taken_by_other_product(db, cand, exclude_product_id):
@@ -273,7 +295,7 @@ def ensure_unique_internal_product_code(
     """
     Trả `code` đúng `[A-Z][0-9]{4}`.
 
-    - Nếu `proposed` đã đúng định dạng (không phân biệt hoa/thường chữ cái đầu),
+    - Nếu `proposed` đã đúng định dạng và không phải mã kết thúc «0000» (A0000–Z0000 — không nhận),
       không trùng `batch_reserved` và không bị SP khác chiếm trong DB → giữ.
     - Ngược lại → sinh ngẫu nhiên; `batch_reserved` được mutate để tránh trùng trong cùng batch.
     """
@@ -282,7 +304,7 @@ def ensure_unique_internal_product_code(
     raw = (proposed or "").strip()
     if raw:
         cand = raw.upper()
-        if INTERNAL_SKU_RE.fullmatch(cand):
+        if INTERNAL_SKU_RE.fullmatch(cand) and not _is_disallowed_internal_sku_create(cand):
             # Mã nhập tay / từ Excel (kể cả mã đã xuất file trước đó) — chỉ cấm trùng SP khác.
             if cand not in reserved and not _internal_sku_taken_by_other_product(db, cand, exclude_product_id):
                 reserved.add(cand)

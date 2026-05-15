@@ -9,11 +9,11 @@ import traceback
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from pydantic import BaseModel
@@ -37,6 +37,11 @@ from app.schemas.import_1688 import (
     Import1688ExcelBatchSummaryOut,
     Import1688JobCreate,
     Import1688JobOut,
+    ListingImportQueueActionMessage,
+    ListingImportQueueDeleteOut,
+    ListingImportQueueEnqueueIn,
+    ListingImportQueueEnqueueOut,
+    ListingImportQueueRunsOut,
     ProductImportDraftOut,
     ProductImportDraftUpdate,
 )
@@ -46,6 +51,8 @@ from app.services.product_rating_question_groups import apply_import_rating_ques
 from app.services.product_info_web_compact import compact_product_info_for_web
 from app.services.product_internal_sku import (
     ensure_import_link_internal_product_code,
+    internal_sku_exists_on_other_product,
+    internal_sku_is_valid_format,
     sync_internal_code_into_product_info,
 )
 from app.services.import_1688_images import ingest_1688_images
@@ -67,6 +74,11 @@ from app.services.import_1688_scraper import (
     extract_1688_numeric_offer_id,
     extract_offer_id,
     scrape_1688_product,
+)
+from app.services.import_batch_url_coercion import (
+    FETCH_TARGET_AUTO,
+    coerce_url_for_excel_batch_import,
+    normalize_fetch_target_param,
 )
 from app.services.import_link_excel_batch import merge_import_excel_overlay_into_product_data, parse_link_import_excel
 
@@ -651,6 +663,35 @@ def _assign_internal_sku_to_import_product_data(db: Session, product_data: Dict[
     compact_product_info_for_web(product_data)
 
 
+def _draft_product_data_for_excel_export(db: Session, draft: ProductImportDraft) -> Dict[str, Any]:
+    """
+    Trước khi xuất Excel: SKU phải đúng [A-Z][0-9]{4}, không được *0000, không trùng products.code
+    của sản phẩm khác (trừ bản ghi đã publish từ chính nháp này).
+    Nếu không → gán lại như lúc import và lưu vào draft.
+    """
+    pd = dict(draft.product_data or {})
+    raw_code = pd.get("code")
+    if raw_code is None:
+        code_str = ""
+    else:
+        code_str = str(raw_code).strip()
+    exclude_pid = None
+    pub_pid = (draft.published_product_id or "").strip()
+    if pub_pid:
+        existing_pub = product_crud.get_product_by_product_id(db, pub_pid)
+        if existing_pub is not None:
+            exclude_pid = existing_pub.id
+    needs_fix = not internal_sku_is_valid_format(code_str) or internal_sku_exists_on_other_product(
+        db,
+        code_str,
+        exclude_product_id=exclude_pid,
+    )
+    if needs_fix:
+        _assign_internal_sku_to_import_product_data(db, pd)
+        draft_crud.update_draft(db, draft, product_data=pd)
+    return pd
+
+
 def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
     def j(value: Any) -> str:
         if value is None:
@@ -669,7 +710,7 @@ def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
 
     # Cột Excel mẫu 39 cột (sau AK: tên tiếng Trung, shop Trung Quốc) —
     # ảnh nguồn vẫn nằm trong product_data / JSON khi cần đối chiếu.
-    # Shop id (cột I) trùng ô Kiểu dáng / Style (cột AI) — lấy theo trường `style`.
+    # H–K để trống trên file Excel xuất ra (Kiểu dáng vẫn ở cột Style).
     return {
         "id": product_data.get("product_id", ""),
         "sku": product_data.get("code", ""),
@@ -678,10 +719,10 @@ def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
         "name": product_data.get("name", ""),
         "pro_content": (product_data.get("description") or ""),
         "price": product_data.get("price", 0),
-        "shop_name": product_data.get("shop_name", ""),
-        "shop_id": style_cell,
-        "pro_lower_price": product_data.get("pro_lower_price", ""),
-        "pro_high_price": product_data.get("pro_high_price", ""),
+        "shop_name": "",
+        "shop_id": "",
+        "pro_lower_price": "",
+        "pro_high_price": "",
         "rating_group_id": product_data.get("group_rating", 0),
         "question_group_id": product_data.get("group_question", 0),
         "sizes": j(product_data.get("sizes", [])),
@@ -860,12 +901,21 @@ def create_import_1688_job(
 async def create_import_jobs_batch_from_excel(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    fetch_target: str = Form("auto"),
     db: Session = Depends(get_db),
     admin: AdminUser = Depends(require_module_permission("products")),
 ):
     """
-    File .xlsx: link cột **F** (dòng 2+), **mã SKU** tùy chọn cột **B**; shop / giá thấp-cao từ tiêu đề + khối **L–O**;
-    **giá bán (cột G bảng xuất)** lấy **cột Q** trên file import (không dùng cột G file nguồn).
+    File .xlsx — **chỉ** mẫu tái nhập listing (hai dòng nhãn đầu): bắt buộc tiêu đề có **Link** (vd. Link SP)
+    và **Giá Tệ / China price**. Không nhận cột giá VND (Q), cột G, khối L–O hay layout đặt hàng Excel cũ.
+
+    **`price`** trên nháp luôn suy từ CN¥ × hệ_số_IF × `LISTING_IMPORT_VND_PER_CNY` (hoặc cột `vnd_per_cny_used`),
+    rồi làm tròn lên bội 10.000 ₫.
+    **Mã sp** chỉ khi có cột tiêu đề «Mã sp» đúng `[A-Z][0-9]{4}` — không đọc cột B cố định.
+
+    Form **`fetch_target`**: `auto` (mặc định) | `hibox` | `1688` — ép link từng dòng về đúng định dạng trước khi tạo job
+    (vd. 1688 offer → `hibox.mn/v/abb-…` khi chọn Hibox; slug `abb-*` trên Hibox → `detail.1688.com` khi chọn 1688).
+    Dòng không quy đổi được bị **bỏ qua** kèm lý do trong `skipped`.
     """
     name = (file.filename or "").lower()
     if not name.endswith((".xlsx", ".xlsm")):
@@ -883,6 +933,8 @@ async def create_import_jobs_batch_from_excel(
         parsed, pskip = parse_link_import_excel(tmp_path)
         skips = list(pskip)
 
+        ft = normalize_fetch_target_param(fetch_target)
+
         batch_token = uuid.uuid4().hex
         draft_ids: List[int] = []
         job_ids: List[str] = []
@@ -892,6 +944,15 @@ async def create_import_jobs_batch_from_excel(
             if len(url_norm) < 10:
                 skips.append(f"Dòng {it.get('excel_row')}: URL quá ngắn.")
                 continue
+            if ft != FETCH_TARGET_AUTO:
+                coerced, skip_reason = coerce_url_for_excel_batch_import(url_norm, ft)
+                if skip_reason:
+                    skips.append(f"Dòng {it.get('excel_row')}: {skip_reason}")
+                    continue
+                url_norm = normalize_product_import_url(coerced)
+                if len(url_norm) < 10:
+                    skips.append(f"Dòng {it.get('excel_row')}: URL sau chuẩn hoá quá ngắn.")
+                    continue
             try:
                 ext_id, src = _infer_import_source_for_url(url_norm, None)
             except ValueError:
@@ -1107,6 +1168,31 @@ def list_import_1688_drafts(
     )
 
 
+def _file_response_import_excel_rows(rows_data: List[Dict[str, Any]], download_filename: str) -> FileResponse:
+    """Ghi file Excel mẫu nhập web (cùng layout export bulk draft)."""
+    if not rows_data:
+        raise HTTPException(
+            status_code=400,
+            detail="Không có draft nào trong danh sách đã có dữ liệu để export (chờ job done).",
+        )
+    columns, vietnamese_headers = _excel_export_columns_and_vi_headers()
+    df = pd.DataFrame(rows_data, columns=columns)
+    export_dir = os.path.join("app", "static", "uploads")
+    os.makedirs(export_dir, exist_ok=True)
+    filepath = os.path.join(export_dir, download_filename)
+    with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Products", index=False, startrow=0)
+        ws = writer.sheets["Products"]
+        ws.insert_rows(2)
+        for idx, header in enumerate(vietnamese_headers, 1):
+            ws.cell(row=2, column=idx, value=header)
+    return FileResponse(
+        filepath,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=download_filename,
+    )
+
+
 @router.post("/drafts/export-excel-bulk")
 def export_import_1688_drafts_bulk(
     payload: Import1688DraftIdsBody,
@@ -1120,31 +1206,50 @@ def export_import_1688_drafts_bulk(
             raise HTTPException(status_code=404, detail=f"Không có draft id={did}.")
         if not draft.product_data:
             continue
-        rows_data.append(_excel_row_from_product(dict(draft.product_data)))
+        pdata = _draft_product_data_for_excel_export(db, draft)
+        rows_data.append(_excel_row_from_product(pdata))
+
+    filename = f"import_1688_drafts_bulk_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return _file_response_import_excel_rows(rows_data, filename)
+
+
+@router.get("/listing-queue/{queue_token}/export-products.xlsx")
+def listing_import_queue_export_products_excel(
+    queue_token: str,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Excel dữ liệu sản phẩm để nhập web — các draft đã hoàn thành trong đợt listing queue."""
+    from app.services import listing_import_queue as liq
+
+    tok = _safe_listing_queue_token_param(queue_token)
+    try:
+        draft_ids = liq.collect_terminal_draft_ids_from_queue(tok)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if not draft_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="Đợt này chưa có draft nào (chưa có dòng done/error ghi draft_id).",
+        )
+
+    rows_data: List[Dict[str, Any]] = []
+    for did in draft_ids:
+        draft = draft_crud.get_by_id(db, did)
+        if not draft or not draft.product_data:
+            continue
+        pdata = _draft_product_data_for_excel_export(db, draft)
+        rows_data.append(_excel_row_from_product(pdata))
 
     if not rows_data:
         raise HTTPException(
             status_code=400,
-            detail="Không có draft nào trong danh sách đã có dữ liệu để export (chờ job done).",
+            detail="Không có draft nào trong đợt đã có product_data để xuất Excel (vd. crawl lỗi).",
         )
 
-    columns, vietnamese_headers = _excel_export_columns_and_vi_headers()
-    df = pd.DataFrame(rows_data, columns=columns)
-    export_dir = os.path.join("app", "static", "uploads")
-    os.makedirs(export_dir, exist_ok=True)
-    filename = f"import_1688_drafts_bulk_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    filepath = os.path.join(export_dir, filename)
-    with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
-        df.to_excel(writer, sheet_name="Products", index=False, startrow=0)
-        ws = writer.sheets["Products"]
-        ws.insert_rows(2)
-        for idx, header in enumerate(vietnamese_headers, 1):
-            ws.cell(row=2, column=idx, value=header)
-    return FileResponse(
-        filepath,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=filename,
-    )
+    filename = f"listing_queue_products_{tok[:12]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return _file_response_import_excel_rows(rows_data, filename)
 
 
 @router.get("/jobs/{job_id}", response_model=Import1688JobOut)
@@ -1312,6 +1417,28 @@ def publish_import_1688_draft(
 
     payload["product_id"] = canonical_pid
 
+    exclude_pk: Set[int] = set()
+    if existing:
+        exclude_pk.add(existing.id)
+    conflict_src = product_crud.find_conflicting_product_id_for_same_listing_source(
+        db,
+        canonical_pid,
+        exclude_product_pk_ids=exclude_pk,
+    )
+    if conflict_src:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason": "duplicate_listing_source_id",
+                "message": (
+                    "Mã nguồn (1688: A… hoặc Taobao/Tmall: T…) — phần trước «a188» trong cột id — "
+                    f"đã tồn tại trên shop ({conflict_src}). Không đăng trùng một offer/item."
+                ),
+                "existing_product_id": conflict_src,
+                "candidate_product_id": canonical_pid,
+            },
+        )
+
     compact_product_info_for_web(payload)
 
     if existing is None:
@@ -1370,8 +1497,9 @@ def export_import_1688_draft_excel(
         raise HTTPException(status_code=404, detail="Không tìm thấy draft.")
     if not draft.product_data:
         raise HTTPException(status_code=400, detail="Draft chưa có dữ liệu sản phẩm để export.")
+    pdata = _draft_product_data_for_excel_export(db, draft)
     columns, vietnamese_headers = _excel_export_columns_and_vi_headers()
-    df = pd.DataFrame([_excel_row_from_product(draft.product_data)], columns=columns)
+    df = pd.DataFrame([_excel_row_from_product(pdata)], columns=columns)
     export_dir = os.path.join("app", "static", "uploads")
     os.makedirs(export_dir, exist_ok=True)
     filename = f"import_1688_draft_{draft.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
@@ -1387,4 +1515,144 @@ def export_import_1688_draft_excel(
         filepath,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename=filename,
+    )
+
+
+def _safe_listing_queue_token_param(raw: str) -> str:
+    t = (raw or "").strip().lower()
+    if not re.fullmatch(r"[a-f0-9]{32,64}", t):
+        raise HTTPException(status_code=400, detail="queue_token không hợp lệ.")
+    return t
+
+
+@router.post("/listing-queue/enqueue", response_model=ListingImportQueueEnqueueOut)
+def listing_import_queue_enqueue(
+    payload: ListingImportQueueEnqueueIn,
+    admin: AdminUser = Depends(require_module_permission("products")),
+):
+    from app.services import listing_import_queue as liq
+
+    admin_id = getattr(admin, "id", None)
+    tasks = [
+        {"url": it.url.strip(), "source": it.source or "hibox", "label": it.label}
+        for it in payload.items
+    ]
+    try:
+        token, added, msg = liq.enqueue(payload.queue_token, tasks, admin_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ListingImportQueueEnqueueOut(queue_token=token, added=added, message=msg)
+
+
+@router.get("/listing-queue/runs", response_model=ListingImportQueueRunsOut)
+def listing_import_queue_list_runs(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    from app.services import listing_import_queue as liq
+
+    items, total = liq.list_saved_queue_summaries(limit=limit, offset=offset)
+    return ListingImportQueueRunsOut(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.delete("/listing-queue/{queue_token}", response_model=ListingImportQueueDeleteOut)
+def listing_import_queue_delete_saved(
+    queue_token: str,
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    from app.services import listing_import_queue as liq
+
+    tok = _safe_listing_queue_token_param(queue_token)
+    try:
+        liq.delete_saved_queue(tok, None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ListingImportQueueDeleteOut(queue_token=tok, deleted=True)
+
+
+@router.get("/listing-queue/{queue_token}")
+def listing_import_queue_status(
+    queue_token: str,
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    from app.services import listing_import_queue as liq
+
+    tok = _safe_listing_queue_token_param(queue_token)
+    try:
+        return liq.get_status_dict(tok)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/listing-queue/{queue_token}/pause", response_model=ListingImportQueueActionMessage)
+def listing_import_queue_pause(
+    queue_token: str,
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    from app.services import listing_import_queue as liq
+
+    tok = _safe_listing_queue_token_param(queue_token)
+    try:
+        out = liq.pause(tok, None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ListingImportQueueActionMessage(queue_token=out["queue_token"], message=out.get("message") or "OK")
+
+
+@router.post("/listing-queue/{queue_token}/resume", response_model=ListingImportQueueActionMessage)
+def listing_import_queue_resume(
+    queue_token: str,
+    admin: AdminUser = Depends(require_module_permission("products")),
+):
+    from app.services import listing_import_queue as liq
+
+    tok = _safe_listing_queue_token_param(queue_token)
+    admin_id = getattr(admin, "id", None)
+    try:
+        out = liq.resume(tok, admin_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ListingImportQueueActionMessage(queue_token=out["queue_token"], message=out.get("message") or "OK")
+
+
+@router.post("/listing-queue/{queue_token}/stop", response_model=ListingImportQueueActionMessage)
+def listing_import_queue_stop(
+    queue_token: str,
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    from app.services import listing_import_queue as liq
+
+    tok = _safe_listing_queue_token_param(queue_token)
+    try:
+        out = liq.stop_permanent(tok, None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ListingImportQueueActionMessage(queue_token=out["queue_token"], message=out.get("message") or "OK")
+
+
+@router.get("/listing-queue/{queue_token}/export.csv")
+def listing_import_queue_export_csv(
+    queue_token: str,
+    finished_only: bool = Query(
+        False,
+        description="True = chỉ các dòng đã kết thúc (done/error). False = toàn bộ hàng đợi (snapshot tiến trình).",
+    ),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    from app.services import listing_import_queue as liq
+
+    tok = _safe_listing_queue_token_param(queue_token)
+    try:
+        csv_text = liq.export_snapshot_csv(tok, finished_only=finished_only)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    body = "\ufeff" + csv_text.lstrip("\ufeff")
+    suffix = "_ket_qua" if finished_only else "_snapshot"
+    return Response(
+        content=body.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="listing_import_queue_{tok[:12]}{suffix}.csv"',
+        },
     )
