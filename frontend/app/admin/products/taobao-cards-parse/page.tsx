@@ -658,7 +658,8 @@ export default function TaobaoCardsParsePage() {
     const fb = fallbackShopTrimmed;
     return rows.map((r) => {
       let x = applyHiboxMntRateToRow(r, effectiveMntPerCny);
-      if (fb && !(x.shop_name || '').trim()) x = { ...x, shop_name: fb };
+      if (fb && !(x.shop_name || '').trim())
+        x = { ...x, shop_name: fb, shop_name_chinese: (x.shop_name_chinese || '').trim() || fb };
       return x;
     });
   }, [rows, effectiveMntPerCny, fallbackShopTrimmed]);
@@ -671,10 +672,12 @@ export default function TaobaoCardsParsePage() {
     }
     if (shopFilterTrimmed) {
       const q = shopFilterTrimmed.toLowerCase();
-      xs = xs.filter((r) => (r.shop_name || '').toLowerCase().includes(q));
+      xs = xs.filter((r) =>
+        `${r.shop_name_chinese || ''} ${r.shop_name || ''}`.toLowerCase().includes(q),
+      );
     }
     if (titleFilterTrimmed) {
-      xs = xs.filter((r) => titleMatchesFlexibleFilter(r.title || '', titleFilterTrimmed));
+      xs = xs.filter((r) => titleMatchesFlexibleFilter(`${r.chinese_name || ''} ${r.title || ''}`, titleFilterTrimmed));
     }
     if (priceVndBounds.active) {
       const { lo, hi } = priceVndBounds;
@@ -2937,11 +2940,11 @@ export default function TaobaoCardsParsePage() {
                       className="p-2 text-slate-700 max-w-[180px]"
                       title={
                         shopFilledByFallback
-                          ? 'Tên shop lấy từ ô «Shop mặc định» vì parse không có shop.'
+                          ? 'Tên shop (shop_name_chinese) lấy từ ô «Shop mặc định» vì parse không có shop.'
                           : undefined
                       }
                     >
-                      {r.shop_name || '—'}
+                      {(r.shop_name_chinese || '').trim() || r.shop_name || '—'}
                     </td>
                     <td
                       className="p-2 font-mono text-xs text-slate-700 break-all max-w-[200px]"
@@ -2966,7 +2969,9 @@ export default function TaobaoCardsParsePage() {
                         r.price_raw || '—'
                       )}
                     </td>
-                    <td className="p-2 text-slate-800 max-w-xl">{r.title || '—'}</td>
+                    <td className="p-2 text-slate-800 max-w-xl">
+                      {(r.chinese_name || '').trim() || r.title || '—'}
+                    </td>
                     <td className="p-2">
                       {r.main_image_url ? (
                         <img

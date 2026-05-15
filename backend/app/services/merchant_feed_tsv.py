@@ -139,10 +139,8 @@ def _pick_additional_images(product: Product, site_base: str) -> str:
 
 
 def _product_canonical_link(product: Product, shop_base_url: str) -> str:
+    """URL trang chi tiết trên shop (Merchant/Meta/TikTok). Không dùng `link_default` — trường đó là URL nguồn NCC (1688/Taobao)."""
     base = shop_base_url.rstrip("/")
-    ld = getattr(product, "link_default", None)
-    if not _is_blankish(ld) and (str(ld).startswith("http://") or str(ld).startswith("https://")):
-        return str(ld).strip()
     slug = "" if _is_blankish(getattr(product, "slug", None)) else str(getattr(product, "slug", "")).strip()
     raw_pid = getattr(product, "product_id", None)
     pid = str(product.id) if _is_blankish(raw_pid) else str(raw_pid).strip()

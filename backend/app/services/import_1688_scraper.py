@@ -576,10 +576,47 @@ def normalize_1688_payload(source_url: str, offer_id: Optional[str], payload: Di
 
     color_names = list(body_specs["colors_label"])
 
+    dom_color_variants_raw = structured.get("color_variants") or []
+    dom_color_pairs: List[Dict[str, Optional[str]]] = []
+    if isinstance(dom_color_variants_raw, list):
+        first_main = main_ordered[0] if main_ordered else None
+        n_dom_color_labels = sum(
+            1
+            for x in dom_color_variants_raw
+            if isinstance(x, dict) and str(x.get("label") or "").strip()
+        )
+        for row in dom_color_variants_raw:
+            if not isinstance(row, dict):
+                continue
+            lab = str(row.get("label") or "").strip()
+            if not lab:
+                continue
+            img_raw = row.get("image_url")
+            img = _normalize_image_url(str(img_raw).strip()) if img_raw else ""
+            if img and _is_junk_product_image_url(img):
+                img = ""
+            if not img and first_main and n_dom_color_labels == 1:
+                img = first_main
+            nu = _prefer_larger_offer_image(img) if img else ""
+            dom_color_pairs.append({"label": lab, "image_url": nu or None})
+
     variants: Dict[str, Any] = {"source": "1688"}
     if merged_sizes:
         variants["sizes"] = merged_sizes
-    if swatches:
+    if dom_color_pairs:
+        variants["color_swatches"] = dom_color_pairs
+        color_names = _dedupe([str(p["label"]) for p in dom_color_pairs if p.get("label")])
+        sw_from_pairs: List[str] = []
+        for p in dom_color_pairs:
+            u = p.get("image_url")
+            if not u:
+                continue
+            nu = _normalize_image_url(str(u))
+            if nu and not _is_junk_product_image_url(nu):
+                sw_from_pairs.append(_prefer_larger_offer_image(nu))
+        if sw_from_pairs:
+            swatches_for_export = _dedupe(sw_from_pairs)[:max_main]
+    elif swatches:
         pairs: List[Dict[str, Optional[str]]] = []
         if len(color_names) == len(swatches):
             pairs = [{"label": a, "image_url": b} for a, b in zip(color_names, swatches)]
@@ -635,6 +672,8 @@ def normalize_1688_payload(source_url: str, offer_id: Optional[str], payload: Di
         "description": description,
         "price": price,
         "shop_name": shop_name,
+        "shop_name_chinese": ((shop_name or "").strip()[:200] or None),
+        "chinese_name": ((title or "").strip()[:500] or None),
         "shop_id": shop_id,
         "pro_lower_price": lower,
         "pro_high_price": higher,
@@ -1151,6 +1190,36 @@ def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[
                       });
                     } catch (e) {}
                   });
+                  /** OD: nút màu trong #skuSelection — có ảnh hoặc chỉ text (.textonly) */
+                  const colorVariants = [];
+                  const seenColorLabel = new Set();
+                  try {
+                    document.querySelectorAll('#skuSelection .feature-item').forEach((block) => {
+                      const labHdr = block.querySelector('.feature-item-label h3, .feature-item-label');
+                      const hdrText = ((labHdr && labHdr.innerText) || '').trim();
+                      if (!/颜色/.test(hdrText)) return;
+                      block.querySelectorAll('.transverse-filter button.sku-filter-button').forEach((btn) => {
+                        const nameEl = btn.querySelector('.label-name');
+                        let label = ((nameEl && nameEl.innerText) || '').trim().replace(/\\s+/g, ' ');
+                        if (!label || label.length > 80) return;
+                        if (seenColorLabel.has(label)) return;
+                        seenColorLabel.add(label);
+                        const imgEl = btn.querySelector('.label-image-wrap img, img.ant-image-img');
+                        let imgUrl = '';
+                        if (imgEl) {
+                          imgUrl = norm(
+                            imgEl.currentSrc ||
+                              imgEl.getAttribute('src') ||
+                              imgEl.getAttribute('data-src') ||
+                              ''
+                          );
+                          if (!good(imgUrl)) imgUrl = '';
+                          else c3.push(imgUrl);
+                        }
+                        colorVariants.push({ label, image_url: imgUrl || null });
+                      });
+                    });
+                  } catch (e) {}
 
                   let videoUrl =
                     document.querySelector('video source[src]')?.getAttribute('src') ||
@@ -1230,6 +1299,7 @@ def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[
                     color_swatch_images: c3.arr,
                     title_candidates: titleCandidates,
                     size_labels: sizeLabels,
+                    color_variants: colorVariants,
                     video_url: videoUrl || null,
                     main_price_cny,
                   };

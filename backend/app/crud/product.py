@@ -22,7 +22,7 @@ from app.services.bunny_storage import delete_bunny_assets_for_product
 from app.services.import_hibox_scraper import canonicalize_hibox_placeholder_product_id
 from app.services.product_internal_sku import (
     ensure_unique_internal_product_code,
-    internal_sku_exists_on_other_product,
+    internal_sku_conflicts_global_inventory,
     internal_sku_is_valid_format,
     sync_internal_code_into_product_info,
 )
@@ -3697,9 +3697,10 @@ def bulk_import_products(
                         "trùng trong cùng file import."
                     )
                     continue
-                if internal_sku_exists_on_other_product(db, proposed_u, exclude_product_id=ex_pid_early):
+                if internal_sku_conflicts_global_inventory(db, proposed_u, exclude_product_id=ex_pid_early):
                     skipped.append(
-                        f"Dòng {idx + 1} ({product_id}): Bỏ qua — mã SKU «{proposed_u}» đã có trên sản phẩm khác."
+                        f"Dòng {idx + 1} ({product_id}): Bỏ qua — mã SKU «{proposed_u}» "
+                        "đã có trên sản phẩm khác, trong nháp import hoặc trên sheet SKU."
                     )
                     continue
 

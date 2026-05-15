@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
 
@@ -34,6 +35,61 @@ logger = logging.getLogger(__name__)
 _SYNC_LOCK = threading.Lock()
 
 SCOPES = ("https://www.googleapis.com/auth/spreadsheets",)
+
+# Cache đọc cột A (SKU sheet) khi cấp mã nội bộ — tránh gọi API mỗi lần thử một mã.
+_SHEET_INTERNAL_SKU_CACHE: Tuple[float, frozenset[str]] | None = None
+_SHEET_INTERNAL_SKU_CACHE_TTL_SEC = 60.0
+
+
+def fetch_internal_sku_keys_from_sheet_cached() -> Set[str]:
+    """
+    Trả các ô cột A (sau header) khớp định dạng SKU nội bộ [A-Z][0-9]{4} (không *0000).
+    Dùng để không cấp / không xuất trùng mã đã có trên sheet khách vận hành.
+
+    Sheet tắt / lỗi API → set rỗng (không chặn toàn hệ thống).
+    """
+    global _SHEET_INTERNAL_SKU_CACHE
+    now = time.monotonic()
+    if _SHEET_INTERNAL_SKU_CACHE is not None:
+        ts, frozen_s = _SHEET_INTERNAL_SKU_CACHE
+        if now - ts < _SHEET_INTERNAL_SKU_CACHE_TTL_SEC:
+            return set(frozen_s)
+
+    out: Set[str] = set()
+    if not getattr(settings, "GOOGLE_SHEETS_SKU_SYNC_ENABLED", False):
+        _SHEET_INTERNAL_SKU_CACHE = (now, frozenset())
+        return out
+
+    spread = getattr(settings, "GOOGLE_SHEETS_SKU_SPREADSHEET_ID", "") or ""
+    gid = int(getattr(settings, "GOOGLE_SHEETS_SKU_SHEET_GID", 0) or 0)
+    if not spread or gid <= 0:
+        _SHEET_INTERNAL_SKU_CACHE = (now, frozenset())
+        return out
+
+    header_rows = int(getattr(settings, "GOOGLE_SHEETS_SKU_HEADER_ROWS", 1) or 0)
+
+    try:
+        from app.services.product_internal_sku import internal_sku_is_valid_format
+
+        service = _get_sheets_service()
+        title = _sheet_title_for_gid(service, spread, gid)
+        sku_to_rows = _parse_column_a(service, spread, title, header_rows)
+        for key in sku_to_rows.keys():
+            k = (key or "").strip().upper()
+            if internal_sku_is_valid_format(k):
+                out.add(k)
+    except Exception:
+        logger.warning("[SKU_SHEET_ALLOC] Không đọc được sheet để kiểm tra trùng SKU (bỏ qua chặn sheet).", exc_info=True)
+
+    _SHEET_INTERNAL_SKU_CACHE = (now, frozenset(out))
+    return out
+
+
+def invalidate_internal_sku_sheet_cache() -> None:
+    """Gọi sau khi ghi sheet để lần cấp SKU sau đọc lại cột A."""
+    global _SHEET_INTERNAL_SKU_CACHE
+    _SHEET_INTERNAL_SKU_CACHE = None
+
 
 # Giới hạn thực tế Google API / kích thước HTTP — đồng bộ ~30k hàng vẫn ổn nếu chia lô.
 _BATCH_UPDATE_MAX_SUBREQUESTS = 100
@@ -422,6 +478,7 @@ def sync_product_skus_to_google_sheet(db: Session) -> Dict[str, Any]:
                 removed_dup,
                 len(db_keys),
             )
+            invalidate_internal_sku_sheet_cache()
             return {
                 "ok": True,
                 "field": field,

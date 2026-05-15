@@ -51,7 +51,7 @@ from app.services.product_rating_question_groups import apply_import_rating_ques
 from app.services.product_info_web_compact import compact_product_info_for_web
 from app.services.product_internal_sku import (
     ensure_import_link_internal_product_code,
-    internal_sku_exists_on_other_product,
+    internal_sku_conflicts_global_inventory,
     internal_sku_is_valid_format,
     sync_internal_code_into_product_info,
 )
@@ -643,16 +643,22 @@ def _publish_payload(product_data: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
-def _assign_internal_sku_to_import_product_data(db: Session, product_data: Dict[str, Any]) -> None:
+def _assign_internal_sku_to_import_product_data(
+    db: Session,
+    product_data: Dict[str, Any],
+    *,
+    exclude_draft_id: Optional[int] = None,
+) -> None:
     """
     SKU đăng web là [A-Z][0-9]{4}, không phải slug Hibox (vd abb-922386436529).
-    Ưu tiên mã vừa xuất file (TTL internal_sku_exports); sau TTL không bắt buộc đối chiếu file —
-    chỉ không trùng code sản phẩm khác. Đồng bộ vào product_info.product_info.sku cho tab AK.
+    Ưu tiên mã vừa xuất file (TTL internal_sku_exports); không trùng SP / nháp khác / ô sheet SKU (định dạng nội bộ).
+    Đồng bộ vào product_info.product_info.sku cho tab AK.
     """
     sku = ensure_import_link_internal_product_code(
         db,
         product_data.get("code"),
         exclude_product_id=None,
+        exclude_draft_id=exclude_draft_id,
         batch_reserved=None,
     )
     product_data["code"] = sku
@@ -681,13 +687,14 @@ def _draft_product_data_for_excel_export(db: Session, draft: ProductImportDraft)
         existing_pub = product_crud.get_product_by_product_id(db, pub_pid)
         if existing_pub is not None:
             exclude_pid = existing_pub.id
-    needs_fix = not internal_sku_is_valid_format(code_str) or internal_sku_exists_on_other_product(
+    needs_fix = not internal_sku_is_valid_format(code_str) or internal_sku_conflicts_global_inventory(
         db,
         code_str,
         exclude_product_id=exclude_pid,
+        exclude_draft_id=draft.id,
     )
     if needs_fix:
-        _assign_internal_sku_to_import_product_data(db, pd)
+        _assign_internal_sku_to_import_product_data(db, pd, exclude_draft_id=draft.id)
         draft_crud.update_draft(db, draft, product_data=pd)
     return pd
 
@@ -774,7 +781,7 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             raw_payload, product_data, warnings = scrape_hibox_for_import(draft.source_url)
             _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
             _merge_excel_overlay_for_job(db, job_id, product_data)
-            _assign_internal_sku_to_import_product_data(db, product_data)
+            _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
             draft_crud.mark_done(
                 db,
                 draft,
@@ -798,7 +805,7 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             warnings.extend(image_warnings)
 
         _merge_excel_overlay_for_job(db, job_id, product_data)
-        _assign_internal_sku_to_import_product_data(db, product_data)
+        _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
         draft = draft_crud.get_by_job_id(db, job_id)
         if not draft:
             return
@@ -1330,6 +1337,7 @@ def publish_import_1688_draft(
             db,
             payload.get("code"),
             exclude_product_id=exclude_id,
+            exclude_draft_id=draft_id,
             batch_reserved=sku_reserved,
         )
     except ValueError as exc:

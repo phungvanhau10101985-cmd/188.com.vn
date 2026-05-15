@@ -14,6 +14,10 @@ export type ParsedTaobaoCardRow = {
   title: string;
   /** Tên shop — thường là <span class="shopNameText--…">…</span> */
   shop_name: string;
+  /** Tên shop NCC (thường tiếng Trung) — trùng `shop_name` từ listing; cột Excel `shop_name_chinese` sau import. */
+  shop_name_chinese: string;
+  /** Tên SP tiếng Trung — trùng `title` từ listing; cột Excel `chinese_name`. */
+  chinese_name: string;
   /** `appUid` trong URL shop `view_shop.htm`, nếu có */
   shop_app_uid: string;
   /** Wangwang nick — `data-nick` trên `.ww-light` */
@@ -100,6 +104,24 @@ export function hiboxMntIntegerToApproxCny(
   const cny = mntInteger / mntPerOneCny;
   if (!Number.isFinite(cny) || cny <= 0) return null;
   return cny;
+}
+
+/**
+ * Gắn cột «Shop Trung Quốc» (`shop_name_chinese`) và «Tên tiếng trung» (`chinese_name`)
+ * — đồng bộ với nháp/Excel sau import — từ `shop_name` và `title` đã parse từ listing.
+ */
+export function withListingCnExportFields(r: ParsedTaobaoCardRow): ParsedTaobaoCardRow {
+  const shop = (r.shop_name || '').trim();
+  const tit = (r.title || '').trim();
+  return {
+    ...r,
+    shop_name_chinese: shop,
+    chinese_name: tit,
+  };
+}
+
+function withListingCnExportRows(rows: ParsedTaobaoCardRow[]): ParsedTaobaoCardRow[] {
+  return rows.map(withListingCnExportFields);
 }
 
 /**
@@ -579,6 +601,8 @@ export function parse1688TextTablePaste(raw: string): ParsedTaobaoCardRow[] {
       main_image_url: '',
       title: title || `Offer ${oid}`,
       shop_name: '',
+      shop_name_chinese: '',
+      chinese_name: (title || `Offer ${oid}`).trim(),
       shop_app_uid: '',
       seller_nick: '',
       tags,
@@ -593,7 +617,7 @@ export function parse1688TextTablePaste(raw: string): ParsedTaobaoCardRow[] {
     });
   }
 
-  return out;
+  return withListingCnExportRows(out);
 }
 
 /** Giá trị `appUid` trong link shop (store.taobao.com/…/view_shop.htm?appUid=…). */
@@ -945,6 +969,8 @@ function extractRow(card: Element, idx: number): ParsedTaobaoCardRow | null {
     main_image_url: mainSrc,
     title,
     shop_name,
+    shop_name_chinese: shop_name.trim(),
+    chinese_name: title.trim(),
     shop_app_uid,
     seller_nick,
     tags,
@@ -1045,6 +1071,8 @@ function extractRowFromHiboxGridCard(a: HTMLAnchorElement, idx: number): ParsedT
     main_image_url: mainSrc,
     title,
     shop_name: '',
+    shop_name_chinese: '',
+    chinese_name: title.trim(),
     shop_app_uid: '',
     seller_nick: '',
     tags: '',
@@ -1315,7 +1343,7 @@ export function parseTaobaoListingHtml(html: string): ParsedTaobaoCardRow[] {
     hiboxRows = parseHiboxListingGrid(doc);
   }
   if (hiboxRows.length > 0) {
-    return hiboxRows;
+    return withListingCnExportRows(hiboxRows);
   }
 
   /** Nếu đã bọc mà không tìm thấy ô — một số trình đọc được HTML «thô» tốt hơn fragment lớn. */
@@ -1332,7 +1360,7 @@ export function parseTaobaoListingHtml(html: string): ParsedTaobaoCardRow[] {
     if (row) rows.push(row);
   });
 
-  return rows;
+  return withListingCnExportRows(rows);
 }
 
 export function rowsToCsv(

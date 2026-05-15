@@ -81,7 +81,7 @@ def compact_product_info_for_web(product_data: Dict[str, Any]) -> None:
     để không làm mất cấu trúc cột AK do Excel nhập tay.
 
     Không giữ `supplier_specs_excerpt` / `hibox_specs_excerpt`, `import_taxonomy_meta`,
-    `pairs`, `color_swatches`, …
+    `pairs`, `color_swatches`, …; `market_info.note` không đưa ra web (ghi chú máy scrape).
     """
     pi = product_data.get("product_info")
     if not isinstance(pi, dict):
@@ -134,9 +134,6 @@ def compact_product_info_for_web(product_data: Dict[str, Any]) -> None:
         cur = (mk.get("currency") or "").strip()
         if cur:
             slim_mk["currency"] = cur
-        note = (mk.get("note") or "").strip()
-        if note:
-            slim_mk["note"] = note
         for ek in ("price_vnd", "price_vnd_display", "excel_price_vnd_source"):
             if ek not in mk:
                 continue

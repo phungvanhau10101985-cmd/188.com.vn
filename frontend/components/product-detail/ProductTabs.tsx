@@ -256,6 +256,12 @@ function ProductInfoTab({ product }: { product: Product }) {
             if (sectionKey === 'specifications') {
               entries = orderSpecificationEntries(entries);
             }
+            if (sectionKey === 'market_info') {
+              entries = entries.filter(([k, v]) => {
+                if (k !== 'note' || typeof v !== 'string') return true;
+                return !v.includes('HIBOX_MNT_PER_CNY_FOR_LISTING');
+              });
+            }
             if (entries.length === 0) return null;
             return (
               <Section key={sectionKey} title={title}>

@@ -437,6 +437,10 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
     sizes = _jlist(row, "sizes_json")
 
     title = (row.get("title") or row.get("h1") or "").strip() or slug
+    shop_cn_hint = (
+        str(row.get("shop_name_chinese") or row.get("supplier_shop_cn") or row.get("store_name_cn") or "")
+        .strip()[:250]
+    )
     desc_short = (row.get("description") or "").strip()
     specs_text = (row.get("specs_text") or "").strip()
     if specs_text and len(specs_text) > 80:
@@ -568,10 +572,6 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
         },
         "market_info": {
             "currency": "VND",
-            "note": (
-                "Giá VNĐ suy từ ₮ hiển thị Hibox ÷ HIBOX_MNT_PER_CNY_FOR_LISTING (~CN¥) × hệ số IF × "
-                "LISTING_IMPORT_VND_PER_CNY (làm tròn lên 10.000 ₫), khớp batch Excel listing."
-            ),
             "hibox_display_mnt_integer": int(mnt_display) if mnt_display else None,
             "hibox_mnt_per_cny_used": _hibox_mnt_per_cny_for_listing(),
             "price_cny_approx": round(cny_approx, 6) if cny_approx > 0 else None,
@@ -589,9 +589,11 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
         "origin": supply_plat,
         "brand_name": None,
         "name": title[:500],
+        "chinese_name": (title or "")[:500] or None,
         "description": desc_block[:20000],
         "price": float(price_vnd),
         "shop_name": "Hibox",
+        "shop_name_chinese": shop_cn_hint or None,
         "shop_id": slug,
         "pro_lower_price": cny_for_excel,
         "pro_high_price": cny_for_excel,
