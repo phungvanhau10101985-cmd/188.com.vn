@@ -627,14 +627,17 @@ def post_listing_parser_ids_db_presence(
 ):
     """
     Cho trang admin parse HTML listing: trả về những ID (A…/T… như trên bảng) đã có trong `products`
-    (trùng `product_id` hoặc có mã dạng `{id}a188…` do nhập từ Hibox/1688).
+    (trùng `product_id` hoặc có mã dạng `{id}a188…` do nhập từ Hibox/1688),
+    hoặc đã có nháp import crawl xong (`product_import_drafts`: status done + có `product_data`) — kể cả chưa đăng web.
     """
     raw_ids = body.ids or []
     if len(raw_ids) > 2000:
         raise HTTPException(status_code=400, detail="Tối đa 2000 id mỗi lần gọi.")
 
-    existing_set = crud.product.listing_parser_ids_existing_in_products(db, raw_ids)
-    return ListingParserIdsDbPresenceResponse(existing_normalized=sorted(existing_set))
+    existing_products = crud.product.listing_parser_ids_existing_in_products(db, raw_ids)
+    existing_drafts = crud.product.listing_parser_ids_with_done_drafts(db, raw_ids)
+    merged = existing_products | existing_drafts
+    return ListingParserIdsDbPresenceResponse(existing_normalized=sorted(merged))
 
 
 @router.post("", response_model=Product, include_in_schema=False)

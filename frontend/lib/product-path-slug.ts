@@ -3,8 +3,27 @@
  * Dùng hàm này trước khi ghép `/products/[slug]` trên Next.js.
  */
 export function productPathSlugFromApi(slug: string | null | undefined, fallback?: string | null): string {
-  const raw = (slug ?? '').trim() || (fallback ?? '').trim();
+  let raw = (slug ?? '').trim() || (fallback ?? '').trim();
   if (!raw) return '';
+
+  // Slug lưu nhầm cả URL đã encode một lần (vd https%3A%2F%2F…) — giải mã vài vòng để tới URL rõ ràng.
+  for (let i = 0; i < 4; i++) {
+    if (/^https?:\/\//i.test(raw)) break;
+    if (!/%[0-9A-Fa-f]{2}/.test(raw)) break;
+    try {
+      const d = decodeURIComponent(raw);
+      if (d === raw) break;
+      raw = d;
+    } catch {
+      break;
+    }
+  }
+
+  if (raw.startsWith('/products/')) {
+    const rest = raw.slice('/products/'.length).split(/[/?#]/)[0];
+    return rest ? decodeURIComponent(rest) : '';
+  }
+
   if (/^https?:\/\//i.test(raw)) {
     try {
       const u = new URL(raw);

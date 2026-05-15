@@ -1301,6 +1301,91 @@ def listing_parser_ids_existing_in_products(db: Session, candidate_external_ids:
     return out
 
 
+def listing_parser_ids_with_done_drafts(db: Session, candidate_external_ids: List[str]) -> Set[str]:
+    """
+    Id listing (A|T + chữ số sau chuẩn hóa) đã có bản nháp import crawl xong:
+    ``status == done``, ``product_data`` có dữ liệu — dù chưa đăng lên ``products``.
+    Khớp ``source_offer_id`` (1688 = chỉ số offer; Hibox = ``abb-<số>`` hoặc slug số Taobao).
+    """
+    from app.models.product_import_draft import ProductImportDraft
+
+    normalized_unique: Dict[str, str] = {}
+    a_digits: Set[str] = set()
+    t_digits: Set[str] = set()
+    for raw in candidate_external_ids:
+        n = normalize_listing_parser_external_id(raw)
+        if not n:
+            continue
+        normalized_unique.setdefault(n, n)
+        if not _LISTING_PARSER_AT_NUMERIC_ONLY.fullmatch(n):
+            continue
+        prefix = (n[0] or "").upper()
+        body = n[1:]
+        if not body.isdigit():
+            continue
+        if prefix == "A":
+            a_digits.add(body)
+        elif prefix == "T":
+            t_digits.add(body)
+
+    if not a_digits and not t_digits:
+        return set()
+
+    hibox_offer_ids: Set[str] = set(t_digits)
+    hibox_offer_ids.update(f"abb-{d}" for d in a_digits)
+
+    clauses = []
+    if a_digits:
+        clauses.append(
+            and_(ProductImportDraft.source == "1688", ProductImportDraft.source_offer_id.in_(sorted(a_digits)))
+        )
+    if hibox_offer_ids:
+        clauses.append(
+            and_(
+                ProductImportDraft.source == "hibox",
+                ProductImportDraft.source_offer_id.in_(sorted(hibox_offer_ids)),
+            )
+        )
+    if not clauses:
+        return set()
+
+    rows = (
+        db.query(ProductImportDraft.source, ProductImportDraft.source_offer_id, ProductImportDraft.product_data)
+        .filter(
+            ProductImportDraft.status == "done",
+            ProductImportDraft.product_data.isnot(None),
+            or_(*clauses),
+        )
+        .all()
+    )
+
+    matched_norm: Set[str] = set()
+    for src, oid, pdata in rows:
+        if pdata is None or (isinstance(pdata, dict) and len(pdata) == 0):
+            continue
+        oid_s = str(oid or "").strip()
+        if not oid_s:
+            continue
+        src_l = (src or "").strip().lower()
+        if src_l == "1688" and oid_s.isdigit() and oid_s in a_digits:
+            matched_norm.add(f"A{oid_s}")
+        elif src_l == "hibox":
+            mabb = re.match(r"(?i)^abb-(\d+)$", oid_s)
+            if mabb:
+                d = mabb.group(1)
+                if d in a_digits:
+                    matched_norm.add(f"A{d}")
+            elif oid_s.isdigit():
+                if oid_s in t_digits:
+                    matched_norm.add(f"T{oid_s}")
+
+    out: Set[str] = set()
+    for n_key, canon in normalized_unique.items():
+        if n_key in matched_norm:
+            out.add(canon)
+    return out
+
+
 def normalize_search_query(q: str) -> str:
     """
     Chuẩn tắc cụm từ tìm kiếm: trim, fix case (Cao lông nam đế).

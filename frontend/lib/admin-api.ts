@@ -73,6 +73,24 @@ function getAdminToken(): string | null {
   return localStorage.getItem('admin_token');
 }
 
+/**
+ * Gắn `<a download>` vào DOM và hoãn `revokeObjectURL` — tránh một số trình duyệt không lưu file
+ * khi click lập trình hoặc revoke quá sớm làm hỏng tải.
+ */
+function triggerBrowserBlobDownload(blob: Blob, filename: string): void {
+  if (typeof window === 'undefined') return;
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objectUrl;
+  a.download = filename;
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 800);
+}
+
 /** Chuỗi thân thiện từ FastAPI detail (chuỗi | mảng validation | object { message }) */
 function formatFastApiDetail(detail: unknown): string {
   if (detail == null || detail === '') return '';
@@ -747,7 +765,7 @@ export const adminProductAPI = {
     });
   },
 
-  /** Đối chiếu ID parse HTML listing với `products.product_id` (Admin). */
+  /** Đối chiếu ID parse HTML listing với `products` và nháp import crawl xong (`product_import_drafts`). */
   listingParserDbPresence: (ids: string[]) =>
     fetchAdmin<{ existing_normalized: string[] }>('/products/listing-parser-db-presence', {
       method: 'POST',
@@ -957,12 +975,8 @@ export const adminProductAPI = {
       throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Tải CSV hàng đợi thất bại');
     }
     const blob = await res.blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
     const suffix = finishedOnly ? '_ket_qua' : '_snapshot';
-    a.download = `listing_import_queue_${queueToken.slice(0, 12)}${suffix}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    triggerBrowserBlobDownload(blob, `listing_import_queue_${queueToken.slice(0, 12)}${suffix}.csv`);
   },
 
   /** Excel mẫu nhập web — dữ liệu sản phẩm từ draft các dòng đã xong trong đợt (giống export bulk draft). */
@@ -970,23 +984,29 @@ export const adminProductAPI = {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
     const url = `${getApiBaseUrl()}/import-1688/listing-queue/${encodeURIComponent(queueToken)}/export-products.xlsx`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Tải Excel sản phẩm từ đợt thất bại');
+    const ctrl = new AbortController();
+    const tid =
+      typeof window !== 'undefined'
+        ? window.setTimeout(() => ctrl.abort(), 180_000)
+        : undefined;
+    try {
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+        signal: ctrl.signal,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Tải Excel sản phẩm từ đợt thất bại');
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get('Content-Disposition');
+      let filename = `listing_queue_products_${queueToken.slice(0, 12)}.xlsx`;
+      const m = cd && /filename="?([^";]+)"?/i.exec(cd);
+      if (m?.[1]) filename = m[1].trim();
+      triggerBrowserBlobDownload(blob, filename);
+    } finally {
+      if (tid != null) window.clearTimeout(tid);
     }
-    const blob = await res.blob();
-    const cd = res.headers.get('Content-Disposition');
-    let filename = `listing_queue_products_${queueToken.slice(0, 12)}.xlsx`;
-    const m = cd && /filename="?([^";]+)"?/i.exec(cd);
-    if (m?.[1]) filename = m[1].trim();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(a.href);
   },
 
   getImport1688Job: (jobId: string) =>
@@ -1033,11 +1053,7 @@ export const adminProductAPI = {
     const disposition = res.headers.get('Content-Disposition');
     const match = disposition?.match(/filename="?([^";]+)"?/);
     const filename = match ? match[1] : `import_1688_draft_${draftId}.xlsx`;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    triggerBrowserBlobDownload(blob, filename);
   },
 
   uploadImport1688ExcelBatch: async (

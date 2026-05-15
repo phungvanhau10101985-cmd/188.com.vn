@@ -336,7 +336,7 @@ class PurgeDeadMediaUrlBody(BaseModel):
 
 
 class ListingParserIdsDbPresenceBody(BaseModel):
-    """Đối chiếu id từ parse HTML listing với products.product_id (kể cả mã dạng Ax…a188SKU)."""
+    """Đối chiếu id từ parse HTML listing với products + nháp import crawl xong (kể cả chưa đăng web)."""
 
     ids: List[str] = Field(default_factory=list, description="ID như trên bảng parse (vd A918…)")
 
@@ -344,5 +344,5 @@ class ListingParserIdsDbPresenceBody(BaseModel):
 class ListingParserIdsDbPresenceResponse(BaseModel):
     existing_normalized: List[str] = Field(
         ...,
-        description="Các id sau chuẩn hoá (A|T + số) đã có trong DB",
+        description="Các id sau chuẩn hoá (A|T + số) đã có trong shop hoặc đã có nháp crawl xong (chưa đăng web)",
     )

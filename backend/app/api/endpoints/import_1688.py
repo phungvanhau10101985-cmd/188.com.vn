@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
+from io import BytesIO
 import threading
 import traceback
 import uuid
@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from pydantic import BaseModel
@@ -1175,8 +1175,8 @@ def list_import_1688_drafts(
     )
 
 
-def _file_response_import_excel_rows(rows_data: List[Dict[str, Any]], download_filename: str) -> FileResponse:
-    """Ghi file Excel mẫu nhập web (cùng layout export bulk draft)."""
+def _file_response_import_excel_rows(rows_data: List[Dict[str, Any]], download_filename: str) -> Response:
+    """Tạo Excel mẫu nhập web (cùng layout export bulk draft) — trả bytes, không phụ thuộc CWD hay ghi đĩa."""
     if not rows_data:
         raise HTTPException(
             status_code=400,
@@ -1184,19 +1184,18 @@ def _file_response_import_excel_rows(rows_data: List[Dict[str, Any]], download_f
         )
     columns, vietnamese_headers = _excel_export_columns_and_vi_headers()
     df = pd.DataFrame(rows_data, columns=columns)
-    export_dir = os.path.join("app", "static", "uploads")
-    os.makedirs(export_dir, exist_ok=True)
-    filepath = os.path.join(export_dir, download_filename)
-    with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="Products", index=False, startrow=0)
         ws = writer.sheets["Products"]
         ws.insert_rows(2)
         for idx, header in enumerate(vietnamese_headers, 1):
             ws.cell(row=2, column=idx, value=header)
-    return FileResponse(
-        filepath,
+    body = buf.getvalue()
+    return Response(
+        content=body,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=download_filename,
+        headers={"Content-Disposition": f'attachment; filename="{download_filename}"'},
     )
 
 
@@ -1506,24 +1505,8 @@ def export_import_1688_draft_excel(
     if not draft.product_data:
         raise HTTPException(status_code=400, detail="Draft chưa có dữ liệu sản phẩm để export.")
     pdata = _draft_product_data_for_excel_export(db, draft)
-    columns, vietnamese_headers = _excel_export_columns_and_vi_headers()
-    df = pd.DataFrame([_excel_row_from_product(pdata)], columns=columns)
-    export_dir = os.path.join("app", "static", "uploads")
-    os.makedirs(export_dir, exist_ok=True)
     filename = f"import_1688_draft_{draft.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    filepath = os.path.join(export_dir, filename)
-    with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
-        df.to_excel(writer, sheet_name="Products", index=False, startrow=0)
-        ws = writer.sheets["Products"]
-        # Dòng 1: tiếng Anh | Dòng 2: nhãn tiếng Việt | Dòng 3+: dữ liệu (_try_read_method_1 skiprows=[1])
-        ws.insert_rows(2)
-        for idx, header in enumerate(vietnamese_headers, 1):
-            ws.cell(row=2, column=idx, value=header)
-    return FileResponse(
-        filepath,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=filename,
-    )
+    return _file_response_import_excel_rows([_excel_row_from_product(pdata)], filename)
 
 
 def _safe_listing_queue_token_param(raw: str) -> str:

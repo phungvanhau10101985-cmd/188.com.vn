@@ -4,6 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { adminOrderAPI, type AdminOrder, type PaymentRecord } from '@/lib/admin-api';
 import { cdnUrl, normalizeRemoteImageUrlForDisplay } from '@/lib/cdn-url';
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
 
 const STATUS_TEXTS: Record<string, string> = {
   pending: 'Chờ xác nhận',
@@ -109,8 +110,9 @@ function orderItemImageUrl(src: string | null | undefined): string {
 }
 
 function productPublicUrl(slug: string | null | undefined): string | null {
-  if (!slug?.trim()) return null;
-  return `${shopOrigin()}/products/${encodeURIComponent(slug.trim())}`;
+  const seg = productPathSlugFromApi(slug);
+  if (!seg) return null;
+  return `${shopOrigin()}/products/${encodeURIComponent(seg)}`;
 }
 
 function colorDisplay(item: {

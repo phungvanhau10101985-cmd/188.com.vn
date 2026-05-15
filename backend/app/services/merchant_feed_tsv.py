@@ -17,6 +17,7 @@ import math
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterator, Optional
+from urllib.parse import quote, unquote, urlparse
 
 from sqlalchemy.orm import Session
 
@@ -138,14 +139,57 @@ def _pick_additional_images(product: Product, site_base: str) -> str:
     return ",".join(imgs)
 
 
+def _feed_path_segment_from_slug(raw_slug: str, fallback: str) -> str:
+    """
+    Slug trên DB đôi khi lưu cả URL PDP (https://…/products/segment) hoặc chuỗi đã encode.
+    Trả về một segment path an toàn cho /products/{segment} (khớp frontend productPathSlugFromApi).
+    """
+    s = (raw_slug or "").strip()
+    if not s:
+        return (fallback or "").strip()
+    for _ in range(4):
+        low = s.lower()
+        if low.startswith("http://") or low.startswith("https://"):
+            break
+        if "%" not in s:
+            break
+        try:
+            d = unquote(s)
+        except Exception:
+            break
+        if d == s:
+            break
+        s = d
+    if s.startswith("/products/"):
+        part = s.split("/products/", 1)[-1].split("?")[0].split("#")[0].strip("/").split("/")[0]
+        return unquote(part) if part else (fallback or "").strip()
+    low = s.lower()
+    if low.startswith("http://") or low.startswith("https://"):
+        try:
+            u = urlparse(s)
+            segs = [x for x in u.path.split("/") if x]
+            if "products" in segs:
+                i = segs.index("products")
+                if i + 1 < len(segs):
+                    return unquote(segs[i + 1])
+            if segs:
+                return unquote(segs[-1])
+        except Exception:
+            return (fallback or "").strip()
+        return (fallback or "").strip()
+    return s
+
+
 def _product_canonical_link(product: Product, shop_base_url: str) -> str:
     """URL trang chi tiết trên shop (Merchant/Meta/TikTok). Không dùng `link_default` — trường đó là URL nguồn NCC (1688/Taobao)."""
     base = shop_base_url.rstrip("/")
-    slug = "" if _is_blankish(getattr(product, "slug", None)) else str(getattr(product, "slug", "")).strip()
+    raw_slug = "" if _is_blankish(getattr(product, "slug", None)) else str(getattr(product, "slug", "")).strip()
     raw_pid = getattr(product, "product_id", None)
     pid = str(product.id) if _is_blankish(raw_pid) else str(raw_pid).strip()
-    path = slug if slug else str(pid).strip()
-    return f"{base}/products/{path}"
+    path = _feed_path_segment_from_slug(raw_slug, pid) if raw_slug else pid
+    if _is_blankish(path):
+        path = pid
+    return f"{base}/products/{quote(path, safe='')}"
 
 
 def _availability(product: Product) -> str:

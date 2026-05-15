@@ -24,6 +24,10 @@ import {
   IMPORT_1688_EXCEL_COLUMNS,
   excelExportRowFromProductData,
 } from '@/lib/import-1688-excel-export-preview';
+import {
+  getListingDraftPublishBlockers,
+  isListingDraftPublishReady,
+} from '@/lib/listing-draft-publish-validation';
 
 /** Lưu ô «₮ / 1 CN¥» (quy Hibox → tệ). */
 const TAOBAO_CARDS_PARSE_MNT_PER_CNY_LS_KEY = 'admin.products.taobao_cards_parse.mnt_per_cny';
@@ -438,6 +442,9 @@ export default function TaobaoCardsParsePage() {
   const [onlyCompleteListingRows, setOnlyCompleteListingRows] = useState(true);
   const [onlyMissingInDb, setOnlyMissingInDb] = useState(true);
   const [dbExistingSet, setDbExistingSet] = useState<Set<string>>(() => new Set());
+  /** Tăng sau khi có SP mới trong `products` (đăng từ modal / đổi tab) hoặc thêm dòng queue `done` (nháp crawl xong) — gọi lại listing-parser-db-presence. */
+  const [listingParseDbPresenceTick, setListingParseDbPresenceTick] = useState(0);
+  const prevQueueDoneSumRef = useRef(0);
   const [presenceFetchKey, setPresenceFetchKey] = useState<string | null>(null);
   const [dbLookupPending, setDbLookupPending] = useState(false);
   const [dbLookupError, setDbLookupError] = useState<string | null>(null);
@@ -560,6 +567,21 @@ export default function TaobaoCardsParsePage() {
       clearInterval(id);
     };
   }, [trackedQueueTokens]);
+
+  /** Khi crawl xong thêm dòng trong đợt — đối chiếu lại DB + nháp done để ẩn dòng (kể cả chưa đăng web). */
+  useEffect(() => {
+    let done = 0;
+    for (const tok of trackedQueueTokens) {
+      const c = queueStatusByToken[tok]?.counts;
+      if (typeof c?.done === 'number') done += c.done;
+    }
+    const prev = prevQueueDoneSumRef.current;
+    prevQueueDoneSumRef.current = done;
+    if (!onlyMissingInDb || rows.length === 0) return;
+    if (done > prev) {
+      setListingParseDbPresenceTick((n) => n + 1);
+    }
+  }, [queueStatusByToken, onlyMissingInDb, rows.length, trackedQueueTokens]);
 
   useEffect(() => {
     try {
@@ -739,13 +761,22 @@ export default function TaobaoCardsParsePage() {
     return () => {
       active = false;
     };
-  }, [onlyMissingInDb, idsForDbLookupKey, rows.length]);
+  }, [onlyMissingInDb, idsForDbLookupKey, rows.length, listingParseDbPresenceTick]);
+
+  /** Quay lại tab: đối chiếu lại khi đang lọc (shop + nháp xong). */
+  useEffect(() => {
+    if (!onlyMissingInDb || rows.length === 0) return undefined;
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        setListingParseDbPresenceTick((n) => n + 1);
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [onlyMissingInDb, rows.length]);
 
   const dbPresenceReady =
-    onlyMissingInDb &&
-    presenceFetchKey === idsForDbLookupKey &&
-    !dbLookupPending &&
-    !!idsForDbLookupKey;
+    onlyMissingInDb && !!idsForDbLookupKey && presenceFetchKey === idsForDbLookupKey;
 
   const displayRows = useMemo(() => {
     let xs = preDbFilteredRows;
@@ -959,6 +990,22 @@ export default function TaobaoCardsParsePage() {
         const st = await adminProductAPI.getListingImportQueueStatus(res.queue_token);
         setQueueStatusByToken((prev) => ({ ...prev, [res.queue_token]: st }));
 
+        const nAdded = items.length;
+        setSelectedRowKeys((prev) => {
+          const next = new Set(prev);
+          for (const it of items) {
+            const lab = (it.label || '').trim();
+            const uEnqueue = (it.url || '').trim();
+            const hit = displayRows.find((r) => {
+              if (lab && (r.item_id || '').trim() === lab) return true;
+              const uRow = (r.item_url || '').trim();
+              return Boolean(uEnqueue && uRow && uEnqueue === uRow);
+            });
+            if (hit) next.delete(stableListingRowKey(hit));
+          }
+          return next;
+        });
+
         const modeLabel =
           importFetchTarget === 'hibox'
             ? 'qua Hibox'
@@ -976,12 +1023,12 @@ export default function TaobaoCardsParsePage() {
         if (skipLines.length) {
           showToast(
             'ok',
-            `${res.message} (${modeLabel}). ${scopeLabel}${parallelNote} ${skipLines.length} dòng không ghép URL — không thêm vào đợt.`,
+            `${res.message} · Đã bỏ chọn ${nAdded} dòng đã gửi. (${modeLabel}). ${scopeLabel}${parallelNote} ${skipLines.length} dòng không ghép URL — không thêm vào đợt.`,
           );
         } else {
           showToast(
             'ok',
-            `${res.message} (${modeLabel}). ${scopeLabel}${parallelNote} Xử lý lần lượt trong đợt này — theo dõi trong danh sách bên dưới.`,
+            `${res.message} · Đã bỏ chọn ${nAdded} dòng đã gửi. (${modeLabel}). ${scopeLabel}${parallelNote} Xử lý lần lượt trong đợt này — theo dõi trong danh sách bên dưới.`,
           );
         }
       } catch (e) {
@@ -999,6 +1046,7 @@ export default function TaobaoCardsParsePage() {
       appendToCurrentQueueOption.hint,
       showToast,
       importFetchTarget,
+      displayRows,
     ],
   );
 
@@ -1210,7 +1258,8 @@ export default function TaobaoCardsParsePage() {
   }, [doneDraftsPublishing]);
 
   const doneDraftsModalStats = useMemo(() => {
-    let withData = 0;
+    let formatReady = 0;
+    let formatNeedsFix = 0;
     let fetchErr = 0;
     let noData = 0;
     let published = 0;
@@ -1224,7 +1273,9 @@ export default function TaobaoCardsParsePage() {
         noData += 1;
         continue;
       }
-      withData += 1;
+      const pd = r.draft.product_data as Record<string, unknown>;
+      if (isListingDraftPublishReady(pd)) formatReady += 1;
+      else formatNeedsFix += 1;
       if (r.draft.published_product_id?.trim()) published += 1;
       else if (draftRowAlreadyInShop(r, doneDraftsShopPresenceKeys)) alreadyInShop += 1;
     }
@@ -1232,12 +1283,14 @@ export default function TaobaoCardsParsePage() {
       doneDraftsModalRows.some((row) => {
         if (!row.draft?.product_data || row.fetchErr) return false;
         if (draftRowAlreadyInShop(row, doneDraftsShopPresenceKeys)) return false;
+        if (!isListingDraftPublishReady(row.draft.product_data as Record<string, unknown>)) return false;
         return row.draftId === id;
       }),
     ).length;
     return {
       total: doneDraftsModalRows.length,
-      withData,
+      formatReady,
+      formatNeedsFix,
       fetchErr,
       noData,
       published,
@@ -1313,6 +1366,7 @@ export default function TaobaoCardsParsePage() {
         const ready = rows
           .filter((r) => {
             if (!r.draft?.product_data || r.fetchErr) return false;
+            if (!isListingDraftPublishReady(r.draft.product_data as Record<string, unknown>)) return false;
             return !draftRowAlreadyInShop(r, shopPresence);
           })
           .map((r) => r.draftId);
@@ -1333,11 +1387,15 @@ export default function TaobaoCardsParsePage() {
           r.draftId === id &&
           r.draft?.product_data &&
           !r.fetchErr &&
-          !draftRowAlreadyInShop(r, doneDraftsShopPresenceKeys),
+          !draftRowAlreadyInShop(r, doneDraftsShopPresenceKeys) &&
+          isListingDraftPublishReady(r.draft.product_data as Record<string, unknown>),
       ),
     );
     if (!publishable.length) {
-      showToast('err', 'Chọn ít nhất một nháp đã có đủ dữ liệu sản phẩm.');
+      showToast(
+        'err',
+        'Chọn ít nhất một nháp đạt định dạng (màu + ảnh từng màu, ảnh chi tiết > thư viện, tên/shop Trung Quốc; giày dép/quần áo: ≥3 size hoặc free size).',
+      );
       return;
     }
     const rowByDraftId = new Map(doneDraftsModalRows.map((r) => [r.draftId, r]));
@@ -1401,6 +1459,9 @@ export default function TaobaoCardsParsePage() {
       setQueueStatusByToken((prev) => ({ ...prev, [token]: fresh }));
     } catch {
       /* noop */
+    }
+    if (ok > 0) {
+      setListingParseDbPresenceTick((n) => n + 1);
     }
     if (fail === 0) {
       showToast('ok', `Đã đăng ${ok} sản phẩm lên danh mục (cùng API với Import 1688).`);
@@ -1657,7 +1718,12 @@ export default function TaobaoCardsParsePage() {
                   <strong className="font-medium text-slate-800">Bảng giống Excel đăng web</strong> — sau vài cột thao tác là{' '}
                   <strong className="font-medium text-slate-800">đúng 39 cột</strong> như file Export/Import 1688 trên server; vuốt ngang để xem
                   Tên, Giá, Size/Biến thể, ảnh, mô tả, danh mục… Cuối bảng là thông tin crawl/đợt (job, link).
-                  Tick nháp có <code className="text-xs bg-slate-100 px-1 rounded">product_data</code> rồi đăng (API Import 1688).
+                  Chỉ tick được nháp <strong className="font-medium text-slate-800">đạt kiểm tra định dạng</strong>: mỗi màu có tên +
+                  URL ảnh; ảnh chi tiết (<code className="text-[10px] bg-slate-100 px-1 rounded">gallery</code>) nhiều hơn ảnh thư viện (
+                  <code className="text-[10px] bg-slate-100 px-1 rounded">images</code>);{' '}
+                  <code className="text-[10px] bg-slate-100 px-1 rounded">chinese_name</code> và{' '}
+                  <code className="text-[10px] bg-slate-100 px-1 rounded">shop_name_chinese</code> có chữ Hán; nếu là giày dép/quần áo thì ≥
+                  3 size hoặc chỉ free size. Sau đó đăng qua API Import 1688.
                 </p>
                 <p className="text-xs font-mono text-slate-500 mt-1.5 break-all" title={doneDraftsModalToken}>
                   Đợt: {doneDraftsModalToken.slice(0, 14)}…{doneDraftsModalToken.slice(-10)}
@@ -1695,7 +1761,10 @@ export default function TaobaoCardsParsePage() {
                         <strong className="tabular-nums text-slate-900">{doneDraftsModalStats.total}</strong> nháp hoàn tất
                       </span>
                       <span>
-                        <strong className="tabular-nums text-emerald-800">{doneDraftsModalStats.withData}</strong> đủ dữ liệu để đăng
+                        <strong className="tabular-nums text-emerald-800">{doneDraftsModalStats.formatReady}</strong> đạt định dạng để đăng
+                      </span>
+                      <span>
+                        <strong className="tabular-nums text-amber-900">{doneDraftsModalStats.formatNeedsFix}</strong> có nháp nhưng chưa đạt định dạng
                       </span>
                       <span>
                         <strong className="tabular-nums text-emerald-800">{doneDraftsModalStats.published}</strong> đã có mã SP đăng trước
@@ -1829,11 +1898,14 @@ export default function TaobaoCardsParsePage() {
                         <tbody className="bg-white">
                           {doneDraftsModalRows.map((row, rowIdx) => {
                             const alreadyInShop = draftRowAlreadyInShop(row, doneDraftsShopPresenceKeys);
+                            const pd = row.draft?.product_data as Record<string, unknown> | undefined;
+                            const formatBlockers =
+                              pd && !row.fetchErr ? getListingDraftPublishBlockers(pd) : [];
+                            const formatOk = Boolean(pd && !row.fetchErr && formatBlockers.length === 0);
                             const canPublish = Boolean(
-                              row.draft?.product_data && !row.fetchErr && !alreadyInShop,
+                              row.draft?.product_data && !row.fetchErr && !alreadyInShop && formatOk,
                             );
                             const pubId = row.draft?.published_product_id?.trim();
-                            const pd = row.draft?.product_data as Record<string, unknown> | undefined;
                             let note = '';
                             if (row.fetchErr) note = row.fetchErr;
                             else if (!row.draft?.product_data)
@@ -1844,7 +1916,9 @@ export default function TaobaoCardsParsePage() {
                                 pk != null
                                   ? `Đã có sản phẩm trên shop (mã ${pk} — trùng product_id hoặc …${pk}a188…).`
                                   : 'Đã có sản phẩm trên shop.';
-                            } else note = row.draft?.message || row.draft?.status || 'Sẵn sàng đăng';
+                            } else if (!formatOk)
+                              note = formatBlockers.length ? formatBlockers.join(' · ') : 'Chưa đạt định dạng đăng.';
+                            else note = row.draft?.message || row.draft?.status || 'Sẵn sàng đăng';
 
                             let badgeCls = 'bg-slate-100 text-slate-800';
                             let badgeText = '—';
@@ -1860,6 +1934,9 @@ export default function TaobaoCardsParsePage() {
                             } else if (alreadyInShop) {
                               badgeCls = 'bg-slate-300 text-slate-900';
                               badgeText = 'Đã có trong shop';
+                            } else if (!formatOk) {
+                              badgeCls = 'bg-orange-100 text-orange-950';
+                              badgeText = 'Chưa đạt định dạng';
                             } else {
                               badgeCls = 'bg-sky-100 text-sky-950';
                               badgeText = 'Sẵn sàng đăng';
@@ -1905,7 +1982,9 @@ export default function TaobaoCardsParsePage() {
                                     aria-label={
                                       alreadyInShop
                                         ? `Nháp ${row.draftId} đã có trong shop — không chọn để đăng`
-                                        : `Chọn nháp ${row.draftId}`
+                                        : !formatOk
+                                          ? `Nháp ${row.draftId} chưa đạt định dạng — không chọn để đăng`
+                                          : `Chọn nháp ${row.draftId}`
                                     }
                                   />
                                 </td>
@@ -2115,6 +2194,7 @@ export default function TaobaoCardsParsePage() {
                     const ids = doneDraftsModalRows
                       .filter((r) => {
                         if (!r.draft?.product_data || r.fetchErr) return false;
+                        if (!isListingDraftPublishReady(r.draft.product_data as Record<string, unknown>)) return false;
                         return !draftRowAlreadyInShop(r, doneDraftsShopPresenceKeys);
                       })
                       .map((r) => r.draftId);
@@ -2122,7 +2202,7 @@ export default function TaobaoCardsParsePage() {
                   }}
                   className="px-3 py-1.5 rounded-md border border-slate-300 bg-white text-sm disabled:opacity-40"
                 >
-                  Chọn tất cả đủ dữ liệu
+                  Chọn tất cả đạt định dạng
                 </button>
                 <button
                   type="button"
@@ -2262,7 +2342,7 @@ export default function TaobaoCardsParsePage() {
           {' '}
           <span className="text-slate-700">
             Mặc định chỉ hiện các dòng đủ cột trong bảng (với Hibox / bảng text 1688 không bắt buộc shop/tag/ảnh); bỏ chọn để xem cả dòng thiếu dữ liệu.
-            Sau đó có thể chỉ giữ các ID chưa có trong DB (bỏ chọn để xem cả lô).
+            Sau đó có thể chỉ giữ các ID chưa có trên shop và chưa có nháp crawl xong (bỏ chọn để xem cả lô).
           </span>{' '}
           <span className="text-slate-700">
             Chọn một hoặc nhiều dòng rồi chọn <strong>Trang lấy dữ liệu</strong> (Hibox / 1688 / tự động) và bấm «Lấy thông tin»
@@ -2338,8 +2418,9 @@ export default function TaobaoCardsParsePage() {
           type="button"
           disabled={!displayRows.length || enqueueSubmitting || selectedOnPage.length === 0}
           onClick={() => void openListingEnqueueChoice()}
-          title="Mở hộp thoại: thêm vào đợt đang mở hoặc tạo đợt / job mới trên server."
-          className="px-4 py-2 rounded-lg bg-indigo-700 text-white text-sm font-medium hover:bg-indigo-800 disabled:opacity-50"
+          title="Gửi các dòng đang tick lên hàng đợi server. Sau khi gửi thành công, các dòng đó được bỏ chọn — tránh bấm trùng; chọn lại nếu cần gửi thêm."
+          aria-busy={enqueueSubmitting}
+          className="px-4 py-2 rounded-lg bg-indigo-700 text-white text-sm font-medium hover:bg-indigo-800 disabled:opacity-50 disabled:pointer-events-none"
         >
           {enqueueSubmitting ? 'Đang gửi lên server…' : `Lấy thông tin${selectedOnPage.length ? ` (${selectedOnPage.length})` : ''}`}
         </button>
@@ -2379,10 +2460,10 @@ export default function TaobaoCardsParsePage() {
             }}
             disabled={rows.length === 0}
             className="rounded border-slate-300"
-            title="Bật: chỉ hiện ID chưa có trong DB. Tắt: hiện toàn bộ lô sau parse."
-            aria-label="Chỉ hiện sản phẩm ID chưa có trong cửa hàng; bỏ chọn để xem cả lô"
+            title="Bật: chỉ hiện ID chưa có trên shop và chưa có nháp crawl xong; sau đăng SP hoặc khi queue xong thêm dòng, bảng tự đối chiếu lại; quay lại tab cũng làm mới. Tắt: hiện toàn bộ lô sau parse."
+            aria-label="Chỉ hiện sản phẩm chưa có trên shop và chưa có nháp import crawl xong; bỏ chọn để xem cả lô"
           />
-          <span className="text-sm text-slate-700 whitespace-nowrap">Chỉ ID chưa có trong DB</span>
+          <span className="text-sm text-slate-700 whitespace-nowrap">Chưa có trên shop — chưa nháp xong</span>
           {onlyMissingInDb && dbLookupPending ? (
             <span className="text-xs text-slate-500">Đang đối chiếu…</span>
           ) : null}

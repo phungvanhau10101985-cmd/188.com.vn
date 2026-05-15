@@ -17,6 +17,7 @@ import {
   type AdminProductListSort,
 } from '@/lib/admin-api';
 import { getCatalogFeedApiBaseUrl, isNonPublicCatalogFeedBase } from '@/lib/api-base';
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { ImportDraftExcelCompare } from '@/components/admin/ImportDraftExcelCompare';
 
 const PAGE_SIZE = 100;
@@ -180,9 +181,9 @@ function adminPublicShopOrigin(): string {
 }
 
 function adminProductPublicUrl(slug: string | null | undefined): string | null {
-  const s = typeof slug === 'string' ? slug.trim() : '';
-  if (!s) return null;
-  return `${adminPublicShopOrigin()}/products/${encodeURIComponent(s)}`;
+  const seg = productPathSlugFromApi(slug);
+  if (!seg) return null;
+  return `${adminPublicShopOrigin()}/products/${encodeURIComponent(seg)}`;
 }
 
 type Stored1688LinkJob = {
