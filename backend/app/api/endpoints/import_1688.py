@@ -1258,7 +1258,11 @@ def listing_import_queue_export_products_excel(
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("products")),
 ):
-    """Excel dữ liệu sản phẩm để nhập web — các draft đã hoàn thành trong đợt listing queue."""
+    """Excel dữ liệu sản phẩm để nhập web — các draft đã hoàn thành trong đợt listing queue.
+
+    Xuất thẳng từ `product_data` đã lưu (không chuẩn hoá SKU lại) để tránh hàng trăm truy vấn
+    và timeout gateway (504) trên đợt lớn.
+    """
     from app.services import listing_import_queue as liq
 
     tok = _safe_listing_queue_token_param(queue_token)
@@ -1277,35 +1281,24 @@ def listing_import_queue_export_products_excel(
     by_id = draft_crud.get_by_ids_map(db, draft_ids)
     rows_data: List[Dict[str, Any]] = []
     missing_in_db = 0
-    batch_reserved: Set[str] = set()
-    sku_fix_pending: List[Tuple[ProductImportDraft, Dict[str, Any]]] = []
+    # Không gọi _draft_product_data_for_excel_export (kiểm tra SKU + nhiều query DB / nháp):
+    # với vài trăm dòng dễ vượt timeout nginx (504). Dữ liệu đã có từ crawl; SKU có thể chỉnh
+    # qua export từng nháp hoặc bulk draft nếu cần.
     for did in draft_ids:
         draft = by_id.get(did)
         if not draft:
             missing_in_db += 1
             continue
-        pdata = _draft_product_data_for_excel_export(
-            db,
-            draft,
-            sku_fix_pending=sku_fix_pending,
-            batch_reserved=batch_reserved,
-        )
+        pdata = dict(draft.product_data or {})
         rows_data.append(_excel_row_from_product(pdata))
-
-    if sku_fix_pending:
-        for drow, pdata in sku_fix_pending:
-            drow.product_data = pdata
-            db.add(drow)
-        db.commit()
 
     elapsed = time.perf_counter() - t0
     logger.info(
-        "listing_queue export-products token=%s… draft_ids=%s missing_in_db=%s excel_rows=%s sku_fixes=%s duration_s=%.2f",
+        "listing_queue export-products (fast) token=%s… draft_ids=%s missing_in_db=%s excel_rows=%s duration_s=%.2f",
         tok[:12],
         len(draft_ids),
         missing_in_db,
         len(rows_data),
-        len(sku_fix_pending),
         elapsed,
     )
 
