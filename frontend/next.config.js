@@ -58,9 +58,9 @@ const nextConfig = {
       { protocol: "https", hostname: "**" },
       { protocol: "http", hostname: "**" },
     ],
-    unoptimized: process.env.NODE_ENV === "development",
-    // Next 16 chỉ cho images.formats: 'image/webp' và/hoặc 'image/avif' — không hỗ trợ image/jpeg.
-    // Ảnh sản phẩm lưu JPEG trên Bunny xử lý ở backend; optimizer Next vẫn có thể phục vụ WebP/AVIF cho CDN.
+    // Luôn dùng URL ảnh gốc (không qua /_next/image → không ép WebP/AVIF, không q=75).
+    // Đổi lại: không resize phía Next — ảnh nặng hơn nếu URL là file lớn ( Bunny / alicdn …).
+    unoptimized: true,
   },
   typescript: { ignoreBuildErrors: false },
   /** Next.js 16: build mặc định dùng Turbopack — cần `next build --webpack` (xem package.json) vì alias antd ở dưới. */
