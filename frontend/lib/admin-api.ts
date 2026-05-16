@@ -396,6 +396,46 @@ export interface AdminSourceStockQueueStats {
   in_cooldown: number;
 }
 
+/** Một dòng trong các bảng mẫu báo cáo kiểm tra nguồn (30 ngày). */
+export interface AdminSourceStockActivityReportSampleRow {
+  id: number;
+  product_id: string;
+  name: string;
+  slug: string;
+  link_default: string;
+  source_stock_status: string | null;
+  source_stock_checked_at: string | null;
+  admin_source_batch_scanned_at: string | null;
+  available: number;
+}
+
+export interface AdminSourceStockActivityReportCounts {
+  batch_ttl_stamped_in_window: number;
+  source_stock_checked_any_in_window: number;
+  source_stock_oos_signal_in_window: number;
+  source_stock_in_stock_signal_in_window: number;
+  checked_available_positive_in_window: number;
+  checked_available_zero_or_negative_in_window: number;
+}
+
+/** Báo cáo rolling N ngày + lặp lại `queue` để đối chiếu hàng chờ. */
+export interface AdminSourceStockActivityReport {
+  ok: boolean;
+  domain: string;
+  active_only: boolean;
+  window_days: number;
+  window_since_utc_iso: string;
+  detail_limit_applied: number;
+  queue: AdminSourceStockQueueStats;
+  counts: AdminSourceStockActivityReportCounts;
+  checked_in_window_by_source_stock_status: Record<string, number>;
+  samples: {
+    oos: AdminSourceStockActivityReportSampleRow[];
+    in_stock: AdminSourceStockActivityReportSampleRow[];
+    batch_ttl_recent: AdminSourceStockActivityReportSampleRow[];
+  };
+}
+
 export interface AdminImageLocalizationJob {
   job_id: string;
   status: 'queued' | 'running' | 'done' | 'error' | 'cancelled';
@@ -926,17 +966,17 @@ export const adminProductAPI = {
       source_stock_next_check_at?: string | null;
     }>(`/products/by-id/${dbPkId}/source-stock-check/enqueue`, { method: 'POST' }),
 
-  /** Một URL: luôn quy đổi + scrape Hibox (như nhập Excel). Lỗi/không đọc được đủ dữ liệu → có thể gán SP khớp `available = 0`. */
-  runSourceStockBatchOne: (body: { url: string; domain: 'hibox' }) =>
+  /** Một URL: quy đổi + đọc Hibox (scrape) hoặc CSSBuy (API /web/item). */
+  runSourceStockBatchOne: (body: { url: string; domain: 'hibox' | 'cssbuy' }) =>
     fetchAdmin<AdminSourceStockBatchOneResult>('/products/admin/source-stock-batch/run', {
       method: 'POST',
       body: JSON.stringify(body),
       timeoutMs: 300_000,
     }),
 
-  /** Một SP kế trong DB (link_default = product_url), chạy một lần kiểm tra qua Hibox; không cần nạp danh sách trước. */
+  /** Một SP kế trong DB — kiểm tra qua Hibox hoặc CSSBuy. */
   runSourceStockBatchNextFromDb: (params: {
-    domain: 'hibox';
+    domain: 'hibox' | 'cssbuy';
     activeOnly?: boolean;
     cursorAfterProductId?: number;
     /** products.id — giữ kiểm tra lại đúng SP sau lỗi tạm (captcha/chặn…). */
@@ -953,9 +993,9 @@ export const adminProductAPI = {
       timeoutMs: 300_000,
     }),
 
-  /** Nạp `link_default` trong DB (= product_url trong Excel nhập SP), lọc theo luồng kiểm tra qua Hibox. */
+  /** Nạp `link_default` trong DB — lọc theo miền kiểm tra (hibox vs cssbuy). */
   fetchSourceStockProductUrls: (params: {
-    domain: 'hibox';
+    domain: 'hibox' | 'cssbuy';
     limit?: number;
     activeOnly?: boolean;
   }) =>
@@ -964,11 +1004,29 @@ export const adminProductAPI = {
       { timeoutMs: 120_000 },
     ),
 
-  fetchSourceStockQueueStats: (params: { domain: 'hibox'; activeOnly?: boolean }) =>
+  fetchSourceStockQueueStats: (params: { domain: 'hibox' | 'cssbuy'; activeOnly?: boolean }) =>
     fetchAdmin<AdminSourceStockQueueStats>(
       `/products/admin/source-stock-batch/queue-stats?domain=${encodeURIComponent(params.domain)}&active_only=${params.activeOnly ?? true}`,
       { timeoutMs: 60_000 },
     ),
+
+  /** Đếm đã kiểm tra / OOS / còn hàng trong cửa sổ + mẫu chi tiết (giới hạn `detailLimit`). */
+  fetchSourceStockActivityReport: (params: {
+    domain: 'hibox' | 'cssbuy';
+    activeOnly?: boolean;
+    windowDays?: number;
+    detailLimit?: number;
+  }) => {
+    const sp = new URLSearchParams();
+    sp.set('domain', params.domain);
+    sp.set('active_only', String(params.activeOnly ?? true));
+    sp.set('window_days', String(params.windowDays ?? 30));
+    sp.set('detail_limit', String(params.detailLimit ?? 120));
+    return fetchAdmin<AdminSourceStockActivityReport>(
+      `/products/admin/source-stock-batch/report?${sp.toString()}`,
+      { timeoutMs: 120_000 },
+    );
+  },
 
   /** Xóa vĩnh viễn các sản theo khóa chính `products.id` (sau phiên kiểm tra nguồn). */
   deleteSourceStockBatchProductsByDbIds: (dbIds: number[]) =>

@@ -1,5 +1,5 @@
 """
-Chuẩn hoá URL trong batch Excel theo **trang cần mở** (Hibox vs 1688 trực tiếp).
+Chuẩn hoá URL trong batch Excel theo **trang cần mở** (Hibox vs CSSBuy vs 1688 trực tiếp).
 
 Dùng kèm form `fetch_target` trên endpoint `batch-from-excel`; `auto` = giữ hành vi cũ (nhận dạng từ URL).
 """
@@ -10,6 +10,11 @@ from typing import Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from app.services.import_1688_scraper import canonical_1688_offer_pc_url, extract_offer_id
+from app.services.import_cssbuy_client import (
+    canonical_cssbuy_item_url,
+    hibox_slug_to_cssbuy_item_url,
+    is_cssbuy_item_url,
+)
 from app.services.import_hibox_scraper import (
     extract_hibox_1688_offer_digits,
     extract_hibox_slug,
@@ -21,6 +26,7 @@ from app.services.import_hibox_scraper import (
 FETCH_TARGET_AUTO = "auto"
 FETCH_TARGET_HIBOX = "hibox"
 FETCH_TARGET_1688 = "1688"
+FETCH_TARGET_CSSBUY = "cssbuy"
 
 
 def normalize_fetch_target_param(raw: Optional[str]) -> str:
@@ -29,6 +35,8 @@ def normalize_fetch_target_param(raw: Optional[str]) -> str:
         return FETCH_TARGET_AUTO
     if s in {"hibox", "hi-box", "hi_box", "hibox_mn"}:
         return FETCH_TARGET_HIBOX
+    if s in {"cssbuy", "css_buy", "css-buy"}:
+        return FETCH_TARGET_CSSBUY
     if s in {"1688", "detail_1688", "alibaba_1688"}:
         return FETCH_TARGET_1688
     return FETCH_TARGET_AUTO
@@ -61,7 +69,7 @@ def coerce_url_for_excel_batch_import(
     Trả (url_sau_khi_chuẩn, lỗi_skip).
 
     * `lỗi_skip` khác None → bỏ dòng với thông báo tiếng Việt.
-    * `fetch_target` phải là một trong `auto` / `hibox` / `1688` (đã normalize).
+    * `fetch_target` phải là một trong `auto` / `hibox` / `1688` / `cssbuy` (đã normalize).
     """
     ft = (fetch_target or FETCH_TARGET_AUTO).strip().lower()
     norm = normalize_product_import_url((raw_url or "").strip())
@@ -89,6 +97,36 @@ def coerce_url_for_excel_batch_import(
         return (
             norm,
             "không quy đổi được sang Hibox — cần link 1688 (offer), Taobao/Tmall (id SP), hoặc Hibox/taobao1688.kz.",
+        )
+
+    if ft == FETCH_TARGET_CSSBUY:
+        if is_cssbuy_item_url(norm):
+            return canonical_cssbuy_item_url(norm), None
+
+        slug_try = extract_hibox_slug(norm)
+        if slug_try and slug_try != "hibox_import":
+            u = hibox_slug_to_cssbuy_item_url(slug_try)
+            if u:
+                return u, None
+            return norm, "slug Hibox không chuyển được sang URL trang item CSSBuy."
+
+        if is_hibox_import_url(norm):
+            slug2 = extract_hibox_slug(norm)
+            u2 = hibox_slug_to_cssbuy_item_url(slug2 or "")
+            if u2:
+                return u2, None
+
+        oid = extract_offer_id(norm)
+        if oid and oid.isdigit():
+            return f"https://www.cssbuy.com/item-1688-{oid}.html", None
+
+        tid = _extract_taobao_tmall_item_id(norm)
+        if tid:
+            return f"https://www.cssbuy.com/item-{tid}.html", None
+
+        return (
+            norm,
+            "không quy đổi được sang CSSBuy — cần link 1688 (offer), Taobao/Tmall (id SP), Hibox/taobao1688.kz, hoặc URL item cssbuy.com.",
         )
 
     if ft == FETCH_TARGET_1688:

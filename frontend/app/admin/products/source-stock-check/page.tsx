@@ -4,15 +4,16 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   adminProductAPI,
+  type AdminSourceStockActivityReport,
+  type AdminSourceStockActivityReportSampleRow,
   type AdminSourceStockBatchDbNextResult,
   type AdminSourceStockBatchOneMatched,
   type AdminSourceStockBatchOneResult,
   type AdminSourceStockQueueStats,
 } from '@/lib/admin-api';
 
-/** Kiểm tra nguồn chỉ qua scrape Hibox (URL trong DB được quy đổi như nhập Excel). */
-type SourceStockDomain = 'hibox';
-const SOURCE_STOCK_CHECK_DOMAIN: SourceStockDomain = 'hibox';
+/** Nguồn kiểm tra: Hibox (scrape) hoặc CSSBuy (API /web/item — không cần bấm modal). */
+type SourceStockDomain = 'hibox' | 'cssbuy';
 
 /** Theo DB + bật lặp: khoảng cách ngẫu nhiên giữa hai lần *bắt đầu* kiểm tra (sequential — chờ xong SP hiện tại). */
 const ADMIN_SOURCE_DB_LOOP_GAP_MS_MIN = 46_000;
@@ -146,6 +147,9 @@ function detailLooksLikeCaptchaOrSiteBlock(detail: string | null | undefined): b
   const u = (detail || '').trim();
   if (!u) return false;
   const low = u.toLowerCase();
+  if (/cloudflare|security verification|csrf-token không đọc được|không đọc được csrf/i.test(low)) {
+    return true;
+  }
   if (
     /\bcaptcha\b|\bverify\b|verification\b|rate\s*limit|too\s+many\s+requests|\b403\b|\bforbidden\b|\bblocked\b|access\s+denied|\bpunish\b|nocaptcha/i.test(
       low,
@@ -196,12 +200,125 @@ function ExternalHttpLink({ url }: { url: string }) {
   );
 }
 
+function formatReportTimestampUtc(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.toLocaleString('vi-VN', { timeZone: 'UTC' })} UTC`;
+}
+
+/** Bảng mẫu (tối đa `detail_limit` từ API) trong báo cáo 30 ngày. */
+function SourceStockReportSampleTable({
+  title,
+  rows,
+  emptyHint,
+  defaultOpen,
+}: {
+  title: string;
+  rows: AdminSourceStockActivityReportSampleRow[];
+  emptyHint: string;
+  defaultOpen: boolean;
+}) {
+  return (
+    <details
+      className="rounded-lg border border-slate-200 bg-white mt-2"
+      open={defaultOpen}
+    >
+      <summary className="cursor-pointer select-none px-3 py-2 text-sm font-semibold text-slate-800 bg-slate-50/90 list-none [&::-webkit-details-marker]:hidden flex flex-wrap justify-between gap-2">
+        <span>
+          {title}{' '}
+          <span className="font-normal text-slate-500">({rows.length} dòng)</span>
+        </span>
+        <span className="text-[11px] font-normal text-indigo-700 underline">Mở / thu</span>
+      </summary>
+      <div className="overflow-x-auto border-t border-slate-100">
+        <table className="min-w-full text-xs">
+          <thead className="bg-gray-100 text-gray-700">
+            <tr>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
+                DB id
+              </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
+                Mã SP
+              </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[10rem]">
+                Tên
+              </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
+                Tồn
+              </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
+                source_stock_status
+              </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
+                Kiểm tra nguồn
+              </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
+                Batch TTL
+              </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[12rem]">
+                Link DB
+              </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
+                PDP
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={9} className="px-2 py-4 text-gray-500 text-center">
+                  {emptyHint}
+                </td>
+              </tr>
+            ) : (
+              rows.map((row) => (
+                <tr key={`${title}-${row.id}`} className="border-t border-gray-200 align-top">
+                  <td className="px-2 py-1.5 whitespace-nowrap font-mono">{row.id}</td>
+                  <td className="px-2 py-1.5 whitespace-nowrap font-mono text-[11px]">{row.product_id}</td>
+                  <td className="px-2 py-1.5 max-w-[14rem]">{row.name}</td>
+                  <td className="px-2 py-1.5 whitespace-nowrap">{row.available}</td>
+                  <td className="px-2 py-1.5 whitespace-nowrap">{row.source_stock_status ?? '—'}</td>
+                  <td className="px-2 py-1.5 whitespace-nowrap text-[11px]">
+                    {formatReportTimestampUtc(row.source_stock_checked_at)}
+                  </td>
+                  <td className="px-2 py-1.5 whitespace-nowrap text-[11px]">
+                    {formatReportTimestampUtc(row.admin_source_batch_scanned_at)}
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <ExternalHttpLink url={row.link_default} />
+                  </td>
+                  <td className="px-2 py-1.5 whitespace-nowrap">
+                    {row.slug ? (
+                      <Link
+                        href={`/products/${encodeURIComponent(row.slug)}`}
+                        className="text-indigo-700 underline"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Xem
+                      </Link>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
+}
+
 export default function AdminSourceStockCheckPage() {
   const [scanFromDb, setScanFromDb] = useState(true);
   const [auto, setAuto] = useState(true);
   const [running, setRunning] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: 'ok' | 'info' | 'err'; msg: string } | null>(null);
+  const [domain, setDomain] = useState<SourceStockDomain>('hibox');
 
   /** DB: cứ SAU id này thì query SP kế có link_default trong bộ lọc */
   const [dbCursorAfterId, setDbCursorAfterId] = useState(0);
@@ -223,6 +340,9 @@ export default function AdminSourceStockCheckPage() {
   const [bulkDeletingDb, setBulkDeletingDb] = useState(false);
   const [queueStats, setQueueStats] = useState<AdminSourceStockQueueStats | null>(null);
   const [queueStatsLoading, setQueueStatsLoading] = useState(false);
+  const [activityReport, setActivityReport] = useState<AdminSourceStockActivityReport | null>(null);
+  const [activityReportLoading, setActivityReportLoading] = useState(false);
+  const [activityReportError, setActivityReportError] = useState<string | null>(null);
   const [activeCheck, setActiveCheck] = useState<ActiveCheck | null>(null);
   const [lastFinished, setLastFinished] = useState<LastFinishedCheck | null>(null);
 
@@ -246,6 +366,10 @@ export default function AdminSourceStockCheckPage() {
   const scanFromDbGateRef = useRef(scanFromDb);
   autoGateRef.current = auto;
   scanFromDbGateRef.current = scanFromDb;
+
+  useEffect(() => {
+    stickySeedProductIdRef.current = null;
+  }, [domain]);
 
   useEffect(() => {
     if (!scanFromDb) stickySeedProductIdRef.current = null;
@@ -273,7 +397,7 @@ export default function AdminSourceStockCheckPage() {
     setQueueStatsLoading(true);
     try {
       const s = await adminProductAPI.fetchSourceStockQueueStats({
-        domain: SOURCE_STOCK_CHECK_DOMAIN,
+        domain,
         activeOnly: true,
       });
       setQueueStats(s);
@@ -285,14 +409,34 @@ export default function AdminSourceStockCheckPage() {
     } finally {
       setQueueStatsLoading(false);
     }
-  }, [scanFromDb]);
+  }, [scanFromDb, domain]);
+
+  const refreshActivityReport = useCallback(async () => {
+    if (!scanFromDb) return;
+    setActivityReportLoading(true);
+    setActivityReportError(null);
+    try {
+      const r = await adminProductAPI.fetchSourceStockActivityReport({
+        domain,
+        activeOnly: true,
+        windowDays: 30,
+        detailLimit: 120,
+      });
+      setActivityReport(r);
+    } catch (e) {
+      setActivityReport(null);
+      setActivityReportError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActivityReportLoading(false);
+    }
+  }, [scanFromDb, domain]);
 
   const fillTextareaPreviewFromDb = useCallback(async () => {
     setLoadingPreviewUrls(true);
     setLastError(null);
     try {
       const res = await adminProductAPI.fetchSourceStockProductUrls({
-        domain: SOURCE_STOCK_CHECK_DOMAIN,
+        domain,
         limit: 5000,
         activeOnly: true,
       });
@@ -308,7 +452,7 @@ export default function AdminSourceStockCheckPage() {
     } finally {
       setLoadingPreviewUrls(false);
     }
-  }, [showToast]);
+  }, [domain, showToast]);
 
   const bumpOosRows = useCallback(
     (res: AdminSourceStockBatchDbNextResult | AdminSourceStockBatchOneResult, attemptedUrl: string) => {
@@ -373,7 +517,7 @@ export default function AdminSourceStockCheckPage() {
       setLastError(null);
       try {
         const res = await adminProductAPI.runSourceStockBatchNextFromDb({
-          domain: SOURCE_STOCK_CHECK_DOMAIN,
+          domain,
           activeOnly: true,
           cursorAfterProductId: 0,
           stickySeedProductId: stickySeedProductIdRef.current ?? undefined,
@@ -411,7 +555,7 @@ export default function AdminSourceStockCheckPage() {
         }
         setRecent((prev) => [res, ...prev].slice(0, 36));
         bumpOosRows(res, tried);
-        setLastFinished(buildLastOkFromApi(res, 'db', tried, SOURCE_STOCK_CHECK_DOMAIN));
+        setLastFinished(buildLastOkFromApi(res, 'db', tried, domain));
 
         const shortUrl = tried.length > 86 ? `${tried.slice(0, 86)}…` : tried || '(thiếu link)';
         const seedShort =
@@ -496,7 +640,7 @@ export default function AdminSourceStockCheckPage() {
     setRunning(true);
     setLastError(null);
     try {
-      const res = await adminProductAPI.runSourceStockBatchOne({ url, domain: SOURCE_STOCK_CHECK_DOMAIN });
+      const res = await adminProductAPI.runSourceStockBatchOne({ url, domain });
       const blockedManual = shouldStopAutoForAntiBot(res);
       if (!blockedManual) {
         manualCursorRef.current = i + 1;
@@ -505,7 +649,7 @@ export default function AdminSourceStockCheckPage() {
       setSessionChecks((n) => n + 1);
       setRecent((prev) => [res, ...prev].slice(0, 36));
       bumpOosRows(res, url);
-      setLastFinished(buildLastOkFromApi(res, 'manual', url, SOURCE_STOCK_CHECK_DOMAIN));
+      setLastFinished(buildLastOkFromApi(res, 'manual', url, domain));
 
       const shortUrl = url.length > 86 ? `${url.slice(0, 86)}…` : url;
       const hint = typeof res.detail === 'string' && res.detail.trim() ? ` — ${res.detail.trim().slice(0, 200)}` : '';
@@ -551,6 +695,7 @@ export default function AdminSourceStockCheckPage() {
   }, [
     bumpOosRows,
     cooldownDays,
+    domain,
     refreshQueueStats,
     scanFromDb,
     showToast,
@@ -569,6 +714,15 @@ export default function AdminSourceStockCheckPage() {
     }
     void refreshQueueStats();
   }, [scanFromDb, refreshQueueStats]);
+
+  useEffect(() => {
+    if (!scanFromDb) {
+      setActivityReport(null);
+      setActivityReportError(null);
+      return;
+    }
+    void refreshActivityReport();
+  }, [scanFromDb, refreshActivityReport]);
 
   useEffect(() => {
     if (!scanFromDb || !auto) return;
@@ -712,9 +866,13 @@ export default function AdminSourceStockCheckPage() {
             Excel <code className="text-xs bg-gray-100 px-1 rounded">product_url</code>), sau đó ghi mốc và giữ chờ TTL tương ứng từng loại như trên.
           </p>
           <p className="text-sm text-gray-600 mt-2">
-            Kiểm tra luôn sau khi quy đổi URL trong DB sang{' '}
-            <code className="text-xs bg-gray-100 px-1 rounded">hibox.mn/v/…</code>
-            {' '}(link gốc có thể là 1688/Taobao/mirror — giống luồng nhập Excel).
+            <strong>Hibox:</strong> quy đổi sang <code className="text-xs bg-gray-100 px-1 rounded">hibox.mn/v/…</code> rồi scrape.
+            {' '}
+            <strong>CSSBuy:</strong> quy đổi sang{' '}
+            <code className="text-xs bg-gray-100 px-1 rounded">item-1688-…</code> /{' '}
+            <code className="text-xs bg-gray-100 px-1 rounded">item-….html</code> và đọc qua API{' '}
+            <code className="text-xs bg-gray-100 px-1 rounded">POST /web/item</code> — không cần bấm «I accept the risks»
+            (modal chỉ là UI; JSON đã có giá/title).
           </p>
         </div>
         {toast && (
@@ -815,7 +973,9 @@ export default function AdminSourceStockCheckPage() {
               id="source-url-batch"
               className="w-full min-h-[140px] border border-gray-300 rounded-lg p-3 text-sm font-mono"
               spellCheck={false}
-              placeholder={'https://detail.1688.com/offer/…\nhttps://hibox.mn/v/…'}
+              placeholder={
+                'https://detail.1688.com/offer/…\nhttps://hibox.mn/v/…\nhttps://www.cssbuy.com/item-1688-….html'
+              }
               value={urlsText}
               onChange={(e) => setUrlsText(e.target.value)}
               disabled={running}
@@ -827,11 +987,20 @@ export default function AdminSourceStockCheckPage() {
         )}
 
         <div className="flex flex-wrap items-start gap-4 pt-2 border-t border-gray-100">
-          <div className="text-sm text-gray-700 shrink-0 max-w-[13rem]">
-            <p className="font-medium text-gray-800 mb-0.5">Nguồn kiểm tra</p>
-            <p className="text-gray-600">
-              Luôn qua <strong className="text-gray-900">hibox.mn</strong> (scrape sau khi quy đổi URL trong DB).
-            </p>
+          <div>
+            <label htmlFor="source-domain-select" className="block text-sm font-medium text-gray-800 mb-1">
+              Nguồn kiểm tra
+            </label>
+            <select
+              id="source-domain-select"
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm min-w-[16rem]"
+              value={domain}
+              onChange={(e) => setDomain(e.target.value as SourceStockDomain)}
+              disabled={running}
+            >
+              <option value="hibox">hibox.mn — scrape sau quy đổi</option>
+              <option value="cssbuy">cssbuy.com — API /web/item (Taobao item-… / 1688 item-1688-…)</option>
+            </select>
           </div>
           {scanFromDb ? (
             <div className="text-sm text-gray-600 pb-1 flex-1 min-w-[14rem] space-y-1.5">
@@ -919,6 +1088,153 @@ export default function AdminSourceStockCheckPage() {
               ) : (
                 <p className="text-xs text-gray-500">Không đọc được số đếm — bấm «Làm mới số đếm» hoặc tải lại trang.</p>
               )}
+              <div
+                className={`rounded-lg border px-3 py-2 mt-2 ${
+                  activityReportError ? 'border-red-200 bg-red-50/70' : 'border-indigo-100 bg-indigo-50/35'
+                }`}
+                aria-labelledby="source-stock-report-heading"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
+                  <strong
+                    id="source-stock-report-heading"
+                    className="text-[11px] uppercase tracking-wide text-indigo-900"
+                  >
+                    Báo cáo chi tiết (cửa sổ {activityReport?.window_days ?? 30} ngày, UTC)
+                  </strong>
+                  <button
+                    type="button"
+                    disabled={running || bulkDeletingDb || activityReportLoading}
+                    className="text-[11px] font-semibold text-indigo-800 underline disabled:opacity-50"
+                    onClick={() => void refreshActivityReport()}
+                  >
+                    {activityReportLoading ? 'Đang tải…' : 'Làm mới báo cáo'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-600 mb-2 leading-snug">
+                  Cùng phạm vi link +{' '}
+                  <code className="text-[10px] bg-white/80 px-0.5 rounded">is_active</code> như hàng chờ. «Đã TTL batch»
+                  = có{' '}
+                  <code className="text-[10px] bg-white/80 px-0.5 rounded">admin_source_batch_scanned_at</code> trong cửa sổ.
+                  «Đã có kiểm tra nguồn» = có{' '}
+                  <code className="text-[10px] bg-white/80 px-0.5 rounded">source_stock_checked_at</code> (worker PDP hoặc
+                  batch khi commit). «Hết / còn» trong cửa sổ dựa trên{' '}
+                  <code className="text-[10px] bg-white/80 px-0.5 rounded">source_stock_status</code> và cột tồn khi có
+                  kiểm tra.
+                </p>
+                {activityReportError ? (
+                  <div
+                    role="alert"
+                    className="rounded border border-red-200 bg-white px-2 py-1.5 text-xs text-red-900 mb-2"
+                  >
+                    {activityReportError}{' '}
+                    <button
+                      type="button"
+                      className="underline font-medium"
+                      onClick={() => void refreshActivityReport()}
+                    >
+                      Thử lại
+                    </button>
+                  </div>
+                ) : null}
+                {activityReportLoading && !activityReport ? (
+                  <p className="text-xs text-indigo-900/80">Đang lấy báo cáo từ máy chủ…</p>
+                ) : null}
+                {activityReport ? (
+                  <>
+                    <p className="text-[11px] text-slate-600 mb-2">
+                      Bắt đầu cửa sổ (UTC):{' '}
+                      <code className="text-[10px] bg-white/90 px-1 rounded">
+                        {activityReport.window_since_utc_iso}
+                      </code>
+                      {' · '}
+                      Mẫu tối đa mỗi bảng: <strong>{activityReport.detail_limit_applied}</strong>
+                    </p>
+                    <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-2 text-[11px] text-gray-900 mb-2">
+                      <div className="rounded bg-white/70 border border-white px-2 py-1.5">
+                        <dt className="text-slate-500 font-medium">Đến lượt kiểm tra ngay</dt>
+                        <dd className="text-base font-semibold text-emerald-900">
+                          {activityReport.queue.eligible_now.toLocaleString('vi-VN')}
+                        </dd>
+                      </div>
+                      <div className="rounded bg-white/70 border border-white px-2 py-1.5">
+                        <dt className="text-slate-500 font-medium">Đã TTL batch trong cửa sổ</dt>
+                        <dd className="text-base font-semibold">
+                          {activityReport.counts.batch_ttl_stamped_in_window.toLocaleString('vi-VN')}
+                        </dd>
+                      </div>
+                      <div className="rounded bg-white/70 border border-white px-2 py-1.5">
+                        <dt className="text-slate-500 font-medium">Đã có kiểm tra nguồn (checked_at)</dt>
+                        <dd className="text-base font-semibold">
+                          {activityReport.counts.source_stock_checked_any_in_window.toLocaleString('vi-VN')}
+                        </dd>
+                      </div>
+                      <div className="rounded bg-white/70 border border-white px-2 py-1.5">
+                        <dt className="text-slate-500 font-medium">Cờ out_of_stock trong cửa sổ</dt>
+                        <dd className="text-base font-semibold text-red-900">
+                          {activityReport.counts.source_stock_oos_signal_in_window.toLocaleString('vi-VN')}
+                        </dd>
+                      </div>
+                      <div className="rounded bg-white/70 border border-white px-2 py-1.5">
+                        <dt className="text-slate-500 font-medium">Cờ in_stock trong cửa sổ</dt>
+                        <dd className="text-base font-semibold text-teal-900">
+                          {activityReport.counts.source_stock_in_stock_signal_in_window.toLocaleString('vi-VN')}
+                        </dd>
+                      </div>
+                      <div className="rounded bg-white/70 border border-white px-2 py-1.5">
+                        <dt className="text-slate-500 font-medium">Sau kiểm tra: tồn &gt; 0</dt>
+                        <dd className="text-base font-semibold">
+                          {activityReport.counts.checked_available_positive_in_window.toLocaleString('vi-VN')}
+                        </dd>
+                      </div>
+                      <div className="rounded bg-white/70 border border-white px-2 py-1.5">
+                        <dt className="text-slate-500 font-medium">Sau kiểm tra: tồn ≤ 0</dt>
+                        <dd className="text-base font-semibold">
+                          {activityReport.counts.checked_available_zero_or_negative_in_window.toLocaleString('vi-VN')}
+                        </dd>
+                      </div>
+                    </dl>
+                    <div className="text-[11px] text-slate-700 mb-1">
+                      <strong className="text-slate-600">Phân rã trạng thái</strong> (trong các SP có{' '}
+                      <code className="text-[10px] bg-white px-0.5 rounded">source_stock_checked_at</code> trong cửa sổ):
+                    </div>
+                    <ul className="flex flex-wrap gap-2 text-[11px] mb-2">
+                      {Object.entries(activityReport.checked_in_window_by_source_stock_status)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([k, v]) => (
+                          <li
+                            key={k}
+                            className="rounded-full bg-white/90 border border-slate-200 px-2 py-0.5 font-mono text-[10px]"
+                          >
+                            {k}: <strong>{v.toLocaleString('vi-VN')}</strong>
+                          </li>
+                        ))}
+                      {Object.keys(activityReport.checked_in_window_by_source_stock_status).length === 0 ? (
+                        <li className="text-slate-500">Không có SP nào có checked_at trong cửa sổ.</li>
+                      ) : null}
+                    </ul>
+                    <SourceStockReportSampleTable
+                      title="Mẫu: cờ hết hàng (out_of_stock) trong cửa sổ"
+                      rows={activityReport.samples.oos}
+                      emptyHint="Không có dòng trong phạm vi."
+                      defaultOpen
+                    />
+                    <SourceStockReportSampleTable
+                      title="Mẫu: cờ còn hàng (in_stock) trong cửa sổ"
+                      rows={activityReport.samples.in_stock}
+                      emptyHint="Không có dòng trong phạm vi."
+                      defaultOpen={false}
+                    />
+                    <SourceStockReportSampleTable
+                      title="Mẫu: đã đánh TTL batch gần nhất trong cửa sổ"
+                      rows={activityReport.samples.batch_ttl_recent}
+                      emptyHint="Không có dòng trong phạm vi."
+                      defaultOpen={false}
+                    />
+                  </>
+                ) : !activityReportLoading && !activityReportError ? (
+                  <p className="text-xs text-slate-600">Chưa có dữ liệu báo cáo.</p>
+                ) : null}
+              </div>
             </div>
           ) : null}
         </div>
@@ -948,8 +1264,8 @@ export default function AdminSourceStockCheckPage() {
                       </span>
                     ) : scanFromDb && activeCheck?.mode === 'db' ? (
                       <span className="text-amber-900/90">
-                        Máy chủ đang chọn <strong>một SP kế trong hàng chờ</strong> và scrape{' '}
-                        <strong>Hibox</strong>; URL trong DB chỉ hiện ở dưới sau khi xong lần này.
+                        Máy chủ đang chọn <strong>một SP kế trong hàng chờ</strong> và đọc{' '}
+                        <strong>{domain === 'cssbuy' ? 'CSSBuy (API)' : 'Hibox (scrape)'}</strong>; URL trong DB chỉ hiện ở dưới sau khi xong lần này.
                       </span>
                     ) : (
                       <span className="text-amber-900/90">

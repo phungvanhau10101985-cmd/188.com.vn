@@ -32,6 +32,7 @@ from app.crud import product_media_purge
 from app.services.source_stock_checker import enqueue_product_view_stock_check_if_needed
 from app.services.admin_source_stock_batch import (
     admin_collect_distinct_product_urls_from_db,
+    admin_source_stock_activity_report,
     admin_source_stock_queue_stats,
     run_admin_source_stock_scan_next_from_db,
 )
@@ -41,11 +42,11 @@ router = APIRouter()
 
 class AdminSourceStockBatchBody(BaseModel):
     url: str = Field(..., min_length=3)
-    domain: Literal["hibox"] = "hibox"
+    domain: Literal["hibox", "cssbuy"] = "hibox"
 
 
 class AdminSourceStockScanNextDbBody(BaseModel):
-    domain: Literal["hibox"] = "hibox"
+    domain: Literal["hibox", "cssbuy"] = "hibox"
     active_only: bool = True
     cursor_after_product_id: int = Field(0, ge=0)
     sticky_seed_product_id: int = Field(
@@ -837,7 +838,7 @@ def admin_source_stock_batch_run(
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("products")),
 ):
-    """Admin: kiểm tra một URL nguồn qua scrape Hibox (quy đổi như nhập Excel). Lỗi hoặc không đọc được đủ dữ liệu → có thể set available=0."""
+    """Admin: kiểm tra một URL nguồn qua scrape Hibox hoặc API CSSBuy (quy đổi như nhập Excel)."""
     url = body.url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="Thiếu URL.")
@@ -926,9 +927,9 @@ def admin_source_stock_delete_products_by_db_ids(
 
 @router.get("/admin/source-stock-batch/queue-stats", response_model=dict, include_in_schema=False)
 def admin_source_stock_batch_queue_stats(
-    domain: Literal["hibox"] = Query(
+    domain: Literal["hibox", "cssbuy"] = Query(
         "hibox",
-        description="Luôn scrape qua Hibox (1688 đã ngừng kiểm tra trực tiếp).",
+        description="hibox = scrape hibox.mn; cssbuy = POST /web/item (không cần bấm modal).",
     ),
     active_only: bool = Query(True),
     db: Session = Depends(get_db),
@@ -938,11 +939,38 @@ def admin_source_stock_batch_queue_stats(
     return admin_source_stock_queue_stats(db, domain=str(domain), active_only=bool(active_only))
 
 
+@router.get("/admin/source-stock-batch/report", response_model=dict, include_in_schema=False)
+def admin_source_stock_batch_report(
+    domain: Literal["hibox", "cssbuy"] = Query(
+        "hibox",
+        description="hibox = scrape hibox.mn; cssbuy = POST /web/item.",
+    ),
+    active_only: bool = Query(True),
+    window_days: int = Query(30, ge=1, le=366, description="Cửa sổ rolling «30 ngày» cho các đếm thời điểm"),
+    detail_limit: int = Query(
+        120,
+        ge=0,
+        le=400,
+        description="Số dòng mẫu tối đa mỗi nhóm (0 = không trả danh sách chi tiết)",
+    ),
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Báo cáo đã kiểm tra / OOS / còn hàng trong cửa sổ + lặp lại block queue-stats để đối chiếu."""
+    return admin_source_stock_activity_report(
+        db,
+        domain=str(domain),
+        active_only=bool(active_only),
+        window_days=int(window_days),
+        detail_limit=int(detail_limit),
+    )
+
+
 @router.get("/admin/source-stock-batch/product-urls", response_model=dict, include_in_schema=False)
 def admin_source_stock_batch_product_urls(
-    domain: Literal["hibox"] = Query(
+    domain: Literal["hibox", "cssbuy"] = Query(
         "hibox",
-        description="Lọc link phù hợp luồng kiểm tra qua Hibox",
+        description="Lọc link phù hợp luồng kiểm tra (quy đổi sang Hibox hoặc CSSBuy)",
     ),
     limit: int = Query(6000, ge=1, le=15000),
     active_only: bool = Query(True, description="Chỉ sản phẩm is_active"),

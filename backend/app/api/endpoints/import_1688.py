@@ -953,7 +953,7 @@ async def create_import_jobs_batch_from_excel(
     rồi làm tròn lên bội 10.000 ₫.
     **Mã sp** chỉ khi có cột tiêu đề «Mã sp» đúng `[A-Z][0-9]{4}` — không đọc cột B cố định.
 
-    Form **`fetch_target`**: `auto` (mặc định) | `hibox` | `1688` — ép link từng dòng về đúng định dạng trước khi tạo job
+    Form **`fetch_target`**: `auto` (mặc định) | `hibox` | `1688` | `cssbuy` — ép link từng dòng về đúng định dạng trước khi tạo job
     (vd. 1688 offer → `hibox.mn/v/abb-…` khi chọn Hibox; slug `abb-*` trên Hibox → `detail.1688.com` khi chọn 1688).
     Dòng không quy đổi được bị **bỏ qua** kèm lý do trong `skipped`.
     """
