@@ -178,6 +178,10 @@ function shouldStopAutoForAntiBot(
   return detailLooksLikeCaptchaOrSiteBlock(res.detail);
 }
 
+function isDualPlatformHardFailure(res: AdminSourceStockBatchOneResult): boolean {
+  return res.dual_platform_both_failed === true;
+}
+
 function isAntiBotUiHighlight(raw: string | null | undefined, detail: string | null | undefined): boolean {
   return isBlockedBySourceSite(raw) || (isUnresolvedStockProbe(raw) && detailLooksLikeCaptchaOrSiteBlock(detail));
 }
@@ -572,6 +576,8 @@ export default function AdminSourceStockCheckPage() {
   const [lastError, setLastError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: 'ok' | 'info' | 'err'; msg: string } | null>(null);
   const [domain, setDomain] = useState<SourceStockDomain>('hibox');
+  /** Sen kẽ thứ tự Hibox/CSSBuy + fallback trong một lần kiểm tra (backend). */
+  const [dualAlternateFallback, setDualAlternateFallback] = useState(false);
 
   /** DB: cứ SAU id này thì query SP kế có link_default trong bộ lọc */
   const [dbCursorAfterId, setDbCursorAfterId] = useState(0);
@@ -635,6 +641,7 @@ export default function AdminSourceStockCheckPage() {
   }, [oosRows]);
 
   const manualCursorRef = useRef(0);
+  const alternateSeqRef = useRef(0);
   /** Theo DB: giữ `products.id` khi lần trước lỗi tạm — backend + tab luôn retry đúng SP đó trước. */
   const stickySeedProductIdRef = useRef<number | null>(null);
 
@@ -1112,11 +1119,14 @@ export default function AdminSourceStockCheckPage() {
       setRunning(true);
       setLastError(null);
       try {
+        const seqSlot = dualAlternateFallback ? alternateSeqRef.current++ : 0;
         const res = await adminProductAPI.runSourceStockBatchNextFromDb({
           domain,
           activeOnly: true,
           cursorAfterProductId: 0,
           stickySeedProductId: stickySeedProductIdRef.current ?? undefined,
+          dualAlternateFallback,
+          alternateSequenceIndex: seqSlot,
         });
 
         if (res.done) {
@@ -1170,6 +1180,15 @@ export default function AdminSourceStockCheckPage() {
               `Hết hàng trên nguồn (theo cờ trang); chưa khớp bản trong shop — không đổi DB («${shortUrl}»${seedShort})`,
             );
           }
+        } else if (isDualPlatformHardFailure(res)) {
+          stickySeedProductIdRef.current = null;
+          setAuto(false);
+          const full = (res.detail || '').trim() || 'Hibox và CSSBuy đều không đọc được — không đổi DB.';
+          const toastSlice = full.length > 520 ? `${full.slice(0, 520)}…` : full;
+          showToast(
+            'err',
+            `${toastSlice} Đã dừng lặp — xem đầy đủ trong «Lần kiểm tra gần nhất».`,
+          );
         } else if (shouldStopAutoForAntiBot(res)) {
           stickySeedProductIdRef.current = null;
           setAuto(false);
@@ -1236,9 +1255,16 @@ export default function AdminSourceStockCheckPage() {
     setRunning(true);
     setLastError(null);
     try {
-      const res = await adminProductAPI.runSourceStockBatchOne({ url, domain });
+      const seqSlot = dualAlternateFallback ? alternateSeqRef.current++ : 0;
+      const res = await adminProductAPI.runSourceStockBatchOne({
+        url,
+        domain,
+        dualAlternateFallback,
+        alternateSequenceIndex: seqSlot,
+      });
       const blockedManual = shouldStopAutoForAntiBot(res);
-      if (!blockedManual) {
+      const dualHard = isDualPlatformHardFailure(res);
+      if (!blockedManual && !dualHard) {
         manualCursorRef.current = i + 1;
         setManualCursor(i + 1);
       }
@@ -1258,6 +1284,10 @@ export default function AdminSourceStockCheckPage() {
             `Hết trên nguồn (theo cờ) nhưng chưa thấy sản khớp trong shop — không đổi DB («${shortUrl}»)`,
           );
         }
+      } else if (dualHard) {
+        const full = (res.detail || '').trim() || 'Hibox và CSSBuy đều không đọc được.';
+        const toastSlice = full.length > 520 ? `${full.slice(0, 520)}…` : full;
+        showToast('err', `${toastSlice} (giữ nguyên dòng URL — kiểm tra chặn / thử đổi link).`);
       } else if (blockedManual) {
         const full =
           (res.detail || '').trim() ||
@@ -1292,6 +1322,7 @@ export default function AdminSourceStockCheckPage() {
     bumpOosRows,
     cooldownDays,
     domain,
+    dualAlternateFallback,
     refreshQueueStats,
     scanFromDb,
     showToast,
@@ -1587,6 +1618,21 @@ export default function AdminSourceStockCheckPage() {
               <option value="hibox">hibox.mn — scrape</option>
               <option value="cssbuy">cssbuy.com — API /web/item</option>
             </select>
+            <label className="mt-2 flex items-start gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-orange-700 disabled:opacity-45"
+                checked={dualAlternateFallback}
+                onChange={(ev) => setDualAlternateFallback(ev.target.checked)}
+                disabled={running}
+                aria-describedby="dual-alternate-hint"
+              />
+              <span id="dual-alternate-hint" className="text-[11px] text-gray-600 leading-snug">
+                <strong className="text-gray-800">Sen kẽ + fallback 2 nền:</strong> mỗi lần chạy thử Hibox rồi CSSBuy
+                theo thứ tự luân phiên; một nền lỗi thì đọc nền còn lại. Nếu <strong className="text-gray-800">cả hai
+                lỗi</strong> → dừng lặp và xem chi tiết bên dưới. Khi tắt: chỉ một nền như ô «Nguồn đọc».
+              </span>
+            </label>
           </div>
         </div>
 

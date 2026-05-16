@@ -28,7 +28,7 @@ from app.services.import_hibox_scraper import (
 logger = logging.getLogger(__name__)
 
 # Lỗi tạm (chặn / captcha / lỗi đọc): không ghi admin_source_batch_scanned_at để SP được ưu tiên kiểm tra lại ngay.
-_TRANSIENT_ADMIN_BATCH_RAW_STATUSES = frozenset({"error", "unknown", "fetch_error"})
+_TRANSIENT_ADMIN_BATCH_RAW_STATUSES = frozenset({"error", "unknown", "fetch_error", "dual_fetch_error"})
 
 
 def should_commit_admin_batch_ttl_after_scan(raw_status: str | None) -> bool:
@@ -469,6 +469,8 @@ def run_admin_source_stock_scan_next_from_db(
     active_only: bool = True,
     cursor_after_product_id: int = 0,
     sticky_seed_product_id: int = 0,
+    dual_alternate_fallback: bool = False,
+    alternate_sequence_index: int = 0,
 ) -> Dict[str, Any]:
     """
     Chọn một SP thỏa bộ lọc miền + TTL hàng chờ (SP có PDP traffic được xử lý theo cửa sổ lượt xem và khoảng đợi riêng).
@@ -518,7 +520,15 @@ def run_admin_source_stock_scan_next_from_db(
 
     seed_link_default = str(prod.link_default or "").strip().strip('"').strip("'")
     ttl_days = admin_batch_scan_cooldown_days()
-    scan = dict(run_admin_source_url_scan(db, url=seed_link_default, domain=domain_l))
+    scan = dict(
+        run_admin_source_url_scan(
+            db,
+            url=seed_link_default,
+            domain=domain_l,
+            dual_alternate_fallback=bool(dual_alternate_fallback),
+            alternate_sequence_index=int(alternate_sequence_index),
+        )
+    )
     marked_at: datetime | None = None
     if should_commit_admin_batch_ttl_after_scan(scan.get("raw_status")):
         try:
@@ -546,49 +556,37 @@ def run_admin_source_stock_scan_next_from_db(
     return scan
 
 
-def run_admin_source_url_scan(db: Session, *, url: str, domain: str) -> Dict[str, Any]:
-    domain_lower = (domain or "").strip().lower()
-    if domain_lower == "1688":
-        return {
-            "ok": False,
-            "canonical_url": (url or "").strip(),
-            "domain": domain_lower,
-            "raw_status": "bad_domain",
-            "classified_out_of_stock": False,
-            "detail": "Đã ngừng kiểm tra trực tiếp 1688 — dùng domain=hibox hoặc cssbuy.",
-            "matched_products": [],
-            "updated_product_ids": [],
-            "matched_count": 0,
-        }
+def _alternate_primary_platform(sequence_index: int) -> str:
+    return "hibox" if int(sequence_index) % 2 == 0 else "cssbuy"
 
-    if domain_lower in ("", "hibox"):
-        domain_lower = "hibox"
-    elif domain_lower == "cssbuy":
-        pass
-    else:
-        return {
-            "ok": False,
-            "canonical_url": (url or "").strip(),
-            "domain": domain_lower,
-            "raw_status": "bad_domain",
-            "classified_out_of_stock": False,
-            "detail": "domain phải là «hibox» hoặc «cssbuy».",
-            "matched_products": [],
-            "updated_product_ids": [],
-            "matched_count": 0,
-        }
 
-    canonical_url = (url or "").strip()
+def _other_source_platform(platform: str) -> str:
+    pl = (platform or "").strip().lower()
+    return "cssbuy" if pl == "hibox" else "hibox"
+
+
+def _attempt_has_usable_catalog_read(scan: Dict[str, Any]) -> bool:
+    if scan.get("classified_out_of_stock") is True:
+        return True
+    rs = (scan.get("raw_status") or "").strip().lower()
+    return rs == "ok"
+
+
+def _gather_platform_scan_attempt(db: Session, *, seed_url: str, platform: str) -> Dict[str, Any]:
+    plat = (platform or "").strip().lower()
+    if plat not in ("hibox", "cssbuy"):
+        plat = "hibox"
+
     classified_oos = False
     raw_status: str | None = None
     detail: str | None = None
     warnings: List[str] = []
     matched: List[Product] = []
 
-    normalized_in = normalize_product_import_url((url or "").strip())
-    canonical_url = (normalized_in or (url or "").strip()).strip()
+    normalized_in = normalize_product_import_url((seed_url or "").strip())
+    canonical_url = (normalized_in or (seed_url or "").strip()).strip()
 
-    if domain_lower == "hibox":
+    if plat == "hibox":
         hibox_url, coercion_err = coerce_url_for_excel_batch_import(canonical_url, FETCH_TARGET_HIBOX)
         warnings = []
 
@@ -685,6 +683,31 @@ def run_admin_source_url_scan(db: Session, *, url: str, domain: str) -> Dict[str
                     ((str(exc) or "unexpected_error")[:920] + " — chưa kiểm tra được, không đổi tồn.")[:1000]
                 )
 
+    return {
+        "canonical_url": canonical_url,
+        "domain": plat,
+        "raw_status": raw_status,
+        "classified_out_of_stock": classified_oos,
+        "detail": detail,
+        "warnings": warnings,
+        "matched_orm": matched,
+    }
+
+
+def _finalize_scan_commit_and_serialise(
+    db: Session,
+    *,
+    computed: Dict[str, Any],
+    extras: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    canonical_url = str(computed.get("canonical_url") or "").strip()
+    domain_used = str(computed.get("domain") or "").strip().lower()
+    raw_status = computed.get("raw_status")
+    detail = computed.get("detail")
+    warnings = list(computed.get("warnings") or [])
+    classified_oos = bool(computed.get("classified_out_of_stock"))
+    matched: List[Product] = list(computed.get("matched_orm") or [])
+
     updated_ids: List[int] = []
     if classified_oos and matched:
         now = _utcnow()
@@ -697,7 +720,7 @@ def run_admin_source_url_scan(db: Session, *, url: str, domain: str) -> Dict[str
             p.available = 0
             p.source_stock_status = "out_of_stock"
             p.source_stock_checked_at = now
-            err_note = detail or ""
+            err_note = (detail or "") if isinstance(detail, str) else ""
             if warnings:
                 err_note = (err_note + " " if err_note else "") + "; ".join(warnings[:3])
             p.source_stock_error = (err_note or "").strip()[:2000] or None
@@ -713,16 +736,16 @@ def run_admin_source_url_scan(db: Session, *, url: str, domain: str) -> Dict[str
                 logger.info(
                     "admin source batch marked OOS: product_id=%s domain=%s url=%s",
                     pid,
-                    domain_lower,
+                    domain_used,
                     canonical_url[:200],
                 )
         except Exception:
             pass
 
-    return {
+    out: Dict[str, Any] = {
         "ok": True,
         "canonical_url": canonical_url,
-        "domain": domain_lower,
+        "domain": domain_used,
         "raw_status": raw_status,
         "classified_out_of_stock": classified_oos,
         "detail": detail,
@@ -740,7 +763,116 @@ def run_admin_source_url_scan(db: Session, *, url: str, domain: str) -> Dict[str
         "matched_count": len(matched),
         "updates_committed": bool(updated_ids),
     }
+    if extras:
+        out.update(extras)
+    return out
 
+
+def run_admin_source_url_scan(
+    db: Session,
+    *,
+    url: str,
+    domain: str,
+    dual_alternate_fallback: bool = False,
+    alternate_sequence_index: int = 0,
+) -> Dict[str, Any]:
+    domain_lower = (domain or "").strip().lower()
+    if domain_lower == "1688":
+        return {
+            "ok": False,
+            "canonical_url": (url or "").strip(),
+            "domain": domain_lower,
+            "raw_status": "bad_domain",
+            "classified_out_of_stock": False,
+            "detail": "Đã ngừng kiểm tra trực tiếp 1688 — dùng domain=hibox hoặc cssbuy.",
+            "matched_products": [],
+            "updated_product_ids": [],
+            "matched_count": 0,
+        }
+
+    if not dual_alternate_fallback:
+        if domain_lower in ("", "hibox"):
+            domain_lower = "hibox"
+        elif domain_lower == "cssbuy":
+            pass
+        else:
+            return {
+                "ok": False,
+                "canonical_url": (url or "").strip(),
+                "domain": domain_lower,
+                "raw_status": "bad_domain",
+                "classified_out_of_stock": False,
+                "detail": "domain phải là «hibox» hoặc «cssbuy».",
+                "matched_products": [],
+                "updated_product_ids": [],
+                "matched_count": 0,
+            }
+        gathered = _gather_platform_scan_attempt(db, seed_url=url, platform=domain_lower)
+        return _finalize_scan_commit_and_serialise(db, computed=gathered, extras=None)
+
+    primary = _alternate_primary_platform(alternate_sequence_index)
+    secondary = _other_source_platform(primary)
+    first = _gather_platform_scan_attempt(db, seed_url=url, platform=primary)
+
+    extras_common: Dict[str, Any] = {
+        "alternate_sequence_index": int(alternate_sequence_index),
+        "alternate_primary_domain": primary,
+    }
+
+    if _attempt_has_usable_catalog_read(first):
+        return _finalize_scan_commit_and_serialise(db, computed=first, extras=dict(extras_common))
+
+    second = _gather_platform_scan_attempt(db, seed_url=url, platform=secondary)
+    if _attempt_has_usable_catalog_read(second):
+        merged_extras = dict(extras_common)
+        merged_extras.update(
+            {
+                "alternate_fallback_used": True,
+                "alternate_failed_domain": primary,
+            }
+        )
+        return _finalize_scan_commit_and_serialise(db, computed=second, extras=merged_extras)
+
+    det_a_raw = first.get("detail")
+    det_b_raw = second.get("detail")
+    det_a = (det_a_raw if isinstance(det_a_raw, str) else "") or ""
+    det_b = (det_b_raw if isinstance(det_b_raw, str) else "") or ""
+    det_a = det_a.strip()
+    det_b = det_b.strip()
+    rs_a = str(first.get("raw_status") or "—").strip()
+    rs_b = str(second.get("raw_status") or "—").strip()
+    if not det_a:
+        det_a = "(không có chi tiết)"
+    if not det_b:
+        det_b = "(không có chi tiết)"
+    canon = (str(second.get("canonical_url") or first.get("canonical_url") or "") or "").strip()
+    mega_detail = (
+        f"Cả hai nền đều không đọc được — không ghi DB; nên dừng lặp và xử lý chặn/captcha.\n\n"
+        f"[{primary.upper()}] raw_status={rs_a}\n{det_a}\n\n"
+        f"[{secondary.upper()}] raw_status={rs_b}\n{det_b}"
+    )
+    attempts = [
+        {"domain": primary, "raw_status": first.get("raw_status"), "detail": first.get("detail")},
+        {"domain": secondary, "raw_status": second.get("raw_status"), "detail": second.get("detail")},
+    ]
+    merged_warns = list((first.get("warnings") or []) + (second.get("warnings") or []))[:40]
+    return {
+        "ok": True,
+        "canonical_url": canon,
+        "domain": f"{primary}+{secondary}",
+        "raw_status": "dual_fetch_error",
+        "classified_out_of_stock": False,
+        "detail": mega_detail,
+        "warnings": merged_warns,
+        "matched_products": [],
+        "updated_product_ids": [],
+        "matched_count": 0,
+        "updates_committed": False,
+        "dual_platform_both_failed": True,
+        "dual_attempts": attempts,
+        "alternate_sequence_index": int(alternate_sequence_index),
+        "alternate_primary_domain": primary,
+    }
 
 def admin_clear_false_source_oos_flag(db: Session, *, db_id: int) -> Dict[str, Any]:
     """

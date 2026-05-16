@@ -346,6 +346,13 @@ export interface AdminSourceStockBatchOneResult {
   updated_product_ids: number[];
   matched_count: number;
   updates_committed?: boolean;
+  /** Hai nền đều lỗi — không commit; client nên dừng lặp. */
+  dual_platform_both_failed?: boolean;
+  dual_attempts?: Array<{ domain: string; raw_status?: string | null; detail?: string | null }>;
+  alternate_fallback_used?: boolean;
+  alternate_failed_domain?: string;
+  alternate_sequence_index?: number;
+  alternate_primary_domain?: string;
 }
 
 /** Kiểm tra tuần tự từ DB (thêm các trường done / seed). */
@@ -987,10 +994,20 @@ export const adminProductAPI = {
     }>(`/products/by-id/${dbPkId}/source-stock-check/enqueue`, { method: 'POST' }),
 
   /** Một URL: quy đổi + đọc Hibox (scrape) hoặc CSSBuy (API /web/item). */
-  runSourceStockBatchOne: (body: { url: string; domain: 'hibox' | 'cssbuy' }) =>
+  runSourceStockBatchOne: (body: {
+    url: string;
+    domain: 'hibox' | 'cssbuy';
+    dualAlternateFallback?: boolean;
+    alternateSequenceIndex?: number;
+  }) =>
     fetchAdmin<AdminSourceStockBatchOneResult>('/products/admin/source-stock-batch/run', {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        url: body.url,
+        domain: body.domain,
+        dual_alternate_fallback: body.dualAlternateFallback ?? false,
+        alternate_sequence_index: body.alternateSequenceIndex ?? 0,
+      }),
       timeoutMs: 300_000,
     }),
 
@@ -1001,6 +1018,8 @@ export const adminProductAPI = {
     cursorAfterProductId?: number;
     /** products.id — giữ kiểm tra lại đúng SP sau lỗi tạm (captcha/chặn…). */
     stickySeedProductId?: number;
+    dualAlternateFallback?: boolean;
+    alternateSequenceIndex?: number;
   }) =>
     fetchAdmin<AdminSourceStockBatchDbNextResult>('/products/admin/source-stock-batch/run-next-from-db', {
       method: 'POST',
@@ -1009,6 +1028,8 @@ export const adminProductAPI = {
         active_only: params.activeOnly ?? true,
         cursor_after_product_id: params.cursorAfterProductId ?? 0,
         sticky_seed_product_id: params.stickySeedProductId ?? 0,
+        dual_alternate_fallback: params.dualAlternateFallback ?? false,
+        alternate_sequence_index: params.alternateSequenceIndex ?? 0,
       }),
       timeoutMs: 300_000,
     }),

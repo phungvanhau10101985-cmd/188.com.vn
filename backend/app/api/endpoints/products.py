@@ -45,6 +45,11 @@ router = APIRouter()
 class AdminSourceStockBatchBody(BaseModel):
     url: str = Field(..., min_length=3)
     domain: Literal["hibox", "cssbuy"] = "hibox"
+    dual_alternate_fallback: bool = Field(
+        False,
+        description="Sen kẽ thứ tự Hibox/CSSBuy theo alternate_sequence_index, fallback khi một nền không đọc được.",
+    )
+    alternate_sequence_index: int = Field(0, ge=0, le=900_000_000)
 
 
 class AdminSourceStockScanNextDbBody(BaseModel):
@@ -56,6 +61,11 @@ class AdminSourceStockScanNextDbBody(BaseModel):
         ge=0,
         description="products.id — ưu tiên kiểm tra lại đúng SP (retry sau lỗi tạm captcha/chặn). 0 = tắt.",
     )
+    dual_alternate_fallback: bool = Field(
+        False,
+        description="Sen kẽ + fallback hai nền (Hibox scrape / CSSBuy API) trong một lần kiểm tra.",
+    )
+    alternate_sequence_index: int = Field(0, ge=0, le=900_000_000)
 
 
 class AdminBulkDeleteProductsByDbIdBody(BaseModel):
@@ -852,7 +862,13 @@ def admin_source_stock_batch_run(
     try:
         from app.services.admin_source_stock_batch import run_admin_source_url_scan
 
-        out = run_admin_source_url_scan(db, url=url, domain=str(body.domain))
+        out = run_admin_source_url_scan(
+            db,
+            url=url,
+            domain=str(body.domain),
+            dual_alternate_fallback=bool(body.dual_alternate_fallback),
+            alternate_sequence_index=int(body.alternate_sequence_index),
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -875,6 +891,8 @@ def admin_source_stock_batch_run_next_from_db(
             active_only=bool(body.active_only),
             cursor_after_product_id=int(body.cursor_after_product_id),
             sticky_seed_product_id=int(body.sticky_seed_product_id),
+            dual_alternate_fallback=bool(body.dual_alternate_fallback),
+            alternate_sequence_index=int(body.alternate_sequence_index),
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
