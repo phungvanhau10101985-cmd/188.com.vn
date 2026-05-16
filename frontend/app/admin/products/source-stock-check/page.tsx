@@ -12,6 +12,8 @@ import {
   type AdminSourceStockQueueStats,
 } from '@/lib/admin-api';
 
+const EMPTY_REPORT_SAMPLE_ROWS: AdminSourceStockActivityReportSampleRow[] = [];
+
 /** Nguồn kiểm tra: Hibox (scrape) hoặc CSSBuy (API /web/item — không cần bấm modal). */
 type SourceStockDomain = 'hibox' | 'cssbuy';
 
@@ -251,6 +253,23 @@ type ReportSampleOosRowActions = {
   onRecheck: (row: AdminSourceStockActivityReportSampleRow) => void;
 };
 
+/** Chọn nhiều dòng trong bảng mẫu OOS — thao tác hàng loạt và «tất cả mẫu». */
+type ReportSampleOosBulkSelection = {
+  selectedDbIds: readonly number[];
+  displayedCount: number;
+  selectedCount: number;
+  bulkBarBusy: boolean;
+  onToggleDbId: (dbId: number, nextSelected: boolean) => void;
+  onSelectAllDisplayed: () => void;
+  onClearSelection: () => void;
+  onBulkDeleteSelected: () => void;
+  onBulkClearFlagSelected: () => void;
+  onBulkRecheckSelected: () => void;
+  onBulkDeleteAllDisplayed: () => void;
+  onBulkClearFlagAllDisplayed: () => void;
+  onBulkRecheckAllDisplayed: () => void;
+};
+
 /** Bảng mẫu (tối đa `detail_limit` từ API) trong báo cáo 30 ngày. */
 function SourceStockReportSampleTable({
   title,
@@ -258,14 +277,31 @@ function SourceStockReportSampleTable({
   emptyHint,
   defaultOpen,
   oosActions,
+  oosBulkSelection,
 }: {
   title: string;
   rows: AdminSourceStockActivityReportSampleRow[];
   emptyHint: string;
   defaultOpen: boolean;
   oosActions?: ReportSampleOosRowActions;
+  oosBulkSelection?: ReportSampleOosBulkSelection;
 }) {
-  const colSpan = oosActions ? 10 : 9;
+  const colSpan = 9 + (oosActions ? 1 : 0) + (oosBulkSelection ? 1 : 0);
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+
+  const selectedSet = useMemo(
+    () => new Set(oosBulkSelection?.selectedDbIds ?? []),
+    [oosBulkSelection?.selectedDbIds],
+  );
+
+  const allDisplayedSelected = rows.length > 0 && rows.every((r) => selectedSet.has(r.id));
+  const someDisplayedSelected = rows.some((r) => selectedSet.has(r.id));
+
+  useEffect(() => {
+    const el = headerCheckboxRef.current;
+    if (!el || !oosBulkSelection) return;
+    el.indeterminate = someDisplayedSelected && !allDisplayedSelected;
+  }, [oosBulkSelection, someDisplayedSelected, allDisplayedSelected]);
 
   return (
     <details
@@ -279,10 +315,115 @@ function SourceStockReportSampleTable({
         </span>
         <span className="text-[11px] font-normal text-indigo-700 underline">Mở / thu</span>
       </summary>
+      {oosBulkSelection && rows.length > 0 ? (
+        <div className="border-t border-slate-200 bg-slate-50/80 px-2.5 py-2 flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-800">
+            {oosBulkSelection.bulkBarBusy ? <SpinnerIcon className="text-slate-700" /> : null}
+            <span>
+              Đã chọn <strong className="tabular-nums">{oosBulkSelection.selectedCount}</strong>{' '}
+              /{' '}
+              <strong className="tabular-nums">{oosBulkSelection.displayedCount}</strong> trong bảng
+            </span>
+            <span className="hidden sm:inline text-slate-400" aria-hidden>
+              ·
+            </span>
+            <button
+              type="button"
+              disabled={oosBulkSelection.bulkBarBusy}
+              className="text-[11px] font-medium text-indigo-800 underline disabled:opacity-45 disabled:no-underline"
+              onClick={() => oosBulkSelection.onSelectAllDisplayed()}
+            >
+              Chọn hết
+            </button>
+            <button
+              type="button"
+              disabled={oosBulkSelection.bulkBarBusy || !oosBulkSelection.selectedCount}
+              className="text-[11px] font-medium text-slate-700 underline disabled:opacity-45 disabled:no-underline"
+              onClick={() => oosBulkSelection.onClearSelection()}
+            >
+              Bỏ chọn
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span className="font-semibold text-slate-600 mr-0.5">Theo ô đánh dấu:</span>
+            <button
+              type="button"
+              disabled={oosBulkSelection.bulkBarBusy || !oosBulkSelection.selectedCount}
+              className="rounded-md border border-red-200 bg-white px-2 py-1 font-semibold text-red-950 hover:bg-red-50 disabled:opacity-45"
+              onClick={() => oosBulkSelection.onBulkDeleteSelected()}
+            >
+              Xóa DB
+            </button>
+            <button
+              type="button"
+              disabled={oosBulkSelection.bulkBarBusy || !oosBulkSelection.selectedCount}
+              className="rounded-md border border-slate-300 bg-white px-2 py-1 font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-45"
+              onClick={() => oosBulkSelection.onBulkClearFlagSelected()}
+            >
+              Gỡ cờ
+            </button>
+            <button
+              type="button"
+              disabled={oosBulkSelection.bulkBarBusy || !oosBulkSelection.selectedCount}
+              className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 font-semibold text-emerald-950 hover:bg-emerald-100 disabled:opacity-45"
+              onClick={() => oosBulkSelection.onBulkRecheckSelected()}
+            >
+              PDP lại
+            </button>
+            <span className="mx-1 h-4 w-px bg-slate-300 shrink-0" aria-hidden />
+            <span className="font-semibold text-slate-600 mr-0.5">Toàn bộ mẫu:</span>
+            <button
+              type="button"
+              disabled={oosBulkSelection.bulkBarBusy}
+              className="rounded-md border border-red-400 bg-red-50 px-2 py-1 font-semibold text-red-950 hover:bg-red-100 disabled:opacity-45"
+              onClick={() => oosBulkSelection.onBulkDeleteAllDisplayed()}
+            >
+              Xóa DB (tất cả)
+            </button>
+            <button
+              type="button"
+              disabled={oosBulkSelection.bulkBarBusy}
+              className="rounded-md border border-slate-300 bg-white px-2 py-1 font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-45"
+              onClick={() => oosBulkSelection.onBulkClearFlagAllDisplayed()}
+            >
+              Gỡ cờ (tất cả)
+            </button>
+            <button
+              type="button"
+              disabled={oosBulkSelection.bulkBarBusy}
+              className="rounded-md border border-emerald-400 bg-emerald-50 px-2 py-1 font-semibold text-emerald-950 hover:bg-emerald-100 disabled:opacity-45"
+              onClick={() => oosBulkSelection.onBulkRecheckAllDisplayed()}
+            >
+              PDP lại (tất cả)
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div className="overflow-x-auto border-t border-slate-100">
         <table className="min-w-full text-xs">
           <thead className="bg-gray-100 text-gray-700">
             <tr>
+              {oosBulkSelection ? (
+                <th scope="col" className="w-9 px-1 py-1.5 align-middle">
+                  <span className="sr-only">Chọn dòng</span>
+                  <input
+                    ref={headerCheckboxRef}
+                    type="checkbox"
+                    checked={allDisplayedSelected}
+                    disabled={oosBulkSelection.bulkBarBusy}
+                    onChange={() => {
+                      if (allDisplayedSelected) {
+                        oosBulkSelection.onClearSelection();
+                      } else {
+                        oosBulkSelection.onSelectAllDisplayed();
+                      }
+                    }}
+                    className="h-4 w-4 accent-indigo-700 disabled:opacity-45"
+                    title="Chọn hoặc bỏ chọn toàn bộ dòng hiển thị"
+                    aria-label="Chọn hoặc bỏ chọn toàn bộ dòng hiển thị trong bảng mẫu"
+                  />
+                </th>
+              ) : null}
               <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
                 DB id
               </th>
@@ -327,6 +468,20 @@ function SourceStockReportSampleTable({
             ) : (
               rows.map((row) => (
                 <tr key={`${title}-${row.id}`} className="border-t border-gray-200 align-top">
+                  {oosBulkSelection ? (
+                    <td className="px-1 py-1.5 align-middle text-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedSet.has(row.id)}
+                        disabled={oosBulkSelection.bulkBarBusy}
+                        onChange={(ev) =>
+                          oosBulkSelection.onToggleDbId(row.id, ev.target.checked)
+                        }
+                        className="h-4 w-4 accent-indigo-700 disabled:opacity-45"
+                        aria-label={`Chọn SP database id ${row.id}`}
+                      />
+                    </td>
+                  ) : null}
                   <td className="px-2 py-1.5 whitespace-nowrap font-mono">{row.id}</td>
                   <td className="px-2 py-1.5 whitespace-nowrap font-mono text-[11px]">{row.product_id}</td>
                   <td className="px-2 py-1.5 max-w-[14rem]">{row.name}</td>
@@ -443,14 +598,32 @@ export default function AdminSourceStockCheckPage() {
   const [activityReportError, setActivityReportError] = useState<string | null>(null);
   /** Hàng đang chờ thao tác trên báo cáo OOS — khóa trùng nút trong bảng. */
   const [reportOosRowBusyById, setReportOosRowBusyById] = useState<Record<number, string>>({});
-  const [reportOosDeleteTarget, setReportOosDeleteTarget] =
-    useState<AdminSourceStockActivityReportSampleRow | null>(null);
+  /** `products.id` đang chờ xác nhận xóa (một hoặc nhiều) trong modal báo cáo OOS. */
+  const [reportOosDeleteConfirmIds, setReportOosDeleteConfirmIds] = useState<number[] | null>(
+    null,
+  );
   const [reportOosDeleting, setReportOosDeleting] = useState(false);
+  const [reportOosSampleSelectedIds, setReportOosSampleSelectedIds] = useState<number[]>([]);
+  const [reportOosBulkBusy, setReportOosBulkBusy] = useState(false);
   const recheckPollCancelRef = useRef(false);
   const [activeCheck, setActiveCheck] = useState<ActiveCheck | null>(null);
   const [lastFinished, setLastFinished] = useState<LastFinishedCheck | null>(null);
 
   const urlsList = useMemo(() => parseUrls(urlsText), [urlsText]);
+
+  const reportOosSampleRows = activityReport?.samples?.oos ?? EMPTY_REPORT_SAMPLE_ROWS;
+  const reportOosRowById = useMemo(() => {
+    const m = new Map<number, AdminSourceStockActivityReportSampleRow>();
+    for (const r of reportOosSampleRows) {
+      m.set(r.id, r);
+    }
+    return m;
+  }, [reportOosSampleRows]);
+
+  useEffect(() => {
+    const valid = new Set(reportOosSampleRows.map((r) => r.id));
+    setReportOosSampleSelectedIds((prev) => prev.filter((id) => valid.has(id)));
+  }, [reportOosSampleRows]);
 
   /** Cột «DB id» trong bảng = `products.id` (để xóa thật trên máy chủ). */
   const oosDistinctDbIds = useMemo(() => {
@@ -651,21 +824,141 @@ export default function AdminSourceStockCheckPage() {
     [bumpReportBusy, clearReportBusy, pollWorkerRecheckOutcome, showToast],
   );
 
+  const toggleReportOosSampleSelect = useCallback((dbId: number, nextSelected: boolean) => {
+    setReportOosSampleSelectedIds((prev) => {
+      const s = new Set(prev);
+      if (nextSelected) s.add(dbId);
+      else s.delete(dbId);
+      return [...s].sort((a, b) => a - b);
+    });
+  }, []);
+
+  const selectAllReportOosDisplayed = useCallback(() => {
+    const rows = activityReport?.samples?.oos ?? EMPTY_REPORT_SAMPLE_ROWS;
+    setReportOosSampleSelectedIds([...rows.map((r) => r.id)].sort((a, b) => a - b));
+  }, [activityReport?.samples?.oos]);
+
+  const clearReportOosSampleSelection = useCallback(() => {
+    setReportOosSampleSelectedIds([]);
+  }, []);
+
+  const requestReportOosDeleteDbIds = useCallback(
+    (rawIds: number[]) => {
+      const uniq = [...new Set(rawIds.filter((id) => id > 0))].sort((a, b) => a - b);
+      if (!uniq.length) {
+        showToast('err', 'Chưa có SP nào được chọn trong bảng mẫu.');
+        return;
+      }
+      const cap =
+        typeof activityReport?.detail_limit_applied === 'number'
+          ? activityReport.detail_limit_applied
+          : 120;
+      if (uniq.length > cap) {
+        showToast('err', `Chỉ xử lý tối đa ${cap} SP mỗi lần (giới hạn bảng mẫu).`);
+        return;
+      }
+      setReportOosDeleteConfirmIds(uniq);
+    },
+    [activityReport?.detail_limit_applied, showToast],
+  );
+
+  const runBulkReportOosClearFlags = useCallback(
+    async (dbIds: number[]) => {
+      const ids = [...new Set(dbIds)].filter((id) => id > 0);
+      if (!ids.length) {
+        showToast('err', 'Không có SP trong bảng mẫu để gỡ cờ.');
+        return;
+      }
+      setReportOosBulkBusy(true);
+      try {
+        let ok = 0;
+        let failed = 0;
+        for (const id of ids) {
+          bumpReportBusy(id, 'Hàng loạt · gỡ cờ…');
+          try {
+            await adminProductAPI.clearSourceStockOosFlagByDbId(id);
+            ok++;
+          } catch {
+            failed++;
+          } finally {
+            clearReportBusy(id);
+          }
+          await sleepMs(140);
+        }
+        showToast(
+          failed ? 'info' : 'ok',
+          `Gỡ cờ hàng loạt: thành công ${ok}, lỗi ${failed}. Làm mới báo cáo nếu danh sách chưa đổi.`,
+        );
+        setReportOosSampleSelectedIds((prev) => prev.filter((tid) => !ids.includes(tid)));
+        void refreshActivityReport();
+        void refreshQueueStats();
+      } finally {
+        setReportOosBulkBusy(false);
+      }
+    },
+    [bumpReportBusy, clearReportBusy, refreshActivityReport, refreshQueueStats, showToast],
+  );
+
+  const runBulkReportOosEnqueueRecheckNoPoll = useCallback(
+    async (dbIds: number[]) => {
+      const ids = [...new Set(dbIds)].filter((id) => id > 0);
+      if (!ids.length) {
+        showToast('err', 'Không có SP trong bảng mẫu để xếp PDP.');
+        return;
+      }
+      setReportOosBulkBusy(true);
+      try {
+        let queuedOk = 0;
+        let alreadyPending = 0;
+        let ineligible = 0;
+        let callErr = 0;
+        for (const id of ids) {
+          bumpReportBusy(id, 'Đang xếp hàng PDP…');
+          try {
+            const out = await adminProductAPI.forceWorkerSourceStockRecheckByDbId(id);
+            if (out.skip_reason === 'not_eligible_or_failed' && !out.enqueued_now) {
+              ineligible++;
+            } else if (!out.enqueued_now && out.skip_reason === 'already_pending') {
+              bumpReportBusy(id, 'Đang chờ worker…');
+              alreadyPending++;
+            } else {
+              bumpReportBusy(id, 'Worker đọc…');
+              queuedOk++;
+            }
+          } catch {
+            callErr++;
+          } finally {
+            clearReportBusy(id);
+          }
+          await sleepMs(160);
+        }
+        showToast(
+          callErr ? 'info' : 'ok',
+          `Xếp kiểm tra PDP (hàng loạt): enqueue ${queuedOk}, đã chờ sẵn ${alreadyPending}, không đủ điều kiện ${ineligible}, lỗi gọi ${callErr}. Mở từng dòng «Kiểm tra lại PDP» nếu cần chờ kết quả chi tiết.`,
+        );
+        void refreshActivityReport();
+        void refreshQueueStats();
+      } finally {
+        setReportOosBulkBusy(false);
+      }
+    },
+    [bumpReportBusy, clearReportBusy, refreshActivityReport, refreshQueueStats, showToast],
+  );
+
   const executeReportOosDeleteFromDb = useCallback(async () => {
-    const target = reportOosDeleteTarget;
-    if (!target) return;
+    const ids = reportOosDeleteConfirmIds;
+    if (!ids?.length) return;
     setReportOosDeleting(true);
     try {
-      const res = await adminProductAPI.deleteSourceStockBatchProductsByDbIds([target.id]);
-      if (res.deleted_count > 0) {
-        showToast(
-          'ok',
-          `Đã xóa vĩnh viễn khỏi cửa hàng (products.id=${target.id}).`,
-        );
-      } else {
-        showToast('info', `Không xóa được id=${target.id} — không tìm thấy trong DB hoặc bị chặn.`);
+      const res = await adminProductAPI.deleteSourceStockBatchProductsByDbIds(ids);
+      let msg = `Đã xóa ${res.deleted_count ?? 0} sản (${(res.deleted_db_ids ?? []).length} khớp).`;
+      if ((res.not_found_db_ids ?? []).length) {
+        msg += ` Không thấy id: ${res.not_found_db_ids!.join(', ')}.`;
       }
-      setReportOosDeleteTarget(null);
+      showToast(res.deleted_count ? 'ok' : 'info', msg);
+      setReportOosDeleteConfirmIds(null);
+      const removed = new Set(res.deleted_db_ids ?? []);
+      setReportOosSampleSelectedIds((prev) => prev.filter((tid) => !removed.has(tid)));
       void refreshActivityReport();
       void refreshQueueStats();
     } catch (e) {
@@ -673,13 +966,51 @@ export default function AdminSourceStockCheckPage() {
     } finally {
       setReportOosDeleting(false);
     }
-  }, [refreshActivityReport, refreshQueueStats, reportOosDeleteTarget, showToast]);
+  }, [refreshActivityReport, refreshQueueStats, reportOosDeleteConfirmIds, showToast]);
+
+  const reportOosBulkSelection = useMemo<ReportSampleOosBulkSelection | undefined>(() => {
+    if (!reportOosSampleRows.length) return undefined;
+    return {
+      selectedDbIds: reportOosSampleSelectedIds,
+      displayedCount: reportOosSampleRows.length,
+      selectedCount: reportOosSampleSelectedIds.length,
+      bulkBarBusy: reportOosBulkBusy || reportOosDeleting,
+      onToggleDbId: toggleReportOosSampleSelect,
+      onSelectAllDisplayed: selectAllReportOosDisplayed,
+      onClearSelection: clearReportOosSampleSelection,
+      onBulkDeleteSelected: () => requestReportOosDeleteDbIds([...reportOosSampleSelectedIds]),
+      onBulkClearFlagSelected: () => void runBulkReportOosClearFlags([...reportOosSampleSelectedIds]),
+      onBulkRecheckSelected: () => void runBulkReportOosEnqueueRecheckNoPoll([...reportOosSampleSelectedIds]),
+      onBulkDeleteAllDisplayed: () =>
+        requestReportOosDeleteDbIds(reportOosSampleRows.map((r) => r.id)),
+      onBulkClearFlagAllDisplayed: () =>
+        void runBulkReportOosClearFlags(reportOosSampleRows.map((r) => r.id)),
+      onBulkRecheckAllDisplayed: () =>
+        void runBulkReportOosEnqueueRecheckNoPoll(reportOosSampleRows.map((r) => r.id)),
+    };
+  }, [
+    clearReportOosSampleSelection,
+    reportOosBulkBusy,
+    reportOosDeleting,
+    reportOosSampleRows,
+    reportOosSampleSelectedIds,
+    requestReportOosDeleteDbIds,
+    runBulkReportOosClearFlags,
+    runBulkReportOosEnqueueRecheckNoPoll,
+    selectAllReportOosDisplayed,
+    toggleReportOosSampleSelect,
+  ]);
 
   const reportOosActionsForTable = useMemo<ReportSampleOosRowActions>(
     () => ({
       busyByDbId: reportOosRowBusyById,
-      disabledGlobally: running || bulkDeletingDb || activityReportLoading || reportOosDeleting,
-      onDeleteDb: (row) => setReportOosDeleteTarget(row),
+      disabledGlobally:
+        running ||
+        bulkDeletingDb ||
+        activityReportLoading ||
+        reportOosDeleting ||
+        reportOosBulkBusy,
+      onDeleteDb: (row) => requestReportOosDeleteDbIds([row.id]),
       onClearFlag: handleReportOosClearFlag,
       onRecheck: handleReportOosRecheck,
     }),
@@ -688,8 +1019,10 @@ export default function AdminSourceStockCheckPage() {
       bulkDeletingDb,
       handleReportOosClearFlag,
       handleReportOosRecheck,
+      reportOosBulkBusy,
       reportOosDeleting,
       reportOosRowBusyById,
+      requestReportOosDeleteDbIds,
       running,
     ],
   );
@@ -994,15 +1327,15 @@ export default function AdminSourceStockCheckPage() {
   }, [scanFromDb, auto, refreshQueueStats]);
 
   useEffect(() => {
-    if (!deleteDbModalOpen && !reportOosDeleteTarget) return;
+    if (!deleteDbModalOpen && reportOosDeleteConfirmIds == null) return;
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
       if (deleteDbModalOpen && !bulkDeletingDb) setDeleteDbModalOpen(false);
-      if (reportOosDeleteTarget && !reportOosDeleting) setReportOosDeleteTarget(null);
+      if (reportOosDeleteConfirmIds != null && !reportOosDeleting) setReportOosDeleteConfirmIds(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [deleteDbModalOpen, bulkDeletingDb, reportOosDeleteTarget, reportOosDeleting]);
+  }, [deleteDbModalOpen, bulkDeletingDb, reportOosDeleteConfirmIds, reportOosDeleting]);
 
   useEffect(() => {
     if (!auto || !scanFromDb) return;
@@ -1524,6 +1857,7 @@ export default function AdminSourceStockCheckPage() {
                     emptyHint="Không có dòng trong phạm vi."
                     defaultOpen
                     oosActions={reportOosActionsForTable}
+                    oosBulkSelection={reportOosBulkSelection}
                   />
                   <SourceStockReportSampleTable
                     title="Mẫu: cờ còn hàng (in_stock) trong cửa sổ"
@@ -1910,12 +2244,12 @@ export default function AdminSourceStockCheckPage() {
         </div>
       ) : null}
 
-      {reportOosDeleteTarget ? (
+      {reportOosDeleteConfirmIds != null ? (
         <div
           className="fixed inset-0 z-[121] flex items-center justify-center bg-black/45 p-4"
           role="presentation"
           onClick={() => {
-            if (!reportOosDeleting) setReportOosDeleteTarget(null);
+            if (!reportOosDeleting) setReportOosDeleteConfirmIds(null);
           }}
         >
           <div
@@ -1926,27 +2260,38 @@ export default function AdminSourceStockCheckPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="report-oos-del-title" className="text-lg font-bold text-gray-900">
-              Xóa vĩnh viễn sản khỏi DB cửa hàng?
+              Xóa vĩnh viễn {reportOosDeleteConfirmIds.length} sản khỏi DB cửa hàng?
             </h3>
-            <p className="text-sm text-gray-700 mt-3 leading-relaxed">
-              Sẽ gọi API xóa <strong>một</strong> sản —{' '}
-              <code className="text-xs bg-gray-100 px-1 rounded">products.id = {reportOosDeleteTarget.id}</code>.
+            <div className="text-sm text-gray-700 mt-3 leading-relaxed space-y-2">
+              <p>
+                Sẽ xóa theo khóa <code className="text-xs bg-gray-100 px-1 rounded">products.id</code> — không
+                hoàn tác (kèm dọn Bunny). Thích hợp khi chắc chắn không còn bán những mã này.
+              </p>
               {!reportOosDeleting ? (
-                <>
-                  {' '}
-                  <strong className="block mt-2 text-gray-900">{reportOosDeleteTarget.name}</strong>
-                </>
+                <ul className="mt-2 max-h-48 overflow-auto border border-gray-100 rounded-lg divide-y divide-gray-100 text-[13px]">
+                  {reportOosDeleteConfirmIds.slice(0, 18).map((id) => {
+                    const row = reportOosRowById.get(id);
+                    return (
+                      <li key={id} className="px-3 py-2 flex flex-col gap-0.5">
+                        <span className="font-mono text-xs text-gray-900">#{id}</span>
+                        <span className="text-gray-800 line-clamp-2">{row?.name ?? '—'}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
               ) : null}
-              <span className="block mt-2">
-                Không hoàn tác (dọn Bunny như xóa sản trong admin). Dùng khi xác nhận «thật sự không còn bán».
-              </span>
-            </p>
+              {reportOosDeleteConfirmIds.length > 18 && !reportOosDeleting ? (
+                <p className="text-xs text-gray-500">
+                  và {reportOosDeleteConfirmIds.length - 18} mã khác trong cùng lần xóa.
+                </p>
+              ) : null}
+            </div>
             <div className="flex flex-wrap gap-3 justify-end mt-6">
               <button
                 type="button"
                 className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
                 disabled={reportOosDeleting}
-                onClick={() => setReportOosDeleteTarget(null)}
+                onClick={() => setReportOosDeleteConfirmIds(null)}
               >
                 Hủy
               </button>
