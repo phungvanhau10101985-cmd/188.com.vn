@@ -46,6 +46,14 @@ def get_by_id(db: Session, draft_id: int) -> Optional[ProductImportDraft]:
     return db.query(ProductImportDraft).filter(ProductImportDraft.id == draft_id).first()
 
 
+def get_by_ids_map(db: Session, draft_ids: List[int]) -> Dict[int, ProductImportDraft]:
+    """Một truy vấn SQL IN — tra cứu theo id (không giữ thứ tự input)."""
+    if not draft_ids:
+        return {}
+    rows = db.query(ProductImportDraft).filter(ProductImportDraft.id.in_(draft_ids)).all()
+    return {r.id: r for r in rows}
+
+
 def list_drafts(
     db: Session,
     *,

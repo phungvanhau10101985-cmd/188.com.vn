@@ -1079,7 +1079,7 @@ export const adminProductAPI = {
     const ctrl = new AbortController();
     const tid =
       typeof window !== 'undefined'
-        ? window.setTimeout(() => ctrl.abort(), 180_000)
+        ? window.setTimeout(() => ctrl.abort(), 600_000)
         : undefined;
     try {
       const res = await fetch(url, {
@@ -1087,8 +1087,20 @@ export const adminProductAPI = {
         signal: ctrl.signal,
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Tải Excel sản phẩm từ đợt thất bại');
+        const err = await res.json().catch(() => null as unknown);
+        let detail = formatFastApiDetail(
+          err && typeof err === 'object' && err !== null && 'detail' in err
+            ? (err as { detail?: unknown }).detail
+            : err,
+        );
+        if (!detail) {
+          const raw = await res.clone().text().catch(() => '');
+          const clip = raw.replace(/\s+/g, ' ').trim().slice(0, 280);
+          detail = clip || res.statusText || `HTTP ${res.status}`;
+        }
+        throw new Error(
+          `${detail} (HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''})`,
+        );
       }
       const blob = await res.blob();
       await assertBlobLooksLikeXlsx(blob);

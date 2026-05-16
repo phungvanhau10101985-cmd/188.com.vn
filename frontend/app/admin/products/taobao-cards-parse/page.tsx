@@ -475,6 +475,10 @@ export default function TaobaoCardsParsePage() {
   /** Token đợt đang xác nhận «xóa khỏi DB» trong panel. */
   const [dbDeleteConfirmToken, setDbDeleteConfirmToken] = useState<string | null>(null);
   const [panelDbDeleting, setPanelDbDeleting] = useState(false);
+  /** Lỗi tải Excel theo từng queue_token — hiển thị ngay dưới nút để debug (server/proxy/trình duyệt). */
+  const [listingQueueExcelErrByToken, setListingQueueExcelErrByToken] = useState<
+    Record<string, string>
+  >({});
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
 
   /** Modal: chọn nháp đã crawl xong để đăng lên web (publish giống Import 1688). */
@@ -1120,11 +1124,19 @@ export default function TaobaoCardsParsePage() {
         showToast('err', 'Chưa có dòng nào kết thúc — chưa có draft để xuất Excel.');
         return;
       }
+      setListingQueueExcelErrByToken((prev) => {
+        const next = { ...prev };
+        delete next[token];
+        return next;
+      });
       try {
         await adminProductAPI.downloadListingImportQueueProductsExcel(token);
         showToast('ok', 'Đã tải Excel nhập web (tiêu đề, giá, ảnh, biến thể… — giống export bulk draft).');
       } catch (e) {
-        showToast('err', e instanceof Error ? e.message : String(e));
+        const msg = e instanceof Error ? e.message : String(e);
+        setListingQueueExcelErrByToken((prev) => ({ ...prev, [token]: msg }));
+        console.error('[taobao-cards-parse] downloadListingImportQueueProductsExcel', token.slice(0, 12), e);
+        showToast('err', msg);
       }
     },
     [queueStatusByToken, showToast],
@@ -1913,6 +1925,13 @@ export default function TaobaoCardsParsePage() {
                               row.draft?.product_data && !row.fetchErr && !alreadyInShop && formatOk,
                             );
                             const pubId = row.draft?.published_product_id?.trim();
+                            const showFormatReasonsBelowBadge = Boolean(
+                              pd &&
+                                !row.fetchErr &&
+                                !pubId &&
+                                !alreadyInShop &&
+                                !formatOk,
+                            );
                             let note = '';
                             if (row.fetchErr) note = row.fetchErr;
                             else if (!row.draft?.product_data)
@@ -1998,12 +2017,29 @@ export default function TaobaoCardsParsePage() {
                                 <td className="p-2 font-mono tabular-nums text-slate-800 whitespace-nowrap align-top border-r border-slate-100/80">
                                   #{row.draftId}
                                 </td>
-                                <td className="p-2 align-top whitespace-nowrap border-r border-slate-100/80">
-                                  <span
-                                    className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badgeCls}`}
-                                  >
-                                    {badgeText}
-                                  </span>
+                                <td className="p-2 align-top border-r border-slate-100/80 max-w-[20rem]">
+                                  <div className="flex flex-col items-start gap-1">
+                                    <span
+                                      className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badgeCls}`}
+                                    >
+                                      {badgeText}
+                                    </span>
+                                    {showFormatReasonsBelowBadge && formatBlockers.length > 0 ? (
+                                      <ul
+                                        className="m-0 list-disc space-y-0.5 pl-4 text-[10px] font-normal normal-case leading-snug tracking-normal text-orange-950"
+                                        aria-label="Lý do chưa đạt định dạng"
+                                      >
+                                        {formatBlockers.map((reason, ri) => (
+                                          <li key={`${row.queueItemId}-fmt-${ri}`}>{reason}</li>
+                                        ))}
+                                      </ul>
+                                    ) : null}
+                                    {showFormatReasonsBelowBadge && formatBlockers.length === 0 ? (
+                                      <p className="m-0 text-[10px] font-normal normal-case tracking-normal text-orange-950">
+                                        Chưa đạt định dạng đăng.
+                                      </p>
+                                    ) : null}
+                                  </div>
                                 </td>
                                 <td className="p-2 font-mono text-[11px] text-slate-700 align-top whitespace-nowrap border-r border-slate-300">
                                   {pubId || '—'}
@@ -2811,6 +2847,16 @@ export default function TaobaoCardsParsePage() {
                         : 'Chọn để đăng web…'}
                     </button>
                   </div>
+
+                  {listingQueueExcelErrByToken[token] ? (
+                    <div
+                      className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900 whitespace-pre-wrap break-words"
+                      role="status"
+                    >
+                      <span className="font-semibold">Tải Excel nhập web — chi tiết lỗi:</span>{' '}
+                      {listingQueueExcelErrByToken[token]}
+                    </div>
+                  ) : null}
 
                   {dbDeleteConfirmToken === token ? (
                     <div

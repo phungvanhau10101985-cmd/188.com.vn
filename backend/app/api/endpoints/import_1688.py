@@ -5,6 +5,7 @@ import logging
 import re
 from io import BytesIO
 import threading
+import time
 import traceback
 import uuid
 from datetime import datetime, timezone
@@ -648,6 +649,7 @@ def _assign_internal_sku_to_import_product_data(
     product_data: Dict[str, Any],
     *,
     exclude_draft_id: Optional[int] = None,
+    batch_reserved: Optional[Set[str]] = None,
 ) -> None:
     """
     SKU đăng web là [A-Z][0-9]{4}, không phải slug Hibox (vd abb-922386436529).
@@ -659,7 +661,7 @@ def _assign_internal_sku_to_import_product_data(
         product_data.get("code"),
         exclude_product_id=None,
         exclude_draft_id=exclude_draft_id,
-        batch_reserved=None,
+        batch_reserved=batch_reserved,
     )
     product_data["code"] = sku
     product_data["product_info"] = sync_internal_code_into_product_info(
@@ -669,11 +671,19 @@ def _assign_internal_sku_to_import_product_data(
     compact_product_info_for_web(product_data)
 
 
-def _draft_product_data_for_excel_export(db: Session, draft: ProductImportDraft) -> Dict[str, Any]:
+def _draft_product_data_for_excel_export(
+    db: Session,
+    draft: ProductImportDraft,
+    *,
+    sku_fix_pending: Optional[List[Tuple[ProductImportDraft, Dict[str, Any]]]] = None,
+    batch_reserved: Optional[Set[str]] = None,
+) -> Dict[str, Any]:
     """
     Trước khi xuất Excel: SKU phải đúng [A-Z][0-9]{4}, không được *0000, không trùng products.code
     của sản phẩm khác (trừ bản ghi đã publish từ chính nháp này).
     Nếu không → gán lại như lúc import và lưu vào draft.
+
+    `sku_fix_pending` + `batch_reserved`: khi xuất hàng loạt, gom cập nhật DB một lần (tránh trăm lần commit).
     """
     pd = dict(draft.product_data or {})
     raw_code = pd.get("code")
@@ -694,8 +704,16 @@ def _draft_product_data_for_excel_export(db: Session, draft: ProductImportDraft)
         exclude_draft_id=draft.id,
     )
     if needs_fix:
-        _assign_internal_sku_to_import_product_data(db, pd, exclude_draft_id=draft.id)
-        draft_crud.update_draft(db, draft, product_data=pd)
+        _assign_internal_sku_to_import_product_data(
+            db,
+            pd,
+            exclude_draft_id=draft.id,
+            batch_reserved=batch_reserved,
+        )
+        if sku_fix_pending is not None:
+            sku_fix_pending.append((draft, pd))
+        else:
+            draft_crud.update_draft(db, draft, product_data=pd)
     return pd
 
 
@@ -1205,15 +1223,30 @@ def export_import_1688_drafts_bulk(
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("products")),
 ):
+    ids_sorted = sorted(set(payload.draft_ids))
+    by_id = draft_crud.get_by_ids_map(db, ids_sorted)
     rows_data: List[Dict[str, Any]] = []
-    for did in sorted(set(payload.draft_ids)):
-        draft = draft_crud.get_by_id(db, did)
+    batch_reserved: Set[str] = set()
+    sku_fix_pending: List[Tuple[ProductImportDraft, Dict[str, Any]]] = []
+    for did in ids_sorted:
+        draft = by_id.get(did)
         if not draft:
             raise HTTPException(status_code=404, detail=f"Không có draft id={did}.")
         if not draft.product_data:
             continue
-        pdata = _draft_product_data_for_excel_export(db, draft)
+        pdata = _draft_product_data_for_excel_export(
+            db,
+            draft,
+            sku_fix_pending=sku_fix_pending,
+            batch_reserved=batch_reserved,
+        )
         rows_data.append(_excel_row_from_product(pdata))
+
+    if sku_fix_pending:
+        for drow, pdata in sku_fix_pending:
+            drow.product_data = pdata
+            db.add(drow)
+        db.commit()
 
     filename = f"import_1688_drafts_bulk_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return _file_response_import_excel_rows(rows_data, filename)
@@ -1240,22 +1273,68 @@ def listing_import_queue_export_products_excel(
             detail="Đợt này chưa có draft nào (chưa có dòng done/error ghi draft_id).",
         )
 
+    t0 = time.perf_counter()
+    by_id = draft_crud.get_by_ids_map(db, draft_ids)
     rows_data: List[Dict[str, Any]] = []
+    missing_in_db = 0
+    batch_reserved: Set[str] = set()
+    sku_fix_pending: List[Tuple[ProductImportDraft, Dict[str, Any]]] = []
     for did in draft_ids:
-        draft = draft_crud.get_by_id(db, did)
-        if not draft or not draft.product_data:
+        draft = by_id.get(did)
+        if not draft:
+            missing_in_db += 1
             continue
-        pdata = _draft_product_data_for_excel_export(db, draft)
+        pdata = _draft_product_data_for_excel_export(
+            db,
+            draft,
+            sku_fix_pending=sku_fix_pending,
+            batch_reserved=batch_reserved,
+        )
         rows_data.append(_excel_row_from_product(pdata))
+
+    if sku_fix_pending:
+        for drow, pdata in sku_fix_pending:
+            drow.product_data = pdata
+            db.add(drow)
+        db.commit()
+
+    elapsed = time.perf_counter() - t0
+    logger.info(
+        "listing_queue export-products token=%s… draft_ids=%s missing_in_db=%s excel_rows=%s sku_fixes=%s duration_s=%.2f",
+        tok[:12],
+        len(draft_ids),
+        missing_in_db,
+        len(rows_data),
+        len(sku_fix_pending),
+        elapsed,
+    )
 
     if not rows_data:
         raise HTTPException(
             status_code=400,
-            detail="Không có draft nào trong đợt đã có product_data để xuất Excel (vd. crawl lỗi).",
+            detail=(
+                f"Không xuất được dòng Excel nào: có {len(draft_ids)} draft_id trên snapshot đợt, "
+                f"{missing_in_db} không còn trong DB (có thể nháp đã xóa). "
+                "Kiểm tra bảng nháp Import hoặc tải CSV meta để đối chiếu draft_id."
+            ),
+        )
+
+    if missing_in_db:
+        logger.warning(
+            "listing_queue export-products token=%s… %s draft_id trên đợt không tìm thấy trong DB",
+            tok[:12],
+            missing_in_db,
         )
 
     filename = f"listing_queue_products_{tok[:12]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    return _file_response_import_excel_rows(rows_data, filename)
+    try:
+        return _file_response_import_excel_rows(rows_data, filename)
+    except Exception as exc:
+        logger.exception("listing_queue export-products Excel build failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Lỗi tạo file Excel trên server: {exc}",
+        ) from exc
 
 
 @router.get("/jobs/{job_id}", response_model=Import1688JobOut)
