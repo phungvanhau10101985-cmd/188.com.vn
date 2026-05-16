@@ -126,11 +126,11 @@ class TextTranslator:
 
         combined = "\n".join(unicodedata.normalize("NFKC", text).lower() for text in texts)
         has_explicit_title = any(self._is_explicit_size_chart_title(text) for text in texts)
-        has_product_info = any(self._has_product_info_guard(text) for text in texts)
         size_token_count = sum(1 for text in texts if self._is_size_token_text(text))
         size_label_count = sum(1 for text in texts if self._is_size_dimension_label(text))
         has_unit = bool(re.search(r"(?:cm|\u5398\u7c73|mm|kg|\u65a4)", combined, re.IGNORECASE))
         has_table_word = bool(re.search(r"(?:\u8868|\u5bf9\u7167\u8868|table|chart)", combined, re.IGNORECASE))
+        has_size_keyword = any(self._is_size_table_keyword_text(text) for text in texts)
         size_block_count = sum(
             1
             for text in texts
@@ -142,21 +142,24 @@ class TextTranslator:
         )
         size_block_ratio = size_block_count / max(1, len(texts))
 
-        # Product-info/spec images often mention cm, height, color, material, or model.
-        # Delete only when the image is clearly a dedicated size-selection table.
-        if has_product_info and not has_explicit_title:
-            return False
-
         if has_explicit_title:
-            return (size_token_count >= 2 and has_unit) or size_label_count >= 2
+            return True
+
+        # Aggressive policy: any clear size chart/table section deletes the whole image,
+        # even when the image also contains model/product/spec text.
+        if has_size_keyword and size_label_count >= 1 and size_token_count >= 3:
+            return True
+        if size_label_count >= 2 and size_token_count >= 5:
+            return True
+        if has_table_word and size_label_count >= 1 and size_token_count >= 3:
+            return True
 
         return (
             has_table_word
             and size_token_count >= 5
             and size_label_count >= 2
             and has_unit
-            and size_block_ratio >= 0.75
-            and not has_product_info
+            and size_block_ratio >= 0.35
         )
 
     def _is_size_table_block(self, text: str) -> bool:
@@ -165,6 +168,45 @@ class TextTranslator:
             or self._is_size_dimension_label(text)
             or self._is_size_token_text(text)
         )
+
+    def _is_laundry_care_text(self, text: str) -> bool:
+        if not text:
+            return False
+        t = unicodedata.normalize("NFKC", str(text)).lower()
+        compact = re.sub(r"[\s\u3000:_：\-|/]+", "", t)
+        keywords = [
+            "\u6d17\u6da4", "\u6e05\u6d17", "\u4fdd\u517b", "\u62a4\u7406", "\u6e05\u6d01",
+            "\u6c34\u6d17", "\u5e72\u6d17", "\u624b\u6d17", "\u673a\u6d17",
+            "\u667e\u5e72", "\u98ce\u5e72", "\u9634\u5e72", "\u70d8\u5e72",
+            "\u71a8\u70eb", "\u70eb\u6597", "\u6f02\u767d", "\u4e0d\u53ef\u6f02\u767d",
+            "\u6d17\u6c34\u551b", "\u6d17\u6da4\u6807\u8bc6", "\u6d17\u6807",
+            "\u6d17\u6da4\u8bf4\u660e", "\u6d17\u6da4\u65b9\u5f0f", "\u6d17\u6da4\u5efa\u8bae", "\u6d17\u6da4\u5c0f\u8d34\u58eb",
+            "washing", "washinginstruction", "carelabel", "washinglabel",
+            "handwash", "machinewash", "dryclean", "donotbleach", "donotiron", "tumbledry",
+        ]
+        return any(k in compact or k in t for k in keywords)
+
+    def _has_laundry_care_context(self, items: List[Tuple[str, tuple]]) -> bool:
+        texts = [str(text or "") for text, _ in items if str(text or "").strip()]
+        if not texts:
+            return False
+        combined = "\n".join(unicodedata.normalize("NFKC", text).lower() for text in texts)
+        laundry_count = sum(1 for text in texts if self._is_laundry_care_text(text))
+        strong_title = bool(
+            re.search(
+                r"(\u6d17\u6da4\u8bf4\u660e|\u6d17\u6da4\u65b9\u5f0f|\u6d17\u6da4\u5efa\u8bae|\u6d17\u6c34\u551b|\u62a4\u7406\u8bf4\u660e|washing\s*instruction|care\s*label|washing\s*label)",
+                combined,
+                re.IGNORECASE,
+            )
+        )
+        has_care_action = bool(
+            re.search(
+                r"(\u624b\u6d17|\u673a\u6d17|\u5e72\u6d17|\u6c34\u6d17|\u6f02\u767d|\u71a8\u70eb|hand\s*wash|machine\s*wash|dry\s*clean|bleach|iron)",
+                combined,
+                re.IGNORECASE,
+            )
+        )
+        return strong_title or (laundry_count >= 2 and has_care_action)
 
 
     def _has_factory_intro_context(self, items: List[Tuple[str, tuple]]) -> bool:
@@ -321,6 +363,10 @@ YÊU CẦU:
         size_table_context = self._has_size_table_context(normalized_items)
         if size_table_context:
             print("    [SIZE TABLE] delete image")
+            return None
+
+        if self._has_laundry_care_context(normalized_items):
+            print("    [LAUNDRY CARE] delete image")
             return None
 
         for text, bbox in normalized_items:

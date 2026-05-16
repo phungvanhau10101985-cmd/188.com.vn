@@ -340,7 +340,31 @@ class ImageClassifier:
                     }
                 }
         
-        # BƯỚC 1: Kiểm tra nhanh nếu chỉ có Latin/symbols -> KEEP ngay
+        # BƯỚC 1: Nội dung giặt tẩy/size cần AI ảnh nếu job cho phép.
+        # Nếu job là DeepSeek + local, service sẽ rơi xuống _process_local và translator sẽ xóa.
+        if self._has_laundry_delete_context(text_blocks_to_draw):
+            return {
+                'type': 'gemini',
+                'reason': 'Ảnh chứa bảng/hướng dẫn giặt tẩy',
+                'details': {
+                    'text_blocks': num_text_blocks,
+                    'laundry_care': True,
+                    'quick_detection': True
+                }
+            }
+
+        if self._has_size_table_delete_context(text_blocks_to_draw):
+            return {
+                'type': 'gemini',
+                'reason': 'Ảnh chứa bảng chọn size',
+                'details': {
+                    'text_blocks': num_text_blocks,
+                    'size_table': True,
+                    'quick_detection': True
+                }
+            }
+
+        # BƯỚC 2: Kiểm tra nhanh nếu chỉ có Latin/symbols -> KEEP ngay
         all_latin_only = True
         for item in text_blocks_to_draw:
             text = item.get('text', '')
@@ -360,7 +384,7 @@ class ImageClassifier:
                 }
             }
         
-        # BƯỚC 2: Kiểm tra nhanh tín hiệu XÓA thông thường
+        # BƯỚC 3: Kiểm tra nhanh tín hiệu XÓA thông thường
         for item in text_blocks_to_draw:
             text = item.get('text', '')
             if not text:
@@ -408,7 +432,7 @@ class ImageClassifier:
                     }
                 }
         
-        # BƯỚC 3: Kiểm tra nhanh từ khóa GIẶT TẨY - ƯU TIÊN CHO GEMINI
+        # BƯỚC 4: Kiểm tra nhanh từ khóa GIẶT TẨY - gửi AI nếu được phép.
         for item in text_blocks_to_draw:
             text = item.get('text', '')
             if not text:
@@ -435,7 +459,7 @@ class ImageClassifier:
                         }
                     }
         
-        # BƯỚC 4: Kiểm tra nhanh tín hiệu GEMINI - CHỈ KHI CÓ ĐỦ HÁN TỰ
+        # BƯỚC 5: Kiểm tra nhanh tín hiệu GEMINI - CHỈ KHI CÓ ĐỦ HÁN TỰ
         for item in text_blocks_to_draw:
             text = item.get('text', '')
             if not text:
@@ -452,7 +476,22 @@ class ImageClassifier:
             text_lower = text.lower()
             
             # 1. Kiểm tra từ khóa kích thước QUAN TRỌNG
-            critical_size_keywords = ['尺码', '尺寸', '码数', '码', 'size table', 'size chart']
+            delete_size_keywords = ['尺码表', '尺寸表', '尺码', 'size table', 'size chart']
+            for keyword in delete_size_keywords:
+                if keyword in text or keyword in text_lower:
+                    return {
+                        'type': 'gemini',
+                        'reason': f'Chứa bảng chọn size: {keyword} ({hanzi_count} Hán tự)',
+                        'details': {
+                            'text_blocks': num_text_blocks,
+                            'detected_keyword': keyword,
+                            'hanzi_count': hanzi_count,
+                            'size_table': True,
+                            'quick_detection': True
+                        }
+                    }
+
+            critical_size_keywords = ['尺寸', '码数', '码']
             for keyword in critical_size_keywords:
                 if keyword in text or keyword in text_lower:
                     return {
@@ -641,6 +680,81 @@ class ImageClassifier:
             return True, main_keyword, all_detected_keywords
         
         return False, "", []
+
+    def _has_laundry_delete_context(self, text_blocks: List[Dict]) -> bool:
+        """True khi OCR thấy một bảng/hướng dẫn giặt tẩy đủ rõ để ưu tiên AI/local policy."""
+        if not text_blocks:
+            return False
+
+        texts = [str(item.get('text', '') or '') for item in text_blocks if str(item.get('text', '') or '').strip()]
+        if not texts:
+            return False
+
+        combined = "\n".join(texts).lower()
+        compact = re.sub(r"[\s\u3000:_：\-|/]+", "", combined)
+        strong_patterns = [
+            '洗涤说明', '洗涤方式', '洗涤建议', '洗涤小贴士',
+            '洗涤标识', '洗水唛', '洗标', '护理说明',
+            'washinginstruction', 'carelabel', 'washinglabel',
+        ]
+        if any(pattern in compact for pattern in strong_patterns):
+            return True
+
+        detected = []
+        for text in texts:
+            has_laundry_care, _keyword, keywords = self._check_laundry_care_keywords(text)
+            if has_laundry_care:
+                detected.extend(keywords)
+
+        if len(set(detected)) < 2:
+            return False
+
+        action_patterns = [
+            '手洗', '机洗', '水洗', '干洗', '漂白', '熨烫', '烘干',
+            'handwash', 'machinewash', 'dryclean', 'bleach', 'iron', 'tumbledry',
+        ]
+        return any(pattern in compact for pattern in action_patterns)
+
+    def _has_size_table_delete_context(self, text_blocks: List[Dict]) -> bool:
+        """True khi OCR thấy một bảng chọn size đủ rõ để ưu tiên AI/local policy."""
+        if not text_blocks:
+            return False
+
+        texts = [str(item.get('text', '') or '') for item in text_blocks if str(item.get('text', '') or '').strip()]
+        if not texts:
+            return False
+
+        combined = "\n".join(texts).lower()
+        compact = re.sub(r"[\s\u3000:_：\-|/]+", "", combined)
+        explicit_title_patterns = [
+            '尺码表', '尺寸表', '尺码对照表', '尺寸对照表',
+            '选择尺码', '选尺码', 'sizechart', 'sizetable', 'sizeguide',
+        ]
+        if any(pattern in compact for pattern in explicit_title_patterns):
+            return True
+
+        size_labels = [
+            '胸围', '腰围', '臀围', '肩宽', '衣长', '袖长', '裤长', '裙长',
+            '身高', '体重', '脚长', '内长', '鞋码', '欧码', '码数',
+            'chest', 'waist', 'hip', 'shoulder', 'length', 'sleeve',
+            'height', 'weight', 'footlength',
+        ]
+        label_count = sum(1 for label in size_labels if label in compact)
+        size_token_count = 0
+        for text in texts:
+            t = re.sub(r"[\s\u3000]+", "", text.lower())
+            if re.fullmatch(r"(?:xxxs|xxs|xs|s|m|l|xl|xxl|xxxl|xxxxl|\d{2,3})(?:[-/](?:xxxs|xxs|xs|s|m|l|xl|xxl|xxxl|xxxxl|\d{2,3}))*", t):
+                size_token_count += 1
+            elif re.fullmatch(r"\d+(?:[\.,]\d+)?(?:cm|mm|kg|g|斤)?", t):
+                size_token_count += 1
+
+        has_size_keyword = any(k in compact for k in ['尺码', '尺寸', 'size'])
+        has_unit = bool(re.search(r"(?:cm|厘米|mm|kg|斤)", combined, re.IGNORECASE))
+        if has_size_keyword and label_count >= 1 and size_token_count >= 3:
+            return True
+        if label_count >= 2 and size_token_count >= 5:
+            return True
+        return label_count >= 2 and has_unit and size_token_count >= 3
     
     def classify_image(self, 
                       processed_blocks: List,
@@ -752,7 +866,7 @@ class ImageClassifier:
             print(f"    🧺 PHÁT HIỆN TỪ KHÓA GIẶT TẨY: {laundry_keyword}")
             print(f"    📋 Tất cả từ khóa: {all_laundry_keywords}")
             
-            # Ảnh có từ khóa giặt tẩy -> ƯU TIÊN GỬI GEMINI
+            # Ảnh có từ khóa giặt tẩy -> gửi AI nếu được phép; local translator sẽ xóa.
             return {
                 'type': 'gemini',
                 'reason': f'Chứa từ khóa hướng dẫn giặt tẩy: {laundry_keyword} - {total_hanzi_chars} Hán tự',
@@ -763,7 +877,7 @@ class ImageClassifier:
                     'hanzi_count': total_hanzi_chars,
                     'hanzi_list': all_hanzi_chars,
                     'has_laundry_care': True,
-                    'priority': 'HIGH'  # Ưu tiên cao
+                    'priority': 'HIGH'
                 }
             }
         
