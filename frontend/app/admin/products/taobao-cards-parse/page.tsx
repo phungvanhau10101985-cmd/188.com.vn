@@ -1352,12 +1352,15 @@ export default function TaobaoCardsParsePage() {
         let shopPresence = new Set<string>();
         if (ids.length > 0) {
           try {
-            const pres = await adminProductAPI.listingParserDbPresence(ids);
+            const pres = await adminProductAPI.listingParserDbPresence(ids, {
+              includeDoneDrafts: false,
+              productsActiveOnly: true,
+            });
             shopPresence = new Set(pres.existing_normalized ?? []);
           } catch {
             showToast(
               'err',
-              'Không đối chiếu được sản phẩm đã có trên shop — các ô chọn vẫn bật; kiểm tra mạng và thử lại.',
+              'Không đối chiếu được sản phẩm đã bán trên shop — các ô chọn vẫn bật; kiểm tra mạng và thử lại.',
             );
           }
         }
@@ -1742,7 +1745,7 @@ export default function TaobaoCardsParsePage() {
             <div className="flex-1 overflow-auto px-4 py-3 min-h-[160px]">
               {doneDraftsModalLoading ? (
                 <p className="text-sm text-slate-600" role="status">
-                  Đang tải nháp và đối chiếu sản phẩm đã có trên shop…
+                  Đang tải nháp và đối chiếu sản phẩm đã đăng bán trên web…
                 </p>
               ) : doneDraftsModalRows.length === 0 ? (
                 <p className="text-sm text-slate-600">Không có nháp để hiển thị.</p>
@@ -1753,8 +1756,12 @@ export default function TaobaoCardsParsePage() {
                     <p className="text-xs text-slate-600">
                       Cột «đăng web» khớp Export Excel nháp — trượt ngang để đối chiếu file import/export. Hàng có mã{' '}
                       <code className="text-[10px] bg-white/80 px-1 rounded">A…</code>/
-                      <code className="text-[10px] bg-white/80 px-1 rounded">T…</code> trùng sản phẩm đã lưu (theo{' '}
-                      <code className="text-[10px] bg-white/80 px-1 rounded">…a188…</code>) sẽ không chọn để đăng.
+                      <code className="text-[10px] bg-white/80 px-1 rounded">T…</code> trùng{' '}
+                      <strong className="font-medium text-slate-800">sản phẩm đang bán trên web</strong> (theo{' '}
+                      <code className="text-[10px] bg-white/80 px-1 rounded">…a188…</code> trong{' '}
+                      <code className="text-[10px] bg-white/80 px-1 rounded">products</code>, chỉ{' '}
+                      <code className="text-[10px] bg-white/80 px-1 rounded">is_active</code>) sẽ không chọn để đăng —{' '}
+                      <strong className="font-medium text-slate-800">không</strong> chặn chỉ vì có nháp crawl.
                     </p>
                     <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-slate-700">
                       <span>
@@ -1771,7 +1778,7 @@ export default function TaobaoCardsParsePage() {
                       </span>
                       <span>
                         <strong className="tabular-nums text-slate-700">{doneDraftsModalStats.alreadyInShop}</strong>{' '}
-                        đã có trong shop (không cho chọn đăng)
+                        đã có trên shop đang bán (không cho chọn đăng)
                       </span>
                       <span>
                         <strong className="tabular-nums text-amber-800">{doneDraftsModalStats.noData}</strong> thiếu product_data
@@ -1914,8 +1921,8 @@ export default function TaobaoCardsParsePage() {
                               const pk = draftListingPresenceKeyFromProductData(pd);
                               note =
                                 pk != null
-                                  ? `Đã có sản phẩm trên shop (mã ${pk} — trùng product_id hoặc …${pk}a188…).`
-                                  : 'Đã có sản phẩm trên shop.';
+                                  ? `Đã có sản phẩm đang bán trên shop (mã ${pk} — trùng product_id hoặc …${pk}a188…).`
+                                  : 'Đã có sản phẩm đang bán trên shop.';
                             } else if (!formatOk)
                               note = formatBlockers.length ? formatBlockers.join(' · ') : 'Chưa đạt định dạng đăng.';
                             else note = row.draft?.message || row.draft?.status || 'Sẵn sàng đăng';
@@ -1933,7 +1940,7 @@ export default function TaobaoCardsParsePage() {
                               badgeText = 'Đã đăng';
                             } else if (alreadyInShop) {
                               badgeCls = 'bg-slate-300 text-slate-900';
-                              badgeText = 'Đã có trong shop';
+                              badgeText = 'Đã bán trên shop';
                             } else if (!formatOk) {
                               badgeCls = 'bg-orange-100 text-orange-950';
                               badgeText = 'Chưa đạt định dạng';
@@ -1981,7 +1988,7 @@ export default function TaobaoCardsParsePage() {
                                     }}
                                     aria-label={
                                       alreadyInShop
-                                        ? `Nháp ${row.draftId} đã có trong shop — không chọn để đăng`
+                                        ? `Nháp ${row.draftId} đã có SP đang bán trên shop — không chọn để đăng`
                                         : !formatOk
                                           ? `Nháp ${row.draftId} chưa đạt định dạng — không chọn để đăng`
                                           : `Chọn nháp ${row.draftId}`

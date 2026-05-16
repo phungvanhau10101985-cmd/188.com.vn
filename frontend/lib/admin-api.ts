@@ -73,22 +73,103 @@ function getAdminToken(): string | null {
   return localStorage.getItem('admin_token');
 }
 
+function sanitizeDownloadFilename(name: string): string {
+  const n = (name || '').trim() || 'download.bin';
+  return n.replace(/[/\\?%*:|"<>]/g, '_');
+}
+
 /**
- * Gắn `<a download>` vào DOM và hoãn `revokeObjectURL` — tránh một số trình duyệt không lưu file
- * khi click lập trình hoặc revoke quá sớm làm hỏng tải.
+ * Trình duyệt thường **mất user activation** sau `await fetch()`, nên `<a download>` sau đó có thể bị bỏ qua
+ * (HTTPS/production hay Safari). Ưu tiên File System Access API (Chrome/Edge) để mở hộp thoại «Lưu vào…».
  */
-function triggerBrowserBlobDownload(blob: Blob, filename: string): void {
-  if (typeof window === 'undefined') return;
+async function triggerBlobDownloadPreferred(blob: Blob, filename: string): Promise<void> {
+  const safeName = sanitizeDownloadFilename(filename);
+  const w = typeof window !== 'undefined' ? window : undefined;
+  if (!w) return;
+
+  const pickerFn = Reflect.get(w, 'showSaveFilePicker') as
+    | ((options: {
+        suggestedName: string;
+        types?: { description: string; accept: Record<string, string[]> }[];
+      }) => Promise<FileSystemFileHandle>)
+    | undefined;
+
+  if (typeof pickerFn === 'function') {
+    const isXlsx = /\.xlsx$/i.test(safeName);
+    try {
+      const handle = await pickerFn({
+        suggestedName: safeName,
+        types: isXlsx
+          ? [
+              {
+                description: 'Excel',
+                accept: {
+                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+                },
+              },
+            ]
+          : [{ description: 'CSV', accept: { 'text/csv': ['.csv'] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return;
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      console.warn('[admin-api] showSaveFilePicker failed, fallback <a download>', e);
+    }
+  }
+
   const objectUrl = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = objectUrl;
-  a.download = filename;
-  a.rel = 'noopener';
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 800);
+  const revokeLater = () => {
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  };
+
+  try {
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = safeName;
+    a.rel = 'noopener noreferrer';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: w }));
+    document.body.removeChild(a);
+  } catch (e) {
+    console.warn('[admin-api] anchor download failed, trying window.open(blob)', e);
+    try {
+      const opened = w.open(objectUrl, '_blank', 'noopener,noreferrer');
+      if (!opened) {
+        throw new Error('popup blocked');
+      }
+    } catch {
+      URL.revokeObjectURL(objectUrl);
+      throw new Error(
+        'Trình duyệt chặn tải file sau khi nhận dữ liệu. Thử Chrome/Edge (có hộp thoại Lưu), tắt chặn popup, hoặc kiểm tra HTTPS.',
+      );
+    }
+  }
+  revokeLater();
+}
+
+async function assertBlobLooksLikeXlsx(blob: Blob): Promise<void> {
+  if (blob.size < 64) {
+    throw new Error(
+      `Phản hồi quá nhỏ (${blob.size} byte). Thường do proxy/nginx trả HTML thay vì Excel — kiểm tra tab Network.`,
+    );
+  }
+  const head = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+  const pk =
+    head[0] === 0x50 &&
+    head[1] === 0x4b &&
+    (head[2] === 0x03 || head[2] === 0x05 || head[2] === 0x07) &&
+    (head[3] === 0x04 || head[3] === 0x06 || head[3] === 0x08);
+  if (pk) return;
+  const snippet = (await blob.slice(0, 500).text()).replace(/\s+/g, ' ').trim().slice(0, 240);
+  throw new Error(
+    snippet.startsWith('<') || snippet.startsWith('{')
+      ? `Không nhận được Excel — có vẻ là HTML/JSON (${snippet.slice(0, 120)}…). Kiểm tra URL API, nginx và phiên đăng nhập admin.`
+      : 'Không nhận được file Excel (.xlsx là ZIP). Kiểm tra phản hồi server.',
+  );
 }
 
 /** Chuỗi thân thiện từ FastAPI detail (chuỗi | mảng validation | object { message }) */
@@ -765,11 +846,22 @@ export const adminProductAPI = {
     });
   },
 
-  /** Đối chiếu ID parse HTML listing với `products` và nháp import crawl xong (`product_import_drafts`). */
-  listingParserDbPresence: (ids: string[]) =>
+  /**
+   * Đối chiếu ID parse HTML listing với DB.
+   * - Mặc định (như trước): ``products`` + nháp import ``done`` có ``product_data`` — dùng cho lưới «chưa có trên shop».
+   * - Modal đăng sau crawl: ``{ includeDoneDrafts: false, productsActiveOnly: true }`` — chỉ SP đang ``is_active`` trên shop.
+   */
+  listingParserDbPresence: (
+    ids: string[],
+    opts?: { includeDoneDrafts?: boolean; productsActiveOnly?: boolean },
+  ) =>
     fetchAdmin<{ existing_normalized: string[] }>('/products/listing-parser-db-presence', {
       method: 'POST',
-      body: JSON.stringify({ ids }),
+      body: JSON.stringify({
+        ids,
+        include_done_drafts: opts?.includeDoneDrafts ?? true,
+        products_active_only: opts?.productsActiveOnly ?? false,
+      }),
     }),
 
   updateProduct: (productId: string, data: Partial<AdminProduct>) =>
@@ -976,7 +1068,7 @@ export const adminProductAPI = {
     }
     const blob = await res.blob();
     const suffix = finishedOnly ? '_ket_qua' : '_snapshot';
-    triggerBrowserBlobDownload(blob, `listing_import_queue_${queueToken.slice(0, 12)}${suffix}.csv`);
+    await triggerBlobDownloadPreferred(blob, `listing_import_queue_${queueToken.slice(0, 12)}${suffix}.csv`);
   },
 
   /** Excel mẫu nhập web — dữ liệu sản phẩm từ draft các dòng đã xong trong đợt (giống export bulk draft). */
@@ -999,11 +1091,12 @@ export const adminProductAPI = {
         throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Tải Excel sản phẩm từ đợt thất bại');
       }
       const blob = await res.blob();
+      await assertBlobLooksLikeXlsx(blob);
       const cd = res.headers.get('Content-Disposition');
       let filename = `listing_queue_products_${queueToken.slice(0, 12)}.xlsx`;
       const m = cd && /filename="?([^";]+)"?/i.exec(cd);
       if (m?.[1]) filename = m[1].trim();
-      triggerBrowserBlobDownload(blob, filename);
+      await triggerBlobDownloadPreferred(blob, filename);
     } finally {
       if (tid != null) window.clearTimeout(tid);
     }
@@ -1050,10 +1143,11 @@ export const adminProductAPI = {
       throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Export draft 1688 thất bại');
     }
     const blob = await res.blob();
+    await assertBlobLooksLikeXlsx(blob);
     const disposition = res.headers.get('Content-Disposition');
     const match = disposition?.match(/filename="?([^";]+)"?/);
     const filename = match ? match[1] : `import_1688_draft_${draftId}.xlsx`;
-    triggerBrowserBlobDownload(blob, filename);
+    await triggerBlobDownloadPreferred(blob, filename);
   },
 
   uploadImport1688ExcelBatch: async (

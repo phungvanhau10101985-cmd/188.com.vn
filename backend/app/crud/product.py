@@ -1256,11 +1256,15 @@ def normalize_listing_parser_external_id(raw: Optional[str]) -> str:
     return t
 
 
-def listing_parser_ids_existing_in_products(db: Session, candidate_external_ids: List[str]) -> Set[str]:
+def listing_parser_ids_existing_in_products(
+    db: Session, candidate_external_ids: List[str], *, active_only: bool = False
+) -> Set[str]:
     """
-    Đánh dấu id listing (vd A945… sau chuẩn hoa) là đã có trong shop nếu:
+    Đánh dấu id listing (vd A945… sau chuẩn hoa) là đã có trong bảng ``products`` nếu:
     - `products.product_id` trùng chính xác, hoặc
     - `product_id` bắt đầu bằng `{id}a188…` (mã nội bộ nhập Hibox/1688 kèm SKU).
+
+    ``active_only=True``: chỉ các SP đang ``is_active`` (đang lên web catalog).
     """
     out: Set[str] = set()
     normalized_unique: Dict[str, str] = {}  # key chuẩn → canonical (duplicate input gộp 1 khóa)
@@ -1274,7 +1278,10 @@ def listing_parser_ids_existing_in_products(db: Session, candidate_external_ids:
     if not cands:
         return out
 
-    found_exact_rows = db.query(Product.product_id).filter(Product.product_id.in_(cands)).all()
+    q_exact = db.query(Product.product_id).filter(Product.product_id.in_(cands))
+    if active_only:
+        q_exact = q_exact.filter(Product.is_active.is_(True))
+    found_exact_rows = q_exact.all()
     exact_db = {r[0] for r in found_exact_rows}
     need_prefix_scan: List[str] = []
 
@@ -1288,7 +1295,10 @@ def listing_parser_ids_existing_in_products(db: Session, candidate_external_ids:
     if not like_patterns:
         return out
 
-    hit_rows = db.query(Product.product_id).filter(or_(*[Product.product_id.like(p) for p in like_patterns])).all()
+    q_like = db.query(Product.product_id).filter(or_(*[Product.product_id.like(p) for p in like_patterns]))
+    if active_only:
+        q_like = q_like.filter(Product.is_active.is_(True))
+    hit_rows = q_like.all()
     hit_ids = [r[0] for r in hit_rows]
 
     for c in need_prefix_scan:

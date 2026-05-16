@@ -336,13 +336,21 @@ class PurgeDeadMediaUrlBody(BaseModel):
 
 
 class ListingParserIdsDbPresenceBody(BaseModel):
-    """Đối chiếu id từ parse HTML listing với products + nháp import crawl xong (kể cả chưa đăng web)."""
+    """Đối chiếu id từ parse HTML listing — mặc định gồm ``products`` và nháp crawl xong (như trước)."""
 
     ids: List[str] = Field(default_factory=list, description="ID như trên bảng parse (vd A918…)")
+    include_done_drafts: bool = Field(
+        True,
+        description="True (mặc định): gộp id đã có nháp import status=done có product_data (chưa chắc đã lên web). False: chỉ nhìn bảng products.",
+    )
+    products_active_only: bool = Field(
+        False,
+        description="True: chỉ coi là «đã có» khi có dòng ``products`` và ``is_active``. False: mọi dòng products (kể cả ẩn).",
+    )
 
 
 class ListingParserIdsDbPresenceResponse(BaseModel):
     existing_normalized: List[str] = Field(
         ...,
-        description="Các id sau chuẩn hoá (A|T + số) đã có trong shop hoặc đã có nháp crawl xong (chưa đăng web)",
+        description="Các id sau chuẩn hoá (A|T + số) khớp điều kiện trong body",
     )

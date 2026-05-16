@@ -626,17 +626,24 @@ def post_listing_parser_ids_db_presence(
     _: AdminUser = Depends(require_module_permission("products")),
 ):
     """
-    Cho trang admin parse HTML listing: trả về những ID (A…/T… như trên bảng) đã có trong `products`
-    (trùng `product_id` hoặc có mã dạng `{id}a188…` do nhập từ Hibox/1688),
-    hoặc đã có nháp import crawl xong (`product_import_drafts`: status done + có `product_data`) — kể cả chưa đăng web.
+    Cho trang admin parse HTML listing:
+
+    - Luôn đối chiếu `products` (trùng `product_id` hoặc prefix `{id}a188…`).
+    - ``products_active_only``: chỉ SP đang ``is_active`` (đang hiển thị trên shop).
+    - ``include_done_drafts``: gộp id đã có nháp import ``done`` + ``product_data`` (dùng để ẩn dòng lưới parse:
+      «chưa có trên shop và chưa có nháp»). Modal «đăng web sau crawl» nên gửi ``include_done_drafts=false``
+      để «đã có trong shop» chỉ khi đã có trong ``products``.
     """
     raw_ids = body.ids or []
     if len(raw_ids) > 2000:
         raise HTTPException(status_code=400, detail="Tối đa 2000 id mỗi lần gọi.")
 
-    existing_products = crud.product.listing_parser_ids_existing_in_products(db, raw_ids)
-    existing_drafts = crud.product.listing_parser_ids_with_done_drafts(db, raw_ids)
-    merged = existing_products | existing_drafts
+    existing_products = crud.product.listing_parser_ids_existing_in_products(
+        db, raw_ids, active_only=body.products_active_only
+    )
+    merged = set(existing_products)
+    if body.include_done_drafts:
+        merged |= crud.product.listing_parser_ids_with_done_drafts(db, raw_ids)
     return ListingParserIdsDbPresenceResponse(existing_normalized=sorted(merged))
 
 
