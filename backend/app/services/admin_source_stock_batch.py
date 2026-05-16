@@ -28,6 +28,15 @@ from app.services.source_stock_checker import _evaluate_page_stock
 
 logger = logging.getLogger(__name__)
 
+# Lỗi tạm (chặn / captcha / lỗi đọc): không ghi admin_source_batch_scanned_at để SP được ưu tiên kiểm tra lại ngay.
+_TRANSIENT_ADMIN_BATCH_RAW_STATUSES = frozenset({"error", "unknown", "fetch_error"})
+
+
+def should_commit_admin_batch_ttl_after_scan(raw_status: str | None) -> bool:
+    """False → không đánh dấu đã batch — giữ SP trong hàng chờ tức thì (sticky retry phía client)."""
+    s = (raw_status or "").strip().lower()
+    return s not in _TRANSIENT_ADMIN_BATCH_RAW_STATUSES
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -296,6 +305,7 @@ def run_admin_source_stock_scan_next_from_db(
     domain: str,
     active_only: bool = True,
     cursor_after_product_id: int = 0,
+    sticky_seed_product_id: int = 0,
 ) -> Dict[str, Any]:
     """
     Chọn một SP thỏa bộ lọc miền + TTL hàng chờ (SP có PDP traffic được xử lý theo cửa sổ lượt xem và khoảng đợi riêng).
@@ -304,6 +314,7 @@ def run_admin_source_stock_scan_next_from_db(
       2) Chưa từng đánh batch hay mốt ``admin_source_batch_scanned_at`` cũ hơn.
       3) Tie-break ``products.id`` tăng dần.
 
+    ``sticky_seed_product_id`` (``products.id``): nếu còn thỏa bộ lọc, ưu tiên kiểm tra lại đúng SP đó (retry captcha/chặn…).
     Biến ``cursor_after_product_id`` giữ chỉ cho tương thích API; không lái queue.
     """
     _ = cursor_after_product_id
@@ -311,12 +322,18 @@ def run_admin_source_stock_scan_next_from_db(
     domain_l = (domain or "1688").strip().lower()
     filt, vu = _ttl_ready_filters(Product, domain_l, active_only=active_only)
 
-    prod = (
-        db.query(Product)
-        .filter(*filt)
-        .order_by(*_admin_batch_queue_priority_order(Product, traffic_view_since_utc=vu))
-        .first()
-    )
+    prod = None
+    sid = max(0, int(sticky_seed_product_id or 0))
+    if sid > 0:
+        prod = db.query(Product).filter(Product.id == sid, *filt).first()
+
+    if prod is None:
+        prod = (
+            db.query(Product)
+            .filter(*filt)
+            .order_by(*_admin_batch_queue_priority_order(Product, traffic_view_since_utc=vu))
+            .first()
+        )
     if not prod:
         ttl_days = admin_batch_scan_cooldown_days()
         return {
@@ -340,16 +357,17 @@ def run_admin_source_stock_scan_next_from_db(
     ttl_days = admin_batch_scan_cooldown_days()
     scan = dict(run_admin_source_url_scan(db, url=seed_link_default, domain=domain_l))
     marked_at: datetime | None = None
-    try:
-        now_stamp = _utcnow()
-        row = db.query(Product).filter(Product.id == prod.id).first()
-        if row is not None:
-            row.admin_source_batch_scanned_at = now_stamp
-            db.commit()
-            marked_at = now_stamp
-    except Exception as exc:
-        db.rollback()
-        logger.warning("admin_source_batch_scanned_at không ghi được (id=%s): %s", prod.id, exc)
+    if should_commit_admin_batch_ttl_after_scan(scan.get("raw_status")):
+        try:
+            now_stamp = _utcnow()
+            row = db.query(Product).filter(Product.id == prod.id).first()
+            if row is not None:
+                row.admin_source_batch_scanned_at = now_stamp
+                db.commit()
+                marked_at = now_stamp
+        except Exception as exc:
+            db.rollback()
+            logger.warning("admin_source_batch_scanned_at không ghi được (id=%s): %s", prod.id, exc)
 
     scan.update(
         {

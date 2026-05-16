@@ -7,7 +7,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from sqlalchemy import or_
 
@@ -51,6 +51,66 @@ _IN_STOCK_PATTERNS = (
     "起批量",
     "库存",
 )
+
+
+def _format_source_blocked_detail(summary: str, title: str, text: str, href: str) -> str:
+    """Ghép tiêu đề + URL + đoạn DOM để admin thấy phía nguồn báo gì."""
+    t_one = " ".join(str(text).split())
+    excerpt = t_one[:720]
+    lines = [
+        "[1688 — phản hồi trang khi kiểm tra] " + summary.strip(),
+        "Tiêu đề trình duyệt: " + (title or "").strip()[:280],
+        "URL hiện tại: " + (href or "").strip()[:500],
+    ]
+    if excerpt:
+        lines.append("Trích nội dung hiển thị (rút gọn): " + excerpt)
+    return "\n".join(lines)[:2400]
+
+
+def _blocked_probe_from_dom(title: str, text: str, href: str) -> Optional[SourceStockCheckResult]:
+    """Captcha / đăng nhập / giới hạn / ‘phát hiện quét’ — không tiếp tục queue tự động phía frontend."""
+    hay = f"{title}\n{text}"
+    probes: List[Tuple[re.Pattern[str], str]] = [
+        (
+            re.compile(
+                r"验证码|滑块验证|拖动滑块|向右滑动|安全验证|人机验证|身份验证|验证您的身份",
+                re.I,
+            ),
+            "Trang đang hiển thị captcha hoặc bước xác minh an toàn.",
+        ),
+        (
+            re.compile(r"请登录|请先登录|登录后查看|账号登录|登录\s*1688", re.I),
+            "Trang yêu cầu đăng nhập tài khoản.",
+        ),
+        (
+            re.compile(
+                r"访问被拒绝|访问过于频繁|访问请求过于频繁|您的访问过于频繁|请求太过频繁|访问过快",
+                re.I,
+            ),
+            "Trang báo giới hạn lượt truy cập hoặc từ chối kết nối.",
+        ),
+        (
+            re.compile(
+                r"风控|风险控制|系统检测.*异常|非正常访问|疑似爬虫|自动化访问|恶意访问|拦截访问",
+                re.I,
+            ),
+            "Trang báo kiểm soát rủi ro / nghi ngờ truy cập tự động hoặc quét dữ liệu.",
+        ),
+        (
+            re.compile(
+                r"sorry[, ]+you\s+have\s+been\s+blocked|access\s+denied|403\s*forbidden|\bforbidden\b",
+                re.I,
+            ),
+            "Trang báo chặn truy cập (tiếng Anh / forbidden).",
+        ),
+    ]
+    for rx, summary in probes:
+        if rx.search(hay):
+            return SourceStockCheckResult(
+                status="blocked",
+                error=_format_source_blocked_detail(summary, title, text, href),
+            )
+    return None
 
 
 @dataclass
@@ -238,9 +298,12 @@ def _evaluate_page_stock(url: str) -> SourceStockCheckResult:
     title = str((payload or {}).get("title") or "")
     text = str((payload or {}).get("text") or "")
     href = str((payload or {}).get("href") or "")
+
+    blocked = _blocked_probe_from_dom(title, text, href)
+    if blocked is not None:
+        return blocked
+
     haystack = f"{title} {text}"
-    if re.search(r"验证码|滑块|安全验证|登录|请登录", haystack):
-        return SourceStockCheckResult(status="error", error="1688 yêu cầu đăng nhập/xác minh/captcha khi kiểm tra tồn kho.")
     if any(token in haystack for token in _OUT_OF_STOCK_PATTERNS):
         return SourceStockCheckResult(status="out_of_stock")
     if "1688.com/offer/" not in href and "detail.1688.com" not in href:
@@ -272,7 +335,7 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
         product.source_stock_error = result.error
         retry_minutes = (
             settings.SOURCE_STOCK_CHECK_ERROR_RETRY_MINUTES
-            if result.status in {"error", "unknown"}
+            if result.status in {"error", "unknown", "blocked"}
             else settings.SOURCE_STOCK_CHECK_STALE_MINUTES
         )
         product.source_stock_next_check_at = now + timedelta(minutes=retry_minutes)
@@ -281,7 +344,7 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
         elif result.status == "in_stock" and (product.available or 0) <= 0 and previous_status == "out_of_stock":
             product.available = 500
         db.commit()
-        if result.status in {"error", "unknown"}:
+        if result.status in {"error", "unknown", "blocked"}:
             logger.warning("source stock check issue: product_id=%s status=%s error=%s", product_id, result.status, result.error)
         else:
             logger.info("source stock checked: product_id=%s status=%s", product_id, result.status)

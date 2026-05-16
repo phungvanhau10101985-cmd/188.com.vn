@@ -128,6 +128,11 @@ function isUnresolvedStockProbe(raw: string | null | undefined): boolean {
   return ['error', 'unknown', 'fetch_error', 'bad_url', 'no_data'].includes(s);
 }
 
+/** Trang nguồn (1688) báo captcha / chặn / phát hiện quét — dừng lặp queue, chi tiết trong `detail`. */
+function isBlockedBySourceSite(raw: string | null | undefined): boolean {
+  return (raw || '').trim().toLowerCase() === 'blocked';
+}
+
 /** Link http(s) mở tab mới — URL trong DB / canonical scrape. */
 function ExternalHttpLink({ url }: { url: string }) {
   const u = url.trim();
@@ -191,12 +196,22 @@ export default function AdminSourceStockCheckPage() {
   }, [oosRows]);
 
   const manualCursorRef = useRef(0);
+  /** Theo DB: giữ `products.id` khi lần trước lỗi tạm — backend + tab luôn retry đúng SP đó trước. */
+  const stickySeedProductIdRef = useRef<number | null>(null);
 
   /** Luôn khớp render hiện tại — async loop đọc sau `await` không bị stale như chỉ state. */
   const autoGateRef = useRef(auto);
   const scanFromDbGateRef = useRef(scanFromDb);
   autoGateRef.current = auto;
   scanFromDbGateRef.current = scanFromDb;
+
+  useEffect(() => {
+    stickySeedProductIdRef.current = null;
+  }, [domain]);
+
+  useEffect(() => {
+    if (!scanFromDb) stickySeedProductIdRef.current = null;
+  }, [scanFromDb]);
 
   useEffect(() => {
     manualCursorRef.current = manualCursor;
@@ -322,9 +337,11 @@ export default function AdminSourceStockCheckPage() {
           domain,
           activeOnly: true,
           cursorAfterProductId: 0,
+          stickySeedProductId: stickySeedProductIdRef.current ?? undefined,
         });
 
         if (res.done) {
+          stickySeedProductIdRef.current = null;
           const ttl =
             typeof res.admin_batch_scan_cooldown_days === 'number'
               ? res.admin_batch_scan_cooldown_days
@@ -362,6 +379,7 @@ export default function AdminSourceStockCheckPage() {
           typeof res.seed_product_db_id === 'number' ? ` — DB id ${res.seed_product_db_id}` : '';
         const hint = typeof res.detail === 'string' && res.detail.trim() ? ` — ${res.detail.trim().slice(0, 200)}` : '';
         if (res.classified_out_of_stock) {
+          stickySeedProductIdRef.current = null;
           if (res.updates_committed) {
             showToast(
               'info',
@@ -373,12 +391,25 @@ export default function AdminSourceStockCheckPage() {
               `Hết hàng trên nguồn (theo cờ trang); chưa khớp bản trong shop — không đổi DB («${shortUrl}»${seedShort})`,
             );
           }
+        } else if (isBlockedBySourceSite(res.raw_status)) {
+          stickySeedProductIdRef.current = null;
+          setAuto(false);
+          const full = (res.detail || '').trim() || 'Trang nguồn báo chặn hoặc phát hiện quét.';
+          const toastSlice = full.length > 520 ? `${full.slice(0, 520)}…` : full;
+          showToast(
+            'err',
+            `${toastSlice} Đã dừng lặp — xem đầy đủ trong ô «Lần kiểm tra gần nhất».`,
+          );
         } else if (isUnresolvedStockProbe(res.raw_status)) {
+          if (typeof res.seed_product_db_id === 'number' && res.seed_product_db_id > 0) {
+            stickySeedProductIdRef.current = res.seed_product_db_id;
+          }
           showToast(
             'info',
-            `Chưa kiểm tra được nguồn (captcha, chặn, lỗi đọc trang…) — không coi là hết hàng («${shortUrl}»${seedShort})${hint}`,
+            `Chưa kiểm tra được nguồn (lỗi đọc / mạng…) — giữ SP này, sẽ chạy lại sau («${shortUrl}»${seedShort})${hint}`,
           );
         } else {
+          stickySeedProductIdRef.current = null;
           showToast(
             'ok',
             `OK — nguồn đọc được, không xếp hết («${shortUrl}»${seedShort})`,
@@ -423,8 +454,11 @@ export default function AdminSourceStockCheckPage() {
     setLastError(null);
     try {
       const res = await adminProductAPI.runSourceStockBatchOne({ url, domain });
-      manualCursorRef.current = i + 1;
-      setManualCursor(i + 1);
+      const blockedManual = isBlockedBySourceSite(res.raw_status);
+      if (!blockedManual) {
+        manualCursorRef.current = i + 1;
+        setManualCursor(i + 1);
+      }
       setSessionChecks((n) => n + 1);
       setRecent((prev) => [res, ...prev].slice(0, 36));
       bumpOosRows(res, url);
@@ -441,6 +475,10 @@ export default function AdminSourceStockCheckPage() {
             `Hết trên nguồn (theo cờ) nhưng chưa thấy sản khớp trong shop — không đổi DB («${shortUrl}»)`,
           );
         }
+      } else if (blockedManual) {
+        const full = (res.detail || '').trim() || 'Trang nguồn báo chặn hoặc phát hiện quét.';
+        const toastSlice = full.length > 520 ? `${full.slice(0, 520)}…` : full;
+        showToast('err', `${toastSlice} (giữ nguyên dòng URL trong ô để xử lý cookie / thử lại).`);
       } else if (isUnresolvedStockProbe(res.raw_status)) {
         showToast('info', `Chưa kiểm tra được nguồn — không coi là hết hàng («${shortUrl}»)${hint}`);
       } else {
@@ -538,6 +576,7 @@ export default function AdminSourceStockCheckPage() {
 
   const resetPointers = () => {
     if (scanFromDb) {
+      stickySeedProductIdRef.current = null;
       setDbCursorAfterId(0);
       showToast(
         'ok',
@@ -585,6 +624,7 @@ export default function AdminSourceStockCheckPage() {
 
   const startAutoSequence = async () => {
     if (scanFromDb) {
+      stickySeedProductIdRef.current = null;
       setDbCursorAfterId(0);
     } else {
       manualCursorRef.current = 0;
@@ -605,7 +645,13 @@ export default function AdminSourceStockCheckPage() {
           <p className="text-sm text-gray-600 mt-1">
             Mặc định không cần nạp danh sách; với chế độ Theo DB tab mở và <strong>đã bật lặp</strong>: luôn{' '}
             <strong>một SP một lần</strong> — chờ kiểm tra xong SP đó rồi mới xếp lượt tiếp; giữa hai lần <em>bắt đầu</em>{' '}
-            kiểm tra cách nhau <strong>tối thiểu ~60 giây</strong> (nếu một SP chạy lâu hơn 60 giây thì SP kế bắt đầu ngay sau khi xong). Backend đọc{' '}
+            kiểm tra cách nhau <strong>tối thiểu ~60 giây</strong> (nếu một SP chạy lâu hơn 60 giây thì SP kế bắt đầu ngay sau khi xong).
+            Khi trang nguồn báo captcha / chặn / phát hiện quét (<code className="text-[11px] bg-gray-100 px-1 rounded">blocked</code>), backend ghép{' '}
+            <strong>tiêu đề + trích nội dung</strong> trang và <strong>tự dừng lặp</strong>. Khi chỉ lỗi đọc tạm (<code className="text-[11px] bg-gray-100 px-1 rounded">error</code> /{' '}
+            <code className="text-[11px] bg-gray-100 px-1 rounded">unknown</code> /{' '}
+            <code className="text-[11px] bg-gray-100 px-1 rounded">fetch_error</code>), hệ thống{' '}
+            <strong>không đánh dấu TTL batch</strong> và <strong>giữ đúng SP đó</strong> cho tới khi đọc được trang hoặc có kết quả xác định khác.
+            Backend đọc{' '}
             <strong>PDP traffic</strong> từ bảng{' '}
             <code className="text-[11px] bg-gray-100 px-1 rounded">user_product_views</code> /{' '}
             <code className="text-[11px] bg-gray-100 px-1 rounded">guest_product_views</code>: trong cửa sổ gần (ENV{' '}
@@ -964,12 +1010,27 @@ export default function AdminSourceStockCheckPage() {
                     </div>
                   ) : null}
                   {!lastFinished.classifiedOutOfStock &&
+                  isBlockedBySourceSite(lastFinished.rawStatus ?? undefined) ? (
+                    <div className="rounded-md bg-red-50 border-2 border-red-400 px-3 py-2 text-red-950 space-y-2 mt-1">
+                      <p className="font-semibold">Nguồn chặn / phát hiện quét — đã dừng lặp hàng chờ</p>
+                      <p className="text-[12px] leading-relaxed whitespace-pre-wrap">{lastFinished.detail ?? '—'}</p>
+                      <p className="text-[11px] text-red-900/90">
+                        Kiểm tra cookie 1688, giảm tần suất hoặc xử lý theo thông báo trên trang nguồn; sau đó bấm «Chạy 1 SP» hoặc «Bật lặp».
+                      </p>
+                      <dl className="grid gap-2 text-[12px]">
+                        <div>
+                          <dt className="font-medium text-red-900/95">raw_status</dt>
+                          <dd className="font-mono mt-0.5 break-all">{lastFinished.rawStatus ?? '—'}</dd>
+                        </div>
+                      </dl>
+                    </div>
+                  ) : !lastFinished.classifiedOutOfStock &&
                   isUnresolvedStockProbe(lastFinished.rawStatus ?? undefined) ? (
                     <div className="rounded-md bg-amber-50 border border-amber-300 px-3 py-2 text-amber-950 space-y-1.5 mt-1">
                       <p className="font-semibold">Chưa kiểm tra được nguồn</p>
                       <p className="text-amber-950/95 text-[12px]">
-                        Login/captcha, chặn bảo mật, lỗi mạng hoặc scraper không coi là &quot;hết hàng&quot; —{' '}
-                        <strong>tồn kho trong shop không đổi</strong>.
+                        Lỗi đọc trang tạm, mạng hoặc scraper không khẳng định được tồn —{' '}
+                        <strong>không coi là hết hàng</strong>, <strong>tồn kho shop không đổi</strong>; phiên sẽ giữ SP để thử lại.
                       </p>
                       <dl className="grid gap-2 text-[12px]">
                         <div>
@@ -1270,21 +1331,33 @@ export default function AdminSourceStockCheckPage() {
             recent.map((r, idx) => {
               const dbr = r as AdminSourceStockBatchDbNextResult;
               const doneQueue = typeof dbr.done === 'boolean' && dbr.done;
+              const blockedBySite =
+                !doneQueue && !r.classified_out_of_stock && isBlockedBySourceSite(r.raw_status);
               const unresolvedProbe =
                 !doneQueue && !r.classified_out_of_stock && isUnresolvedStockProbe(r.raw_status);
               const headline = doneQueue
                 ? 'Hết danh sách DB trong bộ lọc'
                 : r.classified_out_of_stock
                   ? 'Hết hàng trên nguồn (đã có cờ trang)'
+                  : blockedBySite
+                    ? 'Bị chặn / phát hiện quét — đã dừng lặp'
                   : unresolvedProbe
-                    ? 'Chưa kiểm tra được (chặn / lỗi đọc / captcha…)'
+                    ? 'Chưa kiểm tra được (lỗi đọc tạm…)'
                     : 'Đọc OK — không xếp hết';
               const sub =
                 typeof dbr.seed_product_db_id === 'number'
                   ? `SP hàng chờ #${dbr.seed_product_db_id} ${r.canonical_url || ''}`
                   : r.canonical_url || '';
               const summaryClass =
-                doneQueue ? 'text-gray-800' : r.classified_out_of_stock ? 'text-red-700' : unresolvedProbe ? 'text-amber-900' : 'text-emerald-800';
+                doneQueue
+                  ? 'text-gray-800'
+                  : r.classified_out_of_stock
+                    ? 'text-red-700'
+                    : blockedBySite
+                      ? 'text-red-800 font-semibold'
+                    : unresolvedProbe
+                      ? 'text-amber-900'
+                      : 'text-emerald-800';
               return (
                 <details key={`recent-${idx}-${sub}-${idx}`} className="p-4 group">
                   <summary className="cursor-pointer font-medium text-gray-900 list-none flex flex-wrap gap-2 items-baseline">

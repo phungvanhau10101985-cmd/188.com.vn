@@ -939,6 +939,8 @@ export const adminProductAPI = {
     domain: '1688' | 'hibox';
     activeOnly?: boolean;
     cursorAfterProductId?: number;
+    /** products.id — giữ kiểm tra lại đúng SP sau lỗi tạm (captcha/chặn…). */
+    stickySeedProductId?: number;
   }) =>
     fetchAdmin<AdminSourceStockBatchDbNextResult>('/products/admin/source-stock-batch/run-next-from-db', {
       method: 'POST',
@@ -946,6 +948,7 @@ export const adminProductAPI = {
         domain: params.domain,
         active_only: params.activeOnly ?? true,
         cursor_after_product_id: params.cursorAfterProductId ?? 0,
+        sticky_seed_product_id: params.stickySeedProductId ?? 0,
       }),
       timeoutMs: 300_000,
     }),

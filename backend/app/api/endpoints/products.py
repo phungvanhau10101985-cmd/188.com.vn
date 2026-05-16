@@ -48,6 +48,11 @@ class AdminSourceStockScanNextDbBody(BaseModel):
     domain: Literal["1688", "hibox"] = "1688"
     active_only: bool = True
     cursor_after_product_id: int = Field(0, ge=0)
+    sticky_seed_product_id: int = Field(
+        0,
+        ge=0,
+        description="products.id — ưu tiên kiểm tra lại đúng SP (retry sau lỗi tạm captcha/chặn). 0 = tắt.",
+    )
 
 
 class AdminBulkDeleteProductsByDbIdBody(BaseModel):
@@ -862,6 +867,7 @@ def admin_source_stock_batch_run_next_from_db(
             domain=str(body.domain),
             active_only=bool(body.active_only),
             cursor_after_product_id=int(body.cursor_after_product_id),
+            sticky_seed_product_id=int(body.sticky_seed_product_id),
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
