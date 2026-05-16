@@ -1014,7 +1014,7 @@ export const adminProductAPI = {
   getListingImportQueueStatus: (queueToken: string) =>
     fetchAdmin<AdminListingImportQueueStatus>(
       `/import-1688/listing-queue/${encodeURIComponent(queueToken)}`,
-      { timeoutMs: 60_000 },
+      { timeoutMs: 120_000 },
     ),
 
   pauseListingImportQueue: (queueToken: string) =>
@@ -1087,15 +1087,18 @@ export const adminProductAPI = {
         signal: ctrl.signal,
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => null as unknown);
-        let detail = formatFastApiDetail(
-          err && typeof err === 'object' && err !== null && 'detail' in err
-            ? (err as { detail?: unknown }).detail
-            : err,
-        );
+        const text = await res.text().catch(() => '');
+        let detail = '';
+        if (text) {
+          try {
+            const err = JSON.parse(text) as { detail?: unknown };
+            detail = formatFastApiDetail(err?.detail);
+          } catch {
+            /* body không phải JSON */
+          }
+        }
         if (!detail) {
-          const raw = await res.clone().text().catch(() => '');
-          const clip = raw.replace(/\s+/g, ' ').trim().slice(0, 280);
+          const clip = text.replace(/\s+/g, ' ').trim().slice(0, 280);
           detail = clip || res.statusText || `HTTP ${res.status}`;
         }
         throw new Error(

@@ -43,6 +43,46 @@ const TAOBAO_LISTING_QUEUE_PANEL_COLLAPSED_LS_KEY =
 /** Lưu dropdown «Trang lấy dữ liệu» (import listing → nháp). */
 const TAOBAO_CARDS_PARSE_IMPORT_TARGET_LS_KEY = 'admin.products.taobao_cards_parse.import_fetch_target';
 
+function listingQueueLastOkStorageKey(token: string): string {
+  return `admin.products.taobao_cards_parse.listing_queue_last_ok.${token}`;
+}
+
+/** Snapshot đợt lần poll thành công — khi API timeout hoặc F5 mất state vẫn bật được nút Excel/CSV. */
+function readCachedListingQueueStatus(token: string): AdminListingImportQueueStatus | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const raw = sessionStorage.getItem(listingQueueLastOkStorageKey(token));
+    if (!raw?.trim()) return undefined;
+    const v = JSON.parse(raw) as AdminListingImportQueueStatus;
+    return v && typeof v === 'object' ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeCachedListingQueueStatus(token: string, st: AdminListingImportQueueStatus): void {
+  try {
+    sessionStorage.setItem(listingQueueLastOkStorageKey(token), JSON.stringify(st));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+function clearCachedListingQueueStatus(token: string): void {
+  try {
+    sessionStorage.removeItem(listingQueueLastOkStorageKey(token));
+  } catch {
+    /* noop */
+  }
+}
+
+function resolveListingQueueStatusDisplay(
+  token: string,
+  liveByToken: Record<string, AdminListingImportQueueStatus>,
+): AdminListingImportQueueStatus | undefined {
+  return liveByToken[token] ?? readCachedListingQueueStatus(token);
+}
+
 /** Chuẩn hoá như backend (A|T + chỉ chữ số). */
 function normalizeListingParserItemId(raw: string): string {
   const t = raw.trim();
@@ -542,7 +582,10 @@ export default function TaobaoCardsParsePage() {
         const next = { ...prev };
         outcomes.forEach((r, i) => {
           const tok = slice[i];
-          if (r.status === 'fulfilled') next[tok] = r.value;
+          if (r.status === 'fulfilled') {
+            next[tok] = r.value;
+            writeCachedListingQueueStatus(tok, r.value);
+          }
         });
         return next;
       });
@@ -556,6 +599,7 @@ export default function TaobaoCardsParsePage() {
       });
       setQueuesPollErrorByToken(nextErr);
       if (dead.length) {
+        dead.forEach((d) => clearCachedListingQueueStatus(d));
         setTrackedQueueTokens((p) => p.filter((x) => !dead.includes(x)));
         setQueueStatusByToken((p) => {
           const n = { ...p };
@@ -893,6 +937,7 @@ export default function TaobaoCardsParsePage() {
   }, [newestTrackedQueueToken, newestTrackedQueueStatus]);
 
   const removeTrackedQueueToken = useCallback((token: string) => {
+    clearCachedListingQueueStatus(token);
     setTrackedQueueTokens((p) => p.filter((x) => x !== token));
     setQueueStatusByToken((p) => {
       const n = { ...p };
@@ -1098,7 +1143,7 @@ export default function TaobaoCardsParsePage() {
 
   const downloadListingQueueCsv = useCallback(
     async (token: string) => {
-      const st = queueStatusByToken[token];
+      const st = resolveListingQueueStatusDisplay(token, queueStatusByToken);
       const done = st?.counts?.done ?? 0;
       const err = st?.counts?.error ?? 0;
       if (done + err === 0) {
@@ -1117,7 +1162,7 @@ export default function TaobaoCardsParsePage() {
 
   const downloadListingQueueProductsExcel = useCallback(
     async (token: string) => {
-      const st = queueStatusByToken[token];
+      const st = resolveListingQueueStatusDisplay(token, queueStatusByToken);
       const done = st?.counts?.done ?? 0;
       const err = st?.counts?.error ?? 0;
       if (done + err === 0) {
@@ -1143,6 +1188,9 @@ export default function TaobaoCardsParsePage() {
   );
 
   const forgetAllTrackedQueues = useCallback(() => {
+    for (const t of trackedQueueTokens) {
+      clearCachedListingQueueStatus(t);
+    }
     try {
       localStorage.removeItem(TAOBAO_TRACKED_QUEUE_TOKENS_LS_KEY);
       localStorage.removeItem(TAOBAO_LISTING_QUEUE_TOKEN_LS_KEY);
@@ -1155,7 +1203,28 @@ export default function TaobaoCardsParsePage() {
     setQueuesPollErrorByToken({});
     setQueuesPanelCollapsed(false);
     setDbDeleteConfirmToken(null);
-  }, []);
+  }, [trackedQueueTokens]);
+
+  const refreshListingQueueStatus = useCallback(
+    async (token: string) => {
+      try {
+        const st = await adminProductAPI.getListingImportQueueStatus(token);
+        setQueueStatusByToken((p) => ({ ...p, [token]: st }));
+        writeCachedListingQueueStatus(token, st);
+        setQueuesPollErrorByToken((p) => {
+          const n = { ...p };
+          delete n[token];
+          return n;
+        });
+        showToast('ok', 'Đã lấy lại trạng thái đợt.');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setQueuesPollErrorByToken((p) => ({ ...p, [token]: msg }));
+        showToast('err', msg);
+      }
+    },
+    [showToast],
+  );
 
   const collapseQueuesPanel = useCallback(() => {
     setQueuesPanelCollapsed(true);
@@ -1313,7 +1382,7 @@ export default function TaobaoCardsParsePage() {
 
   const openDoneDraftsModalForToken = useCallback(
     async (token: string) => {
-      const st = queueStatusByToken[token];
+      const st = resolveListingQueueStatusDisplay(token, queueStatusByToken);
       const candidates = (st?.items ?? []).filter(
         (it) => it.state === 'done' && typeof it.draft_id === 'number' && it.draft_id > 0,
       );
@@ -2742,8 +2811,10 @@ export default function TaobaoCardsParsePage() {
 
           <div className="space-y-3">
             {displayQueueTokens.map((token, idx) => {
-              const st = queueStatusByToken[token];
+              const liveSt = queueStatusByToken[token];
               const pollErr = queuesPollErrorByToken[token];
+              const st = resolveListingQueueStatusDisplay(token, queueStatusByToken);
+              const statusFromCacheOnly = Boolean(pollErr && !liveSt && st);
               const pct = progressPctForQueue(st);
               const curLab = currentItemLabelForQueue(st);
               const runLbl = listingQueueRunStatusLabel(st ?? null);
@@ -2920,10 +2991,25 @@ export default function TaobaoCardsParsePage() {
 
                   {pollErr ? (
                     <div
-                      className="text-sm text-red-800 border border-red-200 bg-red-50 rounded-md px-3 py-2"
+                      className="text-sm text-red-800 border border-red-200 bg-red-50 rounded-md px-3 py-2 space-y-2"
                       role="alert"
                     >
-                      {pollErr}
+                      <div className="flex flex-wrap gap-2 items-center justify-between">
+                        <span className="min-w-0">{pollErr}</span>
+                        <button
+                          type="button"
+                          onClick={() => void refreshListingQueueStatus(token)}
+                          className="shrink-0 px-2.5 py-1 rounded border border-red-300 bg-white text-red-900 text-xs font-medium hover:bg-red-100"
+                        >
+                          Làm mới trạng thái
+                        </button>
+                      </div>
+                      {statusFromCacheOnly ? (
+                        <p className="text-xs text-amber-950">
+                          Đang hiển thị tiến độ từ lần kết nối API thành công trước (lưu trên trình duyệt). Các nút
+                          tải file vẫn dùng số đếm này.
+                        </p>
+                      ) : null}
                     </div>
                   ) : null}
 
