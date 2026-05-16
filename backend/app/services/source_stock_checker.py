@@ -69,11 +69,11 @@ def _format_source_blocked_detail(summary: str, title: str, text: str, href: str
 
 def _blocked_probe_from_dom(title: str, text: str, href: str) -> Optional[SourceStockCheckResult]:
     """Captcha / đăng nhập / giới hạn / ‘phát hiện quét’ — không tiếp tục queue tự động phía frontend."""
-    hay = f"{title}\n{text}"
+    hay = f"{title}\n{text}\n{href}"
     probes: List[Tuple[re.Pattern[str], str]] = [
         (
             re.compile(
-                r"验证码|滑块验证|拖动滑块|向右滑动|安全验证|人机验证|身份验证|验证您的身份",
+                r"验证码|验证失败|校验码|扫码验证|滑动验证|滑块验证|拖动滑块|向右滑动|安全验证|人机验证|身份验证|验证您的身份",
                 re.I,
             ),
             "Trang đang hiển thị captcha hoặc bước xác minh an toàn.",
@@ -111,6 +111,54 @@ def _blocked_probe_from_dom(title: str, text: str, href: str) -> Optional[Source
                 error=_format_source_blocked_detail(summary, title, text, href),
             )
     return None
+
+
+def _blocked_from_navigation_url(href: str, title: str, text: str) -> Optional[SourceStockCheckResult]:
+    """Đã nhảy sang trang đăng nhập / punish / anti-bot — không coi là lỗi đọc thường."""
+    h = (href or "").strip().lower()
+    if not h:
+        return None
+    needle_reasons: List[Tuple[str, str]] = [
+        ("login.taobao.com", "Trình duyệt đang ở trang đăng nhập Taobao (chuyển hướng từ 1688)."),
+        ("login.1688.com", "Trình duyệt đang ở trang đăng nhập 1688."),
+        ("passport.", "Luồng xác thực / passport (đăng nhập hoặc kiểm tra tài khoản)."),
+        ("/punish", "Trang xử phạt / giới hạn truy cập (punish)."),
+        ("_____tmd____", "Trang kiểm tra rủi ro / anti-bot (tmd)."),
+        ("nocaptcha", "Luồng xác minh / anti-bot (nocaptcha)."),
+        ("sec.taobao.com", "Trang bảo mật Taobao."),
+        ("identity_verification", "Luồng xác minh danh tính."),
+        ("wh_nav/", "Luồng điều hướng bảo mật / kiểm tra."),
+    ]
+    for needle, summary in needle_reasons:
+        if needle in h:
+            return SourceStockCheckResult(
+                status="blocked",
+                error=_format_source_blocked_detail(summary, title, text, href),
+            )
+    return None
+
+
+def _blocked_sparse_offer_page(title: str, text: str, href: str) -> Optional[SourceStockCheckResult]:
+    """
+    Vẫn URL offer/detail nhưng DOM quá ít chữ — hay là khung verify/interstitial không khớp regex đầy đủ.
+    """
+    if not href:
+        return None
+    hl = href.lower()
+    if "detail.1688.com" not in hl and "1688.com/offer/" not in hl:
+        return None
+    t = " ".join(str(text).split()).strip()
+    if len(t) >= 160:
+        return None
+    return SourceStockCheckResult(
+        status="blocked",
+        error=_format_source_blocked_detail(
+            "Trang offer có DOM quá ngắn — thường là khung chặn/captcha/interstitial (không đọc được nội dung SP).",
+            title,
+            text,
+            href,
+        ),
+    )
 
 
 @dataclass
@@ -303,6 +351,10 @@ def _evaluate_page_stock(url: str) -> SourceStockCheckResult:
     if blocked is not None:
         return blocked
 
+    nav_blocked = _blocked_from_navigation_url(href, title, text)
+    if nav_blocked is not None:
+        return nav_blocked
+
     haystack = f"{title} {text}"
     if any(token in haystack for token in _OUT_OF_STOCK_PATTERNS):
         return SourceStockCheckResult(status="out_of_stock")
@@ -310,6 +362,11 @@ def _evaluate_page_stock(url: str) -> SourceStockCheckResult:
         return SourceStockCheckResult(status="error", error=f"1688 chuyển hướng ngoài trang chi tiết: {href[:300]}")
     if any(token in haystack for token in _IN_STOCK_PATTERNS):
         return SourceStockCheckResult(status="in_stock")
+
+    sparse_block = _blocked_sparse_offer_page(title, text, href)
+    if sparse_block is not None:
+        return sparse_block
+
     return SourceStockCheckResult(status="unknown", error="Không nhận diện được trạng thái tồn kho từ DOM 1688.")
 
 
