@@ -25,6 +25,7 @@ from app.models.category_seo import CategorySeoGeminiTarget, CategorySeoSettings
 from app.models.category_final_mapping import CategoryFinalMapping
 from app.models.guest_behavior import GuestProductView, GuestFavorite, GuestSearchHistory
 from app.models.admin import AdminUser
+from app.models.source_stock_worker_state import SourceStockWorkerState
 from app.db.session import engine
 from app.core.config import settings
 import os
@@ -550,8 +551,39 @@ class MigrationManager:
         results['payments_sync_columns'] = self._sync_table_columns("payments", Payment)
         # 19. category_final_mappings.restrict_product_ids (tuỳ chọn: chỉ map một số product_id)
         results['category_final_mappings_sync'] = self._sync_table_columns("category_final_mappings", CategoryFinalMapping)
+        results['source_stock_worker_state_create'] = self._create_table_if_not_exists(
+            "source_stock_worker_state", SourceStockWorkerState
+        )
+        results['source_stock_worker_state_seed'] = self.migrate_source_stock_worker_state_seed_row()
+        results['source_stock_worker_state_sync'] = self._sync_table_columns(
+            "source_stock_worker_state", SourceStockWorkerState
+        )
 
         return results
+
+    def migrate_source_stock_worker_state_seed_row(self) -> bool:
+        """Một hàng singleton id=1 để không cần NULL-as-default khi pause."""
+        try:
+            inspector = inspect(engine)
+            if "source_stock_worker_state" not in inspector.get_table_names():
+                return True
+            with engine.connect() as conn:
+                if IS_POSTGRESQL:
+                    conn.execute(
+                        text(
+                            "INSERT INTO source_stock_worker_state (id, paused) VALUES (1, false) "
+                            "ON CONFLICT (id) DO NOTHING"
+                        )
+                    )
+                else:
+                    conn.execute(
+                        text("INSERT OR IGNORE INTO source_stock_worker_state (id, paused) VALUES (1, 0)")
+                    )
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.warning("migrate_source_stock_worker_state_seed_row: %s", e)
+            return True
 
     def create_migration_history_table(self):
         """Tạo bảng lịch sử migration nếu chưa có"""

@@ -475,6 +475,39 @@ export interface AdminSourceStockForceWorkerRecheckResult {
   source_stock_next_check_at?: string | null;
 }
 
+/** Dòng PDP trong snapshot worker (đang làm / vừa xong / sắp tới). */
+export interface AdminSourceStockWorkerProgressRow {
+  product_db_id: number;
+  product_code?: string | null;
+  name?: string | null;
+  link_default?: string | null;
+  checking_started_at_utc_iso?: string | null;
+  finished_at_utc_iso?: string | null;
+  source_stock_status?: string | null;
+  queue_hint?: string | null;
+  queue_hint_vi?: string | null;
+}
+
+/** Trạng thái worker kiểm tra nguồn (daemon + cờ pause DB). */
+export interface AdminSourceStockWorkerState {
+  ok: boolean;
+  env_source_stock_check_enabled: boolean;
+  db_paused: boolean;
+  db_pause_updated_at_utc_iso?: string | null;
+  daemon_thread_started_flag: boolean;
+  daemon_thread_alive: boolean;
+  process_in_memory_queue_depth: number;
+  check_interval_seconds: number;
+  effective_idle_reason: string | null;
+  effective_idle_hint_vi?: string | null;
+  deployment_notes_vi?: string | null;
+  checking?: AdminSourceStockWorkerProgressRow | null;
+  last_completed?: AdminSourceStockWorkerProgressRow | null;
+  next_upcoming_primary?: AdminSourceStockWorkerProgressRow | null;
+  upcoming_candidates?: AdminSourceStockWorkerProgressRow[];
+  progress_notes_vi?: string | null;
+}
+
 export interface AdminImageLocalizationJob {
   job_id: string;
   status: 'queued' | 'running' | 'done' | 'error' | 'cancelled';
@@ -1047,6 +1080,18 @@ export const adminProductAPI = {
       `/products/admin/source-stock-batch/queue-stats?domain=${encodeURIComponent(params.domain)}&active_only=${params.activeOnly ?? true}`,
       { timeoutMs: 60_000 },
     ),
+
+  fetchSourceStockWorkerState: () =>
+    fetchAdmin<AdminSourceStockWorkerState>('/products/admin/source-stock-batch/worker-state', {
+      timeoutMs: 45_000,
+    }),
+
+  setSourceStockWorkerPaused: (paused: boolean) =>
+    fetchAdmin<AdminSourceStockWorkerState>('/products/admin/source-stock-batch/worker-pause', {
+      method: 'POST',
+      body: JSON.stringify({ paused }),
+      timeoutMs: 45_000,
+    }),
 
   /** Đếm đã kiểm tra / OOS / còn hàng trong cửa sổ + mẫu chi tiết (giới hạn `detailLimit`). */
   fetchSourceStockActivityReport: (params: {

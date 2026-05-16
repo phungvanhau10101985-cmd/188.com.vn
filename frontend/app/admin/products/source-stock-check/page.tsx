@@ -6,95 +6,15 @@ import {
   adminProductAPI,
   type AdminSourceStockActivityReport,
   type AdminSourceStockActivityReportSampleRow,
-  type AdminSourceStockBatchDbNextResult,
-  type AdminSourceStockBatchOneMatched,
-  type AdminSourceStockBatchOneResult,
   type AdminSourceStockQueueStats,
+  type AdminSourceStockWorkerProgressRow,
+  type AdminSourceStockWorkerState,
 } from '@/lib/admin-api';
 
 const EMPTY_REPORT_SAMPLE_ROWS: AdminSourceStockActivityReportSampleRow[] = [];
 
-/** Nguồn kiểm tra: Hibox (scrape) hoặc CSSBuy (API /web/item — không cần bấm modal). */
+/** Nguồn trong thống kê queue / báo cáo (worker nền kiểm tra nguồn luôn Hibox). */
 type SourceStockDomain = 'hibox' | 'cssbuy';
-
-/** Theo DB + bật lặp: khoảng cách ngẫu nhiên giữa hai lần *bắt đầu* kiểm tra (sequential — chờ xong SP hiện tại). */
-const ADMIN_SOURCE_DB_LOOP_GAP_MS_MIN = 46_000;
-const ADMIN_SOURCE_DB_LOOP_GAP_MS_MAX = 60_000;
-
-function randomAdminSourceLoopGapMs(): number {
-  const span = ADMIN_SOURCE_DB_LOOP_GAP_MS_MAX - ADMIN_SOURCE_DB_LOOP_GAP_MS_MIN + 1;
-  return ADMIN_SOURCE_DB_LOOP_GAP_MS_MIN + Math.floor(Math.random() * span);
-}
-
-/** Kết quả một lần gọi run-next (phục vụ lặp tuần tự). */
-type RunNextOutcome = 'ok' | 'halt' | 'fail';
-
-type OosRow = AdminSourceStockBatchOneMatched & {
-  rowKey: string;
-  sourceUrl: string;
-  canonicalUrl: string;
-  domain: SourceStockDomain;
-  reason: string;
-  checkedAtIso: string;
-};
-
-/** Trong lúc gọi API máy chủ chọn SP từ hàng chờ. */
-type ActiveCheck = { mode: 'db' };
-
-type LastFinishedCheck =
-  | {
-      kind: 'ok';
-      finishedAtIso: string;
-      attemptedUrl: string;
-      canonicalUrl: string;
-      domain: SourceStockDomain;
-      seedProductDbId?: number | null;
-      seedProductName?: string | null;
-      classifiedOutOfStock: boolean;
-      updatesCommitted?: boolean;
-      rawStatus?: string | null;
-      detail?: string | null;
-      warnings: string[];
-    }
-  | { kind: 'queue_empty'; finishedAtIso: string; detail?: string | null }
-  | {
-      kind: 'error';
-      finishedAtIso: string;
-      attemptedUrl?: string;
-      message: string;
-    };
-
-function buildLastOkFromApi(
-  res: AdminSourceStockBatchDbNextResult | AdminSourceStockBatchOneResult,
-  attemptedUrl: string,
-  domainUsed: SourceStockDomain,
-): Extract<LastFinishedCheck, { kind: 'ok' }> {
-  const dbr = res as AdminSourceStockBatchDbNextResult;
-  return {
-    kind: 'ok',
-    finishedAtIso: new Date().toISOString(),
-    attemptedUrl: attemptedUrl.trim() || res.canonical_url?.trim() || '—',
-    canonicalUrl: (res.canonical_url || '').trim() || '—',
-    domain: domainUsed,
-    seedProductDbId: dbr.seed_product_db_id,
-    seedProductName: dbr.seed_product_name,
-    classifiedOutOfStock: !!res.classified_out_of_stock,
-    updatesCommitted: res.updates_committed,
-    rawStatus: res.raw_status,
-    detail: res.detail,
-    warnings: res.warnings ?? [],
-  };
-}
-
-/** Ghi chú hàng chờ DB vào ô Lý do. */
-function stockScanReasonLine(
-  res: AdminSourceStockBatchOneResult | AdminSourceStockBatchDbNextResult,
-): string | undefined {
-  const r = res as AdminSourceStockBatchDbNextResult;
-  if (r.seed_product_db_id == null) return undefined;
-  const name = r.seed_product_name?.trim();
-  return `Hàng DB #${r.seed_product_db_id}${name ? `: ${name}` : ''}`;
-}
 
 function SpinnerIcon({ className }: { className?: string }) {
   return (
@@ -113,66 +33,6 @@ function SpinnerIcon({ className }: { className?: string }) {
       />
     </svg>
   );
-}
-
-function newOosRowKey(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `oos-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
-}
-
-/** DOM/API không khẳng định được còn hàng — không được coi «hết hàng» trong nghiệp vụ cửa hàng. */
-function isUnresolvedStockProbe(raw: string | null | undefined): boolean {
-  const s = (raw || '').trim().toLowerCase();
-  return ['error', 'unknown', 'fetch_error', 'bad_url', 'no_data'].includes(s);
-}
-
-/** Phản hồi raw_status «blocked» (hiếm) hoặc heuristic chặn — dừng lặp queue, chi tiết trong `detail`. */
-function isBlockedBySourceSite(raw: string | null | undefined): boolean {
-  return (raw || '').trim().toLowerCase() === 'blocked';
-}
-
-/** Backend đôi khi trả `unknown`/`error` nhưng `detail` vẫn mô tả captcha/chặn — dừng lặp như `blocked`. */
-function detailLooksLikeCaptchaOrSiteBlock(detail: string | null | undefined): boolean {
-  const u = (detail || '').trim();
-  if (!u) return false;
-  const low = u.toLowerCase();
-  if (/cloudflare|security verification|csrf-token không đọc được|không đọc được csrf/i.test(low)) {
-    return true;
-  }
-  if (
-    /\bcaptcha\b|\bverify\b|verification\b|rate\s*limit|too\s+many\s+requests|\b403\b|\bforbidden\b|\bblocked\b|access\s+denied|\bpunish\b|nocaptcha/i.test(
-      low,
-    )
-  ) {
-    return true;
-  }
-  if (
-    /验证码|验证失败|校验|扫码验证|滑动验证|滑块|安全验证|人机验证|风控|拦截|访问过于频繁|请登录|登录后|passport|x5sec|_____tmd____|wh_nav/i.test(u)
-  ) {
-    return true;
-  }
-  if (/khung chặn|captcha|interstitial|anti-bot/i.test(low)) {
-    return true;
-  }
-  return false;
-}
-
-function shouldStopAutoForAntiBot(
-  res: AdminSourceStockBatchDbNextResult | AdminSourceStockBatchOneResult,
-): boolean {
-  if (isBlockedBySourceSite(res.raw_status)) return true;
-  if (!isUnresolvedStockProbe(res.raw_status)) return false;
-  return detailLooksLikeCaptchaOrSiteBlock(res.detail);
-}
-
-function isDualPlatformHardFailure(res: AdminSourceStockBatchOneResult): boolean {
-  return res.dual_platform_both_failed === true;
-}
-
-function isAntiBotUiHighlight(raw: string | null | undefined, detail: string | null | undefined): boolean {
-  return isBlockedBySourceSite(raw) || (isUnresolvedStockProbe(raw) && detailLooksLikeCaptchaOrSiteBlock(detail));
 }
 
 /** Link http(s) mở tab mới — URL trong DB / canonical scrape. */
@@ -220,6 +80,88 @@ function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+/** Ô «đang scrape / vừa xong / sắp tới» trên snapshot worker. */
+function WorkerStockProgressCard({
+  title,
+  subtitle,
+  tone,
+  row,
+  emptyHint,
+  mode,
+}: {
+  title: string;
+  subtitle: string;
+  tone: 'sky' | 'emerald' | 'slate';
+  row: AdminSourceStockWorkerProgressRow | null | undefined;
+  emptyHint: string;
+  mode: 'checking' | 'completed' | 'upcoming';
+}) {
+  const skin =
+    tone === 'sky'
+      ? 'border-sky-200/90 bg-white/85'
+      : tone === 'emerald'
+        ? 'border-emerald-200/90 bg-white/85'
+        : 'border-slate-200/90 bg-white/85';
+  const titleColor =
+    tone === 'sky' ? 'text-sky-950' : tone === 'emerald' ? 'text-emerald-950' : 'text-slate-900';
+
+  return (
+    <div className={`rounded-lg border px-2.5 py-2 min-w-0 ${skin}`}>
+      <p className={`text-[11px] font-semibold uppercase tracking-wide ${titleColor}`}>{title}</p>
+      <p className="text-[10px] text-slate-600 leading-snug mt-0.5">{subtitle}</p>
+      {!row ? (
+        <p className="text-[11px] text-slate-500 mt-2 leading-snug">{emptyHint}</p>
+      ) : (
+        <div className="mt-2 space-y-1 text-[11px] text-slate-800">
+          <p>
+            <span className="font-mono tabular-nums">DB #{row.product_db_id}</span>
+            {row.product_code ? (
+              <>
+                {' · '}
+                <span className="font-mono">{row.product_code}</span>
+              </>
+            ) : null}
+          </p>
+          {row.name ? <p className="line-clamp-2 text-slate-700">{row.name}</p> : null}
+          <p className="break-all">
+            <span className="text-slate-500">Link: </span>
+            <ExternalHttpLink url={row.link_default ?? ''} />
+          </p>
+          {mode === 'checking' && row.checking_started_at_utc_iso ? (
+            <p className="text-slate-600">
+              Bắt đầu:{' '}
+              <span className="font-mono text-[10px]">{formatReportTimestampUtc(row.checking_started_at_utc_iso)}</span>{' '}
+              <span className="text-slate-400">{formatReportAge(row.checking_started_at_utc_iso)}</span>
+            </p>
+          ) : null}
+          {mode === 'completed' ? (
+            <>
+              {row.source_stock_status ? (
+                <p>
+                  Trạng thái:{' '}
+                  <code className="text-[10px] bg-slate-100 px-1 rounded border border-slate-200">{row.source_stock_status}</code>
+                </p>
+              ) : null}
+              {row.finished_at_utc_iso ? (
+                <p className="text-slate-600">
+                  Hoàn tất:{' '}
+                  <span className="font-mono text-[10px]">{formatReportTimestampUtc(row.finished_at_utc_iso)}</span>{' '}
+                  <span className="text-slate-400">{formatReportAge(row.finished_at_utc_iso)}</span>
+                </p>
+              ) : null}
+            </>
+          ) : null}
+          {mode === 'upcoming' && row.queue_hint_vi ? (
+            <p className="text-[10px] text-indigo-950/90 bg-indigo-50/80 border border-indigo-100 rounded px-1.5 py-1">
+              {row.queue_hint_vi}
+            </p>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function MiniStat({
@@ -583,29 +525,17 @@ function SourceStockReportSampleTable({
 }
 
 export default function AdminSourceStockCheckPage() {
-  const [auto, setAuto] = useState(true);
-  const [running, setRunning] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: 'ok' | 'info' | 'err'; msg: string } | null>(null);
   const [domain, setDomain] = useState<SourceStockDomain>('hibox');
-  /** Sen kẽ thứ tự Hibox/CSSBuy + fallback trong một lần kiểm tra (backend). */
-  const [dualAlternateFallback, setDualAlternateFallback] = useState(false);
 
-  /** DB: cứ SAU id này thì query SP kế có link_default trong bộ lọc */
-  const [dbCursorAfterId, setDbCursorAfterId] = useState(0);
-
-  const [recent, setRecent] = useState<Array<AdminSourceStockBatchDbNextResult | AdminSourceStockBatchOneResult>>(
-    [],
-  );
-  const [oosRows, setOosRows] = useState<OosRow[]>([]);
-  /** Số lần đã gọi kiểm tra thành công (phiên làm việc) */
-  const [sessionChecks, setSessionChecks] = useState(0);
   /** Số ngày chờ để một SP được xếp hàng kiểm tra lại (theo backend, mặc định 30). */
   const [cooldownDays, setCooldownDays] = useState(30);
-  const [deleteDbModalOpen, setDeleteDbModalOpen] = useState(false);
-  const [bulkDeletingDb, setBulkDeletingDb] = useState(false);
   const [queueStats, setQueueStats] = useState<AdminSourceStockQueueStats | null>(null);
   const [queueStatsLoading, setQueueStatsLoading] = useState(false);
+  /** Snapshot daemon + cờ pause DB (`source_stock_worker_state`); queue RAM chỉ của process báo KPI. */
+  const [workerState, setWorkerState] = useState<AdminSourceStockWorkerState | null>(null);
+  const [pauseActionBusy, setPauseActionBusy] = useState(false);
   const [activityReport, setActivityReport] = useState<AdminSourceStockActivityReport | null>(null);
   const [activityReportLoading, setActivityReportLoading] = useState(false);
   const [activityReportError, setActivityReportError] = useState<string | null>(null);
@@ -619,8 +549,6 @@ export default function AdminSourceStockCheckPage() {
   const [reportOosSampleSelectedIds, setReportOosSampleSelectedIds] = useState<number[]>([]);
   const [reportOosBulkBusy, setReportOosBulkBusy] = useState(false);
   const recheckPollCancelRef = useRef(false);
-  const [activeCheck, setActiveCheck] = useState<ActiveCheck | null>(null);
-  const [lastFinished, setLastFinished] = useState<LastFinishedCheck | null>(null);
 
   const reportOosSampleRows = activityReport?.samples?.oos ?? EMPTY_REPORT_SAMPLE_ROWS;
   const reportOosRowById = useMemo(() => {
@@ -635,30 +563,6 @@ export default function AdminSourceStockCheckPage() {
     const valid = new Set(reportOosSampleRows.map((r) => r.id));
     setReportOosSampleSelectedIds((prev) => prev.filter((id) => valid.has(id)));
   }, [reportOosSampleRows]);
-
-  /** Cột «DB id» trong bảng = `products.id` (để xóa thật trên máy chủ). */
-  const oosDistinctDbIds = useMemo(() => {
-    const s = new Set<number>();
-    for (const row of oosRows) {
-      if (typeof row.id === 'number' && row.id > 0) s.add(row.id);
-    }
-    return Array.from(s).sort((a, b) => a - b);
-  }, [oosRows]);
-
-  const alternateSeqRef = useRef(0);
-  /** Theo DB: giữ `products.id` khi lần trước lỗi tạm — backend + tab luôn retry đúng SP đó trước. */
-  const stickySeedProductIdRef = useRef<number | null>(null);
-  /** Số lần lỗi tạm liên tiếp của sticky hiện tại; lần sau sẽ yêu cầu backend bỏ qua nếu vẫn lỗi. */
-  const stickyTransientFailureCountRef = useRef(0);
-
-  /** Luôn khớp render hiện tại — async loop đọc sau `await` không bị stale như chỉ state. */
-  const autoGateRef = useRef(auto);
-  autoGateRef.current = auto;
-
-  useEffect(() => {
-    stickySeedProductIdRef.current = null;
-    stickyTransientFailureCountRef.current = 0;
-  }, [domain]);
 
   useEffect(() => {
     recheckPollCancelRef.current = false;
@@ -688,7 +592,34 @@ export default function AdminSourceStockCheckPage() {
     } finally {
       setQueueStatsLoading(false);
     }
+    try {
+      const w = await adminProductAPI.fetchSourceStockWorkerState();
+      setWorkerState(w);
+    } catch {
+      /* giữ snapshot cũ — API worker-state lỗi không làm trống queue-stats */
+    }
   }, [domain]);
+
+  const toggleWorkerPauseFromDb = useCallback(
+    async (nextPaused: boolean) => {
+      setPauseActionBusy(true);
+      try {
+        const w = await adminProductAPI.setSourceStockWorkerPaused(nextPaused);
+        setWorkerState(w);
+        showToast(
+          'ok',
+          nextPaused
+            ? 'Đã tạm dừng kiểm tra nguồn (ghi DB). Worker không pop/claim cho đến khi «Chạy tiếp».'
+            : 'Đã bỏ tạm dừng — worker scrape lại khi có SP trong queue hoặc đến hạn.',
+        );
+      } catch (e) {
+        showToast('err', e instanceof Error ? e.message : String(e));
+      } finally {
+        setPauseActionBusy(false);
+      }
+    },
+    [showToast],
+  );
 
   const refreshActivityReport = useCallback(async () => {
     setActivityReportLoading(true);
@@ -999,248 +930,21 @@ export default function AdminSourceStockCheckPage() {
     () => ({
       busyByDbId: reportOosRowBusyById,
       disabledGlobally:
-        running ||
-        bulkDeletingDb ||
-        activityReportLoading ||
-        reportOosDeleting ||
-        reportOosBulkBusy,
+        activityReportLoading || reportOosDeleting || reportOosBulkBusy,
       onDeleteDb: (row) => requestReportOosDeleteDbIds([row.id]),
       onClearFlag: handleReportOosClearFlag,
       onRecheck: handleReportOosRecheck,
     }),
     [
       activityReportLoading,
-      bulkDeletingDb,
       handleReportOosClearFlag,
       handleReportOosRecheck,
       reportOosBulkBusy,
       reportOosDeleting,
       reportOosRowBusyById,
       requestReportOosDeleteDbIds,
-      running,
     ],
   );
-
-  const bumpOosRows = useCallback(
-    (res: AdminSourceStockBatchDbNextResult | AdminSourceStockBatchOneResult, attemptedUrl: string) => {
-      if (!res.classified_out_of_stock) return;
-      const seedLine = stockScanReasonLine(res);
-      const markLine =
-        typeof (res as AdminSourceStockBatchDbNextResult).seed_admin_batch_scanned_at === 'string'
-          ? `Đánh dấu queue: ${(res as AdminSourceStockBatchDbNextResult).seed_admin_batch_scanned_at}`
-          : undefined;
-      const reason = [
-        seedLine,
-        markLine,
-        res.raw_status ?? '',
-        res.detail ?? '',
-        (res.warnings ?? []).slice(0, 2).join('; '),
-      ]
-        .filter(Boolean)
-        .join(' · ')
-        .slice(0, 520);
-
-      const products: AdminSourceStockBatchOneMatched[] =
-        res.matched_products?.length > 0
-          ? res.matched_products
-          : [{ id: 0, name: '— không khớp sản phẩm trong shop —', slug: '', product_id: null }];
-
-      const iso = new Date().toISOString();
-      const dom = res.domain as SourceStockDomain;
-
-      setOosRows((prev) => {
-        const next = [...prev];
-        for (const m of products) {
-          const dedupeKey = `${m.id}|${attemptedUrl}|${res.canonical_url}|${reason.slice(0, 80)}`;
-          if (
-            next.some(
-              (row) =>
-                `${row.id}|${row.sourceUrl}|${row.canonicalUrl}|${row.reason.slice(0, 80)}` === dedupeKey,
-            )
-          )
-            continue;
-          next.unshift({
-            rowKey: newOosRowKey(),
-            ...m,
-            sourceUrl: attemptedUrl,
-            canonicalUrl: res.canonical_url,
-            domain: dom,
-            reason:
-              reason ||
-              'Phát hiện không đọc đủ dữ liệu SP trên Hibox sau scrape — có thể hết hoặc trang lỗi.',
-            checkedAtIso: iso,
-          });
-        }
-        return next.slice(0, 220);
-      });
-    },
-    [],
-  );
-
-  const runNextInternal = useCallback(async (): Promise<RunNextOutcome> => {
-    setActiveCheck({ mode: 'db' });
-    setRunning(true);
-    setLastError(null);
-    try {
-        const stickyBeforeRequest = stickySeedProductIdRef.current ?? null;
-        const skipStickyAfterFailure =
-          stickyBeforeRequest != null && stickyTransientFailureCountRef.current >= 1;
-        const seqSlot = dualAlternateFallback ? alternateSeqRef.current++ : 0;
-        const res = await adminProductAPI.runSourceStockBatchNextFromDb({
-          domain,
-          activeOnly: true,
-          cursorAfterProductId: 0,
-          stickySeedProductId: stickyBeforeRequest ?? undefined,
-          skipStickyAfterFailure,
-          dualAlternateFallback,
-          alternateSequenceIndex: seqSlot,
-        });
-
-        if (res.done) {
-          stickySeedProductIdRef.current = null;
-          stickyTransientFailureCountRef.current = 0;
-          const ttl =
-            typeof res.admin_batch_scan_cooldown_days === 'number'
-              ? res.admin_batch_scan_cooldown_days
-              : cooldownDays;
-          if (typeof res.admin_batch_scan_cooldown_days === 'number') {
-            setCooldownDays(res.admin_batch_scan_cooldown_days);
-          }
-          showToast(
-            'info',
-            res.detail ||
-              `Không còn sản trong hàng chờ (có thể tất cả đang chờ TTL ${ttl} ngày hoặc hết SP khớp bộ lọc).`,
-          );
-          setAuto(false);
-          setLastFinished({
-            kind: 'queue_empty',
-            finishedAtIso: new Date().toISOString(),
-            detail: res.detail ?? null,
-          });
-          setRecent((prev) => [res, ...prev].slice(0, 36));
-          return 'halt';
-        }
-
-        const tried = (res.seed_link_default || '').trim() || res.canonical_url || '';
-        setDbCursorAfterId(res.cursor_after_product_id);
-        setSessionChecks((n) => n + 1);
-        if (typeof res.admin_batch_scan_cooldown_days === 'number') {
-          setCooldownDays(res.admin_batch_scan_cooldown_days);
-        }
-        setRecent((prev) => [res, ...prev].slice(0, 36));
-        bumpOosRows(res, tried);
-        setLastFinished(buildLastOkFromApi(res, tried, domain));
-
-        const shortUrl = tried.length > 86 ? `${tried.slice(0, 86)}…` : tried || '(thiếu link)';
-        const seedShort =
-          typeof res.seed_product_db_id === 'number' ? ` — DB id ${res.seed_product_db_id}` : '';
-        const hint = typeof res.detail === 'string' && res.detail.trim() ? ` — ${res.detail.trim().slice(0, 200)}` : '';
-        if (res.classified_out_of_stock) {
-          stickySeedProductIdRef.current = null;
-          stickyTransientFailureCountRef.current = 0;
-          if (res.updates_committed) {
-            showToast(
-              'info',
-              `Hết hàng trên nguồn đã có dấu hiệu rõ — đã cập nhật tồn = 0 trên đúng SP hàng chờ («${shortUrl}»${seedShort})`,
-            );
-          } else {
-            showToast(
-              'info',
-              `Hết hàng trên nguồn (theo cờ trang) nhưng chưa ghi được DB — kiểm tra phản hồi hệ thống («${shortUrl}»${seedShort})`,
-            );
-          }
-        } else if (isDualPlatformHardFailure(res)) {
-          stickySeedProductIdRef.current = null;
-          stickyTransientFailureCountRef.current = 0;
-          setAuto(false);
-          const full = (res.detail || '').trim() || 'Hibox và CSSBuy đều không đọc được — đã ghi mốc lỗi lên SP hàng chờ.';
-          const toastSlice = full.length > 520 ? `${full.slice(0, 520)}…` : full;
-          showToast(
-            'err',
-            `${toastSlice} Đã dừng lặp — xem đầy đủ trong «Lần kiểm tra gần nhất».`,
-          );
-        } else if (shouldStopAutoForAntiBot(res)) {
-          stickySeedProductIdRef.current = null;
-          stickyTransientFailureCountRef.current = 0;
-          setAuto(false);
-          const full =
-            (res.detail || '').trim() ||
-            (isBlockedBySourceSite(res.raw_status)
-              ? 'Trang nguồn báo chặn hoặc phát hiện quét.'
-              : 'Phát hiện dấu hiệu captcha/chặn trong phản hồi — đã dừng lặp.');
-          const toastSlice = full.length > 520 ? `${full.slice(0, 520)}…` : full;
-          showToast(
-            'err',
-            `${toastSlice} Đã dừng lặp — xem đầy đủ trong ô «Lần kiểm tra gần nhất».`,
-          );
-        } else if (isUnresolvedStockProbe(res.raw_status)) {
-          if (res.skipped_after_retry) {
-            stickySeedProductIdRef.current = null;
-            stickyTransientFailureCountRef.current = 0;
-            showToast(
-              'info',
-              `SP lỗi lại sau khi retry — đã ghi mốc lỗi và bỏ qua vòng này, lượt sau chạy SP kế («${shortUrl}»${seedShort})${hint}`,
-            );
-          } else if (typeof res.seed_product_db_id === 'number' && res.seed_product_db_id > 0) {
-            stickySeedProductIdRef.current = res.seed_product_db_id;
-            stickyTransientFailureCountRef.current =
-              stickyBeforeRequest === res.seed_product_db_id
-                ? stickyTransientFailureCountRef.current + 1
-                : 1;
-            const nextAction =
-              stickyTransientFailureCountRef.current >= 1
-                ? 'sẽ retry đúng SP này; nếu vẫn lỗi thì bỏ qua để chạy SP kế'
-                : 'sẽ chạy lại SP này';
-            showToast(
-              'info',
-              `Chưa kiểm tra được nguồn (lỗi đọc / mạng…) — ${nextAction} («${shortUrl}»${seedShort})${hint}`,
-            );
-          } else {
-            stickyTransientFailureCountRef.current = 0;
-            showToast(
-              'info',
-              `Chưa kiểm tra được nguồn — không coi là hết hàng («${shortUrl}»${seedShort})${hint}`,
-            );
-          }
-        } else {
-          stickySeedProductIdRef.current = null;
-          stickyTransientFailureCountRef.current = 0;
-          showToast(
-            'ok',
-            `OK — nguồn đọc được, không xếp hết («${shortUrl}»${seedShort})`,
-          );
-        }
-        return 'ok';
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        const stickyBeforeError = stickySeedProductIdRef.current;
-        if (stickyBeforeError != null) {
-          stickyTransientFailureCountRef.current += 1;
-        }
-        setLastError(msg);
-        setLastFinished({
-          kind: 'error',
-          finishedAtIso: new Date().toISOString(),
-          message: msg,
-        });
-        showToast(
-          'err',
-          stickyBeforeError != null
-            ? `${msg} — sẽ thử lại SP này; nếu vẫn lỗi sẽ bỏ qua vòng này để chạy SP kế.`
-            : `${msg} — không nhận được seed từ server; lượt sau sẽ thử lại hàng chờ hiện tại hoặc SP kế nếu server đã ghi mốc.`,
-        );
-        return 'fail';
-      } finally {
-        setActiveCheck(null);
-        setRunning(false);
-        void refreshQueueStats();
-      }
-  }, [bumpOosRows, cooldownDays, domain, dualAlternateFallback, refreshQueueStats, showToast]);
-
-  const runNextRef = useRef(runNextInternal);
-  useEffect(() => {
-    runNextRef.current = runNextInternal;
-  }, [runNextInternal]);
 
   useEffect(() => {
     void refreshQueueStats();
@@ -1251,108 +955,19 @@ export default function AdminSourceStockCheckPage() {
   }, [refreshActivityReport]);
 
   useEffect(() => {
-    if (!auto) return;
     const id = window.setInterval(() => void refreshQueueStats(), 90_000);
     return () => window.clearInterval(id);
-  }, [auto, refreshQueueStats]);
+  }, [refreshQueueStats]);
 
   useEffect(() => {
-    if (!deleteDbModalOpen && reportOosDeleteConfirmIds == null) return;
+    if (reportOosDeleteConfirmIds == null) return;
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
-      if (deleteDbModalOpen && !bulkDeletingDb) setDeleteDbModalOpen(false);
-      if (reportOosDeleteConfirmIds != null && !reportOosDeleting) setReportOosDeleteConfirmIds(null);
+      if (!reportOosDeleting) setReportOosDeleteConfirmIds(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [deleteDbModalOpen, bulkDeletingDb, reportOosDeleteConfirmIds, reportOosDeleting]);
-
-  useEffect(() => {
-    if (!auto) return;
-
-    const ctl = { cancelled: false, sleepTimer: null as number | null };
-
-    const sleepRemain = (ms: number) =>
-      new Promise<void>((resolve) => {
-        if (ctl.cancelled || ms <= 0) {
-          resolve();
-          return;
-        }
-        ctl.sleepTimer = window.setTimeout(() => {
-          ctl.sleepTimer = null;
-          resolve();
-        }, ms);
-      });
-
-    void (async () => {
-      while (!ctl.cancelled && autoGateRef.current) {
-        const startedAt = Date.now();
-        const outcome = await runNextRef.current();
-        if (ctl.cancelled || outcome === 'halt') break;
-        if (!autoGateRef.current) break;
-        const elapsed = Date.now() - startedAt;
-        const remaining = Math.max(0, randomAdminSourceLoopGapMs() - elapsed);
-        await sleepRemain(remaining);
-      }
-    })();
-
-    return () => {
-      ctl.cancelled = true;
-      if (ctl.sleepTimer != null) window.clearTimeout(ctl.sleepTimer);
-    };
-  }, [auto]);
-
-  const resetPointers = () => {
-    stickySeedProductIdRef.current = null;
-    setDbCursorAfterId(0);
-    showToast(
-      'ok',
-      'Đã xóa id seed cục bộ trên tab (để ý chỉ báo hiển thị). Backend vẫn chọn SP theo độ ưu tiên toàn DB như trong chú thích.',
-    );
-    void refreshQueueStats();
-  };
-
-  const clearOosBrowserOnly = () => {
-    setOosRows([]);
-    showToast('ok', 'Đã ẩn danh sách trên tab này — không đổi dữ liệu trên máy chủ.');
-  };
-
-  const confirmDeleteOosProductsFromDb = async () => {
-    if (!oosDistinctDbIds.length) {
-      showToast('err', 'Không có hàng nào có DB id khớp sản trong shop để xóa.');
-      return;
-    }
-    setBulkDeletingDb(true);
-    setLastError(null);
-    try {
-      const res = await adminProductAPI.deleteSourceStockBatchProductsByDbIds(oosDistinctDbIds);
-      const removed = new Set(res.deleted_db_ids ?? []);
-      setOosRows((prev) => prev.filter((row) => !removed.has(row.id)));
-      setDeleteDbModalOpen(false);
-      let msg = `Đã xóa ${res.deleted_count ?? 0} sản khỏi DB.`;
-      if ((res.not_found_db_ids ?? []).length) {
-        msg += ` Không thấy id: ${res.not_found_db_ids!.join(', ')}.`;
-      }
-      showToast(res.deleted_count ? 'info' : 'err', msg);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setLastError(msg);
-      showToast('err', msg);
-    } finally {
-      setBulkDeletingDb(false);
-      void refreshQueueStats();
-    }
-  };
-
-  const startAutoSequence = async () => {
-    stickySeedProductIdRef.current = null;
-    setDbCursorAfterId(0);
-    setAuto(true);
-    showToast(
-      'info',
-      'Đã bật lặp — chạy ngay một SP; các lần sau: chờ xong SP hiện tại rồi nghỉ thêm ngẫu nhiên ~46–60 giây giữa hai lần bắt đầu.',
-    );
-  };
+  }, [reportOosDeleteConfirmIds, reportOosDeleting]);
 
   return (
     <div className="max-w-[88rem] mx-auto px-3 sm:px-5 py-5 pb-8">
@@ -1361,8 +976,11 @@ export default function AdminSourceStockCheckPage() {
           <div className="min-w-0">
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">Kiểm tra nguồn hàng</h1>
             <p className="text-xs sm:text-sm text-gray-600 mt-1 max-w-3xl">
-              Mỗi lần <strong>một SP</strong>. Lặp: nghỉ ngẫu nhiên ~46–60s giữa hai lần <em>bắt đầu</em>. Ưu tiên SP có lượt
-              xem PDP trong cửa sổ gần; lỗi tạm / captcha → giữ SP, không TTL.
+              <strong>Kiểm tra hết/còn hàng trên nguồn (1688/Hibox) chạy trên máy chủ:</strong> thread daemon trong process FastAPI, xếp
+              từng SP và ghi vào DB. Env chính:{' '}
+              <code className="text-[11px] bg-gray-100 px-1 rounded">SOURCE_STOCK_CHECK_ENABLED</code> (mặc định <strong>bật</strong>; đặt
+              false và khởi động lại backend để tắt), cùng <code className="text-[11px] bg-gray-100 px-1 rounded">SOURCE_STOCK_CHECK_*</code>{' '}
+              (interval, stale…). Worker luôn qua scrape Hibox. Tab này chỉ xem tiến độ queue và báo cáo — không scrape từ trình duyệt.
             </p>
           </div>
         </div>
@@ -1374,15 +992,17 @@ export default function AdminSourceStockCheckPage() {
             <span aria-hidden className="text-gray-400 text-[10px] hidden group-open:inline">
               ▾
             </span>
-            Đọc thêm — TTL batch, PDP traffic, chặn lặp, Hibox &amp; CSSBuy
+            Đọc thêm — TTL batch, PDP traffic, chặn / captcha, Hibox &amp; CSSBuy
           </summary>
           <div className="px-3 pb-3 pt-0 space-y-3 text-[13px] leading-relaxed text-gray-700 border-t border-gray-200">
             <p>
-              Không cần nạp danh sách tay khi Theo DB + bật lặp (tab mở): luôn <strong>một SP một lần</strong>; chờ xong SP
-              hiện tại rồi xếp lượt tiếp. Giữa hai lần <em>bắt đầu</em> có khoảng nghỉ ngẫu nhiên như phần đầu; nếu một SP xử lý lâu
-              hơn khoảng đó, SP kế bắt đầu ngay sau khi xong. Khi phản hồi báo chặn / rủi ro (
+              Worker máy chủ (khi <code className="text-[11px] bg-white px-1 rounded border border-gray-200">SOURCE_STOCK_CHECK_ENABLED</code>{' '}
+              bật — mặc định vậy) luôn xử lý qua <strong>scrape Hibox</strong> (không có chọn CSSBuy trên luồng nền), một SP mỗi vòng,
+              nghỉ theo{' '}
+              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">SOURCE_STOCK_CHECK_INTERVAL_SECONDS</code>. Không
+              cần mở tab admin để duy trì luồng. Khi phản hồi báo chặn / rủi ro (
               <code className="text-[11px] bg-white px-1 rounded border border-gray-200">blocked</code>
-              hoặc dấu hiệu captcha trên UI), lặp <strong>tự dừng</strong>.{' '}
+              hoặc dấu hiệu captcha trên UI), hãy xử lý nguồn hoặc hạ tần suất trên server.{' '}
               <code className="text-[11px] bg-white px-1 rounded border border-gray-200">error</code> /{' '}
               <code className="text-[11px] bg-white px-1 rounded border border-gray-200">fetch_error</code>:{' '}
               <strong>không đánh dấu TTL batch</strong> và <strong>giữ đúng SP đó</strong> để thử lại.
@@ -1405,7 +1025,7 @@ export default function AdminSourceStockCheckPage() {
                 ADMIN_SOURCE_BATCH_SCAN_COOLDOWN_DAYS
               </code>{' '}
               (= <strong>{cooldownDays}</strong> ngày theo API hiện tại). Một lần chạy cần{' '}
-              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">link_default</code> đủ dài.
+              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">link_default</code> đủ dài trong DB.
             </p>
             <p>
               <strong>Hibox:</strong> quy đổi <code className="text-[11px] bg-white px-1 rounded border">hibox.mn/v/…</code> rồi
@@ -1451,84 +1071,161 @@ export default function AdminSourceStockCheckPage() {
           <div className="flex flex-col gap-1 min-w-[10rem]">
             <span className="text-xs font-medium text-gray-500">Luồng</span>
             <p className="text-sm font-semibold text-gray-900">Theo DB (queue)</p>
-            <p className="text-[11px] text-gray-500 max-w-[16rem] leading-snug">
-              Một SP mỗi lần; ưu tiên PDP. Lặp: nghỉ ~46–60s giữa hai lần bắt đầu.
+            <p className="text-[11px] text-gray-500 max-w-[19rem] leading-snug">
+              Worker máy chủ (mặc định <strong>bật</strong>, scrape Hibox) tiếp tục đọc và cập nhật DB — tab chỉ làm dashboard, không có
+              lượt chạy từ trình duyệt.
             </p>
           </div>
           <div className="flex flex-col gap-1 flex-1 min-w-[12rem] max-w-md">
             <label htmlFor="source-domain-select" className="text-xs font-medium text-gray-500">
-              Nguồn đọc (batch)
+              Góc nhìn thống kê (batch)
             </label>
             <select
               id="source-domain-select"
               className="border border-gray-300 rounded-lg px-3 h-10 text-sm w-full"
               value={domain}
               onChange={(e) => setDomain(e.target.value as SourceStockDomain)}
-              disabled={running}
             >
               <option value="hibox">hibox.mn — scrape</option>
               <option value="cssbuy">cssbuy.com — API /web/item</option>
             </select>
-            <label className="mt-2 flex items-start gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-orange-700 disabled:opacity-45"
-                checked={dualAlternateFallback}
-                onChange={(ev) => setDualAlternateFallback(ev.target.checked)}
-                disabled={running}
-                aria-describedby="dual-alternate-hint"
-              />
-              <span id="dual-alternate-hint" className="text-[11px] text-gray-600 leading-snug">
-                <strong className="text-gray-800">Sen kẽ + fallback 2 nền:</strong> mỗi lần chạy thử Hibox rồi CSSBuy
-                theo thứ tự luân phiên; một nền lỗi thì đọc nền còn lại. Nếu <strong className="text-gray-800">cả hai
-                lỗi</strong> → dừng lặp và xem chi tiết bên dưới. Khi tắt: chỉ một nền như ô «Nguồn đọc».
-              </span>
-            </label>
+            <p className="text-[11px] text-gray-500 mt-1 leading-snug">
+              Lọc số trong «Tiến độ DB» và «Báo cáo 30 ngày» theo chiều admin batch đã định nghĩa — không đổi worker nền (luôn Hibox).
+            </p>
           </div>
         </div>
+
+        <section
+          className="rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-3 space-y-2"
+          aria-label="Tiến trình worker và tạm dừng trên DB"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <p className="text-xs font-semibold text-indigo-950 uppercase tracking-wide">Worker PDP / Hibox (server)</p>
+              {workerState ? (
+                <>
+                  <p className="text-[11px] text-indigo-950/85 leading-snug">
+                    ENV <code className="text-[10px] px-1 bg-white/80 rounded border border-indigo-100">SOURCE_STOCK_CHECK_ENABLED</code>:{' '}
+                    <strong>{workerState.env_source_stock_check_enabled ? 'bật' : 'tắt'}</strong>
+                    {' · '}Cờ tạm dừng (DB){' '}
+                    <strong>{workerState.db_paused ? 'BẬT — không scrape' : 'tắt'}</strong>
+                    {workerState.db_pause_updated_at_utc_iso
+                      ? ` · ${formatReportTimestampUtc(workerState.db_pause_updated_at_utc_iso)}`
+                      : ''}
+                    <br />
+                    Luồng <code className="text-[10px] px-1 bg-white/80 rounded border border-indigo-100">source-stock-checker</code>{' '}
+                    trong process này:{' '}
+                    <strong>{workerState.daemon_thread_alive ? 'đang chạy' : 'không hoạt động / chưa bật'}</strong>
+                    {' · '}Hàng chờ RAM process:{' '}
+                    <strong className="tabular-nums">{workerState.process_in_memory_queue_depth}</strong>
+                    {' · '}chu kỳ ~{' '}
+                    <strong className="tabular-nums">{workerState.check_interval_seconds}s</strong>
+                  </p>
+                  {workerState.effective_idle_reason ? (
+                    <p className="text-[11px] text-amber-950 bg-amber-50/95 border border-amber-100 rounded-md px-2 py-1.5">
+                      Hiện worker idle:{' '}
+                      <code className="text-[10px]">{workerState.effective_idle_reason}</code>
+                      {workerState.effective_idle_hint_vi ? ` — ${workerState.effective_idle_hint_vi}` : null}
+                    </p>
+                  ) : null}
+                  <details className="text-[10px] text-indigo-900/85">
+                    <summary className="cursor-pointer underline font-medium text-indigo-900 select-none">Nhiều tiến trình / VPS</summary>
+                    <p className="mt-1.5 leading-relaxed">{workerState.deployment_notes_vi}</p>
+                  </details>
+                </>
+              ) : (
+                <p className="text-[11px] text-indigo-900/85">
+                  Chưa có snapshot worker — đang tải cùng «Làm mới queue» hoặc lỗi mạng. Bấm «Làm mới queue» để đọc lại API.
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2 shrink-0">
+              <button
+                type="button"
+                aria-label="Tạm dừng kiểm tra nguồn, ghi cờ vào DB"
+                disabled={
+                  pauseActionBusy || !workerState || workerState.db_paused || !workerState.env_source_stock_check_enabled
+                }
+                className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-950 hover:bg-amber-50 disabled:opacity-45 disabled:pointer-events-none"
+                onClick={() => void toggleWorkerPauseFromDb(true)}
+              >
+                {pauseActionBusy ? 'Đang ghi…' : 'Tạm dừng (DB)'}
+              </button>
+              <button
+                type="button"
+                aria-label="Bỏ tạm dừng, worker chạy lại trong các process backend"
+                disabled={pauseActionBusy || !workerState || !workerState.db_paused}
+                className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-100 disabled:opacity-45 disabled:pointer-events-none"
+                onClick={() => void toggleWorkerPauseFromDb(false)}
+              >
+                Chạy tiếp (DB)
+              </button>
+            </div>
+          </div>
+          {workerState ? (
+            <div className="space-y-2 pt-2 mt-2 border-t border-indigo-100/80">
+              <p className="text-[10px] font-semibold text-indigo-950/90 uppercase tracking-wide">Link PDP — tiến trình scrape</p>
+              <div className="grid md:grid-cols-3 gap-2">
+                <WorkerStockProgressCard
+                  tone="sky"
+                  title="Đang chạy"
+                  subtitle="Ghi vào DB khi worker bước vào scrape (mọi process đọc chung)."
+                  row={workerState.checking}
+                  emptyHint="Không có SP đang «checking» trên snapshot — có thể worker đang nghỉ giữa chu kỳ hoặc vừa xong và chưa kịp vào PDP kế."
+                  mode="checking"
+                />
+                <WorkerStockProgressCard
+                  tone="emerald"
+                  title="Vừa chạy xong"
+                  subtitle="PDP kết thúc gần nhất đã commit trạng thái."
+                  row={workerState.last_completed}
+                  emptyHint="Chưa ghi «vừa xong» (chưa có lần scrape commit / worker mới restart)."
+                  mode="completed"
+                />
+                <WorkerStockProgressCard
+                  tone="slate"
+                  title="Chuẩn bị chạy tiếp"
+                  subtitle="Ưu tiên FIFO hàng chờ RAM process này, rồi SP đến hạn theo DB."
+                  row={workerState.next_upcoming_primary}
+                  emptyHint="FIFO RAM trống và không còn dòng đến hạn phù hợp trong bản preview (hoặc đang chờ TTL)."
+                  mode="upcoming"
+                />
+              </div>
+              {(workerState.upcoming_candidates ?? []).length > 0 ? (
+                <details className="rounded-md border border-indigo-100/80 bg-white/60 px-2 py-1.5 text-[10px] text-indigo-950/90">
+                  <summary className="cursor-pointer font-medium select-none underline">
+                    Các PDP xếp tiếp theo snapshot ({workerState.upcoming_candidates?.length ?? 0} dòng)
+                  </summary>
+                  <ol className="mt-2 list-decimal pl-4 space-y-2">
+                    {(workerState.upcoming_candidates ?? []).map((u) => (
+                      <li key={`${String(u.queue_hint)}-${String(u.product_db_id)}`} className="leading-snug">
+                        <span className="font-mono">#{u.product_db_id}</span>
+                        {u.product_code ? (
+                          <>
+                            {' · '}<span className="font-mono">{u.product_code}</span>
+                          </>
+                        ) : null}{' '}
+                        —{' '}
+                        <ExternalHttpLink url={u.link_default ?? ''} />
+                        {u.queue_hint_vi ? (
+                          <span className="block text-[9px] text-slate-600 mt-0.5">{u.queue_hint_vi}</span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ol>
+                </details>
+              ) : null}
+              {workerState.progress_notes_vi ? (
+                <p className="text-[10px] text-slate-600 leading-relaxed italic">{workerState.progress_notes_vi}</p>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
 
         <div className="flex flex-wrap items-center gap-2 py-2 border-y border-gray-100">
           <button
             type="button"
-            onClick={() => void runNextInternal()}
-            disabled={running}
-            className="rounded-lg bg-orange-600 text-white px-4 py-2 text-sm font-semibold disabled:opacity-50 hover:bg-orange-700 shadow-sm"
-          >
-            {running ? 'Đang chạy…' : 'Chạy 1 SP'}
-          </button>
-          <button
-            type="button"
-            aria-pressed={auto}
-            onClick={() => {
-              if (auto) {
-                setAuto(false);
-                showToast('info', 'Đã dừng lặp.');
-              } else {
-                void startAutoSequence();
-              }
-            }}
-            disabled={running && !auto}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold border-2 transition-colors shadow-sm ${
-              auto
-                ? 'border-emerald-600 bg-emerald-50 text-emerald-950 hover:bg-emerald-100 disabled:opacity-50'
-                : 'border-slate-800 bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-45'
-            }`}
-          >
-            {auto ? 'Dừng lặp' : 'Bật lặp'}
-          </button>
-          <span className="hidden sm:inline w-px h-7 bg-gray-200 shrink-0" aria-hidden />
-          <button
-            type="button"
-            onClick={resetPointers}
-            disabled={running}
-            title="Chỉ trên tab này"
-            className="text-xs font-semibold text-gray-600 hover:text-gray-900 underline underline-offset-2 disabled:opacity-40"
-          >
-            Đặt lại chỉ báo
-          </button>
-          <button
-            type="button"
-            disabled={running || bulkDeletingDb || queueStatsLoading}
+            disabled={queueStatsLoading}
             className="text-xs font-semibold text-indigo-700 underline underline-offset-2 disabled:opacity-45"
             onClick={() => void refreshQueueStats()}
           >
@@ -1536,7 +1233,7 @@ export default function AdminSourceStockCheckPage() {
           </button>
           <button
             type="button"
-            disabled={running || bulkDeletingDb || activityReportLoading}
+            disabled={activityReportLoading}
             className="text-xs font-semibold text-indigo-700 underline underline-offset-2 disabled:opacity-45"
             onClick={() => void refreshActivityReport()}
           >
@@ -1546,12 +1243,6 @@ export default function AdminSourceStockCheckPage() {
 
         <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-gray-800 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
-              <span>
-                Seed <code className="text-[11px] bg-white px-1 rounded border">{dbCursorAfterId}</code>
-              </span>
-              <span className="text-gray-400" aria-hidden>
-                ·
-              </span>
               <span>TTL cổ điển {cooldownDays} ngày</span>
               {queueStats?.admin_batch_traffic_check_gap_days != null ? (
                 <span className="text-gray-600">· PDP gap {queueStats.admin_batch_traffic_check_gap_days}d</span>
@@ -1559,12 +1250,6 @@ export default function AdminSourceStockCheckPage() {
               {queueStats?.admin_batch_traffic_view_window_days != null ? (
                 <span className="text-gray-600">· PDP cửa sổ {queueStats.admin_batch_traffic_view_window_days}d</span>
               ) : null}
-              <span className="text-gray-400" aria-hidden>
-                ·
-              </span>
-              <span className="text-emerald-800">
-                Phiên OK: <strong>{sessionChecks}</strong>
-              </span>
             </div>
 
             {queueStatsLoading && !queueStats ? (
@@ -1711,23 +1396,15 @@ export default function AdminSourceStockCheckPage() {
                       <p className="font-semibold mb-1">Vì sao vừa «hết» nhưng bảng này vẫn trống, hoặc F5 là mất link?</p>
                       <ul className="list-disc ml-4 space-y-1 text-amber-900/95">
                         <li>
-                          <strong>Reload trang làm trống</strong>{' '}
-                          <a
-                            href="#oos-heading"
-                            className="font-semibold text-indigo-800 underline underline-offset-2 whitespace-nowrap"
-                          >
-                            «Hết trên nguồn (phiên tab)»
-                          </a>{' '}
-                          — chỉ lưu tạm trên tab, <strong>không gửi máy chủ</strong>. Dữ liệu bền nằm ở bảng mẫu này
-                          (đã có out_of_stock trong DB trong cửa sổ) và trong tab sản CRM.
+                          Dữ liệu bền nằm ở bảng mẫu và tab sản CRM (theo cờ và timestamp trong DB), không nhờ bảng tạm trên tab.
                         </li>
                         <li>
                           <strong>Hàng chờ DB:</strong> mỗi lần kiểm tra sẽ ghi{' '}
                           <code className="text-[10px] bg-white px-0.5">source_stock_checked_at</code> và{' '}
                           <code className="text-[10px] bg-white px-0.5">source_stock_status</code> lên đúng{' '}
                           <code className="text-[10px] bg-white px-0.5">products.id</code> được lấy từ queue. Nếu hết nguồn thì
-                          thêm tồn ≤ 0 / <code className="text-[10px] bg-white px-0.5">out_of_stock</code>; nếu đọc OK thì ghi
-                          <code className="text-[10px] bg-white px-0.5">in_stock</code>; nếu lỗi hai nền thì ghi
+                          thêm tồn ≤ 0 / <code className="text-[10px] bg-white px-0.5">out_of_stock</code>; nếu đọc OK thì ghi{' '}
+                          <code className="text-[10px] bg-white px-0.5">in_stock</code>; nếu lỗi scrape / không khẳng định được thì ghi{' '}
                           <code className="text-[10px] bg-white px-0.5">error</code>.
                         </li>
                         <li>
@@ -1765,353 +1442,21 @@ export default function AdminSourceStockCheckPage() {
           <div
             role="status"
             aria-live="polite"
-            className={`flex flex-wrap items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm ${
-              running
-                ? 'border-amber-300 bg-amber-50 text-amber-950'
-                : auto
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-                  : 'border-slate-200 bg-slate-50 text-slate-700'
-            }`}
+            className="flex flex-wrap items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
           >
-            {running ? (
-              <>
-                <SpinnerIcon className="text-amber-700" />
-                <div className="flex flex-col gap-1 min-w-0 flex-1">
-                  <span className="font-semibold">Đang kiểm tra</span>
-                  {activeCheck?.mode === 'db' ? (
-                    <span className="text-amber-900/90">
-                      Máy chủ đang chọn <strong>một SP kế trong hàng chờ</strong> và đọc{' '}
-                      <strong>{domain === 'cssbuy' ? 'CSSBuy (API)' : 'Hibox (scrape)'}</strong>; URL trong DB chỉ hiện ở dưới sau khi xong lần này.
-                    </span>
-                  ) : (
-                    <span className="text-amber-900/90">Đang gọi API scrape / cập nhật…</span>
-                  )}
-                  <span className="text-amber-800/85 text-xs leading-snug">
-                    Một SP mỗi lần; lần kế chỉ sau khi xong + nghỉ ~46–60s khi lặp bật.
-                  </span>
-                </div>
-              </>
-            ) : auto ? (
-              <>
-                <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" aria-hidden />
-                <span className="font-semibold">Lặp đang bật</span>
-                <span className="text-emerald-900/95 text-xs sm:text-sm leading-snug max-w-xl">
-                  Nghỉ ~46–60s giữa hai lần bắt đầu. Dừng: nút «Dừng lặp» trên thanh thao tác.
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="h-2 w-2 rounded-full bg-slate-400 shrink-0" aria-hidden />
-                <span className="font-semibold">Lặp đang tắt</span>
-                <span className="text-sm text-gray-700">
-                  Cam = một SP; nút đen/xanh lá = bật lặp tuần tự theo queue.
-                </span>
-              </>
-            )}
-          </div>
-
-          {lastFinished ? (
-            <div
-              className="rounded-lg border border-indigo-200 bg-indigo-50/70 px-3 py-3 text-sm text-indigo-950 space-y-2"
-              aria-live="polite"
-            >
-              <h3 className="font-semibold text-indigo-950 text-[13px] uppercase tracking-wide">
-                Lần kiểm tra gần nhất
-              </h3>
-              {lastFinished.kind === 'queue_empty' ? (
-                <p className="text-indigo-900/95">
-                  <strong>Hết / không còn sản trong hàng chờ</strong>
-                  {lastFinished.detail ? ` — ${lastFinished.detail}` : ''}.
-                </p>
-              ) : lastFinished.kind === 'error' ? (
-                <div className="space-y-1">
-                  <p className="font-medium text-red-900">Lỗi kiểm tra nguồn</p>
-                  {lastFinished.attemptedUrl ? (
-                    <p className="break-words">
-                      <strong className="font-medium">Đang cố kiểm tra:</strong>{' '}
-                      <ExternalHttpLink url={lastFinished.attemptedUrl} />
-                    </p>
-                  ) : null}
-                  <p className="text-red-950/95 whitespace-pre-wrap">{lastFinished.message}</p>
-                </div>
-              ) : (
-                <div className="space-y-2 text-[13px] leading-snug">
-                  <p className="text-indigo-800/90">
-                    Hoàn lúc{' '}
-                    <time dateTime={lastFinished.finishedAtIso}>
-                      {new Date(lastFinished.finishedAtIso).toLocaleString('vi-VN')}
-                    </time>
-                    {' · Hàng chờ DB'}
-                  </p>
-                  {lastFinished.seedProductDbId != null ? (
-                    <p>
-                      <strong>Sản trong shop:</strong> DB id{' '}
-                      <code className="text-xs bg-white/80 px-1 rounded">{lastFinished.seedProductDbId}</code>
-                      {lastFinished.seedProductName ? ` · ${lastFinished.seedProductName}` : ''}
-                    </p>
-                  ) : null}
-                  <div>
-                    <p className="font-medium mb-1">Link lấy trong DB / vừa thử scrape</p>
-                    <div className="font-mono text-xs bg-white/60 rounded px-2 py-1 border border-indigo-100 break-all">
-                      <ExternalHttpLink url={lastFinished.attemptedUrl} />
-                    </div>
-                  </div>
-                  {lastFinished.canonicalUrl && lastFinished.canonicalUrl !== '—' ? (
-                    <div>
-                      <p className="font-medium mb-1">Canonical / URL sau scrape</p>
-                      <div className="font-mono text-xs bg-white/60 rounded px-2 py-1 border border-indigo-100 break-all">
-                        <ExternalHttpLink url={lastFinished.canonicalUrl} />
-                      </div>
-                    </div>
-                  ) : null}
-                  {!lastFinished.classifiedOutOfStock &&
-                  isAntiBotUiHighlight(lastFinished.rawStatus, lastFinished.detail) ? (
-                    <div className="rounded-md bg-red-50 border-2 border-red-400 px-3 py-2 text-red-950 space-y-2 mt-1">
-                      <p className="font-semibold">
-                        {isBlockedBySourceSite(lastFinished.rawStatus)
-                          ? 'Nguồn chặn / phát hiện quét — đã dừng lặp hàng chờ'
-                          : 'Phát hiện captcha/chặn trong phản hồi — đã dừng lặp hàng chờ'}
-                      </p>
-                      <p className="text-[12px] leading-relaxed whitespace-pre-wrap">{lastFinished.detail ?? '—'}</p>
-                      <p className="text-[11px] text-red-900/90">
-                        Kiểm tra lại URL trong DB / độ trễ Hibox / giảm tần suất lặp nếu cần; sau đó bấm «Chạy 1 SP» hoặc «Bật lặp».
-                      </p>
-                      <dl className="grid gap-2 text-[12px]">
-                        <div>
-                          <dt className="font-medium text-red-900/95">raw_status</dt>
-                          <dd className="font-mono mt-0.5 break-all">{lastFinished.rawStatus ?? '—'}</dd>
-                        </div>
-                      </dl>
-                    </div>
-                  ) : !lastFinished.classifiedOutOfStock &&
-                  isUnresolvedStockProbe(lastFinished.rawStatus) &&
-                  !isAntiBotUiHighlight(lastFinished.rawStatus, lastFinished.detail) ? (
-                    <div className="rounded-md bg-amber-50 border border-amber-300 px-3 py-2 text-amber-950 space-y-1.5 mt-1">
-                      <p className="font-semibold">Chưa kiểm tra được nguồn</p>
-                      <p className="text-amber-950/95 text-[12px]">
-                        Lỗi đọc trang tạm, mạng hoặc scraper không khẳng định được tồn —{' '}
-                        <strong>không coi là hết hàng</strong>, <strong>tồn kho shop không đổi</strong>; phiên sẽ giữ SP để thử lại.
-                      </p>
-                      <dl className="grid gap-2 text-[12px]">
-                        <div>
-                          <dt className="font-medium text-amber-900/95">raw_status</dt>
-                          <dd className="font-mono mt-0.5 break-all">{lastFinished.rawStatus ?? '—'}</dd>
-                        </div>
-                        <div>
-                          <dt className="font-medium text-amber-900/95">detail</dt>
-                          <dd className="mt-0.5 whitespace-pre-wrap">{lastFinished.detail ?? '—'}</dd>
-                        </div>
-                        {lastFinished.warnings.length > 0 ? (
-                          <div>
-                            <dt className="font-medium text-amber-900/95">warnings</dt>
-                            <dd className="break-words">{lastFinished.warnings.join(' · ')}</dd>
-                          </div>
-                        ) : null}
-                      </dl>
-                    </div>
-                  ) : !lastFinished.classifiedOutOfStock ? (
-                    <p className="text-emerald-900 font-semibold pt-1">
-                      Kết quả: có tín hiệu trang đọc bình thường — <strong>không xếp hết</strong>.
-                    </p>
-                  ) : (
-                    <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-red-950 space-y-1.5 mt-1">
-                      <p className="font-semibold">Đã có dấu hiệu không đọc được SP trên Hibox (xếp hết khi có khớp DB)</p>
-                      <p className="text-red-950/95 text-[12px]">
-                        Chỉ khi scrape đọc được nội dung và gặp cờ «đã xuống kệ / hết». Không nhầm với chỉ báo khác.
-                      </p>
-                      <dl className="grid gap-2 text-[12px]">
-                        <div>
-                          <dt className="text-red-950/85 font-medium">raw_status</dt>
-                          <dd className="font-mono text-red-950 mt-0.5 break-all">{lastFinished.rawStatus ?? '—'}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-red-950/85 font-medium">detail</dt>
-                          <dd className="text-red-950 mt-0.5 whitespace-pre-wrap">{lastFinished.detail ?? '—'}</dd>
-                        </div>
-                        {lastFinished.warnings.length > 0 ? (
-                          <div>
-                            <dt className="text-red-950/85 font-medium">warnings</dt>
-                            <dd className="text-red-950 mt-0.5 break-words">{lastFinished.warnings.join(' · ')}</dd>
-                          </div>
-                        ) : null}
-                      </dl>
-                    </div>
-                  )}
-                  {lastFinished.classifiedOutOfStock && lastFinished.updatesCommitted ? (
-                    <p className="text-amber-900 text-[12px]">
-                      Đã cập nhật cửa hàng (tồn = 0 / trạng thái phù hợp theo luồng admin) cho đúng SP hàng chờ.
-                    </p>
-                  ) : lastFinished.classifiedOutOfStock && !lastFinished.updatesCommitted ? (
-                    <p className="text-amber-900 text-[12px]">
-                      Chưa ghi đổi trên cửa hàng — thường do không khớp sản hoặc lỗi commit.
-                    </p>
-                  ) : null}
-                </div>
-              )}
+            <span className="h-2 w-2 mt-1.5 rounded-full bg-emerald-500 shrink-0" aria-hidden />
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <span className="font-semibold text-slate-900">Luồng chính: máy chủ</span>
+              <span className="text-xs sm:text-sm text-slate-700 leading-snug max-w-4xl">
+                Worker kiểm tra nguồn chạy trong process backend với{' '}
+                <code className="text-[10px] bg-white px-1 rounded border">SOURCE_STOCK_CHECK_ENABLED=true</code> (mặc định). Các ô đếm
+                trên chỉ đọc DB đã được worker/hệ thống ghi — để tần suất / sự cố, chỉnh env và log trên máy chủ (tab không bắt đầu
+                scrape tay).
+              </span>
             </div>
-          ) : null}
+          </div>
         </div>
       </div>
-
-      <section className="mt-8 scroll-mt-4" aria-labelledby="oos-heading">
-        <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
-          <div>
-            <h2 id="oos-heading" className="text-base sm:text-lg font-semibold text-gray-900 tracking-tight">
-              Hết trên nguồn <span className="font-normal text-red-800">(phiên tab)</span>
-            </h2>
-            <details className="mb-3 rounded-lg border border-gray-100 bg-gray-50/70 text-[13px] text-gray-700">
-              <summary className="cursor-pointer px-3 py-2 font-medium text-gray-900 select-none [&::-webkit-details-marker]:hidden list-none flex items-center gap-2">
-                <span className="text-gray-400 text-[10px]">▾</span>
-                Danh sách phiên chỉ trong tab — không thay máy chủ
-              </summary>
-              <div className="px-3 pb-3 pt-0 border-t border-gray-100 space-y-2 leading-relaxed">
-                <p>
-                  Khi scrape báo cờ «hết», SP được ghép vào bảng bên dưới để bạn đối chiếu. «DB đã commit» nghĩa là đã
-                  ghi mốc/trạng thái nguồn lên SP hàng chờ — không tự xóa sản. Xóa vĩnh viễn cần bấm đỏ + xác nhận.
-                </p>
-                <p className="text-gray-600 text-xs">
-                  Refresh tab làm trống danh sách phiên; không ảnh hưởng DB.
-                </p>
-              </div>
-            </details>
-          </div>
-          <div className="flex flex-wrap gap-3 items-center shrink-0 justify-end">
-            <button
-              type="button"
-              className="text-sm text-orange-700 font-medium underline disabled:opacity-50"
-              onClick={clearOosBrowserOnly}
-              disabled={oosRows.length === 0 || bulkDeletingDb}
-            >
-              Ẩn danh sách trong trình duyệt
-            </button>
-            <button
-              type="button"
-              className="text-sm rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 font-semibold text-red-900 hover:bg-red-100 disabled:opacity-50"
-              disabled={bulkDeletingDb || oosDistinctDbIds.length === 0}
-              onClick={() => setDeleteDbModalOpen(true)}
-              aria-expanded={deleteDbModalOpen}
-            >
-              Xóa sản khỏi DB cửa hàng…
-            </button>
-          </div>
-        </div>
-        <div className="rounded-xl border overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-100 text-gray-700">
-              <tr>
-                <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Trên phiên tab</th>
-                <th className="text-left px-3 py-2 font-medium">DB id</th>
-                <th className="text-left px-3 py-2 font-medium">Mã</th>
-                <th className="text-left px-3 py-2 font-medium">Tên</th>
-                <th className="text-left px-3 py-2 font-medium">Domain</th>
-                <th className="text-left px-3 py-2 font-medium">URL trong DB</th>
-                <th className="text-left px-3 py-2 font-medium">Canonical / scrape</th>
-                <th className="text-left px-3 py-2 font-medium">Ghi chú</th>
-                <th className="text-left px-3 py-2 font-medium">Slug</th>
-              </tr>
-            </thead>
-            <tbody>
-              {oosRows.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="px-3 py-6 text-gray-500 text-center">
-                    Chưa có SP nào bị đánh trong phiên làm việc này.
-                  </td>
-                </tr>
-              ) : (
-                oosRows.map((row) => (
-                  <tr key={row.rowKey} className="border-t border-gray-200 align-top">
-                    <td className="px-3 py-2 whitespace-nowrap align-top">
-                      <button
-                        type="button"
-                        className="text-xs font-medium text-slate-600 underline hover:text-orange-900"
-                        aria-label={`Xóa khỏi danh sách hết hàng (browser) DB id ${row.id > 0 ? row.id : '—'} `}
-                        onClick={() =>
-                          setOosRows((prev) => prev.filter((r) => r.rowKey !== row.rowKey))
-                        }
-                      >
-                        Xóa dòng (tab)
-                      </button>
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">{row.id > 0 ? row.id : '—'}</td>
-                    <td className="px-3 py-2 font-mono text-xs max-w-[120px] break-all">{row.product_id ?? '—'}</td>
-                    <td className="px-3 py-2 max-w-[200px]">{row.name}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{row.domain}</td>
-                    <td className="px-3 py-2 max-w-[200px]">
-                      <ExternalHttpLink url={row.sourceUrl} />
-                    </td>
-                    <td className="px-3 py-2 max-w-[200px]">
-                      <ExternalHttpLink url={row.canonicalUrl} />
-                    </td>
-                    <td className="px-3 py-2 text-xs max-w-[260px]" title={row.reason}>
-                      {row.reason}
-                    </td>
-                    <td className="px-3 py-2 text-xs">
-                      {row.slug ? (
-                        <Link
-                          className="text-orange-700 underline"
-                          href={`/products/${row.slug}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          /{row.slug}
-                        </Link>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {deleteDbModalOpen ? (
-        <div
-          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 p-4"
-          role="presentation"
-          onClick={() => {
-            if (!bulkDeletingDb) setDeleteDbModalOpen(false);
-          }}
-        >
-          <div
-            className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 border border-gray-200"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="del-db-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 id="del-db-title" className="text-lg font-bold text-gray-900">
-              Xóa vĩnh viễn khỏi CSDL cửa hàng?
-            </h3>
-            <p className="text-sm text-gray-700 mt-3 leading-relaxed">
-              Đây là <strong>bước quyết định cuối của admin</strong>, tách khỏi việc chỉ cập nhật tồn khi kiểm tra nguồn.
-              Sẽ gọi API xóa <strong>{oosDistinctDbIds.length}</strong> sản theo khóa{' '}
-              <code className="text-xs bg-gray-100 px-1 rounded">products.id</code> đang có trong danh sách —
-              không hoàn tác (kèm dọn asset Bunny như khi xóa sản ở admin). Hàng chỉ «không khớp SP» không có DB id vẫn không bị đụng đến.
-            </p>
-            <div className="flex flex-wrap gap-3 justify-end mt-6">
-              <button
-                type="button"
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
-                disabled={bulkDeletingDb}
-                onClick={() => setDeleteDbModalOpen(false)}
-              >
-                Hủy
-              </button>
-              <button
-                type="button"
-                className="rounded-lg bg-red-700 text-white px-4 py-2 text-sm font-semibold hover:bg-red-800 disabled:opacity-50"
-                disabled={bulkDeletingDb}
-                onClick={() => void confirmDeleteOosProductsFromDb()}
-              >
-                {bulkDeletingDb ? 'Đang xóa…' : 'Đồng ý — xóa'}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {reportOosDeleteConfirmIds != null ? (
         <div
@@ -2177,73 +1522,6 @@ export default function AdminSourceStockCheckPage() {
         </div>
       ) : null}
 
-      <section className="mt-10" aria-labelledby="recent-heading">
-        <h2 id="recent-heading" className="text-lg font-semibold text-gray-900 mb-2">
-          Phản hồi hệ thống (mới nhất)
-        </h2>
-        <div className="rounded-xl border border-gray-200 bg-white divide-y text-sm">
-          {recent.length === 0 ? (
-            <p className="p-4 text-gray-500">Chưa có phiên kiểm tra.</p>
-          ) : (
-            recent.map((r, idx) => {
-              const dbr = r as AdminSourceStockBatchDbNextResult;
-              const doneQueue = typeof dbr.done === 'boolean' && dbr.done;
-              const blockedBySite =
-                !doneQueue &&
-                !r.classified_out_of_stock &&
-                (isBlockedBySourceSite(r.raw_status) ||
-                  (isUnresolvedStockProbe(r.raw_status) && detailLooksLikeCaptchaOrSiteBlock(r.detail)));
-              const unresolvedProbe =
-                !doneQueue &&
-                !r.classified_out_of_stock &&
-                isUnresolvedStockProbe(r.raw_status) &&
-                !detailLooksLikeCaptchaOrSiteBlock(r.detail);
-              const headline = doneQueue
-                ? 'Hết danh sách DB trong bộ lọc'
-                : r.classified_out_of_stock
-                  ? 'Hết hàng trên nguồn (đã có cờ trang)'
-                  : blockedBySite
-                    ? 'Bị chặn / phát hiện quét — đã dừng lặp'
-                  : unresolvedProbe
-                    ? 'Chưa kiểm tra được (lỗi đọc tạm…)'
-                    : 'Đọc OK — không xếp hết';
-              const sub =
-                typeof dbr.seed_product_db_id === 'number'
-                  ? `SP hàng chờ #${dbr.seed_product_db_id} ${r.canonical_url || ''}`
-                  : r.canonical_url || '';
-              const summaryClass =
-                doneQueue
-                  ? 'text-gray-800'
-                  : r.classified_out_of_stock
-                    ? 'text-red-700'
-                    : blockedBySite
-                      ? 'text-red-800 font-semibold'
-                    : unresolvedProbe
-                      ? 'text-amber-900'
-                      : 'text-emerald-800';
-              return (
-                <details key={`recent-${idx}-${sub}-${idx}`} className="p-4 group">
-                  <summary className="cursor-pointer font-medium text-gray-900 list-none flex flex-wrap gap-2 items-baseline">
-                    <span className={summaryClass}>{headline}</span>
-                    <span className="text-gray-500 font-mono text-xs truncate max-w-xl">{sub}</span>
-                    {r.updates_committed ? (
-                      <span
-                        className="text-xs bg-orange-50 text-orange-900 px-2 rounded border border-orange-100 cursor-help"
-                        title="Đã ghi thay đổi tồn/trạng thái nguồn lên các SP khớp trong DB. Không xóa sản — xóa vĩnh viễn chỉ khi admin dùng «Xóa sản khỏi DB cửa hàng»."
-                      >
-                        DB đã commit
-                      </span>
-                    ) : null}
-                  </summary>
-                  <pre className="mt-3 text-xs bg-gray-50 p-3 rounded-lg overflow-auto max-h-48 whitespace-pre-wrap">
-                    {JSON.stringify(r, null, 2)}
-                  </pre>
-                </details>
-              );
-            })
-          )}
-        </div>
-      </section>
     </div>
   );
 }

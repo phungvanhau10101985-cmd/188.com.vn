@@ -29,7 +29,11 @@ from app.models.admin import AdminUser
 from app.core.security import require_module_permission
 from app.core.config import settings
 from app.crud import product_media_purge
-from app.services.source_stock_checker import enqueue_product_view_stock_check_if_needed
+from app.services.source_stock_checker import (
+    enqueue_product_view_stock_check_if_needed,
+    get_source_stock_worker_admin_snapshot,
+    set_source_stock_worker_paused,
+)
 from app.services.admin_source_stock_batch import (
     admin_collect_distinct_product_urls_from_db,
     admin_clear_false_source_oos_flag,
@@ -80,6 +84,10 @@ class AdminBulkDeleteProductsByDbIdBody(BaseModel):
 
 class AdminSingleProductDbIdBody(BaseModel):
     db_id: int = Field(..., gt=0, description="Khóa chính products.id")
+
+
+class AdminSourceStockWorkerPauseBody(BaseModel):
+    paused: bool
 
 
 def _serialize_products_for_api(db: Session, raw_products: List) -> List:
@@ -1003,6 +1011,30 @@ def admin_source_stock_batch_queue_stats(
 ):
     """Đếm SP trong phạm vi link + miền và tách TTL (sẵn sàng vòng / chờ cooldown)."""
     return admin_source_stock_queue_stats(db, domain=str(domain), active_only=bool(active_only))
+
+
+@router.get("/admin/source-stock-batch/worker-state", response_model=dict, include_in_schema=False)
+def admin_source_stock_worker_state(
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """
+    Snapshot trạng thái worker PDP/Hibox: env, cờ pause DB (chung mọi process), luồng daemon trong process hiện tại,
+    và độ sâu hàng chờ in-memory của process đó (không phải tổng cluster).
+    """
+    return {"ok": True, **get_source_stock_worker_admin_snapshot(force_refresh_pause=True)}
+
+
+@router.post("/admin/source-stock-batch/worker-pause", response_model=dict, include_in_schema=False)
+def admin_source_stock_worker_pause_route(
+    body: AdminSourceStockWorkerPauseBody,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """
+    Tạm dừng / chạy tiếp kiểm tra nguồn qua CSDL (singleton). Áp ngay trong vòng vài giây cho mọi worker đang chạy.
+    """
+    set_source_stock_worker_paused(db, paused=bool(body.paused))
+    return {"ok": True, **get_source_stock_worker_admin_snapshot(force_refresh_pause=True)}
 
 
 @router.get("/admin/source-stock-batch/report", response_model=dict, include_in_schema=False)
