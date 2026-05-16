@@ -199,6 +199,33 @@ class Settings:
         self.IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT: int = int(
             os.getenv("IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT", "80") or "80"
         )
+        # Logo dán lên ảnh đã bản địa hóa trước khi PUT lên Bunny (mặc định: logo188.png ở root repo).
+        _repo_root_logo188 = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "logo188.png")
+        )
+        self.IMAGE_LOCALIZATION_BRAND_LOGO_ENABLED: bool = os.getenv(
+            "IMAGE_LOCALIZATION_BRAND_LOGO_ENABLED", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.IMAGE_LOCALIZATION_BRAND_LOGO_PATH: str = (
+            os.getenv("IMAGE_LOCALIZATION_BRAND_LOGO_PATH", _repo_root_logo188).strip()
+        )
+        _lw_frac = os.getenv("IMAGE_LOCALIZATION_BRAND_LOGO_MAX_WIDTH_FRAC", "0.22").strip()
+        try:
+            self.IMAGE_LOCALIZATION_BRAND_LOGO_MAX_WIDTH_FRAC = float(_lw_frac)
+        except ValueError:
+            self.IMAGE_LOCALIZATION_BRAND_LOGO_MAX_WIDTH_FRAC = 0.22
+        _lm = os.getenv("IMAGE_LOCALIZATION_BRAND_LOGO_MARGIN_FRAC", "0.012").strip()
+        try:
+            self.IMAGE_LOCALIZATION_BRAND_LOGO_MARGIN_FRAC = float(_lm)
+        except ValueError:
+            self.IMAGE_LOCALIZATION_BRAND_LOGO_MARGIN_FRAC = 0.012
+        # Ảnh đăng Bunny sau bản địa hóa / import: luôn JPEG (tránh WebP mềm chi tiết); 70–100.
+        _ojq = os.getenv("IMAGE_LOCALIZATION_OUTPUT_JPEG_QUALITY", "95").strip()
+        try:
+            _q = int(_ojq)
+            self.IMAGE_LOCALIZATION_OUTPUT_JPEG_QUALITY = max(70, min(100, _q))
+        except ValueError:
+            self.IMAGE_LOCALIZATION_OUTPUT_JPEG_QUALITY = 95
         # Gemini cho bản địa hóa ảnh: web (Playwright + cookie) hoặc api (GEMINI_API_KEY + model sinh/sửa ảnh).
         # openai = OpenAI GPT Image (/v1/images/edits), dùng OPENAI_API_KEY.
         _ilm = os.getenv("IMAGE_LOCALIZATION_GEMINI_MODE", "web").strip().lower()

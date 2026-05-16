@@ -85,7 +85,7 @@ class BunnyUploader:
         else:
             suffix = f"{unique_suffix}"
             
-        ext = original_ext.lower() if original_ext and original_ext.lower() in ['.jpg', '.jpeg', '.png', '.gif', '.webp'] else '.jpg'
+        ext = ".jpg"
         
         # Ghép tên file
         final_name = f"{safe_name}-{safe_code}-{suffix}{ext}"
@@ -110,8 +110,8 @@ class BunnyUploader:
             
             if len(safe_name) > 80: safe_name = safe_name[:80]
             
-            ext = ext.lower() if ext and ext.lower() in ['.jpg', '.jpeg', '.png', '.gif', '.webp'] else '.jpg'
-            
+            ext = ".jpg"
+
             # Thêm random vào timestamp
             unique_id = f"{int(time.time() % 10000)}_{random.randint(1000, 9999)}"
             
@@ -155,9 +155,7 @@ class BunnyUploader:
             
             # Encode ảnh
             encode_params = [cv2.IMWRITE_JPEG_QUALITY, 95]
-            if filename.lower().endswith('.png'): encode_params = [cv2.IMWRITE_PNG_COMPRESSION, 3]
-            
-            file_ext = os.path.splitext(filename)[1] or '.jpg'
+            file_ext = ".jpg"
             _, encoded_img = cv2.imencode(file_ext, image_data, encode_params)
             image_bytes = encoded_img.tobytes()
             

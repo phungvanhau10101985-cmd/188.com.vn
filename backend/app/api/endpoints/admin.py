@@ -55,6 +55,7 @@ from app.schemas.integrations_admin import (
     AdminIntegrationKeysOverviewOut,
 )
 from app.services.bunny_storage import build_public_object_url, upload_file_to_zone
+from app.services.image_raster_jpeg import raster_bytes_to_jpeg_bytes
 from app.services.linked_admin_staff import apply_linked_staff_role
 from app.services.user_public_response import admin_panel_user_response, batch_admin_panel_user_responses
 from app.core.security import create_admin_token, require_privileged_admin, require_module_permission, require_super_admin
@@ -830,6 +831,16 @@ async def admin_bunny_cdn_upload(
             status_code=400,
             detail="Chỉ chấp nhận ảnh: JPG, JPEG, PNG, GIF, WEBP",
         )
+    if ext == ".webp":
+        conv = raster_bytes_to_jpeg_bytes(raw)
+        if not conv:
+            raise HTTPException(
+                status_code=400,
+                detail="Không giải mã / chuyển WebP sang JPEG được — thử file khác hoặc xuất JPG từ máy.",
+            )
+        raw = conv
+        ext = ".jpg"
+        orig_name = f"{Path(orig_name).stem}.jpg"
     folder = _bunny_safe_subfolder(subfolder)
     prefix = (settings.BUNNY_UPLOAD_PATH_PREFIX or "site").strip().strip("/") or "site"
     day = datetime.now(timezone.utc).strftime("%Y%m%d")
@@ -842,7 +853,10 @@ async def admin_bunny_cdn_upload(
         parts.append(folder)
     parts.extend([day, fname])
     remote = "/".join(parts)
-    ct = file.content_type or mimetypes.guess_type(fname)[0] or "application/octet-stream"
+    if ext in (".jpg", ".jpeg"):
+        ct = "image/jpeg"
+    else:
+        ct = file.content_type or mimetypes.guess_type(fname)[0] or "application/octet-stream"
     try:
         upload_file_to_zone(
             zone_name=zone,

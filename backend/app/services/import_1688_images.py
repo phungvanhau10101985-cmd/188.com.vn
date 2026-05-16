@@ -1,23 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import mimetypes
 from typing import Any, Dict, List, Tuple
-from urllib.parse import urlparse
 
 import requests
 
 from app.core.config import settings
 from app.services.bunny_storage import build_public_object_url, upload_file_to_zone
-
-
-def _image_ext(url: str, content_type: str | None) -> str:
-    path = urlparse(url).path
-    ext = (path.rsplit(".", 1)[-1].lower() if "." in path else "").split("?")[0]
-    if ext in ("jpg", "jpeg", "png", "webp", "gif"):
-        return "jpg" if ext == "jpeg" else ext
-    guessed = mimetypes.guess_extension(content_type or "") or ".jpg"
-    return guessed.lstrip(".").replace("jpeg", "jpg")
+from app.services.image_raster_jpeg import raster_bytes_to_jpeg_bytes
 
 
 def _can_upload_to_bunny() -> bool:
@@ -50,7 +40,10 @@ def ingest_1688_images(product_data: Dict[str, Any], offer_id: str | None) -> Tu
             content_type = resp.headers.get("Content-Type", "")
             if "image" not in content_type.lower() and len(resp.content) < 1024:
                 raise RuntimeError(f"Nội dung tải về không giống ảnh ({content_type})")
-            ext = _image_ext(image_url, content_type)
+            jpeg_bytes = raster_bytes_to_jpeg_bytes(resp.content)
+            if not jpeg_bytes:
+                raise RuntimeError("Không giải mã / chuyển ảnh sang JPEG được")
+            ext = "jpg"
             digest = hashlib.sha1(image_url.encode("utf-8")).hexdigest()[:12]
             oid = offer_id or str(abs(hash(product_data.get("link_default") or "")))
             prefix = settings.BUNNY_UPLOAD_PATH_PREFIX.strip("/")
@@ -61,8 +54,8 @@ def ingest_1688_images(product_data: Dict[str, Any], offer_id: str | None) -> Tu
                 zone_name=settings.BUNNY_STORAGE_ZONE_NAME,
                 access_key=settings.BUNNY_STORAGE_ACCESS_KEY,
                 remote_path=remote_path,
-                data=resp.content,
-                content_type=content_type or mimetypes.guess_type(remote_path)[0],
+                data=jpeg_bytes,
+                content_type="image/jpeg",
             )
             uploaded.append(build_public_object_url(settings.BUNNY_CDN_PUBLIC_BASE, remote_path))
         except Exception as exc:

@@ -135,16 +135,124 @@ def _has_chinese_text_blocks(blocks: List[Any]) -> bool:
     return False
 
 
+def _output_jpeg_quality() -> int:
+    return int(getattr(settings, "IMAGE_LOCALIZATION_OUTPUT_JPEG_QUALITY", 95) or 95)
+
+
 def _encode_image_bytes(image_data: Any, filename: str = "image.jpg") -> bytes:
     import cv2
 
-    ext = os.path.splitext(filename)[1].lower()
-    if ext not in (".jpg", ".jpeg", ".png", ".webp"):
-        ext = ".jpg"
-    params = [cv2.IMWRITE_JPEG_QUALITY, 95] if ext in (".jpg", ".jpeg") else []
-    ok, encoded = cv2.imencode(ext, image_data, params)
+    q = max(70, min(100, _output_jpeg_quality()))
+    ok, encoded = cv2.imencode(".jpg", image_data, [cv2.IMWRITE_JPEG_QUALITY, q])
     if not ok:
         raise ImageLocalizationError("Không encode được ảnh sau xử lý")
+    return encoded.tobytes()
+
+
+_brand_logo_bgra_template: Optional[Any] = None
+_brand_logo_template_unavailable: bool = False
+
+
+def _get_brand_logo_bgra_template() -> Optional[Any]:
+    """PNG logo (BGRA) gốc; scale theo từng ảnh khi dán. None = tắt hoặc không đọc được."""
+    global _brand_logo_bgra_template, _brand_logo_template_unavailable
+    if _brand_logo_template_unavailable:
+        return None
+    if _brand_logo_bgra_template is not None:
+        return _brand_logo_bgra_template
+    if not getattr(settings, "IMAGE_LOCALIZATION_BRAND_LOGO_ENABLED", True):
+        _brand_logo_template_unavailable = True
+        return None
+    path = (getattr(settings, "IMAGE_LOCALIZATION_BRAND_LOGO_PATH", "") or "").strip()
+    if not path or not os.path.isfile(path):
+        logger.info("Logo bản địa hóa: không có file %s — bỏ overlay.", path or "(rỗng)")
+        _brand_logo_template_unavailable = True
+        return None
+    import cv2
+
+    logo = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    if logo is None:
+        logger.warning("Logo bản địa hóa: không decode được %s", path)
+        _brand_logo_template_unavailable = True
+        return None
+    if logo.ndim == 2:
+        logo = cv2.cvtColor(logo, cv2.COLOR_GRAY2BGRA)
+    elif logo.shape[2] == 3:
+        logo = cv2.cvtColor(logo, cv2.COLOR_BGR2BGRA)
+    _brand_logo_bgra_template = logo
+    return logo
+
+
+def apply_brand_logo_top_right_bgr(image_bgr: Any) -> Any:
+    """
+    Dán logo lên góc phải phía trên (giống banner mẫu). Chỉ gọi cho ảnh đã xử lý, trước encode/upload.
+    """
+    import cv2
+    import numpy as np
+
+    logo0 = _get_brand_logo_bgra_template()
+    if logo0 is None or image_bgr is None:
+        return image_bgr
+    if not hasattr(image_bgr, "shape") or image_bgr.ndim != 3 or image_bgr.shape[2] < 3:
+        return image_bgr
+    h, w = int(image_bgr.shape[0]), int(image_bgr.shape[1])
+    if h < 16 or w < 48:
+        return image_bgr
+    try:
+        frac = float(getattr(settings, "IMAGE_LOCALIZATION_BRAND_LOGO_MAX_WIDTH_FRAC", 0.22))
+    except (TypeError, ValueError):
+        frac = 0.22
+    frac = max(0.05, min(0.9, frac))
+    max_w = max(8, int(w * frac))
+    lh, lw = int(logo0.shape[0]), int(logo0.shape[1])
+    scale = min(1.0, max_w / float(max(lw, 1)))
+    new_w = max(1, int(lw * scale))
+    new_h = max(1, int(lh * scale))
+    logo = (
+        logo0
+        if (new_w == lw and new_h == lh)
+        else cv2.resize(logo0, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    )
+    lh, lw = int(logo.shape[0]), int(logo.shape[1])
+    try:
+        mfrac = float(getattr(settings, "IMAGE_LOCALIZATION_BRAND_LOGO_MARGIN_FRAC", 0.012))
+    except (TypeError, ValueError):
+        mfrac = 0.012
+    mfrac = max(0.0, min(0.2, mfrac))
+    margin = max(4, int(min(h, w) * mfrac))
+    x1 = w - lw - margin
+    y1 = margin
+    if x1 < 0 or y1 < 0 or y1 + lh > h or x1 + lw > w:
+        return image_bgr
+    roi = image_bgr[y1 : y1 + lh, x1 : x1 + lw]
+    if logo.shape[2] == 4:
+        alpha = logo[:, :, 3:4].astype(np.float32) / 255.0
+        lbgr = logo[:, :, :3].astype(np.float32)
+        blended = (1.0 - alpha) * roi.astype(np.float32) + alpha * lbgr
+        image_bgr[y1 : y1 + lh, x1 : x1 + lw] = blended.astype(np.uint8)
+    else:
+        image_bgr[y1 : y1 + lh, x1 : x1 + lw] = logo[:, :, :3]
+    return image_bgr
+
+
+def _apply_brand_logo_to_image_bytes(image_bytes: bytes, filename: str = "") -> bytes:
+    """Decode → logo (nếu bật) → luôn encode JPEG (đồng bộ định dạng đăng Bunny)."""
+    import cv2
+    import numpy as np
+
+    if not image_bytes:
+        return image_bytes
+    arr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        return image_bytes
+    logo = _get_brand_logo_bgra_template()
+    if logo is not None:
+        apply_brand_logo_top_right_bgr(img)
+    q = max(70, min(100, _output_jpeg_quality()))
+    ok, encoded = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, q])
+    if not ok:
+        return image_bytes
     return encoded.tobytes()
 
 
@@ -1910,7 +2018,10 @@ class LegacyImageLocalizationPipeline:
                 if action == "deleted":
                     results[orig_url] = ImageProcessResult(orig_url, None, "deleted", message)
                 elif action == "processed":
-                    final_bytes = _encode_image_bytes(final_image, data.get("filename") or "image.jpg")
+                    final_bytes = _encode_image_bytes(
+                        apply_brand_logo_top_right_bgr(final_image),
+                        data.get("filename") or "image.jpg",
+                    )
                     final_url = self._upload_bytes(product, final_bytes, data.get("filename") or "image.jpg")
                     results[orig_url] = ImageProcessResult(orig_url, final_url, "processed", message)
                 else:
@@ -1944,7 +2055,10 @@ class LegacyImageLocalizationPipeline:
                 logger.warning("Ghép split lỗi (%s), giữ ảnh gốc: %s", orig_url, exc)
                 results[orig_url] = ImageProcessResult(orig_url, orig_url, "kept", f"Ghép phần ảnh lỗi: {exc}")
                 continue
-            final_bytes = _encode_image_bytes(merged, info["filename"] + ".jpg")
+            final_bytes = _encode_image_bytes(
+                apply_brand_logo_top_right_bgr(merged),
+                info["filename"] + ".jpg",
+            )
             final_url = self._upload_bytes(product, final_bytes, info["filename"] + ".jpg")
             trail = sorted(
                 info.get("part_trail") or [],
@@ -2001,7 +2115,7 @@ class LegacyImageLocalizationPipeline:
         if action == "deleted":
             return ImageProcessResult(normalized, None, "deleted", message)
         if action == "processed":
-            final_bytes = _encode_image_bytes(final_image, filename)
+            final_bytes = _encode_image_bytes(apply_brand_logo_top_right_bgr(final_image), filename)
             final_url = self._upload_bytes(product, final_bytes, filename)
             return ImageProcessResult(normalized, final_url, "processed", message)
         return ImageProcessResult(normalized, normalized, "kept", message)
@@ -2158,9 +2272,7 @@ class LegacyImageLocalizationPipeline:
         return img
 
     def _upload_bytes(self, product: Product, image_bytes: bytes, filename: str) -> str:
-        ext = os.path.splitext(filename)[1].lower()
-        if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
-            ext = ".jpg"
+        ext = ".jpg"
         digest = hashlib.sha1(image_bytes).hexdigest()[:12]
         safe_code = re.sub(r"[^a-zA-Z0-9_-]+", "-", product.product_id or product.code or "product").strip("-") or "product"
         remote_name = f"{safe_code}-{self.language}-{int(time.time())}-{digest}{ext}"
@@ -2409,13 +2521,12 @@ class ProductImageLocalizationService:
         return res.content, parsed_name
 
     def _upload_to_bunny(self, image_bytes: bytes, source_filename: str, product: Product) -> str:
+        image_bytes = _apply_brand_logo_to_image_bytes(image_bytes, source_filename)
         zone = settings.BUNNY_STORAGE_ZONE_NAME
         key = settings.BUNNY_STORAGE_ACCESS_KEY
         if not zone or not key:
             raise ImageLocalizationError("Thiếu BUNNY_STORAGE_ZONE_NAME hoặc BUNNY_STORAGE_ACCESS_KEY")
-        ext = os.path.splitext(source_filename)[1].lower()
-        if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
-            ext = ".jpg"
+        ext = ".jpg"
         digest = hashlib.sha1(image_bytes).hexdigest()[:12]
         safe_code = re.sub(r"[^a-zA-Z0-9_-]+", "-", product.product_id or product.code or "product").strip("-") or "product"
         filename = f"{safe_code}-{self.language}-{int(time.time())}-{digest}{ext}"

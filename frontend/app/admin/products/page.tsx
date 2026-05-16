@@ -97,6 +97,44 @@ function removeStoredLocalizationJobId(jobId: string) {
   writeStoredLocalizationJobIds(readStoredLocalizationJobIds().filter((id) => id !== jobId));
 }
 
+/** Ô URL trong báo cáo ảnh: xem trước + link — luôn mở trong tab mới (không dùng download). */
+function ImageLocReportUrlCell({ url, textClassName }: { url: string; textClassName: string }) {
+  const [thumbFailed, setThumbFailed] = useState(false);
+  const short = url.length > 72 ? `${url.slice(0, 72)}…` : url;
+  return (
+    <div className="max-w-[14rem]">
+      {!thumbFailed ? (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mb-1 inline-block overflow-hidden rounded border border-gray-200 bg-gray-50"
+          title="Mở ảnh trong tab mới"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={url}
+            alt=""
+            className="block h-16 w-16 object-cover"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setThumbFailed(true)}
+          />
+        </a>
+      ) : null}
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`block break-all hover:underline ${textClassName}`}
+        title="Mở URL trong tab mới"
+      >
+        {short}
+      </a>
+    </div>
+  );
+}
+
 /** Model Gemini API: ảnh hưởng “hiểu” prompt, dịch chữ và giữ layout. imageSize chỉ là độ nét đầu ra. */
 const IMAGE_LOC_GEMINI_MODEL_PRESETS: { id: string; label: string; model: string }[] = [
   { id: 'server', label: 'Theo backend (.env) — để trống ô Model', model: '' },
@@ -2675,12 +2713,20 @@ export default function AdminProductsPage() {
                 <div className="flex flex-col lg:flex-row gap-4">
                   <div className="w-full lg:w-40 shrink-0">
                     {import1688Draft.product_data.main_image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={String(import1688Draft.product_data.main_image)}
-                        alt={String(import1688Draft.product_data.name || 'Ảnh sản phẩm 1688')}
-                        className="h-40 w-full object-cover rounded-lg border border-gray-200 bg-gray-50"
-                      />
+                      <a
+                        href={String(import1688Draft.product_data.main_image)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                        title="Mở ảnh trong tab mới"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={String(import1688Draft.product_data.main_image)}
+                          alt={String(import1688Draft.product_data.name || 'Ảnh sản phẩm 1688')}
+                          className="h-40 w-full object-cover rounded-lg border border-gray-200 bg-gray-50"
+                        />
+                      </a>
                     ) : (
                       <div className="h-40 rounded-lg border border-dashed border-gray-300 bg-gray-50 flex items-center justify-center text-xs text-gray-500">
                         Chưa có ảnh
@@ -4001,28 +4047,12 @@ export default function AdminProductsPage() {
                                   </td>
                                   <td className="py-2 px-2 text-gray-800 max-w-[10rem]">{row.label_vi}</td>
                                   <td className="py-2 px-2 font-mono text-[10px]">{row.status}</td>
-                                  <td className="py-2 px-2 max-w-[14rem] break-all text-blue-700">
-                                    <a
-                                      href={row.original_url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="hover:underline"
-                                    >
-                                      {row.original_url.slice(0, 72)}
-                                      {row.original_url.length > 72 ? '…' : ''}
-                                    </a>
+                                  <td className="py-2 px-2 align-top text-blue-700">
+                                    <ImageLocReportUrlCell url={row.original_url} textClassName="text-blue-700" />
                                   </td>
-                                  <td className="py-2 px-2 max-w-[14rem] break-all">
+                                  <td className="py-2 px-2 align-top">
                                     {row.final_url ? (
-                                      <a
-                                        href={row.final_url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-violet-700 hover:underline"
-                                      >
-                                        {row.final_url.slice(0, 72)}
-                                        {row.final_url.length > 72 ? '…' : ''}
-                                      </a>
+                                      <ImageLocReportUrlCell url={row.final_url} textClassName="text-violet-700" />
                                     ) : (
                                       <span className="text-gray-400">—</span>
                                     )}

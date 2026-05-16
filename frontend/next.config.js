@@ -59,6 +59,8 @@ const nextConfig = {
       { protocol: "http", hostname: "**" },
     ],
     unoptimized: process.env.NODE_ENV === "development",
+    // Ưu tiên JPEG khi optimizer phục vụ ảnh (CDN đã .jpg — tránh WebP làm mềm chi tiết)
+    formats: ["image/jpeg"],
   },
   typescript: { ignoreBuildErrors: false },
   /** Next.js 16: build mặc định dùng Turbopack — cần `next build --webpack` (xem package.json) vì alias antd ở dưới. */
