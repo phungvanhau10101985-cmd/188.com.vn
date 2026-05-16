@@ -163,6 +163,9 @@ function formatFastApiDetail(detail: unknown): string {
   return String(detail);
 }
 
+/** Scrape nguồn có thể chạy lâu — phải ≥ timeout proxy/nginx (khuyến nghị 600s+ cho location API). */
+export const ADMIN_SOURCE_STOCK_SCAN_TIMEOUT_MS = 660_000;
+
 async function fetchAdmin<T>(
   endpoint: string,
   options: RequestInit & { timeoutMs?: number } = {},
@@ -207,6 +210,10 @@ async function fetchAdmin<T>(
       const statusHint =
         res.status === 422
           ? '[422] Body JSON cần dạng: {"url":"https://..." , "download_images":true}. '
+          : res.status === 504 || res.status === 502
+            ? `[${res.status}] Hết giờ chờ proxy (gateway timeout) — request lâu hơn giới hạn nginx/Cloudflare. Cấu hình proxy_read_timeout / timeout ít nhất ${Math.round(
+                ADMIN_SOURCE_STOCK_SCAN_TIMEOUT_MS / 60000,
+              )} phút cho route API /products/ hoặc thử lại. `
           : res.status === 404
             ? `[404 ${url}] `
             : '';
@@ -353,6 +360,8 @@ export interface AdminSourceStockBatchOneResult {
   alternate_failed_domain?: string;
   alternate_sequence_index?: number;
   alternate_primary_domain?: string;
+  /** Theo DB: khi slug không map nhưng vẫn commit OOS, SP hàng chờ được gắn thêm vào nhóm khớp. */
+  oos_commit_included_anchor_db_id?: number;
 }
 
 /** Kiểm tra tuần tự từ DB (thêm các trường done / seed). */
@@ -1008,7 +1017,7 @@ export const adminProductAPI = {
         dual_alternate_fallback: body.dualAlternateFallback ?? false,
         alternate_sequence_index: body.alternateSequenceIndex ?? 0,
       }),
-      timeoutMs: 300_000,
+      timeoutMs: ADMIN_SOURCE_STOCK_SCAN_TIMEOUT_MS,
     }),
 
   /** Một SP kế trong DB — kiểm tra qua Hibox hoặc CSSBuy. */
@@ -1031,7 +1040,7 @@ export const adminProductAPI = {
         dual_alternate_fallback: params.dualAlternateFallback ?? false,
         alternate_sequence_index: params.alternateSequenceIndex ?? 0,
       }),
-      timeoutMs: 300_000,
+      timeoutMs: ADMIN_SOURCE_STOCK_SCAN_TIMEOUT_MS,
     }),
 
   /** Nạp `link_default` trong DB — lọc theo miền kiểm tra (hibox vs cssbuy). */

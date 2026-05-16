@@ -1900,11 +1900,45 @@ export default function AdminSourceStockCheckPage() {
                   <SourceStockReportSampleTable
                     title="Mẫu: cờ hết hàng (out_of_stock) trong cửa sổ"
                     rows={activityReport.samples.oos}
-                    emptyHint="Không có dòng trong phạm vi."
+                    emptyHint={
+                      'Chưa có sản được gắn out_of_stock trong DB trong cửa sổ. ' +
+                      'Nếu vừa thấy hết trong toast nhưng khớp không shop hoặc lỗi đọc — không có dòng trong bảng này.'
+                    }
                     defaultOpen
                     oosActions={reportOosActionsForTable}
                     oosBulkSelection={reportOosBulkSelection}
                   />
+                  {activityReport.samples.oos.length === 0 ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 mb-3 text-[11px] text-amber-950 leading-snug">
+                      <p className="font-semibold mb-1">Vì sao vừa «hết hàng» nhưng bảng này trống?</p>
+                      <ul className="list-disc ml-4 space-y-1 text-amber-900/95">
+                        <li>
+                          Bảng báo cáo chỉ liệt kê các sản<strong> đã lưu trên máy chủ</strong>:{' '}
+                          <code className="bg-white/90 px-0.5 rounded text-[10px]">source_stock_status = out_of_stock</code> + có mốc
+                          kiểm tra trong cửa sổ. Nếu nguồn báo hết nhưng <strong>không map được vào một dòng trong shop</strong>
+                          (slug/link không khớp) → <strong>không ghi DB</strong>, card «Cờ hết trong cửa sổ» vẫn 0 — đây là
+                          đúng với luật hiện tại.
+                        </li>
+                        <li>
+                          Để xem ngay các lần vừa phát hiện hết trong <strong className="italic">phiên làm việc này</strong>, xuống khối{' '}
+                          <a
+                            href="#oos-heading"
+                            className="font-semibold text-indigo-800 underline underline-offset-2 whitespace-nowrap"
+                          >
+                            Hết trên nguồn (phiên tab)
+                          </a>
+                          . Hoặc mở <strong>Phản hồi hệ thống</strong>: xem <code className="text-[10px] bg-white px-0.5">updates_committed</code>,{' '}
+                          <code className="text-[10px] bg-white px-0.5">matched_products</code>.
+                        </li>
+                        <li>
+                          Card <strong>«Sau KT: tồn ≤ 0»</strong> (ví dụ 47) là <strong>cột tồn ≤ 0</strong> trong nhóm có
+                          <code className="text-[10px] ml-1 bg-white px-0.5">checked_at</code> —{' '}
+                          <strong className="not-italic">khác</strong> với chỉ báo cờ <code className="text-[10px] ml-1 bg-white px-0.5">out_of_stock</code>
+                          của bảng mẫu.
+                        </li>
+                      </ul>
+                    </div>
+                  ) : null}
                   <SourceStockReportSampleTable
                     title="Mẫu: cờ còn hàng (in_stock) trong cửa sổ"
                     rows={activityReport.samples.in_stock}

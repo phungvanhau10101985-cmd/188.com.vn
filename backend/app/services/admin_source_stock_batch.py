@@ -479,6 +479,9 @@ def run_admin_source_stock_scan_next_from_db(
       2) Chưa từng đánh batch hay mốt ``admin_source_batch_scanned_at`` cũ hơn.
       3) Tie-break ``products.id`` tăng dần.
 
+    Kết quả scrape **hết nguồn**: ngoài sản khớp slug trong DB (nếu có), cờ được ghi **ảnh hưởng** lên
+    đúng ``products.id`` của SP được chọn trong hàng chờ (neo), để báo cáo / «Xóa khỏi DB» đứng với một bản ghi cụ thể.
+
     ``sticky_seed_product_id`` (``products.id``): nếu còn thỏa bộ lọc, ưu tiên kiểm tra lại đúng SP đó (retry captcha/chặn…).
     Biến ``cursor_after_product_id`` giữ chỉ cho tương thích API; không lái queue.
     """
@@ -527,6 +530,7 @@ def run_admin_source_stock_scan_next_from_db(
             domain=domain_l,
             dual_alternate_fallback=bool(dual_alternate_fallback),
             alternate_sequence_index=int(alternate_sequence_index),
+            anchor_product_db_id=int(prod.id),
         )
     )
     marked_at: datetime | None = None
@@ -699,6 +703,7 @@ def _finalize_scan_commit_and_serialise(
     *,
     computed: Dict[str, Any],
     extras: Dict[str, Any] | None = None,
+    anchor_product_db_id: int | None = None,
 ) -> Dict[str, Any]:
     canonical_url = str(computed.get("canonical_url") or "").strip()
     domain_used = str(computed.get("domain") or "").strip().lower()
@@ -707,6 +712,16 @@ def _finalize_scan_commit_and_serialise(
     warnings = list(computed.get("warnings") or [])
     classified_oos = bool(computed.get("classified_out_of_stock"))
     matched: List[Product] = list(computed.get("matched_orm") or [])
+
+    anch = max(0, int(anchor_product_db_id or 0))
+    anchor_added = False
+    if classified_oos and anch > 0:
+        ids_present = {int(p.id) for p in matched}
+        if anch not in ids_present:
+            anchor_row = db.query(Product).filter(Product.id == anch).first()
+            if anchor_row is not None:
+                matched = [anchor_row] + matched
+                anchor_added = True
 
     updated_ids: List[int] = []
     if classified_oos and matched:
@@ -765,6 +780,8 @@ def _finalize_scan_commit_and_serialise(
     }
     if extras:
         out.update(extras)
+    if anchor_added:
+        out["oos_commit_included_anchor_db_id"] = anch
     return out
 
 
@@ -775,6 +792,7 @@ def run_admin_source_url_scan(
     domain: str,
     dual_alternate_fallback: bool = False,
     alternate_sequence_index: int = 0,
+    anchor_product_db_id: int = 0,
 ) -> Dict[str, Any]:
     domain_lower = (domain or "").strip().lower()
     if domain_lower == "1688":
@@ -808,7 +826,12 @@ def run_admin_source_url_scan(
                 "matched_count": 0,
             }
         gathered = _gather_platform_scan_attempt(db, seed_url=url, platform=domain_lower)
-        return _finalize_scan_commit_and_serialise(db, computed=gathered, extras=None)
+        return _finalize_scan_commit_and_serialise(
+            db,
+            computed=gathered,
+            extras=None,
+            anchor_product_db_id=anchor_product_db_id or None,
+        )
 
     primary = _alternate_primary_platform(alternate_sequence_index)
     secondary = _other_source_platform(primary)
@@ -820,7 +843,12 @@ def run_admin_source_url_scan(
     }
 
     if _attempt_has_usable_catalog_read(first):
-        return _finalize_scan_commit_and_serialise(db, computed=first, extras=dict(extras_common))
+        return _finalize_scan_commit_and_serialise(
+            db,
+            computed=first,
+            extras=dict(extras_common),
+            anchor_product_db_id=anchor_product_db_id or None,
+        )
 
     second = _gather_platform_scan_attempt(db, seed_url=url, platform=secondary)
     if _attempt_has_usable_catalog_read(second):
@@ -831,7 +859,12 @@ def run_admin_source_url_scan(
                 "alternate_failed_domain": primary,
             }
         )
-        return _finalize_scan_commit_and_serialise(db, computed=second, extras=merged_extras)
+        return _finalize_scan_commit_and_serialise(
+            db,
+            computed=second,
+            extras=merged_extras,
+            anchor_product_db_id=anchor_product_db_id or None,
+        )
 
     det_a_raw = first.get("detail")
     det_b_raw = second.get("detail")
