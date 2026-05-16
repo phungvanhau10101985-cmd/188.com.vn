@@ -125,6 +125,8 @@ class ListingImportQueueTaskIn(BaseModel):
     url: str = Field(..., min_length=10)
     source: Optional[str] = "hibox"
     label: Optional[str] = None
+    chinese_name: Optional[str] = None
+    shop_name_chinese: Optional[str] = None
 
 
 class ListingImportQueueEnqueueIn(BaseModel):

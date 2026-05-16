@@ -22,7 +22,7 @@ from app.services.bunny_storage import delete_bunny_assets_for_product
 from app.services.import_hibox_scraper import canonicalize_hibox_placeholder_product_id
 from app.services.product_internal_sku import (
     ensure_unique_internal_product_code,
-    internal_sku_conflicts_global_inventory,
+    internal_sku_exists_on_other_product,
     internal_sku_is_valid_format,
     sync_internal_code_into_product_info,
 )
@@ -133,6 +133,36 @@ def _bulk_import_conflict_maps_initial(db: Session) -> Tuple[Dict[str, str], Dic
             if u and u not in code_own:
                 code_own[u] = pid
     return pref_own, code_own
+
+
+def _ensure_bulk_import_internal_product_code(
+    db: Session,
+    proposed: Optional[str],
+    *,
+    exclude_product_id: Optional[int] = None,
+    batch_reserved: Optional[Set[str]] = None,
+) -> str:
+    """
+    Import Excel lên web chỉ chặn SKU đang có trên products; không chặn vì nháp import
+    hoặc Google Sheet SKU vì các mã đó chính là pool admin dùng để import.
+    """
+    reserved = batch_reserved if batch_reserved is not None else set()
+    cand = str(proposed or "").strip().upper()
+    if internal_sku_is_valid_format(cand):
+        if cand not in reserved and not internal_sku_exists_on_other_product(
+            db,
+            cand,
+            exclude_product_id=exclude_product_id,
+        ):
+            reserved.add(cand)
+            return cand
+
+    return ensure_unique_internal_product_code(
+        db,
+        proposed,
+        exclude_product_id=exclude_product_id,
+        batch_reserved=reserved,
+    )
 
 
 # Đồng bộ Google Sheet: debounce nhiều thao tác liên tiếp → một lần gọi API (tránh vượt quota).
@@ -3741,10 +3771,29 @@ def bulk_import_products(
     batch_prefix_owner: Dict[str, str] = {}
     batch_code_owner: Dict[str, str] = {}
 
+    def _missing_required_category_labels(data: Dict) -> List[str]:
+        labels = (
+            ("category", "danh mục cấp 1"),
+            ("subcategory", "danh mục cấp 2"),
+            ("sub_subcategory", "danh mục cấp 3"),
+        )
+        missing: List[str] = []
+        for key, label in labels:
+            value = str(data.get(key) or "").strip()
+            if not value or value.lower() == "nan":
+                missing.append(label)
+        return missing
+
     for idx, product_data in enumerate(products_data):
         product_id = product_data.get("product_id")
         if not product_id:
             errors.append(f"Dòng {idx + 1}: Thiếu product_id")
+            continue
+        missing_categories = _missing_required_category_labels(product_data)
+        if missing_categories:
+            errors.append(
+                f"Dòng {idx + 1} ({product_id}): Thiếu {', '.join(missing_categories)} — không import."
+            )
             continue
 
         seg = split_product_id_web_prefix_and_internal_sku(product_id)
@@ -3792,10 +3841,10 @@ def bulk_import_products(
                         "trùng trong cùng file import."
                     )
                     continue
-                if internal_sku_conflicts_global_inventory(db, proposed_u, exclude_product_id=ex_pid_early):
+                if internal_sku_exists_on_other_product(db, proposed_u, exclude_product_id=ex_pid_early):
                     skipped.append(
                         f"Dòng {idx + 1} ({product_id}): Bỏ qua — mã SKU «{proposed_u}» "
-                        "đã có trên sản phẩm khác, trong nháp import hoặc trên sheet SKU."
+                        "đã có trên sản phẩm khác trên web."
                     )
                     continue
 
@@ -3816,7 +3865,7 @@ def bulk_import_products(
                 resolved_cat_id = _resolve_category_id_from_row(product_data, cat3_idx)
                 product_data["category_id"] = resolved_cat_id
 
-                product_data["code"] = ensure_unique_internal_product_code(
+                product_data["code"] = _ensure_bulk_import_internal_product_code(
                     db,
                     product_data.get("code"),
                     exclude_product_id=existing.id if existing else None,

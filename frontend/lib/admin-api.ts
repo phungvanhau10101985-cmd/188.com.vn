@@ -578,6 +578,8 @@ export interface AdminListingImportQueueItem {
   url: string;
   source: string;
   label?: string | null;
+  chinese_name?: string | null;
+  shop_name_chinese?: string | null;
   state: string;
   job_id?: string | null;
   draft_id?: number | null;
@@ -964,7 +966,13 @@ export const adminProductAPI = {
 
   enqueueListingImportQueue: (params: {
     queue_token?: string | null;
-    items: { url: string; source?: string; label?: string | null }[];
+    items: {
+      url: string;
+      source?: string;
+      label?: string | null;
+      chinese_name?: string | null;
+      shop_name_chinese?: string | null;
+    }[];
   }) =>
     fetchAdmin<AdminListingImportQueueEnqueueResponse>('/import-1688/listing-queue/enqueue', {
       method: 'POST',

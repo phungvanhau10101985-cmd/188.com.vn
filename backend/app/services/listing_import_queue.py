@@ -195,7 +195,12 @@ def new_queue_skeleton(admin_id: Optional[int] = None) -> Dict[str, Any]:
     }
 
 
-def _execute_one_import(url: str, source: Optional[str], admin_id: Optional[int]) -> Dict[str, Any]:
+def _execute_one_import(
+    url: str,
+    source: Optional[str],
+    admin_id: Optional[int],
+    overlay: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Chạy một job import đồng bộ (như POST /jobs nhưng không BackgroundTasks)."""
     from app.crud import product_import_draft as draft_crud
     from app.db.session import SessionLocal
@@ -239,6 +244,17 @@ def _execute_one_import(url: str, source: Optional[str], admin_id: Optional[int]
         d = draft_crud.get_by_job_id(db2, job_id)
         if not d:
             return {"ok": False, "job_id": job_id, "error": "Không đọc lại draft sau import."}
+        clean_overlay = {
+            k: str(v).strip()
+            for k, v in (overlay or {}).items()
+            if k in {"chinese_name", "shop_name_chinese"} and v is not None and str(v).strip()
+        }
+        if clean_overlay:
+            pdata = dict(d.product_data or {})
+            pdata.update(clean_overlay)
+            d.product_data = pdata
+            db2.add(d)
+            db2.commit()
         return {
             "ok": d.status != "error",
             "job_id": job_id,
@@ -289,9 +305,13 @@ def _worker_loop(token: str) -> None:
             url = pending.get("url") or ""
             source = pending.get("source")
             label = pending.get("label") or ""
+            overlay = {
+                "chinese_name": pending.get("chinese_name"),
+                "shop_name_chinese": pending.get("shop_name_chinese"),
+            }
 
         try:
-            out = _execute_one_import(url, source, q.get("created_by"))
+            out = _execute_one_import(url, source, q.get("created_by"), overlay)
         except Exception as exc:
             logger.exception("listing queue item failed")
             out = {"ok": False, "error": str(exc)}
@@ -406,12 +426,16 @@ def enqueue(
                 label = (raw.get("label") or "").strip() or None
                 if len(url) < 10:
                     continue
+                chinese_name = str(raw.get("chinese_name") or "").strip() or None
+                shop_name_chinese = str(raw.get("shop_name_chinese") or "").strip() or None
                 q["items"].append(
                     {
                         "id": uuid.uuid4().hex,
                         "url": url,
                         "source": src,
                         "label": label,
+                        "chinese_name": chinese_name,
+                        "shop_name_chinese": shop_name_chinese,
                         "state": "pending",
                         "job_id": None,
                         "draft_id": None,

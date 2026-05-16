@@ -497,7 +497,13 @@ export default function TaobaoCardsParsePage() {
   /** Sau khi bấm «Lấy thông tin» — chờ user chọn đợt đích trước khi gọi API. */
   const [enqueueChoiceOpen, setEnqueueChoiceOpen] = useState(false);
   const [pendingEnqueuePayload, setPendingEnqueuePayload] = useState<{
-    items: { url: string; source: ListingImportSource; label?: string }[];
+    items: {
+      url: string;
+      source: ListingImportSource;
+      label?: string;
+      chinese_name?: string;
+      shop_name_chinese?: string;
+    }[];
     skipLines: string[];
   } | null>(null);
   const [trackedQueueTokens, setTrackedQueueTokens] = useState<string[]>([]);
@@ -989,6 +995,9 @@ export default function TaobaoCardsParsePage() {
         url: t.url,
         source: t.source,
         label: t.row.item_id || undefined,
+        chinese_name: (t.row.chinese_name || t.row.title || '').trim() || undefined,
+        shop_name_chinese:
+          (t.row.shop_name_chinese || t.row.shop_name || '').trim() || undefined,
       })),
       skipLines,
     });

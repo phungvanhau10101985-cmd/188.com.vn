@@ -10,6 +10,11 @@ function trimStr(v: unknown): string {
   return '';
 }
 
+function isBlankExcelText(v: unknown): boolean {
+  const s = trimStr(v);
+  return !s || s.toLowerCase() === 'nan';
+}
+
 function hasChineseScript(s: string): boolean {
   return /[\u3400-\u9FFF\uF900-\uFAFF]/.test(s);
 }
@@ -155,6 +160,10 @@ export function getListingDraftPublishBlockers(pd: Record<string, unknown> | und
   else if (!hasChineseScript(cn)) issues.push('Tên tiếng Trung cần có chữ Hán');
   if (!shopCn) issues.push('Thiếu tên shop tiếng Trung');
   else if (!hasChineseScript(shopCn)) issues.push('Tên shop tiếng Trung cần có chữ Hán');
+
+  if (isBlankExcelText(pd.category)) issues.push('Thiếu danh mục cấp 1');
+  if (isBlankExcelText(pd.subcategory)) issues.push('Thiếu danh mục cấp 2');
+  if (isBlankExcelText(pd.sub_subcategory)) issues.push('Thiếu danh mục cấp 3');
 
   const lib = countHttpImageUrls(pd.images);
   const detail = countHttpImageUrls(pd.gallery);

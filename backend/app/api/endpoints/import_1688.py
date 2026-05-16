@@ -638,6 +638,21 @@ def _publish_payload(product_data: Dict[str, Any]) -> Dict[str, Any]:
     required_missing = [k for k in ("product_id", "name") if not payload.get(k)]
     if required_missing:
         raise HTTPException(status_code=400, detail=f"Draft thiếu trường bắt buộc: {', '.join(required_missing)}")
+    required_category_labels = {
+        "category": "danh mục cấp 1",
+        "subcategory": "danh mục cấp 2",
+        "sub_subcategory": "danh mục cấp 3",
+    }
+    missing_categories = [
+        label
+        for key, label in required_category_labels.items()
+        if not str(payload.get(key) or "").strip() or str(payload.get(key) or "").strip().lower() == "nan"
+    ]
+    if missing_categories:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Draft thiếu {', '.join(missing_categories)} — không cho import sản phẩm.",
+        )
     payload["colors"] = _coerce_colors_for_create(payload.get("colors"))
     # Khớp nghiệp vụ + cột Excel mẫu (=1): lưu DB dạng bool; draft/export dùng số 1/0.
     payload["deposit_require"] = True
@@ -1597,7 +1612,13 @@ def listing_import_queue_enqueue(
 
     admin_id = getattr(admin, "id", None)
     tasks = [
-        {"url": it.url.strip(), "source": it.source or "hibox", "label": it.label}
+        {
+            "url": it.url.strip(),
+            "source": it.source or "hibox",
+            "label": it.label,
+            "chinese_name": it.chinese_name,
+            "shop_name_chinese": it.shop_name_chinese,
+        }
         for it in payload.items
     ]
     try:
