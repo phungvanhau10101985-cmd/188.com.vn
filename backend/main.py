@@ -423,6 +423,19 @@ async def startup_event():
     except Exception as _e_ir:
         print(f"   ⚠️  import_1688 batch resume startup: {_e_ir}")
 
+    try:
+        from app.services.source_stock_checker import start_source_stock_checker_daemon_if_enabled
+
+        start_source_stock_checker_daemon_if_enabled()
+        from app.core.config import settings as _ssc_settings
+        if getattr(_ssc_settings, "SOURCE_STOCK_CHECK_ENABLED", False):
+            print(
+                "   📦 SOURCE_STOCK_CHECK_ENABLED: worker kiểm tra tồn kho nguồn "
+                f"mỗi {_ssc_settings.SOURCE_STOCK_CHECK_INTERVAL_SECONDS}s."
+            )
+    except Exception as _e_ssc:
+        print(f"   ⚠️  source stock checker startup: {_e_ssc}")
+
     from app.core.config import settings as _startup_settings
     _db_url = (_startup_settings.DATABASE_URL or "").lower()
     if _db_url.startswith("postgresql"):

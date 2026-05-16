@@ -273,7 +273,7 @@ class ApiClient {
   async getProductById(id: number): Promise<Product> {
     return this.fetch<Product>(`/products/by-id/${id}`);
   }
-  
+
   async getProductByProductId(productId: string): Promise<Product> {
     return this.fetch<Product>(`/products/${encodeURIComponent(productId)}`);
   }

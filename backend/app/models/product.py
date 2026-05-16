@@ -65,7 +65,15 @@ class Product(Base):
     image_localization_language = Column(String(20))
     image_localized_at = Column(DateTime(timezone=True))
     image_localization_error = Column(Text)
-    
+    # Cache kiểm tra trạng thái nguồn 1688. Worker nền cập nhật các cột này,
+    # request trang chi tiết chỉ enqueue lại khi dữ liệu đã cũ.
+    source_stock_status = Column(String(50), default="unknown", index=True)
+    source_stock_checked_at = Column(DateTime(timezone=True), nullable=True)
+    source_stock_next_check_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    source_stock_error = Column(Text, nullable=True)
+    # Trang admin Kiểm tra nguồn (DB): thời điểm đã xếp hàng chạy lần gần nhất; qua N ngày mới vào lại vòng.
+    admin_source_batch_scanned_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
     # ========== ADDITIONAL FIELDS ==========
     slug = Column(String(500), unique=True, index=True)
     

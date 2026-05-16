@@ -10,6 +10,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     items: [
       { href: '/admin/orders', label: 'Đơn hàng' },
       { href: '/admin/products', label: 'Sản phẩm' },
+      { href: '/admin/products/source-stock-check', label: 'Kiểm tra nguồn hàng' },
       { href: '/admin/products/taobao-cards-parse', label: 'Parse HTML listing Taobao' },
       { href: '/admin/products#import-1688', label: 'Import 1688' },
       { href: '/admin/import-1688', label: 'Cookie 1688', privilegedOnly: true },

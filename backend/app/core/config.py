@@ -280,6 +280,47 @@ class Settings:
         )
         self.IMPORT_1688_MAX_IMAGES: int = int(os.getenv("IMPORT_1688_MAX_IMAGES", "24"))
         self.IMPORT_1688_DOWNLOAD_IMAGES: bool = os.getenv("IMPORT_1688_DOWNLOAD_IMAGES", "True").strip().lower() in ("1", "true", "yes")
+        # Kiểm tra tồn kho nguồn 1688: worker nền chạy chậm, cache kết quả vào bảng products.
+        self.SOURCE_STOCK_CHECK_ENABLED: bool = os.getenv(
+            "SOURCE_STOCK_CHECK_ENABLED", "True"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.SOURCE_STOCK_CHECK_INTERVAL_SECONDS: int = max(
+            10,
+            int(os.getenv("SOURCE_STOCK_CHECK_INTERVAL_SECONDS", "60") or "60"),
+        )
+        self.SOURCE_STOCK_CHECK_STALE_MINUTES: int = max(
+            1,
+            int(os.getenv("SOURCE_STOCK_CHECK_STALE_MINUTES", "360") or "360"),
+        )
+        self.SOURCE_STOCK_CHECK_ERROR_RETRY_MINUTES: int = max(
+            1,
+            int(os.getenv("SOURCE_STOCK_CHECK_ERROR_RETRY_MINUTES", "30") or "30"),
+        )
+        self.SOURCE_STOCK_CHECK_PAGEVIEW_MIN_INTERVAL_SECONDS: int = max(
+            5,
+            int(os.getenv("SOURCE_STOCK_CHECK_PAGEVIEW_MIN_INTERVAL_SECONDS", "300") or "300"),
+        )
+        self.SOURCE_STOCK_CHECK_PLAYWRIGHT_TIMEOUT_MS: int = int(
+            os.getenv("SOURCE_STOCK_CHECK_PLAYWRIGHT_TIMEOUT_MS", str(self.IMPORT_1688_TIMEOUT_MS)) or str(self.IMPORT_1688_TIMEOUT_MS)
+        )
+        self.SOURCE_STOCK_CHECK_HEADLESS: bool = os.getenv(
+            "SOURCE_STOCK_CHECK_HEADLESS", "True"
+        ).strip().lower() not in ("0", "false", "no", "off")
+        # Admin Kiểm tra nguồn (DB): sau khi chạy một SP, không chọn lại cho đến khi qua N ngày (queue vòng tròn).
+        self.ADMIN_SOURCE_BATCH_SCAN_COOLDOWN_DAYS: int = max(
+            1,
+            int(os.getenv("ADMIN_SOURCE_BATCH_SCAN_COOLDOWN_DAYS", "30") or "30"),
+        )
+        # Cửa sổ «có khách xem PDP» (user_product_views / guest_product_views) để nhận là SP traffic.
+        self.ADMIN_SOURCE_BATCH_TRAFFIC_VIEW_WINDOW_DAYS: int = max(
+            1,
+            int(os.getenv("ADMIN_SOURCE_BATCH_TRAFFIC_VIEW_WINDOW_DAYS", "30") or "30"),
+        )
+        # SP được coi traffic: nếu đã có admin_source_batch_scanned_at trong N ngày gần → không đưa vào hàng chờ.
+        self.ADMIN_SOURCE_BATCH_TRAFFIC_CHECK_GAP_DAYS: int = max(
+            1,
+            int(os.getenv("ADMIN_SOURCE_BATCH_TRAFFIC_CHECK_GAP_DAYS", "30") or "30"),
+        )
         # Sau restart API: tự quét file meta import_batches/*.json và nối chạy tiếp link chưa xong (default tắt).
         self.IMPORT_1688_BATCH_RESUME_ON_STARTUP: bool = os.getenv(
             "IMPORT_1688_BATCH_RESUME_ON_STARTUP", ""

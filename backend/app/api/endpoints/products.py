@@ -6,7 +6,8 @@ import pandas as pd
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from pydantic import BaseModel, Field
+from typing import Annotated, List, Literal, Optional
 
 from app.db.session import get_db
 from app import crud
@@ -28,8 +29,31 @@ from app.models.admin import AdminUser
 from app.core.security import require_module_permission
 from app.core.config import settings
 from app.crud import product_media_purge
+from app.services.source_stock_checker import enqueue_product_view_stock_check_if_needed
+from app.services.admin_source_stock_batch import (
+    admin_collect_distinct_product_urls_from_db,
+    admin_source_stock_queue_stats,
+    run_admin_source_stock_scan_next_from_db,
+)
 
 router = APIRouter()
+
+
+class AdminSourceStockBatchBody(BaseModel):
+    url: str = Field(..., min_length=3)
+    domain: Literal["1688", "hibox"] = "1688"
+
+
+class AdminSourceStockScanNextDbBody(BaseModel):
+    domain: Literal["1688", "hibox"] = "1688"
+    active_only: bool = True
+    cursor_after_product_id: int = Field(0, ge=0)
+
+
+class AdminBulkDeleteProductsByDbIdBody(BaseModel):
+    """Xóa sản theo khóa chính bảng `products.id` (dùng cho admin sau kiểm tra nguồn)."""
+
+    db_ids: Annotated[List[int], Field(default_factory=list, max_length=300)]
 
 
 def _serialize_products_for_api(db: Session, raw_products: List) -> List:
@@ -50,6 +74,7 @@ def _product_to_response(db: Session, db_product) -> Product:
     d = Product.model_validate(db_product).model_dump()
     enrich_product_payloads_with_category_size_guide(db, [db_product], [d])
     return Product(**d)
+
 
 @router.get("/search", response_model=dict, include_in_schema=False)
 @router.get("/search/", response_model=dict)
@@ -685,6 +710,8 @@ def read_product(
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return _product_to_response(db, db_product)
+
+
 def update_product(
     product_id: str,
     product_update: ProductUpdate,
@@ -774,6 +801,150 @@ def read_product_by_id(
         raise HTTPException(status_code=404, detail="Product not found")
     return _product_to_response(db, db_product)
 
+
+@router.post("/by-id/{id}/source-stock-check/enqueue", response_model=dict)
+def enqueue_product_source_stock_check(
+    id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Kích kiểm tra tồn kho nguồn cho PDP. Response trả ngay; worker nền xử lý theo rate limit.
+    """
+    db_product = crud.product.get_product(db, product_id=id)
+    if db_product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    queued = enqueue_product_view_stock_check_if_needed(db_product)
+    try:
+        db.refresh(db_product)
+    except Exception:
+        pass
+    return {
+        "queued": queued,
+        "source_stock_status": getattr(db_product, "source_stock_status", None),
+        "source_stock_checked_at": getattr(db_product, "source_stock_checked_at", None),
+        "source_stock_next_check_at": getattr(db_product, "source_stock_next_check_at", None),
+    }
+
+
+@router.post("/admin/source-stock-batch/run", response_model=dict, include_in_schema=False)
+def admin_source_stock_batch_run(
+    body: AdminSourceStockBatchBody,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Admin: kiểm tra một URL nguồn (1688 cookie / hoặc Hibox scrape). Lỗi hoặc hết → có thể set available=0."""
+    url = body.url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="Thiếu URL.")
+
+    try:
+        from app.services.admin_source_stock_batch import run_admin_source_url_scan
+
+        out = run_admin_source_url_scan(db, url=url, domain=str(body.domain))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("detail") or "Yêu cầu không hợp lệ.")
+    return out
+
+
+@router.post("/admin/source-stock-batch/run-next-from-db", response_model=dict, include_in_schema=False)
+def admin_source_stock_batch_run_next_from_db(
+    body: AdminSourceStockScanNextDbBody,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Lấy một sản phẩm kế trong DB có link_default (Excel product_url) và chạy một lần kiểm tra nguồn."""
+    try:
+        out = run_admin_source_stock_scan_next_from_db(
+            db,
+            domain=str(body.domain),
+            active_only=bool(body.active_only),
+            cursor_after_product_id=int(body.cursor_after_product_id),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("detail") or "Yêu cầu không hợp lệ.")
+    return out
+
+
+@router.post("/admin/source-stock-batch/delete-by-db-ids", response_model=dict, include_in_schema=False)
+def admin_source_stock_delete_products_by_db_ids(
+    body: AdminBulkDeleteProductsByDbIdBody,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """
+    Xóa vĩnh viễn các sản trong CSDL (`products.id`), kèm dọn Bunny như DELETE sản đơn lẻ.
+    Dùng từ màn Kiểm tra nguồn hàng: danh sách hết/khớp SP trên phiên chỉ là tạm; thao tác này mới gỡ SP khỏi shop.
+    """
+    incoming = getattr(body, "db_ids", None) or []
+    seen: set[int] = set()
+    ordered: List[int] = []
+    for x in incoming:
+        try:
+            pk = int(x)
+        except (TypeError, ValueError):
+            continue
+        if pk <= 0 or pk in seen:
+            continue
+        seen.add(pk)
+        ordered.append(pk)
+
+    if not ordered:
+        raise HTTPException(
+            status_code=400,
+            detail="Không có id DB hợp lệ (cần số nguyên dương, tối đa 300 mỗi lần).",
+        )
+
+    deleted_db_ids: List[int] = []
+    not_found_db_ids: List[int] = []
+    for pk in ordered:
+        row = crud.product.get_product(db, product_id=pk)
+        if row is None:
+            not_found_db_ids.append(pk)
+            continue
+        crud.product.delete_product(db, product_id=pk)
+        deleted_db_ids.append(pk)
+
+    return {
+        "ok": True,
+        "deleted_count": len(deleted_db_ids),
+        "deleted_db_ids": deleted_db_ids,
+        "not_found_db_ids": not_found_db_ids,
+    }
+
+
+@router.get("/admin/source-stock-batch/queue-stats", response_model=dict, include_in_schema=False)
+def admin_source_stock_batch_queue_stats(
+    domain: Literal["1688", "hibox"] = Query(
+        "1688",
+        description="Cùng nhánh lọc như run-next-from-db / product-urls",
+    ),
+    active_only: bool = Query(True),
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Đếm SP trong phạm vi link + miền và tách TTL (sẵn sàng vòng / chờ cooldown)."""
+    return admin_source_stock_queue_stats(db, domain=str(domain), active_only=bool(active_only))
+
+
+@router.get("/admin/source-stock-batch/product-urls", response_model=dict, include_in_schema=False)
+def admin_source_stock_batch_product_urls(
+    domain: Literal["1688", "hibox"] = Query(
+        "1688",
+        description="Lọc link phù hợp luồng kiểm tra (Excel product_url → DB link_default)",
+    ),
+    limit: int = Query(6000, ge=1, le=15000),
+    active_only: bool = Query(True, description="Chỉ sản phẩm is_active"),
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    domain_l = (domain or "1688").strip().lower()
+    return admin_collect_distinct_product_urls_from_db(db, domain=domain_l, limit=int(limit), active_only=bool(active_only))
 
 @router.post("/by-id/{id}/purge-dead-media-url", response_model=dict, include_in_schema=False)
 def purge_dead_media_url_by_db_id(

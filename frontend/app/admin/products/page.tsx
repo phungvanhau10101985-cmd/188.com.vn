@@ -18,9 +18,37 @@ import {
 } from '@/lib/admin-api';
 import { getCatalogFeedApiBaseUrl, isNonPublicCatalogFeedBase } from '@/lib/api-base';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import { looksLike1688OfferUrl } from '@/lib/is-1688-offer-url';
 import { ImportDraftExcelCompare } from '@/components/admin/ImportDraftExcelCompare';
 
 const PAGE_SIZE = 100;
+
+function admin1688SourceStockBadgeClass(raw: string | null | undefined): string {
+  const s = (raw || 'unknown').toLowerCase();
+  if (s === 'out_of_stock') return 'text-red-700';
+  if (s === 'in_stock') return 'text-green-700';
+  if (s === 'queued' || s === 'checking') return 'text-amber-700';
+  if (s === 'error') return 'text-orange-900';
+  return 'text-gray-600';
+}
+
+function admin1688SourceStockLabel(raw: string | null | undefined): string {
+  const s = (raw || 'unknown').toLowerCase();
+  switch (s) {
+    case 'out_of_stock':
+      return 'Hết nguồn';
+    case 'in_stock':
+      return 'Còn nguồn';
+    case 'queued':
+      return 'Xếp hàng';
+    case 'checking':
+      return 'Đang kiểm';
+    case 'error':
+      return 'Lỗi kiểm';
+    default:
+      return 'Chưa có dữ liệu';
+  }
+}
 
 /** Thời gian chờ (giây) khi Google Sheets trả 429 — hiển thị toast đếm ngược. */
 const GOOGLE_SHEET_RATE_LIMIT_COOLDOWN_SEC = 120;
@@ -480,6 +508,8 @@ export default function AdminProductsPage() {
   const [editing, setEditing] = useState<{ productId: string; field: string; value: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+  /** id bảng `products`, khi nhấn «Kiểm tra nguồn». */
+  const [sourceStockEnqueueBusyIds, setSourceStockEnqueueBusyIds] = useState<Set<number>>(() => new Set());
 
   const catalogFeedBase = useMemo(() => getCatalogFeedApiBaseUrl(), []);
 
@@ -596,6 +626,38 @@ export default function AdminProductsPage() {
       setLoading(false);
     }
   }, [page, searchName, searchId, listSort]);
+
+  const enqueue1688SourceStockCheck = useCallback(
+    async (p: AdminProduct) => {
+      if (!looksLike1688OfferUrl(String(p.link_default ?? ''))) {
+        showToast(
+          'err',
+          'SKU này không có link offer 1688 trong link nguồn (product_url). Cập nhật trong Excel/import hoặc sửa trên nháp 1688.',
+          7000,
+        );
+        return;
+      }
+      setSourceStockEnqueueBusyIds((prev) => new Set(prev).add(p.id));
+      try {
+        await adminProductAPI.enqueueSourceStockCheckByDbId(p.id);
+        showToast(
+          'ok',
+          `Đã gửi kiểm tra nguồn 1688 cho «${String(p.name || p.product_id).slice(0, 48)}» — chờ worker (tối đa vài phút) rồi tải lại.`,
+          5500,
+        );
+        await fetchProducts();
+      } catch (e) {
+        showToast('err', e instanceof Error ? e.message : 'API kiểm tra nguồn thất bại.', 8000);
+      } finally {
+        setSourceStockEnqueueBusyIds((prev) => {
+          const n = new Set(prev);
+          n.delete(p.id);
+          return n;
+        });
+      }
+    },
+    [fetchProducts],
+  );
 
   useEffect(() => {
     try {
@@ -3697,7 +3759,9 @@ export default function AdminProductsPage() {
                 <span className="font-semibold tabular-nums text-gray-900">
                   {data.total.toLocaleString('vi-VN')}
                 </span>{' '}
-                sản phẩm trong danh sách
+                sản phẩm trong danh sách · cột{' '}
+                <span className="font-medium text-orange-900">«Nguồn 1688»</span> hiển thị kết quả kiểm tra tình trạng
+                link nguồn (offer)
                 {totalPages > 1 ? (
                   <span className="text-gray-500">
                     {' '}
@@ -3731,6 +3795,9 @@ export default function AdminProductsPage() {
                           <th className="text-left py-3 px-4 font-semibold text-gray-700 w-32">Thương hiệu</th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">Danh mục</th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700 w-20">Trạng thái</th>
+                          <th className="text-left py-3 px-3 font-semibold text-gray-700 min-w-[8.75rem] max-w-[11rem]">
+                            Nguồn 1688
+                          </th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">Ảnh</th>
                         </tr>
                       </thead>
@@ -3875,6 +3942,53 @@ export default function AdminProductsPage() {
                           <span className={p.is_active !== false ? 'text-green-600' : 'text-gray-400'}>
                             {p.is_active !== false ? 'Hiển thị' : 'Ẩn'}
                           </span>
+                        </td>
+                        <td className="py-2 px-3 align-top max-w-[11rem]">
+                          {!looksLike1688OfferUrl(String(p.link_default ?? '')) ? (
+                            <span
+                              className="text-[11px] text-gray-400"
+                              title="Chỉ sản phẩm có link detail.1688.com/offer/… (hoặc offerId=) mới kiểm tra được nguồn."
+                            >
+                              —
+                            </span>
+                          ) : (
+                            <div className="flex flex-col gap-1 items-start">
+                              <span
+                                className={`text-xs font-semibold leading-tight ${admin1688SourceStockBadgeClass(
+                                  typeof p.source_stock_status === 'string' ? p.source_stock_status : null,
+                                )}`}
+                                title={
+                                  (
+                                    [
+                                      p.source_stock_error ? `Lỗi: ${String(p.source_stock_error)}` : '',
+                                      p.source_stock_checked_at
+                                        ? `Kiểm tra: ${new Date(String(p.source_stock_checked_at)).toLocaleString('vi-VN')}`
+                                        : '',
+                                    ]
+                                      .filter(Boolean)
+                                      .join('\n') || undefined
+                                  ) || 'Kiểm tra tồn kho/ghi nhận từ trang chi tiết 1688 (Playwright).'
+                                }
+                              >
+                                {admin1688SourceStockLabel(
+                                  typeof p.source_stock_status === 'string' ? p.source_stock_status : null,
+                                )}
+                              </span>
+                              {p.source_stock_checked_at ? (
+                                <span className="text-[10px] text-gray-500 tabular-nums leading-tight">
+                                  {new Date(String(p.source_stock_checked_at)).toLocaleString('vi-VN')}
+                                </span>
+                              ) : null}
+                              <button
+                                type="button"
+                                className="text-[11px] font-medium text-orange-700 hover:text-orange-900 hover:underline disabled:opacity-50 disabled:pointer-events-none"
+                                disabled={sourceStockEnqueueBusyIds.has(p.id)}
+                                onClick={() => void enqueue1688SourceStockCheck(p)}
+                              >
+                                {sourceStockEnqueueBusyIds.has(p.id) ? 'Đang gửi…' : 'Kiểm tra ngay'}
+                              </button>
+                            </div>
+                          )}
                         </td>
                         <td className="py-2 px-4">
                           <button

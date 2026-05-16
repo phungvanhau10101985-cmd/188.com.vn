@@ -74,6 +74,10 @@ export interface Product {
   /** Slug danh mục taxonomy cấp 1 (slug gốc trong cây category) — trang / popup «chọn size». */
   category_level1_slug?: string | null;
   category_level2_slug?: string | null;
+  source_stock_status?: 'unknown' | 'queued' | 'checking' | 'in_stock' | 'out_of_stock' | 'error' | string | null;
+  source_stock_checked_at?: string | null;
+  source_stock_next_check_at?: string | null;
+  source_stock_error?: string | null;
 }
 
 /** Biến thể màu từ NanoAI (schema partner): tên + ảnh nguyên bản. */

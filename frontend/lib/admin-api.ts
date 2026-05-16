@@ -303,6 +303,15 @@ export interface AdminProduct {
   is_active?: boolean;
   deposit_require?: boolean;
   description?: string;
+  /** Link nguồn Excel `product_url` — dùng cho kiểm tra tồn 1688. */
+  link_default?: string | null;
+  /** Cache worker kiểm tra trang chi tiết 1688 (`unknown`, `queued`, …). */
+  source_stock_status?: string | null;
+  source_stock_checked_at?: string | null;
+  source_stock_next_check_at?: string | null;
+  source_stock_error?: string | null;
+  /** Admin Kiểm tra nguồn (DB): không xếp hàng lại cho đến khi đủ số ngày cooldown */
+  admin_source_batch_scanned_at?: string | null;
   image_localization_status?: string | null;
   image_localization_language?: string | null;
   image_localized_at?: string | null;
@@ -316,6 +325,75 @@ export interface AdminProductsResponse {
   page: number;
   size: number;
   total_pages: number;
+}
+
+export interface AdminSourceStockBatchOneMatched {
+  id: number;
+  name: string;
+  slug: string;
+  product_id: string | null;
+}
+
+export interface AdminSourceStockBatchOneResult {
+  ok: boolean;
+  canonical_url: string;
+  domain: string;
+  raw_status?: string | null;
+  classified_out_of_stock: boolean;
+  detail?: string | null;
+  warnings?: string[];
+  matched_products: AdminSourceStockBatchOneMatched[];
+  updated_product_ids: number[];
+  matched_count: number;
+  updates_committed?: boolean;
+}
+
+/** Kiểm tra tuần tự từ DB (thêm các trường done / seed). */
+export type AdminSourceStockBatchDbNextResult = AdminSourceStockBatchOneResult & {
+  done?: boolean;
+  cursor_after_product_id: number;
+  seed_product_db_id?: number | null;
+  seed_product_name?: string | null;
+  seed_link_default?: string | null;
+  admin_batch_scan_cooldown_days?: number;
+  seed_admin_batch_scanned_at?: string | null;
+};
+
+export interface AdminSourceStockProductUrlsResponse {
+  urls: string[];
+  count: number;
+  domain_filter: string;
+  active_only?: boolean;
+}
+
+export interface AdminSourceStockBatchDeleteByDbIdsResult {
+  ok: boolean;
+  deleted_count: number;
+  deleted_db_ids: number[];
+  not_found_db_ids: number[];
+}
+
+export interface AdminSourceStockQueueStats {
+  ok: boolean;
+  domain: string;
+  active_only: boolean;
+  admin_batch_scan_cooldown_days: number;
+  admin_batch_traffic_view_window_days?: number;
+  admin_batch_traffic_check_gap_days?: number;
+  cooldown_cutoff_utc_iso: string;
+  traffic_recent_check_cutoff_utc_iso?: string;
+  traffic_view_since_utc_iso?: string;
+  total_in_scope: number;
+  eligible_now: number;
+  /** Trong nhóm được xếp hàng ngay — chưa từng đánh batch (scanned_at null) */
+  eligible_never_scanned?: number;
+  /** Trong nhóm được xếp hàng ngay — đã đánh batch trước đây và đã hết chờ TTL */
+  eligible_rescan_after_ttl?: number;
+  /** Trong nhóm đến lượt có lượt xem PDP trong cửa sổ traffic */
+  eligible_with_recent_customer_view?: number;
+  /** Đến lượt, không có lượt xem PDP trong cửa sổ — xử lý theo TTL «thường» */
+  eligible_without_recent_customer_view?: number;
+  in_cooldown: number;
 }
 
 export interface AdminImageLocalizationJob {
@@ -838,6 +916,67 @@ export const adminProductAPI = {
 
   deleteProduct: (productId: string) =>
     fetchAdmin<AdminProduct>(`/products/${encodeURIComponent(productId)}`, { method: 'DELETE' }),
+
+  /** Xếp hàng kiểm tra tình trạng hàng qua Playwright (`SOURCE_STOCK_CHECK_*`). Không chờ worker xong. */
+  enqueueSourceStockCheckByDbId: (dbPkId: number) =>
+    fetchAdmin<{
+      queued: boolean;
+      source_stock_status?: string | null;
+      source_stock_checked_at?: string | null;
+      source_stock_next_check_at?: string | null;
+    }>(`/products/by-id/${dbPkId}/source-stock-check/enqueue`, { method: 'POST' }),
+
+  /** Một URL: 1688 (cookie như crawler) hoặc hibox (scrape). Lỗi/không đọc được → có thể gán SP khớp `available = 0`. */
+  runSourceStockBatchOne: (body: { url: string; domain: '1688' | 'hibox' }) =>
+    fetchAdmin<AdminSourceStockBatchOneResult>('/products/admin/source-stock-batch/run', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      timeoutMs: 240_000,
+    }),
+
+  /** Một SP kế trong DB (link_default = product_url), chạy một lần kiểm tra; không cần nạp danh sách trước. */
+  runSourceStockBatchNextFromDb: (params: {
+    domain: '1688' | 'hibox';
+    activeOnly?: boolean;
+    cursorAfterProductId?: number;
+  }) =>
+    fetchAdmin<AdminSourceStockBatchDbNextResult>('/products/admin/source-stock-batch/run-next-from-db', {
+      method: 'POST',
+      body: JSON.stringify({
+        domain: params.domain,
+        active_only: params.activeOnly ?? true,
+        cursor_after_product_id: params.cursorAfterProductId ?? 0,
+      }),
+      timeoutMs: 240_000,
+    }),
+
+  /** Nạp `link_default` trong DB (= product_url trong Excel nhập SP), lọc theo luồng 1688 / Hibox. */
+  fetchSourceStockProductUrls: (params: {
+    domain: '1688' | 'hibox';
+    limit?: number;
+    activeOnly?: boolean;
+  }) =>
+    fetchAdmin<AdminSourceStockProductUrlsResponse>(
+      `/products/admin/source-stock-batch/product-urls?domain=${encodeURIComponent(params.domain)}&limit=${params.limit ?? 8000}&active_only=${params.activeOnly ?? true}`,
+      { timeoutMs: 120_000 },
+    ),
+
+  fetchSourceStockQueueStats: (params: { domain: '1688' | 'hibox'; activeOnly?: boolean }) =>
+    fetchAdmin<AdminSourceStockQueueStats>(
+      `/products/admin/source-stock-batch/queue-stats?domain=${encodeURIComponent(params.domain)}&active_only=${params.activeOnly ?? true}`,
+      { timeoutMs: 60_000 },
+    ),
+
+  /** Xóa vĩnh viễn các sản theo khóa chính `products.id` (sau phiên kiểm tra nguồn). */
+  deleteSourceStockBatchProductsByDbIds: (dbIds: number[]) =>
+    fetchAdmin<AdminSourceStockBatchDeleteByDbIdsResult>(
+      '/products/admin/source-stock-batch/delete-by-db-ids',
+      {
+        method: 'POST',
+        body: JSON.stringify({ db_ids: dbIds }),
+        timeoutMs: 120_000,
+      },
+    ),
 
   saveGeminiImageLocalizationCookie: (cookie: string) =>
     fetchAdmin<{ success: boolean; cookie_count: number }>('/image-localization/settings/gemini-cookie', {

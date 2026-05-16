@@ -137,7 +137,18 @@ class ProductBase(BaseModel):
     image_localization_language: Optional[str] = Field(None, description="Ngôn ngữ bản địa hóa ảnh gần nhất")
     image_localized_at: Optional[datetime] = Field(None, description="Thời điểm hoàn tất bản địa hóa ảnh")
     image_localization_error: Optional[str] = Field(None, description="Lỗi bản địa hóa ảnh gần nhất")
-    
+    source_stock_status: Optional[str] = Field(
+        "unknown",
+        description="Trạng thái tồn kho nguồn: unknown, queued, checking, in_stock, out_of_stock, error",
+    )
+    source_stock_checked_at: Optional[datetime] = Field(None, description="Thời điểm kiểm tra nguồn gần nhất")
+    source_stock_next_check_at: Optional[datetime] = Field(None, description="Thời điểm nên kiểm tra nguồn tiếp theo")
+    source_stock_error: Optional[str] = Field(None, description="Lỗi kiểm tra nguồn gần nhất")
+    admin_source_batch_scanned_at: Optional[datetime] = Field(
+        None,
+        description="Admin Kiểm tra nguồn (DB): thời điểm chạy lần cuối; qua ADMIN_SOURCE_BATCH_SCAN_COOLDOWN_DAYS mới được xếp hàng lại",
+    )
+
     # Cột AL (38): Slug (export only; import auto-generated)
     slug: Optional[str] = Field(
         None,
@@ -210,6 +221,11 @@ class ProductUpdate(BaseModel):
     image_localization_language: Optional[str] = None
     image_localized_at: Optional[datetime] = None
     image_localization_error: Optional[str] = None
+    source_stock_status: Optional[str] = None
+    source_stock_checked_at: Optional[datetime] = None
+    source_stock_next_check_at: Optional[datetime] = None
+    source_stock_error: Optional[str] = None
+    admin_source_batch_scanned_at: Optional[datetime] = None
     slug: Optional[str] = None
     is_active: Optional[bool] = None
     meta_title: Optional[str] = None
