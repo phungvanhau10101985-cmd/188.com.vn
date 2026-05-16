@@ -1128,6 +1128,72 @@ export default function AdminSourceStockCheckPage() {
                       {workerState.effective_idle_hint_vi ? ` — ${workerState.effective_idle_hint_vi}` : null}
                     </p>
                   ) : null}
+                  {workerState.products_commit_audit ? (
+                    workerState.products_commit_audit.ok === false ? (
+                      <div
+                        role="alert"
+                        className="rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 space-y-1"
+                      >
+                        <p className="font-semibold">Commit bảng products: chưa ghi được (hoặc lỗi ghi).</p>
+                        {workerState.products_commit_audit.detail ? (
+                          <p className="whitespace-pre-wrap leading-snug">{workerState.products_commit_audit.detail}</p>
+                        ) : null}
+                        {workerState.products_commit_audit.at_utc_iso ? (
+                          <p className="text-[10px] opacity-85">
+                            Ghi nhận audit:{' '}
+                            <span className="font-mono">{formatReportTimestampUtc(workerState.products_commit_audit.at_utc_iso)}</span>{' '}
+                            {workerState.products_commit_audit.product_db_id != null ? (
+                              <span className="font-mono">{` · DB #${workerState.products_commit_audit.product_db_id}`}</span>
+                            ) : null}
+                          </p>
+                        ) : null}
+                        {workerState.products_commit_audit.consistency_hint_vi ? (
+                          <p className="text-[10px] leading-snug border-t border-red-100 pt-1 mt-1">
+                            {workerState.products_commit_audit.consistency_hint_vi}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div
+                        role="status"
+                        className={`rounded-md border px-2 py-1.5 text-[11px] space-y-1 ${
+                          workerState.products_commit_audit.ok === true
+                            ? 'border-emerald-200 bg-emerald-50/90 text-emerald-950'
+                            : 'border-amber-200 bg-amber-50/90 text-amber-950'
+                        }`}
+                      >
+                        <p className="font-semibold">
+                          Commit bảng products:{' '}
+                          {workerState.products_commit_audit.ok === true
+                            ? 'đã ghi (theo audit worker state).'
+                            : 'chưa rõ — xem detail / đối chiếu.'}
+                        </p>
+                        {workerState.products_commit_audit.detail ? (
+                          <p className="text-[10px] leading-snug opacity-90 whitespace-pre-wrap">
+                            {workerState.products_commit_audit.detail}
+                          </p>
+                        ) : null}
+                        {workerState.products_commit_audit.at_utc_iso ? (
+                          <p className="text-[10px] opacity-85">
+                            Thời điểm audit:{' '}
+                            <span className="font-mono">{formatReportTimestampUtc(workerState.products_commit_audit.at_utc_iso)}</span>
+                            {workerState.products_commit_audit.product_db_id != null ? (
+                              <span className="font-mono">{` · DB #${workerState.products_commit_audit.product_db_id}`}</span>
+                            ) : null}
+                          </p>
+                        ) : null}
+                        {workerState.products_commit_audit.consistency_hint_vi ? (
+                          <p className="text-[10px] leading-snug border-t border-black/5 pt-1 mt-1 opacity-95">
+                            {workerState.products_commit_audit.consistency_hint_vi}
+                          </p>
+                        ) : null}
+                      </div>
+                    )
+                  ) : (
+                    <p className="text-[10px] text-indigo-900/70">
+                      Chưa có audit commit bảng products — lần scrape đầu sau khi cập nhật backend sẽ có dòng trạng thái tại đây.
+                    </p>
+                  )}
                   <details className="text-[10px] text-indigo-900/85">
                     <summary className="cursor-pointer underline font-medium text-indigo-900 select-none">Nhiều tiến trình / VPS</summary>
                     <p className="mt-1.5 leading-relaxed">{workerState.deployment_notes_vi}</p>

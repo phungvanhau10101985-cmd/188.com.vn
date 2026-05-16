@@ -488,6 +488,14 @@ export interface AdminSourceStockWorkerProgressRow {
   queue_hint_vi?: string | null;
 }
 
+export interface AdminSourceStockProductsCommitAudit {
+  ok?: boolean | null;
+  at_utc_iso?: string | null;
+  detail?: string | null;
+  product_db_id?: number | null;
+  consistency_hint_vi?: string | null;
+}
+
 /** Trạng thái worker kiểm tra nguồn (daemon + cờ pause DB). */
 export interface AdminSourceStockWorkerState {
   ok: boolean;
@@ -505,6 +513,7 @@ export interface AdminSourceStockWorkerState {
   last_completed?: AdminSourceStockWorkerProgressRow | null;
   next_upcoming_primary?: AdminSourceStockWorkerProgressRow | null;
   upcoming_candidates?: AdminSourceStockWorkerProgressRow[];
+  products_commit_audit?: AdminSourceStockProductsCommitAudit | null;
   progress_notes_vi?: string | null;
 }
 

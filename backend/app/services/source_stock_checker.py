@@ -183,7 +183,13 @@ def _worker_progress_mark_started(product_id: int) -> None:
         db.close()
 
 
-def _worker_progress_mark_finished(product_id: int, status: str) -> None:
+def _worker_progress_mark_finished(
+    product_id: int,
+    status: str,
+    *,
+    products_commit_ok: Optional[bool] = None,
+    products_commit_detail: Optional[str] = None,
+) -> None:
     from app.models.source_stock_worker_state import SourceStockWorkerState
 
     pid = int(product_id)
@@ -211,6 +217,14 @@ def _worker_progress_mark_finished(product_id: int, status: str) -> None:
             row.last_done_finished_at = now
             row.last_done_source_stock_status = st
             row.updated_at = now
+
+        if products_commit_ok is not None:
+            row.last_products_commit_ok = bool(products_commit_ok)
+            row.last_products_commit_at = now
+            row.last_products_commit_detail = (products_commit_detail or "")[:920] or (
+                "Đã ghi vào worker state (không kèm mô tả)."
+            )
+
         db.commit()
     except Exception as exc:
         db.rollback()
@@ -250,6 +264,8 @@ def get_source_stock_worker_admin_snapshot(*, force_refresh_pause: bool = False)
     upcoming_candidates: List[Dict[str, Any]] = []
 
     from app.models.source_stock_worker_state import SourceStockWorkerState
+
+    products_commit_audit: Optional[Dict[str, Any]] = None
 
     dbx = SessionLocal()
     try:
@@ -317,6 +333,63 @@ def get_source_stock_worker_admin_snapshot(*, force_refresh_pause: bool = False)
             m["queue_hint"] = "db_due_next"
             m["queue_hint_vi"] = "Dự kiến lần «claim» từ DB nếu hàng chờ RAM trống hoặc hết FIFO."
             upcoming_candidates.append(m)
+
+        if row_ws is not None and getattr(row_ws, "last_products_commit_at", None) is not None:
+            lid_done = int(row_ws.last_done_product_db_id) if row_ws.last_done_product_db_id else None
+            products_commit_audit = {
+                "ok": row_ws.last_products_commit_ok,
+                "at_utc_iso": _utc_iso(row_ws.last_products_commit_at),
+                "detail": ((row_ws.last_products_commit_detail or "").strip() or None),
+                "product_db_id": lid_done,
+                "consistency_hint_vi": None,
+            }
+            co_ok = row_ws.last_products_commit_ok
+            if co_ok is False:
+                products_commit_audit["consistency_hint_vi"] = (
+                    "Audit: lần scrape gần nhất không xác nhận được commit bảng products — xem detail."
+                )
+            elif co_ok is True and lid_done:
+                pr = (
+                    dbx.query(Product.source_stock_checked_at, Product.source_stock_status)
+                    .filter(Product.id == lid_done)
+                    .first()
+                )
+                if pr is None:
+                    products_commit_audit["consistency_hint_vi"] = (
+                        f"Đối chiếu DB: không còn products.id={lid_done} — không đọc được checked_at."
+                    )
+                else:
+                    ca, stp = pr
+                    if ca is None:
+                        products_commit_audit["consistency_hint_vi"] = (
+                            f"Đối chiếu DB: products.id={lid_done} có source_stock_checked_at = NULL — "
+                            "lệch với audit commit OK."
+                        )
+                    else:
+                        done_t = row_ws.last_done_finished_at
+                        cax = ca
+                        if cax.tzinfo is None:
+                            cax = cax.replace(tzinfo=timezone.utc)
+                        if done_t is not None:
+                            dt = done_t
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            skew_sec = abs((cax - dt).total_seconds())
+                        else:
+                            skew_sec = 0.0
+                        st_match = (stp or "").strip().lower() == (
+                            (row_ws.last_done_source_stock_status or "").strip().lower()
+                        )
+                        if skew_sec > 125 or not st_match:
+                            products_commit_audit["consistency_hint_vi"] = (
+                                "Đối chiếu DB: worker state và dòng products có thể lệch (thời gian checked_at >2 phút "
+                                f"so với last_done_* hoặc khác status). products.status={stp!r}, worker={row_ws.last_done_source_stock_status!r}."
+                            )
+                        else:
+                            products_commit_audit["consistency_hint_vi"] = (
+                                f"Đối chiếu DB: khớp products.id={lid_done} "
+                                "(status + checked_at gần thời điểm last_done)."
+                            )
     finally:
         dbx.close()
 
@@ -341,6 +414,7 @@ def get_source_stock_worker_admin_snapshot(*, force_refresh_pause: bool = False)
         "last_completed": last_completed,
         "next_upcoming_primary": next_primary,
         "upcoming_candidates": upcoming_candidates[:10],
+        "products_commit_audit": products_commit_audit,
         "progress_notes_vi": (
             "«Đang scrape» và «Vừa xong» ghi vào DB (chia sẻ giữa mọi process). "
             "«Sắp tới» là ước lượng: SP đầu hàng chờ RAM của process này, rồi SP đến hạn trong DB "
@@ -560,6 +634,8 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
     db = SessionLocal()
     progressed = False
     final_st: Optional[str] = None
+    products_commit_ok = False
+    products_commit_detail = "Chưa xác nhận commit bảng products."
     try:
         product = db.query(Product).filter(Product.id == product_id).first()
         if not product or not _link_eligible_for_hibox_stock_check(product.link_default or ""):
@@ -578,6 +654,10 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
         product = db.query(Product).filter(Product.id == product_id).first()
         if not product:
             final_st = getattr(result, "status", None) or "error"
+            products_commit_ok = False
+            products_commit_detail = (
+                "Không tìm thấy products sau khi scrape — không thể COMMIT kết quả lên dòng products."
+            )
             return result
 
         now = _utcnow()
@@ -606,11 +686,17 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
             logger.info("source stock checked: product_id=%s status=%s", product_id, result.status)
 
         final_st = result.status
+        products_commit_ok = True
+        products_commit_detail = (
+            f"Đã COMMIT products.id={product_id} status={result.status}; "
+            "cập nhật source_stock_checked_at, next_check_at và (nếu có) available."
+        )
         return result
 
     except Exception as exc:
         db.rollback()
         logger.exception("source stock check failed: product_id=%s", product_id)
+        committed_fallback = False
         try:
             product = db.query(Product).filter(Product.id == product_id).first()
             if product:
@@ -620,13 +706,27 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
                 product.source_stock_error = str(exc)[:1000]
                 product.source_stock_next_check_at = now + timedelta(minutes=settings.SOURCE_STOCK_CHECK_ERROR_RETRY_MINUTES)
                 db.commit()
+                committed_fallback = True
         except Exception:
             db.rollback()
         final_st = final_st or "error"
+        if committed_fallback:
+            products_commit_ok = True
+            products_commit_detail = (
+                f"Đã COMMIT products.id={product_id} status=error sau exception (ghi source_stock_error)."
+            )
+        else:
+            products_commit_ok = False
+            products_commit_detail = f"Không COMMIT được bảng products sau lỗi: {(str(exc) or 'unknown')[:800]}"
         return SourceStockCheckResult(status="error", error=str(exc)[:1000])
     finally:
         if progressed:
-            _worker_progress_mark_finished(product_id, final_st or "error")
+            _worker_progress_mark_finished(
+                product_id,
+                final_st or "error",
+                products_commit_ok=products_commit_ok,
+                products_commit_detail=products_commit_detail,
+            )
         db.close()
 
 

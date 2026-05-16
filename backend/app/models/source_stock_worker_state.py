@@ -17,5 +17,10 @@ class SourceStockWorkerState(Base):
     last_done_finished_at = Column(DateTime(timezone=True), nullable=True)
     last_done_source_stock_status = Column(String(64), nullable=True)
 
+    # Audit lần ghi bảng `products` gần nhất sau scrape PDP (singleton).
+    last_products_commit_ok = Column(Boolean, nullable=True)
+    last_products_commit_at = Column(DateTime(timezone=True), nullable=True)
+    last_products_commit_detail = Column(String(920), nullable=True)
+
     def __repr__(self):
         return f"<SourceStockWorkerState id={self.id} paused={self.paused}>"
