@@ -504,7 +504,7 @@ export default function AdminSourceStockCheckPage() {
   useEffect(() => {
     if (!auto || !scanFromDb) return;
 
-    const ctl = { cancelled: false, sleepTimer: null as ReturnType<typeof window.setTimeout> | null };
+    const ctl = { cancelled: false, sleepTimer: null as number | null };
 
     const sleepRemain = (ms: number) =>
       new Promise<void>((resolve) => {
