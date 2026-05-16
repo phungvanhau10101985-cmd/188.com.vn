@@ -207,18 +207,66 @@ function formatReportTimestampUtc(iso: string | null | undefined): string {
   return `${d.toLocaleString('vi-VN', { timeZone: 'UTC' })} UTC`;
 }
 
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function MiniStat({
+  label,
+  value,
+  variant = 'slate',
+}: {
+  label: string;
+  value: number | string;
+  variant?: 'slate' | 'emerald' | 'violet' | 'amber' | 'rose' | 'teal';
+}) {
+  const skin: Record<string, string> = {
+    slate: 'border-slate-200 bg-slate-50/90 text-slate-900',
+    emerald: 'border-emerald-200 bg-emerald-50/90 text-emerald-950',
+    violet: 'border-violet-200 bg-violet-50/90 text-violet-950',
+    amber: 'border-amber-200 bg-amber-50/90 text-amber-950',
+    rose: 'border-rose-200 bg-rose-50/90 text-rose-950',
+    teal: 'border-teal-200 bg-teal-50/90 text-teal-950',
+  };
+  const v = skin[variant] ?? skin.slate;
+  const display = typeof value === 'number' ? value.toLocaleString('vi-VN') : value;
+  return (
+    <div className={`rounded-lg border px-2.5 py-2 text-center min-w-0 ${v}`}>
+      <div className="text-[10px] uppercase tracking-wide opacity-80 font-medium leading-tight line-clamp-2">
+        {label}
+      </div>
+      <div className="text-base sm:text-lg font-semibold tabular-nums mt-0.5">{display}</div>
+    </div>
+  );
+}
+
+/** Nút trong bảng mẫu «cờ hết nguồn»: xóa DB / gỡ cờ / kiểm tra worker PDP lại. */
+type ReportSampleOosRowActions = {
+  busyByDbId: Record<number, string>;
+  disabledGlobally: boolean;
+  onDeleteDb: (row: AdminSourceStockActivityReportSampleRow) => void;
+  onClearFlag: (row: AdminSourceStockActivityReportSampleRow) => void;
+  onRecheck: (row: AdminSourceStockActivityReportSampleRow) => void;
+};
+
 /** Bảng mẫu (tối đa `detail_limit` từ API) trong báo cáo 30 ngày. */
 function SourceStockReportSampleTable({
   title,
   rows,
   emptyHint,
   defaultOpen,
+  oosActions,
 }: {
   title: string;
   rows: AdminSourceStockActivityReportSampleRow[];
   emptyHint: string;
   defaultOpen: boolean;
+  oosActions?: ReportSampleOosRowActions;
 }) {
+  const colSpan = oosActions ? 10 : 9;
+
   return (
     <details
       className="rounded-lg border border-slate-200 bg-white mt-2"
@@ -262,12 +310,17 @@ function SourceStockReportSampleTable({
               <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
                 PDP
               </th>
+              {oosActions ? (
+                <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap min-w-[7.5rem]">
+                  Thao tác
+                </th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-2 py-4 text-gray-500 text-center">
+                <td colSpan={colSpan} className="px-2 py-4 text-gray-500 text-center">
                   {emptyHint}
                 </td>
               </tr>
@@ -302,6 +355,51 @@ function SourceStockReportSampleTable({
                       '—'
                     )}
                   </td>
+                  {oosActions ? (
+                    <td className="px-2 py-1.5 align-top min-w-[7.75rem]">
+                      {(() => {
+                        const busy = oosActions.busyByDbId[row.id];
+                        const blocked = oosActions.disabledGlobally || Boolean(busy);
+                        return (
+                          <div className="flex flex-col gap-1.5">
+                            <button
+                              type="button"
+                              className="text-[10px] font-semibold rounded border border-red-300 bg-red-50 px-2 py-1 text-red-950 hover:bg-red-100 disabled:opacity-45 text-left leading-tight"
+                              disabled={blocked}
+                              aria-label={`Xóa vĩnh viễn sản khỏi cửa hàng, DB id ${row.id}`}
+                              onClick={() => oosActions.onDeleteDb(row)}
+                            >
+                              Xóa khỏi DB…
+                              <span className="font-normal block text-[9px] text-red-950/85">Đúng là hết, gỡ SP shop</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="text-[10px] font-semibold rounded border border-slate-300 bg-white px-2 py-1 text-slate-900 hover:bg-slate-50 disabled:opacity-45 text-left leading-tight"
+                              disabled={blocked}
+                              aria-label={`Gỡ cờ out_of_stock sai, DB id ${row.id}`}
+                              onClick={() => oosActions.onClearFlag(row)}
+                            >
+                              Gỡ cờ hết…
+                              <span className="font-normal block text-[9px] text-slate-600">Đọc sai — giữ SP, mở tồn lại</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="text-[10px] font-semibold rounded border border-emerald-400 bg-emerald-50 px-2 py-1 text-emerald-950 hover:bg-emerald-100 disabled:opacity-45 text-left leading-tight"
+                              disabled={blocked}
+                              aria-label={`Xếp worker kiểm tra lại PDP, DB id ${row.id}`}
+                              onClick={() => oosActions.onRecheck(row)}
+                            >
+                              Kiểm tra lại PDP
+                              <span className="font-normal block text-[9px] text-emerald-900">Hết vẫn cờ • còn thì báo</span>
+                            </button>
+                            {busy ? (
+                              <span className="text-[10px] text-slate-500 leading-snug">{busy}</span>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
+                    </td>
+                  ) : null}
                 </tr>
               ))
             )}
@@ -343,6 +441,12 @@ export default function AdminSourceStockCheckPage() {
   const [activityReport, setActivityReport] = useState<AdminSourceStockActivityReport | null>(null);
   const [activityReportLoading, setActivityReportLoading] = useState(false);
   const [activityReportError, setActivityReportError] = useState<string | null>(null);
+  /** Hàng đang chờ thao tác trên báo cáo OOS — khóa trùng nút trong bảng. */
+  const [reportOosRowBusyById, setReportOosRowBusyById] = useState<Record<number, string>>({});
+  const [reportOosDeleteTarget, setReportOosDeleteTarget] =
+    useState<AdminSourceStockActivityReportSampleRow | null>(null);
+  const [reportOosDeleting, setReportOosDeleting] = useState(false);
+  const recheckPollCancelRef = useRef(false);
   const [activeCheck, setActiveCheck] = useState<ActiveCheck | null>(null);
   const [lastFinished, setLastFinished] = useState<LastFinishedCheck | null>(null);
 
@@ -370,6 +474,13 @@ export default function AdminSourceStockCheckPage() {
   useEffect(() => {
     stickySeedProductIdRef.current = null;
   }, [domain]);
+
+  useEffect(() => {
+    recheckPollCancelRef.current = false;
+    return () => {
+      recheckPollCancelRef.current = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!scanFromDb) stickySeedProductIdRef.current = null;
@@ -430,6 +541,158 @@ export default function AdminSourceStockCheckPage() {
       setActivityReportLoading(false);
     }
   }, [scanFromDb, domain]);
+
+  const bumpReportBusy = useCallback((id: number, label: string) => {
+    setReportOosRowBusyById((m) => ({ ...m, [id]: label }));
+  }, []);
+
+  const clearReportBusy = useCallback((id: number) => {
+    setReportOosRowBusyById((m) => {
+      const next = { ...m };
+      delete next[id];
+      return next;
+    });
+  }, []);
+
+  const pollWorkerRecheckOutcome = useCallback(
+    async (productDbId: number) => {
+      const stepMs = 2800;
+      const maxAttempts = 32;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (recheckPollCancelRef.current) return;
+        await sleepMs(stepMs);
+        if (recheckPollCancelRef.current) return;
+        try {
+          const p = await adminProductAPI.getProductByDatabaseId(productDbId);
+          const st = (p.source_stock_status ?? '').trim().toLowerCase();
+          if (st === 'queued' || st === 'checking') continue;
+          if (st === 'in_stock') {
+            showToast('ok', `SP DB #${productDbId}: đã kiểm tra — nguồn còn hàng (in_stock).`);
+            void refreshActivityReport();
+            void refreshQueueStats();
+            return;
+          }
+          if (st === 'out_of_stock') {
+            showToast('info', `SP DB #${productDbId}: đã kiểm tra — vẫn hết trên nguồn.`);
+            void refreshActivityReport();
+            void refreshQueueStats();
+            return;
+          }
+          const err = typeof p.source_stock_error === 'string' ? p.source_stock_error.trim() : '';
+          const slice = err.length > 160 ? `${err.slice(0, 160)}…` : err;
+          showToast(
+            'info',
+            `SP DB #${productDbId}: kết quả «${st || 'không rõ'}».${slice ? ` ${slice}` : ''}`,
+          );
+          void refreshActivityReport();
+          void refreshQueueStats();
+          return;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          showToast('err', `Không đọc được SP DB #${productDbId} khi chờ worker — ${msg}`);
+          return;
+        }
+      }
+      showToast(
+        'info',
+        `SP DB #${productDbId}: chưa có kết quả sau ~${Math.round(
+          (maxAttempts * stepMs) / 1000,
+        )}s — đợi thêm và bấm «Làm mới báo cáo».`,
+      );
+    },
+    [refreshActivityReport, refreshQueueStats, showToast],
+  );
+
+  const handleReportOosClearFlag = useCallback(
+    async (row: AdminSourceStockActivityReportSampleRow) => {
+      bumpReportBusy(row.id, 'Đang gỡ cờ…');
+      try {
+        await adminProductAPI.clearSourceStockOosFlagByDbId(row.id);
+        showToast(
+          'ok',
+          `Đã gỡ cờ và mở tồn mặc định khi đang 0 — DB #${row.id}. TTL batch admin không đổi.`,
+        );
+        void refreshActivityReport();
+        void refreshQueueStats();
+      } catch (e) {
+        showToast('err', e instanceof Error ? e.message : String(e));
+      } finally {
+        clearReportBusy(row.id);
+      }
+    },
+    [bumpReportBusy, clearReportBusy, refreshActivityReport, refreshQueueStats, showToast],
+  );
+
+  const handleReportOosRecheck = useCallback(
+    async (row: AdminSourceStockActivityReportSampleRow) => {
+      bumpReportBusy(row.id, 'Đang xếp hàng PDP…');
+      try {
+        const out = await adminProductAPI.forceWorkerSourceStockRecheckByDbId(row.id);
+        if (out.skip_reason === 'not_eligible_or_failed' && !out.enqueued_now) {
+          showToast(
+            'err',
+            `Không xếp kiểm tra PDP cho DB #${row.id}: link không đủ điều kiện hoặc tắt worker.`,
+          );
+          return;
+        }
+        bumpReportBusy(row.id, 'Worker đọc…');
+        if (!out.enqueued_now && out.skip_reason === 'already_pending') {
+          showToast('info', `SP DB #${row.id} đã trong hàng chờ worker — đang chờ kết quả.`);
+        } else {
+          showToast('ok', `Đã xếp worker PDP kiểm tra DB #${row.id}.`);
+        }
+        await pollWorkerRecheckOutcome(row.id);
+      } catch (e) {
+        showToast('err', e instanceof Error ? e.message : String(e));
+      } finally {
+        clearReportBusy(row.id);
+      }
+    },
+    [bumpReportBusy, clearReportBusy, pollWorkerRecheckOutcome, showToast],
+  );
+
+  const executeReportOosDeleteFromDb = useCallback(async () => {
+    const target = reportOosDeleteTarget;
+    if (!target) return;
+    setReportOosDeleting(true);
+    try {
+      const res = await adminProductAPI.deleteSourceStockBatchProductsByDbIds([target.id]);
+      if (res.deleted_count > 0) {
+        showToast(
+          'ok',
+          `Đã xóa vĩnh viễn khỏi cửa hàng (products.id=${target.id}).`,
+        );
+      } else {
+        showToast('info', `Không xóa được id=${target.id} — không tìm thấy trong DB hoặc bị chặn.`);
+      }
+      setReportOosDeleteTarget(null);
+      void refreshActivityReport();
+      void refreshQueueStats();
+    } catch (e) {
+      showToast('err', e instanceof Error ? e.message : String(e));
+    } finally {
+      setReportOosDeleting(false);
+    }
+  }, [refreshActivityReport, refreshQueueStats, reportOosDeleteTarget, showToast]);
+
+  const reportOosActionsForTable = useMemo<ReportSampleOosRowActions>(
+    () => ({
+      busyByDbId: reportOosRowBusyById,
+      disabledGlobally: running || bulkDeletingDb || activityReportLoading || reportOosDeleting,
+      onDeleteDb: (row) => setReportOosDeleteTarget(row),
+      onClearFlag: handleReportOosClearFlag,
+      onRecheck: handleReportOosRecheck,
+    }),
+    [
+      activityReportLoading,
+      bulkDeletingDb,
+      handleReportOosClearFlag,
+      handleReportOosRecheck,
+      reportOosDeleting,
+      reportOosRowBusyById,
+      running,
+    ],
+  );
 
   const fillTextareaPreviewFromDb = useCallback(async () => {
     setLoadingPreviewUrls(true);
@@ -731,13 +994,15 @@ export default function AdminSourceStockCheckPage() {
   }, [scanFromDb, auto, refreshQueueStats]);
 
   useEffect(() => {
-    if (!deleteDbModalOpen) return;
+    if (!deleteDbModalOpen && !reportOosDeleteTarget) return;
     const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape' && !bulkDeletingDb) setDeleteDbModalOpen(false);
+      if (ev.key !== 'Escape') return;
+      if (deleteDbModalOpen && !bulkDeletingDb) setDeleteDbModalOpen(false);
+      if (reportOosDeleteTarget && !reportOosDeleting) setReportOosDeleteTarget(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [deleteDbModalOpen, bulkDeletingDb]);
+  }, [deleteDbModalOpen, bulkDeletingDb, reportOosDeleteTarget, reportOosDeleting]);
 
   useEffect(() => {
     if (!auto || !scanFromDb) return;
@@ -838,58 +1103,82 @@ export default function AdminSourceStockCheckPage() {
   };
 
   return (
-    <div className="p-6 max-w-5xl pb-28">
-      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Kiểm tra nguồn hàng</h1>
-          <p className="text-sm text-gray-600 mt-1">
-            Mặc định không cần nạp danh sách; với chế độ Theo DB tab mở và <strong>đã bật lặp</strong>: luôn{' '}
-            <strong>một SP một lần</strong> — chờ kiểm tra xong SP đó rồi mới xếp lượt tiếp; giữa hai lần <em>bắt đầu</em>{' '}
-            kiểm tra cách nhau <strong>ngẫu nhiên ~46–60 giây</strong> giữa hai lần <em>bắt đầu</em> (nếu một SP chạy lâu hơn khoảng đó thì SP kế bắt đầu ngay sau khi xong).
-            Khi phản hồi báo chặn / rủi ro (<code className="text-[11px] bg-gray-100 px-1 rounded">blocked</code>) hoặc heuristic tương tự trên UI, lặp <strong>tự dừng</strong>. Khi chỉ lỗi đọc tạm (<code className="text-[11px] bg-gray-100 px-1 rounded">error</code> /{' '}
-            <code className="text-[11px] bg-gray-100 px-1 rounded">fetch_error</code>), hệ thống{' '}
-            <strong>không đánh dấu TTL batch</strong> và <strong>giữ đúng SP đó</strong> cho tới khi đọc được trang hoặc có kết quả xác định khác.
-            Backend đọc{' '}
-            <strong>PDP traffic</strong> từ bảng{' '}
-            <code className="text-[11px] bg-gray-100 px-1 rounded">user_product_views</code> /{' '}
-            <code className="text-[11px] bg-gray-100 px-1 rounded">guest_product_views</code>: trong cửa sổ gần (ENV{' '}
-            <code className="text-xs bg-gray-100 px-1 rounded">ADMIN_SOURCE_BATCH_TRAFFIC_VIEW_WINDOW_DAYS</code>) SP đó được{' '}
-            <strong>xếp hàng chờ và được ưu tiên trong vòng luân phiên</strong>. Nếu SP traffic đã có mốc{' '}
-            <code className="text-xs bg-gray-100 px-1 rounded">admin_source_batch_scanned_at</code> nhưng{' '}
-            <strong>chưa qua đủ</strong> cửa sổ chờ ENV{' '}
-            <code className="text-xs bg-gray-100 px-1 rounded">ADMIN_SOURCE_BATCH_TRAFFIC_CHECK_GAP_DAYS</code> →{' '}
-            <strong>không xếp hàng kiểm tra</strong>. SP <strong>không</strong> có PDP traffic trong cửa sổ đó vẫn xếp theo TTL cổ điển{' '}
-            <code className="text-xs bg-gray-100 px-1 rounded">ADMIN_SOURCE_BATCH_SCAN_COOLDOWN_DAYS</code> (= <strong>{cooldownDays}</strong> hiện
-            báo trong API).
-
-            Một lần chạy lấy <strong>một</strong>{' '}sản với đủ <code className="text-xs bg-gray-100 px-1 rounded">link_default</code>{' '}(
-            Excel <code className="text-xs bg-gray-100 px-1 rounded">product_url</code>), sau đó ghi mốc và giữ chờ TTL tương ứng từng loại như trên.
-          </p>
-          <p className="text-sm text-gray-600 mt-2">
-            <strong>Hibox:</strong> quy đổi sang <code className="text-xs bg-gray-100 px-1 rounded">hibox.mn/v/…</code> rồi scrape.
-            {' '}
-            <strong>CSSBuy:</strong> quy đổi sang{' '}
-            <code className="text-xs bg-gray-100 px-1 rounded">item-1688-…</code> /{' '}
-            <code className="text-xs bg-gray-100 px-1 rounded">item-….html</code> và đọc qua API{' '}
-            <code className="text-xs bg-gray-100 px-1 rounded">POST /web/item</code> — không cần bấm «I accept the risks»
-            (modal chỉ là UI; JSON đã có giá/title).
-          </p>
-        </div>
-        {toast && (
-          <div
-            className={`rounded-lg border px-4 py-2 text-sm shrink-0 max-w-sm ${
-              toast.type === 'err'
-                ? 'bg-red-50 border-red-200 text-red-800'
-                : toast.type === 'ok'
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                  : 'bg-amber-50 border-amber-200 text-amber-900'
-            }`}
-            role="status"
-          >
-            {toast.msg}
+    <div className="max-w-[88rem] mx-auto px-3 sm:px-5 py-5 pb-8">
+      <header className="mb-5">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">Kiểm tra nguồn hàng</h1>
+            <p className="text-xs sm:text-sm text-gray-600 mt-1 max-w-3xl">
+              Mỗi lần <strong>một SP</strong>. Lặp: nghỉ ngẫu nhiên ~46–60s giữa hai lần <em>bắt đầu</em>. Ưu tiên SP có lượt
+              xem PDP trong cửa sổ gần; lỗi tạm / captcha → giữ SP, không TTL.
+            </p>
           </div>
-        )}
-      </div>
+        </div>
+        <details className="group rounded-lg border border-gray-200 bg-gray-50/90 text-sm text-gray-700">
+          <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden flex items-center gap-2 px-3 py-2.5 font-medium text-gray-900 select-none hover:bg-gray-100/80 rounded-lg transition-colors">
+            <span aria-hidden className="text-gray-400 text-[10px] group-open:hidden">
+              ▸
+            </span>
+            <span aria-hidden className="text-gray-400 text-[10px] hidden group-open:inline">
+              ▾
+            </span>
+            Đọc thêm — TTL batch, PDP traffic, chặn lặp, Hibox &amp; CSSBuy
+          </summary>
+          <div className="px-3 pb-3 pt-0 space-y-3 text-[13px] leading-relaxed text-gray-700 border-t border-gray-200">
+            <p>
+              Không cần nạp danh sách tay khi Theo DB + bật lặp (tab mở): luôn <strong>một SP một lần</strong>; chờ xong SP
+              hiện tại rồi xếp lượt tiếp. Giữa hai lần <em>bắt đầu</em> có khoảng nghỉ ngẫu nhiên như phần đầu; nếu một SP xử lý lâu
+              hơn khoảng đó, SP kế bắt đầu ngay sau khi xong. Khi phản hồi báo chặn / rủi ro (
+              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">blocked</code>
+              hoặc dấu hiệu captcha trên UI), lặp <strong>tự dừng</strong>.{' '}
+              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">error</code> /{' '}
+              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">fetch_error</code>:{' '}
+              <strong>không đánh dấu TTL batch</strong> và <strong>giữ đúng SP đó</strong> để thử lại.
+            </p>
+            <p>
+              PDP traffic lấy từ{' '}
+              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">user_product_views</code> và{' '}
+              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">guest_product_views</code> trong cửa sổ{' '}
+              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">
+                ADMIN_SOURCE_BATCH_TRAFFIC_VIEW_WINDOW_DAYS
+              </code>
+              ; SP traffic được ưu tiên. Nếu đã có{' '}
+              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">admin_source_batch_scanned_at</code> nhưng
+              chưa qua{' '}
+              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">
+                ADMIN_SOURCE_BATCH_TRAFFIC_CHECK_GAP_DAYS
+              </code>
+              → không xếp hàng. SP không traffic vẫn theo TTL{' '}
+              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">
+                ADMIN_SOURCE_BATCH_SCAN_COOLDOWN_DAYS
+              </code>{' '}
+              (= <strong>{cooldownDays}</strong> ngày theo API hiện tại). Một lần chạy cần{' '}
+              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">link_default</code> đủ dài.
+            </p>
+            <p>
+              <strong>Hibox:</strong> quy đổi <code className="text-[11px] bg-white px-1 rounded border">hibox.mn/v/…</code> rồi
+              scrape. <strong>CSSBuy:</strong> quy đổi <code className="text-[11px] bg-white px-1 rounded border">item-1688-…</code> /{' '}
+              <code className="text-[11px] bg-white px-1 rounded border">item-….html</code> — API{' '}
+              <code className="text-[11px] bg-white px-1 rounded border">POST /web/item</code> (không cần modal rủi ro).
+            </p>
+          </div>
+        </details>
+      </header>
+
+      {toast ? (
+        <div
+          className={`fixed bottom-4 right-4 z-[130] max-w-[min(22rem,calc(100vw-1.5rem))] rounded-lg border px-3 py-2 text-sm shadow-lg ${
+            toast.type === 'err'
+              ? 'bg-red-50 border-red-200 text-red-800'
+              : toast.type === 'ok'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                : 'bg-amber-50 border-amber-200 text-amber-900'
+          }`}
+          role="status"
+        >
+          {toast.msg}
+        </div>
+      ) : null}
 
       {lastError && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -905,73 +1194,164 @@ export default function AdminSourceStockCheckPage() {
         </div>
       )}
 
-      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-4">
-        <fieldset className="space-y-2">
-          <legend className="text-sm font-medium text-gray-800">Chế độ hàng chờ</legend>
-          <div className="flex flex-wrap gap-4">
-            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-              <input
-                type="radio"
-                name="scan-mode"
-                checked={scanFromDb}
-                onChange={() => {
-                  setScanFromDb(true);
-                }}
+      <div className="rounded-xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm space-y-4">
+        <div className="flex flex-wrap items-end gap-4 gap-y-3">
+          <div className="flex flex-col gap-1 min-w-[10rem]">
+            <span className="text-xs font-medium text-gray-500">Chế độ</span>
+            <div
+              className="inline-flex rounded-lg border border-gray-200 p-1 bg-gray-50"
+              role="group"
+              aria-label="Chế độ hàng chờ"
+            >
+              <button
+                type="button"
+                aria-pressed={scanFromDb}
+                className={`px-3 py-2 text-sm rounded-md transition ${
+                  scanFromDb ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-600 hover:text-gray-900'
+                }`}
                 disabled={running}
-              />
-              <span>
-                <strong>Theo DB</strong> — <strong>máy chủ chọn một SP mỗi lần</strong>: PDP traffic (guest + khách có tài khoản
-                mới mở trang PDP) được <strong>ưu tiên trước</strong>; SP không PDP traffic chỉ chờ TTL thường. Trong từng
-                nhánh thỏa điều kiện: chưa từng batch đi trước, tiếp theo là mốc batch càng cũ, cuối cùng là id tăng dần.
-              </span>
-            </label>
-            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-              <input
-                type="radio"
-                name="scan-mode"
-                checked={!scanFromDb}
-                onChange={() => {
-                  setScanFromDb(false);
-                  setAuto(false);
-                  setShowManualTextarea(true);
+                onClick={() => {
+                  if (!scanFromDb) setScanFromDb(true);
                 }}
+              >
+                Theo DB
+              </button>
+              <button
+                type="button"
+                aria-pressed={!scanFromDb}
+                className={`px-3 py-2 text-sm rounded-md transition ${
+                  !scanFromDb ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-600 hover:text-gray-900'
+                }`}
                 disabled={running}
-              />
-              <span>
-                <strong>Dán tay</strong> — mỗi dòng một URL trong ô bên dưới
-              </span>
-            </label>
+                onClick={() => {
+                  if (scanFromDb) {
+                    setScanFromDb(false);
+                    setAuto(false);
+                    setShowManualTextarea(true);
+                  }
+                }}
+              >
+                Dán tay
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-500 max-w-[16rem] leading-snug">
+              {scanFromDb
+                ? 'Một SP mỗi lần; ưu tiên PDP. Lặp: nghỉ ~46–60s giữa hai lần bắt đầu.'
+                : 'Một URL mỗi lần; không auto lặp.'}
+            </p>
           </div>
-        </fieldset>
+          <div className="flex flex-col gap-1 flex-1 min-w-[12rem] max-w-md">
+            <label htmlFor="source-domain-select" className="text-xs font-medium text-gray-500">
+              Nguồn đọc (batch)
+            </label>
+            <select
+              id="source-domain-select"
+              className="border border-gray-300 rounded-lg px-3 h-10 text-sm w-full"
+              value={domain}
+              onChange={(e) => setDomain(e.target.value as SourceStockDomain)}
+              disabled={running}
+            >
+              <option value="hibox">hibox.mn — scrape</option>
+              <option value="cssbuy">cssbuy.com — API /web/item</option>
+            </select>
+          </div>
+        </div>
 
-        {!scanFromDb && (
+        <div className="flex flex-wrap items-center gap-2 py-2 border-y border-gray-100">
+          <button
+            type="button"
+            onClick={() => void runNextInternal()}
+            disabled={running}
+            className="rounded-lg bg-orange-600 text-white px-4 py-2 text-sm font-semibold disabled:opacity-50 hover:bg-orange-700 shadow-sm"
+          >
+            {running
+              ? 'Đang chạy…'
+              : scanFromDb
+                ? 'Chạy 1 SP'
+                : 'Chạy 1 link'}
+          </button>
+          {scanFromDb ? (
+            <button
+              type="button"
+              aria-pressed={auto}
+              onClick={() => {
+                if (auto) {
+                  setAuto(false);
+                  showToast('info', 'Đã dừng lặp.');
+                } else {
+                  void startAutoSequence();
+                }
+              }}
+              disabled={running && !auto}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold border-2 transition-colors shadow-sm ${
+                auto
+                  ? 'border-emerald-600 bg-emerald-50 text-emerald-950 hover:bg-emerald-100 disabled:opacity-50'
+                  : 'border-slate-800 bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-45'
+              }`}
+            >
+              {auto ? 'Dừng lặp' : 'Bật lặp'}
+            </button>
+          ) : null}
+          <span className="hidden sm:inline w-px h-7 bg-gray-200 shrink-0" aria-hidden />
+          <button
+            type="button"
+            onClick={resetPointers}
+            disabled={running}
+            title="Chỉ trên tab này"
+            className="text-xs font-semibold text-gray-600 hover:text-gray-900 underline underline-offset-2 disabled:opacity-40"
+          >
+            Đặt lại chỉ báo
+          </button>
+          {scanFromDb ? (
+            <>
+              <button
+                type="button"
+                disabled={running || bulkDeletingDb || queueStatsLoading}
+                className="text-xs font-semibold text-indigo-700 underline underline-offset-2 disabled:opacity-45"
+                onClick={() => void refreshQueueStats()}
+              >
+                {queueStatsLoading ? 'Đang đếm queue…' : 'Làm mới queue'}
+              </button>
+              <button
+                type="button"
+                disabled={running || bulkDeletingDb || activityReportLoading}
+                className="text-xs font-semibold text-indigo-700 underline underline-offset-2 disabled:opacity-45"
+                onClick={() => void refreshActivityReport()}
+              >
+                {activityReportLoading ? 'Đang tải BC…' : 'Làm mới báo cáo 30 ngày'}
+              </button>
+            </>
+          ) : null}
+        </div>
+
+        {!scanFromDb ? (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <button
               type="button"
-              className="text-sm font-medium text-indigo-700 underline"
+              className="text-sm font-medium text-indigo-700 underline disabled:opacity-50"
               disabled={running || loadingPreviewUrls}
               onClick={() => void fillTextareaPreviewFromDb()}
             >
-              {loadingPreviewUrls ? 'Đang lấy mẫu…' : 'Chỉ xem trước: đổ vào ô danh sách (không chạy kiểm tra)'}
+              {loadingPreviewUrls ? 'Đang lấy…' : 'Đổ mẫu link từ DB (không chạy)'}
             </button>
             <button
               type="button"
               className="text-sm text-gray-600 underline"
               onClick={() => setShowManualTextarea((s) => !s)}
             >
-              {showManualTextarea ? 'Thu gọn ô danh sách' : 'Mở rộng ô danh sách'}
+              {showManualTextarea ? 'Thu ô URL' : 'Mở ô URL'}
             </button>
           </div>
-        )}
+        ) : null}
 
-        {!scanFromDb && showManualTextarea && (
+        {!scanFromDb && showManualTextarea ? (
           <div>
-            <label className="block text-sm font-medium text-gray-800 mb-2" htmlFor="source-url-batch">
-              Danh sách URL (mỗi dòng một link)
+            <label className="block text-xs font-medium text-gray-700 mb-1.5" htmlFor="source-url-batch">
+              URL (một dòng một link)
             </label>
             <textarea
               id="source-url-batch"
-              className="w-full min-h-[140px] border border-gray-300 rounded-lg p-3 text-sm font-mono"
+              className="w-full min-h-[120px] border border-gray-300 rounded-lg p-3 text-sm font-mono"
               spellCheck={false}
               placeholder={
                 'https://detail.1688.com/offer/…\nhttps://hibox.mn/v/…\nhttps://www.cssbuy.com/item-1688-….html'
@@ -980,264 +1360,190 @@ export default function AdminSourceStockCheckPage() {
               onChange={(e) => setUrlsText(e.target.value)}
               disabled={running}
             />
-            <p className="text-xs text-gray-500 mt-1">
-              Tay: dòng đang chỉ {manualCursor}/{urlsList.length}
+            <p className="text-[11px] text-gray-500 mt-1">
+              Đang chọn dòng <strong>{manualCursor}</strong> / {urlsList.length}
             </p>
           </div>
-        )}
+        ) : null}
 
-        <div className="flex flex-wrap items-start gap-4 pt-2 border-t border-gray-100">
-          <div>
-            <label htmlFor="source-domain-select" className="block text-sm font-medium text-gray-800 mb-1">
-              Nguồn kiểm tra
-            </label>
-            <select
-              id="source-domain-select"
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm min-w-[16rem]"
-              value={domain}
-              onChange={(e) => setDomain(e.target.value as SourceStockDomain)}
-              disabled={running}
-            >
-              <option value="hibox">hibox.mn — scrape sau quy đổi</option>
-              <option value="cssbuy">cssbuy.com — API /web/item (Taobao item-… / 1688 item-1688-…)</option>
-            </select>
-          </div>
-          {scanFromDb ? (
-            <div className="text-sm text-gray-600 pb-1 flex-1 min-w-[14rem] space-y-1.5">
-              <div>
-                <strong>Vừa xử lý (id báo trong phiên tab):</strong>{' '}
-                <code className="text-xs bg-gray-100 px-1 rounded">products.id</code> seed ={' '}
-                <strong>{dbCursorAfterId}</strong>
-                {' · '}
-                <span className="text-gray-500">
-                  TTL thường <strong>{cooldownDays}</strong> ngày
-                  {queueStats?.admin_batch_traffic_check_gap_days != null ? (
-                    <>
-                      {' '}
-                      — PDP chờ-gap <strong>{queueStats.admin_batch_traffic_check_gap_days}</strong> ngày
-                    </>
-                  ) : null}
-                  {queueStats?.admin_batch_traffic_view_window_days != null ? (
-                    <>
-                      {' '}
-                      — cửa sổ PDP <strong>{queueStats.admin_batch_traffic_view_window_days}</strong> ngày
-                    </>
-                  ) : null}
-                  {' — '}
-                  phiên đã kiểm tra thành công: <strong>{sessionChecks}</strong> lần
-                </span>
-              </div>
-              {queueStatsLoading && !queueStats ? (
-                <p className="text-xs text-gray-500">Đang đếm hàng chờ trên DB…</p>
-              ) : queueStats ? (
-                <div className="text-xs text-gray-800 leading-snug rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
-                  <strong className="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">Tiến độ trong DB</strong>
-                  Tổng phạm vi (link đủ dài + lọc miền + chỉ sản đang hoạt động{' '}
-                  <code className="text-[10px] bg-white px-0.5 rounded">is_active</code>):{' '}
-                  <strong>{queueStats.total_in_scope.toLocaleString('vi-VN')}</strong> SP
-                  {' — '}
-                  <span className="text-emerald-900 whitespace-nowrap">
-                    đến lượt ngay:{' '}
-                    <strong>{queueStats.eligible_now.toLocaleString('vi-VN')}</strong>
-                    （chưa từng batch:{' '}
-                    <strong>
-                      {(queueStats.eligible_never_scanned ?? 0).toLocaleString('vi-VN')}
-                    </strong>
-                    ; đã TTL:{' '}
-                    <strong>
-                      {(queueStats.eligible_rescan_after_ttl ?? 0).toLocaleString('vi-VN')}
-                    </strong>）
-                  </span>
-                  <span className="block text-violet-950/95 mt-1.5">
-                    Trong <strong>{queueStats.eligible_now.toLocaleString('vi-VN')}</strong> SP đến lượt — nhánh PDP traffic
-                    (cửa sổ <strong>{queueStats.admin_batch_traffic_view_window_days ?? '?'}</strong> ngày):{' '}
-                    <strong>
-                      {(queueStats.eligible_with_recent_customer_view ?? 0).toLocaleString('vi-VN')}
-                    </strong>
-                    ; không PDP traffic chỉ chờ TTL thường:{' '}
-                    <strong>
-                      {(queueStats.eligible_without_recent_customer_view ?? 0).toLocaleString('vi-VN')}
-                    </strong>
-                  </span>
-                  <span className="text-amber-900 whitespace-nowrap mt-1.5 inline-block md:inline">
-                    đang chờ TTL (chưa tới vòng tiếp):{' '}
-                    <strong>{queueStats.in_cooldown.toLocaleString('vi-VN')}</strong>
-                    <abbr
-                      title="Gồm SP traffic vừa batch chưa qua ADMIN_SOURCE_BATCH_TRAFFIC_CHECK_GAP_DAYS và SP không traffic vừa batch nhưng chưa qua ADMIN_SOURCE_BATCH_SCAN_COOLDOWN_DAYS"
-                      className="no-underline cursor-help mx-1"
-                    >
-                      ({queueStats.admin_batch_scan_cooldown_days} ngày)
-                    </abbr>
-                  </span>
-                  <span className="text-slate-500"> · </span>
-                  <button
-                    type="button"
-                    disabled={running || bulkDeletingDb || queueStatsLoading}
-                    className="text-indigo-700 font-medium underline disabled:opacity-50"
-                    onClick={() => void refreshQueueStats()}
-                  >
-                    Làm mới số đếm
-                  </button>
-                  <span className="block text-[11px] text-slate-500 mt-1">
-                    Đếm COUNT trên DB. Ưu tiên chọn: nhánh PDP traffic (cửa sổ xem) trước; trong nhánh không traffic vẫn theo TTL
-                    thường. Tie-break trong mỗi nhóm:{' '}
-                    <code className="text-[10px] bg-white px-0.5 rounded">admin_source_batch_scanned_at</code> chưa có → đi
-                    trước, có thì ai càng cũ càng được lấy, cuối cùng là <code className="text-[10px] bg-white px-0.5 rounded">products.id</code>.
-                  </span>
-                </div>
-              ) : (
-                <p className="text-xs text-gray-500">Không đọc được số đếm — bấm «Làm mới số đếm» hoặc tải lại trang.</p>
-              )}
-              <div
-                className={`rounded-lg border px-3 py-2 mt-2 ${
-                  activityReportError ? 'border-red-200 bg-red-50/70' : 'border-indigo-100 bg-indigo-50/35'
-                }`}
-                aria-labelledby="source-stock-report-heading"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
-                  <strong
-                    id="source-stock-report-heading"
-                    className="text-[11px] uppercase tracking-wide text-indigo-900"
-                  >
-                    Báo cáo chi tiết (cửa sổ {activityReport?.window_days ?? 30} ngày, UTC)
-                  </strong>
-                  <button
-                    type="button"
-                    disabled={running || bulkDeletingDb || activityReportLoading}
-                    className="text-[11px] font-semibold text-indigo-800 underline disabled:opacity-50"
-                    onClick={() => void refreshActivityReport()}
-                  >
-                    {activityReportLoading ? 'Đang tải…' : 'Làm mới báo cáo'}
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-600 mb-2 leading-snug">
-                  Cùng phạm vi link +{' '}
-                  <code className="text-[10px] bg-white/80 px-0.5 rounded">is_active</code> như hàng chờ. «Đã TTL batch»
-                  = có{' '}
-                  <code className="text-[10px] bg-white/80 px-0.5 rounded">admin_source_batch_scanned_at</code> trong cửa sổ.
-                  «Đã có kiểm tra nguồn» = có{' '}
-                  <code className="text-[10px] bg-white/80 px-0.5 rounded">source_stock_checked_at</code> (worker PDP hoặc
-                  batch khi commit). «Hết / còn» trong cửa sổ dựa trên{' '}
-                  <code className="text-[10px] bg-white/80 px-0.5 rounded">source_stock_status</code> và cột tồn khi có
-                  kiểm tra.
-                </p>
-                {activityReportError ? (
-                  <div
-                    role="alert"
-                    className="rounded border border-red-200 bg-white px-2 py-1.5 text-xs text-red-900 mb-2"
-                  >
-                    {activityReportError}{' '}
-                    <button
-                      type="button"
-                      className="underline font-medium"
-                      onClick={() => void refreshActivityReport()}
-                    >
-                      Thử lại
-                    </button>
-                  </div>
-                ) : null}
-                {activityReportLoading && !activityReport ? (
-                  <p className="text-xs text-indigo-900/80">Đang lấy báo cáo từ máy chủ…</p>
-                ) : null}
-                {activityReport ? (
-                  <>
-                    <p className="text-[11px] text-slate-600 mb-2">
-                      Bắt đầu cửa sổ (UTC):{' '}
-                      <code className="text-[10px] bg-white/90 px-1 rounded">
-                        {activityReport.window_since_utc_iso}
-                      </code>
-                      {' · '}
-                      Mẫu tối đa mỗi bảng: <strong>{activityReport.detail_limit_applied}</strong>
-                    </p>
-                    <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-2 text-[11px] text-gray-900 mb-2">
-                      <div className="rounded bg-white/70 border border-white px-2 py-1.5">
-                        <dt className="text-slate-500 font-medium">Đến lượt kiểm tra ngay</dt>
-                        <dd className="text-base font-semibold text-emerald-900">
-                          {activityReport.queue.eligible_now.toLocaleString('vi-VN')}
-                        </dd>
-                      </div>
-                      <div className="rounded bg-white/70 border border-white px-2 py-1.5">
-                        <dt className="text-slate-500 font-medium">Đã TTL batch trong cửa sổ</dt>
-                        <dd className="text-base font-semibold">
-                          {activityReport.counts.batch_ttl_stamped_in_window.toLocaleString('vi-VN')}
-                        </dd>
-                      </div>
-                      <div className="rounded bg-white/70 border border-white px-2 py-1.5">
-                        <dt className="text-slate-500 font-medium">Đã có kiểm tra nguồn (checked_at)</dt>
-                        <dd className="text-base font-semibold">
-                          {activityReport.counts.source_stock_checked_any_in_window.toLocaleString('vi-VN')}
-                        </dd>
-                      </div>
-                      <div className="rounded bg-white/70 border border-white px-2 py-1.5">
-                        <dt className="text-slate-500 font-medium">Cờ out_of_stock trong cửa sổ</dt>
-                        <dd className="text-base font-semibold text-red-900">
-                          {activityReport.counts.source_stock_oos_signal_in_window.toLocaleString('vi-VN')}
-                        </dd>
-                      </div>
-                      <div className="rounded bg-white/70 border border-white px-2 py-1.5">
-                        <dt className="text-slate-500 font-medium">Cờ in_stock trong cửa sổ</dt>
-                        <dd className="text-base font-semibold text-teal-900">
-                          {activityReport.counts.source_stock_in_stock_signal_in_window.toLocaleString('vi-VN')}
-                        </dd>
-                      </div>
-                      <div className="rounded bg-white/70 border border-white px-2 py-1.5">
-                        <dt className="text-slate-500 font-medium">Sau kiểm tra: tồn &gt; 0</dt>
-                        <dd className="text-base font-semibold">
-                          {activityReport.counts.checked_available_positive_in_window.toLocaleString('vi-VN')}
-                        </dd>
-                      </div>
-                      <div className="rounded bg-white/70 border border-white px-2 py-1.5">
-                        <dt className="text-slate-500 font-medium">Sau kiểm tra: tồn ≤ 0</dt>
-                        <dd className="text-base font-semibold">
-                          {activityReport.counts.checked_available_zero_or_negative_in_window.toLocaleString('vi-VN')}
-                        </dd>
-                      </div>
-                    </dl>
-                    <div className="text-[11px] text-slate-700 mb-1">
-                      <strong className="text-slate-600">Phân rã trạng thái</strong> (trong các SP có{' '}
-                      <code className="text-[10px] bg-white px-0.5 rounded">source_stock_checked_at</code> trong cửa sổ):
-                    </div>
-                    <ul className="flex flex-wrap gap-2 text-[11px] mb-2">
-                      {Object.entries(activityReport.checked_in_window_by_source_stock_status)
-                        .sort((a, b) => b[1] - a[1])
-                        .map(([k, v]) => (
-                          <li
-                            key={k}
-                            className="rounded-full bg-white/90 border border-slate-200 px-2 py-0.5 font-mono text-[10px]"
-                          >
-                            {k}: <strong>{v.toLocaleString('vi-VN')}</strong>
-                          </li>
-                        ))}
-                      {Object.keys(activityReport.checked_in_window_by_source_stock_status).length === 0 ? (
-                        <li className="text-slate-500">Không có SP nào có checked_at trong cửa sổ.</li>
-                      ) : null}
-                    </ul>
-                    <SourceStockReportSampleTable
-                      title="Mẫu: cờ hết hàng (out_of_stock) trong cửa sổ"
-                      rows={activityReport.samples.oos}
-                      emptyHint="Không có dòng trong phạm vi."
-                      defaultOpen
-                    />
-                    <SourceStockReportSampleTable
-                      title="Mẫu: cờ còn hàng (in_stock) trong cửa sổ"
-                      rows={activityReport.samples.in_stock}
-                      emptyHint="Không có dòng trong phạm vi."
-                      defaultOpen={false}
-                    />
-                    <SourceStockReportSampleTable
-                      title="Mẫu: đã đánh TTL batch gần nhất trong cửa sổ"
-                      rows={activityReport.samples.batch_ttl_recent}
-                      emptyHint="Không có dòng trong phạm vi."
-                      defaultOpen={false}
-                    />
-                  </>
-                ) : !activityReportLoading && !activityReportError ? (
-                  <p className="text-xs text-slate-600">Chưa có dữ liệu báo cáo.</p>
-                ) : null}
-              </div>
+        {scanFromDb ? (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-gray-800 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+              <span>
+                Seed <code className="text-[11px] bg-white px-1 rounded border">{dbCursorAfterId}</code>
+              </span>
+              <span className="text-gray-400" aria-hidden>
+                ·
+              </span>
+              <span>TTL cổ điển {cooldownDays} ngày</span>
+              {queueStats?.admin_batch_traffic_check_gap_days != null ? (
+                <span className="text-gray-600">· PDP gap {queueStats.admin_batch_traffic_check_gap_days}d</span>
+              ) : null}
+              {queueStats?.admin_batch_traffic_view_window_days != null ? (
+                <span className="text-gray-600">· PDP cửa sổ {queueStats.admin_batch_traffic_view_window_days}d</span>
+              ) : null}
+              <span className="text-gray-400" aria-hidden>
+                ·
+              </span>
+              <span className="text-emerald-800">
+                Phiên OK: <strong>{sessionChecks}</strong>
+              </span>
             </div>
-          ) : null}
-        </div>
+
+            {queueStatsLoading && !queueStats ? (
+              <p className="text-xs text-gray-500">Đang đếm hàng chờ…</p>
+            ) : queueStats ? (
+              <div className="space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Tiến độ DB · is_active</p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                  <MiniStat label="Tổng phạm vi" value={queueStats.total_in_scope} variant="slate" />
+                  <MiniStat label="Đến lượt ngay" value={queueStats.eligible_now} variant="emerald" />
+                  <MiniStat label="PDP trong đến lượt" value={queueStats.eligible_with_recent_customer_view ?? 0} variant="violet" />
+                  <MiniStat label="Chờ TTL" value={queueStats.in_cooldown} variant="amber" />
+                  <MiniStat label="Chưa batch lần nào" value={queueStats.eligible_never_scanned ?? 0} variant="slate" />
+                  <MiniStat label="Đến lượt sau TTL" value={queueStats.eligible_rescan_after_ttl ?? 0} variant="teal" />
+                  <MiniStat
+                    label="Đến lượt không PDP"
+                    value={queueStats.eligible_without_recent_customer_view ?? 0}
+                    variant="slate"
+                  />
+                </div>
+                <details className="text-[11px] text-gray-600 rounded-lg border border-slate-100 bg-white px-2.5 py-1.5">
+                  <summary className="cursor-pointer font-medium text-gray-800 select-none">Cách đếm &amp; thứ tự chọn</summary>
+                  <p className="mt-2 leading-relaxed">
+                    Ưu tiên PDP traffic trong cửa sổ; trong mỗi nhóm:{' '}
+                    <code className="bg-gray-50 px-0.5 rounded border border-gray-200">admin_source_batch_scanned_at</code> chưa
+                    có đi trước → ai càng cũ càng được lấy → <code className="bg-gray-50 px-0.5 rounded border border-gray-200">products.id</code> tăng dần. «Chờ TTL» gồm SP traffic chưa qua chờ-gap và SP không traffic chưa qua TTL cổ điển.
+                  </p>
+                </details>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500">Không đọc được số đếm — bấm «Làm mới queue».</p>
+            )}
+
+            <div
+              className={`rounded-lg border px-3 py-3 ${
+                activityReportError ? 'border-red-200 bg-red-50/70' : 'border-indigo-100 bg-indigo-50/40'
+              }`}
+              aria-labelledby="source-stock-report-heading"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <h3 id="source-stock-report-heading" className="text-sm font-semibold text-indigo-950">
+                  Báo cáo cửa sổ <span className="tabular-nums">{activityReport?.window_days ?? 30}</span> ngày{' '}
+                  <span className="font-normal text-indigo-800/85 text-xs">(UTC rolling)</span>
+                </h3>
+              </div>
+              <details className="text-[11px] text-indigo-900/85 mb-2 rounded border border-white/70 bg-white/50 px-2 py-1.5">
+                <summary className="cursor-pointer font-medium select-none text-indigo-950">Giải thích nhanh các cột đếm</summary>
+                <p className="mt-2 text-gray-700 leading-relaxed">
+                  Cùng phạm vi <code className="text-[10px] bg-gray-50 px-0.5 rounded border">is_active</code> và link như queue. «TTL
+                  batch»: <code className="text-[10px] bg-gray-50 px-0.5 rounded border">admin_source_batch_scanned_at</code> trong
+                  cửa sổ. «Kiểm tra nguồn»: <code className="text-[10px] bg-gray-50 px-0.5 rounded border">source_stock_checked_at</code>{' '}
+                  trong cửa sổ. Hết / còn: theo{' '}
+                  <code className="text-[10px] bg-gray-50 px-0.5 rounded border">source_stock_status</code> và tồn.
+                </p>
+              </details>
+              {activityReportError ? (
+                <div
+                  role="alert"
+                  className="rounded border border-red-200 bg-white px-2 py-1.5 text-xs text-red-900 mb-2 flex flex-wrap items-center gap-x-2 gap-y-1"
+                >
+                  <span>{activityReportError}</span>
+                  <button type="button" className="underline font-medium shrink-0" onClick={() => void refreshActivityReport()}>
+                    Thử lại
+                  </button>
+                </div>
+              ) : null}
+              {activityReportLoading && !activityReport ? (
+                <p className="text-xs text-indigo-900/85">Đang tải báo cáo…</p>
+              ) : null}
+              {activityReport ? (
+                <>
+                  <p className="text-[11px] text-slate-700 mb-2">
+                    <span className="text-gray-500">Từ</span>{' '}
+                    <code className="text-[10px] bg-white/95 px-1 rounded border border-indigo-100">
+                      {activityReport.window_since_utc_iso}
+                    </code>{' '}
+                    <span className="text-gray-500">·</span> Mẫu / bảng tối đa{' '}
+                    <strong className="tabular-nums">{activityReport.detail_limit_applied}</strong> dòng
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-2 mb-2">
+                    <MiniStat label="Đến lượt ngay" value={activityReport.queue.eligible_now} variant="emerald" />
+                    <MiniStat
+                      label="TTL batch trong cửa sổ"
+                      value={activityReport.counts.batch_ttl_stamped_in_window}
+                      variant="slate"
+                    />
+                    <MiniStat
+                      label="Đã có checked_at"
+                      value={activityReport.counts.source_stock_checked_any_in_window}
+                      variant="slate"
+                    />
+                    <MiniStat
+                      label="Cờ hết trong cửa sổ"
+                      value={activityReport.counts.source_stock_oos_signal_in_window}
+                      variant="rose"
+                    />
+                    <MiniStat
+                      label="Cờ còn trong cửa sổ"
+                      value={activityReport.counts.source_stock_in_stock_signal_in_window}
+                      variant="teal"
+                    />
+                    <MiniStat
+                      label="Sau KT: tồn &gt; 0"
+                      value={activityReport.counts.checked_available_positive_in_window}
+                      variant="emerald"
+                    />
+                    <MiniStat
+                      label="Sau KT: tồn ≤ 0"
+                      value={activityReport.counts.checked_available_zero_or_negative_in_window}
+                      variant="amber"
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <span className="text-[11px] font-semibold text-slate-600">status khi có checked_at trong cửa sổ:</span>
+                  </div>
+                  <ul className="flex flex-wrap gap-1.5 text-[11px] mb-2">
+                    {Object.entries(activityReport.checked_in_window_by_source_stock_status)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([k, v]) => (
+                        <li
+                          key={k}
+                          className="rounded-full bg-white/95 border border-slate-200 px-2 py-0.5 font-mono text-[10px]"
+                        >
+                          {k}: <strong>{v.toLocaleString('vi-VN')}</strong>
+                        </li>
+                      ))}
+                    {Object.keys(activityReport.checked_in_window_by_source_stock_status).length === 0 ? (
+                      <li className="text-slate-500 text-[11px]">Không có checked_at trong cửa sổ.</li>
+                    ) : null}
+                  </ul>
+                  <SourceStockReportSampleTable
+                    title="Mẫu: cờ hết hàng (out_of_stock) trong cửa sổ"
+                    rows={activityReport.samples.oos}
+                    emptyHint="Không có dòng trong phạm vi."
+                    defaultOpen
+                    oosActions={reportOosActionsForTable}
+                  />
+                  <SourceStockReportSampleTable
+                    title="Mẫu: cờ còn hàng (in_stock) trong cửa sổ"
+                    rows={activityReport.samples.in_stock}
+                    emptyHint="Không có dòng trong phạm vi."
+                    defaultOpen={false}
+                  />
+                  <SourceStockReportSampleTable
+                    title="Mẫu: TTL batch gần nhất trong cửa sổ"
+                    rows={activityReport.samples.batch_ttl_recent}
+                    emptyHint="Không có dòng trong phạm vi."
+                    defaultOpen={false}
+                  />
+                </>
+              ) : !activityReportLoading && !activityReportError ? (
+                <p className="text-xs text-slate-600">Chưa có dữ liệu báo cáo.</p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         <div className="space-y-3 pt-4 border-t border-gray-100">
           {(running || scanFromDb) && (
@@ -1274,10 +1580,10 @@ export default function AdminSourceStockCheckPage() {
                           : 'Đang gọi API cho link tay…'}
                       </span>
                     )}
-                    <span className="text-amber-800/85 text-[13px]">
+                    <span className="text-amber-800/85 text-xs leading-snug">
                       {scanFromDb
-                        ? 'Đang xử lý một SP — chờ xong lần này; lần tiếp chỉ bắt đầu sau đó và sau khoảng nghỉ ngẫu nhiên ~46–60 giây kể từ lần bắt đầu trước (nếu lặp vẫn bật).'
-                        : 'Chờ phản hồi máy chủ.'}
+                        ? 'Một SP mỗi lần; lần kế chỉ sau khi xong + nghỉ ~46–60s khi lặp bật.'
+                        : 'Chờ máy chủ.'}
                     </span>
                   </div>
                 </>
@@ -1285,17 +1591,16 @@ export default function AdminSourceStockCheckPage() {
                 <>
                   <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" aria-hidden />
                   <span className="font-semibold">Lặp đang bật</span>
-                  <span className="text-emerald-900/95">
-                    Khi không «Đang kiểm tra»: đang nghỉ giữa hai SP (ngẫu nhiên ~46–60 giây kể từ lần bắt đầu trước). Muốn dừng: bấm{' '}
-                    <strong>Bật lặp</strong> (lúc đang bật sẽ hiện «Đang lặp · bấm dừng»).
+                  <span className="text-emerald-900/95 text-xs sm:text-sm leading-snug max-w-xl">
+                    Nghỉ ~46–60s giữa hai lần bắt đầu. Dừng: nút «Dừng lặp» trên thanh thao tác.
                   </span>
                 </>
               ) : scanFromDb ? (
                 <>
                   <span className="h-2 w-2 rounded-full bg-slate-400 shrink-0" aria-hidden />
                   <span className="font-semibold">Lặp đang tắt</span>
-                  <span>
-                    Trong khối «Kiểm tra nguồn»: nút đậm kế nút cam là <strong>Bật lặp</strong>. Nút cam chỉ chạy đúng một lần.
+                  <span className="text-sm text-gray-700">
+                    Cam = một SP; nút đen/xanh lá = bật lặp chỉ khi Theo DB.
                   </span>
                 </>
               ) : null}
@@ -1442,103 +1747,30 @@ export default function AdminSourceStockCheckPage() {
               )}
             </div>
           ) : null}
-
-          <div className="space-y-3 pt-4 border-t border-gray-100">
-            <h3 className="text-sm font-semibold text-gray-900">Kiểm tra nguồn</h3>
-            <div className="rounded-xl border border-gray-200 bg-slate-50/90 p-4 space-y-3">
-              <div className="flex flex-wrap items-end gap-4">
-                <div className="flex flex-col gap-1">
-                  <span id="ctrl-once-label" className="text-[11px] font-medium text-gray-500">
-                    Một vòng tay (API một lần)
-                  </span>
-                  <button
-                    type="button"
-                    aria-labelledby="ctrl-once-label"
-                    onClick={() => void runNextInternal()}
-                    disabled={running}
-                    className="rounded-lg bg-orange-600 text-white px-4 py-2.5 text-sm font-semibold disabled:opacity-50 hover:bg-orange-700 shadow-sm"
-                  >
-                    {running
-                      ? 'Đang chạy…'
-                      : scanFromDb
-                        ? 'Chạy 1 SP'
-                        : 'Chạy 1 link tay'}
-                  </button>
-                </div>
-                {scanFromDb ? (
-                  <div className="flex flex-col gap-1">
-                    <span id="ctrl-loop-label" className="text-[11px] font-medium text-gray-500">
-                      Lặp tuần tự (~46–60 giây ngẫu nhiên / lần)
-                    </span>
-                    <button
-                      type="button"
-                      aria-labelledby="ctrl-loop-label"
-                      aria-pressed={auto}
-                      onClick={() => {
-                        if (auto) {
-                          setAuto(false);
-                          showToast('info', 'Đã dừng lặp.');
-                        } else {
-                          void startAutoSequence();
-                        }
-                      }}
-                      disabled={running && !auto}
-                      className={`rounded-lg px-4 py-2.5 text-sm font-semibold border-2 transition-colors shadow-sm ${
-                        auto
-                          ? 'border-emerald-600 bg-emerald-50 text-emerald-950 hover:bg-emerald-100 disabled:opacity-50'
-                          : 'border-slate-800 bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-45'
-                      }`}
-                    >
-                      {auto ? 'Đang lặp · bấm dừng' : 'Bật lặp'}
-                    </button>
-                  </div>
-                ) : (
-                  <p className="text-xs text-gray-600 max-w-[17rem] pb-1 leading-snug">
-                    Chế độ <strong>dán tay</strong>: chỉ dùng nút cam. Để <strong>bật lặp</strong>, chọn radio{' '}
-                    <strong>Theo DB</strong> phía trên.
-                  </p>
-                )}
-              </div>
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 pt-2 border-t border-gray-200/90">
-                <button
-                  type="button"
-                  onClick={resetPointers}
-                  disabled={running}
-                  title="Đặt lại chỉ báo cục bộ — không ép thứ tự queue trên server"
-                  className="text-xs font-semibold text-gray-600 underline hover:text-gray-900 disabled:opacity-40"
-                >
-                  Đặt lại chỉ báo / đầu danh sách tay
-                </button>
-                <span className="text-[11px] text-gray-400 hidden sm:inline" aria-hidden>
-                  ·
-                </span>
-                <p className="text-[11px] text-gray-500 leading-snug">
-                  Hai nút to: cam = một lần API; kế bên = bật/tắt lặp (chỉ khi Theo DB). Dòng gạch chân chỉ đặt lại chỉ
-                  báo trên tab — <strong>không</strong> gọi scrape.
-                </p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 
-      <section className="mt-10" aria-labelledby="oos-heading">
+      <section className="mt-8 scroll-mt-4" aria-labelledby="oos-heading">
         <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div>
-            <h2 id="oos-heading" className="text-lg font-semibold text-gray-900">
-              Danh sách <span className="text-red-800">hết hàng trên nguồn</span>{' '}
-              <span className="font-normal text-gray-600">(phiên làm việc; chỉ thêm khi scrape báo không đủ dữ liệu / xếp hết)</span>
+            <h2 id="oos-heading" className="text-base sm:text-lg font-semibold text-gray-900 tracking-tight">
+              Hết trên nguồn <span className="font-normal text-red-800">(phiên tab)</span>
             </h2>
-            <p className="text-sm text-gray-600 mt-1 max-w-3xl">
-              Khi kiểm tra thấy cờ «hết» trên nguồn, SP được <strong>ghi vào danh sách phiên</strong> để admin{' '}
-              <strong>đánh dấu và quyết định cuối</strong> (có giữ trên cửa hàng hay không).{' '}
-              Trong «Phản hồi hệ thống», badge «DB đã commit» nghĩa là đã{' '}
-              <strong>cập nhật tồn/trạng thái nguồn</strong> cho các bản ghi khớp trong DB —{' '}
-              <strong>không phải</strong> đã xóa sản khỏi CSDL.{' '}
-              <strong>Xóa vĩnh viễn</strong> chỉ sau khi bạn bấm nút đỏ «Xóa sản khỏi DB cửa hàng» và xác nhận; đó là{' '}
-              <strong>quyền quyết định cuối của admin</strong>. Captcha / lỗi đọc không vào đây — xem «Lần kiểm tra gần nhất».
-              Ẩn tab hoặc refresh làm mất danh sách phiên; «Xóa dòng (tab)» chỉ gỡ khỏi trình duyệt.
-            </p>
+            <details className="mb-3 rounded-lg border border-gray-100 bg-gray-50/70 text-[13px] text-gray-700">
+              <summary className="cursor-pointer px-3 py-2 font-medium text-gray-900 select-none [&::-webkit-details-marker]:hidden list-none flex items-center gap-2">
+                <span className="text-gray-400 text-[10px]">▾</span>
+                Danh sách phiên chỉ trong tab — không thay máy chủ
+              </summary>
+              <div className="px-3 pb-3 pt-0 border-t border-gray-100 space-y-2 leading-relaxed">
+                <p>
+                  Khi scrape báo cờ «hết», SP được ghép vào bảng bên dưới để bạn đối chiếu. «DB đã commit» chỉ có nghĩa đã
+                  đổi tồn/trạng thái nguồn trên các bản ghi khớp — không tự xóa sản. Xóa vĩnh viễn cần bấm đỏ + xác nhận.
+                </p>
+                <p className="text-gray-600 text-xs">
+                  Refresh tab làm trống danh sách phiên; không ảnh hưởng DB.
+                </p>
+              </div>
+            </details>
           </div>
           <div className="flex flex-wrap gap-3 items-center shrink-0 justify-end">
             <button
@@ -1672,6 +1904,59 @@ export default function AdminSourceStockCheckPage() {
                 onClick={() => void confirmDeleteOosProductsFromDb()}
               >
                 {bulkDeletingDb ? 'Đang xóa…' : 'Đồng ý — xóa'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {reportOosDeleteTarget ? (
+        <div
+          className="fixed inset-0 z-[121] flex items-center justify-center bg-black/45 p-4"
+          role="presentation"
+          onClick={() => {
+            if (!reportOosDeleting) setReportOosDeleteTarget(null);
+          }}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 border border-gray-200"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="report-oos-del-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="report-oos-del-title" className="text-lg font-bold text-gray-900">
+              Xóa vĩnh viễn sản khỏi DB cửa hàng?
+            </h3>
+            <p className="text-sm text-gray-700 mt-3 leading-relaxed">
+              Sẽ gọi API xóa <strong>một</strong> sản —{' '}
+              <code className="text-xs bg-gray-100 px-1 rounded">products.id = {reportOosDeleteTarget.id}</code>.
+              {!reportOosDeleting ? (
+                <>
+                  {' '}
+                  <strong className="block mt-2 text-gray-900">{reportOosDeleteTarget.name}</strong>
+                </>
+              ) : null}
+              <span className="block mt-2">
+                Không hoàn tác (dọn Bunny như xóa sản trong admin). Dùng khi xác nhận «thật sự không còn bán».
+              </span>
+            </p>
+            <div className="flex flex-wrap gap-3 justify-end mt-6">
+              <button
+                type="button"
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+                disabled={reportOosDeleting}
+                onClick={() => setReportOosDeleteTarget(null)}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-red-700 text-white px-4 py-2 text-sm font-semibold hover:bg-red-800 disabled:opacity-50"
+                disabled={reportOosDeleting}
+                onClick={() => void executeReportOosDeleteFromDb()}
+              >
+                {reportOosDeleting ? 'Đang xóa…' : 'Đồng ý — xóa'}
               </button>
             </div>
           </div>

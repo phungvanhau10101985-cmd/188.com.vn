@@ -32,6 +32,8 @@ from app.crud import product_media_purge
 from app.services.source_stock_checker import enqueue_product_view_stock_check_if_needed
 from app.services.admin_source_stock_batch import (
     admin_collect_distinct_product_urls_from_db,
+    admin_clear_false_source_oos_flag,
+    admin_force_worker_source_stock_recheck,
     admin_source_stock_activity_report,
     admin_source_stock_queue_stats,
     run_admin_source_stock_scan_next_from_db,
@@ -60,6 +62,10 @@ class AdminBulkDeleteProductsByDbIdBody(BaseModel):
     """Xóa sản theo khóa chính bảng `products.id` (dùng cho admin sau kiểm tra nguồn)."""
 
     db_ids: Annotated[List[int], Field(default_factory=list, max_length=300)]
+
+
+class AdminSingleProductDbIdBody(BaseModel):
+    db_id: int = Field(..., gt=0, description="Khóa chính products.id")
 
 
 def _serialize_products_for_api(db: Session, raw_products: List) -> List:
@@ -923,6 +929,43 @@ def admin_source_stock_delete_products_by_db_ids(
         "deleted_db_ids": deleted_db_ids,
         "not_found_db_ids": not_found_db_ids,
     }
+
+
+@router.post("/admin/source-stock-batch/clear-oos-flag", response_model=dict, include_in_schema=False)
+def admin_source_stock_clear_oos_flag_route(
+    body: AdminSingleProductDbIdBody,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """
+    Gỡ cờ hết hàng nguồn (đọc sai / dọn danh sách báo cáo): không xóa sản; không đụng TTL batch admin.
+    """
+    out = admin_clear_false_source_oos_flag(db, db_id=int(body.db_id))
+    if out.get("ok"):
+        return out
+    detail = str(out.get("detail") or "unknown_error")
+    if detail == "product_not_found":
+        raise HTTPException(status_code=404, detail=f"Không có product id={body.db_id}")
+    raise HTTPException(status_code=400, detail=detail)
+
+
+@router.post("/admin/source-stock-batch/force-worker-recheck", response_model=dict, include_in_schema=False)
+def admin_source_stock_force_worker_recheck_route(
+    body: AdminSingleProductDbIdBody,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """
+    Xếp lại PDP worker đọc Hibox (force); kết quả in_stock / out_of_stock sẽ cập nhật sau vài giây.
+    """
+    out = admin_force_worker_source_stock_recheck(db, db_id=int(body.db_id))
+    if not out.get("ok"):
+        detail = str(out.get("detail") or "unknown_error")
+        pid = body.db_id
+        if detail == "product_not_found":
+            raise HTTPException(status_code=404, detail=f"Không có product id={pid}")
+        raise HTTPException(status_code=400, detail=detail)
+    return out
 
 
 @router.get("/admin/source-stock-batch/queue-stats", response_model=dict, include_in_schema=False)

@@ -436,6 +436,26 @@ export interface AdminSourceStockActivityReport {
   };
 }
 
+/** Gỡ cờ «hết hàng nguồn» sai từ báo cáo — không xóa sản. */
+export interface AdminSourceStockClearOosFlagResult {
+  ok: boolean;
+  product_db_id: number;
+  source_stock_status?: string | null;
+  available?: number;
+  source_stock_checked_at?: string | null;
+  detail?: string;
+}
+
+/** Xếp worker PDP kiểm tra lại (force). */
+export interface AdminSourceStockForceWorkerRecheckResult {
+  ok: boolean;
+  product_db_id: number;
+  enqueued_now: boolean;
+  skip_reason?: string | null;
+  source_stock_status?: string | null;
+  source_stock_next_check_at?: string | null;
+}
+
 export interface AdminImageLocalizationJob {
   job_id: string;
   status: 'queued' | 'running' | 'done' | 'error' | 'cancelled';
@@ -1027,6 +1047,26 @@ export const adminProductAPI = {
       { timeoutMs: 120_000 },
     );
   },
+
+  getProductByDatabaseId: (dbId: number) =>
+    fetchAdmin<AdminProduct>(`/products/by-id/${dbId}`, { timeoutMs: 60_000 }),
+
+  clearSourceStockOosFlagByDbId: (dbId: number) =>
+    fetchAdmin<AdminSourceStockClearOosFlagResult>('/products/admin/source-stock-batch/clear-oos-flag', {
+      method: 'POST',
+      body: JSON.stringify({ db_id: dbId }),
+      timeoutMs: 60_000,
+    }),
+
+  forceWorkerSourceStockRecheckByDbId: (dbId: number) =>
+    fetchAdmin<AdminSourceStockForceWorkerRecheckResult>(
+      '/products/admin/source-stock-batch/force-worker-recheck',
+      {
+        method: 'POST',
+        body: JSON.stringify({ db_id: dbId }),
+        timeoutMs: 60_000,
+      },
+    ),
 
   /** Xóa vĩnh viễn các sản theo khóa chính `products.id` (sau phiên kiểm tra nguồn). */
   deleteSourceStockBatchProductsByDbIds: (dbIds: number[]) =>

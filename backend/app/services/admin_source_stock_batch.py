@@ -740,3 +740,79 @@ def run_admin_source_url_scan(db: Session, *, url: str, domain: str) -> Dict[str
         "matched_count": len(matched),
         "updates_committed": bool(updated_ids),
     }
+
+
+def admin_clear_false_source_oos_flag(db: Session, *, db_id: int) -> Dict[str, Any]:
+    """
+    Gỡ cờ sai: đặt lại ``source_stock_status`` (không còn out_of_stock), xóa mốc ``source_stock_checked_at``,
+    phục hồi tồn mặc định nghiệp vụ khi đang là 0.
+    """
+    pk = max(1, int(db_id))
+    row = db.query(Product).filter(Product.id == pk).first()
+    if not row:
+        return {"ok": False, "detail": "product_not_found", "product_db_id": pk}
+    try:
+        row.source_stock_status = "unknown"
+        row.source_stock_error = None
+        row.source_stock_checked_at = None
+        row.source_stock_next_check_at = None
+        if int(row.available or 0) <= 0:
+            row.available = 500
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning("clear_false_oos_flag failed id=%s: %s", pk, exc)
+        return {"ok": False, "detail": "database_error", "product_db_id": pk}
+
+    refreshed = db.query(Product).filter(Product.id == pk).first()
+
+    checked_iso = None
+    if refreshed and refreshed.source_stock_checked_at:
+        checked_iso = refreshed.source_stock_checked_at.isoformat()
+
+    return {
+        "ok": True,
+        "product_db_id": pk,
+        "source_stock_status": refreshed.source_stock_status if refreshed else "unknown",
+        "available": int(refreshed.available or 0) if refreshed else 0,
+        "source_stock_checked_at": checked_iso,
+    }
+
+
+def admin_force_worker_source_stock_recheck(db: Session, *, db_id: int) -> Dict[str, Any]:
+    """
+    Ép PDP worker (queue in-process): ``enqueue_source_stock_check(..., force=True)``.
+    """
+    # Local import để tránh khởi tạo nặng nếu module không đụng vào báo cáo.
+    from app.services.source_stock_checker import enqueue_source_stock_check
+
+    pk = max(1, int(db_id))
+    row = db.query(Product).filter(Product.id == pk).first()
+    if not row:
+        return {"ok": False, "detail": "product_not_found", "product_db_id": pk}
+
+    ok_enqueue = enqueue_source_stock_check(pk, reason="admin_report_recheck", force=True)
+
+    db.expire_all()
+    row2 = db.query(Product).filter(Product.id == pk).first()
+    if not row2:
+        return {"ok": False, "detail": "product_not_found", "product_db_id": pk}
+
+    st_l = (row2.source_stock_status or "").strip().lower()
+    if ok_enqueue:
+        skip_reason = None
+    elif st_l in {"queued", "checking"}:
+        skip_reason = "already_pending"
+    else:
+        skip_reason = "not_eligible_or_failed"
+
+    next_iso = row2.source_stock_next_check_at.isoformat() if row2.source_stock_next_check_at else None
+
+    return {
+        "ok": True,
+        "product_db_id": pk,
+        "enqueued_now": bool(ok_enqueue),
+        "skip_reason": skip_reason,
+        "source_stock_status": row2.source_stock_status,
+        "source_stock_next_check_at": next_iso,
+    }
