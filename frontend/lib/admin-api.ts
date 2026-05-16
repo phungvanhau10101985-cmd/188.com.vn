@@ -931,7 +931,7 @@ export const adminProductAPI = {
     fetchAdmin<AdminSourceStockBatchOneResult>('/products/admin/source-stock-batch/run', {
       method: 'POST',
       body: JSON.stringify(body),
-      timeoutMs: 240_000,
+      timeoutMs: 300_000,
     }),
 
   /** Một SP kế trong DB (link_default = product_url), chạy một lần kiểm tra; không cần nạp danh sách trước. */
@@ -947,7 +947,7 @@ export const adminProductAPI = {
         active_only: params.activeOnly ?? true,
         cursor_after_product_id: params.cursorAfterProductId ?? 0,
       }),
-      timeoutMs: 240_000,
+      timeoutMs: 300_000,
     }),
 
   /** Nạp `link_default` trong DB (= product_url trong Excel nhập SP), lọc theo luồng 1688 / Hibox. */

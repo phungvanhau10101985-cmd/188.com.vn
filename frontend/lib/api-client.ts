@@ -118,6 +118,9 @@ export interface AnalyticsEventCreate {
   properties?: Record<string, any>;
 }
 
+/** Tuỳ chọn mở rộng cho `fetch` nội bộ — không đưa xuống `global fetch`. */
+type ApiFetchOptions = RequestInit & { quiet?: boolean };
+
 class ApiClient {
   private compactErrorText(errorText: string, status: number): string {
     const raw = (errorText || '').trim();
@@ -129,14 +132,15 @@ class ApiClient {
     return raw.length > 500 ? `${raw.slice(0, 500)}...` : raw;
   }
 
-  private async fetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  private async fetch<T>(endpoint: string, options: ApiFetchOptions = {}): Promise<T> {
+    const { quiet, ...restInit } = options;
     const url = endpoint.startsWith('http') ? endpoint : `${getApiBaseUrl()}${endpoint}`;
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
     
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...ngrokFetchHeaders(),
-      ...(options.headers as Record<string, string> || {}),
+      ...(restInit.headers as Record<string, string> || {}),
     };
 
     if (token) {
@@ -148,18 +152,18 @@ class ApiClient {
       headers['X-Guest-Session-Id'] = guestSid;
     }
 
-    if (!IS_PRODUCTION) {
+    if (!IS_PRODUCTION && !quiet) {
       console.log(`🔍 API Call: ${url}`, { headers: { ...headers, Authorization: 'Bearer ***' } });
     }
 
     try {
       const response = await fetch(url, {
-        ...options,
+        ...restInit,
         headers,
         credentials: 'include',
       });
 
-      if (!IS_PRODUCTION) {
+      if (!IS_PRODUCTION && !quiet) {
         console.log(`📡 Response: ${response.status} ${response.statusText}`);
       }
 
@@ -178,7 +182,9 @@ class ApiClient {
       if (!response.ok) {
         const errorText = await response.text();
         const compactErrorText = this.compactErrorText(errorText, response.status);
-        console.error(`❌ API Error ${response.status}:`, compactErrorText);
+        if (!quiet) {
+          console.error(`❌ API Error ${response.status}:`, compactErrorText);
+        }
         let errorData;
         try {
           errorData = JSON.parse(errorText);
@@ -189,12 +195,14 @@ class ApiClient {
       }
 
       const data = await response.json();
-      if (!IS_PRODUCTION) {
+      if (!IS_PRODUCTION && !quiet) {
         console.log('✅ API Success:', data);
       }
       return data;
     } catch (error) {
-      console.error(`🔥 Fetch error at ${url}:`, error);
+      if (!quiet) {
+        console.error(`🔥 Fetch error at ${url}:`, error);
+      }
       throw error;
     }
   }
@@ -1232,7 +1240,17 @@ class ApiClient {
   }
 
   async getUnreadNotificationCount(): Promise<number> {
-    return this.fetch<number>('/notifications/unread-count').catch(() => 0);
+    const call = () => this.fetch<number>('/notifications/unread-count', { quiet: true });
+    try {
+      return await call();
+    } catch {
+      await new Promise((r) => setTimeout(r, 650));
+      try {
+        return await call();
+      } catch {
+        return 0;
+      }
+    }
   }
 
   async markNotificationAsRead(id: number): Promise<any> {

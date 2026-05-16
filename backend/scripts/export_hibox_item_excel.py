@@ -1512,8 +1512,16 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
                     except Exception:
                         continue
         finally:
-            ctx.close()
-            browser.close()
+            # Trình duyệt/tab có thể crash hoặc driver đã đóng → ctx.close() ném «Target … has been closed».
+            for _cleanup in (
+                lambda: page.close(),
+                lambda: ctx.close(),
+                lambda: browser.close(),
+            ):
+                try:
+                    _cleanup()
+                except Exception:
+                    pass
 
     if not isinstance(raw, dict):
         raise RuntimeError("Không đọc được dữ liệu từ trang.")

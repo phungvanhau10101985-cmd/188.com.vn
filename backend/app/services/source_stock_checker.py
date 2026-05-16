@@ -223,8 +223,15 @@ def _evaluate_page_stock(url: str) -> SourceStockCheckResult:
                     }"""
                 )
             finally:
-                context.close()
-                browser.close()
+                for _cleanup in (
+                    lambda: page.close(),
+                    lambda: context.close(),
+                    lambda: browser.close(),
+                ):
+                    try:
+                        _cleanup()
+                    except Exception:
+                        pass
     except Exception as exc:
         return SourceStockCheckResult(status="error", error=str(exc)[:1000])
 

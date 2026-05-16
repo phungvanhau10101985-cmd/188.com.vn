@@ -3,21 +3,27 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from app.models.notification import Notification
 from app.schemas.notification import NotificationCreate, NotificationUpdate
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def _utc_now() -> datetime:
+    """So khớp cột DateTime(timezone=True) trên PostgreSQL (tránh so sánh naive/aware lệch giờ)."""
+    return datetime.now(timezone.utc)
+
 
 def get_user_notifications(db: Session, user_id: int, skip: int = 0, limit: int = 100) -> List[Notification]:
     # Chỉ lấy thông báo đã đến giờ gửi (scheduled_at <= now)
-    now = datetime.now()
+    now = _utc_now()
     return db.query(Notification).filter(
         Notification.user_id == user_id,
         Notification.scheduled_at <= now
     ).order_by(desc(Notification.created_at)).offset(skip).limit(limit).all()
 
 def get_unread_count(db: Session, user_id: int) -> int:
-    now = datetime.now()
+    now = _utc_now()
     return db.query(Notification).filter(
         Notification.user_id == user_id,
-        Notification.is_read == False,
+        Notification.is_read.is_(False),
         Notification.scheduled_at <= now
     ).count()
 
@@ -56,12 +62,12 @@ def mark_as_read(db: Session, notification_id: int, user_id: int) -> Optional[No
 def mark_all_as_read(db: Session, user_id: int):
     db.query(Notification).filter(
         Notification.user_id == user_id,
-        Notification.is_read == False
+        Notification.is_read.is_(False)
     ).update({"is_read": True})
     db.commit()
 
 def delete_expired_notifications(db: Session):
-    now = datetime.now()
+    now = _utc_now()
     # Xóa các thông báo đã hết hạn
     deleted_count = db.query(Notification).filter(Notification.expires_at <= now).delete()
     db.commit()

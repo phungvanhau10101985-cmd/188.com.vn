@@ -1324,8 +1324,15 @@ def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[
                     base_urls = [_normalize_image_url(u) for u in (cur if isinstance(cur, list) else []) if isinstance(u, str)]
                     structured["detail_images"] = _dedupe(base_urls + list(preview_layer_urls))
         finally:
-            context.close()
-            browser.close()
+            for _cleanup in (
+                lambda: page.close(),
+                lambda: context.close(),
+                lambda: browser.close(),
+            ):
+                try:
+                    _cleanup()
+                except Exception:
+                    pass
 
     if not isinstance(payload, dict):
         raise Import1688Error("Không đọc được payload từ trang 1688.")

@@ -66,97 +66,162 @@ function applyResponseHeaders(from: Response, to: NextResponse, extraSkip?: Set<
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Lỗi TCP/ngắt kết nối tạm — hay gặp khi uvicorn đóng idle socket trong khi undici vẫn reuse pool. */
+function isTransientUpstreamNetError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false;
+  const code = (e as NodeJS.ErrnoException).code;
+  const msg = e instanceof Error ? e.message : String(e);
+  return (
+    code === 'ECONNRESET' ||
+    code === 'ECONNREFUSED' ||
+    code === 'ETIMEDOUT' ||
+    code === 'UND_ERR_SOCKET' ||
+    /\bECONNRESET\b/i.test(msg) ||
+    /socket hang up/i.test(msg) ||
+    /fetch failed/i.test(msg)
+  );
+}
+
+/** Undici giữ pool keep-alive tới localhost; uvicorn có thể đóng phía đối diện → đọc body báo ECONNRESET. */
+async function fetchUpstreamBuffered(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<{ upstream: Response; bodyBuf: ArrayBuffer }> {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const upstream = await fetch(url, { ...init, signal: ac.signal });
+    const bodyBuf = await upstream.arrayBuffer();
+    return { upstream, bodyBuf };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse> {
   try {
     const url = targetUrl(req, segments);
     const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
     const headers = forwardRequestHeaders(req, { omitContentLength: hasBody });
-  // Phải xử lý redirect nội bộ: nếu upstream trả Location `http://127.0.0.1:8001/...`
-  // được chuyển nguyên xuống trình duyệt (ngrok/mobile) → client nhảy tới 127.0.0.1 → lỗi & banner "offline".
-  // Không follow tại Node (undici hay 502 khi Host bị override trước redirect):
-  // Thay vào đó, ta tự rewrite Location về cùng path /api/v1 để client follow.
-  const init: RequestInit = {
-    method: req.method,
-    headers,
-    redirect: 'manual',
-  };
+    headers.set('Connection', 'close');
+    // Phải xử lý redirect nội bộ: nếu upstream trả Location `http://127.0.0.1:8001/...`
+    // được chuyển nguyên xuống trình duyệt (ngrok/mobile) → client nhảy tới 127.0.0.1 → lỗi & banner "offline".
+    // Không follow tại Node (undici hay 502 khi Host bị override trước redirect):
+    // Thay vào đó, ta tự rewrite Location về cùng path /api/v1 để client follow.
+    const init: RequestInit = {
+      method: req.method,
+      headers,
+      redirect: 'manual',
+    };
 
-  if (hasBody) {
-    init.body = await req.arrayBuffer();
-  }
+    if (hasBody) {
+      init.body = await req.arrayBuffer();
+    }
 
-  // Import Excel ~24MB: Next đệm body rồi forward; undici cần đủ thời gian (mạng chậm / VPS tải cao).
-  const contentLen = parseInt(req.headers.get('content-length') || '0', 10);
-  const pathSuffix = req.nextUrl.pathname;
-  const heavyUpload =
-    contentLen > 2 * 1024 * 1024 ||
-    (pathSuffix.includes('/import-export/import/excel') && req.method === 'POST');
-  const timeoutMs = heavyUpload ? 900_000 : 120_000;
+    // Import Excel ~24MB: Next đệm body rồi forward; undici cần đủ thời gian (mạng chậm / VPS tải cao).
+    const contentLen = parseInt(req.headers.get('content-length') || '0', 10);
+    const pathSuffix = req.nextUrl.pathname;
+    const heavyUpload =
+      contentLen > 2 * 1024 * 1024 ||
+      (pathSuffix.includes('/import-export/import/excel') && req.method === 'POST');
+    /** Admin kiểm tra nguồn: Playwright 1688 + scrape Hibox có thể > 2 phút — phải > timeout fetchAdmin (240s). */
+    const adminSourceHeavy =
+      pathSuffix.includes('/admin/source-stock-batch/run-next-from-db') ||
+      pathSuffix.includes('/admin/source-stock-batch/run');
+    const timeoutMs = heavyUpload ? 900_000 : adminSourceHeavy ? 420_000 : 120_000;
 
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), timeoutMs);
-  let upstream: Response;
-  try {
-    upstream = await fetch(url, { ...init, signal: ac.signal });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'fetch failed';
-    return NextResponse.json(
-      { detail: `Không kết nối được backend (${backendBase()}): ${msg}. Đảm bảo FastAPI/uvicorn đang chạy tại URL này.` },
-      { status: 502 }
-    );
-  } finally {
-    clearTimeout(t);
-  }
+    const safeToRetry =
+      req.method === 'GET' ||
+      req.method === 'HEAD' ||
+      req.method === 'OPTIONS';
 
-  // Đệm toàn bộ phản hồi: truyền thẳng upstream.body vào NextResponse dễ gây
-  // ReadableStream already closed / disturbed trong Next 14 + Node undici (đặc biệt Fast Refresh).
-  const bodyBuf = await upstream.arrayBuffer();
-  const upstreamCt = (upstream.headers.get('content-type') || '').toLowerCase();
-  const upstreamLooksJson =
-    upstreamCt.includes('application/json') ||
-    upstreamCt.includes('application/problem+json') ||
-    upstreamCt.includes('+json');
+    let upstream: Response | undefined;
+    let bodyBuf: ArrayBuffer | undefined;
 
-  // FastAPI/uvicorn đôi khi trả 500 dạng text "Internal Server Error" → admin parse JSON lỗi.
-  if (upstream.status >= 400 && !upstreamLooksJson) {
-    const text =
-      bodyBuf.byteLength > 0
-        ? new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(bodyBuf)).trim()
-        : '';
-    const res = NextResponse.json(
-      {
-        detail:
-          text ||
-          `HTTP ${upstream.status} từ backend (${backendBase()}), body rỗng hoặc không phải JSON. Kiểm tra log FastAPI.`,
-      },
-      { status: upstream.status },
-    );
-    applyResponseHeaders(upstream, res, new Set(['content-type', 'content-length']));
-    res.headers.set('content-type', 'application/json; charset=utf-8');
-    return res;
-  }
-
-  const res = new NextResponse(bodyBuf, {
-    status: upstream.status,
-    statusText: upstream.statusText,
-  });
-  applyResponseHeaders(upstream, res);
-
-  if (upstream.status >= 300 && upstream.status < 400) {
-    const loc = upstream.headers.get('location');
-    if (loc) {
+    const maxAttempts = safeToRetry ? 3 : 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const u = new URL(loc, backendBase());
-        // Giữ lại path/query trên cùng origin (không trả ra http://127.0.0.1)
-        const rewritten = `${u.pathname}${u.search}`;
-        res.headers.set('location', rewritten);
-      } catch {
-        /* nếu URL không hợp lệ thì giữ nguyên */
+        const out = await fetchUpstreamBuffered(url, init, timeoutMs);
+        upstream = out.upstream;
+        bodyBuf = out.bodyBuf;
+        break;
+      } catch (e) {
+        const transient = isTransientUpstreamNetError(e);
+        const aborted = e instanceof Error && e.name === 'AbortError';
+        if (attempt < maxAttempts && transient && !aborted) {
+          await sleep(100 * attempt);
+          continue;
+        }
+        const msg = e instanceof Error ? e.message : 'fetch failed';
+        return NextResponse.json(
+          {
+            detail: `Không kết nối được backend (${backendBase()}): ${msg}. Đảm bảo FastAPI/uvicorn đang chạy tại URL này.`,
+          },
+          { status: 502 },
+        );
       }
     }
-  }
 
-  return res;
+    if (upstream === undefined || bodyBuf === undefined) {
+      return NextResponse.json(
+        { detail: `Không kết nối được backend (${backendBase()}).` },
+        { status: 502 },
+      );
+    }
+
+    // Đệm toàn bộ phản hồi: truyền thẳng upstream.body vào NextResponse dễ gây
+    // ReadableStream already closed / disturbed trong Next 14 + Node undici (đặc biệt Fast Refresh).
+    const upstreamCt = (upstream.headers.get('content-type') || '').toLowerCase();
+    const upstreamLooksJson =
+      upstreamCt.includes('application/json') ||
+      upstreamCt.includes('application/problem+json') ||
+      upstreamCt.includes('+json');
+
+    // FastAPI/uvicorn đôi khi trả 500 dạng text "Internal Server Error" → admin parse JSON lỗi.
+    if (upstream.status >= 400 && !upstreamLooksJson) {
+      const text =
+        bodyBuf.byteLength > 0
+          ? new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(bodyBuf)).trim()
+          : '';
+      const res = NextResponse.json(
+        {
+          detail:
+            text ||
+            `HTTP ${upstream.status} từ backend (${backendBase()}), body rỗng hoặc không phải JSON. Kiểm tra log FastAPI.`,
+        },
+        { status: upstream.status },
+      );
+      applyResponseHeaders(upstream, res, new Set(['content-type', 'content-length']));
+      res.headers.set('content-type', 'application/json; charset=utf-8');
+      return res;
+    }
+
+    const res = new NextResponse(bodyBuf, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+    });
+    applyResponseHeaders(upstream, res);
+
+    if (upstream.status >= 300 && upstream.status < 400) {
+      const loc = upstream.headers.get('location');
+      if (loc) {
+        try {
+          const u = new URL(loc, backendBase());
+          // Giữ lại path/query trên cùng origin (không trả ra http://127.0.0.1)
+          const rewritten = `${u.pathname}${u.search}`;
+          res.headers.set('location', rewritten);
+        } catch {
+          /* nếu URL không hợp lệ thì giữ nguyên */
+        }
+      }
+    }
+
+    return res;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json(

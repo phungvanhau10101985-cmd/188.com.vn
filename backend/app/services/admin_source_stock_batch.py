@@ -390,9 +390,9 @@ def run_admin_source_url_scan(db: Session, *, url: str, domain: str) -> Dict[str
     if domain_lower == "1688":
         oid = extract_1688_numeric_offer_id(canonical_url)
         if not oid:
-            classified_oos = True
+            classified_oos = False
             raw_status = "bad_url"
-            detail = "Không đọc được mã offer 1688 trong URL."
+            detail = "Không đọc được mã offer 1688 trong URL — không đổi tồn kho."
             matched = []
         else:
             open_url = canonical_1688_offer_pc_url(oid) or canonical_url
@@ -401,9 +401,13 @@ def run_admin_source_url_scan(db: Session, *, url: str, domain: str) -> Dict[str
             res = _evaluate_page_stock(open_url)
             raw_status = res.status
             detail = res.error
-            classified_oos = res.status != "in_stock"
-            if classified_oos and res.status not in {"out_of_stock"} and not (detail or "").strip():
-                detail = "Không đọc được / không xác định được tồn → coi như hết hàng."
+            # Chỉ đánh «hết hàng» và gán available=0 khi DOM nguồn có cờ đã biết là hết.
+            # Login/captcha/error/unknown → không được coi hết để không sập sai tồn kho.
+            classified_oos = res.status == "out_of_stock"
+            if not classified_oos and res.status == "unknown" and not (detail or "").strip():
+                detail = "Không nhận diện được tồn kho — chưa kiểm tra được để khẳng định hết hàng."
+            if not classified_oos and res.status == "error" and not (detail or "").strip():
+                detail = "Không đọc được trang nguồn (mạng, captcha…) — chưa kiểm tra được."
 
     else:
         # Chuẩn hoá và quy đổi sang https://hibox.mn/v/… (offer 1688 → abb-*; mirror Taobao/KZ → /v/…).
@@ -414,7 +418,7 @@ def run_admin_source_url_scan(db: Session, *, url: str, domain: str) -> Dict[str
         warnings = []
 
         if coercion_err:
-            classified_oos = True
+            classified_oos = False
             raw_status = "bad_url"
             detail = f"Không quy đổi được sang link Hibox hợp lệ: {coercion_err}"
             matched = []
@@ -442,9 +446,16 @@ def run_admin_source_url_scan(db: Session, *, url: str, domain: str) -> Dict[str
                     if warns:
                         detail = "; ".join(warnings[:6])
             except ImportHiboxError as exc:
-                classified_oos = True
+                classified_oos = False
                 raw_status = "fetch_error"
                 detail = str(exc)
+            except Exception as exc:
+                logger.exception("admin source batch hibox scrape failed url=%s", canonical_url[:200])
+                classified_oos = False
+                raw_status = "fetch_error"
+                detail = (
+                    ((str(exc) or "unexpected_error")[:920] + " — chưa kiểm tra được, không đổi tồn.")[:1000]
+                )
 
     updated_ids: List[int] = []
     if classified_oos and matched:
