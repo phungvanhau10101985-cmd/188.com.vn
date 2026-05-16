@@ -356,6 +356,7 @@ export interface AdminSourceStockBatchOneResult {
   /** Hai nền đều lỗi; backend vẫn ghi mốc lỗi lên SP hàng chờ rồi client dừng lặp. */
   dual_platform_both_failed?: boolean;
   dual_attempts?: Array<{ domain: string; raw_status?: string | null; detail?: string | null }>;
+  skipped_after_retry?: boolean;
   alternate_fallback_used?: boolean;
   alternate_failed_domain?: string;
   alternate_sequence_index?: number;
@@ -1011,6 +1012,8 @@ export const adminProductAPI = {
     cursorAfterProductId?: number;
     /** products.id — giữ kiểm tra lại đúng SP sau lỗi tạm (captcha/chặn…). */
     stickySeedProductId?: number;
+    /** Retry sticky vẫn lỗi thì backend đóng TTL để bỏ qua vòng này. */
+    skipStickyAfterFailure?: boolean;
     dualAlternateFallback?: boolean;
     alternateSequenceIndex?: number;
   }) =>
@@ -1021,6 +1024,7 @@ export const adminProductAPI = {
         active_only: params.activeOnly ?? true,
         cursor_after_product_id: params.cursorAfterProductId ?? 0,
         sticky_seed_product_id: params.stickySeedProductId ?? 0,
+        skip_sticky_after_failure: params.skipStickyAfterFailure ?? false,
         dual_alternate_fallback: params.dualAlternateFallback ?? false,
         alternate_sequence_index: params.alternateSequenceIndex ?? 0,
       }),

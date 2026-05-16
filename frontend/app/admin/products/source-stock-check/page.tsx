@@ -202,6 +202,20 @@ function formatReportTimestampUtc(iso: string | null | undefined): string {
   return `${d.toLocaleString('vi-VN', { timeZone: 'UTC' })} UTC`;
 }
 
+function formatReportAge(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const diffMs = Date.now() - d.getTime();
+  if (diffMs < 0) return 'vừa ghi';
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 60) return minutes <= 1 ? 'vừa ghi' : `${minutes} phút trước`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} giờ trước`;
+  const days = Math.floor(hours / 24);
+  return `${days} ngày trước`;
+}
+
 function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -481,10 +495,20 @@ function SourceStockReportSampleTable({
                   <td className="px-2 py-1.5 whitespace-nowrap">{row.available}</td>
                   <td className="px-2 py-1.5 whitespace-nowrap">{row.source_stock_status ?? '—'}</td>
                   <td className="px-2 py-1.5 whitespace-nowrap text-[11px]">
-                    {formatReportTimestampUtc(row.source_stock_checked_at)}
+                    <span className="block">{formatReportTimestampUtc(row.source_stock_checked_at)}</span>
+                    {formatReportAge(row.source_stock_checked_at) ? (
+                      <span className="block text-[10px] text-slate-500">
+                        {formatReportAge(row.source_stock_checked_at)}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="px-2 py-1.5 whitespace-nowrap text-[11px]">
-                    {formatReportTimestampUtc(row.admin_source_batch_scanned_at)}
+                    <span className="block">{formatReportTimestampUtc(row.admin_source_batch_scanned_at)}</span>
+                    {formatReportAge(row.admin_source_batch_scanned_at) ? (
+                      <span className="block text-[10px] text-slate-500">
+                        {formatReportAge(row.admin_source_batch_scanned_at)}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="px-2 py-1.5">
                     <ExternalHttpLink url={row.link_default} />
@@ -624,6 +648,8 @@ export default function AdminSourceStockCheckPage() {
   const alternateSeqRef = useRef(0);
   /** Theo DB: giữ `products.id` khi lần trước lỗi tạm — backend + tab luôn retry đúng SP đó trước. */
   const stickySeedProductIdRef = useRef<number | null>(null);
+  /** Số lần lỗi tạm liên tiếp của sticky hiện tại; lần sau sẽ yêu cầu backend bỏ qua nếu vẫn lỗi. */
+  const stickyTransientFailureCountRef = useRef(0);
 
   /** Luôn khớp render hiện tại — async loop đọc sau `await` không bị stale như chỉ state. */
   const autoGateRef = useRef(auto);
@@ -631,6 +657,7 @@ export default function AdminSourceStockCheckPage() {
 
   useEffect(() => {
     stickySeedProductIdRef.current = null;
+    stickyTransientFailureCountRef.current = 0;
   }, [domain]);
 
   useEffect(() => {
@@ -1055,18 +1082,23 @@ export default function AdminSourceStockCheckPage() {
     setRunning(true);
     setLastError(null);
     try {
+        const stickyBeforeRequest = stickySeedProductIdRef.current ?? null;
+        const skipStickyAfterFailure =
+          stickyBeforeRequest != null && stickyTransientFailureCountRef.current >= 1;
         const seqSlot = dualAlternateFallback ? alternateSeqRef.current++ : 0;
         const res = await adminProductAPI.runSourceStockBatchNextFromDb({
           domain,
           activeOnly: true,
           cursorAfterProductId: 0,
-          stickySeedProductId: stickySeedProductIdRef.current ?? undefined,
+          stickySeedProductId: stickyBeforeRequest ?? undefined,
+          skipStickyAfterFailure,
           dualAlternateFallback,
           alternateSequenceIndex: seqSlot,
         });
 
         if (res.done) {
           stickySeedProductIdRef.current = null;
+          stickyTransientFailureCountRef.current = 0;
           const ttl =
             typeof res.admin_batch_scan_cooldown_days === 'number'
               ? res.admin_batch_scan_cooldown_days
@@ -1105,6 +1137,7 @@ export default function AdminSourceStockCheckPage() {
         const hint = typeof res.detail === 'string' && res.detail.trim() ? ` — ${res.detail.trim().slice(0, 200)}` : '';
         if (res.classified_out_of_stock) {
           stickySeedProductIdRef.current = null;
+          stickyTransientFailureCountRef.current = 0;
           if (res.updates_committed) {
             showToast(
               'info',
@@ -1118,6 +1151,7 @@ export default function AdminSourceStockCheckPage() {
           }
         } else if (isDualPlatformHardFailure(res)) {
           stickySeedProductIdRef.current = null;
+          stickyTransientFailureCountRef.current = 0;
           setAuto(false);
           const full = (res.detail || '').trim() || 'Hibox và CSSBuy đều không đọc được — đã ghi mốc lỗi lên SP hàng chờ.';
           const toastSlice = full.length > 520 ? `${full.slice(0, 520)}…` : full;
@@ -1127,6 +1161,7 @@ export default function AdminSourceStockCheckPage() {
           );
         } else if (shouldStopAutoForAntiBot(res)) {
           stickySeedProductIdRef.current = null;
+          stickyTransientFailureCountRef.current = 0;
           setAuto(false);
           const full =
             (res.detail || '').trim() ||
@@ -1139,15 +1174,37 @@ export default function AdminSourceStockCheckPage() {
             `${toastSlice} Đã dừng lặp — xem đầy đủ trong ô «Lần kiểm tra gần nhất».`,
           );
         } else if (isUnresolvedStockProbe(res.raw_status)) {
-          if (typeof res.seed_product_db_id === 'number' && res.seed_product_db_id > 0) {
+          if (res.skipped_after_retry) {
+            stickySeedProductIdRef.current = null;
+            stickyTransientFailureCountRef.current = 0;
+            showToast(
+              'info',
+              `SP lỗi lại sau khi retry — đã ghi mốc lỗi và bỏ qua vòng này, lượt sau chạy SP kế («${shortUrl}»${seedShort})${hint}`,
+            );
+          } else if (typeof res.seed_product_db_id === 'number' && res.seed_product_db_id > 0) {
             stickySeedProductIdRef.current = res.seed_product_db_id;
+            stickyTransientFailureCountRef.current =
+              stickyBeforeRequest === res.seed_product_db_id
+                ? stickyTransientFailureCountRef.current + 1
+                : 1;
+            const nextAction =
+              stickyTransientFailureCountRef.current >= 1
+                ? 'sẽ retry đúng SP này; nếu vẫn lỗi thì bỏ qua để chạy SP kế'
+                : 'sẽ chạy lại SP này';
+            showToast(
+              'info',
+              `Chưa kiểm tra được nguồn (lỗi đọc / mạng…) — ${nextAction} («${shortUrl}»${seedShort})${hint}`,
+            );
+          } else {
+            stickyTransientFailureCountRef.current = 0;
+            showToast(
+              'info',
+              `Chưa kiểm tra được nguồn — không coi là hết hàng («${shortUrl}»${seedShort})${hint}`,
+            );
           }
-          showToast(
-            'info',
-            `Chưa kiểm tra được nguồn (lỗi đọc / mạng…) — giữ SP này, sẽ chạy lại sau («${shortUrl}»${seedShort})${hint}`,
-          );
         } else {
           stickySeedProductIdRef.current = null;
+          stickyTransientFailureCountRef.current = 0;
           showToast(
             'ok',
             `OK — nguồn đọc được, không xếp hết («${shortUrl}»${seedShort})`,
@@ -1156,13 +1213,22 @@ export default function AdminSourceStockCheckPage() {
         return 'ok';
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        const stickyBeforeError = stickySeedProductIdRef.current;
+        if (stickyBeforeError != null) {
+          stickyTransientFailureCountRef.current += 1;
+        }
         setLastError(msg);
         setLastFinished({
           kind: 'error',
           finishedAtIso: new Date().toISOString(),
           message: msg,
         });
-        showToast('err', `${msg} — giữ nguyên, xem báo lỗi phía trên và thử lại.`);
+        showToast(
+          'err',
+          stickyBeforeError != null
+            ? `${msg} — sẽ thử lại SP này; nếu vẫn lỗi sẽ bỏ qua vòng này để chạy SP kế.`
+            : `${msg} — không nhận được seed từ server; lượt sau sẽ thử lại hàng chờ hiện tại hoặc SP kế nếu server đã ghi mốc.`,
+        );
         return 'fail';
       } finally {
         setActiveCheck(null);

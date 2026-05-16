@@ -61,6 +61,10 @@ class AdminSourceStockScanNextDbBody(BaseModel):
         ge=0,
         description="products.id — ưu tiên kiểm tra lại đúng SP (retry sau lỗi tạm captcha/chặn). 0 = tắt.",
     )
+    skip_sticky_after_failure: bool = Field(
+        False,
+        description="Nếu sticky SP vẫn lỗi tạm sau khi retry, đóng dấu TTL để bỏ qua vòng này và chạy SP kế.",
+    )
     dual_alternate_fallback: bool = Field(
         False,
         description="Sen kẽ + fallback hai nền (Hibox scrape / CSSBuy API) trong một lần kiểm tra.",
@@ -891,6 +895,7 @@ def admin_source_stock_batch_run_next_from_db(
             active_only=bool(body.active_only),
             cursor_after_product_id=int(body.cursor_after_product_id),
             sticky_seed_product_id=int(body.sticky_seed_product_id),
+            skip_sticky_after_failure=bool(body.skip_sticky_after_failure),
             dual_alternate_fallback=bool(body.dual_alternate_fallback),
             alternate_sequence_index=int(body.alternate_sequence_index),
         )

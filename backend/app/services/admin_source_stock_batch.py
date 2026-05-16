@@ -484,6 +484,7 @@ def run_admin_source_stock_scan_next_from_db(
     active_only: bool = True,
     cursor_after_product_id: int = 0,
     sticky_seed_product_id: int = 0,
+    skip_sticky_after_failure: bool = False,
     dual_alternate_fallback: bool = False,
     alternate_sequence_index: int = 0,
 ) -> Dict[str, Any]:
@@ -548,8 +549,10 @@ def run_admin_source_stock_scan_next_from_db(
             anchor_product_db_id=int(prod.id),
         )
     )
+    raw_status_l = str(scan.get("raw_status") or "").strip().lower()
+    skip_after_retry = bool(skip_sticky_after_failure and sid > 0 and int(prod.id) == sid and raw_status_l in _TRANSIENT_ADMIN_BATCH_RAW_STATUSES)
     marked_at: datetime | None = None
-    if should_commit_admin_batch_ttl_after_scan(scan.get("raw_status")):
+    if should_commit_admin_batch_ttl_after_scan(scan.get("raw_status")) or skip_after_retry:
         try:
             now_stamp = _utcnow()
             row = db.query(Product).filter(Product.id == prod.id).first()
@@ -570,6 +573,7 @@ def run_admin_source_stock_scan_next_from_db(
             "seed_link_default": seed_link_default,
             "admin_batch_scan_cooldown_days": ttl_days,
             "seed_admin_batch_scanned_at": marked_at.isoformat() if marked_at else None,
+            "skipped_after_retry": skip_after_retry,
         }
     )
     return scan
