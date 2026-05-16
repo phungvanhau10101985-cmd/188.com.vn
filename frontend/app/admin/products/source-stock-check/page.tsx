@@ -38,14 +38,13 @@ type OosRow = AdminSourceStockBatchOneMatched & {
   checkedAtIso: string;
 };
 
-/** Trong lúc gọi API (tay: biết URL; DB: máy chủ chọn SP). */
-type ActiveCheck = { mode: 'db' } | { mode: 'manual'; url: string };
+/** Trong lúc gọi API máy chủ chọn SP từ hàng chờ. */
+type ActiveCheck = { mode: 'db' };
 
 type LastFinishedCheck =
   | {
       kind: 'ok';
       finishedAtIso: string;
-      scanMode: 'db' | 'manual';
       attemptedUrl: string;
       canonicalUrl: string;
       domain: SourceStockDomain;
@@ -61,14 +60,12 @@ type LastFinishedCheck =
   | {
       kind: 'error';
       finishedAtIso: string;
-      scanMode: 'db' | 'manual';
       attemptedUrl?: string;
       message: string;
     };
 
 function buildLastOkFromApi(
   res: AdminSourceStockBatchDbNextResult | AdminSourceStockBatchOneResult,
-  scanMode: 'db' | 'manual',
   attemptedUrl: string,
   domainUsed: SourceStockDomain,
 ): Extract<LastFinishedCheck, { kind: 'ok' }> {
@@ -76,7 +73,6 @@ function buildLastOkFromApi(
   return {
     kind: 'ok',
     finishedAtIso: new Date().toISOString(),
-    scanMode,
     attemptedUrl: attemptedUrl.trim() || res.canonical_url?.trim() || '—',
     canonicalUrl: (res.canonical_url || '').trim() || '—',
     domain: domainUsed,
@@ -88,13 +84,6 @@ function buildLastOkFromApi(
     detail: res.detail,
     warnings: res.warnings ?? [],
   };
-}
-
-function parseUrls(raw: string): string[] {
-  return raw
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter(Boolean);
 }
 
 /** Ghi chú hàng chờ DB vào ô Lý do. */
@@ -570,7 +559,6 @@ function SourceStockReportSampleTable({
 }
 
 export default function AdminSourceStockCheckPage() {
-  const [scanFromDb, setScanFromDb] = useState(true);
   const [auto, setAuto] = useState(true);
   const [running, setRunning] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -581,11 +569,6 @@ export default function AdminSourceStockCheckPage() {
 
   /** DB: cứ SAU id này thì query SP kế có link_default trong bộ lọc */
   const [dbCursorAfterId, setDbCursorAfterId] = useState(0);
-  /** Dán tay: chỉ số trong textarea */
-  const [manualCursor, setManualCursor] = useState(0);
-  const [urlsText, setUrlsText] = useState('');
-  const [showManualTextarea, setShowManualTextarea] = useState(false);
-  const [loadingPreviewUrls, setLoadingPreviewUrls] = useState(false);
 
   const [recent, setRecent] = useState<Array<AdminSourceStockBatchDbNextResult | AdminSourceStockBatchOneResult>>(
     [],
@@ -615,8 +598,6 @@ export default function AdminSourceStockCheckPage() {
   const [activeCheck, setActiveCheck] = useState<ActiveCheck | null>(null);
   const [lastFinished, setLastFinished] = useState<LastFinishedCheck | null>(null);
 
-  const urlsList = useMemo(() => parseUrls(urlsText), [urlsText]);
-
   const reportOosSampleRows = activityReport?.samples?.oos ?? EMPTY_REPORT_SAMPLE_ROWS;
   const reportOosRowById = useMemo(() => {
     const m = new Map<number, AdminSourceStockActivityReportSampleRow>();
@@ -640,16 +621,13 @@ export default function AdminSourceStockCheckPage() {
     return Array.from(s).sort((a, b) => a - b);
   }, [oosRows]);
 
-  const manualCursorRef = useRef(0);
   const alternateSeqRef = useRef(0);
   /** Theo DB: giữ `products.id` khi lần trước lỗi tạm — backend + tab luôn retry đúng SP đó trước. */
   const stickySeedProductIdRef = useRef<number | null>(null);
 
   /** Luôn khớp render hiện tại — async loop đọc sau `await` không bị stale như chỉ state. */
   const autoGateRef = useRef(auto);
-  const scanFromDbGateRef = useRef(scanFromDb);
   autoGateRef.current = auto;
-  scanFromDbGateRef.current = scanFromDb;
 
   useEffect(() => {
     stickySeedProductIdRef.current = null;
@@ -662,29 +640,12 @@ export default function AdminSourceStockCheckPage() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!scanFromDb) stickySeedProductIdRef.current = null;
-  }, [scanFromDb]);
-
-  useEffect(() => {
-    manualCursorRef.current = manualCursor;
-  }, [manualCursor]);
-
-  useEffect(() => {
-    const n = urlsList.length;
-    if (manualCursor > n) {
-      manualCursorRef.current = n;
-      setManualCursor(n);
-    }
-  }, [manualCursor, urlsList.length]);
-
   const showToast = useCallback((type: 'ok' | 'info' | 'err', msg: string) => {
     setToast({ type, msg });
     setTimeout(() => setToast(null), 5200);
   }, []);
 
   const refreshQueueStats = useCallback(async () => {
-    if (!scanFromDb) return;
     setQueueStatsLoading(true);
     try {
       const s = await adminProductAPI.fetchSourceStockQueueStats({
@@ -700,10 +661,9 @@ export default function AdminSourceStockCheckPage() {
     } finally {
       setQueueStatsLoading(false);
     }
-  }, [scanFromDb, domain]);
+  }, [domain]);
 
   const refreshActivityReport = useCallback(async () => {
-    if (!scanFromDb) return;
     setActivityReportLoading(true);
     setActivityReportError(null);
     try {
@@ -720,7 +680,7 @@ export default function AdminSourceStockCheckPage() {
     } finally {
       setActivityReportLoading(false);
     }
-  }, [scanFromDb, domain]);
+  }, [domain]);
 
   const bumpReportBusy = useCallback((id: number, label: string) => {
     setReportOosRowBusyById((m) => ({ ...m, [id]: label }));
@@ -1034,29 +994,6 @@ export default function AdminSourceStockCheckPage() {
     ],
   );
 
-  const fillTextareaPreviewFromDb = useCallback(async () => {
-    setLoadingPreviewUrls(true);
-    setLastError(null);
-    try {
-      const res = await adminProductAPI.fetchSourceStockProductUrls({
-        domain,
-        limit: 5000,
-        activeOnly: true,
-      });
-      setUrlsText(res.urls.join('\n'));
-      manualCursorRef.current = 0;
-      setManualCursor(0);
-      setShowManualTextarea(true);
-      showToast('ok', `Đã điền ${res.count} link xem trước vào ô bên dưới — không chạy queue.`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setLastError(msg);
-      showToast('err', msg);
-    } finally {
-      setLoadingPreviewUrls(false);
-    }
-  }, [domain, showToast]);
-
   const bumpOosRows = useCallback(
     (res: AdminSourceStockBatchDbNextResult | AdminSourceStockBatchOneResult, attemptedUrl: string) => {
       if (!res.classified_out_of_stock) return;
@@ -1114,11 +1051,10 @@ export default function AdminSourceStockCheckPage() {
   );
 
   const runNextInternal = useCallback(async (): Promise<RunNextOutcome> => {
-    if (scanFromDb) {
-      setActiveCheck({ mode: 'db' });
-      setRunning(true);
-      setLastError(null);
-      try {
+    setActiveCheck({ mode: 'db' });
+    setRunning(true);
+    setLastError(null);
+    try {
         const seqSlot = dualAlternateFallback ? alternateSeqRef.current++ : 0;
         const res = await adminProductAPI.runSourceStockBatchNextFromDb({
           domain,
@@ -1161,7 +1097,7 @@ export default function AdminSourceStockCheckPage() {
         }
         setRecent((prev) => [res, ...prev].slice(0, 36));
         bumpOosRows(res, tried);
-        setLastFinished(buildLastOkFromApi(res, 'db', tried, domain));
+        setLastFinished(buildLastOkFromApi(res, tried, domain));
 
         const shortUrl = tried.length > 86 ? `${tried.slice(0, 86)}…` : tried || '(thiếu link)';
         const seedShort =
@@ -1224,7 +1160,6 @@ export default function AdminSourceStockCheckPage() {
         setLastFinished({
           kind: 'error',
           finishedAtIso: new Date().toISOString(),
-          scanMode: 'db',
           message: msg,
         });
         showToast('err', `${msg} — giữ nguyên, xem báo lỗi phía trên và thử lại.`);
@@ -1234,100 +1169,7 @@ export default function AdminSourceStockCheckPage() {
         setRunning(false);
         void refreshQueueStats();
       }
-    }
-
-    /* Chế độ dán tay */
-    const q = parseUrls(urlsText);
-    const i = manualCursorRef.current;
-
-    if (!q.length) {
-      showToast('err', 'Chưa có URL — điền mỗi dòng một link hoặc bật chế độ theo DB.');
-      return 'fail';
-    }
-    if (i >= q.length) {
-      showToast('info', 'Đã hết ô danh sách — đặt lại chỉ số tay hoặc dán thêm.');
-      setAuto(false);
-      return 'halt';
-    }
-
-    const url = q[i];
-    setActiveCheck({ mode: 'manual', url });
-    setRunning(true);
-    setLastError(null);
-    try {
-      const seqSlot = dualAlternateFallback ? alternateSeqRef.current++ : 0;
-      const res = await adminProductAPI.runSourceStockBatchOne({
-        url,
-        domain,
-        dualAlternateFallback,
-        alternateSequenceIndex: seqSlot,
-      });
-      const blockedManual = shouldStopAutoForAntiBot(res);
-      const dualHard = isDualPlatformHardFailure(res);
-      if (!blockedManual && !dualHard) {
-        manualCursorRef.current = i + 1;
-        setManualCursor(i + 1);
-      }
-      setSessionChecks((n) => n + 1);
-      setRecent((prev) => [res, ...prev].slice(0, 36));
-      bumpOosRows(res, url);
-      setLastFinished(buildLastOkFromApi(res, 'manual', url, domain));
-
-      const shortUrl = url.length > 86 ? `${url.slice(0, 86)}…` : url;
-      const hint = typeof res.detail === 'string' && res.detail.trim() ? ` — ${res.detail.trim().slice(0, 200)}` : '';
-      if (res.classified_out_of_stock) {
-        if (res.updates_committed) {
-          showToast('info', `Hết trên nguồn (có cờ): đặt hết và tồn = 0 nếu khớp («${shortUrl}»)`);
-        } else {
-          showToast(
-            'info',
-            `Hết trên nguồn (theo cờ) nhưng chưa thấy sản khớp trong shop — không đổi DB («${shortUrl}»)`,
-          );
-        }
-      } else if (dualHard) {
-        const full = (res.detail || '').trim() || 'Hibox và CSSBuy đều không đọc được.';
-        const toastSlice = full.length > 520 ? `${full.slice(0, 520)}…` : full;
-        showToast('err', `${toastSlice} (giữ nguyên dòng URL — kiểm tra chặn / thử đổi link).`);
-      } else if (blockedManual) {
-        const full =
-          (res.detail || '').trim() ||
-          (isBlockedBySourceSite(res.raw_status)
-            ? 'Trang nguồn báo chặn hoặc phát hiện quét.'
-            : 'Phát hiện dấu hiệu captcha/chặn trong phản hồi.');
-        const toastSlice = full.length > 520 ? `${full.slice(0, 520)}…` : full;
-        showToast('err', `${toastSlice} (giữ nguyên dòng URL trong ô để chỉnh link / thử lại).`);
-      } else if (isUnresolvedStockProbe(res.raw_status)) {
-        showToast('info', `Chưa kiểm tra được nguồn — không coi là hết hàng («${shortUrl}»)${hint}`);
-      } else {
-        showToast('ok', `OK — đọc nguồn được («${shortUrl}»)`);
-      }
-      return 'ok';
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setLastError(msg);
-      setLastFinished({
-        kind: 'error',
-        finishedAtIso: new Date().toISOString(),
-        scanMode: 'manual',
-        attemptedUrl: url,
-        message: msg,
-      });
-      showToast('err', `${msg} — giữ nguyên chỉ số, vui lòng thử lại.`);
-      return 'fail';
-    } finally {
-      setActiveCheck(null);
-      setRunning(false);
-    }
-  }, [
-    bumpOosRows,
-    cooldownDays,
-    domain,
-    dualAlternateFallback,
-    refreshQueueStats,
-    scanFromDb,
-    showToast,
-    urlsText,
-  ]);
+  }, [bumpOosRows, cooldownDays, domain, dualAlternateFallback, refreshQueueStats, showToast]);
 
   const runNextRef = useRef(runNextInternal);
   useEffect(() => {
@@ -1335,27 +1177,18 @@ export default function AdminSourceStockCheckPage() {
   }, [runNextInternal]);
 
   useEffect(() => {
-    if (!scanFromDb) {
-      setQueueStats(null);
-      return;
-    }
     void refreshQueueStats();
-  }, [scanFromDb, refreshQueueStats]);
+  }, [refreshQueueStats]);
 
   useEffect(() => {
-    if (!scanFromDb) {
-      setActivityReport(null);
-      setActivityReportError(null);
-      return;
-    }
     void refreshActivityReport();
-  }, [scanFromDb, refreshActivityReport]);
+  }, [refreshActivityReport]);
 
   useEffect(() => {
-    if (!scanFromDb || !auto) return;
+    if (!auto) return;
     const id = window.setInterval(() => void refreshQueueStats(), 90_000);
     return () => window.clearInterval(id);
-  }, [scanFromDb, auto, refreshQueueStats]);
+  }, [auto, refreshQueueStats]);
 
   useEffect(() => {
     if (!deleteDbModalOpen && reportOosDeleteConfirmIds == null) return;
@@ -1369,7 +1202,7 @@ export default function AdminSourceStockCheckPage() {
   }, [deleteDbModalOpen, bulkDeletingDb, reportOosDeleteConfirmIds, reportOosDeleting]);
 
   useEffect(() => {
-    if (!auto || !scanFromDb) return;
+    if (!auto) return;
 
     const ctl = { cancelled: false, sleepTimer: null as number | null };
 
@@ -1386,11 +1219,11 @@ export default function AdminSourceStockCheckPage() {
       });
 
     void (async () => {
-      while (!ctl.cancelled && autoGateRef.current && scanFromDbGateRef.current) {
+      while (!ctl.cancelled && autoGateRef.current) {
         const startedAt = Date.now();
         const outcome = await runNextRef.current();
         if (ctl.cancelled || outcome === 'halt') break;
-        if (!autoGateRef.current || !scanFromDbGateRef.current) break;
+        if (!autoGateRef.current) break;
         const elapsed = Date.now() - startedAt;
         const remaining = Math.max(0, randomAdminSourceLoopGapMs() - elapsed);
         await sleepRemain(remaining);
@@ -1401,22 +1234,16 @@ export default function AdminSourceStockCheckPage() {
       ctl.cancelled = true;
       if (ctl.sleepTimer != null) window.clearTimeout(ctl.sleepTimer);
     };
-  }, [auto, scanFromDb]);
+  }, [auto]);
 
   const resetPointers = () => {
-    if (scanFromDb) {
-      stickySeedProductIdRef.current = null;
-      setDbCursorAfterId(0);
-      showToast(
-        'ok',
-        'Đã xóa id seed cục bộ trên tab (để ý chỉ báo hiển thị). Backend vẫn chọn SP theo độ ưu tiên toàn DB như trong chú thích.'
-      );
-      void refreshQueueStats();
-    } else {
-      manualCursorRef.current = 0;
-      setManualCursor(0);
-      showToast('ok', 'Đã đặt chỉ số danh sách tay về dòng đầu.');
-    }
+    stickySeedProductIdRef.current = null;
+    setDbCursorAfterId(0);
+    showToast(
+      'ok',
+      'Đã xóa id seed cục bộ trên tab (để ý chỉ báo hiển thị). Backend vẫn chọn SP theo độ ưu tiên toàn DB như trong chú thích.',
+    );
+    void refreshQueueStats();
   };
 
   const clearOosBrowserOnly = () => {
@@ -1447,18 +1274,13 @@ export default function AdminSourceStockCheckPage() {
       showToast('err', msg);
     } finally {
       setBulkDeletingDb(false);
-      if (scanFromDb) void refreshQueueStats();
+      void refreshQueueStats();
     }
   };
 
   const startAutoSequence = async () => {
-    if (scanFromDb) {
-      stickySeedProductIdRef.current = null;
-      setDbCursorAfterId(0);
-    } else {
-      manualCursorRef.current = 0;
-      setManualCursor(0);
-    }
+    stickySeedProductIdRef.current = null;
+    setDbCursorAfterId(0);
     setAuto(true);
     showToast(
       'info',
@@ -1561,47 +1383,10 @@ export default function AdminSourceStockCheckPage() {
       <div className="rounded-xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm space-y-4">
         <div className="flex flex-wrap items-end gap-4 gap-y-3">
           <div className="flex flex-col gap-1 min-w-[10rem]">
-            <span className="text-xs font-medium text-gray-500">Chế độ</span>
-            <div
-              className="inline-flex rounded-lg border border-gray-200 p-1 bg-gray-50"
-              role="group"
-              aria-label="Chế độ hàng chờ"
-            >
-              <button
-                type="button"
-                aria-pressed={scanFromDb}
-                className={`px-3 py-2 text-sm rounded-md transition ${
-                  scanFromDb ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-600 hover:text-gray-900'
-                }`}
-                disabled={running}
-                onClick={() => {
-                  if (!scanFromDb) setScanFromDb(true);
-                }}
-              >
-                Theo DB
-              </button>
-              <button
-                type="button"
-                aria-pressed={!scanFromDb}
-                className={`px-3 py-2 text-sm rounded-md transition ${
-                  !scanFromDb ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-600 hover:text-gray-900'
-                }`}
-                disabled={running}
-                onClick={() => {
-                  if (scanFromDb) {
-                    setScanFromDb(false);
-                    setAuto(false);
-                    setShowManualTextarea(true);
-                  }
-                }}
-              >
-                Dán tay
-              </button>
-            </div>
+            <span className="text-xs font-medium text-gray-500">Luồng</span>
+            <p className="text-sm font-semibold text-gray-900">Theo DB (queue)</p>
             <p className="text-[11px] text-gray-500 max-w-[16rem] leading-snug">
-              {scanFromDb
-                ? 'Một SP mỗi lần; ưu tiên PDP. Lặp: nghỉ ~46–60s giữa hai lần bắt đầu.'
-                : 'Một URL mỗi lần; không auto lặp.'}
+              Một SP mỗi lần; ưu tiên PDP. Lặp: nghỉ ~46–60s giữa hai lần bắt đầu.
             </p>
           </div>
           <div className="flex flex-col gap-1 flex-1 min-w-[12rem] max-w-md">
@@ -1643,34 +1428,28 @@ export default function AdminSourceStockCheckPage() {
             disabled={running}
             className="rounded-lg bg-orange-600 text-white px-4 py-2 text-sm font-semibold disabled:opacity-50 hover:bg-orange-700 shadow-sm"
           >
-            {running
-              ? 'Đang chạy…'
-              : scanFromDb
-                ? 'Chạy 1 SP'
-                : 'Chạy 1 link'}
+            {running ? 'Đang chạy…' : 'Chạy 1 SP'}
           </button>
-          {scanFromDb ? (
-            <button
-              type="button"
-              aria-pressed={auto}
-              onClick={() => {
-                if (auto) {
-                  setAuto(false);
-                  showToast('info', 'Đã dừng lặp.');
-                } else {
-                  void startAutoSequence();
-                }
-              }}
-              disabled={running && !auto}
-              className={`rounded-lg px-4 py-2 text-sm font-semibold border-2 transition-colors shadow-sm ${
-                auto
-                  ? 'border-emerald-600 bg-emerald-50 text-emerald-950 hover:bg-emerald-100 disabled:opacity-50'
-                  : 'border-slate-800 bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-45'
-              }`}
-            >
-              {auto ? 'Dừng lặp' : 'Bật lặp'}
-            </button>
-          ) : null}
+          <button
+            type="button"
+            aria-pressed={auto}
+            onClick={() => {
+              if (auto) {
+                setAuto(false);
+                showToast('info', 'Đã dừng lặp.');
+              } else {
+                void startAutoSequence();
+              }
+            }}
+            disabled={running && !auto}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold border-2 transition-colors shadow-sm ${
+              auto
+                ? 'border-emerald-600 bg-emerald-50 text-emerald-950 hover:bg-emerald-100 disabled:opacity-50'
+                : 'border-slate-800 bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-45'
+            }`}
+          >
+            {auto ? 'Dừng lặp' : 'Bật lặp'}
+          </button>
           <span className="hidden sm:inline w-px h-7 bg-gray-200 shrink-0" aria-hidden />
           <button
             type="button"
@@ -1681,72 +1460,25 @@ export default function AdminSourceStockCheckPage() {
           >
             Đặt lại chỉ báo
           </button>
-          {scanFromDb ? (
-            <>
-              <button
-                type="button"
-                disabled={running || bulkDeletingDb || queueStatsLoading}
-                className="text-xs font-semibold text-indigo-700 underline underline-offset-2 disabled:opacity-45"
-                onClick={() => void refreshQueueStats()}
-              >
-                {queueStatsLoading ? 'Đang đếm queue…' : 'Làm mới queue'}
-              </button>
-              <button
-                type="button"
-                disabled={running || bulkDeletingDb || activityReportLoading}
-                className="text-xs font-semibold text-indigo-700 underline underline-offset-2 disabled:opacity-45"
-                onClick={() => void refreshActivityReport()}
-              >
-                {activityReportLoading ? 'Đang tải BC…' : 'Làm mới báo cáo 30 ngày'}
-              </button>
-            </>
-          ) : null}
+          <button
+            type="button"
+            disabled={running || bulkDeletingDb || queueStatsLoading}
+            className="text-xs font-semibold text-indigo-700 underline underline-offset-2 disabled:opacity-45"
+            onClick={() => void refreshQueueStats()}
+          >
+            {queueStatsLoading ? 'Đang đếm queue…' : 'Làm mới queue'}
+          </button>
+          <button
+            type="button"
+            disabled={running || bulkDeletingDb || activityReportLoading}
+            className="text-xs font-semibold text-indigo-700 underline underline-offset-2 disabled:opacity-45"
+            onClick={() => void refreshActivityReport()}
+          >
+            {activityReportLoading ? 'Đang tải BC…' : 'Làm mới báo cáo 30 ngày'}
+          </button>
         </div>
 
-        {!scanFromDb ? (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <button
-              type="button"
-              className="text-sm font-medium text-indigo-700 underline disabled:opacity-50"
-              disabled={running || loadingPreviewUrls}
-              onClick={() => void fillTextareaPreviewFromDb()}
-            >
-              {loadingPreviewUrls ? 'Đang lấy…' : 'Đổ mẫu link từ DB (không chạy)'}
-            </button>
-            <button
-              type="button"
-              className="text-sm text-gray-600 underline"
-              onClick={() => setShowManualTextarea((s) => !s)}
-            >
-              {showManualTextarea ? 'Thu ô URL' : 'Mở ô URL'}
-            </button>
-          </div>
-        ) : null}
-
-        {!scanFromDb && showManualTextarea ? (
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5" htmlFor="source-url-batch">
-              URL (một dòng một link)
-            </label>
-            <textarea
-              id="source-url-batch"
-              className="w-full min-h-[120px] border border-gray-300 rounded-lg p-3 text-sm font-mono"
-              spellCheck={false}
-              placeholder={
-                'https://detail.1688.com/offer/…\nhttps://hibox.mn/v/…\nhttps://www.cssbuy.com/item-1688-….html'
-              }
-              value={urlsText}
-              onChange={(e) => setUrlsText(e.target.value)}
-              disabled={running}
-            />
-            <p className="text-[11px] text-gray-500 mt-1">
-              Đang chọn dòng <strong>{manualCursor}</strong> / {urlsList.length}
-            </p>
-          </div>
-        ) : null}
-
-        {scanFromDb ? (
-          <div className="space-y-3">
+        <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-gray-800 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
               <span>
                 Seed <code className="text-[11px] bg-white px-1 rounded border">{dbCursorAfterId}</code>
@@ -1901,8 +1633,8 @@ export default function AdminSourceStockCheckPage() {
                     title="Mẫu: cờ hết hàng (out_of_stock) trong cửa sổ"
                     rows={activityReport.samples.oos}
                     emptyHint={
-                      'Chưa có sản được gắn out_of_stock trong DB trong cửa sổ. ' +
-                      'Nếu vừa thấy hết trong toast nhưng khớp không shop hoặc lỗi đọc — không có dòng trong bảng này.'
+                      'Không có sản DB nào thỏa: trong cửa sổ 30 ngày + source_stock_status = out_of_stock. Nếu vừa kiểm tra xong — bấm «Làm mới báo cáo 30 ngày».' +
+                      ' Luôn gắn cờ lên đúng SP được chọn trong hàng chờ (neo), không chỉ dựa slug.'
                     }
                     defaultOpen
                     oosActions={reportOosActionsForTable}
@@ -1910,31 +1642,37 @@ export default function AdminSourceStockCheckPage() {
                   />
                   {activityReport.samples.oos.length === 0 ? (
                     <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 mb-3 text-[11px] text-amber-950 leading-snug">
-                      <p className="font-semibold mb-1">Vì sao vừa «hết hàng» nhưng bảng này trống?</p>
+                      <p className="font-semibold mb-1">Vì sao vừa «hết» nhưng bảng này vẫn trống, hoặc F5 là mất link?</p>
                       <ul className="list-disc ml-4 space-y-1 text-amber-900/95">
                         <li>
-                          Bảng báo cáo chỉ liệt kê các sản<strong> đã lưu trên máy chủ</strong>:{' '}
-                          <code className="bg-white/90 px-0.5 rounded text-[10px]">source_stock_status = out_of_stock</code> + có mốc
-                          kiểm tra trong cửa sổ. Nếu nguồn báo hết nhưng <strong>không map được vào một dòng trong shop</strong>
-                          (slug/link không khớp) → <strong>không ghi DB</strong>, card «Cờ hết trong cửa sổ» vẫn 0 — đây là
-                          đúng với luật hiện tại.
-                        </li>
-                        <li>
-                          Để xem ngay các lần vừa phát hiện hết trong <strong className="italic">phiên làm việc này</strong>, xuống khối{' '}
+                          <strong>Reload trang làm trống</strong>{' '}
                           <a
                             href="#oos-heading"
                             className="font-semibold text-indigo-800 underline underline-offset-2 whitespace-nowrap"
                           >
-                            Hết trên nguồn (phiên tab)
-                          </a>
-                          . Hoặc mở <strong>Phản hồi hệ thống</strong>: xem <code className="text-[10px] bg-white px-0.5">updates_committed</code>,{' '}
-                          <code className="text-[10px] bg-white px-0.5">matched_products</code>.
+                            «Hết trên nguồn (phiên tab)»
+                          </a>{' '}
+                          — chỉ lưu tạm trên tab, <strong>không gửi máy chủ</strong>. Dữ liệu bền nằm ở bảng mẫu này
+                          (đã có out_of_stock trong DB trong cửa sổ) và trong tab sản CRM.
                         </li>
                         <li>
-                          Card <strong>«Sau KT: tồn ≤ 0»</strong> (ví dụ 47) là <strong>cột tồn ≤ 0</strong> trong nhóm có
-                          <code className="text-[10px] ml-1 bg-white px-0.5">checked_at</code> —{' '}
-                          <strong className="not-italic">khác</strong> với chỉ báo cờ <code className="text-[10px] ml-1 bg-white px-0.5">out_of_stock</code>
-                          của bảng mẫu.
+                          <strong>Hàng chờ DB:</strong> kết quả scrape/API báo «hết nguồn», backend{' '}
+                          <strong className="not-italic">luôn cập nhật cờ + mốc kiểm tra + tồn ≤ 0 trên đúng</strong>{' '}
+                          <code className="text-[10px] bg-white px-0.5">products.id</code> của sản được lấy từ queue (neo),
+                          kể khi không tìm thêm được bản ghi khác qua slug. Không map slug <em>ngoài</em> neo không bị coi là
+                          «mất cờ»: tra cứu trong{' '}
+                          <strong>Phản hồi hệ thống</strong> trường <code className="text-[10px] bg-white px-0.5">oos_commit_included_anchor_db_id</code>{' '}
+                          (xuất hiện khi chỉ neo mới có mặt — lúc đó nên chỉnh <code className="text-[10px] bg-white px-0.5">link_default</code> /{' '}
+                          <code className="text-[10px] bg-white px-0.5">product_id</code> để slug đồng bộ nhưng không bắt buộc để có dòng trong báo cáo).
+                        </li>
+                        <li>
+                          Nếu vừa chạy xong có commit DB nhưng bảng này không đổi: bấm <strong>«Làm mới báo cáo 30 ngày»</strong>, kiểm
+                          tra ô domain (hibox/cssbuy) và xem trong JSON <code className="text-[10px] bg-white px-0.5">classified_out_of_stock</code> /{' '}
+                          <code className="text-[10px] bg-white px-0.5">updates_committed</code>.
+                        </li>
+                        <li>
+                          Card <strong>«Sau KT: tồn ≤ 0»</strong> khác chỉ báo{' '}
+                          <code className="text-[10px] ml-1 bg-white px-0.5">out_of_stock</code> của bảng OOS — đừng so sánh một-một.
                         </li>
                       </ul>
                     </div>
@@ -1956,70 +1694,56 @@ export default function AdminSourceStockCheckPage() {
                 <p className="text-xs text-slate-600">Chưa có dữ liệu báo cáo.</p>
               ) : null}
             </div>
-          </div>
-        ) : null}
+        </div>
 
         <div className="space-y-3 pt-4 border-t border-gray-100">
-          {(running || scanFromDb) && (
-            <div
-              role="status"
-              aria-live="polite"
-              className={`flex flex-wrap items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm ${
-                running
-                  ? 'border-amber-300 bg-amber-50 text-amber-950'
-                  : auto
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-                    : 'border-slate-200 bg-slate-50 text-slate-700'
-              }`}
-            >
-              {running ? (
-                <>
-                  <SpinnerIcon className="text-amber-700" />
-                  <div className="flex flex-col gap-1 min-w-0 flex-1">
-                    <span className="font-semibold">Đang kiểm tra</span>
-                    {activeCheck?.mode === 'manual' ? (
-                      <span className="text-amber-900/95 break-words">
-                        <strong className="font-medium">Link trong danh sách tay:</strong>{' '}
-                        <ExternalHttpLink url={activeCheck.url} />
-                      </span>
-                    ) : scanFromDb && activeCheck?.mode === 'db' ? (
-                      <span className="text-amber-900/90">
-                        Máy chủ đang chọn <strong>một SP kế trong hàng chờ</strong> và đọc{' '}
-                        <strong>{domain === 'cssbuy' ? 'CSSBuy (API)' : 'Hibox (scrape)'}</strong>; URL trong DB chỉ hiện ở dưới sau khi xong lần này.
-                      </span>
-                    ) : (
-                      <span className="text-amber-900/90">
-                        {scanFromDb
-                          ? 'Đang gọi API scrape / cập nhật…'
-                          : 'Đang gọi API cho link tay…'}
-                      </span>
-                    )}
-                    <span className="text-amber-800/85 text-xs leading-snug">
-                      {scanFromDb
-                        ? 'Một SP mỗi lần; lần kế chỉ sau khi xong + nghỉ ~46–60s khi lặp bật.'
-                        : 'Chờ máy chủ.'}
+          <div
+            role="status"
+            aria-live="polite"
+            className={`flex flex-wrap items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm ${
+              running
+                ? 'border-amber-300 bg-amber-50 text-amber-950'
+                : auto
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                  : 'border-slate-200 bg-slate-50 text-slate-700'
+            }`}
+          >
+            {running ? (
+              <>
+                <SpinnerIcon className="text-amber-700" />
+                <div className="flex flex-col gap-1 min-w-0 flex-1">
+                  <span className="font-semibold">Đang kiểm tra</span>
+                  {activeCheck?.mode === 'db' ? (
+                    <span className="text-amber-900/90">
+                      Máy chủ đang chọn <strong>một SP kế trong hàng chờ</strong> và đọc{' '}
+                      <strong>{domain === 'cssbuy' ? 'CSSBuy (API)' : 'Hibox (scrape)'}</strong>; URL trong DB chỉ hiện ở dưới sau khi xong lần này.
                     </span>
-                  </div>
-                </>
-              ) : scanFromDb && auto ? (
-                <>
-                  <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" aria-hidden />
-                  <span className="font-semibold">Lặp đang bật</span>
-                  <span className="text-emerald-900/95 text-xs sm:text-sm leading-snug max-w-xl">
-                    Nghỉ ~46–60s giữa hai lần bắt đầu. Dừng: nút «Dừng lặp» trên thanh thao tác.
+                  ) : (
+                    <span className="text-amber-900/90">Đang gọi API scrape / cập nhật…</span>
+                  )}
+                  <span className="text-amber-800/85 text-xs leading-snug">
+                    Một SP mỗi lần; lần kế chỉ sau khi xong + nghỉ ~46–60s khi lặp bật.
                   </span>
-                </>
-              ) : scanFromDb ? (
-                <>
-                  <span className="h-2 w-2 rounded-full bg-slate-400 shrink-0" aria-hidden />
-                  <span className="font-semibold">Lặp đang tắt</span>
-                  <span className="text-sm text-gray-700">
-                    Cam = một SP; nút đen/xanh lá = bật lặp chỉ khi Theo DB.
-                  </span>
-                </>
-              ) : null}
-            </div>
-          )}
+                </div>
+              </>
+            ) : auto ? (
+              <>
+                <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" aria-hidden />
+                <span className="font-semibold">Lặp đang bật</span>
+                <span className="text-emerald-900/95 text-xs sm:text-sm leading-snug max-w-xl">
+                  Nghỉ ~46–60s giữa hai lần bắt đầu. Dừng: nút «Dừng lặp» trên thanh thao tác.
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="h-2 w-2 rounded-full bg-slate-400 shrink-0" aria-hidden />
+                <span className="font-semibold">Lặp đang tắt</span>
+                <span className="text-sm text-gray-700">
+                  Cam = một SP; nút đen/xanh lá = bật lặp tuần tự theo queue.
+                </span>
+              </>
+            )}
+          </div>
 
           {lastFinished ? (
             <div
@@ -2036,7 +1760,7 @@ export default function AdminSourceStockCheckPage() {
                 </p>
               ) : lastFinished.kind === 'error' ? (
                 <div className="space-y-1">
-                  <p className="font-medium text-red-900">Lỗi ({lastFinished.scanMode === 'db' ? 'Theo DB' : 'Danh sách tay'})</p>
+                  <p className="font-medium text-red-900">Lỗi kiểm tra nguồn</p>
                   {lastFinished.attemptedUrl ? (
                     <p className="break-words">
                       <strong className="font-medium">Đang cố kiểm tra:</strong>{' '}
@@ -2052,7 +1776,7 @@ export default function AdminSourceStockCheckPage() {
                     <time dateTime={lastFinished.finishedAtIso}>
                       {new Date(lastFinished.finishedAtIso).toLocaleString('vi-VN')}
                     </time>
-                    {lastFinished.scanMode === 'db' ? ' · Theo DB' : ' · Tay'}
+                    {' · Hàng chờ DB'}
                   </p>
                   {lastFinished.seedProductDbId != null ? (
                     <p>

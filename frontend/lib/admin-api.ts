@@ -1002,24 +1002,6 @@ export const adminProductAPI = {
       source_stock_next_check_at?: string | null;
     }>(`/products/by-id/${dbPkId}/source-stock-check/enqueue`, { method: 'POST' }),
 
-  /** Một URL: quy đổi + đọc Hibox (scrape) hoặc CSSBuy (API /web/item). */
-  runSourceStockBatchOne: (body: {
-    url: string;
-    domain: 'hibox' | 'cssbuy';
-    dualAlternateFallback?: boolean;
-    alternateSequenceIndex?: number;
-  }) =>
-    fetchAdmin<AdminSourceStockBatchOneResult>('/products/admin/source-stock-batch/run', {
-      method: 'POST',
-      body: JSON.stringify({
-        url: body.url,
-        domain: body.domain,
-        dual_alternate_fallback: body.dualAlternateFallback ?? false,
-        alternate_sequence_index: body.alternateSequenceIndex ?? 0,
-      }),
-      timeoutMs: ADMIN_SOURCE_STOCK_SCAN_TIMEOUT_MS,
-    }),
-
   /** Một SP kế trong DB — kiểm tra qua Hibox hoặc CSSBuy. */
   runSourceStockBatchNextFromDb: (params: {
     domain: 'hibox' | 'cssbuy';
