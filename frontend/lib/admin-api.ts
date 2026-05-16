@@ -78,47 +78,11 @@ function sanitizeDownloadFilename(name: string): string {
   return n.replace(/[/\\?%*:|"<>]/g, '_');
 }
 
-/**
- * Trình duyệt thường **mất user activation** sau `await fetch()`, nên `<a download>` sau đó có thể bị bỏ qua
- * (HTTPS/production hay Safari). Ưu tiên File System Access API (Chrome/Edge) để mở hộp thoại «Lưu vào…».
- */
+/** Tải thẳng về thư mục Downloads mặc định của trình duyệt, không mở hộp thoại chọn nơi lưu. */
 async function triggerBlobDownloadPreferred(blob: Blob, filename: string): Promise<void> {
   const safeName = sanitizeDownloadFilename(filename);
   const w = typeof window !== 'undefined' ? window : undefined;
   if (!w) return;
-
-  const pickerFn = Reflect.get(w, 'showSaveFilePicker') as
-    | ((options: {
-        suggestedName: string;
-        types?: { description: string; accept: Record<string, string[]> }[];
-      }) => Promise<FileSystemFileHandle>)
-    | undefined;
-
-  if (typeof pickerFn === 'function') {
-    const isXlsx = /\.xlsx$/i.test(safeName);
-    try {
-      const handle = await pickerFn({
-        suggestedName: safeName,
-        types: isXlsx
-          ? [
-              {
-                description: 'Excel',
-                accept: {
-                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-                },
-              },
-            ]
-          : [{ description: 'CSV', accept: { 'text/csv': ['.csv'] } }],
-      });
-      const writable = await handle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      return;
-    } catch (e) {
-      if (e instanceof DOMException && e.name === 'AbortError') return;
-      console.warn('[admin-api] showSaveFilePicker failed, fallback <a download>', e);
-    }
-  }
 
   const objectUrl = URL.createObjectURL(blob);
   const revokeLater = () => {
