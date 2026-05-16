@@ -1,9 +1,13 @@
 """
 Kiểm tra tồn kho nguồn (admin batch): scrape **Hibox** hoặc API **CSSBuy** (quy đổi URL nguồn như nhập Excel).
-Không đọc được / lỗi → coi như hết hàng: có thể cập nhật available = 0 trên các sản khớp trong DB.
+
+Chỉ khi không đọc được PDP (thiếu tín hiệu SP / ``no_data``, lỗi fetch…) mới xếp hết và có thể
+cập nhật ``available = 0``. Nếu vẫn thấy màu–size hay ma trận SKU → coi là đọc được offer,
+không đánh ``out_of_stock`` chỉ vì tiêu đề trống hoặc giá tổng hợp = 0.
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
@@ -19,6 +23,7 @@ from app.services.import_batch_url_coercion import FETCH_TARGET_CSSBUY, FETCH_TA
 from app.services.import_cssbuy_client import ImportCssbuyError, cssbuy_item_page_to_hibox_slug, fetch_cssbuy_item_json
 from app.services.import_hibox_scraper import (
     ImportHiboxError,
+    extract_hibox_1688_offer_digits,
     extract_hibox_slug,
     hibox_canonical_scrape_url,
     normalize_product_import_url,
@@ -42,23 +47,33 @@ def _utcnow() -> datetime:
 
 
 def _find_products_for_hibox_slug(db: Session, slug: str) -> List[Product]:
+    """
+    Khớp ``products`` với slug sau khi quy đổi Hibox (vd ``abb-823190872324``).
+
+    Lưu ý: nhiều SP lưu ``link_default`` là URL 1688 ``…/offer/{id}.html`` — không chứa
+    chuỗi ``/v/abb-…`` nên phải đối chiếu thêm offer id sau khi bóc từ slug.
+    Khi chạy từ DB, ``anchor_product_db_id`` vẫn là khóa ghi kết quả chính xác cho
+    đúng dòng được lấy từ queue.
+    """
     s = (slug or "").strip()
     if not s or s == "hibox_import":
         return []
     prefixed = f"hibox_{s}"
-    return list(
-        db.query(Product)
-        .filter(
-            or_(
-                Product.link_default.ilike(f"%hibox.mn%/v/{s}%"),
-                Product.link_default.ilike(f"%/v/{s}%"),
-                Product.link_default.ilike(f"%item?id={s}%"),
-                Product.product_id.ilike(f"{prefixed}%"),
-                Product.product_id == prefixed,
-            )
-        )
-        .all()
-    )
+    clauses: List[Any] = [
+        Product.link_default.ilike(f"%hibox.mn%/v/{s}%"),
+        Product.link_default.ilike(f"%/v/{s}%"),
+        Product.link_default.ilike(f"%item?id={s}%"),
+        Product.product_id.ilike(f"{prefixed}%"),
+        Product.product_id == prefixed,
+    ]
+    oid = extract_hibox_1688_offer_digits(s)
+    if oid:
+        clauses.append(Product.link_default.ilike(f"%offer/{oid}%"))
+        clauses.append(Product.link_default.ilike(f"%item-1688-{oid}%"))
+    if s.isdigit():
+        clauses.append(Product.link_default.ilike(f"%id={s}%"))
+
+    return list(db.query(Product).filter(or_(*clauses)).all())
 
 
 def _admin_batch_scan_cooldown_cutoff_sql() -> datetime:
@@ -569,6 +584,120 @@ def _other_source_platform(platform: str) -> str:
     return "cssbuy" if pl == "hibox" else "hibox"
 
 
+def _json_list_nonempty_for_catalog(raw_json: Any) -> bool:
+    """Mảng JSON từ scraper: tên màu, size, hoặc cặp color×size."""
+    if raw_json is None:
+        return False
+    try:
+        data = json.loads(raw_json) if isinstance(raw_json, str) else raw_json
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(data, list) or len(data) == 0:
+        return False
+    for x in data[:200]:
+        if x is None:
+            continue
+        if isinstance(x, str) and x.strip():
+            return True
+        if isinstance(x, dict) and (
+            str(x.get("color") or "").strip() or str(x.get("size") or "").strip()
+        ):
+            return True
+    return False
+
+
+def _hibox_row_shows_color_size_catalog(raw_row: Dict[str, Any], product_data: Dict[str, Any]) -> bool:
+    """
+    PDP vẫn có thông tin SKU (màu/size/variant) → coi là đọc được offer, không gán hết
+    chỉ vì thiếu tiêu đề/SKU dạng chữ.
+    """
+    if str(raw_row.get("h1") or "").strip():
+        return True
+    if _json_list_nonempty_for_catalog(raw_row.get("variant_color_size_json")):
+        return True
+    if _json_list_nonempty_for_catalog(raw_row.get("colors_json")):
+        return True
+    if _json_list_nonempty_for_catalog(raw_row.get("sizes_json")):
+        return True
+    try:
+        if int(raw_row.get("color_variant_image_count") or 0) > 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+
+    sizes = product_data.get("sizes")
+    if isinstance(sizes, list) and any(str(s).strip() for s in sizes if s is not None):
+        return True
+
+    colors = product_data.get("colors")
+    if isinstance(colors, list):
+        for c in colors[:120]:
+            if isinstance(c, dict) and str(c.get("name") or "").strip():
+                return True
+            if not isinstance(c, dict) and str(c).strip():
+                return True
+
+    pi = product_data.get("product_info")
+    variants_blob = pi.get("variants") if isinstance(pi, dict) else None
+    if isinstance(variants_blob, dict):
+        pairs = variants_blob.get("pairs")
+        if isinstance(pairs, list):
+            for it in pairs[:160]:
+                if isinstance(it, dict) and (
+                    str(it.get("color") or "").strip() or str(it.get("size") or "").strip()
+                ):
+                    return True
+
+    return False
+
+
+def _cssbuy_row_shows_variant_matrix(row0: Dict[str, Any]) -> bool:
+    """
+    Trong payload /web/item thường có skumap / danh sách thuộc tính — nếu còn matrix SKU,
+    không coi là hết chỉ vì giá summary = 0.
+    """
+
+    def walk(o: Any, depth: int, seen: List[int]) -> bool:
+        if depth > 12 or seen[0] > 380:
+            return False
+        seen[0] += 1
+        if isinstance(o, dict):
+            for k, v in o.items():
+                kl = str(k).lower()
+                kln = kl.replace("_", "").replace("-", "")
+                is_sku_blob = ("skumap" in kln) or ("sku" in kln and ("prop" in kln or "spec" in kln))
+                if is_sku_blob and v:
+                    if isinstance(v, dict) and len(v) >= 2:
+                        return True
+                    if isinstance(v, list) and len(v) >= 2:
+                        return True
+                if walk(v, depth + 1, seen):
+                    return True
+        elif isinstance(o, list):
+            if (
+                len(o) >= 3
+                and o
+                and all(isinstance(x, dict) for x in o[: min(8, len(o))])
+            ):
+                hit = 0
+                keys_union: set[str] = set()
+                for x in o[:20]:
+                    if not isinstance(x, dict):
+                        continue
+                    keys_union.update(str(k).lower() for k in x.keys())
+                    if any(str(x.get(nk) or "").strip() for nk in ("name", "value", "text", "propertyname", "prop")):
+                        hit += 1
+                dense = {"pid", "vid", "value", "prop", "properties"}.intersection(keys_union)
+                if hit >= 3 or ("pid" in keys_union and len(o) >= 3) or dense:
+                    return True
+            for x in o[:48]:
+                if walk(x, depth + 1, seen):
+                    return True
+        return False
+
+    return walk(row0, 0, [0])
+
+
 def _attempt_has_usable_catalog_read(scan: Dict[str, Any]) -> bool:
     if scan.get("classified_out_of_stock") is True:
         return True
@@ -608,15 +737,18 @@ def _gather_platform_scan_attempt(db: Session, *, seed_url: str, platform: str) 
             try:
                 _raw_row, product_data, warns = scrape_hibox_for_import(canonical_url)
                 warnings = list(warns or [])
-                title_like = (_raw_row or {}).get("title") if isinstance(_raw_row, dict) else None
-                sku_like = (_raw_row or {}).get("sku") if isinstance(_raw_row, dict) else None
-                pname = product_data.get("name") if isinstance(product_data, dict) else None
-                has_signal = bool((title_like or "").strip() or (sku_like or "").strip() or (pname or "").strip())
+                rr = dict(_raw_row) if isinstance(_raw_row, dict) else {}
+                pd = dict(product_data) if isinstance(product_data, dict) else {}
+                title_like = rr.get("title")
+                sku_like = rr.get("sku")
+                pname = pd.get("name")
+                basics = bool((title_like or "").strip() or (sku_like or "").strip() or (pname or "").strip())
+                has_signal = basics or _hibox_row_shows_color_size_catalog(rr, pd)
                 raw_status = "ok" if has_signal else "no_data"
                 if not has_signal:
                     classified_oos = True
                     detail = (
-                        "Hibox không trả đủ title/SKU sau khi scrape — coi như không lấy được (hết hoặc lỗi trang)."
+                        "Hibox không trả đủ dữ liệu đọc SP (thiếu tiêu đề/SKU và không thấy màu–size hay variant có nội dung) — có thể hết hoặc lỗi trang."
                     )
                 else:
                     classified_oos = False
@@ -667,11 +799,14 @@ def _gather_platform_scan_attempt(db: Session, *, seed_url: str, platform: str) 
                         except (TypeError, ValueError):
                             price = 0.0
                         title = (row0.get("title") or row0.get("title_cn") or "").strip()
-                        has_signal = price > 0 and bool(title)
+                        variant_matrix = _cssbuy_row_shows_variant_matrix(row0)
+                        has_signal = bool(title) and (price > 0 or variant_matrix)
                         raw_status = "ok" if has_signal else "no_data"
                         if not has_signal:
                             classified_oos = True
-                            detail = "CSSBuy: giá ≤ 0 hoặc thiếu tiêu đề — coi như không đọc được SP."
+                            detail = (
+                                "CSSBuy: thiếu tiêu đề hoặc không có (giá > 0 / ma trận SKU thuộc tính) — không khẳng định được offer còn."
+                            )
                         else:
                             classified_oos = False
                             detail = None
@@ -715,7 +850,7 @@ def _finalize_scan_commit_and_serialise(
 
     anch = max(0, int(anchor_product_db_id or 0))
     anchor_added = False
-    if classified_oos and anch > 0:
+    if anch > 0:
         ids_present = {int(p.id) for p in matched}
         if anch not in ids_present:
             anchor_row = db.query(Product).filter(Product.id == anch).first()
@@ -724,7 +859,8 @@ def _finalize_scan_commit_and_serialise(
                 anchor_added = True
 
     updated_ids: List[int] = []
-    if classified_oos and matched:
+    scan_status = "out_of_stock" if classified_oos else ("in_stock" if str(raw_status or "").strip().lower() == "ok" else "error")
+    if matched:
         now = _utcnow()
         seen: set[int] = set()
         for p in matched:
@@ -732,13 +868,17 @@ def _finalize_scan_commit_and_serialise(
             if pid in seen:
                 continue
             seen.add(pid)
-            p.available = 0
-            p.source_stock_status = "out_of_stock"
+            previous_status = (p.source_stock_status or "").strip().lower()
+            if classified_oos:
+                p.available = 0
+            elif scan_status == "in_stock" and int(p.available or 0) <= 0 and previous_status == "out_of_stock":
+                p.available = 500
+            p.source_stock_status = scan_status
             p.source_stock_checked_at = now
             err_note = (detail or "") if isinstance(detail, str) else ""
             if warnings:
                 err_note = (err_note + " " if err_note else "") + "; ".join(warnings[:3])
-            p.source_stock_error = (err_note or "").strip()[:2000] or None
+            p.source_stock_error = ((err_note or "").strip()[:2000] or None) if scan_status != "in_stock" else None
             updated_ids.append(pid)
         try:
             db.commit()
@@ -749,8 +889,9 @@ def _finalize_scan_commit_and_serialise(
         try:
             for pid in updated_ids:
                 logger.info(
-                    "admin source batch marked OOS: product_id=%s domain=%s url=%s",
+                    "admin source batch stamped source stock: product_id=%s status=%s domain=%s url=%s",
                     pid,
+                    scan_status,
                     domain_used,
                     canonical_url[:200],
                 )
@@ -781,7 +922,9 @@ def _finalize_scan_commit_and_serialise(
     if extras:
         out.update(extras)
     if anchor_added:
-        out["oos_commit_included_anchor_db_id"] = anch
+        out["anchor_included_db_id"] = anch
+        if classified_oos:
+            out["oos_commit_included_anchor_db_id"] = anch
     return out
 
 
@@ -880,7 +1023,7 @@ def run_admin_source_url_scan(
         det_b = "(không có chi tiết)"
     canon = (str(second.get("canonical_url") or first.get("canonical_url") or "") or "").strip()
     mega_detail = (
-        f"Cả hai nền đều không đọc được — không ghi DB; nên dừng lặp và xử lý chặn/captcha.\n\n"
+        f"Cả hai nền đều không đọc được — đã ghi trạng thái lỗi kiểm tra lên SP hàng chờ; nên dừng lặp và xử lý chặn/captcha.\n\n"
         f"[{primary.upper()}] raw_status={rs_a}\n{det_a}\n\n"
         f"[{secondary.upper()}] raw_status={rs_b}\n{det_b}"
     )
@@ -889,23 +1032,25 @@ def run_admin_source_url_scan(
         {"domain": secondary, "raw_status": second.get("raw_status"), "detail": second.get("detail")},
     ]
     merged_warns = list((first.get("warnings") or []) + (second.get("warnings") or []))[:40]
-    return {
-        "ok": True,
-        "canonical_url": canon,
-        "domain": f"{primary}+{secondary}",
-        "raw_status": "dual_fetch_error",
-        "classified_out_of_stock": False,
-        "detail": mega_detail,
-        "warnings": merged_warns,
-        "matched_products": [],
-        "updated_product_ids": [],
-        "matched_count": 0,
-        "updates_committed": False,
-        "dual_platform_both_failed": True,
-        "dual_attempts": attempts,
-        "alternate_sequence_index": int(alternate_sequence_index),
-        "alternate_primary_domain": primary,
-    }
+    return _finalize_scan_commit_and_serialise(
+        db,
+        computed={
+            "canonical_url": canon,
+            "domain": f"{primary}+{secondary}",
+            "raw_status": "dual_fetch_error",
+            "classified_out_of_stock": False,
+            "detail": mega_detail,
+            "warnings": merged_warns,
+            "matched_orm": [],
+        },
+        extras={
+            "dual_platform_both_failed": True,
+            "dual_attempts": attempts,
+            "alternate_sequence_index": int(alternate_sequence_index),
+            "alternate_primary_domain": primary,
+        },
+        anchor_product_db_id=anchor_product_db_id or None,
+    )
 
 def admin_clear_false_source_oos_flag(db: Session, *, db_id: int) -> Dict[str, Any]:
     """

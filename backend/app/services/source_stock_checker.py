@@ -12,6 +12,7 @@ from sqlalchemy import or_
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.product import Product
+from app.services.admin_source_stock_batch import _hibox_row_shows_color_size_catalog
 from app.services.import_batch_url_coercion import FETCH_TARGET_HIBOX, coerce_url_for_excel_batch_import
 from app.services.import_hibox_scraper import (
     ImportHiboxError,
@@ -69,16 +70,21 @@ def _evaluate_stock_via_hibox(raw_url: str) -> SourceStockCheckResult:
     canonical_url = hibox_canonical_scrape_url(coerced) if coerced else canonical_url
     try:
         _raw_row, product_data, warns = scrape_hibox_for_import(canonical_url)
-        title_like = (_raw_row or {}).get("title") if isinstance(_raw_row, dict) else None
-        sku_like = (_raw_row or {}).get("sku") if isinstance(_raw_row, dict) else None
-        pname = product_data.get("name") if isinstance(product_data, dict) else None
-        has_signal = bool((title_like or "").strip() or (sku_like or "").strip() or (pname or "").strip())
+        rr = dict(_raw_row) if isinstance(_raw_row, dict) else {}
+        pd = dict(product_data) if isinstance(product_data, dict) else {}
+        title_like = rr.get("title")
+        sku_like = rr.get("sku")
+        pname = pd.get("name")
+        basics = bool((title_like or "").strip() or (sku_like or "").strip() or (pname or "").strip())
+        has_signal = basics or _hibox_row_shows_color_size_catalog(rr, pd)
         if has_signal:
             warn_txt = "; ".join(list(warns or [])[:6]).strip()
             return SourceStockCheckResult(status="in_stock", error=warn_txt or None)
         return SourceStockCheckResult(
             status="out_of_stock",
-            error="Hibox không trả đủ title/SKU sau khi scrape — coi như không lấy được trang.",
+            error=(
+                "Hibox không trả đủ dữ liệu PDP (thiếu tiêu đề/SKU và không có màu–size có nội dung)."
+            ),
         )
     except ImportHiboxError as exc:
         return SourceStockCheckResult(status="error", error=str(exc)[:1000])

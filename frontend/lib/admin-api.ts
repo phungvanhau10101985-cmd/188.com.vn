@@ -353,14 +353,16 @@ export interface AdminSourceStockBatchOneResult {
   updated_product_ids: number[];
   matched_count: number;
   updates_committed?: boolean;
-  /** Hai nền đều lỗi — không commit; client nên dừng lặp. */
+  /** Hai nền đều lỗi; backend vẫn ghi mốc lỗi lên SP hàng chờ rồi client dừng lặp. */
   dual_platform_both_failed?: boolean;
   dual_attempts?: Array<{ domain: string; raw_status?: string | null; detail?: string | null }>;
   alternate_fallback_used?: boolean;
   alternate_failed_domain?: string;
   alternate_sequence_index?: number;
   alternate_primary_domain?: string;
-  /** Theo DB: khi slug không map nhưng vẫn commit OOS, SP hàng chờ được gắn thêm vào nhóm khớp. */
+  /** Theo DB: SP hàng chờ được gắn thêm vào nhóm kết quả khi cần neo đúng `products.id`. */
+  anchor_included_db_id?: number;
+  /** Khi OOS và slug không map nhưng vẫn commit, SP hàng chờ được gắn thêm vào nhóm khớp. */
   oos_commit_included_anchor_db_id?: number;
 }
 

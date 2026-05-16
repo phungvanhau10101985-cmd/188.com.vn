@@ -1108,18 +1108,18 @@ export default function AdminSourceStockCheckPage() {
           if (res.updates_committed) {
             showToast(
               'info',
-              `Hết hàng trên nguồn đã có dấu hiệu rõ — đã cập nhật tồn = 0 nếu khớp SP («${shortUrl}»${seedShort})`,
+              `Hết hàng trên nguồn đã có dấu hiệu rõ — đã cập nhật tồn = 0 trên đúng SP hàng chờ («${shortUrl}»${seedShort})`,
             );
           } else {
             showToast(
               'info',
-              `Hết hàng trên nguồn (theo cờ trang); chưa khớp bản trong shop — không đổi DB («${shortUrl}»${seedShort})`,
+              `Hết hàng trên nguồn (theo cờ trang) nhưng chưa ghi được DB — kiểm tra phản hồi hệ thống («${shortUrl}»${seedShort})`,
             );
           }
         } else if (isDualPlatformHardFailure(res)) {
           stickySeedProductIdRef.current = null;
           setAuto(false);
-          const full = (res.detail || '').trim() || 'Hibox và CSSBuy đều không đọc được — không đổi DB.';
+          const full = (res.detail || '').trim() || 'Hibox và CSSBuy đều không đọc được — đã ghi mốc lỗi lên SP hàng chờ.';
           const toastSlice = full.length > 520 ? `${full.slice(0, 520)}…` : full;
           showToast(
             'err',
@@ -1656,19 +1656,18 @@ export default function AdminSourceStockCheckPage() {
                           (đã có out_of_stock trong DB trong cửa sổ) và trong tab sản CRM.
                         </li>
                         <li>
-                          <strong>Hàng chờ DB:</strong> kết quả scrape/API báo «hết nguồn», backend{' '}
-                          <strong className="not-italic">luôn cập nhật cờ + mốc kiểm tra + tồn ≤ 0 trên đúng</strong>{' '}
-                          <code className="text-[10px] bg-white px-0.5">products.id</code> của sản được lấy từ queue (neo),
-                          kể khi không tìm thêm được bản ghi khác qua slug. Không map slug <em>ngoài</em> neo không bị coi là
-                          «mất cờ»: tra cứu trong{' '}
-                          <strong>Phản hồi hệ thống</strong> trường <code className="text-[10px] bg-white px-0.5">oos_commit_included_anchor_db_id</code>{' '}
-                          (xuất hiện khi chỉ neo mới có mặt — lúc đó nên chỉnh <code className="text-[10px] bg-white px-0.5">link_default</code> /{' '}
-                          <code className="text-[10px] bg-white px-0.5">product_id</code> để slug đồng bộ nhưng không bắt buộc để có dòng trong báo cáo).
+                          <strong>Hàng chờ DB:</strong> mỗi lần kiểm tra sẽ ghi{' '}
+                          <code className="text-[10px] bg-white px-0.5">source_stock_checked_at</code> và{' '}
+                          <code className="text-[10px] bg-white px-0.5">source_stock_status</code> lên đúng{' '}
+                          <code className="text-[10px] bg-white px-0.5">products.id</code> được lấy từ queue. Nếu hết nguồn thì
+                          thêm tồn ≤ 0 / <code className="text-[10px] bg-white px-0.5">out_of_stock</code>; nếu đọc OK thì ghi
+                          <code className="text-[10px] bg-white px-0.5">in_stock</code>; nếu lỗi hai nền thì ghi
+                          <code className="text-[10px] bg-white px-0.5">error</code>.
                         </li>
                         <li>
-                          Nếu vừa chạy xong có commit DB nhưng bảng này không đổi: bấm <strong>«Làm mới báo cáo 30 ngày»</strong>, kiểm
-                          tra ô domain (hibox/cssbuy) và xem trong JSON <code className="text-[10px] bg-white px-0.5">classified_out_of_stock</code> /{' '}
-                          <code className="text-[10px] bg-white px-0.5">updates_committed</code>.
+                          Nếu JSON có <code className="text-[10px] bg-white px-0.5">classified_out_of_stock = true</code> và đã commit
+                          nhưng bảng này chưa đổi: bấm <strong>«Làm mới báo cáo 30 ngày»</strong>, kiểm tra ô domain (hibox/cssbuy)
+                          và <code className="text-[10px] bg-white px-0.5">updates_committed</code>.
                         </li>
                         <li>
                           Card <strong>«Sau KT: tồn ≤ 0»</strong> khác chỉ báo{' '}
@@ -1874,7 +1873,7 @@ export default function AdminSourceStockCheckPage() {
                   )}
                   {lastFinished.classifiedOutOfStock && lastFinished.updatesCommitted ? (
                     <p className="text-amber-900 text-[12px]">
-                      Đã cập nhật cửa hàng (tồn = 0 / trạng thái phù hợp theo luồng admin) cho sản khớp.
+                      Đã cập nhật cửa hàng (tồn = 0 / trạng thái phù hợp theo luồng admin) cho đúng SP hàng chờ.
                     </p>
                   ) : lastFinished.classifiedOutOfStock && !lastFinished.updatesCommitted ? (
                     <p className="text-amber-900 text-[12px]">
@@ -1901,8 +1900,8 @@ export default function AdminSourceStockCheckPage() {
               </summary>
               <div className="px-3 pb-3 pt-0 border-t border-gray-100 space-y-2 leading-relaxed">
                 <p>
-                  Khi scrape báo cờ «hết», SP được ghép vào bảng bên dưới để bạn đối chiếu. «DB đã commit» chỉ có nghĩa đã
-                  đổi tồn/trạng thái nguồn trên các bản ghi khớp — không tự xóa sản. Xóa vĩnh viễn cần bấm đỏ + xác nhận.
+                  Khi scrape báo cờ «hết», SP được ghép vào bảng bên dưới để bạn đối chiếu. «DB đã commit» nghĩa là đã
+                  ghi mốc/trạng thái nguồn lên SP hàng chờ — không tự xóa sản. Xóa vĩnh viễn cần bấm đỏ + xác nhận.
                 </p>
                 <p className="text-gray-600 text-xs">
                   Refresh tab làm trống danh sách phiên; không ảnh hưởng DB.
