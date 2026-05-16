@@ -10,7 +10,9 @@ import {
   type AdminSourceStockQueueStats,
 } from '@/lib/admin-api';
 
-type Domain = '1688' | 'hibox';
+/** Kiểm tra nguồn chỉ qua scrape Hibox (URL trong DB được quy đổi như nhập Excel). */
+type SourceStockDomain = 'hibox';
+const SOURCE_STOCK_CHECK_DOMAIN: SourceStockDomain = 'hibox';
 
 /** Theo DB + bật lặp: khoảng cách ngẫu nhiên giữa hai lần *bắt đầu* kiểm tra (sequential — chờ xong SP hiện tại). */
 const ADMIN_SOURCE_DB_LOOP_GAP_MS_MIN = 46_000;
@@ -28,7 +30,7 @@ type OosRow = AdminSourceStockBatchOneMatched & {
   rowKey: string;
   sourceUrl: string;
   canonicalUrl: string;
-  domain: Domain;
+  domain: SourceStockDomain;
   reason: string;
   checkedAtIso: string;
 };
@@ -43,7 +45,7 @@ type LastFinishedCheck =
       scanMode: 'db' | 'manual';
       attemptedUrl: string;
       canonicalUrl: string;
-      domain: Domain;
+      domain: SourceStockDomain;
       seedProductDbId?: number | null;
       seedProductName?: string | null;
       classifiedOutOfStock: boolean;
@@ -65,7 +67,7 @@ function buildLastOkFromApi(
   res: AdminSourceStockBatchDbNextResult | AdminSourceStockBatchOneResult,
   scanMode: 'db' | 'manual',
   attemptedUrl: string,
-  domainUsed: Domain,
+  domainUsed: SourceStockDomain,
 ): Extract<LastFinishedCheck, { kind: 'ok' }> {
   const dbr = res as AdminSourceStockBatchDbNextResult;
   return {
@@ -134,7 +136,7 @@ function isUnresolvedStockProbe(raw: string | null | undefined): boolean {
   return ['error', 'unknown', 'fetch_error', 'bad_url', 'no_data'].includes(s);
 }
 
-/** Trang nguồn (1688) báo captcha / chặn / phát hiện quét — dừng lặp queue, chi tiết trong `detail`. */
+/** Phản hồi raw_status «blocked» (hiếm) hoặc heuristic chặn — dừng lặp queue, chi tiết trong `detail`. */
 function isBlockedBySourceSite(raw: string | null | undefined): boolean {
   return (raw || '').trim().toLowerCase() === 'blocked';
 }
@@ -196,7 +198,6 @@ function ExternalHttpLink({ url }: { url: string }) {
 
 export default function AdminSourceStockCheckPage() {
   const [scanFromDb, setScanFromDb] = useState(true);
-  const [domain, setDomain] = useState<Domain>('1688');
   const [auto, setAuto] = useState(true);
   const [running, setRunning] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -247,10 +248,6 @@ export default function AdminSourceStockCheckPage() {
   scanFromDbGateRef.current = scanFromDb;
 
   useEffect(() => {
-    stickySeedProductIdRef.current = null;
-  }, [domain]);
-
-  useEffect(() => {
     if (!scanFromDb) stickySeedProductIdRef.current = null;
   }, [scanFromDb]);
 
@@ -276,7 +273,7 @@ export default function AdminSourceStockCheckPage() {
     setQueueStatsLoading(true);
     try {
       const s = await adminProductAPI.fetchSourceStockQueueStats({
-        domain,
+        domain: SOURCE_STOCK_CHECK_DOMAIN,
         activeOnly: true,
       });
       setQueueStats(s);
@@ -288,14 +285,14 @@ export default function AdminSourceStockCheckPage() {
     } finally {
       setQueueStatsLoading(false);
     }
-  }, [scanFromDb, domain]);
+  }, [scanFromDb]);
 
   const fillTextareaPreviewFromDb = useCallback(async () => {
     setLoadingPreviewUrls(true);
     setLastError(null);
     try {
       const res = await adminProductAPI.fetchSourceStockProductUrls({
-        domain,
+        domain: SOURCE_STOCK_CHECK_DOMAIN,
         limit: 5000,
         activeOnly: true,
       });
@@ -311,7 +308,7 @@ export default function AdminSourceStockCheckPage() {
     } finally {
       setLoadingPreviewUrls(false);
     }
-  }, [domain, showToast]);
+  }, [showToast]);
 
   const bumpOosRows = useCallback(
     (res: AdminSourceStockBatchDbNextResult | AdminSourceStockBatchOneResult, attemptedUrl: string) => {
@@ -338,7 +335,7 @@ export default function AdminSourceStockCheckPage() {
           : [{ id: 0, name: '— không khớp sản phẩm trong shop —', slug: '', product_id: null }];
 
       const iso = new Date().toISOString();
-      const dom = res.domain as Domain;
+      const dom = res.domain as SourceStockDomain;
 
       setOosRows((prev) => {
         const next = [...prev];
@@ -358,7 +355,8 @@ export default function AdminSourceStockCheckPage() {
             canonicalUrl: res.canonical_url,
             domain: dom,
             reason:
-              reason || 'Phát hiện hết/đình chỉ trên trang nguồn (theo dấu hiệu trang 1688) — không gồm captcha chỉ đăng nhập.',
+              reason ||
+              'Phát hiện không đọc đủ dữ liệu SP trên Hibox sau scrape — có thể hết hoặc trang lỗi.',
             checkedAtIso: iso,
           });
         }
@@ -375,7 +373,7 @@ export default function AdminSourceStockCheckPage() {
       setLastError(null);
       try {
         const res = await adminProductAPI.runSourceStockBatchNextFromDb({
-          domain,
+          domain: SOURCE_STOCK_CHECK_DOMAIN,
           activeOnly: true,
           cursorAfterProductId: 0,
           stickySeedProductId: stickySeedProductIdRef.current ?? undefined,
@@ -413,7 +411,7 @@ export default function AdminSourceStockCheckPage() {
         }
         setRecent((prev) => [res, ...prev].slice(0, 36));
         bumpOosRows(res, tried);
-        setLastFinished(buildLastOkFromApi(res, 'db', tried, domain));
+        setLastFinished(buildLastOkFromApi(res, 'db', tried, SOURCE_STOCK_CHECK_DOMAIN));
 
         const shortUrl = tried.length > 86 ? `${tried.slice(0, 86)}…` : tried || '(thiếu link)';
         const seedShort =
@@ -498,7 +496,7 @@ export default function AdminSourceStockCheckPage() {
     setRunning(true);
     setLastError(null);
     try {
-      const res = await adminProductAPI.runSourceStockBatchOne({ url, domain });
+      const res = await adminProductAPI.runSourceStockBatchOne({ url, domain: SOURCE_STOCK_CHECK_DOMAIN });
       const blockedManual = shouldStopAutoForAntiBot(res);
       if (!blockedManual) {
         manualCursorRef.current = i + 1;
@@ -507,7 +505,7 @@ export default function AdminSourceStockCheckPage() {
       setSessionChecks((n) => n + 1);
       setRecent((prev) => [res, ...prev].slice(0, 36));
       bumpOosRows(res, url);
-      setLastFinished(buildLastOkFromApi(res, 'manual', url, domain));
+      setLastFinished(buildLastOkFromApi(res, 'manual', url, SOURCE_STOCK_CHECK_DOMAIN));
 
       const shortUrl = url.length > 86 ? `${url.slice(0, 86)}…` : url;
       const hint = typeof res.detail === 'string' && res.detail.trim() ? ` — ${res.detail.trim().slice(0, 200)}` : '';
@@ -527,7 +525,7 @@ export default function AdminSourceStockCheckPage() {
             ? 'Trang nguồn báo chặn hoặc phát hiện quét.'
             : 'Phát hiện dấu hiệu captcha/chặn trong phản hồi.');
         const toastSlice = full.length > 520 ? `${full.slice(0, 520)}…` : full;
-        showToast('err', `${toastSlice} (giữ nguyên dòng URL trong ô để xử lý cookie / thử lại).`);
+        showToast('err', `${toastSlice} (giữ nguyên dòng URL trong ô để chỉnh link / thử lại).`);
       } else if (isUnresolvedStockProbe(res.raw_status)) {
         showToast('info', `Chưa kiểm tra được nguồn — không coi là hết hàng («${shortUrl}»)${hint}`);
       } else {
@@ -553,7 +551,6 @@ export default function AdminSourceStockCheckPage() {
   }, [
     bumpOosRows,
     cooldownDays,
-    domain,
     refreshQueueStats,
     scanFromDb,
     showToast,
@@ -695,9 +692,7 @@ export default function AdminSourceStockCheckPage() {
             Mặc định không cần nạp danh sách; với chế độ Theo DB tab mở và <strong>đã bật lặp</strong>: luôn{' '}
             <strong>một SP một lần</strong> — chờ kiểm tra xong SP đó rồi mới xếp lượt tiếp; giữa hai lần <em>bắt đầu</em>{' '}
             kiểm tra cách nhau <strong>ngẫu nhiên ~46–60 giây</strong> giữa hai lần <em>bắt đầu</em> (nếu một SP chạy lâu hơn khoảng đó thì SP kế bắt đầu ngay sau khi xong).
-            Khi trang nguồn báo captcha / chặn / phát hiện quét (<code className="text-[11px] bg-gray-100 px-1 rounded">blocked</code>), backend ghép{' '}
-            <strong>tiêu đề + trích nội dung</strong> trang và <strong>tự dừng lặp</strong>. Khi chỉ lỗi đọc tạm (<code className="text-[11px] bg-gray-100 px-1 rounded">error</code> /{' '}
-            <code className="text-[11px] bg-gray-100 px-1 rounded">unknown</code> /{' '}
+            Khi phản hồi báo chặn / rủi ro (<code className="text-[11px] bg-gray-100 px-1 rounded">blocked</code>) hoặc heuristic tương tự trên UI, lặp <strong>tự dừng</strong>. Khi chỉ lỗi đọc tạm (<code className="text-[11px] bg-gray-100 px-1 rounded">error</code> /{' '}
             <code className="text-[11px] bg-gray-100 px-1 rounded">fetch_error</code>), hệ thống{' '}
             <strong>không đánh dấu TTL batch</strong> và <strong>giữ đúng SP đó</strong> cho tới khi đọc được trang hoặc có kết quả xác định khác.
             Backend đọc{' '}
@@ -717,12 +712,9 @@ export default function AdminSourceStockCheckPage() {
             Excel <code className="text-xs bg-gray-100 px-1 rounded">product_url</code>), sau đó ghi mốc và giữ chờ TTL tương ứng từng loại như trên.
           </p>
           <p className="text-sm text-gray-600 mt-2">
-            Cookie cho 1688:{' '}
-            <Link href="/admin/import-1688" className="text-orange-700 font-medium underline">
-              Cookie 1688
-            </Link>
-            . Hi-box ép link về <code className="text-xs bg-gray-100 px-1 rounded">hibox.mn/v/…</code> trước khi
-            scrape.
+            Kiểm tra luôn sau khi quy đổi URL trong DB sang{' '}
+            <code className="text-xs bg-gray-100 px-1 rounded">hibox.mn/v/…</code>
+            {' '}(link gốc có thể là 1688/Taobao/mirror — giống luồng nhập Excel).
           </p>
         </div>
         {toast && (
@@ -835,20 +827,11 @@ export default function AdminSourceStockCheckPage() {
         )}
 
         <div className="flex flex-wrap items-start gap-4 pt-2 border-t border-gray-100">
-          <div>
-            <label htmlFor="source-domain-select" className="block text-sm font-medium text-gray-800 mb-1">
-              Tên miền để kiểm tra
-            </label>
-            <select
-              id="source-domain-select"
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm min-w-[14rem]"
-              value={domain}
-              onChange={(e) => setDomain(e.target.value as Domain)}
-              disabled={running}
-            >
-              <option value="1688">detail.1688.com (cookie)</option>
-              <option value="hibox">hibox.mn (+ quy đổi)</option>
-            </select>
+          <div className="text-sm text-gray-700 shrink-0 max-w-[13rem]">
+            <p className="font-medium text-gray-800 mb-0.5">Nguồn kiểm tra</p>
+            <p className="text-gray-600">
+              Luôn qua <strong className="text-gray-900">hibox.mn</strong> (scrape sau khi quy đổi URL trong DB).
+            </p>
           </div>
           {scanFromDb ? (
             <div className="text-sm text-gray-600 pb-1 flex-1 min-w-[14rem] space-y-1.5">
@@ -965,9 +948,8 @@ export default function AdminSourceStockCheckPage() {
                       </span>
                     ) : scanFromDb && activeCheck?.mode === 'db' ? (
                       <span className="text-amber-900/90">
-                        Máy chủ đang chọn <strong>một SP kế trong hàng chờ</strong> và đọc nguồn{' '}
-                        <strong>{domain === '1688' ? '1688 (cookie)' : 'hibox'}</strong>; URL trong DB chỉ hiện ở dưới sau khi
-                        xong lần này.
+                        Máy chủ đang chọn <strong>một SP kế trong hàng chờ</strong> và scrape{' '}
+                        <strong>Hibox</strong>; URL trong DB chỉ hiện ở dưới sau khi xong lần này.
                       </span>
                     ) : (
                       <span className="text-amber-900/90">
@@ -1068,7 +1050,7 @@ export default function AdminSourceStockCheckPage() {
                       </p>
                       <p className="text-[12px] leading-relaxed whitespace-pre-wrap">{lastFinished.detail ?? '—'}</p>
                       <p className="text-[11px] text-red-900/90">
-                        Kiểm tra cookie 1688, giảm tần suất hoặc xử lý theo thông báo trên trang nguồn; sau đó bấm «Chạy 1 SP» hoặc «Bật lặp».
+                        Kiểm tra lại URL trong DB / độ trễ Hibox / giảm tần suất lặp nếu cần; sau đó bấm «Chạy 1 SP» hoặc «Bật lặp».
                       </p>
                       <dl className="grid gap-2 text-[12px]">
                         <div>
@@ -1109,7 +1091,7 @@ export default function AdminSourceStockCheckPage() {
                     </p>
                   ) : (
                     <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-red-950 space-y-1.5 mt-1">
-                      <p className="font-semibold">Đã có dấu hiệu hết / đình chỉ trên trang nguồn (1688)</p>
+                      <p className="font-semibold">Đã có dấu hiệu không đọc được SP trên Hibox (xếp hết khi có khớp DB)</p>
                       <p className="text-red-950/95 text-[12px]">
                         Chỉ khi scrape đọc được nội dung và gặp cờ «đã xuống kệ / hết». Không nhầm với chỉ báo khác.
                       </p>
@@ -1229,7 +1211,7 @@ export default function AdminSourceStockCheckPage() {
           <div>
             <h2 id="oos-heading" className="text-lg font-semibold text-gray-900">
               Danh sách <span className="text-red-800">hết hàng trên nguồn</span>{' '}
-              <span className="font-normal text-gray-600">(phiên làm việc; chỉ thêm sau khi trang báo có cờ hết 1688)</span>
+              <span className="font-normal text-gray-600">(phiên làm việc; chỉ thêm khi scrape báo không đủ dữ liệu / xếp hết)</span>
             </h2>
             <p className="text-sm text-gray-600 mt-1 max-w-3xl">
               Khi kiểm tra thấy cờ «hết» trên nguồn, SP được <strong>ghi vào danh sách phiên</strong> để admin{' '}

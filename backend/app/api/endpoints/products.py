@@ -41,11 +41,11 @@ router = APIRouter()
 
 class AdminSourceStockBatchBody(BaseModel):
     url: str = Field(..., min_length=3)
-    domain: Literal["1688", "hibox"] = "1688"
+    domain: Literal["hibox"] = "hibox"
 
 
 class AdminSourceStockScanNextDbBody(BaseModel):
-    domain: Literal["1688", "hibox"] = "1688"
+    domain: Literal["hibox"] = "hibox"
     active_only: bool = True
     cursor_after_product_id: int = Field(0, ge=0)
     sticky_seed_product_id: int = Field(
@@ -837,7 +837,7 @@ def admin_source_stock_batch_run(
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("products")),
 ):
-    """Admin: kiểm tra một URL nguồn (1688 cookie / hoặc Hibox scrape). Lỗi hoặc hết → có thể set available=0."""
+    """Admin: kiểm tra một URL nguồn qua scrape Hibox (quy đổi như nhập Excel). Lỗi hoặc không đọc được đủ dữ liệu → có thể set available=0."""
     url = body.url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="Thiếu URL.")
@@ -926,9 +926,9 @@ def admin_source_stock_delete_products_by_db_ids(
 
 @router.get("/admin/source-stock-batch/queue-stats", response_model=dict, include_in_schema=False)
 def admin_source_stock_batch_queue_stats(
-    domain: Literal["1688", "hibox"] = Query(
-        "1688",
-        description="Cùng nhánh lọc như run-next-from-db / product-urls",
+    domain: Literal["hibox"] = Query(
+        "hibox",
+        description="Luôn scrape qua Hibox (1688 đã ngừng kiểm tra trực tiếp).",
     ),
     active_only: bool = Query(True),
     db: Session = Depends(get_db),
@@ -940,16 +940,16 @@ def admin_source_stock_batch_queue_stats(
 
 @router.get("/admin/source-stock-batch/product-urls", response_model=dict, include_in_schema=False)
 def admin_source_stock_batch_product_urls(
-    domain: Literal["1688", "hibox"] = Query(
-        "1688",
-        description="Lọc link phù hợp luồng kiểm tra (Excel product_url → DB link_default)",
+    domain: Literal["hibox"] = Query(
+        "hibox",
+        description="Lọc link phù hợp luồng kiểm tra qua Hibox",
     ),
     limit: int = Query(6000, ge=1, le=15000),
     active_only: bool = Query(True, description="Chỉ sản phẩm is_active"),
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("products")),
 ):
-    domain_l = (domain or "1688").strip().lower()
+    domain_l = (domain or "hibox").strip().lower()
     return admin_collect_distinct_product_urls_from_db(db, domain=domain_l, limit=int(limit), active_only=bool(active_only))
 
 @router.post("/by-id/{id}/purge-dead-media-url", response_model=dict, include_in_schema=False)

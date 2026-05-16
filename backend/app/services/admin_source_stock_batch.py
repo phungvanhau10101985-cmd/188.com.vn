@@ -1,5 +1,5 @@
 """
-Kiểm tra tồn kho nguồn theo từng URL (admin batch): 1688 (cookie Playwright) hoặc hibox.mn (scrape như import).
+Kiểm tra tồn kho nguồn (admin batch): chỉ scrape qua Hibox (quy đổi URL nguồn như nhập Excel).
 Không đọc được / lỗi → coi như hết hàng: có thể cập nhật available = 0 trên các sản khớp trong DB.
 """
 from __future__ import annotations
@@ -23,9 +23,6 @@ from app.services.import_hibox_scraper import (
     normalize_product_import_url,
     scrape_hibox_for_import,
 )
-from app.services.import_1688_scraper import canonical_1688_offer_pc_url, extract_1688_numeric_offer_id
-from app.services.source_stock_checker import _evaluate_page_stock
-
 logger = logging.getLogger(__name__)
 
 # Lỗi tạm (chặn / captcha / lỗi đọc): không ghi admin_source_batch_scanned_at để SP được ưu tiên kiểm tra lại ngay.
@@ -40,23 +37,6 @@ def should_commit_admin_batch_ttl_after_scan(raw_status: str | None) -> bool:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _find_products_for_1688_offer(db: Session, offer_id: str) -> List[Product]:
-    oid = (offer_id or "").strip()
-    if not oid.isdigit():
-        return []
-    prefix_a = f"A{oid}a188"
-    q = db.query(Product).filter(
-        or_(
-            Product.link_default.ilike(f"%/offer/{oid}.htm%"),
-            Product.link_default.ilike(f"%/offer/{oid}.html%"),
-            Product.link_default.ilike(f"%offerId={oid}%"),
-            Product.link_default.ilike(f"%offer/{oid}%"),
-            Product.product_id.ilike(f"{prefix_a}%"),
-        )
-    )
-    return list(q.all())
 
 
 def _find_products_for_hibox_slug(db: Session, slug: str) -> List[Product]:
@@ -161,8 +141,8 @@ def admin_product_source_link_base_filters(
     *,
     active_only: bool,
 ) -> List[Any]:
-    """Bộ lọc link/domain/active — không gồm điều kiện TTL vòng kiểm tra."""
-    domain_l = (domain or "1688").strip().lower()
+    """Bộ lọc link/active — chỉ SP có URL có thể đưa vào luồng quy đổi + scrape Hibox."""
+    _ = (domain or "hibox").strip().lower()
     filters = [
         ProductModel.link_default.isnot(None),
         func.length(func.trim(ProductModel.link_default)) > 8,
@@ -170,26 +150,17 @@ def admin_product_source_link_base_filters(
     if active_only:
         filters.append(ProductModel.is_active.is_(True))
 
-    if domain_l == "1688":
-        filters.append(
-            or_(
-                ProductModel.link_default.ilike("%1688.com%"),
-                ProductModel.link_default.ilike("%offer.1688%"),
-                ProductModel.link_default.ilike("%detail.1688%"),
-            )
+    filters.append(
+        or_(
+            ProductModel.link_default.ilike("%hibox.mn%"),
+            ProductModel.link_default.ilike("%taobao1688.kz%"),
+            ProductModel.link_default.ilike("%1688.com%"),
+            ProductModel.link_default.ilike("%offer.1688%"),
+            ProductModel.link_default.ilike("%detail.1688%"),
+            ProductModel.link_default.ilike("%taobao.com%"),
+            ProductModel.link_default.ilike("%tmall.com%"),
         )
-    else:
-        filters.append(
-            or_(
-                ProductModel.link_default.ilike("%hibox.mn%"),
-                ProductModel.link_default.ilike("%taobao1688.kz%"),
-                ProductModel.link_default.ilike("%1688.com%"),
-                ProductModel.link_default.ilike("%offer.1688%"),
-                ProductModel.link_default.ilike("%detail.1688%"),
-                ProductModel.link_default.ilike("%taobao.com%"),
-                ProductModel.link_default.ilike("%tmall.com%"),
-            )
-        )
+    )
 
     return filters
 
@@ -200,7 +171,7 @@ def admin_product_source_link_filters(
     *,
     active_only: bool,
 ) -> List[Any]:
-    domain_l = (domain or "1688").strip().lower()
+    domain_l = (domain or "hibox").strip().lower()
     return _ttl_ready_filters(ProductModel, domain_l, active_only=active_only)[0]
 
 
@@ -215,7 +186,7 @@ def admin_source_stock_queue_stats(
     - total_in_scope, eligible_now, in_cooldown như trước
     - eligible_with_recent_customer_view / eligible_without_recent_customer_view:tácheligible theo PDP traffic trong cửa sổ
     """
-    domain_l = (domain or "1688").strip().lower()
+    domain_l = (domain or "hibox").strip().lower()
     ttl_days_cold = admin_batch_scan_cooldown_days()
     cold_cut_iso = _admin_batch_scan_cooldown_cutoff_sql().isoformat()
     filt, vu = _ttl_ready_filters(Product, domain_l, active_only=active_only)
@@ -260,7 +231,7 @@ def admin_collect_distinct_product_urls_from_db(
     limit: int,
     active_only: bool,
 ) -> Dict[str, Any]:
-    domain_l = (domain or "1688").strip().lower()
+    domain_l = (domain or "hibox").strip().lower()
     filt, vu = _ttl_ready_filters(Product, domain_l, active_only=active_only)
     seen: set[str] = set()
     urls_out: List[str] = []
@@ -319,7 +290,7 @@ def run_admin_source_stock_scan_next_from_db(
     """
     _ = cursor_after_product_id
 
-    domain_l = (domain or "1688").strip().lower()
+    domain_l = (domain or "hibox").strip().lower()
     filt, vu = _ttl_ready_filters(Product, domain_l, active_only=active_only)
 
     prod = None
@@ -385,18 +356,31 @@ def run_admin_source_stock_scan_next_from_db(
 
 def run_admin_source_url_scan(db: Session, *, url: str, domain: str) -> Dict[str, Any]:
     domain_lower = (domain or "").strip().lower()
-    if domain_lower not in ("1688", "hibox"):
+    if domain_lower == "1688":
         return {
             "ok": False,
             "canonical_url": (url or "").strip(),
             "domain": domain_lower,
             "raw_status": "bad_domain",
             "classified_out_of_stock": False,
-            "detail": "domain phải là «1688» hoặc «hibox».",
+            "detail": "Đã ngừng kiểm tra trực tiếp 1688 — chỉ dùng scrape Hibox (domain=hibox).",
             "matched_products": [],
             "updated_product_ids": [],
             "matched_count": 0,
         }
+    if domain_lower not in ("hibox", ""):
+        return {
+            "ok": False,
+            "canonical_url": (url or "").strip(),
+            "domain": domain_lower,
+            "raw_status": "bad_domain",
+            "classified_out_of_stock": False,
+            "detail": "domain phải là «hibox».",
+            "matched_products": [],
+            "updated_product_ids": [],
+            "matched_count": 0,
+        }
+    domain_lower = "hibox"
 
     canonical_url = (url or "").strip()
     classified_oos = False
@@ -405,75 +389,51 @@ def run_admin_source_url_scan(db: Session, *, url: str, domain: str) -> Dict[str
     warnings: List[str] = []
     matched: List[Product] = []
 
-    if domain_lower == "1688":
-        oid = extract_1688_numeric_offer_id(canonical_url)
-        if not oid:
-            classified_oos = False
-            raw_status = "bad_url"
-            detail = "Không đọc được mã offer 1688 trong URL — không đổi tồn kho."
-            matched = []
-        else:
-            open_url = canonical_1688_offer_pc_url(oid) or canonical_url
-            canonical_url = open_url
-            matched = _find_products_for_1688_offer(db, oid)
-            res = _evaluate_page_stock(open_url)
-            raw_status = res.status
-            detail = res.error
-            # Chỉ đánh «hết hàng» và gán available=0 khi DOM nguồn có cờ đã biết là hết.
-            # Login/captcha/error/unknown → không được coi hết để không sập sai tồn kho.
-            classified_oos = res.status == "out_of_stock"
-            if not classified_oos and res.status == "unknown" and not (detail or "").strip():
-                detail = "Không nhận diện được tồn kho — chưa kiểm tra được để khẳng định hết hàng."
-            if not classified_oos and res.status == "error" and not (detail or "").strip():
-                detail = "Không đọc được trang nguồn (mạng, captcha…) — chưa kiểm tra được."
+    normalized_in = normalize_product_import_url((url or "").strip())
+    canonical_url = (normalized_in or (url or "").strip()).strip()
 
+    hibox_url, coercion_err = coerce_url_for_excel_batch_import(canonical_url, FETCH_TARGET_HIBOX)
+    warnings = []
+
+    if coercion_err:
+        classified_oos = False
+        raw_status = "bad_url"
+        detail = f"Không quy đổi được sang link Hibox hợp lệ: {coercion_err}"
+        matched = []
+        canonical_url = (hibox_url or canonical_url).strip()
     else:
-        # Chuẩn hoá và quy đổi sang https://hibox.mn/v/… (offer 1688 → abb-*; mirror Taobao/KZ → /v/…).
-        normalized_in = normalize_product_import_url((url or "").strip())
-        canonical_url = (normalized_in or (url or "").strip()).strip()
-
-        hibox_url, coercion_err = coerce_url_for_excel_batch_import(canonical_url, FETCH_TARGET_HIBOX)
-        warnings = []
-
-        if coercion_err:
-            classified_oos = False
-            raw_status = "bad_url"
-            detail = f"Không quy đổi được sang link Hibox hợp lệ: {coercion_err}"
-            matched = []
-            canonical_url = (hibox_url or canonical_url).strip()
-        else:
-            coerced = (hibox_url or "").strip()
-            canonical_url = hibox_canonical_scrape_url(coerced) if coerced else canonical_url
-            slug = extract_hibox_slug(canonical_url)
-            matched = _find_products_for_hibox_slug(db, slug or "")
-            try:
-                _raw_row, product_data, warns = scrape_hibox_for_import(canonical_url)
-                warnings = list(warns or [])
-                title_like = (_raw_row or {}).get("title") if isinstance(_raw_row, dict) else None
-                sku_like = (_raw_row or {}).get("sku") if isinstance(_raw_row, dict) else None
-                pname = product_data.get("name") if isinstance(product_data, dict) else None
-                has_signal = bool((title_like or "").strip() or (sku_like or "").strip() or (pname or "").strip())
-                raw_status = "ok" if has_signal else "no_data"
-                if not has_signal:
-                    classified_oos = True
-                    detail = (
-                        "Hibox không trả đủ title/SKU sau khi scrape — coi như không lấy được (hết hoặc lỗi trang)."
-                    )
-                else:
-                    classified_oos = False
-                    if warns:
-                        detail = "; ".join(warnings[:6])
-            except ImportHiboxError as exc:
-                classified_oos = False
-                raw_status = "fetch_error"
-                detail = str(exc)
-            except Exception as exc:
-                logger.exception("admin source batch hibox scrape failed url=%s", canonical_url[:200])
-                classified_oos = False
-                raw_status = "fetch_error"
+        coerced = (hibox_url or "").strip()
+        canonical_url = hibox_canonical_scrape_url(coerced) if coerced else canonical_url
+        slug = extract_hibox_slug(canonical_url)
+        matched = _find_products_for_hibox_slug(db, slug or "")
+        try:
+            _raw_row, product_data, warns = scrape_hibox_for_import(canonical_url)
+            warnings = list(warns or [])
+            title_like = (_raw_row or {}).get("title") if isinstance(_raw_row, dict) else None
+            sku_like = (_raw_row or {}).get("sku") if isinstance(_raw_row, dict) else None
+            pname = product_data.get("name") if isinstance(product_data, dict) else None
+            has_signal = bool((title_like or "").strip() or (sku_like or "").strip() or (pname or "").strip())
+            raw_status = "ok" if has_signal else "no_data"
+            if not has_signal:
+                classified_oos = True
                 detail = (
-                    ((str(exc) or "unexpected_error")[:920] + " — chưa kiểm tra được, không đổi tồn.")[:1000]
+                    "Hibox không trả đủ title/SKU sau khi scrape — coi như không lấy được (hết hoặc lỗi trang)."
                 )
+            else:
+                classified_oos = False
+                if warns:
+                    detail = "; ".join(warnings[:6])
+        except ImportHiboxError as exc:
+            classified_oos = False
+            raw_status = "fetch_error"
+            detail = str(exc)
+        except Exception as exc:
+            logger.exception("admin source batch hibox scrape failed url=%s", canonical_url[:200])
+            classified_oos = False
+            raw_status = "fetch_error"
+            detail = (
+                ((str(exc) or "unexpected_error")[:920] + " — chưa kiểm tra được, không đổi tồn.")[:1000]
+            )
 
     updated_ids: List[int] = []
     if classified_oos and matched:

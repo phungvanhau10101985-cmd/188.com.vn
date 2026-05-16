@@ -1,24 +1,23 @@
 from __future__ import annotations
 
 import logging
-import re
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Tuple
-
+from typing import Optional
 from sqlalchemy import or_
 
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.product import Product
-from app.services.import_1688_scraper import (
-    _load_cookie_json,
-    _normalize_playwright_cookie,
-    canonical_1688_offer_pc_url,
-    extract_1688_numeric_offer_id,
+from app.services.import_batch_url_coercion import FETCH_TARGET_HIBOX, coerce_url_for_excel_batch_import
+from app.services.import_hibox_scraper import (
+    ImportHiboxError,
+    hibox_canonical_scrape_url,
+    normalize_product_import_url,
+    scrape_hibox_for_import,
 )
 
 logger = logging.getLogger(__name__)
@@ -28,138 +27,6 @@ _queued_ids: set[int] = set()
 _queue_lock = threading.Lock()
 _worker_started = False
 _worker_lock = threading.Lock()
-
-_OUT_OF_STOCK_PATTERNS = (
-    "商品已下架",
-    "该商品已下架",
-    "商品不存在",
-    "该商品不存在",
-    "宝贝不存在",
-    "已售罄",
-    "售罄",
-    "暂无现货",
-    "暂时缺货",
-    "库存不足",
-    "找不到商品",
-)
-
-_IN_STOCK_PATTERNS = (
-    "立即订购",
-    "加入进货单",
-    "加入采购单",
-    "立即购买",
-    "起批量",
-    "库存",
-)
-
-
-def _format_source_blocked_detail(summary: str, title: str, text: str, href: str) -> str:
-    """Ghép tiêu đề + URL + đoạn DOM để admin thấy phía nguồn báo gì."""
-    t_one = " ".join(str(text).split())
-    excerpt = t_one[:720]
-    lines = [
-        "[1688 — phản hồi trang khi kiểm tra] " + summary.strip(),
-        "Tiêu đề trình duyệt: " + (title or "").strip()[:280],
-        "URL hiện tại: " + (href or "").strip()[:500],
-    ]
-    if excerpt:
-        lines.append("Trích nội dung hiển thị (rút gọn): " + excerpt)
-    return "\n".join(lines)[:2400]
-
-
-def _blocked_probe_from_dom(title: str, text: str, href: str) -> Optional[SourceStockCheckResult]:
-    """Captcha / đăng nhập / giới hạn / ‘phát hiện quét’ — không tiếp tục queue tự động phía frontend."""
-    hay = f"{title}\n{text}\n{href}"
-    probes: List[Tuple[re.Pattern[str], str]] = [
-        (
-            re.compile(
-                r"验证码|验证失败|校验码|扫码验证|滑动验证|滑块验证|拖动滑块|向右滑动|安全验证|人机验证|身份验证|验证您的身份",
-                re.I,
-            ),
-            "Trang đang hiển thị captcha hoặc bước xác minh an toàn.",
-        ),
-        (
-            re.compile(r"请登录|请先登录|登录后查看|账号登录|登录\s*1688", re.I),
-            "Trang yêu cầu đăng nhập tài khoản.",
-        ),
-        (
-            re.compile(
-                r"访问被拒绝|访问过于频繁|访问请求过于频繁|您的访问过于频繁|请求太过频繁|访问过快",
-                re.I,
-            ),
-            "Trang báo giới hạn lượt truy cập hoặc từ chối kết nối.",
-        ),
-        (
-            re.compile(
-                r"风控|风险控制|系统检测.*异常|非正常访问|疑似爬虫|自动化访问|恶意访问|拦截访问",
-                re.I,
-            ),
-            "Trang báo kiểm soát rủi ro / nghi ngờ truy cập tự động hoặc quét dữ liệu.",
-        ),
-        (
-            re.compile(
-                r"sorry[, ]+you\s+have\s+been\s+blocked|access\s+denied|403\s*forbidden|\bforbidden\b",
-                re.I,
-            ),
-            "Trang báo chặn truy cập (tiếng Anh / forbidden).",
-        ),
-    ]
-    for rx, summary in probes:
-        if rx.search(hay):
-            return SourceStockCheckResult(
-                status="blocked",
-                error=_format_source_blocked_detail(summary, title, text, href),
-            )
-    return None
-
-
-def _blocked_from_navigation_url(href: str, title: str, text: str) -> Optional[SourceStockCheckResult]:
-    """Đã nhảy sang trang đăng nhập / punish / anti-bot — không coi là lỗi đọc thường."""
-    h = (href or "").strip().lower()
-    if not h:
-        return None
-    needle_reasons: List[Tuple[str, str]] = [
-        ("login.taobao.com", "Trình duyệt đang ở trang đăng nhập Taobao (chuyển hướng từ 1688)."),
-        ("login.1688.com", "Trình duyệt đang ở trang đăng nhập 1688."),
-        ("passport.", "Luồng xác thực / passport (đăng nhập hoặc kiểm tra tài khoản)."),
-        ("/punish", "Trang xử phạt / giới hạn truy cập (punish)."),
-        ("_____tmd____", "Trang kiểm tra rủi ro / anti-bot (tmd)."),
-        ("nocaptcha", "Luồng xác minh / anti-bot (nocaptcha)."),
-        ("sec.taobao.com", "Trang bảo mật Taobao."),
-        ("identity_verification", "Luồng xác minh danh tính."),
-        ("wh_nav/", "Luồng điều hướng bảo mật / kiểm tra."),
-    ]
-    for needle, summary in needle_reasons:
-        if needle in h:
-            return SourceStockCheckResult(
-                status="blocked",
-                error=_format_source_blocked_detail(summary, title, text, href),
-            )
-    return None
-
-
-def _blocked_sparse_offer_page(title: str, text: str, href: str) -> Optional[SourceStockCheckResult]:
-    """
-    Vẫn URL offer/detail nhưng DOM quá ít chữ — hay là khung verify/interstitial không khớp regex đầy đủ.
-    """
-    if not href:
-        return None
-    hl = href.lower()
-    if "detail.1688.com" not in hl and "1688.com/offer/" not in hl:
-        return None
-    t = " ".join(str(text).split()).strip()
-    if len(t) >= 160:
-        return None
-    return SourceStockCheckResult(
-        status="blocked",
-        error=_format_source_blocked_detail(
-            "Trang offer có DOM quá ngắn — thường là khung chặn/captcha/interstitial (không đọc được nội dung SP).",
-            title,
-            text,
-            href,
-        ),
-    )
-
 
 @dataclass
 class SourceStockCheckResult:
@@ -171,16 +38,56 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _source_url(product: Product) -> str:
-    url = (product.link_default or "").strip()
-    offer_id = extract_1688_numeric_offer_id(url)
-    if offer_id:
-        return canonical_1688_offer_pc_url(offer_id) or url
-    return url
+def _link_eligible_for_hibox_stock_check(url: str) -> bool:
+    u = (url or "").strip().lower()
+    if len(u) < 12:
+        return False
+    return any(
+        marker in u
+        for marker in (
+            "hibox.mn",
+            "taobao1688.kz",
+            "1688.com",
+            "offer.1688",
+            "detail.1688",
+            "taobao.com",
+            "tmall.com",
+        )
+    )
 
 
-def _is_supported_1688_product(product: Product) -> bool:
-    return bool(extract_1688_numeric_offer_id(product.link_default or ""))
+def _evaluate_stock_via_hibox(raw_url: str) -> SourceStockCheckResult:
+    """Đọc tình trạng qua scrape Hibox (quy đổi URL nguồn như luồng nhập Excel)."""
+    canonical_url = (normalize_product_import_url((raw_url or "").strip()) or (raw_url or "").strip()).strip()
+    hibox_url, coercion_err = coerce_url_for_excel_batch_import(canonical_url, FETCH_TARGET_HIBOX)
+    if coercion_err:
+        return SourceStockCheckResult(
+            status="error",
+            error=f"Không quy đổi được sang link Hibox hợp lệ: {coercion_err}"[:1000],
+        )
+    coerced = (hibox_url or "").strip()
+    canonical_url = hibox_canonical_scrape_url(coerced) if coerced else canonical_url
+    try:
+        _raw_row, product_data, warns = scrape_hibox_for_import(canonical_url)
+        title_like = (_raw_row or {}).get("title") if isinstance(_raw_row, dict) else None
+        sku_like = (_raw_row or {}).get("sku") if isinstance(_raw_row, dict) else None
+        pname = product_data.get("name") if isinstance(product_data, dict) else None
+        has_signal = bool((title_like or "").strip() or (sku_like or "").strip() or (pname or "").strip())
+        if has_signal:
+            warn_txt = "; ".join(list(warns or [])[:6]).strip()
+            return SourceStockCheckResult(status="in_stock", error=warn_txt or None)
+        return SourceStockCheckResult(
+            status="out_of_stock",
+            error="Hibox không trả đủ title/SKU sau khi scrape — coi như không lấy được trang.",
+        )
+    except ImportHiboxError as exc:
+        return SourceStockCheckResult(status="error", error=str(exc)[:1000])
+    except Exception as exc:
+        logger.warning("hibox source stock evaluate failed: %s", exc)
+        return SourceStockCheckResult(
+            status="error",
+            error=((str(exc) or "unexpected_error")[:920] + " — chưa kiểm tra được.")[:1000],
+        )
 
 
 def _datetime_is_recent(value: Optional[datetime], seconds: int) -> bool:
@@ -214,7 +121,7 @@ def enqueue_source_stock_check(product_id: int, *, reason: str = "manual", force
     db = SessionLocal()
     try:
         product = db.query(Product).filter(Product.id == product_id).first()
-        if not product or not _is_supported_1688_product(product):
+        if not product or not _link_eligible_for_hibox_stock_check(product.link_default or ""):
             with _queue_lock:
                 _queued_ids.discard(product_id)
                 try:
@@ -238,7 +145,7 @@ def enqueue_source_stock_check(product_id: int, *, reason: str = "manual", force
 
 def enqueue_product_view_stock_check_if_needed(product: Product) -> bool:
     """Gọi khi khách mở PDP: chỉ enqueue nếu cache thiếu/cũ và không spam cùng một sản phẩm."""
-    if not product or not _is_supported_1688_product(product):
+    if not product or not _link_eligible_for_hibox_stock_check(product.link_default or ""):
         return False
     status = (product.source_stock_status or "").strip().lower()
     if status in {"queued", "checking"} and _datetime_is_recent(
@@ -269,7 +176,17 @@ def _claim_due_product_id() -> Optional[int]:
             db.query(Product)
             .filter(Product.is_active == True)  # noqa: E712
             .filter(Product.link_default.isnot(None))
-            .filter(Product.link_default.ilike("%1688.com%"))
+            .filter(
+                or_(
+                    Product.link_default.ilike("%hibox.mn%"),
+                    Product.link_default.ilike("%taobao1688.kz%"),
+                    Product.link_default.ilike("%1688.com%"),
+                    Product.link_default.ilike("%offer.1688%"),
+                    Product.link_default.ilike("%detail.1688%"),
+                    Product.link_default.ilike("%taobao.com%"),
+                    Product.link_default.ilike("%tmall.com%"),
+                )
+            )
             .filter(
                 or_(
                     Product.source_stock_next_check_at.is_(None),
@@ -281,7 +198,7 @@ def _claim_due_product_id() -> Optional[int]:
             .order_by(Product.source_stock_next_check_at.isnot(None), Product.source_stock_next_check_at.asc(), Product.id.asc())
             .first()
         )
-        if not product or not _is_supported_1688_product(product):
+        if not product or not _link_eligible_for_hibox_stock_check(product.link_default or ""):
             return None
         product.source_stock_status = "queued"
         product.source_stock_next_check_at = now
@@ -295,86 +212,11 @@ def _claim_due_product_id() -> Optional[int]:
         db.close()
 
 
-def _evaluate_page_stock(url: str) -> SourceStockCheckResult:
-    try:
-        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-        from playwright.sync_api import sync_playwright
-    except ImportError as exc:
-        return SourceStockCheckResult(
-            status="error",
-            error="Backend chưa cài Playwright. Chạy pip install -r requirements.txt và playwright install chromium.",
-        )
-
-    cookies = _load_cookie_json()
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=settings.SOURCE_STOCK_CHECK_HEADLESS)
-            context = browser.new_context(
-                user_agent=settings.IMPORT_1688_USER_AGENT,
-                viewport={"width": 1366, "height": 900},
-                locale="zh-CN",
-            )
-            if cookies:
-                context.add_cookies([_normalize_playwright_cookie(c) for c in cookies])
-            page = context.new_page()
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=settings.SOURCE_STOCK_CHECK_PLAYWRIGHT_TIMEOUT_MS)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=min(12000, settings.SOURCE_STOCK_CHECK_PLAYWRIGHT_TIMEOUT_MS))
-                except PlaywrightTimeoutError:
-                    pass
-                page.wait_for_timeout(1200)
-                payload = page.evaluate(
-                    """() => {
-                      const text = (document.body?.innerText || '').replace(/\\s+/g, ' ').slice(0, 20000);
-                      return { title: document.title || '', text, href: location.href };
-                    }"""
-                )
-            finally:
-                for _cleanup in (
-                    lambda: page.close(),
-                    lambda: context.close(),
-                    lambda: browser.close(),
-                ):
-                    try:
-                        _cleanup()
-                    except Exception:
-                        pass
-    except Exception as exc:
-        return SourceStockCheckResult(status="error", error=str(exc)[:1000])
-
-    title = str((payload or {}).get("title") or "")
-    text = str((payload or {}).get("text") or "")
-    href = str((payload or {}).get("href") or "")
-
-    blocked = _blocked_probe_from_dom(title, text, href)
-    if blocked is not None:
-        return blocked
-
-    nav_blocked = _blocked_from_navigation_url(href, title, text)
-    if nav_blocked is not None:
-        return nav_blocked
-
-    haystack = f"{title} {text}"
-    if any(token in haystack for token in _OUT_OF_STOCK_PATTERNS):
-        return SourceStockCheckResult(status="out_of_stock")
-    if "1688.com/offer/" not in href and "detail.1688.com" not in href:
-        return SourceStockCheckResult(status="error", error=f"1688 chuyển hướng ngoài trang chi tiết: {href[:300]}")
-    if any(token in haystack for token in _IN_STOCK_PATTERNS):
-        return SourceStockCheckResult(status="in_stock")
-
-    sparse_block = _blocked_sparse_offer_page(title, text, href)
-    if sparse_block is not None:
-        return sparse_block
-
-    return SourceStockCheckResult(status="unknown", error="Không nhận diện được trạng thái tồn kho từ DOM 1688.")
-
-
 def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResult]:
     db = SessionLocal()
     try:
         product = db.query(Product).filter(Product.id == product_id).first()
-        if not product or not _is_supported_1688_product(product):
+        if not product or not _link_eligible_for_hibox_stock_check(product.link_default or ""):
             return None
         previous_status = (product.source_stock_status or "").strip().lower()
         product.source_stock_status = "checking"
@@ -382,7 +224,7 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
         product.source_stock_next_check_at = _utcnow()
         db.commit()
 
-        result = _evaluate_page_stock(_source_url(product))
+        result = _evaluate_stock_via_hibox(product.link_default or "")
         product = db.query(Product).filter(Product.id == product_id).first()
         if not product:
             return result

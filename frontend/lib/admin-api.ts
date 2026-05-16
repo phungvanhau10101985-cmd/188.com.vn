@@ -917,7 +917,7 @@ export const adminProductAPI = {
   deleteProduct: (productId: string) =>
     fetchAdmin<AdminProduct>(`/products/${encodeURIComponent(productId)}`, { method: 'DELETE' }),
 
-  /** Xếp hàng kiểm tra tình trạng hàng qua Playwright (`SOURCE_STOCK_CHECK_*`). Không chờ worker xong. */
+  /** Xếp hàng kiểm tra tình trạng nguồn qua worker scrape Hibox (`SOURCE_STOCK_CHECK_*`). Không chờ worker xong. */
   enqueueSourceStockCheckByDbId: (dbPkId: number) =>
     fetchAdmin<{
       queued: boolean;
@@ -926,17 +926,17 @@ export const adminProductAPI = {
       source_stock_next_check_at?: string | null;
     }>(`/products/by-id/${dbPkId}/source-stock-check/enqueue`, { method: 'POST' }),
 
-  /** Một URL: 1688 (cookie như crawler) hoặc hibox (scrape). Lỗi/không đọc được → có thể gán SP khớp `available = 0`. */
-  runSourceStockBatchOne: (body: { url: string; domain: '1688' | 'hibox' }) =>
+  /** Một URL: luôn quy đổi + scrape Hibox (như nhập Excel). Lỗi/không đọc được đủ dữ liệu → có thể gán SP khớp `available = 0`. */
+  runSourceStockBatchOne: (body: { url: string; domain: 'hibox' }) =>
     fetchAdmin<AdminSourceStockBatchOneResult>('/products/admin/source-stock-batch/run', {
       method: 'POST',
       body: JSON.stringify(body),
       timeoutMs: 300_000,
     }),
 
-  /** Một SP kế trong DB (link_default = product_url), chạy một lần kiểm tra; không cần nạp danh sách trước. */
+  /** Một SP kế trong DB (link_default = product_url), chạy một lần kiểm tra qua Hibox; không cần nạp danh sách trước. */
   runSourceStockBatchNextFromDb: (params: {
-    domain: '1688' | 'hibox';
+    domain: 'hibox';
     activeOnly?: boolean;
     cursorAfterProductId?: number;
     /** products.id — giữ kiểm tra lại đúng SP sau lỗi tạm (captcha/chặn…). */
@@ -953,9 +953,9 @@ export const adminProductAPI = {
       timeoutMs: 300_000,
     }),
 
-  /** Nạp `link_default` trong DB (= product_url trong Excel nhập SP), lọc theo luồng 1688 / Hibox. */
+  /** Nạp `link_default` trong DB (= product_url trong Excel nhập SP), lọc theo luồng kiểm tra qua Hibox. */
   fetchSourceStockProductUrls: (params: {
-    domain: '1688' | 'hibox';
+    domain: 'hibox';
     limit?: number;
     activeOnly?: boolean;
   }) =>
@@ -964,7 +964,7 @@ export const adminProductAPI = {
       { timeoutMs: 120_000 },
     ),
 
-  fetchSourceStockQueueStats: (params: { domain: '1688' | 'hibox'; activeOnly?: boolean }) =>
+  fetchSourceStockQueueStats: (params: { domain: 'hibox'; activeOnly?: boolean }) =>
     fetchAdmin<AdminSourceStockQueueStats>(
       `/products/admin/source-stock-batch/queue-stats?domain=${encodeURIComponent(params.domain)}&active_only=${params.activeOnly ?? true}`,
       { timeoutMs: 60_000 },
