@@ -51,7 +51,6 @@ export default function AdminSourceStockCheckPage() {
   const [manualCursor, setManualCursor] = useState(0);
   const [urlsText, setUrlsText] = useState('');
   const [showManualTextarea, setShowManualTextarea] = useState(false);
-  const [includeInactiveProducts, setIncludeInactiveProducts] = useState(false);
   const [loadingPreviewUrls, setLoadingPreviewUrls] = useState(false);
 
   const [recent, setRecent] = useState<Array<AdminSourceStockBatchDbNextResult | AdminSourceStockBatchOneResult>>(
@@ -108,7 +107,7 @@ export default function AdminSourceStockCheckPage() {
     try {
       const s = await adminProductAPI.fetchSourceStockQueueStats({
         domain,
-        activeOnly: !includeInactiveProducts,
+        activeOnly: true,
       });
       setQueueStats(s);
       if (typeof s.admin_batch_scan_cooldown_days === 'number') {
@@ -119,7 +118,7 @@ export default function AdminSourceStockCheckPage() {
     } finally {
       setQueueStatsLoading(false);
     }
-  }, [scanFromDb, domain, includeInactiveProducts]);
+  }, [scanFromDb, domain]);
 
   const fillTextareaPreviewFromDb = useCallback(async () => {
     setLoadingPreviewUrls(true);
@@ -128,7 +127,7 @@ export default function AdminSourceStockCheckPage() {
       const res = await adminProductAPI.fetchSourceStockProductUrls({
         domain,
         limit: 5000,
-        activeOnly: !includeInactiveProducts,
+        activeOnly: true,
       });
       setUrlsText(res.urls.join('\n'));
       manualCursorRef.current = 0;
@@ -142,7 +141,7 @@ export default function AdminSourceStockCheckPage() {
     } finally {
       setLoadingPreviewUrls(false);
     }
-  }, [domain, includeInactiveProducts, showToast]);
+  }, [domain, showToast]);
 
   const bumpOosRows = useCallback(
     (res: AdminSourceStockBatchDbNextResult | AdminSourceStockBatchOneResult, attemptedUrl: string) => {
@@ -204,7 +203,7 @@ export default function AdminSourceStockCheckPage() {
       try {
         const res = await adminProductAPI.runSourceStockBatchNextFromDb({
           domain,
-          activeOnly: !includeInactiveProducts,
+          activeOnly: true,
           cursorAfterProductId: 0,
         });
 
@@ -306,7 +305,6 @@ export default function AdminSourceStockCheckPage() {
     bumpOosRows,
     cooldownDays,
     domain,
-    includeInactiveProducts,
     refreshQueueStats,
     scanFromDb,
     showToast,
@@ -510,19 +508,6 @@ export default function AdminSourceStockCheckPage() {
           </div>
         </fieldset>
 
-        {scanFromDb && (
-          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              className="rounded border-gray-300"
-              checked={includeInactiveProducts}
-              onChange={(e) => setIncludeInactiveProducts(e.target.checked)}
-              disabled={running}
-            />
-            Gồm luôn sản đang inactive (still quét <code className="text-xs bg-gray-100 px-1">link_default</code>)
-          </label>
-        )}
-
         {!scanFromDb && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <button
@@ -609,7 +594,8 @@ export default function AdminSourceStockCheckPage() {
               ) : queueStats ? (
                 <div className="text-xs text-gray-800 leading-snug rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
                   <strong className="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">Tiến độ trong DB</strong>
-                  Tổng phạm vi (link đủ dài + lọc miền + {queueStats.active_only ? 'chỉ active' : 'gồm inactive'}):{' '}
+                  Tổng phạm vi (link đủ dài + lọc miền + chỉ sản đang hoạt động{' '}
+                  <code className="text-[10px] bg-white px-0.5 rounded">is_active</code>):{' '}
                   <strong>{queueStats.total_in_scope.toLocaleString('vi-VN')}</strong> SP
                   {' — '}
                   <span className="text-emerald-900 whitespace-nowrap">
