@@ -16,6 +16,27 @@ const EMPTY_REPORT_SAMPLE_ROWS: AdminSourceStockActivityReportSampleRow[] = [];
 /** Đồng bộ với query `sample_page_size` (backend max 500). */
 const SOURCE_STOCK_REPORT_SAMPLE_PAGE_SIZE = 200;
 
+/** Cụm gõ vào ô xác nhận modal «Reset PDP toàn phạm vi». */
+const RESET_PDP_CONFIRM_PROMPT_VI = 'đồng ý reset tất cả';
+
+/** Chuẩn hoá nhẹ tiếng Việt ASCII để gõ không dấu vẫn khớp. */
+function normalizeResetPdpConfirmInput(raw: string): string {
+  return raw
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\u0111/g, 'd')
+    .replace(/\u0110/g, 'd')
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+const RESET_PDP_CONFIRM_TARGET_NORM = normalizeResetPdpConfirmInput(RESET_PDP_CONFIRM_PROMPT_VI);
+
+function resetPdpTypedPhraseMatchesConfirm(raw: string): boolean {
+  return normalizeResetPdpConfirmInput(raw) === RESET_PDP_CONFIRM_TARGET_NORM;
+}
+
 type ReportSamplePagesState = {
   oos: number;
   in_stock: number;
@@ -32,7 +53,7 @@ type ReportSampleTablePagination = {
   onPageChange: (nextPage: number) => void;
 };
 
-/** Nguồn trong thống kê queue / báo cáo (worker nền kiểm tra nguồn luôn Hibox). */
+/** Nguồn trong thống kê queue / báo cáo (CSSBuy mặc định). Worker PDP: CSSBuy (/web/item) trước; nếu không in_stock thì scrape Hibox và gộp (sai khác Hibox lỗi/Mongolia). */
 type SourceStockDomain = 'hibox' | 'cssbuy';
 
 function SpinnerIcon({ className }: { className?: string }) {
@@ -238,6 +259,18 @@ type ReportSampleOosBulkSelection = {
   onBulkRecheckAllDisplayed: () => void;
 };
 
+/** Một ô trong bảng mẫu: URL sau quy đổi + ghi chú lỗi quy đổi (nếu có). */
+function ReportConvertedSourceLinkCell({ url, err }: { url?: string | null; err?: string | null }) {
+  const u = (url ?? '').trim();
+  const e = (err ?? '').trim();
+  return (
+    <div className="min-w-[9rem] max-w-[20rem]">
+      {u ? <ExternalHttpLink url={u} /> : <span className="text-slate-400">—</span>}
+      {e ? <p className="mt-1 text-[10px] text-amber-900/90 leading-snug break-words">{e}</p> : null}
+    </div>
+  );
+}
+
 /** Bảng mẫu báo cáo 30 ngày — thứ tự **mới nhất trước**, phân trang server. */
 function SourceStockReportSampleTable({
   title,
@@ -256,7 +289,7 @@ function SourceStockReportSampleTable({
   oosBulkSelection?: ReportSampleOosBulkSelection;
   pagination?: ReportSampleTablePagination;
 }) {
-  const colSpan = 9 + (oosActions ? 1 : 0) + (oosBulkSelection ? 1 : 0);
+  const colSpan = 11 + (oosActions ? 1 : 0) + (oosBulkSelection ? 1 : 0);
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
 
   const selectedSet = useMemo(
@@ -432,6 +465,12 @@ function SourceStockReportSampleTable({
               <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[12rem]">
                 Link DB
               </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[10rem]">
+                Link CSSBuy (quy đổi)
+              </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[10rem]">
+                Link Hibox (quy đổi)
+              </th>
               <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
                 PDP
               </th>
@@ -489,6 +528,12 @@ function SourceStockReportSampleTable({
                   </td>
                   <td className="px-2 py-1.5">
                     <ExternalHttpLink url={row.link_default} />
+                  </td>
+                  <td className="px-2 py-1.5 align-top">
+                    <ReportConvertedSourceLinkCell url={row.link_convert_cssbuy} err={row.link_convert_cssbuy_err} />
+                  </td>
+                  <td className="px-2 py-1.5 align-top">
+                    <ReportConvertedSourceLinkCell url={row.link_convert_hibox} err={row.link_convert_hibox_err} />
                   </td>
                   <td className="px-2 py-1.5 whitespace-nowrap">
                     {row.slug ? (
@@ -607,7 +652,7 @@ function SourceStockReportSampleTable({
 export default function AdminSourceStockCheckPage() {
   const [lastError, setLastError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: 'ok' | 'info' | 'err'; msg: string } | null>(null);
-  const [domain, setDomain] = useState<SourceStockDomain>('hibox');
+  const [domain, setDomain] = useState<SourceStockDomain>('cssbuy');
 
   /** Số ngày chờ để một SP được xếp hàng kiểm tra lại (theo backend, mặc định 30). */
   const [cooldownDays, setCooldownDays] = useState(30);
@@ -633,6 +678,10 @@ export default function AdminSourceStockCheckPage() {
   const [reportOosDeleting, setReportOosDeleting] = useState(false);
   const [reportOosSampleSelectedIds, setReportOosSampleSelectedIds] = useState<number[]>([]);
   const [reportOosBulkBusy, setReportOosBulkBusy] = useState(false);
+  const [resetPdpConfirmOpen, setResetPdpConfirmOpen] = useState(false);
+  /** Nhập đúng cụm trong modal — tránh nhấp nhầm «Reset toàn phạm vi». */
+  const [resetPdpTypedPhrase, setResetPdpTypedPhrase] = useState('');
+  const [resetPdpBusy, setResetPdpBusy] = useState(false);
   const recheckPollCancelRef = useRef(false);
 
   const reportOosSampleRows = activityReport?.samples?.oos ?? EMPTY_REPORT_SAMPLE_ROWS;
@@ -742,6 +791,36 @@ export default function AdminSourceStockCheckPage() {
       setActivityReportLoading(false);
     }
   }, [domain, reportSamplePages]);
+
+  const runResetPdpCycle = useCallback(async () => {
+    if (!resetPdpTypedPhraseMatchesConfirm(resetPdpTypedPhrase)) {
+      showToast(
+        'err',
+        `Nhập đúng «${RESET_PDP_CONFIRM_PROMPT_VI}» (cho phép viết không dấu) rồi mới được reset.`,
+      );
+      return;
+    }
+    setResetPdpBusy(true);
+    try {
+      const out = await adminProductAPI.resetSourceStockPdpCycle({
+        domain,
+        activeOnly: true,
+        confirm: true,
+      });
+      setResetPdpConfirmOpen(false);
+      setResetPdpTypedPhrase('');
+      showToast(
+        'ok',
+        `Đã reset kiểm tra PDP: ${out.products_updated} sản; xóa ${out.memory_queue_cleared} trong queue RAM (process xử lý request).`,
+      );
+      await refreshQueueStats();
+      await refreshActivityReport();
+    } catch (e) {
+      showToast('err', e instanceof Error ? e.message : String(e));
+    } finally {
+      setResetPdpBusy(false);
+    }
+  }, [domain, refreshActivityReport, refreshQueueStats, resetPdpTypedPhrase, showToast]);
 
   const bumpReportBusy = useCallback((id: number, label: string) => {
     setReportOosRowBusyById((m) => ({ ...m, [id]: label }));
@@ -1072,6 +1151,23 @@ export default function AdminSourceStockCheckPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [reportOosDeleteConfirmIds, reportOosDeleting]);
 
+  useEffect(() => {
+    if (!resetPdpConfirmOpen) return;
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== 'Escape') return;
+      if (!resetPdpBusy) {
+        setResetPdpConfirmOpen(false);
+        setResetPdpTypedPhrase('');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [resetPdpConfirmOpen, resetPdpBusy]);
+
+  useEffect(() => {
+    if (resetPdpConfirmOpen) setResetPdpTypedPhrase('');
+  }, [resetPdpConfirmOpen]);
+
   return (
     <div className="max-w-[88rem] mx-auto px-3 sm:px-5 py-5 pb-8">
       <header className="mb-5">
@@ -1079,11 +1175,12 @@ export default function AdminSourceStockCheckPage() {
           <div className="min-w-0">
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">Kiểm tra nguồn hàng</h1>
             <p className="text-xs sm:text-sm text-gray-600 mt-1 max-w-3xl">
-              <strong>Kiểm tra hết/còn hàng trên nguồn (1688/Hibox) chạy trên máy chủ:</strong> thread daemon trong process FastAPI, xếp
+              <strong>Kiểm tra hết/còn hàng trên nguồn chạy trên máy chủ:</strong> thread daemon trong process FastAPI, xếp
               từng SP và ghi vào DB. Env chính:{' '}
               <code className="text-[11px] bg-gray-100 px-1 rounded">SOURCE_STOCK_CHECK_ENABLED</code> (mặc định <strong>bật</strong>; đặt
               false và khởi động lại backend để tắt), cùng <code className="text-[11px] bg-gray-100 px-1 rounded">SOURCE_STOCK_CHECK_*</code>{' '}
-              (interval, stale…). Worker luôn qua scrape Hibox. Tab này chỉ xem tiến độ queue và báo cáo — không scrape từ trình duyệt.
+              (interval, stale…). Worker ưu tiên <strong>API CSSBuy</strong> (/web/item); nếu không <strong>in_stock</strong> thì scrape{' '}
+              <strong>Hibox</strong> và gộp kết quả (Hibox báo offer mất / trang lỗi → ưu tiên hết hàng; CSS không tải data / code≠0 → thường coi hết offer). Tab này chỉ xem tiến độ queue và báo cáo — không scrape từ trình duyệt.
             </p>
           </div>
         </div>
@@ -1100,8 +1197,8 @@ export default function AdminSourceStockCheckPage() {
           <div className="px-3 pb-3 pt-0 space-y-3 text-[13px] leading-relaxed text-gray-700 border-t border-gray-200">
             <p>
               Worker máy chủ (khi <code className="text-[11px] bg-white px-1 rounded border border-gray-200">SOURCE_STOCK_CHECK_ENABLED</code>{' '}
-              bật — mặc định vậy) luôn xử lý qua <strong>scrape Hibox</strong> (không có chọn CSSBuy trên luồng nền), một SP mỗi vòng,
-              nghỉ theo{' '}
+              bật — mặc định vậy) gọi <strong>CSSBuy /web/item</strong> trước; nếu không in_stock hoặc thiếu dữ liệu offer (kể code API / skeleton PDP) hoặc cần chốt qua PDP thì scrape <strong>Hibox</strong> trong cùng lượt và gộp, một SP mỗi
+              vòng, nghỉ theo{' '}
               <code className="text-[11px] bg-white px-1 rounded border border-gray-200">SOURCE_STOCK_CHECK_INTERVAL_SECONDS</code>. Không
               cần mở tab admin để duy trì luồng. Khi phản hồi báo chặn / rủi ro (
               <code className="text-[11px] bg-white px-1 rounded border border-gray-200">blocked</code>
@@ -1175,8 +1272,8 @@ export default function AdminSourceStockCheckPage() {
             <span className="text-xs font-medium text-gray-500">Luồng</span>
             <p className="text-sm font-semibold text-gray-900">Theo DB (queue)</p>
             <p className="text-[11px] text-gray-500 max-w-[19rem] leading-snug">
-              Worker máy chủ (mặc định <strong>bật</strong>, scrape Hibox) tiếp tục đọc và cập nhật DB — tab chỉ làm dashboard, không có
-              lượt chạy từ trình duyệt.
+              Worker máy chủ (mặc định <strong>bật</strong>; CSSBuy /web/item trước, không in_stock → Hibox gộp) đọc và cập nhật DB —
+              tab chỉ là dashboard, không có lượt chạy từ trình duyệt.
             </p>
           </div>
           <div className="flex flex-col gap-1 flex-1 min-w-[12rem] max-w-md">
@@ -1192,11 +1289,12 @@ export default function AdminSourceStockCheckPage() {
                 setReportSamplePages({ oos: 1, in_stock: 1, batch_ttl_recent: 1 });
               }}
             >
-              <option value="hibox">hibox.mn — scrape</option>
               <option value="cssbuy">cssbuy.com — API /web/item</option>
+              <option value="hibox">hibox.mn — scrape</option>
             </select>
             <p className="text-[11px] text-gray-500 mt-1 leading-snug">
-              Lọc số trong «Tiến độ DB» và «Báo cáo 30 ngày» theo chiều admin batch đã định nghĩa — không đổi worker nền (luôn Hibox).
+              Mặc định CSSBuy. Lọc số trong «Tiến độ DB» và «Báo cáo 30 ngày» theo cách đọc đã chọn; worker PDP vẫn CSSBuy→Hibox (gộp) như đầu trang,
+              chỉ báo KPI nền chứ không ép miền từ menu này.
             </p>
           </div>
         </div>
@@ -1207,7 +1305,9 @@ export default function AdminSourceStockCheckPage() {
         >
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
-              <p className="text-xs font-semibold text-indigo-950 uppercase tracking-wide">Worker PDP / Hibox (server)</p>
+              <p className="text-xs font-semibold text-indigo-950 uppercase tracking-wide">
+                Worker PDP / CSSBuy→Hibox (server)
+              </p>
               {workerState ? (
                 <>
                   <p className="text-[11px] text-indigo-950/85 leading-snug">
@@ -1410,6 +1510,15 @@ export default function AdminSourceStockCheckPage() {
             onClick={() => void refreshActivityReport()}
           >
             {activityReportLoading ? 'Đang tải BC…' : 'Làm mới báo cáo 30 ngày'}
+          </button>
+          <button
+            type="button"
+            aria-label="Mở hộp thoại reset kiểm tra PDP toàn phạm vi"
+            disabled={queueStatsLoading || activityReportLoading}
+            className="text-xs font-semibold text-rose-800 underline underline-offset-2 hover:text-rose-900 disabled:opacity-45"
+            onClick={() => setResetPdpConfirmOpen(true)}
+          >
+            Reset kiểm tra PDP (toàn phạm vi)
           </button>
         </div>
 
@@ -1655,6 +1764,92 @@ export default function AdminSourceStockCheckPage() {
           </div>
         </div>
       </div>
+
+      {resetPdpConfirmOpen ? (
+        <div
+          className="fixed inset-0 z-[121] flex items-center justify-center bg-black/45 p-4"
+          role="presentation"
+          onClick={() => {
+            if (!resetPdpBusy) {
+              setResetPdpConfirmOpen(false);
+              setResetPdpTypedPhrase('');
+            }
+          }}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 border border-gray-200"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reset-pdp-title"
+            aria-describedby="reset-pdp-desc reset-pdp-phrase-hint"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="reset-pdp-title" className="text-lg font-bold text-gray-900">
+              Xác nhận reset kiểm tra PDP toàn phạm vi?
+            </h3>
+            <div
+              id="reset-pdp-desc"
+              className="text-sm text-gray-700 mt-3 leading-relaxed space-y-2"
+            >
+              <p>
+                Sẽ đặt lại <code className="text-xs bg-gray-100 px-1 rounded">source_stock_status</code> về{' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">unknown</code>, xóa{' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">source_stock_checked_at</code>,{' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">source_stock_next_check_at</code>, ghi chú lỗi — cho{' '}
+                <strong>tất cả sản trong phạm vi link như ô «Tiến độ DB»</strong> đang hiển thị (<strong>{domain}</strong>,{' '}
+                <strong>active only</strong>).
+              </p>
+              <p className="text-amber-900 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5 text-[13px]">
+                Bỏ qua sản đang <code className="text-[11px]">queued</code> /{' '}
+                <code className="text-[11px]">checking</code>. Queue RAM chỉ{' '}
+                <strong>một process</strong> nhận request được xóa — nếu nhiều worker, chỉ một instance được dọn deque.
+              </p>
+              <p className="text-xs text-gray-500">
+                Không đụng TTL batch (<code className="bg-gray-50 px-0.5 rounded">admin_source_batch_scanned_at</code>) và không tự chỉnh{' '}
+                <code className="bg-gray-50 px-0.5 rounded">available</code>.
+              </p>
+              <label htmlFor="reset-pdp-phrase-input" className="block pt-1">
+                <span id="reset-pdp-phrase-hint" className="text-[13px] font-medium text-gray-900 block mb-1.5">
+                  Gõ <code className="text-[12px] bg-gray-100 px-1 py-0.5 rounded">{RESET_PDP_CONFIRM_PROMPT_VI}</code>{' '}
+                  rồi mới được bấm reset (không phân biệt hoa thường, có hoặc không dấu).
+                </span>
+                <input
+                  id="reset-pdp-phrase-input"
+                  type="text"
+                  autoComplete="off"
+                  value={resetPdpTypedPhrase}
+                  onChange={(e) => setResetPdpTypedPhrase(e.target.value)}
+                  disabled={resetPdpBusy}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:bg-gray-50"
+                  placeholder={`Ví dụ: ${RESET_PDP_CONFIRM_PROMPT_VI}`}
+                />
+              </label>
+            </div>
+            <div className="flex flex-wrap gap-3 justify-end mt-6">
+              <button
+                type="button"
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+                disabled={resetPdpBusy}
+                onClick={() => {
+                  setResetPdpConfirmOpen(false);
+                  setResetPdpTypedPhrase('');
+                }}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-rose-700 text-white px-4 py-2 text-sm font-semibold hover:bg-rose-800 disabled:opacity-50"
+                disabled={resetPdpBusy || !resetPdpTypedPhraseMatchesConfirm(resetPdpTypedPhrase)}
+                aria-disabled={resetPdpBusy || !resetPdpTypedPhraseMatchesConfirm(resetPdpTypedPhrase)}
+                onClick={() => void runResetPdpCycle()}
+              >
+                {resetPdpBusy ? 'Đang reset…' : 'Đồng ý — reset'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {reportOosDeleteConfirmIds != null ? (
         <div

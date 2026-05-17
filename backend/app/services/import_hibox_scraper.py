@@ -16,8 +16,9 @@ import importlib.util
 import json
 import math
 import re
+import unicodedata
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlparse
 
 from app.core.config import settings
@@ -75,6 +76,74 @@ def extract_hibox_1688_offer_digits(slug: str) -> Optional[str]:
 
 def hibox_slug_is_1688_offer(slug: str) -> bool:
     return extract_hibox_1688_offer_digits(slug) is not None
+
+
+def _hibox_join_visible_text_snippets(raw_row: Mapping[str, Any]) -> str:
+    specs = raw_row.get("specs_text")
+    specs_s = specs if isinstance(specs, str) else ""
+    if len(specs_s) > 20000:
+        specs_s = specs_s[:20000]
+    blobs: List[str] = []
+    for k in ("title", "h1", "description"):
+        v = raw_row.get(k)
+        if isinstance(v, str) and v.strip():
+            blobs.append(v.strip())
+    bt = raw_row.get("body_text_sample")
+    if isinstance(bt, str) and bt.strip():
+        blobs.append(bt.strip()[:14000])
+    if specs_s.strip():
+        blobs.append(specs_s.strip())
+    return unicodedata.normalize("NFKC", "\n".join(blobs))
+
+
+def _hibox_casefold_hyphen_relaxed(s: str) -> str:
+    out = unicodedata.normalize("NFKC", s)
+    for sep in ("\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2212"):
+        out = out.replace(sep, "-")
+    return out.casefold()
+
+
+def hibox_scrape_signals_removed_or_not_found_offer(raw_row: Mapping[str, Any]) -> bool:
+    """
+    PDP Hibox (Playwright) vẫn có title/slug kỹ thuật nhưng là trang báo không có offer / đã xóa Taobao 1688 —
+    coi là hết hàng (ưu tiên logic kiểm tra nguồn).
+    Khớp nhiều ngôn ngữ (Mông Cổ Kirin, tiếng Trung, một mẫu EN).
+    """
+    joined = _hibox_join_visible_text_snippets(raw_row).strip()
+    if not joined:
+        return False
+    hay_relaxed = _hibox_casefold_hyphen_relaxed(joined)
+
+    raw_markers = (
+        # Mongolian Cyrillic — Hibox (cả chữ HOA như trên trang lỗi)
+        "ИЙМ КОДТОЙ БАРАА ОЛДСОНГҮЙ!",
+        "ИЙМ КОДТОЙ БАРАА ОЛДСОНГҮЙ",
+        "Ийм кодтой бараа олдсонгүй",
+        "олдсонгүй",
+        "олсонгүй",
+        "Taobao-с устсан",
+        # Gợi ý SP tương tự sau khi offer biến mất (cả câu, tránh báo sai trên PDP thường).
+        "Ижил төстэй барааг танд санал болгож байна",
+        # Chinese
+        "商品不存在",
+        "找不到商品",
+        "页面失效",
+        "已下架",
+        "商品已经下架",
+        # English-ish
+        "removed from taobao",
+        "no longer exists on taobao",
+    )
+    for m in raw_markers:
+        lm = _hibox_casefold_hyphen_relaxed(m).strip()
+        if lm and lm in hay_relaxed:
+            return True
+
+    # Taobao + «đã xóa» (Mông Cổ Kirin «устсан») trong cùng nội dung
+    if "taobao" in hay_relaxed and "устсан" in hay_relaxed:
+        return True
+
+    return False
 
 
 def supply_product_link_default_for_hibox_slug(slug: str) -> str:

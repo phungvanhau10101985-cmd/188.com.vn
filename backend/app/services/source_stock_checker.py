@@ -15,14 +15,22 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.product import Product
-from app.services.admin_source_stock_batch import _hibox_row_shows_color_size_catalog
-from app.services.import_batch_url_coercion import FETCH_TARGET_HIBOX, coerce_url_for_excel_batch_import
+from app.services.admin_source_stock_batch import _cssbuy_row_shows_variant_matrix, _hibox_row_shows_color_size_catalog
+from app.services.import_batch_url_coercion import FETCH_TARGET_CSSBUY, FETCH_TARGET_HIBOX, coerce_url_for_excel_batch_import
+from app.services.import_cssbuy_client import (
+    ImportCssbuyError,
+    cssbuy_html_disclaimer_agreement_without_add_to_cart,
+    cssbuy_html_shows_add_to_cart_button,
+    fetch_cssbuy_item_json_bundle,
+)
 from app.services.import_hibox_scraper import (
     ImportHiboxError,
     hibox_canonical_scrape_url,
+    hibox_scrape_signals_removed_or_not_found_offer,
     normalize_product_import_url,
     scrape_hibox_for_import,
 )
+from app.services.hibox_cart_dom_probe import HIBOX_CART_CTA_PROBE_JS
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +114,15 @@ def set_source_stock_worker_paused(db: Session, paused: bool) -> None:
 def get_source_stock_worker_memory_queue_depth() -> int:
     with _queue_lock:
         return len(_queue)
+
+
+def clear_source_stock_in_memory_queue() -> Dict[str, int]:
+    """Xóa deque id trong-process (worker của process nhận request). Không xóa hàng chờ/ghi nhận của process khác."""
+    with _queue_lock:
+        n = len(_queue)
+        _queue.clear()
+        _queued_ids.clear()
+    return {"cleared_count": n}
 
 
 def _utc_iso(dt: Optional[datetime]) -> Optional[str]:
@@ -495,6 +512,166 @@ def _preview_upcoming_db_product_ids(sess: Session, limit: int = 8) -> List[int]
     return out
 
 
+def _evaluate_stock_via_cssbuy(raw_url: str) -> SourceStockCheckResult:
+    """Đọc tình trạng qua API CSSBuy /web/item (ưu tiên trước Hibox khi không lỗi)."""
+    canonical_url = (normalize_product_import_url((raw_url or "").strip()) or (raw_url or "").strip()).strip()
+    cssbuy_page, coercion_err = coerce_url_for_excel_batch_import(canonical_url, FETCH_TARGET_CSSBUY)
+    if coercion_err:
+        return SourceStockCheckResult(
+            status="error",
+            error=f"Không quy đổi được sang URL CSSBuy hợp lệ: {coercion_err}"[:1000],
+        )
+    canonical_url = (cssbuy_page or "").strip() or canonical_url
+    try:
+        payload, page_html = fetch_cssbuy_item_json_bundle(canonical_url)
+        code = payload.get("code")
+        if code != 0:
+            return SourceStockCheckResult(
+                status="out_of_stock",
+                error=(
+                    "CSSBuy /web/item không trả OK (dead offer hoặc API từ chối) — "
+                    + str(payload.get("message") or payload.get("msg") or f"code={code}")[:780]
+                )[:1000],
+            )
+        rows = payload.get("data")
+        row0 = rows[0] if isinstance(rows, list) and rows else None
+        if not isinstance(row0, dict):
+            return SourceStockCheckResult(
+                status="out_of_stock",
+                error="CSSBuy trả payload không có dòng data hợp lệ — thường gặp khi PDP không load / offer đã mất.",
+            )
+        ph = (page_html or "").strip()
+        if cssbuy_html_disclaimer_agreement_without_add_to_cart(ph):
+            return SourceStockCheckResult(
+                status="out_of_stock",
+                error=(
+                    "CSSBuy: HTML PDP có đoạn disclaimer đồng ý («I have read… terms of service…») nhưng "
+                    "không thấy nút «Add To Cart» — coi PDP hết hàng / không còn bán được."
+                )[:1000],
+            )
+        try:
+            price = float(row0.get("price") or 0)
+        except (TypeError, ValueError):
+            price = 0.0
+        title = (row0.get("title") or row0.get("title_cn") or "").strip()
+        variant_matrix = _cssbuy_row_shows_variant_matrix(row0)
+        has_signal = bool(title) and (price > 0 or variant_matrix)
+        if has_signal:
+            if not cssbuy_html_shows_add_to_cart_button(page_html):
+                return SourceStockCheckResult(
+                    status="out_of_stock",
+                    error=(
+                        "CSSBuy: API có dữ liệu nhưng HTML PDP không có nút «Add To Cart» "
+                        "(khoanh đỏ) — coi offer không còn bán được / hết hàng."
+                    )[:1000],
+                )
+            return SourceStockCheckResult(status="in_stock")
+        return SourceStockCheckResult(
+            status="out_of_stock",
+            error=(
+                "CSSBuy: thiếu tiêu đề hoặc không có (giá > 0 / ma trận SKU thuộc tính) — không khẳng định được offer còn."
+            ),
+        )
+    except ImportCssbuyError as exc:
+        return SourceStockCheckResult(
+            status="out_of_stock",
+            error=(
+                "CSSBuy không tải/lấy được dữ liệu item (không scrape được như PDP skeleton hoặc mạng) — "
+                + str(exc)
+            )[:1000],
+        )
+    except Exception as exc:
+        logger.warning("cssbuy source stock evaluate failed: %s", exc)
+        return SourceStockCheckResult(
+            status="error",
+            error=((str(exc) or "unexpected_error")[:920] + " — chưa kiểm tra được.")[:1000],
+        )
+
+
+def _evaluate_stock_primary_cssbuy_then_merge_hibox(raw_url: str) -> SourceStockCheckResult:
+    """
+    Đọc CSSBuy (/web/item) trước; nếu không ``in_stock`` thì scrape Hibox và gộp:
+    báo không còn offer / PDP lỗi của Hibox thắng; nếu Hibox vẫn ``in_stock`` nhưng CSS đã báo không còn dữ liệu offer — giữ kết luận theo CSS.
+    """
+    css = _evaluate_stock_via_cssbuy(raw_url)
+    if css.status == "in_stock":
+        return css
+
+    hb = _evaluate_stock_via_hibox(raw_url)
+
+    if hb.status == "out_of_stock":
+        parts = [p for p in (css.error, hb.error) if p]
+        merged = "; ".join(parts).strip()
+        err_msg = (merged or hb.error or css.error or "").strip() or None
+        return SourceStockCheckResult(status="out_of_stock", error=err_msg[:1000] if err_msg else None)
+
+    if css.status == "out_of_stock":
+        return SourceStockCheckResult(
+            status="out_of_stock",
+            error=(css.error or hb.error or "CSSBuy: không thấy tín hiệu offer trong phản hồi.")[:1000],
+        )
+
+    # CSS chỉ ``error`` (vd. không quy đổi được URL): tin nhánh Hibox.
+    return hb
+
+
+def _hibox_quick_cart_cta_via_playwright(page_url: str) -> Optional[bool]:
+    """
+    PDP Hibox: có nút «САГСЛАХ» (thêm vào giỏ) không — fallback khi scrape đầy đủ lỗi.
+    Trả None nếu Playwright không chạy/navigate không xong (không kết luận cứng).
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return None
+
+    opened = (page_url or "").strip()
+    if len(opened) < 14:
+        return None
+
+    ua = getattr(settings, "IMPORT_1688_USER_AGENT", None) or (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    )
+    headless_raw = getattr(settings, "SOURCE_STOCK_CHECK_HEADLESS", True)
+    headless = str(headless_raw).strip().lower() not in {"0", "false", "no"}
+
+    needle_js = HIBOX_CART_CTA_PROBE_JS
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=headless,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
+            ctx = browser.new_context(
+                viewport={"width": 1280, "height": 900},
+                locale="mn-MN",
+                timezone_id="Asia/Ulaanbaatar",
+                user_agent=ua,
+            )
+            page = ctx.new_page()
+            try:
+                page.goto(opened, wait_until="domcontentloaded", timeout=90_000)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=40_000)
+                except Exception:
+                    pass
+                page.wait_for_timeout(1800)
+                return bool(page.evaluate(needle_js))
+            finally:
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+    except Exception:
+        return None
+
+
 def _evaluate_stock_via_hibox(raw_url: str) -> SourceStockCheckResult:
     """Đọc tình trạng qua scrape Hibox (quy đổi URL nguồn như luồng nhập Excel)."""
     canonical_url = (normalize_product_import_url((raw_url or "").strip()) or (raw_url or "").strip()).strip()
@@ -510,12 +687,27 @@ def _evaluate_stock_via_hibox(raw_url: str) -> SourceStockCheckResult:
         _raw_row, product_data, warns = scrape_hibox_for_import(canonical_url)
         rr = dict(_raw_row) if isinstance(_raw_row, dict) else {}
         pd = dict(product_data) if isinstance(product_data, dict) else {}
+        if hibox_scrape_signals_removed_or_not_found_offer(rr):
+            return SourceStockCheckResult(
+                status="out_of_stock",
+                error=(
+                    "Hibox: trang báo không tìm thấy sản theo mã / đã xóa khỏi Taobao (hoặc tương đương) — coi hết hàng nguồn."
+                )[:1000],
+            )
         title_like = rr.get("title")
         sku_like = rr.get("sku")
         pname = pd.get("name")
         basics = bool((title_like or "").strip() or (sku_like or "").strip() or (pname or "").strip())
         has_signal = basics or _hibox_row_shows_color_size_catalog(rr, pd)
         if has_signal:
+            cart_probe = rr.get("hibox_dom_cart_cta")
+            if cart_probe is False:
+                return SourceStockCheckResult(
+                    status="out_of_stock",
+                    error=(
+                        "Hibox: không thấy nút «САГСЛАХ» (thêm giỏ — khoanh đỏ) trên PDP — coi hết hàng nguồn."
+                    ),
+                )
             warn_txt = "; ".join(list(warns or [])[:6]).strip()
             return SourceStockCheckResult(status="in_stock", error=warn_txt or None)
         return SourceStockCheckResult(
@@ -525,6 +717,15 @@ def _evaluate_stock_via_hibox(raw_url: str) -> SourceStockCheckResult:
             ),
         )
     except ImportHiboxError as exc:
+        fb_cart = _hibox_quick_cart_cta_via_playwright(canonical_url)
+        if fb_cart is False:
+            return SourceStockCheckResult(
+                status="out_of_stock",
+                error=(
+                    "Hibox: không thấy nút «САГСЛАХ» (thêm giỏ) sau khi tải PDP — coi hết hàng. "
+                    f"(scrape báo lỗi tạm: {str(exc)[:420]})"
+                )[:1000],
+            )
         return SourceStockCheckResult(status="error", error=str(exc)[:1000])
     except Exception as exc:
         logger.warning("hibox source stock evaluate failed: %s", exc)
@@ -650,7 +851,7 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
         _worker_progress_mark_started(product_id)
         progressed = True
 
-        result = _evaluate_stock_via_hibox(product.link_default or "")
+        result = _evaluate_stock_primary_cssbuy_then_merge_hibox(product.link_default or "")
         product = db.query(Product).filter(Product.id == product_id).first()
         if not product:
             final_st = getattr(result, "status", None) or "error"
@@ -732,7 +933,7 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
 
 def _worker_loop() -> None:
     logger.info(
-        "source stock checker started: interval=%ss stale=%sm",
+        "source stock checker started: interval=%ss stale=%sm (cssbuy first, merge hibox if not in_stock)",
         settings.SOURCE_STOCK_CHECK_INTERVAL_SECONDS,
         settings.SOURCE_STOCK_CHECK_STALE_MINUTES,
     )

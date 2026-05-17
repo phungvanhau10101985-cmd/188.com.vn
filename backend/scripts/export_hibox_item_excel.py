@@ -45,6 +45,9 @@ except ImportError:
         return u[: m.end()] if m else u
 
 
+from app.services.hibox_cart_dom_probe import HIBOX_CART_CTA_PROBE_JS as HIBOX_DOM_CART_CTA_PROBE_JS
+
+
 def _hibox_scheme_and_trunc(u: str) -> str:
     s = (u or "").strip()
     if not s:
@@ -715,14 +718,25 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
             route.continue_()
 
     js = """() => {
-      const og = (p) =>
-        document.querySelector(`meta[property="og:${p}"]`)?.getAttribute("content") || "";
+      const og = (p) => {
+        const mTag = document.querySelector('meta[property="og:' + p + '"]');
+        return ((mTag && mTag.getAttribute("content")) || "");
+      };
       const ogImg = (og("image") || "").trim();
 
-      const specsRoot = (() => {
-        const sums = [...document.querySelectorAll("summary")];
-        const hit = sums.find((s) => (s.innerText || "").includes("Барааны үзүүлэлт"));
-        return hit?.closest("details") || null;
+      const specsRoot = (function () {
+        const sums = [].slice.call(document.querySelectorAll("summary"));
+        let hit = null;
+        let si;
+        for (si = 0; si < sums.length; si++) {
+          const s = sums[si];
+          const t = ((s.innerText || "") + "").trim();
+          if (t.indexOf("Барааны үзүүлэлт") >= 0) {
+            hit = s;
+            break;
+          }
+        }
+        return hit && hit.closest ? hit.closest("details") : null;
       })();
       const inSpecs = (el) => specsRoot && specsRoot.contains(el);
 
@@ -747,7 +761,7 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
       const mainEl = document.querySelector("main") || document.body;
       const firstDetails = mainEl.querySelector("details");
 
-      [...mainEl.querySelectorAll("img")].forEach((img) => {
+      [].slice.call(mainEl.querySelectorAll("img")).forEach(function (img) {
         if (inSpecs(img)) return;
         const url = imgUrl(img);
         if (!url.startsWith("http")) return;
@@ -794,7 +808,7 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
       };
 
       if (gallery.length === 0 && firstDetails) {
-        [...mainEl.querySelectorAll("img")].forEach((img) => {
+        [].slice.call(mainEl.querySelectorAll("img")).forEach(function (img) {
           if (inSpecs(img)) return;
           const url = imgUrl(img);
           if (!url.startsWith("http")) return;
@@ -853,20 +867,25 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
         );
         document.querySelectorAll("video[src]").forEach((el) => tryPush(el.getAttribute("src")));
         tryPush(
-          document.querySelector('meta[property="og:video"]')?.getAttribute("content"),
+          (function () {
+            var m = document.querySelector('meta[property="og:video"]');
+            return m ? m.getAttribute("content") : null;
+          })(),
         );
         tryPush(
-          document.querySelector('meta[property="og:video:url"]')?.getAttribute("content"),
+          (function () {
+            var m2 = document.querySelector('meta[property="og:video:url"]');
+            return m2 ? m2.getAttribute("content") : null;
+          })(),
         );
         for (const u of candidates) {
           const low = u.toLowerCase();
           if (low.includes("cloud.video.taobao.com") && low.includes(".mp4")) return u;
           if (/\\.mp4(\\?|$)/i.test(u)) return u;
         }
-        const html = document.documentElement?.innerHTML || "";
-        const m = html.match(
-          /https?:\\/\\/cloud\\.video\\.taobao\\.com\\/[^"'\\s<>]+\\.mp4/i,
-        );
+        const docEl = document.documentElement;
+        const htmlDoc = docEl ? docEl.innerHTML : "";
+        const m = (/cloud\\.video\\.taobao\\.com[\\s\\S]{0,4000}?\\.mp4/i).exec(htmlDoc);
         if (m) return m[0];
         return "";
       };
@@ -878,20 +897,36 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
         og_description: og("description"),
         og_image: og("image"),
         video_url: pickVideoUrl(),
-        h1:
-          [...document.querySelectorAll("h1")]
-            .map((e) => (e.innerText || "").trim())
-            .filter(Boolean)[0] || "",
+        h1: (function () {
+          var hNodes = document.querySelectorAll("h1");
+          var hi, hh, vt;
+          for (hi = 0; hi < hNodes.length; hi++) {
+            hh = hNodes[hi];
+            vt = ((hh.innerText || "") + "").trim();
+            if (vt) return vt;
+          }
+          return "";
+        })(),
         code_line: codeLine,
-        sku_candidates: [...new Set(codes)],
+        sku_candidates: Array.from(new Set(codes)),
         main_sku: main ? main[1] : "",
         main_price: main ? main[2] : "",
-        number_tokens_sample: [...new Set(nums)].slice(0, 48),
+        number_tokens_sample: Array.from(new Set(nums)).slice(0, 48),
         gallery_images: gallery,
         description_images: description,
         other_images: other,
+        body_preview: (function () {
+          var bt = "";
+          try {
+            bt = document.body && document.body.innerText ? document.body.innerText : "";
+          } catch (e0) {
+            bt = "";
+          }
+          return String(bt || "").trim().slice(0, 14000);
+        })(),
       };
     }"""
+
 
     sheet_js = """() => {
       let best = "";
@@ -946,7 +981,7 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
         if (b.z !== a.z) return b.z - a.z;
         return b.area - a.area;
       });
-      let pane = cand[0]?.el;
+      let pane = cand.length && cand[0] ? cand[0].el : null;
       if (!pane && sheetCombo) {
         const fb = [];
         [...document.body.querySelectorAll("*")].forEach((el) => {
@@ -966,7 +1001,7 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
           if (b.z !== a.z) return b.z - a.z;
           return b.area - a.area;
         });
-        pane = fb[0]?.el;
+        pane = fb.length && fb[0] ? fb[0].el : null;
       }
       if (!pane || !pane.querySelectorAll) return { urls: [], labels: [], sizes: [] };
 
@@ -1414,7 +1449,7 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
                         """() => {
                       const sums = [...document.querySelectorAll("summary")];
                       const hit = sums.find((s) => (s.innerText || "").includes("Барааны үзүүлэлт"));
-                      const det = hit?.closest("details");
+                      const det = hit && hit.closest ? hit.closest("details") : null;
                       if (det) {
                         det.scrollIntoView({ block: "nearest", behavior: "instant" });
                         const inner = det.querySelector(".prose, [class*='prose'], .detail, [class*='detail']") || det;
@@ -1473,6 +1508,11 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
             if not isinstance(specs_data, dict):
                 specs_data = {}
             raw = page.evaluate(js)
+            if isinstance(raw, dict):
+                try:
+                    raw["hibox_dom_cart_cta"] = bool(page.evaluate(HIBOX_DOM_CART_CTA_PROBE_JS))
+                except Exception:
+                    pass
             page.evaluate("() => window.scrollTo(0, Math.max(0, document.body.scrollHeight - 400))")
             page.wait_for_timeout(400)
             cart_opened = False
@@ -1650,6 +1690,7 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
         "specs_images_json": json.dumps(spec_imgs, ensure_ascii=False),
         "specs_image_count": len(spec_imgs),
         "video_url": (str(raw.get("video_url") or "").strip()),
+        "hibox_dom_cart_cta": raw.get("hibox_dom_cart_cta"),
         "gallery_images_json": json.dumps(gal_u[:80], ensure_ascii=False),
         "gallery_image_count": len(gal_u),
         "gallery_swiper_slide_count": gallery_swiper_slide_count,
@@ -1657,6 +1698,7 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
         "description_image_count": len(desc_u),
         "other_images_json": json.dumps(oth_u[:80], ensure_ascii=False),
         "other_image_count": len(oth_u),
+        "body_text_sample": (str(raw.get("body_preview") or "").strip())[:14000],
     }
     return row
 

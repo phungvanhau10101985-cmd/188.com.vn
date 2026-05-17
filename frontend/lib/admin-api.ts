@@ -422,6 +422,12 @@ export interface AdminSourceStockActivityReportSampleRow {
   name: string;
   slug: string;
   link_default: string;
+  /** URL trang item CSSBuy sau quy đổi (như batch Excel / worker). */
+  link_convert_cssbuy?: string;
+  link_convert_cssbuy_err?: string;
+  /** URL Hibox scrape sau quy đổi. */
+  link_convert_hibox?: string;
+  link_convert_hibox_err?: string;
   source_stock_status: string | null;
   source_stock_checked_at: string | null;
   admin_source_batch_scanned_at: string | null;
@@ -488,6 +494,16 @@ export interface AdminSourceStockForceWorkerRecheckResult {
   skip_reason?: string | null;
   source_stock_status?: string | null;
   source_stock_next_check_at?: string | null;
+}
+
+/** Reset PDP source_stock_* trong phạm vi link + domain (bulk). */
+export interface AdminSourceStockResetPdpResult {
+  ok: boolean;
+  domain: string;
+  active_only: boolean;
+  products_updated: number;
+  memory_queue_cleared: number;
+  detail?: string;
 }
 
 /** Dòng PDP trong snapshot worker (đang làm / vừa xong / sắp tới). */
@@ -1160,6 +1176,25 @@ export const adminProductAPI = {
         timeoutMs: 60_000,
       },
     ),
+
+  /**
+   * Xóa lịch/ghi PDP (source_stock_*) và reset trạng thái kiểm tra trong phạm vi link giống queue-stats.
+   * Xóa hàng chờ RAM chỉ trên một process backend.
+   */
+  resetSourceStockPdpCycle: (params: {
+    domain: 'hibox' | 'cssbuy';
+    activeOnly?: boolean;
+    confirm: boolean;
+  }) =>
+    fetchAdmin<AdminSourceStockResetPdpResult>('/products/admin/source-stock-batch/reset-pdp-cycle', {
+      method: 'POST',
+      body: JSON.stringify({
+        domain: params.domain,
+        active_only: params.activeOnly ?? true,
+        confirm: params.confirm,
+      }),
+      timeoutMs: 120_000,
+    }),
 
   /** Xóa vĩnh viễn các sản theo khóa chính `products.id` (sau phiên kiểm tra nguồn). */
   deleteSourceStockBatchProductsByDbIds: (dbIds: number[]) =>

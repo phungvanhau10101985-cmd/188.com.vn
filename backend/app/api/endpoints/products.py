@@ -38,6 +38,7 @@ from app.services.admin_source_stock_batch import (
     admin_collect_distinct_product_urls_from_db,
     admin_clear_false_source_oos_flag,
     admin_force_worker_source_stock_recheck,
+    admin_reset_source_stock_pdp_cycle,
     admin_source_stock_activity_report,
     admin_source_stock_queue_stats,
     run_admin_source_stock_scan_next_from_db,
@@ -48,7 +49,7 @@ router = APIRouter()
 
 class AdminSourceStockBatchBody(BaseModel):
     url: str = Field(..., min_length=3)
-    domain: Literal["hibox", "cssbuy"] = "hibox"
+    domain: Literal["hibox", "cssbuy"] = "cssbuy"
     dual_alternate_fallback: bool = Field(
         False,
         description="Sen kẽ thứ tự Hibox/CSSBuy theo alternate_sequence_index, fallback khi một nền không đọc được.",
@@ -57,7 +58,7 @@ class AdminSourceStockBatchBody(BaseModel):
 
 
 class AdminSourceStockScanNextDbBody(BaseModel):
-    domain: Literal["hibox", "cssbuy"] = "hibox"
+    domain: Literal["hibox", "cssbuy"] = "cssbuy"
     active_only: bool = True
     cursor_after_product_id: int = Field(0, ge=0)
     sticky_seed_product_id: int = Field(
@@ -88,6 +89,20 @@ class AdminSingleProductDbIdBody(BaseModel):
 
 class AdminSourceStockWorkerPauseBody(BaseModel):
     paused: bool
+
+
+class AdminSourceStockResetPdpBody(BaseModel):
+    """Reset kết quả kiểm tra PDP (source_stock_*) và xóa queue RAM của một process."""
+
+    domain: Literal["hibox", "cssbuy"] = Field(
+        "cssbuy",
+        description="Giống queue-stats — lọc phạm vi sản có link có thể quy đổi như nhập Excel.",
+    )
+    active_only: bool = Field(True)
+    confirm: bool = Field(
+        False,
+        description="Bắt buộc gửi true sau khi admin đọc đủ cảnh báo — ngăn bấm nhầm.",
+    )
 
 
 def _serialize_products_for_api(db: Session, raw_products: List) -> List:
@@ -987,7 +1002,8 @@ def admin_source_stock_force_worker_recheck_route(
     _: AdminUser = Depends(require_module_permission("products")),
 ):
     """
-    Xếp lại PDP worker đọc Hibox (force); kết quả in_stock / out_of_stock sẽ cập nhật sau vài giây.
+    Xếp lại PDP worker: CSSBuy (/web/item) trước, gộp scrape Hibox khi không còn in_stock từ CSS;
+    kết quả in_stock / out_of_stock cập nhật sau khi worker chạy.
     """
     out = admin_force_worker_source_stock_recheck(db, db_id=int(body.db_id))
     if not out.get("ok"):
@@ -999,10 +1015,38 @@ def admin_source_stock_force_worker_recheck_route(
     return out
 
 
+@router.post("/admin/source-stock-batch/reset-pdp-cycle", response_model=dict, include_in_schema=False)
+def admin_source_stock_reset_pdp_cycle_route(
+    body: AdminSourceStockResetPdpBody,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """
+    Reset toàn phạm vi: đặt lại các cột ``source_stock_*`` về «chưa biết»
+    và xóa hàng chờ RAM của process đang nhận request. Bỏ qua sản ``queued``/``checking``.
+    """
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Thiếu xác nhận: đặt «confirm»: true trong body sau khi đã đọc cảnh báo.",
+        )
+    try:
+        out = admin_reset_source_stock_pdp_cycle(
+            db,
+            domain=str(body.domain),
+            active_only=bool(body.active_only),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=str(out.get("detail") or "reset_failed"))
+    return out
+
+
 @router.get("/admin/source-stock-batch/queue-stats", response_model=dict, include_in_schema=False)
 def admin_source_stock_batch_queue_stats(
     domain: Literal["hibox", "cssbuy"] = Query(
-        "hibox",
+        "cssbuy",
         description="hibox = scrape hibox.mn; cssbuy = POST /web/item (không cần bấm modal).",
     ),
     active_only: bool = Query(True),
@@ -1018,7 +1062,7 @@ def admin_source_stock_worker_state(
     _: AdminUser = Depends(require_module_permission("products")),
 ):
     """
-    Snapshot trạng thái worker PDP/Hibox: env, cờ pause DB (chung mọi process), luồng daemon trong process hiện tại,
+    Snapshot trạng thái worker PDP (CSSBuy trước, gộp Hibox nếu không in_stock): env, cờ pause DB (chung mọi process), luồng daemon trong process hiện tại,
     và độ sâu hàng chờ in-memory của process đó (không phải tổng cluster).
     """
     return {"ok": True, **get_source_stock_worker_admin_snapshot(force_refresh_pause=True)}
@@ -1040,7 +1084,7 @@ def admin_source_stock_worker_pause_route(
 @router.get("/admin/source-stock-batch/report", response_model=dict, include_in_schema=False)
 def admin_source_stock_batch_report(
     domain: Literal["hibox", "cssbuy"] = Query(
-        "hibox",
+        "cssbuy",
         description="hibox = scrape hibox.mn; cssbuy = POST /web/item.",
     ),
     active_only: bool = Query(True),
@@ -1073,7 +1117,7 @@ def admin_source_stock_batch_report(
 @router.get("/admin/source-stock-batch/product-urls", response_model=dict, include_in_schema=False)
 def admin_source_stock_batch_product_urls(
     domain: Literal["hibox", "cssbuy"] = Query(
-        "hibox",
+        "cssbuy",
         description="Lọc link phù hợp luồng kiểm tra (quy đổi sang Hibox hoặc CSSBuy)",
     ),
     limit: int = Query(6000, ge=1, le=15000),
@@ -1081,7 +1125,7 @@ def admin_source_stock_batch_product_urls(
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("products")),
 ):
-    domain_l = (domain or "hibox").strip().lower()
+    domain_l = (domain or "cssbuy").strip().lower()
     return admin_collect_distinct_product_urls_from_db(db, domain=domain_l, limit=int(limit), active_only=bool(active_only))
 
 @router.post("/by-id/{id}/purge-dead-media-url", response_model=dict, include_in_schema=False)
