@@ -1031,8 +1031,8 @@ def sync_google_sheet_skus(
     _: AdminUser = Depends(require_privileged_admin),
 ):
     """
-    Đồng bộ tay cột mã trên Google Sheet với DB (giống luồng nền sau import/tạo/xóa SP).
-    Cần GOOGLE_SHEETS_SKU_* trong .env và quyền Editor cho service account.
+    Đồng bộ tay Google Sheet với DB (giống luồng nền sau import/tạo/xóa SP).
+    Cột A theo GOOGLE_SHEETS_SKU_SYNC_FIELD (code | product_id | web_prefix). Cần GOOGLE_SHEETS_SKU_* và quyền Editor cho service account.
     """
     from app.services.google_sheets_sku_sync import sync_product_skus_to_google_sheet
 

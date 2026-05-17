@@ -1,7 +1,8 @@
 """
 Đồng bộ Google Sheet theo **web/DB** (chuẩn). Luồng xử lý trước khi ghi (tiết kiệm quota API):
 
-1. Đọc sheet (cột A… theo cấu hình) một lần.
+1. Đọc sheet (cột A… theo cấu hình; nếu có cột E — thời điểm đồng bộ UTC) một lần.
+   Cột A có thể là mã SKU (`code`), `product_id` đầy đủ, hoặc phần `product_id` trước «a188» (`web_prefix`).
 2. So với toàn bộ sản phẩm trong DB — chỉ **batchUpdate** những hàng có ô lệch; hàng trùng dữ liệu bỏ qua.
 3. Chỉ **append** hàng mới cho mã chưa có trên sheet; xóa hàng orphan / trùng mã ở lớp này.
 
@@ -22,12 +23,14 @@ import logging
 import os
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.crud.product import split_product_id_web_prefix_and_internal_sku
 from app.models.product import Product
 
 logger = logging.getLogger(__name__)
@@ -152,13 +155,22 @@ def _sheet_title_for_gid(service: Any, spreadsheet_id: str, sheet_gid: int) -> s
     raise ValueError(f"Không tìm thấy tab sheetId={sheet_gid} trong spreadsheet.")
 
 
+def _sheet_primary_key_from_product(p: Product, field: str) -> str:
+    """Giá trị cột A / khóa khớp sheet — trùng với `_row_values_from_product` ô đầu hàng."""
+    if field == "product_id":
+        return (p.product_id or "").strip()
+    if field == "web_prefix":
+        seg = split_product_id_web_prefix_and_internal_sku(p.product_id)
+        if seg:
+            return (seg.get("prefix") or "").strip()
+        return (p.product_id or "").strip()
+    return (p.code or "").strip()
+
+
 def _fetch_products_by_key(db: Session, field: str) -> Dict[str, Product]:
     m: Dict[str, Product] = {}
     for p in db.query(Product).all():
-        if field == "product_id":
-            k = (p.product_id or "").strip()
-        else:
-            k = (p.code or "").strip()
+        k = _sheet_primary_key_from_product(p, field)
         if not k:
             continue
         if k not in m:
@@ -166,11 +178,19 @@ def _fetch_products_by_key(db: Session, field: str) -> Dict[str, Product]:
     return m
 
 
-def _row_values_from_product(p: Product, key_field: str, n_cols: int) -> List[str]:
-    if key_field == "product_id":
-        key = (p.product_id or "").strip()
-    else:
-        key = (p.code or "").strip()
+def _sync_stamp_utc_str() -> str:
+    """Chuỗi hiển thị một lần mỗi phiên đồng bộ (cột E)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _row_values_from_product(
+    p: Product,
+    key_field: str,
+    n_cols: int,
+    *,
+    written_at: str = "",
+) -> List[str]:
+    key = _sheet_primary_key_from_product(p, key_field)
     row: List[str] = []
     row.append(key)
     if n_cols >= 2:
@@ -186,6 +206,8 @@ def _row_values_from_product(p: Product, key_field: str, n_cols: int) -> List[st
             row.append(str(int(float(price))))
         else:
             row.append(str(price))
+    if n_cols >= 5:
+        row.append((written_at or "").strip())
     while len(row) < n_cols:
         row.append("")
     return row[:n_cols]
@@ -210,10 +232,10 @@ def _cells_semantically_equal(
     col_index: int,
     n_cols: int,
 ) -> bool:
-    """So sánh ô sheet với giá trị chuẩn từ DB (web). Cột giá (cột cuối khi n_cols>=4): so theo số."""
+    """So sánh ô sheet với giá trị chuẩn từ DB (web). Cột giá luôn là cột D (index 3) khi n_cols>=4."""
     s = (sheet_val or "").strip()
     d = (db_val or "").strip()
-    if n_cols >= 4 and col_index == n_cols - 1:
+    if n_cols >= 4 and col_index == 3:
         ps, pd = _normalize_price_cell(s), _normalize_price_cell(d)
         if ps == pd:
             return True
@@ -227,7 +249,9 @@ def _cells_semantically_equal(
 
 
 def _row_matches_db(sheet_row: List[str], db_row: List[str], n_cols: int) -> bool:
-    for i in range(n_cols):
+    # Cột E trở đi (timestamp / đệm) không dùng để quyết định skip batchUpdate — chỉ so A–D khi có thêm cột.
+    compare_cols = min(n_cols, 4) if n_cols >= 5 else n_cols
+    for i in range(compare_cols):
         sv = sheet_row[i] if i < len(sheet_row) else ""
         dv = db_row[i] if i < len(db_row) else ""
         if not _cells_semantically_equal(str(sv), str(dv), i, n_cols):
@@ -364,7 +388,8 @@ def sync_product_skus_to_google_sheet(db: Session) -> Dict[str, Any]:
 
     - Hàng không còn trong DB → xóa.
     - Trùng mã → giữ một hàng, xóa dư.
-    - Mã có ở cả hai: đối chiếu từng ô với DB; khác mới batchUpdate.
+    - Mã có ở cả hai: đối chiếu A–D với DB; khác mới batchUpdate (khi GOOGLE_SHEETS_SKU_COLUMN_COUNT≥5,
+      cột E ghi thời điểm đồng bộ của phiên đó).
     - Mã mới trong DB → append.
 
     Tần suất gọi: hạn chế ở lớp schedule (debounce CRUD); import Excel/sync tay gọi trực tiếp.
@@ -382,8 +407,9 @@ def sync_product_skus_to_google_sheet(db: Session) -> Dict[str, Any]:
 
     field = getattr(settings, "GOOGLE_SHEETS_SKU_SYNC_FIELD", "code") or "code"
     header_rows = int(getattr(settings, "GOOGLE_SHEETS_SKU_HEADER_ROWS", 1) or 0)
-    n_cols = int(getattr(settings, "GOOGLE_SHEETS_SKU_COLUMN_COUNT", 4) or 4)
+    n_cols = int(getattr(settings, "GOOGLE_SHEETS_SKU_COLUMN_COUNT", 5) or 5)
     n_cols = max(1, n_cols)
+    sync_written_at = _sync_stamp_utc_str() if n_cols >= 5 else ""
 
     with _SYNC_LOCK:
         try:
@@ -433,7 +459,9 @@ def sync_product_skus_to_google_sheet(db: Session) -> Dict[str, Any]:
                 if not rlist:
                     continue
                 r = rlist[0]
-                new_vals = _row_values_from_product(prod, field, n_cols)
+                new_vals = _row_values_from_product(
+                    prod, field, n_cols, written_at=sync_written_at
+                )
                 old_vals = row_map.get(r)
                 if old_vals is None:
                     old_vals = [""] * n_cols
@@ -452,7 +480,12 @@ def sync_product_skus_to_google_sheet(db: Session) -> Dict[str, Any]:
             to_add = sorted(db_keys - current_sheet)
             added = 0
             if to_add:
-                body_vals = [_row_values_from_product(products_by_key[s], field, n_cols) for s in to_add]
+                body_vals = [
+                    _row_values_from_product(
+                        products_by_key[s], field, n_cols, written_at=sync_written_at
+                    )
+                    for s in to_add
+                ]
                 # Append một lần với ~30k hàng dễ timeout / vượt giới hạn xử lý — chia lô.
                 for a in range(0, len(body_vals), _APPEND_ROWS_PER_REQUEST):
                     chunk = body_vals[a : a + _APPEND_ROWS_PER_REQUEST]

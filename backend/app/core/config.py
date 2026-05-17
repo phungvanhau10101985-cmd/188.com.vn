@@ -561,9 +561,11 @@ class Settings:
             self.GOOGLE_SHEETS_SKU_SHEET_GID: int = int(_gid) if _gid else 0
         except ValueError:
             self.GOOGLE_SHEETS_SKU_SHEET_GID = 0
-        # code = mã SKU nội bộ; product_id = Id sản phẩm (cột id Excel)
+        # code = mã SKU nội bộ; product_id = Id đầy đủ; web_prefix = phần product_id trước «a188» (vd A…1688 / T…tb)
         _sf = os.getenv("GOOGLE_SHEETS_SKU_SYNC_FIELD", "code").strip().lower()
-        self.GOOGLE_SHEETS_SKU_SYNC_FIELD: str = _sf if _sf in ("code", "product_id") else "code"
+        self.GOOGLE_SHEETS_SKU_SYNC_FIELD: str = (
+            _sf if _sf in ("code", "product_id", "web_prefix") else "code"
+        )
         try:
             self.GOOGLE_SHEETS_SKU_HEADER_ROWS: int = max(
                 0, int(os.getenv("GOOGLE_SHEETS_SKU_HEADER_ROWS", "1") or "1")
@@ -573,12 +575,12 @@ class Settings:
         self.GOOGLE_SHEETS_SKU_CREDENTIALS_PATH: str = os.getenv(
             "GOOGLE_SHEETS_SKU_CREDENTIALS_PATH", ""
         ).strip()
-        # Số cột ghi từ DB mỗi hàng: 1=chỉ A; 4=A–D (mã, link 1688, tên shop, giá) như sheet mẫu
+        # Số cột ghi mỗi hàng: 1=chỉ A; 4=A–D (mã, link, shop, giá); 5=A–E (+ thời điểm đồng bộ UTC)
         try:
-            _n_col = int(os.getenv("GOOGLE_SHEETS_SKU_COLUMN_COUNT", "4") or "4")
+            _n_col = int(os.getenv("GOOGLE_SHEETS_SKU_COLUMN_COUNT", "5") or "5")
             self.GOOGLE_SHEETS_SKU_COLUMN_COUNT: int = max(1, min(_n_col, 100))
         except ValueError:
-            self.GOOGLE_SHEETS_SKU_COLUMN_COUNT = 4
+            self.GOOGLE_SHEETS_SKU_COLUMN_COUNT = 5
         # Gộp nhiều lần tạo/sửa/xóa SP thành một lần đồng bộ sheet (giây). 0 = mỗi lần gọi chạy ngay.
         try:
             self.GOOGLE_SHEETS_SKU_SYNC_DEBOUNCE_SECONDS: int = max(
