@@ -10,11 +10,7 @@ export const ADMIN_ROLE_STORAGE_KEY = 'admin_role';
 export const ADMIN_MODULES_STORAGE_KEY = 'admin_modules';
 
 function expandAdminNavPrefixes(hrefs: string[]): string[] {
-  const out = new Set(hrefs);
-  if (out.has('/admin/products')) {
-    out.add('/admin/import-1688');
-  }
-  return [...out];
+  return [...new Set(hrefs)];
 }
 
 export function getStoredAdminRole(): string | null {
@@ -69,7 +65,6 @@ export function adminNavPrefixesForRole(role: string | null): string[] | null {
   if (r === 'product_manager')
     return [
       '/admin/products',
-      '/admin/import-1688',
       '/admin/taxonomy',
       '/admin/search-mappings',
       '/admin/search-cache',

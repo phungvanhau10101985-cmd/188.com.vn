@@ -5,7 +5,7 @@
 export const ADMIN_MODULE_NAV: Record<string, string> = {
   orders: '/admin/orders',
   products: '/admin/products',
-  import_1688: '/admin/import-1688',
+  import_1688: '/admin/products#import-hibox',
   taxonomy: '/admin/taxonomy',
   search_mappings: '/admin/search-mappings',
   search_cache: '/admin/search-cache',
@@ -51,7 +51,7 @@ export const ADMIN_MODULE_KEYS_ASSIGNABLE = ADMIN_MODULE_ORDER.filter((k) => k !
 export const ADMIN_MODULE_LABELS: Record<string, string> = {
   orders: 'Đơn hàng',
   products: 'Sản phẩm',
-  import_1688: 'Cookie / Import 1688',
+  import_1688: 'Import Hibox (trang Sản phẩm)',
   taxonomy: 'Cây danh mục',
   search_mappings: 'Từ khóa mapping',
   search_cache: 'Cache & thống kê tìm kiếm',

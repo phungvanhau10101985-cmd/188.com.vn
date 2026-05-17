@@ -1,7 +1,8 @@
 """
 Chuẩn hoá URL trong batch Excel theo **trang cần mở** (Hibox vs CSSBuy vs 1688 trực tiếp).
 
-Dùng kèm form `fetch_target` trên endpoint `batch-from-excel`; `auto` = giữ hành vi cũ (nhận dạng từ URL).
+Dùng kèm form `fetch_target` trên endpoint `batch-from-excel`.
+`auto` = quy đổi sang Hibox khi có thể (Taobao/Tmall → /v/<id>, offer 1688 → /v/abb-<id>, v.v.) vì import chỉ scrape qua Hibox.
 """
 
 from __future__ import annotations
@@ -69,7 +70,7 @@ def coerce_url_for_excel_batch_import(
     Trả (url_sau_khi_chuẩn, lỗi_skip).
 
     * `lỗi_skip` khác None → bỏ dòng với thông báo tiếng Việt.
-    * `fetch_target` phải là một trong `auto` / `hibox` / `1688` / `cssbuy` (đã normalize).
+    * `fetch_target` phải là một trong `auto` / `hibox` / `1688` / `cssbuy` (đã normalize). `auto` = quy về Hibox như `hibox`.
     """
     ft = (fetch_target or FETCH_TARGET_AUTO).strip().lower()
     norm = normalize_product_import_url((raw_url or "").strip())
@@ -77,7 +78,7 @@ def coerce_url_for_excel_batch_import(
         return "", "thiếu hoặc không đọc được URL."
 
     if ft == FETCH_TARGET_AUTO:
-        return norm, None
+        return coerce_url_for_excel_batch_import(norm, FETCH_TARGET_HIBOX)
 
     if ft == FETCH_TARGET_HIBOX:
         slug_try = extract_hibox_slug(norm)

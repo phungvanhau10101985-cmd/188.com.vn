@@ -1565,7 +1565,7 @@ export const adminProductAPI = {
 
   uploadImport1688ExcelBatch: async (
     file: File,
-    fetchTarget: 'auto' | 'hibox' | '1688' = 'auto',
+    fetchTarget: 'auto' | 'hibox' = 'auto',
   ): Promise<AdminImport1688ExcelBatchStart> => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');

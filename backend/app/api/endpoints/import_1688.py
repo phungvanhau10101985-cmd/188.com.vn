@@ -56,7 +56,6 @@ from app.services.product_internal_sku import (
     internal_sku_is_valid_format,
     sync_internal_code_into_product_info,
 )
-from app.services.import_1688_images import ingest_1688_images
 from app.services.import_hibox_scraper import (
     ImportHiboxError,
     build_canonical_product_id_from_hibox_slug,
@@ -70,14 +69,13 @@ from app.services.import_hibox_scraper import (
     scrape_hibox_for_import,
 )
 from app.services.import_1688_scraper import (
-    Import1688Error,
     build_canonical_1688_product_id,
     extract_1688_numeric_offer_id,
     extract_offer_id,
-    scrape_1688_product,
 )
 from app.services.import_batch_url_coercion import (
     FETCH_TARGET_AUTO,
+    FETCH_TARGET_1688,
     coerce_url_for_excel_batch_import,
     normalize_fetch_target_param,
 )
@@ -825,36 +823,14 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             )
             return
 
-        draft_crud.mark_running(db, draft, "scraping", "Đang mở link 1688 bằng Playwright...", 15)
-        raw_payload, product_data, warnings = scrape_1688_product(draft.source_url)
-        _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
-
-        draft = draft_crud.get_by_job_id(db, job_id)
-        if not draft:
-            return
-        if download_images:
-            draft_crud.mark_running(db, draft, "images", "Đang tải ảnh sản phẩm về CDN...", 70)
-            product_data, image_warnings = ingest_1688_images(product_data, draft.source_offer_id)
-            warnings.extend(image_warnings)
-
-        _merge_excel_overlay_for_job(db, job_id, product_data)
-        _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
-        draft = draft_crud.get_by_job_id(db, job_id)
-        if not draft:
-            return
-        draft_crud.mark_done(
+        draft_crud.mark_error(
             db,
             draft,
-            raw_payload=raw_payload,
-            product_data=product_data,
-            warnings=warnings,
-            success_message="Đã tạo bản nháp từ link 1688.",
+            message="Import trực tiếp từ 1688 đã tắt. Tạo lại nháp từ link Hibox (hibox.mn hoặc taobao1688.kz).",
+            errors=["import_1688_disabled"],
         )
+        return
     except ImportHiboxError as exc:
-        draft = draft_crud.get_by_job_id(db, job_id)
-        if draft:
-            draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
-    except Import1688Error as exc:
         draft = draft_crud.get_by_job_id(db, job_id)
         if draft:
             draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
@@ -902,16 +878,22 @@ def create_import_1688_job(
             detail={
                 "reason": "unsupported_import_link",
                 "message": (
-                    "Không nhận dạng được link là 1688 (offerId) hay Hibox / mirror taobao1688.kz (id=…)."
+                    "Không nhận dạng được link Hibox / taobao1688.kz (mã sản phẩm trong đường dẫn)."
                 ),
                 "normalized_length": len(source_url),
                 "normalized_preview": source_url[:200],
                 "hints": (
-                    "1688: có offer/xxxxxxxx.html hoặc ?offerId= (mobile: detail.m.1688.com/page/index.html?offerId=). "
                     "Hibox: https://hibox.mn/v/{mã}. Mirror: https://taobao1688.kz/item?id={mã}. "
-                    "Nếu đúng là Hibox mà vẫn báo lỗi: API đang chạy có thể là bản cũ — restart backend và kiểm tra "
-                    "bạn không gọi nhầm instance (hay gặp: Next dev ép cổng khác SERVER_PORT — xem frontend/.env.local (API_INTERNAL_ORIGIN, NEXT_PUBLIC_API_BASE_URL) và restart Next + backend."
+                    "Import trực tiếp từ 1688.com không còn hỗ trợ."
                 ),
+            },
+        )
+    if src == "1688":
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason": "import_1688_disabled",
+                "message": "Import trực tiếp từ 1688 đã tắt. Chỉ hỗ trợ link Hibox (hibox.mn, taobao1688.kz).",
             },
         )
     job_id = str(uuid.uuid4())
@@ -953,9 +935,9 @@ async def create_import_jobs_batch_from_excel(
     rồi làm tròn lên bội 10.000 ₫.
     **Mã sp** chỉ khi có cột tiêu đề «Mã sp» đúng `[A-Z][0-9]{4}` — không đọc cột B cố định.
 
-    Form **`fetch_target`**: `auto` (mặc định) | `hibox` | `1688` | `cssbuy` — ép link từng dòng về đúng định dạng trước khi tạo job
-    (vd. 1688 offer → `hibox.mn/v/abb-…` khi chọn Hibox; slug `abb-*` trên Hibox → `detail.1688.com` khi chọn 1688).
-    Dòng không quy đổi được bị **bỏ qua** kèm lý do trong `skipped`.
+    Form **`fetch_target`**: `auto` (mặc định) | `hibox` | `cssbuy` — chuẩn hoá URL từng dòng trước khi tạo job.
+    **`auto`** quy Taobao/Tmall và offer 1688 sang URL Hibox (`hibox.mn/v/…`) khi quy đổi được.
+    **`1688` không còn hỗ trợ.** Dòng không quy đổi được bị **bỏ qua** kèm lý do trong `skipped`.
     """
     name = (file.filename or "").lower()
     if not name.endswith((".xlsx", ".xlsm")):
@@ -974,6 +956,11 @@ async def create_import_jobs_batch_from_excel(
         skips = list(pskip)
 
         ft = normalize_fetch_target_param(fetch_target)
+        if ft == FETCH_TARGET_1688:
+            raise HTTPException(
+                status_code=400,
+                detail="fetch_target=1688 không còn hỗ trợ. Chọn auto hoặc hibox.",
+            )
 
         batch_token = uuid.uuid4().hex
         draft_ids: List[int] = []
@@ -984,19 +971,23 @@ async def create_import_jobs_batch_from_excel(
             if len(url_norm) < 10:
                 skips.append(f"Dòng {it.get('excel_row')}: URL quá ngắn.")
                 continue
-            if ft != FETCH_TARGET_AUTO:
-                coerced, skip_reason = coerce_url_for_excel_batch_import(url_norm, ft)
-                if skip_reason:
-                    skips.append(f"Dòng {it.get('excel_row')}: {skip_reason}")
-                    continue
-                url_norm = normalize_product_import_url(coerced)
-                if len(url_norm) < 10:
-                    skips.append(f"Dòng {it.get('excel_row')}: URL sau chuẩn hoá quá ngắn.")
-                    continue
+            coerced, skip_reason = coerce_url_for_excel_batch_import(url_norm, ft)
+            if skip_reason:
+                skips.append(f"Dòng {it.get('excel_row')}: {skip_reason}")
+                continue
+            url_norm = normalize_product_import_url(coerced)
+            if len(url_norm) < 10:
+                skips.append(f"Dòng {it.get('excel_row')}: URL sau chuẩn hoá quá ngắn.")
+                continue
             try:
                 ext_id, src = _infer_import_source_for_url(url_norm, None)
             except ValueError:
-                skips.append(f"Dòng {it.get('excel_row')}: link không nhận dạng 1688/Hibox.")
+                skips.append(f"Dòng {it.get('excel_row')}: link không nhận dạng Hibox/taobao1688.kz.")
+                continue
+            if src == "1688":
+                skips.append(
+                    f"Dòng {it.get('excel_row')}: import trực tiếp 1688 đã tắt — chỉ hỗ trợ Hibox/taobao1688.kz."
+                )
                 continue
             overlays = dict(it.get("overlays") or {})
             overlays["_excel_row"] = int(it["excel_row"])

@@ -18,37 +18,9 @@ import {
 } from '@/lib/admin-api';
 import { getCatalogFeedApiBaseUrl, isNonPublicCatalogFeedBase } from '@/lib/api-base';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
-import { looksLike1688OfferUrl } from '@/lib/is-1688-offer-url';
 import { ImportDraftExcelCompare } from '@/components/admin/ImportDraftExcelCompare';
 
 const PAGE_SIZE = 100;
-
-function admin1688SourceStockBadgeClass(raw: string | null | undefined): string {
-  const s = (raw || 'unknown').toLowerCase();
-  if (s === 'out_of_stock') return 'text-red-700';
-  if (s === 'in_stock') return 'text-green-700';
-  if (s === 'queued' || s === 'checking') return 'text-amber-700';
-  if (s === 'error') return 'text-orange-900';
-  return 'text-gray-600';
-}
-
-function admin1688SourceStockLabel(raw: string | null | undefined): string {
-  const s = (raw || 'unknown').toLowerCase();
-  switch (s) {
-    case 'out_of_stock':
-      return 'Hết nguồn';
-    case 'in_stock':
-      return 'Còn nguồn';
-    case 'queued':
-      return 'Xếp hàng';
-    case 'checking':
-      return 'Đang kiểm';
-    case 'error':
-      return 'Lỗi kiểm';
-    default:
-      return 'Chưa có dữ liệu';
-  }
-}
 
 /** Thời gian chờ (giây) khi Google Sheets trả 429 — hiển thị toast đếm ngược. */
 const GOOGLE_SHEET_RATE_LIMIT_COOLDOWN_SEC = 120;
@@ -103,10 +75,10 @@ function formatGoogleSheetSyncTargetsSummary(
 /** Lưu job_id đang chạy để khôi phục khi reload trang giữa chừng. */
 const IMPORT_JOB_STORAGE_KEY = 'admin:products:import_excel:job';
 
-/** Theo dõi batch Excel link 1688 (server xử lý tuần tự) sau khi đóng / mở lại tab. */
+/** Theo dõi batch Excel import link (server xử lý tuần tự) sau khi đóng / mở lại tab. */
 const ADMIN_1688_EXCEL_BATCH_TOKEN_KEY = 'admin:products:import_1688_excel_batch_token';
 
-/** Theo dõi một job import từng link 1688/Hibox sau khi reload. */
+/** Theo dõi một job import từng link Hibox sau khi reload. */
 const ADMIN_1688_LINK_JOB_KEY = 'admin:products:import_1688_link_job';
 
 /** Legacy: một job_id — migrate sang IMAGE_LOCALIZATION_JOBS_KEY. */
@@ -458,13 +430,13 @@ export default function AdminProductsPage() {
   const [excelBatchBusy, setExcelBatchBusy] = useState(false);
   /** File đã chọn; upload chỉ khi bấm «Chạy lấy dữ liệu». */
   const [excelBatchFile, setExcelBatchFile] = useState<File | null>(null);
-  /** Trang Playwright mở: auto | hibox | 1688 — khớp backend `fetch_target`. */
-  const [excelBatchFetchTarget, setExcelBatchFetchTarget] = useState<'auto' | 'hibox' | '1688'>('auto');
+  /** Trang mở khi batch Excel: auto | hibox — khớp backend `fetch_target` (không còn 1688 trực tiếp). */
+  const [excelBatchFetchTarget, setExcelBatchFetchTarget] = useState<'auto' | 'hibox'>('auto');
   const [excelBatchTrackToken, setExcelBatchTrackToken] = useState<string | null>(null);
   const [excelBatchHint, setExcelBatchHint] = useState<string | null>(null);
   const [bulkExport1688Busy, setBulkExport1688Busy] = useState(false);
   const [resumeBatchBusy, setResumeBatchBusy] = useState(false);
-  /** Tab trong khối Import 1688 — tách luồng để giao diện không chồng chéo. */
+  /** Tab trong khối Import Hibox — tách luồng để giao diện không chồng chéo. */
   const [import1688SectionTab, setImport1688SectionTab] = useState<'link' | 'excel' | 'history'>('link');
   const [importDraftsLoading, setImportDraftsLoading] = useState(false);
   const [importDraftsError, setImportDraftsError] = useState<string | null>(null);
@@ -542,8 +514,6 @@ export default function AdminProductsPage() {
   const [editing, setEditing] = useState<{ productId: string; field: string; value: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
-  /** id bảng `products`, khi nhấn «Kiểm tra nguồn». */
-  const [sourceStockEnqueueBusyIds, setSourceStockEnqueueBusyIds] = useState<Set<number>>(() => new Set());
 
   const catalogFeedBase = useMemo(() => getCatalogFeedApiBaseUrl(), []);
 
@@ -662,38 +632,6 @@ export default function AdminProductsPage() {
     }
   }, [page, searchName, searchId, listSort]);
 
-  const enqueue1688SourceStockCheck = useCallback(
-    async (p: AdminProduct) => {
-      if (!looksLike1688OfferUrl(String(p.link_default ?? ''))) {
-        showToast(
-          'err',
-          'SKU này không có link offer 1688 trong link nguồn (product_url). Cập nhật trong Excel/import hoặc sửa trên nháp 1688.',
-          7000,
-        );
-        return;
-      }
-      setSourceStockEnqueueBusyIds((prev) => new Set(prev).add(p.id));
-      try {
-        await adminProductAPI.enqueueSourceStockCheckByDbId(p.id);
-        showToast(
-          'ok',
-          `Đã gửi kiểm tra nguồn 1688 cho «${String(p.name || p.product_id).slice(0, 48)}» — chờ worker (tối đa vài phút) rồi tải lại.`,
-          5500,
-        );
-        await fetchProducts();
-      } catch (e) {
-        showToast('err', e instanceof Error ? e.message : 'API kiểm tra nguồn thất bại.', 8000);
-      } finally {
-        setSourceStockEnqueueBusyIds((prev) => {
-          const n = new Set(prev);
-          n.delete(p.id);
-          return n;
-        });
-      }
-    },
-    [fetchProducts],
-  );
-
   useEffect(() => {
     try {
       const parsed = parseStoredProductListSort(localStorage.getItem(ADMIN_PRODUCTS_LIST_SORT_KEY));
@@ -800,7 +738,7 @@ export default function AdminProductsPage() {
         const job = await adminProductAPI.getImport1688Job(jobId);
         lastJob = job;
         setImport1688Progress({
-          message: job.message || 'Đang xử lý link 1688…',
+          message: job.message || 'Đang xử lý link Hibox…',
           percent: job.percent ?? null,
           phase: job.phase || null,
           warn: job.warnings?.[0] || null,
@@ -1064,10 +1002,17 @@ export default function AdminProductsPage() {
     e.preventDefault();
     const url = resolveImportLinkUrl(import1688Url);
     if (!url) {
-      showToast('err', 'Vui lòng dán link sản phẩm (1688 hoặc Hibox)');
+      showToast('err', 'Vui lòng dán link sản phẩm Hibox (hoặc taobao1688.kz)');
       return;
     }
-    const fromHibox = isHiboxProductUrl(url);
+    if (!isHiboxProductUrl(url)) {
+      showToast(
+        'err',
+        'Chỉ hỗ trợ link Hibox / taobao1688.kz. Import trực tiếp từ 1688.com đã tắt.',
+        8000,
+      );
+      return;
+    }
     try {
       localStorage.removeItem(ADMIN_1688_LINK_JOB_KEY);
     } catch {
@@ -1076,25 +1021,24 @@ export default function AdminProductsPage() {
     setImporting1688(true);
     setImport1688Draft(null);
     setImport1688Progress({
-      message: fromHibox ? 'Đang gửi link Hibox lên server…' : 'Đang gửi link 1688 lên server…',
+      message: 'Đang gửi link Hibox lên server…',
       percent: null,
     });
     try {
-      // Giữ URL ảnh gốc trong draft/export; không tự tải ảnh về Bunny ở luồng import link.
-      const started = await adminProductAPI.startImport1688(url, false, fromHibox ? 'hibox' : '1688');
+      const started = await adminProductAPI.startImport1688(url, false, 'hibox');
       try {
         const payload: Stored1688LinkJob = {
           job_id: started.job_id,
           draft_id: started.draft_id,
           started_at: Date.now(),
-          source: fromHibox ? 'hibox' : '1688',
+          source: 'hibox',
         };
         localStorage.setItem(ADMIN_1688_LINK_JOB_KEY, JSON.stringify(payload));
       } catch {
         /* noop */
       }
       setImport1688Progress({
-        message: fromHibox ? 'Đã nhận link, đang mở trang Hibox…' : 'Đã nhận link, đang mở trang 1688…',
+        message: 'Đã nhận link, đang mở trang Hibox…',
         percent: null,
       });
       const job = await pollImport1688Job(started.job_id);
@@ -1102,22 +1046,22 @@ export default function AdminProductsPage() {
         const body = [...(job.errors || []), ...(job.warnings || [])].filter(Boolean).join('\n');
         setImportDetailPanel({
           variant: 'err',
-          title: fromHibox ? 'Import Hibox thất bại' : 'Import 1688 thất bại',
+          title: 'Import Hibox thất bại',
           body: body || job.message || 'Không đọc được dữ liệu từ link.',
         });
-        showToast('err', job.message || (fromHibox ? 'Import Hibox thất bại' : 'Import 1688 thất bại'), 8000);
+        showToast('err', job.message || 'Import Hibox thất bại', 8000);
         return;
       }
       const draftId = job.draft_id ?? started.draft_id;
       const draft = await adminProductAPI.getImport1688Draft(draftId);
       setImport1688Draft(draft);
       const warnText = draft.warnings?.length ? ` Có ${draft.warnings.length} cảnh báo cần kiểm tra.` : '';
-      showToast('ok', `Đã tạo draft từ ${fromHibox ? 'Hibox' : '1688'}.${warnText}`, 6000);
+      showToast('ok', `Đã tạo draft từ Hibox.${warnText}`, 6000);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : fromHibox ? 'Import Hibox thất bại' : 'Import 1688 thất bại';
+      const msg = err instanceof Error ? err.message : 'Import Hibox thất bại';
       setImportDetailPanel({
         variant: 'err',
-        title: fromHibox ? 'Không thể import Hibox' : 'Không thể import 1688',
+        title: 'Không thể import Hibox',
         body: msg,
       });
       showToast('err', msg, 9000);
@@ -1174,9 +1118,9 @@ export default function AdminProductsPage() {
     try {
       await saveImport1688Draft();
       await adminProductAPI.exportImport1688DraftExcel(import1688Draft.id);
-      showToast('ok', 'Đã tải Excel draft 1688');
+      showToast('ok', 'Đã tải Excel bản nháp import');
     } catch (err) {
-      showToast('err', err instanceof Error ? err.message : 'Export draft 1688 thất bại', 8000);
+      showToast('err', err instanceof Error ? err.message : 'Export Excel nháp thất bại', 8000);
     } finally {
       setExporting1688Draft(false);
     }
@@ -1361,7 +1305,7 @@ export default function AdminProductsPage() {
       window.setTimeout(() => {
         const goDraft = Boolean(d.product_data);
         document
-          .getElementById(goDraft ? 'import-1688-draft' : 'import-1688')
+          .getElementById(goDraft ? 'import-hibox-draft' : 'import-hibox')
           ?.scrollIntoView({ behavior: 'smooth', block: goDraft ? 'nearest' : 'start' });
       }, 120);
     } catch (err) {
@@ -1499,7 +1443,7 @@ export default function AdminProductsPage() {
     if (!file) return;
     setExcelBatchFile(file);
     setExcelBatchHint(
-      `Đã chọn «${file.name}». Chọn trang cần lấy dữ liệu rồi bấm «Chạy lấy dữ liệu» — link sẽ được chuẩn hoá theo lựa chọn trước khi tạo nháp.`,
+      `Đã chọn «${file.name}». Chế độ «Tự động» sẽ đổi link Taobao/1688 sang Hibox khi có thể; hoặc chọn «Ép về Hibox». Bấm «Chạy lấy dữ liệu».`,
     );
   };
 
@@ -1728,6 +1672,14 @@ export default function AdminProductsPage() {
         saved = null;
       }
       if (!saved?.job_id) return;
+      if (saved.source === '1688') {
+        try {
+          localStorage.removeItem(ADMIN_1688_LINK_JOB_KEY);
+        } catch {
+          /* noop */
+        }
+        return;
+      }
       const maxAgeMs = 2 * 60 * 60 * 1000;
       if (saved.started_at && Date.now() - saved.started_at > maxAgeMs) {
         try {
@@ -1737,12 +1689,9 @@ export default function AdminProductsPage() {
         }
         return;
       }
-      const fromHibox = saved.source === 'hibox';
       setImporting1688(true);
       setImport1688Progress({
-        message: fromHibox
-          ? 'Khôi phục theo dõi import Hibox (job đã gửi trước đó)…'
-          : 'Khôi phục theo dõi import 1688 (job đã gửi trước đó)…',
+        message: 'Khôi phục theo dõi import Hibox (job đã gửi trước đó)…',
         percent: null,
       });
       try {
@@ -1757,10 +1706,10 @@ export default function AdminProductsPage() {
           const body = [...(job.errors || []), ...(job.warnings || [])].filter(Boolean).join('\n');
           setImportDetailPanel({
             variant: 'err',
-            title: fromHibox ? 'Import Hibox thất bại' : 'Import 1688 thất bại',
+            title: 'Import Hibox thất bại',
             body: body || job.message || 'Không đọc được dữ liệu từ link.',
           });
-          showToast('err', job.message || (fromHibox ? 'Import Hibox thất bại' : 'Import 1688 thất bại'), 8000);
+          showToast('err', job.message || 'Import Hibox thất bại', 8000);
           return;
         }
         const draftId = job.draft_id ?? saved.draft_id;
@@ -1772,13 +1721,13 @@ export default function AdminProductsPage() {
         if (cancelled) return;
         setImport1688Draft(draft);
         const warnText = draft.warnings?.length ? ` Có ${draft.warnings.length} cảnh báo cần kiểm tra.` : '';
-        showToast('ok', `Đã tạo draft từ ${fromHibox ? 'Hibox' : '1688'}.${warnText}`, 6000);
+        showToast('ok', `Đã tạo draft từ Hibox.${warnText}`, 6000);
       } catch (err) {
         if (cancelled) return;
-        const msg = err instanceof Error ? err.message : fromHibox ? 'Import Hibox thất bại' : 'Import 1688 thất bại';
+        const msg = err instanceof Error ? err.message : 'Import Hibox thất bại';
         setImportDetailPanel({
           variant: 'err',
-          title: fromHibox ? 'Không khôi phục được import Hibox' : 'Không khôi phục được import 1688',
+          title: 'Không khôi phục được import Hibox',
           body: msg,
         });
         showToast('err', msg, 9000);
@@ -2265,37 +2214,29 @@ export default function AdminProductsPage() {
             </div>
           ) : null}
           <section
-            id="import-1688"
-            aria-labelledby="import-1688-heading"
+            id="import-hibox"
+            aria-labelledby="import-hibox-heading"
             className="mt-6 scroll-mt-24 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/5"
           >
             <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-4 sm:px-5">
               <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
-                  <h2 id="import-1688-heading" className="text-lg font-semibold tracking-tight text-slate-900">
-                    Import 1688 và Hibox
+                  <h2 id="import-hibox-heading" className="text-lg font-semibold tracking-tight text-slate-900">
+                    Import Hibox
                   </h2>
                   <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                    Một URL hoặc Excel nhiều dòng → bản nháp. Luôn kiểm tra nháp trước khi đăng hoặc xuất Excel.
+                    Một URL hoặc Excel nhiều dòng → bản nháp (chỉ Hibox / taobao1688.kz). Luôn kiểm tra nháp trước khi đăng
+                    hoặc xuất Excel.
                   </p>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <span className="inline-flex items-center rounded-md border border-orange-200/80 bg-orange-50/90 px-2 py-0.5 text-[11px] font-medium text-orange-950">
-                      1688 · cookie Playwright
-                    </span>
                     <span className="inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-950">
-                      Hibox · không cần cookie
+                      Hibox · không cần cookie 1688
                     </span>
                   </div>
                 </div>
-                <a
-                  href="/admin/import-1688"
-                  className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
-                >
-                  Cấu hình cookie 1688
-                </a>
               </header>
 
-              <div className="mt-4" role="tablist" aria-label="Chế độ import 1688 / Hibox">
+              <div className="mt-4" role="tablist" aria-label="Chế độ import Hibox">
                 <div className="flex flex-wrap gap-1 rounded-xl bg-slate-100/95 p-1">
                   <button
                     type="button"
@@ -2365,19 +2306,19 @@ export default function AdminProductsPage() {
                 >
                 <h3 className="text-sm font-semibold text-slate-900">Import một link</h3>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Dán địa chỉ sản phẩm (1688, hibox hoặc taobao1688.kz).
+                  Dán địa chỉ sản phẩm trên Hibox hoặc mirror <span className="whitespace-nowrap">taobao1688.kz</span>.
                 </p>
                 <form onSubmit={handleImport1688} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
                   <div className="min-w-0 flex-1">
-                    <label htmlFor="admin-import-1688-url" className="sr-only">
-                      URL nguồn (1688 / Hibox)
+                    <label htmlFor="admin-import-hibox-url" className="sr-only">
+                      URL nguồn Hibox
                     </label>
                     <input
-                      id="admin-import-1688-url"
+                      id="admin-import-hibox-url"
                       type="url"
                       value={import1688Url}
                       onChange={(e) => setImport1688Url(e.target.value)}
-                      placeholder="https://detail.1688.com/… hoặc hibox.mn/v/… hoặc taobao1688.kz/…"
+                      placeholder="https://hibox.mn/v/… hoặc https://taobao1688.kz/item?id=…"
                       className="w-full rounded-lg border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-orange-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-orange-300/80"
                       autoComplete="off"
                       spellCheck={false}
@@ -2388,14 +2329,12 @@ export default function AdminProductsPage() {
                           <span aria-hidden className="text-orange-600 transition group-open:rotate-90">
                             ›
                           </span>
-                          Chi tiết: ảnh Bunny, Excel → Shop ID, luồng draft
+                          Chi tiết: ảnh, Excel → Shop ID, luồng draft
                         </span>
                       </summary>
                       <div className="border-t border-gray-100 px-3 py-2 leading-relaxed text-gray-600">
-                        <strong className="font-medium text-gray-800">1688:</strong> Playwright và cookie trong cấu hình backend (
-                        <span className="whitespace-nowrap">có thể tải ảnh lên Bunny</span>).{' '}
-                        <strong className="font-medium text-gray-800">Hibox:</strong> không cần cookie; ảnh giữ URL gốc. Luôn có bước
-                        nháp trước khi đăng hoặc export Excel khớp cột import.
+                        Luồng import Hibox không dùng cookie 1688; ảnh giữ URL gốc trên nháp. Luôn có bước nháp trước khi đăng
+                        hoặc export Excel khớp cột import.
                         <span className="mt-2 block">
                           File Excel link: ô <strong>Kiểu dáng / Style</strong> (hoặc cột AI đủ rộng) đồng bộ vào{' '}
                           <strong>Shop ID</strong> và trường kiểu dáng trong nháp.
@@ -2429,8 +2368,9 @@ export default function AdminProductsPage() {
                   <code className="rounded bg-white/80 px-1">LISTING_IMPORT_VND_PER_CNY</code>, mặc định 3580; hoặc cột{' '}
                   <code className="rounded bg-white/80 px-1">vnd_per_cny_used</code>), sau đó làm tròn lên bội 10.000&nbsp;₫.
                   Tuỳ chọn: Shop Trung Quốc / Tên tiếng Trung / «Mã sp»{' '}
-                  <span className="whitespace-nowrap">[A-Z]0001–9999</span>. Chọn file → chọn trang → bấm chạy; link không khớp
-                  trang đã chọn sẽ được đổi sang định dạng đúng trước khi tạo nháp (hoặc dòng bị bỏ qua kèm lý do).
+                  <span className="whitespace-nowrap">[A-Z]0001–9999</span>. Chọn file → chọn cách lấy dữ liệu → bấm chạy;
+                  URL sẽ được chuẩn hoá về Hibox: Taobao/Tmall và offer 1688 → <span className="whitespace-nowrap">hibox.mn/v/…</span>{' '}
+                  khi đọc được mã; hoặc dòng bị bỏ qua kèm lý do nếu không quy đổi được.
                 </p>
                 <div className="mt-3 flex flex-col gap-3">
                   <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
@@ -2449,15 +2389,12 @@ export default function AdminProductsPage() {
                       <select
                         id="admin-excel-batch-fetch-target"
                         value={excelBatchFetchTarget}
-                        onChange={(e) =>
-                          setExcelBatchFetchTarget(e.target.value as 'auto' | 'hibox' | '1688')
-                        }
+                        onChange={(e) => setExcelBatchFetchTarget(e.target.value as 'auto' | 'hibox')}
                         disabled={excelBatchBusy}
                         className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-orange-300 focus:outline-none focus:ring-2 focus:ring-orange-300/80 disabled:opacity-60"
                       >
-                        <option value="auto">Tự động (nhận dạng từ từng link)</option>
-                        <option value="hibox">Hibox — không cần cookie 1688</option>
-                        <option value="1688">1688 trực tiếp — cần cookie Playwright</option>
+                        <option value="auto">Tự động — Taobao / 1688 → Hibox khi đổi được</option>
+                        <option value="hibox">Ép về Hibox (hibox.mn)</option>
                       </select>
                     </div>
                     <button
@@ -2821,7 +2758,7 @@ export default function AdminProductsPage() {
 
             {import1688Draft?.product_data ? (
               <div
-                id="import-1688-draft"
+                id="import-hibox-draft"
                 className="scroll-mt-28 rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm ring-1 ring-slate-900/5 sm:p-5"
               >
                 <div className="mb-4 flex flex-col gap-1 border-b border-gray-100 pb-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
@@ -2848,7 +2785,7 @@ export default function AdminProductsPage() {
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={String(import1688Draft.product_data.main_image)}
-                          alt={String(import1688Draft.product_data.name || 'Ảnh sản phẩm 1688')}
+                          alt={String(import1688Draft.product_data.name || 'Ảnh sản phẩm nháp')}
                           className="h-40 w-full object-cover rounded-lg border border-gray-200 bg-gray-50"
                         />
                       </a>
@@ -3822,9 +3759,7 @@ export default function AdminProductsPage() {
                 <span className="font-semibold tabular-nums text-gray-900">
                   {data.total.toLocaleString('vi-VN')}
                 </span>{' '}
-                sản phẩm trong danh sách · cột{' '}
-                <span className="font-medium text-orange-900">«Nguồn 1688»</span> hiển thị kết quả kiểm tra tình trạng
-                link nguồn (offer)
+                sản phẩm trong danh sách
                 {totalPages > 1 ? (
                   <span className="text-gray-500">
                     {' '}
@@ -3858,9 +3793,6 @@ export default function AdminProductsPage() {
                           <th className="text-left py-3 px-4 font-semibold text-gray-700 w-32">Thương hiệu</th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">Danh mục</th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700 w-20">Trạng thái</th>
-                          <th className="text-left py-3 px-3 font-semibold text-gray-700 min-w-[8.75rem] max-w-[11rem]">
-                            Nguồn 1688
-                          </th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">Ảnh</th>
                         </tr>
                       </thead>
@@ -4005,53 +3937,6 @@ export default function AdminProductsPage() {
                           <span className={p.is_active !== false ? 'text-green-600' : 'text-gray-400'}>
                             {p.is_active !== false ? 'Hiển thị' : 'Ẩn'}
                           </span>
-                        </td>
-                        <td className="py-2 px-3 align-top max-w-[11rem]">
-                          {!looksLike1688OfferUrl(String(p.link_default ?? '')) ? (
-                            <span
-                              className="text-[11px] text-gray-400"
-                              title="Chỉ sản phẩm có link detail.1688.com/offer/… (hoặc offerId=) mới kiểm tra được nguồn."
-                            >
-                              —
-                            </span>
-                          ) : (
-                            <div className="flex flex-col gap-1 items-start">
-                              <span
-                                className={`text-xs font-semibold leading-tight ${admin1688SourceStockBadgeClass(
-                                  typeof p.source_stock_status === 'string' ? p.source_stock_status : null,
-                                )}`}
-                                title={
-                                  (
-                                    [
-                                      p.source_stock_error ? `Lỗi: ${String(p.source_stock_error)}` : '',
-                                      p.source_stock_checked_at
-                                        ? `Kiểm tra: ${new Date(String(p.source_stock_checked_at)).toLocaleString('vi-VN')}`
-                                        : '',
-                                    ]
-                                      .filter(Boolean)
-                                      .join('\n') || undefined
-                                  ) || 'Kiểm tra tồn kho/ghi nhận từ trang chi tiết 1688 (Playwright).'
-                                }
-                              >
-                                {admin1688SourceStockLabel(
-                                  typeof p.source_stock_status === 'string' ? p.source_stock_status : null,
-                                )}
-                              </span>
-                              {p.source_stock_checked_at ? (
-                                <span className="text-[10px] text-gray-500 tabular-nums leading-tight">
-                                  {new Date(String(p.source_stock_checked_at)).toLocaleString('vi-VN')}
-                                </span>
-                              ) : null}
-                              <button
-                                type="button"
-                                className="text-[11px] font-medium text-orange-700 hover:text-orange-900 hover:underline disabled:opacity-50 disabled:pointer-events-none"
-                                disabled={sourceStockEnqueueBusyIds.has(p.id)}
-                                onClick={() => void enqueue1688SourceStockCheck(p)}
-                              >
-                                {sourceStockEnqueueBusyIds.has(p.id) ? 'Đang gửi…' : 'Kiểm tra ngay'}
-                              </button>
-                            </div>
-                          )}
                         </td>
                         <td className="py-2 px-4">
                           <button
