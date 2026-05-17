@@ -30,6 +30,7 @@ from app.core.security import require_module_permission
 from app.core.config import settings
 from app.crud import product_media_purge
 from app.services.source_stock_checker import (
+    admin_preview_source_stock_by_url,
     enqueue_product_view_stock_check_if_needed,
     get_source_stock_worker_admin_snapshot,
     set_source_stock_worker_paused,
@@ -89,6 +90,12 @@ class AdminSingleProductDbIdBody(BaseModel):
 
 class AdminSourceStockWorkerPauseBody(BaseModel):
     paused: bool
+
+
+class AdminSourceStockPreviewUrlBody(BaseModel):
+    """Admin thử PDP (CSSBuy → Hibox gộp) theo một URL — không ghi DB."""
+
+    url: str = Field(..., min_length=8, max_length=8192)
 
 
 class AdminSourceStockResetPdpBody(BaseModel):
@@ -1013,6 +1020,18 @@ def admin_source_stock_force_worker_recheck_route(
             raise HTTPException(status_code=404, detail=f"Không có product id={pid}")
         raise HTTPException(status_code=400, detail=detail)
     return out
+
+
+@router.post("/admin/source-stock-batch/preview-url", response_model=dict, include_in_schema=False)
+def admin_source_stock_preview_url_route(
+    body: AdminSourceStockPreviewUrlBody,
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Thử PDP theo một link (CSSBuy→Hibox gộp) giống worker; không sửa bảng products — có thể chậm (~1–3 phút)."""
+    try:
+        return admin_preview_source_stock_by_url(str(body.url or "").strip())
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/admin/source-stock-batch/reset-pdp-cycle", response_model=dict, include_in_schema=False)

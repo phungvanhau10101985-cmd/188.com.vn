@@ -496,6 +496,29 @@ export interface AdminSourceStockForceWorkerRecheckResult {
   source_stock_next_check_at?: string | null;
 }
 
+/** Thử PDP theo một link — không ghi DB (CSSBuy→Hibox như worker). */
+export interface AdminSourceStockPreviewUrlBranch {
+  status: string;
+  error?: string | null;
+}
+
+export interface AdminSourceStockPreviewUrlCoercion {
+  cssbuy_url: string;
+  cssbuy_coercion_error: string;
+  hibox_url: string;
+  hibox_coercion_error: string;
+}
+
+export interface AdminSourceStockPreviewUrlResult {
+  ok: boolean;
+  canonical_input: string;
+  link_eligible: boolean;
+  coercion: AdminSourceStockPreviewUrlCoercion;
+  cssbuy: AdminSourceStockPreviewUrlBranch;
+  hibox: AdminSourceStockPreviewUrlBranch;
+  merged: AdminSourceStockPreviewUrlBranch;
+}
+
 /** Reset PDP source_stock_* trong phạm vi link + domain (bulk). */
 export interface AdminSourceStockResetPdpResult {
   ok: boolean;
@@ -1176,6 +1199,14 @@ export const adminProductAPI = {
         timeoutMs: 60_000,
       },
     ),
+
+  /** Một request thử PDP (CSSBuy→Hibox) theo URL — không cập nhật products. */
+  previewSourceStockByUrl: (url: string) =>
+    fetchAdmin<AdminSourceStockPreviewUrlResult>('/products/admin/source-stock-batch/preview-url', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+      timeoutMs: 240_000,
+    }),
 
   /**
    * Xóa lịch/ghi PDP (source_stock_*) và reset trạng thái kiểm tra trong phạm vi link giống queue-stats.

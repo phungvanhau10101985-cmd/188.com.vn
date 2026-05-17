@@ -6,6 +6,8 @@ import {
   adminProductAPI,
   type AdminSourceStockActivityReport,
   type AdminSourceStockActivityReportSampleRow,
+  type AdminSourceStockPreviewUrlBranch,
+  type AdminSourceStockPreviewUrlResult,
   type AdminSourceStockQueueStats,
   type AdminSourceStockWorkerProgressRow,
   type AdminSourceStockWorkerState,
@@ -120,6 +122,37 @@ function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+/** Thẻ kết quả nhánh PDP thử tay (preview URL). */
+function PreviewStockBranchCard({
+  title,
+  branch,
+}: {
+  title: string;
+  branch: AdminSourceStockPreviewUrlBranch;
+}) {
+  const st = (branch.status || '').trim().toLowerCase();
+  const skin =
+    st === 'in_stock'
+      ? 'border-emerald-300 bg-emerald-50/95 text-emerald-950'
+      : st === 'out_of_stock'
+        ? 'border-rose-300 bg-rose-50/95 text-rose-950'
+        : st === 'skipped'
+          ? 'border-slate-200 bg-white text-slate-700'
+          : st === 'error'
+            ? 'border-amber-400 bg-amber-50 text-amber-950'
+            : 'border-slate-200 bg-slate-50 text-slate-900';
+  const msg = typeof branch.error === 'string' ? branch.error.trim() : '';
+  return (
+    <div className={`rounded-lg border px-2.5 py-2 ${skin}`}>
+      <p className="text-[10px] font-semibold uppercase tracking-wide opacity-85">{title}</p>
+      <p className="text-sm font-semibold mt-1">
+        status: <code className="text-[12px] bg-white/60 px-1 rounded">{branch.status || '—'}</code>
+      </p>
+      {msg ? <p className="text-[11px] mt-1.5 whitespace-pre-wrap leading-snug opacity-95">{msg}</p> : null}
+    </div>
+  );
 }
 
 /** Ô «đang scrape / vừa xong / sắp tới» trên snapshot worker. */
@@ -682,6 +715,9 @@ export default function AdminSourceStockCheckPage() {
   /** Nhập đúng cụm trong modal — tránh nhấp nhầm «Reset toàn phạm vi». */
   const [resetPdpTypedPhrase, setResetPdpTypedPhrase] = useState('');
   const [resetPdpBusy, setResetPdpBusy] = useState(false);
+  const [testLinkInput, setTestLinkInput] = useState('');
+  const [testLinkBusy, setTestLinkBusy] = useState(false);
+  const [testLinkResult, setTestLinkResult] = useState<AdminSourceStockPreviewUrlResult | null>(null);
   const recheckPollCancelRef = useRef(false);
 
   const reportOosSampleRows = activityReport?.samples?.oos ?? EMPTY_REPORT_SAMPLE_ROWS;
@@ -821,6 +857,30 @@ export default function AdminSourceStockCheckPage() {
       setResetPdpBusy(false);
     }
   }, [domain, refreshActivityReport, refreshQueueStats, resetPdpTypedPhrase, showToast]);
+
+  const runTestLinkPreview = useCallback(async () => {
+    const u = testLinkInput.trim();
+    if (!u || u.length < 12 || !/^https?:\/\//i.test(u)) {
+      showToast('err', 'Dán một link PDP đầy đủ (bắt đầu bằng http hoặc https).');
+      return;
+    }
+    setTestLinkBusy(true);
+    setTestLinkResult(null);
+    try {
+      const r = await adminProductAPI.previewSourceStockByUrl(u);
+      setTestLinkResult(r);
+      if (!r.link_eligible) {
+        showToast('info', 'Link không thuộc miền worker PDP — xem ô «Gộp».');
+      } else {
+        showToast('ok', `Thử PDP xong · gộp: ${r.merged.status}`);
+      }
+    } catch (e) {
+      setTestLinkResult(null);
+      showToast('err', e instanceof Error ? e.message : String(e));
+    } finally {
+      setTestLinkBusy(false);
+    }
+  }, [testLinkInput, showToast]);
 
   const bumpReportBusy = useCallback((id: number, label: string) => {
     setReportOosRowBusyById((m) => ({ ...m, [id]: label }));
@@ -1298,6 +1358,96 @@ export default function AdminSourceStockCheckPage() {
             </p>
           </div>
         </div>
+
+        <section
+          className="rounded-lg border border-teal-200 bg-teal-50/55 px-3 py-3 space-y-2"
+          aria-labelledby="source-stock-test-link-heading"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h2 id="source-stock-test-link-heading" className="text-xs font-semibold text-teal-950 uppercase tracking-wide">
+                Thử PDP theo link (không ghi DB)
+              </h2>
+              <p className="text-[11px] text-teal-900/85 mt-1 max-w-[42rem] leading-snug">
+                Một request trên máy chủ — đúng thứ tự <strong>CSSBuy → bọc Hibox</strong> như worker PDP.{' '}
+                <strong>Rất có thể chậm</strong> (tới ~3 phút) khi scrape Hibox. Không cập nhật{' '}
+                <code className="text-[10px] bg-white/80 px-0.5 rounded border border-teal-100">products</code>.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="shrink-0 rounded-lg bg-teal-700 text-white px-3 py-2 text-xs font-semibold hover:bg-teal-800 disabled:opacity-45 flex items-center gap-2"
+              disabled={testLinkBusy}
+              aria-busy={testLinkBusy}
+              onClick={() => void runTestLinkPreview()}
+            >
+              {testLinkBusy ? (
+                <>
+                  <SpinnerIcon className="text-white" />
+                  Đang chạy…
+                </>
+              ) : (
+                'Chạy thử'
+              )}
+            </button>
+          </div>
+          <label htmlFor="source-stock-test-link-input" className="block">
+            <span className="sr-only">Link PDP để kiểm thử</span>
+            <textarea
+              id="source-stock-test-link-input"
+              rows={2}
+              className="w-full mt-1 border border-teal-200 rounded-lg px-3 py-2 text-sm placeholder:text-teal-900/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 disabled:bg-white/50"
+              placeholder="https://detail.1688.com/offer/… hoặc https://hibox.mn/v/…"
+              value={testLinkInput}
+              disabled={testLinkBusy}
+              onChange={(e) => setTestLinkInput(e.target.value)}
+            />
+          </label>
+
+          {testLinkResult?.ok ? (
+            <div className="rounded-lg border border-white/80 bg-white/90 px-2.5 py-2 space-y-2">
+              <p className="text-[11px] text-slate-700 leading-snug">
+                <span className="text-slate-500">Chuẩn hoá:</span>{' '}
+                <code className="text-[10px] break-all bg-slate-100 px-1 rounded">{testLinkResult.canonical_input}</code>
+                {' · '}
+                <span className={`font-semibold ${testLinkResult.link_eligible ? 'text-emerald-800' : 'text-amber-800'}`}>
+                  {testLinkResult.link_eligible ? 'Hợp miền worker' : 'Ngoài miền worker'}
+                </span>
+              </p>
+              <div className="grid sm:grid-cols-2 gap-x-3 gap-y-1.5 text-[10px] text-slate-600">
+                <p>
+                  CSSBuy (coerce){' '}
+                  {testLinkResult.coercion.cssbuy_url.trim() ? (
+                    <ExternalHttpLink url={testLinkResult.coercion.cssbuy_url} />
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                  {testLinkResult.coercion.cssbuy_coercion_error ? (
+                    <span className="block text-amber-900/90 mt-0.5">
+                      {testLinkResult.coercion.cssbuy_coercion_error}
+                    </span>
+                  ) : null}
+                </p>
+                <p>
+                  Hibox (coerce){' '}
+                  {testLinkResult.coercion.hibox_url.trim() ? (
+                    <ExternalHttpLink url={testLinkResult.coercion.hibox_url} />
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                  {testLinkResult.coercion.hibox_coercion_error ? (
+                    <span className="block text-amber-900/90 mt-0.5">
+                      {testLinkResult.coercion.hibox_coercion_error}
+                    </span>
+                  ) : null}
+                </p>
+              </div>
+              <PreviewStockBranchCard title="CSSBuy (/web/item + PDP HTML)" branch={testLinkResult.cssbuy} />
+              <PreviewStockBranchCard title="Hibox (scrape)" branch={testLinkResult.hibox} />
+              <PreviewStockBranchCard title="Gộp · như worker" branch={testLinkResult.merged} />
+            </div>
+          ) : null}
+        </section>
 
         <section
           className="rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-3 space-y-2"

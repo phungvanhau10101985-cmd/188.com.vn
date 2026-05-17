@@ -588,17 +588,8 @@ def _evaluate_stock_via_cssbuy(raw_url: str) -> SourceStockCheckResult:
         )
 
 
-def _evaluate_stock_primary_cssbuy_then_merge_hibox(raw_url: str) -> SourceStockCheckResult:
-    """
-    Đọc CSSBuy (/web/item) trước; nếu không ``in_stock`` thì scrape Hibox và gộp:
-    báo không còn offer / PDP lỗi của Hibox thắng; nếu Hibox vẫn ``in_stock`` nhưng CSS đã báo không còn dữ liệu offer — giữ kết luận theo CSS.
-    """
-    css = _evaluate_stock_via_cssbuy(raw_url)
-    if css.status == "in_stock":
-        return css
-
-    hb = _evaluate_stock_via_hibox(raw_url)
-
+def _merge_stock_cssbuy_then_hibox(css: SourceStockCheckResult, hb: SourceStockCheckResult) -> SourceStockCheckResult:
+    """Gộp hai nhánh CSSBuy và Hibox sau khi biết CSS không ``in_stock``."""
     if hb.status == "out_of_stock":
         parts = [p for p in (css.error, hb.error) if p]
         merged = "; ".join(parts).strip()
@@ -613,6 +604,85 @@ def _evaluate_stock_primary_cssbuy_then_merge_hibox(raw_url: str) -> SourceStock
 
     # CSS chỉ ``error`` (vd. không quy đổi được URL): tin nhánh Hibox.
     return hb
+
+
+def _evaluate_stock_primary_cssbuy_then_merge_hibox(raw_url: str) -> SourceStockCheckResult:
+    """
+    Đọc CSSBuy (/web/item) trước; nếu không ``in_stock`` thì scrape Hibox và gộp:
+    báo không còn offer / PDP lỗi của Hibox thắng; nếu Hibox vẫn ``in_stock`` nhưng CSS đã báo không còn dữ liệu offer — giữ kết luận theo CSS.
+    """
+    css = _evaluate_stock_via_cssbuy(raw_url)
+    if css.status == "in_stock":
+        return css
+
+    hb = _evaluate_stock_via_hibox(raw_url)
+    return _merge_stock_cssbuy_then_hibox(css, hb)
+
+
+def admin_preview_source_stock_by_url(raw_url: str) -> Dict[str, Any]:
+    """
+    Admin thử PDP giống worker (CSSBuy trước; nếu không ``in_stock`` → Hibox rồi gộp) **không ghi DB**.
+    Không scrape Hibox khi CSSBuy đã ``in_stock`` (giống merge thật).
+    """
+    stripped = (raw_url or "").strip()
+    canon = (normalize_product_import_url(stripped) or stripped).strip()
+
+    cssbuy_page, coercion_css_err = coerce_url_for_excel_batch_import(canon, FETCH_TARGET_CSSBUY)
+    hibox_page, coercion_hb_err = coerce_url_for_excel_batch_import(canon, FETCH_TARGET_HIBOX)
+
+    def _bubble(r: SourceStockCheckResult) -> Dict[str, Any]:
+        return {"status": (r.status or "").strip(), "error": r.error}
+
+    coercion = {
+        "cssbuy_url": (cssbuy_page or "").strip(),
+        "cssbuy_coercion_error": (coercion_css_err or "").strip(),
+        "hibox_url": (hibox_page or "").strip(),
+        "hibox_coercion_error": (coercion_hb_err or "").strip(),
+    }
+
+    markers = ("hibox.mn", "1688.com", "detail.1688", "offer.1688", "taobao", "tmall")
+    eligible = _link_eligible_for_hibox_stock_check(canon)
+    if not eligible:
+        note = (
+            "Link không thuộc miền được worker PDP kiểm tra — cần chứa một trong: "
+            + ", ".join(markers)
+        )
+        err_r = SourceStockCheckResult(status="error", error=note[:1000])
+        skipped = SourceStockCheckResult(status="skipped", error=None)
+        return {
+            "ok": True,
+            "canonical_input": canon,
+            "link_eligible": False,
+            "coercion": coercion,
+            "cssbuy": _bubble(skipped),
+            "hibox": _bubble(skipped),
+            "merged": _bubble(err_r),
+        }
+
+    css = _evaluate_stock_via_cssbuy(canon)
+    if css.status == "in_stock":
+        skip_r = SourceStockCheckResult(status="skipped", error="Không scrape Hibox — CSSBuy đã in_stock.")
+        return {
+            "ok": True,
+            "canonical_input": canon,
+            "link_eligible": True,
+            "coercion": coercion,
+            "cssbuy": _bubble(css),
+            "hibox": _bubble(skip_r),
+            "merged": _bubble(css),
+        }
+
+    hb = _evaluate_stock_via_hibox(canon)
+    merged = _merge_stock_cssbuy_then_hibox(css, hb)
+    return {
+        "ok": True,
+        "canonical_input": canon,
+        "link_eligible": True,
+        "coercion": coercion,
+        "cssbuy": _bubble(css),
+        "hibox": _bubble(hb),
+        "merged": _bubble(merged),
+    }
 
 
 def _hibox_quick_cart_cta_via_playwright(page_url: str) -> Optional[bool]:
