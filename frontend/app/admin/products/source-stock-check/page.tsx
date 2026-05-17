@@ -152,6 +152,11 @@ function PreviewStockBranchCard({
       <p className="text-sm font-semibold mt-1">
         status: <code className="text-[12px] bg-white/60 px-1 rounded">{branch.status || '—'}</code>
       </p>
+      {branch.checked_via ? (
+        <p className="text-[10px] mt-1">
+          nền: <code className="bg-white/60 px-1 rounded font-mono">{branch.checked_via}</code>
+        </p>
+      ) : null}
       {msg ? <p className="text-[11px] mt-1.5 whitespace-pre-wrap leading-snug opacity-95">{msg}</p> : null}
     </div>
   );
@@ -217,6 +222,12 @@ function WorkerStockProgressCard({
                 <p>
                   Trạng thái:{' '}
                   <code className="text-[10px] bg-slate-100 px-1 rounded border border-slate-200">{row.source_stock_status}</code>
+                  {row.source_stock_check_platform ? (
+                    <>
+                      {' '}
+                      · nền <code className="text-[10px] bg-slate-100 px-1 rounded border border-slate-200">{row.source_stock_check_platform}</code>
+                    </>
+                  ) : null}
                 </p>
               ) : null}
               {row.finished_at_utc_iso ? (
@@ -324,7 +335,7 @@ function SourceStockReportSampleTable({
   oosBulkSelection?: ReportSampleOosBulkSelection;
   pagination?: ReportSampleTablePagination;
 }) {
-  const colSpan = 11 + (oosActions ? 1 : 0) + (oosBulkSelection ? 1 : 0);
+  const colSpan = 12 + (oosActions ? 1 : 0) + (oosBulkSelection ? 1 : 0);
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
 
   const selectedSet = useMemo(
@@ -492,6 +503,9 @@ function SourceStockReportSampleTable({
                 source_stock_status
               </th>
               <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
+                Nền kết luận
+              </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
                 Kiểm tra nguồn
               </th>
               <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
@@ -545,6 +559,9 @@ function SourceStockReportSampleTable({
                   <td className="px-2 py-1.5 max-w-[14rem]">{row.name}</td>
                   <td className="px-2 py-1.5 whitespace-nowrap">{row.available}</td>
                   <td className="px-2 py-1.5 whitespace-nowrap">{row.source_stock_status ?? '—'}</td>
+                  <td className="px-2 py-1.5 whitespace-nowrap font-mono text-[11px]" title={row.source_stock_check_platform ?? ''}>
+                    {row.source_stock_check_platform ?? '—'}
+                  </td>
                   <td className="px-2 py-1.5 whitespace-nowrap text-[11px]">
                     <span className="block">{formatReportTimestampUtc(row.source_stock_checked_at)}</span>
                     {formatReportAge(row.source_stock_checked_at) ? (
@@ -874,7 +891,10 @@ export default function AdminSourceStockCheckPage() {
       if (!r.link_eligible) {
         showToast('info', 'Link không thuộc miền worker PDP — xem ô «Gộp».');
       } else {
-        showToast('ok', `Thử PDP xong · ${r.merged.status}`);
+        showToast(
+          'ok',
+          `Thử PDP xong · ${r.merged.status}${r.merged.checked_via ? ` (${r.merged.checked_via})` : ''}`,
+        );
       }
     } catch (e) {
       setTestLinkResult(null);
@@ -1743,10 +1763,11 @@ export default function AdminSourceStockCheckPage() {
               <details className="text-[11px] text-indigo-900/85 mb-2 rounded border border-white/70 bg-white/50 px-2 py-1.5">
                 <summary className="cursor-pointer font-medium select-none text-indigo-950">Giải thích nhanh các cột đếm</summary>
                 <p className="mt-2 text-gray-700 leading-relaxed">
-                  Cùng phạm vi <code className="text-[10px] bg-gray-50 px-0.5 rounded border">is_active</code> và link như queue. «TTL
-                  batch»: <code className="text-[10px] bg-gray-50 px-0.5 rounded border">admin_source_batch_scanned_at</code> trong
-                  cửa sổ. «Kiểm tra nguồn»: <code className="text-[10px] bg-gray-50 px-0.5 rounded border">source_stock_checked_at</code>{' '}
-                  trong cửa sổ. Hết / còn: theo{' '}
+                  Cùng phạm vi <code className="text-[10px] bg-gray-50 px-0.5 rounded border">is_active</code> và link như queue. «Nền kết luận»:{' '}
+                  <code className="text-[10px] bg-gray-50 px-0.5 rounded border mx-0.5">source_stock_check_platform</code>{' '}
+                  (cssbuy / hibox / batch ví dụ cssbuy+hibox). «TTL batch»:{' '}
+                  <code className="text-[10px] bg-gray-50 px-0.5 rounded border">admin_source_batch_scanned_at</code> trong cửa sổ. «Kiểm tra
+                  nguồn»: <code className="text-[10px] bg-gray-50 px-0.5 rounded border">source_stock_checked_at</code> trong cửa sổ. Hết / còn: theo{' '}
                   <code className="text-[10px] bg-gray-50 px-0.5 rounded border">source_stock_status</code> và tồn.
                 </p>
               </details>
@@ -1959,7 +1980,8 @@ export default function AdminSourceStockCheckPage() {
                 Sẽ đặt lại <code className="text-xs bg-gray-100 px-1 rounded">source_stock_status</code> về{' '}
                 <code className="text-xs bg-gray-100 px-1 rounded">unknown</code>, xóa{' '}
                 <code className="text-xs bg-gray-100 px-1 rounded">source_stock_checked_at</code>,{' '}
-                <code className="text-xs bg-gray-100 px-1 rounded">source_stock_next_check_at</code>, ghi chú lỗi — cho{' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">source_stock_next_check_at</code>,{' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">source_stock_check_platform</code>, ghi chú lỗi — cho{' '}
                 <strong>tất cả sản trong phạm vi link như ô «Tiến độ DB»</strong> đang hiển thị (<strong>{domain}</strong>,{' '}
                 <strong>active only</strong>).
               </p>

@@ -306,6 +306,9 @@ def admin_source_stock_activity_report(
       (worker PDP, batch khi commit OOS, v.v.).
     - Phân rã ``source_stock_status`` chỉ trên các SP có ``source_stock_checked_at`` trong cửa sổ.
 
+    - Mỗi dòng mẫu có thêm ``source_stock_check_platform`` khi PDP worker hoặc batch commit kết luận
+      (cssbuy / hibox / ``cssbuy+hibox`` khi batch ghi nhận cả hai nền không đọc được).
+
     Mẫu trong ``samples``: sắp xếp **mới nhất trước** (``source_stock_checked_at`` hoặc ``admin_source_batch_scanned_at``
     giảm dần), phân trang độc lập mỗi nhóm qua ``samples_*_page`` và ``sample_page_size``.
     """
@@ -415,6 +418,7 @@ def admin_source_stock_activity_report(
             "source_stock_status": p.source_stock_status,
             "source_stock_checked_at": iso_dt(p.source_stock_checked_at),
             "admin_source_batch_scanned_at": iso_dt(p.admin_source_batch_scanned_at),
+            "source_stock_check_platform": (p.source_stock_check_platform or "").strip() or None,
             "available": int(p.available or 0),
         }
 
@@ -990,6 +994,7 @@ def _finalize_scan_commit_and_serialise(
 
     updated_ids: List[int] = []
     scan_status = "out_of_stock" if classified_oos else ("in_stock" if str(raw_status or "").strip().lower() == "ok" else "error")
+    plat = domain_used.strip()[:80] if domain_used.strip() else None
     if matched:
         now = _utcnow()
         seen: set[int] = set()
@@ -1005,6 +1010,7 @@ def _finalize_scan_commit_and_serialise(
                 p.available = 500
             p.source_stock_status = scan_status
             p.source_stock_checked_at = now
+            p.source_stock_check_platform = plat
             err_note = (detail or "") if isinstance(detail, str) else ""
             if warnings:
                 err_note = (err_note + " " if err_note else "") + "; ".join(warnings[:3])
@@ -1196,6 +1202,7 @@ def admin_clear_false_source_oos_flag(db: Session, *, db_id: int) -> Dict[str, A
         row.source_stock_error = None
         row.source_stock_checked_at = None
         row.source_stock_next_check_at = None
+        row.source_stock_check_platform = None
         if int(row.available or 0) <= 0:
             row.available = 500
         db.commit()
@@ -1248,6 +1255,7 @@ def admin_reset_source_stock_pdp_cycle(
             source_stock_checked_at=None,
             source_stock_status="unknown",
             source_stock_error=None,
+            source_stock_check_platform=None,
         )
     )
     res = db.execute(stmt)

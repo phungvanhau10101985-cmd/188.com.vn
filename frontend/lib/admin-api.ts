@@ -430,6 +430,8 @@ export interface AdminSourceStockActivityReportSampleRow {
   link_convert_hibox_err?: string;
   source_stock_status: string | null;
   source_stock_checked_at: string | null;
+  /** Nền đã đọc PDP cho kết quả kiểm tra (worker: cssbuy / hibox; batch: cssbuy, hibox, cssbuy+hibox…) */
+  source_stock_check_platform?: string | null;
   admin_source_batch_scanned_at: string | null;
   available: number;
 }
@@ -500,6 +502,7 @@ export interface AdminSourceStockForceWorkerRecheckResult {
 export interface AdminSourceStockPreviewUrlBranch {
   status: string;
   error?: string | null;
+  checked_via?: string | null;
 }
 
 export interface AdminSourceStockPreviewUrlCoercion {
@@ -538,6 +541,8 @@ export interface AdminSourceStockWorkerProgressRow {
   checking_started_at_utc_iso?: string | null;
   finished_at_utc_iso?: string | null;
   source_stock_status?: string | null;
+  /** Nền đã đọc PDP trong lần kiểm tra gần nhất (snapshot merge từ products). */
+  source_stock_check_platform?: string | null;
   queue_hint?: string | null;
   queue_hint_vi?: string | null;
 }

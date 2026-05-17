@@ -71,6 +71,8 @@ class Product(Base):
     source_stock_checked_at = Column(DateTime(timezone=True), nullable=True)
     source_stock_next_check_at = Column(DateTime(timezone=True), nullable=True, index=True)
     source_stock_error = Column(Text, nullable=True)
+    # PDP/batch đã đọc kết quả qua nền nào (cssbuy | hibox | cssbuy+hibox cho batch lỗi kép…) — chỉ báo cáo/đối soát.
+    source_stock_check_platform = Column(String(80), nullable=True)
     # Trang admin Kiểm tra nguồn (DB): thời điểm đã xếp hàng chạy lần gần nhất; qua N ngày mới vào lại vòng.
     admin_source_batch_scanned_at = Column(DateTime(timezone=True), nullable=True, index=True)
 

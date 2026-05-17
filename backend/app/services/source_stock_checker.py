@@ -157,6 +157,7 @@ def _bulk_product_mini_payloads(sess: Session, ids: Sequence[int]) -> Dict[int, 
             "product_code": ((p.product_id or "").strip() or None),
             "name": (p.name or "")[:220],
             "link_default": ((p.link_default or "").strip() or None),
+            "source_stock_check_platform": ((p.source_stock_check_platform or "").strip() or None),
         }
     return out
 
@@ -444,6 +445,7 @@ def get_source_stock_worker_admin_snapshot(*, force_refresh_pause: bool = False)
 class SourceStockCheckResult:
     status: str
     error: Optional[str] = None
+    checked_via: Optional[str] = None  # cssbuy | hibox — nền cho kết luận PDP worker lần này
 
 
 _CSSBUY_BLOCK_MSG_FRAGMENTS = (
@@ -570,6 +572,7 @@ def _evaluate_stock_via_cssbuy(raw_url: str) -> SourceStockCheckResult:
         return SourceStockCheckResult(
             status="error",
             error=f"Không quy đổi được sang URL CSSBuy hợp lệ: {coercion_err}"[:1000],
+            checked_via="cssbuy",
         )
     canonical_url = (cssbuy_page or "").strip() or canonical_url
     try:
@@ -582,12 +585,14 @@ def _evaluate_stock_via_cssbuy(raw_url: str) -> SourceStockCheckResult:
                 return SourceStockCheckResult(
                     status="blocked",
                     error=(compact + " — có dấu hiệu chặn/CAPTCHA, fallback Hibox.")[:1000],
+                    checked_via="cssbuy",
                 )
             return SourceStockCheckResult(
                 status="out_of_stock",
                 error=(
                     "CSSBuy /web/item không trả OK (dead offer hoặc API nghiệp vụ từ chối) — " + msg_tail
                 )[:1000],
+                checked_via="cssbuy",
             )
         rows = payload.get("data")
         row0 = rows[0] if isinstance(rows, list) and rows else None
@@ -595,6 +600,7 @@ def _evaluate_stock_via_cssbuy(raw_url: str) -> SourceStockCheckResult:
             return SourceStockCheckResult(
                 status="out_of_stock",
                 error="CSSBuy trả payload không có dòng data hợp lệ — thường gặp khi PDP không load / offer đã mất.",
+                checked_via="cssbuy",
             )
         ph = (page_html or "").strip()
         if cssbuy_html_disclaimer_agreement_without_add_to_cart(ph):
@@ -604,6 +610,7 @@ def _evaluate_stock_via_cssbuy(raw_url: str) -> SourceStockCheckResult:
                     "CSSBuy: HTML PDP có đoạn disclaimer đồng ý («I have read… terms of service…») nhưng "
                     "không thấy nút «Add To Cart» — coi PDP hết hàng / không còn bán được."
                 )[:1000],
+                checked_via="cssbuy",
             )
         try:
             price = float(row0.get("price") or 0)
@@ -620,13 +627,15 @@ def _evaluate_stock_via_cssbuy(raw_url: str) -> SourceStockCheckResult:
                         "CSSBuy: API có dữ liệu nhưng HTML PDP không có nút «Add To Cart» "
                         "(khoanh đỏ) — coi offer không còn bán được / hết hàng."
                     )[:1000],
+                    checked_via="cssbuy",
                 )
-            return SourceStockCheckResult(status="in_stock")
+            return SourceStockCheckResult(status="in_stock", checked_via="cssbuy")
         return SourceStockCheckResult(
             status="out_of_stock",
             error=(
                 "CSSBuy: thiếu tiêu đề hoặc không có (giá > 0 / ma trận SKU thuộc tính) — không khẳng định được offer còn."
             ),
+            checked_via="cssbuy",
         )
     except ImportCssbuyError as exc:
         es = str(exc)
@@ -637,12 +646,14 @@ def _evaluate_stock_via_cssbuy(raw_url: str) -> SourceStockCheckResult:
                 + "Cloudflare/WAF hoặc mạng — "
                 + es
             )[:1000],
+            checked_via="cssbuy",
         )
     except Exception as exc:
         logger.warning("cssbuy source stock evaluate failed: %s", exc)
         return SourceStockCheckResult(
             status="error",
             error=((str(exc) or "unexpected_error")[:920] + " — chưa kiểm tra được.")[:1000],
+            checked_via="cssbuy",
         )
 
 
@@ -675,7 +686,7 @@ def admin_preview_source_stock_by_url(raw_url: str) -> Dict[str, Any]:
     hibox_page, coercion_hb_err = coerce_url_for_excel_batch_import(canon, FETCH_TARGET_HIBOX)
 
     def _bubble(r: SourceStockCheckResult) -> Dict[str, Any]:
-        return {"status": (r.status or "").strip(), "error": r.error}
+        return {"status": (r.status or "").strip(), "error": r.error, "checked_via": r.checked_via}
 
     coercion = {
         "cssbuy_url": (cssbuy_page or "").strip(),
@@ -811,6 +822,7 @@ def _evaluate_stock_via_hibox(raw_url: str) -> SourceStockCheckResult:
         return SourceStockCheckResult(
             status="error",
             error=f"Không quy đổi được sang link Hibox hợp lệ: {coercion_err}"[:1000],
+            checked_via="hibox",
         )
     coerced = (hibox_url or "").strip()
     canonical_url = hibox_canonical_scrape_url(coerced) if coerced else canonical_url
@@ -824,6 +836,7 @@ def _evaluate_stock_via_hibox(raw_url: str) -> SourceStockCheckResult:
                 error=(
                     "Hibox: trang báo không tìm thấy sản theo mã / đã xóa khỏi Taobao (hoặc tương đương) — coi hết hàng nguồn."
                 )[:1000],
+                checked_via="hibox",
             )
         title_like = rr.get("title")
         sku_like = rr.get("sku")
@@ -838,14 +851,16 @@ def _evaluate_stock_via_hibox(raw_url: str) -> SourceStockCheckResult:
                     error=(
                         "Hibox: không thấy nút «САГСЛАХ» (thêm giỏ — khoanh đỏ) trên PDP — coi hết hàng nguồn."
                     ),
+                    checked_via="hibox",
                 )
             warn_txt = "; ".join(list(warns or [])[:6]).strip()
-            return SourceStockCheckResult(status="in_stock", error=warn_txt or None)
+            return SourceStockCheckResult(status="in_stock", error=warn_txt or None, checked_via="hibox")
         return SourceStockCheckResult(
             status="out_of_stock",
             error=(
                 "Hibox không trả đủ dữ liệu PDP (thiếu tiêu đề/SKU và không có màu–size có nội dung)."
             ),
+            checked_via="hibox",
         )
     except ImportHiboxError as exc:
         fb_cart = _hibox_quick_cart_cta_via_playwright(canonical_url)
@@ -856,13 +871,15 @@ def _evaluate_stock_via_hibox(raw_url: str) -> SourceStockCheckResult:
                     "Hibox: không thấy nút «САГСЛАХ» (thêm giỏ) sau khi tải PDP — coi hết hàng. "
                     f"(scrape báo lỗi tạm: {str(exc)[:420]})"
                 )[:1000],
+                checked_via="hibox",
             )
-        return SourceStockCheckResult(status="error", error=str(exc)[:1000])
+        return SourceStockCheckResult(status="error", error=str(exc)[:1000], checked_via="hibox")
     except Exception as exc:
         logger.warning("hibox source stock evaluate failed: %s", exc)
         return SourceStockCheckResult(
             status="error",
             error=((str(exc) or "unexpected_error")[:920] + " — chưa kiểm tra được.")[:1000],
+            checked_via="hibox",
         )
 
 
@@ -908,6 +925,7 @@ def enqueue_source_stock_check(product_id: int, *, reason: str = "manual", force
         product.source_stock_status = "queued"
         product.source_stock_error = None
         product.source_stock_next_check_at = _utcnow()
+        product.source_stock_check_platform = None
         db.commit()
         logger.info("source stock check queued: product_id=%s reason=%s", product_id, reason)
         return True
@@ -952,6 +970,7 @@ def _claim_due_product_id() -> Optional[int]:
             return None
         product.source_stock_status = "queued"
         product.source_stock_next_check_at = now
+        product.source_stock_check_platform = None
         db.commit()
         return product.id
     except Exception as exc:
@@ -977,6 +996,7 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
         product.source_stock_status = "checking"
         product.source_stock_error = None
         product.source_stock_next_check_at = _utcnow()
+        product.source_stock_check_platform = None
         db.commit()
 
         _worker_progress_mark_started(product_id)
@@ -996,6 +1016,8 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
         product.source_stock_status = result.status
         product.source_stock_checked_at = now
         product.source_stock_error = result.error
+        via = ((result.checked_via or "").strip()[:80] if result.checked_via else "") or None
+        product.source_stock_check_platform = via
         retry_minutes = (
             settings.SOURCE_STOCK_CHECK_ERROR_RETRY_MINUTES
             if result.status in {"error", "unknown", "blocked"}
@@ -1036,6 +1058,7 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
                 product.source_stock_status = "error"
                 product.source_stock_checked_at = now
                 product.source_stock_error = str(exc)[:1000]
+                product.source_stock_check_platform = None
                 product.source_stock_next_check_at = now + timedelta(minutes=settings.SOURCE_STOCK_CHECK_ERROR_RETRY_MINUTES)
                 db.commit()
                 committed_fallback = True
