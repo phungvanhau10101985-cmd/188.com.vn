@@ -55,7 +55,7 @@ type ReportSampleTablePagination = {
   onPageChange: (nextPage: number) => void;
 };
 
-/** Nguồn trong thống kê queue / báo cáo (CSSBuy mặc định). Worker PDP: CSSBuy (/web/item) trước; nếu không in_stock thì scrape Hibox và gộp (sai khác Hibox lỗi/Mongolia). */
+/** Nguồn trong thống kê queue / báo cáo (CSSBuy mặc định). Worker PDP: CSSBuy (/web/item) một lần; chỉ scrape Hibox khi CSS `blocked`/`error`. */
 type SourceStockDomain = 'hibox' | 'cssbuy';
 
 function SpinnerIcon({ className }: { className?: string }) {
@@ -140,9 +140,11 @@ function PreviewStockBranchCard({
         ? 'border-rose-300 bg-rose-50/95 text-rose-950'
         : st === 'skipped'
           ? 'border-slate-200 bg-white text-slate-700'
-          : st === 'error'
-            ? 'border-amber-400 bg-amber-50 text-amber-950'
-            : 'border-slate-200 bg-slate-50 text-slate-900';
+          : st === 'blocked'
+            ? 'border-violet-400 bg-violet-50 text-violet-950'
+            : st === 'error'
+              ? 'border-amber-400 bg-amber-50 text-amber-950'
+              : 'border-slate-200 bg-slate-50 text-slate-900';
   const msg = typeof branch.error === 'string' ? branch.error.trim() : '';
   return (
     <div className={`rounded-lg border px-2.5 py-2 ${skin}`}>
@@ -872,7 +874,7 @@ export default function AdminSourceStockCheckPage() {
       if (!r.link_eligible) {
         showToast('info', 'Link không thuộc miền worker PDP — xem ô «Gộp».');
       } else {
-        showToast('ok', `Thử PDP xong · gộp: ${r.merged.status}`);
+        showToast('ok', `Thử PDP xong · ${r.merged.status}`);
       }
     } catch (e) {
       setTestLinkResult(null);
@@ -1239,8 +1241,12 @@ export default function AdminSourceStockCheckPage() {
               từng SP và ghi vào DB. Env chính:{' '}
               <code className="text-[11px] bg-gray-100 px-1 rounded">SOURCE_STOCK_CHECK_ENABLED</code> (mặc định <strong>bật</strong>; đặt
               false và khởi động lại backend để tắt), cùng <code className="text-[11px] bg-gray-100 px-1 rounded">SOURCE_STOCK_CHECK_*</code>{' '}
-              (interval, stale…). Worker ưu tiên <strong>API CSSBuy</strong> (/web/item); nếu không <strong>in_stock</strong> thì scrape{' '}
-              <strong>Hibox</strong> và gộp kết quả (Hibox báo offer mất / trang lỗi → ưu tiên hết hàng; CSS không tải data / code≠0 → thường coi hết offer). Tab này chỉ xem tiến độ queue và báo cáo — không scrape từ trình duyệt.
+              (interval, stale…). Ưu tiên <strong>CSSBuy</strong> (/web/item): có <strong>in_stock</strong> hoặc <strong>out_of_stock</strong> nghiệp vụ
+              thì <strong>một PDP</strong> rồi dừng; chỉ <strong>mở Hibox</strong> khi CSS báo{' '}
+              <code className="text-[10px] px-1 bg-gray-50 rounded border">blocked</code> /{' '}
+              <code className="text-[10px] px-1 bg-gray-50 rounded border">error</code>{' '}
+              (CAPTCHA/WAF không CSRF không JSON, không quy đổi URL…); không đọc cả hai nguồn để «gộp» trong một lần có
+              kết luận. Tab này chỉ là dashboard admin.
             </p>
           </div>
         </div>
@@ -1257,8 +1263,11 @@ export default function AdminSourceStockCheckPage() {
           <div className="px-3 pb-3 pt-0 space-y-3 text-[13px] leading-relaxed text-gray-700 border-t border-gray-200">
             <p>
               Worker máy chủ (khi <code className="text-[11px] bg-white px-1 rounded border border-gray-200">SOURCE_STOCK_CHECK_ENABLED</code>{' '}
-              bật — mặc định vậy) gọi <strong>CSSBuy /web/item</strong> trước; nếu không in_stock hoặc thiếu dữ liệu offer (kể code API / skeleton PDP) hoặc cần chốt qua PDP thì scrape <strong>Hibox</strong> trong cùng lượt và gộp, một SP mỗi
-              vòng, nghỉ theo{' '}
+              bật — mặc định vậy) luôn thử CSSBuy PDP + <code className="text-[11px] bg-white px-1 rounded border border-gray-200">POST /web/item</code>; nếu
+              response là <strong>in_stock</strong>/<strong>out_of_stock</strong> nghiệp vụ thì không scrape Hibox. Chỉ khi là{' '}
+              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">blocked</code> /{' '}
+              <code className="text-[11px] bg-white px-1 rounded border border-gray-200">error</code> (chặn bảo mật, CAPTCHA, thiếu CSRF không JSON…) mới scrape Hibox thay vai trò PDP.
+              Vòng chỉ xử lý một SP, nghỉ theo{' '}
               <code className="text-[11px] bg-white px-1 rounded border border-gray-200">SOURCE_STOCK_CHECK_INTERVAL_SECONDS</code>. Không
               cần mở tab admin để duy trì luồng. Khi phản hồi báo chặn / rủi ro (
               <code className="text-[11px] bg-white px-1 rounded border border-gray-200">blocked</code>
@@ -1332,8 +1341,10 @@ export default function AdminSourceStockCheckPage() {
             <span className="text-xs font-medium text-gray-500">Luồng</span>
             <p className="text-sm font-semibold text-gray-900">Theo DB (queue)</p>
             <p className="text-[11px] text-gray-500 max-w-[19rem] leading-snug">
-              Worker máy chủ (mặc định <strong>bật</strong>; CSSBuy /web/item trước, không in_stock → Hibox gộp) đọc và cập nhật DB —
-              tab chỉ là dashboard, không có lượt chạy từ trình duyệt.
+              Worker máy chủ (<strong>mặc định bật</strong>): CSSBuy PDP + `/web/item` một lần; chỉ mở Hibox khi CSS{' '}
+              <code className="text-[10px] bg-gray-100 px-0.5 rounded">blocked</code> /{' '}
+              <code className="text-[10px] bg-gray-100 px-0.5 rounded">error</code> —
+              dashboard không chạy scrape tay.
             </p>
           </div>
           <div className="flex flex-col gap-1 flex-1 min-w-[12rem] max-w-md">
@@ -1353,8 +1364,7 @@ export default function AdminSourceStockCheckPage() {
               <option value="hibox">hibox.mn — scrape</option>
             </select>
             <p className="text-[11px] text-gray-500 mt-1 leading-snug">
-              Mặc định CSSBuy. Lọc số trong «Tiến độ DB» và «Báo cáo 30 ngày» theo cách đọc đã chọn; worker PDP vẫn CSSBuy→Hibox (gộp) như đầu trang,
-              chỉ báo KPI nền chứ không ép miền từ menu này.
+              Mặc định CSSBuy. KPI «Tiến độ DB» / «Báo cáo» lọc theo miền đã chọn; worker vẫn CSS trước, Hibox chỉ fallback chặn.
             </p>
           </div>
         </div>
@@ -1369,8 +1379,12 @@ export default function AdminSourceStockCheckPage() {
                 Thử PDP theo link (không ghi DB)
               </h2>
               <p className="text-[11px] text-teal-900/85 mt-1 max-w-[42rem] leading-snug">
-                Một request trên máy chủ — đúng thứ tự <strong>CSSBuy → bọc Hibox</strong> như worker PDP.{' '}
-                <strong>Rất có thể chậm</strong> (tới ~3 phút) khi scrape Hibox. Không cập nhật{' '}
+                Giống worker: chỉ một PDP có kết luận; ưu tiên CSSBuy,{' '}
+                <strong>chỉ fallback Hibox</strong> khi CSS{' '}
+                <code className="text-[10px] bg-white/80 px-0.5 rounded">blocked</code> /{' '}
+                <code className="text-[10px] bg-white/80 px-0.5 rounded">error</code>{' '}
+                (CAPTCHA/WAF/thiếu CSRF không JSON…) •{' '}
+                <strong>Có thể chậm</strong> (~3 phút) khi cần Hibox. Không ghi{' '}
                 <code className="text-[10px] bg-white/80 px-0.5 rounded border border-teal-100">products</code>.
               </p>
             </div>
@@ -1444,7 +1458,7 @@ export default function AdminSourceStockCheckPage() {
               </div>
               <PreviewStockBranchCard title="CSSBuy (/web/item + PDP HTML)" branch={testLinkResult.cssbuy} />
               <PreviewStockBranchCard title="Hibox (scrape)" branch={testLinkResult.hibox} />
-              <PreviewStockBranchCard title="Gộp · như worker" branch={testLinkResult.merged} />
+              <PreviewStockBranchCard title="Kết quả dùng (một PDP — như worker)" branch={testLinkResult.merged} />
             </div>
           ) : null}
         </section>
@@ -1456,7 +1470,7 @@ export default function AdminSourceStockCheckPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
               <p className="text-xs font-semibold text-indigo-950 uppercase tracking-wide">
-                Worker PDP / CSSBuy→Hibox (server)
+                Worker PDP · CSSBuy, fallback Hibox (server)
               </p>
               {workerState ? (
                 <>

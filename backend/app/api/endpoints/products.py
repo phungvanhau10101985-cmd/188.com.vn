@@ -93,7 +93,7 @@ class AdminSourceStockWorkerPauseBody(BaseModel):
 
 
 class AdminSourceStockPreviewUrlBody(BaseModel):
-    """Admin thử PDP (CSSBuy → Hibox gộp) theo một URL — không ghi DB."""
+    """Admin thử PDP theo một URL — không ghi DB (ưu tiên CSSBuy; Hibox chỉ khi CSS blocked/error)."""
 
     url: str = Field(..., min_length=8, max_length=8192)
 
@@ -1009,7 +1009,7 @@ def admin_source_stock_force_worker_recheck_route(
     _: AdminUser = Depends(require_module_permission("products")),
 ):
     """
-    Xếp lại PDP worker: CSSBuy (/web/item) trước, gộp scrape Hibox khi không còn in_stock từ CSS;
+    Xếp lại PDP worker: CSSBuy (/web/item) trước; chỉ scrape Hibox khi CSS blocked/error (chặn/CAPTCHA…);
     kết quả in_stock / out_of_stock cập nhật sau khi worker chạy.
     """
     out = admin_force_worker_source_stock_recheck(db, db_id=int(body.db_id))
@@ -1027,7 +1027,7 @@ def admin_source_stock_preview_url_route(
     body: AdminSourceStockPreviewUrlBody,
     _: AdminUser = Depends(require_module_permission("products")),
 ):
-    """Thử PDP theo một link (CSSBuy→Hibox gộp) giống worker; không sửa bảng products — có thể chậm (~1–3 phút)."""
+    """Thử PDP theo một link giống worker (CSSBuy một lần; Hibox chỉ fallback chặn); không sửa bảng products — có thể chậm (~1–3 phút)."""
     try:
         return admin_preview_source_stock_by_url(str(body.url or "").strip())
     except Exception as exc:
@@ -1081,7 +1081,7 @@ def admin_source_stock_worker_state(
     _: AdminUser = Depends(require_module_permission("products")),
 ):
     """
-    Snapshot trạng thái worker PDP (CSSBuy trước, gộp Hibox nếu không in_stock): env, cờ pause DB (chung mọi process), luồng daemon trong process hiện tại,
+    Snapshot trạng thái worker PDP (CSSBuy trước, Hibox chỉ khi CSS blocked/error): env, cờ pause DB (chung mọi process), luồng daemon trong process hiện tại,
     và độ sâu hàng chờ in-memory của process đó (không phải tổng cluster).
     """
     return {"ok": True, **get_source_stock_worker_admin_snapshot(force_refresh_pause=True)}
