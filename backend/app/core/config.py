@@ -602,6 +602,13 @@ class Settings:
         self.GOOGLE_SHEETS_SKU_SYNC_FIELD_2: str = (
             _sf2 if _sf2 in ("code", "product_id", "web_prefix") else "code"
         )
+        # full = A–E (theo COLUMN_COUNT); key_time = chỉ A (khóa) + B (thời điểm đồng bộ UTC)
+        _rm = os.getenv("GOOGLE_SHEETS_SKU_SYNC_ROW_MODE", "full").strip().lower()
+        self.GOOGLE_SHEETS_SKU_SYNC_ROW_MODE: str = _rm if _rm in ("full", "key_time") else "full"
+        _rm2 = os.getenv("GOOGLE_SHEETS_SKU_SYNC_ROW_MODE_2", "").strip().lower()
+        self.GOOGLE_SHEETS_SKU_SYNC_ROW_MODE_2: str = (
+            _rm2 if _rm2 in ("full", "key_time") else "full"
+        )
         
         # ========================
         # FILE UPLOAD CONFIGURATION

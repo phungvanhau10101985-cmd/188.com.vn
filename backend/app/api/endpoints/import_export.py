@@ -1032,7 +1032,7 @@ def sync_google_sheet_skus(
 ):
     """
     Đồng bộ tay Google Sheet với DB (một hoặc hai bảng: GOOGLE_SHEETS_SKU_* + tuỳ chọn *_2).
-    Cột A theo từng bảng (GOOGLE_SHEETS_SKU_SYNC_FIELD / _2). Cột B–E: link | shop | giá | stamp UTC.
+    Cột A theo từng bảng (FIELD / _2); ROW_MODE=key_time → chỉ A+B. Bảng full: B–E như COLUMN_COUNT.
     """
     from app.services.google_sheets_sku_sync import sync_product_skus_to_google_sheet
 

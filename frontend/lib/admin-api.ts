@@ -1036,6 +1036,8 @@ export type AdminProductListSort = 'default' | 'views_desc' | 'newest' | 'oldest
 export type AdminGoogleSheetSkuSyncTargetResult = {
   ok: boolean;
   field?: string;
+  /** full | key_time — backend */
+  row_mode?: string;
   sheet_title?: string;
   spreadsheet_id?: string;
   sheet_gid?: number;

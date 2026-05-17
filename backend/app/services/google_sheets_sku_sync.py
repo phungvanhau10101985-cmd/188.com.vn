@@ -1,6 +1,6 @@
 """
-Đồng bộ Google Sheet theo **web/DB** (chuẩn). Có thể ghi **hai** spreadsheet/tab (primary + `_2`),
-mỗi nơi một khóa cột A (`GOOGLE_SHEETS_SKU_SYNC_FIELD` vs `GOOGLE_SHEETS_SKU_SYNC_FIELD_2`); cột B–E giống nhau.
+Đồng bộ Google Sheet theo **web/DB** (chuẩn). Có thể **hai** spreadsheet/tab (primary + `_2`),
+từng bảng có `ROW_MODE`: **full** (khóa + link + shop + giá + stamp) hoặc **key_time** (chỉ khóa A + thời điểm B).
 
 1. Đọc sheet (cột A… theo cấu hình; nếu có cột E — thời điểm đồng bộ UTC) một lần.
    Cột A có thể là mã SKU (`code`), `product_id` đầy đủ, hoặc phần `product_id` trước «a188» (`web_prefix`).
@@ -202,7 +202,7 @@ def _fetch_products_by_key(db: Session, field: str) -> Dict[str, Product]:
 
 
 def _sync_stamp_utc_str() -> str:
-    """Chuỗi hiển thị một lần mỗi phiên đồng bộ (cột E)."""
+    """Chuỗi thời điểm đồng bộ phiên (UTC) — cột E khi full 5 cột, hoặc cột B khi ROW_MODE=key_time."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
@@ -212,8 +212,12 @@ def _row_values_from_product(
     n_cols: int,
     *,
     written_at: str = "",
+    row_mode: str = "full",
 ) -> List[str]:
     key = _sheet_primary_key_from_product(p, key_field)
+    if row_mode == "key_time":
+        return [key, (written_at or "").strip()]
+
     row: List[str] = []
     row.append(key)
     if n_cols >= 2:
@@ -405,32 +409,37 @@ def _values_batch_update(
         ).execute()
 
 
-def _build_sheet_sync_targets() -> List[Tuple[str, int, str]]:
-    """Danh sách (spreadsheet_id, sheet_gid, sync_field); bỏ trùng (spread, gid)."""
-    targets: List[Tuple[str, int, str]] = []
+def _build_sheet_sync_targets() -> List[Tuple[str, int, str, str]]:
+    """Danh sách (spreadsheet_id, sheet_gid, sync_field, row_mode); bỏ trùng (spread, gid)."""
+    targets: List[Tuple[str, int, str, str]] = []
     seen: Set[Tuple[str, int]] = set()
 
-    def push(spread_raw: str, gid_raw: int, field_raw: str) -> None:
+    def push(spread_raw: str, gid_raw: int, field_raw: str, row_mode_raw: str) -> None:
         spread = (spread_raw or "").strip()
         gid = int(gid_raw or 0)
         field = (field_raw or "code").strip()
+        row_mode = (row_mode_raw or "full").strip().lower()
+        if row_mode not in ("full", "key_time"):
+            row_mode = "full"
         if not spread or gid <= 0:
             return
         key = (spread, gid)
         if key in seen:
             return
         seen.add(key)
-        targets.append((spread, gid, field))
+        targets.append((spread, gid, field, row_mode))
 
     push(
         getattr(settings, "GOOGLE_SHEETS_SKU_SPREADSHEET_ID", "") or "",
         int(getattr(settings, "GOOGLE_SHEETS_SKU_SHEET_GID", 0) or 0),
         getattr(settings, "GOOGLE_SHEETS_SKU_SYNC_FIELD", "code") or "code",
+        getattr(settings, "GOOGLE_SHEETS_SKU_SYNC_ROW_MODE", "full") or "full",
     )
     push(
         getattr(settings, "GOOGLE_SHEETS_SKU_SPREADSHEET_ID_2", "") or "",
         int(getattr(settings, "GOOGLE_SHEETS_SKU_SHEET_GID_2", 0) or 0),
         getattr(settings, "GOOGLE_SHEETS_SKU_SYNC_FIELD_2", "code") or "code",
+        getattr(settings, "GOOGLE_SHEETS_SKU_SYNC_ROW_MODE_2", "full") or "full",
     )
     return targets
 
@@ -442,11 +451,20 @@ def _sync_single_google_sheet(
     gid: int,
     field: str,
     header_rows: int,
-    n_cols: int,
+    row_mode: str,
 ) -> Dict[str, Any]:
-    """Đồng bộ một tab Sheet với DB (khóa cột A = field)."""
-    n_cols = max(1, n_cols)
-    sync_written_at = _sync_stamp_utc_str() if n_cols >= 5 else ""
+    """Đồng bộ một tab Sheet với DB (khóa cột A = field). row_mode=key_time → chỉ cột A+B."""
+    row_mode = (row_mode or "full").strip().lower()
+    if row_mode not in ("full", "key_time"):
+        row_mode = "full"
+    n_cols = (
+        2
+        if row_mode == "key_time"
+        else max(1, int(getattr(settings, "GOOGLE_SHEETS_SKU_COLUMN_COUNT", 5) or 5))
+    )
+    sync_written_at = (
+        _sync_stamp_utc_str() if (row_mode == "key_time" or n_cols >= 5) else ""
+    )
 
     title = _sheet_title_for_gid(service, spread, gid)
     t_esc = _escape_sheet_title(title)
@@ -488,11 +506,13 @@ def _sync_single_google_sheet(
         if not rlist:
             continue
         r = rlist[0]
-        new_vals = _row_values_from_product(prod, field, n_cols, written_at=sync_written_at)
+        new_vals = _row_values_from_product(
+            prod, field, n_cols, written_at=sync_written_at, row_mode=row_mode
+        )
         old_vals = row_map.get(r)
         if old_vals is None:
             old_vals = [""] * n_cols
-        if _row_matches_db(old_vals, new_vals, n_cols):
+        if row_mode != "key_time" and _row_matches_db(old_vals, new_vals, n_cols):
             unchanged += 1
             continue
         rng = f"{t_esc}!A{r}:{last_col}{r}"
@@ -507,7 +527,9 @@ def _sync_single_google_sheet(
     added = 0
     if to_add:
         body_vals = [
-            _row_values_from_product(products_by_key[s], field, n_cols, written_at=sync_written_at)
+            _row_values_from_product(
+                products_by_key[s], field, n_cols, written_at=sync_written_at, row_mode=row_mode
+            )
             for s in to_add
         ]
         for a in range(0, len(body_vals), _APPEND_ROWS_PER_REQUEST):
@@ -522,10 +544,11 @@ def _sync_single_google_sheet(
         added = len(to_add)
 
     logger.info(
-        "[SKU_SHEET_SYNC] spread=%s… field=%s tab=%s cols=%s updated=%s unchanged=%s added=%s "
+        "[SKU_SHEET_SYNC] spread=%s… field=%s row_mode=%s tab=%s cols=%s updated=%s unchanged=%s added=%s "
         "removed_orphans=%s removed_dup=%s db=%s",
         spread[:8],
         field,
+        row_mode,
         title,
         n_cols,
         updated,
@@ -541,6 +564,7 @@ def _sync_single_google_sheet(
         "spreadsheet_id": spread,
         "sheet_gid": gid,
         "field": field,
+        "row_mode": row_mode,
         "sheet_title": title,
         "column_count": n_cols,
         "updated_rows": updated,
@@ -558,10 +582,10 @@ def sync_product_skus_to_google_sheet(db: Session) -> Dict[str, Any]:
 
     - Hàng không còn trong DB → xóa.
     - Trùng mã (cột A) → giữ một hàng, xóa dư.
-    - Mã có ở cả hai: đối chiếu A–D với DB; khác mới batchUpdate (cột E = thời điểm đồng bộ khi ≥5 cột).
+    - Mã có ở cả hai: đối chiếu với DB (full: A–D; key_time: luôn làm mới cột B thời gian).
     - Mã mới trong DB → append.
 
-    Cột B–E: link_default | shop TQ | giá | stamp UTC (product_url import cột R → link_default trong DB).
+    GOOGLE_SHEETS_SKU_SYNC_ROW_MODE=key_time → chỉ ghi cột A (khóa) + B (thời điểm UTC); full → A–E theo COLUMN_COUNT.
     """
     if not getattr(settings, "GOOGLE_SHEETS_SKU_SYNC_ENABLED", False):
         return {"ok": True, "skipped": True, "reason": "disabled"}
@@ -574,18 +598,16 @@ def sync_product_skus_to_google_sheet(db: Session) -> Dict[str, Any]:
         }
 
     header_rows = int(getattr(settings, "GOOGLE_SHEETS_SKU_HEADER_ROWS", 1) or 0)
-    n_cols = int(getattr(settings, "GOOGLE_SHEETS_SKU_COLUMN_COUNT", 5) or 5)
-    n_cols = max(1, n_cols)
 
     with _SYNC_LOCK:
         try:
             service = _get_sheets_service()
             results: List[Dict[str, Any]] = []
             first_err: str | None = None
-            for spread, gid, field in targets:
+            for spread, gid, field, row_mode in targets:
                 try:
                     one = _sync_single_google_sheet(
-                        db, service, spread, gid, field, header_rows, n_cols
+                        db, service, spread, gid, field, header_rows, row_mode
                     )
                     results.append(one)
                 except Exception as e:
@@ -598,6 +620,7 @@ def sync_product_skus_to_google_sheet(db: Session) -> Dict[str, Any]:
                             "spreadsheet_id": spread,
                             "sheet_gid": gid,
                             "field": field,
+                            "row_mode": row_mode,
                             "error": msg,
                         }
                     )

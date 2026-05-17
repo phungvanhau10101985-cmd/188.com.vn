@@ -71,6 +71,7 @@ function formatGoogleSheetSyncTargetsSummary(
   targets: Array<{
     ok: boolean;
     field?: string;
+    row_mode?: string;
     sheet_title?: string;
     sheet_gid?: number;
     error?: string;
@@ -93,7 +94,8 @@ function formatGoogleSheetSyncTargetsSummary(
         parts.push(`−${t.removed_orphan_rows} thừa`);
       if (t.removed_duplicate_rows != null && t.removed_duplicate_rows > 0)
         parts.push(`−${t.removed_duplicate_rows} trùng`);
-      return `${tag} (${t.field ?? '?'}): ${parts.length ? parts.join(' · ') : 'ổn định'}`;
+      const rm = t.row_mode && t.row_mode !== 'full' ? `, ${t.row_mode}` : '';
+      return `${tag} (${t.field ?? '?'}${rm}): ${parts.length ? parts.join(' · ') : 'ổn định'}`;
     })
     .join(' — ');
 }
