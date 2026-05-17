@@ -588,6 +588,20 @@ class Settings:
             )
         except ValueError:
             self.GOOGLE_SHEETS_SKU_SYNC_DEBOUNCE_SECONDS = 45
+
+        # Bảng Google Sheet thứ hai (tuỳ chọn): cùng schema cột A–E; khác khóa A (vd code vs web_prefix).
+        self.GOOGLE_SHEETS_SKU_SPREADSHEET_ID_2: str = os.getenv(
+            "GOOGLE_SHEETS_SKU_SPREADSHEET_ID_2", ""
+        ).strip()
+        _gid2 = os.getenv("GOOGLE_SHEETS_SKU_SHEET_GID_2", "").strip()
+        try:
+            self.GOOGLE_SHEETS_SKU_SHEET_GID_2: int = int(_gid2) if _gid2 else 0
+        except ValueError:
+            self.GOOGLE_SHEETS_SKU_SHEET_GID_2 = 0
+        _sf2 = os.getenv("GOOGLE_SHEETS_SKU_SYNC_FIELD_2", "code").strip().lower()
+        self.GOOGLE_SHEETS_SKU_SYNC_FIELD_2: str = (
+            _sf2 if _sf2 in ("code", "product_id", "web_prefix") else "code"
+        )
         
         # ========================
         # FILE UPLOAD CONFIGURATION

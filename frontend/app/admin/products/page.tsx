@@ -66,6 +66,38 @@ function isGoogleSheetsRateLimitMessage(message: string): boolean {
   );
 }
 
+/** Tóm tắt toast khi đồng bộ nhiều Google Sheet (primary + _2). */
+function formatGoogleSheetSyncTargetsSummary(
+  targets: Array<{
+    ok: boolean;
+    field?: string;
+    sheet_title?: string;
+    sheet_gid?: number;
+    error?: string;
+    updated_rows?: number;
+    unchanged_rows?: number;
+    added_rows?: number;
+    removed_orphan_rows?: number;
+    removed_duplicate_rows?: number;
+  }>,
+): string {
+  return targets
+    .map((t, i) => {
+      const tag = t.sheet_title ? `"${t.sheet_title}"` : `Bảng ${i + 1}`;
+      if (!t.ok) return `${tag}: ${t.error ?? 'lỗi'}`;
+      const parts: string[] = [];
+      if (t.updated_rows != null) parts.push(`${t.updated_rows} cập nhật`);
+      if (t.unchanged_rows != null) parts.push(`${t.unchanged_rows} giữ nguyên`);
+      if (t.added_rows != null && t.added_rows > 0) parts.push(`+${t.added_rows} mới`);
+      if (t.removed_orphan_rows != null && t.removed_orphan_rows > 0)
+        parts.push(`−${t.removed_orphan_rows} thừa`);
+      if (t.removed_duplicate_rows != null && t.removed_duplicate_rows > 0)
+        parts.push(`−${t.removed_duplicate_rows} trùng`);
+      return `${tag} (${t.field ?? '?'}): ${parts.length ? parts.join(' · ') : 'ổn định'}`;
+    })
+    .join(' — ');
+}
+
 /** Lưu job_id đang chạy để khôi phục khi reload trang giữa chừng. */
 const IMPORT_JOB_STORAGE_KEY = 'admin:products:import_excel:job';
 
@@ -517,6 +549,7 @@ export default function AdminProductsPage() {
     process.env.NEXT_PUBLIC_ADMIN_GOOGLE_SHEET_SYNC !== '0' &&
     process.env.NEXT_PUBLIC_ADMIN_GOOGLE_SHEET_SYNC !== 'false';
   const googleSheetsEditorUrl = (process.env.NEXT_PUBLIC_GOOGLE_SHEETS_EDITOR_URL || '').trim();
+  const googleSheetsEditorUrl2 = (process.env.NEXT_PUBLIC_GOOGLE_SHEETS_EDITOR_URL_2 || '').trim();
 
   const imageLocalizationHeadlessNeedsSavedCookie =
     imageLocalizationGeminiMode === 'web' &&
@@ -1798,7 +1831,23 @@ export default function AdminProductsPage() {
           setGoogleSheetRateLimitSec(GOOGLE_SHEET_RATE_LIMIT_COOLDOWN_SEC);
           return;
         }
+        if (r.partial && r.targets && r.targets.length > 0) {
+          showToast(
+            'err',
+            `Đồng bộ một phần: ${errRaw}. Chi tiết: ${formatGoogleSheetSyncTargetsSummary(r.targets)}`,
+            10000,
+          );
+          return;
+        }
         showToast('err', errRaw.length > 500 ? `${errRaw.slice(0, 500)}…` : errRaw, 8000);
+        return;
+      }
+      if (r.targets && r.targets.length > 1) {
+        showToast(
+          'ok',
+          `Google Sheet: ${formatGoogleSheetSyncTargetsSummary(r.targets)}`,
+          9000,
+        );
         return;
       }
       const parts: string[] = [];
@@ -2113,8 +2162,20 @@ export default function AdminProductsPage() {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs text-sky-800 hover:underline text-center sm:text-right"
+                    title="Bảng primary trên backend (GOOGLE_SHEETS_SKU_SPREADSHEET_ID)"
                   >
-                    Mở Google Sheet
+                    {googleSheetsEditorUrl2 ? 'Mở Sheet (prefix / trước a188)' : 'Mở Google Sheet'}
+                  </a>
+                ) : null}
+                {googleSheetsEditorUrl2 ? (
+                  <a
+                    href={googleSheetsEditorUrl2}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-sky-800 hover:underline text-center sm:text-right"
+                    title="Bảng phụ _2 (GOOGLE_SHEETS_SKU_*_2, thường cột A = SKU)"
+                  >
+                    Mở Sheet (SKU)
                   </a>
                 ) : null}
               </div>

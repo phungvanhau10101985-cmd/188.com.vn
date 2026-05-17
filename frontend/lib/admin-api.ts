@@ -1032,12 +1032,32 @@ const ADMIN_PRODUCTS_LIST_TIMEOUT_MS = 120_000;
 
 export type AdminProductListSort = 'default' | 'views_desc' | 'newest' | 'oldest';
 
+/** Một mục tiêu trong POST /import-export/sync/google-sheet-skus */
+export type AdminGoogleSheetSkuSyncTargetResult = {
+  ok: boolean;
+  field?: string;
+  sheet_title?: string;
+  spreadsheet_id?: string;
+  sheet_gid?: number;
+  error?: string;
+  column_count?: number;
+  updated_rows?: number;
+  unchanged_rows?: number;
+  added_rows?: number;
+  removed_orphan_rows?: number;
+  removed_duplicate_rows?: number;
+  db_key_count?: number;
+};
+
 /** Kết quả POST /import-export/sync/google-sheet-skus */
 export type AdminGoogleSheetSkuSyncResult = {
   ok: boolean;
   skipped?: boolean;
+  /** Một bảng thành công, một bảng lỗi */
+  partial?: boolean;
   reason?: string;
   error?: string;
+  targets?: AdminGoogleSheetSkuSyncTargetResult[];
   field?: string;
   sheet_title?: string;
   column_count?: number;
