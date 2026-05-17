@@ -241,13 +241,33 @@ def admin_source_stock_queue_stats(
     }
 
 
+def _paginate_slice(*, total: int, page: int, page_size: int) -> tuple[int, int]:
+    """
+    Clamp ``page`` theo tổng và trả ``(page_use, offset)`` cho OFFSET/LIMIT.
+
+    ``page_size`` đã được clamp ở caller (1…500).
+    """
+    ps = max(1, int(page_size))
+    t = max(0, int(total))
+    if t <= 0:
+        return (1, 0)
+    tp = max(1, (t + ps - 1) // ps)
+    p_req = max(1, int(page))
+    p_use = min(p_req, tp)
+    off = (p_use - 1) * ps
+    return (p_use, off)
+
+
 def admin_source_stock_activity_report(
     db: Session,
     *,
     domain: str,
     active_only: bool,
     window_days: int = 30,
-    detail_limit: int = 120,
+    samples_oos_page: int = 1,
+    samples_in_stock_page: int = 1,
+    samples_batch_ttl_page: int = 1,
+    sample_page_size: int = 200,
 ) -> Dict[str, Any]:
     """
     Báo cáo trong cửa sổ N ngày (rolling) trên cùng phạm vi link + is_active như hàng chờ admin.
@@ -257,12 +277,14 @@ def admin_source_stock_activity_report(
     - ``source_stock_checked_any_in_window``: đã có ``source_stock_checked_at`` trong cửa sổ
       (worker PDP, batch khi commit OOS, v.v.).
     - Phân rã ``source_stock_status`` chỉ trên các SP có ``source_stock_checked_at`` trong cửa sổ.
+
+    Mẫu trong ``samples``: sắp xếp **mới nhất trước** (``source_stock_checked_at`` hoặc ``admin_source_batch_scanned_at``
+    giảm dần), phân trang độc lập mỗi nhóm qua ``samples_*_page`` và ``sample_page_size``.
     """
     domain_l = (domain or "hibox").strip().lower()
     wd = max(1, min(int(window_days), 366))
     since = _utcnow() - timedelta(days=wd)
     base = admin_product_source_link_base_filters(Product, domain_l, active_only=active_only)
-    dl = max(0, min(int(detail_limit), 400))
 
     batch_ttl_stamped = int(
         db.query(func.count(Product.id))
@@ -367,48 +389,85 @@ def admin_source_stock_activity_report(
             "available": int(p.available or 0),
         }
 
+    page_size_clamped = max(1, min(int(sample_page_size), 500))
+
+    pg_oos_p, pg_off_oos = _paginate_slice(
+        total=oos_signal, page=samples_oos_page, page_size=page_size_clamped
+    )
+    pg_ins_p, pg_off_ins = _paginate_slice(
+        total=in_stock_signal, page=samples_in_stock_page, page_size=page_size_clamped
+    )
+    pg_bt_p, pg_off_bt = _paginate_slice(
+        total=batch_ttl_stamped, page=samples_batch_ttl_page, page_size=page_size_clamped
+    )
+
     samples: Dict[str, List[Dict[str, Any]]] = {"oos": [], "in_stock": [], "batch_ttl_recent": []}
-    if dl > 0:
-        oos_rows = (
-            db.query(Product)
-            .filter(
-                *base,
-                Product.source_stock_checked_at.isnot(None),
-                Product.source_stock_checked_at >= since,
-                Product.source_stock_status == "out_of_stock",
-            )
-            .order_by(Product.source_stock_checked_at.desc(), Product.id.desc())
-            .limit(dl)
-            .all()
-        )
-        samples["oos"] = [row_dict(p) for p in oos_rows]
 
-        ins_rows = (
-            db.query(Product)
-            .filter(
-                *base,
-                Product.source_stock_checked_at.isnot(None),
-                Product.source_stock_checked_at >= since,
-                Product.source_stock_status == "in_stock",
-            )
-            .order_by(Product.source_stock_checked_at.desc(), Product.id.desc())
-            .limit(dl)
-            .all()
-        )
-        samples["in_stock"] = [row_dict(p) for p in ins_rows]
+    def tp_for(total_n: int, ps: int) -> int:
+        return max(1, (total_n + ps - 1) // ps) if total_n > 0 else 1
 
-        batch_rows = (
-            db.query(Product)
-            .filter(
-                *base,
-                Product.admin_source_batch_scanned_at.isnot(None),
-                Product.admin_source_batch_scanned_at >= since,
-            )
-            .order_by(Product.admin_source_batch_scanned_at.desc(), Product.id.desc())
-            .limit(dl)
-            .all()
+    oos_rows = (
+        db.query(Product)
+        .filter(
+            *base,
+            Product.source_stock_checked_at.isnot(None),
+            Product.source_stock_checked_at >= since,
+            Product.source_stock_status == "out_of_stock",
         )
-        samples["batch_ttl_recent"] = [row_dict(p) for p in batch_rows]
+        .order_by(Product.source_stock_checked_at.desc(), Product.id.desc())
+        .offset(pg_off_oos)
+        .limit(page_size_clamped)
+        .all()
+    )
+    samples["oos"] = [row_dict(p) for p in oos_rows]
+
+    ins_rows = (
+        db.query(Product)
+        .filter(
+            *base,
+            Product.source_stock_checked_at.isnot(None),
+            Product.source_stock_checked_at >= since,
+            Product.source_stock_status == "in_stock",
+        )
+        .order_by(Product.source_stock_checked_at.desc(), Product.id.desc())
+        .offset(pg_off_ins)
+        .limit(page_size_clamped)
+        .all()
+    )
+    samples["in_stock"] = [row_dict(p) for p in ins_rows]
+
+    batch_rows = (
+        db.query(Product)
+        .filter(
+            *base,
+            Product.admin_source_batch_scanned_at.isnot(None),
+            Product.admin_source_batch_scanned_at >= since,
+        )
+        .order_by(Product.admin_source_batch_scanned_at.desc(), Product.id.desc())
+        .offset(pg_off_bt)
+        .limit(page_size_clamped)
+        .all()
+    )
+    samples["batch_ttl_recent"] = [row_dict(p) for p in batch_rows]
+
+    samples_pagination = {
+        "page_size": page_size_clamped,
+        "oos": {
+            "page": pg_oos_p,
+            "total": int(oos_signal),
+            "total_pages": tp_for(oos_signal, page_size_clamped),
+        },
+        "in_stock": {
+            "page": pg_ins_p,
+            "total": int(in_stock_signal),
+            "total_pages": tp_for(in_stock_signal, page_size_clamped),
+        },
+        "batch_ttl_recent": {
+            "page": pg_bt_p,
+            "total": int(batch_ttl_stamped),
+            "total_pages": tp_for(batch_ttl_stamped, page_size_clamped),
+        },
+    }
 
     return {
         "ok": True,
@@ -416,7 +475,7 @@ def admin_source_stock_activity_report(
         "active_only": bool(active_only),
         "window_days": wd,
         "window_since_utc_iso": since.isoformat(),
-        "detail_limit_applied": dl,
+        "samples_pagination": samples_pagination,
         "queue": queue,
         "counts": {
             "batch_ttl_stamped_in_window": batch_ttl_stamped,

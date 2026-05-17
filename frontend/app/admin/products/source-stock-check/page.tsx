@@ -13,6 +13,25 @@ import {
 
 const EMPTY_REPORT_SAMPLE_ROWS: AdminSourceStockActivityReportSampleRow[] = [];
 
+/** Đồng bộ với query `sample_page_size` (backend max 500). */
+const SOURCE_STOCK_REPORT_SAMPLE_PAGE_SIZE = 200;
+
+type ReportSamplePagesState = {
+  oos: number;
+  in_stock: number;
+  batch_ttl_recent: number;
+};
+
+/** Điều khiển phân trang một bảng mẫu báo cáo (server clamp `page`). */
+type ReportSampleTablePagination = {
+  page: number;
+  totalPages: number;
+  total: number;
+  pageSize: number;
+  loading: boolean;
+  onPageChange: (nextPage: number) => void;
+};
+
 /** Nguồn trong thống kê queue / báo cáo (worker nền kiểm tra nguồn luôn Hibox). */
 type SourceStockDomain = 'hibox' | 'cssbuy';
 
@@ -219,7 +238,7 @@ type ReportSampleOosBulkSelection = {
   onBulkRecheckAllDisplayed: () => void;
 };
 
-/** Bảng mẫu (tối đa `detail_limit` từ API) trong báo cáo 30 ngày. */
+/** Bảng mẫu báo cáo 30 ngày — thứ tự **mới nhất trước**, phân trang server. */
 function SourceStockReportSampleTable({
   title,
   rows,
@@ -227,6 +246,7 @@ function SourceStockReportSampleTable({
   defaultOpen,
   oosActions,
   oosBulkSelection,
+  pagination,
 }: {
   title: string;
   rows: AdminSourceStockActivityReportSampleRow[];
@@ -234,6 +254,7 @@ function SourceStockReportSampleTable({
   defaultOpen: boolean;
   oosActions?: ReportSampleOosRowActions;
   oosBulkSelection?: ReportSampleOosBulkSelection;
+  pagination?: ReportSampleTablePagination;
 }) {
   const colSpan = 9 + (oosActions ? 1 : 0) + (oosBulkSelection ? 1 : 0);
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
@@ -260,7 +281,21 @@ function SourceStockReportSampleTable({
       <summary className="cursor-pointer select-none px-3 py-2 text-sm font-semibold text-slate-800 bg-slate-50/90 list-none [&::-webkit-details-marker]:hidden flex flex-wrap justify-between gap-2">
         <span>
           {title}{' '}
-          <span className="font-normal text-slate-500">({rows.length} dòng)</span>
+          <span className="font-normal text-slate-500">
+            (
+            {pagination ? (
+              <>
+                <span className="tabular-nums">{rows.length}</span> trên trang ·{' '}
+                <span className="tabular-nums">{pagination.total.toLocaleString('vi-VN')}</span> trong cửa sổ · trang{' '}
+                <span className="tabular-nums">{pagination.page}</span>/<span className="tabular-nums">{pagination.totalPages}</span>
+              </>
+            ) : (
+              <>
+                <span className="tabular-nums">{rows.length}</span> dòng
+              </>
+            )}
+            )
+          </span>
         </span>
         <span className="text-[11px] font-normal text-indigo-700 underline">Mở / thu</span>
       </summary>
@@ -520,6 +555,51 @@ function SourceStockReportSampleTable({
           </tbody>
         </table>
       </div>
+      {pagination ? (
+        <nav
+          className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50/70 px-3 py-2"
+          aria-label={`Phân trang ${title}`}
+        >
+          <p className="text-[11px] text-slate-700 leading-snug">
+            Thứ tự <strong>mới nhất trước</strong>
+            {pagination.total <= 0 ? (
+              <> · không có dòng trong cửa sổ</>
+            ) : (
+              <>
+                {' '}
+                · trang <span className="tabular-nums font-semibold">{pagination.page}</span> /{' '}
+                <span className="tabular-nums">{pagination.totalPages}</span> ·{' '}
+                <span className="tabular-nums">{pagination.pageSize}</span> SP/trang · tổng{' '}
+                <span className="tabular-nums">{pagination.total.toLocaleString('vi-VN')}</span>
+              </>
+            )}
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              disabled={
+                pagination.loading || pagination.total <= 0 || pagination.page <= 1
+              }
+              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-45 disabled:pointer-events-none"
+              onClick={() => pagination.onPageChange(pagination.page - 1)}
+            >
+              Trước
+            </button>
+            <button
+              type="button"
+              disabled={
+                pagination.loading ||
+                pagination.total <= 0 ||
+                pagination.page >= pagination.totalPages
+              }
+              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-45 disabled:pointer-events-none"
+              onClick={() => pagination.onPageChange(pagination.page + 1)}
+            >
+              Sau
+            </button>
+          </div>
+        </nav>
+      ) : null}
     </details>
   );
 }
@@ -539,6 +619,11 @@ export default function AdminSourceStockCheckPage() {
   const [activityReport, setActivityReport] = useState<AdminSourceStockActivityReport | null>(null);
   const [activityReportLoading, setActivityReportLoading] = useState(false);
   const [activityReportError, setActivityReportError] = useState<string | null>(null);
+  const [reportSamplePages, setReportSamplePages] = useState<ReportSamplePagesState>({
+    oos: 1,
+    in_stock: 1,
+    batch_ttl_recent: 1,
+  });
   /** Hàng đang chờ thao tác trên báo cáo OOS — khóa trùng nút trong bảng. */
   const [reportOosRowBusyById, setReportOosRowBusyById] = useState<Record<number, string>>({});
   /** `products.id` đang chờ xác nhận xóa (một hoặc nhiều) trong modal báo cáo OOS. */
@@ -629,16 +714,34 @@ export default function AdminSourceStockCheckPage() {
         domain,
         activeOnly: true,
         windowDays: 30,
-        detailLimit: 120,
+        samplePageSize: SOURCE_STOCK_REPORT_SAMPLE_PAGE_SIZE,
+        samplesOosPage: reportSamplePages.oos,
+        samplesInStockPage: reportSamplePages.in_stock,
+        samplesBatchTtlPage: reportSamplePages.batch_ttl_recent,
       });
       setActivityReport(r);
+      setReportSamplePages((prev) => {
+        const next = {
+          oos: r.samples_pagination.oos.page,
+          in_stock: r.samples_pagination.in_stock.page,
+          batch_ttl_recent: r.samples_pagination.batch_ttl_recent.page,
+        };
+        if (
+          prev.oos === next.oos &&
+          prev.in_stock === next.in_stock &&
+          prev.batch_ttl_recent === next.batch_ttl_recent
+        ) {
+          return prev;
+        }
+        return next;
+      });
     } catch (e) {
       setActivityReport(null);
       setActivityReportError(e instanceof Error ? e.message : String(e));
     } finally {
       setActivityReportLoading(false);
     }
-  }, [domain]);
+  }, [domain, reportSamplePages]);
 
   const bumpReportBusy = useCallback((id: number, label: string) => {
     setReportOosRowBusyById((m) => ({ ...m, [id]: label }));
@@ -775,16 +878,16 @@ export default function AdminSourceStockCheckPage() {
         return;
       }
       const cap =
-        typeof activityReport?.detail_limit_applied === 'number'
-          ? activityReport.detail_limit_applied
-          : 120;
+        typeof activityReport?.samples_pagination?.page_size === 'number'
+          ? activityReport.samples_pagination.page_size
+          : SOURCE_STOCK_REPORT_SAMPLE_PAGE_SIZE;
       if (uniq.length > cap) {
-        showToast('err', `Chỉ xử lý tối đa ${cap} SP mỗi lần (giới hạn bảng mẫu).`);
+        showToast('err', `Chỉ xử lý tối đa ${cap} SP mỗi lần (giới hạn trên một trang mẫu).`);
         return;
       }
       setReportOosDeleteConfirmIds(uniq);
     },
-    [activityReport?.detail_limit_applied, showToast],
+    [activityReport?.samples_pagination?.page_size, showToast],
   );
 
   const runBulkReportOosClearFlags = useCallback(
@@ -1084,7 +1187,10 @@ export default function AdminSourceStockCheckPage() {
               id="source-domain-select"
               className="border border-gray-300 rounded-lg px-3 h-10 text-sm w-full"
               value={domain}
-              onChange={(e) => setDomain(e.target.value as SourceStockDomain)}
+              onChange={(e) => {
+                setDomain(e.target.value as SourceStockDomain);
+                setReportSamplePages({ oos: 1, in_stock: 1, batch_ttl_recent: 1 });
+              }}
             >
               <option value="hibox">hibox.mn — scrape</option>
               <option value="cssbuy">cssbuy.com — API /web/item</option>
@@ -1392,8 +1498,10 @@ export default function AdminSourceStockCheckPage() {
                     <code className="text-[10px] bg-white/95 px-1 rounded border border-indigo-100">
                       {activityReport.window_since_utc_iso}
                     </code>{' '}
-                    <span className="text-gray-500">·</span> Mẫu / bảng tối đa{' '}
-                    <strong className="tabular-nums">{activityReport.detail_limit_applied}</strong> dòng
+                    <span className="text-gray-500">·</span> Danh sách mẫu:{' '}
+                    <strong>mới nhất trước</strong>,{' '}
+                    <strong className="tabular-nums">{activityReport.samples_pagination.page_size}</strong> SP/trang cho mỗi nhóm
+                    (phân trang riêng OOS / in_stock / TTL batch).
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-2 mb-2">
                     <MiniStat label="Đến lượt ngay" value={activityReport.queue.eligible_now} variant="emerald" />
@@ -1456,8 +1564,16 @@ export default function AdminSourceStockCheckPage() {
                     defaultOpen
                     oosActions={reportOosActionsForTable}
                     oosBulkSelection={reportOosBulkSelection}
+                    pagination={{
+                      page: activityReport.samples_pagination.oos.page,
+                      totalPages: activityReport.samples_pagination.oos.total_pages,
+                      total: activityReport.samples_pagination.oos.total,
+                      pageSize: activityReport.samples_pagination.page_size,
+                      loading: activityReportLoading,
+                      onPageChange: (p) => setReportSamplePages((s) => ({ ...s, oos: p })),
+                    }}
                   />
-                  {activityReport.samples.oos.length === 0 ? (
+                  {activityReport.samples_pagination.oos.total === 0 ? (
                     <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 mb-3 text-[11px] text-amber-950 leading-snug">
                       <p className="font-semibold mb-1">Vì sao vừa «hết» nhưng bảng này vẫn trống, hoặc F5 là mất link?</p>
                       <ul className="list-disc ml-4 space-y-1 text-amber-900/95">
@@ -1490,12 +1606,28 @@ export default function AdminSourceStockCheckPage() {
                     rows={activityReport.samples.in_stock}
                     emptyHint="Không có dòng trong phạm vi."
                     defaultOpen={false}
+                    pagination={{
+                      page: activityReport.samples_pagination.in_stock.page,
+                      totalPages: activityReport.samples_pagination.in_stock.total_pages,
+                      total: activityReport.samples_pagination.in_stock.total,
+                      pageSize: activityReport.samples_pagination.page_size,
+                      loading: activityReportLoading,
+                      onPageChange: (p) => setReportSamplePages((s) => ({ ...s, in_stock: p })),
+                    }}
                   />
                   <SourceStockReportSampleTable
                     title="Mẫu: TTL batch gần nhất trong cửa sổ"
                     rows={activityReport.samples.batch_ttl_recent}
                     emptyHint="Không có dòng trong phạm vi."
                     defaultOpen={false}
+                    pagination={{
+                      page: activityReport.samples_pagination.batch_ttl_recent.page,
+                      totalPages: activityReport.samples_pagination.batch_ttl_recent.total_pages,
+                      total: activityReport.samples_pagination.batch_ttl_recent.total,
+                      pageSize: activityReport.samples_pagination.page_size,
+                      loading: activityReportLoading,
+                      onPageChange: (p) => setReportSamplePages((s) => ({ ...s, batch_ttl_recent: p })),
+                    }}
                   />
                 </>
               ) : !activityReportLoading && !activityReportError ? (

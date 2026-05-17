@@ -1045,11 +1045,14 @@ def admin_source_stock_batch_report(
     ),
     active_only: bool = Query(True),
     window_days: int = Query(30, ge=1, le=366, description="Cửa sổ rolling «30 ngày» cho các đếm thời điểm"),
-    detail_limit: int = Query(
-        120,
-        ge=0,
-        le=400,
-        description="Số dòng mẫu tối đa mỗi nhóm (0 = không trả danh sách chi tiết)",
+    samples_oos_page: int = Query(1, ge=1, description="Trang danh sách mẫu OOS (mới nhất trước)"),
+    samples_in_stock_page: int = Query(1, ge=1, description="Trang danh sách mẫu in_stock"),
+    samples_batch_ttl_page: int = Query(1, ge=1, description="Trang mẫu TTL batch trong cửa sổ"),
+    sample_page_size: int = Query(
+        200,
+        ge=1,
+        le=500,
+        description="Số SP mỗi trang cho mỗi nhóm mẫu",
     ),
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("products")),
@@ -1060,7 +1063,10 @@ def admin_source_stock_batch_report(
         domain=str(domain),
         active_only=bool(active_only),
         window_days=int(window_days),
-        detail_limit=int(detail_limit),
+        samples_oos_page=int(samples_oos_page),
+        samples_in_stock_page=int(samples_in_stock_page),
+        samples_batch_ttl_page=int(samples_batch_ttl_page),
+        sample_page_size=int(sample_page_size),
     )
 
 

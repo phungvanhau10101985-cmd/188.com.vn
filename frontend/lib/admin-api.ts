@@ -437,6 +437,21 @@ export interface AdminSourceStockActivityReportCounts {
   checked_available_zero_or_negative_in_window: number;
 }
 
+/** Phân trang một nhóm mẫu (API có thể clamp `page` xuống `total_pages`). */
+export interface AdminSourceStockReportSamplePaginationSlice {
+  page: number;
+  total: number;
+  total_pages: number;
+}
+
+/** Phân trang danh sách mẫu — mỗi nhóm có `page` riêng, `page_size` chung. */
+export interface AdminSourceStockSamplesPagination {
+  page_size: number;
+  oos: AdminSourceStockReportSamplePaginationSlice;
+  in_stock: AdminSourceStockReportSamplePaginationSlice;
+  batch_ttl_recent: AdminSourceStockReportSamplePaginationSlice;
+}
+
 /** Báo cáo rolling N ngày + lặp lại `queue` để đối chiếu hàng chờ. */
 export interface AdminSourceStockActivityReport {
   ok: boolean;
@@ -444,7 +459,7 @@ export interface AdminSourceStockActivityReport {
   active_only: boolean;
   window_days: number;
   window_since_utc_iso: string;
-  detail_limit_applied: number;
+  samples_pagination: AdminSourceStockSamplesPagination;
   queue: AdminSourceStockQueueStats;
   counts: AdminSourceStockActivityReportCounts;
   checked_in_window_by_source_stock_status: Record<string, number>;
@@ -1102,18 +1117,24 @@ export const adminProductAPI = {
       timeoutMs: 45_000,
     }),
 
-  /** Đếm đã kiểm tra / OOS / còn hàng trong cửa sổ + mẫu chi tiết (giới hạn `detailLimit`). */
+  /** Đếm đã kiểm tra / OOS / còn hàng trong cửa sổ + mẫu chi tiết (phân trang, mới nhất trước). */
   fetchSourceStockActivityReport: (params: {
     domain: 'hibox' | 'cssbuy';
     activeOnly?: boolean;
     windowDays?: number;
-    detailLimit?: number;
+    samplesOosPage?: number;
+    samplesInStockPage?: number;
+    samplesBatchTtlPage?: number;
+    samplePageSize?: number;
   }) => {
     const sp = new URLSearchParams();
     sp.set('domain', params.domain);
     sp.set('active_only', String(params.activeOnly ?? true));
     sp.set('window_days', String(params.windowDays ?? 30));
-    sp.set('detail_limit', String(params.detailLimit ?? 120));
+    sp.set('samples_oos_page', String(params.samplesOosPage ?? 1));
+    sp.set('samples_in_stock_page', String(params.samplesInStockPage ?? 1));
+    sp.set('samples_batch_ttl_page', String(params.samplesBatchTtlPage ?? 1));
+    sp.set('sample_page_size', String(params.samplePageSize ?? 200));
     return fetchAdmin<AdminSourceStockActivityReport>(
       `/products/admin/source-stock-batch/report?${sp.toString()}`,
       { timeoutMs: 120_000 },
