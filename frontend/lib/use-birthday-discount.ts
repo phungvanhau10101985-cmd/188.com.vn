@@ -19,8 +19,9 @@ function loadBackendBirthdayPromoState(): Promise<BirthdayDiscountState | null> 
   inflightBackendState = apiClient
     .getMyBirthdayPromoStatus()
     .then((data) => {
-      cachedBackendState = birthdayDiscountStateFromBackend(data);
-      return cachedBackendState;
+      const mapped = birthdayDiscountStateFromBackend(data);
+      cachedBackendState = mapped;
+      return mapped;
     })
     .catch(() => {
       cachedBackendState = null;
@@ -39,12 +40,15 @@ export function useBirthdayDiscount(dateOfBirth?: string | null): BirthdayDiscou
     [dateOfBirth, user?.date_of_birth]
   );
   const [backendState, setBackendState] = useState<BirthdayDiscountState | null>(null);
+  const [backendResolved, setBackendResolved] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
       setBackendState(null);
+      setBackendResolved(false);
       return;
     }
+    setBackendResolved(false);
     const identityKey = `${user?.id ?? ''}:${user?.email ?? ''}`;
     if (identityKey !== cachedIdentityKey) {
       cachedIdentityKey = identityKey;
@@ -56,11 +60,23 @@ export function useBirthdayDiscount(dateOfBirth?: string | null): BirthdayDiscou
       .then((data) => {
         if (!active) return;
         setBackendState(data);
+        setBackendResolved(true);
       });
     return () => {
       active = false;
     };
   }, [isAuthenticated, user?.email, user?.id]);
 
+  if (!isAuthenticated) {
+    return localState;
+  }
+  if (!backendResolved) {
+    return {
+      active: false,
+      percent: 0,
+      daysUntil: null,
+      nextBirthdayLabel: null,
+    };
+  }
   return backendState ?? localState;
 }

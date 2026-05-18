@@ -98,14 +98,22 @@ export function birthdayDiscountStateFromBackend(input?: {
   days_until?: number | null;
   next_birthday?: string | null;
 } | null): BirthdayDiscountState | null {
-  if (!input || input.active !== true) return null;
+  if (input == null) return null;
+  const shared = {
+    daysUntil: input.days_until ?? null,
+    nextBirthdayLabel: input.next_birthday ?? null,
+  };
+  if (input.active !== true) {
+    return { active: false, percent: 0, ...shared };
+  }
   const percent = Math.min(100, Math.max(0, Math.floor(Number(input.percent ?? 0))));
-  if (percent <= 0) return null;
+  if (percent <= 0) {
+    return { active: false, percent: 0, ...shared };
+  }
   return {
     active: true,
     percent,
-    daysUntil: input.days_until ?? null,
-    nextBirthdayLabel: input.next_birthday ?? null,
+    ...shared,
   };
 }
 

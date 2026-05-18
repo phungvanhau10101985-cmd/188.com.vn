@@ -341,7 +341,7 @@ export default function ProductDetailMobile({
               <>
                 <span className="inline-flex items-baseline gap-1 rounded-full border border-gray-300 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 shadow-sm">
                   <span className="text-[10px] font-medium text-gray-500">Giá gốc</span>
-                  <span className="text-sm text-gray-800 line-through decoration-2 decoration-gray-500">
+                  <span className="text-sm text-gray-800 line-through decoration-1 decoration-gray-400">
                     {formatPrice(product.price)}
                   </span>
                 </span>

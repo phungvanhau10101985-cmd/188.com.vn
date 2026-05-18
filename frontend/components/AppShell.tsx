@@ -18,6 +18,10 @@ const BirthGenderSalePromptModal = dynamic(
   () => import('@/components/BirthGenderSalePromptModal'),
   { ssr: false }
 );
+const BirthdayPromoWelcomeModal = dynamic(
+  () => import('@/components/BirthdayPromoWelcomeModal'),
+  { ssr: false }
+);
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCart } from '@/features/cart/hooks/useCart';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
@@ -406,6 +410,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       <PwaInstallPrompt />
       <CartAddedPopup />
       {!isAuthPage && <BirthGenderSalePromptModal />}
+      {!isAuthPage && !pathname?.startsWith('/admin') && <BirthdayPromoWelcomeModal />}
     </div>
   );
 }

@@ -249,7 +249,7 @@ export default function ProductVariantModal({
               <div className="mt-0.5 flex flex-wrap items-baseline gap-2">
                 <p className="text-lg font-extrabold text-red-600">{formatPrice(displayPrice)}</p>
                 {birthdayDiscount.active && displayPrice < (product.price || 0) && (
-                  <p className="rounded-full border border-gray-300 bg-white px-2 py-0.5 text-xs font-semibold text-gray-800 line-through decoration-2 decoration-gray-500">
+                  <p className="rounded-full border border-gray-300 bg-white px-2 py-0.5 text-xs font-semibold text-gray-800 line-through decoration-1 decoration-gray-400">
                     Giá gốc {formatPrice(product.price)}
                   </p>
                 )}
@@ -397,7 +397,7 @@ export default function ProductVariantModal({
                   <div className="flex flex-wrap items-baseline gap-2">
                     <p className="text-lg font-extrabold text-red-600">{formatPrice(displayPrice)}</p>
                     {birthdayDiscount.active && displayPrice < (product.price || 0) && (
-                      <p className="rounded-full border border-gray-300 bg-white px-2 py-0.5 text-xs font-semibold text-gray-800 line-through decoration-2 decoration-gray-500">
+                      <p className="rounded-full border border-gray-300 bg-white px-2 py-0.5 text-xs font-semibold text-gray-800 line-through decoration-1 decoration-gray-400">
                         Giá gốc {formatPrice(product.price)}
                       </p>
                     )}

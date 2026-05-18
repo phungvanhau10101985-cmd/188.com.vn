@@ -213,7 +213,7 @@ export default function ProductInfo({
             <>
               <span className="inline-flex items-baseline gap-1 rounded-full border border-gray-300 bg-white px-3 py-1 text-sm font-semibold text-gray-700 shadow-sm">
                 <span className="text-xs font-medium text-gray-500">Giá gốc</span>
-                <span className="text-base text-gray-800 line-through decoration-2 decoration-gray-500">
+                <span className="text-base text-gray-800 line-through decoration-1 decoration-gray-400">
                   {formatPrice(product.price)}
                 </span>
               </span>
