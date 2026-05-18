@@ -1073,6 +1073,47 @@ def _excel_str(row: Dict, *keys: str) -> str:
     return ""
 
 
+def _excel_listed_raw(row: Dict[str, Any]) -> Any:
+    """
+    Đọc ô «listed» / «Trong danh sách»: khi read_excel dùng hàng 2 làm header, tên cột là tiếng Việt
+    (vd. «Trong danh sách (1=import, 0=xóa DB)»), không phải khóa `listed` — khi đó row.get('listed') luôn None
+    và hệ thống coi như 1 → chỉ cập nhật. Phải khớp mọi alias + mọi cột có tiền tố «Trong danh sách».
+    Giá trị 0 hợp lệ (không được bỏ qua như ô rỗng).
+    """
+    explicit = (
+        "listed",
+        "Trong danh sách (1=import, 0=xóa DB)",
+        "Trong danh sách (1=cập nhật, 0=gỡ)",
+        "Trong danh sách",
+        "trong_danh_sach",
+        "Trong danh sach",
+    )
+    for k in explicit:
+        if k not in row:
+            continue
+        v = row[k]
+        if v is None:
+            continue
+        if isinstance(v, float) and math.isnan(v):
+            continue
+        if isinstance(v, str) and str(v).strip() == "":
+            continue
+        return v
+    for col, v in row.items():
+        if col is None:
+            continue
+        cs = str(col).strip().lower()
+        if cs == "listed" or cs.startswith("trong danh sách"):
+            if v is None:
+                continue
+            if isinstance(v, float) and math.isnan(v):
+                continue
+            if isinstance(v, str) and str(v).strip() == "":
+                continue
+            return v
+    return None
+
+
 def excel_row_to_product(row: Dict) -> Dict:
     """
     Convert Excel row (~40 cột: tới `chinese_name`, `shop_name_chinese`, `listed`) to product dictionary.
@@ -1096,13 +1137,7 @@ def excel_row_to_product(row: Dict) -> Dict:
         # Tạo slug từ tên sản phẩm và product_id
         slug_value = generate_consistent_slug(product_name, product_id)
 
-        listed_cell = listed_from_excel_cell(
-            row.get("listed")
-            or row.get("Trong danh sách")
-            or row.get("trong_danh_sach")
-            or row.get("Trong danh sach"),
-            default=1,
-        )
+        listed_cell = listed_from_excel_cell(_excel_listed_raw(row), default=1)
         # Nội bộ bulk_import: pop trước khi ORM — không phải cột Product
         excel_import_listed = 1 if listed_cell else 0
 
