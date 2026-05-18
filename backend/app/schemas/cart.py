@@ -60,6 +60,10 @@ class CartResponse(BaseModel):
     loyalty_discount_amount: float = 0.0
     final_price: float = 0.0
     loyalty_tier_name: Optional[str] = None
+    birthday_discount_active: bool = False
+    birthday_discount_percent: float = 0.0
+    birthday_discount_amount: float = 0.0
+    birthday_next_date: Optional[str] = None
     
     class Config:
         from_attributes = True

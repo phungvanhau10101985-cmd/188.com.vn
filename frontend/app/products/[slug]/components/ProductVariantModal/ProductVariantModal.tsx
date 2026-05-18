@@ -9,6 +9,10 @@ import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { colorLabelForCart, colorVariantKeyPart, colorEntryImageUrl } from '@/lib/product-color-variant';
 import ProductSizeGuideModal from '@/components/category-size-guide/ProductSizeGuideModal';
+import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
+import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
+import { applyBirthdayDiscount } from '@/lib/birthday-discount';
+import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 
 /** Số tồn hiển thị (ảo) random 1–3 cho mỗi phiên bản. */
 function getRandomDisplayStock(): number {
@@ -110,8 +114,13 @@ export default function ProductVariantModal({
   /** Số còn lại hiển thị: khi số lượng = 1 thì không đổi; cộng lên 2 thì trừ 1 (đang 3 → còn 2). */
   const remainingDisplay = Math.max(0, displayStockForVariant - (effectiveQuantity - 1));
 
+  const birthdayDiscount = useBirthdayDiscount();
+  const displayPrice = birthdayDiscount.active
+    ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
+    : product.price || 0;
+  const birthdayDiscountAmount = Math.max(0, (product.price || 0) - displayPrice) * effectiveQuantity;
   const loyaltyDiscountPercent = loyaltyStatus?.current_tier?.discount_percent || 0;
-  const loyaltyDiscountAmount = (product.price * loyaltyDiscountPercent * effectiveQuantity) / 100;
+  const loyaltyDiscountAmount = (displayPrice * loyaltyDiscountPercent * effectiveQuantity) / 100;
   const loyaltyTierName = loyaltyStatus?.current_tier?.name || 'L0';
 
   const images = [
@@ -232,7 +241,19 @@ export default function ProductVariantModal({
             <div className="flex-1 min-w-0 flex flex-col gap-0.5">
               <p className="text-[11px] text-gray-500">Mã sp: {product.code || product.product_id || '—'}</p>
               <p className="text-sm font-medium text-gray-900 line-clamp-2 leading-tight">{product.name}</p>
-              <p className="text-base font-bold text-red-600 mt-0.5">{formatPrice(product.price)}</p>
+              {birthdayDiscount.active && displayPrice < (product.price || 0) && (
+                <span className="mt-1 inline-flex w-fit rounded-full bg-pink-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                  Giá sinh nhật -{birthdayDiscount.percent}%
+                </span>
+              )}
+              <div className="mt-0.5 flex flex-wrap items-baseline gap-2">
+                <p className="text-lg font-extrabold text-red-600">{formatPrice(displayPrice)}</p>
+                {birthdayDiscount.active && displayPrice < (product.price || 0) && (
+                  <p className="rounded-full border border-gray-300 bg-white px-2 py-0.5 text-xs font-semibold text-gray-800 line-through decoration-2 decoration-gray-500">
+                    Giá gốc {formatPrice(product.price)}
+                  </p>
+                )}
+              </div>
               
               {realStock === 0 ? (
                 <p className="text-[11px] font-medium text-red-600 flex items-center gap-1">
@@ -368,7 +389,19 @@ export default function ProductVariantModal({
                   <p className="text-sm font-medium text-gray-900 line-clamp-2 leading-tight mb-1">{product.name}</p>
                 </div>
                 <div>
-                  <p className="text-base font-bold text-red-600">{formatPrice(product.price)}</p>
+                  {birthdayDiscount.active && displayPrice < (product.price || 0) && (
+                    <span className="mb-0.5 inline-flex w-fit rounded-full bg-pink-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                      Giá sinh nhật -{birthdayDiscount.percent}%
+                    </span>
+                  )}
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <p className="text-lg font-extrabold text-red-600">{formatPrice(displayPrice)}</p>
+                    {birthdayDiscount.active && displayPrice < (product.price || 0) && (
+                      <p className="rounded-full border border-gray-300 bg-white px-2 py-0.5 text-xs font-semibold text-gray-800 line-through decoration-2 decoration-gray-500">
+                        Giá gốc {formatPrice(product.price)}
+                      </p>
+                    )}
+                  </div>
                   
                   {realStock === 0 ? (
                     <p className="text-[10px] font-medium text-red-600 flex items-center gap-1">
@@ -498,6 +531,20 @@ export default function ProductVariantModal({
         </div>
         {/* Sticky action buttons */}
         <div className="sticky bottom-0 z-10 bg-white border-t border-gray-200 p-3">
+          <BirthdayPromoBanner
+            active={birthdayDiscount.active}
+            percent={birthdayDiscount.percent}
+            nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
+            compact
+            className="mb-3 p-3"
+          />
+          <BirthdaySavingsCard
+            percent={birthdayDiscount.percent}
+            savings={birthdayDiscountAmount}
+            nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
+            compact
+            className="mb-3"
+          />
           {/* Loyalty Discount Message */}
           {isAuthenticated && loyaltyDiscountAmount > 0 && (
             <div className="bg-green-50 border border-green-100 rounded-lg px-3 py-2 mb-3 text-center">

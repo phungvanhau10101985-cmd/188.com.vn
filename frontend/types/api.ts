@@ -309,6 +309,10 @@ export interface Cart {
   loyalty_discount_amount?: number;
   final_price?: number;
   loyalty_tier_name?: string;
+  birthday_discount_active?: boolean;
+  birthday_discount_percent?: number;
+  birthday_discount_amount?: number;
+  birthday_next_date?: string | null;
 }
 
 export interface CartResponse {

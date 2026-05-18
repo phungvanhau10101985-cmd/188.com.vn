@@ -19,6 +19,10 @@ import ProductQASection from './components/ProductQASection/ProductQASection';
 import ProductReviewSection from './components/ProductReviewSection/ProductReviewSection';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
+import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
+import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
+import { applyBirthdayDiscount } from '@/lib/birthday-discount';
+import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import {
   openNanoAiTryOnEmbed,
   buildNanoAiTryOnCtxFrom188Product,
@@ -80,8 +84,13 @@ export default function ProductDetailMobile({
     };
   }, [isAuthenticated]);
 
+  const birthdayDiscount = useBirthdayDiscount();
+  const displayPrice = birthdayDiscount.active
+    ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
+    : product.price || 0;
+  const birthdayDiscountAmount = Math.max(0, (product.price || 0) - displayPrice);
   const loyaltyDiscountPercent = loyaltyStatus?.current_tier?.discount_percent || 0;
-  const loyaltyDiscountAmount = (product.price * loyaltyDiscountPercent) / 100;
+  const loyaltyDiscountAmount = (displayPrice * loyaltyDiscountPercent) / 100;
   const loyaltyTierName = loyaltyStatus?.current_tier?.name || 'L0';
 
   const openVariantModal = () => setVariantModalOpen(true);
@@ -169,6 +178,14 @@ export default function ProductDetailMobile({
   return (
     <div className="md:hidden min-h-screen bg-white pb-32">
       <div className="px-4 py-3">
+        <BirthdayPromoBanner
+          active={birthdayDiscount.active}
+          percent={birthdayDiscount.percent}
+          nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
+          compact
+          className="mb-3"
+        />
+
         {/* Tiêu đề sản phẩm */}
         <h1 className="text-base font-bold text-gray-900 leading-tight mb-3 uppercase">
           {product.name}
@@ -309,16 +326,37 @@ export default function ProductDetailMobile({
         )}
 
         {/* Giá + giá gốc, giảm giá, trả góp */}
-        <div className="space-y-1 mb-3">
+        <div className="space-y-2 mb-3 rounded-2xl border border-orange-100 bg-orange-50/50 p-3">
+          {birthdayDiscount.active && birthdayDiscountAmount > 0 && (
+            <div className="inline-flex items-center gap-1.5 rounded-full bg-pink-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-sm">
+              <span aria-hidden>🎂</span>
+              Giá sinh nhật đã giảm {birthdayDiscount.percent}%
+            </div>
+          )}
           <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="text-xl font-bold text-[#ea580c]">
-              {formatPrice(product.price)}
+            <span className="text-2xl font-extrabold text-[#ea580c]">
+              {formatPrice(displayPrice)}
             </span>
+            {birthdayDiscount.active && birthdayDiscountAmount > 0 && (
+              <>
+                <span className="inline-flex items-baseline gap-1 rounded-full border border-gray-300 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 shadow-sm">
+                  <span className="text-[10px] font-medium text-gray-500">Giá gốc</span>
+                  <span className="text-sm text-gray-800 line-through decoration-2 decoration-gray-500">
+                    {formatPrice(product.price)}
+                  </span>
+                </span>
+                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-pink-700 ring-1 ring-pink-200">
+                  Tiết kiệm {formatPrice(birthdayDiscountAmount)}
+                </span>
+              </>
+            )}
             {product.original_price && product.original_price > (product.price ?? 0) && (
               <>
-                <span className="text-sm text-gray-500 line-through">
-                  {formatPrice(product.original_price)}
-                </span>
+                {!birthdayDiscount.active && (
+                  <span className="text-sm text-gray-500 line-through">
+                    {formatPrice(product.original_price)}
+                  </span>
+                )}
                 <span className="bg-red-500 text-white px-1.5 py-0.5 rounded text-xs font-bold">
                   -{getDiscountPercentage(product.original_price, product.price ?? 0)}%
                 </span>
@@ -326,6 +364,14 @@ export default function ProductDetailMobile({
             )}
           </div>
         </div>
+
+        <BirthdaySavingsCard
+          percent={birthdayDiscount.percent}
+          savings={birthdayDiscountAmount}
+          nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
+          compact
+          className="mb-3"
+        />
 
         {/* Thống kê: Đã bán, Lượt thích, Đánh giá */}
         <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600 mb-3">
@@ -408,6 +454,14 @@ export default function ProductDetailMobile({
       {/* Sticky bottom bar: Trang · Thử đồ · Thích | THÊM GIỎ | MUA HÀNG */}
       <div className="fixed bottom-0 left-0 right-0 z-30 bg-gray-100 border-t border-gray-200 safe-area-pb md:hidden">
         {/* Loyalty Discount Message */}
+        {birthdayDiscount.active && birthdayDiscountAmount > 0 && (
+          <div className="bg-pink-600 border-b border-pink-700 px-2 py-1 text-center">
+            <span className="text-[10px] text-white font-semibold flex items-center justify-center gap-1">
+              <span aria-hidden>🎁</span>
+              Giá sinh nhật: tiết kiệm <strong>{formatPrice(birthdayDiscountAmount)}</strong>
+            </span>
+          </div>
+        )}
         {isAuthenticated && loyaltyDiscountAmount > 0 && (
           <div className="bg-green-50 border-b border-green-100 px-2 py-1 text-center">
             <span className="text-[10px] text-green-700 font-medium flex items-center justify-center gap-1">

@@ -111,6 +111,10 @@ class Settings:
         _ss = os.getenv("AUTH_COOKIE_SAMESITE", "lax").strip().lower()
         self.AUTH_COOKIE_SAMESITE: str = _ss if _ss in ("lax", "strict", "none") else "lax"
         self.FRONTEND_BASE_URL: str = (os.getenv("FRONTEND_BASE_URL", "http://localhost:3001").strip().rstrip("/") or "http://localhost:3001")
+        self.BIRTHDAY_PROMO_CRON_SECRET: str = (
+            os.getenv("BIRTHDAY_PROMO_CRON_SECRET", "").strip()
+            or os.getenv("CRON_SECRET", "").strip()
+        )
         self.BACKEND_PUBLIC_URL: str = (
             os.getenv("BACKEND_PUBLIC_URL", "").strip().rstrip("/")
             or f"http://{os.getenv('SERVER_HOST', '127.0.0.1')}:{os.getenv('SERVER_PORT', '8001')}".replace("0.0.0.0", "127.0.0.1")

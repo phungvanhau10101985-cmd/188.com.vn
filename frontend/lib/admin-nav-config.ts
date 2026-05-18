@@ -10,6 +10,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     items: [
       { href: '/admin/orders', label: 'Đơn hàng' },
       { href: '/admin/products', label: 'Sản phẩm' },
+      { href: '/admin/test', label: 'Test & thử nghiệm', privilegedOnly: true },
       { href: '/admin/products/source-stock-check', label: 'Kiểm tra nguồn hàng' },
       { href: '/admin/products/taobao-cards-parse', label: 'Parse HTML listing Taobao' },
       { href: '/admin/products#import-hibox', label: 'Import Hibox' },
@@ -47,7 +48,9 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   },
   {
     title: 'Khác',
-    items: [{ href: '/admin/notifications', label: 'Thông báo' }],
+    items: [
+      { href: '/admin/notifications', label: 'Thông báo' },
+    ],
   },
 ];
 

@@ -10,6 +10,8 @@ import { apiClient } from '@/lib/api-client';
 import { formatPrice, getProductMainImage } from '@/lib/utils';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { excelCell } from '@/lib/product-related-tabs';
+import { applyBirthdayDiscount } from '@/lib/birthday-discount';
+import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 
 interface ShopSidebarProductsProps {
   currentProduct: Product;
@@ -27,6 +29,7 @@ function shuffle<T>(items: T[]): T[] {
 export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProductsProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const birthdayDiscount = useBirthdayDiscount();
 
   useEffect(() => {
     let isMounted = true;
@@ -66,29 +69,39 @@ export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProdu
     <aside className="w-full">
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <div className="divide-y divide-gray-100">
-          {visibleProducts.map((product) => (
-            <Link
-              key={product.id}
-              href={`/products/${productPathSlugFromApi(product.slug, product.product_id) || product.id}`}
-              className="flex flex-col items-center gap-2 p-3 -mt-6 first:mt-0 hover:bg-gray-50"
-            >
-              <div className="w-32 h-32 bg-gray-100 rounded overflow-hidden flex-shrink-0 relative">
-                <Image
-                  src={getProductMainImage(product)}
-                  alt={product.name}
-                  fill
-                  sizes="128px"
-                  className="object-cover"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src = cdnUrl('/images/placeholder.jpg');
-                  }}
-                />
-              </div>
-              <div className="text-sm font-bold text-[#ea580c] mt-0.5">
-                {formatPrice(product.price)}
-              </div>
-            </Link>
-          ))}
+          {visibleProducts.map((product) => {
+            const displayPrice = birthdayDiscount.active
+              ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
+              : product.price || 0;
+            return (
+              <Link
+                key={product.id}
+                href={`/products/${productPathSlugFromApi(product.slug, product.product_id) || product.id}`}
+                className="flex flex-col items-center gap-2 p-3 -mt-6 first:mt-0 hover:bg-gray-50"
+              >
+                <div className="w-32 h-32 bg-gray-100 rounded overflow-hidden flex-shrink-0 relative">
+                  <Image
+                    src={getProductMainImage(product)}
+                    alt={product.name}
+                    fill
+                    sizes="128px"
+                    className="object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = cdnUrl('/images/placeholder.jpg');
+                    }}
+                  />
+                </div>
+                <div className="text-sm font-bold text-[#ea580c] mt-0.5">
+                  {formatPrice(displayPrice)}
+                </div>
+                {birthdayDiscount.active && displayPrice < (product.price || 0) && (
+                  <div className="text-xs text-gray-400 line-through -mt-2">
+                    {formatPrice(product.price)}
+                  </div>
+                )}
+              </Link>
+            );
+          })}
         </div>
       </div>
     </aside>

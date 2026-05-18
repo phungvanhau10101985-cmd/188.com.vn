@@ -87,6 +87,40 @@ def send_order_email(to_email: str, subject: str, message: str) -> None:
     send_email(to_email, subject, text_body, html_body)
 
 
+def send_birthday_promo_email(
+    to_email: str,
+    customer_name: str,
+    percent: int,
+    next_birthday_label: str,
+    website_url: str,
+) -> None:
+    display_name = (customer_name or "bạn").strip() or "bạn"
+    origin = website_url.rstrip("/")
+    subject = f"188.com.vn - Ưu đãi sinh nhật {percent}% dành cho {display_name}"
+    text_body = (
+        f"Xin chào {display_name},\n\n"
+        f"Tuần lễ sinh nhật của bạn đã bắt đầu. 188.com.vn gửi tặng ưu đãi {percent}% "
+        "tự động trên giá sản phẩm khi bạn đăng nhập và mua hàng trên web, không cần mã.\n"
+        f"Sinh nhật sắp tới: {next_birthday_label}.\n\n"
+        f"Mua sắm ngay: {origin}\n\n"
+        "Trân trọng,\n188.com.vn\n"
+        f"--\nTin nhắn tự động từ 188.com.vn · {origin}"
+    )
+    html_body = f"""
+<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.55;color:#111827;max-width:560px;">
+  <p>Xin chào <strong>{display_name}</strong>,</p>
+  <p>Tuần lễ sinh nhật của bạn đã bắt đầu. 188.com.vn gửi tặng ưu đãi <strong>{percent}%</strong> tự động trên giá sản phẩm khi bạn đăng nhập và mua hàng trên web, không cần mã.</p>
+  <p style="color:#4b5563;font-size:14px;">Sinh nhật sắp tới: {next_birthday_label}.</p>
+  <p style="margin:20px 0 12px;"><a href="{origin}" style="display:inline-block;padding:12px 22px;background:#ea580c;color:#ffffff !important;text-decoration:none;border-radius:10px;font-weight:600;">Vào web xem giá ưu đãi</a></p>
+  <p style="font-size:12px;color:#6b7280;word-break:break-all;">Hoặc sao chép liên kết: <a href="{origin}">{origin}</a></p>
+  <p style="margin-top:24px;">Trân trọng,<br/>188.com.vn</p>
+  <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
+  <p style="font-size:12px;color:#9ca3af;">Tin nhắn tự động từ 188.com.vn</p>
+</div>
+"""
+    send_email(to_email, subject, text_body, html_body)
+
+
 def _format_vnd_plain(n) -> str:
     try:
         x = int(Decimal(str(n)))

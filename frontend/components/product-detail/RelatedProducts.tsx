@@ -19,6 +19,8 @@ import {
   type ProductRelatedTabId,
 } from '@/lib/product-related-tabs';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import { applyBirthdayDiscount } from '@/lib/birthday-discount';
+import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 
 interface RelatedProductsProps {
   currentProduct: Product;
@@ -56,6 +58,10 @@ function emptyHint(tab: ProductRelatedTabId): string {
 
 function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSizes: string }) {
   const seg = productPathSlugFromApi(product.slug, product.product_id) || String(product.id);
+  const birthdayDiscount = useBirthdayDiscount();
+  const displayPrice = birthdayDiscount.active
+    ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
+    : product.price || 0;
   return (
     <Link
       href={`/products/${seg}`}
@@ -80,10 +86,12 @@ function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSi
         </h4>
 
         <div className="flex items-baseline justify-between">
-          <span className="text-sm font-bold text-[#ea580c]">{formatPrice(product.price)}</span>
-          {product.original_price && product.original_price > product.price && (
+          <span className="text-sm font-bold text-[#ea580c]">{formatPrice(displayPrice)}</span>
+          {birthdayDiscount.active && displayPrice < (product.price || 0) ? (
+            <span className="text-xs text-gray-500 line-through">{formatPrice(product.price)}</span>
+          ) : product.original_price && product.original_price > product.price ? (
             <span className="text-xs text-gray-500 line-through">{formatPrice(product.original_price)}</span>
-          )}
+          ) : null}
         </div>
 
         {typeof product.purchases === 'number' && product.purchases > 0 && (

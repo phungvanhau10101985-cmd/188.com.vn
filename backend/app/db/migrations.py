@@ -19,6 +19,8 @@ from app.models.search_log import SearchLog
 from app.models.push_subscription import UserPushSubscription
 from app.models.email_login_challenge import EmailLoginChallenge
 from app.models.email_trusted_device import EmailTrustedDevice
+from app.models.birthday_promo import BirthdayPromoEmailLog
+from app.models.admin_feature_test import AdminFeatureTestSetting
 from app.models.bank_account import BankAccount
 from app.models.site_embed_code import SiteEmbedCode
 from app.models.category_seo import CategorySeoGeminiTarget, CategorySeoSettings
@@ -557,6 +559,12 @@ class MigrationManager:
         results['source_stock_worker_state_seed'] = self.migrate_source_stock_worker_state_seed_row()
         results['source_stock_worker_state_sync'] = self._sync_table_columns(
             "source_stock_worker_state", SourceStockWorkerState
+        )
+        results['admin_feature_test_settings_create'] = self._create_table_if_not_exists(
+            "admin_feature_test_settings", AdminFeatureTestSetting
+        )
+        results['admin_feature_test_settings_sync'] = self._sync_table_columns(
+            "admin_feature_test_settings", AdminFeatureTestSetting
         )
 
         return results

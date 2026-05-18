@@ -1968,6 +1968,28 @@ export const adminIntegrationsAPI = {
     fetchAdmin<AdminIntegrationKeysOverview>('/admin/integrations/api-keys-overview'),
 };
 
+export interface AdminBirthdayPromoTestSettings {
+  birthday_promo_enabled: boolean;
+  birthday_promo_expires_at?: string | null;
+  test_duration_minutes?: number;
+  admin_email?: string | null;
+  test_email?: string | null;
+  linked_user_id?: number | null;
+  can_apply_on_web: boolean;
+  test_email_sent?: boolean;
+  test_email_error?: string | null;
+}
+
+export const adminFeatureTestAPI = {
+  getBirthdayPromoSettings: () =>
+    fetchAdmin<AdminBirthdayPromoTestSettings>('/birthday-promo/admin/test-settings'),
+  updateBirthdayPromoSettings: (birthday_promo_enabled: boolean, test_email?: string | null) =>
+    fetchAdmin<AdminBirthdayPromoTestSettings>('/birthday-promo/admin/test-settings', {
+      method: 'PUT',
+      body: JSON.stringify({ birthday_promo_enabled, test_email }),
+    }),
+};
+
 export interface BunnyCdnStatus {
   configured: boolean;
   cdn_public_base: string;

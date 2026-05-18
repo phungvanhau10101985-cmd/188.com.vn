@@ -25,6 +25,8 @@ import { buildAuthLoginHrefFromFullPath } from '@/lib/auth-redirect';
 import type { CartLineRef } from '@/features/cart/types/cart';
 import CartEmptySameShopSection from '@/components/cart/CartEmptySameShopSection';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
+import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 
 function formatAddressLine(addr: UserAddress): string {
   const parts = [addr.street_address];
@@ -139,9 +141,14 @@ export default function CartPage() {
   );
 
   const loyaltyPercent = cart?.loyalty_discount_percent ?? 0;
+  const birthdayActive = cart?.birthday_discount_active === true;
+  const birthdayPercent = cart?.birthday_discount_percent ?? 0;
+  const selectedBirthdayDiscount =
+    birthdayActive && birthdayPercent > 0 ? (selectedSubtotal * birthdayPercent) / 100 : 0;
+  const selectedSubtotalAfterBirthday = Math.max(0, selectedSubtotal - selectedBirthdayDiscount);
   const selectedLoyaltyDiscount =
-    loyaltyPercent > 0 ? (selectedSubtotal * loyaltyPercent) / 100 : 0;
-  const selectedFinalPrice = Math.max(0, selectedSubtotal - selectedLoyaltyDiscount);
+    loyaltyPercent > 0 ? (selectedSubtotalAfterBirthday * loyaltyPercent) / 100 : 0;
+  const selectedFinalPrice = Math.max(0, selectedSubtotalAfterBirthday - selectedLoyaltyDiscount);
 
   const allLineIds = useMemo(() => cartItems.map((i) => i.id), [cartItems]);
   const allSelected =
@@ -494,6 +501,13 @@ export default function CartPage() {
           </button>
         </div>
 
+        <BirthdayPromoBanner
+          active={birthdayActive}
+          percent={birthdayPercent || 10}
+          nextBirthdayLabel={cart?.birthday_next_date ?? null}
+          className="mb-4"
+        />
+
         <div className="space-y-4 md:space-y-6">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
@@ -564,7 +578,11 @@ export default function CartPage() {
             <div className="divide-y divide-gray-100">
               {(cart?.items ?? []).map((item) => {
                 const price = item.unit_price ?? item.product_data?.price ?? 0;
+                const displayPrice =
+                  birthdayActive && birthdayPercent > 0 ? applyBirthdayDiscount(price, birthdayPercent) : price;
                 const lineTotal = cartLineTotal(item);
+                const displayLineTotal =
+                  birthdayActive && birthdayPercent > 0 ? applyBirthdayDiscount(lineTotal, birthdayPercent) : lineTotal;
                 const lineKey = `${item.product_id}-${item.selected_size ?? ''}-${item.selected_color ?? ''}-${item.id}`;
                 const lineChecked = selectionForTotals.has(item.id);
                 return (
@@ -624,8 +642,13 @@ export default function CartPage() {
 
                       <div className="text-right">
                         <p className="text-sm md:text-base font-semibold text-gray-900 whitespace-nowrap">
-                          {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(price)}
+                          {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(displayPrice)}
                         </p>
+                        {birthdayActive && displayPrice < price && (
+                          <p className="text-xs text-gray-400 line-through whitespace-nowrap">
+                            {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(price)}
+                          </p>
+                        )}
                       </div>
 
                       <div className="flex items-center justify-start md:justify-center">
@@ -653,8 +676,13 @@ export default function CartPage() {
 
                       <div className="text-right">
                         <p className="text-sm md:text-base font-bold text-[#ea580c] whitespace-nowrap">
-                          {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(lineTotal)}
+                          {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(displayLineTotal)}
                         </p>
+                        {birthdayActive && displayLineTotal < lineTotal && (
+                          <p className="text-xs text-gray-400 line-through whitespace-nowrap">
+                            {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(lineTotal)}
+                          </p>
+                        )}
                       </div>
 
                       <div className="flex md:justify-end">
@@ -678,6 +706,17 @@ export default function CartPage() {
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 md:px-5 md:py-4">
+            {birthdayActive && selectedBirthdayDiscount > 0 ? (
+              <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
+                <span className="text-gray-500">
+                  Ưu đãi sinh nhật <span className="font-bold text-pink-600">{birthdayPercent}%</span>
+                </span>
+                <span className="font-medium text-pink-600">
+                  -{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(selectedBirthdayDiscount)}
+                </span>
+              </div>
+            ) : null}
+
             {/* Loyalty Discount — theo phần đã chọn (khi có giảm giá hạng) */}
             {loyaltyPercent > 0 && selectedLoyaltyDiscount > 0 ? (
               <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">

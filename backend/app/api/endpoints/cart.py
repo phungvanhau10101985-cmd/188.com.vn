@@ -12,6 +12,7 @@ from app.crud import loyalty as crud_loyalty
 import app.schemas as schemas
 from app.schemas.cart import CartItemCreate, CartItemUpdate, CartResponse, CartItemResponse
 from app.models.cart import CartItem, Cart
+from app.services.birthday_discount import get_birthday_discount_for_user
 
 router = APIRouter()
 
@@ -57,6 +58,8 @@ def get_user_cart(
     items = cart_crud.get_user_cart_items(db, user_id=current_user.id)
     summary = cart_crud.get_cart_summary(db, user_id=current_user.id)
     
+    birthday_discount = get_birthday_discount_for_user(db, current_user)
+
     # Calculate loyalty discount
     total_spent = crud_loyalty.calculate_user_spend_6_months(db, current_user.id)
     current_tier = crud_loyalty.get_tier_by_spend(db, total_spent)
@@ -69,8 +72,11 @@ def get_user_cart(
         loyalty_tier_name = current_tier.name
         
     total_price = float(summary["total_price"])
-    loyalty_discount_amount = (total_price * loyalty_discount_percent) / 100
-    final_price = total_price - loyalty_discount_amount
+    birthday_discount_percent = float(birthday_discount.percent)
+    birthday_discount_amount = (total_price * birthday_discount_percent) / 100
+    remaining_after_birthday = max(0.0, total_price - birthday_discount_amount)
+    loyalty_discount_amount = (remaining_after_birthday * loyalty_discount_percent) / 100
+    final_price = max(0.0, remaining_after_birthday - loyalty_discount_amount)
     
     # Convert CartItem models to CartItemResponse schema
     cart_items_response = [_cart_item_to_response(item) for item in items]
@@ -88,7 +94,11 @@ def get_user_cart(
         loyalty_discount_percent=loyalty_discount_percent,
         loyalty_discount_amount=loyalty_discount_amount,
         final_price=final_price,
-        loyalty_tier_name=loyalty_tier_name
+        loyalty_tier_name=loyalty_tier_name,
+        birthday_discount_active=birthday_discount.active,
+        birthday_discount_percent=birthday_discount_percent,
+        birthday_discount_amount=birthday_discount_amount,
+        birthday_next_date=birthday_discount.next_birthday.isoformat() if birthday_discount.next_birthday else None,
     )
 
 @router.post("/items", response_model=CartItemResponse)
@@ -178,6 +188,8 @@ def migrate_guest_cart(
         
         summary = cart_crud.get_cart_summary(db, user_id=current_user.id)
         
+        birthday_discount = get_birthday_discount_for_user(db, current_user)
+
         # Calculate loyalty discount
         total_spent = crud_loyalty.calculate_user_spend_6_months(db, current_user.id)
         current_tier = crud_loyalty.get_tier_by_spend(db, total_spent)
@@ -190,8 +202,11 @@ def migrate_guest_cart(
             loyalty_tier_name = current_tier.name
             
         total_price = float(summary["total_price"])
-        loyalty_discount_amount = (total_price * loyalty_discount_percent) / 100
-        final_price = total_price - loyalty_discount_amount
+        birthday_discount_percent = float(birthday_discount.percent)
+        birthday_discount_amount = (total_price * birthday_discount_percent) / 100
+        remaining_after_birthday = max(0.0, total_price - birthday_discount_amount)
+        loyalty_discount_amount = (remaining_after_birthday * loyalty_discount_percent) / 100
+        final_price = max(0.0, remaining_after_birthday - loyalty_discount_amount)
         
         return schemas.CartMergeResponse(
             message=result.get("message", "Migration completed"),
@@ -210,7 +225,11 @@ def migrate_guest_cart(
                 loyalty_discount_percent=loyalty_discount_percent,
                 loyalty_discount_amount=loyalty_discount_amount,
                 final_price=final_price,
-                loyalty_tier_name=loyalty_tier_name
+                loyalty_tier_name=loyalty_tier_name,
+                birthday_discount_active=birthday_discount.active,
+                birthday_discount_percent=birthday_discount_percent,
+                birthday_discount_amount=birthday_discount_amount,
+                birthday_next_date=birthday_discount.next_birthday.isoformat() if birthday_discount.next_birthday else None,
             )
         )
     except ValueError as e:

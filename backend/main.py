@@ -200,6 +200,7 @@ def load_api_routes():
         ("image_localization", "/image-localization", "image-localization"),
         ("user_behavior", "/user-behavior", "user-behavior"),
         ("analytics", "/analytics", "analytics"),
+        ("birthday_promo", "/birthday-promo", "birthday-promo"),
         ("nanoai_search", "/nanoai", "nanoai"),
         ("sepay_webhook", "/sepay", "sepay"),
         ("debug", "/debug", "debug"),

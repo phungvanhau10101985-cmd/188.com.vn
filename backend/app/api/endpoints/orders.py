@@ -13,6 +13,7 @@ from app.core.security import get_current_user, get_current_user_optional, requi
 from app.core.config import settings
 from app.services.email_service import send_order_email, send_deposit_confirmed_email_task
 from app.services import sepay as sepay_svc
+from app.services.birthday_discount import get_birthday_discount_for_user
 
 
 def _dec(v) -> Decimal:
@@ -111,21 +112,34 @@ def create_order(
                 "deposit_amount": unit_price * Decimal('0.3') if product.deposit_require else Decimal('0')
             })
         
-        # --- LOYALTY CALCULATION (chỉ khi đã đăng nhập) ---
+        # --- BIRTHDAY + LOYALTY DISCOUNT (chỉ khi đã đăng nhập) ---
+        birthday_discount_amount = Decimal('0')
         loyalty_discount_amount = Decimal('0')
-        loyalty_note = ""
+        discount_notes = []
 
         if current_user is not None:
+            birthday_discount = get_birthday_discount_for_user(db, current_user)
+            if birthday_discount.active and birthday_discount.percent > 0:
+                birthday_percent = Decimal(str(birthday_discount.percent))
+                birthday_discount_amount = (total_amount * birthday_percent) / 100
+                discount_notes.append(
+                    f"Ưu đãi sinh nhật ({birthday_discount.percent}%): -{birthday_discount_amount:,.0f} đ"
+                )
+
             total_spent_6_months = crud_loyalty.calculate_user_spend_6_months(db, current_user.id)
             current_tier = crud_loyalty.get_tier_by_spend(db, total_spent_6_months)
 
             if current_tier and current_tier.discount_percent > 0:
                 discount_percent = Decimal(str(current_tier.discount_percent))
-                loyalty_discount_amount = (total_amount * discount_percent) / 100
-                loyalty_note = f"Giảm giá thành viên {current_tier.name} ({current_tier.discount_percent}%): -{loyalty_discount_amount:,.0f} đ"
+                remaining_after_birthday = max(Decimal('0'), total_amount - birthday_discount_amount)
+                loyalty_discount_amount = (remaining_after_birthday * discount_percent) / 100
+                discount_notes.append(
+                    f"Giảm giá thành viên {current_tier.name} ({current_tier.discount_percent}%): -{loyalty_discount_amount:,.0f} đ"
+                )
             
         # Apply discount
-        total_amount_after_discount = total_amount - loyalty_discount_amount
+        total_discount_amount = birthday_discount_amount + loyalty_discount_amount
+        total_amount_after_discount = max(Decimal('0'), total_amount - total_discount_amount)
 
         # 2. Calculate deposit
         deposit_type = order_data.deposit_type
@@ -161,10 +175,10 @@ def create_order(
             payment_method=order_data.payment_method.value,
             shipping_method=order_data.shipping_method,
             subtotal=total_amount,
-            discount_amount=loyalty_discount_amount,
+            discount_amount=total_discount_amount,
             shipping_fee=shipping_fee,
             total_amount=total_amount_after_discount + shipping_fee,
-            admin_notes=loyalty_note,
+            admin_notes="\n".join(discount_notes),
             requires_deposit=requires_deposit,
             deposit_type=deposit_type.value if deposit_type else None,
             deposit_percentage=deposit_percentage,

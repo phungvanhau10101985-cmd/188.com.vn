@@ -725,6 +725,15 @@ class ApiClient {
     return this.fetch('/loyalty/my-status');
   }
 
+  async getMyBirthdayPromoStatus(): Promise<{
+    active: boolean;
+    percent: number;
+    days_until: number | null;
+    next_birthday: string | null;
+  }> {
+    return this.fetch('/birthday-promo/me');
+  }
+
   async getLoyaltyTiers(): Promise<any[]> {
     return this.fetch<any[]>('/loyalty/tiers');
   }

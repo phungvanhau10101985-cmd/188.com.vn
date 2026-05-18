@@ -9,6 +9,8 @@ import { formatPrice, getDiscountPercentage, truncateText } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { hasVideoLink } from '@/lib/video-utils';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import { applyBirthdayDiscount } from '@/lib/birthday-discount';
+import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 
 function ProductVideoBadge({ videoLink }: { videoLink?: string | null }) {
   if (!hasVideoLink(videoLink)) return null;
@@ -89,6 +91,10 @@ export default function ProductCard({
   
   const available = (product.available || 0) > 0;
   const hasDiscount = product.original_price && product.original_price > product.price;
+  const birthdayDiscount = useBirthdayDiscount();
+  const displayPrice = birthdayDiscount.active
+    ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
+    : product.price || 0;
   
   // Sử dụng image utils với kích thước tối ưu
   const imageUrl = getOptimizedImage(product.main_image, {
@@ -177,11 +183,15 @@ export default function ProductCard({
         </Link>
 
         {/* Discount Badge */}
-        {hasDiscount && !imageError && (
+        {birthdayDiscount.active && !imageError ? (
+          <div className="absolute top-2 left-2 bg-pink-500 text-white px-1.5 py-0.5 rounded-full text-xs font-bold shadow-md">
+            SN -{birthdayDiscount.percent}%
+          </div>
+        ) : hasDiscount && !imageError ? (
           <div className="absolute top-2 left-2 bg-red-500 text-white px-1.5 py-0.5 rounded-full text-xs font-bold shadow-md">
             -{getDiscountPercentage(product.original_price!, product.price)}%
           </div>
-        )}
+        ) : null}
 
         {!imageError && <ProductVideoBadge videoLink={product.video_link} />}
 
@@ -240,19 +250,26 @@ export default function ProductCard({
         <div className="space-y-1">
           <div className="flex items-baseline space-x-1">
             <span className={`font-bold text-red-600 ${sizeClasses.price}`}>
-              {formatPrice(product.price)}
+              {formatPrice(displayPrice)}
             </span>
-            {hasDiscount && (
+            {birthdayDiscount.active && displayPrice < (product.price || 0) && (
               <span className="text-xs text-gray-500 line-through">
-                {formatPrice(product.original_price!)}
+                {formatPrice(product.price)}
               </span>
+            )}
+            {hasDiscount && (
+              !birthdayDiscount.active ? (
+                <span className="text-xs text-gray-500 line-through">
+                  {formatPrice(product.original_price!)}
+                </span>
+              ) : null
             )}
           </div>
           
           {/* Installment */}
-          {product.price && product.price > 1000000 && (
+          {displayPrice && displayPrice > 1000000 && (
             <div className="text-xs text-green-600 font-medium">
-              Trả góp 0% • {formatPrice(product.price / 6)}/tháng
+              Trả góp 0% • {formatPrice(displayPrice / 6)}/tháng
             </div>
           )}
         </div>
@@ -298,6 +315,10 @@ export const SimpleProductCard = ({
   priority?: boolean;
 }) => {
   const [imageError, setImageError] = useState(false);
+  const birthdayDiscount = useBirthdayDiscount();
+  const displayPrice = birthdayDiscount.active
+    ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
+    : product.price || 0;
   
   const imageUrl = getOptimizedImage(product.main_image, {
     width: 250,
@@ -371,8 +392,13 @@ export const SimpleProductCard = ({
         {/* Price */}
         <div className="flex items-baseline space-x-1 mb-1">
           <span className="text-sm font-bold text-gray-900">
-            {formatPrice(product.price)}
+            {formatPrice(displayPrice)}
           </span>
+          {birthdayDiscount.active && displayPrice < (product.price || 0) && (
+            <span className="text-[10px] text-gray-500 line-through">
+              {formatPrice(product.price)}
+            </span>
+          )}
         </div>
 
         {/* Stats */}

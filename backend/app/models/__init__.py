@@ -42,6 +42,10 @@ print("[OK] UserTrustedDevice model loaded")
 from app.models.email_login_challenge import EmailLoginChallenge
 from app.models.email_trusted_device import EmailTrustedDevice
 print("[OK] Email login challenge / trusted device models loaded")
+from app.models.birthday_promo import BirthdayPromoEmailLog
+print("[OK] BirthdayPromoEmailLog model loaded")
+from app.models.admin_feature_test import AdminFeatureTestSetting
+print("[OK] AdminFeatureTestSetting model loaded")
 from app.models.push_subscription import UserPushSubscription
 print("[OK] UserPushSubscription model loaded")
 
@@ -158,6 +162,8 @@ __all__ = [
     "UserTrustedDevice",
     "EmailLoginChallenge",
     "EmailTrustedDevice",
+    "BirthdayPromoEmailLog",
+    "AdminFeatureTestSetting",
     "UserPushSubscription",
     "UserAddress",
     "UserProductView",
