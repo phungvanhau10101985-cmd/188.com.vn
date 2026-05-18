@@ -21,6 +21,7 @@ import {
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
+import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
 
 interface RelatedProductsProps {
   currentProduct: Product;
@@ -78,6 +79,7 @@ function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSi
             (e.currentTarget as HTMLImageElement).src = cdnUrl('/images/placeholder.jpg');
           }}
         />
+        <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
       </div>
 
       <div className="p-2">
@@ -85,12 +87,13 @@ function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSi
           {product.name}
         </h4>
 
-        <div className="flex items-baseline justify-between">
+        <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0">
           <span className="text-sm font-bold text-[#ea580c]">{formatPrice(displayPrice)}</span>
+          <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
           {birthdayDiscount.active && displayPrice < (product.price || 0) ? (
-            <span className="text-xs text-gray-500 line-through">{formatPrice(product.price)}</span>
+            <span className="text-xs text-gray-500 line-through decoration-1 decoration-gray-400">{formatPrice(product.price)}</span>
           ) : product.original_price && product.original_price > product.price ? (
-            <span className="text-xs text-gray-500 line-through">{formatPrice(product.original_price)}</span>
+            <span className="text-xs text-gray-500 line-through decoration-1 decoration-gray-400">{formatPrice(product.original_price)}</span>
           ) : null}
         </div>
 

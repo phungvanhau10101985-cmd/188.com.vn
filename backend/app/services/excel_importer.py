@@ -36,7 +36,9 @@ class ExcelImporter:
         progress_callback: Optional[Callable[[str, int, Optional[int]], None]] = None,
     ) -> Dict[str, Any]:
         """
-        Import sản phẩm từ file Excel ~39 cột (sau AK: tên TQ / shop TQ, row 2 nhãn VI).
+        Import sản phẩm từ file Excel (~40 cột mẫu / ~41 cột export: thêm «listed» sau Slug).
+        Cột listed: 1 = thêm mới/cập nhật; 0 = xóa bản ghi sản phẩm khỏi DB (nếu tồn tại).
+        Sau AK: tên TQ / shop TQ; row 2 nhãn VI.
         Slug được tự động tạo
         Template thường gặp: hàng 1 = tên cột (id, sku, ...), hàng 2 = nhãn tiếng Việt, dữ liệu từ hàng 3.
 
@@ -158,6 +160,7 @@ class ExcelImporter:
                 logger.info(f"📦 KẾT QUẢ IMPORT:")
                 logger.info(f"   ➕ Tạo mới: {result.get('created', 0)}")
                 logger.info(f"   🔄 Cập nhật: {result.get('updated', 0)}")
+                logger.info(f"   🗑 Xóa khỏi DB (listed=0): {result.get('deleted', 0)}")
                 logger.info(f"   ⏭ Bỏ qua (trùng id/SKU kiểu a188): {skipped_count}")
                 logger.info(f"   ⚠️  Cảnh báo: {len(all_warnings)}")
                 logger.info(f"   ❌ Lỗi: {len(all_errors)}")
@@ -261,7 +264,7 @@ class ExcelImporter:
     
     def export_to_excel(self, products: List[Dict] = None, filename: str = None) -> Dict[str, Any]:
         """
-        Export sản phẩm ra file Excel với 37 cột A-AK (có Slug)
+        Export sản phẩm ra file Excel (Slug + listed)
         """
         try:
             if not products:
@@ -274,7 +277,7 @@ class ExcelImporter:
             
             df = pd.DataFrame(products)
             
-            # 40 CỘT EXPORT ORDER: ... product_info (AK), chinese_name (AL), shop_name_chinese (AM), Slug (AN)
+            # EXPORT ORDER: ... Slug (AN) + listed (AO): 1=trên web, 0=đã ẩn
             excel_columns_order = [
                 'id', 'sku', 'origin', 'brand', 'name', 'pro_content',
                 'price', 'shop_name', 'shop_id', 'pro_lower_price', 'pro_high_price',
@@ -287,7 +290,8 @@ class ExcelImporter:
                 'product_info',  # AK: Thông tin sản phẩm (JSON)
                 'chinese_name',
                 'shop_name_chinese',
-                'Slug'           # sau hai cột tiếng Trung
+                'Slug',          # sau hai cột tiếng Trung
+                'listed',
             ]
             
             if 'product_info' not in df.columns and 'product_info' in excel_columns_order:
@@ -355,7 +359,8 @@ class ExcelImporter:
                 'product_info': 'Thông tin sản phẩm',
                 'chinese_name': 'Tên tiếng trung',
                 'shop_name_chinese': 'Shop Trung Quốc',
-                'Slug': 'Slug'
+                'Slug': 'Slug',
+                'listed': 'Trong danh sách (1=import, 0=xóa DB)',
             }
             
             with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
@@ -410,7 +415,8 @@ class ExcelImporter:
     
     def create_sample_template(self) -> Dict[str, Any]:
         """
-        Tạo file Excel mẫu với 37 cột (A-AK): ... Weight (AI), product_info (AK). Không có Slug (tự tạo khi import).
+        Tạo file Excel mẫu (40 cột tới «listed»): ... AK product_info; AL-AM tiếng Trung; không Slug (tự tạo).
+        Cột «listed» = 1 mặc định; ghi 0 để khi import xóa bản ghi sản phẩm khỏi DB theo cột id (cần đã tồn tại).
         """
         try:
             sample_product_info = json.dumps({
@@ -461,6 +467,7 @@ class ExcelImporter:
                 'product_info': sample_product_info,  # Cột AK
                 'chinese_name': '商务正装皮鞋男牛津鞋真皮尖头增高',
                 'shop_name_chinese': '示例义乌商行',
+                'listed': 1,
             }]
             
             df = pd.DataFrame(sample_data)
@@ -475,7 +482,7 @@ class ExcelImporter:
                 workbook = writer.book
                 worksheet = writer.sheets['Products']
                 
-                # 39 cột import: A-AK + AL-AM (tên tiếng Trung, shop TQ); không Slug
+                # 40 cột import mẫu: tới shop TQ + listed; không Slug
                 worksheet.insert_rows(2)
                 vietnamese_headers = [
                     'Id sản phẩm', 'Mã sản phẩm', 'Xuất xứ', 'Thương hiệu', 'Tên',
@@ -489,6 +496,7 @@ class ExcelImporter:
                     'Thông tin sản phẩm',
                     'Tên tiếng trung',
                     'Shop Trung Quốc',
+                    'Trong danh sách (1=import, 0=xóa DB)',
                 ]
                 
                 for col_idx, header in enumerate(vietnamese_headers, 1):
@@ -508,14 +516,16 @@ class ExcelImporter:
                     worksheet.column_dimensions[column_letter].width = adjusted_width
             
             logger.info(f"✅ Tạo template mẫu thành công: {filepath}")
-            logger.info("📋 Cấu trúc: 39 cột (tới shop TQ), AK = product_info; AL = tên tiếng Trung; AM = shop Trung Quốc; slug tự tạo khi import.")
+            logger.info(
+                "📋 Cấu trúc: 40 cột, AK = product_info; AL-AM tiếng Trung; cột «listed» (1/0); slug tự tạo khi import."
+            )
 
             return {
                 "success": True,
                 "filename": "sample_import_template.xlsx",
                 "filepath": filepath,
                 "download_url": "/static/templates/sample_import_template.xlsx",
-                "note": "Template 39 cột (sau AK thêm Tên tiếng trung, Shop Trung Quốc). «Cần đặt cọc» mặc định = 1.",
+                "note": "Template 40 cột. «listed»=1 import bình thường; 0 = xóa sản phẩm khỏi DB (đã có id). «Cần đặt cọc» mặc định = 1.",
             }
             
         except Exception as e:

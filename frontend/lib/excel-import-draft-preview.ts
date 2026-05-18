@@ -83,6 +83,11 @@ export const DRAFT_IMPORT_EXCEL_COLUMNS = [
   },
   { key: 'chinese_name', labelVi: 'Tên tiếng trung', sampleHint: '商务正装皮鞋男牛津鞋…' },
   { key: 'shop_name_chinese', labelVi: 'Shop Trung Quốc', sampleHint: '义乌市××商行' },
+  {
+    key: 'listed',
+    labelVi: 'Trong danh sách (1=import, 0=xóa DB)',
+    sampleHint: '1',
+  },
 ] as const;
 
 function colLetter(index1Based: number): string {
@@ -177,6 +182,7 @@ export function productDataToDraftExcelRow(
     product_info: j(p.product_info),
     chinese_name: String((p as Record<string, unknown>).chinese_name ?? ''),
     shop_name_chinese: String((p as Record<string, unknown>).shop_name_chinese ?? ''),
+    listed: depositRequireToExcelCell((p as Record<string, unknown>).is_active),
   };
 }
 

@@ -47,6 +47,7 @@ export const IMPORT_1688_EXCEL_COLUMNS: ReadonlyArray<readonly [string, string]>
   ['product_info', 'Thông tin sản phẩm'],
   ['chinese_name', 'Tên tiếng trung'],
   ['shop_name_chinese', 'Shop Trung Quốc'],
+  ['listed', 'Trong danh sách (1=import, 0=xóa DB)'],
 ];
 
 function jsonExcelCell(value: unknown): string {
@@ -120,6 +121,7 @@ function emptyExcelExportRow(): Import1688ExcelExportRow {
   for (const [k] of IMPORT_1688_EXCEL_COLUMNS) {
     if (k === 'deposit_required') empty[k] = 1;
     else if (k === 'stock_quantity') empty[k] = 500;
+    else if (k === 'listed') empty[k] = 1;
     else if (numericZeros.has(k)) empty[k] = 0;
     else empty[k] = '';
   }
@@ -176,5 +178,6 @@ export function excelExportRowFromProductData(
     product_info: jsonExcelCell(pd.product_info ?? {}),
     chinese_name: excelStr(pd.chinese_name),
     shop_name_chinese: excelStr(pd.shop_name_chinese),
+    listed: depositRequireToExcelInt(pd.is_active, 1),
   };
 }

@@ -11,6 +11,7 @@ import { hasVideoLink } from '@/lib/video-utils';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
+import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
 
 function ProductVideoBadge({ videoLink }: { videoLink?: string | null }) {
   if (!hasVideoLink(videoLink)) return null;
@@ -183,11 +184,10 @@ export default function ProductCard({
         </Link>
 
         {/* Discount Badge */}
-        {birthdayDiscount.active && !imageError ? (
-          <div className="absolute top-2 left-2 bg-pink-500 text-white px-1.5 py-0.5 rounded-full text-xs font-bold shadow-md">
-            SN -{birthdayDiscount.percent}%
-          </div>
-        ) : hasDiscount && !imageError ? (
+        {!imageError && (
+          <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
+        )}
+        {hasDiscount && !imageError && !birthdayDiscount.active ? (
           <div className="absolute top-2 left-2 bg-red-500 text-white px-1.5 py-0.5 rounded-full text-xs font-bold shadow-md">
             -{getDiscountPercentage(product.original_price!, product.price)}%
           </div>
@@ -248,12 +248,13 @@ export default function ProductCard({
 
         {/* Price */}
         <div className="space-y-1">
-          <div className="flex items-baseline space-x-1">
+          <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0">
             <span className={`font-bold text-red-600 ${sizeClasses.price}`}>
               {formatPrice(displayPrice)}
             </span>
+            <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
             {birthdayDiscount.active && displayPrice < (product.price || 0) && (
-              <span className="text-xs text-gray-500 line-through">
+              <span className="text-xs text-gray-500 line-through decoration-1 decoration-gray-400">
                 {formatPrice(product.price)}
               </span>
             )}
@@ -365,6 +366,10 @@ export const SimpleProductCard = ({
           </div>
         )}
 
+        {!imageError && (
+          <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
+        )}
+
         {/* Favorite Button */}
         <button
           type="button"
@@ -390,12 +395,11 @@ export const SimpleProductCard = ({
         </h3>
 
         {/* Price */}
-        <div className="flex items-baseline space-x-1 mb-1">
-          <span className="text-sm font-bold text-gray-900">
-            {formatPrice(displayPrice)}
-          </span>
+        <div className="mb-1 flex flex-wrap items-baseline gap-x-1 gap-y-0">
+          <span className="text-sm font-bold text-gray-900">{formatPrice(displayPrice)}</span>
+          <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
           {birthdayDiscount.active && displayPrice < (product.price || 0) && (
-            <span className="text-[10px] text-gray-500 line-through">
+            <span className="text-[10px] text-gray-500 line-through decoration-1 decoration-gray-400">
               {formatPrice(product.price)}
             </span>
           )}

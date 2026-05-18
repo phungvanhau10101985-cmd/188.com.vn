@@ -295,12 +295,16 @@ function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
   const skipped = job.result?.skipped ?? [];
   const skippedFromData = typeof d?.skipped_count === 'number' ? d.skipped_count : undefined;
   const skippedCount = skippedFromData ?? skipped.length;
-  const headline = `Tạo mới ${d?.created ?? 0}, cập nhật ${d?.updated ?? 0}, bỏ qua ${skippedCount}. Không lỗi: ${d?.success_rate ?? '—'}. Tổng dòng file: ${d?.total_processed ?? 0}.`;
+  const deletedCount = typeof d?.deleted === 'number' ? d.deleted : 0;
+  const headline = `Tạo mới ${d?.created ?? 0}, cập nhật ${d?.updated ?? 0}, xóa khỏi DB ${deletedCount}, bỏ qua ${skippedCount}. Không lỗi: ${d?.success_rate ?? '—'}. Tổng dòng file: ${d?.total_processed ?? 0}.`;
 
   if (!rowErrs.length && !warns.length && skippedCount === 0) {
     return {
       panel: null,
-      toast: { type: 'ok', msg: `Import xong: ${d?.created ?? 0} mới, ${d?.updated ?? 0} cập nhật` },
+      toast: {
+        type: 'ok',
+        msg: `Import xong: ${d?.created ?? 0} mới, ${d?.updated ?? 0} cập nhật${deletedCount ? `, ${deletedCount} đã xóa` : ''}`,
+      },
     };
   }
 

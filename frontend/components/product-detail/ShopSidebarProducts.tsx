@@ -12,6 +12,7 @@ import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { excelCell } from '@/lib/product-related-tabs';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
+import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
 
 interface ShopSidebarProductsProps {
   currentProduct: Product;
@@ -79,7 +80,7 @@ export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProdu
                 href={`/products/${productPathSlugFromApi(product.slug, product.product_id) || product.id}`}
                 className="flex flex-col items-center gap-2 p-3 -mt-6 first:mt-0 hover:bg-gray-50"
               >
-                <div className="w-32 h-32 bg-gray-100 rounded overflow-hidden flex-shrink-0 relative">
+                <div className="relative h-32 w-32 flex-shrink-0 overflow-hidden rounded bg-gray-100">
                   <Image
                     src={getProductMainImage(product)}
                     alt={product.name}
@@ -90,12 +91,18 @@ export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProdu
                       (e.currentTarget as HTMLImageElement).src = cdnUrl('/images/placeholder.jpg');
                     }}
                   />
+                  <BirthdayPromoImageBadge
+                    active={birthdayDiscount.active}
+                    percent={birthdayDiscount.percent}
+                    className="left-1 top-1 px-1 py-px text-[9px] sm:text-[10px]"
+                  />
                 </div>
-                <div className="text-sm font-bold text-[#ea580c] mt-0.5">
-                  {formatPrice(displayPrice)}
+                <div className="flex flex-wrap items-center justify-center gap-x-1 gap-y-0">
+                  <div className="mt-0.5 text-sm font-bold text-[#ea580c]">{formatPrice(displayPrice)}</div>
+                  <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
                 </div>
                 {birthdayDiscount.active && displayPrice < (product.price || 0) && (
-                  <div className="text-xs text-gray-400 line-through -mt-2">
+                  <div className="-mt-2 text-xs text-gray-400 line-through decoration-1 decoration-gray-400">
                     {formatPrice(product.price)}
                   </div>
                 )}

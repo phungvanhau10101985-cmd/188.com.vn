@@ -181,7 +181,7 @@ def _infer_import_source_for_url(norm_url: str, requested_source: Optional[str] 
 
 def _excel_export_columns_and_vi_headers() -> Tuple[List[str], List[str]]:
     """
-    Trùng thứ tự với template / file 39 cột (sau `product_info` thêm tên tiếng Trung, shop Trung Quốc).
+    Trùng thứ tự với template / file ~40 cột (sau `product_info` thêm tên tiếng Trung, shop Trung Quốc, listed).
     """
     columns = [
         "id",
@@ -223,6 +223,7 @@ def _excel_export_columns_and_vi_headers() -> Tuple[List[str], List[str]]:
         "product_info",
         "chinese_name",
         "shop_name_chinese",
+        "listed",
     ]
     vietnamese_headers = [
         "Id sản phẩm",
@@ -264,6 +265,7 @@ def _excel_export_columns_and_vi_headers() -> Tuple[List[str], List[str]]:
         "Thông tin sản phẩm",
         "Tên tiếng trung",
         "Shop Trung Quốc",
+        "Trong danh sách (1=import, 0=xóa DB)",
     ]
     return columns, vietnamese_headers
 
@@ -791,6 +793,9 @@ def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
         "product_info": j(product_data.get("product_info", {})),
         "chinese_name": product_data.get("chinese_name", "") or "",
         "shop_name_chinese": product_data.get("shop_name_chinese", "") or "",
+        "listed": product_crud.deposit_require_to_excel_int(
+            product_data.get("is_active", True), default=1
+        ),
     }
 
 

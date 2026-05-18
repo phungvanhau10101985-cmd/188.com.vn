@@ -113,6 +113,20 @@ def find_conflicting_product_id_for_same_listing_source(
     return None
 
 
+def _bulk_import_maps_remove_product_id(
+    product_id_str: str,
+    batch_prefix_owner: Dict[str, str],
+    db_prefix_owner: Dict[str, str],
+    batch_code_owner: Dict[str, str],
+    db_code_owner: Dict[str, str],
+) -> None:
+    """Khi xóa SP trong bulk import — gỡ mọi map prefix/SKU trỏ tới product_id đó (dòng sau có thể tái dùng)."""
+    for m in (batch_prefix_owner, db_prefix_owner, batch_code_owner, db_code_owner):
+        dead = [k for k, v in m.items() if v == product_id_str]
+        for k in dead:
+            del m[k]
+
+
 def _bulk_import_conflict_maps_initial(db: Session) -> Tuple[Dict[str, str], Dict[str, str]]:
     """
     prefix_key (phần trước a188) → product_id sở hữu,
@@ -505,6 +519,15 @@ def deposit_require_to_bool(raw: Any, *, default: bool = True) -> bool:
 def deposit_require_from_excel_cell(raw: Any) -> bool:
     """Import Excel: ô trống/NaN → cần cọc; chỉ tắt khi ghi rõ 0/false."""
     return deposit_require_to_bool(raw, default=True)
+
+
+def listed_from_excel_cell(raw: Any, *, default: int = 1) -> int:
+    """
+    Cột Excel «listed» / «Trong danh sách»: 1 = thêm mới hoặc cập nhật; 0 = xóa khỏi DB (bulk import).
+    Ô trống/NaN → 1 (giữ hành vi cũ).
+    """
+    return deposit_require_to_excel_int(raw, default=default)
+
 
 # ---------- Nhóm danh mục cùng ý định SEO (aggregation) ----------
 # Khi khách vào danh mục "Giày boot Nam" thì hiển thị tất cả sản phẩm có subcategory
@@ -1052,8 +1075,8 @@ def _excel_str(row: Dict, *keys: str) -> str:
 
 def excel_row_to_product(row: Dict) -> Dict:
     """
-    Convert Excel row (~39 cột: tới `chinese_name`, `shop_name_chinese` sau AK) to product dictionary.
-    FIX: Đúng mapping các cột Color, Occasion, Features
+    Convert Excel row (~40 cột: tới `chinese_name`, `shop_name_chinese`, `listed`) to product dictionary.
+    Cột «listed» 0: bulk_import xóa bản ghi Product khỏi DB (nếu tồn tại); không tạo SP mới.
     """
     try:
         # Lấy các giá trị cơ bản
@@ -1072,7 +1095,17 @@ def excel_row_to_product(row: Dict) -> Dict:
         
         # Tạo slug từ tên sản phẩm và product_id
         slug_value = generate_consistent_slug(product_name, product_id)
-        
+
+        listed_cell = listed_from_excel_cell(
+            row.get("listed")
+            or row.get("Trong danh sách")
+            or row.get("trong_danh_sach")
+            or row.get("Trong danh sach"),
+            default=1,
+        )
+        # Nội bộ bulk_import: pop trước khi ORM — không phải cột Product
+        excel_import_listed = 1 if listed_cell else 0
+
         # FIX: Xử lý Features - có thể là string hoặc JSON
         features_value = row.get('Features', '')
         features_list = []
@@ -1154,7 +1187,8 @@ def excel_row_to_product(row: Dict) -> Dict:
             'chinese_name': _excel_str(row, 'chinese_name', 'Tên tiếng trung'),
             'shop_name_chinese': _excel_str(row, 'shop_name_chinese', 'Shop Trung Quốc'),
             'slug': slug_value,
-            'is_active': True,
+            'excel_import_listed': excel_import_listed,
+            'is_active': bool(excel_import_listed),
             'created_at': datetime.now()
         }
 
@@ -1244,7 +1278,9 @@ def product_to_excel_row(product: Product) -> Dict:
             'chinese_name': getattr(product, 'chinese_name', None) or '',
             'shop_name_chinese': getattr(product, 'shop_name_chinese', None) or '',
             # Slug (sau hai cột tiếng Trung — file đầy đủ có thể 40 cột)
-            'Slug': slug_value
+            'Slug': slug_value,
+            # 1 = đang hiển thị; 0 = đã ẩn (export trước khi xóa)
+            'listed': deposit_require_to_excel_int(getattr(product, "is_active", True), default=1),
         }
         
         # Debug log
@@ -3476,11 +3512,16 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
             _schedule_google_sheets_sku_sync()
     return db_product
 
+def _delete_product_orm_only(db: Session, db_product: Product) -> None:
+    """Xóa SP trong session (Bunny best-effort + db.delete); không commit — dùng bulk import batch."""
+    delete_bunny_assets_for_product(db_product)
+    db.delete(db_product)
+
+
 def delete_product(db: Session, product_id: int):
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if db_product:
-        delete_bunny_assets_for_product(db_product)
-        db.delete(db_product)
+        _delete_product_orm_only(db, db_product)
         db.commit()
         _schedule_google_sheets_sku_sync()
     return db_product
@@ -3743,6 +3784,7 @@ def bulk_import_products(
     """Import multiple products from Excel data. progress_callback(phase, current, total) optional."""
     created = 0
     updated = 0
+    deleted = 0
     errors = []
     warnings = []
     skipped: List[str] = []
@@ -3789,6 +3831,41 @@ def bulk_import_products(
         if not product_id:
             errors.append(f"Dòng {idx + 1}: Thiếu product_id")
             continue
+
+        excel_listed = listed_from_excel_cell(product_data.pop("excel_import_listed", 1), default=1)
+        if excel_listed == 0:
+            existing_del = db.query(Product).filter(Product.product_id == product_id).first()
+            if existing_del:
+                try:
+                    code_upper = str(existing_del.code or "").strip().upper()
+                    with db.begin_nested():
+                        _delete_product_orm_only(db, existing_del)
+                    _bulk_import_maps_remove_product_id(
+                        product_id,
+                        batch_prefix_owner,
+                        db_prefix_owner,
+                        batch_code_owner,
+                        db_code_owner,
+                    )
+                    if code_upper and internal_sku_is_valid_format(code_upper):
+                        sku_batch_reserved.discard(code_upper)
+                    deleted += 1
+                except Exception as e:
+                    errors.append(f"Dòng {idx + 1} ({product_id}): Không thể xóa khỏi DB — {e}")
+                    logger.error("❌ Delete-from-excel row %s: %s", idx + 1, e)
+            else:
+                skipped.append(
+                    f"Dòng {idx + 1} ({product_id}): listed=0 nhưng chưa có sản phẩm trong DB — bỏ qua."
+                )
+
+            if (idx + 1) % batch_size == 0:
+                db.commit()
+                logger.info("💾 Batch commit: %s rows (kể cả xóa SP)", idx + 1)
+
+            if progress_callback and ((idx + 1) % db_tick == 0 or (idx + 1) == n_products):
+                progress_callback("database", idx + 1, n_products)
+            continue
+
         missing_categories = _missing_required_category_labels(product_data)
         if missing_categories:
             errors.append(
@@ -3938,7 +4015,7 @@ def bulk_import_products(
     # Final commit
     try:
         db.commit()
-        logger.info(f"💾 Final commit: {created + updated} products processed")
+        logger.info(f"💾 Final commit: {created + updated + deleted} products processed")
         # Import Excel phải hoàn tất và trả trạng thái ổn định trước; Google Sheet sync
         # chạy nền/debounce để lỗi quota/mạng Google không làm hỏng luồng import.
         _schedule_google_sheets_sku_sync()
@@ -3947,10 +4024,13 @@ def bulk_import_products(
         db.rollback()
         logger.error(f"❌ Final commit error: {e}")
         total_processed = len(products_data)
-        success_rate = ((created + updated) / total_processed * 100) if total_processed > 0 else 0
+        success_rate = (
+            ((created + updated + deleted) / total_processed * 100) if total_processed > 0 else 0
+        )
         return {
             "created": created,
             "updated": updated,
+            "deleted": deleted,
             "errors": errors,
             "warnings": warnings,
             "skipped": skipped,
@@ -3972,7 +4052,9 @@ def bulk_import_products(
 
     # CATEGORY_GEMINI_SEO_AUTO: sinh seo_description + seo_body (Gemini, nền) cho path DM có trong batch — né batch cực lớn.
     total_processed = len(products_data)
-    success_rate_pct = ((created + updated) / total_processed * 100) if total_processed > 0 else 0
+    success_rate_pct = (
+        ((created + updated + deleted) / total_processed * 100) if total_processed > 0 else 0
+    )
 
     if _should_run_auto_category_gemini_after_import(db, total_processed):
         paths = _collect_unique_category_paths_for_import(products_data)
@@ -3992,6 +4074,7 @@ def bulk_import_products(
     result = {
         "created": created,
         "updated": updated,
+        "deleted": deleted,
         "errors": errors,
         "warnings": warnings,
         "skipped": skipped,
@@ -4003,6 +4086,7 @@ def bulk_import_products(
     logger.info(f"📦 BULK IMPORT COMPLETE:")
     logger.info(f"   ➕ Created: {created}")
     logger.info(f"   🔄 Updated: {updated}")
+    logger.info(f"   🗑 Xóa khỏi DB (listed=0): {deleted}")
     logger.info(f"   ⏭ Skipped (trùng a188/SKU): {len(skipped)}")
     logger.info(f"   ⚠️  Warnings: {len(warnings)}")
     logger.info(f"   ❌ Errors: {len(errors)}")
