@@ -715,6 +715,8 @@ export interface AdminImportExcelJob {
     data?: {
       created: number;
       updated: number;
+      /** Import Excel: số dòng có listed=0 và đã xóa khỏi DB */
+      deleted?: number;
       skipped_count?: number;
       total_processed: number;
       success_rate?: string;
