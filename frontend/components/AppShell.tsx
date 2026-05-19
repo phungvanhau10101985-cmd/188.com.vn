@@ -29,6 +29,7 @@ import { apiClient } from '@/lib/api-client';
 import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
 import { searchParamsToEncodedQueryString } from '@/lib/product-related-tabs';
 import type { CategoryLevel1 } from '@/types/api';
+import { usePersonalizedCategoryTree } from '@/lib/use-personalized-category-tree';
 
 /** Chiều cao thanh cam mỏng (logo + tìm + icon) khi trang listing ghim header đã thu gọn — khớp offset sticky bộ lọc. */
 const DESKTOP_LISTING_THIN_CHROME_PX = 54;
@@ -40,6 +41,7 @@ interface AppShellProps {
 }
 
 export default function AppShell({ children, initialCategoryTree }: AppShellProps) {
+  const categoryTree = usePersonalizedCategoryTree(initialCategoryTree);
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -278,7 +280,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       router.push('/');
       return;
     }
-    navigateProductTextSearch(router, raw, initialCategoryTree || []);
+    navigateProductTextSearch(router, raw, categoryTree);
   };
 
   // Danh mục: đọc từ URL khi ở trang chủ, để highlight đúng nút
@@ -341,7 +343,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
             <Navigation
               selectedFilter={selectedFilter}
               onCategoryChange={handleCategoryChange}
-              initialCategoryTree={initialCategoryTree}
+              initialCategoryTree={categoryTree}
               headerVisible={useListingThinOnScroll ? !pinnedListingCompact : true}
               embedInStickyChrome
               collapseListingCategoryBar={useListingThinOnScroll && pinnedListingCompact}
@@ -389,7 +391,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
           viewedProductsCount={viewedProductsCount}
           suggestions={suggestions}
           onSuggestionClick={handleSuggestionClick}
-          initialCategoryTree={initialCategoryTree}
+          initialCategoryTree={categoryTree}
         />
       )}
 

@@ -110,7 +110,7 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
 
   const baseDesc =
     info.seo_description ||
-    `${info.full_name} - ${info.product_count} sản phẩm. Mua sắm tại 188.com.vn - Xem là thích.`;
+    `${info.full_name} - ${info.product_count} sản phẩm. Mua sắm tại 188.com.vn - Xem là thích click là mê.`;
   const description = `${baseDesc} ${filterStr ? `Đang lọc: ${filterStr}. ` : ''}Cập nhật ${month}.`.slice(
     0,
     160,

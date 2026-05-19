@@ -9,6 +9,7 @@ import { useCart } from '@/features/cart/hooks/useCart';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import type { Product, CategoryLevel1 } from '@/types/api';
+import { usePersonalizedCategoryTree } from '@/lib/use-personalized-category-tree';
 import ProductHeader from './components/ProductHeader/ProductHeader';
 import ProductGallery from './components/ProductGallery/ProductGallery';
 import ProductInfo from './components/ProductInfo/ProductInfo';
@@ -52,7 +53,8 @@ export default function ProductDetailClient({
   const [qaModalOpen, setQaModalOpen] = useState(false);
   const [reviewsModalOpen, setReviewsModalOpen] = useState(false);
   const [selectedColorImage, setSelectedColorImage] = useState<string | null>(null);
-  const [categoryTree, setCategoryTree] = useState<CategoryLevel1[]>([]);
+  const [categoryTreeBase, setCategoryTreeBase] = useState<CategoryLevel1[]>([]);
+  const categoryTree = usePersonalizedCategoryTree(categoryTreeBase);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [openLevel1, setOpenLevel1] = useState<string | null>(null);
   const [isStickyPinned, setIsStickyPinned] = useState(false);
@@ -109,10 +111,10 @@ export default function ProductDetailClient({
         .then((data) => {
           if (!active) return;
           const tree = Array.isArray(data) ? data : [];
-          setCategoryTree(tree);
+          setCategoryTreeBase(tree);
         })
         .catch(() => {
-          if (active) setCategoryTree([]);
+          if (active) setCategoryTreeBase([]);
         });
     };
     if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {

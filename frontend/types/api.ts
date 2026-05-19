@@ -197,6 +197,52 @@ export interface ProductListResponse {
   ai_processed?: boolean;
 }
 
+/** API GET /user-behavior/categories/popular-for-profile */
+export interface PopularCategoryForProfile {
+  name: string;
+  purchases: number;
+  product_count: number;
+  view_hits?: number;
+}
+
+export type PopularCategoryHeroSource = 'profile_gender' | 'recent_views';
+
+export type HeroCategoryAspectRatio = 'portrait' | 'landscape' | 'square';
+
+/** Tile danh mục hero (cấp 1 / 2 / 3). */
+export interface HeroCategoryTile {
+  level: 1 | 2 | 3;
+  name: string;
+  short_name?: string;
+  category: string;
+  subcategory?: string | null;
+  sub_subcategory?: string | null;
+  product_count: number;
+  purchases: number;
+  ctr_hint: string;
+  aspect_ratio: HeroCategoryAspectRatio;
+  image_url?: string | null;
+  col_span?: number;
+  row_span?: number;
+}
+
+export interface HeroCategoryTilesResponse {
+  tiles: HeroCategoryTile[];
+  gender_label: string | null;
+  heading: string | null;
+  subtitle: string | null;
+  anchor_category: string | null;
+  source: PopularCategoryHeroSource;
+}
+
+/** GET /user-behavior/categories/inferred-gender — ưu tiên sắp menu danh mục */
+export interface InferredCategoryGenderResponse {
+  gender_suffix: 'Nam' | 'Nữ' | null;
+  gender_label: 'Nam' | 'Nữ' | null;
+  source: PopularCategoryHeroSource;
+  recent_view_count?: number;
+}
+
 /** API /user-behavior/products/viewed-by-same-age-gender */
 export type SameAgeGenderCohortMode =
   | 'requires_login'

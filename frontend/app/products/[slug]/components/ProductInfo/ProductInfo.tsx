@@ -309,19 +309,17 @@ export default function ProductInfo({
 
       {/* Giao hàng & Đổi trả */}
       <div className="border-t border-gray-100 pt-3">
-        <p className="text-xs text-gray-700 leading-snug">
+        <p className="text-xs text-gray-900 leading-snug">
           🚚 Giao hàng toàn quốc – Miễn phí đơn từ 500k. 🔁 Đổi trả trong 7 ngày nếu sản phẩm lỗi hoặc không đúng mô tả.{' '}
-          <span className="text-[#ea580c]">
-            👉 Xem chi tiết tại{' '}
-            <Link href="/info/chinh-sach-giao-hang" className="hover:underline font-medium">
-              Chính sách giao hàng
-            </Link>{' '}
-            và{' '}
-            <Link href="/info/doi-tra-hoan-tien" className="hover:underline font-medium">
-              Chính sách đổi trả
-            </Link>
-            .
-          </span>
+          👉 Xem chi tiết tại{' '}
+          <Link href="/info/chinh-sach-giao-hang" className="text-[#ea580c] hover:underline font-medium">
+            Chính sách giao hàng
+          </Link>{' '}
+          và{' '}
+          <Link href="/info/doi-tra-hoan-tien" className="text-[#ea580c] hover:underline font-medium">
+            Chính sách đổi trả
+          </Link>
+          .
         </p>
       </div>
 
@@ -355,9 +353,10 @@ export default function ProductInfo({
       </div>
 
       {/* Chính sách đánh giá */}
-      <p className="text-xs">
+      <p className="text-xs text-gray-900">
+        Bấm để xem{' '}
         <Link href="/info/chinh-sach-danh-gia" className="text-[#ea580c] hover:underline">
-          Bấm để xem Chính sách quản lý đánh giá và quản lý chất lượng sản phẩm
+          Chính sách quản lý đánh giá và quản lý chất lượng sản phẩm
         </Link>
       </p>
 

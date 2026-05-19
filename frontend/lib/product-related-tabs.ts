@@ -337,3 +337,14 @@ export function buildHomeListingHref(tab: ProductRelatedTabId, f: StoredRelatedF
   const params = buildHomeListingSearchParams(tab, f);
   return params ? `/?${searchParamsToEncodedQueryString(params)}` : null;
 }
+
+/** Trang chủ lọc theo shop Trung Quốc (`shop_name_chinese` / cột AM). */
+export function buildHomeListingHrefByChineseShop(shopNameChinese: string): string | null {
+  const sc = excelCell(shopNameChinese);
+  if (!sc) return null;
+  const sxc = encodeShopChineseNameForListingUrl(sc);
+  if (!sxc) return null;
+  const p = new URLSearchParams();
+  p.set(SHOP_NAME_CHINESE_QUERY_PARAM, sxc);
+  return `/?${searchParamsToEncodedQueryString(p)}`;
+}

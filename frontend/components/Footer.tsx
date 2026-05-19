@@ -29,14 +29,16 @@ export default function Footer() {
             >
               <Image
                 src="https://188comvn.b-cdn.net/logo188.png"
-                alt="188.com.vn - XEM LÀ THÍCH"
+                alt="188.com.vn - Xem là thích click là mê"
                 width={160}
                 height={48}
                 className="h-12 w-auto object-contain"
               />
               <div>
                 <h3 className="text-lg font-bold tracking-tight text-gray-900">188.com.vn</h3>
-                <p className="text-gray-600 text-xs font-medium uppercase tracking-wider">Xem là thích</p>
+                <p className="text-gray-600 text-xs font-medium uppercase tracking-wider">
+                  Xem là thích · Click là mê
+                </p>
               </div>
             </Link>
             <p className="text-gray-700 text-sm leading-relaxed max-w-xs">

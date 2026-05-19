@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import type { CategoryLevel1, CategoryLevel2, CategoryLevel3 } from '@/types/api';
+import { usePersonalizedCategoryTree } from '@/lib/use-personalized-category-tree';
 
 interface CategoryListPageProps {
   categoryTree: CategoryLevel1[];
@@ -38,7 +39,7 @@ const ArrowRight = ({ open }: { open?: boolean }) => (
 export default function CategoryListPage({ categoryTree }: CategoryListPageProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const list = categoryTree || [];
+  const list = usePersonalizedCategoryTree(categoryTree);
   const [openL1, setOpenL1] = useState<Set<string>>(new Set());
   const [openL2, setOpenL2] = useState<Set<string>>(new Set());
 

@@ -106,7 +106,7 @@ Yêu cầu:
 3. Bao gồm: lợi ích mua hàng (đa dạng mẫu mã, chất lượng). KHÔNG ghi số lượng sản phẩm cụ thể (số thay đổi hàng ngày).
 4. Kêu gọi hành động (CTA) nhẹ nhàng
 5. Tự nhiên, không spam từ khóa
-6. Phù hợp thương hiệu 188.com.vn - "Xem là thích"
+6. Phù hợp thương hiệu 188.com.vn - "Xem là thích click là mê"
 
 Chỉ trả về mô tả, không giải thích, không markdown, không dấu ngoặc kép."""
 
@@ -132,7 +132,7 @@ def _generate_fallback_description(category_name: str, _product_count: int = 0) 
     """Mô tả mặc định khi AI không khả dụng. Không ghi số sản phẩm (thay đổi hàng ngày)."""
     templates = [
         f"{category_name} chính hãng, đa dạng mẫu mã. Giá tốt, giao hàng nhanh toàn quốc. Mua ngay tại 188.com.vn!",
-        f"Khám phá {category_name.lower()} đa dạng tại 188.com.vn. Chất lượng đảm bảo, giá hợp lý. Xem là thích!",
+        f"Khám phá {category_name.lower()} đa dạng tại 188.com.vn. Chất lượng đảm bảo, giá hợp lý. Xem là thích click là mê!",
         f"{category_name} - nhiều sản phẩm đang chờ bạn. Xem ngay bộ sưu tập mới nhất tại 188.com.vn!",
     ]
     # Chọn template dựa trên hash để nhất quán

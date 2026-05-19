@@ -52,7 +52,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const rawDesc =
     product.meta_description ||
     product.description ||
-    `${product.name}. ${brandForSeo ? `Thương hiệu ${brandForSeo}. ` : ""}Giá ${new Intl.NumberFormat("vi-VN").format(product.price)} ₫. Mua sắm tại 188.com.vn - Xem là thích.`;
+    `${product.name}. ${brandForSeo ? `Thương hiệu ${brandForSeo}. ` : ""}Giá ${new Intl.NumberFormat("vi-VN").format(product.price)} ₫. Mua sắm tại 188.com.vn - Xem là thích click là mê.`;
   const description = truncateDescriptionAtSentence(rawDesc, 160);
   const canonical = productPublicPdpUrl(product.slug, SITE_URL);
   const image = absoluteImage(product.main_image) || absoluteImage(product.images?.[0]);

@@ -64,7 +64,7 @@ export const metadata: Metadata = {
     default: "188.COM.VN - Xem là thích click là mê",
   },
   description:
-    "188.COM.VN - Nền tảng thương mại điện tử hàng đầu Việt Nam. Thời trang nam nữ, giày dép, phụ kiện và nhiều mặt hàng khác — chính hãng, giao hàng toàn quốc.",
+    "188.COM.VN - Xem là thích click là mê. Thời trang nam nữ, giày dép, phụ kiện và nhiều mặt hàng khác — chính hãng, giao hàng toàn quốc.",
   keywords: [
     "thời trang nam",
     "thời trang nữ",
@@ -94,20 +94,22 @@ export const metadata: Metadata = {
     url: "https://188.com.vn",
     siteName: "188.COM.VN",
     title: "188.COM.VN - Xem là thích click là mê",
-    description: "Thời trang nam nữ và đa dạng sản phẩm — chính hãng, giao hàng toàn quốc",
+    description:
+      "188.COM.VN - Xem là thích click là mê. Thời trang nam nữ, giày dép, phụ kiện — chính hãng, giao hàng toàn quốc",
     images: [
       {
         url: APP_WEB_ICON_URL,
         width: 536,
         height: 536,
-        alt: "188.COM.VN",
+        alt: "188.COM.VN - Xem là thích click là mê",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
     title: "188.COM.VN - Xem là thích click là mê",
-    description: "Thời trang nam nữ và đa dạng sản phẩm — chính hãng, giao hàng toàn quốc",
+    description:
+      "188.COM.VN - Xem là thích click là mê. Thời trang nam nữ, giày dép, phụ kiện — chính hãng, giao hàng toàn quốc",
     images: [APP_WEB_ICON_URL],
   },
   robots: {

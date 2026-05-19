@@ -10,6 +10,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import { buildHomeListingHrefByChineseShop } from '@/lib/product-related-tabs';
 
 interface FavoriteItem {
   id: number;
@@ -22,6 +23,7 @@ interface FavoriteItem {
     main_image?: string;
     brand_name?: string;
     slug?: string;
+    shop_name_chinese?: string;
   };
 }
 
@@ -50,7 +52,11 @@ export default function FavoritesPage() {
           raw.map(async (item: FavoriteItem) => {
             const data = item.product_data || {};
             const needsEnrich =
-              !data.name || data.price == null || data.price === undefined || !data.main_image;
+              !data.name ||
+              data.price == null ||
+              data.price === undefined ||
+              !data.main_image ||
+              !data.shop_name_chinese;
             if (!needsEnrich) return item;
             try {
               const product = await apiClient.getProductById(item.product_id);
@@ -66,6 +72,7 @@ export default function FavoritesPage() {
                   main_image: product.main_image,
                   brand_name: product.brand_name ?? data.brand_name,
                   slug: product.slug ?? data.slug,
+                  shop_name_chinese: product.shop_name_chinese ?? data.shop_name_chinese,
                 },
               };
             } catch {
@@ -145,15 +152,44 @@ export default function FavoritesPage() {
               const pathSeg = productPathSlugFromApi(data.slug, String(item.product_id));
               const href = `/products/${pathSeg}`;
               const imageUrl = getOptimizedImage(data.main_image, { fallbackStrategy: 'local' });
+              const similarShopHref = buildHomeListingHrefByChineseShop(data.shop_name_chinese || '');
 
               return (
                 <div
                   key={item.id}
                   className="bg-white rounded-xl shadow border border-gray-100 overflow-hidden hover:shadow-md transition-shadow"
                 >
-                  <Link href={href} className="block aspect-square bg-gray-100 relative">
-                    <Image src={imageUrl} alt={name} fill sizes="(min-width: 1280px) 20vw, (min-width: 1024px) 25vw, (min-width: 640px) 33vw, 100vw" className="object-cover" />
-                  </Link>
+                  <div className="relative aspect-square bg-gray-100">
+                    <Link href={href} className="absolute inset-0 z-0 block" aria-label={`Xem ${name}`}>
+                      <Image
+                        src={imageUrl}
+                        alt={name}
+                        fill
+                        sizes="(min-width: 1280px) 20vw, (min-width: 1024px) 25vw, (min-width: 640px) 33vw, 100vw"
+                        className="object-cover"
+                      />
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => handleRemove(item.product_id, item.id)}
+                      disabled={removingId === item.id}
+                      className="absolute top-1.5 right-1.5 z-20 min-h-[36px] rounded-lg border border-red-200 bg-white/95 px-2.5 py-1 text-[11px] font-semibold text-red-600 shadow-sm backdrop-blur-[2px] hover:bg-red-50 disabled:opacity-50 md:top-2 md:right-2 md:text-xs"
+                      aria-label="Bỏ yêu thích sản phẩm"
+                    >
+                      {removingId === item.id ? 'Đang xóa...' : 'Bỏ thích'}
+                    </button>
+                    {similarShopHref ? (
+                      <Link
+                        href={similarShopHref}
+                        className="absolute bottom-1.5 left-1.5 right-1.5 z-20 rounded-lg bg-[#ea580c]/95 px-2 py-1.5 text-center text-[11px] font-semibold text-white shadow-md backdrop-blur-[2px] hover:bg-[#c2410c] md:bottom-2 md:left-2 md:right-2 md:text-xs"
+                        onClick={() =>
+                          trackEvent('favorite_similar_shop_click', { product_id: item.product_id })
+                        }
+                      >
+                        Sản phẩm tương tự
+                      </Link>
+                    ) : null}
+                  </div>
                   <div className="p-3 md:p-4">
                     <Link href={href}>
                       <h3 className="text-sm font-medium leading-snug text-gray-900 line-clamp-2 hover:text-[#ea580c] md:text-base">
@@ -166,22 +202,12 @@ export default function FavoritesPage() {
                     <p className="mt-2 text-base font-bold text-[#ea580c] md:text-lg">
                       {formatVnd(price)}
                     </p>
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                      <Link
-                        href={href}
-                        className="flex-1 rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-medium text-gray-800 hover:bg-gray-200 min-h-[44px] flex items-center justify-center md:min-h-0"
-                      >
-                        Xem chi tiết
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => handleRemove(item.product_id, item.id)}
-                        disabled={removingId === item.id}
-                        className="rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 min-h-[44px] md:min-h-0"
-                      >
-                        {removingId === item.id ? 'Đang xóa...' : 'Bỏ thích'}
-                      </button>
-                    </div>
+                    <Link
+                      href={href}
+                      className="mt-3 flex min-h-[44px] w-full items-center justify-center rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-medium text-gray-800 hover:bg-gray-200 md:min-h-0"
+                    >
+                      Xem chi tiết
+                    </Link>
                   </div>
                 </div>
               );

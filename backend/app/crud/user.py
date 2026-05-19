@@ -739,4 +739,149 @@ def get_user_behavior_stats(db: Session, user_id: int) -> Dict[str, Any]:
     }
 
 
+def _gender_category_suffix(gender: Optional[str]) -> Optional[str]:
+    """Hậu tố tên danh mục cấp 1 theo giới (taxonomy: «… Nam» / «… Nữ»)."""
+    g = (gender or "").strip().lower()
+    if g in ("male", "m", "nam"):
+        return " Nam"
+    if g in ("female", "f", "nu", "nữ"):
+        return " Nữ"
+    return None
+
+
+def get_popular_categories_for_gender(
+    db: Session,
+    gender: Optional[str],
+    *,
+    limit: int = 6,
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """
+    Danh mục cấp 1 phổ biến theo giới tính hồ sơ — xếp theo tổng lượt mua (purchases).
+    Trả (danh sách {name, purchases, product_count}, nhãn «Nam»|«Nữ»).
+    """
+    suffix = _gender_category_suffix(gender)
+    if not suffix:
+        return [], None
+    gender_label = "Nam" if suffix.strip() == "Nam" else "Nữ"
+    purchase_sum = func.coalesce(func.sum(Product.purchases), 0)
+    rows = (
+        db.query(
+            Product.category.label("name"),
+            purchase_sum.label("purchases"),
+            func.count(Product.id).label("product_count"),
+        )
+        .filter(Product.is_active.is_(True))
+        .filter(Product.category.isnot(None))
+        .filter(Product.category != "")
+        .filter(Product.category.like(f"%{suffix}"))
+        .group_by(Product.category)
+        .order_by(purchase_sum.desc(), func.count(Product.id).desc(), Product.category)
+        .limit(max(1, min(int(limit), 12)))
+        .all()
+    )
+    items: List[Dict[str, Any]] = []
+    for r in rows:
+        name = (r.name or "").strip()
+        if not name:
+            continue
+        items.append(
+            {
+                "name": name,
+                "purchases": int(r.purchases or 0),
+                "product_count": int(r.product_count or 0),
+            }
+        )
+    return items, gender_label
+
+
+def get_popular_categories_from_recent_views(
+    db: Session,
+    *,
+    user_id: Optional[int] = None,
+    guest_session_id: Optional[str] = None,
+    recent_limit: int = 8,
+    limit: int = 6,
+) -> List[Dict[str, Any]]:
+    """
+    Danh mục cấp 1 gợi ý từ tối đa `recent_limit` sản phẩm xem gần nhất (user hoặc phiên khách).
+    Ưu tiên danh mục xuất hiện nhiều / gần đây trong lượt xem; hòa theo purchases tổng danh mục.
+    """
+    product_ids: List[int] = []
+    if user_id is not None:
+        rows = (
+            db.query(UserProductView.product_id)
+            .filter(UserProductView.user_id == user_id)
+            .order_by(UserProductView.viewed_at.desc())
+            .limit(max(1, min(int(recent_limit), 24)))
+            .all()
+        )
+        product_ids = [int(r[0]) for r in rows if r[0] is not None]
+    else:
+        sid = (guest_session_id or "").strip()
+        if not sid:
+            return []
+        from app.crud import guest_behavior as guest_behavior_crud
+
+        product_ids = guest_behavior_crud.recent_guest_view_product_ids(
+            db, sid, limit=max(1, min(int(recent_limit), 24))
+        )
+
+    if not product_ids:
+        return []
+
+    products = (
+        db.query(Product)
+        .filter(Product.id.in_(product_ids), Product.is_active.is_(True))  # noqa: E712
+        .all()
+    )
+    by_id = {p.id: p for p in products}
+    cap = max(1, min(int(recent_limit), 24))
+
+    scores: Dict[str, Dict[str, Any]] = {}
+    for i, pid in enumerate(product_ids):
+        p = by_id.get(pid)
+        if not p:
+            continue
+        cat = (p.category or "").strip()
+        if not cat:
+            continue
+        if cat not in scores:
+            scores[cat] = {"name": cat, "view_hits": 0, "recency_score": 0}
+        scores[cat]["view_hits"] += 1
+        scores[cat]["recency_score"] += cap - i
+
+    if not scores:
+        return []
+
+    purchase_sum = func.coalesce(func.sum(Product.purchases), 0)
+    for cat, row in scores.items():
+        agg = (
+            db.query(
+                purchase_sum.label("purchases"),
+                func.count(Product.id).label("product_count"),
+            )
+            .filter(Product.is_active.is_(True), Product.category == cat)  # noqa: E712
+            .first()
+        )
+        row["purchases"] = int((agg.purchases if agg else 0) or 0)
+        row["product_count"] = int((agg.product_count if agg else 0) or 0)
+
+    ranked = sorted(
+        scores.values(),
+        key=lambda x: (x["recency_score"], x["view_hits"], x["purchases"]),
+        reverse=True,
+    )
+    out: List[Dict[str, Any]] = []
+    for row in ranked[: max(1, min(int(limit), 12))]:
+        out.append(
+            {
+                "name": row["name"],
+                "purchases": row["purchases"],
+                "product_count": row["product_count"],
+                "view_hits": row["view_hits"],
+            }
+        )
+    return out
+
+
 print("✅ User CRUD module loaded successfully with get_user() function")

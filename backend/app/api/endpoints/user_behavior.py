@@ -19,6 +19,7 @@ from app.crud import guest_behavior as guest_behavior_crud
 from app.crud.personalized_feed import get_personalized_home_products
 from app.models.product import Product as ProductRow
 from app.schemas.product import Product as ProductSchema
+from app.crud.category_hero_suggestions import get_hero_category_tiles, infer_category_gender_priority
 from app.crud.user import (
     add_product_view_with_data, get_user_viewed_products,
     get_products_viewed_by_same_age_gender, get_products_same_shop_as_recent_views,
@@ -27,8 +28,10 @@ from app.crud.user import (
     add_category_view_with_name, get_user_viewed_categories,
     add_brand_view, get_user_viewed_brands,
     add_search_history, get_user_search_history, clear_search_history, get_search_suggestions,
+    get_popular_categories_for_gender,
+    get_popular_categories_from_recent_views,
     add_shop_interaction, get_user_shop_interactions,
-    get_user_shop_interactions_by_type, get_user_behavior_stats
+    get_user_shop_interactions_by_type, get_user_behavior_stats,
 )
 
 router = APIRouter()
@@ -431,6 +434,139 @@ def clear_user_search_history(
         raise HTTPException(status_code=400, detail="Cần đăng nhập hoặc gửi header X-Guest-Session-Id")
     guest_behavior_crud.clear_guest_search_history(db, sid)
     return {"message": "Đã xóa lịch sử tìm kiếm"}
+
+
+@router.get("/categories/inferred-gender")
+def get_inferred_category_gender_endpoint(
+    response: Response,
+    recent_limit: int = 8,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
+):
+    """
+    Giới tính ưu tiên cho sắp xếp menu danh mục (8 SP xem gần nhất hoặc hồ sơ).
+  """
+    response.headers["Cache-Control"] = "private, no-store"
+    sid = (x_guest_session_id or "").strip()
+    profile_gender = getattr(current_user, "gender", None) if current_user else None
+    if current_user:
+        return infer_category_gender_priority(
+            db,
+            user_id=current_user.id,
+            profile_gender=profile_gender,
+            recent_limit=recent_limit,
+        )
+    if sid:
+        return infer_category_gender_priority(
+            db,
+            guest_session_id=sid,
+            profile_gender=None,
+            recent_limit=recent_limit,
+        )
+    return {
+        "gender_suffix": None,
+        "gender_label": None,
+        "source": "recent_views",
+        "recent_view_count": 0,
+    }
+
+
+@router.get("/categories/hero-tiles")
+def get_hero_category_tiles_endpoint(
+    response: Response,
+    limit: int = 8,
+    recent_limit: int = 8,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
+):
+    """
+    Tile danh mục cấp 1/2/3 theo giới (hồ sơ hoặc suy từ SP xem gần nhất).
+    Khách: X-Guest-Session-Id + lượt xem. Đăng nhập: ưu tiên giới tính hồ sơ.
+    """
+    response.headers["Cache-Control"] = "private, no-store"
+    sid = (x_guest_session_id or "").strip()
+    profile_gender = getattr(current_user, "gender", None) if current_user else None
+    if current_user:
+        return get_hero_category_tiles(
+            db,
+            user_id=current_user.id,
+            profile_gender=profile_gender,
+            recent_limit=recent_limit,
+            limit=limit,
+        )
+    if sid:
+        return get_hero_category_tiles(
+            db,
+            guest_session_id=sid,
+            profile_gender=None,
+            recent_limit=recent_limit,
+            limit=limit,
+        )
+    return {
+        "tiles": [],
+        "gender_label": None,
+        "heading": None,
+        "subtitle": None,
+        "anchor_category": None,
+        "source": "recent_views",
+    }
+
+
+@router.get("/categories/popular-for-profile")
+def get_popular_categories_for_profile_endpoint(
+    limit: int = 8,
+    recent_limit: int = 8,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Tương thích cũ — trả hero tiles theo giới tính hồ sơ."""
+    return get_hero_category_tiles(
+        db,
+        user_id=current_user.id,
+        profile_gender=getattr(current_user, "gender", None),
+        recent_limit=recent_limit,
+        limit=limit,
+    )
+
+
+@router.get("/categories/popular-from-recent-views")
+def get_popular_categories_from_recent_views_endpoint(
+    response: Response,
+    limit: int = 8,
+    recent_limit: int = 8,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
+):
+    """Tương thích cũ — alias hero-tiles (khách hoặc tài khoản)."""
+    response.headers["Cache-Control"] = "private, no-store"
+    sid = (x_guest_session_id or "").strip()
+    if current_user:
+        return get_hero_category_tiles(
+            db,
+            user_id=current_user.id,
+            profile_gender=getattr(current_user, "gender", None),
+            recent_limit=recent_limit,
+            limit=limit,
+        )
+    if sid:
+        return get_hero_category_tiles(
+            db,
+            guest_session_id=sid,
+            profile_gender=None,
+            recent_limit=recent_limit,
+            limit=limit,
+        )
+    return {
+        "tiles": [],
+        "gender_label": None,
+        "heading": None,
+        "subtitle": None,
+        "anchor_category": None,
+        "source": "recent_views",
+    }
 
 
 @router.get("/search/suggestions")

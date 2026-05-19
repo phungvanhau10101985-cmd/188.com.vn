@@ -18,6 +18,10 @@ import {
   AddressUpdateInput,
   NanoaiSearchResponse,
   SameAgeGenderCohortMode,
+  PopularCategoryForProfile,
+  PopularCategoryHeroSource,
+  HeroCategoryTilesResponse,
+  InferredCategoryGenderResponse,
 } from '@/types/api';
 
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
@@ -443,13 +447,19 @@ class ApiClient {
 
   // USER BEHAVIOR
   async trackProductView(productId: number, productData?: any): Promise<void> {
-    this.fetch('/user-behavior/products/view', {
+    return this.fetch('/user-behavior/products/view', {
       method: 'POST',
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         product_id: productId,
-        product_data: productData 
+        product_data: productData,
+      }),
+    })
+      .then(() => {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('188-product-viewed'));
+        }
       })
-    }).catch(() => {});
+      .catch(() => {});
   }
 
   /** Danh sách sản phẩm đã xem (tài khoản hoặc phiên khách qua X-Guest-Session-Id). */
@@ -535,6 +545,65 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ search_query: searchQuery.trim() }),
     });
+  }
+
+  /** Giới tính ưu tiên menu danh mục (8 SP xem gần nhất hoặc hồ sơ). */
+  async getInferredCategoryGender(recentLimit = 8): Promise<InferredCategoryGenderResponse> {
+    const empty: InferredCategoryGenderResponse = {
+      gender_suffix: null,
+      gender_label: null,
+      source: 'recent_views',
+      recent_view_count: 0,
+    };
+    const res = await this.fetch<InferredCategoryGenderResponse>(
+      `/user-behavior/categories/inferred-gender?recent_limit=${recentLimit}`,
+    ).catch(() => empty);
+    const suffix = res?.gender_suffix === 'Nam' || res?.gender_suffix === 'Nữ' ? res.gender_suffix : null;
+    const label = res?.gender_label === 'Nam' || res?.gender_label === 'Nữ' ? res.gender_label : null;
+    return {
+      gender_suffix: suffix,
+      gender_label: label,
+      source: res?.source === 'profile_gender' ? 'profile_gender' : 'recent_views',
+      recent_view_count: typeof res?.recent_view_count === 'number' ? res.recent_view_count : 0,
+    };
+  }
+
+  /** Tile danh mục cấp 1/2/3 cho hero (giới tính hồ sơ hoặc từ SP xem gần nhất). */
+  async getHeroCategoryTiles(limit = 8, recentLimit = 8): Promise<HeroCategoryTilesResponse> {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      recent_limit: String(recentLimit),
+    });
+    const empty: HeroCategoryTilesResponse = {
+      tiles: [],
+      gender_label: null,
+      heading: null,
+      subtitle: null,
+      anchor_category: null,
+      source: 'recent_views',
+    };
+    const res = await this.fetch<HeroCategoryTilesResponse>(
+      `/user-behavior/categories/hero-tiles?${params}`
+    ).catch(() => empty);
+    return {
+      tiles: Array.isArray(res?.tiles) ? res.tiles : [],
+      gender_label: res?.gender_label ?? null,
+      heading: res?.heading ?? null,
+      subtitle: res?.subtitle ?? null,
+      anchor_category: res?.anchor_category ?? null,
+      source: res?.source ?? 'recent_views',
+    };
+  }
+
+  /** Lịch sử tìm kiếm (tài khoản hoặc phiên khách qua X-Guest-Session-Id). */
+  async getSearchHistory(limit = 5): Promise<{ search_query: string }[]> {
+    const rows = await this.fetch<{ search_query?: string }[]>(
+      `/user-behavior/search/history?limit=${limit}`
+    ).catch(() => []);
+    if (!Array.isArray(rows)) return [];
+    return rows
+      .map((r) => ({ search_query: (r.search_query ?? '').trim() }))
+      .filter((r) => r.search_query.length > 0);
   }
 
   // ANALYTICS EVENTS (conversion funnel)

@@ -3,10 +3,10 @@ import { APP_WEB_ICON_URL } from "@/lib/app-web-icon";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "188.COM.VN",
+    name: "188.COM.VN - Xem là thích click là mê",
     short_name: "188",
     description:
-      "Nền tảng thương mại điện tử 188.com.vn — thời trang nam nữ, nhiều ngành hàng khác, giày dép, phụ kiện.",
+      "188.COM.VN — Xem là thích click là mê. Thời trang nam nữ, giày dép, phụ kiện và nhiều ngành hàng khác.",
     start_url: "/",
     display: "standalone",
     background_color: "#fafafa",

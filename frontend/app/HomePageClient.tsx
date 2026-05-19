@@ -10,6 +10,7 @@ import { SimpleProductCard } from '@/components/ProductCard';
 
 const NanoaiSimilarProductCard = dynamic(() => import('@/components/NanoaiSimilarProductCard'));
 import MobilePromoBanner from '@/components/mobile/MobilePromoBanner';
+import PersonalizedHeroBanner, { type HeroVariant } from '@/components/home/PersonalizedHeroBanner';
 import { apiClient, NANOAI_TEXT_SEARCH_LIMIT } from '@/lib/api-client';
 import { useLazyRevealList } from '@/hooks/useLazyRevealList';
 import { trackEvent } from '@/lib/analytics';
@@ -1004,6 +1005,24 @@ export default function HomePageClient({
 
   const sameAgeGenderExplain = sameAgeGenderSectionDescription(sameAgeGenderCohortMode, sameAgeGenderLoading);
 
+  const heroShopName = useMemo(() => {
+    for (const p of sameShopProducts) {
+      const name = (p.shop_name ?? '').trim();
+      if (name) return name;
+    }
+    return null;
+  }, [sameShopProducts]);
+
+  const heroPreviewProducts = useMemo(() => sameShopProducts.slice(0, 3), [sameShopProducts]);
+
+  const heroUserGender =
+    user?.gender === 'male' || user?.gender === 'female' ? user.gender : null;
+
+  const [heroVariant, setHeroVariant] = useState<HeroVariant>('brand');
+  const handleHeroVariantChange = useCallback((v: HeroVariant) => {
+    setHeroVariant(v);
+  }, []);
+
   return (
     <div>
       {apiStatus === 'offline' && (
@@ -1026,8 +1045,22 @@ export default function HomePageClient({
           </div>
         )}
 
-        {/* Mobile: banner KM — ẩn khi đang tìm kiếm / lọc (trang kết quả) */}
-        {!hasFilterParams && <MobilePromoBanner />}
+        {!hasFilterParams && (
+          <PersonalizedHeroBanner
+            apiStatus={apiStatus}
+            sameShopTotal={sameShopTotal}
+            sameShopLoading={sameShopLoading}
+            shopName={heroShopName}
+            previewProducts={heroPreviewProducts}
+            behaviorKey={recommendationKey}
+            isAuthenticated={isAuthenticated}
+            userGender={heroUserGender}
+            onVariantChange={handleHeroVariantChange}
+          />
+        )}
+
+        {/* Mobile: KM tĩnh — chỉ khi chưa có danh mục / tìm kiếm cá nhân hóa */}
+        {!hasFilterParams && heroVariant === 'brand' && <MobilePromoBanner />}
 
         {hasFilterParams && (
           <section className="mb-6">
@@ -1209,36 +1242,6 @@ export default function HomePageClient({
               </div>
             )}
           </section>
-        )}
-
-        {/* Hero Banner - desktop + tablet */}
-        {!hasFilterParams && (
-          <div className="hidden md:block mb-10 rounded-2xl overflow-hidden shadow-xl border border-gray-100">
-          <div className="relative bg-gradient-to-br from-[#ea580c] via-orange-500 to-amber-600 h-52 md:h-72 flex items-center justify-center text-white">
-            <div className="absolute inset-0 bg-black/5" />
-            <div className="relative text-center px-6">
-              <h2 className="text-2xl md:text-4xl font-bold tracking-tight mb-2 drop-shadow-sm">
-                188.COM.VN
-              </h2>
-              <p className="text-base md:text-lg text-white/95 font-medium mb-1">
-                Xem là thích — Mua sắm tin cậy
-              </p>
-              {/* Cố định copy: tránh CLS khi tổng SP thay đổi sau refetch personalized feed. */}
-              <p className="text-sm text-white">
-                Mua sắm khám phá toàn cửa hàng
-                {apiStatus === 'online' ? (
-                  <>
-                    {' '}
-                    <span aria-hidden className="text-white/95">
-                      ·
-                    </span>{' '}
-                    <span className="text-white/95">Kết nối ổn định</span>
-                  </>
-                ) : null}
-              </p>
-            </div>
-          </div>
-          </div>
         )}
 
         {/* Cùng shop — chỉ khi khách đã xem SP và API có gợi ý (total > 0). */}

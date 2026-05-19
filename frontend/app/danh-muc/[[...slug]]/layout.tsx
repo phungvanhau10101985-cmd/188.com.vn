@@ -76,7 +76,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   // Sử dụng mô tả AI nếu có, fallback về mô tả mặc định
   const description = info.seo_description ||
-    `${info.full_name} - ${info.product_count} sản phẩm. Mua sắm tại 188.com.vn - Xem là thích.`.slice(0, 160);
+    `${info.full_name} - ${info.product_count} sản phẩm. Mua sắm tại 188.com.vn - Xem là thích click là mê.`.slice(0, 160);
 
   // Tạo danh sách ảnh cho og:image (tối đa 4 ảnh)
   const ogImages = info.images && info.images.length > 0
