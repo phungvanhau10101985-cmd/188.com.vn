@@ -11,6 +11,7 @@ from app.api.endpoints.import_1688 import (
     _excel_row_from_product,
 )
 from app.services.import_1688_scraper import scrape_1688_product
+from app.services.import_vipomall_scraper import is_vipomall_import_url, scrape_vipomall_for_import
 
 DEFAULT_URL = "https://detail.1688.com/offer/920080333655.html?offerId=920080333655"
 
@@ -26,7 +27,10 @@ def shorten(v: object, lim: int = 72) -> str:
 
 def main() -> None:
     url = (sys.argv[1] if len(sys.argv) > 1 else DEFAULT_URL).strip()
-    _, product_data, warnings = scrape_1688_product(url)
+    if is_vipomall_import_url(url):
+        _, product_data, warnings = scrape_vipomall_for_import(url)
+    else:
+        _, product_data, warnings = scrape_1688_product(url)
 
     columns, vietnamese_headers = _excel_export_columns_and_vi_headers()
     row = _excel_row_from_product(product_data)

@@ -14,6 +14,7 @@ from app.schemas.product import ProductCreate, ProductUpdate
 import math
 import logging
 import json
+import copy
 import time
 from datetime import datetime
 from app.core.config import settings
@@ -594,6 +595,30 @@ def _parse_product_info(value: Any) -> Optional[Dict]:
     if isinstance(value, dict):
         return value
     return None
+
+
+def _merge_product_info_preserve_image_localization(incoming: Any, existing_product_info: Any) -> Any:
+    """
+    Import Excel thường ghi đè nguyên `product_info`: mất `image_localization` do file AK không chứa
+    báo cáo chi tiết (popup admin trống) trong khi `image_localization_status` trên row vẫn «localized».
+    Nếu payload import không có khóa `image_localization` và DB đã có báo cáo → giữ lại.
+    """
+    if not isinstance(incoming, dict):
+        return incoming
+    if "image_localization" in incoming:
+        return incoming
+    old = _parse_product_info(existing_product_info)
+    if not isinstance(old, dict):
+        return incoming
+    loc_old = old.get("image_localization")
+    if isinstance(loc_old, dict) and (
+        loc_old.get("results") or loc_old.get("originals") or loc_old.get("processed_at")
+    ):
+        out = copy.deepcopy(incoming)
+        out["image_localization"] = copy.deepcopy(loc_old)
+        return out
+    return incoming
+
 
 def generate_consistent_slug(name: str, product_id: str = "") -> str:
     """
@@ -3987,6 +4012,11 @@ def bulk_import_products(
                     product_data.get("product_info"),
                     product_data["code"],
                 )
+                if existing:
+                    product_data["product_info"] = _merge_product_info_preserve_image_localization(
+                        product_data.get("product_info"),
+                        existing.product_info,
+                    )
                 canonicalize_hibox_placeholder_product_id(product_data)
 
                 if existing:

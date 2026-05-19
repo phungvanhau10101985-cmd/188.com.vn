@@ -818,8 +818,6 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
 
                     overlays["code"] = sku_raw
 
-
-
             if shop_cn_col:
 
                 cn_shop_cell = coord(shop_cn_col)

@@ -1145,6 +1145,32 @@ def run_admin_source_url_scan(
             anchor_product_db_id=anchor_product_db_id or None,
         )
 
+    from app.services.vipomall_source_stock import vipomall_gather_admin_batch_scan
+
+    fb_pid = None
+    anch = max(0, int(anchor_product_db_id or 0))
+    if anch > 0:
+        anchor_row = db.query(Product).filter(Product.id == anch).first()
+        if anchor_row is not None:
+            fb_pid = anchor_row.product_id
+    third = vipomall_gather_admin_batch_scan(db, seed_url=url, fallback_product_id=fb_pid)
+    if _attempt_has_usable_catalog_read(third):
+        merged_extras = dict(extras_common)
+        merged_extras.update(
+            {
+                "vipomall_fallback_used": True,
+                "alternate_fallback_used": True,
+                "alternate_failed_domain": primary,
+                "cssbuy_and_hibox_inconclusive": True,
+            }
+        )
+        return _finalize_scan_commit_and_serialise(
+            db,
+            computed=third,
+            extras=merged_extras,
+            anchor_product_db_id=anchor_product_db_id or None,
+        )
+
     det_a_raw = first.get("detail")
     det_b_raw = second.get("detail")
     det_a = (det_a_raw if isinstance(det_a_raw, str) else "") or ""
@@ -1158,16 +1184,27 @@ def run_admin_source_url_scan(
     if not det_b:
         det_b = "(không có chi tiết)"
     canon = (str(second.get("canonical_url") or first.get("canonical_url") or "") or "").strip()
+    det_c_raw = third.get("detail")
+    det_c = (det_c_raw if isinstance(det_c_raw, str) else "") or ""
+    det_c = det_c.strip() or "(không có chi tiết)"
+    rs_c = str(third.get("raw_status") or "—").strip()
     mega_detail = (
-        f"Cả hai nền đều không đọc được — đã ghi trạng thái lỗi kiểm tra lên SP hàng chờ; nên dừng lặp và xử lý chặn/captcha.\n\n"
+        "CSSBuy, Hibox và Vipomall (1688) đều không đưa ra kết luận in_stock/out_of_stock rõ — "
+        "đã ghi trạng thái lỗi kiểm tra; nên xử lý chặn/captcha hoặc thiếu offerId 1688.\n\n"
         f"[{primary.upper()}] raw_status={rs_a}\n{det_a}\n\n"
-        f"[{secondary.upper()}] raw_status={rs_b}\n{det_b}"
+        f"[{secondary.upper()}] raw_status={rs_b}\n{det_b}\n\n"
+        f"[VIPOMALL] raw_status={rs_c}\n{det_c}"
     )
     attempts = [
         {"domain": primary, "raw_status": first.get("raw_status"), "detail": first.get("detail")},
         {"domain": secondary, "raw_status": second.get("raw_status"), "detail": second.get("detail")},
+        {"domain": "vipomall", "raw_status": third.get("raw_status"), "detail": third.get("detail")},
     ]
-    merged_warns = list((first.get("warnings") or []) + (second.get("warnings") or []))[:40]
+    merged_warns = list(
+        (first.get("warnings") or [])
+        + (second.get("warnings") or [])
+        + (third.get("warnings") or [])
+    )[:40]
     return _finalize_scan_commit_and_serialise(
         db,
         computed={

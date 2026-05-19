@@ -23,11 +23,13 @@ from app.services.import_hibox_scraper import (
     is_hibox_import_url,
     normalize_product_import_url,
 )
+from app.services.import_vipomall_scraper import is_vipomall_import_url, vipomall_canonical_import_url
 
 FETCH_TARGET_AUTO = "auto"
 FETCH_TARGET_HIBOX = "hibox"
 FETCH_TARGET_1688 = "1688"
 FETCH_TARGET_CSSBUY = "cssbuy"
+FETCH_TARGET_VIPOMALL = "vipomall"
 
 
 def normalize_fetch_target_param(raw: Optional[str]) -> str:
@@ -38,6 +40,8 @@ def normalize_fetch_target_param(raw: Optional[str]) -> str:
         return FETCH_TARGET_HIBOX
     if s in {"cssbuy", "css_buy", "css-buy"}:
         return FETCH_TARGET_CSSBUY
+    if s in {"vipomall", "vipo", "vipomail", "vipo_mall", "vipo-mall"}:
+        return FETCH_TARGET_VIPOMALL
     if s in {"1688", "detail_1688", "alibaba_1688"}:
         return FETCH_TARGET_1688
     return FETCH_TARGET_AUTO
@@ -70,7 +74,8 @@ def coerce_url_for_excel_batch_import(
     Trả (url_sau_khi_chuẩn, lỗi_skip).
 
     * `lỗi_skip` khác None → bỏ dòng với thông báo tiếng Việt.
-    * `fetch_target` phải là một trong `auto` / `hibox` / `1688` / `cssbuy` (đã normalize). `auto` = quy về Hibox như `hibox`.
+    * `fetch_target` phải là một trong `auto` / `hibox` / `1688` / `cssbuy` / `vipomall` (đã normalize).
+      `auto` = quy về Hibox như `hibox`.
     """
     ft = (fetch_target or FETCH_TARGET_AUTO).strip().lower()
     norm = normalize_product_import_url((raw_url or "").strip())
@@ -81,6 +86,9 @@ def coerce_url_for_excel_batch_import(
         return coerce_url_for_excel_batch_import(norm, FETCH_TARGET_HIBOX)
 
     if ft == FETCH_TARGET_HIBOX:
+        if is_vipomall_import_url(norm):
+            return vipomall_canonical_import_url(norm), None
+
         slug_try = extract_hibox_slug(norm)
         if slug_try and slug_try != "hibox_import":
             return hibox_canonical_scrape_url(norm), None
@@ -128,6 +136,35 @@ def coerce_url_for_excel_batch_import(
         return (
             norm,
             "không quy đổi được sang CSSBuy — cần link 1688 (offer), Taobao/Tmall (id SP), Hibox/taobao1688.kz, hoặc URL item cssbuy.com.",
+        )
+
+    if ft == FETCH_TARGET_VIPOMALL:
+        if is_vipomall_import_url(norm):
+            return vipomall_canonical_import_url(norm), None
+
+        oid = extract_offer_id(norm)
+        if oid and oid.isdigit():
+            return f"https://vipomall.vn/san-pham/{oid}?platform_type=10", None
+
+        slug = extract_hibox_slug(norm)
+        if slug and slug != "hibox_import":
+            abb = extract_hibox_1688_offer_digits(slug)
+            if abb:
+                return f"https://vipomall.vn/san-pham/{abb}?platform_type=10", None
+            return (
+                norm,
+                "link Hibox/Taobao không có offerId 1688 (abb-*) — không quy đổi sang Vipomall.",
+            )
+
+        if _extract_taobao_tmall_item_id(norm):
+            return (
+                norm,
+                "link Taobao/Tmall — không quy đổi sang Vipomall 1688; cần link 1688 hoặc Hibox abb-*.",
+            )
+
+        return (
+            norm,
+            "không quy đổi được sang Vipomall — cần link offer 1688, Vipomall, hoặc Hibox dạng abb-<số>.",
         )
 
     if ft == FETCH_TARGET_1688:

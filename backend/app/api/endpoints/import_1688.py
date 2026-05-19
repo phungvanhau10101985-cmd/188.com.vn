@@ -68,6 +68,12 @@ from app.services.import_hibox_scraper import (
     normalize_product_import_url,
     scrape_hibox_for_import,
 )
+from app.services.import_vipomall_scraper import (
+    ImportVipomallError,
+    extract_vipomall_offer_id,
+    is_vipomall_import_url,
+    scrape_vipomall_for_import,
+)
 from app.services.import_1688_scraper import (
     build_canonical_1688_product_id,
     extract_1688_numeric_offer_id,
@@ -168,8 +174,12 @@ def _batch_status_out_for_draft_ids(db: Session, batch_token: str, draft_ids: Li
 
 
 def _infer_import_source_for_url(norm_url: str, requested_source: Optional[str] = None) -> Tuple[str, str]:
-    """Trả (external_id, source). Raises ValueError nếu không phải 1688/Hibox."""
+    """Trả (external_id, source). Raises ValueError nếu không phải 1688/Hibox/Vipomall."""
     req = (requested_source or "").strip().lower()
+    if req in {"vipomall", "vipo", "vipomail"} or is_vipomall_import_url(norm_url):
+        oid = extract_vipomall_offer_id(norm_url)
+        if oid:
+            return oid, "vipomall"
     force_hibox = req in {"hibox", "hi-box", "hi_box"} or "hibox.mn" in norm_url.lower()
     if force_hibox or is_hibox_import_url(norm_url):
         return (extract_hibox_slug(norm_url) or "hibox_import"), "hibox"
@@ -372,6 +382,28 @@ def _apply_deepseek_taxonomy_after_scrape(db: Session, product_data: Dict[str, A
         logger.warning("import link DeepSeek taxonomy: %s", exc)
         warnings.append(f"deepseek_taxonomy: lỗi không mong đợi — {type(exc).__name__}: {exc}")
     apply_import_rating_question_groups_to_product_data(product_data, warnings)
+
+
+def _prefer_excel_chinese_name_for_import_ai(product_data: Dict[str, Any]) -> None:
+    """
+    Batch Excel có `chinese_name` từ NCC: dùng chuỗi gốc này làm input dịch/phân loại,
+    còn tên Vipomall/Hibox đọc được được giữ trong product_info để đối chiếu.
+    """
+    cn = str(product_data.get("chinese_name") or "").strip()
+    if not cn:
+        return
+    cur = str(product_data.get("name") or "").strip()
+    if cur and cur != cn:
+        pi = product_data.get("product_info")
+        if not isinstance(pi, dict):
+            pi = {}
+            product_data["product_info"] = pi
+        inner = pi.get("product_info")
+        if not isinstance(inner, dict):
+            inner = {}
+            pi["product_info"] = inner
+        inner.setdefault("scraped_display_name_before_excel_chinese_name", cur[:500])
+    product_data["name"] = cn[:500]
 
 
 @router.get("/debug/classify-url")
@@ -807,7 +839,9 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             return
         norm_url = normalize_product_import_url(draft.source_url or "")
         saved_source = (draft.source or "1688").strip().lower()
-        if saved_source == "hibox" or "hibox.mn" in norm_url.lower() or is_hibox_import_url(norm_url):
+        if saved_source == "vipomall" or is_vipomall_import_url(norm_url):
+            source = "vipomall"
+        elif saved_source == "hibox" or "hibox.mn" in norm_url.lower() or is_hibox_import_url(norm_url):
             source = "hibox"
         else:
             source = saved_source
@@ -815,8 +849,9 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
         if source == "hibox":
             draft_crud.mark_running(db, draft, "scraping", "Đang mở trang Hibox bằng Playwright...", 15)
             raw_payload, product_data, warnings = scrape_hibox_for_import(draft.source_url)
-            _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
             _merge_excel_overlay_for_job(db, job_id, product_data)
+            _prefer_excel_chinese_name_for_import_ai(product_data)
+            _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
             _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
             draft_crud.mark_done(
                 db,
@@ -828,14 +863,38 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             )
             return
 
+        if source == "vipomall":
+            draft_crud.mark_running(db, draft, "scraping", "Đang mở trang Vipomall bằng Playwright...", 15)
+            raw_payload, product_data, warnings = scrape_vipomall_for_import(draft.source_url)
+            _merge_excel_overlay_for_job(db, job_id, product_data)
+            _prefer_excel_chinese_name_for_import_ai(product_data)
+            _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
+            _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
+            draft_crud.mark_done(
+                db,
+                draft,
+                raw_payload=raw_payload,
+                product_data=product_data,
+                warnings=warnings,
+                success_message="Đã tạo bản nháp từ link Vipomall.",
+            )
+            return
+
         draft_crud.mark_error(
             db,
             draft,
-            message="Import trực tiếp từ 1688 đã tắt. Tạo lại nháp từ link Hibox (hibox.mn hoặc taobao1688.kz).",
+            message=(
+                "Import trực tiếp từ 1688 đã tắt. Tạo lại nháp từ link Hibox "
+                "(hibox.mn / taobao1688.kz) hoặc Vipomall."
+            ),
             errors=["import_1688_disabled"],
         )
         return
     except ImportHiboxError as exc:
+        draft = draft_crud.get_by_job_id(db, job_id)
+        if draft:
+            draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
+    except ImportVipomallError as exc:
         draft = draft_crud.get_by_job_id(db, job_id)
         if draft:
             draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
@@ -883,12 +942,13 @@ def create_import_1688_job(
             detail={
                 "reason": "unsupported_import_link",
                 "message": (
-                    "Không nhận dạng được link Hibox / taobao1688.kz (mã sản phẩm trong đường dẫn)."
+                    "Không nhận dạng được link Hibox / taobao1688.kz / Vipomall."
                 ),
                 "normalized_length": len(source_url),
                 "normalized_preview": source_url[:200],
                 "hints": (
                     "Hibox: https://hibox.mn/v/{mã}. Mirror: https://taobao1688.kz/item?id={mã}. "
+                    "Vipomall 1688: https://vipomall.vn/san-pham/{offerId}?platform_type=10. "
                     "Import trực tiếp từ 1688.com không còn hỗ trợ."
                 ),
             },
@@ -940,8 +1000,9 @@ async def create_import_jobs_batch_from_excel(
     rồi làm tròn lên bội 10.000 ₫.
     **Mã sp** chỉ khi có cột tiêu đề «Mã sp» đúng `[A-Z][0-9]{4}` — không đọc cột B cố định.
 
-    Form **`fetch_target`**: `auto` (mặc định) | `hibox` | `cssbuy` — chuẩn hoá URL từng dòng trước khi tạo job.
+    Form **`fetch_target`**: `auto` (mặc định) | `hibox` | `cssbuy` | `vipomall` — chuẩn hoá URL từng dòng trước khi tạo job.
     **`auto`** quy Taobao/Tmall và offer 1688 sang URL Hibox (`hibox.mn/v/…`) khi quy đổi được.
+    **`vipomall`** quy offer 1688 / Hibox abb-* sang `vipomall.vn/san-pham/{offerId}?platform_type=10`.
     **`1688` không còn hỗ trợ.** Dòng không quy đổi được bị **bỏ qua** kèm lý do trong `skipped`.
     """
     name = (file.filename or "").lower()
@@ -987,11 +1048,11 @@ async def create_import_jobs_batch_from_excel(
             try:
                 ext_id, src = _infer_import_source_for_url(url_norm, None)
             except ValueError:
-                skips.append(f"Dòng {it.get('excel_row')}: link không nhận dạng Hibox/taobao1688.kz.")
+                skips.append(f"Dòng {it.get('excel_row')}: link không nhận dạng Hibox/taobao1688.kz/Vipomall.")
                 continue
             if src == "1688":
                 skips.append(
-                    f"Dòng {it.get('excel_row')}: import trực tiếp 1688 đã tắt — chỉ hỗ trợ Hibox/taobao1688.kz."
+                    f"Dòng {it.get('excel_row')}: import trực tiếp 1688 đã tắt — chỉ hỗ trợ Hibox/taobao1688.kz/Vipomall."
                 )
                 continue
             overlays = dict(it.get("overlays") or {})

@@ -64,6 +64,25 @@ function collectAwIdsFromScripts(): string[] {
   return [...new Set(out)];
 }
 
+function collectGa4IdsFromScripts(): string[] {
+  if (typeof document === 'undefined') return [];
+  const out: string[] = [];
+  document.querySelectorAll('script[src*="googletagmanager.com/gtag/js"]').forEach((el) => {
+    const src = el.getAttribute('src') || '';
+    const m = src.match(/[?&]id=(G-[A-Z0-9]+)/i);
+    if (m?.[1]) out.push(m[1].toUpperCase());
+  });
+  document.querySelectorAll('script').forEach((el) => {
+    const text = el.textContent || '';
+    const re = /gtag\s*\(\s*['"]config['"]\s*,\s*['"](G-[A-Z0-9]+)['"]/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (m[1]) out.push(m[1].toUpperCase());
+    }
+  });
+  return [...new Set(out)];
+}
+
 function collectSendToFromEnv(): string[] {
   const raw = process.env.NEXT_PUBLIC_GOOGLE_ADS_AW_ID?.trim();
   if (!raw) return [];
@@ -73,6 +92,22 @@ function collectSendToFromEnv(): string[] {
         .split(/[\s,]+/)
         .map((s) => s.trim().toUpperCase())
         .filter((s) => /^AW-\d+$/.test(s))
+    ),
+  ];
+}
+
+function collectGa4FromEnv(): string[] {
+  const raw =
+    process.env.NEXT_PUBLIC_GA4_MEASUREMENT_ID?.trim() ||
+    process.env.NEXT_PUBLIC_GOOGLE_ANALYTICS_ID?.trim() ||
+    process.env.NEXT_PUBLIC_GOOGLE_ANALYTICS_MEASUREMENT_ID?.trim();
+  if (!raw) return [];
+  return [
+    ...new Set(
+      raw
+        .split(/[\s,]+/)
+        .map((s) => s.trim().toUpperCase())
+        .filter((s) => /^G-[A-Z0-9]+$/.test(s))
     ),
   ];
 }
@@ -88,6 +123,10 @@ export function getGoogleAdsSendToTargets(): string[] {
 function sendToJoined(): string | null {
   const ids = getGoogleAdsSendToTargets();
   return ids.length ? ids.join(',') : null;
+}
+
+function getGa4SendToTargets(): string[] {
+  return [...new Set([...collectGa4FromEnv(), ...collectGa4IdsFromScripts()])];
 }
 
 export type GoogleAdsWebConversionKey = keyof GoogleAdsWebConversionsPublic;
@@ -296,12 +335,18 @@ function whenGtagReady(run: () => void): void {
 }
 
 function fireGtagEvent(eventName: string, payload: Record<string, unknown>): void {
-  const send_to = sendToJoined();
-  if (!send_to) return;
+  const adsSendTo = sendToJoined();
+  const ga4SendTo = getGa4SendToTargets();
+  if (!adsSendTo && !ga4SendTo.length) return;
   whenGtagReady(() => {
     const gtag = getGtag();
     if (!gtag) return;
-    gtag('event', eventName, { send_to, ...payload });
+    if (adsSendTo) {
+      gtag('event', eventName, { send_to: adsSendTo, ...payload });
+    }
+    ga4SendTo.forEach((send_to) => {
+      gtag('event', eventName, { send_to, ...payload });
+    });
   });
 }
 
@@ -311,13 +356,13 @@ function retailDynamicPageView(payload: {
   ecomm_prodid?: string | string[];
   ecomm_totalvalue?: number;
 }): void {
-  const send_to = sendToJoined();
-  if (!send_to) return;
+  const adsSendTo = sendToJoined();
+  const ga4SendTo = getGa4SendToTargets();
+  if (!adsSendTo && !ga4SendTo.length) return;
   whenGtagReady(() => {
     const gtag = getGtag();
     if (!gtag) return;
     const body: Record<string, unknown> = {
-      send_to,
       ecomm_pagetype: payload.ecomm_pagetype,
     };
     if (payload.ecomm_prodid != null) {
@@ -327,7 +372,12 @@ function retailDynamicPageView(payload: {
     if (payload.ecomm_totalvalue != null && payload.ecomm_totalvalue > 0) {
       body.ecomm_totalvalue = payload.ecomm_totalvalue;
     }
-    gtag('event', 'page_view', body);
+    if (adsSendTo) {
+      gtag('event', 'page_view', { send_to: adsSendTo, ...body });
+    }
+    ga4SendTo.forEach((send_to) => {
+      gtag('event', 'page_view', { send_to, ...body });
+    });
   });
 }
 
