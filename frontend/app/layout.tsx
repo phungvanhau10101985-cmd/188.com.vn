@@ -61,7 +61,7 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: {
     template: "%s | 188.COM.VN",
-    default: "188.COM.VN - Nền tảng TMĐT số 1 Việt Nam",
+    default: "188.COM.VN - Xem là thích click là mê",
   },
   description:
     "188.COM.VN - Nền tảng thương mại điện tử hàng đầu Việt Nam. Thời trang nam nữ, giày dép, phụ kiện và nhiều mặt hàng khác — chính hãng, giao hàng toàn quốc.",
@@ -93,7 +93,7 @@ export const metadata: Metadata = {
     locale: "vi_VN",
     url: "https://188.com.vn",
     siteName: "188.COM.VN",
-    title: "188.COM.VN - Nền tảng TMĐT số 1 Việt Nam",
+    title: "188.COM.VN - Xem là thích click là mê",
     description: "Thời trang nam nữ và đa dạng sản phẩm — chính hãng, giao hàng toàn quốc",
     images: [
       {
@@ -106,7 +106,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "188.COM.VN - Nền tảng TMĐT số 1",
+    title: "188.COM.VN - Xem là thích click là mê",
     description: "Thời trang nam nữ và đa dạng sản phẩm — chính hãng, giao hàng toàn quốc",
     images: [APP_WEB_ICON_URL],
   },
