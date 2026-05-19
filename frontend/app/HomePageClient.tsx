@@ -9,8 +9,7 @@ import Image from 'next/image';
 import { SimpleProductCard } from '@/components/ProductCard';
 
 const NanoaiSimilarProductCard = dynamic(() => import('@/components/NanoaiSimilarProductCard'));
-import MobilePromoBanner from '@/components/mobile/MobilePromoBanner';
-import PersonalizedHeroBanner, { type HeroVariant } from '@/components/home/PersonalizedHeroBanner';
+import PersonalizedHeroBanner from '@/components/home/PersonalizedHeroBanner';
 import { apiClient, NANOAI_TEXT_SEARCH_LIMIT } from '@/lib/api-client';
 import { useLazyRevealList } from '@/hooks/useLazyRevealList';
 import { trackEvent } from '@/lib/analytics';
@@ -1018,11 +1017,6 @@ export default function HomePageClient({
   const heroUserGender =
     user?.gender === 'male' || user?.gender === 'female' ? user.gender : null;
 
-  const [heroVariant, setHeroVariant] = useState<HeroVariant>('brand');
-  const handleHeroVariantChange = useCallback((v: HeroVariant) => {
-    setHeroVariant(v);
-  }, []);
-
   return (
     <div>
       {apiStatus === 'offline' && (
@@ -1055,12 +1049,8 @@ export default function HomePageClient({
             behaviorKey={recommendationKey}
             isAuthenticated={isAuthenticated}
             userGender={heroUserGender}
-            onVariantChange={handleHeroVariantChange}
           />
         )}
-
-        {/* Mobile: KM tĩnh — chỉ khi chưa có danh mục / tìm kiếm cá nhân hóa */}
-        {!hasFilterParams && heroVariant === 'brand' && <MobilePromoBanner />}
 
         {hasFilterParams && (
           <section className="mb-6">

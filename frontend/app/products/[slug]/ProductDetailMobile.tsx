@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import type { Product } from '@/types/api';
@@ -52,6 +52,9 @@ export default function ProductDetailMobile({
   onToggleFavorite,
 }: ProductDetailMobileProps) {
   const [selectedImage, setSelectedImage] = useState(0);
+  const thumbStripRef = useRef<HTMLDivElement>(null);
+  const thumbButtonRefs = useRef<Record<number, HTMLButtonElement | null>>({});
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const [variantModalOpen, setVariantModalOpen] = useState(false);
   const [qaModalOpen, setQaModalOpen] = useState(false);
   const [reviewsModalOpen, setReviewsModalOpen] = useState(false);
@@ -160,6 +163,45 @@ export default function ProductDetailMobile({
   // Khi có video: index 0 = video, sau đó mới đến ảnh. Video luôn hiển thị đầu tiên.
   const mediaCount = hasVideo ? 1 + visiblePhotoUrls.length : visiblePhotoUrls.length;
   const isShowingVideo = hasVideo && selectedImage === 0;
+  const goPrevMedia = useCallback(() => {
+    setSelectedImage((i) => Math.max(0, i - 1));
+  }, []);
+  const goNextMedia = useCallback(() => {
+    setSelectedImage((i) => Math.min(mediaCount - 1, i + 1));
+  }, [mediaCount]);
+
+  useEffect(() => {
+    const btn = thumbButtonRefs.current[selectedImage];
+    const strip = thumbStripRef.current;
+    if (!btn || !strip) return;
+    const stripRect = strip.getBoundingClientRect();
+    const btnRect = btn.getBoundingClientRect();
+    const left = btn.offsetLeft - strip.offsetLeft - (stripRect.width - btnRect.width) / 2;
+    strip.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+  }, [selectedImage, visiblePhotoUrls.length, hasVideo]);
+
+  const handleMainTouchStart = useCallback((e: React.TouchEvent) => {
+    const t = e.touches[0];
+    if (!t) return;
+    touchStartRef.current = { x: t.clientX, y: t.clientY };
+  }, []);
+
+  const handleMainTouchEnd = useCallback(
+    (e: React.TouchEvent) => {
+      const start = touchStartRef.current;
+      touchStartRef.current = null;
+      if (!start || mediaCount <= 1) return;
+      const t = e.changedTouches[0];
+      if (!t) return;
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+      if (dx < 0) goNextMedia();
+      else goPrevMedia();
+    },
+    [mediaCount, goNextMedia, goPrevMedia],
+  );
+
   const mainImageRaw = isShowingVideo
     ? null
     : (visiblePhotoUrls[hasVideo ? selectedImage - 1 : selectedImage] ?? null);
@@ -198,7 +240,11 @@ export default function ProductDetailMobile({
 
         <div className="image_list mb-2">
         {/* Main media: chỉ hiển thị video khi có video_url; video luôn ở index 0, sau đó mới ảnh */}
-        <div className="relative rounded-xl overflow-hidden bg-gray-100 mb-2">
+        <div
+          className="relative rounded-xl overflow-hidden bg-gray-100 mb-2 touch-pan-y"
+          onTouchStart={handleMainTouchStart}
+          onTouchEnd={handleMainTouchEnd}
+        >
           <div className="aspect-[4/5] max-h-[70vh] relative">
             {isShowingVideo && parsedVideo ? (
               parsedVideo.kind === 'youtube' ? (
@@ -265,12 +311,20 @@ export default function ProductDetailMobile({
         </div>
         {/* Thumbnail dưới khung ảnh chính: chỉ hiển thị nút video khi có video_url; video luôn đầu tiên */}
         {mediaCount > 1 && (
-          <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-2 -mx-4 px-4">
+          <div
+            ref={thumbStripRef}
+            className="product-gallery-thumb-strip flex items-center gap-2 overflow-x-auto scrollbar-hide snap-x snap-mandatory touch-pan-x overscroll-x-contain py-2 -mx-4 px-4"
+            style={{ WebkitOverflowScrolling: 'touch' }}
+            aria-label="Thư viện ảnh sản phẩm"
+          >
             {hasVideo && (
               <button
+                ref={(el) => {
+                  thumbButtonRefs.current[0] = el;
+                }}
                 type="button"
                 onClick={() => setSelectedImage(0)}
-                className={`relative flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 ${
+                className={`relative flex-shrink-0 w-16 h-16 snap-center snap-always rounded-lg overflow-hidden border-2 ${
                   selectedImage === 0 ? 'border-[#ea580c]' : 'border-gray-200'
                 }`}
                 aria-label="Xem video"
@@ -290,9 +344,12 @@ export default function ProductDetailMobile({
               return (
                 <button
                   key={img}
+                  ref={(el) => {
+                    thumbButtonRefs.current[mediaIndex] = el;
+                  }}
                   type="button"
                   onClick={() => setSelectedImage(mediaIndex)}
-                  className={`relative flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 ${
+                  className={`relative flex-shrink-0 w-16 h-16 snap-center snap-always rounded-lg overflow-hidden border-2 ${
                     selectedImage === mediaIndex ? 'border-[#ea580c]' : 'border-gray-200'
                   }`}
                 >
@@ -310,7 +367,7 @@ export default function ProductDetailMobile({
             <button
               type="button"
               onClick={handleCopyLink}
-              className="flex-shrink-0 px-3 py-2 rounded-lg border border-gray-300 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              className="flex-shrink-0 snap-center px-3 py-2 rounded-lg border border-gray-300 text-xs font-medium text-gray-700 hover:bg-gray-50"
             >
               Copy link
             </button>

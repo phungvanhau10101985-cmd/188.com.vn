@@ -21,6 +21,7 @@ import {
   PopularCategoryForProfile,
   PopularCategoryHeroSource,
   HeroCategoryTilesResponse,
+  CategoryCatalogTilesResponse,
   InferredCategoryGenderResponse,
 } from '@/types/api';
 
@@ -566,6 +567,15 @@ class ApiClient {
       source: res?.source === 'profile_gender' ? 'profile_gender' : 'recent_views',
       recent_view_count: typeof res?.recent_view_count === 'number' ? res.recent_view_count : 0,
     };
+  }
+
+  /** Lưới L2/L3 kèm số SP — trang /danh-muc (cache server 120s). */
+  async getCategoryCatalogTiles(limit = 120): Promise<CategoryCatalogTilesResponse> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    const res = await this.fetch<CategoryCatalogTilesResponse>(
+      `/categories/from-products/catalog-tiles?${params}`,
+    );
+    return { tiles: Array.isArray(res?.tiles) ? res.tiles : [] };
   }
 
   /** Tile danh mục cấp 1/2/3 cho hero (giới tính hồ sơ hoặc từ SP xem gần nhất). */

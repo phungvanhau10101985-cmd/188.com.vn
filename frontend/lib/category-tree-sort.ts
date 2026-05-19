@@ -1,4 +1,4 @@
-import type { CategoryLevel1, CategoryLevel2, CategoryLevel3 } from '@/types/api';
+import type { CategoryLevel1, HeroCategoryTile } from '@/types/api';
 
 type GenderPriority = 'nam' | 'nu' | null;
 
@@ -57,4 +57,31 @@ export function sortCategoryLevel1Tree(
       })),
     };
   });
+}
+
+function tileSortLabel(tile: HeroCategoryTile): string {
+  return [tile.category, tile.subcategory, tile.sub_subcategory, tile.name]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/** Sắp tile danh mục: khớp giới lên trước, trong nhóm ưu tiên nhiều SP hơn. */
+export function sortCategoryTiles(
+  tiles: HeroCategoryTile[],
+  genderSuffix: string | null | undefined,
+): HeroCategoryTile[] {
+  const priority = genderSuffixToPriority(genderSuffix);
+  if (!priority || tiles.length === 0) return tiles;
+  const indexed = tiles.map((tile, i) => ({ tile, i }));
+  indexed.sort((a, b) => {
+    const ra = textGenderRank(tileSortLabel(a.tile), priority);
+    const rb = textGenderRank(tileSortLabel(b.tile), priority);
+    if (ra !== rb) return ra - rb;
+    const ca = a.tile.product_count ?? 0;
+    const cb = b.tile.product_count ?? 0;
+    if (ca !== cb) return cb - ca;
+    if (a.i !== b.i) return a.i - b.i;
+    return a.tile.name.localeCompare(b.tile.name, 'vi');
+  });
+  return indexed.map(({ tile }) => tile);
 }

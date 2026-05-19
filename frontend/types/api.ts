@@ -235,6 +235,11 @@ export interface HeroCategoryTilesResponse {
   source: PopularCategoryHeroSource;
 }
 
+/** GET /categories/from-products/catalog-tiles — lưới /danh-muc */
+export interface CategoryCatalogTilesResponse {
+  tiles: HeroCategoryTile[];
+}
+
 /** GET /user-behavior/categories/inferred-gender — ưu tiên sắp menu danh mục */
 export interface InferredCategoryGenderResponse {
   gender_suffix: 'Nam' | 'Nữ' | null;

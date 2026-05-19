@@ -6,6 +6,7 @@ from app.db.session import SessionLocal, get_db
 from app.schemas.category import Category, CategoryCreate, CategoryUpdate
 from app.crud import category as crud_category
 from app.crud import product as crud_product
+from app.crud import category_hero_suggestions
 from app.models.category import Category as CategoryModel
 from app.models.seo_cluster import SeoCluster
 from app.utils.ttl_cache import cache as ttl_cache
@@ -32,6 +33,34 @@ def read_category_tree_from_products(is_active: bool = True):
         _log.exception("GET /categories/from-products failed (is_active=%s)", is_active)
         # Menu trống vẫn tốt hơn 500/plain text cho SSR + Navigation
         return []
+
+
+_CATALOG_TILES_TTL = 120.0
+
+
+@router.get("/from-products/catalog-tiles")
+@router.get("/from-products/catalog-tiles/")
+def read_category_catalog_tiles(
+    limit: int = Query(120, ge=16, le=200),
+):
+    """
+    Lưới danh mục L2/L3 kèm product_count và ảnh đại diện — trang /danh-muc.
+    Cache 120s (public, không phụ thuộc phiên).
+    """
+    cache_key = f"category_catalog_tiles:limit={limit}"
+
+    def _fetch() -> Dict[str, Any]:
+        db = SessionLocal()
+        try:
+            return category_hero_suggestions.get_category_catalog_tiles(db, limit=limit)
+        finally:
+            db.close()
+
+    try:
+        return ttl_cache.get_or_fetch(cache_key, _CATALOG_TILES_TTL, _fetch)
+    except Exception:
+        _log.exception("GET /categories/from-products/catalog-tiles failed (limit=%s)", limit)
+        return {"tiles": []}
 
 
 # ----- Tree v2: trả từ bảng `categories` (sau khi import taxonomy) -----

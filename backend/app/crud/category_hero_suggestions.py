@@ -15,6 +15,8 @@ from app.models.user import UserProductView
 _ASPECT_RATIOS = ("portrait", "landscape", "square")
 
 HERO_CAROUSEL_TILE_MAX = 24
+CATALOG_TILE_DEFAULT_LIMIT = 120
+CATALOG_TILE_MAX = 200
 
 
 def _short_display_name(name: str, max_len: int = 22) -> str:
@@ -461,6 +463,148 @@ def get_hero_category_tiles(
         "anchor_category": anchor,
         "source": source,
     }
+
+
+def get_category_catalog_tiles(
+    db: Session,
+    *,
+    limit: int = CATALOG_TILE_DEFAULT_LIMIT,
+    min_products: int = 1,
+) -> Dict[str, Any]:
+    """
+    Lưới danh mục trang /danh-muc: mọi nhánh L2/L3 có sản phẩm (không lọc giới).
+    Client sắp theo Nam/Nữ nếu có inferred-gender.
+    """
+    active = Product.is_active.is_(True)  # noqa: E712
+    purchase_sum = func.coalesce(func.sum(Product.purchases), 0)
+    cap = max(16, min(int(limit), CATALOG_TILE_MAX))
+    min_cnt = max(1, int(min_products))
+    candidates: List[Dict[str, Any]] = []
+
+    def add_candidate(
+        level: int,
+        cat: str,
+        sub: Optional[str],
+        subsub: Optional[str],
+        cnt: int,
+        purch: int,
+    ) -> None:
+        cat = (cat or "").strip()
+        if not cat or int(cnt) < min_cnt:
+            return
+        sub = (sub or "").strip() or None
+        subsub = (subsub or "").strip() or None
+        name = _display_name(level, cat, sub, subsub)
+        if not name:
+            return
+        key = f"{level}|{cat}|{sub or ''}|{subsub or ''}"
+        score = float(cnt) + float(purch) * 0.05
+        candidates.append(
+            {
+                "level": level,
+                "name": name,
+                "category": cat,
+                "subcategory": sub,
+                "sub_subcategory": subsub,
+                "product_count": int(cnt),
+                "purchases": int(purch),
+                "score": score,
+                "key": key,
+            }
+        )
+
+    l2_rows = (
+        db.query(
+            Product.category.label("cat"),
+            Product.subcategory.label("sub"),
+            func.count(Product.id).label("cnt"),
+            purchase_sum.label("purch"),
+        )
+        .filter(
+            active,
+            Product.category.isnot(None),
+            Product.category != "",
+            Product.subcategory.isnot(None),
+            Product.subcategory != "",
+        )
+        .group_by(Product.category, Product.subcategory)
+        .order_by(purchase_sum.desc(), func.count(Product.id).desc())
+        .limit(400)
+        .all()
+    )
+    for r in l2_rows:
+        add_candidate(2, r.cat, r.sub, None, int(r.cnt or 0), int(r.purch or 0))
+
+    l3_rows = (
+        db.query(
+            Product.category.label("cat"),
+            Product.subcategory.label("sub"),
+            Product.sub_subcategory.label("subsub"),
+            func.count(Product.id).label("cnt"),
+            purchase_sum.label("purch"),
+        )
+        .filter(
+            active,
+            Product.category.isnot(None),
+            Product.category != "",
+            Product.subcategory.isnot(None),
+            Product.subcategory != "",
+            Product.sub_subcategory.isnot(None),
+            Product.sub_subcategory != "",
+        )
+        .group_by(Product.category, Product.subcategory, Product.sub_subcategory)
+        .order_by(purchase_sum.desc(), func.count(Product.id).desc())
+        .limit(600)
+        .all()
+    )
+    for r in l3_rows:
+        add_candidate(3, r.cat, r.sub, r.subsub, int(r.cnt or 0), int(r.purch or 0))
+
+    seen_keys: Set[str] = set()
+    unique: List[Dict[str, Any]] = []
+    for c in sorted(candidates, key=lambda x: x["score"], reverse=True):
+        if c["key"] in seen_keys:
+            continue
+        seen_keys.add(c["key"])
+        if c["level"] in (2, 3):
+            unique.append(c)
+
+    picked = unique[:cap]
+    used_images: Set[str] = set()
+    tiles: List[Dict[str, Any]] = []
+    for i, c in enumerate(picked):
+        img = _sample_image_for_branch(
+            db,
+            category=c["category"],
+            subcategory=c.get("subcategory"),
+            sub_subcategory=c.get("sub_subcategory"),
+            level=int(c["level"]),
+            viewed_product_ids=[],
+            exclude_urls=used_images,
+        )
+        if img:
+            used_images.add(img)
+        tiles.append(
+            {
+                "level": c["level"],
+                "name": c["name"],
+                "short_name": _short_display_name(c["name"]),
+                "category": c["category"],
+                "subcategory": c["subcategory"],
+                "sub_subcategory": c["sub_subcategory"],
+                "product_count": c["product_count"],
+                "purchases": c["purchases"],
+                "ctr_hint": _ctr_hint(c["name"], c["product_count"], i),
+                "aspect_ratio": _aspect_ratio(c["key"], i),
+                "image_url": img,
+            }
+        )
+
+    with_img = [t for t in tiles if t.get("image_url")]
+    without_img = [t for t in tiles if not t.get("image_url")]
+    display_tiles = (with_img + without_img)[:cap]
+
+    return {"tiles": display_tiles}
 
 
 def _gender_rank_for_name(name: str, prefer_suffix: str) -> int:

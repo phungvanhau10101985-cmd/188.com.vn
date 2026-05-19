@@ -68,6 +68,12 @@ body {
   display: none;
 }
 
+.product-gallery-thumb-strip {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scroll-behavior: smooth;
+}
+
 /* Scrollbar: ẩn mặc định, hover mới hiện */
 .scrollbar-on-hover {
   -ms-overflow-style: none;
@@ -142,8 +148,17 @@ body {
 }
 
 .hero-category-marquee-vertical {
-  animation: hero-category-marquee-vertical 45s linear infinite;
+  animation: hero-category-marquee-vertical 30s linear infinite;
   will-change: transform;
+}
+
+.hero-category-viewport--scroll .hero-category-marquee-vertical {
+  animation: none;
+  will-change: auto;
+}
+
+.hero-category-viewport--scroll.is-paused {
+  cursor: default;
 }
 
 .hero-category-marquee-vertical:hover {
@@ -156,7 +171,7 @@ body {
 
 @media (max-width: 767px) {
   .hero-category-marquee-vertical {
-    animation-duration: 38s;
+    animation-duration: 26s;
   }
 
   .hero-category-tile:hover {
