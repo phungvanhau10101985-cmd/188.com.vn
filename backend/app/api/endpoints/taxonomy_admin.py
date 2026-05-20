@@ -20,7 +20,7 @@ import io
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple  # noqa: F401 — List used in API models
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -41,6 +41,12 @@ from app.services.category_size_guide_gemini import (
     build_prompt_for_cat1_slug,
     gemini_generate_image_from_text,
     generate_and_upload_cat1_size_guide,
+)
+from app.services.product_taxonomy_mismatch import (
+    list_active_category_l1_names,
+    reclassify_products_batch,
+    scan_taxonomy_mismatches,
+    scan_taxonomy_mismatches_all_l1,
 )
 
 logger = logging.getLogger(__name__)
@@ -1022,6 +1028,115 @@ def download_sample_taxonomy_file(
         media_type=_XLSX_MEDIA,
         headers={"Content-Disposition": _ATTACHMENT_TAXONOMY},
     )
+
+
+# ---------- TAXONOMY MISMATCH (tên SP ↔ cây danh mục) ----------
+class TaxonomyMismatchScanIn(BaseModel):
+    skip: int = Field(0, ge=0)
+    limit: int = Field(50, ge=1, le=500)
+    category_l1: Optional[str] = Field(
+        None,
+        description="Bắt buộc khi quét một danh mục — tên cấp 1 (vd «Thời trang Nữ»)",
+    )
+    is_active: Optional[bool] = True
+    max_scan: int = Field(12000, ge=100, le=50000)
+
+
+class TaxonomyMismatchScanAllIn(BaseModel):
+    limit_per_l1: int = Field(50, ge=1, le=500)
+    is_active: Optional[bool] = True
+    max_scan_per_l1: int = Field(12000, ge=100, le=50000)
+    sample_items: int = Field(2, ge=0, le=10)
+
+
+class TaxonomyMismatchReclassifyIn(BaseModel):
+    product_ids: List[str] = Field(
+        default_factory=list,
+        description="Mã product_id (SKU). Trống = lấy từ kết quả quét mismatch gần nhất theo filter.",
+    )
+    category_l1: Optional[str] = None
+    is_active: Optional[bool] = True
+    limit: int = Field(20, ge=1, le=100)
+    only_mismatched: bool = True
+    dry_run: bool = False
+
+
+@router.get("/mismatch-category-l1-list")
+def taxonomy_mismatch_category_l1_list(
+    db: Session = Depends(get_db),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
+) -> Dict[str, Any]:
+    """Danh sách tên danh mục cấp 1 active — dùng dropdown quét từng nhánh."""
+    names = list_active_category_l1_names(db)
+    return {"items": names, "count": len(names)}
+
+
+@router.post("/mismatch-scan")
+def taxonomy_mismatch_scan(
+    body: TaxonomyMismatchScanIn,
+    db: Session = Depends(get_db),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
+) -> Dict[str, Any]:
+    """
+    Quét SP có taxonomy lệch so với tên (vd giày nam trong Thời trang Nữ).
+    Dùng heuristic từ khóa + so khớp category_id FK. Chỉ trong một danh mục cấp 1.
+    """
+    l1 = (body.category_l1 or "").strip()
+    if not l1:
+        raise HTTPException(
+            status_code=400,
+            detail="Chọn danh mục cấp 1 (category_l1) — quét từng danh mục một, hoặc dùng POST /taxonomy/mismatch-scan-all.",
+        )
+    return scan_taxonomy_mismatches(
+        db,
+        skip=body.skip,
+        limit=body.limit,
+        category_l1=l1,
+        is_active=body.is_active,
+        max_scan=body.max_scan,
+    )
+
+
+@router.post("/mismatch-scan-all")
+def taxonomy_mismatch_scan_all(
+    body: TaxonomyMismatchScanAllIn,
+    db: Session = Depends(get_db),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
+) -> Dict[str, Any]:
+    """Quét lần lượt mọi danh mục cấp 1 — bảng tổng hợp số SP lệch từng nhánh."""
+    return scan_taxonomy_mismatches_all_l1(
+        db,
+        limit_per_l1=body.limit_per_l1,
+        is_active=body.is_active,
+        max_scan_per_l1=body.max_scan_per_l1,
+        sample_items=body.sample_items,
+    )
+
+
+@router.post("/mismatch-reclassify")
+def taxonomy_mismatch_reclassify(
+    body: TaxonomyMismatchReclassifyIn,
+    db: Session = Depends(get_db),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
+) -> Dict[str, Any]:
+    """
+    Tái gán taxonomy (DeepSeek) cho SP đã chọn hoặc batch mismatch.
+    Cần IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED và DEEPSEEK_API_KEY.
+    """
+    try:
+        return reclassify_products_batch(
+            db,
+            product_ids=body.product_ids or None,
+            category_l1=body.category_l1,
+            is_active=body.is_active,
+            limit=body.limit,
+            only_mismatched=body.only_mismatched,
+            dry_run=body.dry_run,
+        )
+    except Exception as exc:
+        db.rollback()
+        logger.exception("taxonomy mismatch reclassify failed")
+        raise HTTPException(status_code=500, detail=str(exc)[:800]) from exc
 
 
 # ---------- INFO ----------

@@ -150,6 +150,47 @@ export default function TaxonomyAdminPage() {
   const [manualResult, setManualResult] = useState<ImportSummary | null>(null);
   const [manualError, setManualError] = useState<string | null>(null);
 
+  interface MismatchItem {
+    product_id: string;
+    name: string;
+    category: string | null;
+    subcategory: string | null;
+    sub_subcategory: string | null;
+    inferred_domain_label?: string | null;
+    reason: string;
+  }
+  interface MismatchScanResult {
+    items: MismatchItem[];
+    count: number;
+    scanned: number;
+    skip: number;
+    limit: number;
+  }
+  const [mismatchL1, setMismatchL1] = useState('');
+  const [mismatchLimit, setMismatchLimit] = useState(50);
+  const [mismatchScanning, setMismatchScanning] = useState(false);
+  const [mismatchScanAllRunning, setMismatchScanAllRunning] = useState(false);
+  const [mismatchScan, setMismatchScan] = useState<MismatchScanResult | null>(null);
+  const [mismatchScanAll, setMismatchScanAll] = useState<{
+    total_mismatch: number;
+    category_count: number;
+    categories: {
+      category_l1: string;
+      count: number;
+      scanned: number;
+      samples?: MismatchItem[];
+    }[];
+  } | null>(null);
+  const [mismatchScanError, setMismatchScanError] = useState<string | null>(null);
+  const [mismatchReclassifying, setMismatchReclassifying] = useState(false);
+  const [mismatchReclassifyResult, setMismatchReclassifyResult] = useState<{
+    ok: number;
+    failed: number;
+    dry_run: boolean;
+    results: { product_id: string; ok?: boolean; error?: string; new?: Record<string, unknown> }[];
+  } | null>(null);
+  const [mismatchReclassifyError, setMismatchReclassifyError] = useState<string | null>(null);
+
   const reloadInfo = useCallback(async () => {
     setLoadingInfo(true);
     setErrorInfo(null);
@@ -198,6 +239,12 @@ export default function TaxonomyAdminPage() {
     () => formTree.filter((n) => Boolean(n.external_id) && n.level === 1),
     [formTree],
   );
+
+  useEffect(() => {
+    if (!mismatchL1 && cat1Options.length > 0) {
+      setMismatchL1(cat1Options[0].name);
+    }
+  }, [cat1Options, mismatchL1]);
 
   const cat2Options = useMemo(() => {
     if (!cat1ExistingId) return [];
@@ -363,6 +410,127 @@ export default function TaxonomyAdminPage() {
     (manualResult?.errors.categories.length ?? 0) +
     (manualResult?.errors.category_paths.length ?? 0);
 
+  const runMismatchScanForL1 = useCallback(
+    async (l1: string) => {
+      const cat = l1.trim();
+      if (!cat) {
+        setMismatchScanError('Chọn danh mục cấp 1 trước khi quét.');
+        return;
+      }
+      setMismatchScanning(true);
+      setMismatchScanError(null);
+      setMismatchReclassifyResult(null);
+      setMismatchScanAll(null);
+      try {
+        const data = await callApi<MismatchScanResult>('/taxonomy/mismatch-scan', {
+          method: 'POST',
+          body: JSON.stringify({
+            skip: 0,
+            limit: mismatchLimit,
+            category_l1: cat,
+            is_active: true,
+            max_scan: 12000,
+          }),
+        });
+        setMismatchScan(data);
+      } catch (e) {
+        setMismatchScanError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setMismatchScanning(false);
+      }
+    },
+    [mismatchLimit],
+  );
+
+  const handleMismatchScan = useCallback(() => {
+    void runMismatchScanForL1(mismatchL1);
+  }, [mismatchL1, runMismatchScanForL1]);
+
+  const handleMismatchScanAll = useCallback(async () => {
+    setMismatchScanAllRunning(true);
+    setMismatchScanError(null);
+    setMismatchReclassifyResult(null);
+    setMismatchScan(null);
+    try {
+      const data = await callApi<{
+        total_mismatch: number;
+        category_count: number;
+        categories: {
+          category_l1: string;
+          count: number;
+          scanned: number;
+          samples?: MismatchItem[];
+        }[];
+      }>('/taxonomy/mismatch-scan-all', {
+        method: 'POST',
+        body: JSON.stringify({
+          limit_per_l1: mismatchLimit,
+          is_active: true,
+          max_scan_per_l1: 12000,
+          sample_items: 2,
+        }),
+      });
+      setMismatchScanAll(data);
+    } catch (e) {
+      setMismatchScanError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMismatchScanAllRunning(false);
+    }
+  }, [mismatchLimit]);
+
+  const handleMismatchDrillDown = useCallback(
+    (l1: string) => {
+      setMismatchL1(l1);
+      void runMismatchScanForL1(l1);
+    },
+    [runMismatchScanForL1],
+  );
+
+  const handleMismatchReclassify = useCallback(
+    async (dryRun: boolean) => {
+      const ids = (mismatchScan?.items || []).map((x) => x.product_id).filter(Boolean);
+      if (!ids.length) {
+        alert('Chưa có danh sách — bấm «Quét lệch taxonomy» trước.');
+        return;
+      }
+      if (
+        !dryRun &&
+        !window.confirm(
+          `Chạy DeepSeek tái gán taxonomy cho tối đa ${Math.min(ids.length, mismatchLimit)} SP? Việc này có thể mất vài phút.`,
+        )
+      ) {
+        return;
+      }
+      setMismatchReclassifying(true);
+      setMismatchReclassifyError(null);
+      try {
+        const data = await callApi<{
+          ok: number;
+          failed: number;
+          dry_run: boolean;
+          results: { product_id: string; ok?: boolean; error?: string; new?: Record<string, unknown> }[];
+        }>('/taxonomy/mismatch-reclassify', {
+          method: 'POST',
+          body: JSON.stringify({
+            product_ids: ids,
+            category_l1: mismatchL1.trim() || null,
+            is_active: true,
+            limit: mismatchLimit,
+            only_mismatched: true,
+            dry_run: dryRun,
+          }),
+        });
+        setMismatchReclassifyResult(data);
+        if (!dryRun) void reloadInfo();
+      } catch (e) {
+        setMismatchReclassifyError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setMismatchReclassifying(false);
+      }
+    },
+    [mismatchScan, mismatchL1, mismatchLimit, reloadInfo],
+  );
+
   return (
       <div className="space-y-6 p-4 sm:p-6">
         <div>
@@ -403,6 +571,176 @@ export default function TaxonomyAdminPage() {
                 value={`${info.products.linked_to_cat3} / ${info.products.total}`}
                 hint="đã link cat3 / tổng"
               />
+            </div>
+          ) : null}
+        </section>
+
+        <section className="rounded-lg border border-orange-200 bg-white p-4 shadow-sm">
+          <h2 className="text-lg font-semibold text-gray-900">Sửa taxonomy lệch (theo tên SP)</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Quét <strong>từng danh mục cấp 1</strong>: chọn nhánh → «Quét danh mục này» → tái gán DeepSeek.
+            Hoặc «Quét tất cả danh mục» → bấm <strong>Chi tiết</strong> trên từng dòng có lệch.
+            Cần <code>IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED</code>.
+          </p>
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            <label className="flex min-w-[14rem] flex-col gap-1 text-sm">
+              <span className="text-xs font-medium text-gray-600">Danh mục cấp 1</span>
+              <select
+                className="rounded-md border border-gray-300 bg-white px-2 py-2 text-sm"
+                value={mismatchL1}
+                onChange={(e) => {
+                  setMismatchL1(e.target.value);
+                  setMismatchScan(null);
+                }}
+                disabled={formLoading || cat1Options.length === 0}
+              >
+                {cat1Options.length === 0 ? (
+                  <option value="">— Chưa có cây danh mục —</option>
+                ) : (
+                  cat1Options.map((c) => (
+                    <option key={c.external_id} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-xs text-gray-500">Số kết quả tối đa</span>
+              <input
+                type="number"
+                min={1}
+                max={200}
+                className="w-24 rounded-md border border-gray-300 px-2 py-2 text-sm"
+                value={mismatchLimit}
+                onChange={(e) => setMismatchLimit(Number(e.target.value) || 50)}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={mismatchScanning || !mismatchL1.trim()}
+              onClick={() => handleMismatchScan()}
+              className="rounded-md bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:opacity-50"
+            >
+              {mismatchScanning ? 'Đang quét…' : 'Quét danh mục này'}
+            </button>
+            <button
+              type="button"
+              disabled={mismatchScanAllRunning || mismatchScanning}
+              onClick={() => void handleMismatchScanAll()}
+              className="rounded-md border border-orange-600 bg-white px-4 py-2 text-sm font-medium text-orange-700 hover:bg-orange-50 disabled:opacity-50"
+            >
+              {mismatchScanAllRunning ? 'Đang quét tất cả…' : 'Quét tất cả danh mục'}
+            </button>
+            <button
+              type="button"
+              disabled={mismatchReclassifying || !mismatchScan?.items?.length}
+              onClick={() => void handleMismatchReclassify(true)}
+              className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Xem trước (dry-run)
+            </button>
+            <button
+              type="button"
+              disabled={mismatchReclassifying || !mismatchScan?.items?.length}
+              onClick={() => void handleMismatchReclassify(false)}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {mismatchReclassifying ? 'Đang gán lại…' : 'Tái gán taxonomy (DeepSeek)'}
+            </button>
+          </div>
+          {mismatchScanError ? (
+            <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {mismatchScanError}
+            </div>
+          ) : null}
+          {mismatchScanAll ? (
+            <div className="mt-3 space-y-2">
+              <p className="text-sm text-gray-700">
+                Tổng <strong>{mismatchScanAll.total_mismatch}</strong> SP lệch /{' '}
+                <strong>{mismatchScanAll.category_count}</strong> danh mục.
+              </p>
+              <div className="max-h-64 overflow-auto rounded border border-gray-200">
+                <table className="min-w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="px-2 py-2">Danh mục cấp 1</th>
+                      <th className="px-2 py-2">SP lệch</th>
+                      <th className="px-2 py-2">Đã quét</th>
+                      <th className="px-2 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mismatchScanAll.categories
+                      .filter((row) => row.count > 0)
+                      .map((row) => (
+                        <tr key={row.category_l1} className="border-t border-gray-100">
+                          <td className="px-2 py-1.5 font-medium">{row.category_l1}</td>
+                          <td className="px-2 py-1.5 text-orange-700">{row.count}</td>
+                          <td className="px-2 py-1.5 text-gray-500">{row.scanned}</td>
+                          <td className="px-2 py-1.5">
+                            <button
+                              type="button"
+                              className="text-indigo-600 hover:underline"
+                              onClick={() => handleMismatchDrillDown(row.category_l1)}
+                            >
+                              Chi tiết
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+          {mismatchScan ? (
+            <div className="mt-3 text-sm text-gray-700">
+              <span className="font-medium text-gray-800">{mismatchL1}</span>
+              {' — '}
+              đã quét <strong>{mismatchScan.scanned}</strong> SP, tìm thấy{' '}
+              <strong>{mismatchScan.count}</strong> lệch.
+            </div>
+          ) : null}
+          {mismatchScan?.items?.length ? (
+            <div className="mt-3 max-h-72 overflow-auto rounded border border-gray-200">
+              <table className="min-w-full text-left text-xs">
+                <thead className="sticky top-0 bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="px-2 py-2">Mã SP</th>
+                    <th className="px-2 py-2">Tên</th>
+                    <th className="px-2 py-2">Danh mục hiện tại</th>
+                    <th className="px-2 py-2">Gợi ý từ tên</th>
+                    <th className="px-2 py-2">Lý do</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mismatchScan.items.map((row) => (
+                    <tr key={row.product_id} className="border-t border-gray-100">
+                      <td className="px-2 py-1.5 font-mono">{row.product_id}</td>
+                      <td className="max-w-[14rem] truncate px-2 py-1.5" title={row.name}>
+                        {row.name}
+                      </td>
+                      <td className="px-2 py-1.5">
+                        {[row.category, row.subcategory, row.sub_subcategory].filter(Boolean).join(' › ') || '—'}
+                      </td>
+                      <td className="px-2 py-1.5">{row.inferred_domain_label || '—'}</td>
+                      <td className="max-w-[16rem] px-2 py-1.5 text-gray-600">{row.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          {mismatchReclassifyError ? (
+            <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {mismatchReclassifyError}
+            </div>
+          ) : null}
+          {mismatchReclassifyResult ? (
+            <div className="mt-3 rounded border border-green-200 bg-green-50 p-3 text-sm text-green-900">
+              {mismatchReclassifyResult.dry_run ? 'Dry-run: ' : ''}
+              Thành công {mismatchReclassifyResult.ok}, lỗi {mismatchReclassifyResult.failed}.
             </div>
           ) : null}
         </section>
