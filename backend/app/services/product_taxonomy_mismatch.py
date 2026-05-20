@@ -73,6 +73,9 @@ _DOMAIN_LABEL_VI: Dict[str, str] = {
     DOMAIN_OTHER: "Khác",
 }
 
+# Chỉ các danh mục cấp 1 có «ngành» rõ — quét / báo lệch chỉ trên tập này.
+_SCANNABLE_L1_NAMES: frozenset = frozenset(_CATEGORY_L1_DOMAIN.keys())
+
 
 def _norm_name(text: str) -> str:
     return remove_vietnamese_accents((text or "").lower())
@@ -108,8 +111,17 @@ def category_l1_domain(l1_name: Optional[str]) -> Optional[str]:
     return _CATEGORY_L1_DOMAIN.get(s)
 
 
-def _norm_l1_name(l1_name: Optional[str]) -> str:
-    return remove_vietnamese_accents((l1_name or "").strip().lower())
+def is_severe_l1_name_domain_mismatch(inferred: Optional[str], l1_domain: Optional[str]) -> bool:
+    """
+    Lệch cấp 1 «quá rõ»: tên SP gợi ý một ngành khác hẳn danh mục cấp 1 đang ghi.
+    Không so category_id / subcategory — chỉ cột category (L1) vs tên.
+    """
+    if not inferred or not l1_domain or inferred == l1_domain:
+        return False
+    # Phụ kiện: chỉ báo khi tên gợi ý rõ ngành cụ thể (giày, quần áo, đồng hồ…).
+    if l1_domain == DOMAIN_OTHER:
+        return inferred != DOMAIN_OTHER
+    return True
 
 
 def _build_cat3_id_to_l1_name(db: Session) -> Dict[int, str]:
@@ -147,41 +159,31 @@ def detect_product_taxonomy_mismatch(
     cat3_l1_map: Optional[Dict[int, str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Trả dict mô tả lệch taxonomy, hoặc None nếu không phát hiện lệch rõ.
+    Chỉ ghi nhận lệch cấp 1 rõ: ngành suy từ **tên SP** ≠ ngành của **cột category** (L1).
+    Vd quần áo trong Giày dép, giày trong Đồng hồ. Không so FK / subcategory.
     """
+    del cat3_l1_map  # giữ tham số tương thích caller cũ
     name = (product.name or "").strip()
     if not name:
         return None
 
     inferred, scores = infer_domain_from_product_name(name)
-    l1_text = (product.category or "").strip()
-    l1_from_text = category_l1_domain(l1_text)
-    l1_from_fk: Optional[str] = None
-    if product.category_id and cat3_l1_map:
-        l1_from_fk = cat3_l1_map.get(int(product.category_id))
-
-    reasons: List[str] = []
-
-    if inferred and l1_from_text and inferred != l1_from_text:
-        reasons.append(
-            f"Tên gợi ý «{_DOMAIN_LABEL_VI.get(inferred, inferred)}» nhưng danh mục cấp 1 là «{l1_text}»"
-        )
-
-    if inferred and l1_from_fk:
-        dom_fk = category_l1_domain(l1_from_fk)
-        if dom_fk and inferred != dom_fk:
-            reasons.append(
-                f"Tên gợi ý «{_DOMAIN_LABEL_VI.get(inferred, inferred)}» nhưng category_id thuộc «{l1_from_fk}»"
-            )
-
-    if l1_from_text and l1_from_fk and _norm_l1_name(l1_from_text) != _norm_l1_name(l1_from_fk):
-        dom_t = category_l1_domain(l1_from_text)
-        dom_f = category_l1_domain(l1_from_fk)
-        if dom_t != dom_f or (inferred and dom_t and inferred != dom_t):
-            reasons.append(f"Cột category «{l1_text}» khác nhánh FK «{l1_from_fk}»")
-
-    if not reasons:
+    if not inferred:
         return None
+
+    l1_text = (product.category or "").strip()
+    l1_domain = category_l1_domain(l1_text)
+    if not l1_domain or l1_text not in _SCANNABLE_L1_NAMES:
+        return None
+
+    if not is_severe_l1_name_domain_mismatch(inferred, l1_domain):
+        return None
+
+    reason = (
+        f"Tên gợi ý «{_DOMAIN_LABEL_VI.get(inferred, inferred)}» "
+        f"nhưng danh mục cấp 1 là «{l1_text}» "
+        f"(«{_DOMAIN_LABEL_VI.get(l1_domain, l1_domain)}»)"
+    )
 
     return {
         "product_pk": product.id,
@@ -192,13 +194,11 @@ def detect_product_taxonomy_mismatch(
         "sub_subcategory": product.sub_subcategory,
         "category_id": product.category_id,
         "inferred_domain": inferred,
-        "inferred_domain_label": _DOMAIN_LABEL_VI.get(inferred or "", inferred),
+        "inferred_domain_label": _DOMAIN_LABEL_VI.get(inferred, inferred),
         "domain_scores": scores,
-        "l1_from_text": l1_text or None,
-        "l1_from_fk": l1_from_fk,
-        "l1_domain_text": l1_from_text,
-        "l1_domain_fk": category_l1_domain(l1_from_fk) if l1_from_fk else None,
-        "reason": " · ".join(reasons),
+        "l1_from_text": l1_text,
+        "l1_domain": l1_domain,
+        "reason": reason,
     }
 
 
@@ -215,7 +215,6 @@ def scan_taxonomy_mismatches(
     Quét SP — trả danh sách lệch + meta phân trang.
     max_scan: số dòng DB tối đa duyệt để tìm `limit` kết quả (tránh quét 24k mỗi lần).
     """
-    cat3_l1_map = _build_cat3_id_to_l1_name(db)
     q = db.query(Product).order_by(Product.id.asc())
     if is_active is True:
         q = q.filter(Product.is_active.is_(True))
@@ -233,7 +232,7 @@ def scan_taxonomy_mismatches(
 
     for product in q.offset(offset).limit(cap).all():
         scanned += 1
-        row = detect_product_taxonomy_mismatch(product, cat3_l1_map=cat3_l1_map)
+        row = detect_product_taxonomy_mismatch(product)
         if row:
             items.append(row)
             if len(items) >= need:
@@ -257,7 +256,8 @@ def list_active_category_l1_names(db: Session) -> List[str]:
         .order_by(Category.name.asc())
         .all()
     )
-    return [(r[0] or "").strip() for r in rows if (r[0] or "").strip()]
+    names = [(r[0] or "").strip() for r in rows if (r[0] or "").strip()]
+    return [n for n in names if n in _SCANNABLE_L1_NAMES]
 
 
 def scan_taxonomy_mismatches_all_l1(
@@ -425,7 +425,6 @@ def reclassify_products_batch(
     """Tái phân loại theo danh sách product_id hoặc quét mismatch (giới hạn)."""
     cap = max(1, min(int(limit), 100))
     results: List[Dict[str, Any]] = []
-    cat3_l1_map = _build_cat3_id_to_l1_name(db)
 
     targets: List[Product] = []
     if product_ids:
@@ -463,7 +462,7 @@ def reclassify_products_batch(
     fail_n = 0
     for product in targets:
         if only_mismatched and product_ids is None:
-            if not detect_product_taxonomy_mismatch(product, cat3_l1_map=cat3_l1_map):
+            if not detect_product_taxonomy_mismatch(product):
                 continue
         if dry_run:
             results.append(

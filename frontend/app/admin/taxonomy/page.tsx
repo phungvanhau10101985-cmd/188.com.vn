@@ -662,9 +662,10 @@ export default function TaxonomyAdminPage() {
         <section className="rounded-lg border border-orange-200 bg-white p-4 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900">Sửa taxonomy lệch (theo tên SP)</h2>
           <p className="mt-1 text-sm text-gray-600">
-            <strong>Quét tất cả</strong> → <strong>Tái gán tất cả danh mục</strong> (không cần chọn từng nhánh).
-            Hoặc quét/tái gán <strong>một danh mục</strong> qua dropdown. Cần{' '}
-            <code>IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED</code>.
+            Chỉ báo SP <strong>lệch cấp 1 rõ</strong>: ngành từ <strong>tên</strong> (giày, quần áo, đồng hồ…)
+            khác hẳn <strong>danh mục cấp 1</strong> đang ghi — vd quần áo trong Giày dép, giày trong Đồng hồ.
+            Không so <code>category_id</code> / cấp 2–3. <strong>Quét tất cả</strong> →{' '}
+            <strong>Tái gán tất cả</strong>. Cần <code>IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED</code>.
           </p>
           <div className="mt-3 flex flex-wrap items-end gap-3">
             <label className="flex min-w-[14rem] flex-col gap-1 text-sm">
