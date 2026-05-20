@@ -1,6 +1,6 @@
 """
-Gán danh mục cấp 1–3 cho draft import từ link (1688 / Hibox): đọc taxonomy từ bảng `categories`,
-gọi DeepSeek (OpenAI-compatible) theo **tên sản phẩm**. Chỉ ghi được bộ ba đã **có sẵn** trong taxonomy
+Gán danh mục cấp 1–3: đọc taxonomy từ bảng `categories`, gọi DeepSeek theo **chinese_name** (file import)
+hoặc tên Việt. Chỉ ghi được bộ ba đã **có sẵn** trong taxonomy
 (import taxonomy_import.xlsx) — không tạo nhánh mới trong DB và không chấp nhận chuỗi do model bịa ngoài danh sách.
 """
 from __future__ import annotations
@@ -130,9 +130,33 @@ def _violates_gender_hint(hint: Optional[str], cat1: str) -> bool:
     return False
 
 
+def _nonempty_product_field(product_data: Dict[str, Any], key: str) -> str:
+    s = (product_data.get(key) or "").strip()
+    if s.lower() in ("nan", "none", "null"):
+        return ""
+    return s
+
+
+def resolve_taxonomy_source_title(product_data: Dict[str, Any]) -> str:
+    """
+    Tiêu đề ưu tiên cho phân loại taxonomy: cột chinese_name (file import / DB),
+    sau đó mới tên tiếng Việt.
+    """
+    cn = _nonempty_product_field(product_data, "chinese_name")
+    if cn:
+        return cn
+    return _nonempty_product_field(product_data, "name")
+
+
 def build_taxonomy_context_blob(product_data: Dict[str, Any]) -> str:
     """Gom mô tả + excerpt thông số NCC để đưa vào prompt (không chỉ dựa vào title)."""
     parts: List[str] = []
+    cn = _nonempty_product_field(product_data, "chinese_name")
+    vi = _nonempty_product_field(product_data, "name")
+    if cn:
+        parts.append(f"Tên tiếng Trung (nguồn phân loại — cột chinese_name / import): {cn}")
+    if vi and vi != cn:
+        parts.append(f"Tên tiếng Việt (tham khảo): {vi}")
     d = (product_data.get("description") or "").strip()
     if d:
         parts.append(d)
@@ -705,7 +729,7 @@ def classify_product_taxonomy_deepseek(
         "Bạn là chuyên gia phân loại sản phẩm thương mại điện tử Việt Nam.\n\n"
         + _TAXONOMY_CLASSIFICATION_RULES_VI.strip()
         + "\n\n---\n"
-        "Nhiệm vụ: đọc BẢNG DANH MỤC, **TÊN** và **NGỮ CẢNH THÔNG SỐ/MÔ TẢ** (có thể tiếng Mông Cổ, Nga…); "
+        "Nhiệm vụ: đọc BẢNG DANH MỤC, **TÊN** (thường là tiếng Trung từ NCC) và **NGỮ CẢNH THÔNG SỐ/MÔ TẢ**; "
         "ưu tiên trường giới tính do NCC ghi (vd хүйс / Эмэгтэй = nữ; Эрэгтэй = nam). "
         "Chọn đúng một bộ cat1/cat2/cat3 **sao chép nguyên văn từ bảng**, điền đủ các trường tiếng Việt trong JSON (khách hàng, tên, chất liệu, mô tả, thương hiệu, xuất xứ, phong cách, dịp, trọng lượng, gót/đế…).\n"
         "Không dùng markdown; không giải thích ngoài JSON."
@@ -722,7 +746,7 @@ def classify_product_taxonomy_deepseek(
         f"BẢNG DANH MỤC (mỗi ## là cat1; dòng «cat2 > cat3» là một nhánh hợp lệ):\n\n{block}\n\n"
         f"{gender_lines}"
         f"{ctx_block}"
-        f"TÊN SẢN PHẨM:\n{name}\n\n"
+        f"TÊN SẢN PHẨM (ưu tiên tiếng Trung / tên NCC gốc):\n{name}\n\n"
         "QUAN TRỌNG: cat1, cat2, cat3 phải là ba chuỗi xuất hiện nguyên văn trong bảng trên — không được phép là danh mục ngoài bảng.\n"
         'Trả về DUY NHẤT một JSON đủ 14 key (mo_ta_vi / thong_so_kich_thuoc_vi có thể dùng \\n giữa các ý):\n'
         '{"cat1":"...","cat2":"...","cat3":"...","khach_hang":"...","ten_tieng_viet":"...","chat_lieu_vi":"","mo_ta_vi":"...",'
@@ -1328,12 +1352,13 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
     if not settings.IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED:
         return warnings
 
-    name = (product_data.get("name") or "").strip()
+    name_vi = (product_data.get("name") or "").strip()
+    title_src = resolve_taxonomy_source_title(product_data)
     desc_src = (product_data.get("description") or "").strip()
     ctx = build_taxonomy_context_blob(product_data)
 
     if _should_skip_existing(product_data):
-        tv, mv, tw = translate_product_listing_deepseek_only(name, desc_src, context_text=ctx)
+        tv, mv, tw = translate_product_listing_deepseek_only(name_vi or title_src, desc_src, context_text=ctx)
         warnings.extend(tw)
         if tv or mv:
             _apply_vi_listing_from_strings(product_data, tv, mv)
@@ -1342,12 +1367,16 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
             )
         return warnings
 
+    if not title_src:
+        warnings.append("deepseek_taxonomy: thiếu chinese_name và tên — bỏ qua phân loại.")
+        return warnings
+
     triples = load_active_category_triples(db)
     if not triples:
         warnings.append(
             "deepseek_taxonomy: chưa có nhánh cat3 active trong bảng categories — import taxonomy_import.xlsx trước."
         )
-        tv_nt, mv_nt, tw_nt = translate_product_listing_deepseek_only(name, desc_src, context_text=ctx)
+        tv_nt, mv_nt, tw_nt = translate_product_listing_deepseek_only(name_vi or title_src, desc_src, context_text=ctx)
         warnings.extend(tw_nt)
         if tv_nt or mv_nt:
             _apply_vi_listing_from_strings(product_data, tv_nt, mv_nt)
@@ -1358,15 +1387,20 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
     merged_hint: Optional[str] = None
 
     if needs_gender:
-        merged_hint = infer_supplier_gender_hint(f"{name}\n{ctx}")
+        merged_hint = infer_supplier_gender_hint(f"{title_src}\n{name_vi}\n{ctx}")
         if merged_hint is None:
             warnings.append(
                 "deepseek_taxonomy: không có gợi ý giới tính chắc chắn — DeepSeek sẽ tự chọn nhánh từ toàn bộ taxonomy."
             )
 
+    if _nonempty_product_field(product_data, "chinese_name"):
+        warnings.append(
+            "deepseek_taxonomy: phân loại theo cột chinese_name (tên tiếng Trung từ file import)."
+        )
+
     triple, tw = classify_product_taxonomy_deepseek(
         db,
-        name,
+        title_src,
         context_text=ctx,
         supplier_gender_hint=merged_hint,
     )
@@ -1375,7 +1409,7 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
         warnings.append("deepseek_taxonomy: DeepSeek không gán được bộ taxonomy hợp lệ — không fallback sang Gemini.")
 
     if not triple:
-        tv_x, mv_x, tw_x = translate_product_listing_deepseek_only(name, desc_src, context_text=ctx)
+        tv_x, mv_x, tw_x = translate_product_listing_deepseek_only(name_vi or title_src, desc_src, context_text=ctx)
         warnings.extend(tw_x)
         if tv_x or mv_x:
             _apply_vi_listing_from_strings(product_data, tv_x, mv_x)
@@ -1386,7 +1420,7 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
 
     khach = (triple.get("khach_hang") or "").strip() or None
     ten_vi = (triple.get("ten_tieng_viet") or "").strip()
-    if _looks_untranslated_non_vi(ten_vi, name):
+    if _looks_untranslated_non_vi(ten_vi, name_vi or title_src):
         warnings.append("deepseek_taxonomy: ten_tieng_viet rỗng hoặc còn chữ ngoại ngữ — giữ nguyên kết quả DeepSeek, không fallback Gemini.")
 
     product_data.pop("taxonomy_import_error", None)
@@ -1422,7 +1456,7 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
             product_data["name"] = vi_display[:500]
     if not mo_from_classify.strip():
         desc_left = (product_data.get("description") or "").strip()
-        nm_for_desc = (product_data.get("name") or name).strip()
+        nm_for_desc = (product_data.get("name") or title_src).strip()
         if desc_left:
             _td, md_fb, tw_fb = translate_product_listing_deepseek_only(
                 nm_for_desc,

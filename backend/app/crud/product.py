@@ -1331,7 +1331,16 @@ def excel_row_to_product(row: Dict) -> Dict:
                 or row.get('thong_tin_san_pham')
                 or row.get('Thong tin san pham')
             ),
-            'chinese_name': _excel_str(row, 'chinese_name', 'Tên tiếng trung'),
+            'chinese_name': _excel_str(
+                row,
+                'chinese_name',
+                'al chinese_name',
+                'AL chinese_name',
+                'Chinese name',
+                'chinese name',
+                'Tên tiếng trung',
+                'Tên tiếng Trung',
+            ),
             'shop_name_chinese': _excel_str(row, 'shop_name_chinese', 'Shop Trung Quốc'),
             'slug': slug_value,
             'excel_import_listed': excel_import_listed,

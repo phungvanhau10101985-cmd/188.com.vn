@@ -310,6 +310,7 @@ def scan_taxonomy_mismatches_all_l1(
 def _product_to_taxonomy_payload(product: Product) -> Dict[str, Any]:
     return {
         "name": product.name,
+        "chinese_name": product.chinese_name,
         "description": product.description,
         "category": product.category,
         "subcategory": product.subcategory,
@@ -428,7 +429,7 @@ def reclassify_products_batch(
     max_scan: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Tái phân loại theo danh sách product_id hoặc quét mismatch (giới hạn)."""
-    cap = max(1, min(int(limit), 100))
+    cap = max(1, min(int(limit), 500))
     results: List[Dict[str, Any]] = []
 
     targets: List[Product] = []
@@ -538,7 +539,7 @@ def reclassify_products_batch_all_l1(
     Tái gán DeepSeek lần lượt mọi danh mục cấp 1 (tối đa `limit_per_l1` SP mỗi nhánh).
     Mỗi nhánh commit riêng — tránh mất toàn bộ nếu một nhánh lỗi giữa chừng.
     """
-    cap = max(1, min(int(limit_per_l1), 100))
+    cap = max(1, min(int(limit_per_l1), 500))
     l1_list = [x.strip() for x in (category_l1_names or list_active_category_l1_names(db)) if x.strip()]
     blocks: List[Dict[str, Any]] = []
     total_ok = 0

@@ -1057,13 +1057,13 @@ class TaxonomyMismatchReclassifyIn(BaseModel):
     )
     category_l1: Optional[str] = None
     is_active: Optional[bool] = True
-    limit: int = Field(20, ge=1, le=100)
+    limit: int = Field(20, ge=1, le=500)
     only_mismatched: bool = True
     dry_run: bool = False
 
 
 class TaxonomyMismatchReclassifyAllIn(BaseModel):
-    limit_per_l1: int = Field(20, ge=1, le=100)
+    limit_per_l1: int = Field(20, ge=1, le=500)
     is_active: Optional[bool] = True
     max_scan_per_l1: int = Field(12000, ge=100, le=50000)
     only_mismatched: bool = True

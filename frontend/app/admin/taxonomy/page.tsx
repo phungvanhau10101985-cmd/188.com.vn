@@ -167,6 +167,7 @@ export default function TaxonomyAdminPage() {
     limit: number;
   }
   const [mismatchL1, setMismatchL1] = useState('');
+  const MISMATCH_LIMIT_MAX = 500;
   const [mismatchLimit, setMismatchLimit] = useState(50);
   const [mismatchScanning, setMismatchScanning] = useState(false);
   const [mismatchScanAllRunning, setMismatchScanAllRunning] = useState(false);
@@ -532,7 +533,7 @@ export default function TaxonomyAdminPage() {
             product_ids: ids,
             category_l1: mismatchL1.trim() || null,
             is_active: true,
-            limit: mismatchLimit,
+            limit: Math.min(mismatchLimit, MISMATCH_LIMIT_MAX),
             only_mismatched: true,
             dry_run: dryRun,
           }),
@@ -555,7 +556,7 @@ export default function TaxonomyAdminPage() {
 
   const handleMismatchReclassifyAll = useCallback(
     async (dryRun: boolean) => {
-      const limitPerL1 = Math.min(Math.max(1, mismatchLimit), 100);
+      const limitPerL1 = Math.min(Math.max(1, mismatchLimit), MISMATCH_LIMIT_MAX);
       const catCount = mismatchL1WithIssues.length;
       const estTotal = mismatchScanAll?.total_mismatch ?? 0;
       const scopeLabel =
@@ -662,10 +663,9 @@ export default function TaxonomyAdminPage() {
         <section className="rounded-lg border border-orange-200 bg-white p-4 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900">Sửa taxonomy lệch (theo tên SP)</h2>
           <p className="mt-1 text-sm text-gray-600">
-            Chỉ báo SP <strong>lệch cấp 1 rõ</strong>: ngành từ <strong>tên</strong> (giày, quần áo, đồng hồ…)
-            khác hẳn <strong>danh mục cấp 1</strong> đang ghi — vd quần áo trong Giày dép, giày trong Đồng hồ.
-            Không so <code>category_id</code> / cấp 2–3. <strong>Quét tất cả</strong> →{' '}
-            <strong>Tái gán tất cả</strong>. Cần <code>IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED</code>.
+            Chỉ báo SP <strong>lệch cấp 1 rõ</strong> (tên Việt vs danh mục). <strong>Tái gán DeepSeek</strong> ưu tiên{' '}
+            <code>chinese_name</code> (cột import / «al chinese_name») để chọn cat1–cat3. Cần{' '}
+            <code>IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED</code>.
           </p>
           <div className="mt-3 flex flex-wrap items-end gap-3">
             <label className="flex min-w-[14rem] flex-col gap-1 text-sm">
@@ -691,14 +691,17 @@ export default function TaxonomyAdminPage() {
               </select>
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-xs text-gray-500">Số kết quả tối đa</span>
+              <span className="text-xs text-gray-500">Số kết quả tối đa (quét / tái gán ≤500)</span>
               <input
                 type="number"
                 min={1}
-                max={100}
+                max={MISMATCH_LIMIT_MAX}
                 className="w-24 rounded-md border border-gray-300 px-2 py-2 text-sm"
                 value={mismatchLimit}
-                onChange={(e) => setMismatchLimit(Number(e.target.value) || 50)}
+                onChange={(e) => {
+                  const n = Number(e.target.value) || 50;
+                  setMismatchLimit(Math.min(MISMATCH_LIMIT_MAX, Math.max(1, n)));
+                }}
               />
             </label>
             <button
