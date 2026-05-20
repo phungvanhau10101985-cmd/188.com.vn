@@ -298,7 +298,8 @@ def _read_products_list_impl(
     if order_random and not raw_q and not pid:
         response.headers["Cache-Control"] = "private, no-store"
     else:
-        response.headers["Cache-Control"] = "public, max-age=60"
+        # Admin / công cụ nội bộ cần dữ liệu mới sau PUT; public cache gây hiển thị cũ ~60s.
+        response.headers["Cache-Control"] = "private, no-cache, must-revalidate"
     cache_key = None
     if use_search_cache and raw_q and not pid:
         norm_q = crud.product._normalize_search_key(raw_q)

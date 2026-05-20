@@ -1096,6 +1096,7 @@ export const adminProductAPI = {
     if (params?.sort && params.sort !== 'default') sp.set('sort', params.sort);
     return fetchAdmin<AdminProductsResponse>(`/products/?${sp.toString()}`, {
       timeoutMs: ADMIN_PRODUCTS_LIST_TIMEOUT_MS,
+      cache: 'no-store',
     });
   },
 

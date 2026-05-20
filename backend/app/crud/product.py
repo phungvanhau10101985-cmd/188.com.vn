@@ -1766,6 +1766,8 @@ _STYLE_TAG_ALIASES: Dict[str, List[str]] = {
     "Mule": ["mule", "sục", "clog"],
 }
 _STYLE_TAG_ORDER: Dict[str, int] = {label: idx for idx, label in enumerate(_STYLE_TAG_ALIASES.keys())}
+# Dropdown «Kiểu» — ẩn tag có ít hơn N sản phẩm trong tập facets hiện tại.
+_MIN_STYLE_TAG_FACET_PRODUCTS = 3
 
 
 def _canonical_size_label(raw: Any) -> str:
@@ -2139,7 +2141,7 @@ def _facet_listing_dimensions_present(
 def _aggregate_product_facet_rows(rows) -> Dict[str, Any]:
     sizes_acc: Set[str] = set()
     colors_acc: Set[str] = set()
-    style_tags_acc: Set[str] = set()
+    style_tag_counts: Dict[str, int] = {}
     prices: List[float] = []
     for row in rows:
         sizes_val, colors_val, color_col, name, price = row[:5]
@@ -2149,12 +2151,18 @@ def _aggregate_product_facet_rows(rows) -> Dict[str, Any]:
             colors_acc.add(lab)
         if len(row) > 5:
             for tag in style_tags_from_product_row(name, *row[5:]):
-                style_tags_acc.add(tag)
+                style_tag_counts[tag] = style_tag_counts.get(tag, 0) + 1
         try:
             if price is not None:
                 prices.append(float(price))
         except (TypeError, ValueError):
             pass
+
+    style_tags_acc = {
+        tag
+        for tag, cnt in style_tag_counts.items()
+        if cnt >= _MIN_STYLE_TAG_FACET_PRODUCTS
+    }
 
     def _size_sort_key(x: str) -> tuple:
         try:

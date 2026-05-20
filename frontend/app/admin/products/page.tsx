@@ -2180,7 +2180,19 @@ export default function AdminProductsPage() {
     inlineSaveInFlightRef.current = true;
     setSaving(true);
     try {
-      await adminProductAPI.updateProduct(cur.productId, payload as Partial<AdminProduct>);
+      const updated = await adminProductAPI.updateProduct(
+        cur.productId,
+        payload as Partial<AdminProduct>,
+      );
+      setData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          products: prev.products.map((p) =>
+            p.product_id === cur.productId ? { ...p, ...updated } : p,
+          ),
+        };
+      });
       showToast('ok', 'Đã lưu');
       setEditing(null);
       await fetchProducts();
