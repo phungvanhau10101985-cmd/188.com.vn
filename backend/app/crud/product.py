@@ -1,6 +1,6 @@
 # backend/app/crud/product.py - COMPLETE FIXED VERSION
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, cast, func as sql_func, or_, select, String, union_all
+from sqlalchemy import and_, cast, func as sql_func, not_, or_, select, String, union_all
 from typing import List, Optional, Dict, Any, Set, Tuple
 from app.models.product import Product
 from app.models.search_mapping import SearchMapping, SearchMappingType
@@ -541,6 +541,93 @@ SUBCATEGORY_GROUPS = {
         "Boot Cổ Cao Nam",
     ],
 }
+
+# Listing cấp 1: siết taxonomy + loại subcategory lệch ngành (hai chiều giày ↔ quần áo).
+_FOOTWEAR_CATEGORY_L1_NAMES = frozenset({"Giày dép Nam", "Giày dép Nữ"})
+_FASHION_CATEGORY_L1_NAMES = frozenset(
+    {"Thời trang Nam", "Thời trang Nữ", "Thời trang trẻ em"}
+)
+_CATEGORY_L1_LISTING_GUARD_NAMES = _FOOTWEAR_CATEGORY_L1_NAMES | _FASHION_CATEGORY_L1_NAMES
+
+_FOOTWEAR_MISCAT_SUBCATEGORY_FRAGMENTS = (
+    "áo khoác",
+    "ao khoac",
+    "áo thun",
+    "ao thun",
+    "áo sơ mi",
+    "ao so mi",
+    "áo polo",
+    "áo len",
+    "áo vest",
+    "blazer",
+    "cardigan",
+    "quần jeans",
+    "quan jeans",
+    "quần short",
+    "quan short",
+    "quần jogger",
+    "quần tây",
+    "váy ",
+    "vay ",
+    "đầm",
+    "dam ",
+    "chân váy",
+    "chan vay",
+    "bikini",
+    "đồ ngủ",
+    "do ngu",
+)
+_FASHION_MISCAT_SUBCATEGORY_FRAGMENTS = (
+    "giày ",
+    "giay ",
+    "giày tây",
+    "giay tay",
+    "giày lười",
+    "giay luoi",
+    "giày boot",
+    "giày sneaker",
+    "giày dép",
+    "giay dep",
+    " dép",
+    " dep",
+    "sneaker",
+    "sandal",
+    " loafer",
+    "loafer",
+    " oxford",
+    " derby",
+    " mule",
+    " boot ",
+    " boot nam",
+    " boot nữ",
+    "cao gót",
+    "cao got",
+    "búp bê",
+    "bup be",
+    "monkstrap",
+)
+_FASHION_NU_EXTRA_MISCAT_FRAGMENTS = (
+    "giày dép nam",
+    "giay dep nam",
+    "giày tây nam",
+    "giay tay nam",
+    "giày lười nam",
+    "giày boot nam",
+    "sneaker nam",
+    "oxford nam",
+    "derby nam",
+)
+_FASHION_NAM_EXTRA_MISCAT_FRAGMENTS = (
+    "giày dép nữ",
+    "giay dep nu",
+    "giày cao gót",
+    "váy ",
+    "vay ",
+    "đầm",
+    "chân váy",
+    "chan vay",
+    "bikini",
+)
 
 
 def get_subcategory_group_for_query(category: str, subcategory: str) -> Optional[List[str]]:
@@ -1768,6 +1855,35 @@ _STYLE_TAG_ALIASES: Dict[str, List[str]] = {
 _STYLE_TAG_ORDER: Dict[str, int] = {label: idx for idx, label in enumerate(_STYLE_TAG_ALIASES.keys())}
 # Dropdown «Kiểu» — ẩn tag có ít hơn N sản phẩm trong tập facets hiện tại.
 _MIN_STYLE_TAG_FACET_PRODUCTS = 3
+_APPAREL_ONLY_STYLE_TAGS = frozenset(
+    {
+        "Váy",
+        "Đuôi cá",
+        "Xòe",
+        "Ôm body",
+        "Suông",
+        "Maxi",
+        "Midi",
+        "Hai dây",
+        "Cổ V",
+        "Kẻ caro",
+        "Kẻ sọc",
+        "Hoa nhí",
+        "Áo thun",
+        "Áo sơ mi",
+        "Áo khoác",
+        "Polo",
+        "Oversize",
+        "Slim fit",
+        "Quần jeans",
+        "Quần short",
+        "Jogger",
+        "Cargo",
+        "Chân váy",
+    }
+)
+_FOOTWEAR_STYLE_TAGS = frozenset(_STYLE_TAG_ALIASES.keys()) - _APPAREL_ONLY_STYLE_TAGS
+_FASHION_STYLE_TAGS = _APPAREL_ONLY_STYLE_TAGS | frozenset({"Cổ cao"})
 
 
 def _canonical_size_label(raw: Any) -> str:
@@ -1921,6 +2037,79 @@ def color_labels_from_product_row(
     return out
 
 
+def _build_cat3_ids_under_category_l1(db: Session, l1_name: str) -> Set[int]:
+    """Mọi category_id cấp 3 thuộc cây taxonomy cấp 1 (vd Giày dép Nam)."""
+    from app.models.category import Category as Cat
+
+    l1_row = (
+        db.query(Cat.id)
+        .filter(Cat.level == 1, sql_func.lower(Cat.name) == l1_name.strip().lower())
+        .first()
+    )
+    if not l1_row:
+        return set()
+    l2_ids = [
+        r.id
+        for r in db.query(Cat.id).filter(Cat.parent_id == l1_row.id, Cat.level == 2).all()
+    ]
+    if not l2_ids:
+        return set()
+    return {
+        r.id
+        for r in db.query(Cat.id).filter(Cat.parent_id.in_(l2_ids), Cat.level == 3).all()
+    }
+
+
+def _miscat_subcategory_predicate(fragments: Tuple[str, ...]):
+    """Khớp subcategory / sub_subcategory chứa mảnh gợi ý sai ngành."""
+    parts = []
+    for frag in fragments:
+        pat = f"%{frag}%"
+        parts.append(Product.subcategory.ilike(pat))
+        parts.append(Product.sub_subcategory.ilike(pat))
+    return or_(*parts) if parts else None
+
+
+def _listing_guard_miscat_fragments_for_l1(l1_name: str) -> Tuple[str, ...]:
+    if l1_name in _FOOTWEAR_CATEGORY_L1_NAMES:
+        return _FOOTWEAR_MISCAT_SUBCATEGORY_FRAGMENTS
+    if l1_name in _FASHION_CATEGORY_L1_NAMES:
+        frags = list(_FASHION_MISCAT_SUBCATEGORY_FRAGMENTS)
+        if l1_name == "Thời trang Nữ":
+            frags.extend(_FASHION_NU_EXTRA_MISCAT_FRAGMENTS)
+        elif l1_name == "Thời trang Nam":
+            frags.extend(_FASHION_NAM_EXTRA_MISCAT_FRAGMENTS)
+        return tuple(frags)
+    return ()
+
+
+def apply_category_l1_listing_guard(query, db: Session, category: Optional[str]):
+    """
+    Siết listing cấp 1 cho giày dép và thời trang:
+    - Giữ SP có category_id thuộc cây taxonomy đúng cấp 1, hoặc
+    - category_id NULL + cột category khớp + subcategory không gợi ý sai ngành/giới.
+    Loại SP có FK cat3 thuộc nhánh khác (map nhầm Excel).
+    """
+    cat_s = (category or "").strip()
+    if cat_s not in _CATEGORY_L1_LISTING_GUARD_NAMES:
+        return query
+    allowed_cat3 = _build_cat3_ids_under_category_l1(db, cat_s)
+    miscat_frags = _listing_guard_miscat_fragments_for_l1(cat_s)
+    miscat = _miscat_subcategory_predicate(miscat_frags) if miscat_frags else None
+    ce = category_field_equals_ci(Product.category, cat_s)
+    branches = []
+    if allowed_cat3:
+        branches.append(Product.category_id.in_(allowed_cat3))
+    if ce is not None:
+        null_branch = and_(Product.category_id.is_(None), ce)
+        if miscat is not None:
+            null_branch = and_(null_branch, not_(miscat))
+        branches.append(null_branch)
+    if not branches:
+        return query
+    return query.filter(or_(*branches))
+
+
 def apply_product_category_filters(
     query,
     db: Session,
@@ -1974,7 +2163,7 @@ def apply_product_category_filters(
             sse = category_field_equals_ci(Product.sub_subcategory, subsub_s)
             if sse is not None:
                 query = query.filter(sse)
-    return query
+    return apply_category_l1_listing_guard(query, db, cat_s)
 
 
 def _size_filter_candidates(size: str) -> List[str]:
@@ -2226,13 +2415,15 @@ def _facet_style_tags_with_min_products(
     base_query,
     *,
     min_count: int = _MIN_STYLE_TAG_FACET_PRODUCTS,
+    allowed_labels: Optional[Set[str]] = None,
 ) -> List[str]:
     """
     Dropdown «Kiểu»: chỉ tag có >= min_count SP khi áp `apply_product_style_tag_filter`
     trên cùng base query (danh mục + size/màu/giá đang chọn, không gồm style_tag hiện tại).
     """
     valid: List[str] = []
-    for label in _STYLE_TAG_ALIASES:
+    labels = allowed_labels if allowed_labels is not None else set(_STYLE_TAG_ALIASES.keys())
+    for label in labels:
         try:
             cnt = apply_product_style_tag_filter(base_query, label).count()
             if cnt >= min_count:
@@ -2278,6 +2469,7 @@ def build_dependent_product_facets(
     filter_size: Optional[str] = None,
     filter_color: Optional[str] = None,
     filter_style_tag: Optional[str] = None,
+    listing_category_l1: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Facets phụ thuộc nhau cho một base query bất kỳ:
@@ -2297,7 +2489,16 @@ def build_dependent_product_facets(
         filter_size=filter_size,
         filter_color=filter_color,
     )
-    style_tags = _facet_style_tags_with_min_products(style_query)
+    l1 = (listing_category_l1 or "").strip()
+    if l1 in _FOOTWEAR_CATEGORY_L1_NAMES:
+        style_allowed: Optional[Set[str]] = _FOOTWEAR_STYLE_TAGS
+    elif l1 in _FASHION_CATEGORY_L1_NAMES:
+        style_allowed = _FASHION_STYLE_TAGS
+    else:
+        style_allowed = None
+    style_tags = _facet_style_tags_with_min_products(
+        style_query, allowed_labels=style_allowed
+    )
 
     if not any([min_price is not None, max_price is not None, filter_size, filter_color, filter_style_tag]):
         facets = _aggregate_product_facet_rows(query.with_entities(*facet_columns).all())
@@ -2468,6 +2669,7 @@ def get_product_listing_facets(
         filter_size=filter_size,
         filter_color=filter_color,
         filter_style_tag=filter_style_tag,
+        listing_category_l1=(category or "").strip() or None,
     )
 
 
