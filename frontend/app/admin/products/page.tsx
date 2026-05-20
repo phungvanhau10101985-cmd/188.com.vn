@@ -425,6 +425,19 @@ function productFieldToJsonCellText(raw: unknown): string {
   }
 }
 
+function coerceImageUrlItem(item: unknown): string | null {
+  if (typeof item === 'string') {
+    const s = item.trim();
+    return s || null;
+  }
+  if (item && typeof item === 'object') {
+    const row = item as { url?: unknown; src?: unknown };
+    if (typeof row.url === 'string' && row.url.trim()) return row.url.trim();
+    if (typeof row.src === 'string' && row.src.trim()) return row.src.trim();
+  }
+  return null;
+}
+
 function parseJsonImageFieldEdit(
   value: string,
   mode: 'string' | 'array',
@@ -436,14 +449,41 @@ function parseJsonImageFieldEdit(
     if (mode === 'string') {
       if (typeof parsed === 'string') return parsed;
       if (parsed === null) return null;
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          const url = coerceImageUrlItem(item);
+          if (url) return url;
+        }
+      }
+      const single = coerceImageUrlItem(parsed);
+      if (single) return single;
       return t;
     }
-    if (Array.isArray(parsed)) return parsed as string[];
-    throw new Error('not array');
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => coerceImageUrlItem(item))
+        .filter((url): url is string => Boolean(url));
+    }
+    const one = coerceImageUrlItem(parsed);
+    return one ? [one] : [];
   } catch {
-    if (mode === 'array') return t.split(/\r?\n/);
+    if (mode === 'array') {
+      return t
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    }
     return t;
   }
+}
+
+function productListFieldEditSnapshot(product: AdminProduct, field: string): string {
+  if (field === 'main_image') return productFieldToJsonCellText(product.main_image);
+  if (field === 'images') return productFieldToJsonCellText(product.images);
+  if (field === 'gallery') return productFieldToJsonCellText(product.gallery);
+  const v = product[field as keyof AdminProduct];
+  if (v == null) return '';
+  return String(v);
 }
 
 function AdminProductJsonFieldCell({
@@ -515,7 +555,10 @@ function AdminProductJsonFieldCell({
       role="button"
       tabIndex={0}
       className="w-[14rem] max-w-[14rem] cursor-pointer rounded border border-gray-100 bg-slate-50/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
-      onClick={() => onStart(productId, field, jsonText)}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onStart(productId, field, jsonText);
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -586,7 +629,10 @@ function AdminProductEditableCell({
       role="button"
       tabIndex={0}
       className={`cursor-pointer rounded px-1 -mx-1 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${cellClassName}`}
-      onClick={() => onStart(productId, field, value)}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onStart(productId, field, value);
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -725,6 +771,9 @@ export default function AdminProductsPage() {
   const excelBatch1688InputRef = useRef<HTMLInputElement>(null);
 
   const [editing, setEditing] = useState<{ productId: string; field: string; value: string } | null>(null);
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
+  const inlineSaveInFlightRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
 
@@ -2082,42 +2131,80 @@ export default function AdminProductsPage() {
     setEditing(null);
   };
 
-  const saveEdit = async () => {
-    if (!editing || !data?.products) return;
-    const product = data.products.find((p) => p.product_id === editing.productId);
-    if (!product) return;
+  const commitInlineEdit = useCallback(async () => {
+    const cur = editingRef.current;
+    if (!cur || !data?.products || inlineSaveInFlightRef.current) return;
+    const product = data.products.find((p) => p.product_id === cur.productId);
+    if (!product) {
+      setEditing(null);
+      return;
+    }
+
+    const imageJsonFields = new Set(['main_image', 'images', 'gallery']);
+    const previous =
+      imageJsonFields.has(cur.field)
+        ? productListFieldEditSnapshot(product, cur.field)
+        : String((product as Record<string, unknown>)[cur.field] ?? '');
+    if (cur.value === previous) {
+      setEditing(null);
+      return;
+    }
+
+    const payload: Record<string, unknown> = {};
+    if (cur.field === 'name') payload.name = cur.value;
+    if (cur.field === 'price') payload.price = parseFloat(cur.value) || 0;
+    if (cur.field === 'product_id') payload.product_id = cur.value;
+    if (cur.field === 'brand_name') payload.brand_name = cur.value;
+    if (cur.field === 'category') payload.category = cur.value;
+    if (cur.field === 'subcategory') payload.subcategory = cur.value;
+    if (cur.field === 'sub_subcategory') payload.sub_subcategory = cur.value;
+    if (cur.field === 'code') payload.code = cur.value;
+    if (cur.field === 'slug') payload.slug = cur.value;
+    if (cur.field === 'available') payload.available = parseInt(cur.value, 10) || 0;
+    if (cur.field === 'link_default') payload.link_default = cur.value;
+    if (cur.field === 'main_image') {
+      payload.main_image = parseJsonImageFieldEdit(cur.value, 'string');
+    }
+    if (cur.field === 'images') {
+      payload.images = parseJsonImageFieldEdit(cur.value, 'array');
+    }
+    if (cur.field === 'gallery') {
+      payload.gallery = parseJsonImageFieldEdit(cur.value, 'array');
+    }
+
+    if (Object.keys(payload).length === 0) {
+      setEditing(null);
+      return;
+    }
+
+    inlineSaveInFlightRef.current = true;
     setSaving(true);
     try {
-      const payload: Record<string, unknown> = {};
-      if (editing.field === 'name') payload.name = editing.value;
-      if (editing.field === 'price') payload.price = parseFloat(editing.value) || 0;
-      if (editing.field === 'product_id') payload.product_id = editing.value;
-      if (editing.field === 'brand_name') payload.brand_name = editing.value;
-      if (editing.field === 'category') payload.category = editing.value;
-      if (editing.field === 'subcategory') payload.subcategory = editing.value;
-      if (editing.field === 'sub_subcategory') payload.sub_subcategory = editing.value;
-      if (editing.field === 'code') payload.code = editing.value;
-      if (editing.field === 'slug') payload.slug = editing.value;
-      if (editing.field === 'available') payload.available = parseInt(editing.value, 10) || 0;
-      if (editing.field === 'link_default') payload.link_default = editing.value;
-      if (editing.field === 'main_image') {
-        payload.main_image = parseJsonImageFieldEdit(editing.value, 'string');
-      }
-      if (editing.field === 'images') {
-        payload.images = parseJsonImageFieldEdit(editing.value, 'array');
-      }
-      if (editing.field === 'gallery') {
-        payload.gallery = parseJsonImageFieldEdit(editing.value, 'array');
-      }
-      await adminProductAPI.updateProduct(editing.productId, payload as Partial<AdminProduct>);
+      await adminProductAPI.updateProduct(cur.productId, payload as Partial<AdminProduct>);
       showToast('ok', 'Đã lưu');
       setEditing(null);
-      fetchProducts();
-    } catch {
-      showToast('err', 'Lưu thất bại');
+      await fetchProducts();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Lưu thất bại';
+      showToast('err', msg.length > 280 ? `${msg.slice(0, 280)}…` : msg);
     } finally {
+      inlineSaveInFlightRef.current = false;
       setSaving(false);
     }
+  }, [data?.products, fetchProducts, showToast]);
+
+  const openInlineEdit = useCallback(
+    (productId: string, field: string, value: string | number) => {
+      void (async () => {
+        await commitInlineEdit();
+        startEdit(productId, field, value);
+      })();
+    },
+    [commitInlineEdit],
+  );
+
+  const saveEdit = () => {
+    void commitInlineEdit();
   };
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -4127,13 +4214,14 @@ export default function AdminProductsPage() {
                                     role="button"
                                     tabIndex={0}
                                     className="cursor-pointer font-mono text-xs text-blue-600 hover:underline"
-                                    onClick={() =>
-                                      startEdit(p.product_id, 'product_id', p.product_id ?? '')
-                                    }
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      openInlineEdit(p.product_id, 'product_id', p.product_id ?? '');
+                                    }}
                                     onKeyDown={(e) => {
                                       if (e.key === 'Enter' || e.key === ' ') {
                                         e.preventDefault();
-                                        startEdit(p.product_id, 'product_id', p.product_id ?? '');
+                                        openInlineEdit(p.product_id, 'product_id', p.product_id ?? '');
                                       }
                                     }}
                                     title="Bấm để sửa ID"
@@ -4183,7 +4271,7 @@ export default function AdminProductsPage() {
                                   raw={p.main_image}
                                   editing={editing}
                                   saving={saving}
-                                  onStart={startEdit}
+                                  onStart={openInlineEdit}
                                   onEditChange={onEditChange}
                                   onSave={saveEdit}
                                   onCancel={cancelEdit}
@@ -4197,7 +4285,7 @@ export default function AdminProductsPage() {
                                   raw={p.images}
                                   editing={editing}
                                   saving={saving}
-                                  onStart={startEdit}
+                                  onStart={openInlineEdit}
                                   onEditChange={onEditChange}
                                   onSave={saveEdit}
                                   onCancel={cancelEdit}
@@ -4211,7 +4299,7 @@ export default function AdminProductsPage() {
                                   raw={p.gallery}
                                   editing={editing}
                                   saving={saving}
-                                  onStart={startEdit}
+                                  onStart={openInlineEdit}
                                   onEditChange={onEditChange}
                                   onSave={saveEdit}
                                   onCancel={cancelEdit}
@@ -4226,7 +4314,7 @@ export default function AdminProductsPage() {
                                   display={formatCell(p.code)}
                                   editing={editing}
                                   saving={saving}
-                                  onStart={startEdit}
+                                  onStart={openInlineEdit}
                                   onEditChange={onEditChange}
                                   onSave={saveEdit}
                                   onKeyDown={handleKeyDown}
@@ -4245,7 +4333,7 @@ export default function AdminProductsPage() {
                                   }
                                   editing={editing}
                                   saving={saving}
-                                  onStart={startEdit}
+                                  onStart={openInlineEdit}
                                   onEditChange={onEditChange}
                                   onSave={saveEdit}
                                   onKeyDown={handleKeyDown}
@@ -4260,7 +4348,7 @@ export default function AdminProductsPage() {
                                   display={<span className="whitespace-normal">{p.name || '—'}</span>}
                                   editing={editing}
                                   saving={saving}
-                                  onStart={startEdit}
+                                  onStart={openInlineEdit}
                                   onEditChange={onEditChange}
                                   onSave={saveEdit}
                                   onKeyDown={handleKeyDown}
@@ -4279,7 +4367,7 @@ export default function AdminProductsPage() {
                                   }
                                   editing={editing}
                                   saving={saving}
-                                  onStart={startEdit}
+                                  onStart={openInlineEdit}
                                   onEditChange={onEditChange}
                                   onSave={saveEdit}
                                   onKeyDown={handleKeyDown}
@@ -4294,7 +4382,7 @@ export default function AdminProductsPage() {
                                   display={formatCell(p.brand_name)}
                                   editing={editing}
                                   saving={saving}
-                                  onStart={startEdit}
+                                  onStart={openInlineEdit}
                                   onEditChange={onEditChange}
                                   onSave={saveEdit}
                                   onKeyDown={handleKeyDown}
@@ -4308,7 +4396,7 @@ export default function AdminProductsPage() {
                                   display={formatCell(p.available)}
                                   editing={editing}
                                   saving={saving}
-                                  onStart={startEdit}
+                                  onStart={openInlineEdit}
                                   onEditChange={onEditChange}
                                   onSave={saveEdit}
                                   onKeyDown={handleKeyDown}

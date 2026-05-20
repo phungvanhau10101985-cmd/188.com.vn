@@ -3531,7 +3531,11 @@ def create_product(db: Session, product: ProductCreate):
 def update_product(db: Session, product_id: int, product_update: ProductUpdate):
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if db_product:
-        update_data = product_update.dict(exclude_unset=True)
+        update_data = (
+            product_update.model_dump(exclude_unset=True)
+            if hasattr(product_update, "model_dump")
+            else product_update.dict(exclude_unset=True)
+        )
         
         if 'name' in update_data and 'slug' not in update_data:
             update_data['slug'] = generate_consistent_slug(update_data['name'], db_product.product_id)
