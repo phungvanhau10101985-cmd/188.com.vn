@@ -1,14 +1,13 @@
 // frontend/components/product-detail/ProductTabs.tsx - FIXED HOÀN CHỈNH
 'use client';
 
-import { useState } from 'react';
-import { cdnUrl } from '@/lib/cdn-url';
+import { useState, useMemo, useCallback } from 'react';
 import { Product } from '@/types/api';
 import RelatedProducts from '@/components/product-detail/RelatedProducts';
 import ShopSidebarProducts from '@/components/product-detail/ShopSidebarProducts';
-import Image from 'next/image';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { displayableBrandOrOrigin } from '@/lib/utils';
+import { normalizeProductImageUrl } from '@/lib/product-gallery-merge';
 
 interface ProductTabsProps {
   product: Product;
@@ -312,29 +311,41 @@ function ProductInfoTab({ product }: { product: Product }) {
   );
 }
 
+function collectDetailImageUrls(product: Product): string[] {
+  if (!product.gallery || !Array.isArray(product.gallery)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of product.gallery) {
+    const u = normalizeProductImageUrl(typeof raw === 'string' ? raw : String(raw ?? ''));
+    if (!u || seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
+}
+
 export default function ProductTabs({ product }: ProductTabsProps) {
   const [activeTab, setActiveTab] = useState('description');
+  const [brokenDetailImages, setBrokenDetailImages] = useState<Record<string, true>>({});
 
   const tabs = [
     { id: 'description', label: 'Mô Tả Sản Phẩm' },
     { id: 'specifications', label: 'Thông tin sản phẩm' },
   ];
 
-  // Lấy ảnh chi tiết từ gallery (cột Q - detail_images)
-  const getDetailImages = () => {
-    if (product.gallery && Array.isArray(product.gallery) && product.gallery.length > 0) {
-      return product.gallery;
-    }
-    return [];
-  };
+  const detailImageUrls = useMemo(() => collectDetailImageUrls(product), [product]);
+  const visibleDetailImages = useMemo(
+    () => detailImageUrls.filter((u) => !brokenDetailImages[u]),
+    [detailImageUrls, brokenDetailImages],
+  );
 
-  // Lấy mô tả sản phẩm - kiểm tra cả description và product_description
-  const getProductDescription = () => {
-    return product.description || product.product_description || '';
-  };
+  const markDetailImageBroken = useCallback((url: string) => {
+    const u = url.trim();
+    if (!u) return;
+    setBrokenDetailImages((prev) => (prev[u] ? prev : { ...prev, [u]: true }));
+  }, []);
 
-  const detailImages = getDetailImages();
-  const description = getProductDescription();
+  const description = product.description || product.product_description || '';
 
   return (
     <div className="bg-white rounded-lg border border-gray-200">
@@ -383,8 +394,8 @@ export default function ProductTabs({ product }: ProductTabsProps) {
               </div>
             </div>
 
-            {/* ẢNH CHI TIẾT SẢN PHẨM - từ gallery (cột Q) */}
-            {detailImages.length > 0 && (
+            {/* ẢNH CHI TIẾT — ảnh lỗi bị ẩn hẳn, không để khung trắng */}
+            {visibleDetailImages.length > 0 && (
               <div className="mt-4">
                 <h2 className="text-base font-bold text-gray-900 mb-3 pb-2 border-b border-gray-200">
                   📸 Hình ảnh chi tiết sản phẩm
@@ -394,25 +405,20 @@ export default function ProductTabs({ product }: ProductTabsProps) {
                     <ShopSidebarProducts currentProduct={product} />
                   </div>
                   <div className="space-y-4">
-                    {detailImages.map((image, index) => (
-                      <div 
-                        key={index} 
+                    {visibleDetailImages.map((image, index) => (
+                      <div
+                        key={image}
                         className="bg-white rounded-xl overflow-hidden border border-gray-200 shadow-sm"
                       >
-                        <div className="relative w-full h-auto">
-                          <Image
-                            src={getOptimizedImage(image, { width: 800, height: 600 })}
-                            alt={`${product.name} chi tiết ${index + 1}`}
-                            width={800}
-                            height={600}
-                            sizes="(max-width: 1024px) 100vw, 800px"
-                            className="w-full h-auto max-w-4xl mx-auto"
-                            onError={(e) => {
-                              e.currentTarget.src = cdnUrl('/images/placeholder.jpg');
-                              e.currentTarget.alt = 'Ảnh không khả dụng';
-                            }}
-                          />
-                        </div>
+                        {/* img thuần: không giữ khung trắng khi URL lỗi (khác next/image width/height cố định) */}
+                        <img
+                          src={getOptimizedImage(image, { width: 800, height: 600 })}
+                          alt={`${product.name} chi tiết ${index + 1}`}
+                          loading="lazy"
+                          decoding="async"
+                          className="w-full h-auto max-w-4xl mx-auto block"
+                          onError={() => markDetailImageBroken(image)}
+                        />
                       </div>
                     ))}
                   </div>

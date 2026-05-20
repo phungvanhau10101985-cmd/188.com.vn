@@ -71,8 +71,11 @@ export default function ProductGallery({ product, selectedImageUrl, onSelectImag
       ? (visiblePhotoUrls[0] ?? null)
       : logicalMainUrl;
 
+  const showMainFrame = (isShowingVideo && parsedVideo) || mainRaw;
+
   return (
     <div className="space-y-2 image_list">
+      {showMainFrame ? (
       <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
         {isShowingVideo && parsedVideo ? (
           parsedVideo.kind === 'youtube' ? (
@@ -103,10 +106,9 @@ export default function ProductGallery({ product, selectedImageUrl, onSelectImag
             priority
             onError={() => markBroken(mainRaw)}
           />
-        ) : (
-          <div className="w-full h-full min-h-[200px] flex items-center justify-center bg-gray-200 text-gray-400 text-sm" role="img" aria-label="Không có ảnh hiển thị" />
-        )}
+        ) : null}
       </div>
+      ) : null}
 
       {mediaCount > 1 && (
         <div className="flex space-x-1.5 overflow-x-auto pb-1">

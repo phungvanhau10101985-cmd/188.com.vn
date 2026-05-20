@@ -240,6 +240,7 @@ export default function ProductDetailMobile({
 
         <div className="image_list mb-2">
         {/* Main media: chỉ hiển thị video khi có video_url; video luôn ở index 0, sau đó mới ảnh */}
+        {(isShowingVideo && parsedVideo) || mainImageRaw ? (
         <div
           className="relative rounded-xl overflow-hidden bg-gray-100 mb-2 touch-pan-y"
           onTouchStart={handleMainTouchStart}
@@ -304,11 +305,10 @@ export default function ProductDetailMobile({
                   </Link>
                 </div>
               </>
-            ) : (
-              <div className="absolute inset-0 bg-gray-200" role="img" aria-label="Không có ảnh hiển thị" />
-            )}
+            ) : null}
           </div>
         </div>
+        ) : null}
         {/* Thumbnail dưới khung ảnh chính: chỉ hiển thị nút video khi có video_url; video luôn đầu tiên */}
         {mediaCount > 1 && (
           <div
