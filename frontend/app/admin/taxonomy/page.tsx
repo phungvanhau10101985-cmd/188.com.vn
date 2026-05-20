@@ -166,6 +166,25 @@ export default function TaxonomyAdminPage() {
     skip: number;
     limit: number;
   }
+
+  interface MismatchReclassifyWorkItem {
+    product_id: string;
+    name: string;
+    category_l1: string;
+  }
+
+  interface MismatchReclassifyProgress {
+    phase: 'collect' | 'running' | 'done';
+    current: number;
+    total: number;
+    productId?: string;
+    productName?: string;
+    categoryL1?: string;
+    ok: number;
+    failed: number;
+    message?: string;
+  }
+
   const [mismatchL1, setMismatchL1] = useState('');
   const MISMATCH_LIMIT_MAX = 500;
   const [mismatchLimit, setMismatchLimit] = useState(50);
@@ -205,6 +224,8 @@ export default function TaxonomyAdminPage() {
     }[];
   } | null>(null);
   const [mismatchReclassifyError, setMismatchReclassifyError] = useState<string | null>(null);
+  const [mismatchReclassifyProgress, setMismatchReclassifyProgress] =
+    useState<MismatchReclassifyProgress | null>(null);
 
   const reloadInfo = useCallback(async () => {
     setLoadingInfo(true);
@@ -503,17 +524,99 @@ export default function TaxonomyAdminPage() {
     [runMismatchScanForL1],
   );
 
+  const runReclassifyWithProgress = useCallback(
+    async (
+      workItems: MismatchReclassifyWorkItem[],
+      dryRun: boolean,
+    ): Promise<{ ok: number; failed: number; processed: number }> => {
+      const total = workItems.length;
+      let ok = 0;
+      let failed = 0;
+
+      setMismatchReclassifyProgress({
+        phase: 'running',
+        current: 0,
+        total,
+        ok: 0,
+        failed: 0,
+        message: dryRun ? 'Đang xem trước (dry-run)…' : 'Đang tái gán taxonomy (DeepSeek)…',
+      });
+
+      for (let i = 0; i < workItems.length; i++) {
+        const item = workItems[i];
+        setMismatchReclassifyProgress({
+          phase: 'running',
+          current: i,
+          total,
+          productId: item.product_id,
+          productName: item.name,
+          categoryL1: item.category_l1,
+          ok,
+          failed,
+          message: dryRun ? 'Dry-run' : 'Đang gán',
+        });
+
+        try {
+          const row = await callApi<{
+            ok: number;
+            failed: number;
+            dry_run: boolean;
+          }>('/taxonomy/mismatch-reclassify', {
+            method: 'POST',
+            body: JSON.stringify({
+              product_ids: [item.product_id],
+              category_l1: item.category_l1.trim() || null,
+              is_active: true,
+              limit: 1,
+              only_mismatched: true,
+              dry_run: dryRun,
+            }),
+          });
+          ok += row.ok;
+          failed += row.failed;
+        } catch {
+          failed += 1;
+        }
+
+        setMismatchReclassifyProgress({
+          phase: 'running',
+          current: i + 1,
+          total,
+          productId: item.product_id,
+          productName: item.name,
+          categoryL1: item.category_l1,
+          ok,
+          failed,
+          message: dryRun ? 'Dry-run' : 'Đang gán',
+        });
+      }
+
+      setMismatchReclassifyProgress({
+        phase: 'done',
+        current: total,
+        total,
+        ok,
+        failed,
+        message: 'Hoàn tất',
+      });
+
+      return { ok, failed, processed: total };
+    },
+    [],
+  );
+
   const handleMismatchReclassify = useCallback(
     async (dryRun: boolean) => {
-      const ids = (mismatchScan?.items || []).map((x) => x.product_id).filter(Boolean);
-      if (!ids.length) {
-        alert('Chưa có danh sách — bấm «Quét lệch taxonomy» trước.');
+      const l1 = mismatchL1.trim();
+      const items = (mismatchScan?.items || []).slice(0, Math.min(mismatchLimit, MISMATCH_LIMIT_MAX));
+      if (!items.length) {
+        alert('Chưa có danh sách — bấm «Quét danh mục này» trước.');
         return;
       }
       if (
         !dryRun &&
         !window.confirm(
-          `Chạy DeepSeek tái gán taxonomy cho tối đa ${Math.min(ids.length, mismatchLimit)} SP? Việc này có thể mất vài phút.`,
+          `Chạy DeepSeek tái gán taxonomy cho ${items.length} SP? Hiển thị tiến trình từng sản phẩm.`,
         )
       ) {
         return;
@@ -521,32 +624,29 @@ export default function TaxonomyAdminPage() {
       setMismatchReclassifying(true);
       setMismatchReclassifyError(null);
       setMismatchReclassifyAllResult(null);
+      setMismatchReclassifyProgress(null);
       try {
-        const data = await callApi<{
-          ok: number;
-          failed: number;
-          dry_run: boolean;
-          results: { product_id: string; ok?: boolean; error?: string; new?: Record<string, unknown> }[];
-        }>('/taxonomy/mismatch-reclassify', {
-          method: 'POST',
-          body: JSON.stringify({
-            product_ids: ids,
-            category_l1: mismatchL1.trim() || null,
-            is_active: true,
-            limit: Math.min(mismatchLimit, MISMATCH_LIMIT_MAX),
-            only_mismatched: true,
-            dry_run: dryRun,
-          }),
+        const work: MismatchReclassifyWorkItem[] = items.map((x) => ({
+          product_id: x.product_id,
+          name: x.name,
+          category_l1: l1,
+        }));
+        const summary = await runReclassifyWithProgress(work, dryRun);
+        setMismatchReclassifyResult({
+          ok: summary.ok,
+          failed: summary.failed,
+          dry_run: dryRun,
+          results: [],
         });
-        setMismatchReclassifyResult(data);
         if (!dryRun) void reloadInfo();
       } catch (e) {
         setMismatchReclassifyError(e instanceof Error ? e.message : String(e));
+        setMismatchReclassifyProgress(null);
       } finally {
         setMismatchReclassifying(false);
       }
     },
-    [mismatchScan, mismatchL1, mismatchLimit, reloadInfo],
+    [mismatchScan, mismatchL1, mismatchLimit, reloadInfo, runReclassifyWithProgress],
   );
 
   const mismatchL1WithIssues = useMemo(
@@ -557,19 +657,15 @@ export default function TaxonomyAdminPage() {
   const handleMismatchReclassifyAll = useCallback(
     async (dryRun: boolean) => {
       const limitPerL1 = Math.min(Math.max(1, mismatchLimit), MISMATCH_LIMIT_MAX);
-      const catCount = mismatchL1WithIssues.length;
+      let l1List = mismatchL1WithIssues;
       const estTotal = mismatchScanAll?.total_mismatch ?? 0;
-      const scopeLabel =
-        catCount > 0
-          ? `${catCount} danh mục có lệch (tối đa ${limitPerL1} SP / danh mục)`
-          : `mọi danh mục cấp 1 (tối đa ${limitPerL1} SP / danh mục)`;
 
       if (
         !dryRun &&
         !window.confirm(
-          catCount > 0
-            ? `Chạy DeepSeek tái gán taxonomy cho ${scopeLabel}? Ước tính tối đa ~${Math.min(estTotal, catCount * limitPerL1)} SP — có thể mất rất lâu và tốn API.`
-            : `Chưa quét tổng — vẫn chạy trên ${scopeLabel}. Nên «Quét tất cả danh mục» trước để biết số lượng. Tiếp tục?`,
+          l1List.length > 0
+            ? `Tái gán ${l1List.length} danh mục (~${Math.min(estTotal, l1List.length * limitPerL1)} SP)? Hiển thị tiến trình từng SP.`
+            : 'Chưa quét tổng — sẽ quét từng danh mục rồi tái gán. Tiếp tục?',
         )
       ) {
         return;
@@ -579,42 +675,100 @@ export default function TaxonomyAdminPage() {
       setMismatchReclassifyError(null);
       setMismatchReclassifyAllResult(null);
       setMismatchReclassifyResult(null);
+      setMismatchReclassifyProgress({
+        phase: 'collect',
+        current: 0,
+        total: 0,
+        ok: 0,
+        failed: 0,
+        message: 'Đang lấy danh sách SP lệch…',
+      });
+
       try {
-        const data = await callApi<{
-          ok: number;
-          failed: number;
-          processed: number;
-          dry_run: boolean;
-          categories_processed: number;
-          categories: {
-            category_l1: string;
-            skipped?: boolean;
-            ok: number;
-            failed: number;
-            processed: number;
-          }[];
-        }>('/taxonomy/mismatch-reclassify-all', {
-          method: 'POST',
-          body: JSON.stringify({
-            limit_per_l1: limitPerL1,
-            is_active: true,
-            max_scan_per_l1: 12000,
-            only_mismatched: true,
-            dry_run: dryRun,
-            only_categories_with_mismatch: true,
-            category_l1_names: catCount > 0 ? mismatchL1WithIssues : null,
-          }),
+        if (l1List.length === 0) {
+          const listRes = await callApi<{ items: string[] }>('/taxonomy/mismatch-category-l1-list');
+          l1List = listRes.items || [];
+        }
+
+        const work: MismatchReclassifyWorkItem[] = [];
+        for (let c = 0; c < l1List.length; c++) {
+          const l1 = l1List[c];
+          setMismatchReclassifyProgress({
+            phase: 'collect',
+            current: c,
+            total: l1List.length,
+            categoryL1: l1,
+            ok: 0,
+            failed: 0,
+            message: `Đang quét danh mục ${c + 1}/${l1List.length}: ${l1}`,
+          });
+          const scan = await callApi<MismatchScanResult>('/taxonomy/mismatch-scan', {
+            method: 'POST',
+            body: JSON.stringify({
+              skip: 0,
+              limit: limitPerL1,
+              category_l1: l1,
+              is_active: true,
+              max_scan: 12000,
+            }),
+          });
+          for (const row of scan.items || []) {
+            if (row.product_id) {
+              work.push({
+                product_id: row.product_id,
+                name: row.name,
+                category_l1: l1,
+              });
+            }
+          }
+        }
+
+        if (!work.length) {
+          setMismatchReclassifyError('Không có SP lệch để tái gán.');
+          setMismatchReclassifyProgress(null);
+          return;
+        }
+
+        const summary = await runReclassifyWithProgress(work, dryRun);
+        const byCat = new Map<string, { ok: number; failed: number; processed: number }>();
+        for (const item of work) {
+          const row = byCat.get(item.category_l1) || { ok: 0, failed: 0, processed: 0 };
+          row.processed += 1;
+          byCat.set(item.category_l1, row);
+        }
+        setMismatchReclassifyAllResult({
+          ok: summary.ok,
+          failed: summary.failed,
+          processed: summary.processed,
+          dry_run: dryRun,
+          categories_processed: byCat.size,
+          categories: [...byCat.entries()].map(([category_l1, stats]) => ({
+            category_l1,
+            skipped: false,
+            ok: stats.ok,
+            failed: stats.failed,
+            processed: stats.processed,
+          })),
         });
-        setMismatchReclassifyAllResult(data);
         if (!dryRun) void reloadInfo();
       } catch (e) {
         setMismatchReclassifyError(e instanceof Error ? e.message : String(e));
+        setMismatchReclassifyProgress(null);
       } finally {
         setMismatchReclassifying(false);
       }
     },
-    [mismatchLimit, mismatchL1WithIssues, mismatchScanAll, reloadInfo],
+    [mismatchLimit, mismatchL1WithIssues, mismatchScanAll, reloadInfo, runReclassifyWithProgress],
   );
+
+  const reclassifyPercent = useMemo(() => {
+    if (!mismatchReclassifyProgress || mismatchReclassifyProgress.total <= 0) return 0;
+    return Math.min(
+      100,
+      Math.round((mismatchReclassifyProgress.current / mismatchReclassifyProgress.total) * 100),
+    );
+  }, [mismatchReclassifyProgress]);
+
 
   return (
       <div className="space-y-6 p-4 sm:p-6">
@@ -737,11 +891,58 @@ export default function TaxonomyAdminPage() {
               {mismatchReclassifying ? 'Đang gán lại…' : 'Tái gán taxonomy (DeepSeek)'}
             </button>
           </div>
+          {mismatchReclassifyProgress ? (
+            <div
+              className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50/80 p-4"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <span className="font-medium text-indigo-900">
+                  {mismatchReclassifyProgress.phase === 'collect'
+                    ? mismatchReclassifyProgress.message || 'Đang chuẩn bị…'
+                    : mismatchReclassifyProgress.phase === 'done'
+                      ? `Hoàn tất — ${mismatchReclassifyProgress.current}/${mismatchReclassifyProgress.total} SP`
+                      : `Đang xử lý ${mismatchReclassifyProgress.current}/${mismatchReclassifyProgress.total} (${reclassifyPercent}%)`}
+                </span>
+                {mismatchReclassifyProgress.phase === 'running' ? (
+                  <span className="text-indigo-700">
+                    OK {mismatchReclassifyProgress.ok} · Lỗi {mismatchReclassifyProgress.failed}
+                  </span>
+                ) : null}
+              </div>
+              {mismatchReclassifyProgress.phase !== 'collect' ? (
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-indigo-100">
+                  <div
+                    className="h-full rounded-full bg-indigo-600 transition-all duration-300"
+                    style={{ width: `${reclassifyPercent}%` }}
+                  />
+                </div>
+              ) : null}
+              {mismatchReclassifyProgress.productId ? (
+                <p className="mt-2 text-xs text-indigo-950/90">
+                  <span className="font-mono">{mismatchReclassifyProgress.productId}</span>
+                  {mismatchReclassifyProgress.productName ? (
+                    <>
+                      {' — '}
+                      <span>{mismatchReclassifyProgress.productName}</span>
+                    </>
+                  ) : null}
+                  {mismatchReclassifyProgress.categoryL1 ? (
+                    <span className="text-indigo-700"> · {mismatchReclassifyProgress.categoryL1}</span>
+                  ) : null}
+                </p>
+              ) : mismatchReclassifyProgress.categoryL1 && mismatchReclassifyProgress.phase === 'collect' ? (
+                <p className="mt-2 text-xs text-indigo-800">{mismatchReclassifyProgress.categoryL1}</p>
+              ) : null}
+            </div>
+          ) : null}
           {mismatchScanError ? (
             <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               {mismatchScanError}
             </div>
           ) : null}
+
           {mismatchScanAll ? (
             <div className="mt-3 space-y-2">
               <p className="text-sm text-gray-700">
