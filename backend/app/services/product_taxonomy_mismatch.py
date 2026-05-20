@@ -420,6 +420,7 @@ def reclassify_products_batch(
     limit: int = 20,
     only_mismatched: bool = True,
     dry_run: bool = False,
+    max_scan: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Tái phân loại theo danh sách product_id hoặc quét mismatch (giới hạn)."""
     cap = max(1, min(int(limit), 100))
@@ -438,13 +439,14 @@ def reclassify_products_batch(
                 .all()
             )
     else:
+        scan_cap = max(cap * 40, int(max_scan)) if max_scan else cap * 40
         scan = scan_taxonomy_mismatches(
             db,
             skip=0,
             limit=cap,
             category_l1=category_l1,
             is_active=is_active,
-            max_scan=cap * 40,
+            max_scan=scan_cap,
         )
         pk_ids = [int(x["product_pk"]) for x in scan.get("items", []) if x.get("product_pk")]
         if pk_ids:
@@ -514,4 +516,83 @@ def reclassify_products_batch(
         "ok": ok_n,
         "failed": fail_n,
         "results": results,
+    }
+
+
+def reclassify_products_batch_all_l1(
+    db: Session,
+    *,
+    limit_per_l1: int = 20,
+    is_active: Optional[bool] = True,
+    max_scan_per_l1: int = 12000,
+    only_mismatched: bool = True,
+    dry_run: bool = False,
+    category_l1_names: Optional[List[str]] = None,
+    only_categories_with_mismatch: bool = True,
+) -> Dict[str, Any]:
+    """
+    Tái gán DeepSeek lần lượt mọi danh mục cấp 1 (tối đa `limit_per_l1` SP mỗi nhánh).
+    Mỗi nhánh commit riêng — tránh mất toàn bộ nếu một nhánh lỗi giữa chừng.
+    """
+    cap = max(1, min(int(limit_per_l1), 100))
+    l1_list = [x.strip() for x in (category_l1_names or list_active_category_l1_names(db)) if x.strip()]
+    blocks: List[Dict[str, Any]] = []
+    total_ok = 0
+    total_failed = 0
+    total_processed = 0
+
+    for l1 in l1_list:
+        if only_categories_with_mismatch:
+            scan_preview = scan_taxonomy_mismatches(
+                db,
+                skip=0,
+                limit=1,
+                category_l1=l1,
+                is_active=is_active,
+                max_scan=max_scan_per_l1,
+            )
+            if not (scan_preview.get("items") or []):
+                blocks.append(
+                    {
+                        "category_l1": l1,
+                        "skipped": True,
+                        "ok": 0,
+                        "failed": 0,
+                        "processed": 0,
+                    }
+                )
+                continue
+
+        block = reclassify_products_batch(
+            db,
+            product_ids=None,
+            category_l1=l1,
+            is_active=is_active,
+            limit=cap,
+            only_mismatched=only_mismatched,
+            dry_run=dry_run,
+            max_scan=max_scan_per_l1,
+        )
+        blocks.append(
+            {
+                "category_l1": l1,
+                "skipped": False,
+                "ok": block.get("ok", 0),
+                "failed": block.get("failed", 0),
+                "processed": block.get("processed", 0),
+            }
+        )
+        total_ok += int(block.get("ok") or 0)
+        total_failed += int(block.get("failed") or 0)
+        total_processed += int(block.get("processed") or 0)
+
+    return {
+        "dry_run": dry_run,
+        "categories": blocks,
+        "category_count": len(blocks),
+        "categories_processed": sum(1 for b in blocks if not b.get("skipped")),
+        "ok": total_ok,
+        "failed": total_failed,
+        "processed": total_processed,
+        "limit_per_l1": cap,
     }

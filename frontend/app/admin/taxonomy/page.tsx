@@ -189,6 +189,20 @@ export default function TaxonomyAdminPage() {
     dry_run: boolean;
     results: { product_id: string; ok?: boolean; error?: string; new?: Record<string, unknown> }[];
   } | null>(null);
+  const [mismatchReclassifyAllResult, setMismatchReclassifyAllResult] = useState<{
+    ok: number;
+    failed: number;
+    processed: number;
+    dry_run: boolean;
+    categories_processed: number;
+    categories: {
+      category_l1: string;
+      skipped?: boolean;
+      ok: number;
+      failed: number;
+      processed: number;
+    }[];
+  } | null>(null);
   const [mismatchReclassifyError, setMismatchReclassifyError] = useState<string | null>(null);
 
   const reloadInfo = useCallback(async () => {
@@ -420,6 +434,7 @@ export default function TaxonomyAdminPage() {
       setMismatchScanning(true);
       setMismatchScanError(null);
       setMismatchReclassifyResult(null);
+      setMismatchReclassifyAllResult(null);
       setMismatchScanAll(null);
       try {
         const data = await callApi<MismatchScanResult>('/taxonomy/mismatch-scan', {
@@ -450,6 +465,7 @@ export default function TaxonomyAdminPage() {
     setMismatchScanAllRunning(true);
     setMismatchScanError(null);
     setMismatchReclassifyResult(null);
+    setMismatchReclassifyAllResult(null);
     setMismatchScan(null);
     try {
       const data = await callApi<{
@@ -503,6 +519,7 @@ export default function TaxonomyAdminPage() {
       }
       setMismatchReclassifying(true);
       setMismatchReclassifyError(null);
+      setMismatchReclassifyAllResult(null);
       try {
         const data = await callApi<{
           ok: number;
@@ -529,6 +546,73 @@ export default function TaxonomyAdminPage() {
       }
     },
     [mismatchScan, mismatchL1, mismatchLimit, reloadInfo],
+  );
+
+  const mismatchL1WithIssues = useMemo(
+    () => (mismatchScanAll?.categories || []).filter((row) => row.count > 0).map((row) => row.category_l1),
+    [mismatchScanAll],
+  );
+
+  const handleMismatchReclassifyAll = useCallback(
+    async (dryRun: boolean) => {
+      const limitPerL1 = Math.min(Math.max(1, mismatchLimit), 100);
+      const catCount = mismatchL1WithIssues.length;
+      const estTotal = mismatchScanAll?.total_mismatch ?? 0;
+      const scopeLabel =
+        catCount > 0
+          ? `${catCount} danh mục có lệch (tối đa ${limitPerL1} SP / danh mục)`
+          : `mọi danh mục cấp 1 (tối đa ${limitPerL1} SP / danh mục)`;
+
+      if (
+        !dryRun &&
+        !window.confirm(
+          catCount > 0
+            ? `Chạy DeepSeek tái gán taxonomy cho ${scopeLabel}? Ước tính tối đa ~${Math.min(estTotal, catCount * limitPerL1)} SP — có thể mất rất lâu và tốn API.`
+            : `Chưa quét tổng — vẫn chạy trên ${scopeLabel}. Nên «Quét tất cả danh mục» trước để biết số lượng. Tiếp tục?`,
+        )
+      ) {
+        return;
+      }
+
+      setMismatchReclassifying(true);
+      setMismatchReclassifyError(null);
+      setMismatchReclassifyAllResult(null);
+      setMismatchReclassifyResult(null);
+      try {
+        const data = await callApi<{
+          ok: number;
+          failed: number;
+          processed: number;
+          dry_run: boolean;
+          categories_processed: number;
+          categories: {
+            category_l1: string;
+            skipped?: boolean;
+            ok: number;
+            failed: number;
+            processed: number;
+          }[];
+        }>('/taxonomy/mismatch-reclassify-all', {
+          method: 'POST',
+          body: JSON.stringify({
+            limit_per_l1: limitPerL1,
+            is_active: true,
+            max_scan_per_l1: 12000,
+            only_mismatched: true,
+            dry_run: dryRun,
+            only_categories_with_mismatch: true,
+            category_l1_names: catCount > 0 ? mismatchL1WithIssues : null,
+          }),
+        });
+        setMismatchReclassifyAllResult(data);
+        if (!dryRun) void reloadInfo();
+      } catch (e) {
+        setMismatchReclassifyError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setMismatchReclassifying(false);
+      }
+    },
+    [mismatchLimit, mismatchL1WithIssues, mismatchScanAll, reloadInfo],
   );
 
   return (
@@ -578,9 +662,9 @@ export default function TaxonomyAdminPage() {
         <section className="rounded-lg border border-orange-200 bg-white p-4 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900">Sửa taxonomy lệch (theo tên SP)</h2>
           <p className="mt-1 text-sm text-gray-600">
-            Quét <strong>từng danh mục cấp 1</strong>: chọn nhánh → «Quét danh mục này» → tái gán DeepSeek.
-            Hoặc «Quét tất cả danh mục» → bấm <strong>Chi tiết</strong> trên từng dòng có lệch.
-            Cần <code>IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED</code>.
+            <strong>Quét tất cả</strong> → <strong>Tái gán tất cả danh mục</strong> (không cần chọn từng nhánh).
+            Hoặc quét/tái gán <strong>một danh mục</strong> qua dropdown. Cần{' '}
+            <code>IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED</code>.
           </p>
           <div className="mt-3 flex flex-wrap items-end gap-3">
             <label className="flex min-w-[14rem] flex-col gap-1 text-sm">
@@ -610,7 +694,7 @@ export default function TaxonomyAdminPage() {
               <input
                 type="number"
                 min={1}
-                max={200}
+                max={100}
                 className="w-24 rounded-md border border-gray-300 px-2 py-2 text-sm"
                 value={mismatchLimit}
                 onChange={(e) => setMismatchLimit(Number(e.target.value) || 50)}
@@ -659,7 +743,35 @@ export default function TaxonomyAdminPage() {
               <p className="text-sm text-gray-700">
                 Tổng <strong>{mismatchScanAll.total_mismatch}</strong> SP lệch /{' '}
                 <strong>{mismatchScanAll.category_count}</strong> danh mục.
+                {mismatchL1WithIssues.length > 0 ? (
+                  <>
+                    {' '}
+                    — <strong>{mismatchL1WithIssues.length}</strong> danh mục có thể tái gán hàng loạt.
+                  </>
+                ) : null}
               </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={mismatchReclassifying || mismatchScanAllRunning}
+                  onClick={() => void handleMismatchReclassifyAll(true)}
+                  className="rounded-md border border-indigo-300 bg-white px-3 py-1.5 text-sm text-indigo-800 hover:bg-indigo-50 disabled:opacity-50"
+                >
+                  Xem trước tái gán tất cả
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    mismatchReclassifying ||
+                    mismatchScanAllRunning ||
+                    (mismatchScanAll.total_mismatch <= 0 && mismatchL1WithIssues.length === 0)
+                  }
+                  onClick={() => void handleMismatchReclassifyAll(false)}
+                  className="rounded-md bg-indigo-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-50"
+                >
+                  {mismatchReclassifying ? 'Đang gán lại tất cả…' : 'Tái gán tất cả danh mục (DeepSeek)'}
+                </button>
+              </div>
               <div className="max-h-64 overflow-auto rounded border border-gray-200">
                 <table className="min-w-full text-left text-xs">
                   <thead className="sticky top-0 bg-gray-50 text-gray-600">
@@ -739,8 +851,42 @@ export default function TaxonomyAdminPage() {
           ) : null}
           {mismatchReclassifyResult ? (
             <div className="mt-3 rounded border border-green-200 bg-green-50 p-3 text-sm text-green-900">
-              {mismatchReclassifyResult.dry_run ? 'Dry-run: ' : ''}
+              {mismatchReclassifyResult.dry_run ? 'Dry-run (một danh mục): ' : 'Một danh mục: '}
               Thành công {mismatchReclassifyResult.ok}, lỗi {mismatchReclassifyResult.failed}.
+            </div>
+          ) : null}
+          {mismatchReclassifyAllResult ? (
+            <div className="mt-3 space-y-2 rounded border border-green-200 bg-green-50 p-3 text-sm text-green-900">
+              <p>
+                {mismatchReclassifyAllResult.dry_run ? 'Dry-run (tất cả): ' : 'Tất cả danh mục: '}
+                Thành công {mismatchReclassifyAllResult.ok}, lỗi {mismatchReclassifyAllResult.failed},{' '}
+                đã xử lý {mismatchReclassifyAllResult.processed} SP /{' '}
+                {mismatchReclassifyAllResult.categories_processed} danh mục.
+              </p>
+              {mismatchReclassifyAllResult.categories.some((r) => !r.skipped && r.processed > 0) ? (
+                <div className="max-h-40 overflow-auto rounded border border-green-300/60 bg-white/60">
+                  <table className="min-w-full text-left text-xs">
+                    <thead className="sticky top-0 bg-green-50/90 text-green-900">
+                      <tr>
+                        <th className="px-2 py-1.5">Danh mục</th>
+                        <th className="px-2 py-1.5">OK</th>
+                        <th className="px-2 py-1.5">Lỗi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mismatchReclassifyAllResult.categories
+                        .filter((r) => !r.skipped && r.processed > 0)
+                        .map((r) => (
+                          <tr key={r.category_l1} className="border-t border-green-100">
+                            <td className="px-2 py-1">{r.category_l1}</td>
+                            <td className="px-2 py-1">{r.ok}</td>
+                            <td className="px-2 py-1">{r.failed}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </section>

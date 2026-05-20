@@ -45,6 +45,7 @@ from app.services.category_size_guide_gemini import (
 from app.services.product_taxonomy_mismatch import (
     list_active_category_l1_names,
     reclassify_products_batch,
+    reclassify_products_batch_all_l1,
     scan_taxonomy_mismatches,
     scan_taxonomy_mismatches_all_l1,
 )
@@ -1061,6 +1062,22 @@ class TaxonomyMismatchReclassifyIn(BaseModel):
     dry_run: bool = False
 
 
+class TaxonomyMismatchReclassifyAllIn(BaseModel):
+    limit_per_l1: int = Field(20, ge=1, le=100)
+    is_active: Optional[bool] = True
+    max_scan_per_l1: int = Field(12000, ge=100, le=50000)
+    only_mismatched: bool = True
+    dry_run: bool = False
+    only_categories_with_mismatch: bool = Field(
+        True,
+        description="Bỏ qua danh mục không còn SP lệch (quét nhanh 1 dòng trước khi gọi DeepSeek).",
+    )
+    category_l1_names: Optional[List[str]] = Field(
+        None,
+        description="Chỉ các nhánh cấp 1 này; trống = mọi danh mục active.",
+    )
+
+
 @router.get("/mismatch-category-l1-list")
 def taxonomy_mismatch_category_l1_list(
     db: Session = Depends(get_db),
@@ -1136,6 +1153,36 @@ def taxonomy_mismatch_reclassify(
     except Exception as exc:
         db.rollback()
         logger.exception("taxonomy mismatch reclassify failed")
+        raise HTTPException(status_code=500, detail=str(exc)[:800]) from exc
+
+
+@router.post("/mismatch-reclassify-all")
+def taxonomy_mismatch_reclassify_all(
+    body: TaxonomyMismatchReclassifyAllIn,
+    db: Session = Depends(get_db),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
+) -> Dict[str, Any]:
+    """
+    Tái gán DeepSeek cho SP lệch trên mọi danh mục cấp 1 (tối đa limit_per_l1 SP / nhánh).
+    Sau «Quét tất cả danh mục» — không cần chọn từng danh mục.
+    """
+    try:
+        names = None
+        if body.category_l1_names:
+            names = [str(x).strip() for x in body.category_l1_names if str(x).strip()]
+        return reclassify_products_batch_all_l1(
+            db,
+            limit_per_l1=body.limit_per_l1,
+            is_active=body.is_active,
+            max_scan_per_l1=body.max_scan_per_l1,
+            only_mismatched=body.only_mismatched,
+            dry_run=body.dry_run,
+            category_l1_names=names,
+            only_categories_with_mismatch=body.only_categories_with_mismatch,
+        )
+    except Exception as exc:
+        db.rollback()
+        logger.exception("taxonomy mismatch reclassify-all failed")
         raise HTTPException(status_code=500, detail=str(exc)[:800]) from exc
 
 
