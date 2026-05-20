@@ -6,7 +6,7 @@ import {
   useMemo,
   useRef,
   useCallback,
-  type KeyboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
 import {
@@ -473,7 +473,7 @@ function AdminProductJsonFieldCell({
   const isEditing = editing?.productId === productId && editing?.field === field;
   const isArray = editMode === 'array';
 
-  const handleEditKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleEditKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Escape') {
       e.preventDefault();
       onCancel();
@@ -560,7 +560,7 @@ function AdminProductEditableCell({
   onStart: (productId: string, field: string, value: string | number) => void;
   onEditChange: (value: string) => void;
   onSave: () => void;
-  onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void;
+  onKeyDown: (e: ReactKeyboardEvent<HTMLInputElement>) => void;
   inputType?: 'text' | 'number';
   cellClassName?: string;
   inputClassName?: string;
@@ -815,7 +815,7 @@ export default function AdminProductsPage() {
 
   useEffect(() => {
     if (!imageLocReportOpen) return;
-    const onKey = (ev: KeyboardEvent) => {
+    const onKey = (ev: globalThis.KeyboardEvent) => {
       if (ev.key === 'Escape') setImageLocReportOpen(false);
     };
     window.addEventListener('keydown', onKey);
@@ -1347,7 +1347,7 @@ export default function AdminProductsPage() {
 
   useEffect(() => {
     if (!importDraftDeleteTarget) return undefined;
-    const onKey = (e: KeyboardEvent) => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === 'Escape' && !importDraftDeleting && !importBatchDeleting) {
         setImportDraftDeleteTarget(null);
       }
@@ -1358,7 +1358,7 @@ export default function AdminProductsPage() {
 
   useEffect(() => {
     if (!importBatchDeleteTarget) return undefined;
-    const onKey = (e: KeyboardEvent) => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === 'Escape' && !importBatchDeleting && !importDraftDeleting) {
         setImportBatchDeleteTarget(null);
       }
@@ -2120,7 +2120,7 @@ export default function AdminProductsPage() {
     }
   };
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') saveEdit();
     if (e.key === 'Escape') cancelEdit();
   };
