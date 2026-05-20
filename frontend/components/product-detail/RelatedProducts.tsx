@@ -616,9 +616,9 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   return (
     <div className="border-t border-gray-200 pt-5">
       {canShowShopGroupSection && (
-        <section className="mb-8" aria-label="Cùng danh mục cấp 2 và shop Trung Quốc">
+        <section className="mb-8" aria-label="Sản phẩm tương tự">
           <h3 className="text-base font-bold text-gray-900 mb-3 uppercase">
-            Cùng danh mục (cấp 2) — shop Trung Quốc
+            Sản phẩm tương tự
           </h3>
           {hasShopGroupProducts ? (
             shopGroupActionsRow ? (
