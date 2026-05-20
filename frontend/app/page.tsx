@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import HomePageClient from "./HomePageClient";
 import { getInitialHomeProductList } from "@/lib/home-initial-feed";
+import { getInitialHomeHeroCategories } from "@/lib/home-hero-categories";
 import {
   buildHomeCanonicalWithFilters,
   buildHomeFilterTitleParts,
@@ -68,10 +69,15 @@ export default async function HomePage({
   const PAGE_SIZE = 48;
   const skip = (currentPage - 1) * PAGE_SIZE;
 
-  const initialPlainHome = homeHasListingFilters(resolvedSearchParams)
-    ? null
-    : await getInitialHomeProductList(skip, PAGE_SIZE);
+  const hasFilters = homeHasListingFilters(resolvedSearchParams);
+  const initialPlainHome = hasFilters ? null : await getInitialHomeProductList(skip, PAGE_SIZE);
+  const initialHeroCategories = hasFilters ? null : await getInitialHomeHeroCategories('Nam', 16);
 
   /** Nội dung không bọc Suspense riêng: layout đã có Suspense `{children}` với skeleton ổn định hơn. */
-  return <HomePageClient initialPlainHome={initialPlainHome} />;
+  return (
+    <HomePageClient
+      initialPlainHome={initialPlainHome}
+      initialHeroCategories={initialHeroCategories}
+    />
+  );
 }

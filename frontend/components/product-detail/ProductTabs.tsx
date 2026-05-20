@@ -8,6 +8,8 @@ import ShopSidebarProducts from '@/components/product-detail/ShopSidebarProducts
 import { getOptimizedImage } from '@/lib/image-utils';
 import { displayableBrandOrOrigin } from '@/lib/utils';
 import { normalizeProductImageUrl } from '@/lib/product-gallery-merge';
+import HideOnImageError from '@/components/product-detail/HideOnImageError';
+import DescriptionHtmlSafeImages from '@/components/product-detail/DescriptionHtmlSafeImages';
 
 interface ProductTabsProps {
   product: Product;
@@ -379,11 +381,9 @@ export default function ProductTabs({ product }: ProductTabsProps) {
               <h2 className="text-base font-bold text-gray-900">📋 Mô tả sản phẩm</h2>
               <div className="prose prose-sm max-w-none text-sm">
                 {description ? (
-                  <div 
-                    className="text-gray-700 leading-snug bg-gray-50 p-4 rounded-lg border border-gray-200 text-sm"
-                    dangerouslySetInnerHTML={{ 
-                      __html: description.replace(/\n/g, '<br/>') 
-                    }}
+                  <DescriptionHtmlSafeImages
+                    className="text-gray-700 leading-snug bg-gray-50 p-4 rounded-lg border border-gray-200 text-sm [&_img]:max-w-full [&_img]:h-auto"
+                    html={description.replace(/\n/g, '<br/>')}
                   />
                 ) : (
                   <div className="text-center py-6 text-gray-500 bg-gray-50 rounded-lg border border-gray-200 text-sm">
@@ -406,20 +406,12 @@ export default function ProductTabs({ product }: ProductTabsProps) {
                   </div>
                   <div className="space-y-4">
                     {visibleDetailImages.map((image, index) => (
-                      <div
+                      <HideOnImageError
                         key={image}
-                        className="bg-white rounded-xl overflow-hidden border border-gray-200 shadow-sm"
-                      >
-                        {/* img thuần: không giữ khung trắng khi URL lỗi (khác next/image width/height cố định) */}
-                        <img
-                          src={getOptimizedImage(image, { width: 800, height: 600 })}
-                          alt={`${product.name} chi tiết ${index + 1}`}
-                          loading="lazy"
-                          decoding="async"
-                          className="w-full h-auto max-w-4xl mx-auto block"
-                          onError={() => markDetailImageBroken(image)}
-                        />
-                      </div>
+                        src={getOptimizedImage(image, { width: 800, height: 600 })}
+                        alt={`${product.name} chi tiết ${index + 1}`}
+                        onBroken={() => markDetailImageBroken(image)}
+                      />
                     ))}
                   </div>
                 </div>

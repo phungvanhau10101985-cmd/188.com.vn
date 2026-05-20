@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { apiClient } from '@/lib/api-client';
@@ -11,6 +11,7 @@ import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { buildHomeListingHrefByChineseShop } from '@/lib/product-related-tabs';
+import { displayableBrandOrOrigin } from '@/lib/utils';
 
 interface FavoriteItem {
   id: number;
@@ -31,6 +32,119 @@ function formatVnd(n: number) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
 }
 
+function FavoriteCardSkeleton() {
+  return (
+    <div className="overflow-hidden rounded-xl bg-white ring-1 ring-gray-100" aria-hidden>
+      <div className="aspect-[3/4] animate-pulse bg-gray-200" />
+      <div className="space-y-2 p-2.5">
+        <div className="h-3.5 animate-pulse rounded bg-gray-200" />
+        <div className="h-3 w-2/3 animate-pulse rounded bg-gray-200" />
+        <div className="h-4 w-1/3 animate-pulse rounded bg-gray-200" />
+      </div>
+    </div>
+  );
+}
+
+type FavoriteCardProps = {
+  item: FavoriteItem;
+  removing: boolean;
+  priorityImage?: boolean;
+  onRemove: (productId: number, favoriteId: number) => void;
+};
+
+function FavoriteProductCard({ item, removing, priorityImage, onRemove }: FavoriteCardProps) {
+  const [imageError, setImageError] = useState(false);
+  const data = item.product_data || {};
+  const name = data.name || `Sản phẩm #${item.product_id}`;
+  const price = data.price ?? 0;
+  const pathSeg = productPathSlugFromApi(data.slug, String(item.product_id));
+  const href = `/products/${pathSeg}`;
+  const imageUrl = getOptimizedImage(data.main_image, {
+    width: 480,
+    height: 640,
+    quality: 85,
+    fallbackStrategy: 'local',
+  });
+  const brand = displayableBrandOrOrigin(data.brand_name);
+  const similarShopHref = buildHomeListingHrefByChineseShop(data.shop_name_chinese || '');
+
+  return (
+    <article className="group flex flex-col overflow-hidden rounded-xl bg-white ring-1 ring-gray-100 transition-shadow hover:shadow-md hover:ring-orange-100">
+      <div className="relative aspect-[3/4] overflow-hidden bg-gray-50">
+        <Link href={href} className="absolute inset-0 z-0 block" aria-label={`Xem ${name}`}>
+          {!imageError ? (
+            <Image
+              src={imageUrl}
+              alt={name}
+              fill
+              priority={priorityImage}
+              sizes="(max-width: 767px) 46vw, (min-width: 1280px) 22vw, (min-width: 1024px) 28vw, 33vw"
+              className="object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+              onError={() => setImageError(true)}
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-gray-100 text-xs text-gray-400">
+              Không có ảnh
+            </div>
+          )}
+        </Link>
+
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onRemove(item.product_id, item.id);
+          }}
+          disabled={removing}
+          className="absolute right-2 top-2 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-red-500 shadow-sm ring-1 ring-black/5 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+          aria-label="Bỏ yêu thích sản phẩm"
+        >
+          {removing ? (
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-red-300 border-t-red-600" />
+          ) : (
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M4.318 6.318a4.5 4.5 0 016.364 0L12 7.636l1.318-1.318a4.5 4.5 0 116.364 6.364L12 20.364l-7.682-7.682a4.5 4.5 0 010-6.364z" />
+            </svg>
+          )}
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-1 p-2.5 sm:p-3">
+        <Link href={href} className="min-h-0">
+          <h2 className="line-clamp-2 text-xs font-medium leading-snug text-gray-900 transition-colors group-hover:text-[#ea580c] sm:text-sm">
+            {name}
+          </h2>
+        </Link>
+
+        {brand ? (
+          <p className="line-clamp-1 text-[11px] text-gray-500 sm:text-xs">{brand}</p>
+        ) : null}
+
+        <p className="text-sm font-bold tabular-nums text-[#ea580c] sm:text-base">{formatVnd(price)}</p>
+
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <Link
+            href={href}
+            className="text-xs font-semibold text-gray-800 underline decoration-gray-300 underline-offset-2 hover:text-[#ea580c] hover:decoration-[#ea580c]/40"
+          >
+            Xem chi tiết
+          </Link>
+          {similarShopHref ? (
+            <Link
+              href={similarShopHref}
+              className="text-xs font-medium text-[#ea580c] hover:text-[#c2410c]"
+              onClick={() => trackEvent('favorite_similar_shop_click', { product_id: item.product_id })}
+            >
+              SP tương tự →
+            </Link>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export default function FavoritesPage() {
   const { refreshFavorites } = useFavorites();
   const { isAuthenticated } = useAuth();
@@ -47,7 +161,6 @@ export default function FavoritesPage() {
       .getFavorites()
       .then(async (list) => {
         const raw = Array.isArray(list) ? list : [];
-        // Bổ sung product_data từ API nếu thiếu (favorites cũ hoặc lỗi lưu)
         const enriched = await Promise.all(
           raw.map(async (item: FavoriteItem) => {
             const data = item.product_data || {};
@@ -78,7 +191,7 @@ export default function FavoritesPage() {
             } catch {
               return item;
             }
-          })
+          }),
         );
         if (cancelled) return;
         setItems(enriched);
@@ -98,120 +211,97 @@ export default function FavoritesPage() {
     };
   }, [isAuthenticated, refreshFavorites]);
 
-  const handleRemove = async (productId: number, favoriteId: number) => {
-    setRemovingId(favoriteId);
-    try {
-      await apiClient.removeFromFavorites(productId);
-      setItems((prev) => prev.filter((f) => f.id !== favoriteId));
-      await refreshFavorites();
-      trackEvent('remove_favorite', { product_id: productId });
-      pushToast({ title: 'Đã bỏ yêu thích', variant: 'success', durationMs: 2500 });
-    } catch (e) {
-      pushToast({ title: 'Không thể bỏ yêu thích', description: (e as Error)?.message || 'Vui lòng thử lại', variant: 'error', durationMs: 3000 });
-    } finally {
-      setRemovingId(null);
-    }
+  const handleRemove = useCallback(
+    async (productId: number, favoriteId: number) => {
+      setRemovingId(favoriteId);
+      try {
+        await apiClient.removeFromFavorites(productId);
+        setItems((prev) => prev.filter((f) => f.id !== favoriteId));
+        await refreshFavorites();
+        trackEvent('remove_favorite', { product_id: productId });
+        pushToast({ title: 'Đã bỏ yêu thích', variant: 'success', durationMs: 2500 });
+      } catch (e) {
+        pushToast({
+          title: 'Không thể bỏ yêu thích',
+          description: (e as Error)?.message || 'Vui lòng thử lại',
+          variant: 'error',
+          durationMs: 3000,
+        });
+      } finally {
+        setRemovingId(null);
+      }
+    },
+    [pushToast, refreshFavorites],
+  );
+
+  const reload = () => {
+    setError(null);
+    setLoading(true);
+    window.location.reload();
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-3 pb-5 pt-2 sm:px-3 md:px-4 md:py-8 md:pb-6 md:pt-3">
-        <div className="mb-3 md:mb-6">
-          <h1 className="text-base font-bold tracking-tight text-gray-900 sm:text-lg md:text-2xl">
-            Sản phẩm yêu thích
-          </h1>
-          <p className="mt-0.5 text-xs text-gray-600 sm:text-sm md:mt-1 md:text-base">
-            Đã thích ({items.length})
-          </p>
-        </div>
-
-        {error && (
-          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 md:mb-4 md:px-4 md:py-3 md:text-sm">
-            {error}
+    <div className="min-h-screen bg-[#f8f9fb]">
+      <div className="mx-auto max-w-7xl px-3 pb-8 pt-3 sm:px-4 md:py-6">
+        <header className="mb-4 flex items-end justify-between gap-3 md:mb-6">
+          <div>
+            <h1 className="text-lg font-bold tracking-tight text-gray-900 md:text-2xl">Sản phẩm yêu thích</h1>
+            <p className="mt-0.5 text-xs text-gray-500 sm:text-sm">
+              {loading ? 'Đang tải…' : `${items.length} sản phẩm đã lưu`}
+            </p>
           </div>
-        )}
-
-        {loading ? (
-          <div className="py-6 text-center text-sm text-gray-500 md:py-12 md:text-base">Đang tải...</div>
-        ) : items.length === 0 ? (
-          <div className="rounded-xl border border-gray-100 bg-white p-6 text-center shadow sm:p-8 md:p-12">
-            <p className="mb-3 text-sm text-gray-500 md:mb-4 md:text-base">Bạn chưa thích sản phẩm nào.</p>
+          {!loading && items.length > 0 ? (
             <Link
               href="/"
-              className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-[#ea580c] px-5 py-2.5 font-medium text-white hover:bg-[#c2410c] md:min-h-0"
+              className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:border-orange-200 hover:text-[#ea580c] sm:text-sm"
+            >
+              Tiếp tục mua sắm
+            </Link>
+          ) : null}
+        </header>
+
+        {error ? (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}{' '}
+            <button type="button" onClick={reload} className="font-medium underline">
+              Thử lại
+            </button>
+          </div>
+        ) : null}
+
+        {loading ? (
+          <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 md:gap-4 lg:grid-cols-4">
+            {[...Array(6)].map((_, i) => (
+              <FavoriteCardSkeleton key={i} />
+            ))}
+          </div>
+        ) : items.length === 0 ? (
+          <div className="rounded-2xl border border-gray-100 bg-white px-6 py-12 text-center shadow-sm md:py-16">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-50 text-red-400">
+              <svg className="h-8 w-8" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M4.318 6.318a4.5 4.5 0 016.364 0L12 7.636l1.318-1.318a4.5 4.5 0 116.364 6.364L12 20.364l-7.682-7.682a4.5 4.5 0 010-6.364z" />
+              </svg>
+            </div>
+            <p className="mb-1 text-base font-medium text-gray-900">Chưa có sản phẩm yêu thích</p>
+            <p className="mb-6 text-sm text-gray-500">Nhấn ♥ trên sản phẩm để lưu vào danh sách này.</p>
+            <Link
+              href="/"
+              className="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-[#ea580c] px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#c2410c]"
             >
               Khám phá sản phẩm
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">
-            {items.map((item) => {
-              const data = item.product_data || {};
-              const name = data.name || `Sản phẩm #${item.product_id}`;
-              const price = data.price ?? 0;
-              const pathSeg = productPathSlugFromApi(data.slug, String(item.product_id));
-              const href = `/products/${pathSeg}`;
-              const imageUrl = getOptimizedImage(data.main_image, { fallbackStrategy: 'local' });
-              const similarShopHref = buildHomeListingHrefByChineseShop(data.shop_name_chinese || '');
-
-              return (
-                <div
-                  key={item.id}
-                  className="bg-white rounded-xl shadow border border-gray-100 overflow-hidden hover:shadow-md transition-shadow"
-                >
-                  <div className="relative aspect-square bg-gray-100">
-                    <Link href={href} className="absolute inset-0 z-0 block" aria-label={`Xem ${name}`}>
-                      <Image
-                        src={imageUrl}
-                        alt={name}
-                        fill
-                        sizes="(min-width: 1280px) 20vw, (min-width: 1024px) 25vw, (min-width: 640px) 33vw, 100vw"
-                        className="object-cover"
-                      />
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => handleRemove(item.product_id, item.id)}
-                      disabled={removingId === item.id}
-                      className="absolute top-1.5 right-1.5 z-20 min-h-[36px] rounded-lg border border-red-200 bg-white/95 px-2.5 py-1 text-[11px] font-semibold text-red-600 shadow-sm backdrop-blur-[2px] hover:bg-red-50 disabled:opacity-50 md:top-2 md:right-2 md:text-xs"
-                      aria-label="Bỏ yêu thích sản phẩm"
-                    >
-                      {removingId === item.id ? 'Đang xóa...' : 'Bỏ thích'}
-                    </button>
-                    {similarShopHref ? (
-                      <Link
-                        href={similarShopHref}
-                        className="absolute bottom-1.5 left-1.5 right-1.5 z-20 rounded-lg bg-[#ea580c]/95 px-2 py-1.5 text-center text-[11px] font-semibold text-white shadow-md backdrop-blur-[2px] hover:bg-[#c2410c] md:bottom-2 md:left-2 md:right-2 md:text-xs"
-                        onClick={() =>
-                          trackEvent('favorite_similar_shop_click', { product_id: item.product_id })
-                        }
-                      >
-                        Sản phẩm tương tự
-                      </Link>
-                    ) : null}
-                  </div>
-                  <div className="p-3 md:p-4">
-                    <Link href={href}>
-                      <h3 className="text-sm font-medium leading-snug text-gray-900 line-clamp-2 hover:text-[#ea580c] md:text-base">
-                        {name}
-                      </h3>
-                    </Link>
-                    {data.brand_name && (
-                      <p className="mt-0.5 text-xs text-gray-500 md:text-sm">{data.brand_name}</p>
-                    )}
-                    <p className="mt-2 text-base font-bold text-[#ea580c] md:text-lg">
-                      {formatVnd(price)}
-                    </p>
-                    <Link
-                      href={href}
-                      className="mt-3 flex min-h-[44px] w-full items-center justify-center rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-medium text-gray-800 hover:bg-gray-200 md:min-h-0"
-                    >
-                      Xem chi tiết
-                    </Link>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 md:gap-4 lg:grid-cols-4">
+            {items.map((item, index) => (
+              <FavoriteProductCard
+                key={item.id}
+                item={item}
+                removing={removingId === item.id}
+                priorityImage={index < 2}
+                onRemove={handleRemove}
+              />
+            ))}
           </div>
         )}
       </div>

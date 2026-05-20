@@ -17,6 +17,8 @@ export interface PersonalizedHeroBannerProps {
   behaviorKey: string;
   isAuthenticated: boolean;
   userGender: 'male' | 'female' | null;
+  /** SSR: tile cache DB — hiển thị ngay khi vào trang chủ */
+  initialHeroCategories?: HeroCategoryTilesResponse | null;
   onVariantChange?: (variant: HeroVariant) => void;
 }
 
@@ -25,50 +27,89 @@ const HERO_CATEGORY_TILE_COUNT = 16;
 export default function PersonalizedHeroBanner({
   sameShopLoading,
   behaviorKey,
+  isAuthenticated,
+  userGender,
+  initialHeroCategories = null,
   onVariantChange,
 }: PersonalizedHeroBannerProps) {
   const [latestSearchQuery, setLatestSearchQuery] = useState<string | null>(null);
   const [searchResolved, setSearchResolved] = useState(false);
-  const [heroCategories, setHeroCategories] = useState<HeroCategoryTilesResponse | null>(null);
-  const [categoriesResolved, setCategoriesResolved] = useState(false);
+  const [heroCategories, setHeroCategories] = useState<HeroCategoryTilesResponse | null>(
+    initialHeroCategories ?? null,
+  );
+  const [categoriesResolved, setCategoriesResolved] = useState(
+    Boolean(initialHeroCategories?.tiles?.length),
+  );
+
+  const defaultGender: 'Nam' | 'Nữ' =
+    userGender === 'female' ? 'Nữ' : userGender === 'male' ? 'Nam' : 'Nam';
 
   useEffect(() => {
-    if (sameShopLoading) return;
-
     let cancelled = false;
     setSearchResolved(false);
-    setCategoriesResolved(false);
 
-    void Promise.all([
-      apiClient
-        .getSearchHistory(1)
-        .then((rows) => {
-          if (cancelled) return;
-          setLatestSearchQuery(rows[0]?.search_query?.trim() || null);
-        })
-        .catch(() => {
-          if (!cancelled) setLatestSearchQuery(null);
-        })
-        .finally(() => {
-          if (!cancelled) setSearchResolved(true);
-        }),
-      apiClient
-        .getHeroCategoryTiles(HERO_CATEGORY_TILE_COUNT, 8)
-        .then((res) => {
-          if (!cancelled) setHeroCategories(res);
-        })
-        .catch(() => {
-          if (!cancelled) setHeroCategories(null);
-        })
-        .finally(() => {
-          if (!cancelled) setCategoriesResolved(true);
-        }),
-    ]);
+    void apiClient
+      .getSearchHistory(1)
+      .then((rows) => {
+        if (cancelled) return;
+        setLatestSearchQuery(rows[0]?.search_query?.trim() || null);
+      })
+      .catch(() => {
+        if (!cancelled) setLatestSearchQuery(null);
+      })
+      .finally(() => {
+        if (!cancelled) setSearchResolved(true);
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [sameShopLoading, behaviorKey]);
+  }, [behaviorKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hasInitial =
+      Boolean(initialHeroCategories?.tiles?.length) &&
+      (initialHeroCategories?.gender_label === defaultGender ||
+        userGender == null);
+
+    if (hasInitial) {
+      setHeroCategories(initialHeroCategories!);
+      setCategoriesResolved(true);
+    }
+
+    void apiClient
+      .getHeroCategoryTiles(HERO_CATEGORY_TILE_COUNT, 8)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.tiles?.length) {
+          setHeroCategories(res);
+        } else if (!hasInitial) {
+          return apiClient.getHeroCategoryTilesCached(defaultGender, HERO_CATEGORY_TILE_COUNT);
+        }
+        return null;
+      })
+      .then((fallback) => {
+        if (cancelled || !fallback?.tiles?.length) return;
+        setHeroCategories(fallback);
+      })
+      .catch(() => {
+        if (cancelled || hasInitial) return;
+        return apiClient
+          .getHeroCategoryTilesCached(defaultGender, HERO_CATEGORY_TILE_COUNT)
+          .then((cached) => {
+            if (!cancelled && cached.tiles?.length) setHeroCategories(cached);
+          });
+      })
+      .finally(() => {
+        if (!cancelled) setCategoriesResolved(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [behaviorKey, defaultGender, initialHeroCategories, userGender]);
 
   const l23Count = useMemo(
     () => heroCategories?.tiles.filter((t) => t.level === 2 || t.level === 3).length ?? 0,
@@ -76,7 +117,9 @@ export default function PersonalizedHeroBanner({
   );
 
   const variant: HeroVariant = useMemo(() => {
-    if (!searchResolved || !categoriesResolved) return 'brand';
+    if (!searchResolved || !categoriesResolved) {
+      return l23Count > 0 ? 'categories' : 'brand';
+    }
     if (l23Count > 0) return 'categories';
     if (latestSearchQuery) return 'search';
     return 'brand';
@@ -103,18 +146,18 @@ export default function PersonalizedHeroBanner({
         role="region"
       >
         <div className="relative min-h-0 flex-1">
-        <CategoryCatalogMarquee
-          tiles={heroCategories.tiles}
-          maxTiles={HERO_CATEGORY_TILE_COUNT}
-          ariaLabel={heroCategories.heading || 'Danh mục gợi ý'}
-          viewportClassName="absolute inset-0"
-          desktopCols={5}
-          rowClassName="hero-category-grid-row flex h-[88px] sm:h-[96px] md:h-[115px] w-full shrink-0"
-        />
-        <div
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-10 bg-gradient-to-t from-black/35 to-transparent"
-          aria-hidden
-        />
+          <CategoryCatalogMarquee
+            tiles={heroCategories.tiles}
+            maxTiles={HERO_CATEGORY_TILE_COUNT}
+            ariaLabel={heroCategories.heading || 'Danh mục gợi ý'}
+            viewportClassName="absolute inset-0"
+            desktopCols={5}
+            rowClassName="hero-category-grid-row flex h-[88px] sm:h-[96px] md:h-[115px] w-full shrink-0"
+          />
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-10 bg-gradient-to-t from-black/35 to-transparent"
+            aria-hidden
+          />
         </div>
         <div className="relative z-30 flex shrink-0 items-center justify-center border-t border-white/15 bg-black/15 px-3 py-2 backdrop-blur-sm md:py-2.5">
           <Link

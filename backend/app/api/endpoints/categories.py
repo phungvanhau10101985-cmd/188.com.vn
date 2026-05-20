@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 from typing import List, Any, Dict, Optional
 import logging
@@ -7,6 +7,7 @@ from app.schemas.category import Category, CategoryCreate, CategoryUpdate
 from app.crud import category as crud_category
 from app.crud import product as crud_product
 from app.crud import category_hero_suggestions
+from app.crud import home_hero_category_cache
 from app.models.category import Category as CategoryModel
 from app.models.seo_cluster import SeoCluster
 from app.utils.ttl_cache import cache as ttl_cache
@@ -36,6 +37,45 @@ def read_category_tree_from_products(is_active: bool = True):
 
 
 _CATALOG_TILES_TTL = 120.0
+_HOME_HERO_CACHED_TTL = 300.0
+
+
+@router.get("/from-products/hero-tiles-cached")
+@router.get("/from-products/hero-tiles-cached/")
+def read_home_hero_tiles_cached(
+    response: Response,
+    gender: str = Query("Nam", description="Nam hoặc Nữ"),
+    limit: int = Query(16, ge=8, le=24),
+):
+    """
+    Tile danh mục hero đã tính sẵn trong DB (2 nhóm Nam + 2 nhóm Nữ).
+    Public cache — trang chủ SSR / load tức thì.
+    """
+    response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=600"
+    gl = "Nữ" if (gender or "").strip().lower() in ("nữ", "nu", "female", "f") else "Nam"
+    cache_key = f"home_hero_cached:gender={gl}:limit={limit}"
+
+    def _fetch() -> Dict[str, Any]:
+        db = SessionLocal()
+        try:
+            return home_hero_category_cache.get_cached_home_hero_payload(
+                db, gender_label=gl, limit=limit
+            )
+        finally:
+            db.close()
+
+    try:
+        return ttl_cache.get_or_fetch(cache_key, _HOME_HERO_CACHED_TTL, _fetch)
+    except Exception:
+        _log.exception("GET hero-tiles-cached failed (gender=%s)", gl)
+        return {
+            "tiles": [],
+            "gender_label": gl,
+            "heading": None,
+            "subtitle": None,
+            "anchor_category": None,
+            "source": "cached_db",
+        }
 
 
 @router.get("/from-products/catalog-tiles")

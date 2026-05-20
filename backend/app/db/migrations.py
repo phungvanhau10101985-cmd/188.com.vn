@@ -566,6 +566,14 @@ class MigrationManager:
         results['admin_feature_test_settings_sync'] = self._sync_table_columns(
             "admin_feature_test_settings", AdminFeatureTestSetting
         )
+        from app.models.home_hero_category_group import HomeHeroCategoryGroup
+
+        results['home_hero_category_groups_create'] = self._create_table_if_not_exists(
+            "home_hero_category_groups", HomeHeroCategoryGroup
+        )
+        results['home_hero_category_groups_sync'] = self._sync_table_columns(
+            "home_hero_category_groups", HomeHeroCategoryGroup
+        )
 
         return results
 

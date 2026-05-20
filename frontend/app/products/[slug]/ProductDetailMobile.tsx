@@ -8,6 +8,7 @@ import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { formatPrice, getDiscountPercentage } from '@/lib/utils';
 import { mergeProductGalleryPhotoUrls } from '@/lib/product-gallery-merge';
+import { ProductFillImage, GalleryThumbImage } from '@/components/product-detail/HideOnImageError';
 import { reportUnreachableProductMedia } from '@/lib/report-broken-product-media';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { hasVideoLink, parseVideoLink, buildYoutubeEmbedSrc } from '@/lib/video-utils';
@@ -240,7 +241,7 @@ export default function ProductDetailMobile({
 
         <div className="image_list mb-2">
         {/* Main media: chỉ hiển thị video khi có video_url; video luôn ở index 0, sau đó mới ảnh */}
-        {(isShowingVideo && parsedVideo) || mainImageRaw ? (
+        {isShowingVideo && parsedVideo ? (
         <div
           className="relative rounded-xl overflow-hidden bg-gray-100 mb-2 touch-pan-y"
           onTouchStart={handleMainTouchStart}
@@ -281,32 +282,32 @@ export default function ProductDetailMobile({
                   </div>
                 </>
               )
-            ) : mainImageRaw ? (
-              <>
-                <Image
-                  src={getOptimizedImage(mainImageRaw, { width: 600, height: 750 })}
-                  alt={product.name}
-                  fill
-                  className="object-cover"
-                  sizes="100vw"
-                  priority={!isShowingVideo}
-                  fetchPriority={isShowingVideo ? 'auto' : 'high'}
-                  onError={() => markBrokenPhoto(mainImageRaw)}
-                />
-                <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
-                  <span className="font-medium truncate max-w-[140px]">{product.brand_name || '188 com vn'}</span>
-                </div>
-                <div className="absolute bottom-2 left-2 flex gap-2">
-                  <button type="button" className="w-8 h-8 rounded-full bg-white/80 flex items-center justify-center" aria-label="Chia sẻ">
-                    <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
-                  </button>
-                  <Link href="/da-xem" className="w-8 h-8 rounded-full bg-white/80 flex items-center justify-center" aria-label="Sản phẩm đã xem">
-                    <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                  </Link>
-                </div>
-              </>
             ) : null}
           </div>
+        </div>
+        ) : mainImageRaw ? (
+        <div
+          className="relative rounded-xl overflow-hidden bg-gray-100 mb-2 touch-pan-y"
+          onTouchStart={handleMainTouchStart}
+          onTouchEnd={handleMainTouchEnd}
+        >
+          <ProductFillImage
+            src={getOptimizedImage(mainImageRaw, { width: 600, height: 750 })}
+            alt={product.name}
+            onBroken={() => markBrokenPhoto(mainImageRaw)}
+          >
+            <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
+              <span className="font-medium truncate max-w-[140px]">{product.brand_name || '188 com vn'}</span>
+            </div>
+            <div className="absolute bottom-2 left-2 flex gap-2">
+              <button type="button" className="w-8 h-8 rounded-full bg-white/80 flex items-center justify-center" aria-label="Chia sẻ">
+                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+              </button>
+              <Link href="/da-xem" className="w-8 h-8 rounded-full bg-white/80 flex items-center justify-center" aria-label="Sản phẩm đã xem">
+                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              </Link>
+            </div>
+          </ProductFillImage>
         </div>
         ) : null}
         {/* Thumbnail dưới khung ảnh chính: chỉ hiển thị nút video khi có video_url; video luôn đầu tiên */}
@@ -342,26 +343,13 @@ export default function ProductDetailMobile({
             {visiblePhotoUrls.map((img, i) => {
               const mediaIndex = hasVideo ? i + 1 : i;
               return (
-                <button
+                <GalleryThumbImage
                   key={img}
-                  ref={(el) => {
-                    thumbButtonRefs.current[mediaIndex] = el;
-                  }}
-                  type="button"
+                  src={getOptimizedImage(img, { width: 64, height: 64 })}
+                  selected={selectedImage === mediaIndex}
                   onClick={() => setSelectedImage(mediaIndex)}
-                  className={`relative flex-shrink-0 w-16 h-16 snap-center snap-always rounded-lg overflow-hidden border-2 ${
-                    selectedImage === mediaIndex ? 'border-[#ea580c]' : 'border-gray-200'
-                  }`}
-                >
-                  <Image
-                    src={getOptimizedImage(img, { width: 64, height: 64 })}
-                    alt=""
-                    width={64}
-                    height={64}
-                    className="w-full h-full object-cover"
-                    onError={() => markBrokenPhoto(img)}
-                  />
-                </button>
+                  onBroken={() => markBrokenPhoto(img)}
+                />
               );
             })}
             <button

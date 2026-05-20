@@ -7,6 +7,7 @@ import { Product } from '@/types/api';
 import { mergeProductGalleryPhotoUrls, normalizeProductImageUrl } from '@/lib/product-gallery-merge';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { reportUnreachableProductMedia } from '@/lib/report-broken-product-media';
+import { ProductFillImage, GalleryThumbImage } from '@/components/product-detail/HideOnImageError';
 import { hasVideoLink, parseVideoLink, buildYoutubeEmbedSrc } from '@/lib/video-utils';
 
 interface ProductGalleryProps {
@@ -71,14 +72,11 @@ export default function ProductGallery({ product, selectedImageUrl, onSelectImag
       ? (visiblePhotoUrls[0] ?? null)
       : logicalMainUrl;
 
-  const showMainFrame = (isShowingVideo && parsedVideo) || mainRaw;
-
   return (
     <div className="space-y-2 image_list">
-      {showMainFrame ? (
+      {isShowingVideo && parsedVideo ? (
       <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
-        {isShowingVideo && parsedVideo ? (
-          parsedVideo.kind === 'youtube' ? (
+        {parsedVideo.kind === 'youtube' ? (
             <iframe
               title={`Video ${product.name}`}
               src={buildYoutubeEmbedSrc(parsedVideo.urlOrId)}
@@ -95,19 +93,15 @@ export default function ProductGallery({ product, selectedImageUrl, onSelectImag
               className="w-full h-full object-contain bg-black"
               playsInline
             />
-          )
-        ) : mainRaw ? (
-          <Image
-            src={getOptimizedImage(mainRaw, { width: 900, height: 900 })}
-            alt={product.name}
-            width={900}
-            height={900}
-            className="w-full h-full object-cover"
-            priority
-            onError={() => markBroken(mainRaw)}
-          />
-        ) : null}
+          )}
       </div>
+      ) : mainRaw ? (
+        <ProductFillImage
+          src={getOptimizedImage(mainRaw, { width: 900, height: 900 })}
+          alt={product.name}
+          frameClassName="aspect-square relative w-full overflow-hidden rounded-lg bg-gray-100"
+          onBroken={() => markBroken(mainRaw)}
+        />
       ) : null}
 
       {mediaCount > 1 && (
@@ -145,29 +139,19 @@ export default function ProductGallery({ product, selectedImageUrl, onSelectImag
           {visiblePhotoUrls.map((image, index) => {
             const mediaIndex = hasVideo ? index + 1 : index;
             return (
-              <button
+              <GalleryThumbImage
                 key={image}
-                type="button"
+                src={getOptimizedImage(image, { width: 64, height: 64 })}
+                sizeClass="w-14 h-14"
+                selectedClassName="border-blue-500 scale-105 shadow-md"
+                unselectedClassName="border-gray-300 hover:border-gray-400"
+                selected={selectedIndex === mediaIndex}
                 onClick={() => {
                   setSelectedIndex(mediaIndex);
                   onSelectImage?.(image);
                 }}
-                className={`flex-shrink-0 w-14 h-14 rounded border-2 transition-all ${
-                  selectedIndex === mediaIndex ? 'border-blue-500 scale-105 shadow-md' : 'border-gray-300 hover:border-gray-400'
-                }`}
-                aria-label={`Xem ảnh ${index + 1}`}
-              >
-                <div className="relative w-full h-full">
-                  <Image
-                    src={getOptimizedImage(image, { width: 64, height: 64 })}
-                    alt={`${product.name} ${index + 1}`}
-                    width={64}
-                    height={64}
-                    className="w-full h-full object-cover rounded"
-                    onError={() => markBroken(image)}
-                  />
-                </div>
-              </button>
+                onBroken={() => markBroken(image)}
+              />
             );
           })}
         </div>

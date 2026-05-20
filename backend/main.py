@@ -453,6 +453,14 @@ async def startup_event():
     except Exception as _e_ssc:
         print(f"   ⚠️  source stock checker startup: {_e_ssc}")
 
+    try:
+        from app.services.home_hero_category_startup import start_home_hero_cache_daemon_if_needed
+
+        start_home_hero_cache_daemon_if_needed(delay_seconds=4.0)
+        print("   🏷️  home_hero_category_groups: sẽ rebuild nếu DB trống sau ~4s (thread daemon).")
+    except Exception as _e_hhc:
+        print(f"   ⚠️  home hero category cache startup: {_e_hhc}")
+
     from app.core.config import settings as _startup_settings
     _db_url = (_startup_settings.DATABASE_URL or "").lower()
     if _db_url.startswith("postgresql"):

@@ -16,7 +16,13 @@ import { trackEvent } from '@/lib/analytics';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { formatPrice } from '@/lib/utils';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
-import type { Product, ProductListResponse, NanoaiSearchProduct, SameAgeGenderCohortMode } from '@/types/api';
+import type {
+  Product,
+  ProductListResponse,
+  NanoaiSearchProduct,
+  SameAgeGenderCohortMode,
+  HeroCategoryTilesResponse,
+} from '@/types/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import {
@@ -79,8 +85,10 @@ function sameAgeGenderPanelTitle(mode: SameAgeGenderCohortMode | null): string {
 
 export default function HomePageClient({
   initialPlainHome,
+  initialHeroCategories = null,
 }: {
   initialPlainHome: ProductListResponse | null;
+  initialHeroCategories?: HeroCategoryTilesResponse | null;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1049,6 +1057,7 @@ export default function HomePageClient({
             behaviorKey={recommendationKey}
             isAuthenticated={isAuthenticated}
             userGender={heroUserGender}
+            initialHeroCategories={initialHeroCategories}
           />
         )}
 

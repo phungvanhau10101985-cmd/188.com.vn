@@ -578,6 +578,33 @@ class ApiClient {
     return { tiles: Array.isArray(res?.tiles) ? res.tiles : [] };
   }
 
+  /** Tile hero đã cache DB (public, nhanh) — mặc định Nam. */
+  async getHeroCategoryTilesCached(
+    gender: 'Nam' | 'Nữ' = 'Nam',
+    limit = 16,
+  ): Promise<HeroCategoryTilesResponse> {
+    const params = new URLSearchParams({ gender, limit: String(limit) });
+    const empty: HeroCategoryTilesResponse = {
+      tiles: [],
+      gender_label: gender,
+      heading: null,
+      subtitle: null,
+      anchor_category: null,
+      source: 'cached_db',
+    };
+    const res = await this.fetch<HeroCategoryTilesResponse>(
+      `/categories/from-products/hero-tiles-cached?${params}`,
+    ).catch(() => empty);
+    return {
+      tiles: Array.isArray(res?.tiles) ? res.tiles : [],
+      gender_label: res?.gender_label ?? gender,
+      heading: res?.heading ?? null,
+      subtitle: res?.subtitle ?? null,
+      anchor_category: res?.anchor_category ?? null,
+      source: res?.source ?? 'cached_db',
+    };
+  }
+
   /** Tile danh mục cấp 1/2/3 cho hero (giới tính hồ sơ hoặc từ SP xem gần nhất). */
   async getHeroCategoryTiles(limit = 8, recentLimit = 8): Promise<HeroCategoryTilesResponse> {
     const params = new URLSearchParams({

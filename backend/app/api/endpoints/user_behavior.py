@@ -20,6 +20,7 @@ from app.crud.personalized_feed import get_personalized_home_products
 from app.models.product import Product as ProductRow
 from app.schemas.product import Product as ProductSchema
 from app.crud.category_hero_suggestions import get_hero_category_tiles, infer_category_gender_priority
+from app.crud.home_hero_category_cache import get_home_hero_tiles_fast
 from app.crud.user import (
     add_product_view_with_data, get_user_viewed_products,
     get_products_viewed_by_same_age_gender, get_products_same_shop_as_recent_views,
@@ -485,11 +486,11 @@ def get_hero_category_tiles_endpoint(
     Tile danh mục cấp 1/2/3 theo giới (hồ sơ hoặc suy từ SP xem gần nhất).
     Khách: X-Guest-Session-Id + lượt xem. Đăng nhập: ưu tiên giới tính hồ sơ.
     """
-    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Cache-Control"] = "private, max-age=60, stale-while-revalidate=120"
     sid = (x_guest_session_id or "").strip()
     profile_gender = getattr(current_user, "gender", None) if current_user else None
     if current_user:
-        return get_hero_category_tiles(
+        return get_home_hero_tiles_fast(
             db,
             user_id=current_user.id,
             profile_gender=profile_gender,
@@ -497,21 +498,16 @@ def get_hero_category_tiles_endpoint(
             limit=limit,
         )
     if sid:
-        return get_hero_category_tiles(
+        return get_home_hero_tiles_fast(
             db,
             guest_session_id=sid,
             profile_gender=None,
             recent_limit=recent_limit,
             limit=limit,
         )
-    return {
-        "tiles": [],
-        "gender_label": None,
-        "heading": None,
-        "subtitle": None,
-        "anchor_category": None,
-        "source": "recent_views",
-    }
+    from app.crud.home_hero_category_cache import get_cached_home_hero_payload
+
+    return get_cached_home_hero_payload(db, gender_label="Nam", limit=limit)
 
 
 @router.get("/categories/popular-for-profile")

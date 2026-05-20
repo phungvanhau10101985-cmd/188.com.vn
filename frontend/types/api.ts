@@ -205,7 +205,11 @@ export interface PopularCategoryForProfile {
   view_hits?: number;
 }
 
-export type PopularCategoryHeroSource = 'profile_gender' | 'recent_views';
+export type PopularCategoryHeroSource =
+  | 'profile_gender'
+  | 'recent_views'
+  | 'cached_db'
+  | 'cached_db_profile';
 
 export type HeroCategoryAspectRatio = 'portrait' | 'landscape' | 'square';
 
