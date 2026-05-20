@@ -2141,7 +2141,7 @@ def _facet_listing_dimensions_present(
 def _aggregate_product_facet_rows(rows) -> Dict[str, Any]:
     sizes_acc: Set[str] = set()
     colors_acc: Set[str] = set()
-    style_tag_counts: Dict[str, int] = {}
+    style_tags_acc: Set[str] = set()
     prices: List[float] = []
     for row in rows:
         sizes_val, colors_val, color_col, name, price = row[:5]
@@ -2151,18 +2151,12 @@ def _aggregate_product_facet_rows(rows) -> Dict[str, Any]:
             colors_acc.add(lab)
         if len(row) > 5:
             for tag in style_tags_from_product_row(name, *row[5:]):
-                style_tag_counts[tag] = style_tag_counts.get(tag, 0) + 1
+                style_tags_acc.add(tag)
         try:
             if price is not None:
                 prices.append(float(price))
         except (TypeError, ValueError):
             pass
-
-    style_tags_acc = {
-        tag
-        for tag, cnt in style_tag_counts.items()
-        if cnt >= _MIN_STYLE_TAG_FACET_PRODUCTS
-    }
 
     def _size_sort_key(x: str) -> tuple:
         try:
@@ -2228,6 +2222,46 @@ def _filter_facet_colors_with_product_results(base_query, colors: List[str]) -> 
     return valid
 
 
+def _facet_style_tags_with_min_products(
+    base_query,
+    *,
+    min_count: int = _MIN_STYLE_TAG_FACET_PRODUCTS,
+) -> List[str]:
+    """
+    Dropdown «Kiểu»: chỉ tag có >= min_count SP khi áp `apply_product_style_tag_filter`
+    trên cùng base query (danh mục + size/màu/giá đang chọn, không gồm style_tag hiện tại).
+    """
+    valid: List[str] = []
+    for label in _STYLE_TAG_ALIASES:
+        try:
+            cnt = apply_product_style_tag_filter(base_query, label).count()
+            if cnt >= min_count:
+                valid.append(label)
+        except Exception:
+            try:
+                base_query.session.rollback()
+            except Exception:
+                pass
+    return sorted(valid, key=lambda x: (_STYLE_TAG_ORDER.get(x, 999), x.lower()))
+
+
+def _style_facet_base_query(
+    query,
+    *,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    filter_size: Optional[str] = None,
+    filter_color: Optional[str] = None,
+):
+    """Query dùng đếm option kiểu — cùng phạm vi size/màu/giá, không lọc style_tag đang chọn."""
+    style_query = query
+    if filter_size:
+        style_query = apply_product_size_filter(style_query, filter_size)
+    if filter_color:
+        style_query = apply_product_color_filter(style_query, filter_color)
+    return _apply_product_price_filters(style_query, min_price, max_price)
+
+
 def _apply_product_price_filters(query, min_price: Optional[float], max_price: Optional[float]):
     if min_price is not None:
         query = query.filter(Product.price >= min_price)
@@ -2256,12 +2290,21 @@ def build_dependent_product_facets(
         Product.style, Product.material, Product.features, Product.product_info,
         Product.category, Product.subcategory, Product.sub_subcategory
     )
+    style_query = _style_facet_base_query(
+        query,
+        min_price=min_price,
+        max_price=max_price,
+        filter_size=filter_size,
+        filter_color=filter_color,
+    )
+    style_tags = _facet_style_tags_with_min_products(style_query)
+
     if not any([min_price is not None, max_price is not None, filter_size, filter_color, filter_style_tag]):
         facets = _aggregate_product_facet_rows(query.with_entities(*facet_columns).all())
         return {
             "sizes": facets["sizes"],
             "colors": facets["colors"],
-            "style_tags": facets["style_tags"],
+            "style_tags": style_tags,
             "price_min": facets["price_min"],
             "price_max": facets["price_max"],
         }
@@ -2294,19 +2337,10 @@ def build_dependent_product_facets(
     price_rows = price_query.with_entities(*facet_columns).all()
     price_facets = _aggregate_product_facet_rows(price_rows)
 
-    style_query = query
-    if filter_size:
-        style_query = apply_product_size_filter(style_query, filter_size)
-    if filter_color:
-        style_query = apply_product_color_filter(style_query, filter_color)
-    style_query = _apply_product_price_filters(style_query, min_price, max_price)
-    style_rows = style_query.with_entities(*facet_columns).all()
-    style_facets = _aggregate_product_facet_rows(style_rows)
-
     return {
         "sizes": size_facets["sizes"],
         "colors": color_facets["colors"],
-        "style_tags": style_facets["style_tags"],
+        "style_tags": style_tags,
         "price_min": price_facets["price_min"],
         "price_max": price_facets["price_max"],
     }
