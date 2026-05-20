@@ -2611,6 +2611,63 @@ class ProductImageLocalizationService:
         product.product_info = info
 
 
+def reset_stale_processing_in_queue(
+    db: Session,
+    queue_product_ids: Iterable[str],
+    processed_ids: Iterable[str],
+) -> int:
+    """SP còn trong hàng đợi nhưng kẹt `processing` (sau crash) → pending để resume."""
+    processed = {str(x).strip() for x in processed_ids if str(x).strip()}
+    ids = [str(x).strip() for x in queue_product_ids if str(x).strip() and str(x).strip() not in processed]
+    if not ids:
+        return 0
+    rows = (
+        db.query(Product)
+        .filter(
+            Product.product_id.in_(ids),
+            Product.image_localization_status == "processing",
+        )
+        .all()
+    )
+    for p in rows:
+        p.image_localization_status = "pending"
+    if rows:
+        db.commit()
+    return len(rows)
+
+
+def products_for_job_resume(
+    db: Session,
+    queue_product_ids: List[str],
+    processed_ids: Iterable[str],
+    force: bool,
+) -> List[Product]:
+    """Tiếp tục job: giữ thứ tự hàng đợi, bỏ SP đã xử lý (và đã localized nếu không force)."""
+    processed = {str(x).strip() for x in processed_ids if str(x).strip()}
+    remaining = [pid for pid in queue_product_ids if pid and pid not in processed]
+    if not remaining:
+        return []
+    rows = db.query(Product).filter(Product.product_id.in_(remaining)).all()
+    by_pid = {p.product_id: p for p in rows}
+    pending_filter = (
+        Product.image_localization_status.is_(None)
+        | (Product.image_localization_status.in_(["", "pending", "failed"]))
+    )
+    out: List[Product] = []
+    for pid in remaining:
+        p = by_pid.get(pid)
+        if not p:
+            continue
+        if not force:
+            st = (p.image_localization_status or "").strip()
+            if st == "localized":
+                continue
+            if st not in ("", "pending", "failed", "processing") and st:
+                continue
+        out.append(p)
+    return out
+
+
 def products_pending_localization(db: Session, product_ids: Optional[Iterable[str]], force: bool, limit: int) -> List[Product]:
     query = db.query(Product)
     pending_filter = (

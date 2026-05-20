@@ -1,3 +1,4 @@
+import logging
 import threading
 import time
 import uuid
@@ -11,9 +12,15 @@ from sqlalchemy.orm import Session
 
 from app.core.security import require_module_permission
 from app.core.config import settings
+from app.crud import image_localization_job as image_loc_job_crud
 from app.db.session import SessionLocal, get_db
 from app.models.admin import AdminUser
 from app.models.product import Product
+from app.services.image_localization_job_runtime import (
+    payload_from_stored,
+    start_job_thread,
+    start_resume_daemon,
+)
 from app.services.image_localization_service import (
     GeminiApiImageAdapter,
     GeminiWebImageAdapter,
@@ -21,9 +28,13 @@ from app.services.image_localization_service import (
     OpenAiGptImageAdapter,
     ProductImageLocalizationService,
     is_image_localization_fatal_dependency_error,
+    products_for_job_resume,
     products_pending_localization,
+    reset_stale_processing_in_queue,
     save_gemini_cookie,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -107,56 +118,173 @@ def _effective_payload_playwright_headless(payload: StartImageLocalizationPayloa
     return bool(getattr(settings, "IMAGE_LOCALIZATION_PLAYWRIGHT_HEADLESS", True))
 
 
+def _persist_job_to_db(job_id: str) -> None:
+    with _jobs_lock:
+        snapshot = dict(_jobs.get(job_id) or {})
+    if not snapshot:
+        return
+    db = SessionLocal()
+    try:
+        image_loc_job_crud.sync_dict_to_row(db, job_id, snapshot)
+    except Exception:
+        logger.exception("persist image localization job %s failed", job_id)
+        db.rollback()
+    finally:
+        db.close()
+
+
 def _job_update(job_id: str, **kwargs: Any) -> None:
     with _jobs_lock:
         job = _jobs.get(job_id, {})
         job.update(kwargs)
         job["job_id"] = job_id
         _jobs[job_id] = job
+    _persist_job_to_db(job_id)
 
 
 def _job_get(job_id: str) -> Dict[str, Any]:
     with _jobs_lock:
-        return dict(_jobs.get(job_id) or {})
-
-
-def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
+        mem = _jobs.get(job_id)
+        if mem:
+            return dict(mem)
     db = SessionLocal()
     try:
-        _job_update(
+        row = image_loc_job_crud.get_job(db, job_id)
+        if not row:
+            return {}
+        data = image_loc_job_crud.row_to_job_dict(row)
+        data["processed_product_ids"] = list(row.processed_product_ids or [])
+        with _jobs_lock:
+            _jobs[job_id] = data
+        return data
+    finally:
+        db.close()
+
+
+def _payload_snapshot(payload: StartImageLocalizationPayload) -> Dict[str, Any]:
+    return payload.model_dump()
+
+
+def _create_db_job_row(
+    job_id: str,
+    payload: StartImageLocalizationPayload,
+    *,
+    extra: Dict[str, Any],
+) -> None:
+    db = SessionLocal()
+    try:
+        image_loc_job_crud.create_job(
+            db,
             job_id,
-            status="running",
-            phase="selecting",
-            message="Đang chọn sản phẩm chưa bản địa hóa...",
-            started_at=datetime.now(timezone.utc).isoformat(),
+            {
+                "status": extra.get("status", "queued"),
+                "phase": extra.get("phase", "queued"),
+                "message": extra.get("message"),
+                "payload": _payload_snapshot(payload),
+                "language": payload.language,
+                "force": bool(payload.force),
+                "dry_run": bool(payload.dry_run),
+                "gemini_mode": extra.get("gemini_mode"),
+                "local_image_only": bool(extra.get("local_image_only", False)),
+                "current": extra.get("current", 0),
+                "total": extra.get("total"),
+                "done": extra.get("done", 0),
+                "failed": extra.get("failed", 0),
+                "skipped": extra.get("skipped", 0),
+                "percent": extra.get("percent"),
+                "queue_product_ids": list(extra.get("queue_product_ids") or []),
+                "processed_product_ids": list(extra.get("processed_product_ids") or []),
+                "job_queue_truncated": bool(extra.get("job_queue_truncated", False)),
+                "recent_results": list(extra.get("recent_results") or []),
+                "skipped_product_reports": list(extra.get("skipped_product_reports") or []),
+            },
         )
-        limit = payload.limit or int(getattr(settings, "IMAGE_LOCALIZATION_BATCH_LIMIT", 0) or 0)
-        products = products_pending_localization(db, payload.product_ids, payload.force, limit)
-        total = len(products)
-        queue_ids = [p.product_id for p in products]
+    finally:
+        db.close()
+
+
+def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: bool = False) -> None:
+    db = SessionLocal()
+    processed_ids: List[str] = []
+    done = 0
+    failed = 0
+    skipped = 0
+    results: List[Dict[str, Any]] = []
+    skipped_reports: List[Dict[str, Any]] = []
+    try:
+        if resume:
+            row = image_loc_job_crud.get_job(db, job_id)
+            if not row:
+                return
+            stored = payload_from_stored(row.payload, StartImageLocalizationPayload)
+            if stored is not None:
+                payload = stored
+            processed_ids = list(row.processed_product_ids or [])
+            done = int(row.done or 0)
+            failed = int(row.failed or 0)
+            skipped = int(row.skipped or 0)
+            results = list(row.recent_results or [])[-100:]
+            skipped_reports = list(row.skipped_product_reports or [])[-_JOB_SKIPPED_REPORT_MAX:]
+            queue_ids = list(row.queue_product_ids or [])
+            reset_stale_processing_in_queue(db, queue_ids, processed_ids)
+            _job_update(
+                job_id,
+                status="running",
+                phase="resuming",
+                message=f"Tiếp tục job — đã xử lý {len(processed_ids)}/{len(queue_ids)} sản phẩm…",
+                started_at=row.started_at.isoformat() if row.started_at else datetime.now(timezone.utc).isoformat(),
+            )
+            products = products_for_job_resume(db, queue_ids, processed_ids, payload.force)
+            total = len(queue_ids)
+        else:
+            _job_update(
+                job_id,
+                status="running",
+                phase="selecting",
+                message="Đang chọn sản phẩm chưa bản địa hóa...",
+                started_at=datetime.now(timezone.utc).isoformat(),
+            )
+            limit = payload.limit or int(getattr(settings, "IMAGE_LOCALIZATION_BATCH_LIMIT", 0) or 0)
+            products = products_pending_localization(db, payload.product_ids, payload.force, limit)
+            total = len(products)
+            queue_ids = [p.product_id for p in products]
+
         queue_truncated = len(queue_ids) > _JOB_QUEUE_IDS_MAX
         queue_preview = queue_ids[:_JOB_QUEUE_IDS_MAX]
         _job_update(
             job_id,
             total=total,
-            current=0,
-            percent=0.0,
+            current=len(processed_ids),
+            percent=round(100.0 * len(processed_ids) / total, 1) if total else 0.0,
             job_queue_product_ids=queue_preview,
             job_queue_truncated=queue_truncated,
-            skipped_product_reports=[],
+            queue_product_ids=queue_ids,
+            processed_product_ids=processed_ids,
+            done=done,
+            failed=failed,
+            skipped=skipped,
+            skipped_product_reports=skipped_reports,
         )
-        if total == 0:
+        if total == 0 or (resume and not products):
+            if resume and total > 0 and len(processed_ids) >= total:
+                done_msg = f"Đã hoàn tất ({len(processed_ids)}/{total} sản phẩm trong hàng đợi)."
+            elif resume and not products:
+                done_msg = "Không còn sản phẩm cần xử lý trong hàng đợi resume."
+            else:
+                done_msg = "Không còn sản phẩm cần bản địa hóa ảnh."
             _job_update(
                 job_id,
                 status="done",
                 phase="done",
-                message="Không còn sản phẩm cần bản địa hóa ảnh.",
+                message=done_msg,
                 finished_at=datetime.now(timezone.utc).isoformat(),
                 percent=100.0,
+                current=len(processed_ids),
                 current_product_id=None,
-                job_queue_product_ids=[],
-                job_queue_truncated=False,
-                skipped_product_reports=[],
+                job_queue_product_ids=queue_preview if total else [],
+                job_queue_truncated=queue_truncated if total else False,
+                processed_product_ids=processed_ids,
+                skipped_product_reports=skipped_reports,
             )
             return
 
@@ -174,24 +302,20 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
             allow_ai_image_models=payload.allow_ai_image_models,
             playwright_headless=payload.playwright_headless,
         )
-        done = 0
-        failed = 0
-        skipped = 0
         consecutive_product_failures = 0
-        results: List[Dict[str, Any]] = []
-        skipped_reports: List[Dict[str, Any]] = []
 
         def should_cancel() -> bool:
             return bool(_job_get(job_id).get("cancel_requested"))
 
         for idx, product in enumerate(products, 1):
+            abs_idx = len(processed_ids) + idx
             if should_cancel():
                 _job_update(
                     job_id,
                     status="cancelled",
                     phase="cancelled",
-                    current=idx - 1,
-                    percent=round(100.0 * (idx - 1) / total, 1),
+                    current=abs_idx - 1,
+                    percent=round(100.0 * (abs_idx - 1) / total, 1) if total else 0.0,
                     message="Đã hủy job bản địa hóa ảnh.",
                     finished_at=datetime.now(timezone.utc).isoformat(),
                     current_product_id=None,
@@ -202,9 +326,9 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
             _job_update(
                 job_id,
                 phase="processing",
-                current=idx,
-                percent=round(100.0 * (idx - 1) / total, 1),
-                message=f"Đang xử lý {idx}/{total}: {product.product_id}",
+                current=abs_idx,
+                percent=round(100.0 * (abs_idx - 1) / total, 1) if total else 0.0,
+                message=f"Đang xử lý {abs_idx}/{total}: {product.product_id}",
                 current_product_id=product.product_id,
             )
             try:
@@ -226,18 +350,20 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
                             for r in results[-IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES:]
                             if r.get("status") == "failed"
                         )
+                        processed_ids.append(product.product_id)
                         _job_update(
                             job_id,
                             status="error",
                             phase="error",
-                            current=idx,
+                            current=abs_idx,
                             done=done,
                             failed=failed,
                             skipped=skipped,
-                            percent=round(100.0 * idx / total, 1),
+                            processed_product_ids=processed_ids,
+                            percent=round(100.0 * abs_idx / total, 1) if total else 0.0,
                             message=(
                                 f"Dừng job: {IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES} "
-                                f"sản phẩm lỗi liên tiếp (đến {product.product_id}, {idx}/{total}). "
+                                f"sản phẩm lỗi liên tiếp (đến {product.product_id}, {abs_idx}/{total}). "
                                 f"{last_msgs[:750]}"
                             ),
                             finished_at=datetime.now(timezone.utc).isoformat(),
@@ -272,15 +398,17 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
                 results.append({"product_id": product.product_id, "status": "failed", "message": str(exc)})
                 err_tail = str(exc)[:1000]
                 if is_image_localization_fatal_dependency_error(exc):
+                    processed_ids.append(product.product_id)
                     _job_update(
                         job_id,
                         status="error",
                         phase="error",
-                        current=idx,
+                        current=abs_idx,
                         done=done,
                         failed=failed,
                         skipped=skipped,
-                        percent=round(100.0 * idx / total, 1),
+                        processed_product_ids=processed_ids,
+                        percent=round(100.0 * abs_idx / total, 1) if total else 0.0,
                         message=(
                             "Dừng bản địa hóa ảnh vì OCR/DeepSeek lỗi bắt buộc "
                             f"(hết quota/tiền, thiếu key hoặc billing lỗi): {err_tail}"
@@ -293,18 +421,20 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
                     return
                 consecutive_product_failures += 1
                 if consecutive_product_failures >= IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES:
+                    processed_ids.append(product.product_id)
                     _job_update(
                         job_id,
                         status="error",
                         phase="error",
-                        current=idx,
+                        current=abs_idx,
                         done=done,
                         failed=failed,
                         skipped=skipped,
-                        percent=round(100.0 * idx / total, 1),
+                        processed_product_ids=processed_ids,
+                        percent=round(100.0 * abs_idx / total, 1) if total else 0.0,
                         message=(
                             f"Dừng job: {IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES} "
-                            f"sản phẩm lỗi liên tiếp (exception tại {product.product_id}, {idx}/{total}). {err_tail}"
+                            f"sản phẩm lỗi liên tiếp (exception tại {product.product_id}, {abs_idx}/{total}). {err_tail}"
                         ),
                         finished_at=datetime.now(timezone.utc).isoformat(),
                         recent_results=results[-100:],
@@ -313,13 +443,16 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload) -> None:
                     )
                     return
 
+            processed_ids.append(product.product_id)
             _job_update(
                 job_id,
                 done=done,
                 failed=failed,
                 skipped=skipped,
+                current=abs_idx,
+                processed_product_ids=processed_ids,
                 recent_results=results[-30:],
-                percent=round(100.0 * idx / total, 1),
+                percent=round(100.0 * abs_idx / total, 1) if total else 0.0,
                 skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
             )
 
@@ -481,37 +614,45 @@ def start_job(
                 raise HTTPException(status_code=400, detail=detail)
     job_id = uuid.uuid4().hex
     _pw_eff = _effective_payload_playwright_headless(payload)
-    _job_update(
-        job_id,
-        status="queued",
-        phase="queued",
-        message="Đã xếp hàng bản địa hóa ảnh.",
-        created_at=datetime.now(timezone.utc).isoformat(),
-        current=0,
-        total=None,
-        done=0,
-        failed=0,
-        skipped=0,
-        percent=None,
-        language=payload.language,
-        force=payload.force,
-        dry_run=payload.dry_run,
-        gemini_mode=mode,
-        gemini_image_model=payload.gemini_image_model,
-        gemini_image_size=payload.gemini_image_size,
-        openai_image_model=payload.openai_image_model,
-        openai_image_quality=payload.openai_image_quality,
-        openai_image_size=payload.openai_image_size,
-        inference_tier=_resolve_inference_tier(payload.inference_tier),
-        allow_ai_image_models=payload.allow_ai_image_models,
-        local_image_only=bool(payload.allow_ai_image_models is False),
-        ai_image_explicit_only=bool(getattr(settings, "IMAGE_LOCALIZATION_AI_IMAGE_EXPLICIT_ONLY", False)),
-        playwright_headless_requested=payload.playwright_headless,
-        playwright_headless_effective=_pw_eff,
-    )
-    thread = threading.Thread(target=_run_job, args=(job_id, payload), daemon=True)
-    thread.start()
+    initial: Dict[str, Any] = {
+        "status": "queued",
+        "phase": "queued",
+        "message": "Đã xếp hàng bản địa hóa ảnh.",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "current": 0,
+        "total": None,
+        "done": 0,
+        "failed": 0,
+        "skipped": 0,
+        "percent": None,
+        "language": payload.language,
+        "force": payload.force,
+        "dry_run": payload.dry_run,
+        "gemini_mode": mode,
+        "gemini_image_model": payload.gemini_image_model,
+        "gemini_image_size": payload.gemini_image_size,
+        "openai_image_model": payload.openai_image_model,
+        "openai_image_quality": payload.openai_image_quality,
+        "openai_image_size": payload.openai_image_size,
+        "inference_tier": _resolve_inference_tier(payload.inference_tier),
+        "allow_ai_image_models": payload.allow_ai_image_models,
+        "local_image_only": bool(payload.allow_ai_image_models is False),
+        "ai_image_explicit_only": bool(getattr(settings, "IMAGE_LOCALIZATION_AI_IMAGE_EXPLICIT_ONLY", False)),
+        "playwright_headless_requested": payload.playwright_headless,
+        "playwright_headless_effective": _pw_eff,
+        "processed_product_ids": [],
+        "queue_product_ids": [],
+    }
+    with _jobs_lock:
+        _jobs[job_id] = {**initial, "job_id": job_id}
+    _create_db_job_row(job_id, payload, extra=initial)
+    start_job_thread(job_id, _run_job, (job_id, payload), {"resume": False})
     return {"job_id": job_id, "status": "queued"}
+
+
+def start_image_localization_job_resume_daemon_if_enabled() -> None:
+    """Quét job queued/running trong DB và chạy tiếp sau restart backend."""
+    start_resume_daemon(_run_job, StartImageLocalizationPayload)
 
 
 @router.get("/jobs/{job_id}")

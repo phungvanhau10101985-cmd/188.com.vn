@@ -425,6 +425,22 @@ async def startup_event():
         print(f"   ⚠️  import_1688 batch resume startup: {_e_ir}")
 
     try:
+        from app.api.endpoints.image_localization import (
+            start_image_localization_job_resume_daemon_if_enabled,
+        )
+
+        start_image_localization_job_resume_daemon_if_enabled()
+        from app.core.config import settings as _ilr
+
+        if getattr(_ilr, "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", True):
+            print(
+                "   🖼️  IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: "
+                "sẽ tiếp tục job queued/running trong DB sau ~2.5s."
+            )
+    except Exception as _e_ilr:
+        print(f"   ⚠️  image localization job resume startup: {_e_ilr}")
+
+    try:
         from app.services.source_stock_checker import start_source_stock_checker_daemon_if_enabled
 
         start_source_stock_checker_daemon_if_enabled()

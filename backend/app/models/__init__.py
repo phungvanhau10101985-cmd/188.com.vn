@@ -27,6 +27,9 @@ print("[OK] InternalSkuExport model loaded")
 from app.models.product_import_draft import ProductImportDraft
 print("[OK] ProductImportDraft model loaded")
 
+from app.models.image_localization_job import ImageLocalizationJob
+print("[OK] ImageLocalizationJob model loaded")
+
 from app.models.listing_import_queue_snapshot import ListingImportQueueRevocation, ListingImportQueueSnapshot
 print("[OK] ListingImportQueueSnapshot model loaded")
 
@@ -152,6 +155,7 @@ __all__ = [
     "Product",
     "InternalSkuExport",
     "ProductImportDraft",
+    "ImageLocalizationJob",
     "ListingImportQueueSnapshot",
     "ListingImportQueueRevocation",
     "ProductQuestion",

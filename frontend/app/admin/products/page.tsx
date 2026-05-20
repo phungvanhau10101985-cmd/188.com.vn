@@ -1,6 +1,14 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import {
+  useState,
+  useEffect,
+  useMemo,
+  useRef,
+  useCallback,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react';
 import {
   adminProductAPI,
   type AdminImport1688Draft,
@@ -389,6 +397,207 @@ function isHiboxProductUrl(raw: string): boolean {
   } catch {
     return false;
   }
+}
+
+type ProductListEditing = { productId: string; field: string; value: string };
+
+/** Chuỗi JSON gọn để hiển thị trong ô (đúng cấu trúc DB/API). */
+function productFieldToJsonCellText(raw: unknown): string {
+  if (raw == null || raw === '') return '';
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    if (
+      (t.startsWith('[') && t.endsWith(']')) ||
+      (t.startsWith('{') && t.endsWith('}'))
+    ) {
+      try {
+        return JSON.stringify(JSON.parse(t));
+      } catch {
+        /* giữ nguyên */
+      }
+    }
+    return JSON.stringify(raw);
+  }
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return String(raw);
+  }
+}
+
+function parseJsonImageFieldEdit(
+  value: string,
+  mode: 'string' | 'array',
+): string | string[] | null {
+  const t = value.trim();
+  if (!t) return mode === 'array' ? [] : null;
+  try {
+    const parsed = JSON.parse(t) as unknown;
+    if (mode === 'string') {
+      if (typeof parsed === 'string') return parsed;
+      if (parsed === null) return null;
+      return t;
+    }
+    if (Array.isArray(parsed)) return parsed as string[];
+    throw new Error('not array');
+  } catch {
+    if (mode === 'array') return t.split(/\r?\n/);
+    return t;
+  }
+}
+
+function AdminProductJsonFieldCell({
+  productId,
+  field,
+  raw,
+  editing,
+  saving,
+  onStart,
+  onEditChange,
+  onSave,
+  onCancel,
+  editMode = 'string',
+}: {
+  productId: string;
+  field: string;
+  raw: unknown;
+  editing: ProductListEditing | null;
+  saving: boolean;
+  onStart: (productId: string, field: string, value: string | number) => void;
+  onEditChange: (value: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  editMode?: 'string' | 'array';
+}) {
+  const jsonText = productFieldToJsonCellText(raw);
+  const isEditing = editing?.productId === productId && editing?.field === field;
+  const isArray = editMode === 'array';
+
+  const handleEditKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onCancel();
+      return;
+    }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      onSave();
+    }
+  };
+
+  const editClass =
+    'w-full min-w-[12rem] max-w-[14rem] max-h-32 overflow-auto rounded border border-gray-300 px-2 py-1 text-[10px] font-mono text-gray-800 whitespace-pre-wrap break-all resize-y';
+
+  if (isEditing) {
+    return (
+      <textarea
+        autoFocus
+        disabled={saving}
+        rows={isArray ? 5 : 3}
+        value={editing.value}
+        onChange={(e) => onEditChange(e.target.value)}
+        onBlur={onSave}
+        onKeyDown={handleEditKeyDown}
+        className={editClass}
+        placeholder={
+          isArray
+            ? 'JSON mảng URL · vd ["url1","url2"] · Ctrl+Enter lưu'
+            : 'JSON chuỗi URL · vd "https://…" · Ctrl+Enter lưu'
+        }
+        aria-label={`Sửa ${field}`}
+        spellCheck={false}
+      />
+    );
+  }
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className="w-[14rem] max-w-[14rem] cursor-pointer rounded border border-gray-100 bg-slate-50/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+      onClick={() => onStart(productId, field, jsonText)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onStart(productId, field, jsonText);
+        }
+      }}
+      title={`${jsonText || 'Trống'} — Bấm để sửa JSON · Cuộn trong ô để xem đủ`}
+    >
+      {jsonText === '' ? (
+        <span className="block p-2 text-xs text-gray-400">— (bấm nhập JSON)</span>
+      ) : (
+        <pre className="m-0 max-h-20 overflow-auto p-2 text-[10px] leading-snug font-mono text-gray-800 whitespace-pre-wrap break-all">
+          {jsonText}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function AdminProductEditableCell({
+  productId,
+  field,
+  value,
+  display,
+  editing,
+  saving,
+  onStart,
+  onEditChange,
+  onSave,
+  onKeyDown,
+  inputType = 'text',
+  cellClassName = '',
+  inputClassName = 'w-full min-w-[7rem] rounded border border-gray-300 px-2 py-1',
+  title = 'Bấm để sửa · Enter lưu · Esc hủy',
+}: {
+  productId: string;
+  field: string;
+  value: string | number;
+  display: ReactNode;
+  editing: ProductListEditing | null;
+  saving: boolean;
+  onStart: (productId: string, field: string, value: string | number) => void;
+  onEditChange: (value: string) => void;
+  onSave: () => void;
+  onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void;
+  inputType?: 'text' | 'number';
+  cellClassName?: string;
+  inputClassName?: string;
+  title?: string;
+}) {
+  const isEditing = editing?.productId === productId && editing?.field === field;
+  if (isEditing) {
+    return (
+      <input
+        type={inputType}
+        autoFocus
+        disabled={saving}
+        value={editing.value}
+        onChange={(e) => onEditChange(e.target.value)}
+        onBlur={onSave}
+        onKeyDown={onKeyDown}
+        className={inputClassName}
+      />
+    );
+  }
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      className={`cursor-pointer rounded px-1 -mx-1 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${cellClassName}`}
+      onClick={() => onStart(productId, field, value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onStart(productId, field, value);
+        }
+      }}
+      title={title}
+    >
+      {display}
+    </span>
+  );
 }
 
 export default function AdminProductsPage() {
@@ -989,7 +1198,13 @@ export default function AdminProductsPage() {
         })
         .catch((err) => {
           if (!cancelled) {
-            setImageLocalizationError(err instanceof Error ? err.message : 'Không theo dõi được job ảnh');
+            const msg = err instanceof Error ? err.message : 'Không theo dõi được job ảnh';
+            const is404 = /404|Không tìm thấy job/i.test(msg);
+            setImageLocalizationError(
+              is404
+                ? 'Job ảnh không còn trên server (có thể đã xong hoặc server đã restart trước khi lưu DB). Đã xóa khỏi danh sách theo dõi.'
+                : msg,
+            );
             removeStoredLocalizationJobId(jobId);
           }
         })
@@ -1879,7 +2094,21 @@ export default function AdminProductsPage() {
       if (editing.field === 'product_id') payload.product_id = editing.value;
       if (editing.field === 'brand_name') payload.brand_name = editing.value;
       if (editing.field === 'category') payload.category = editing.value;
+      if (editing.field === 'subcategory') payload.subcategory = editing.value;
+      if (editing.field === 'sub_subcategory') payload.sub_subcategory = editing.value;
       if (editing.field === 'code') payload.code = editing.value;
+      if (editing.field === 'slug') payload.slug = editing.value;
+      if (editing.field === 'available') payload.available = parseInt(editing.value, 10) || 0;
+      if (editing.field === 'link_default') payload.link_default = editing.value;
+      if (editing.field === 'main_image') {
+        payload.main_image = parseJsonImageFieldEdit(editing.value, 'string');
+      }
+      if (editing.field === 'images') {
+        payload.images = parseJsonImageFieldEdit(editing.value, 'array');
+      }
+      if (editing.field === 'gallery') {
+        payload.gallery = parseJsonImageFieldEdit(editing.value, 'array');
+      }
       await adminProductAPI.updateProduct(editing.productId, payload as Partial<AdminProduct>);
       showToast('ok', 'Đã lưu');
       setEditing(null);
@@ -1891,9 +2120,24 @@ export default function AdminProductsPage() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent, productId: string, field: string) => {
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') saveEdit();
     if (e.key === 'Escape') cancelEdit();
+  };
+
+  const toggleProductActive = async (p: AdminProduct) => {
+    if (saving) return;
+    const nextActive = p.is_active === false;
+    setSaving(true);
+    try {
+      await adminProductAPI.updateProduct(p.product_id, { is_active: nextActive });
+      showToast('ok', nextActive ? 'Đã bật hiển thị' : 'Đã ẩn sản phẩm');
+      fetchProducts();
+    } catch {
+      showToast('err', 'Cập nhật trạng thái thất bại');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const totalPages = data?.total_pages ?? 1;
@@ -3778,11 +4022,16 @@ export default function AdminProductsPage() {
                 <div className="p-12 text-center text-gray-500">Không có sản phẩm nào.</div>
               ) : (
                 <>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                  <div className="border-b border-gray-100 bg-slate-50/90 px-4 py-2 text-xs text-slate-600">
+                    <span className="font-medium text-slate-800">↔ Cuộn ngang</span> để xem đủ cột ·{' '}
+                    <span className="font-medium text-slate-800">Bấm ô</span> để sửa nhanh · Enter lưu · Esc hủy ·
+                    cột ảnh: JSON trong ô (cuộn trong ô) · bấm để sửa · Ctrl+Enter lưu
+                  </div>
+                  <div className="overflow-x-auto overscroll-x-contain max-w-full">
+                    <table className="w-max min-w-full text-sm border-separate border-spacing-0">
                       <thead>
-                        <tr className="bg-gray-50 border-b border-gray-200">
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700 w-10">
+                        <tr className="border-b border-gray-200">
+                          <th className="sticky left-0 z-30 min-w-[2.75rem] bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">
                             <input
                               type="checkbox"
                               checked={allSelectedOnPage}
@@ -3790,178 +4039,322 @@ export default function AdminProductsPage() {
                               aria-label="Chọn tất cả sản phẩm trong trang"
                             />
                           </th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">ID</th>
-                          <th className="text-left py-3 px-2 font-semibold text-gray-700 w-[5.5rem]">Web</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700">Tên</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700 w-24">Giá</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700 w-32">Thương hiệu</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">Danh mục</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700 w-20">Trạng thái</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700 w-28">Ảnh</th>
+                          <th className="sticky left-[2.75rem] z-30 min-w-[9.5rem] bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.08)]">
+                            ID
+                          </th>
+                          <th className="min-w-[5.5rem] whitespace-nowrap bg-gray-50 py-3 px-2 text-left font-semibold text-gray-700">
+                            Web
+                          </th>
+                          <th className="min-w-[14rem] whitespace-nowrap bg-gray-50 py-3 px-2 text-left font-semibold text-gray-700">
+                            Ảnh đại diện
+                          </th>
+                          <th className="min-w-[14rem] whitespace-nowrap bg-gray-50 py-3 px-2 text-left font-semibold text-gray-700">
+                            Thư viện ảnh
+                          </th>
+                          <th className="min-w-[14rem] whitespace-nowrap bg-gray-50 py-3 px-2 text-left font-semibold text-gray-700">
+                            Ảnh chi tiết SP
+                          </th>
+                          <th className="min-w-[7rem] whitespace-nowrap bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700">
+                            Mã SKU
+                          </th>
+                          <th className="min-w-[10rem] whitespace-nowrap bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700">
+                            Slug
+                          </th>
+                          <th className="min-w-[16rem] bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700">
+                            Tên
+                          </th>
+                          <th className="min-w-[6.5rem] whitespace-nowrap bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700">
+                            Giá
+                          </th>
+                          <th className="min-w-[8rem] whitespace-nowrap bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700">
+                            Thương hiệu
+                          </th>
+                          <th className="min-w-[4.5rem] whitespace-nowrap bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700">
+                            Tồn
+                          </th>
+                          <th className="min-w-[5.5rem] whitespace-nowrap bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700">
+                            Trạng thái
+                          </th>
+                          <th className="min-w-[6rem] whitespace-nowrap bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700">
+                            Nguồn 1688
+                          </th>
+                          <th className="min-w-[5.5rem] whitespace-nowrap bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700">
+                            Ảnh i18n
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
                         {data.products.map((p) => {
                           const webUrl = adminProductPublicUrl(p.slug);
+                          const formatCell = (v: string | number | null | undefined) => {
+                            if (v == null || v === '') return '—';
+                            if (typeof v === 'string' && v.toLowerCase() === 'nan') return '—';
+                            return String(v);
+                          };
+                          const onEditChange = (v: string) =>
+                            setEditing((x) => (x ? { ...x, value: v } : null));
+                          const stickyTd =
+                            'sticky z-10 bg-white py-2 px-3 align-top group-hover:bg-gray-50/80';
                           return (
-                      <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50/50">
-                        <td className="py-2 px-4">
-                          <input
-                            type="checkbox"
-                            checked={selectedProductIds.has(p.product_id)}
-                            onChange={() => toggleSelectOne(p.product_id)}
-                            aria-label={`Chọn sản phẩm ${p.product_id}`}
-                          />
-                        </td>
-                        <td className="py-2 px-4">
-                          {editing?.productId === p.product_id && editing?.field === 'product_id' ? (
-                            <input
-                              autoFocus
-                              value={editing.value}
-                              onChange={(e) => setEditing((x) => x ? { ...x, value: e.target.value } : null)}
-                              onBlur={saveEdit}
-                              onKeyDown={(e) => handleKeyDown(e, p.product_id, 'product_id')}
-                              className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
-                            />
-                          ) : (
-                            <span
-                              className="cursor-pointer text-blue-600 hover:underline"
-                              onClick={() => startEdit(p.product_id, 'product_id', p.product_id ?? '')}
-                              title="Bấm để sửa"
+                            <tr
+                              key={p.id}
+                              className="group border-b border-gray-100 hover:bg-gray-50/50"
                             >
-                              {(p as AdminProduct).product_id || p.id}
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2 px-2 whitespace-nowrap align-middle">
-                          {webUrl ? (
-                              <a
-                                href={webUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:border-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-1"
-                                title="Mở trang sản phẩm trên web (tab mới)"
+                              <td className={`${stickyTd} left-0 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]`}>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedProductIds.has(p.product_id)}
+                                  onChange={() => toggleSelectOne(p.product_id)}
+                                  aria-label={`Chọn sản phẩm ${p.product_id}`}
+                                />
+                              </td>
+                              <td
+                                className={`${stickyTd} left-[2.75rem] shadow-[4px_0_8px_-4px_rgba(0,0,0,0.08)]`}
                               >
-                                <svg className="h-3.5 w-3.5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                </svg>
-                                Xem web
-                              </a>
-                            ) : (
-                              <span
-                                className="inline-flex items-center rounded-md border border-dashed border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-400"
-                                title="Chưa có slug — không tạo được link công khai"
-                              >
-                                —
-                              </span>
-                            )}
-                        </td>
-                        <td className="py-2 px-4">
-                          {editing?.productId === p.product_id && editing?.field === 'name' ? (
-                            <input
-                              autoFocus
-                              value={editing.value}
-                              onChange={(e) => setEditing((x) => x ? { ...x, value: e.target.value } : null)}
-                              onBlur={saveEdit}
-                              onKeyDown={(e) => handleKeyDown(e, p.product_id, 'name')}
-                              className="w-full rounded border border-gray-300 px-2 py-1"
-                            />
-                          ) : (
-                            <span
-                              className="cursor-pointer hover:bg-gray-100 rounded px-1 -mx-1 line-clamp-2"
-                              onClick={() => startEdit(p.product_id, 'name', p.name ?? '')}
-                              title="Bấm để sửa"
-                            >
-                              {p.name || '—'}
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2 px-4">
-                          {editing?.productId === p.product_id && editing?.field === 'price' ? (
-                            <input
-                              type="number"
-                              autoFocus
-                              value={editing.value}
-                              onChange={(e) => setEditing((x) => x ? { ...x, value: e.target.value } : null)}
-                              onBlur={saveEdit}
-                              onKeyDown={(e) => handleKeyDown(e, p.product_id, 'price')}
-                              className="w-full rounded border border-gray-300 px-2 py-1"
-                            />
-                          ) : (
-                            <span
-                              className="cursor-pointer hover:bg-gray-100 rounded px-1 -mx-1"
-                              onClick={() => startEdit(p.product_id, 'price', p.price ?? 0)}
-                              title="Bấm để sửa"
-                            >
-                              {typeof p.price === 'number' ? new Intl.NumberFormat('vi-VN').format(p.price) : p.price}
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2 px-4">
-                          {editing?.productId === p.product_id && editing?.field === 'brand_name' ? (
-                            <input
-                              autoFocus
-                              value={editing.value}
-                              onChange={(e) => setEditing((x) => x ? { ...x, value: e.target.value } : null)}
-                              onBlur={saveEdit}
-                              onKeyDown={(e) => handleKeyDown(e, p.product_id, 'brand_name')}
-                              className="w-full rounded border border-gray-300 px-2 py-1"
-                            />
-                          ) : (
-                            <span
-                              className="cursor-pointer hover:bg-gray-100 rounded px-1 -mx-1"
-                              onClick={() => startEdit(p.product_id, 'brand_name', p.brand_name ?? '')}
-                              title="Bấm để sửa"
-                            >
-                              {p.brand_name || '—'}
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2 px-4">
-                          {editing?.productId === p.product_id && editing?.field === 'category' ? (
-                            <input
-                              autoFocus
-                              value={editing.value}
-                              onChange={(e) => setEditing((x) => x ? { ...x, value: e.target.value } : null)}
-                              onBlur={saveEdit}
-                              onKeyDown={(e) => handleKeyDown(e, p.product_id, 'category')}
-                              className="w-full rounded border border-gray-300 px-2 py-1"
-                            />
-                          ) : (
-                            <span
-                              className="cursor-pointer hover:bg-gray-100 rounded px-1 -mx-1"
-                              onClick={() => startEdit(p.product_id, 'category', p.category ?? '')}
-                              title="Bấm để sửa"
-                            >
-                              {p.category || '—'}
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2 px-4">
-                          <span className={p.is_active !== false ? 'text-green-600' : 'text-gray-400'}>
-                            {p.is_active !== false ? 'Hiển thị' : 'Ẩn'}
-                          </span>
-                        </td>
-                        <td className="py-2 px-4">
-                          <button
-                            type="button"
-                            className={`inline font-medium hover:underline underline-offset-2 text-left ${
-                              p.image_localization_status === 'localized'
-                                ? 'text-violet-700'
-                                : p.image_localization_status === 'failed'
-                                  ? 'text-red-600'
-                                  : 'text-gray-500'
-                            }`}
-                            title={
-                              (p.image_localization_error ? `${p.image_localization_error}\n` : '') +
-                              'Bấm để xem báo cáo chi tiết từng ảnh'
-                            }
-                            onClick={() => void openImageLocReport(p.product_id)}
-                          >
-                            {p.image_localization_status || 'pending'}
-                          </button>
-                        </td>
-                      </tr>
+                                {editing?.productId === p.product_id &&
+                                editing?.field === 'product_id' ? (
+                                  <input
+                                    autoFocus
+                                    disabled={saving}
+                                    value={editing.value}
+                                    onChange={(e) => onEditChange(e.target.value)}
+                                    onBlur={saveEdit}
+                                    onKeyDown={handleKeyDown}
+                                    className="w-full min-w-[8rem] rounded border border-gray-300 px-2 py-1 font-mono text-xs"
+                                  />
+                                ) : (
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    className="cursor-pointer font-mono text-xs text-blue-600 hover:underline"
+                                    onClick={() =>
+                                      startEdit(p.product_id, 'product_id', p.product_id ?? '')
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        startEdit(p.product_id, 'product_id', p.product_id ?? '');
+                                      }
+                                    }}
+                                    title="Bấm để sửa ID"
+                                  >
+                                    {p.product_id || String(p.id)}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="whitespace-nowrap py-2 px-2 align-middle">
+                                {webUrl ? (
+                                  <a
+                                    href={webUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-1"
+                                    title="Mở trang sản phẩm trên web (tab mới)"
+                                  >
+                                    <svg
+                                      className="h-3.5 w-3.5 shrink-0 opacity-70"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                      aria-hidden
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                                      />
+                                    </svg>
+                                    Xem web
+                                  </a>
+                                ) : (
+                                  <span
+                                    className="inline-flex items-center rounded-md border border-dashed border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-400"
+                                    title="Chưa có slug"
+                                  >
+                                    —
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2 px-2 align-top">
+                                <AdminProductJsonFieldCell
+                                  productId={p.product_id}
+                                  field="main_image"
+                                  raw={p.main_image}
+                                  editing={editing}
+                                  saving={saving}
+                                  onStart={startEdit}
+                                  onEditChange={onEditChange}
+                                  onSave={saveEdit}
+                                  onCancel={cancelEdit}
+                                  editMode="string"
+                                />
+                              </td>
+                              <td className="py-2 px-2 align-top">
+                                <AdminProductJsonFieldCell
+                                  productId={p.product_id}
+                                  field="images"
+                                  raw={p.images}
+                                  editing={editing}
+                                  saving={saving}
+                                  onStart={startEdit}
+                                  onEditChange={onEditChange}
+                                  onSave={saveEdit}
+                                  onCancel={cancelEdit}
+                                  editMode="array"
+                                />
+                              </td>
+                              <td className="py-2 px-2 align-top">
+                                <AdminProductJsonFieldCell
+                                  productId={p.product_id}
+                                  field="gallery"
+                                  raw={p.gallery}
+                                  editing={editing}
+                                  saving={saving}
+                                  onStart={startEdit}
+                                  onEditChange={onEditChange}
+                                  onSave={saveEdit}
+                                  onCancel={cancelEdit}
+                                  editMode="array"
+                                />
+                              </td>
+                              <td className="whitespace-nowrap py-2 px-3 align-top">
+                                <AdminProductEditableCell
+                                  productId={p.product_id}
+                                  field="code"
+                                  value={p.code ?? ''}
+                                  display={formatCell(p.code)}
+                                  editing={editing}
+                                  saving={saving}
+                                  onStart={startEdit}
+                                  onEditChange={onEditChange}
+                                  onSave={saveEdit}
+                                  onKeyDown={handleKeyDown}
+                                  inputClassName="w-full min-w-[6rem] rounded border border-gray-300 px-2 py-1 font-mono text-xs"
+                                />
+                              </td>
+                              <td className="max-w-[14rem] py-2 px-3 align-top">
+                                <AdminProductEditableCell
+                                  productId={p.product_id}
+                                  field="slug"
+                                  value={p.slug ?? ''}
+                                  display={
+                                    <span className="block truncate font-mono text-xs">
+                                      {formatCell(p.slug)}
+                                    </span>
+                                  }
+                                  editing={editing}
+                                  saving={saving}
+                                  onStart={startEdit}
+                                  onEditChange={onEditChange}
+                                  onSave={saveEdit}
+                                  onKeyDown={handleKeyDown}
+                                  inputClassName="w-full min-w-[9rem] rounded border border-gray-300 px-2 py-1 font-mono text-xs"
+                                />
+                              </td>
+                              <td className="min-w-[16rem] max-w-[22rem] py-2 px-3 align-top">
+                                <AdminProductEditableCell
+                                  productId={p.product_id}
+                                  field="name"
+                                  value={p.name ?? ''}
+                                  display={<span className="whitespace-normal">{p.name || '—'}</span>}
+                                  editing={editing}
+                                  saving={saving}
+                                  onStart={startEdit}
+                                  onEditChange={onEditChange}
+                                  onSave={saveEdit}
+                                  onKeyDown={handleKeyDown}
+                                  inputClassName="w-full min-w-[14rem] rounded border border-gray-300 px-2 py-1"
+                                />
+                              </td>
+                              <td className="whitespace-nowrap py-2 px-3 align-top tabular-nums">
+                                <AdminProductEditableCell
+                                  productId={p.product_id}
+                                  field="price"
+                                  value={p.price ?? 0}
+                                  display={
+                                    typeof p.price === 'number'
+                                      ? new Intl.NumberFormat('vi-VN').format(p.price)
+                                      : formatCell(p.price)
+                                  }
+                                  editing={editing}
+                                  saving={saving}
+                                  onStart={startEdit}
+                                  onEditChange={onEditChange}
+                                  onSave={saveEdit}
+                                  onKeyDown={handleKeyDown}
+                                  inputType="number"
+                                />
+                              </td>
+                              <td className="whitespace-nowrap py-2 px-3 align-top">
+                                <AdminProductEditableCell
+                                  productId={p.product_id}
+                                  field="brand_name"
+                                  value={p.brand_name ?? ''}
+                                  display={formatCell(p.brand_name)}
+                                  editing={editing}
+                                  saving={saving}
+                                  onStart={startEdit}
+                                  onEditChange={onEditChange}
+                                  onSave={saveEdit}
+                                  onKeyDown={handleKeyDown}
+                                />
+                              </td>
+                              <td className="whitespace-nowrap py-2 px-3 align-top tabular-nums">
+                                <AdminProductEditableCell
+                                  productId={p.product_id}
+                                  field="available"
+                                  value={p.available ?? 0}
+                                  display={formatCell(p.available)}
+                                  editing={editing}
+                                  saving={saving}
+                                  onStart={startEdit}
+                                  onEditChange={onEditChange}
+                                  onSave={saveEdit}
+                                  onKeyDown={handleKeyDown}
+                                  inputType="number"
+                                  inputClassName="w-20 rounded border border-gray-300 px-2 py-1"
+                                />
+                              </td>
+                              <td className="whitespace-nowrap py-2 px-3 align-top">
+                                <button
+                                  type="button"
+                                  disabled={saving}
+                                  onClick={() => void toggleProductActive(p)}
+                                  className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+                                    p.is_active !== false
+                                      ? 'border-green-200 bg-green-50 text-green-700 hover:bg-green-100'
+                                      : 'border-gray-200 bg-gray-50 text-gray-500 hover:bg-gray-100'
+                                  }`}
+                                  title="Bấm để bật/tắt hiển thị trên shop"
+                                >
+                                  {p.is_active !== false ? 'Hiển thị' : 'Ẩn'}
+                                </button>
+                              </td>
+                              <td className="whitespace-nowrap py-2 px-3 align-top text-xs text-gray-600">
+                                {p.source_stock_status || '—'}
+                              </td>
+                              <td className="whitespace-nowrap py-2 px-3 align-top">
+                                <button
+                                  type="button"
+                                  className={`inline text-left text-xs font-medium underline-offset-2 hover:underline ${
+                                    p.image_localization_status === 'localized'
+                                      ? 'text-violet-700'
+                                      : p.image_localization_status === 'failed'
+                                        ? 'text-red-600'
+                                        : 'text-gray-500'
+                                  }`}
+                                  title={
+                                    (p.image_localization_error
+                                      ? `${p.image_localization_error}\n`
+                                      : '') + 'Bấm để xem báo cáo chi tiết từng ảnh'
+                                  }
+                                  onClick={() => void openImageLocReport(p.product_id)}
+                                >
+                                  {p.image_localization_status || 'pending'}
+                                </button>
+                              </td>
+                            </tr>
                           );
                         })}
                   </tbody>

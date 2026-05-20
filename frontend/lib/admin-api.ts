@@ -305,7 +305,12 @@ export interface AdminProduct {
   brand_name?: string;
   category?: string;
   subcategory?: string;
+  sub_subcategory?: string;
   main_image?: string;
+  /** gallery_images — ảnh thư viện / carousel */
+  images?: string[];
+  /** detail_images — ảnh mô tả chi tiết SP */
+  gallery?: string[];
   available?: number;
   is_active?: boolean;
   deposit_require?: boolean;
