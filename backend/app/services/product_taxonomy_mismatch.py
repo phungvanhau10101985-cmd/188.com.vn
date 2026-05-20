@@ -32,7 +32,8 @@ DOMAIN_OTHER = "other"
 _NAME_DOMAIN_PATTERNS: Tuple[Tuple[str, str], ...] = (
     # Không dùng «oxford»/«derby» đơn lẻ — tránh nhầm áo sơ mi Oxford với giày Oxford.
     (DOMAIN_FOOTWEAR, r"(^|[^a-z0-9])(giay|giay dep|giay oxford|giay derby|sneaker|sandal|boot|loafer|mule|monkstrap|clog)([^a-z0-9]|$)"),
-    (DOMAIN_APPAREL, r"(^|[^a-z0-9])(ao khoac|áo khoác|ao thun|áo thun|ao so mi|áo sơ mi|vay|váy|dam|đầm|quan jean|quần jean|quan short|quần short|ao polo|blazer|cardigan|chan vay|chân váy)([^a-z0-9]|$)"),
+    # Không dùng «dam»/«đầm» đơn lẻ — «màu nâu đậm» → «nau dam» nhầm váy đầm.
+    (DOMAIN_APPAREL, r"(^|[^a-z0-9])(ao khoac|áo khoác|ao thun|áo thun|ao so mi|áo sơ mi|vay|váy|vay dam|dam cong|dam suon|dam body|dam om|quan jean|quần jean|quan short|quần short|ao polo|blazer|cardigan|chan vay|chân váy)([^a-z0-9]|$)"),
     (DOMAIN_BAG, r"(^|[^a-z0-9])(tui xach|túi xách|balo|backpack|vi da|ví da|handbag|clutch|tote)([^a-z0-9]|$)"),
     (DOMAIN_UNDERWEAR, r"(^|[^a-z0-9])(do lot|đồ lót|ao lot|áo lót|quan lot|quần lót|noi y|nội y)([^a-z0-9]|$)"),
     (DOMAIN_WATCH, r"(^|[^a-z0-9])(dong ho|đồng hồ)([^a-z0-9]|$)"),
@@ -95,9 +96,13 @@ def infer_domain_from_product_name(name: str) -> Tuple[Optional[str], Dict[str, 
     best_score = max(scores.values())
     leaders = [d for d, s in scores.items() if s == best_score]
     if len(leaders) != 1:
-        # Cả giày lẫn quần áo trong tên → ưu tiên quần áo nếu có «áo»/«quần»/«váy»/«đầm»
+        # Cùng điểm: ưu tiên giày nếu tên có «giày»; quần áo nếu có áo/quần/váy (không dùng «dam» đơn — trùng «đậm»).
+        if DOMAIN_FOOTWEAR in scores and re.search(
+            r"(^|[^a-z0-9])(giay|giay dep|sneaker|sandal|boot|loafer)([^a-z0-9]|$)", text
+        ):
+            return DOMAIN_FOOTWEAR, scores
         if DOMAIN_APPAREL in scores and re.search(
-            r"(^|[^a-z0-9])(ao |quan |vay|dam|dress|shirt)", text
+            r"(^|[^a-z0-9])(ao |quan |vay|dress|shirt|dam cong|dam suon|vay dam)([^a-z0-9]|$)", text
         ):
             return DOMAIN_APPAREL, scores
         return None, scores
