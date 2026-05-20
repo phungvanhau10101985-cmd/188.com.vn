@@ -2037,6 +2037,9 @@ def color_labels_from_product_row(
     return out
 
 
+_CATEGORY_L3_UNDER_L1_TTL_SEC = 300.0
+
+
 def _build_cat3_ids_under_category_l1(db: Session, l1_name: str) -> Set[int]:
     """Mọi category_id cấp 3 thuộc cây taxonomy cấp 1 (vd Giày dép Nam)."""
     from app.models.category import Category as Cat
@@ -2058,6 +2061,18 @@ def _build_cat3_ids_under_category_l1(db: Session, l1_name: str) -> Set[int]:
         r.id
         for r in db.query(Cat.id).filter(Cat.parent_id.in_(l2_ids), Cat.level == 3).all()
     }
+
+
+def get_cached_cat3_ids_under_category_l1(db: Session, l1_name: str) -> Set[int]:
+    """Cache 5 phút — listing guard gọi mỗi request danh mục Giày dép / Thời trang."""
+    from app.utils.ttl_cache import cache as ttl_cache
+
+    key = f"cat3_under_l1:{l1_name.strip().lower()}"
+    return ttl_cache.get_or_fetch(
+        key,
+        _CATEGORY_L3_UNDER_L1_TTL_SEC,
+        lambda: _build_cat3_ids_under_category_l1(db, l1_name),
+    )
 
 
 def _miscat_subcategory_predicate(fragments: Tuple[str, ...]):
@@ -2093,7 +2108,7 @@ def apply_category_l1_listing_guard(query, db: Session, category: Optional[str])
     cat_s = (category or "").strip()
     if cat_s not in _CATEGORY_L1_LISTING_GUARD_NAMES:
         return query
-    allowed_cat3 = _build_cat3_ids_under_category_l1(db, cat_s)
+    allowed_cat3 = get_cached_cat3_ids_under_category_l1(db, cat_s)
     miscat_frags = _listing_guard_miscat_fragments_for_l1(cat_s)
     miscat = _miscat_subcategory_predicate(miscat_frags) if miscat_frags else None
     ce = category_field_equals_ci(Product.category, cat_s)
@@ -2411,29 +2426,71 @@ def _filter_facet_colors_with_product_results(base_query, colors: List[str]) -> 
     return valid
 
 
+def _style_tag_search_text_from_facet_row(name: Any, row_tail: Tuple[Any, ...]) -> str:
+    """Cùng trường concat như `apply_product_style_tag_filter` (ilike trên chuỗi lower)."""
+    parts = [str(name or "")]
+    for value in row_tail:
+        if value is None:
+            continue
+        if isinstance(value, (dict, list)):
+            try:
+                parts.append(json.dumps(value, ensure_ascii=False))
+            except Exception:
+                parts.append(str(value))
+        else:
+            parts.append(str(value))
+    return " ".join(parts).lower()
+
+
+def _facet_row_matches_style_tag(name: Any, row_tail: Tuple[Any, ...], label: str) -> bool:
+    text = _style_tag_search_text_from_facet_row(name, row_tail)
+    for alias in _STYLE_TAG_ALIASES.get(label, [label]):
+        a = str(alias).strip().lower()
+        if a and a in text:
+            return True
+    return False
+
+
+def _facet_style_tags_from_rows(
+    rows,
+    *,
+    min_count: int = _MIN_STYLE_TAG_FACET_PRODUCTS,
+    allowed_labels: Optional[Set[str]] = None,
+) -> List[str]:
+    """
+    Đếm tag kiểu trên một lần quét hàng facet — khớp ilike của `apply_product_style_tag_filter`,
+    tránh N query COUNT riêng cho từng tag.
+    """
+    counts: Dict[str, int] = {}
+    labels = allowed_labels if allowed_labels is not None else set(_STYLE_TAG_ALIASES.keys())
+    for row in rows:
+        if not row or len(row) < 5:
+            continue
+        name = row[3]
+        tail = row[5:] if len(row) > 5 else ()
+        for label in labels:
+            if _facet_row_matches_style_tag(name, tail, label):
+                counts[label] = counts.get(label, 0) + 1
+    valid = [lab for lab, cnt in counts.items() if cnt >= min_count]
+    return sorted(valid, key=lambda x: (_STYLE_TAG_ORDER.get(x, 999), x.lower()))
+
+
 def _facet_style_tags_with_min_products(
     base_query,
     *,
     min_count: int = _MIN_STYLE_TAG_FACET_PRODUCTS,
     allowed_labels: Optional[Set[str]] = None,
 ) -> List[str]:
-    """
-    Dropdown «Kiểu»: chỉ tag có >= min_count SP khi áp `apply_product_style_tag_filter`
-    trên cùng base query (danh mục + size/màu/giá đang chọn, không gồm style_tag hiện tại).
-    """
-    valid: List[str] = []
-    labels = allowed_labels if allowed_labels is not None else set(_STYLE_TAG_ALIASES.keys())
-    for label in labels:
-        try:
-            cnt = apply_product_style_tag_filter(base_query, label).count()
-            if cnt >= min_count:
-                valid.append(label)
-        except Exception:
-            try:
-                base_query.session.rollback()
-            except Exception:
-                pass
-    return sorted(valid, key=lambda x: (_STYLE_TAG_ORDER.get(x, 999), x.lower()))
+    """Một query lấy cột facet rồi đếm in-memory."""
+    facet_columns = (
+        Product.sizes, Product.colors, Product.color, Product.name, Product.price,
+        Product.style, Product.material, Product.features, Product.product_info,
+        Product.category, Product.subcategory, Product.sub_subcategory
+    )
+    rows = base_query.with_entities(*facet_columns).all()
+    return _facet_style_tags_from_rows(
+        rows, min_count=min_count, allowed_labels=allowed_labels
+    )
 
 
 def _style_facet_base_query(
@@ -2496,12 +2553,14 @@ def build_dependent_product_facets(
         style_allowed = _FASHION_STYLE_TAGS
     else:
         style_allowed = None
-    style_tags = _facet_style_tags_with_min_products(
-        style_query, allowed_labels=style_allowed
+    has_dependent_filters = any(
+        [min_price is not None, max_price is not None, filter_size, filter_color, filter_style_tag]
     )
 
-    if not any([min_price is not None, max_price is not None, filter_size, filter_color, filter_style_tag]):
-        facets = _aggregate_product_facet_rows(query.with_entities(*facet_columns).all())
+    if not has_dependent_filters:
+        rows = query.with_entities(*facet_columns).all()
+        facets = _aggregate_product_facet_rows(rows)
+        style_tags = _facet_style_tags_from_rows(rows, allowed_labels=style_allowed)
         return {
             "sizes": facets["sizes"],
             "colors": facets["colors"],
@@ -2509,6 +2568,9 @@ def build_dependent_product_facets(
             "price_min": facets["price_min"],
             "price_max": facets["price_max"],
         }
+
+    style_rows = style_query.with_entities(*facet_columns).all()
+    style_tags = _facet_style_tags_from_rows(style_rows, allowed_labels=style_allowed)
 
     size_query = query
     if filter_color:
