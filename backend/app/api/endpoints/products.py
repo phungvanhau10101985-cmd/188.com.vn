@@ -768,6 +768,7 @@ def read_product(
     return _product_to_response(db, db_product)
 
 
+@router.put("/{product_id}", response_model=Product)
 def update_product(
     product_id: str,
     product_update: ProductUpdate,
