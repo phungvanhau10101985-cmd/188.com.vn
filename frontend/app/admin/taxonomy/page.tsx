@@ -528,6 +528,7 @@ export default function TaxonomyAdminPage() {
     async (
       workItems: MismatchReclassifyWorkItem[],
       dryRun: boolean,
+      onStep?: (item: MismatchReclassifyWorkItem, stepOk: number, stepFailed: number) => void,
     ): Promise<{ ok: number; failed: number; processed: number }> => {
       const total = workItems.length;
       let ok = 0;
@@ -574,8 +575,10 @@ export default function TaxonomyAdminPage() {
           });
           ok += row.ok;
           failed += row.failed;
+          onStep?.(item, row.ok, row.failed);
         } catch {
           failed += 1;
+          onStep?.(item, 0, 1);
         }
 
         setMismatchReclassifyProgress({
@@ -729,13 +732,14 @@ export default function TaxonomyAdminPage() {
           return;
         }
 
-        const summary = await runReclassifyWithProgress(work, dryRun);
         const byCat = new Map<string, { ok: number; failed: number; processed: number }>();
-        for (const item of work) {
+        const summary = await runReclassifyWithProgress(work, dryRun, (item, stepOk, stepFailed) => {
           const row = byCat.get(item.category_l1) || { ok: 0, failed: 0, processed: 0 };
           row.processed += 1;
+          row.ok += stepOk;
+          row.failed += stepFailed;
           byCat.set(item.category_l1, row);
-        }
+        });
         setMismatchReclassifyAllResult({
           ok: summary.ok,
           failed: summary.failed,
