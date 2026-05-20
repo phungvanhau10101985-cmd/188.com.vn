@@ -5,6 +5,7 @@ import {
   getCategoryByPathForSeo,
   getCategorySeoData,
   getProductsByCategory,
+  getCategoryCatalogTilesForPage,
   getCategoryTreeForLayout,
   type CategoryListingFilters,
 } from '@/lib/category-seo';
@@ -146,10 +147,14 @@ export default async function CategoryPage({ params, searchParams }: Props) {
 
   const listingQueryString = serializeSearchParamsForListing(resolvedSearchParams);
 
-  // Trang danh mục tổng (không có slug): mobile = header cam + list; desktop = list + về trang chủ
+  // Trang danh mục tổng: SSR lưới catalog-tiles (cache 120s) — tránh chờ cây 3 cấp + fetch client lần 2.
   if (!level1) {
-    const categoryTree = await getCategoryTreeForLayout();
-    return <CategoryListPage categoryTree={categoryTree} />;
+    const initialTiles = await getCategoryCatalogTilesForPage(120);
+    const categoryTree =
+      initialTiles.length > 0 ? [] : await getCategoryTreeForLayout();
+    return (
+      <CategoryListPage initialTiles={initialTiles} categoryTree={categoryTree} />
+    );
   }
 
   // Lấy thông tin danh mục (không còn redirect canonical, SEO tất cả trang danh mục)

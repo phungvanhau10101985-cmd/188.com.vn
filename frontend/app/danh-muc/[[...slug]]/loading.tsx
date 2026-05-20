@@ -1,34 +1,17 @@
 /**
- * Hiển thị ngay khi chuyển route /danh-muc/... (perceived performance).
- * Không thay metadata/JSON-LD: chúng vẫn do layout + generateMetadata SSR.
+ * Hiển thị ngay khi chuyển route /danh-muc (perceived performance).
  */
 export default function DanhMucLoading() {
   return (
-    <main
-      className="max-w-7xl mx-auto px-4 pt-4 pb-6 md:py-6"
+    <div
+      className="min-h-screen w-full bg-white pb-16 md:pb-8"
       aria-busy="true"
       aria-label="Đang tải danh mục"
     >
-      <div className="flex flex-wrap gap-2 mb-4">
-        <div className="h-4 w-14 rounded bg-gray-200 animate-pulse" />
-        <div className="h-4 w-4 rounded bg-gray-100" />
-        <div className="h-4 w-24 rounded bg-gray-200 animate-pulse" />
-        <div className="h-4 w-4 rounded bg-gray-100" />
-        <div className="h-4 w-32 rounded bg-gray-200 animate-pulse" />
+      <h1 className="sr-only">Tất cả danh mục</h1>
+      <div className="relative left-1/2 h-[min(72vh,640px)] w-screen max-w-[100vw] -translate-x-1/2 overflow-hidden bg-gradient-to-br from-orange-100 to-amber-50 md:left-0 md:h-[min(78vh,720px)] md:w-full md:max-w-7xl md:translate-x-0 md:mx-auto">
+        <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-orange-200/40 via-orange-100/30 to-amber-100/40" />
       </div>
-      <div className="h-9 max-w-2xl rounded-lg bg-gray-200 animate-pulse mb-4" />
-      <div className="h-6 w-48 rounded bg-gray-100 animate-pulse mb-6" />
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4">
-        {Array.from({ length: 12 }).map((_, i) => (
-          <div key={i} className="rounded-xl border border-gray-100 overflow-hidden bg-white shadow-sm">
-            <div className="aspect-[3/4] bg-gray-100 animate-pulse" />
-            <div className="p-2 space-y-2">
-              <div className="h-3 w-full bg-gray-100 rounded animate-pulse" />
-              <div className="h-3 w-2/3 bg-gray-100 rounded animate-pulse" />
-            </div>
-          </div>
-        ))}
-      </div>
-    </main>
+    </div>
   );
 }

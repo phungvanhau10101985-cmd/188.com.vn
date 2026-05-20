@@ -207,6 +207,98 @@ def _sample_image_for_branch(
     return _first_unused(popular_rows)
 
 
+def _bulk_branch_images_l2(
+    db: Session,
+    pairs: List[Tuple[str, str]],
+    exclude_urls: Set[str],
+) -> Dict[Tuple[str, str], str]:
+    """Một query quét SP có ảnh — gán ảnh đại diện cho nhiều nhánh L2 (thay vì N query)."""
+    if not pairs:
+        return {}
+    wanted = {(c.strip(), s.strip()) for c, s in pairs if c and s}
+    if not wanted:
+        return {}
+    cats = list({c for c, _ in wanted})
+    active = Product.is_active.is_(True)  # noqa: E712
+    rows = (
+        db.query(Product.category, Product.subcategory, Product.main_image)
+        .filter(
+            active,
+            Product.category.in_(cats),
+            Product.subcategory.isnot(None),
+            Product.subcategory != "",
+            Product.main_image.isnot(None),
+            Product.main_image != "",
+        )
+        .order_by(Product.purchases.desc().nullslast(), Product.id)
+        .limit(4000)
+        .all()
+    )
+    out: Dict[Tuple[str, str], str] = {}
+    for r in rows:
+        key = ((r.category or "").strip(), (r.subcategory or "").strip())
+        if key not in wanted or key in out:
+            continue
+        url = (r.main_image or "").strip()
+        if url and url not in exclude_urls:
+            out[key] = url
+            exclude_urls.add(url)
+    return out
+
+
+def _bulk_branch_images_l3(
+    db: Session,
+    triples: List[Tuple[str, str, str]],
+    exclude_urls: Set[str],
+) -> Dict[Tuple[str, str, str], str]:
+    if not triples:
+        return {}
+    wanted = {
+        (c.strip(), s.strip(), t.strip())
+        for c, s, t in triples
+        if c and s and t
+    }
+    if not wanted:
+        return {}
+    cats = list({c for c, _, _ in wanted})
+    active = Product.is_active.is_(True)  # noqa: E712
+    rows = (
+        db.query(
+            Product.category,
+            Product.subcategory,
+            Product.sub_subcategory,
+            Product.main_image,
+        )
+        .filter(
+            active,
+            Product.category.in_(cats),
+            Product.subcategory.isnot(None),
+            Product.subcategory != "",
+            Product.sub_subcategory.isnot(None),
+            Product.sub_subcategory != "",
+            Product.main_image.isnot(None),
+            Product.main_image != "",
+        )
+        .order_by(Product.purchases.desc().nullslast(), Product.id)
+        .limit(6000)
+        .all()
+    )
+    out: Dict[Tuple[str, str, str], str] = {}
+    for r in rows:
+        key = (
+            (r.category or "").strip(),
+            (r.subcategory or "").strip(),
+            (r.sub_subcategory or "").strip(),
+        )
+        if key not in wanted or key in out:
+            continue
+        url = (r.main_image or "").strip()
+        if url and url not in exclude_urls:
+            out[key] = url
+            exclude_urls.add(url)
+    return out
+
+
 def _ctr_hint(name: str, count: int, index: int) -> str:
     tpl = _CTR_HINTS[index % len(_CTR_HINTS)]
     if "{count}" in tpl:
@@ -571,17 +663,39 @@ def get_category_catalog_tiles(
 
     picked = unique[:cap]
     used_images: Set[str] = set()
+    l2_pairs: List[Tuple[str, str]] = []
+    l3_triples: List[Tuple[str, str, str]] = []
+    for c in picked:
+        cat = (c.get("category") or "").strip()
+        sub = (c.get("subcategory") or "").strip()
+        subsub = (c.get("sub_subcategory") or "").strip()
+        if int(c["level"]) == 2 and cat and sub:
+            l2_pairs.append((cat, sub))
+        elif int(c["level"]) == 3 and cat and sub and subsub:
+            l3_triples.append((cat, sub, subsub))
+    img_l2 = _bulk_branch_images_l2(db, l2_pairs, used_images)
+    img_l3 = _bulk_branch_images_l3(db, l3_triples, used_images)
+
     tiles: List[Dict[str, Any]] = []
     for i, c in enumerate(picked):
-        img = _sample_image_for_branch(
-            db,
-            category=c["category"],
-            subcategory=c.get("subcategory"),
-            sub_subcategory=c.get("sub_subcategory"),
-            level=int(c["level"]),
-            viewed_product_ids=[],
-            exclude_urls=used_images,
-        )
+        cat = (c.get("category") or "").strip()
+        sub = (c.get("subcategory") or "").strip()
+        subsub = (c.get("sub_subcategory") or "").strip()
+        img: Optional[str] = None
+        if int(c["level"]) == 2 and cat and sub:
+            img = img_l2.get((cat, sub))
+        elif int(c["level"]) == 3 and cat and sub and subsub:
+            img = img_l3.get((cat, sub, subsub))
+        if not img:
+            img = _sample_image_for_branch(
+                db,
+                category=cat,
+                subcategory=sub or None,
+                sub_subcategory=subsub or None,
+                level=int(c["level"]),
+                viewed_product_ids=[],
+                exclude_urls=used_images,
+            )
         if img:
             used_images.add(img)
         tiles.append(

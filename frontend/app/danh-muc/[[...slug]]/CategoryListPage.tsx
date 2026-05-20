@@ -14,11 +14,11 @@ import type {
 
 interface CategoryListPageProps {
   categoryTree: CategoryLevel1[];
+  /** SSR từ catalog-tiles — hiển thị ngay, không chờ fetch client. */
+  initialTiles?: HeroCategoryTile[];
 }
 
 const EXTRA_LINKS = [{ label: 'SALE SỐC', href: '/deals' }];
-
-const CATALOG_TILE_LIMIT = 120;
 
 /** Dự phòng khi API catalog-tiles lỗi — dùng cây SSR (không có ảnh / số mặt). */
 function tilesFromCategoryTree(tree: CategoryLevel1[]): HeroCategoryTile[] {
@@ -59,22 +59,37 @@ function tilesFromCategoryTree(tree: CategoryLevel1[]): HeroCategoryTile[] {
   return out;
 }
 
-export default function CategoryListPage({ categoryTree }: CategoryListPageProps) {
-  const [tiles, setTiles] = useState<HeroCategoryTile[]>([]);
+export default function CategoryListPage({
+  categoryTree,
+  initialTiles = [],
+}: CategoryListPageProps) {
+  const hasInitialTiles = initialTiles.length > 0;
+
+  const [tiles, setTiles] = useState<HeroCategoryTile[]>(initialTiles);
   const [genderSuffix, setGenderSuffix] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!hasInitialTiles);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+
+    const loadGender = () =>
+      apiClient.getInferredCategoryGender(8).then((gender) => {
+        if (!cancelled) setGenderSuffix(gender.gender_suffix);
+      });
+
+    if (hasInitialTiles && reloadKey === 0) {
+      void loadGender().catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }
+
     setLoading(true);
     setError(null);
 
-    void Promise.all([
-      apiClient.getCategoryCatalogTiles(CATALOG_TILE_LIMIT),
-      apiClient.getInferredCategoryGender(8),
-    ])
+    void Promise.all([apiClient.getCategoryCatalogTiles(120), apiClient.getInferredCategoryGender(8)])
       .then(([catalog, gender]) => {
         if (cancelled) return;
         const apiTiles = catalog.tiles;
@@ -83,7 +98,7 @@ export default function CategoryListPage({ categoryTree }: CategoryListPageProps
       })
       .catch(() => {
         if (!cancelled) {
-          setTiles([]);
+          setTiles(tilesFromCategoryTree(categoryTree));
           setError('Không tải được danh mục. Vui lòng thử lại.');
         }
       })
@@ -94,7 +109,7 @@ export default function CategoryListPage({ categoryTree }: CategoryListPageProps
     return () => {
       cancelled = true;
     };
-  }, [reloadKey, categoryTree]);
+  }, [reloadKey, categoryTree, hasInitialTiles]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -180,6 +195,6 @@ export default function CategoryListPage({ categoryTree }: CategoryListPageProps
           ← Về trang chủ
         </Link>
       </div>
-      </div>
+    </div>
   );
 }

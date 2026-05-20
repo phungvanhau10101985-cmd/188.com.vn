@@ -99,9 +99,10 @@ export default function PersonalizedHeroBanner({
       aria-label="Danh mục gợi ý"
     >
       <div
-        className="relative h-48 sm:h-52 md:h-72 overflow-hidden bg-gradient-to-br from-[#ea580c] via-orange-500 to-amber-600 text-white p-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]"
+        className="relative flex h-52 flex-col overflow-hidden bg-gradient-to-br from-[#ea580c] via-orange-500 to-amber-600 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] sm:h-56 md:h-72"
         role="region"
       >
+        <div className="relative min-h-0 flex-1">
         <CategoryCatalogMarquee
           tiles={heroCategories.tiles}
           maxTiles={HERO_CATEGORY_TILE_COUNT}
@@ -110,12 +111,30 @@ export default function PersonalizedHeroBanner({
           desktopCols={5}
           rowClassName="hero-category-grid-row flex h-[88px] sm:h-[96px] md:h-[115px] w-full shrink-0"
         />
-        <Link
-          href="/danh-muc"
-          className="absolute bottom-2.5 left-1/2 z-30 flex min-h-[40px] -translate-x-1/2 items-center justify-center whitespace-nowrap rounded-full bg-white px-4 py-2 text-xs font-semibold text-[#c2410c] shadow-md active:scale-[0.98] md:bottom-3 md:min-h-[44px] md:px-5 md:text-sm"
-        >
-          Xem tất cả danh mục
-        </Link>
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-10 bg-gradient-to-t from-black/35 to-transparent"
+          aria-hidden
+        />
+        </div>
+        <div className="relative z-30 flex shrink-0 items-center justify-center border-t border-white/15 bg-black/15 px-3 py-2 backdrop-blur-sm md:py-2.5">
+          <Link
+            href="/danh-muc"
+            prefetch
+            className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-full border border-white/40 bg-white/95 px-3.5 py-1.5 text-[11px] font-medium leading-none text-[#9a3412] shadow-sm ring-1 ring-black/5 transition-[background-color,transform,box-shadow] hover:bg-white hover:shadow active:scale-[0.98] md:min-h-[38px] md:gap-2 md:px-4 md:text-xs"
+          >
+            <span>Xem tất cả danh mục</span>
+            <svg
+              className="h-3.5 w-3.5 shrink-0 opacity-70"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2.5}
+              aria-hidden
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </Link>
+        </div>
       </div>
     </section>
   );

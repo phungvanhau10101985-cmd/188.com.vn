@@ -3,7 +3,7 @@
  * Và lấy cây danh mục 3 cấp cho thanh Navigation (tránh phụ thuộc fetch client/CORS).
  */
 
-import type { CategoryLevel1 } from "@/types/api";
+import type { CategoryLevel1, HeroCategoryTile } from "@/types/api";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001/api/v1";
@@ -80,6 +80,27 @@ export async function getCategorySeoStatus(
       seo_indexable: true,
       canonical_url: null,
     };
+  }
+}
+
+/** Lưới L2/L3 + ảnh cho trang /danh-muc — cache cùng TTL với API backend (120s). */
+export async function getCategoryCatalogTilesForPage(
+  limit = 120,
+): Promise<HeroCategoryTile[]> {
+  try {
+    const url = `${API_BASE}/categories/from-products/catalog-tiles?limit=${limit}`;
+    const res = await fetch(url, {
+      next: { revalidate: REVALIDATE_CATEGORY, tags: [CACHE_TAG_CATEGORY_SEO] },
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(
+        Math.max(LAYOUT_FETCH_TIMEOUT_MS, 20_000),
+      ),
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { tiles?: HeroCategoryTile[] };
+    return Array.isArray(data?.tiles) ? data.tiles : [];
+  } catch {
+    return [];
   }
 }
 
