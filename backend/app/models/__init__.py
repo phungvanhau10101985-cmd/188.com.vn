@@ -141,6 +141,23 @@ try:
 except ImportError:
     print("[INFO] LoyaltyTier model not available")
 
+# 10b. Affiliate / Wallet
+try:
+    from app.models.affiliate import (
+        AffiliateApplication,
+        AffiliateBankAccountOtp,
+        AffiliateCommission,
+        AffiliateProfile,
+        AffiliateSettings,
+        UserBankAccount,
+        UserWallet,
+        WalletTransaction,
+        WalletWithdrawal,
+    )
+    print("[OK] Affiliate/Wallet models loaded")
+except ImportError:
+    print("[INFO] Affiliate/Wallet models not available")
+
 # 11. Notification
 try:
     from app.models.notification import Notification
@@ -197,6 +214,15 @@ __all__ = [
     "SearchMappingType",
     "SearchLog",
     "LoyaltyTier",
+    "AffiliateSettings",
+    "AffiliateApplication",
+    "AffiliateBankAccountOtp",
+    "AffiliateProfile",
+    "UserWallet",
+    "WalletTransaction",
+    "AffiliateCommission",
+    "UserBankAccount",
+    "WalletWithdrawal",
     "Notification",
 ]
 

@@ -381,6 +381,15 @@ class Settings:
         self.CATALOG_SALE_START: str = os.getenv("CATALOG_SALE_START", "").strip()
         self.CATALOG_SALE_END: str = os.getenv("CATALOG_SALE_END", "").strip()
 
+        # Affiliate / ví thưởng (% trên giá SP sau giảm giá, không tính phí ship)
+        _aff_pct = os.getenv("AFFILIATE_COMMISSION_PERCENT", "10").strip()
+        try:
+            self.AFFILIATE_COMMISSION_PERCENT: float = float(_aff_pct) if _aff_pct else 10.0
+        except ValueError:
+            self.AFFILIATE_COMMISSION_PERCENT = 10.0
+        self.AFFILIATE_MIN_WITHDRAWAL: int = int(os.getenv("AFFILIATE_MIN_WITHDRAWAL", "100000"))
+        self.AFFILIATE_REF_COOKIE_DAYS: int = int(os.getenv("AFFILIATE_REF_COOKIE_DAYS", "30"))
+
         self.EMAIL_TRUSTED_DEVICE_DAYS: int = int(os.getenv("EMAIL_TRUSTED_DEVICE_DAYS", "30"))
         self.EMAIL_AUTH_RL_EMAIL_PER_MINUTE: int = int(os.getenv("EMAIL_AUTH_RL_EMAIL_PER_MINUTE", "5"))
         self.EMAIL_AUTH_RL_IP_PER_MINUTE: int = int(os.getenv("EMAIL_AUTH_RL_IP_PER_MINUTE", "40"))

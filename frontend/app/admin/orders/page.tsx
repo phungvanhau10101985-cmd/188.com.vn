@@ -285,6 +285,19 @@ export default function AdminOrdersPage() {
     }
   };
 
+  const handleRefundDeposit = async (order: AdminOrder) => {
+    try {
+      await adminOrderAPI.refundDeposit(order.id, { refund_note: 'Khách yêu cầu hoàn cọc' });
+      showToast('ok', 'Đã duyệt hoàn cọc và thu hồi hoa hồng affiliate');
+      setDetailOpen(false);
+      setSelectedOrder(null);
+      fetchOrders();
+      fetchStats();
+    } catch (err: any) {
+      showToast('err', err?.message || 'Lỗi duyệt hoàn cọc');
+    }
+  };
+
   const handleConsultationToggle = async (order: AdminOrder, checked: boolean) => {
     setConsultSavingId(order.id);
     try {
@@ -713,6 +726,11 @@ export default function AdminOrdersPage() {
                 {!['cancelled', 'completed'].includes(selectedOrder.status) && (
                   <button onClick={() => handleUpdateStatus(selectedOrder.id, 'cancelled')} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
                     Hủy đơn hàng
+                  </button>
+                )}
+                {parseMoney(selectedOrder.deposit_paid) > 0 && !['cancelled', 'completed'].includes(selectedOrder.status) && selectedOrder.payment_status !== 'refunded' && (
+                  <button onClick={() => handleRefundDeposit(selectedOrder)} className="px-4 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100">
+                    Duyệt hoàn cọc
                   </button>
                 )}
                 <button onClick={() => setDetailOpen(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">

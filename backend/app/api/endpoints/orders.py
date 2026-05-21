@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.services.email_service import send_order_email, send_deposit_confirmed_email_task
 from app.services import sepay as sepay_svc
 from app.services.birthday_discount import get_birthday_discount_for_user
+from app.services import affiliate_wallet as affiliate_svc
 
 
 def _dec(v) -> Decimal:
@@ -162,6 +163,12 @@ def create_order(
         
         # 3. Calculate shipping fee (simplified)
         shipping_fee = Decimal('30000') if total_amount_after_discount < Decimal('500000') else Decimal('0')
+        order_total_before_wallet = total_amount_after_discount + shipping_fee
+
+        referrer_user_id = None
+        if current_user is not None:
+            buyer_profile = affiliate_svc.get_or_create_profile(db, current_user.id)
+            referrer_user_id = buyer_profile.referred_by_user_id
         
         # 4. Create order
         order = crud.order.create_order_with_deposit(
@@ -177,18 +184,38 @@ def create_order(
             subtotal=total_amount,
             discount_amount=total_discount_amount,
             shipping_fee=shipping_fee,
-            total_amount=total_amount_after_discount + shipping_fee,
+            total_amount=order_total_before_wallet,
             admin_notes="\n".join(discount_notes),
             requires_deposit=requires_deposit,
             deposit_type=deposit_type.value if deposit_type else None,
             deposit_percentage=deposit_percentage,
             deposit_amount=deposit_amount,
-            remaining_amount=(total_amount_after_discount + shipping_fee) - deposit_amount,
-            items=items
+            remaining_amount=order_total_before_wallet - deposit_amount,
+            items=items,
+            referrer_user_id=referrer_user_id,
         )
+
+        wallet_note = ""
+        if current_user is not None and order_data.wallet_amount and Decimal(str(order_data.wallet_amount)) > 0:
+            used = affiliate_svc.apply_wallet_to_order(
+                db,
+                current_user.id,
+                order,
+                Decimal(str(order_data.wallet_amount)),
+            )
+            if used > 0:
+                wallet_note = f"Thanh toán ví: -{used:,.0f} đ"
+                discount_notes.append(wallet_note)
+                order.admin_notes = "\n".join(discount_notes)
+
+        if current_user is not None and not requires_deposit:
+            affiliate_svc.create_pending_commission_for_order(db, order)
+
+        db.commit()
+        db.refresh(order)
         
         # 5. If deposit required, set status to WAITING_DEPOSIT (use enum, not .value)
-        if requires_deposit:
+        if requires_deposit and _dec(order.total_amount) > 0:
             order.status = OrderStatusEnum.WAITING_DEPOSIT
             db.commit()
             db.refresh(order)
@@ -549,6 +576,7 @@ def admin_confirm_deposit(
 
         # Update remaining amount
         order.remaining_amount = order.total_amount - order.deposit_paid
+        affiliate_svc.grant_deposit_commission_for_order(db, order)
     else:
         # Payment rejected
         order.status = OrderStatusEnum.WAITING_DEPOSIT
@@ -606,11 +634,51 @@ def admin_confirm_deposit_manual(
     else:
         order.payment_status = PaymentStatusEnum.DEPOSIT_PAID
         order.status = OrderStatusEnum.DEPOSIT_PAID
+    affiliate_svc.grant_deposit_commission_for_order(db, order)
     if body.get("confirmation_note"):
         order.admin_notes = (order.admin_notes or "") + "\n[Xác nhận cọc thủ công] " + str(body.get("confirmation_note"))
     db.commit()
     db.refresh(order)
     background_tasks.add_task(send_deposit_confirmed_email_task, order_id)
+    return order
+
+
+@router.post("/admin/{order_id}/refund-deposit", response_model=schemas.AdminOrderResponse)
+def admin_refund_deposit(
+    order_id: int,
+    body: dict = Body(default={}),
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """
+    Admin: duyệt trả cọc cho đơn đã đặt cọc.
+    Khi hoàn cọc, hoa hồng affiliate của đơn sẽ bị thu hồi.
+    Body: { "refund_note": "..." } (tùy chọn)
+    """
+    order = crud.order.get_order(db, order_id=order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if _dec(order.deposit_paid) <= 0:
+        raise HTTPException(status_code=400, detail="Đơn chưa ghi nhận tiền cọc")
+
+    note = (str(body.get("refund_note") or body.get("reason") or "").strip() or "Đã duyệt trả cọc")
+    for payment in crud.payment.get_order_payments(db, order_id=order.id):
+        payment_type = (payment.payment_type or "").lower()
+        if "deposit" in payment_type:
+            payment.payment_status = PaymentStatusEnum.REFUNDED
+            payment.confirmation_note = note
+
+    order.payment_status = PaymentStatusEnum.REFUNDED
+    order.status = OrderStatusEnum.CANCELLED
+    order.cancelled_reason = note
+    order.cancelled_at = datetime.now()
+    order.processed_by = current_admin.id
+    order.updated_at = datetime.now()
+    order.admin_notes = ((order.admin_notes or "") + f"\n[Hoàn cọc] {note}").strip()
+    affiliate_svc.handle_order_payment_status_change(db, order, PaymentStatusEnum.REFUNDED)
+
+    db.commit()
+    db.refresh(order)
     return order
 
 

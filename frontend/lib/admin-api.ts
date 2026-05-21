@@ -1887,7 +1887,7 @@ export const adminOrderAPI = {
   getStats: (period: 'today' | 'week' | 'month' | 'year' | 'all' = 'today') =>
     fetchAdmin<AdminOrderStats>(`/orders/admin/stats?period=${period}`),
 
-  updateOrder: (orderId: number, data: { status?: string; staff_consultation_contacted?: boolean }) =>
+  updateOrder: (orderId: number, data: { status?: string; payment_status?: string; staff_consultation_contacted?: boolean }) =>
     fetchAdmin<AdminOrder>(`/orders/admin/${orderId}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -1905,6 +1905,12 @@ export const adminOrderAPI = {
   /** Xác nhận cọc khi chưa có giao dịch trong hệ thống (khách đã chuyển khoản) */
   confirmDepositManual: (orderId: number, data?: { confirmation_note?: string }) =>
     fetchAdmin<AdminOrder>(`/orders/admin/${orderId}/confirm-deposit-manual`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    }),
+
+  refundDeposit: (orderId: number, data?: { refund_note?: string }) =>
+    fetchAdmin<AdminOrder>(`/orders/admin/${orderId}/refund-deposit`, {
       method: 'POST',
       body: JSON.stringify(data || {}),
     }),
@@ -2404,6 +2410,94 @@ export const adminLoyaltyAPI = {
     fetchAdmin<AdminLoyaltyTier>(`/loyalty/tiers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteTier: (id: number) =>
     fetchAdmin<void>(`/loyalty/tiers/${id}`, { method: 'DELETE' }),
+};
+
+export interface AdminWalletWithdrawal {
+  id: number;
+  user_id: number;
+  amount: number;
+  bank_name: string;
+  bank_account: string;
+  account_holder: string;
+  status: string;
+  admin_note?: string | null;
+  created_at: string;
+  processed_at?: string | null;
+}
+
+export interface AdminAffiliateCommission {
+  id: number;
+  referrer_user_id: number;
+  buyer_user_id?: number | null;
+  order_id: number;
+  order_base_amount: number;
+  commission_percent: number;
+  commission_amount: number;
+  status: string;
+  created_at: string;
+  confirmed_at?: string | null;
+}
+
+export interface AdminAffiliateSettings {
+  id: number;
+  enabled: boolean;
+  commission_percent: number;
+  min_withdrawal: number;
+  ref_cookie_days: number;
+  commission_policy?: string | null;
+  updated_by?: number | null;
+  updated_at?: string | null;
+}
+
+export interface AdminAffiliateApplication {
+  id: number;
+  user_id: number;
+  status: string;
+  social_links: string[];
+  note?: string | null;
+  admin_note?: string | null;
+  reviewed_by?: number | null;
+  submitted_at: string;
+  reviewed_at?: string | null;
+  updated_at?: string | null;
+}
+
+export const adminAffiliateAPI = {
+  getSettings: () => fetchAdmin<AdminAffiliateSettings>('/affiliate/admin/settings'),
+  updateSettings: (data: Omit<AdminAffiliateSettings, 'id' | 'updated_by' | 'updated_at'>) =>
+    fetchAdmin<AdminAffiliateSettings>('/affiliate/admin/settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  listCommissions: (status?: string) => {
+    const q = status ? `?status=${encodeURIComponent(status)}` : '';
+    return fetchAdmin<AdminAffiliateCommission[]>(`/affiliate/admin/commissions${q}`);
+  },
+  listApplications: (status?: string) => {
+    const q = status ? `?status=${encodeURIComponent(status)}` : '';
+    return fetchAdmin<AdminAffiliateApplication[]>(`/affiliate/admin/applications${q}`);
+  },
+  approveApplication: (id: number, admin_note?: string) =>
+    fetchAdmin<AdminAffiliateApplication>(`/affiliate/admin/applications/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ admin_note: admin_note ?? null }),
+    }),
+  rejectApplication: (id: number, admin_note?: string) =>
+    fetchAdmin<AdminAffiliateApplication>(`/affiliate/admin/applications/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ admin_note: admin_note ?? null }),
+    }),
+  listWithdrawals: (status?: string) => {
+    const q = status ? `?status=${encodeURIComponent(status)}` : '';
+    return fetchAdmin<AdminWalletWithdrawal[]>(`/affiliate/admin/withdrawals${q}`);
+  },
+  approveWithdrawal: (id: number) =>
+    fetchAdmin<AdminWalletWithdrawal>(`/affiliate/admin/withdrawals/${id}/approve`, { method: 'POST' }),
+  rejectWithdrawal: (id: number, admin_note?: string) =>
+    fetchAdmin<AdminWalletWithdrawal>(`/affiliate/admin/withdrawals/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ admin_note: admin_note ?? null }),
+    }),
 };
 
 export interface AdminLoginResponse {

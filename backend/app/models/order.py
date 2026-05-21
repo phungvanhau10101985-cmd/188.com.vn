@@ -55,7 +55,9 @@ class Order(Base):
     subtotal = Column(Numeric(12, 2), default=0)
     shipping_fee = Column(Numeric(12, 2), default=0)
     discount_amount = Column(Numeric(12, 2), default=0)
+    wallet_amount_used = Column(Numeric(12, 2), default=0)
     total_amount = Column(Numeric(12, 2), default=0)
+    referrer_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     
     # Thông tin đặt cọc (Enum dùng value trong DB: 'percent_30', 'waiting_deposit', ...)
     _enum_values = lambda x: [e.value for e in x]

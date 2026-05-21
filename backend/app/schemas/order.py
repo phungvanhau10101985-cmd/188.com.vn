@@ -78,6 +78,7 @@ class OrderCreate(BaseModel):
     
     # Deposit information (calculated on backend)
     deposit_type: Optional[DepositType] = None
+    wallet_amount: Optional[Decimal] = Field(default=None, ge=0, description="Số tiền trả bằng ví affiliate")
 
 class OrderUpdate(BaseModel):
     """Schema for updating order (admin only)"""
@@ -104,6 +105,7 @@ class OrderResponse(BaseModel):
     subtotal: Decimal
     shipping_fee: Decimal
     discount_amount: Decimal
+    wallet_amount_used: Decimal = Decimal('0')
     total_amount: Decimal
     
     # Deposit information

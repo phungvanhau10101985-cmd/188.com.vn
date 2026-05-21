@@ -10,7 +10,7 @@ interface Toast {
   title: string;
   description?: string;
   variant: ToastVariant;
-  durationMs: number;
+  durationMs?: number;
 }
 
 interface ToastContextValue {

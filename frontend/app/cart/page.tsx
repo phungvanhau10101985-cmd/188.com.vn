@@ -72,6 +72,8 @@ export default function CartPage() {
 
   const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(new Set());
   const prevCartLineIdsRef = useRef<Set<number>>(new Set());
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [useWallet, setUseWallet] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -79,6 +81,10 @@ export default function CartPage() {
       return;
     }
     apiClient.getAddresses().then(setAddresses).catch(() => setAddresses([]));
+    apiClient
+      .getAffiliateMe()
+      .then((me) => setWalletBalance(Number(me.balance) || 0))
+      .catch(() => setWalletBalance(0));
   }, [isAuthenticated, router]);
 
   useEffect(() => {
@@ -149,6 +155,10 @@ export default function CartPage() {
   const selectedLoyaltyDiscount =
     loyaltyPercent > 0 ? (selectedSubtotalAfterBirthday * loyaltyPercent) / 100 : 0;
   const selectedFinalPrice = Math.max(0, selectedSubtotalAfterBirthday - selectedLoyaltyDiscount);
+  const walletUsable = useWallet
+    ? Math.min(walletBalance, selectedCartItems.length > 0 ? selectedFinalPrice : 0)
+    : 0;
+  const payableAfterWallet = Math.max(0, selectedFinalPrice - walletUsable);
 
   const allLineIds = useMemo(() => cartItems.map((i) => i.id), [cartItems]);
   const allSelected =
@@ -336,6 +346,7 @@ export default function CartPage() {
         payment_method: depositRequiredForSelected ? 'bank_transfer' : 'cod',
         shipping_method: 'standard',
         deposit_type: depositType,
+        wallet_amount: useWallet && walletUsable > 0 ? walletUsable : undefined,
         items: linesToOrder.map((item) => ({
           product_id: item.product_id,
           quantity: item.quantity,
@@ -729,14 +740,38 @@ export default function CartPage() {
               </div>
             ) : null}
 
+            {walletBalance > 0 ? (
+              <label className="flex items-start gap-2 mb-3 rounded-lg border border-orange-100 bg-orange-50/80 px-3 py-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useWallet}
+                  onChange={(e) => setUseWallet(e.target.checked)}
+                  className="mt-1"
+                />
+                <span>
+                  Dùng ví affiliate ({new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(walletBalance)})
+                  {useWallet && walletUsable > 0 ? (
+                    <span className="block text-green-700 font-medium">
+                      Trừ {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(walletUsable)}
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+            ) : null}
+
             <div className="flex items-center justify-between">
               <span className="text-sm md:text-base font-semibold text-gray-900">Tổng thanh toán</span>
               <span className="text-lg md:text-xl font-bold text-[#ea580c]">
                 {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(
-                  selectedCartItems.length > 0 ? selectedFinalPrice : 0
+                  selectedCartItems.length > 0 ? payableAfterWallet : 0
                 )}
               </span>
             </div>
+            {useWallet && walletUsable > 0 ? (
+              <p className="text-xs text-gray-500 mt-1 text-right line-through">
+                {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(selectedFinalPrice)}
+              </p>
+            ) : null}
             <div className="mt-4 flex flex-col md:flex-row gap-3">
               <Link
                 href="/"

@@ -209,6 +209,7 @@ def load_api_routes():
         ("product_questions", "/product-questions", "product-questions"),
         ("product_reviews", "/product-reviews", "product-reviews"),
         ("loyalty", "/loyalty", "loyalty"),
+        ("affiliate", "/affiliate", "affiliate"),
         ("notifications", "/notifications", "notifications"),
         ("push", "/push", "push"),
     ]

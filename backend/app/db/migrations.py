@@ -21,6 +21,17 @@ from app.models.email_login_challenge import EmailLoginChallenge
 from app.models.email_trusted_device import EmailTrustedDevice
 from app.models.birthday_promo import BirthdayPromoEmailLog
 from app.models.admin_feature_test import AdminFeatureTestSetting
+from app.models.affiliate import (
+    AffiliateApplication,
+    AffiliateBankAccountOtp,
+    AffiliateCommission,
+    AffiliateProfile,
+    AffiliateSettings,
+    UserBankAccount,
+    UserWallet,
+    WalletTransaction,
+    WalletWithdrawal,
+)
 from app.models.bank_account import BankAccount
 from app.models.site_embed_code import SiteEmbedCode
 from app.models.category_seo import CategorySeoGeminiTarget, CategorySeoSettings
@@ -277,6 +288,32 @@ class MigrationManager:
                 db.close()
         except Exception as e:
             logger.warning("  _seed_category_seo_settings_singleton: %s", e)
+            return False
+
+    def _seed_affiliate_settings_singleton(self) -> bool:
+        """Seed cấu hình affiliate từ .env để giữ hành vi cũ sau khi có bảng admin."""
+        try:
+            from app.db.session import SessionLocal
+            from app.models.affiliate import AffiliateSettings as _AffiliateSettings
+
+            db = SessionLocal()
+            try:
+                if db.query(_AffiliateSettings).filter(_AffiliateSettings.id == 1).first() is None:
+                    db.add(
+                        _AffiliateSettings(
+                            id=1,
+                            enabled=True,
+                            commission_percent=getattr(settings, "AFFILIATE_COMMISSION_PERCENT", 10),
+                            min_withdrawal=getattr(settings, "AFFILIATE_MIN_WITHDRAWAL", 100000),
+                            ref_cookie_days=getattr(settings, "AFFILIATE_REF_COOKIE_DAYS", 30),
+                        )
+                    )
+                    db.commit()
+                return True
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning("  _seed_affiliate_settings_singleton: %s", e)
             return False
 
     def _sync_table_columns(self, table_name: str, model_class) -> bool:
@@ -574,6 +611,45 @@ class MigrationManager:
         results['home_hero_category_groups_sync'] = self._sync_table_columns(
             "home_hero_category_groups", HomeHeroCategoryGroup
         )
+        results['affiliate_profiles_create'] = self._create_table_if_not_exists(
+            "affiliate_profiles", AffiliateProfile
+        )
+        results['affiliate_applications_create'] = self._create_table_if_not_exists(
+            "affiliate_applications", AffiliateApplication
+        )
+        results['affiliate_applications_sync'] = self._sync_table_columns(
+            "affiliate_applications", AffiliateApplication
+        )
+        results['user_wallets_create'] = self._create_table_if_not_exists("user_wallets", UserWallet)
+        results['wallet_transactions_create'] = self._create_table_if_not_exists(
+            "wallet_transactions", WalletTransaction
+        )
+        results['affiliate_commissions_create'] = self._create_table_if_not_exists(
+            "affiliate_commissions", AffiliateCommission
+        )
+        results['user_bank_accounts_create'] = self._create_table_if_not_exists(
+            "user_bank_accounts", UserBankAccount
+        )
+        results['user_bank_accounts_sync'] = self._sync_table_columns(
+            "user_bank_accounts", UserBankAccount
+        )
+        results['affiliate_bank_account_otps_create'] = self._create_table_if_not_exists(
+            "affiliate_bank_account_otps", AffiliateBankAccountOtp
+        )
+        results['affiliate_bank_account_otps_sync'] = self._sync_table_columns(
+            "affiliate_bank_account_otps", AffiliateBankAccountOtp
+        )
+        results['wallet_withdrawals_create'] = self._create_table_if_not_exists(
+            "wallet_withdrawals", WalletWithdrawal
+        )
+        results['affiliate_settings_create'] = self._create_table_if_not_exists(
+            "affiliate_settings", AffiliateSettings
+        )
+        results['affiliate_settings_seed'] = self._seed_affiliate_settings_singleton()
+        results['affiliate_settings_sync'] = self._sync_table_columns(
+            "affiliate_settings", AffiliateSettings
+        )
+        results['orders_affiliate_sync'] = self._sync_table_columns("orders", Order)
 
         return results
 

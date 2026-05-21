@@ -30,6 +30,13 @@ import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
 import { searchParamsToEncodedQueryString } from '@/lib/product-related-tabs';
 import type { CategoryLevel1 } from '@/types/api';
 import { usePersonalizedCategoryTree } from '@/lib/use-personalized-category-tree';
+import {
+  captureReferralFromUrl,
+  clearReferralAfterAttribute,
+  getStoredReferralCode,
+  markReferralAttributed,
+  shouldTryAttributeReferral,
+} from '@/lib/affiliate-ref';
 
 /** Chiều cao thanh cam mỏng (logo + tìm + icon) khi trang listing ghim header đã thu gọn — khớp offset sticky bộ lọc. */
 const DESKTOP_LISTING_THIN_CHROME_PX = 54;
@@ -207,6 +214,26 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       setSuggestions([]);
     }
   }, [isAuthenticated, qFromUrl]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    captureReferralFromUrl(window.location.search || `?${searchParams.toString()}`);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !shouldTryAttributeReferral()) return;
+    const code = getStoredReferralCode();
+    if (!code) return;
+    apiClient
+      .attributeAffiliateReferral(code)
+      .then(() => {
+        markReferralAttributed();
+        clearReferralAfterAttribute();
+      })
+      .catch(() => {
+        markReferralAttributed();
+      });
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!isAuthenticated) {

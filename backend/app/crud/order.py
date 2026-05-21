@@ -9,6 +9,7 @@ import logging
 from app.models.order import Order, OrderItem, OrderStatus, PaymentStatus, PaymentMethod, DepositType
 from app.models.product import Product
 from app.schemas.order import OrderCreate, OrderUpdate
+from app.services import affiliate_wallet as affiliate_svc
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,8 @@ def create_order_with_deposit(
     remaining_amount: Decimal,
     items: List[Dict],
     discount_amount: Decimal = Decimal('0'),
-    admin_notes: Optional[str] = None
+    admin_notes: Optional[str] = None,
+    referrer_user_id: Optional[int] = None,
 ) -> Order:
     """Create new order with deposit calculation"""
     try:
@@ -77,6 +79,7 @@ def create_order_with_deposit(
             total_amount=total_amount,
             discount_amount=discount_amount,
             admin_notes=admin_notes,
+            referrer_user_id=referrer_user_id,
             requires_deposit=requires_deposit,
             deposit_type=deposit_type_enum,
             deposit_percentage=deposit_percentage,
@@ -232,6 +235,7 @@ def admin_update_order(
         return None
     
     update_data = order_update.dict(exclude_unset=True)
+    old_status = getattr(order.status, "value", order.status)
     
     # Update status timestamps
     if 'status' in update_data:
@@ -256,6 +260,11 @@ def admin_update_order(
     
     order.processed_by = admin_id
     order.updated_at = datetime.now()
+
+    if 'status' in update_data:
+        affiliate_svc.handle_order_status_change(db, order, old_status, update_data['status'])
+    if 'payment_status' in update_data:
+        affiliate_svc.handle_order_payment_status_change(db, order, update_data['payment_status'])
     
     db.commit()
     db.refresh(order)
@@ -275,15 +284,19 @@ def cancel_order(
     
     if not order:
         return None
+    status_val = getattr(order.status, "value", order.status)
     
     # Check if order can be cancelled
-    if order.status in [OrderStatus.DELIVERED.value, OrderStatus.COMPLETED.value]:
+    if status_val in [OrderStatus.DELIVERED.value, OrderStatus.COMPLETED.value]:
         return None
     
     order.status = OrderStatus.CANCELLED.value
     order.cancelled_reason = reason
     order.cancelled_at = datetime.now()
     order.updated_at = datetime.now()
+
+    old_status = status_val
+    affiliate_svc.handle_order_status_change(db, order, old_status, OrderStatus.CANCELLED.value)
     
     db.commit()
     db.refresh(order)
@@ -311,9 +324,11 @@ def confirm_received(
     ]
     if status_val not in allowed_statuses:
         return None
+    old_status = status_val
     order.status = OrderStatus.DELIVERED.value
     order.delivered_at = datetime.now()
     order.updated_at = datetime.now()
+    affiliate_svc.handle_order_status_change(db, order, old_status, OrderStatus.DELIVERED.value)
     db.commit()
     db.refresh(order)
     return order
@@ -395,8 +410,10 @@ def mark_order_completed_if_reviewed(db: Session, user_id: int, product_id: int)
         .first()
     )
     if order:
+        old_status = OrderStatus.DELIVERED.value
         order.status = OrderStatus.COMPLETED.value
         order.completed_at = datetime.now()
+        affiliate_svc.handle_order_status_change(db, order, old_status, OrderStatus.COMPLETED.value)
         db.commit()
 
 

@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.crud import order as crud_order
 from app.crud import payment as crud_payment
 from app.models.order import DepositType, Order, OrderStatus, Payment, PaymentMethod, PaymentStatus
+from app.services import affiliate_wallet as affiliate_svc
 
 logger = logging.getLogger(__name__)
 
@@ -520,6 +521,7 @@ def _finalize_sepay_deposit_success(
         order.payment_status = PaymentStatus.DEPOSIT_PAID
         order.status = OrderStatus.DEPOSIT_PAID
 
+    affiliate_svc.grant_deposit_commission_for_order(db, order)
     db.commit()
 
 

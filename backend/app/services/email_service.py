@@ -294,6 +294,24 @@ def send_login_otp_email(to_email: str, code: str, expire_minutes: int) -> None:
     send_email(to_email, subject, text_body, html_body)
 
 
+def send_bank_account_otp_email(to_email: str, code: str, expire_minutes: int) -> None:
+    subject = "Mã xác minh tài khoản ngân hàng 188.com.vn"
+    if settings.EMAIL_SUBJECT_PREFIX:
+        subject = f"{settings.EMAIL_SUBJECT_PREFIX} {subject}"
+    text_body = (
+        "Bạn đang thêm hoặc thay đổi tài khoản ngân hàng nhận tiền affiliate.\n\n"
+        f"Mã xác minh của bạn: {code}\n"
+        f"Mã có hiệu lực {expire_minutes} phút.\n\n"
+        "Nếu bạn không thực hiện thao tác này, vui lòng bỏ qua email và liên hệ shop."
+    )
+    html_body = (
+        "<p>Bạn đang thêm hoặc thay đổi <strong>tài khoản ngân hàng nhận tiền affiliate</strong>.</p>"
+        f"<p>Mã xác minh: <strong style=\"font-size:22px;letter-spacing:4px;\">{code}</strong></p>"
+        f"<p>Hiệu lực {expire_minutes} phút. Nếu bạn không yêu cầu mã, hãy bỏ qua email này.</p>"
+    )
+    send_email(to_email, subject, text_body, html_body)
+
+
 def send_login_magic_link_email(to_email: str, magic_url: str, expire_minutes: int) -> None:
     subject = "Đăng nhập 188.com.vn (liên kết nhanh)"
     if settings.EMAIL_SUBJECT_PREFIX:

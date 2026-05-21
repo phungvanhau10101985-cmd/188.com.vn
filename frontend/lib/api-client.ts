@@ -90,6 +90,7 @@ export interface OrderCreateRequest {
   shipping_method?: string;
   items: { product_id: number; quantity: number; selected_size?: string; selected_color?: string }[];
   deposit_type?: 'none' | 'percent_30' | 'percent_100';
+  wallet_amount?: number;
 }
 
 export interface OrderResponse {
@@ -842,6 +843,96 @@ class ApiClient {
 
   async getLoyaltyTiers(): Promise<any[]> {
     return this.fetch<any[]>('/loyalty/tiers');
+  }
+
+  async getAffiliateMe(): Promise<{
+    referral_code: string;
+    referral_link: string;
+    referred_by_user_id: number | null;
+    balance: number;
+    pending_balance: number;
+    affiliate_enabled: boolean;
+    commission_percent: number;
+    min_withdrawal: number;
+    ref_cookie_days: number;
+    commission_policy?: string | null;
+    affiliate_status: string;
+    affiliate_application?: {
+      id: number;
+      user_id: number;
+      status: string;
+      social_links: string[];
+      note?: string | null;
+      admin_note?: string | null;
+      submitted_at: string;
+      reviewed_at?: string | null;
+    } | null;
+    total_commissions_confirmed: number;
+    total_commissions_pending: number;
+    total_orders_referred: number;
+  }> {
+    return this.fetch('/affiliate/me');
+  }
+
+  async attributeAffiliateReferral(referralCode: string): Promise<{ ok: boolean; referred_by_user_id: number | null }> {
+    return this.fetch('/affiliate/attribute', {
+      method: 'POST',
+      body: JSON.stringify({ referral_code: referralCode }),
+    });
+  }
+
+  async submitAffiliateApplication(data: { social_links: string[]; note?: string | null }): Promise<any> {
+    return this.fetch('/affiliate/application', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getWalletTransactions(skip = 0, limit = 50): Promise<any[]> {
+    return this.fetch(`/affiliate/wallet/transactions?skip=${skip}&limit=${limit}`);
+  }
+
+  async getAffiliateBankAccount(): Promise<{
+    bank_name: string;
+    bank_account: string;
+    account_holder: string;
+    updated_at?: string;
+  } | null> {
+    return this.fetch('/affiliate/bank-account');
+  }
+
+  async saveAffiliateBankAccount(data: {
+    bank_name: string;
+    bank_account: string;
+    account_holder: string;
+    otp: string;
+  }): Promise<any> {
+    return this.fetch('/affiliate/bank-account', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async requestAffiliateBankAccountOtp(data: {
+    bank_name: string;
+    bank_account: string;
+    account_holder: string;
+  }): Promise<{ ok: boolean; email: string; expires_in_minutes: number; message: string }> {
+    return this.fetch('/affiliate/bank-account/otp', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async requestWalletWithdraw(amount: number): Promise<any> {
+    return this.fetch('/affiliate/wallet/withdraw', {
+      method: 'POST',
+      body: JSON.stringify({ amount }),
+    });
+  }
+
+  async getMyWalletWithdrawals(skip = 0, limit = 50): Promise<any[]> {
+    return this.fetch(`/affiliate/wallet/withdrawals?skip=${skip}&limit=${limit}`);
   }
 
   async updateProfile(userData: any): Promise<any> {
