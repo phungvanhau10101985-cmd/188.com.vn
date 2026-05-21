@@ -16,7 +16,7 @@ cột G AK, khối L–O hay layout Excel đặt hàng cũ.
 
   Tỷ giá nền `LISTING_IMPORT_VND_PER_CNY`; cột `vnd_per_cny_used` / Tỷ giá ghi đè theo dòng nếu có.
 
-- **Mã sp** (SKU `[A-Z][0-9]{4}`): chỉ khi có cột tiêu đề «Mã sp»… — không đọc cột B cố định.
+- Cột **Mã sp / SKU** không còn đọc trong luồng lấy thông tin; SKU mặc định để trống.
 
 
 
@@ -56,10 +56,6 @@ from app.services.listing_cny_grid import (
 
 )
 
-from app.services.product_internal_sku import INTERNAL_SKU_RE
-
-
-
 _ws_re = re.compile(r"\s+")
 
 
@@ -69,6 +65,7 @@ MAX_IMPORT_COL_1BASED = 32
 DATA_FIRST_ROW = 2
 
 _MAX_ROWS = 500
+
 
 
 
@@ -265,26 +262,6 @@ def _resolve_chinese_name_column(by_col: Dict[int, set[str]]) -> Optional[int]:
     )
 
     return _first_col_matching(by_col, needles)
-
-
-
-
-
-def _resolve_internal_sku_header_column(by_col: Dict[int, set[str]]) -> Optional[int]:
-
-    sku_needles = frozenset(
-
-        _norm_header(x) for x in ("Mã sp", "Ma sp", "mã sp", "internal sku", "mã sku", "ma sku", "SKU nội bộ")
-
-    )
-
-    sku_cols = _sorted_cols_matching(by_col, sku_needles)
-
-    if len(sku_cols) == 1:
-
-        return sku_cols[0]
-
-    return None
 
 
 
@@ -746,8 +723,6 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
 
         ch_name_col = _resolve_chinese_name_column(label_by_col)
 
-        sku_hdr_col = _resolve_internal_sku_header_column(label_by_col)
-
         vnd_optional_col = _resolve_optional_vnd_per_cny_column(label_by_col)
 
         base_vnd_rate = _default_listing_import_vnd_per_cny()
@@ -809,14 +784,6 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
 
 
             overlays: Dict[str, Any] = {}
-
-            if sku_hdr_col:
-
-                sku_raw = _cell_str(coord(sku_hdr_col)).strip().upper()
-
-                if sku_raw and INTERNAL_SKU_RE.fullmatch(sku_raw):
-
-                    overlays["code"] = sku_raw
 
             if shop_cn_col:
 

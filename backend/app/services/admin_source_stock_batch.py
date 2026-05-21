@@ -19,7 +19,12 @@ from app.core.config import settings
 from app.models.guest_behavior import GuestProductView
 from app.models.product import Product
 from app.models.user import UserProductView
-from app.services.import_batch_url_coercion import FETCH_TARGET_CSSBUY, FETCH_TARGET_HIBOX, coerce_url_for_excel_batch_import
+from app.services.import_batch_url_coercion import (
+    FETCH_TARGET_CSSBUY,
+    FETCH_TARGET_HIBOX,
+    FETCH_TARGET_VIPOMALL,
+    coerce_url_for_excel_batch_import,
+)
 from app.services.import_cssbuy_client import (
     ImportCssbuyError,
     cssbuy_html_disclaimer_agreement_without_add_to_cart,
@@ -183,6 +188,7 @@ def admin_product_source_link_base_filters(
             ProductModel.link_default.ilike("%detail.1688%"),
             ProductModel.link_default.ilike("%taobao.com%"),
             ProductModel.link_default.ilike("%tmall.com%"),
+            ProductModel.link_default.ilike("%vipomall.vn%"),
         )
     )
 
@@ -249,7 +255,7 @@ def admin_source_stock_queue_stats(
 
 
 def _report_row_link_conversions(link_default: str | None) -> Dict[str, str]:
-    """URL quy đổi giống nhập Excel / worker — hai cột CSSBuy & Hibox trên báo cáo."""
+    """URL quy đổi giống nhập Excel / worker — CSSBuy, Hibox và Vipomall trên báo cáo."""
     raw = (link_default or "").strip()
     if not raw:
         miss = "thiếu link trong DB."
@@ -258,14 +264,19 @@ def _report_row_link_conversions(link_default: str | None) -> Dict[str, str]:
             "link_convert_cssbuy_err": miss,
             "link_convert_hibox": "",
             "link_convert_hibox_err": miss,
+            "link_convert_vipomall": "",
+            "link_convert_vipomall_err": miss,
         }
     css_u, css_e = coerce_url_for_excel_batch_import(raw, FETCH_TARGET_CSSBUY)
     hb_u, hb_e = coerce_url_for_excel_batch_import(raw, FETCH_TARGET_HIBOX)
+    vm_u, vm_e = coerce_url_for_excel_batch_import(raw, FETCH_TARGET_VIPOMALL)
     return {
         "link_convert_cssbuy": (css_u or "").strip(),
         "link_convert_cssbuy_err": (css_e or "").strip(),
         "link_convert_hibox": (hb_u or "").strip(),
         "link_convert_hibox_err": (hb_e or "").strip(),
+        "link_convert_vipomall": (vm_u or "").strip(),
+        "link_convert_vipomall_err": (vm_e or "").strip(),
     }
 
 
@@ -1081,7 +1092,7 @@ def run_admin_source_url_scan(
             "domain": domain_lower,
             "raw_status": "bad_domain",
             "classified_out_of_stock": False,
-            "detail": "Đã ngừng kiểm tra trực tiếp 1688 — dùng domain=hibox hoặc cssbuy.",
+            "detail": "Đã ngừng kiểm tra trực tiếp 1688 — dùng domain=hibox, cssbuy hoặc vipomall.",
             "matched_products": [],
             "updated_product_ids": [],
             "matched_count": 0,
@@ -1092,6 +1103,24 @@ def run_admin_source_url_scan(
             domain_lower = "cssbuy"
         elif domain_lower == "hibox":
             pass
+        elif domain_lower == "vipomall":
+            fb_pid = None
+            anch = max(0, int(anchor_product_db_id or 0))
+            if anch > 0:
+                anchor_row = db.query(Product).filter(Product.id == anch).first()
+                if anchor_row is not None:
+                    fb_pid = anchor_row.product_id
+            from app.services.vipomall_source_stock import vipomall_gather_admin_batch_scan
+
+            gathered = vipomall_gather_admin_batch_scan(
+                db, seed_url=url, fallback_product_id=fb_pid
+            )
+            return _finalize_scan_commit_and_serialise(
+                db,
+                computed=gathered,
+                extras=None,
+                anchor_product_db_id=anchor_product_db_id or None,
+            )
         else:
             return {
                 "ok": False,
@@ -1099,7 +1128,7 @@ def run_admin_source_url_scan(
                 "domain": domain_lower,
                 "raw_status": "bad_domain",
                 "classified_out_of_stock": False,
-                "detail": "domain phải là «hibox» hoặc «cssbuy».",
+                "detail": "domain phải là «hibox», «cssbuy» hoặc «vipomall».",
                 "matched_products": [],
                 "updated_product_ids": [],
                 "matched_count": 0,

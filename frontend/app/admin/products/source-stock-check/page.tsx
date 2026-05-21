@@ -56,7 +56,7 @@ type ReportSampleTablePagination = {
 };
 
 /** Nguồn trong thống kê queue / báo cáo (CSSBuy mặc định). Worker PDP: CSSBuy (/web/item) một lần; chỉ scrape Hibox khi CSS `blocked`/`error`. */
-type SourceStockDomain = 'hibox' | 'cssbuy';
+type SourceStockDomain = 'hibox' | 'cssbuy' | 'vipomall';
 
 function SpinnerIcon({ className }: { className?: string }) {
   return (
@@ -335,7 +335,7 @@ function SourceStockReportSampleTable({
   oosBulkSelection?: ReportSampleOosBulkSelection;
   pagination?: ReportSampleTablePagination;
 }) {
-  const colSpan = 12 + (oosActions ? 1 : 0) + (oosBulkSelection ? 1 : 0);
+  const colSpan = 13 + (oosActions ? 1 : 0) + (oosBulkSelection ? 1 : 0);
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
 
   const selectedSet = useMemo(
@@ -520,6 +520,9 @@ function SourceStockReportSampleTable({
               <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[10rem]">
                 Link Hibox (quy đổi)
               </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[10rem]">
+                Link Vipomall (1688)
+              </th>
               <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
                 PDP
               </th>
@@ -586,6 +589,9 @@ function SourceStockReportSampleTable({
                   </td>
                   <td className="px-2 py-1.5 align-top">
                     <ReportConvertedSourceLinkCell url={row.link_convert_hibox} err={row.link_convert_hibox_err} />
+                  </td>
+                  <td className="px-2 py-1.5 align-top">
+                    <ReportConvertedSourceLinkCell url={row.link_convert_vipomall} err={row.link_convert_vipomall_err} />
                   </td>
                   <td className="px-2 py-1.5 whitespace-nowrap">
                     {row.slug ? (
@@ -1265,8 +1271,8 @@ export default function AdminSourceStockCheckPage() {
               thì <strong>một PDP</strong> rồi dừng; chỉ <strong>mở Hibox</strong> khi CSS báo{' '}
               <code className="text-[10px] px-1 bg-gray-50 rounded border">blocked</code> /{' '}
               <code className="text-[10px] px-1 bg-gray-50 rounded border">error</code>{' '}
-              (CAPTCHA/WAF không CSRF không JSON, không quy đổi URL…); không đọc cả hai nguồn để «gộp» trong một lần có
-              kết luận. Tab này chỉ là dashboard admin.
+              (CAPTCHA/WAF không CSRF không JSON, không quy đổi URL…); nếu Hibox vẫn không kết luận thì thử{' '}
+              <strong>Vipomall</strong> (1688 qua vipomall.vn). Tab này chỉ là dashboard admin.
             </p>
           </div>
         </div>
@@ -1278,7 +1284,7 @@ export default function AdminSourceStockCheckPage() {
             <span aria-hidden className="text-gray-400 text-[10px] hidden group-open:inline">
               ▾
             </span>
-            Đọc thêm — TTL batch, PDP traffic, chặn / captcha, Hibox &amp; CSSBuy
+            Đọc thêm — TTL batch, PDP traffic, chặn / captcha, Hibox, CSSBuy &amp; Vipomall
           </summary>
           <div className="px-3 pb-3 pt-0 space-y-3 text-[13px] leading-relaxed text-gray-700 border-t border-gray-200">
             <p>
@@ -1320,7 +1326,9 @@ export default function AdminSourceStockCheckPage() {
               <strong>Hibox:</strong> quy đổi <code className="text-[11px] bg-white px-1 rounded border">hibox.mn/v/…</code> rồi
               scrape. <strong>CSSBuy:</strong> quy đổi <code className="text-[11px] bg-white px-1 rounded border">item-1688-…</code> /{' '}
               <code className="text-[11px] bg-white px-1 rounded border">item-….html</code> — API{' '}
-              <code className="text-[11px] bg-white px-1 rounded border">POST /web/item</code> (không cần modal rủi ro).
+              <code className="text-[11px] bg-white px-1 rounded border">POST /web/item</code> (không cần modal rủi ro).{' '}
+              <strong>Vipomall:</strong> gương 1688 qua{' '}
+              <code className="text-[11px] bg-white px-1 rounded border">vipomall.vn/san-pham/{'{offerId}'}?platform_type=10</code> — kiểm tra nút «Thêm giỏ hàng».
             </p>
           </div>
         </details>
@@ -1382,9 +1390,10 @@ export default function AdminSourceStockCheckPage() {
             >
               <option value="cssbuy">cssbuy.com — API /web/item</option>
               <option value="hibox">hibox.mn — scrape</option>
+              <option value="vipomall">vipomall.vn — gương 1688</option>
             </select>
             <p className="text-[11px] text-gray-500 mt-1 leading-snug">
-              Mặc định CSSBuy. KPI «Tiến độ DB» / «Báo cáo» lọc theo miền đã chọn; worker vẫn CSS trước, Hibox chỉ fallback chặn.
+              Mặc định CSSBuy. KPI «Tiến độ DB» / «Báo cáo» lọc theo miền đã chọn; worker vẫn CSS trước, Hibox/Vipomall fallback khi chặn hoặc khi chọn batch Vipomall.
             </p>
           </div>
         </div>
@@ -1399,12 +1408,11 @@ export default function AdminSourceStockCheckPage() {
                 Thử PDP theo link (không ghi DB)
               </h2>
               <p className="text-[11px] text-teal-900/85 mt-1 max-w-[42rem] leading-snug">
-                Giống worker: chỉ một PDP có kết luận; ưu tiên CSSBuy,{' '}
-                <strong>chỉ fallback Hibox</strong> khi CSS{' '}
+                Giống worker: ưu tiên CSSBuy, fallback Hibox khi CSS{' '}
                 <code className="text-[10px] bg-white/80 px-0.5 rounded">blocked</code> /{' '}
-                <code className="text-[10px] bg-white/80 px-0.5 rounded">error</code>{' '}
-                (CAPTCHA/WAF/thiếu CSRF không JSON…) •{' '}
-                <strong>Có thể chậm</strong> (~3 phút) khi cần Hibox. Không ghi{' '}
+                <code className="text-[10px] bg-white/80 px-0.5 rounded">error</code>
+                ; luôn thử thêm <strong>Vipomall</strong> (1688 qua vipomall.vn) khi suy ra được offerId.{' '}
+                <strong>Có thể chậm</strong> (~3 phút) khi cần Hibox/Vipomall. Không ghi{' '}
                 <code className="text-[10px] bg-white/80 px-0.5 rounded border border-teal-100">products</code>.
               </p>
             </div>
@@ -1431,7 +1439,7 @@ export default function AdminSourceStockCheckPage() {
               id="source-stock-test-link-input"
               rows={2}
               className="w-full mt-1 border border-teal-200 rounded-lg px-3 py-2 text-sm placeholder:text-teal-900/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 disabled:bg-white/50"
-              placeholder="https://detail.1688.com/offer/… hoặc https://hibox.mn/v/…"
+              placeholder="https://detail.1688.com/offer/… · hibox.mn/v/… · vipomall.vn/san-pham/…"
               value={testLinkInput}
               disabled={testLinkBusy}
               onChange={(e) => setTestLinkInput(e.target.value)}
@@ -1448,7 +1456,7 @@ export default function AdminSourceStockCheckPage() {
                   {testLinkResult.link_eligible ? 'Hợp miền worker' : 'Ngoài miền worker'}
                 </span>
               </p>
-              <div className="grid sm:grid-cols-2 gap-x-3 gap-y-1.5 text-[10px] text-slate-600">
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-3 gap-y-1.5 text-[10px] text-slate-600">
                 <p>
                   CSSBuy (coerce){' '}
                   {testLinkResult.coercion.cssbuy_url.trim() ? (
@@ -1475,9 +1483,23 @@ export default function AdminSourceStockCheckPage() {
                     </span>
                   ) : null}
                 </p>
+                <p>
+                  Vipomall (coerce){' '}
+                  {testLinkResult.coercion.vipomall_url?.trim() ? (
+                    <ExternalHttpLink url={testLinkResult.coercion.vipomall_url} />
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                  {testLinkResult.coercion.vipomall_coercion_error ? (
+                    <span className="block text-amber-900/90 mt-0.5">
+                      {testLinkResult.coercion.vipomall_coercion_error}
+                    </span>
+                  ) : null}
+                </p>
               </div>
               <PreviewStockBranchCard title="CSSBuy (/web/item + PDP HTML)" branch={testLinkResult.cssbuy} />
               <PreviewStockBranchCard title="Hibox (scrape)" branch={testLinkResult.hibox} />
+              <PreviewStockBranchCard title="Vipomall (1688 — vipomall.vn)" branch={testLinkResult.vipomall ?? { status: 'skipped' }} />
               <PreviewStockBranchCard title="Kết quả dùng (một PDP — như worker)" branch={testLinkResult.merged} />
             </div>
           ) : null}
@@ -1765,7 +1787,7 @@ export default function AdminSourceStockCheckPage() {
                 <p className="mt-2 text-gray-700 leading-relaxed">
                   Cùng phạm vi <code className="text-[10px] bg-gray-50 px-0.5 rounded border">is_active</code> và link như queue. «Nền kết luận»:{' '}
                   <code className="text-[10px] bg-gray-50 px-0.5 rounded border mx-0.5">source_stock_check_platform</code>{' '}
-                  (cssbuy / hibox / batch ví dụ cssbuy+hibox). «TTL batch»:{' '}
+                  (cssbuy / hibox / vipomall / batch ví dụ cssbuy+hibox). «TTL batch»:{' '}
                   <code className="text-[10px] bg-gray-50 px-0.5 rounded border">admin_source_batch_scanned_at</code> trong cửa sổ. «Kiểm tra
                   nguồn»: <code className="text-[10px] bg-gray-50 px-0.5 rounded border">source_stock_checked_at</code> trong cửa sổ. Hết / còn: theo{' '}
                   <code className="text-[10px] bg-gray-50 px-0.5 rounded border">source_stock_status</code> và tồn.
@@ -1885,7 +1907,7 @@ export default function AdminSourceStockCheckPage() {
                         </li>
                         <li>
                           Nếu JSON có <code className="text-[10px] bg-white px-0.5">classified_out_of_stock = true</code> và đã commit
-                          nhưng bảng này chưa đổi: bấm <strong>«Làm mới báo cáo 30 ngày»</strong>, kiểm tra ô domain (hibox/cssbuy)
+                          nhưng bảng này chưa đổi: bấm <strong>«Làm mới báo cáo 30 ngày»</strong>, kiểm tra ô domain (cssbuy/hibox/vipomall)
                           và <code className="text-[10px] bg-white px-0.5">updates_committed</code>.
                         </li>
                         <li>

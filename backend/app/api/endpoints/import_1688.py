@@ -50,16 +50,9 @@ from app.schemas.product import ProductCreate, ProductUpdate
 from app.services.import_link_deepseek_taxonomy import apply_deepseek_taxonomy_to_product_data
 from app.services.product_rating_question_groups import apply_import_rating_question_groups_to_product_data
 from app.services.product_info_web_compact import compact_product_info_for_web
-from app.services.product_internal_sku import (
-    ensure_import_link_internal_product_code,
-    internal_sku_conflicts_global_inventory,
-    internal_sku_is_valid_format,
-    sync_internal_code_into_product_info,
-)
 from app.services.import_hibox_scraper import (
     ImportHiboxError,
     build_canonical_product_id_from_hibox_slug,
-    canonicalize_hibox_placeholder_product_id,
     extract_hibox_1688_offer_digits,
     extract_hibox_slug,
     hibox_canonical_scrape_url,
@@ -696,72 +689,23 @@ def _assign_internal_sku_to_import_product_data(
     product_data: Dict[str, Any],
     *,
     exclude_draft_id: Optional[int] = None,
-    batch_reserved: Optional[Set[str]] = None,
 ) -> None:
     """
-    SKU đăng web là [A-Z][0-9]{4}, không phải slug Hibox (vd abb-922386436529).
-    Ưu tiên mã vừa xuất file (TTL internal_sku_exports); không trùng SP / nháp khác / ô sheet SKU (định dạng nội bộ).
-    Đồng bộ vào product_info.product_info.sku cho tab AK.
+    Legacy hook: trước đây tự cấp SKU cho draft import link.
+    Hiện tại luồng lấy thông tin sản phẩm giữ `code` trống nếu Excel không truyền SKU rõ ràng.
     """
-    sku = ensure_import_link_internal_product_code(
-        db,
-        product_data.get("code"),
-        exclude_product_id=None,
-        exclude_draft_id=exclude_draft_id,
-        batch_reserved=batch_reserved,
-    )
-    product_data["code"] = sku
-    product_data["product_info"] = sync_internal_code_into_product_info(
-        product_data.get("product_info"), sku
-    )
-    canonicalize_hibox_placeholder_product_id(product_data)
+    product_data["code"] = str(product_data.get("code") or "").strip().upper()
     compact_product_info_for_web(product_data)
 
 
 def _draft_product_data_for_excel_export(
     db: Session,
     draft: ProductImportDraft,
-    *,
-    sku_fix_pending: Optional[List[Tuple[ProductImportDraft, Dict[str, Any]]]] = None,
-    batch_reserved: Optional[Set[str]] = None,
 ) -> Dict[str, Any]:
     """
-    Trước khi xuất Excel: SKU phải đúng [A-Z][0-9]{4}, không được *0000, không trùng products.code
-    của sản phẩm khác (trừ bản ghi đã publish từ chính nháp này).
-    Nếu không → gán lại như lúc import và lưu vào draft.
-
-    `sku_fix_pending` + `batch_reserved`: khi xuất hàng loạt, gom cập nhật DB một lần (tránh trăm lần commit).
+    Xuất dữ liệu nháp đúng như đã scrape/overlay. Không tự sinh hoặc sửa SKU khi export.
     """
-    pd = dict(draft.product_data or {})
-    raw_code = pd.get("code")
-    if raw_code is None:
-        code_str = ""
-    else:
-        code_str = str(raw_code).strip()
-    exclude_pid = None
-    pub_pid = (draft.published_product_id or "").strip()
-    if pub_pid:
-        existing_pub = product_crud.get_product_by_product_id(db, pub_pid)
-        if existing_pub is not None:
-            exclude_pid = existing_pub.id
-    needs_fix = not internal_sku_is_valid_format(code_str) or internal_sku_conflicts_global_inventory(
-        db,
-        code_str,
-        exclude_product_id=exclude_pid,
-        exclude_draft_id=draft.id,
-    )
-    if needs_fix:
-        _assign_internal_sku_to_import_product_data(
-            db,
-            pd,
-            exclude_draft_id=draft.id,
-            batch_reserved=batch_reserved,
-        )
-        if sku_fix_pending is not None:
-            sku_fix_pending.append((draft, pd))
-        else:
-            draft_crud.update_draft(db, draft, product_data=pd)
-    return pd
+    return dict(draft.product_data or {})
 
 
 def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -998,7 +942,7 @@ async def create_import_jobs_batch_from_excel(
 
     **`price`** trên nháp luôn suy từ CN¥ × hệ_số_IF × `LISTING_IMPORT_VND_PER_CNY` (hoặc cột `vnd_per_cny_used`),
     rồi làm tròn lên bội 10.000 ₫.
-    **Mã sp** chỉ khi có cột tiêu đề «Mã sp» đúng `[A-Z][0-9]{4}` — không đọc cột B cố định.
+    Cột **Mã sp / SKU** không còn đọc trong luồng lấy thông tin; SKU mặc định để trống.
 
     Form **`fetch_target`**: `auto` (mặc định) | `hibox` | `cssbuy` | `vipomall` — chuẩn hoá URL từng dòng trước khi tạo job.
     **`auto`** quy Taobao/Tmall và offer 1688 sang URL Hibox (`hibox.mn/v/…`) khi quy đổi được.
@@ -1298,27 +1242,14 @@ def export_import_1688_drafts_bulk(
     ids_sorted = sorted(set(payload.draft_ids))
     by_id = draft_crud.get_by_ids_map(db, ids_sorted)
     rows_data: List[Dict[str, Any]] = []
-    batch_reserved: Set[str] = set()
-    sku_fix_pending: List[Tuple[ProductImportDraft, Dict[str, Any]]] = []
     for did in ids_sorted:
         draft = by_id.get(did)
         if not draft:
             raise HTTPException(status_code=404, detail=f"Không có draft id={did}.")
         if not draft.product_data:
             continue
-        pdata = _draft_product_data_for_excel_export(
-            db,
-            draft,
-            sku_fix_pending=sku_fix_pending,
-            batch_reserved=batch_reserved,
-        )
+        pdata = _draft_product_data_for_excel_export(db, draft)
         rows_data.append(_excel_row_from_product(pdata))
-
-    if sku_fix_pending:
-        for drow, pdata in sku_fix_pending:
-            drow.product_data = pdata
-            db.add(drow)
-        db.commit()
 
     filename = f"import_1688_drafts_bulk_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return _file_response_import_excel_rows(rows_data, filename)
@@ -1474,22 +1405,7 @@ def publish_import_1688_draft(
         existing = product_crud.get_product_by_product_id(db, payload["product_id"])
 
     exclude_id = existing.id if existing else None
-    sku_reserved: set[str] = set()
-    try:
-        sku_code = ensure_import_link_internal_product_code(
-            db,
-            payload.get("code"),
-            exclude_product_id=exclude_id,
-            exclude_draft_id=draft_id,
-            batch_reserved=sku_reserved,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    payload["code"] = sku_code
-    payload["product_info"] = sync_internal_code_into_product_info(payload.get("product_info"), sku_code)
+    payload["code"] = str(payload.get("code") or "").strip().upper() or None
 
     canonical_pid = ""
 
@@ -1510,7 +1426,31 @@ def publish_import_1688_draft(
         if existing is None:
             existing = product_crud.get_product_by_product_id(db, f"1688_{oid}")
         try:
-            canonical_pid = build_canonical_1688_product_id(oid, sku_code)
+            canonical_pid = build_canonical_1688_product_id(oid)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"reason": "invalid_internal_product_id", "message": str(exc)},
+            ) from exc
+
+    elif src == "vipomall":
+        oid = extract_vipomall_offer_id(norm_url) or (draft.source_offer_id or "").strip()
+        if not oid or not oid.isdigit():
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "reason": "import_publish_missing_vipomall_offer_id",
+                    "message": "Không trích được offerId 1688 từ link Vipomall.",
+                    "normalized_url_preview": norm_url[:240],
+                    "source_offer_id": draft.source_offer_id,
+                },
+            )
+        if existing is None:
+            existing = product_crud.get_product_by_product_id(db, f"hibox_abb-{oid}")
+        if existing is None:
+            existing = product_crud.get_product_by_product_id(db, f"1688_{oid}")
+        try:
+            canonical_pid = build_canonical_1688_product_id(oid)
         except ValueError as exc:
             raise HTTPException(
                 status_code=400,
@@ -1537,7 +1477,7 @@ def publish_import_1688_draft(
         if existing is None:
             existing = product_crud.get_product_by_product_id(db, f"hibox_{hid}")
         try:
-            canonical_pid = build_canonical_product_id_from_hibox_slug(hid, sku_code)
+            canonical_pid = build_canonical_product_id_from_hibox_slug(hid)
         except ValueError as exc:
             raise HTTPException(
                 status_code=400,
@@ -1553,8 +1493,9 @@ def publish_import_1688_draft(
         if existing is None:
             existing = product_crud.get_product_by_product_id(db, f"hibox_{hid}")
         if existing is None and hibox_slug_is_1688_offer(hid):
-            legacy_pid = f"T{hid}a188{sku_code.strip().upper()}"
-            existing = product_crud.get_product_by_product_id(db, legacy_pid)
+            oid1688 = extract_hibox_1688_offer_digits(hid)
+            if oid1688:
+                existing = product_crud.get_product_by_product_id(db, f"A{oid1688}")
 
     else:
         raise HTTPException(
@@ -1582,7 +1523,7 @@ def publish_import_1688_draft(
             detail={
                 "reason": "duplicate_listing_source_id",
                 "message": (
-                    "Mã nguồn (1688: A… hoặc Taobao/Tmall: T…) — phần trước «a188» trong cột id — "
+                    "Mã nguồn (1688: A… hoặc Taobao/Tmall: T…) "
                     f"đã tồn tại trên shop ({conflict_src}). Không đăng trùng một offer/item."
                 ),
                 "existing_product_id": conflict_src,
@@ -1617,10 +1558,7 @@ def publish_import_1688_draft(
 
     merged_pd = dict(draft.product_data or {})
     merged_pd["product_id"] = canonical_pid
-    merged_pd["code"] = sku_code
-    merged_pd["product_info"] = sync_internal_code_into_product_info(
-        merged_pd.get("product_info"), sku_code
-    )
+    merged_pd["code"] = payload.get("code") or ""
     compact_product_info_for_web(merged_pd)
     merged_pd["deposit_require"] = 1
 

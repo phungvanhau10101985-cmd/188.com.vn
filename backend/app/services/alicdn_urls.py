@@ -8,6 +8,7 @@ import re
 from typing import Any, Dict
 
 _IMG_KEYS = ("img", "image", "image_url", "imageUrl", "url", "thumb", "picture")
+_SUPPLIER_IMAGE_BLOCK_MARKERS = ("viposeller", "viettelidc.com.vn")
 
 
 def truncate_alicdn_url_to_first_jpg(url: str) -> str:
@@ -29,11 +30,17 @@ def _scheme_normalize(url: str) -> str:
     return u
 
 
+def is_blocked_supplier_image_url(url: str) -> bool:
+    u = (url or "").strip().lower()
+    return any(marker in u for marker in _SUPPLIER_IMAGE_BLOCK_MARKERS)
+
+
 def normalize_excel_product_image_urls(product_data: Dict[str, Any]) -> None:
     """In-place: main_image, images[], gallery[], colors[].* ảnh alicdn → tới .jpg đầu tiên."""
 
     def norm_one(s: str) -> str:
-        return truncate_alicdn_url_to_first_jpg(_scheme_normalize(s))
+        u = truncate_alicdn_url_to_first_jpg(_scheme_normalize(s))
+        return "" if is_blocked_supplier_image_url(u) else u
 
     mi = product_data.get("main_image")
     if isinstance(mi, str) and mi.strip():
@@ -43,9 +50,22 @@ def normalize_excel_product_image_urls(product_data: Dict[str, Any]) -> None:
         lst = product_data.get(key)
         if not isinstance(lst, list):
             continue
-        product_data[key] = [
-            norm_one(str(x)) if isinstance(x, str) and str(x).strip() else x for x in lst
-        ]
+        out = []
+        for x in lst:
+            if isinstance(x, str) and str(x).strip():
+                u = norm_one(str(x))
+                if u:
+                    out.append(u)
+            elif x:
+                out.append(x)
+        product_data[key] = out
+
+    if not product_data.get("main_image"):
+        imgs = product_data.get("images")
+        if isinstance(imgs, list):
+            first = next((x for x in imgs if isinstance(x, str) and x.strip()), "")
+            if first:
+                product_data["main_image"] = first
 
     colors = product_data.get("colors")
     if not isinstance(colors, list):

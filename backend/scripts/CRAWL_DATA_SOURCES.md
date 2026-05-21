@@ -47,6 +47,7 @@ Tất cả lệnh mẫu chạy từ thư mục **`backend`** (Windows): `cd back
 | Mục | File / vị trí | Ghi chú |
 |-----|----------------|--------|
 | Một offer → Excel mẫu (giống export draft) | `export_1688_excel_preview.py` | Gọi `app.services.import_1688_scraper.scrape_1688_product`; ghi `app/static/uploads/sample_1688_export_*.xlsx`. |
+| Lọc offer **chưa có PDP** trên [vipomall.vn](https://vipomall.vn/) → Excel Hibox | `filter_1688_not_on_vipomall.py` | Playwright probe PDP Vipomall; giữ dòng chưa list, đổi Link → `hibox.mn/v/abb-{offerId}` để import admin. |
 | Import có auth / batch | API **`/import-1688`** | `app/api/endpoints/import_1688.py` + `import_1688_scraper.py`, `import_hibox_scraper.py` — crawl 1688 / Hi-box phục vụ draft sản phẩm (không phải một file script độc lập “chạy tay” đầy đủ như bảng trên; dùng admin/API). |
 
 ---

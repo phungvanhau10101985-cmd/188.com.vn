@@ -28,6 +28,7 @@ class ImportVipomallError(RuntimeError):
 _VIPOMALL_HOST_RE = re.compile(r"^(?:www\.)?vipomall\.vn$", re.I)
 _VIPOMALL_PATH_OFFER_RE = re.compile(r"^/san-pham/(\d+)", re.I)
 _BLOCK_MARKERS = ("captcha", "cloudflare", "cf-ray", "access denied", "forbidden", "blocked")
+_VIPOMALL_IMAGE_HOST_MARKERS = ("viposeller", "viettelidc.com.vn")
 
 
 def is_vipomall_import_url(raw: str) -> bool:
@@ -69,6 +70,8 @@ def _norm_img_url(raw: str) -> str:
         u = f"https:{u}"
     if u.startswith("http://"):
         u = "https://" + u[len("http://") :]
+    if any(marker in u.lower() for marker in _VIPOMALL_IMAGE_HOST_MARKERS):
+        return ""
     return truncate_alicdn_url_to_first_jpg(u)
 
 
@@ -120,6 +123,28 @@ def _estimate_cny_from_vnd(price_vnd: float) -> str:
 def _clean_text(raw: Any, *, limit: int = 500) -> str:
     s = re.sub(r"\s+", " ", str(raw or "").replace("\xa0", " ")).strip()
     return s[:limit]
+
+
+_VIPOMALL_INFO_NOISE_RE = re.compile(
+    r"(trung tâm hỗ trợ|hướng dẫn|ước tính chi phí|chính sách|hàng cấm|giới thiệu|"
+    r"điều khoản dịch vụ|quy chế hoạt động|kinh nghiệm vipomall|vipo\s*mall)",
+    re.I,
+)
+
+
+def _clean_vipomall_info_texts(values: List[Any]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        s = _clean_text(raw, limit=400)
+        if not s or _VIPOMALL_INFO_NOISE_RE.search(s):
+            continue
+        key = s.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(s)
+    return out
 
 
 _SCRAPE_JS = r"""() => {
@@ -462,7 +487,7 @@ def vipomall_row_to_product_data(row: Dict[str, Any], source_url: str, offer_id:
             price_vnd = _parse_vnd_price(t)
             if price_vnd > 0:
                 break
-    main_image = meta_image or (gallery[0] if gallery else "") or (colors_out[0]["img"] if colors_out else "")
+    main_image = (gallery[0] if gallery else "") or (colors_out[0]["img"] if colors_out else "")
     if not gallery and main_image:
         gallery = [main_image]
 
@@ -472,8 +497,7 @@ def vipomall_row_to_product_data(row: Dict[str, Any], source_url: str, offer_id:
     if not title:
         title = f"1688 {offer_id}"
 
-    info_texts = [_clean_text(x, limit=400) for x in row.get("info_texts") or []]
-    info_texts = [x for x in info_texts if x]
+    info_texts = _clean_vipomall_info_texts(row.get("info_texts") or [])
     variant_context_parts: List[str] = []
     if colors_out:
         variant_context_parts.append(
@@ -526,8 +550,8 @@ def vipomall_row_to_product_data(row: Dict[str, Any], source_url: str, offer_id:
     cny_for_excel = _estimate_cny_from_vnd(price_vnd)
 
     return {
-        "product_id": f"hibox_abb-{offer_id}",
-        "code": f"abb-{offer_id}",
+        "product_id": f"A{offer_id}",
+        "code": "",
         "origin": "1688",
         "brand_name": None,
         "name": title[:500],

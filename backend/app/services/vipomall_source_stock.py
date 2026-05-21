@@ -1,7 +1,7 @@
 """
 Fallback kiểm tra tồn nguồn qua PDP Vipomall (gương 1688).
 
-Chỉ áp dụng khi đã suy ra được offerId 1688 (link offer/Hibox abb-*/CSSBuy item-1688 hoặc mã A{offer}a188…).
+Chỉ áp dụng khi đã suy ra được offerId 1688 (link offer/Hibox abb-*/CSSBuy item-1688 hoặc mã A{offer}; vẫn hỗ trợ mã legacy A{offer}a188…).
 Tiêu chí: có nút / chữ «Thêm giỏ hàng» trong HTML tải về → còn hàng; không thấy → hết hàng nguồn.
 """
 
@@ -26,7 +26,7 @@ from app.services.import_hibox_scraper import (
 logger = logging.getLogger(__name__)
 
 _VIPOMALL_HOST_OK = re.compile(r"^(?:www\.)?vipomall\.vn$", re.I)
-_PRODUCT_ID_A_OFFER_RE = re.compile(r"^A(\d+)a188", re.I)
+_PRODUCT_ID_A_OFFER_RE = re.compile(r"^A(\d+)(?:a188.*)?$", re.I)
 
 _BLOCK_MARKERS = (
     "captcha",
@@ -46,16 +46,64 @@ def build_vipomall_1688_pdp_url(offer_id: str) -> str:
     return f"https://vipomall.vn/san-pham/{oid}?platform_type=10" if oid.isdigit() else ""
 
 
+_VIPOMALL_PLACEHOLDER_TITLES = frozenset(
+    {
+        "",
+        "SẢN PHẨM MỚI",
+        "SAN PHAM MOI",
+        "VIPO MALL: MUA HÀNG XUYÊN BIÊN GIỚI",
+        "VIPO MALL: MUA HANG XUYEN BIEN GIOI",
+    }
+)
+
+
+def vipomall_scraped_product_looks_listed(product_data: Dict[str, Any]) -> bool:
+    """
+    Heuristic sau ``scrape_vipomall_for_import``: PDP thật thường có variant/ảnh;
+    offer không có trên Vipomall hay trả shell «SẢN PHẨM MỚI» + gallery tối thiểu.
+    """
+    if not isinstance(product_data, dict):
+        return False
+    title = re.sub(r"\s+", " ", str(product_data.get("name") or "")).strip().upper()
+    if title in _VIPOMALL_PLACEHOLDER_TITLES:
+        return False
+    colors = len(product_data.get("colors") or [])
+    sizes = len(product_data.get("sizes") or [])
+    gallery = len(product_data.get("images") or product_data.get("gallery") or [])
+    return colors > 0 or sizes > 0 or gallery >= 2
+
+
+def probe_vipomall_1688_offer_listed(offer_id: str) -> Tuple[bool, Optional[str]]:
+    """
+    Playwright mở PDP Vipomall. Trả (có_listing, lỗi_ngắn).
+    """
+    oid = str(offer_id or "").strip()
+    if not oid.isdigit():
+        return False, "offerId không phải số."
+    try:
+        from app.services.import_vipomall_scraper import scrape_vipomall_for_import
+
+        _, product_data, _warnings = scrape_vipomall_for_import(build_vipomall_1688_pdp_url(oid))
+        return vipomall_scraped_product_looks_listed(product_data), None
+    except Exception as exc:
+        return False, str(exc)[:500]
+
+
 def resolve_numeric_1688_offer_id_from_source_url(
     url: str,
     *,
     fallback_product_id: Optional[str] = None,
 ) -> Optional[str]:
     """
-    offerId thuần số từ URL nguồn (1688 / Hibox abb-* / cssbuy item-1688) hoặc từ product_id dạng A{offer}a188….
+    offerId thuần số từ URL nguồn (1688 / Hibox abb-* / cssbuy item-1688) hoặc từ product_id dạng A{offer}.
     Taobao/Tmall thuần (slug số, link item.taobao…) → None (không có PDP 1688 trên Vipomall theo offer).
     """
     norm = (normalize_product_import_url((url or "").strip()) or (url or "").strip()).strip()
+    from app.services.import_vipomall_scraper import extract_vipomall_offer_id
+
+    vm_oid = extract_vipomall_offer_id(norm)
+    if vm_oid and vm_oid.isdigit():
+        return vm_oid
     oid_url = extract_offer_id(norm)
     if oid_url and oid_url.isdigit():
         return oid_url
@@ -176,7 +224,7 @@ def vipomall_gather_admin_batch_scan(
             "domain": "vipomall",
             "raw_status": "bad_url",
             "classified_out_of_stock": False,
-            "detail": "Không suy ra được offerId 1688 — không thể kiểm tra qua Vipomall (chỉ hỗ trợ link 1688 / Hibox abb-* / CSSBuy item-1688 hoặc mã A{offer}a188…).",
+            "detail": "Không suy ra được offerId 1688 — không thể kiểm tra qua Vipomall (chỉ hỗ trợ link 1688 / Hibox abb-* / CSSBuy item-1688 hoặc mã A{offer}).",
             "warnings": [],
             "matched_orm": [],
         }

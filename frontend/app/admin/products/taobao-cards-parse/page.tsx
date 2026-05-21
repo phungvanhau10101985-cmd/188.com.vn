@@ -257,8 +257,8 @@ function strPd(v: unknown): string {
 }
 
 /**
- * Khóa đối chiếu API `/products/listing-parser-db-presence`: tiền tố A|T + chữ số trước `a188…`
- * trong product_id (vd `A942397061385` từ `A942397061385a188X0793`).
+ * Khóa đối chiếu API `/products/listing-parser-db-presence`: mã nguồn A|T + chữ số.
+ * Vẫn đọc legacy `...a188...` nếu gặp dữ liệu cũ.
  */
 function draftListingPresenceKeyFromProductData(pd: Record<string, unknown> | undefined): string | null {
   if (!pd) return null;
@@ -331,8 +331,8 @@ function listingRowToHiboxImportUrl(r: ParsedTaobaoCardRow): string | null {
   return null;
 }
 
-type ListingImportSource = '1688' | 'hibox';
-type ListingImportFetchTarget = 'auto' | 'hibox' | '1688';
+type ListingImportSource = 'hibox' | 'vipomall';
+type ListingImportFetchTarget = 'auto' | 'hibox' | 'vipomall';
 
 /** Offer id: từ href 1688 hoặc ID SP dạng A+digits. */
 function pick1688OfferIdFromListingRow(r: ParsedTaobaoCardRow): string | null {
@@ -343,10 +343,16 @@ function pick1688OfferIdFromListingRow(r: ParsedTaobaoCardRow): string | null {
   return m?.[1] ?? null;
 }
 
-function listingRowTo1688DetailPcUrl(r: ParsedTaobaoCardRow): string | null {
+/** PDP gương 1688 trên Vipomall — chỉ khi có offerId số (A+digits hoặc URL 1688). */
+function listingRowToVipomallImportUrl(r: ParsedTaobaoCardRow): string | null {
   const oid = pick1688OfferIdFromListingRow(r);
   if (!oid) return null;
-  return `https://detail.1688.com/offer/${oid}.html`;
+  const u = (r.item_url || '').trim().toLowerCase();
+  if (u.includes('vipomall.vn')) {
+    const m = u.match(/\/san-pham\/(\d+)/);
+    if (m?.[1]) return `https://vipomall.vn/san-pham/${m[1]}?platform_type=10`;
+  }
+  return `https://vipomall.vn/san-pham/${oid}?platform_type=10`;
 }
 
 /** Ghép URL + source API theo dropdown (khớp luồng Excel batch / backend). */
@@ -355,18 +361,18 @@ function resolveListingImportTask(
   target: ListingImportFetchTarget,
 ): { url: string; source: ListingImportSource } | null {
   const hiboxUrl = listingRowToHiboxImportUrl(r);
-  const detail1688 = listingRowTo1688DetailPcUrl(r);
+  const vipomallUrl = listingRowToVipomallImportUrl(r);
 
   if (target === 'hibox') {
     if (!hiboxUrl) return null;
     return { url: hiboxUrl, source: 'hibox' };
   }
-  if (target === '1688') {
-    if (!detail1688) return null;
-    return { url: detail1688, source: '1688' };
+  if (target === 'vipomall') {
+    if (!vipomallUrl) return null;
+    return { url: vipomallUrl, source: 'vipomall' };
   }
   if (hiboxUrl) return { url: hiboxUrl, source: 'hibox' };
-  if (detail1688) return { url: detail1688, source: '1688' };
+  if (vipomallUrl) return { url: vipomallUrl, source: 'vipomall' };
   return null;
 }
 
@@ -462,7 +468,8 @@ export default function TaobaoCardsParsePage() {
   useEffect(() => {
     try {
       const s = localStorage.getItem(TAOBAO_CARDS_PARSE_IMPORT_TARGET_LS_KEY);
-      if (s === 'auto' || s === 'hibox' || s === '1688') setImportFetchTarget(s);
+      if (s === '1688') setImportFetchTarget('vipomall');
+      else if (s === 'auto' || s === 'hibox' || s === 'vipomall') setImportFetchTarget(s);
     } catch {
       /* noop */
     }
@@ -971,11 +978,11 @@ export default function TaobaoCardsParsePage() {
       const task = resolveListingImportTask(r, importFetchTarget);
       if (!task) {
         skipLines.push(
-          importFetchTarget === '1688'
-            ? `${r.item_id || '—'}: không ghép được link 1688 (cần offer trong URL hoặc ID SP dạng A+số).`
+          importFetchTarget === 'vipomall'
+            ? `${r.item_id || '—'}: không ghép được link Vipomall (cần offer 1688 trong URL hoặc ID SP dạng A+số).`
             : importFetchTarget === 'hibox'
               ? `${r.item_id || '—'}: không ghép được link Hibox (cần link 1688/Taobao/Tmall và mã sản phẩm).`
-              : `${r.item_id || '—'}: không ghép được URL import — thử đổi «Trang lấy dữ liệu» (Hibox / 1688).`,
+              : `${r.item_id || '—'}: không ghép được URL import — thử đổi «Trang lấy dữ liệu» (Hibox / Vipomall).`,
         );
         continue;
       }
@@ -1067,9 +1074,9 @@ export default function TaobaoCardsParsePage() {
         const modeLabel =
           importFetchTarget === 'hibox'
             ? 'qua Hibox'
-            : importFetchTarget === '1688'
-              ? 'qua 1688 trực tiếp'
-              : 'tự chọn Hibox hoặc 1688';
+            : importFetchTarget === 'vipomall'
+              ? 'qua Vipomall'
+              : 'tự chọn Hibox hoặc Vipomall';
         const scopeLabel =
           mode === 'append' && queue_token
             ? 'Đã thêm vào đợt đang mở (đợt mới nhất trong danh sách).'
@@ -2376,9 +2383,9 @@ export default function TaobaoCardsParsePage() {
                 <strong className="tabular-nums">{pendingEnqueuePayload.items.length}</strong> link (
                 {importFetchTarget === 'hibox'
                   ? 'Hibox'
-                  : importFetchTarget === '1688'
-                    ? '1688'
-                    : 'tự động Hibox/1688'}
+                  : importFetchTarget === 'vipomall'
+                    ? 'Vipomall'
+                    : 'tự động Hibox/Vipomall'}
                 ). Chọn đợt đích:
               </p>
               {newestTrackedQueueToken ? (
@@ -2466,7 +2473,7 @@ export default function TaobaoCardsParsePage() {
             Sau đó có thể chỉ giữ các ID chưa có trên shop và chưa có nháp crawl xong (bỏ chọn để xem cả lô).
           </span>{' '}
           <span className="text-slate-700">
-            Chọn một hoặc nhiều dòng rồi chọn <strong>Trang lấy dữ liệu</strong> (Hibox / 1688 / tự động) và bấm «Lấy thông tin»
+            Chọn một hoặc nhiều dòng rồi chọn <strong>Trang lấy dữ liệu</strong> (Hibox / Vipomall / tự động) và bấm «Lấy thông tin»
             — cửa sổ sẽ hỏi <strong>thêm vào đợt đang mở</strong> hay <strong>tạo đợt / job mới</strong>. Server xử lý link{' '}
             <strong>lần lượt</strong> (Playwright). Có tạm dừng / tiếp tục / dừng hẳn, tải CSV tiến trình và thanh % bên dưới.
             Hoặc «Export đã chọn» để tải CSV bảng parse.
@@ -2527,12 +2534,12 @@ export default function TaobaoCardsParsePage() {
             onChange={(e) => persistImportFetchTarget(e.target.value as ListingImportFetchTarget)}
             disabled={enqueueSubmitting}
             className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 shadow-sm disabled:opacity-60 max-w-[min(100%,15rem)]"
-            aria-label="Chọn trang để lấy thông tin: Hibox không cần cookie 1688, hoặc 1688 trực tiếp"
-            title="Tự động: ưu tiên link Hibox nếu ghép được, không thì link chi tiết 1688 (khi có offer id)."
+            aria-label="Chọn trang để lấy thông tin: Hibox hoặc Vipomall (offer 1688)"
+            title="Tự động: ưu tiên Hibox; không ghép được thì Vipomall (cần offerId 1688). Import trực tiếp detail.1688.com đã tắt."
           >
-            <option value="auto">Tự động (Hibox hoặc 1688)</option>
+            <option value="auto">Tự động (Hibox hoặc Vipomall)</option>
             <option value="hibox">Hibox (hibox.mn)</option>
-            <option value="1688">1688 (detail.1688.com)</option>
+            <option value="vipomall">Vipomall (vipomall.vn)</option>
           </select>
         </div>
         <button

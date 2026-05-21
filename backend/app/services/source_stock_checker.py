@@ -16,7 +16,12 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.product import Product
 from app.services.admin_source_stock_batch import _cssbuy_row_shows_variant_matrix, _hibox_row_shows_color_size_catalog
-from app.services.import_batch_url_coercion import FETCH_TARGET_CSSBUY, FETCH_TARGET_HIBOX, coerce_url_for_excel_batch_import
+from app.services.import_batch_url_coercion import (
+    FETCH_TARGET_CSSBUY,
+    FETCH_TARGET_HIBOX,
+    FETCH_TARGET_VIPOMALL,
+    coerce_url_for_excel_batch_import,
+)
 from app.services.import_cssbuy_client import (
     ImportCssbuyError,
     cssbuy_html_disclaimer_agreement_without_add_to_cart,
@@ -517,6 +522,7 @@ def _link_eligible_for_hibox_stock_check(url: str) -> bool:
             "detail.1688",
             "taobao.com",
             "tmall.com",
+            "vipomall.vn",
         )
     )
 
@@ -692,13 +698,15 @@ def _evaluate_stock_primary_cssbuy_with_hibox_fallback(
 
 def admin_preview_source_stock_by_url(raw_url: str) -> Dict[str, Any]:
     """
-    Admin thử PDP giống worker (**một PDP có kết luận nghiệp vụ**; CSS ``blocked``/``error`` → Hibox) **không ghi DB**.
+    Admin thử PDP giống worker (**một PDP có kết luận nghiệp vụ**; CSS ``blocked``/``error`` → Hibox → Vipomall) **không ghi DB**.
+    Luôn chạy nhánh Vipomall riêng khi suy ra được offerId 1688.
     """
     stripped = (raw_url or "").strip()
     canon = (normalize_product_import_url(stripped) or stripped).strip()
 
     cssbuy_page, coercion_css_err = coerce_url_for_excel_batch_import(canon, FETCH_TARGET_CSSBUY)
     hibox_page, coercion_hb_err = coerce_url_for_excel_batch_import(canon, FETCH_TARGET_HIBOX)
+    vipomall_page, coercion_vm_err = coerce_url_for_excel_batch_import(canon, FETCH_TARGET_VIPOMALL)
 
     def _bubble(r: SourceStockCheckResult) -> Dict[str, Any]:
         return {"status": (r.status or "").strip(), "error": r.error, "checked_via": r.checked_via}
@@ -708,10 +716,30 @@ def admin_preview_source_stock_by_url(raw_url: str) -> Dict[str, Any]:
         "cssbuy_coercion_error": (coercion_css_err or "").strip(),
         "hibox_url": (hibox_page or "").strip(),
         "hibox_coercion_error": (coercion_hb_err or "").strip(),
+        "vipomall_url": (vipomall_page or "").strip(),
+        "vipomall_coercion_error": (coercion_vm_err or "").strip(),
     }
 
-    markers = ("hibox.mn", "1688.com", "detail.1688", "offer.1688", "taobao", "tmall")
+    vm_cached: Optional[SourceStockCheckResult] = None
+
+    def _vipomall_branch() -> SourceStockCheckResult:
+        nonlocal vm_cached
+        if vm_cached is not None:
+            return vm_cached
+        oid = resolve_numeric_1688_offer_id_from_source_url(canon)
+        if not oid:
+            vm_cached = SourceStockCheckResult(
+                status="skipped",
+                error="Không suy ra offerId 1688 — không kiểm tra Vipomall (link Taobao/Tmall thuần).",
+            )
+            return vm_cached
+        st, err, via = evaluate_vipomall_1688_offer_stock(oid)
+        vm_cached = SourceStockCheckResult(status=st, error=err, checked_via=via)
+        return vm_cached
+
+    markers = ("hibox.mn", "1688.com", "detail.1688", "offer.1688", "taobao", "tmall", "vipomall.vn")
     eligible = _link_eligible_for_hibox_stock_check(canon)
+    vm_branch = _vipomall_branch()
     if not eligible:
         note = (
             "Link không thuộc miền được worker PDP kiểm tra — cần chứa một trong: "
@@ -726,7 +754,7 @@ def admin_preview_source_stock_by_url(raw_url: str) -> Dict[str, Any]:
             "coercion": coercion,
             "cssbuy": _bubble(skipped),
             "hibox": _bubble(skipped),
-            "vipomall": _bubble(skipped),
+            "vipomall": _bubble(vm_branch if vm_branch.status != "skipped" else skipped),
             "merged": _bubble(err_r),
         }
 
@@ -740,7 +768,7 @@ def admin_preview_source_stock_by_url(raw_url: str) -> Dict[str, Any]:
             "coercion": coercion,
             "cssbuy": _bubble(css),
             "hibox": _bubble(skip_r),
-            "vipomall": _bubble(SourceStockCheckResult(status="skipped", error="Không cần Vipomall — CSSBuy đã in_stock.")),
+            "vipomall": _bubble(vm_branch),
             "merged": _bubble(css),
         }
 
@@ -754,27 +782,9 @@ def admin_preview_source_stock_by_url(raw_url: str) -> Dict[str, Any]:
                 "coercion": coercion,
                 "cssbuy": _bubble(css),
                 "hibox": _bubble(hb),
-                "vipomall": _bubble(SourceStockCheckResult(status="skipped", error="Không cần Vipomall — Hibox đã in_stock/out_of_stock.")),
+                "vipomall": _bubble(vm_branch),
                 "merged": _bubble(hb),
             }
-        oid = resolve_numeric_1688_offer_id_from_source_url(canon)
-        if oid:
-            st, err, via = evaluate_vipomall_1688_offer_stock(oid)
-            vm = SourceStockCheckResult(status=st, error=err, checked_via=via)
-            return {
-                "ok": True,
-                "canonical_input": canon,
-                "link_eligible": True,
-                "coercion": coercion,
-                "cssbuy": _bubble(css),
-                "hibox": _bubble(hb),
-                "vipomall": _bubble(vm),
-                "merged": _bubble(vm),
-            }
-        skip_vm = SourceStockCheckResult(
-            status="skipped",
-            error="Không suy ra offerId 1688 — không kiểm tra Vipomall (URL Taobao/Tmall thuần).",
-        )
         return {
             "ok": True,
             "canonical_input": canon,
@@ -782,8 +792,8 @@ def admin_preview_source_stock_by_url(raw_url: str) -> Dict[str, Any]:
             "coercion": coercion,
             "cssbuy": _bubble(css),
             "hibox": _bubble(hb),
-            "vipomall": _bubble(skip_vm),
-            "merged": _bubble(hb),
+            "vipomall": _bubble(vm_branch),
+            "merged": _bubble(vm_branch if vm_branch.status not in ("skipped",) else hb),
         }
 
     skip_hibox_r = SourceStockCheckResult(
@@ -800,7 +810,7 @@ def admin_preview_source_stock_by_url(raw_url: str) -> Dict[str, Any]:
         "coercion": coercion,
         "cssbuy": _bubble(css),
         "hibox": _bubble(skip_hibox_r),
-        "vipomall": _bubble(SourceStockCheckResult(status="skipped", error=None)),
+        "vipomall": _bubble(vm_branch),
         "merged": _bubble(css),
     }
 

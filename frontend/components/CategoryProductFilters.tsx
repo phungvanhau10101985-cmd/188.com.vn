@@ -91,6 +91,7 @@ function CategoryProductFiltersInner({
   const qList = searchParams.get('q')?.trim() ?? '';
   const showSearchShell = Boolean(enableEmptyListing && qList);
   const showListingFacetShell = Boolean(enableListingFacetShell);
+  const facetsLoading = (showSearchShell || showListingFacetShell) && facets === null;
 
   useEffect(() => {
     if (!facets) return;
@@ -129,68 +130,84 @@ function CategoryProductFiltersInner({
     return null;
   }
 
+  const showSizeFilter = facetsLoading || (facets != null && facets.sizes.length > 0);
+  const showStyleFilter = facetsLoading || (facets != null && facets.style_tags.length > 0);
+  const showColorFilter = facetsLoading || (facets != null && facets.colors.length > 0);
+
   return (
     <div className={compact ? "flex w-full flex-col gap-1" : "flex flex-col gap-2 sm:gap-3 w-full"} aria-label="Bộ lọc sản phẩm">
       <div className={compact ? "grid grid-cols-3 gap-1.5 sm:flex sm:flex-row sm:flex-wrap sm:items-end sm:justify-start" : "grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:flex-wrap sm:items-end sm:justify-start"}>
-        {facets && facets.sizes.length > 0 ? (
+        {showSizeFilter ? (
           <label className={compact ? "flex min-w-0 flex-col text-left" : "flex min-w-0 flex-col gap-1 text-left"}>
             <span className={compact ? "sr-only" : "text-xs font-medium text-gray-500"}>Size</span>
             <select
               value={size}
+              disabled={facetsLoading}
               onChange={(e) =>
                 navigateWith({ size: e.target.value || null, page: null })
               }
-              className={compact ? "h-8 w-full min-w-0 rounded-md border border-gray-300 bg-white px-1.5 text-[11px] text-gray-800 sm:min-w-[110px] sm:px-2 sm:text-xs" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-800 sm:min-w-[120px] sm:px-3 sm:text-sm"}
+              className={compact ? "h-8 w-full min-w-0 rounded-md border border-gray-300 bg-white px-1.5 text-[11px] text-gray-800 disabled:cursor-wait disabled:bg-gray-50 disabled:text-gray-500 sm:min-w-[110px] sm:px-2 sm:text-xs" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-800 disabled:cursor-wait disabled:bg-gray-50 disabled:text-gray-500 sm:min-w-[120px] sm:px-3 sm:text-sm"}
               aria-label="Lọc theo size"
+              aria-busy={facetsLoading}
             >
-              <option value="">Tất cả size</option>
-              {facets.sizes.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
+              <option value="">{facetsLoading ? 'Đang tải size…' : 'Tất cả size'}</option>
+              {!facetsLoading && facets
+                ? facets.sizes.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))
+                : null}
             </select>
           </label>
         ) : null}
 
-        {facets && facets.style_tags.length > 0 ? (
+        {showStyleFilter ? (
           <label className={compact ? "flex min-w-0 flex-col text-left" : "flex min-w-0 flex-col gap-1 text-left"}>
             <span className={compact ? "sr-only" : "text-xs font-medium text-gray-500"}>Kiểu</span>
             <select
               value={styleTag}
+              disabled={facetsLoading}
               onChange={(e) =>
                 navigateWith({ style_tag: e.target.value || null, page: null })
               }
-              className={compact ? "h-8 w-full min-w-0 rounded-md border border-gray-300 bg-white px-1.5 text-[11px] text-gray-800 sm:min-w-[130px] sm:max-w-[200px] sm:px-2 sm:text-xs" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-800 sm:min-w-[150px] sm:max-w-[220px] sm:px-3 sm:text-sm"}
+              className={compact ? "h-8 w-full min-w-0 rounded-md border border-gray-300 bg-white px-1.5 text-[11px] text-gray-800 disabled:cursor-wait disabled:bg-gray-50 disabled:text-gray-500 sm:min-w-[130px] sm:max-w-[200px] sm:px-2 sm:text-xs" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-800 disabled:cursor-wait disabled:bg-gray-50 disabled:text-gray-500 sm:min-w-[150px] sm:max-w-[220px] sm:px-3 sm:text-sm"}
               aria-label="Lọc theo kiểu sản phẩm"
+              aria-busy={facetsLoading}
             >
-              <option value="">Tất cả kiểu</option>
-              {facets.style_tags.map((tag) => (
-                <option key={tag} value={tag}>
-                  {tag}
-                </option>
-              ))}
+              <option value="">{facetsLoading ? 'Đang tải kiểu…' : 'Tất cả kiểu'}</option>
+              {!facetsLoading && facets
+                ? facets.style_tags.map((tag) => (
+                    <option key={tag} value={tag}>
+                      {tag}
+                    </option>
+                  ))
+                : null}
             </select>
           </label>
         ) : null}
 
-        {facets && facets.colors.length > 0 ? (
+        {showColorFilter ? (
           <label className={compact ? "flex min-w-0 flex-col text-left" : "flex min-w-0 flex-col gap-1 text-left"}>
             <span className={compact ? "sr-only" : "text-xs font-medium text-gray-500"}>Màu</span>
             <select
               value={color}
+              disabled={facetsLoading}
               onChange={(e) =>
                 navigateWith({ color: e.target.value || null, page: null })
               }
-              className={compact ? "h-8 w-full min-w-0 rounded-md border border-gray-300 bg-white px-1.5 text-[11px] text-gray-800 sm:min-w-[120px] sm:max-w-[190px] sm:px-2 sm:text-xs" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-800 sm:min-w-[140px] sm:max-w-[220px] sm:px-3 sm:text-sm"}
+              className={compact ? "h-8 w-full min-w-0 rounded-md border border-gray-300 bg-white px-1.5 text-[11px] text-gray-800 disabled:cursor-wait disabled:bg-gray-50 disabled:text-gray-500 sm:min-w-[120px] sm:max-w-[190px] sm:px-2 sm:text-xs" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs text-gray-800 disabled:cursor-wait disabled:bg-gray-50 disabled:text-gray-500 sm:min-w-[140px] sm:max-w-[220px] sm:px-3 sm:text-sm"}
               aria-label="Lọc theo màu"
+              aria-busy={facetsLoading}
             >
-              <option value="">Tất cả màu</option>
-              {facets.colors.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
+              <option value="">{facetsLoading ? 'Đang tải màu…' : 'Tất cả màu'}</option>
+              {!facetsLoading && facets
+                ? facets.colors.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))
+                : null}
             </select>
           </label>
         ) : null}

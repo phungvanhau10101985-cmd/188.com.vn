@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import {
   getSeoClusterDetail,
+  getSeoClusterFacets,
   getSeoClusterProducts,
   type SeoClusterProductCard,
   type SeoClusterListingFilters,
@@ -83,6 +84,7 @@ export default async function SeoClusterLandingPage({ params, searchParams }: Pr
   const listingQueryString = serializeSearchParams(resolvedSearchParams);
   const hasFilters = hasClusterFilters(filters);
   const skip = (page - 1) * PAGE_SIZE;
+  const initialFacets = await getSeoClusterFacets(slug, filters);
 
   // Trang 1 dùng products_sample đã có trong detail (đỡ 1 round-trip).
   // Trang 2+ gọi /products?skip=&limit=.
@@ -119,7 +121,11 @@ export default async function SeoClusterLandingPage({ params, searchParams }: Pr
       </header>
 
       <div className="sticky top-[var(--mobile-app-header-height)] z-40 mb-5 border-b border-gray-200 bg-gray-50/95 px-1.5 py-1.5 shadow-sm backdrop-blur sm:px-3 md:top-[var(--listing-filter-sticky-top)] md:border-t-0 md:bg-gray-50 md:shadow-none md:backdrop-blur-none">
-        <SeoClusterFiltersClient slug={cluster.slug} />
+        <SeoClusterFiltersClient
+          key={listingQueryString || cluster.slug}
+          slug={cluster.slug}
+          initialFacets={initialFacets}
+        />
       </div>
 
       {products.length === 0 ? (

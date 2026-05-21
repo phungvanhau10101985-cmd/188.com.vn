@@ -62,18 +62,15 @@ def extract_1688_numeric_offer_id(url: str, fallback_offer_id: Optional[str] = N
     return None
 
 
-def build_canonical_1688_product_id(offer_digits: str, sku_code: str) -> str:
+def build_canonical_1688_product_id(offer_digits: str, sku_code: str = "") -> str:
     """
-    Mã nội bộ web: A + offerId (chữ số) + a188 + SKU (đã chuẩn hoá in hoa).
-    Ví dụ offer 746204251298, SKU B0038 → A746204251298a188B0038.
+    Mã nội bộ web theo nguồn 1688: A + offerId.
+    Không ghép `a188` / SKU trong luồng lấy thông tin sản phẩm.
     """
     oid = str(offer_digits or "").strip()
-    sku = str(sku_code or "").strip().upper()
     if not oid.isdigit():
         raise ValueError("offer id 1688 phải là chuỗi chữ số.")
-    if not sku:
-        raise ValueError("thiếu sku để ghép mã sản phẩm.")
-    return f"A{oid}a188{sku}"
+    return f"A{oid}"
 
 
 def _dedupe(values: List[str]) -> List[str]:
@@ -634,8 +631,6 @@ def normalize_1688_payload(source_url: str, offer_id: Optional[str], payload: Di
     if body_specs.get("article_no"):
         specifications.setdefault("货号", body_specs["article_no"])
 
-    code_out = (body_specs.get("article_no") or "").strip() or (offer_id or "")
-
     product_info = {
         "product_info": {
             "source": "1688",
@@ -664,8 +659,8 @@ def normalize_1688_payload(source_url: str, offer_id: Optional[str], payload: Di
     _eng = synthetic_engagement_counts()
 
     return {
-        "product_id": f"1688_{offer_id}" if offer_id else f"1688_{abs(hash(source_url))}",
-        "code": code_out,
+        "product_id": build_canonical_1688_product_id(offer_id) if offer_id else f"1688_{abs(hash(source_url))}",
+        "code": "",
         "origin": "1688",
         "brand_name": None,
         "name": title,

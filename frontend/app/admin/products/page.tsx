@@ -270,8 +270,10 @@ type Stored1688LinkJob = {
   job_id: string;
   draft_id?: number;
   started_at: number;
-  source: '1688' | 'hibox';
+  source: '1688' | 'hibox' | 'vipomall';
 };
+
+type ImportExcelFetchTarget = 'auto' | 'hibox' | 'vipomall';
 
 /** Nội dung panel + toast sau khi poll job import xong */
 function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
@@ -318,7 +320,7 @@ function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
 
   const body: string[] = [headline];
   if (skippedCount > 0) {
-    body.push('', `Bỏ qua — trùng phần id trước «a188» hoặc trùng SKU (${skippedCount}):`);
+    body.push('', `Bỏ qua — trùng ID nguồn hoặc SKU (${skippedCount}):`);
     if (skipped.length) {
       skipped.slice(0, 200).forEach((s) => body.push(typeof s === 'string' ? s : String(s)));
       if (skipped.length > 200) body.push(`… và ${skipped.length - 200} dòng bỏ qua khác`);
@@ -342,7 +344,7 @@ function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
     rowErrs.length
       ? 'Import hoàn thành nhưng có lỗi ở một số dòng — xem chi tiết phía dưới ô Import.'
       : skippedCount > 0
-        ? `Import xong — ${skippedCount} dòng bỏ qua (trùng id/SKU); xem báo cáo.`
+        ? `Import xong — ${skippedCount} dòng bỏ qua (trùng ID/SKU); xem báo cáo.`
         : 'Import xong có cảnh báo — xem chi tiết phía dưới ô Import.';
 
   return {
@@ -372,6 +374,15 @@ function resolveImportLinkUrl(raw: string): string {
     const frag = bareMatch[0];
     return /^https?:\/\//i.test(frag) ? frag : `https://${frag.replace(/^\/+/, '')}`;
   }
+
+  const vipomallMatch = trimmed.match(
+    /\b(?:www\.)?vipomall\.vn(?::\d+)?\/san-pham\/[^\s\]\)<>'",?&]+/i,
+  );
+  if (vipomallMatch) {
+    const frag = vipomallMatch[0].replace(/[,.;:"'”’)\]]+$/u, '').trim();
+    return /^https?:\/\//i.test(frag) ? frag : `https://${frag.replace(/^\/+/, '')}`;
+  }
+
   return trimmed;
 }
 
@@ -394,6 +405,23 @@ function isHiboxProductUrl(raw: string): boolean {
       return Boolean(id && /^[a-zA-Z0-9][\w.-]{1,220}$/.test(id));
     }
     return false;
+  } catch {
+    return false;
+  }
+}
+
+/** PDP gương 1688 trên Vipomall — backend scrape Playwright (`source: vipomall`). */
+function isVipomallProductUrl(raw: string): boolean {
+  try {
+    const resolved = resolveImportLinkUrl(raw);
+    const absolute = /^[a-z][a-z0-9+.-]*:/i.test(resolved)
+      ? resolved
+      : `https://${resolved.replace(/^\/+/, '')}`;
+    const u = new URL(absolute);
+    let host = u.hostname.replace(/^www\./i, '').toLowerCase();
+    host = host.endsWith('.') ? host.slice(0, -1) : host;
+    if (host !== 'vipomall.vn') return false;
+    return /^\/san-pham\/\d+/i.test(u.pathname || '');
   } catch {
     return false;
   }
@@ -689,8 +717,8 @@ export default function AdminProductsPage() {
   const [excelBatchBusy, setExcelBatchBusy] = useState(false);
   /** File đã chọn; upload chỉ khi bấm «Chạy lấy dữ liệu». */
   const [excelBatchFile, setExcelBatchFile] = useState<File | null>(null);
-  /** Trang mở khi batch Excel: auto | hibox — khớp backend `fetch_target` (không còn 1688 trực tiếp). */
-  const [excelBatchFetchTarget, setExcelBatchFetchTarget] = useState<'auto' | 'hibox'>('auto');
+  /** Batch Excel: `fetch_target` gửi backend — auto | hibox | vipomall (không còn 1688 trực tiếp). */
+  const [excelBatchFetchTarget, setExcelBatchFetchTarget] = useState<ImportExcelFetchTarget>('auto');
   const [excelBatchTrackToken, setExcelBatchTrackToken] = useState<string | null>(null);
   const [excelBatchHint, setExcelBatchHint] = useState<string | null>(null);
   const [bulkExport1688Busy, setBulkExport1688Busy] = useState(false);
@@ -751,20 +779,9 @@ export default function AdminProductsPage() {
   /** Cờ huỷ theo dõi (job vẫn chạy ở server). */
   const cancelTrackRef = useRef(false);
   const [exporting, setExporting] = useState(false);
-  const [exportingUnusedSkus, setExportingUnusedSkus] = useState(false);
   const [googleSheetSyncing, setGoogleSheetSyncing] = useState(false);
   /** Còn lại giây trước khi cho phép thử đồng bộ lại (quota 429). null = không giới hạn. */
   const [googleSheetRateLimitSec, setGoogleSheetRateLimitSec] = useState<number | null>(null);
-  const [unusedSkuExportCount, setUnusedSkuExportCount] = useState(100);
-  const [unusedSkuStats, setUnusedSkuStats] = useState<{
-    total_space: number;
-    available: number;
-    used_on_products: number;
-    exported_reserved: number;
-    blocked_distinct: number;
-  } | null>(null);
-  const [unusedSkuStatsLoading, setUnusedSkuStatsLoading] = useState(false);
-  const [unusedSkuStatsError, setUnusedSkuStatsError] = useState<string | null>(null);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -909,24 +926,6 @@ export default function AdminProductsPage() {
     if (!listSortReady) return;
     fetchProducts();
   }, [listSortReady, fetchProducts]);
-
-  const loadUnusedInternalSkuStats = useCallback(async () => {
-    setUnusedSkuStatsLoading(true);
-    setUnusedSkuStatsError(null);
-    try {
-      const s = await adminProductAPI.getUnusedInternalSkuStats();
-      setUnusedSkuStats(s);
-    } catch (e) {
-      setUnusedSkuStats(null);
-      setUnusedSkuStatsError(e instanceof Error ? e.message : 'Không tải được số mã SKU');
-    } finally {
-      setUnusedSkuStatsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadUnusedInternalSkuStats();
-  }, [loadUnusedInternalSkuStats]);
 
   useEffect(() => {
     setSelectedProductIds(new Set());
@@ -1288,25 +1287,26 @@ export default function AdminProductsPage() {
     }
     setImporting1688(true);
     setImport1688Draft(null);
+    const importSource = fromVipomall ? 'vipomall' : 'hibox';
     setImport1688Progress({
-      message: 'Đang gửi link Hibox lên server…',
+      message: fromVipomall ? 'Đang gửi link Vipomall lên server…' : 'Đang gửi link Hibox lên server…',
       percent: null,
     });
     try {
-      const started = await adminProductAPI.startImport1688(url, false, 'hibox');
+      const started = await adminProductAPI.startImport1688(url, false, importSource);
       try {
         const payload: Stored1688LinkJob = {
           job_id: started.job_id,
           draft_id: started.draft_id,
           started_at: Date.now(),
-          source: 'hibox',
+          source: importSource,
         };
         localStorage.setItem(ADMIN_1688_LINK_JOB_KEY, JSON.stringify(payload));
       } catch {
         /* noop */
       }
       setImport1688Progress({
-        message: 'Đã nhận link, đang mở trang Hibox…',
+        message: fromVipomall ? 'Đã nhận link, đang mở trang Vipomall…' : 'Đã nhận link, đang mở trang Hibox…',
         percent: null,
       });
       const job = await pollImport1688Job(started.job_id);
@@ -2090,27 +2090,6 @@ export default function AdminProductsPage() {
     }
   };
 
-  const handleExportUnusedInternalSkus = async () => {
-    const maxAllowed =
-      unusedSkuStats != null ? Math.min(10_000, Math.max(0, unusedSkuStats.available)) : 10_000;
-    if (maxAllowed < 1) {
-      showToast('err', 'Không còn mã SKU trống để xuất.');
-      return;
-    }
-    const raw = Math.max(1, Math.floor(Number(unusedSkuExportCount) || 0));
-    const n = Math.min(maxAllowed, Math.min(10_000, raw));
-    setExportingUnusedSkus(true);
-    try {
-      await adminProductAPI.exportUnusedInternalSkus(n);
-      showToast('ok', `Đã tải ${n} mã SKU trống (một cột). Các mã được reserve 7 ngày để lần xuất sau không trùng; sau đó không cần đối chiếu file cũ.`, 7500);
-      await loadUnusedInternalSkuStats();
-    } catch (e) {
-      showToast('err', e instanceof Error ? e.message : 'Export mã SKU trống thất bại');
-    } finally {
-      setExportingUnusedSkus(false);
-    }
-  };
-
   const handleDownloadTemplate = async () => {
     setDownloadingTemplate(true);
     try {
@@ -2240,11 +2219,6 @@ export default function AdminProductsPage() {
   };
 
   const totalPages = data?.total_pages ?? 1;
-  const unusedSkuExportMax = useMemo(
-    () =>
-      unusedSkuStats != null ? Math.min(10_000, Math.max(0, unusedSkuStats.available)) : 10_000,
-    [unusedSkuStats],
-  );
   const currentPageIds = useMemo(() => (data?.products || []).map((p) => p.product_id), [data?.products]);
   const allSelectedOnPage = currentPageIds.length > 0 && currentPageIds.every((id) => selectedProductIds.has(id));
 
@@ -2478,62 +2452,6 @@ export default function AdminProductsPage() {
                 ) : null}
               </div>
             ) : null}
-            <div className="flex flex-wrap items-end gap-2 border-l border-gray-200 pl-3 ml-1">
-              <div>
-                <label htmlFor="admin-unused-sku-count" className="block text-sm font-medium text-gray-700 mb-1">
-                  Số lượng mã SKU cần export
-                </label>
-                <div className="flex flex-col gap-1">
-                  <input
-                    id="admin-unused-sku-count"
-                    type="number"
-                    min={1}
-                    max={Math.max(1, unusedSkuExportMax)}
-                    value={unusedSkuExportCount}
-                    onChange={(e) =>
-                      setUnusedSkuExportCount(Math.max(1, parseInt(e.target.value, 10) || 1))
-                    }
-                    className="w-28 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                    aria-label="Số lượng mã SKU trống cần export"
-                    disabled={unusedSkuStatsLoading || unusedSkuExportMax < 1}
-                  />
-                  {unusedSkuStatsError ? (
-                    <p className="text-xs text-red-600 max-w-[14rem]">
-                      {unusedSkuStatsError}{' '}
-                      <button
-                        type="button"
-                        onClick={() => void loadUnusedInternalSkuStats()}
-                        className="underline font-medium text-red-700"
-                      >
-                        Thử lại
-                      </button>
-                    </p>
-                  ) : unusedSkuStats ? (
-                    <p className="text-[11px] text-gray-600 max-w-[16rem] leading-snug">
-                      Còn{' '}
-                      <strong className="text-gray-800">
-                        {unusedSkuStats.available.toLocaleString('vi-VN')}
-                      </strong>{' '}
-                      mã có thể xuất (tối đa {Math.min(10_000, unusedSkuExportMax).toLocaleString('vi-VN')} mã /
-                      lần). Sau mỗi lần tải file, các mã được reserve <strong className="text-gray-800">7 ngày</strong>{' '}
-                      để lần xuất tiếp theo không trùng.
-                      {unusedSkuStatsLoading ? ' · đang cập nhật…' : ''}
-                    </p>
-                  ) : unusedSkuStatsLoading ? (
-                    <p className="text-[11px] text-gray-500">Đang tải số mã…</p>
-                  ) : null}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => void handleExportUnusedInternalSkus()}
-                disabled={exportingUnusedSkus || unusedSkuExportMax < 1}
-                className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 text-sm font-medium disabled:opacity-70 mb-0"
-                title="Mã A0001–Z9999 (không X0000): chỉ các mã chưa gán SP và không đang reserve sau lần tải trong 7 ngày."
-              >
-                {exportingUnusedSkus ? 'Đang tạo file...' : 'Tải SKU trống'}
-              </button>
-            </div>
           </form>
           {importDetailPanel ? (
             <div
@@ -2572,12 +2490,15 @@ export default function AdminProductsPage() {
                     Import Hibox
                   </h2>
                   <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                    Một URL hoặc Excel nhiều dòng → bản nháp (chỉ Hibox / taobao1688.kz). Luôn kiểm tra nháp trước khi đăng
-                    hoặc xuất Excel.
+                    Một URL hoặc Excel nhiều dòng → bản nháp (Hibox, taobao1688.kz hoặc Vipomall). Luôn kiểm tra nháp trước khi
+                    đăng hoặc xuất Excel.
                   </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <span className="inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-950">
                       Hibox · không cần cookie 1688
+                    </span>
+                    <span className="inline-flex items-center rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-950">
+                      Vipomall · offer 1688 (platform_type=10)
                     </span>
                   </div>
                 </div>
@@ -2653,7 +2574,8 @@ export default function AdminProductsPage() {
                 >
                 <h3 className="text-sm font-semibold text-slate-900">Import một link</h3>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Dán địa chỉ sản phẩm trên Hibox hoặc mirror <span className="whitespace-nowrap">taobao1688.kz</span>.
+                  Dán link Hibox, <span className="whitespace-nowrap">taobao1688.kz</span> hoặc Vipomall{' '}
+                  <span className="whitespace-nowrap">(vipomall.vn/san-pham/…)</span>.
                 </p>
                 <form onSubmit={handleImport1688} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
                   <div className="min-w-0 flex-1">
@@ -2665,7 +2587,7 @@ export default function AdminProductsPage() {
                       type="url"
                       value={import1688Url}
                       onChange={(e) => setImport1688Url(e.target.value)}
-                      placeholder="https://hibox.mn/v/… hoặc https://taobao1688.kz/item?id=…"
+                      placeholder="https://hibox.mn/v/… · taobao1688.kz · vipomall.vn/san-pham/…"
                       className="w-full rounded-lg border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-orange-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-orange-300/80"
                       autoComplete="off"
                       spellCheck={false}
@@ -2714,10 +2636,11 @@ export default function AdminProductsPage() {
                   <strong>Giá bán VNĐ</strong> trên nháp luôn do backend tính: CN¥ × hệ số lưới × tỷ giá (
                   <code className="rounded bg-white/80 px-1">LISTING_IMPORT_VND_PER_CNY</code>, mặc định 3580; hoặc cột{' '}
                   <code className="rounded bg-white/80 px-1">vnd_per_cny_used</code>), sau đó làm tròn lên bội 10.000&nbsp;₫.
-                  Tuỳ chọn: Shop Trung Quốc / Tên tiếng Trung / «Mã sp»{' '}
-                  <span className="whitespace-nowrap">[A-Z]0001–9999</span>. Chọn file → chọn cách lấy dữ liệu → bấm chạy;
-                  URL sẽ được chuẩn hoá về Hibox: Taobao/Tmall và offer 1688 → <span className="whitespace-nowrap">hibox.mn/v/…</span>{' '}
-                  khi đọc được mã; hoặc dòng bị bỏ qua kèm lý do nếu không quy đổi được.
+                  Tuỳ chọn: Shop Trung Quốc / Tên tiếng Trung. Cột **Mã sp / SKU** mặc định để trống; backend không tự sinh SKU khi lấy dữ liệu. Chọn file → chọn{' '}
+                  <strong>Lấy dữ liệu từ trang</strong> → bấm chạy.
+                  <strong>Tự động / Hibox:</strong> offer 1688 → <span className="whitespace-nowrap">hibox.mn/v/abb-…</span>.{' '}
+                  <strong>Vipomall:</strong> offer 1688 → <span className="whitespace-nowrap">vipomall.vn/san-pham/…</span> (cần SP đã có trên Vipomall).
+                  Dòng không quy đổi được sẽ bị bỏ qua kèm lý do.
                 </p>
                 <div className="mt-3 flex flex-col gap-3">
                   <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
@@ -2736,12 +2659,15 @@ export default function AdminProductsPage() {
                       <select
                         id="admin-excel-batch-fetch-target"
                         value={excelBatchFetchTarget}
-                        onChange={(e) => setExcelBatchFetchTarget(e.target.value as 'auto' | 'hibox')}
+                        onChange={(e) =>
+                          setExcelBatchFetchTarget(e.target.value as ImportExcelFetchTarget)
+                        }
                         disabled={excelBatchBusy}
                         className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-orange-300 focus:outline-none focus:ring-2 focus:ring-orange-300/80 disabled:opacity-60"
                       >
                         <option value="auto">Tự động — Taobao / 1688 → Hibox khi đổi được</option>
                         <option value="hibox">Ép về Hibox (hibox.mn)</option>
+                        <option value="vipomall">Ép về Vipomall (vipomall.vn) — offer 1688</option>
                       </select>
                     </div>
                     <button

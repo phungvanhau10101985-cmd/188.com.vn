@@ -50,7 +50,7 @@ router = APIRouter()
 
 class AdminSourceStockBatchBody(BaseModel):
     url: str = Field(..., min_length=3)
-    domain: Literal["hibox", "cssbuy"] = "cssbuy"
+    domain: Literal["hibox", "cssbuy", "vipomall"] = "cssbuy"
     dual_alternate_fallback: bool = Field(
         False,
         description="Sen kẽ thứ tự Hibox/CSSBuy theo alternate_sequence_index, fallback khi một nền không đọc được.",
@@ -59,7 +59,7 @@ class AdminSourceStockBatchBody(BaseModel):
 
 
 class AdminSourceStockScanNextDbBody(BaseModel):
-    domain: Literal["hibox", "cssbuy"] = "cssbuy"
+    domain: Literal["hibox", "cssbuy", "vipomall"] = "cssbuy"
     active_only: bool = True
     cursor_after_product_id: int = Field(0, ge=0)
     sticky_seed_product_id: int = Field(
@@ -101,7 +101,7 @@ class AdminSourceStockPreviewUrlBody(BaseModel):
 class AdminSourceStockResetPdpBody(BaseModel):
     """Reset kết quả kiểm tra PDP (source_stock_*) và xóa queue RAM của một process."""
 
-    domain: Literal["hibox", "cssbuy"] = Field(
+    domain: Literal["hibox", "cssbuy", "vipomall"] = Field(
         "cssbuy",
         description="Giống queue-stats — lọc phạm vi sản có link có thể quy đổi như nhập Excel.",
     )
@@ -968,15 +968,7 @@ def admin_source_stock_delete_products_by_db_ids(
             detail="Không có id DB hợp lệ (cần số nguyên dương, tối đa 300 mỗi lần).",
         )
 
-    deleted_db_ids: List[int] = []
-    not_found_db_ids: List[int] = []
-    for pk in ordered:
-        row = crud.product.get_product(db, product_id=pk)
-        if row is None:
-            not_found_db_ids.append(pk)
-            continue
-        crud.product.delete_product(db, product_id=pk)
-        deleted_db_ids.append(pk)
+    deleted_db_ids, not_found_db_ids = crud.product.bulk_delete_products_by_db_ids(db, ordered)
 
     return {
         "ok": True,
@@ -1066,7 +1058,7 @@ def admin_source_stock_reset_pdp_cycle_route(
 
 @router.get("/admin/source-stock-batch/queue-stats", response_model=dict, include_in_schema=False)
 def admin_source_stock_batch_queue_stats(
-    domain: Literal["hibox", "cssbuy"] = Query(
+    domain: Literal["hibox", "cssbuy", "vipomall"] = Query(
         "cssbuy",
         description="hibox = scrape hibox.mn; cssbuy = POST /web/item (không cần bấm modal).",
     ),
@@ -1104,7 +1096,7 @@ def admin_source_stock_worker_pause_route(
 
 @router.get("/admin/source-stock-batch/report", response_model=dict, include_in_schema=False)
 def admin_source_stock_batch_report(
-    domain: Literal["hibox", "cssbuy"] = Query(
+    domain: Literal["hibox", "cssbuy", "vipomall"] = Query(
         "cssbuy",
         description="hibox = scrape hibox.mn; cssbuy = POST /web/item.",
     ),
@@ -1137,7 +1129,7 @@ def admin_source_stock_batch_report(
 
 @router.get("/admin/source-stock-batch/product-urls", response_model=dict, include_in_schema=False)
 def admin_source_stock_batch_product_urls(
-    domain: Literal["hibox", "cssbuy"] = Query(
+    domain: Literal["hibox", "cssbuy", "vipomall"] = Query(
         "cssbuy",
         description="Lọc link phù hợp luồng kiểm tra (quy đổi sang Hibox hoặc CSSBuy)",
     ),

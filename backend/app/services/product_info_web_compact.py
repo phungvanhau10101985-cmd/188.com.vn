@@ -15,7 +15,6 @@ _INNER_WEB_KEYS = frozenset(
         "sku",
         "name",
         "brand",
-        "origin",
         "category",
         "target_audience_suggestion_vi",
         "name_vi",
@@ -52,14 +51,16 @@ def _truthy(val: Any) -> bool:
 
 
 def _should_compact_hibox_style_product_info(pi: Dict[str, Any]) -> bool:
-    """Nhận diện bản scrape catalog liệt kê ₮ — không phụ thuộc nhãn tên miền trong JSON."""
+    """Nhận diện bản scrape catalog Hibox/Vipomall — không phụ thuộc nhãn tên miền trong JSON."""
     inner_chk = pi.get("product_info")
     if isinstance(inner_chk, dict):
         if str(inner_chk.get("source") or "").lower() == "hibox":
             return True
+        if str(inner_chk.get("origin") or "").lower() == "1688" and inner_chk.get("listing_sku_hint"):
+            return True
     var_chk = pi.get("variants")
     if isinstance(var_chk, dict):
-        if str(var_chk.get("source") or "").lower() == "hibox":
+        if str(var_chk.get("source") or "").lower() in {"hibox", "vipomall"}:
             return True
     mk = pi.get("market_info")
     if isinstance(mk, dict):
@@ -77,11 +78,12 @@ def compact_product_info_for_web(product_data: Dict[str, Any]) -> None:
     """
     Mutate `product_data['product_info']` thành cấu trúc gọn cho PDP.
 
-    Chỉ áp dụng khi payload nhận diện là import Hibox/listing (`_should_compact_hibox_style_product_info`),
+    Chỉ áp dụng khi payload nhận diện là import Hibox/Vipomall/listing (`_should_compact_hibox_style_product_info`),
     để không làm mất cấu trúc cột AK do Excel nhập tay.
 
-    Không giữ `supplier_specs_excerpt` / `hibox_specs_excerpt`, `import_taxonomy_meta`,
-    `pairs`, `color_swatches`, …; `market_info.note` không đưa ra web (ghi chú máy scrape).
+    Không giữ `supplier_specs_excerpt` / `hibox_specs_excerpt`, `vipomall_info_texts`,
+    `import_taxonomy_meta`, `pairs`, `color_swatches`, `vipomall_rows`, link ảnh/source URL…;
+    `market_info.note` không đưa ra web (ghi chú máy scrape).
     """
     pi = product_data.get("product_info")
     if not isinstance(pi, dict):
@@ -126,22 +128,6 @@ def compact_product_info_for_web(product_data: Dict[str, Any]) -> None:
                 continue
             slim_var[k] = copy.deepcopy(v)
 
-    slim_mk: Dict[str, Any] = {}
-    mk = pi.get("market_info")
-    if isinstance(mk, dict):
-        if mk.get("stock") is not None:
-            slim_mk["stock"] = mk["stock"]
-        cur = (mk.get("currency") or "").strip()
-        if cur:
-            slim_mk["currency"] = cur
-        for ek in ("price_vnd", "price_vnd_display", "excel_price_vnd_source"):
-            if ek not in mk:
-                continue
-            ev = mk[ek]
-            if ev is None or (isinstance(ev, str) and not ev.strip()):
-                continue
-            slim_mk[ek] = copy.deepcopy(ev)
-
     new_pi: Dict[str, Any] = {}
     if slim_inner:
         new_pi["product_info"] = slim_inner
@@ -149,9 +135,6 @@ def compact_product_info_for_web(product_data: Dict[str, Any]) -> None:
         new_pi["specifications"] = slim_spec
     if slim_var:
         new_pi["variants"] = slim_var
-    if slim_mk:
-        new_pi["market_info"] = slim_mk
-
     ta = pi.get("target_audience")
     if isinstance(ta, dict) and ta:
         new_pi["target_audience"] = copy.deepcopy(ta)

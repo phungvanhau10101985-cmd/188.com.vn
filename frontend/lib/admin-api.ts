@@ -433,6 +433,9 @@ export interface AdminSourceStockActivityReportSampleRow {
   /** URL Hibox scrape sau quy đổi. */
   link_convert_hibox?: string;
   link_convert_hibox_err?: string;
+  /** URL Vipomall (gương 1688) sau quy đổi. */
+  link_convert_vipomall?: string;
+  link_convert_vipomall_err?: string;
   source_stock_status: string | null;
   source_stock_checked_at: string | null;
   /** Nền đã đọc PDP cho kết quả kiểm tra (worker: cssbuy / hibox; batch: cssbuy, hibox, cssbuy+hibox…) */
@@ -515,6 +518,8 @@ export interface AdminSourceStockPreviewUrlCoercion {
   cssbuy_coercion_error: string;
   hibox_url: string;
   hibox_coercion_error: string;
+  vipomall_url?: string;
+  vipomall_coercion_error?: string;
 }
 
 export interface AdminSourceStockPreviewUrlResult {
@@ -524,6 +529,7 @@ export interface AdminSourceStockPreviewUrlResult {
   coercion: AdminSourceStockPreviewUrlCoercion;
   cssbuy: AdminSourceStockPreviewUrlBranch;
   hibox: AdminSourceStockPreviewUrlBranch;
+  vipomall?: AdminSourceStockPreviewUrlBranch;
   merged: AdminSourceStockPreviewUrlBranch;
 }
 
@@ -1138,7 +1144,7 @@ export const adminProductAPI = {
 
   /** Một SP kế trong DB — kiểm tra qua Hibox hoặc CSSBuy. */
   runSourceStockBatchNextFromDb: (params: {
-    domain: 'hibox' | 'cssbuy';
+    domain: 'hibox' | 'cssbuy' | 'vipomall';
     activeOnly?: boolean;
     cursorAfterProductId?: number;
     /** products.id — giữ kiểm tra lại đúng SP sau lỗi tạm (captcha/chặn…). */
@@ -1164,7 +1170,7 @@ export const adminProductAPI = {
 
   /** Nạp `link_default` trong DB — lọc theo miền kiểm tra (hibox vs cssbuy). */
   fetchSourceStockProductUrls: (params: {
-    domain: 'hibox' | 'cssbuy';
+    domain: 'hibox' | 'cssbuy' | 'vipomall';
     limit?: number;
     activeOnly?: boolean;
   }) =>
@@ -1173,7 +1179,7 @@ export const adminProductAPI = {
       { timeoutMs: 120_000 },
     ),
 
-  fetchSourceStockQueueStats: (params: { domain: 'hibox' | 'cssbuy'; activeOnly?: boolean }) =>
+  fetchSourceStockQueueStats: (params: { domain: 'hibox' | 'cssbuy' | 'vipomall'; activeOnly?: boolean }) =>
     fetchAdmin<AdminSourceStockQueueStats>(
       `/products/admin/source-stock-batch/queue-stats?domain=${encodeURIComponent(params.domain)}&active_only=${params.activeOnly ?? true}`,
       { timeoutMs: 60_000 },
@@ -1193,7 +1199,7 @@ export const adminProductAPI = {
 
   /** Đếm đã kiểm tra / OOS / còn hàng trong cửa sổ + mẫu chi tiết (phân trang, mới nhất trước). */
   fetchSourceStockActivityReport: (params: {
-    domain: 'hibox' | 'cssbuy';
+    domain: 'hibox' | 'cssbuy' | 'vipomall';
     activeOnly?: boolean;
     windowDays?: number;
     samplesOosPage?: number;
@@ -1235,7 +1241,7 @@ export const adminProductAPI = {
       },
     ),
 
-  /** Một request thử PDP (CSSBuy→Hibox) theo URL — không cập nhật products. */
+  /** Một request thử PDP (CSSBuy→Hibox→Vipomall) theo URL — không cập nhật products. */
   previewSourceStockByUrl: (url: string) =>
     fetchAdmin<AdminSourceStockPreviewUrlResult>('/products/admin/source-stock-batch/preview-url', {
       method: 'POST',
@@ -1248,7 +1254,7 @@ export const adminProductAPI = {
    * Xóa hàng chờ RAM chỉ trên một process backend.
    */
   resetSourceStockPdpCycle: (params: {
-    domain: 'hibox' | 'cssbuy';
+    domain: 'hibox' | 'cssbuy' | 'vipomall';
     activeOnly?: boolean;
     confirm: boolean;
   }) =>
@@ -1263,15 +1269,34 @@ export const adminProductAPI = {
     }),
 
   /** Xóa vĩnh viễn các sản theo khóa chính `products.id` (sau phiên kiểm tra nguồn). */
-  deleteSourceStockBatchProductsByDbIds: (dbIds: number[]) =>
-    fetchAdmin<AdminSourceStockBatchDeleteByDbIdsResult>(
-      '/products/admin/source-stock-batch/delete-by-db-ids',
-      {
-        method: 'POST',
-        body: JSON.stringify({ db_ids: dbIds }),
-        timeoutMs: 120_000,
-      },
-    ),
+  deleteSourceStockBatchProductsByDbIds: async (dbIds: number[]) => {
+    const unique = [...new Set(dbIds.filter((id) => Number.isFinite(id) && id > 0))];
+    if (!unique.length) {
+      return { ok: true, deleted_count: 0, deleted_db_ids: [], not_found_db_ids: [] };
+    }
+    const chunkSize = 20;
+    const deleted_db_ids: number[] = [];
+    const not_found_db_ids: number[] = [];
+    for (let i = 0; i < unique.length; i += chunkSize) {
+      const chunk = unique.slice(i, i + chunkSize);
+      const res = await fetchAdmin<AdminSourceStockBatchDeleteByDbIdsResult>(
+        '/products/admin/source-stock-batch/delete-by-db-ids',
+        {
+          method: 'POST',
+          body: JSON.stringify({ db_ids: chunk }),
+          timeoutMs: 120_000,
+        },
+      );
+      deleted_db_ids.push(...(res.deleted_db_ids ?? []));
+      not_found_db_ids.push(...(res.not_found_db_ids ?? []));
+    }
+    return {
+      ok: true,
+      deleted_count: deleted_db_ids.length,
+      deleted_db_ids,
+      not_found_db_ids,
+    };
+  },
 
   saveGeminiImageLocalizationCookie: (cookie: string) =>
     fetchAdmin<{ success: boolean; cookie_count: number }>('/image-localization/settings/gemini-cookie', {
@@ -1388,7 +1413,7 @@ export const adminProductAPI = {
     }
   },
 
-  startImport1688: (url: string, downloadImages = true, source?: '1688' | 'hibox') =>
+  startImport1688: (url: string, downloadImages = true, source?: '1688' | 'hibox' | 'vipomall') =>
     fetchAdmin<{ job_id: string; draft_id: number; message?: string; poll_url?: string }>(
       '/import-1688/jobs',
       {
@@ -1573,7 +1598,7 @@ export const adminProductAPI = {
 
   uploadImport1688ExcelBatch: async (
     file: File,
-    fetchTarget: 'auto' | 'hibox' = 'auto',
+    fetchTarget: 'auto' | 'hibox' | 'vipomall' = 'auto',
   ): Promise<AdminImport1688ExcelBatchStart> => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');

@@ -19,7 +19,11 @@ import time
 from datetime import datetime
 from app.core.config import settings
 from app.services.alicdn_urls import normalize_excel_product_image_urls
-from app.services.bunny_storage import delete_bunny_assets_for_product
+from app.services.bunny_storage import (
+    collect_product_image_urls_for_bunny,
+    delete_bunny_assets_for_product,
+    delete_bunny_storage_objects_for_urls,
+)
 from app.services.import_hibox_scraper import canonicalize_hibox_placeholder_product_id
 from app.services.product_internal_sku import (
     ensure_unique_internal_product_code,
@@ -87,6 +91,26 @@ def split_product_id_web_prefix_and_internal_sku(product_id: Optional[str]) -> O
     return {"prefix": prefix, "prefix_key": prefix.casefold(), "sku": sku_tail}
 
 
+def _listing_source_prefix_from_product_id(product_id: Optional[str]) -> Optional[Dict[str, str]]:
+    """
+    Lấy mã nguồn A/T từ cột id Excel.
+    Hỗ trợ cả dạng mới `A673071730303` và legacy `A673071730303a188B7402`.
+    """
+    raw = str(product_id or "").strip()
+    if not raw:
+        return None
+    seg = split_product_id_web_prefix_and_internal_sku(raw)
+    prefix = (seg.get("prefix") if seg else raw).strip()
+    if not re.fullmatch(r"(?i)[AT]\d{6,}", prefix):
+        return None
+    normalized = prefix[0].upper() + prefix[1:]
+    return {"prefix": normalized, "prefix_key": normalized.casefold()}
+
+
+def _compose_listing_product_id(prefix: str, sku: str) -> str:
+    return f"{prefix.strip()}a188{sku.strip().upper()}"
+
+
 def find_conflicting_product_id_for_same_listing_source(
     db: Session,
     candidate_product_id: str,
@@ -130,7 +154,7 @@ def _bulk_import_maps_remove_product_id(
 
 def _bulk_import_conflict_maps_initial(db: Session) -> Tuple[Dict[str, str], Dict[str, str]]:
     """
-    prefix_key (phần trước a188) → product_id sở hữu,
+    prefix_key (A/T + số nguồn; tách từ cả id mới và legacy a188) → product_id sở hữu,
     sku_code upper → product_id sở hữu (theo Product.code trong DB hiện tại).
     """
     pref_own: Dict[str, str] = {}
@@ -138,9 +162,9 @@ def _bulk_import_conflict_maps_initial(db: Session) -> Tuple[Dict[str, str], Dic
     for pid, code in db.query(Product.product_id, Product.code).all():
         if not pid:
             continue
-        seg = split_product_id_web_prefix_and_internal_sku(pid)
-        if seg:
-            k = seg["prefix_key"]
+        src = _listing_source_prefix_from_product_id(pid)
+        if src:
+            k = src["prefix_key"]
             if k not in pref_own:
                 pref_own[k] = pid
         if code:
@@ -1185,6 +1209,32 @@ def _excel_str(row: Dict, *keys: str) -> str:
     return ""
 
 
+def _clean_excel_text(value: Any, *, max_len: Optional[int] = None) -> str:
+    """Chuẩn hóa text từ Excel cho cột String: bỏ NaN/rỗng và cắt theo giới hạn DB."""
+    if value is None:
+        return ""
+    if isinstance(value, float) and math.isnan(value):
+        return ""
+    s = str(value).strip()
+    if not s or s.lower() in {"nan", "none", "null"}:
+        return ""
+    if max_len is not None and max_len > 0:
+        return s[:max_len]
+    return s
+
+
+def _merge_excel_full_text_into_product_info(product_info: Any, *, color_full: str = "") -> Dict[str, Any]:
+    """Giữ giá trị Excel dài trong JSON để cột String DB có thể cắt ngắn mà không mất dữ liệu."""
+    pi = product_info if isinstance(product_info, dict) else {}
+    variants = pi.get("variants")
+    if not isinstance(variants, dict):
+        variants = {}
+        pi["variants"] = variants
+    if color_full:
+        variants.setdefault("colors", color_full)
+    return pi
+
+
 def _excel_listed_raw(row: Dict[str, Any]) -> Any:
     """
     Đọc ô «listed» / «Trong danh sách»: khi read_excel dùng hàng 2 làm header, tên cột là tiếng Việt
@@ -1233,8 +1283,8 @@ def excel_row_to_product(row: Dict) -> Dict:
     """
     try:
         # Lấy các giá trị cơ bản
-        product_id = str(row.get('id', '')).strip()
-        product_name = str(row.get('name', '')).strip()
+        product_id = _clean_excel_text(row.get('id'), max_len=255)
+        product_name = _clean_excel_text(row.get('name'), max_len=500)
         
         # VALIDATION: Product ID là bắt buộc
         if not product_id or product_id.lower() == 'nan':
@@ -1280,28 +1330,39 @@ def excel_row_to_product(row: Dict) -> Dict:
         
         # 36 CỘT EXCEL MAPPING - ĐÃ FIX
         # Cột Shop id (I) đồng bộ với cột Style (AI): nguồn là ô Style.
-        style_cell = str(row.get('Style', '')).strip()
+        style_cell = _clean_excel_text(row.get('Style'), max_len=100)
+        color_full = _clean_excel_text(row.get('Color'))
+        product_info_value = _parse_product_info(
+            row.get('product_info')
+            or row.get('Thông tin sản phẩm')
+            or row.get('thong_tin_san_pham')
+            or row.get('Thong tin san pham')
+        )
+        product_info_value = _merge_excel_full_text_into_product_info(
+            product_info_value,
+            color_full=color_full,
+        )
         product_data = {
             'product_id': product_id,
-            'code': str(row.get('sku', '')).strip(),
-            'origin': str(row.get('origin', '')).strip(),
-            'brand_name': str(row.get('brand', '')).strip(),
+            'code': _clean_excel_text(row.get('sku'), max_len=100),
+            'origin': _clean_excel_text(row.get('origin'), max_len=100),
+            'brand_name': _clean_excel_text(row.get('brand'), max_len=200),
             'name': product_name,
-            'description': str(row.get('pro_content', '')).strip(),
+            'description': _clean_excel_text(row.get('pro_content')),
             'price': safe_float(row.get('price', 0)),
-            'shop_name': str(row.get('shop_name', '')).strip(),
+            'shop_name': _clean_excel_text(row.get('shop_name'), max_len=200),
             'shop_id': style_cell,
-            'pro_lower_price': str(row.get('pro_lower_price', '')).strip(),
-            'pro_high_price': str(row.get('pro_high_price', '')).strip(),
+            'pro_lower_price': _clean_excel_text(row.get('pro_lower_price'), max_len=255),
+            'pro_high_price': _clean_excel_text(row.get('pro_high_price'), max_len=255),
             'group_rating': safe_int(row.get('rating_group_id', 0)),
             'group_question': safe_int(row.get('question_group_id', 0)),
             'sizes': parse_json_field(row.get('sizes', '[]')),
             'colors': parse_json_field(row.get('Variant', '[]')),
             'images': parse_json_field(row.get('gallery_images', '[]')),
             'gallery': parse_json_field(row.get('detail_images', '[]')),
-            'link_default': str(row.get('product_url', '')).strip(),
-            'video_link': str(row.get('video_url', '')).strip(),
-            'main_image': str(row.get('main_image', '')).strip(),
+            'link_default': _clean_excel_text(row.get('product_url'), max_len=500),
+            'video_link': _clean_excel_text(row.get('video_url'), max_len=500),
+            'main_image': _clean_excel_text(row.get('main_image'), max_len=500),
             'likes': safe_int(row.get('likes_count', 0)),
             'purchases': safe_int(row.get('purchases_count', 0)),
             'rating_total': safe_int(row.get('reviews_count', 0)),
@@ -1309,28 +1370,23 @@ def excel_row_to_product(row: Dict) -> Dict:
             'rating_point': safe_float(row.get('rating_score', 0.0)),
             'available': safe_int(row.get('stock_quantity', 500)),
             'deposit_require': deposit_require_from_excel_cell(row.get("deposit_required")),
-            'category': str(row.get('Main Category', '')).strip(),
-            'subcategory': str(row.get('Subcategory', '')).strip(),
-            'sub_subcategory': str(row.get('Sub-subcategory', '')).strip(),
-            'raw_category': str(row.get('Main Category', '')).strip(),
-            'raw_subcategory': str(row.get('Subcategory', '')).strip(),
-            'raw_sub_subcategory': str(row.get('Sub-subcategory', '')).strip(),
-            'material': str(row.get('Material', '')).strip(),
+            'category': _clean_excel_text(row.get('Main Category'), max_len=100),
+            'subcategory': _clean_excel_text(row.get('Subcategory'), max_len=100),
+            'sub_subcategory': _clean_excel_text(row.get('Sub-subcategory'), max_len=100),
+            'raw_category': _clean_excel_text(row.get('Main Category'), max_len=100),
+            'raw_subcategory': _clean_excel_text(row.get('Subcategory'), max_len=100),
+            'raw_sub_subcategory': _clean_excel_text(row.get('Sub-subcategory'), max_len=100),
+            'material': _clean_excel_text(row.get('Material'), max_len=100),
             'style': style_cell,
             # FIX: Cột Color -> color (đúng mapping)
-            'color': str(row.get('Color', '')).strip(),
+            'color': _clean_excel_text(color_full, max_len=100),
             # FIX: Cột Occasion -> occasion (đúng mapping)
-            'occasion': str(row.get('Occasion', '')).strip(),
+            'occasion': _clean_excel_text(row.get('Occasion'), max_len=100),
             # FIX: Features xử lý đúng
             'features': features_list,
-            'weight': str(row.get('Weight', '')).strip(),
+            'weight': _clean_excel_text(row.get('Weight'), max_len=100),
             # Cột AK: Thông tin sản phẩm (JSON) - thử nhiều tên cột
-            'product_info': _parse_product_info(
-                row.get('product_info')
-                or row.get('Thông tin sản phẩm')
-                or row.get('thong_tin_san_pham')
-                or row.get('Thong tin san pham')
-            ),
+            'product_info': product_info_value,
             'chinese_name': _excel_str(
                 row,
                 'chinese_name',
@@ -1341,7 +1397,7 @@ def excel_row_to_product(row: Dict) -> Dict:
                 'Tên tiếng trung',
                 'Tên tiếng Trung',
             ),
-            'shop_name_chinese': _excel_str(row, 'shop_name_chinese', 'Shop Trung Quốc'),
+            'shop_name_chinese': _clean_excel_text(_excel_str(row, 'shop_name_chinese', 'Shop Trung Quốc'), max_len=200),
             'slug': slug_value,
             'excel_import_listed': excel_import_listed,
             'is_active': bool(excel_import_listed),
@@ -3905,6 +3961,77 @@ def delete_product(db: Session, product_id: int):
         _schedule_google_sheets_sku_sync()
     return db_product
 
+
+def _schedule_bunny_cleanup_for_deleted_products(products: List[Product]) -> None:
+    """Dọn object Bunny sau bulk xóa — chạy nền để tránh timeout gateway trên lô lớn."""
+    if not settings.BUNNY_DELETE_ON_PRODUCT_DELETE or not products:
+        return
+
+    all_urls: List[str] = []
+    seen: Set[str] = set()
+    for product in products:
+        for url in collect_product_image_urls_for_bunny(product):
+            if url not in seen:
+                seen.add(url)
+                all_urls.append(url)
+    if not all_urls:
+        return
+
+    def _run() -> None:
+        try:
+            n = delete_bunny_storage_objects_for_urls(all_urls)
+            if n:
+                logger.info("Bulk xóa SP: đã dọn %s object Bunny (nền)", n)
+        except Exception as exc:
+            logger.warning("Bulk xóa SP — dọn Bunny nền lỗi (DB đã xóa): %s", exc)
+
+    threading.Thread(target=_run, name="bulk-bunny-delete", daemon=True).start()
+
+
+def bulk_delete_products_by_db_ids(db: Session, db_ids: List[int]) -> Tuple[List[int], List[int]]:
+    """
+    Xóa nhiều SP theo ``products.id`` trong một transaction; Bunny CDN dọn nền.
+    Trả (deleted_db_ids, not_found_db_ids) — thứ tự ``deleted`` khớp tham số đầu vào.
+    """
+    if not db_ids:
+        return [], []
+
+    ordered_unique: List[int] = []
+    seen: Set[int] = set()
+    for raw in db_ids:
+        try:
+            pk = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if pk <= 0 or pk in seen:
+            continue
+        seen.add(pk)
+        ordered_unique.append(pk)
+
+    if not ordered_unique:
+        return [], []
+
+    rows = db.query(Product).filter(Product.id.in_(ordered_unique)).all()
+    by_id = {row.id: row for row in rows}
+    deleted: List[int] = []
+    bunny_rows: List[Product] = []
+
+    for pk in ordered_unique:
+        row = by_id.get(pk)
+        if row is None:
+            continue
+        bunny_rows.append(row)
+        db.delete(row)
+        deleted.append(pk)
+
+    if deleted:
+        db.commit()
+        _schedule_google_sheets_sku_sync()
+        _schedule_bunny_cleanup_for_deleted_products(bunny_rows)
+
+    not_found = [pk for pk in ordered_unique if pk not in by_id]
+    return deleted, not_found
+
 def get_category_gemini_auto_settings_snapshot(db: Session) -> Dict[str, Any]:
     """Trả trạng thái chế độ auto Gemini SEO danh mục cho trang admin."""
     env_ok = bool(getattr(settings, "CATEGORY_GEMINI_SEO_AUTO_ENABLED", False))
@@ -4210,12 +4337,31 @@ def bulk_import_products(
         if not product_id:
             errors.append(f"Dòng {idx + 1}: Thiếu product_id")
             continue
+        source_prefix = _listing_source_prefix_from_product_id(product_id)
+        if not source_prefix:
+            errors.append(
+                f"Dòng {idx + 1} ({product_id}): ID sản phẩm phải có dạng A<số> hoặc T<số> "
+                "(có thể kèm legacy a188SKU)."
+            )
+            continue
 
         excel_listed = listed_from_excel_cell(product_data.pop("excel_import_listed", 1), default=1)
         if excel_listed == 0:
-            existing_del = db.query(Product).filter(Product.product_id == product_id).first()
+            delete_candidates = [product_id]
+            prefix_owner = batch_prefix_owner.get(source_prefix["prefix_key"]) or db_prefix_owner.get(
+                source_prefix["prefix_key"]
+            )
+            if prefix_owner and prefix_owner not in delete_candidates:
+                delete_candidates.append(prefix_owner)
+            existing_del = (
+                db.query(Product)
+                .filter(Product.product_id.in_(delete_candidates))
+                .order_by(Product.id.asc())
+                .first()
+            )
             if existing_del:
                 try:
+                    product_id = existing_del.product_id
                     code_upper = str(existing_del.code or "").strip().upper()
                     with db.begin_nested():
                         _delete_product_orm_only(db, existing_del)
@@ -4252,40 +4398,11 @@ def bulk_import_products(
             )
             continue
 
-        seg = split_product_id_web_prefix_and_internal_sku(product_id)
-        existing = db.query(Product).filter(Product.product_id == product_id).first()
-
-        if seg:
-            pk = seg["prefix_key"]
-            pref_holder = batch_prefix_owner.get(pk) or db_prefix_owner.get(pk)
-            if pref_holder and pref_holder != product_id:
-                skipped.append(
-                    f"Dòng {idx + 1} ({product_id}): Bỏ qua — phần id trước «a188» «{seg['prefix']}» "
-                    f"đã trùng với sản phẩm khác ({pref_holder})."
-                )
-                continue
-
-            sku_tag = seg["sku"]
-            sku_holder = batch_code_owner.get(sku_tag) or db_code_owner.get(sku_tag)
-            if sku_holder and sku_holder != product_id:
-                skipped.append(
-                    f"Dòng {idx + 1} ({product_id}): Bỏ qua — mã SKU «{sku_tag}» "
-                    f"đã được sản phẩm khác dùng ({sku_holder})."
-                )
-                continue
-
-        else:
-            # Id không chứa «a188»: vẫn chặn trùng ô sku với SP khác (mã [A-Z][0-9]{4}).
-            code_probe = str(product_data.get("code") or "").strip().upper()
-            if internal_sku_is_valid_format(code_probe):
-                sku_holder2 = batch_code_owner.get(code_probe) or db_code_owner.get(code_probe)
-                if sku_holder2 and sku_holder2 != product_id:
-                    skipped.append(
-                        f"Dòng {idx + 1} ({product_id}): Bỏ qua — mã SKU «{code_probe}» "
-                        f"đã được sản phẩm khác dùng ({sku_holder2})."
-                    )
-                    continue
-
+        pk = source_prefix["prefix_key"]
+        existing_by_prefix = batch_prefix_owner.get(pk) or db_prefix_owner.get(pk)
+        existing = db.query(Product).filter(Product.product_id == existing_by_prefix).first() if existing_by_prefix else None
+        if existing is None:
+            existing = db.query(Product).filter(Product.product_id == product_id).first()
         ex_pid_early = existing.id if existing else None
         proposed_raw = product_data.get("code")
         proposed_u = str(proposed_raw or "").strip().upper()
@@ -4303,11 +4420,36 @@ def bulk_import_products(
                         "đã có trên sản phẩm khác trên web."
                     )
                     continue
+            else:
+                proposed_u = ""
 
         try:
             row_slug_warning: Optional[str] = None
             resolved_cat_id: Optional[int] = None
             with db.begin_nested():
+                existing_code_u = str(getattr(existing, "code", "") or "").strip().upper() if existing else ""
+                if proposed_u:
+                    final_sku = _ensure_bulk_import_internal_product_code(
+                        db,
+                        proposed_u,
+                        exclude_product_id=existing.id if existing else None,
+                        batch_reserved=sku_batch_reserved,
+                    )
+                elif existing and internal_sku_is_valid_format(existing_code_u):
+                    final_sku = existing_code_u
+                    sku_batch_reserved.add(final_sku)
+                else:
+                    final_sku = _ensure_bulk_import_internal_product_code(
+                        db,
+                        "",
+                        exclude_product_id=existing.id if existing else None,
+                        batch_reserved=sku_batch_reserved,
+                    )
+                final_product_id = _compose_listing_product_id(source_prefix["prefix"], final_sku)
+                product_data["product_id"] = final_product_id
+                product_id = final_product_id
+                product_data["slug"] = generate_consistent_slug(product_data.get("name", ""), product_id)
+
                 slug_value = product_data.get("slug", "")
                 if slug_value:
                     existing_slug = db.query(Product).filter(Product.slug == slug_value).first()
@@ -4321,22 +4463,25 @@ def bulk_import_products(
                 resolved_cat_id = _resolve_category_id_from_row(product_data, cat3_idx)
                 product_data["category_id"] = resolved_cat_id
 
-                product_data["code"] = _ensure_bulk_import_internal_product_code(
-                    db,
-                    product_data.get("code"),
-                    exclude_product_id=existing.id if existing else None,
-                    batch_reserved=sku_batch_reserved,
-                )
+                product_data["code"] = final_sku
                 product_data["product_info"] = sync_internal_code_into_product_info(
                     product_data.get("product_info"),
                     product_data["code"],
                 )
                 if existing:
+                    old_product_id = existing.product_id
                     product_data["product_info"] = _merge_product_info_preserve_image_localization(
                         product_data.get("product_info"),
                         existing.product_info,
                     )
-                canonicalize_hibox_placeholder_product_id(product_data)
+                    if old_product_id and old_product_id != product_id:
+                        _bulk_import_maps_remove_product_id(
+                            old_product_id,
+                            batch_prefix_owner,
+                            db_prefix_owner,
+                            batch_code_owner,
+                            db_code_owner,
+                        )
 
                 if existing:
                     for key, value in product_data.items():
@@ -4368,19 +4513,10 @@ def bulk_import_products(
                     f"{product_data.get('sub_subcategory', '')}"
                 )
 
-            if seg:
-                pk = seg["prefix_key"]
-                batch_prefix_owner.setdefault(pk, product_id)
-                db_prefix_owner[pk] = product_id
-                sku_from_id = seg["sku"]
-                final_code_u = str(product_data.get("code") or "").strip().upper()
-                for key in ({sku_from_id, final_code_u} if final_code_u else {sku_from_id}):
-                    if not key:
-                        continue
-                    batch_code_owner.setdefault(key, product_id)
-                    db_code_owner[key] = product_id
-            elif internal_sku_is_valid_format(str(product_data.get("code") or "")):
-                code_only = str(product_data.get("code") or "").strip().upper()
+            batch_prefix_owner.setdefault(pk, product_id)
+            db_prefix_owner[pk] = product_id
+            code_only = str(product_data.get("code") or "").strip().upper()
+            if internal_sku_is_valid_format(code_only):
                 batch_code_owner.setdefault(code_only, product_id)
                 db_code_owner[code_only] = product_id
 

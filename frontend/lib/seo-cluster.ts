@@ -6,8 +6,7 @@
  * `/danh-muc/[[...slug]]/page.tsx` redirect 301 sang `/c/<cluster_slug>` qua API mapping này.
  */
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001/api/v1";
+import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
 
 const REVALIDATE_TTL = process.env.NODE_ENV === "development" ? 0 : 120;
 export const SEO_CLUSTER_TAG = "seo-clusters";
@@ -100,9 +99,9 @@ function appendClusterFilters(params: URLSearchParams, filters?: SeoClusterListi
 /** Trả null nếu cluster không tồn tại — caller dùng `notFound()`. */
 export async function getSeoClusterDetail(slug: string): Promise<SeoClusterDetail | null> {
   try {
-    const res = await fetch(`${API_BASE}/seo-clusters/${encodeURIComponent(slug)}`, {
+    const res = await fetch(`${getApiBaseUrl()}/seo-clusters/${encodeURIComponent(slug)}`, {
       next: { revalidate: REVALIDATE_TTL, tags: [SEO_CLUSTER_TAG] },
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...ngrokFetchHeaders() },
     });
     if (res.status === 404) return null;
     if (!res.ok) return null;
@@ -121,10 +120,10 @@ export async function getSeoClusterProducts(
   try {
     const params = new URLSearchParams({ skip: String(skip), limit: String(limit) });
     appendClusterFilters(params, options.filters);
-    const url = `${API_BASE}/seo-clusters/${encodeURIComponent(slug)}/products?${params.toString()}`;
+    const url = `${getApiBaseUrl()}/seo-clusters/${encodeURIComponent(slug)}/products?${params.toString()}`;
     const res = await fetch(url, {
       cache: "no-store",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...ngrokFetchHeaders() },
     });
     if (!res.ok) return { total: 0, skip, limit, products: [] };
     return (await res.json()) as SeoClusterPagedProducts;
@@ -141,9 +140,9 @@ export async function getSeoClusterFacets(
     const params = new URLSearchParams();
     appendClusterFilters(params, filters);
     const q = params.toString();
-    const res = await fetch(`${API_BASE}/seo-clusters/${encodeURIComponent(slug)}/facets${q ? `?${q}` : ""}`, {
+    const res = await fetch(`${getApiBaseUrl()}/seo-clusters/${encodeURIComponent(slug)}/facets${q ? `?${q}` : ""}`, {
       cache: "no-store",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...ngrokFetchHeaders() },
     });
     if (!res.ok) return null;
     const data = (await res.json()) as Record<string, unknown>;
@@ -161,9 +160,9 @@ export async function getSeoClusterFacets(
 
 export async function listSeoClusters(): Promise<SeoClusterListItem[]> {
   try {
-    const res = await fetch(`${API_BASE}/seo-clusters/`, {
+    const res = await fetch(`${getApiBaseUrl()}/seo-clusters/`, {
       next: { revalidate: REVALIDATE_TTL, tags: [SEO_CLUSTER_TAG] },
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...ngrokFetchHeaders() },
     });
     if (!res.ok) return [];
     const data = await res.json();
@@ -192,9 +191,9 @@ interface TreeV2Node {
 
 async function fetchTreeV2(): Promise<TreeV2Node[]> {
   try {
-    const res = await fetch(`${API_BASE}/categories/tree-v2`, {
+    const res = await fetch(`${getApiBaseUrl()}/categories/tree-v2`, {
       next: { revalidate: REVALIDATE_TTL, tags: [SEO_CLUSTER_TAG] },
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...ngrokFetchHeaders() },
     });
     if (!res.ok) return [];
     const data = await res.json();

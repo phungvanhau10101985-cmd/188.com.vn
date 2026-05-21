@@ -216,7 +216,7 @@ def _execute_one_import(
     try:
         ext_id, src = _infer_import_source_for_url(source_url, source)
     except ValueError:
-        return {"ok": False, "error": "Link không nhận dạng được 1688/Hibox."}
+        return {"ok": False, "error": "Link không nhận dạng được Hibox/taobao1688.kz/Vipomall."}
 
     job_id = str(uuid.uuid4())
     db = SessionLocal()
@@ -384,7 +384,7 @@ def enqueue(
     Mỗi ``queue_token`` có một worker ``threading.Thread`` riêng (``_ensure_worker_started``).
     Nhiều đợt có thể chạy song song, độc lập — không có khóa toàn cục giữa các đợt.
 
-    tasks: [{url, source: hibox|1688, label?: str}]
+    tasks: [{url, source: hibox|vipomall, label?: str}]
     """
     if not tasks:
         raise ValueError("Không có link nào để thêm.")
@@ -421,7 +421,9 @@ def enqueue(
             for raw in tasks:
                 url = (raw.get("url") or "").strip()
                 src = (raw.get("source") or "hibox").strip().lower()
-                if src not in {"hibox", "1688"}:
+                if src in {"vipo", "vipomail", "vipo_mall", "vipo-mall"}:
+                    src = "vipomall"
+                if src not in {"hibox", "vipomall"}:
                     src = "hibox"
                 label = (raw.get("label") or "").strip() or None
                 if len(url) < 10:
