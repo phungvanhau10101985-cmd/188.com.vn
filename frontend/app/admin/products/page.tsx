@@ -1269,17 +1269,19 @@ export default function AdminProductsPage() {
     e.preventDefault();
     const url = resolveImportLinkUrl(import1688Url);
     if (!url) {
-      showToast('err', 'Vui lòng dán link sản phẩm Hibox (hoặc taobao1688.kz)');
+      showToast('err', 'Vui lòng dán link Hibox, taobao1688.kz hoặc Vipomall');
       return;
     }
-    if (!isHiboxProductUrl(url)) {
+    const fromVipomall = isVipomallProductUrl(url);
+    if (!isHiboxProductUrl(url) && !fromVipomall) {
       showToast(
         'err',
-        'Chỉ hỗ trợ link Hibox / taobao1688.kz. Import trực tiếp từ 1688.com đã tắt.',
+        'Chỉ hỗ trợ link Hibox / taobao1688.kz / Vipomall. Import trực tiếp từ 1688.com đã tắt.',
         8000,
       );
       return;
     }
+    const importLabel = fromVipomall ? 'Vipomall' : 'Hibox';
     try {
       localStorage.removeItem(ADMIN_1688_LINK_JOB_KEY);
     } catch {
@@ -1314,22 +1316,22 @@ export default function AdminProductsPage() {
         const body = [...(job.errors || []), ...(job.warnings || [])].filter(Boolean).join('\n');
         setImportDetailPanel({
           variant: 'err',
-          title: 'Import Hibox thất bại',
+          title: `Import ${importLabel} thất bại`,
           body: body || job.message || 'Không đọc được dữ liệu từ link.',
         });
-        showToast('err', job.message || 'Import Hibox thất bại', 8000);
+        showToast('err', job.message || `Import ${importLabel} thất bại`, 8000);
         return;
       }
       const draftId = job.draft_id ?? started.draft_id;
       const draft = await adminProductAPI.getImport1688Draft(draftId);
       setImport1688Draft(draft);
       const warnText = draft.warnings?.length ? ` Có ${draft.warnings.length} cảnh báo cần kiểm tra.` : '';
-      showToast('ok', `Đã tạo draft từ Hibox.${warnText}`, 6000);
+      showToast('ok', `Đã tạo draft từ ${importLabel}.${warnText}`, 6000);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Import Hibox thất bại';
+      const msg = err instanceof Error ? err.message : `Import ${importLabel} thất bại`;
       setImportDetailPanel({
         variant: 'err',
-        title: 'Không thể import Hibox',
+        title: `Không thể import ${importLabel}`,
         body: msg,
       });
       showToast('err', msg, 9000);
