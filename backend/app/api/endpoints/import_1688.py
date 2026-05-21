@@ -103,6 +103,24 @@ def _batch_meta_json_path(batch_token: str) -> Path:
     return d / f"{batch_token}.json"
 
 
+def _remove_batch_meta_file(meta_path: Path) -> bool:
+    """Xóa file meta đợt Excel. Trên Windows file có thể bị khóa → fallback rename."""
+    if not meta_path.is_file():
+        return False
+    try:
+        meta_path.unlink()
+        return True
+    except OSError as exc:
+        logger.warning("Không unlink được file meta batch %s: %s", meta_path, exc)
+    tomb = meta_path.with_name(f"{meta_path.name}.deleted.{int(time.time())}")
+    try:
+        meta_path.rename(tomb)
+        return True
+    except OSError as exc:
+        logger.warning("Không rename được file meta batch %s: %s", meta_path, exc)
+    return False
+
+
 def _safe_batch_token_param(raw: str) -> str:
     t = (raw or "").strip().lower()
     if not re.fullmatch(r"[a-f0-9]{8,128}", t):
@@ -319,9 +337,33 @@ def _run_import_1688_chain_from_meta(meta_path_str: str) -> None:
                     "import batch chain: job lỗi không mong đợi (tiếp tục các job sau): job_id=%s…",
                     (jid[:16] if jid else ""),
                 )
+            time.sleep(2)
     finally:
         with _batch_chain_lock:
             _batch_tokens_running.discard(token)
+
+
+def _enqueue_import_1688_job(job_id: str, download_images: bool) -> None:
+    """Chạy job ngoài asyncio/anyio — tránh NotImplementedError Playwright trên Windows."""
+    t = threading.Thread(
+        target=_run_import_1688_job,
+        args=(job_id, download_images),
+        daemon=True,
+        name=f"import1688-job-{(job_id or '')[:12]}",
+    )
+    t.start()
+
+
+def _enqueue_import_1688_batch_chain(meta_path_str: str) -> None:
+    """Chạy chuỗi batch Excel trong thread daemon riêng (không dùng BackgroundTasks)."""
+    token = Path(meta_path_str).stem
+    t = threading.Thread(
+        target=_run_import_1688_chain_from_meta,
+        args=(meta_path_str,),
+        daemon=True,
+        name=f"import1688-batch-{token[:16]}",
+    )
+    t.start()
 
 
 def _resume_all_batches_pending_after_startup() -> None:
@@ -916,7 +958,7 @@ def create_import_1688_job(
     )
     # Import từ link cần giữ URL ảnh gốc để admin kiểm tra/export đúng nguồn.
     # Không tự tải ảnh về Bunny trong luồng draft này.
-    background_tasks.add_task(_run_import_1688_job, job_id, False)
+    _enqueue_import_1688_job(job_id, False)
     return JSONResponse(
         status_code=202,
         content={
@@ -1029,7 +1071,7 @@ async def create_import_jobs_batch_from_excel(
             encoding="utf-8",
         )
         if job_ids:
-            background_tasks.add_task(_run_import_1688_chain_from_meta, str(meta_path.absolute()))
+            _enqueue_import_1688_batch_chain(str(meta_path.absolute()))
 
         return Import1688ExcelBatchOut(
             batch_token=batch_token,
@@ -1065,9 +1107,14 @@ def list_excel_import_batches(
         except Exception:
             continue
         draft_ids = [int(x) for x in (meta.get("draft_ids") or []) if x is not None]
+        if meta.get("_deleted"):
+            continue
         skipped = meta.get("skipped")
         skipped_n = len(skipped) if isinstance(skipped, list) else 0
         st = _batch_status_out_for_draft_ids(db, token, draft_ids)
+        # Meta còn nhưng nháp đã xóa hết (unlink meta thất bại trước đó) — ẩn khỏi danh sách.
+        if draft_ids and not st.items:
+            continue
         ca_raw = meta.get("created_at")
         created_at_out: Optional[str] = None
         if isinstance(ca_raw, str) and ca_raw.strip():
@@ -1113,12 +1160,7 @@ def delete_excel_import_batch(
         if draft_crud.delete_draft_by_id(db, did):
             deleted_ids.append(did)
 
-    meta_removed = False
-    try:
-        meta_path.unlink()
-        meta_removed = True
-    except OSError:
-        logger.warning("Không xóa được file meta batch: %s", meta_path)
+    meta_removed = _remove_batch_meta_file(meta_path)
 
     return Import1688ExcelBatchDeleteOut(
         success=True,
@@ -1162,7 +1204,7 @@ def resume_excel_import_batch_chain(
                 message="Đợt này đang chạy trên server — chờ vài giây rồi làm mới.",
                 pending=st.pending,
             )
-    background_tasks.add_task(_run_import_1688_chain_from_meta, str(meta_path.resolve()))
+    _enqueue_import_1688_batch_chain(str(meta_path.resolve()))
     return Import1688BatchResumeOut(
         success=True,
         message=f"Đã xếp hàng chạy tiếp {st.pending} link chưa hoàn thành.",

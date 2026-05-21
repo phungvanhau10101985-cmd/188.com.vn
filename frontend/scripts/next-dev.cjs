@@ -33,6 +33,7 @@ const result = spawnSync(process.execPath, [nextCli, 'dev', '-p', port, '--webpa
   env: {
     ...process.env,
     PORT: port,
+    NEXT_DIST_DIR: process.env.NEXT_DIST_DIR || '.next-run',
     /** Khớp backend: `SERVER_PORT` mặc định 8001 trong `backend/app/core/config.py`. */
     API_INTERNAL_ORIGIN: process.env.API_INTERNAL_ORIGIN || 'http://127.0.0.1:8001',
   },

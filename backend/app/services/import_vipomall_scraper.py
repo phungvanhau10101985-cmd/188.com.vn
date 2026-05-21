@@ -332,6 +332,12 @@ def _click_text(page: Any, text: str, *, timeout_ms: int = 2500) -> bool:
 
 
 def scrape_vipomall_for_import(source_url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
+    from app.services.import_playwright_dispatch import run_import_playwright_sync
+
+    return run_import_playwright_sync(lambda: _scrape_vipomall_for_import_sync(source_url))
+
+
+def _scrape_vipomall_for_import_sync(source_url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
     norm = normalize_product_import_url((source_url or "").strip())
     offer_id = extract_vipomall_offer_id(norm)
     if not offer_id:
@@ -397,7 +403,8 @@ def scrape_vipomall_for_import(source_url: str) -> Tuple[Dict[str, Any], Dict[st
                     except Exception:
                         pass
     except Exception as exc:
-        raise ImportVipomallError(f"Lỗi Playwright/Vipomall: {exc}") from exc
+        detail = str(exc).strip() or repr(exc) or type(exc).__name__
+        raise ImportVipomallError(f"Lỗi Playwright/Vipomall: {detail}") from exc
 
     if not isinstance(raw, dict):
         raise ImportVipomallError("Scraper Vipomall trả về dữ liệu không hợp lệ.")

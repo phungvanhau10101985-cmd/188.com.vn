@@ -217,6 +217,8 @@ Start-Sleep -Seconds 3
 Write-Step "Xoa cache frontend (Next.js)..."
 if (Test-Path $FrontendDir) {
     Remove-DirIfExists (Join-Path $FrontendDir ".next") ".next"
+    Remove-DirIfExists (Join-Path $FrontendDir ".next-dev") ".next-dev"
+    Remove-DirIfExists (Join-Path $FrontendDir ".next-run") ".next-run"
     Remove-DirIfExists (Join-Path $FrontendDir "node_modules\.cache") "node_modules\.cache"
     Remove-DirIfExists (Join-Path $FrontendDir ".turbo") ".turbo"
 } else {
@@ -256,16 +258,32 @@ if (Test-Path -LiteralPath $envLocal) {
     }
 }
 
+$NodeDir      = Join-Path $env:LOCALAPPDATA "Programs\nodejs"
+$NgrokDir     = Join-Path $env:LOCALAPPDATA "Programs\ngrok"
+$PythonDir    = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312"
+$PythonScripts = Join-Path $PythonDir "Scripts"
+
+function Get-DevPathPrefix {
+    $parts = @($NodeDir, $NgrokDir, $PythonDir, $PythonScripts) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    if (-not $parts) { return "" }
+    return ('set "PATH=' + (($parts -join ';') + ';%PATH%" && '))
+}
+
 # Mỗi cửa sổ CMD chạy 1 chuỗi lệnh: `cd ... && <lệnh>` — dùng `cmd.exe /c start "TITLE" cmd /k "..."` để set title.
 function Start-CmdWindow([string]$Title, [string]$Command) {
+    $cmd = (Get-DevPathPrefix) + $Command
     # Truyền cmd /c "start "TITLE" cmd /k <cmd>" qua Start-Process — tránh PowerShell tự động xử lý '&'.
-    $payload = 'start "' + $Title + '" cmd.exe /k "' + $Command + '"'
+    $payload = 'start "' + $Title + '" cmd.exe /k "' + $cmd + '"'
     Start-Process cmd.exe -ArgumentList @('/c', $payload) -WindowStyle Normal
 }
 
 Write-Step "Khoi dong backend (port $BackendPort)..."
 if (Test-Path (Join-Path $BackendDir "main.py")) {
-    $beCmd = 'cd /d "' + $BackendDir + '" && python -m uvicorn main:app --reload --host 0.0.0.0 --port ' + $BackendPort
+    $venvPy = Join-Path $BackendDir ".venv\Scripts\python.exe"
+    $pyExe = if (Test-Path -LiteralPath $venvPy) { ('"' + $venvPy + '"') } else { "python" }
+    # Không dùng --reload trên Windows local: reloader có thể để lại nhiều child process
+    # cùng giữ port 8001, khiến UI gọi vào process cũ chưa nạp patch Playwright.
+    $beCmd = 'cd /d "' + $BackendDir + '" && ' + $pyExe + ' -m uvicorn main:app --host 0.0.0.0 --port ' + $BackendPort
     Start-CmdWindow -Title ("BACKEND " + $BackendPort) -Command $beCmd
 } else {
     Write-Host "  Khong co backend\main.py" -ForegroundColor Red
@@ -274,7 +292,7 @@ if (Test-Path (Join-Path $BackendDir "main.py")) {
 Write-Step "Khoi dong frontend (port $FrontendPort)..."
 if (Test-Path (Join-Path $FrontendDir "package.json")) {
     # package.json: "dev" = node scripts/next-dev.cjs (ep -p 3001).
-    $feCmd = 'cd /d "' + $FrontendDir + '" && npm run dev'
+    $feCmd = 'cd /d "' + $FrontendDir + '" && set NEXT_DIST_DIR=.next-run&& npm run dev'
     Start-CmdWindow -Title ("FRONTEND " + $FrontendPort) -Command $feCmd
 } else {
     Write-Host "  Khong co frontend\package.json" -ForegroundColor Red

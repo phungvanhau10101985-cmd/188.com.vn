@@ -3,6 +3,7 @@ const path = require("path");
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   // Trình duyệt mặc định GET /favicon.ico — không có file .ico thì trả về favicon.png (200).
   async rewrites() {
     const apiOrigin = (process.env.API_INTERNAL_ORIGIN || "http://127.0.0.1:8001").replace(/\/$/, "");
