@@ -490,6 +490,18 @@ function SourceStockReportSampleTable({
               <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
                 DB id
               </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[12rem]">
+                Link DB
+              </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[10rem]">
+                Link Vipomall (1688)
+              </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[10rem]">
+                Link CSSBuy (quy đổi)
+              </th>
+              <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[10rem]">
+                Link Hibox (quy đổi)
+              </th>
               <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
                 Mã SP
               </th>
@@ -510,18 +522,6 @@ function SourceStockReportSampleTable({
               </th>
               <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
                 Batch TTL
-              </th>
-              <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[12rem]">
-                Link DB
-              </th>
-              <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[10rem]">
-                Link CSSBuy (quy đổi)
-              </th>
-              <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[10rem]">
-                Link Hibox (quy đổi)
-              </th>
-              <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[10rem]">
-                Link Vipomall (1688)
               </th>
               <th scope="col" className="text-left px-2 py-1.5 font-medium whitespace-nowrap">
                 PDP
@@ -558,6 +558,18 @@ function SourceStockReportSampleTable({
                     </td>
                   ) : null}
                   <td className="px-2 py-1.5 whitespace-nowrap font-mono">{row.id}</td>
+                  <td className="px-2 py-1.5">
+                    <ExternalHttpLink url={row.link_default} />
+                  </td>
+                  <td className="px-2 py-1.5 align-top">
+                    <ReportConvertedSourceLinkCell url={row.link_convert_vipomall} err={row.link_convert_vipomall_err} />
+                  </td>
+                  <td className="px-2 py-1.5 align-top">
+                    <ReportConvertedSourceLinkCell url={row.link_convert_cssbuy} err={row.link_convert_cssbuy_err} />
+                  </td>
+                  <td className="px-2 py-1.5 align-top">
+                    <ReportConvertedSourceLinkCell url={row.link_convert_hibox} err={row.link_convert_hibox_err} />
+                  </td>
                   <td className="px-2 py-1.5 whitespace-nowrap font-mono text-[11px]">{row.product_id}</td>
                   <td className="px-2 py-1.5 max-w-[14rem]">{row.name}</td>
                   <td className="px-2 py-1.5 whitespace-nowrap">{row.available}</td>
@@ -580,18 +592,6 @@ function SourceStockReportSampleTable({
                         {formatReportAge(row.admin_source_batch_scanned_at)}
                       </span>
                     ) : null}
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <ExternalHttpLink url={row.link_default} />
-                  </td>
-                  <td className="px-2 py-1.5 align-top">
-                    <ReportConvertedSourceLinkCell url={row.link_convert_cssbuy} err={row.link_convert_cssbuy_err} />
-                  </td>
-                  <td className="px-2 py-1.5 align-top">
-                    <ReportConvertedSourceLinkCell url={row.link_convert_hibox} err={row.link_convert_hibox_err} />
-                  </td>
-                  <td className="px-2 py-1.5 align-top">
-                    <ReportConvertedSourceLinkCell url={row.link_convert_vipomall} err={row.link_convert_vipomall_err} />
                   </td>
                   <td className="px-2 py-1.5 whitespace-nowrap">
                     {row.slug ? (
