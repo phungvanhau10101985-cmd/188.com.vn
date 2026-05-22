@@ -14,13 +14,22 @@ const VIDEO_FAB_SIZE_PX = 52;
 const FLOAT_GAP_PX = 12;
 const MOBILE_NAV_PX = 60;
 const NANOAI_Z_INDEX = 75;
+const MAX_LAUNCHER_PX = 200;
 
-const NANOAI_HOST_SELECTORS = [
+const LAUNCHER_SELECTORS = [
+  '[data-nanoai-launcher]',
+  '[data-nanoai-chat-launcher]',
+  '#nanoai-chat-widget-v1 > button',
+  '#nanoai-chat-widget-v1 button',
+  '[id^="nanoai-chat-widget"] button',
+  '[id*="nanoai-chat"] button',
+  'button.nanoai-chat-launcher',
+];
+
+const ROOT_SELECTORS = [
   '#nanoai-chat-widget-v1',
   '[id^="nanoai-chat-widget"]',
   '[id*="nanoai-chat-widget"]',
-  '[data-nanoai-launcher]',
-  '[data-nanoai-chat-launcher]',
 ];
 
 function pathNorm(p: string | null | undefined): string {
@@ -47,25 +56,89 @@ function showMobileBottomNav(pathname: string | null): boolean {
   return !Boolean(pathname?.match(/^\/products\/[^/]+$/));
 }
 
-function findNanoAiHosts(): HTMLElement[] {
+function isLauncherSized(el: HTMLElement): boolean {
+  const r = el.getBoundingClientRect();
+  if (r.width < 28 || r.height < 28) return false;
+  if (r.width > MAX_LAUNCHER_PX || r.height > MAX_LAUNCHER_PX) return false;
+  return true;
+}
+
+/** Chỉ chỉnh nút launcher nhỏ — tránh container full-screen che trang /account. */
+function findNanoAiLaunchers(): HTMLElement[] {
   const found = new Set<HTMLElement>();
-  for (const sel of NANOAI_HOST_SELECTORS) {
+
+  for (const sel of LAUNCHER_SELECTORS) {
     document.querySelectorAll<HTMLElement>(sel).forEach((el) => {
-      const host = resolveFixedHost(el);
-      if (host) found.add(host);
+      if (isLauncherSized(el)) found.add(el);
     });
   }
+
+  for (const sel of ROOT_SELECTORS) {
+    document.querySelectorAll<HTMLElement>(sel).forEach((el) => {
+      const cs = getComputedStyle(el);
+      if (cs.position !== 'fixed') return;
+      if (!isLauncherSized(el)) return;
+      found.add(el);
+    });
+  }
+
   return Array.from(found);
 }
 
-function resolveFixedHost(el: HTMLElement): HTMLElement | null {
-  let node: HTMLElement | null = el;
-  while (node) {
-    const cs = getComputedStyle(node);
-    if (cs.position === 'fixed') return node;
-    node = node.parentElement;
+function isLargeFixedOverlay(el: HTMLElement): boolean {
+  const cs = getComputedStyle(el);
+  if (cs.position !== 'fixed' && cs.position !== 'absolute') return false;
+  const r = el.getBoundingClientRect();
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 0;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 0;
+  if (!vw || !vh) return false;
+  return r.width >= vw * 0.72 || r.height >= vh * 0.72;
+}
+
+function isInteractiveNanoAiNode(el: HTMLElement): boolean {
+  const tag = el.tagName;
+  if (/^(BUTTON|A|IFRAME|INPUT|TEXTAREA|SELECT)$/i.test(tag)) return true;
+  const role = el.getAttribute('role');
+  if (role === 'button' || role === 'dialog' || role === 'textbox') return true;
+  if (el.isContentEditable) return true;
+  return isLauncherSized(el);
+}
+
+/** Container NanoAI full-screen không nuốt tap trang — chỉ phần tử tương tác nhận click. */
+function releaseNanoAiClickBlockers() {
+  if (!isMobileViewport()) return;
+
+  for (const sel of ROOT_SELECTORS) {
+    document.querySelectorAll<HTMLElement>(sel).forEach((root) => {
+      if (!isLargeFixedOverlay(root)) return;
+
+      root.style.setProperty('pointer-events', 'none', 'important');
+      root.dataset.nanoai188OverlayPass = '1';
+
+      const stack: HTMLElement[] = [root];
+      while (stack.length > 0) {
+        const node = stack.pop()!;
+        for (const child of Array.from(node.children)) {
+          if (!(child instanceof HTMLElement)) continue;
+          stack.push(child);
+          if (isInteractiveNanoAiNode(child) || !isLargeFixedOverlay(child)) {
+            child.style.setProperty('pointer-events', 'auto', 'important');
+            child.dataset.nanoai188OverlayPass = '1';
+          } else {
+            child.style.setProperty('pointer-events', 'none', 'important');
+            child.dataset.nanoai188OverlayPass = '1';
+          }
+        }
+      }
+    });
   }
-  return el;
+}
+
+function clearOverlayPass() {
+  document.querySelectorAll<HTMLElement>('[data-nanoai188-overlay-pass="1"]').forEach((el) => {
+    el.style.removeProperty('pointer-events');
+    delete el.dataset.nanoai188OverlayPass;
+  });
 }
 
 function computeMobileBottomPx(
@@ -93,40 +166,45 @@ function applyMobileLayout(pathname: string | null, fab: ShopVideoFabPublicSetti
   const bottomPx = computeMobileBottomPx(pathname, fab);
   const rightPx = fab.right_mobile_px;
 
-  for (const host of findNanoAiHosts()) {
-    host.style.setProperty('display', 'block', 'important');
-    host.style.setProperty('visibility', 'visible', 'important');
-    host.style.setProperty('opacity', '1', 'important');
-    host.style.setProperty('pointer-events', 'auto', 'important');
-    host.style.setProperty('transform', 'none', 'important');
-    host.style.setProperty('z-index', String(NANOAI_Z_INDEX), 'important');
-    host.style.setProperty(
+  releaseNanoAiClickBlockers();
+
+  for (const launcher of findNanoAiLaunchers()) {
+    launcher.style.setProperty('display', 'block', 'important');
+    launcher.style.setProperty('visibility', 'visible', 'important');
+    launcher.style.setProperty('opacity', '1', 'important');
+    launcher.style.setProperty('pointer-events', 'auto', 'important');
+    launcher.style.setProperty('transform', 'none', 'important');
+    launcher.style.setProperty('top', 'auto', 'important');
+    launcher.style.setProperty('left', 'auto', 'important');
+    launcher.style.setProperty('z-index', String(NANOAI_Z_INDEX), 'important');
+    launcher.style.setProperty(
       'bottom',
       `calc(${bottomPx}px + env(safe-area-inset-bottom, 0px))`,
       'important',
     );
-    host.style.setProperty(
+    launcher.style.setProperty(
       'right',
       `calc(${rightPx}px + env(safe-area-inset-right, 0px))`,
       'important',
     );
-    host.dataset.nanoai188MobileAdjusted = '1';
+    launcher.dataset.nanoai188MobileAdjusted = '1';
   }
 }
 
 function clearMobileLayout() {
-  for (const host of findNanoAiHosts()) {
-    if (host.dataset.nanoai188MobileAdjusted !== '1') continue;
-    host.style.removeProperty('display');
-    host.style.removeProperty('visibility');
-    host.style.removeProperty('opacity');
-    host.style.removeProperty('pointer-events');
-    host.style.removeProperty('transform');
-    host.style.removeProperty('z-index');
-    host.style.removeProperty('bottom');
-    host.style.removeProperty('right');
-    delete host.dataset.nanoai188MobileAdjusted;
-  }
+  document.querySelectorAll<HTMLElement>('[data-nanoai188-mobile-adjusted="1"]').forEach((el) => {
+    el.style.removeProperty('display');
+    el.style.removeProperty('visibility');
+    el.style.removeProperty('opacity');
+    el.style.removeProperty('pointer-events');
+    el.style.removeProperty('transform');
+    el.style.removeProperty('top');
+    el.style.removeProperty('left');
+    el.style.removeProperty('z-index');
+    el.style.removeProperty('bottom');
+    el.style.removeProperty('right');
+    delete el.dataset.nanoai188MobileAdjusted;
+  });
 }
 
 /**
@@ -145,6 +223,7 @@ export default function NanoAiMobileLauncherAdjust() {
       if (cancelled) return;
       if (!isMobileViewport()) {
         clearMobileLayout();
+        clearOverlayPass();
         return;
       }
       applyMobileLayout(pathname, fab);
@@ -182,6 +261,7 @@ export default function NanoAiMobileLauncherAdjust() {
       window.removeEventListener('resize', schedule);
       if (scanTimer) clearTimeout(scanTimer);
       clearMobileLayout();
+      clearOverlayPass();
     };
   }, [pathname]);
 

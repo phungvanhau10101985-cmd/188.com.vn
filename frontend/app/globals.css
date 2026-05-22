@@ -174,13 +174,21 @@ body {
   [id^="nanoai-chat-widget"],
   [id*="nanoai-chat-widget"] {
     max-width: calc(100vw - 24px);
+    pointer-events: none !important;
   }
 
   #nanoai-chat-widget-v1 button,
   [id^="nanoai-chat-widget"] button,
   [id*="nanoai-chat-widget"] button,
   [data-nanoai-launcher],
-  [data-nanoai-chat-launcher] {
+  [data-nanoai-chat-launcher],
+  #nanoai-chat-widget-v1 iframe,
+  [id^="nanoai-chat-widget"] iframe,
+  [id*="nanoai-chat-widget"] iframe,
+  #nanoai-chat-widget-v1 [role="dialog"],
+  [id^="nanoai-chat-widget"] [role="dialog"],
+  [id*="nanoai-chat-widget"] [role="dialog"] {
+    pointer-events: auto !important;
     touch-action: manipulation;
   }
 

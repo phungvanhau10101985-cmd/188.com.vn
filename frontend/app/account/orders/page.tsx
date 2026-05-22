@@ -279,7 +279,7 @@ export default function AccountOrdersPage() {
       ) : (
         <ul className="space-y-6">
           {filteredOrders.map((order) => (
-            <li key={order.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+            <li key={order.id} className="relative z-[1] bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
               {/* Tóm tắt đơn */}
               <div className="p-4 border-b border-gray-100">
                 <div className="flex flex-wrap justify-between items-start gap-3">
@@ -300,7 +300,7 @@ export default function AccountOrdersPage() {
               </div>
 
               {/* Bảng sản phẩm */}
-              <div className="overflow-x-auto">
+              <div className="relative z-0 overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
@@ -309,8 +309,8 @@ export default function AccountOrdersPage() {
                       <th className="text-right p-3 font-medium text-gray-700">Số lượng</th>
                       <th className="text-right p-3 font-medium text-gray-700">Thành tiền</th>
                       <th className="text-left p-3 font-medium text-gray-700">Trạng thái</th>
-                      <th className="text-left p-3 font-medium text-gray-700">Phương thức thanh toán</th>
-                      <th className="p-3 w-32"></th>
+                      <th className="text-left p-3 font-medium text-gray-700 hidden md:table-cell">Phương thức thanh toán</th>
+                      <th className="p-3 w-32 hidden md:table-cell"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -342,8 +342,8 @@ export default function AccountOrdersPage() {
                             {STATUS_LABELS[order.status] || order.status}
                           </span>
                         </td>
-                        <td className="p-3 text-gray-600 text-xs max-w-[200px]">{paymentMethodText(order, item)}</td>
-                        <td className="p-3">
+                        <td className="p-3 text-gray-600 text-xs max-w-[200px] hidden md:table-cell">{paymentMethodText(order, item)}</td>
+                        <td className="p-3 hidden md:table-cell">
                           {['delivered', 'completed'].includes(order.status) && item.product_id ? (
                             reviewedProductIds.has(item.product_id) ? (
                               <Link
@@ -377,16 +377,26 @@ export default function AccountOrdersPage() {
               </div>
 
               {/* Nút theo trạng thái - đặt dưới bảng, mỗi đơn một hàng nút */}
-              <div className="p-4 bg-gray-50 border-t border-gray-100 flex flex-wrap gap-2">
-                <Link href={`/account/orders/${order.id}`} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-300">
+              <div className="relative z-[2] p-4 bg-gray-50 border-t border-gray-100 flex flex-wrap gap-2">
+                <Link
+                  href={`/account/orders/${order.id}`}
+                  className="inline-flex min-h-[44px] items-center px-4 py-2 bg-gray-200 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-300 active:bg-gray-300"
+                >
                   Chi tiết đơn hàng
                 </Link>
                 {order.status === 'waiting_deposit' && (
                   <>
-                    <Link href={`/account/orders/${order.id}/deposit`} className="px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-[#c2410c]">
+                    <Link
+                      href={`/account/orders/${order.id}/deposit`}
+                      className="inline-flex min-h-[44px] items-center px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-[#c2410c] active:bg-[#c2410c]"
+                    >
                       Thanh toán đặt cọc
                     </Link>
-                    <button onClick={() => setCancelModalOrder(order)} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200">
+                    <button
+                      type="button"
+                      onClick={() => setCancelModalOrder(order)}
+                      className="inline-flex min-h-[44px] items-center px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200 active:bg-red-200"
+                    >
                       Hủy đơn
                     </button>
                   </>
@@ -394,14 +404,15 @@ export default function AccountOrdersPage() {
                 {['deposit_paid', 'confirmed', 'processing', 'shipping'].includes(order.status) && (
                   <>
                     {order.tracking_number && (
-                      <a href="#" className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300">
+                      <a href="#" className="inline-flex min-h-[44px] items-center px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 active:bg-gray-300">
                         Lịch trình đơn hàng
                       </a>
                     )}
                     <button
+                      type="button"
                       onClick={() => handleConfirmReceived(order)}
                       disabled={!!confirmingId}
-                      className="px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-[#c2410c] disabled:opacity-50"
+                      className="inline-flex min-h-[44px] items-center px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-[#c2410c] disabled:opacity-50 active:bg-[#c2410c]"
                     >
                       Đã nhận hàng
                     </button>

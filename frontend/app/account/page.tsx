@@ -79,6 +79,9 @@ export default function AccountPage() {
 
   const notReady = () => pushToast({ title: 'Tính năng đang phát triển', variant: 'info', durationMs: 2000 });
 
+  const menuRowClass =
+    'flex w-full min-h-[48px] items-center justify-between gap-3 px-4 py-3 text-sm text-gray-900 active:bg-gray-50 relative z-[1]';
+
   return (
     <>
       {/* Mobile layout — chỉ md:hidden; desktop giữ khối hidden md:block bên dưới */}
@@ -120,65 +123,65 @@ export default function AccountPage() {
         </div>
 
         {/* Menu list */}
-        <div className="divide-y divide-gray-200">
-          <Link href="/cart" className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
-            <span>🛒 Giỏ hàng</span>
-            <span className="text-gray-400">›</span>
+        <div className="relative z-[1] divide-y divide-gray-200">
+          <Link href="/cart" className={menuRowClass}>
+            <span className="flex-1 text-left">🛒 Giỏ hàng</span>
+            <span className="shrink-0 text-gray-400" aria-hidden>›</span>
           </Link>
-          <Link href="/account/orders" className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
-            <span>🧾 Đơn hàng</span>
-            <span className="text-gray-400">›</span>
+          <Link href="/account/orders" className={menuRowClass}>
+            <span className="flex-1 text-left">🧾 Đơn hàng</span>
+            <span className="shrink-0 text-gray-400" aria-hidden>›</span>
           </Link>
-          <Link href="/da-xem" className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
-            <span>🕒 Sản phẩm đã xem</span>
-            <span className="text-gray-400">›</span>
+          <Link href="/da-xem" className={menuRowClass}>
+            <span className="flex-1 text-left">🕒 Sản phẩm đã xem</span>
+            <span className="shrink-0 text-gray-400" aria-hidden>›</span>
           </Link>
-          <Link href="/account/addresses" className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
-            <span>📍 Sổ địa chỉ</span>
-            <span className="text-gray-400">›</span>
+          <Link href="/account/addresses" className={menuRowClass}>
+            <span className="flex-1 text-left">📍 Sổ địa chỉ</span>
+            <span className="shrink-0 text-gray-400" aria-hidden>›</span>
           </Link>
           {user?.has_linked_admin ? (
             <button
               type="button"
               disabled={adminNavBusy}
               onClick={() => void openAdminPanel()}
-              className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-[#ea580c] disabled:opacity-60"
+              className={`${menuRowClass} font-semibold text-[#ea580c] disabled:opacity-60`}
             >
-              <span>⚙️ Quản trị web</span>
-              <span className="text-gray-400">›</span>
+              <span className="flex-1 text-left">⚙️ Quản trị web</span>
+              <span className="shrink-0 text-gray-400" aria-hidden>›</span>
             </button>
           ) : null}
-          <Link href="/vi-dien-tu" className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
-            <span>💳 Ví Affiliate</span>
-            <span className="text-gray-400">›</span>
+          <Link href="/vi-dien-tu" className={menuRowClass}>
+            <span className="flex-1 text-left">💳 Ví Affiliate</span>
+            <span className="shrink-0 text-gray-400" aria-hidden>›</span>
           </Link>
-          <button onClick={notReady} className="w-full flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
-            <span>👥 Thành viên thân quen</span>
-            <span className="text-gray-400">›</span>
+          <Link href="/thanh-vien" className={menuRowClass}>
+            <span className="flex-1 text-left">👥 Thành viên thân quen</span>
+            <span className="shrink-0 text-gray-400" aria-hidden>›</span>
+          </Link>
+          <Link href="/account/notifications" className={menuRowClass}>
+            <span className="flex-1 text-left">🔔 Trung tâm thông báo</span>
+            <span className="shrink-0 text-gray-400" aria-hidden>›</span>
+          </Link>
+          <Link href="/account/install-app" className={menuRowClass}>
+            <span className="flex-1 text-left">📲 Cài đặt app</span>
+            <span className="shrink-0 text-gray-400" aria-hidden>›</span>
+          </Link>
+          <Link href="/tai-khoan-ngan-hang" className={menuRowClass}>
+            <span className="flex-1 text-left">🏦 Tài khoản ngân hàng</span>
+            <span className="shrink-0 text-gray-400" aria-hidden>›</span>
+          </Link>
+          <button type="button" onClick={notReady} className={menuRowClass}>
+            <span className="flex-1 text-left">💬 Nhắn tin</span>
+            <span className="shrink-0 text-gray-400" aria-hidden>›</span>
           </button>
-          <Link href="/account/notifications" className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
-            <span>🔔 Trung tâm thông báo</span>
-            <span className="text-gray-400">›</span>
+          <Link href="/favorites" className={menuRowClass}>
+            <span className="flex-1 text-left">❤️ Sản phẩm yêu thích</span>
+            <span className="shrink-0 text-gray-400" aria-hidden>›</span>
           </Link>
-          <Link href="/account/install-app" className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
-            <span>📲 Cài đặt app</span>
-            <span className="text-gray-400">›</span>
-          </Link>
-          <Link href="/tai-khoan-ngan-hang" className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
-            <span>🏦 Tài khoản ngân hàng</span>
-            <span className="text-gray-400">›</span>
-          </Link>
-          <button onClick={notReady} className="w-full flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
-            <span>💬 Nhắn tin</span>
-            <span className="text-gray-400">›</span>
-          </button>
-          <Link href="/favorites" className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
-            <span>❤️ Sản phẩm yêu thích</span>
-            <span className="text-gray-400">›</span>
-          </Link>
-          <button onClick={notReady} className="w-full flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
-            <span>🔑 Đổi mật khẩu</span>
-            <span className="text-gray-400">›</span>
+          <button type="button" onClick={notReady} className={menuRowClass}>
+            <span className="flex-1 text-left">🔑 Đổi mật khẩu</span>
+            <span className="shrink-0 text-gray-400" aria-hidden>›</span>
           </button>
         </div>
 
