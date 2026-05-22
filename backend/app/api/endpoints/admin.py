@@ -7,6 +7,7 @@ import re
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
@@ -932,9 +933,20 @@ def admin_integrations_api_keys_overview(
             items=[
                 AdminIntegrationKeyRow(
                     env_var="SEPAY_WEBHOOK_API_KEY",
-                    label="Webhook — Apikey / x-api-key",
-                    configured=_integration_secret_configured(settings.SEPAY_WEBHOOK_API_KEY, min_len=6),
-                    hint="Khớp cấu hình trên SePay; có thể để trống nếu chỉ tin cậy IP.",
+                    label="Webhook — Apikey / ?token= trên URL",
+                    configured=_integration_secret_configured(settings.SEPAY_WEBHOOK_API_KEY, min_len=6)
+                    or _integration_secret_configured(
+                        next(
+                            (
+                                v
+                                for vals in parse_qs(urlparse(settings.SEPAY_WEBHOOK_PUBLIC_URL or "").query).values()
+                                for v in vals
+                            ),
+                            "",
+                        ),
+                        min_len=6,
+                    ),
+                    hint="Khớp token trên SePay (Authorization Apikey hoặc ?token=); có thể ghi token trong SEPAY_WEBHOOK_PUBLIC_URL.",
                 ),
                 AdminIntegrationKeyRow(
                     env_var="SEPAY_SECRET_KEY",

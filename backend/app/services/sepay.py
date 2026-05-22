@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, Optional, Set, Tuple
-from urllib.parse import parse_qsl, urlencode
+from urllib.parse import parse_qsl, urlencode, urlparse, parse_qs
 
 from fastapi import Request
 from sqlalchemy import func, or_
@@ -253,14 +253,54 @@ def _webhook_ip_candidates(request: Request) -> list[str]:
     return parts[:1] if parts else ([real_norm] if real_norm else [])
 
 
+def _safe_secret_match(provided: str, expected: str) -> bool:
+    """So khớp token/Apikey — tránh ValueError khi độ dài khác (hmac.compare_digest)."""
+    a = (provided or "").strip()
+    b = (expected or "").strip()
+    if not a or not b:
+        return False
+    if a == b or a.lower() == b.lower():
+        return True
+    if len(a) == len(b):
+        return hmac.compare_digest(a, b)
+    return False
+
+
+def _configured_webhook_api_keys() -> list[str]:
+    """
+    Các giá trị Apikey hợp lệ:
+    - SEPAY_WEBHOOK_API_KEY
+    - ?token= / ?api_key= trong SEPAY_WEBHOOK_PUBLIC_URL (URL đăng ký trên SePay thường có ?token=...)
+    """
+    keys: list[str] = []
+    seen: set[str] = set()
+
+    def add(raw: str) -> None:
+        v = (raw or "").strip()
+        if not v or v in seen:
+            return
+        seen.add(v)
+        keys.append(v)
+
+    add(getattr(settings, "SEPAY_WEBHOOK_API_KEY", "") or "")
+    pub = (getattr(settings, "SEPAY_WEBHOOK_PUBLIC_URL", "") or "").strip()
+    if "?" in pub:
+        try:
+            q = parse_qs(urlparse(pub).query)
+            for name in ("token", "api_key", "apikey"):
+                for val in q.get(name, []):
+                    add(val)
+        except Exception:
+            logger.debug("SePay webhook: không đọc được token từ SEPAY_WEBHOOK_PUBLIC_URL", exc_info=True)
+    return keys
+
+
 def verify_webhook(request: Request, raw_body: bytes) -> bool:
-    api_key = (getattr(settings, "SEPAY_WEBHOOK_API_KEY", "") or "").strip()
+    api_keys = _configured_webhook_api_keys()
     secret = (getattr(settings, "SEPAY_SECRET_KEY", "") or "").strip()
-    if api_key:
+    if api_keys:
         auth_raw = (request.headers.get("authorization") or request.headers.get("Authorization") or "").strip()
         auth = " ".join(auth_raw.split())
-        expected = " ".join(f"Apikey {api_key}".split())
-        bearer_expected = " ".join(f"Bearer {api_key}".split())
         raw_header_key = (
             request.headers.get("x-api-key")
             or request.headers.get("X-Api-Key")
@@ -274,21 +314,24 @@ def verify_webhook(request: Request, raw_body: bytes) -> bool:
             or request.query_params.get("apikey")
             or ""
         ).strip()
-        if (
-            hmac.compare_digest(auth, expected)
-            or auth.lower() == expected.lower()
-            or hmac.compare_digest(auth, bearer_expected)
-            or auth.lower() == bearer_expected.lower()
-            or hmac.compare_digest(auth, api_key)
-            or hmac.compare_digest(raw_header_key, api_key)
-            or hmac.compare_digest(query_key, api_key)
-        ):
-            return True
+        for api_key in api_keys:
+            expected = " ".join(f"Apikey {api_key}".split())
+            bearer_expected = " ".join(f"Bearer {api_key}".split())
+            if (
+                _safe_secret_match(auth, expected)
+                or _safe_secret_match(auth, bearer_expected)
+                or _safe_secret_match(auth, api_key)
+                or _safe_secret_match(raw_header_key, api_key)
+                or _safe_secret_match(query_key, api_key)
+            ):
+                return True
         logger.warning(
-            "SePay webhook: API key không khớp (authorization=%s, x-api-key=%s, query_token=%s); sẽ thử phương án xác thực khác nếu bật",
+            "SePay webhook: API key không khớp (authorization=%s, x-api-key=%s, query_token=%s len=%s, configured_keys=%s); sẽ thử phương án xác thực khác nếu bật",
             bool(auth),
             bool(raw_header_key),
             bool(query_key),
+            len(query_key) if query_key else 0,
+            len(api_keys),
         )
 
     sig = request.headers.get("x-sepay-signature") or request.headers.get("X-Sepay-Signature")
