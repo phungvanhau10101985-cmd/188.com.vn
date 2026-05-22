@@ -108,6 +108,87 @@ def build_sepay_qr_image_url(*, account_number: str, bank_code: str, amount: Dec
     return f"https://qr.sepay.vn/img?{urlencode(q)}"
 
 
+def _build_qr_from_template(
+    template: str,
+    *,
+    bank_acc: str,
+    bank_id: str,
+    amount: Decimal,
+    des: str,
+) -> str:
+    from urllib.parse import quote
+
+    mapping = {
+        "bank_acc": quote(str(bank_acc).strip(), safe=""),
+        "bank_id": quote(str(bank_id).strip(), safe=""),
+        "amount": quote(str(int(amount)), safe=""),
+        "des": quote(str(des), safe=""),
+    }
+    out = template.strip()
+    for key, val in mapping.items():
+        out = re.sub(r"\{" + re.escape(key) + r"\}", val, out, flags=re.IGNORECASE)
+    return out
+
+
+def resolve_deposit_qr_image_url(db: Session, order: Order) -> Optional[str]:
+    """URL ảnh QR cọc — SePay ưu tiên, fallback VietQR từ tài khoản ngân hàng shop."""
+    status_val = getattr(order.status, "value", order.status)
+    if not order.requires_deposit or status_val != OrderStatus.WAITING_DEPOSIT.value:
+        return None
+
+    transfer_content = build_transfer_content_for_order(order)
+    amount = Decimal(str(order.deposit_amount or 0))
+
+    if sepay_configured_for_qr():
+        return build_sepay_qr_image_url(
+            account_number=settings.SEPAY_QR_ACCOUNT_NUMBER,
+            bank_code=settings.SEPAY_QR_BANK_CODE,
+            amount=amount,
+            des=transfer_content,
+        )
+
+    from app import crud
+
+    accounts = crud.bank_account.get_bank_accounts(db, active_only=True)
+    if not accounts:
+        return None
+    acc = accounts[0]
+    bank_id = (acc.bank_code or "").strip()
+    if not bank_id:
+        return None
+
+    tpl = (acc.qr_template_url or "").strip()
+    if tpl:
+        return _build_qr_from_template(
+            tpl,
+            bank_acc=acc.account_number,
+            bank_id=bank_id,
+            amount=amount,
+            des=transfer_content,
+        )
+
+    from urllib.parse import quote
+
+    holder = quote((acc.account_holder or "").strip(), safe="")
+    info = quote(transfer_content, safe="")
+    return (
+        f"https://img.vietqr.io/image/{bank_id}-{acc.account_number}-compact2.png"
+        f"?amount={int(amount)}&addInfo={info}&accountName={holder}"
+    )
+
+
+def fetch_qr_image_bytes(qr_url: str) -> bytes:
+    import requests
+
+    resp = requests.get(
+        qr_url,
+        timeout=20,
+        headers={"User-Agent": "188.com.vn/deposit-qr-proxy"},
+    )
+    resp.raise_for_status()
+    return resp.content
+
+
 def sepay_configured_for_qr() -> bool:
     acc = (getattr(settings, "SEPAY_QR_ACCOUNT_NUMBER", "") or "").strip()
     bank = (getattr(settings, "SEPAY_QR_BANK_CODE", "") or "").strip()

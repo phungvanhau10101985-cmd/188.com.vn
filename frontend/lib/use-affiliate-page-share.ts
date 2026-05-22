@@ -30,8 +30,6 @@ export function useAffiliatePageShare(options: ShareOptions = {}) {
     return pageUrl;
   }, [isApproved, pageUrl, referralCode]);
 
-  const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
-
   const copyShareUrl = useCallback(async () => {
     if (!shareUrl) return false;
     try {
@@ -48,29 +46,11 @@ export function useAffiliatePageShare(options: ShareOptions = {}) {
     }
   }, [isApproved, pushToast, shareUrl]);
 
-  const nativeShare = useCallback(async () => {
-    if (!shareUrl) return;
-    if (canNativeShare) {
-      try {
-        await navigator.share({
-          title: shareTitle || (typeof document !== 'undefined' ? document.title : '188.com.vn'),
-          url: shareUrl,
-        });
-        return;
-      } catch (err) {
-        if ((err as Error)?.name === 'AbortError') return;
-      }
-    }
-    await copyShareUrl();
-  }, [canNativeShare, copyShareUrl, shareTitle, shareUrl]);
-
   return {
     isApproved,
     isLoading,
     shareUrl,
-    canNativeShare,
     copyShareUrl,
-    nativeShare,
     analyticsMethod,
   };
 }

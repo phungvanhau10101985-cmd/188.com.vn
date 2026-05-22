@@ -10,6 +10,7 @@ import AppShell from "@/components/AppShell";
 import SiteEmbedsRoot from "@/components/SiteEmbedsRoot";
 import SiteEmbedsSsrScripts from "@/components/SiteEmbedsSsrScripts";
 import DraggableThirdPartyFloaters from "@/components/DraggableThirdPartyFloaters";
+import NanoAiMobileLauncherAdjust from "@/components/NanoAiMobileLauncherAdjust";
 import AnalyticsTracker from "@/components/AnalyticsTracker";
 import { fetchPublicSiteEmbeds } from "@/lib/site-embeds-public";
 import { partitionHeadEmbedsForSsr } from "@/lib/site-embed-head-ssr";
@@ -164,6 +165,7 @@ export default async function RootLayout({
       <body className="antialiased font-sans bg-[#fafafa] text-gray-900 min-h-screen" suppressHydrationWarning>
         <SiteEmbedsRoot embeds={siteEmbeds} headClientRemainders={headClientRemainders} />
         <DraggableThirdPartyFloaters />
+        <NanoAiMobileLauncherAdjust />
         {/* Global Providers + Header/Footer xuyên suốt */}
         <ToastProvider>
           <AuthProvider>

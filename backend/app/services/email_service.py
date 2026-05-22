@@ -87,6 +87,149 @@ def send_order_email(to_email: str, subject: str, message: str) -> None:
     send_email(to_email, subject, text_body, html_body)
 
 
+def send_order_created_email_task(order_id: int) -> None:
+    """Email xác nhận đơn mới — kèm QR + nhắc đặt cọc nếu đơn chờ cọc."""
+    from sqlalchemy.orm import joinedload
+
+    from app.db.session import SessionLocal
+    from app.models.order import Order, OrderStatus
+    from app.services import sepay as sepay_svc
+
+    db = SessionLocal()
+    try:
+        order = (
+            db.query(Order)
+            .options(joinedload(Order.user))
+            .filter(Order.id == order_id)
+            .first()
+        )
+        if not order:
+            logger.warning("order_created_email skip: order not found id=%s", order_id)
+            return
+
+        customer_to = (order.customer_email or "").strip()
+        if not customer_to and order.user and (order.user.email or "").strip():
+            customer_to = (order.user.email or "").strip()
+        if not customer_to:
+            logger.info("order_created_email skip: no email order_id=%s", order_id)
+            return
+
+        name = (order.customer_name or "Quý khách").strip()
+        code = order.order_code or f"#{order.id}"
+        fe = (settings.FRONTEND_BASE_URL or "").strip().rstrip("/")
+        detail_url = f"{fe}/account/orders/{order.id}" if fe else ""
+        deposit_url = f"{fe}/account/orders/{order.id}/deposit" if fe else ""
+
+        status_val = getattr(order.status, "value", order.status)
+        waiting_deposit = bool(order.requires_deposit and status_val == OrderStatus.WAITING_DEPOSIT.value)
+
+        if waiting_deposit:
+            deposit_vnd = _format_vnd_plain(order.deposit_amount)
+            remaining_vnd = _format_vnd_plain(order.remaining_amount)
+            transfer_content = sepay_svc.build_transfer_content_for_order(order)
+            qr_url = sepay_svc.resolve_deposit_qr_image_url(db, order)
+
+            subject = f"Đặt cọc đơn {code} để giao hàng sớm · 188.com.vn"
+            if settings.EMAIL_SUBJECT_PREFIX:
+                subject = f"{settings.EMAIL_SUBJECT_PREFIX} {subject}"
+
+            gentle = (
+                "Đơn của bạn đã được tạo thành công. "
+                "Để shop xử lý và giao hàng sớm nhất, bạn vui lòng chuyển khoản đặt cọc trong thời gian sớm nhất nhé."
+            )
+
+            text_lines = [
+                f"Kính gửi {name},",
+                "",
+                gentle,
+                "",
+                f"Mã đơn hàng: {code}",
+                f"Số tiền cọc: {deposit_vnd} VND",
+                f"Còn lại khi nhận hàng: {remaining_vnd} VND",
+                f"Nội dung chuyển khoản: {transfer_content}",
+                "",
+                "Quét mã QR trong email hoặc mở trang đặt cọc để thanh toán.",
+            ]
+            if deposit_url:
+                text_lines.extend(["", f"Đặt cọc ngay: {deposit_url}"])
+            if detail_url:
+                text_lines.extend(["", f"Chi tiết đơn: {detail_url}"])
+            text_lines.extend(["", "Trân trọng,", "188.com.vn"])
+            text_body = "\n".join(text_lines)
+
+            qr_html = (
+                f'<p style="text-align:center;margin:16px 0;">'
+                f'<img src="{qr_url}" alt="Mã QR chuyển khoản" width="240" height="240" '
+                f'style="max-width:240px;height:auto;border:1px solid #e5e7eb;border-radius:12px;" />'
+                f"</p>"
+                if qr_url
+                else ""
+            )
+            cta_html = ""
+            if deposit_url:
+                cta_html = (
+                    f'<p style="margin:20px 0 12px;text-align:center;">'
+                    f'<a href="{deposit_url}" style="display:inline-block;padding:12px 22px;'
+                    f'background:#ea580c;color:#ffffff !important;text-decoration:none;border-radius:10px;font-weight:600;">'
+                    f"Đặt cọc ngay</a></p>"
+                )
+            link_html = (
+                f'<p style="font-size:13px;color:#6b7280;text-align:center;">'
+                f'<a href="{detail_url}">Xem chi tiết đơn hàng</a></p>'
+                if detail_url
+                else ""
+            )
+
+            html_body = f"""
+<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.55;color:#111827;max-width:560px;">
+  <p>Kính gửi <strong>{name}</strong>,</p>
+  <p>{gentle}</p>
+  <p>Mã đơn: <strong>{code}</strong><br/>
+  Số tiền cọc: <strong>{deposit_vnd} VND</strong><br/>
+  Còn lại khi nhận hàng: <strong>{remaining_vnd} VND</strong></p>
+  <p style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;font-size:14px;">
+    <strong>Nội dung CK:</strong> <span style="font-family:monospace;">{transfer_content}</span><br/>
+    <span style="color:#9a3412;font-size:13px;">Ghi đúng nội dung để hệ thống xác nhận tự động.</span>
+  </p>
+  {qr_html}
+  {cta_html}
+  {link_html}
+  <p style="margin-top:24px;">Trân trọng,<br/>188.com.vn</p>
+</div>
+"""
+        else:
+            subject = f"Xác nhận đơn hàng {code} · 188.com.vn"
+            if settings.EMAIL_SUBJECT_PREFIX:
+                subject = f"{settings.EMAIL_SUBJECT_PREFIX} {subject}"
+            text_body = "\n".join(
+                [
+                    f"Kính gửi {name},",
+                    "",
+                    "Đơn hàng của bạn đã được tạo thành công. Cảm ơn bạn đã mua sắm tại 188.com.vn.",
+                    *(["", f"Chi tiết đơn: {detail_url}"] if detail_url else []),
+                    "",
+                    "Trân trọng,",
+                    "188.com.vn",
+                ]
+            )
+            link_html = (
+                f'<p><a href="{detail_url}">Xem chi tiết đơn hàng</a></p>' if detail_url else ""
+            )
+            html_body = (
+                f"<p>Kính gửi <strong>{name}</strong>,</p>"
+                "<p>Đơn hàng của bạn đã được tạo thành công. Cảm ơn bạn đã mua sắm tại 188.com.vn.</p>"
+                f"{link_html}"
+                "<p>Trân trọng,<br>188.com.vn</p>"
+            )
+
+        send_email(customer_to, subject, text_body, html_body)
+        logger.info("order_created_email sent order_id=%s to=%s waiting_deposit=%s", order_id, customer_to, waiting_deposit)
+    except Exception:
+        logger.exception("order_created_email failed order_id=%s", order_id)
+    finally:
+        db.close()
+
+
 def send_birthday_promo_email(
     to_email: str,
     customer_name: str,

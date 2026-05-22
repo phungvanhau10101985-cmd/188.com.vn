@@ -155,46 +155,59 @@ export default function OrderDepositPage() {
   }, [sepayInfo, order, selectedAccount, transferContent]);
 
   const handleDownloadQr = async () => {
-    if (!qrValue || !order) return;
+    if (!order) return;
     setQrDownloading(true);
     const safeCode = String(order.order_code || `don-${id}`).replace(/[^\da-zA-Z._-]+/g, '_') || String(id);
     const filename = `qr-chuyen-khoan-${safeCode}.png`;
 
-    try {
-      const res = await fetch(qrValue, { mode: 'cors' });
-      if (!res.ok) throw new Error('HTTP');
-      const blob = await res.blob();
-      const mime = blob.type || '';
-      const ext =
-        mime.includes('png') ? '.png' : mime.includes('jpeg') || mime.includes('jpg') ? '.jpg' : mime.includes('webp') ? '.webp' : '';
-      const name = ext && !filename.endsWith(ext) ? filename.replace(/\.png$/i, ext) : filename;
-
+    const saveBlob = (blob: Blob) => {
       const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = objectUrl;
-      a.download = name;
+      a.download = filename;
       a.rel = 'noopener';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(objectUrl);
+    };
+
+    try {
+      const blob = await apiClient.downloadOrderDepositQr(id);
+      saveBlob(blob);
       pushToast({ title: 'Đã tải mã QR', variant: 'success', durationMs: 2500 });
     } catch {
-      try {
-        window.open(qrValue, '_blank', 'noopener,noreferrer');
-        pushToast({
-          title: 'Đã mở ảnh QR trong tab mới',
-          description: 'Chuột phải hoặc dùng lệnh «Lưu ảnh» của trình duyệt nếu tải trực tiếp không dùng được.',
-          variant: 'info',
-          durationMs: 4500,
-        });
-      } catch {
+      if (!qrValue) {
         pushToast({
           title: 'Không tải được mã QR',
           description: 'Thử quét QR trực tiếp hoặc chụp màn hình.',
           variant: 'error',
           durationMs: 4000,
         });
+        return;
+      }
+      try {
+        const res = await fetch(qrValue, { mode: 'cors' });
+        if (!res.ok) throw new Error('HTTP');
+        saveBlob(await res.blob());
+        pushToast({ title: 'Đã tải mã QR', variant: 'success', durationMs: 2500 });
+      } catch {
+        try {
+          window.open(qrValue, '_blank', 'noopener,noreferrer');
+          pushToast({
+            title: 'Đã mở ảnh QR trong tab mới',
+            description: 'Chuột phải hoặc «Lưu ảnh» nếu tải trực tiếp không dùng được.',
+            variant: 'info',
+            durationMs: 4500,
+          });
+        } catch {
+          pushToast({
+            title: 'Không tải được mã QR',
+            description: 'Thử quét QR trực tiếp hoặc chụp màn hình.',
+            variant: 'error',
+            durationMs: 4000,
+          });
+        }
       }
     } finally {
       setQrDownloading(false);

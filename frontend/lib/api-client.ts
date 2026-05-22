@@ -447,6 +447,26 @@ class ApiClient {
     return this.fetch(`/orders/${orderId}/sepay-deposit-info`);
   }
 
+  /** Tải file QR cọc qua backend (tránh CORS). */
+  async downloadOrderDepositQr(orderId: number): Promise<Blob> {
+    const url = `${getApiBaseUrl()}/orders/${orderId}/deposit-qr-image`;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    const headers: Record<string, string> = {
+      Accept: 'image/png,image/*',
+      ...ngrokFetchHeaders(),
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const guestSid = typeof window !== 'undefined' ? getGuestSessionId() : null;
+    if (guestSid) headers['X-Guest-Session-Id'] = guestSid;
+
+    const res = await fetch(url, { headers, credentials: 'include' });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(errText || `Không tải được mã QR (${res.status})`);
+    }
+    return res.blob();
+  }
+
   // USER BEHAVIOR
   async trackProductView(productId: number, productData?: any): Promise<void> {
     return this.fetch('/user-behavior/products/view', {

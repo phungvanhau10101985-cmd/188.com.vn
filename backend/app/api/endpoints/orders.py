@@ -1,5 +1,7 @@
 # backend/app/api/endpoints/orders.py - COMPLETE ORDER API WITH DEPOSIT
+import re
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, status, BackgroundTasks
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
@@ -11,7 +13,7 @@ from app.crud import loyalty as crud_loyalty
 from app.models.order import OrderStatus as OrderStatusEnum, DepositType as DepositTypeEnum, PaymentStatus as PaymentStatusEnum
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission
 from app.core.config import settings
-from app.services.email_service import send_order_email, send_deposit_confirmed_email_task
+from app.services.email_service import send_order_email, send_deposit_confirmed_email_task, send_order_created_email_task
 from app.services import sepay as sepay_svc
 from app.services.birthday_discount import get_birthday_discount_for_user
 from app.services import affiliate_wallet as affiliate_svc
@@ -222,12 +224,7 @@ def create_order(
         
         recipient = order.customer_email or (getattr(current_user, "email", None) if current_user else None)
         if recipient:
-            background_tasks.add_task(
-                send_order_email,
-                recipient,
-                f"Xác nhận đơn hàng {order.order_code}",
-                "Đơn hàng của bạn đã được tạo thành công. Cảm ơn bạn đã mua sắm tại 188.com.vn.",
-            )
+            background_tasks.add_task(send_order_created_email_task, order.id)
         return order
         
     except HTTPException:
@@ -329,6 +326,48 @@ def get_sepay_deposit_info(
         bank_code=settings.SEPAY_QR_BANK_CODE or None,
         account_number=settings.SEPAY_QR_ACCOUNT_NUMBER or None,
         register_webhook_url=hook,
+    )
+
+
+@router.get("/{order_id}/deposit-qr-image")
+def download_deposit_qr_image(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Tải ảnh QR cọc qua backend (tránh CORS từ qr.sepay.vn / vietqr.io trên trình duyệt)."""
+    order = crud.order.get_order(db, order_id=order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    status_val = getattr(order.status, "value", order.status)
+    if status_val != OrderStatusEnum.WAITING_DEPOSIT.value or not order.requires_deposit:
+        raise HTTPException(status_code=400, detail="Đơn không ở trạng thái chờ đặt cọc")
+
+    transfer_content = sepay_svc.build_transfer_content_for_order(order)
+    amount = Decimal(str(order.deposit_amount))
+    crud.payment.upsert_pending_sepay_deposit_payment(
+        db,
+        order_id=order.id,
+        transfer_content=transfer_content,
+        amount=amount,
+    )
+
+    qr_url = sepay_svc.resolve_deposit_qr_image_url(db, order)
+    if not qr_url:
+        raise HTTPException(status_code=404, detail="Không tạo được mã QR")
+
+    try:
+        raw = sepay_svc.fetch_qr_image_bytes(qr_url)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Không tải được ảnh QR") from exc
+
+    safe_code = re.sub(r"[^\w.-]+", "_", (order.order_code or f"don-{order_id}").strip()) or str(order_id)
+    return Response(
+        content=raw,
+        media_type="image/png",
+        headers={"Content-Disposition": f'attachment; filename="qr-chuyen-khoan-{safe_code}.png"'},
     )
 
 

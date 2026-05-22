@@ -170,6 +170,20 @@ body {
 }
 
 @media (max-width: 767px) {
+  #nanoai-chat-widget-v1,
+  [id^="nanoai-chat-widget"],
+  [id*="nanoai-chat-widget"] {
+    max-width: calc(100vw - 24px);
+  }
+
+  #nanoai-chat-widget-v1 button,
+  [id^="nanoai-chat-widget"] button,
+  [id*="nanoai-chat-widget"] button,
+  [data-nanoai-launcher],
+  [data-nanoai-chat-launcher] {
+    touch-action: manipulation;
+  }
+
   .hero-category-marquee-vertical {
     animation-duration: 26s;
   }

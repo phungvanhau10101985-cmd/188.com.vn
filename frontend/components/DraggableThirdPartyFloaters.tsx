@@ -20,6 +20,8 @@ function skipElement(el: HTMLElement): boolean {
   if (el.closest('[data-188-video-fab]')) return true;
   if (el.closest('[data-188-skip-draggable]')) return true;
   if (el.dataset.draggable188Attached === '1') return true;
+  if (el.dataset.nanoai188MobileAdjusted === '1') return true;
+  if (el.closest('[data-nanoai188-mobile-adjusted="1"]')) return true;
   return false;
 }
 
@@ -29,7 +31,8 @@ function looksLikeFloatingLauncher(el: HTMLElement): boolean {
   if (cs.position !== 'fixed') return false;
   if (cs.display === 'none' || cs.visibility === 'hidden' || cs.pointerEvents === 'none') return false;
   const r = el.getBoundingClientRect();
-  if (r.width < 36 || r.width > 104 || r.height < 36 || r.height > 104) return false;
+  const maxSize = window.matchMedia('(max-width: 767px)').matches ? 140 : 104;
+  if (r.width < 36 || r.width > maxSize || r.height < 36 || r.height > maxSize) return false;
   const zi = parseInt(cs.zIndex, 10);
   if (cs.zIndex === 'auto' || !Number.isFinite(zi) || zi < 500) return false;
   const iw = window.innerWidth;
