@@ -23,6 +23,7 @@ import {
   buildNanoAiTryOnCtxFrom188Product,
   NANO_AI_CTX_SOURCE_PRODUCT_PDP,
 } from '@/lib/nanoai-hosted-chat';
+import AffiliateShareBar from '@/components/affiliate/AffiliateShareBar';
 
 interface ProductInfoProps {
   product: Product;
@@ -172,6 +173,7 @@ export default function ProductInfo({
             </span>
           )}
         </h1>
+        <AffiliateShareBar shareTitle={product.name} className="mb-2" />
         {displayableBrandOrOrigin(product.brand_name) && (
           <p className="text-sm text-gray-600 mb-2">Thương hiệu: {displayableBrandOrOrigin(product.brand_name)}</p>
         )}

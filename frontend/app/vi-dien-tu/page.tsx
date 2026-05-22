@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ToastProvider';
+import AffiliateLinkConverter from '@/components/affiliate/AffiliateLinkConverter';
 
 function fmt(amount: number) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount || 0);
@@ -186,6 +187,9 @@ export default function WalletPage() {
                 Mã: <strong>{affiliate.referral_code}</strong> · Đơn giới thiệu: {affiliate.total_orders_referred} · Cookie:{' '}
                 {affiliate.ref_cookie_days} ngày
               </p>
+              <div className="mt-4">
+                <AffiliateLinkConverter referralCode={affiliate.referral_code} />
+              </div>
             </div>
           ) : (
             <div className="rounded-xl border border-orange-100 bg-orange-50 p-4 space-y-3">

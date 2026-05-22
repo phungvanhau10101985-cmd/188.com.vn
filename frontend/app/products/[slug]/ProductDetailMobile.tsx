@@ -29,6 +29,8 @@ import {
   buildNanoAiTryOnCtxFrom188Product,
   NANO_AI_CTX_SOURCE_PRODUCT_PDP,
 } from '@/lib/nanoai-hosted-chat';
+import AffiliateShareBar, { ProductShareIconButton } from '@/components/affiliate/AffiliateShareBar';
+import { useAffiliatePageShare } from '@/lib/use-affiliate-page-share';
 
 function formatLikeCount(n: unknown): string {
   const v = Math.max(0, Math.floor(Number(n)) || 0);
@@ -63,6 +65,7 @@ export default function ProductDetailMobile({
   const [displayStockByVariant, setDisplayStockByVariant] = useState<Record<string, number>>({});
   const { isAuthenticated } = useAuth();
   const { pushToast } = useToast();
+  const { copyShareUrl, isApproved: isAffiliateApproved } = useAffiliatePageShare({ shareTitle: product.name });
   const [loyaltyStatus, setLoyaltyStatus] = useState<any>(null);
 
   const quantity = 1;
@@ -209,10 +212,13 @@ export default function ProductDetailMobile({
   const videoThumb = parsedVideo?.thumbUrl ?? null;
 
   const handleCopyLink = () => {
-    const url = typeof window !== 'undefined' ? window.location.href : '';
-    navigator.clipboard.writeText(url).then(() => {
-      pushToast({ title: 'Đã copy link sản phẩm', variant: 'success', durationMs: 2000 });
-      trackEvent('share_product', { method: 'copy_link', product_id: product.id });
+    void copyShareUrl().then((ok) => {
+      if (ok) {
+        trackEvent('share_product', {
+          method: isAffiliateApproved ? 'copy_affiliate_link' : 'copy_link',
+          product_id: product.id,
+        });
+      }
     });
   };
 
@@ -238,6 +244,8 @@ export default function ProductDetailMobile({
             </span>
           )}
         </h1>
+
+        <AffiliateShareBar shareTitle={product.name} className="mb-3" />
 
         <div className="image_list mb-2">
         {/* Main media: chỉ hiển thị video khi có video_url; video luôn ở index 0, sau đó mới ảnh */}
@@ -300,9 +308,7 @@ export default function ProductDetailMobile({
               <span className="font-medium truncate max-w-[140px]">{product.brand_name || '188 com vn'}</span>
             </div>
             <div className="absolute bottom-2 left-2 flex gap-2">
-              <button type="button" className="w-8 h-8 rounded-full bg-white/80 flex items-center justify-center" aria-label="Chia sẻ">
-                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
-              </button>
+              <ProductShareIconButton shareTitle={product.name} />
               <Link href="/da-xem" className="w-8 h-8 rounded-full bg-white/80 flex items-center justify-center" aria-label="Sản phẩm đã xem">
                 <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               </Link>
@@ -357,7 +363,7 @@ export default function ProductDetailMobile({
               onClick={handleCopyLink}
               className="flex-shrink-0 snap-center px-3 py-2 rounded-lg border border-gray-300 text-xs font-medium text-gray-700 hover:bg-gray-50"
             >
-              Copy link
+              {isAffiliateApproved ? 'Copy link giới thiệu' : 'Copy link'}
             </button>
           </div>
         )}

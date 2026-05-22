@@ -50,3 +50,30 @@ export function clearReferralAfterAttribute(): void {
     /* noop */
   }
 }
+
+const DEFAULT_SITE_ORIGIN = 'https://188.com.vn';
+
+function siteOrigin(): string {
+  if (typeof window !== 'undefined' && window.location.origin) {
+    return window.location.origin;
+  }
+  const raw = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_FRONTEND_BASE_URL || DEFAULT_SITE_ORIGIN;
+  return raw.replace(/\/$/, '');
+}
+
+/** Ghép `?ref=` (hoặc `&ref=`) vào URL bất kỳ — dùng khi affiliate copy/share link trang hiện tại. */
+export function appendReferralToUrl(url: string, referralCode: string): string {
+  const code = (referralCode || '').trim().toUpperCase();
+  const trimmed = (url || '').trim();
+  if (!code || !trimmed) return trimmed;
+  try {
+    const parsed = trimmed.startsWith('http://') || trimmed.startsWith('https://')
+      ? new URL(trimmed)
+      : new URL(trimmed, siteOrigin());
+    parsed.searchParams.set('ref', code);
+    return parsed.toString();
+  } catch {
+    const joiner = trimmed.includes('?') ? '&' : '?';
+    return `${trimmed}${joiner}ref=${encodeURIComponent(code)}`;
+  }
+}

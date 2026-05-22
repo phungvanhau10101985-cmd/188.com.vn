@@ -148,10 +148,10 @@ export default function AccountPage() {
               <span className="text-gray-400">›</span>
             </button>
           ) : null}
-          <button onClick={notReady} className="w-full flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
-            <span>💳 Ví điện tử</span>
+          <Link href="/vi-dien-tu" className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
+            <span>💳 Ví Affiliate</span>
             <span className="text-gray-400">›</span>
-          </button>
+          </Link>
           <button onClick={notReady} className="w-full flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
             <span>👥 Thành viên thân quen</span>
             <span className="text-gray-400">›</span>
@@ -164,10 +164,10 @@ export default function AccountPage() {
             <span>📲 Cài đặt app</span>
             <span className="text-gray-400">›</span>
           </Link>
-          <button onClick={notReady} className="w-full flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
+          <Link href="/tai-khoan-ngan-hang" className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
             <span>🏦 Tài khoản ngân hàng</span>
             <span className="text-gray-400">›</span>
-          </button>
+          </Link>
           <button onClick={notReady} className="w-full flex items-center justify-between px-4 py-2.5 text-sm text-gray-900">
             <span>💬 Nhắn tin</span>
             <span className="text-gray-400">›</span>
