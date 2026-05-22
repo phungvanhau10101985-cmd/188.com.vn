@@ -192,6 +192,13 @@ body {
     touch-action: manipulation;
   }
 
+  [data-nanoai188-mobile-adjusted="1"] {
+    top: auto !important;
+    left: auto !important;
+    margin: 0 !important;
+    transform: none !important;
+  }
+
   .hero-category-marquee-vertical {
     animation-duration: 26s;
   }

@@ -22,6 +22,10 @@ function skipElement(el: HTMLElement): boolean {
   if (el.dataset.draggable188Attached === '1') return true;
   if (el.dataset.nanoai188MobileAdjusted === '1') return true;
   if (el.closest('[data-nanoai188-mobile-adjusted="1"]')) return true;
+  const id = el.id || '';
+  if (/nanoai/i.test(id)) return true;
+  if (el.closest('#nanoai-chat-widget-v1, [id^="nanoai-chat-widget"], [id*="nanoai-chat"]')) return true;
+  if (el.matches('[data-nanoai-launcher], [data-nanoai-chat-launcher], .nanoai-chat-launcher')) return true;
   return false;
 }
 

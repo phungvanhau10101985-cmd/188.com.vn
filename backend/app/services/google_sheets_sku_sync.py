@@ -5,7 +5,8 @@ từng bảng có `ROW_MODE`: **full** (khóa + link + shop + giá + stamp) ho�
 1. Đọc sheet (cột A… theo cấu hình; nếu có cột E — thời điểm đồng bộ UTC) một lần.
    Cột A có thể là mã SKU (`code`), `product_id` đầy đủ, hoặc phần `product_id` trước «a188» (`web_prefix`).
 2. So với toàn bộ sản phẩm trong DB — chỉ **batchUpdate** những hàng có ô lệch; hàng trùng dữ liệu bỏ qua.
-3. Chỉ **append** hàng mới cho mã chưa có trên sheet; xóa hàng orphan / trùng mã ở lớp này.
+3. Chỉ **append** hàng mới cho mã chưa có trên sheet; mã orphan / trùng cột A → **xóa nội dung**
+   các cột đồng bộ (A–B khi key_time, A–E khi full) — **không xóa cả hàng**, cột C+ giữ nguyên.
 
 Lịch gọi: CRUD lẻ được **debounce** (mặc định 45s) ở `crud/product.py`; import Excel
 chạy đồng bộ **ngay** một lần; endpoint sync tay gọi trực tiếp không debounce.
@@ -118,7 +119,6 @@ def invalidate_internal_sku_sheet_cache() -> None:
 
 
 # Giới hạn thực tế Google API / kích thước HTTP — đồng bộ ~30k hàng vẫn ổn nếu chia lô.
-_BATCH_UPDATE_MAX_SUBREQUESTS = 100
 _APPEND_ROWS_PER_REQUEST = 2000
 
 
@@ -346,49 +346,22 @@ def _parse_column_a(
     return sku_to_rows
 
 
-def _merge_row_blocks(sorted_desc: List[int]) -> List[Tuple[int, int]]:
-    rows = sorted(set(sorted_desc), reverse=True)
-    if not rows:
-        return []
-    blocks: List[Tuple[int, int]] = []
-    i = 0
-    while i < len(rows):
-        hi = rows[i]
-        lo = hi
-        j = i + 1
-        while j < len(rows) and rows[j] == lo - 1:
-            lo = rows[j]
-            j += 1
-        blocks.append((lo, hi))
-        i = j
-    return blocks
-
-
-def _delete_row_ranges(service: Any, spreadsheet_id: str, sheet_gid: int, human_rows: List[int]) -> None:
+def _clear_sync_columns(
+    service: Any,
+    spreadsheet_id: str,
+    title_esc: str,
+    human_rows: List[int],
+    last_col: str,
+    n_cols: int,
+) -> None:
+    """Xóa nội dung cột đồng bộ (A..last_col) — không xóa hàng, không đụng cột sau last_col."""
     if not human_rows:
         return
-    blocks = _merge_row_blocks(human_rows)
-    blocks.sort(key=lambda b: b[1], reverse=True)
-    requests: List[Dict[str, Any]] = []
-    for lo, hi in blocks:
-        requests.append(
-            {
-                "deleteDimension": {
-                    "range": {
-                        "sheetId": sheet_gid,
-                        "dimension": "ROWS",
-                        "startIndex": lo - 1,
-                        "endIndex": hi,
-                    }
-                }
-            }
-        )
-    # Một batchUpdate quá nhiều deleteDimension → payload/timeout; chia lô.
-    for i in range(0, len(requests), _BATCH_UPDATE_MAX_SUBREQUESTS):
-        part = requests[i : i + _BATCH_UPDATE_MAX_SUBREQUESTS]
-        service.spreadsheets().batchUpdate(
-            spreadsheetId=spreadsheet_id, body={"requests": part}
-        ).execute()
+    empty_row = [[""] * n_cols]
+    data_chunks: List[Dict[str, Any]] = []
+    for r in sorted(set(human_rows)):
+        data_chunks.append({"range": f"{title_esc}!A{r}:{last_col}{r}", "values": empty_row})
+    _values_batch_update(service, spreadsheet_id, data_chunks)
 
 
 def _values_batch_update(
@@ -453,7 +426,7 @@ def _sync_single_google_sheet(
     header_rows: int,
     row_mode: str,
 ) -> Dict[str, Any]:
-    """Đồng bộ một tab Sheet với DB (khóa cột A = field). row_mode=key_time → chỉ cột A+B."""
+    """Đồng bộ một tab Sheet với DB (khóa cột A = field). Chỉ ghi/xóa cột đồng bộ (A–B key_time, A–E full); cột sau đó không đụng."""
     row_mode = (row_mode or "full").strip().lower()
     if row_mode not in ("full", "key_time"):
         row_mode = "full"
@@ -479,9 +452,9 @@ def _sync_single_google_sheet(
     orphan_rows: List[int] = []
     for sku in sorted(sheet_skus - db_keys):
         orphan_rows.extend(sku_to_rows.get(sku, []))
-    removed_orphans = len(orphan_rows)
+    cleared_orphans = len(orphan_rows)
     if orphan_rows:
-        _delete_row_ranges(service, spread, gid, orphan_rows)
+        _clear_sync_columns(service, spread, t_esc, orphan_rows, last_col, n_cols)
         sku_to_rows = _parse_column_a(service, spread, title, header_rows)
 
     dup_rows: List[int] = []
@@ -492,9 +465,9 @@ def _sync_single_google_sheet(
             continue
         sorted_r = sorted(rlist)
         dup_rows.extend(sorted_r[1:])
-    removed_dup = len(dup_rows)
+    cleared_dup = len(dup_rows)
     if dup_rows:
-        _delete_row_ranges(service, spread, gid, dup_rows)
+        _clear_sync_columns(service, spread, t_esc, dup_rows, last_col, n_cols)
         sku_to_rows = _parse_column_a(service, spread, title, header_rows)
 
     row_map = _read_data_rows_map(service, spread, title, header_rows, n_cols, last_col)
@@ -545,7 +518,7 @@ def _sync_single_google_sheet(
 
     logger.info(
         "[SKU_SHEET_SYNC] spread=%s… field=%s row_mode=%s tab=%s cols=%s updated=%s unchanged=%s added=%s "
-        "removed_orphans=%s removed_dup=%s db=%s",
+        "cleared_orphans=%s cleared_dup=%s db=%s",
         spread[:8],
         field,
         row_mode,
@@ -554,8 +527,8 @@ def _sync_single_google_sheet(
         updated,
         unchanged,
         added,
-        removed_orphans,
-        removed_dup,
+        cleared_orphans,
+        cleared_dup,
         len(db_keys),
     )
 
@@ -570,8 +543,11 @@ def _sync_single_google_sheet(
         "updated_rows": updated,
         "unchanged_rows": unchanged,
         "added_rows": added,
-        "removed_orphan_rows": removed_orphans,
-        "removed_duplicate_rows": removed_dup,
+        "cleared_orphan_rows": cleared_orphans,
+        "cleared_duplicate_rows": cleared_dup,
+        # Giữ tên cũ để API/admin không vỡ — cùng số hàng, chỉ xóa A..sync thay vì xóa hàng.
+        "removed_orphan_rows": cleared_orphans,
+        "removed_duplicate_rows": cleared_dup,
         "db_key_count": len(db_keys),
     }
 
@@ -580,8 +556,8 @@ def sync_product_skus_to_google_sheet(db: Session) -> Dict[str, Any]:
     """
     DB/web là chuẩn: một hoặc hai bảng Sheet (GOOGLE_SHEETS_SKU_* và tuỳ chọn *_2).
 
-    - Hàng không còn trong DB → xóa.
-    - Trùng mã (cột A) → giữ một hàng, xóa dư.
+    - Mã không còn trong DB → xóa nội dung cột đồng bộ (A–B / A–E), giữ hàng và cột khác.
+    - Trùng mã (cột A) → giữ một hàng, gỡ A–sync ở hàng trùng.
     - Mã có ở cả hai: đối chiếu với DB (full: A–D; key_time: luôn làm mới cột B thời gian).
     - Mã mới trong DB → append.
 

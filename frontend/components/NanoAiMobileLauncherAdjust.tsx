@@ -14,7 +14,7 @@ const VIDEO_FAB_SIZE_PX = 52;
 const FLOAT_GAP_PX = 12;
 const MOBILE_NAV_PX = 60;
 const NANOAI_Z_INDEX = 75;
-const MAX_LAUNCHER_PX = 200;
+const MAX_LAUNCHER_PX = 280;
 
 const LAUNCHER_SELECTORS = [
   '[data-nanoai-launcher]',
@@ -74,11 +74,14 @@ function findNanoAiLaunchers(): HTMLElement[] {
   }
 
   for (const sel of ROOT_SELECTORS) {
-    document.querySelectorAll<HTMLElement>(sel).forEach((el) => {
-      const cs = getComputedStyle(el);
-      if (cs.position !== 'fixed') return;
-      if (!isLauncherSized(el)) return;
-      found.add(el);
+    document.querySelectorAll<HTMLElement>(sel).forEach((root) => {
+      const cs = getComputedStyle(root);
+      if (cs.position === 'fixed' && isLauncherSized(root)) {
+        found.add(root);
+      }
+      root.querySelectorAll<HTMLElement>('[role="button"], a, div, span').forEach((el) => {
+        if (isLauncherSized(el)) found.add(el);
+      });
     });
   }
 
@@ -141,10 +144,57 @@ function clearOverlayPass() {
   });
 }
 
+/** Phần tử cần gắn bottom/right — thoát container fixed full-screen của widget. */
+function resolveLauncherAnchor(launcher: HTMLElement): HTMLElement {
+  let bestSizedFixed: HTMLElement | null = null;
+  let outerFixed: HTMLElement | null = null;
+
+  let node: HTMLElement | null = launcher;
+  while (node && node !== document.body) {
+    const cs = getComputedStyle(node);
+    if (cs.position === 'fixed') {
+      outerFixed = node;
+      if (!isLargeFixedOverlay(node) && isLauncherSized(node)) {
+        bestSizedFixed = node;
+      }
+    }
+    node = node.parentElement;
+  }
+
+  if (bestSizedFixed) return bestSizedFixed;
+
+  if (outerFixed && isLargeFixedOverlay(outerFixed)) {
+    launcher.style.setProperty('position', 'fixed', 'important');
+    return launcher;
+  }
+
+  return outerFixed ?? launcher;
+}
+
+function readVideoFabMetrics(): { bottomPx: number; rightPx: number } | null {
+  const fab = document.querySelector<HTMLElement>('[data-188-video-fab]');
+  if (!fab) return null;
+  const rect = fab.getBoundingClientRect();
+  if (rect.width < 20 || rect.height < 20) return null;
+  const vh = window.innerHeight;
+  const vw = window.innerWidth;
+  if (!vh || !vw) return null;
+  const videoTopFromBottom = Math.max(0, vh - rect.top);
+  return {
+    bottomPx: videoTopFromBottom + FLOAT_GAP_PX,
+    rightPx: Math.max(0, vw - rect.right),
+  };
+}
+
 function computeMobileBottomPx(
   pathname: string | null,
   fab: ShopVideoFabPublicSettings,
 ): number {
+  const fromDom = readVideoFabMetrics();
+  if (showVideoFab(pathname) && fromDom) {
+    return fromDom.bottomPx;
+  }
+
   const hasVideo = showVideoFab(pathname);
   const hasNav = showMobileBottomNav(pathname);
 
@@ -160,34 +210,54 @@ function computeMobileBottomPx(
   return fab.bottom_mobile_px_no_nav + FLOAT_GAP_PX;
 }
 
+function computeMobileRightPx(
+  pathname: string | null,
+  fab: ShopVideoFabPublicSettings,
+): number {
+  const fromDom = readVideoFabMetrics();
+  if (showVideoFab(pathname) && fromDom) {
+    return fromDom.rightPx;
+  }
+  return fab.right_mobile_px;
+}
+
 function applyMobileLayout(pathname: string | null, fab: ShopVideoFabPublicSettings) {
   if (!isMobileViewport()) return;
 
   const bottomPx = computeMobileBottomPx(pathname, fab);
-  const rightPx = fab.right_mobile_px;
+  const rightPx = computeMobileRightPx(pathname, fab);
 
   releaseNanoAiClickBlockers();
 
+  const adjusted = new Set<HTMLElement>();
+
   for (const launcher of findNanoAiLaunchers()) {
-    launcher.style.setProperty('display', 'block', 'important');
-    launcher.style.setProperty('visibility', 'visible', 'important');
-    launcher.style.setProperty('opacity', '1', 'important');
-    launcher.style.setProperty('pointer-events', 'auto', 'important');
-    launcher.style.setProperty('transform', 'none', 'important');
-    launcher.style.setProperty('top', 'auto', 'important');
-    launcher.style.setProperty('left', 'auto', 'important');
-    launcher.style.setProperty('z-index', String(NANOAI_Z_INDEX), 'important');
-    launcher.style.setProperty(
+    const anchor = resolveLauncherAnchor(launcher);
+    if (adjusted.has(anchor)) continue;
+    adjusted.add(anchor);
+
+    anchor.style.setProperty('display', 'block', 'important');
+    anchor.style.setProperty('visibility', 'visible', 'important');
+    anchor.style.setProperty('opacity', '1', 'important');
+    anchor.style.setProperty('pointer-events', 'auto', 'important');
+    anchor.style.setProperty('transform', 'none', 'important');
+    anchor.style.setProperty('margin', '0', 'important');
+    anchor.style.setProperty('inset', 'auto', 'important');
+    anchor.style.setProperty('top', 'auto', 'important');
+    anchor.style.setProperty('left', 'auto', 'important');
+    anchor.style.setProperty('position', 'fixed', 'important');
+    anchor.style.setProperty('z-index', String(NANOAI_Z_INDEX), 'important');
+    anchor.style.setProperty(
       'bottom',
       `calc(${bottomPx}px + env(safe-area-inset-bottom, 0px))`,
       'important',
     );
-    launcher.style.setProperty(
+    anchor.style.setProperty(
       'right',
       `calc(${rightPx}px + env(safe-area-inset-right, 0px))`,
       'important',
     );
-    launcher.dataset.nanoai188MobileAdjusted = '1';
+    anchor.dataset.nanoai188MobileAdjusted = '1';
   }
 }
 
@@ -198,6 +268,9 @@ function clearMobileLayout() {
     el.style.removeProperty('opacity');
     el.style.removeProperty('pointer-events');
     el.style.removeProperty('transform');
+    el.style.removeProperty('margin');
+    el.style.removeProperty('inset');
+    el.style.removeProperty('position');
     el.style.removeProperty('top');
     el.style.removeProperty('left');
     el.style.removeProperty('z-index');

@@ -71,9 +71,9 @@ function formatGoogleSheetSyncTargetsSummary(
       if (t.unchanged_rows != null) parts.push(`${t.unchanged_rows} giữ nguyên`);
       if (t.added_rows != null && t.added_rows > 0) parts.push(`+${t.added_rows} mới`);
       if (t.removed_orphan_rows != null && t.removed_orphan_rows > 0)
-        parts.push(`−${t.removed_orphan_rows} thừa`);
+        parts.push(`gỡ ${t.removed_orphan_rows} mã thừa (A/B)`);
       if (t.removed_duplicate_rows != null && t.removed_duplicate_rows > 0)
-        parts.push(`−${t.removed_duplicate_rows} trùng`);
+        parts.push(`gỡ ${t.removed_duplicate_rows} trùng (A/B)`);
       const rm = t.row_mode && t.row_mode !== 'full' ? `, ${t.row_mode}` : '';
       return `${tag} (${t.field ?? '?'}${rm}): ${parts.length ? parts.join(' · ') : 'ổn định'}`;
     })
@@ -2076,9 +2076,9 @@ export default function AdminProductsPage() {
       if (r.unchanged_rows != null) parts.push(`${r.unchanged_rows} hàng giữ nguyên`);
       if (r.added_rows != null && r.added_rows > 0) parts.push(`+${r.added_rows} hàng mới`);
       if (r.removed_orphan_rows != null && r.removed_orphan_rows > 0)
-        parts.push(`−${r.removed_orphan_rows} hàng thừa`);
+        parts.push(`gỡ ${r.removed_orphan_rows} mã thừa (A/B)`);
       if (r.removed_duplicate_rows != null && r.removed_duplicate_rows > 0)
-        parts.push(`−${r.removed_duplicate_rows} hàng trùng mã`);
+        parts.push(`gỡ ${r.removed_duplicate_rows} trùng (A/B)`);
       showToast('ok', parts.length ? `Google Sheet: ${parts.join(' · ')}` : 'Đã đồng bộ Google Sheet', 7000);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Đồng bộ Google Sheet lỗi';
