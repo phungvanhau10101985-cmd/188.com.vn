@@ -38,10 +38,10 @@ export function buildVnShareHref(platform: Exclude<VnSharePlatform, 'copy' | 'ti
   }
 }
 
-type ToastFn = (opts: {
+type ToastFn = (toast: {
   title: string;
   description?: string;
-  variant?: 'success' | 'error' | 'info';
+  variant: 'success' | 'error' | 'info';
   durationMs?: number;
 }) => void;
 
