@@ -91,6 +91,7 @@ export interface OrderCreateRequest {
   items: { product_id: number; quantity: number; selected_size?: string; selected_color?: string }[];
   deposit_type?: 'none' | 'percent_30' | 'percent_100';
   wallet_amount?: number;
+  referral_code?: string;
 }
 
 export interface OrderResponse {
@@ -906,6 +907,26 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  async getAffiliateReferredOrders(skip = 0, limit = 50): Promise<Array<{
+    order_id: number;
+    order_code: string | null;
+    buyer_label: string;
+    product_summary: string;
+    order_total: number;
+    order_status: string;
+    order_status_label: string;
+    commission_amount: number;
+    commission_percent: number;
+    commission_status: string;
+    commission_status_label: string;
+    withdrawable: boolean;
+    order_created_at: string;
+    commission_created_at: string | null;
+    commission_confirmed_at: string | null;
+  }>> {
+    return this.fetch(`/affiliate/referred-orders?skip=${skip}&limit=${limit}`);
   }
 
   async getWalletTransactions(skip = 0, limit = 50): Promise<any[]> {

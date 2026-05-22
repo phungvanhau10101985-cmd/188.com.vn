@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation';
 import type { UserAddress, AddressCreateInput } from '@/types/api';
 import { VIETNAM_PROVINCES } from '@/lib/vietnam-provinces';
 import { getOptimizedImage } from '@/lib/image-utils';
-import { useToast } from '@/components/ToastProvider';
+import { getStoredReferralCode } from '@/lib/affiliate-ref';
 import { trackEvent } from '@/lib/analytics';
 import { trackMetaOrderAwaitingDeposit, trackMetaPurchase } from '@/lib/meta-pixel';
 import {
@@ -27,6 +27,7 @@ import CartEmptySameShopSection from '@/components/cart/CartEmptySameShopSection
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
+import { useToast } from '@/components/ToastProvider';
 
 function formatAddressLine(addr: UserAddress): string {
   const parts = [addr.street_address];
@@ -337,6 +338,7 @@ export default function CartPage() {
     setIsCheckingOut(true);
     try {
       trackEvent('begin_checkout', { status: 'start', item_count: linesToOrder.length });
+      const referralCode = getStoredReferralCode();
       const order = await apiClient.createOrderFull({
         customer_name: selectedAddress.full_name,
         customer_phone: selectedAddress.phone,
@@ -347,6 +349,7 @@ export default function CartPage() {
         shipping_method: 'standard',
         deposit_type: depositType,
         wallet_amount: useWallet && walletUsable > 0 ? walletUsable : undefined,
+        referral_code: referralCode || undefined,
         items: linesToOrder.map((item) => ({
           product_id: item.product_id,
           quantity: item.quantity,

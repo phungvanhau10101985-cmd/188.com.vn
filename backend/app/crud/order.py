@@ -261,13 +261,16 @@ def admin_update_order(
     order.processed_by = admin_id
     order.updated_at = datetime.now()
 
+    commission_confirmed = False
     if 'status' in update_data:
-        affiliate_svc.handle_order_status_change(db, order, old_status, update_data['status'])
+        commission_confirmed = affiliate_svc.handle_order_status_change(db, order, old_status, update_data['status'])
     if 'payment_status' in update_data:
         affiliate_svc.handle_order_payment_status_change(db, order, update_data['payment_status'])
     
     db.commit()
     db.refresh(order)
+    if commission_confirmed:
+        affiliate_svc.notify_referrer_commission_confirmed_task(order.id)
     return order
 
 def cancel_order(
@@ -328,9 +331,11 @@ def confirm_received(
     order.status = OrderStatus.DELIVERED.value
     order.delivered_at = datetime.now()
     order.updated_at = datetime.now()
-    affiliate_svc.handle_order_status_change(db, order, old_status, OrderStatus.DELIVERED.value)
+    commission_confirmed = affiliate_svc.handle_order_status_change(db, order, old_status, OrderStatus.DELIVERED.value)
     db.commit()
     db.refresh(order)
+    if commission_confirmed:
+        affiliate_svc.notify_referrer_commission_confirmed_task(order.id)
     return order
 
 def get_order_stats(db: Session, period: str = "today") -> Dict[str, Any]:
@@ -413,8 +418,10 @@ def mark_order_completed_if_reviewed(db: Session, user_id: int, product_id: int)
         old_status = OrderStatus.DELIVERED.value
         order.status = OrderStatus.COMPLETED.value
         order.completed_at = datetime.now()
-        affiliate_svc.handle_order_status_change(db, order, old_status, OrderStatus.COMPLETED.value)
+        commission_confirmed = affiliate_svc.handle_order_status_change(db, order, old_status, OrderStatus.COMPLETED.value)
         db.commit()
+        if commission_confirmed:
+            affiliate_svc.notify_referrer_commission_confirmed_task(order.id)
 
 
 def has_user_purchased_product_for_review(db: Session, user_id: int, product_id: int) -> bool:

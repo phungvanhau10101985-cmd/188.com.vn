@@ -132,6 +132,24 @@ class AdminWithdrawRejectIn(BaseModel):
     admin_note: Optional[str] = None
 
 
+class AffiliateReferredOrderResponse(BaseModel):
+    order_id: int
+    order_code: Optional[str] = None
+    buyer_label: str
+    product_summary: str
+    order_total: Decimal
+    order_status: str
+    order_status_label: str
+    commission_amount: Decimal
+    commission_percent: float
+    commission_status: str
+    commission_status_label: str
+    withdrawable: bool
+    order_created_at: datetime
+    commission_created_at: Optional[datetime] = None
+    commission_confirmed_at: Optional[datetime] = None
+
+
 class AffiliateSettingsResponse(BaseModel):
     id: int
     enabled: bool

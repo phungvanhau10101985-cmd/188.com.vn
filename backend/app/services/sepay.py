@@ -645,8 +645,10 @@ def _finalize_sepay_deposit_success(
         order.payment_status = PaymentStatus.DEPOSIT_PAID
         order.status = OrderStatus.DEPOSIT_PAID
 
-    affiliate_svc.grant_deposit_commission_for_order(db, order)
+    commission = affiliate_svc.grant_deposit_commission_for_order(db, order)
     db.commit()
+    if commission and order.id:
+        affiliate_svc.notify_referrer_deposit_commission_task(order.id)
 
 
 def _latest_pending_sepay_deposit_for_order(db: Session, order_id: int) -> Optional[Payment]:

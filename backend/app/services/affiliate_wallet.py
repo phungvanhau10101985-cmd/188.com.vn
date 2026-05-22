@@ -337,6 +337,274 @@ def attribute_referral(db: Session, user_id: int, referral_code: str) -> Affilia
     return profile
 
 
+def mask_buyer_label(order: Order) -> str:
+    phone = "".join(c for c in (order.customer_phone or "") if c.isdigit())
+    if len(phone) >= 4:
+        return f"Khách ***{phone[-4:]}"
+    code = (order.order_code or "").strip()
+    return f"#{code}" if code else "Khách ẩn danh"
+
+
+def _format_vnd_int(amount: Decimal) -> str:
+    return f"{int(_dec(amount)):,}".replace(",", ".")
+
+
+def _send_affiliate_notification(db: Session, user_id: int, title: str, content: str) -> None:
+    try:
+        from app.crud import notification as crud_notification
+        from app.schemas.notification import NotificationCreate
+
+        crud_notification.create_notification(
+            db,
+            NotificationCreate(user_id=user_id, title=title, content=content, type="affiliate"),
+        )
+    except Exception:
+        logger.exception("affiliate notification failed user_id=%s title=%s", user_id, title)
+
+
+def _run_affiliate_notify_task(task_name: str, order_id: int) -> None:
+    from app.db.session import SessionLocal
+    from sqlalchemy.orm import joinedload
+
+    db = SessionLocal()
+    try:
+        order = db.query(Order).options(joinedload(Order.items)).filter(Order.id == order_id).first()
+        if not order:
+            return
+        if task_name == "new_order":
+            notify_referrer_new_order(db, order)
+        elif task_name == "deposit":
+            commission = (
+                db.query(AffiliateCommission).filter(AffiliateCommission.order_id == order_id).first()
+            )
+            if commission:
+                notify_referrer_deposit_commission(db, order, commission)
+        elif task_name == "confirmed":
+            commission = (
+                db.query(AffiliateCommission)
+                .filter(AffiliateCommission.order_id == order_id)
+                .filter(AffiliateCommission.status == COMMISSION_STATUS_CONFIRMED)
+                .first()
+            )
+            if commission:
+                notify_referrer_commission_confirmed(db, order, commission)
+    except Exception:
+        logger.exception("affiliate notify task failed task=%s order_id=%s", task_name, order_id)
+    finally:
+        db.close()
+
+
+def notify_referrer_new_order_task(order_id: int) -> None:
+    _run_affiliate_notify_task("new_order", order_id)
+
+
+def notify_referrer_deposit_commission_task(order_id: int) -> None:
+    _run_affiliate_notify_task("deposit", order_id)
+
+
+def notify_referrer_commission_confirmed_task(order_id: int) -> None:
+    _run_affiliate_notify_task("confirmed", order_id)
+
+
+def resolve_order_referrer_user_id(
+    db: Session,
+    *,
+    user_id: Optional[int],
+    referral_code: Optional[str] = None,
+) -> Optional[int]:
+    referrer_user_id: Optional[int] = None
+    buyer_profile: Optional[AffiliateProfile] = None
+    if user_id:
+        buyer_profile = get_or_create_profile(db, user_id)
+        referrer_user_id = buyer_profile.referred_by_user_id
+
+    code = (referral_code or "").strip().upper()
+    if code:
+        ref_profile = db.query(AffiliateProfile).filter(AffiliateProfile.referral_code == code).first()
+        if ref_profile and is_user_approved_affiliate(db, ref_profile.user_id):
+            if not user_id or ref_profile.user_id != user_id:
+                referrer_user_id = ref_profile.user_id
+                if user_id and buyer_profile and not buyer_profile.referred_by_user_id:
+                    try:
+                        attribute_referral(db, user_id, code)
+                    except ValueError:
+                        pass
+    return referrer_user_id
+
+
+def notify_referrer_new_order(db: Session, order: Order) -> None:
+    referrer_id = getattr(order, "referrer_user_id", None)
+    if not referrer_id or not is_user_approved_affiliate(db, int(referrer_id)):
+        return
+    base = commission_base_from_order(order)
+    pct = commission_percent(db)
+    est = (base * pct / Decimal("100")).quantize(Decimal("0.01")) if base > 0 else Decimal("0")
+    buyer = mask_buyer_label(order)
+    code = order.order_code or str(order.id)
+    if order.requires_deposit and _dec(order.deposit_amount) > 0:
+        content = (
+            f"{buyer} vừa đặt đơn {code} qua link của bạn. "
+            f"Hoa hồng dự kiến {_format_vnd_int(est)}đ — hiển thị sau khi khách đặt cọc."
+        )
+    else:
+        content = (
+            f"{buyer} vừa đặt đơn {code} qua link của bạn. "
+            f"Hoa hồng {_format_vnd_int(est)}đ đang chờ — rút được khi giao thành công."
+        )
+    _send_affiliate_notification(
+        db,
+        int(referrer_id),
+        "Có đơn hàng từ link giới thiệu",
+        content,
+    )
+
+
+def notify_referrer_deposit_commission(db: Session, order: Order, commission: AffiliateCommission) -> None:
+    buyer = mask_buyer_label(order)
+    code = order.order_code or str(order.id)
+    amt = _dec(commission.commission_amount)
+    _send_affiliate_notification(
+        db,
+        commission.referrer_user_id,
+        "Khách đã đặt cọc — hoa hồng chờ giao hàng",
+        (
+            f"{buyer} · đơn {code}: hoa hồng {_format_vnd_int(amt)}đ đã ghi nhận. "
+            "Bạn có thể rút sau khi đơn giao thành công."
+        ),
+    )
+
+
+def notify_referrer_commission_confirmed(db: Session, order: Order, commission: AffiliateCommission) -> None:
+    buyer = mask_buyer_label(order)
+    code = order.order_code or str(order.id)
+    amt = _dec(commission.commission_amount)
+    _send_affiliate_notification(
+        db,
+        commission.referrer_user_id,
+        "Hoa hồng đã có thể rút",
+        (
+            f"Đơn {code} ({buyer}) đã giao thành công. "
+            f"Hoa hồng {_format_vnd_int(amt)}đ đã chuyển vào số dư khả dụng."
+        ),
+    )
+
+
+def _order_status_label(status_val: str) -> str:
+    labels = {
+        "pending": "Chờ xác nhận",
+        "waiting_deposit": "Chờ đặt cọc",
+        "deposit_paid": "Đã đặt cọc",
+        "confirmed": "Đã xác nhận",
+        "processing": "Đang xử lý",
+        "shipping": "Đang giao",
+        "delivered": "Đã giao",
+        "completed": "Hoàn tất",
+        "cancelled": "Đã hủy",
+    }
+    return labels.get(status_val, status_val)
+
+
+def _product_summary(order: Order, max_len: int = 80) -> str:
+    items = getattr(order, "items", None) or []
+    if not items:
+        return "—"
+    names = [(getattr(i, "product_name", None) or "").strip() for i in items]
+    names = [n for n in names if n]
+    if not names:
+        return "—"
+    text = names[0]
+    if len(items) > 1:
+        text = f"{text} (+{len(items) - 1} SP)"
+    return text if len(text) <= max_len else text[: max_len - 1] + "…"
+
+
+def list_referred_orders_for_affiliate(
+    db: Session,
+    referrer_user_id: int,
+    skip: int = 0,
+    limit: int = 50,
+) -> list[dict]:
+    from sqlalchemy.orm import joinedload
+
+    if not is_user_approved_affiliate(db, referrer_user_id):
+        return []
+
+    orders = (
+        db.query(Order)
+        .options(joinedload(Order.items))
+        .filter(Order.referrer_user_id == referrer_user_id)
+        .order_by(Order.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    if not orders:
+        return []
+
+    order_ids = [o.id for o in orders]
+    commissions = {
+        c.order_id: c
+        for c in db.query(AffiliateCommission).filter(AffiliateCommission.order_id.in_(order_ids)).all()
+    }
+    pct = commission_percent(db)
+
+    rows: list[dict] = []
+    for order in orders:
+        st = getattr(order.status, "value", order.status) or ""
+        comm = commissions.get(order.id)
+        base = _dec(comm.order_base_amount) if comm else commission_base_from_order(order)
+        comm_amt = _dec(comm.commission_amount) if comm else (
+            (base * pct / Decimal("100")).quantize(Decimal("0.01")) if base > 0 else Decimal("0")
+        )
+        comm_pct = float(comm.commission_percent) if comm else float(pct)
+        if comm:
+            comm_status = comm.status
+            withdrawable = comm.status == COMMISSION_STATUS_CONFIRMED
+            comm_created = comm.created_at
+            comm_confirmed = comm.confirmed_at
+        elif st == "cancelled":
+            comm_status = "cancelled"
+            withdrawable = False
+            comm_created = None
+            comm_confirmed = None
+        elif order.requires_deposit and st == "waiting_deposit":
+            comm_status = "awaiting_deposit"
+            withdrawable = False
+            comm_created = None
+            comm_confirmed = None
+        else:
+            comm_status = "pending"
+            withdrawable = False
+            comm_created = order.created_at
+            comm_confirmed = None
+
+        rows.append(
+            {
+                "order_id": order.id,
+                "order_code": order.order_code,
+                "buyer_label": mask_buyer_label(order),
+                "product_summary": _product_summary(order),
+                "order_total": _dec(order.total_amount),
+                "order_status": st,
+                "order_status_label": _order_status_label(st),
+                "commission_amount": comm_amt,
+                "commission_percent": comm_pct,
+                "commission_status": comm_status,
+                "commission_status_label": {
+                    "pending": "Chờ giao hàng",
+                    "confirmed": "Đã cộng — rút được",
+                    "cancelled": "Đã hủy",
+                    "awaiting_deposit": "Chờ khách đặt cọc",
+                }.get(comm_status, comm_status),
+                "withdrawable": withdrawable,
+                "order_created_at": order.created_at,
+                "commission_created_at": comm_created,
+                "commission_confirmed_at": comm_confirmed,
+            }
+        )
+    return rows
+
+
 def commission_base_from_order(order: Order) -> Decimal:
     subtotal = _dec(order.subtotal)
     discount = _dec(order.discount_amount)
@@ -347,15 +615,20 @@ def commission_base_from_order(order: Order) -> Decimal:
 def create_pending_commission_for_order(db: Session, order: Order) -> Optional[AffiliateCommission]:
     if not affiliate_enabled(db):
         return None
-    if not order.user_id:
-        return None
 
-    buyer_profile = db.query(AffiliateProfile).filter(AffiliateProfile.user_id == order.user_id).first()
-    if not buyer_profile or not buyer_profile.referred_by_user_id:
+    buyer_profile = (
+        db.query(AffiliateProfile).filter(AffiliateProfile.user_id == order.user_id).first()
+        if order.user_id
+        else None
+    )
+    referrer_user_id = getattr(order, "referrer_user_id", None) or (
+        buyer_profile.referred_by_user_id if buyer_profile else None
+    )
+    if not referrer_user_id:
         return None
-    if buyer_profile.referred_by_user_id == order.user_id:
+    if order.user_id and referrer_user_id == order.user_id:
         return None
-    if not is_user_approved_affiliate(db, buyer_profile.referred_by_user_id):
+    if not is_user_approved_affiliate(db, int(referrer_user_id)):
         return None
 
     exists = db.query(AffiliateCommission.id).filter(AffiliateCommission.order_id == order.id).first()
@@ -372,7 +645,7 @@ def create_pending_commission_for_order(db: Session, order: Order) -> Optional[A
         return None
 
     commission = AffiliateCommission(
-        referrer_user_id=buyer_profile.referred_by_user_id,
+        referrer_user_id=int(referrer_user_id),
         buyer_user_id=order.user_id,
         order_id=order.id,
         order_base_amount=base,
@@ -393,73 +666,29 @@ def create_pending_commission_for_order(db: Session, order: Order) -> Optional[A
         wallet=wallet,
         reference_type="commission",
         reference_id=commission.id,
-        description=f"Hoa hồng chờ xác nhận đơn #{order.order_code}",
+        description=f"Hoa hồng chờ giao hàng đơn #{order.order_code}",
     )
     return commission
 
 
-def grant_deposit_commission_for_order(db: Session, order: Order) -> Optional[AffiliateCommission]:
-    """Cộng hoa hồng vào ví ngay khi đơn đã được xác nhận đặt cọc."""
+def record_referral_commission_on_deposit(db: Session, order: Order) -> Optional[AffiliateCommission]:
+    """Ghi nhận hoa hồng pending khi khách đặt cọc — chỉ chuyển sang số dư rút được sau giao hàng."""
     if not affiliate_enabled(db):
-        return None
-    if not order.user_id:
         return None
 
     existing = db.query(AffiliateCommission).filter(AffiliateCommission.order_id == order.id).first()
     if existing:
-        if existing.status == COMMISSION_STATUS_PENDING:
-            confirm_commission_for_order(db, order.id)
-            db.flush()
-            db.refresh(existing)
-        return existing if existing.status == COMMISSION_STATUS_CONFIRMED else None
-
-    buyer_profile = db.query(AffiliateProfile).filter(AffiliateProfile.user_id == order.user_id).first()
-    referrer_user_id = getattr(order, "referrer_user_id", None) or (
-        buyer_profile.referred_by_user_id if buyer_profile else None
-    )
-    if not referrer_user_id or referrer_user_id == order.user_id:
-        return None
-    if not is_user_approved_affiliate(db, referrer_user_id):
         return None
 
-    base = commission_base_from_order(order)
-    if base <= 0:
-        return None
-
-    pct = commission_percent(db)
-    amount = (base * pct / Decimal("100")).quantize(Decimal("0.01"))
-    if amount <= 0:
-        return None
-
-    commission = AffiliateCommission(
-        referrer_user_id=referrer_user_id,
-        buyer_user_id=order.user_id,
-        order_id=order.id,
-        order_base_amount=base,
-        commission_percent=pct,
-        commission_amount=amount,
-        status=COMMISSION_STATUS_CONFIRMED,
-        confirmed_at=datetime.utcnow(),
-    )
-    db.add(commission)
-    db.flush()
-
-    wallet = get_or_create_wallet(db, referrer_user_id)
-    wallet.balance = _dec(wallet.balance) + amount
-    _append_tx(
-        db,
-        user_id=referrer_user_id,
-        tx_type="commission_credit",
-        amount=amount,
-        wallet=wallet,
-        reference_type="commission",
-        reference_id=commission.id,
-        description=f"Hoa hồng đặt cọc đơn #{order.order_code}",
-    )
-    return commission
+    return create_pending_commission_for_order(db, order)
 
 
-def confirm_commission_for_order(db: Session, order_id: int) -> None:
+def grant_deposit_commission_for_order(db: Session, order: Order) -> Optional[AffiliateCommission]:
+    """Backward-compatible alias — hoa hồng chỉ pending, không cộng balance ngay."""
+    return record_referral_commission_on_deposit(db, order)
+
+
+def confirm_commission_for_order(db: Session, order_id: int) -> bool:
     commission = (
         db.query(AffiliateCommission)
         .filter(AffiliateCommission.order_id == order_id)
@@ -467,7 +696,7 @@ def confirm_commission_for_order(db: Session, order_id: int) -> None:
         .first()
     )
     if not commission:
-        return
+        return False
 
     wallet = get_or_create_wallet(db, commission.referrer_user_id)
     amount = _dec(commission.commission_amount)
@@ -475,6 +704,8 @@ def confirm_commission_for_order(db: Session, order_id: int) -> None:
     wallet.balance = _dec(wallet.balance) + amount
     commission.status = COMMISSION_STATUS_CONFIRMED
     commission.confirmed_at = datetime.utcnow()
+    order = db.query(Order).filter(Order.id == order_id).first()
+    order_code = order.order_code if order else str(order_id)
     _append_tx(
         db,
         user_id=commission.referrer_user_id,
@@ -483,8 +714,9 @@ def confirm_commission_for_order(db: Session, order_id: int) -> None:
         wallet=wallet,
         reference_type="commission",
         reference_id=commission.id,
-        description=f"Hoa hồng đã duyệt đơn #{order_id}",
+        description=f"Hoa hồng đã duyệt đơn #{order_code}",
     )
+    return True
 
 
 def cancel_commission_for_order(db: Session, order_id: int) -> None:
@@ -579,19 +811,20 @@ def refund_wallet_for_order(db: Session, order: Order) -> None:
     )
 
 
-def handle_order_status_change(db: Session, order: Order, old_status: Optional[str], new_status: str) -> None:
+def handle_order_status_change(db: Session, order: Order, old_status: Optional[str], new_status: str) -> bool:
     old_val = old_status.value if hasattr(old_status, "value") else (old_status or "")
     new_val = new_status.value if hasattr(new_status, "value") else new_status
     if old_val == new_val:
-        return
+        return False
 
     if new_val == OrderStatus.CANCELLED.value:
         cancel_commission_for_order(db, order.id)
         refund_wallet_for_order(db, order)
-        return
+        return False
 
     if new_val in (OrderStatus.DELIVERED.value, OrderStatus.COMPLETED.value):
-        confirm_commission_for_order(db, order.id)
+        return confirm_commission_for_order(db, order.id)
+    return False
 
 
 def handle_order_payment_status_change(db: Session, order: Order, new_payment_status: str) -> None:
@@ -801,8 +1034,8 @@ def build_me_payload(db: Session, user_id: int) -> dict:
         .scalar()
     )
     referred_orders = (
-        db.query(func.count(AffiliateCommission.id))
-        .filter(AffiliateCommission.referrer_user_id == user_id)
+        db.query(func.count(Order.id))
+        .filter(Order.referrer_user_id == user_id)
         .scalar()
     ) or 0
 

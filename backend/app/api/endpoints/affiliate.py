@@ -68,6 +68,18 @@ def submit_my_affiliate_application(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/referred-orders", response_model=List[schemas.AffiliateReferredOrderResponse])
+def list_referred_orders(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    if not svc.is_user_approved_affiliate(db, current_user.id):
+        return []
+    return svc.list_referred_orders_for_affiliate(db, current_user.id, skip=skip, limit=limit)
+
+
 @router.get("/wallet/transactions", response_model=List[schemas.WalletTransactionResponse])
 def list_wallet_transactions(
     db: Session = Depends(get_db),

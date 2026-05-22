@@ -167,10 +167,11 @@ def create_order(
         shipping_fee = Decimal('30000') if total_amount_after_discount < Decimal('500000') else Decimal('0')
         order_total_before_wallet = total_amount_after_discount + shipping_fee
 
-        referrer_user_id = None
-        if current_user is not None:
-            buyer_profile = affiliate_svc.get_or_create_profile(db, current_user.id)
-            referrer_user_id = buyer_profile.referred_by_user_id
+        referrer_user_id = affiliate_svc.resolve_order_referrer_user_id(
+            db,
+            user_id=current_user.id if current_user else None,
+            referral_code=order_data.referral_code,
+        )
         
         # 4. Create order
         order = crud.order.create_order_with_deposit(
@@ -210,7 +211,7 @@ def create_order(
                 discount_notes.append(wallet_note)
                 order.admin_notes = "\n".join(discount_notes)
 
-        if current_user is not None and not requires_deposit:
+        if not requires_deposit:
             affiliate_svc.create_pending_commission_for_order(db, order)
 
         db.commit()
@@ -221,6 +222,9 @@ def create_order(
             order.status = OrderStatusEnum.WAITING_DEPOSIT
             db.commit()
             db.refresh(order)
+        
+        if referrer_user_id:
+            background_tasks.add_task(affiliate_svc.notify_referrer_new_order_task, order.id)
         
         recipient = order.customer_email or (getattr(current_user, "email", None) if current_user else None)
         if recipient:
@@ -615,16 +619,19 @@ def admin_confirm_deposit(
 
         # Update remaining amount
         order.remaining_amount = order.total_amount - order.deposit_paid
-        affiliate_svc.grant_deposit_commission_for_order(db, order)
+        commission = affiliate_svc.grant_deposit_commission_for_order(db, order)
     else:
         # Payment rejected
         order.status = OrderStatusEnum.WAITING_DEPOSIT
+        commission = None
     
     db.commit()
     db.refresh(order)
 
     if payment_data.is_confirmed:
         background_tasks.add_task(send_deposit_confirmed_email_task, order_id)
+        if commission:
+            background_tasks.add_task(affiliate_svc.notify_referrer_deposit_commission_task, order_id)
 
     return order
 
@@ -673,12 +680,14 @@ def admin_confirm_deposit_manual(
     else:
         order.payment_status = PaymentStatusEnum.DEPOSIT_PAID
         order.status = OrderStatusEnum.DEPOSIT_PAID
-    affiliate_svc.grant_deposit_commission_for_order(db, order)
+    commission = affiliate_svc.grant_deposit_commission_for_order(db, order)
     if body.get("confirmation_note"):
         order.admin_notes = (order.admin_notes or "") + "\n[Xác nhận cọc thủ công] " + str(body.get("confirmation_note"))
     db.commit()
     db.refresh(order)
     background_tasks.add_task(send_deposit_confirmed_email_task, order_id)
+    if commission:
+        background_tasks.add_task(affiliate_svc.notify_referrer_deposit_commission_task, order_id)
     return order
 
 
