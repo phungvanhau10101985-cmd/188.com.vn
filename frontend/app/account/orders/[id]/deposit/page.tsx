@@ -7,6 +7,9 @@ import { apiClient } from '@/lib/api-client';
 import type { BankAccountInfo } from '@/lib/api-client';
 import { useToast } from '@/components/ToastProvider';
 import { buildQrFromTemplate } from '@/lib/deposit-qr';
+import { buildSepayTransferContent } from '@/lib/sepay-transfer-content';
+import { detectInAppBrowser, getInAppBrowserSaveHint, getInAppBrowserShortName, type InAppBrowserKind } from '@/lib/in-app-browser';
+import { saveImageBlob } from '@/lib/save-image-blob';
 import { trackEvent } from '@/lib/analytics';
 import {
   trackMetaDepositPageView,
@@ -126,6 +129,9 @@ export default function OrderDepositPage() {
   /** Chuyển đổi Ads «trang cọc» — có thể bắn lại khi admin thêm send_to sau khi đã load trang (key id+label). */
   const googleDepositCheckoutTrackedKeyRef = useRef<string>('');
   const [qrDownloading, setQrDownloading] = useState(false);
+  const [qrSavePreviewUrl, setQrSavePreviewUrl] = useState<string | null>(null);
+  const [inAppKind, setInAppKind] = useState<InAppBrowserKind | null>(null);
+  const inAppBrowser = inAppKind != null;
 
   const formatVnd = (n: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
   
@@ -133,8 +139,7 @@ export default function OrderDepositPage() {
   const transferContent = useMemo(() => {
     if (sepayInfo?.transfer_content) return sepayInfo.transfer_content;
     if (!order) return '';
-    const code = (order.order_code || '').trim();
-    return code ? `SEVQR ${code}` : '';
+    return buildSepayTransferContent(order.order_code);
   }, [order, sepayInfo?.transfer_content]);
 
   const qrValue = useMemo(() => {
@@ -154,49 +159,83 @@ export default function OrderDepositPage() {
     return `https://img.vietqr.io/image/${selectedAccount.bank_short_name}-${selectedAccount.account_number}-compact2.png?amount=${order.deposit_amount}&addInfo=${encodeURIComponent(transferContent)}&accountName=${encodeURIComponent(selectedAccount.account_holder || '')}`;
   }, [sepayInfo, order, selectedAccount, transferContent]);
 
+  useEffect(() => {
+    setInAppKind(detectInAppBrowser());
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (qrSavePreviewUrl) URL.revokeObjectURL(qrSavePreviewUrl);
+    };
+  }, [qrSavePreviewUrl]);
+
+  const closeQrSavePreview = () => {
+    setQrSavePreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  };
+
+  const openQrSavePreview = (blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    setQrSavePreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return url;
+    });
+  };
+
   const handleDownloadQr = async () => {
     if (!order) return;
     setQrDownloading(true);
     const safeCode = String(order.order_code || `don-${id}`).replace(/[^\da-zA-Z._-]+/g, '_') || String(id);
     const filename = `qr-chuyen-khoan-${safeCode}.png`;
 
-    const saveBlob = (blob: Blob) => {
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = filename;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(objectUrl);
+    const fetchQrBlob = async (): Promise<Blob> => {
+      try {
+        return await apiClient.downloadOrderDepositQr(id);
+      } catch {
+        if (!qrValue) throw new Error('no_qr');
+        const res = await fetch(qrValue, { mode: 'cors' });
+        if (!res.ok) throw new Error('no_qr');
+        return res.blob();
+      }
     };
 
     try {
-      const blob = await apiClient.downloadOrderDepositQr(id);
-      saveBlob(blob);
-      pushToast({ title: 'Đã tải mã QR', variant: 'success', durationMs: 2500 });
-    } catch {
-      if (!qrValue) {
-        pushToast({
-          title: 'Không tải được mã QR',
-          description: 'Thử quét QR trực tiếp hoặc chụp màn hình.',
-          variant: 'error',
-          durationMs: 4000,
-        });
-        return;
-      }
+      const blob = await fetchQrBlob();
+
       try {
-        const res = await fetch(qrValue, { mode: 'cors' });
-        if (!res.ok) throw new Error('HTTP');
-        saveBlob(await res.blob());
-        pushToast({ title: 'Đã tải mã QR', variant: 'success', durationMs: 2500 });
-      } catch {
+        const result = await saveImageBlob(blob, filename, { shareTitle: 'Mã QR chuyển khoản 188.com.vn' });
+        if (result === 'share') {
+          pushToast({
+            title: 'Chọn «Lưu ảnh» trong hộp chia sẻ',
+            variant: 'info',
+            durationMs: 4500,
+          });
+          return;
+        }
+        if (result === 'download') {
+          pushToast({ title: 'Đã tải mã QR', variant: 'success', durationMs: 2500 });
+          return;
+        }
+      } catch (e) {
+        if ((e as Error)?.name === 'AbortError') return;
+      }
+
+      openQrSavePreview(blob);
+      pushToast({
+        title: 'Nhấn giữ ảnh QR để lưu',
+        description: getInAppBrowserSaveHint(detectInAppBrowser()),
+        variant: 'info',
+        durationMs: 5500,
+      });
+    } catch {
+      if (qrValue) {
         try {
           window.open(qrValue, '_blank', 'noopener,noreferrer');
           pushToast({
-            title: 'Đã mở ảnh QR trong tab mới',
-            description: 'Chuột phải hoặc «Lưu ảnh» nếu tải trực tiếp không dùng được.',
+            title: 'Đã mở ảnh QR',
+            description: 'Nhấn giữ ảnh → Lưu vào máy.',
             variant: 'info',
             durationMs: 4500,
           });
@@ -208,6 +247,13 @@ export default function OrderDepositPage() {
             durationMs: 4000,
           });
         }
+      } else {
+        pushToast({
+          title: 'Không tải được mã QR',
+          description: 'Thử quét QR trực tiếp hoặc chụp màn hình.',
+          variant: 'error',
+          durationMs: 4000,
+        });
       }
     } finally {
       setQrDownloading(false);
@@ -568,6 +614,7 @@ export default function OrderDepositPage() {
   }
 
   return (
+    <>
     <div className="bg-gray-50 min-h-0 pt-0 pb-3 md:pb-4">
       <div className="mx-auto px-0 sm:px-1 max-w-5xl">
         <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
@@ -741,6 +788,13 @@ export default function OrderDepositPage() {
                   </div>
                   <p className="text-[11px] text-gray-500 mt-1.5 text-center max-w-[280px] leading-snug">
                     Quét mã bằng app ngân hàng.
+                    {inAppBrowser ? (
+                      <>
+                        {' '}
+                        Trong {getInAppBrowserShortName(inAppKind)}: bấm «Lưu mã QR» →{' '}
+                        <strong className="font-semibold text-gray-700">nhấn giữ ảnh</strong> để lưu.
+                      </>
+                    ) : null}
                   </p>
                   <button
                     type="button"
@@ -762,7 +816,7 @@ export default function OrderDepositPage() {
                             clipRule="evenodd"
                           />
                         </svg>
-                        Tải mã QR
+                        {inAppBrowser ? 'Lưu mã QR' : 'Tải mã QR'}
                       </>
                     )}
                   </button>
@@ -784,5 +838,45 @@ export default function OrderDepositPage() {
         </div>
       </div>
     </div>
+
+    {qrSavePreviewUrl ? (
+      <div
+        className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center bg-black/60 p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="qr-save-title"
+        onClick={closeQrSavePreview}
+      >
+        <div
+          className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h2 id="qr-save-title" className="text-base font-bold text-gray-900 text-center">
+            Lưu mã QR
+          </h2>
+          <p className="mt-2 text-sm text-gray-600 text-center leading-snug">
+            <strong>Nhấn giữ</strong> ảnh bên dưới → chọn <strong>Lưu vào máy</strong>
+            {inAppKind ? ` (${getInAppBrowserShortName(inAppKind)} thường không tải file tự động).` : '.'}
+          </p>
+          <div className="mt-4 flex justify-center rounded-xl border border-gray-200 bg-gray-50 p-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={qrSavePreviewUrl}
+              alt="Mã QR chuyển khoản — nhấn giữ để lưu"
+              className="max-w-full w-[min(100%,280px)] h-auto touch-manipulation select-none"
+              draggable={false}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={closeQrSavePreview}
+            className="mt-4 w-full rounded-xl bg-gray-900 py-3 text-sm font-semibold text-white active:bg-gray-800"
+          >
+            Đóng
+          </button>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }

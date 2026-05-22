@@ -6,9 +6,10 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { apiClient } from '@/lib/api-client';
 import { getOptimizedImage } from '@/lib/image-utils';
-import ProductReviewFormModal from '@/app/products/[slug]/components/ProductReviewFormModal/ProductReviewFormModal';
+import { buildSepayTransferContent } from '@/lib/sepay-transfer-content';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
+import ProductReviewFormModal from '@/app/products/[slug]/components/ProductReviewFormModal/ProductReviewFormModal';
 
 interface OrderItem {
   id: number;
@@ -78,7 +79,8 @@ function paymentMethodText(order: Order, item?: OrderItem): string {
   const method = order.payment_method || '';
   if (method === 'cod') return 'Thanh toán khi nhận hàng';
   if (order.status === 'waiting_deposit' && order.requires_deposit && order.deposit_amount) {
-    return `Thanh toán qua chuyển khoản. Chuyển khoản số tiền ${formatVnd(Number(order.deposit_amount))} nội dung ${order.order_code} để đặt cọc.`;
+    const transferContent = buildSepayTransferContent(order.order_code);
+    return `Thanh toán qua chuyển khoản. Chuyển khoản số tiền ${formatVnd(Number(order.deposit_amount))} nội dung ${transferContent} để đặt cọc.`;
   }
   return method === 'bank_transfer' ? 'Chuyển khoản ngân hàng' : method || '—';
 }
