@@ -1,4 +1,4 @@
-"""Challenge lưu OTP + magic link (đăng nhập email), thay thế in-memory store."""
+"""Challenge lưu OTP đăng nhập email, thay thế in-memory store."""
 from sqlalchemy import Column, Integer, String, DateTime, Index
 from sqlalchemy.sql import func
 from app.db.base import Base

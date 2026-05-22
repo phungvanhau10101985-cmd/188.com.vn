@@ -98,7 +98,7 @@ class Order(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # ========== RELATIONSHIPS ==========
-    user = relationship("User", back_populates="orders")
+    user = relationship("User", back_populates="orders", foreign_keys=[user_id])
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     payments = relationship("Payment", back_populates="order", cascade="all, delete-orphan")
     admin_manager = relationship("AdminUser", back_populates="orders_managed")

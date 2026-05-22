@@ -28,7 +28,12 @@ class User(Base):
     # ========== RELATIONSHIPS ==========
     addresses = relationship("UserAddress", back_populates="user", cascade="all, delete-orphan")
     cart = relationship("Cart", back_populates="user", uselist=False, cascade="all, delete-orphan")
-    orders = relationship("Order", back_populates="user", cascade="all, delete-orphan")
+    orders = relationship(
+        "Order",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="Order.user_id",
+    )
     favorites = relationship("UserFavorite", back_populates="user", cascade="all, delete-orphan")
     product_views = relationship("UserProductView", back_populates="user", cascade="all, delete-orphan")
     cart_items = relationship("CartItem", back_populates="user", cascade="all, delete-orphan")

@@ -115,7 +115,7 @@ export const authAPI = {
     return handleResponse(response);
   },
 
-  /** Luồng mới: OTP + magic link + cookie httpOnly */
+  /** Luồng mới: OTP email + cookie httpOnly */
   emailAuthRequest: async (body: {
     email: string;
     next?: string;

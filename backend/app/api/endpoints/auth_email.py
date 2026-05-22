@@ -1,5 +1,5 @@
 """
-Đăng nhập email: OTP + magic link + thiết bị tin cậy + cookie httpOnly JWT.
+Đăng nhập email: OTP + thiết bị tin cậy + cookie httpOnly JWT.
 Đường dẫn: /api/v1/auth/email/request | verify-otp | verify-magic
 """
 from __future__ import annotations
@@ -12,7 +12,6 @@ import time
 from collections import defaultdict, deque
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Tuple
-from urllib.parse import urlencode
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
@@ -34,7 +33,7 @@ from app.schemas.auth_email import (
     EmailAuthVerifyResponse,
 )
 from app.schemas.user import UserCreate, UserResponse
-from app.services.email_service import send_account_email, send_login_magic_link_email, send_login_otp_email
+from app.services.email_service import send_account_email, send_login_otp_email
 from app.services.user_public_response import user_response_with_linked_admin
 
 router = APIRouter()
@@ -370,7 +369,6 @@ def email_auth_request(
         raise HTTPException(status_code=429, detail="Đã vượt giới hạn gửi mã trong hôm nay.")
 
     otp = "".join(secrets.choice(string.digits) for _ in range(OTP_LENGTH))
-    raw_magic = secrets.token_urlsafe(32)
     exp = _now() + timedelta(minutes=int(settings.OTP_EXPIRE_MINUTES))
 
     db.query(EmailLoginChallenge).filter(
@@ -382,27 +380,15 @@ def email_auth_request(
     ch = EmailLoginChallenge(
         email_normalized=email_key,
         otp_hash=_hash_otp(otp),
-        magic_token_hash=_hash_magic(raw_magic),
+        # Cột này vẫn bắt buộc để giữ tương thích schema, nhưng request mới không gửi magic link.
+        magic_token_hash=_hash_magic(secrets.token_urlsafe(32)),
         expires_at=exp,
     )
     db.add(ch)
     db.commit()
 
-    api_prefix = settings.API_V1_STR.rstrip("/")
-    base = settings.BACKEND_PUBLIC_URL.rstrip("/")
-    q = urlencode(
-        {
-            "token": raw_magic,
-            "email": email_key,
-            "next": next_path,
-            "remember": "true" if body.remember_device else "false",
-        }
-    )
-    magic_url = f"{base}{api_prefix}/auth/email/verify-magic?{q}"
-
     try:
         send_login_otp_email(email_key, otp, int(settings.OTP_EXPIRE_MINUTES))
-        send_login_magic_link_email(email_key, magic_url, int(settings.OTP_EXPIRE_MINUTES))
     except Exception:
         db.delete(ch)
         db.commit()
@@ -414,7 +400,7 @@ def email_auth_request(
     return EmailAuthRequestResponse(
         auto_signed_in=False,
         next=next_path,
-        message="Đã gửi mã và liên kết đăng nhập tới email. Kiểm tra cả mục thư rác.",
+        message="Đã gửi mã OTP tới email. Kiểm tra cả mục thư rác.",
     )
 
 
