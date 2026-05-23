@@ -18,7 +18,7 @@ import {
   type EmsTrackingRefreshJob,
 } from '@/lib/admin-api';
 
-const SYNC_LABELS: Record<string, string> = {
+const EMS_TRACKING_JOB_STORAGE_KEY = 'admin_ems_tracking_job_id';
   matched: 'Khớp',
   in_progress: 'Đang xử lý',
   mismatch: 'Lệch trạng thái',
@@ -232,12 +232,18 @@ export default function AdminShippingPage() {
   const startTrackingPoll = useCallback(
     (jobId: string) => {
       stopTrackingPoll();
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem(EMS_TRACKING_JOB_STORAGE_KEY, jobId);
+      }
       const poll = async () => {
         try {
           const job = await adminShippingAPI.getEmsTrackingRefreshJob(jobId);
           setTrackingJob(job);
           if (job.status === 'completed' || job.status === 'failed') {
             stopTrackingPoll();
+            if (typeof window !== 'undefined') {
+              sessionStorage.removeItem(EMS_TRACKING_JOB_STORAGE_KEY);
+            }
             await loadRecords();
             await loadOpsStats();
           }
@@ -252,6 +258,21 @@ export default function AdminShippingPage() {
   );
 
   useEffect(() => () => stopTrackingPoll(), [stopTrackingPoll]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const savedJobId = sessionStorage.getItem(EMS_TRACKING_JOB_STORAGE_KEY);
+    if (savedJobId) {
+      startTrackingPoll(savedJobId);
+      return;
+    }
+    void (async () => {
+      const active = await adminShippingAPI.getActiveEmsTrackingRefreshJob();
+      if (active?.job_id) {
+        startTrackingPoll(active.job_id);
+      }
+    })();
+  }, [startTrackingPoll]);
 
   useEffect(() => {
     void loadRecords();

@@ -344,7 +344,8 @@ def _apply_unlinked_result(
     ems_error: Optional[str] = None,
 ) -> dict[str, Any]:
     """Import thành công nhưng chưa ghép được đơn shop — vẫn lưu COD/EMS để đối soát sau."""
-    result["sync_status"] = "unlinked"
+    has_ems = ems_phase not in ("unknown", "") or bool((ems_status or "").strip())
+    result["sync_status"] = "in_progress" if has_ems and not ems_error else "unlinked"
     result["sync_message"] = _order_not_found_message(
         order_code=order_code,
         ems_phase=ems_phase,

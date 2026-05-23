@@ -2746,6 +2746,14 @@ export const adminShippingAPI = {
   getEmsTrackingRefreshJob: (jobId: string) =>
     fetchAdmin<EmsTrackingRefreshJob>(`/orders/admin/shipping/ems-tracking-refresh/job/${encodeURIComponent(jobId)}`),
 
+  getActiveEmsTrackingRefreshJob: async (): Promise<EmsTrackingRefreshJob | null> => {
+    try {
+      return await fetchAdmin<EmsTrackingRefreshJob>('/orders/admin/shipping/ems-tracking-refresh/active');
+    } catch {
+      return null;
+    }
+  },
+
   enqueueEmsTrackingRefresh: (ids: number[]) =>
     fetchAdmin<{ ok: boolean; job_id?: string | null; queued: number; message: string }>(
       '/orders/admin/shipping/ems-tracking-refresh',

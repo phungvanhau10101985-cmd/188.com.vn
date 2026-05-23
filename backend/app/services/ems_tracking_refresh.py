@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 _SAFE_JOB_ID = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", re.I)
 _TERMINAL_PHASES = frozenset({"delivered", "cod_collected", "cod_settled"})
 
-_JOB_QUEUE: queue.Queue[tuple[str, list[int], Optional[int], str]] = queue.Queue()
+_JOB_QUEUE: queue.Queue[tuple[str, list[int], Optional[int], str, int]] = queue.Queue()
 _WORKER_STARTED = False
 _WORKER_LOCK = threading.Lock()
 _JOBS: dict[str, dict[str, Any]] = {}
@@ -72,12 +72,43 @@ def _job_update(job_id: str, **kwargs: Any) -> None:
         _persist_job(job_id, state)
 
 
+def _parse_job_updated_at(raw: Any) -> Optional[datetime]:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 def get_tracking_refresh_job(job_id: str) -> Optional[dict[str, Any]]:
     with _WORKER_LOCK:
         job = _JOBS.get(job_id) or _load_job(job_id)
         if job:
             _JOBS[job_id] = job
         return job
+
+
+def get_active_tracking_refresh_job() -> Optional[dict[str, Any]]:
+    """Job queued/running mới nhất (theo updated_at)."""
+    active: Optional[dict[str, Any]] = None
+    active_ts: Optional[datetime] = None
+    root = _jobs_root()
+    for path in root.glob("*.json"):
+        if path.name.endswith(".tmp"):
+            continue
+        job = _load_job(path.stem)
+        if not job:
+            continue
+        status = (job.get("status") or "").strip()
+        if status not in ("queued", "running"):
+            continue
+        ts = _parse_job_updated_at(job.get("updated_at"))
+        if active is None or (ts and (active_ts is None or ts > active_ts)):
+            active = job
+            active_ts = ts
+    return active
 
 
 def _refresh_delay_seconds() -> float:
@@ -158,6 +189,7 @@ def enqueue_tracking_refresh(
         "processed": 0,
         "ok": 0,
         "errors": 0,
+        "record_ids": ids,
         "message": "Đang chờ tra EMS…",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -166,27 +198,48 @@ def enqueue_tracking_refresh(
         _JOBS[job_id] = initial
         _persist_job(job_id, initial)
 
-    _JOB_QUEUE.put((job_id, ids, admin_id, source))
+    _JOB_QUEUE.put((job_id, ids, admin_id, source, 0))
     _ensure_worker_started()
     return job_id
 
 
-def _execute_job(job_id: str, record_ids: list[int], admin_id: Optional[int], source: str) -> None:
+def _execute_job(
+    job_id: str,
+    record_ids: list[int],
+    admin_id: Optional[int],
+    source: str,
+    start_index: int = 0,
+) -> None:
     total = len(record_ids)
+    if start_index >= total:
+        _job_update(
+            job_id,
+            status="completed",
+            processed=total,
+            message="Không còn dòng cần tra EMS.",
+            finished_at=datetime.now(timezone.utc).isoformat(),
+        )
+        return
+
+    existing = get_tracking_refresh_job(job_id) or {}
+    ok = int(existing.get("ok") or 0)
+    errors = int(existing.get("errors") or 0)
+
     _job_update(
         job_id,
         status="running",
         total=total,
-        processed=0,
-        ok=0,
-        errors=0,
+        processed=start_index,
+        ok=ok,
+        errors=errors,
+        record_ids=record_ids,
         message=f"Đang tra EMS ({source})…",
-        started_at=datetime.now(timezone.utc).isoformat(),
+        started_at=existing.get("started_at") or datetime.now(timezone.utc).isoformat(),
     )
-    ok = errors = 0
     delay = _refresh_delay_seconds()
 
-    for idx, record_id in enumerate(record_ids, start=1):
+    for idx in range(start_index, total):
+        record_id = record_ids[idx]
         db = SessionLocal()
         try:
             out = refresh_ems_record_by_id(db, record_id, admin_id=admin_id)
@@ -204,14 +257,16 @@ def _execute_job(job_id: str, record_ids: list[int], admin_id: Optional[int], so
         finally:
             db.close()
 
+        processed = idx + 1
         _job_update(
             job_id,
-            processed=idx,
+            processed=processed,
             ok=ok,
             errors=errors,
-            message=f"Đang tra EMS: {idx}/{total} (ok {ok}, lỗi {errors})",
+            record_ids=record_ids,
+            message=f"Đang tra EMS: {processed}/{total} (ok {ok}, lỗi {errors})",
         )
-        if idx < total:
+        if processed < total:
             time.sleep(delay)
 
     _job_update(
@@ -227,9 +282,16 @@ def _execute_job(job_id: str, record_ids: list[int], admin_id: Optional[int], so
 
 def _worker_loop() -> None:
     while True:
-        job_id, record_ids, admin_id, source = _JOB_QUEUE.get()
+        job_id, record_ids, admin_id, source, start_index = _JOB_QUEUE.get()
         try:
-            _execute_job(job_id, record_ids, admin_id, source)
+            logger.info(
+                "EMS tracking job start job_id=%s source=%s from=%s total=%s",
+                job_id,
+                source,
+                start_index,
+                len(record_ids),
+            )
+            _execute_job(job_id, record_ids, admin_id, source, start_index=start_index)
         except Exception as exc:
             logger.exception("EMS tracking refresh job crashed job_id=%s: %s", job_id, exc)
             _job_update(
@@ -240,6 +302,58 @@ def _worker_loop() -> None:
             )
         finally:
             _JOB_QUEUE.task_done()
+
+
+def _resume_interrupted_jobs() -> None:
+    """Sau restart process — tiếp tục job queued/running (dùng file lock tránh trùng multi-worker)."""
+    root = _jobs_root()
+    lock_path = root / ".resume.lock"
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return
+    try:
+        os.write(fd, str(os.getpid()).encode())
+    except OSError:
+        pass
+
+    now = datetime.now(timezone.utc)
+    resumed = 0
+    try:
+        for path in sorted(root.glob("*.json")):
+            if path.name.endswith(".tmp"):
+                continue
+            try:
+                with open(path, encoding="utf-8") as f:
+                    job = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                continue
+            status = (job.get("status") or "").strip()
+            if status not in ("queued", "running"):
+                continue
+            record_ids = job.get("record_ids") or []
+            if not record_ids:
+                continue
+            updated = _parse_job_updated_at(job.get("updated_at"))
+            if status == "running" and updated and (now - updated).total_seconds() < 90:
+                # Worker khác có thể vẫn đang chạy job này.
+                continue
+            start_index = int(job.get("processed") or 0)
+            job_id = str(job.get("job_id") or path.stem)
+            source = str(job.get("source") or "resume")
+            _JOB_QUEUE.put((job_id, [int(x) for x in record_ids], None, f"{source}:resume", start_index))
+            resumed += 1
+        if resumed:
+            logger.info("EMS tracking resume: re-queued %s job(s)", resumed)
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            lock_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _ensure_worker_started() -> None:
@@ -256,6 +370,7 @@ def start_ems_tracking_refresh_worker_if_enabled() -> None:
     if not getattr(settings, "EMS_TRACKING_REFRESH_ENABLED", True):
         return
     _ensure_worker_started()
+    _resume_interrupted_jobs()
 
 
 def run_daily_ems_tracking_refresh(db: Session) -> dict[str, Any]:
