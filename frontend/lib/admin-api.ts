@@ -2710,6 +2710,8 @@ export interface EmsTrackingRefreshJob {
   updated_at?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
+  seconds_since_update?: number | null;
+  is_stale?: boolean;
 }
 
 export const adminShippingAPI = {
@@ -2745,6 +2747,12 @@ export const adminShippingAPI = {
 
   getEmsTrackingRefreshJob: (jobId: string) =>
     fetchAdmin<EmsTrackingRefreshJob>(`/orders/admin/shipping/ems-tracking-refresh/job/${encodeURIComponent(jobId)}`),
+
+  resumeEmsTrackingRefreshJob: (jobId: string) =>
+    fetchAdmin<EmsTrackingRefreshJob>(
+      `/orders/admin/shipping/ems-tracking-refresh/resume/${encodeURIComponent(jobId)}`,
+      { method: 'POST' },
+    ),
 
   getActiveEmsTrackingRefreshJob: async (): Promise<EmsTrackingRefreshJob | null> => {
     try {

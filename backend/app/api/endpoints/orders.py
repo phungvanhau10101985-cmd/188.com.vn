@@ -661,6 +661,21 @@ async def admin_import_ems_shipment_excel(
     return payload
 
 
+@router.post(
+    "/admin/shipping/ems-tracking-refresh/resume/{job_id}",
+    response_model=shipment_schemas.EmsTrackingRefreshJobResponse,
+)
+def admin_resume_ems_tracking_refresh_job(
+    job_id: str,
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Tiếp tục job tra EMS bị dừng giữa chừng (worker crash / restart server)."""
+    job = ems_refresh_svc.resume_tracking_refresh_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Không tìm thấy job tra EMS.")
+    return job
+
+
 @router.get(
     "/admin/shipping/ems-tracking-refresh/active",
     response_model=shipment_schemas.EmsTrackingRefreshJobResponse,

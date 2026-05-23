@@ -26,11 +26,14 @@ logger = logging.getLogger(__name__)
 
 _SAFE_JOB_ID = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", re.I)
 _TERMINAL_PHASES = frozenset({"delivered", "cod_collected", "cod_settled"})
+_STALE_JOB_SECONDS = 120
+_RESUME_COOLDOWN_SECONDS = 45
 
 _JOB_QUEUE: queue.Queue[tuple[str, list[int], Optional[int], str, int]] = queue.Queue()
 _WORKER_STARTED = False
 _WORKER_LOCK = threading.Lock()
 _JOBS: dict[str, dict[str, Any]] = {}
+_RESUME_COOLDOWN: dict[str, float] = {}
 
 
 def _jobs_root() -> Path:
@@ -82,15 +85,101 @@ def _parse_job_updated_at(raw: Any) -> Optional[datetime]:
         return None
 
 
-def get_tracking_refresh_job(job_id: str) -> Optional[dict[str, Any]]:
+def _seconds_since_job_update(job: dict[str, Any]) -> Optional[float]:
+    updated = _parse_job_updated_at(job.get("updated_at"))
+    if not updated:
+        return None
+    return max(0.0, (datetime.now(timezone.utc) - updated).total_seconds())
+
+
+def _enrich_job(job: dict[str, Any]) -> dict[str, Any]:
+    out = dict(job)
+    secs = _seconds_since_job_update(out)
+    if secs is not None:
+        out["seconds_since_update"] = int(secs)
+        out["is_stale"] = (
+            (out.get("status") or "").strip() in ("queued", "running")
+            and secs >= _STALE_JOB_SECONDS
+        )
+    else:
+        out["seconds_since_update"] = None
+        out["is_stale"] = False
+    return out
+
+
+def _try_resume_stale_job(job_id: str, *, force: bool = False) -> bool:
+    """Xếp lại job nếu không cập nhật quá lâu (worker crash / restart server)."""
+    now = time.time()
+    if not force and now - _RESUME_COOLDOWN.get(job_id, 0) < _RESUME_COOLDOWN_SECONDS:
+        return False
+
+    with _WORKER_LOCK:
+        job = _JOBS.get(job_id) or _load_job(job_id)
+        if not job:
+            return False
+        status = (job.get("status") or "").strip()
+        if status not in ("queued", "running"):
+            return False
+        secs = _seconds_since_job_update(job)
+        if not force and (secs is None or secs < _STALE_JOB_SECONDS):
+            return False
+
+        record_ids = [int(x) for x in (job.get("record_ids") or []) if int(x) > 0]
+        if not record_ids:
+            return False
+        start_index = int(job.get("processed") or 0)
+        if start_index >= len(record_ids):
+            _job_update(
+                job_id,
+                status="completed",
+                processed=len(record_ids),
+                message="Hoàn tất tra EMS.",
+                finished_at=datetime.now(timezone.utc).isoformat(),
+            )
+            return False
+
+        source = "manual_resume" if force else "auto_resume"
+        _job_update(
+            job_id,
+            status="queued",
+            message=f"Khôi phục tra EMS từ dòng {start_index + 1}/{len(record_ids)}…",
+        )
+        _JOB_QUEUE.put((job_id, record_ids, None, source, start_index))
+        _RESUME_COOLDOWN[job_id] = now
+        logger.info(
+            "EMS tracking resume job_id=%s from=%s/%s force=%s",
+            job_id,
+            start_index,
+            len(record_ids),
+            force,
+        )
+
+    _ensure_worker_started()
+    return True
+
+
+def resume_tracking_refresh_job(job_id: str) -> Optional[dict[str, Any]]:
+    if not _SAFE_JOB_ID.match(job_id or ""):
+        return None
+    _try_resume_stale_job(job_id, force=True)
+    return get_tracking_refresh_job(job_id)
+
+
+def get_tracking_refresh_job(job_id: str, *, auto_resume: bool = True) -> Optional[dict[str, Any]]:
     with _WORKER_LOCK:
         job = _JOBS.get(job_id) or _load_job(job_id)
         if job:
             _JOBS[job_id] = job
-        return job
+    if not job:
+        return None
+    if auto_resume:
+        _try_resume_stale_job(job_id)
+        with _WORKER_LOCK:
+            job = _JOBS.get(job_id) or _load_job(job_id) or job
+    return _enrich_job(job)
 
 
-def get_active_tracking_refresh_job() -> Optional[dict[str, Any]]:
+def get_active_tracking_refresh_job(*, auto_resume: bool = True) -> Optional[dict[str, Any]]:
     """Job queued/running mới nhất (theo updated_at)."""
     active: Optional[dict[str, Any]] = None
     active_ts: Optional[datetime] = None
@@ -108,7 +197,16 @@ def get_active_tracking_refresh_job() -> Optional[dict[str, Any]]:
         if active is None or (ts and (active_ts is None or ts > active_ts)):
             active = job
             active_ts = ts
-    return active
+    if not active:
+        return None
+    if auto_resume:
+        job_id = str(active.get("job_id") or "")
+        if job_id:
+            _try_resume_stale_job(job_id)
+            refreshed = get_tracking_refresh_job(job_id, auto_resume=False)
+            if refreshed:
+                active = refreshed
+    return _enrich_job(active)
 
 
 def _refresh_delay_seconds() -> float:
@@ -356,6 +454,20 @@ def _resume_interrupted_jobs() -> None:
             pass
 
 
+def _watchdog_loop() -> None:
+    while True:
+        time.sleep(60)
+        if not getattr(settings, "EMS_TRACKING_REFRESH_ENABLED", True):
+            continue
+        try:
+            for path in _jobs_root().glob("*.json"):
+                if path.name.endswith(".tmp"):
+                    continue
+                _try_resume_stale_job(path.stem)
+        except Exception as exc:
+            logger.warning("EMS tracking watchdog error: %s", exc)
+
+
 def _ensure_worker_started() -> None:
     global _WORKER_STARTED
     with _WORKER_LOCK:
@@ -363,6 +475,8 @@ def _ensure_worker_started() -> None:
             return
         thread = threading.Thread(target=_worker_loop, name="ems-tracking-refresh", daemon=True)
         thread.start()
+        watchdog = threading.Thread(target=_watchdog_loop, name="ems-tracking-watchdog", daemon=True)
+        watchdog.start()
         _WORKER_STARTED = True
 
 

@@ -157,6 +157,8 @@ class EmsTrackingRefreshJobResponse(BaseModel):
     updated_at: Optional[str] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
+    seconds_since_update: Optional[int] = None
+    is_stale: bool = False
 
 
 class EmsTrackingRefreshEnqueueResponse(BaseModel):

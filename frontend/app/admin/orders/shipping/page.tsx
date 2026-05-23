@@ -20,6 +20,16 @@ import {
 
 const EMS_TRACKING_JOB_STORAGE_KEY = 'admin_ems_tracking_job_id';
 
+function formatStaleSeconds(seconds?: number | null): string {
+  if (seconds == null || seconds < 0) return '—';
+  if (seconds < 60) return `${seconds} giây`;
+  const mins = Math.floor(seconds / 60);
+  if (mins < 60) return `${mins} phút`;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return remMins > 0 ? `${hours} giờ ${remMins} phút` : `${hours} giờ`;
+}
+
 const SYNC_LABELS: Record<string, string> = {
   matched: 'Khớp',
   in_progress: 'Đang xử lý',
@@ -163,7 +173,9 @@ export default function AdminShippingPage() {
   const [deleteConfirmKeys, setDeleteConfirmKeys] = useState<string[] | null>(null);
   const [orderStatusModal, setOrderStatusModal] = useState<OrderStatusModalState | null>(null);
   const [trackingJob, setTrackingJob] = useState<EmsTrackingRefreshJob | null>(null);
+  const [trackingResumeLoading, setTrackingResumeLoading] = useState(false);
   const trackingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const trackingLastProcessedRef = useRef(0);
 
   const loadRecords = useCallback(async () => {
     setListLoading(true);
@@ -234,6 +246,7 @@ export default function AdminShippingPage() {
   const startTrackingPoll = useCallback(
     (jobId: string) => {
       stopTrackingPoll();
+      trackingLastProcessedRef.current = 0;
       if (typeof window !== 'undefined') {
         sessionStorage.setItem(EMS_TRACKING_JOB_STORAGE_KEY, jobId);
       }
@@ -241,6 +254,10 @@ export default function AdminShippingPage() {
         try {
           const job = await adminShippingAPI.getEmsTrackingRefreshJob(jobId);
           setTrackingJob(job);
+          if (job.processed !== trackingLastProcessedRef.current) {
+            trackingLastProcessedRef.current = job.processed;
+            void loadOpsStats();
+          }
           if (job.status === 'completed' || job.status === 'failed') {
             stopTrackingPoll();
             if (typeof window !== 'undefined') {
@@ -258,6 +275,20 @@ export default function AdminShippingPage() {
     },
     [loadOpsStats, loadRecords, stopTrackingPoll],
   );
+
+  const resumeTrackingJob = useCallback(async () => {
+    if (!trackingJob?.job_id) return;
+    setTrackingResumeLoading(true);
+    try {
+      const job = await adminShippingAPI.resumeEmsTrackingRefreshJob(trackingJob.job_id);
+      setTrackingJob(job);
+      startTrackingPoll(job.job_id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Không thể tiếp tục job tra EMS');
+    } finally {
+      setTrackingResumeLoading(false);
+    }
+  }, [startTrackingPoll, trackingJob?.job_id]);
 
   useEffect(() => () => stopTrackingPoll(), [stopTrackingPoll]);
 
@@ -1015,14 +1046,42 @@ export default function AdminShippingPage() {
       ) : null}
 
       {trackingJob && ['queued', 'running'].includes(trackingJob.status) ? (
-        <div className="bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-lg px-4 py-3 text-sm">
-          <div className="font-medium">Đang tra EMS nền trên server…</div>
+        <div
+          className={`rounded-lg px-4 py-3 text-sm border ${
+            trackingJob.is_stale
+              ? 'bg-amber-50 border-amber-300 text-amber-950'
+              : 'bg-indigo-50 border-indigo-200 text-indigo-900'
+          }`}
+        >
+          <div className="font-medium">
+            {trackingJob.is_stale
+              ? 'Job tra EMS có thể đã dừng trên server'
+              : 'Đang tra EMS nền trên server…'}
+          </div>
           <div className="mt-1">
             {trackingJob.message || 'Đang xử lý…'} ({trackingJob.processed}/{trackingJob.total})
           </div>
+          <div className="mt-1 text-xs opacity-80">
+            Cập nhật gần nhất: {formatStaleSeconds(trackingJob.seconds_since_update)} trước
+            {trackingJob.is_stale
+              ? ' — số không đổi >2 phút thường do worker backend bị restart hoặc crash.'
+              : ' — nếu số tăng đều ~ mỗi vài giây thì job vẫn đang chạy.'}
+          </div>
+          {trackingJob.is_stale ? (
+            <button
+              type="button"
+              onClick={() => void resumeTrackingJob()}
+              disabled={trackingResumeLoading}
+              className="mt-2 inline-flex items-center rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-60"
+            >
+              {trackingResumeLoading ? 'Đang khôi phục…' : 'Tiếp tục tra EMS'}
+            </button>
+          ) : null}
           <div className="mt-2 h-2 rounded-full bg-indigo-100 overflow-hidden">
             <div
-              className="h-full bg-indigo-500 transition-all duration-500"
+              className={`h-full transition-all duration-500 ${
+                trackingJob.is_stale ? 'bg-amber-500' : 'bg-indigo-500'
+              }`}
               style={{
                 width: trackingJob.total
                   ? `${Math.min(100, Math.round((trackingJob.processed / trackingJob.total) * 100))}%`
