@@ -2,6 +2,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { adminOrderAPI, type AdminOrder, type PaymentRecord } from '@/lib/admin-api';
 import { cdnUrl, normalizeRemoteImageUrlForDisplay } from '@/lib/cdn-url';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
@@ -126,6 +127,7 @@ function colorDisplay(item: {
 }
 
 export default function AdminOrdersPage() {
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<AdminOrder[]>([]);
@@ -148,6 +150,7 @@ export default function AdminOrdersPage() {
   const [trackingNumber, setTrackingNumber] = useState('');
   const [shippingProvider, setShippingProvider] = useState('');
   const [clearCustomsBusy, setClearCustomsBusy] = useState(false);
+  const [markOutForConfirmBusy, setMarkOutForConfirmBusy] = useState(false);
 
   const showToast = (type: 'ok' | 'err', msg: string) => {
     setToast({ type, msg });
@@ -205,6 +208,11 @@ export default function AdminOrdersPage() {
     fetchOrders();
     fetchStats();
   }, [fetchOrders, fetchStats]);
+
+  useEffect(() => {
+    const q = (searchParams.get('q') || searchParams.get('highlight') || '').trim();
+    if (q) setSearch(q);
+  }, [searchParams]);
 
   const loadShipmentTimeline = useCallback(async (orderId: number) => {
     setShipmentLoading(true);
@@ -318,11 +326,8 @@ export default function AdminOrdersPage() {
     if (!selectedOrder) return;
     setClearCustomsBusy(true);
     try {
-      const updated = await adminOrderAPI.clearCustomsShipment(selectedOrder.id, {
-        tracking_number: trackingNumber.trim() || undefined,
-        shipping_provider: shippingProvider.trim() || undefined,
-      });
-      showToast('ok', '188.com.vn: Đã thông quan — chuyển giao nội địa');
+      const updated = await adminOrderAPI.clearCustomsShipment(selectedOrder.id);
+      showToast('ok', '188.com.vn: Đã thông quan — hàng về shop đóng gói');
       setSelectedOrder(updated);
       void loadShipmentTimeline(updated.id);
       fetchOrders();
@@ -331,6 +336,26 @@ export default function AdminOrdersPage() {
       showToast('err', err instanceof Error ? err.message : 'Không thể cập nhật lịch trình');
     } finally {
       setClearCustomsBusy(false);
+    }
+  };
+
+  const handleMarkOutForCustomerConfirm = async () => {
+    if (!selectedOrder) return;
+    setMarkOutForConfirmBusy(true);
+    try {
+      const updated = await adminOrderAPI.markOutForCustomerConfirm(selectedOrder.id, {
+        tracking_number: trackingNumber.trim() || undefined,
+        shipping_provider: shippingProvider.trim() || undefined,
+      });
+      showToast('ok', '188.com.vn: Đã đóng hàng & gửi shipper — khách có thể xác nhận nhận hàng');
+      setSelectedOrder(updated);
+      void loadShipmentTimeline(updated.id);
+      fetchOrders();
+      fetchStats();
+    } catch (err: unknown) {
+      showToast('err', err instanceof Error ? err.message : 'Không thể cập nhật lịch trình');
+    } finally {
+      setMarkOutForConfirmBusy(false);
     }
   };
 
@@ -777,11 +802,56 @@ export default function AdminOrdersPage() {
                 ) : (
                   <p className="text-sm text-gray-500 mb-4">Chưa có lịch trình (đơn chưa đặt cọc hoặc chưa khởi tạo).</p>
                 )}
+                {shipmentTimeline?.ems_tracking?.available ? (
+                  <div className="mb-4 rounded-lg border border-indigo-100 bg-white p-3">
+                    <p className="text-sm font-semibold text-indigo-900">Hành trình EMS</p>
+                    {shipmentTimeline.ems_tracking.current_status_description ? (
+                      <p className="mt-1 text-xs text-indigo-700">
+                        Mới nhất: {shipmentTimeline.ems_tracking.current_status_description}
+                      </p>
+                    ) : null}
+                    {shipmentTimeline.ems_tracking.error ? (
+                      <p className="mt-2 text-xs text-amber-800">{shipmentTimeline.ems_tracking.error}</p>
+                    ) : shipmentTimeline.ems_tracking.events.length ? (
+                      <ul className="mt-2 space-y-1.5">
+                        {shipmentTimeline.ems_tracking.events.slice(0, 5).map((ev, idx) => (
+                          <li key={`${ev.description}-${ev.traced_at || idx}`} className="text-xs text-gray-700">
+                            <span className="font-medium">{ev.description}</span>
+                            {ev.traced_at ? (
+                              <span className="text-gray-500">
+                                {' '}
+                                — {new Date(ev.traced_at).toLocaleString('vi-VN')}
+                              </span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-xs text-gray-500">Chưa có cập nhật từ EMS.</p>
+                    )}
+                  </div>
+                ) : null}
                 {shipmentTimeline?.waiting_admin_at_customs ? (
                   <div className="rounded-lg border border-amber-200 bg-white p-3 space-y-3">
-                    <p className="text-sm text-amber-900">188.com.vn đang xử lý thủ tục — ưu tiên chuyển giao sớm</p>
+                    <p className="text-sm text-amber-900">188.com.vn đang xử lý thủ tục cửa khẩu</p>
                     <p className="text-xs text-amber-800/80">
-                      Xong bước này, duyệt bên dưới để cập nhật giao nội địa cho khách.
+                      Khi hàng đã thông quan và chuyển về shop, bấm bên dưới để cập nhật lịch trình cho khách.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={clearCustomsBusy}
+                      onClick={() => void handleClearCustoms()}
+                      className="px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-[#c2410c] disabled:opacity-60"
+                    >
+                      {clearCustomsBusy ? 'Đang xử lý…' : '188.com.vn: Đã thông quan — hàng về shop'}
+                    </button>
+                  </div>
+                ) : null}
+                {shipmentTimeline?.waiting_admin_domestic_delivery ? (
+                  <div className="rounded-lg border border-emerald-200 bg-white p-3 space-y-3">
+                    <p className="text-sm text-emerald-900">Hàng đã về shop — đóng gói & gửi shipper</p>
+                    <p className="text-xs text-emerald-800/80">
+                      Sau khi nhân viên đóng hàng và bàn giao cho shipper, xác nhận bên dưới để mở nút «Đã nhận hàng» cho khách.
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <label className="block text-xs">
@@ -789,7 +859,7 @@ export default function AdminOrdersPage() {
                         <input
                           value={shippingProvider}
                           onChange={(e) => setShippingProvider(e.target.value)}
-                          placeholder="VD: Viettel Post, GHN…"
+                          placeholder="VD: EMS, Viettel Post, GHN…"
                           className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm"
                         />
                       </label>
@@ -798,18 +868,18 @@ export default function AdminOrdersPage() {
                         <input
                           value={trackingNumber}
                           onChange={(e) => setTrackingNumber(e.target.value)}
-                          placeholder="Mã tracking nội địa"
+                          placeholder="VD: EM123456789VN"
                           className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm"
                         />
                       </label>
                     </div>
                     <button
                       type="button"
-                      disabled={clearCustomsBusy}
-                      onClick={() => void handleClearCustoms()}
+                      disabled={markOutForConfirmBusy}
+                      onClick={() => void handleMarkOutForCustomerConfirm()}
                       className="px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-[#c2410c] disabled:opacity-60"
                     >
-                      {clearCustomsBusy ? 'Đang xử lý…' : '188.com.vn: Đã thông quan — chuyển giao nội địa'}
+                      {markOutForConfirmBusy ? 'Đang xử lý…' : '188.com.vn: Đóng hàng & gửi shipper'}
                     </button>
                   </div>
                 ) : null}
@@ -825,11 +895,6 @@ export default function AdminOrdersPage() {
                     Chuyển đang giao (thủ công)
                   </button>
                 ) : null}
-                {selectedOrder.status === 'shipping' && (
-                  <button onClick={() => handleUpdateStatus(selectedOrder.id, 'delivered')} className="px-4 py-2 bg-[#ea580c] text-white rounded-lg hover:bg-[#c2410c]">
-                    Xác nhận đã giao
-                  </button>
-                )}
                 {selectedOrder.status === 'delivered' && (
                   <button onClick={() => handleUpdateStatus(selectedOrder.id, 'completed')} className="px-4 py-2 bg-[#ea580c] text-white rounded-lg hover:bg-[#c2410c]">
                     Hoàn thành

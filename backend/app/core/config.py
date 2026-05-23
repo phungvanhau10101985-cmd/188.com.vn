@@ -745,6 +745,25 @@ class Settings:
         self.NANOAI_BEARER_TOKEN: str = os.getenv("NANOAI_BEARER_TOKEN", "").strip()
 
         # ========================
+        # EMS — theo dõi vận đơn (public: api.myems.vn; legacy merchant: ws.ems.com.vn)
+        # ========================
+        self.EMS_MERCHANT_TOKEN: str = os.getenv("EMS_MERCHANT_TOKEN", "").strip()
+        self.EMS_PUBLIC_API_BASE_URL: str = (
+            os.getenv("EMS_PUBLIC_API_BASE_URL", "https://api.myems.vn").strip().rstrip("/")
+            or "https://api.myems.vn"
+        )
+        self.EMS_API_BASE_URL: str = (
+            os.getenv("EMS_API_BASE_URL", self.EMS_PUBLIC_API_BASE_URL).strip().rstrip("/")
+            or self.EMS_PUBLIC_API_BASE_URL
+        )
+        self.EMS_LEGACY_API_BASE_URL: str = (
+            os.getenv("EMS_LEGACY_API_BASE_URL", "http://ws.ems.com.vn").strip().rstrip("/")
+            or "http://ws.ems.com.vn"
+        )
+        self.EMS_TRACKING_LANGUAGE: int = int(os.getenv("EMS_TRACKING_LANGUAGE", "0") or "0")
+        self.EMS_API_TIMEOUT_SECONDS: int = int(os.getenv("EMS_API_TIMEOUT_SECONDS", "15") or "15")
+
+        # ========================
         # RATE LIMITING
         # ========================
         self.RATE_LIMIT_ENABLED: bool = os.getenv("RATE_LIMIT_ENABLED", "True").lower() == "true"

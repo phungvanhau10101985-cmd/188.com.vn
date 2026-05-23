@@ -1,0 +1,134 @@
+﻿============================================================
+≡ƒöº CONFIGURATION STATUS CHECK
+============================================================
+
+≡ƒùä∩╕Å  DATABASE:
+   Database URL: postgresql://postgres:10101985@localhost:5432/188comvn
+   Mode: PostgreSQL (production)
+   Tables: 69 bß║úng
+   Products: 24436 sß║ún phß║⌐m
+
+≡ƒöÉ SECURITY:
+   Γ£à SECRET_KEY: ─É├ú cß║Ñu h├¼nh
+
+≡ƒô▒ OTP SYSTEM:
+   Primary Provider: firebase
+   Fallback Enabled: True
+   Simulation Mode: False
+   OTP Length: 6
+   OTP Expire: 10 minutes
+
+≡ƒÆ¼ ZALO OTP:
+   Γ£à ZALO: Access Token configured
+      OA ID: 1714121106420519241
+      Register Template: 303744
+      Reset Password Template: 303744
+      Verify Phone Template: 303744
+      Login Template: 303744
+
+≡ƒöÑ FIREBASE:
+   Γ£à FIREBASE: Fully configured for production
+      Project: comvn-320603
+      Client: firebase-adminsdk-t34so@comvn-...
+      Token URI: https://oauth2.googleapis.com/token
+      API Key: True
+
+≡ƒñû AI APIs:
+   Γ£à DEEPSEEK: Configured
+   Γ£à OPENAI: Configured
+
+≡ƒôº EMAIL (OTP Backup):
+   Γ£à EMAIL: Configured for OTP backup
+
+≡ƒîì ENVIRONMENT:
+   Environment: development
+   Debug Mode: True
+   Server: 0.0.0.0:8001
+
+============================================================
+≡ƒôï SUMMARY:
+Γ£à OTP SYSTEM: READY FOR PRODUCTION
+   Primary: Firebase Authentication
+   Fallback: Zalo OTP
+============================================================
+=== PUBLIC itemcode=H28042606EMS | 200 ===
+{
+  "List_TBL_DINH_VI": [
+    {
+      "NGAY_TRANG_THAI": "4/28/2026 11:13:00 PM",
+      "NGAY": "28/04/2026",
+      "GIO": "23:13:00",
+      "TRANG_THAI": "EMA - Chß║Ñp nhß║¡n gß╗¡i (Posting / Collection) (130658: EMS Bß║»c Tß╗½ Li├¬m - Ha╠Ç N├┤╠úi                        ) (─Éß║ºu mß╗æi CSKH: 1900 545433)",
+      "VI_TRI": "S├┤┬┤Ng├╡ 84,   ─É╞░╞í╠Çng Xu├ón Ph╞░╞íng, Ph╞░ß╗¥ng Xu├ón Ph╞░╞íng, Nam Tß╗½ Li├¬m, Ha╠Ç N├┤╠úi        ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "4/28/2026 11:47:59 PM",
+      "NGAY": "28/04/2026",
+      "GIO": "23:47:59",
+      "TRANG_THAI": "─É├ú vß║¡n chuyß╗ân ─æi khß╗Åi b╞░u cß╗Ñc (Transport departure from PO) (130658: EMS Bß║»c Tß╗½ Li├¬m - Ha╠Ç N├┤╠úi                        )",
+      "VI_TRI": "S├┤┬┤Ng├╡ 84,   ─É╞░╞í╠Çng Xu├ón Ph╞░╞íng, Ph╞░ß╗¥ng Xu├ón Ph╞░╞íng, Nam Tß╗½ Li├¬m, Ha╠Ç N├┤╠úi        ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "4/29/2026 12:06:07 AM",
+      "NGAY": "29/04/2026",
+      "GIO": "00:06:07",
+      "TRANG_THAI": "[COD]Ph├ít h├ánh phiß║┐u nhß╗¥ thu (130658: EMS Bß║»c Tß╗½ Li├¬m - Ha╠Ç N├┤╠úi                        )",
+      "VI_TRI": "S├┤┬┤Ng├╡ 84,   ─É╞░╞í╠Çng Xu├ón Ph╞░╞íng, Ph╞░ß╗¥ng Xu├ón Ph╞░╞íng, Nam Tß╗½ Li├¬m, Ha╠Ç N├┤╠úi        ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "4/29/2026 2:20:00 AM",
+      "NGAY": "29/04/2026",
+      "GIO": "02:20:00",
+      "TRANG_THAI": "─É├ú ─æß║┐n b╞░u cß╗Ñc (Arrival at PO) (100916: EMS HN LT - Ha╠Ç N├┤╠úi                        )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "4/29/2026 2:20:39 AM",
+      "NGAY": "29/04/2026",
+      "GIO": "02:20:39",
+      "TRANG_THAI": "─É├ú vß║¡n chuyß╗ân ─æß║┐n b╞░u cß╗Ñc (Transport arrival at PO) (100916: EMS HN LT - Ha╠Ç N├┤╠úi                        )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "4/29/2026 12:19:00 PM",
+      "NGAY": "29/04/2026",
+      "GIO": "12:19:00",
+      "TRANG_THAI": "─Éi khß╗Åi b╞░u cß╗Ñc (Departure from PO) (100916: EMS HN LT - Ha╠Ç N├┤╠úi                        )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "4/29/2026 11:41:08 PM",
+      "NGAY": "29/04/2026",
+      "GIO": "23:41:08",
+      "TRANG_THAI": "─É├ú vß║¡n chuyß╗ân ─æi khß╗Åi b╞░u cß╗Ñc (Transport departure from PO) (100916: EMS HN LT - Ha╠Ç N├┤╠úi                        )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/1/2026 1:43:14 PM",
+      "NGAY": "01/05/2026",
+      "GIO": "13:43:14",
+      "TRANG_THAI": "─É├ú vß║¡n chuyß╗ân ─æß║┐n b╞░u cß╗Ñc (Transport arrival at PO) (700916: EMS HCM LT - H├┤╠Ç Chi╠ü Minh                )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/1/2026 2:40:00 PM",
+      "NGAY": "01/05/2026",
+      "GIO": "14:40:00",
+      "TRANG_THAI": "─É├ú ─æß║┐n b╞░u cß╗Ñc (Arrival at PO) (700916: EMS HCM LT - H├┤╠Ç Chi╠ü Minh                )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/1/2026 5:46:00 PM",
+      "NGAY": "01/05/2026",
+      "GIO": "17:46:00",
+      "TRANG_THAI": "─Éi khß╗Åi b╞░u cß╗Ñc (Departure from PO) (
+

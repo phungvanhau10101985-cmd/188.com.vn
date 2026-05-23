@@ -1,0 +1,59 @@
+﻿login 200 cookies ['XSRF-TOKEN', 'laravel_session']
+POST api/tracking {'tracking_code': 'EH042737692VN'} => 419
+{
+  "message": "CSRF token mismatch."
+}
+POST api/tracking {'code': 'EH042737692VN'} => 419
+{
+  "message": "CSRF token mismatch."
+}
+POST api/tracking {'tracking_codes': 'EH042737692VN'} => 419
+{
+  "message": "CSRF token mismatch."
+}
+POST api/tracking {'tracking_code': 'EH042737692VN', 'merchant_token': 'd3196f828f8a9ef0f689b0aa9e80023d'} => 419
+{
+  "message": "CSRF token mismatch."
+}
+POST api/tracking xsrf => 200
+.\.venv\Scripts\python.exe : Traceback (most recent call last):
+At C:\Users\Mr Hau\AppData\Local\Temp\ps-script-39ff30d1-1b58-4a27-82c7-d2367b79755d.ps1:73 char:41
++ ... n\backend"; .\.venv\Scripts\python.exe scripts\probe_ems_api.py 2>&1  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "E:\python-code\188-com-vn\backend\.venv\Lib\site-packages\requests\models.py", line 971, in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mr Hau\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mr Hau\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py", line 338, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mr Hau\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py", line 356, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "E:\python-code\188-com-vn\backend\scripts\probe_ems_api.py", line 73, in main
+    data = resp.json()
+           ^^^^^^^^^^^
+  File "E:\python-code\188-com-vn\backend\.venv\Lib\site-packages\requests\models.py", line 975, in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "E:\python-code\188-com-vn\backend\scripts\probe_ems_api.py", line 136, in <module>
+    main()
+  File "E:\python-code\188-com-vn\backend\scripts\probe_ems_api.py", line 76, in main
+    print(resp.text[:6000])
+  File "C:\Users\Mr Hau\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u1ec7' in position 460: character maps to <undefined>

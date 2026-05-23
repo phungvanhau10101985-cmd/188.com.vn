@@ -243,11 +243,63 @@ def _resolve_shop_chinese_column(by_col: Dict[int, set[str]]) -> Optional[int]:
 
         _norm_header(x)
 
-        for x in ("shop_name_chinese", "shop trung quốc", "shop trung quoc", "shop_cn", "supplier_cn")
+        for x in (
+
+            "shop_name_chinese",
+
+            "shop trung quốc",
+
+            "shop trung quoc",
+
+            "shop_cn",
+
+            "supplier_cn",
+
+            "shop",
+
+            "tên shop",
+
+            "ten shop",
+
+            "supplier",
+
+            "supplier name",
+
+            "ncc",
+
+        )
 
     )
 
     return _first_col_matching(by_col, needles)
+
+
+
+
+
+def _resolve_compact_listing_shop_column(
+
+    link_col: Optional[int],
+
+    china_price_col: Optional[int],
+
+    ch_name_col: Optional[int],
+
+) -> Optional[int]:
+
+    """
+
+    Mẫu listing gọn 6 cột: Link C (3), Shop D (4), Giá Tệ E (5), Tên TQ F (6).
+
+    Nếu tiêu đề không ghi shop_name_chinese thì vẫn lấy ô cột D.
+
+    """
+
+    if link_col == 3 and china_price_col == 5 and ch_name_col in (None, 6):
+
+        return 4
+
+    return None
 
 
 
@@ -722,6 +774,10 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
         shop_cn_col = _resolve_shop_chinese_column(label_by_col)
 
         ch_name_col = _resolve_chinese_name_column(label_by_col)
+
+        if shop_cn_col is None:
+
+            shop_cn_col = _resolve_compact_listing_shop_column(link_col, china_price_col, ch_name_col)
 
         vnd_optional_col = _resolve_optional_vnd_per_cny_column(label_by_col)
 

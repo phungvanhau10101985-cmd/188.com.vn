@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import type { PromotionVoucherItem } from '@/lib/api-client';
 
 function formatCurrency(amount: number) {
@@ -47,9 +48,9 @@ export default function CartVoucherPicker({
     return (
       <div className="mb-3 rounded-xl border border-dashed border-gray-200 bg-white px-4 py-5 text-sm text-gray-500">
         Bạn chưa có mã trong ví. Shop sẽ tặng qua thông báo khi có ưu đãi riêng.{' '}
-        <a href="/khuyen-mai" className="text-[#ea580c] font-medium hover:underline">
+        <Link href="/account/khuyen-mai" className="text-[#ea580c] font-medium hover:underline">
           Xem ví khuyến mãi
-        </a>
+        </Link>
       </div>
     );
   }
@@ -158,9 +159,9 @@ export default function CartVoucherPicker({
       {eligibleCount === 0 ? (
         <p className="mt-2 text-xs text-gray-500">
           Hiện không có mã dùng được cho đơn này.{' '}
-          <a href="/khuyen-mai" className="text-[#ea580c] hover:underline">
+          <Link href="/account/khuyen-mai" className="text-[#ea580c] hover:underline">
             Xem chi tiết
-          </a>
+          </Link>
         </p>
       ) : applying ? (
         <p className="mt-2 text-xs text-gray-500">Đang áp dụng mã...</p>

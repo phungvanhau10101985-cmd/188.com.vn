@@ -457,6 +457,8 @@ class ApiClient {
     footer_note: string;
     current_step_key?: string | null;
     waiting_admin_at_customs: boolean;
+    waiting_admin_domestic_delivery: boolean;
+    can_confirm_received: boolean;
     events: Array<{
       step_key: string;
       title: string;
@@ -465,6 +467,19 @@ class ApiClient {
       completed_at?: string | null;
       note?: string | null;
     }>;
+    ems_tracking?: {
+      available: boolean;
+      tracking_code?: string | null;
+      current_status?: number | null;
+      current_status_description?: string | null;
+      events: Array<{
+        status_code?: number | null;
+        description: string;
+        address?: string | null;
+        traced_at?: string | null;
+      }>;
+      error?: string | null;
+    } | null;
   }> {
     return this.fetch(`/orders/${orderId}/shipment-timeline`);
   }

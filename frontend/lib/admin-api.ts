@@ -1911,6 +1911,8 @@ export const adminOrderAPI = {
       footer_note: string;
       current_step_key?: string | null;
       waiting_admin_at_customs: boolean;
+      waiting_admin_domestic_delivery: boolean;
+      can_confirm_received: boolean;
       events: Array<{
         step_key: string;
         title: string;
@@ -1919,10 +1921,29 @@ export const adminOrderAPI = {
         completed_at?: string | null;
         note?: string | null;
       }>;
+      ems_tracking?: {
+        available: boolean;
+        tracking_code?: string | null;
+        current_status?: number | null;
+        current_status_description?: string | null;
+        events: Array<{
+          status_code?: number | null;
+          description: string;
+          address?: string | null;
+          traced_at?: string | null;
+        }>;
+        error?: string | null;
+      } | null;
     }>(`/orders/admin/${orderId}/shipment-timeline`),
 
-  clearCustomsShipment: (orderId: number, data?: { tracking_number?: string; shipping_provider?: string }) =>
+  clearCustomsShipment: (orderId: number) =>
     fetchAdmin<AdminOrder>(`/orders/admin/${orderId}/shipment/clear-customs`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+
+  markOutForCustomerConfirm: (orderId: number, data?: { tracking_number?: string; shipping_provider?: string }) =>
+    fetchAdmin<AdminOrder>(`/orders/admin/${orderId}/shipment/mark-out-for-confirm`, {
       method: 'POST',
       body: JSON.stringify(data || {}),
     }),
@@ -2599,6 +2620,68 @@ export const adminAffiliateAPI = {
       method: 'POST',
       body: JSON.stringify({ admin_note: admin_note ?? null }),
     }),
+};
+
+export type EmsShippingSyncStatus =
+  | 'matched'
+  | 'in_progress'
+  | 'mismatch'
+  | 'order_not_found'
+  | 'ems_not_found'
+  | 'parse_error'
+  | 'pending';
+
+export interface EmsShippingImportRow {
+  row_number: number;
+  reference_code: string;
+  recipient_label: string;
+  order_code?: string | null;
+  order_id?: number | null;
+  order_status?: string | null;
+  current_step_key?: string | null;
+  tracking_number_saved?: string | null;
+  ems_tracking_code?: string | null;
+  ems_reference_code?: string | null;
+  ems_status?: string | null;
+  ems_phase?: string | null;
+  sync_status: EmsShippingSyncStatus;
+  sync_message: string;
+  ems_error?: string | null;
+}
+
+export interface EmsShippingImportResult {
+  ok: boolean;
+  warnings: string[];
+  summary: {
+    total_rows: number;
+    matched: number;
+    in_progress: number;
+    mismatch: number;
+    order_not_found: number;
+    ems_not_found: number;
+    parse_error: number;
+  };
+  rows: EmsShippingImportRow[];
+}
+
+export const adminShippingAPI = {
+  importEmsExcel: async (file: File): Promise<EmsShippingImportResult> => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const form = new FormData();
+    form.append('file', file);
+    const url = `${getApiBaseUrl()}/orders/admin/shipping/ems-import`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+      body: form,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Import EMS thất bại');
+    }
+    return res.json();
+  },
 };
 
 export interface AdminLoginResponse {

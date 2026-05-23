@@ -59,7 +59,7 @@ export default function AccountLayout({
     { href: '/account/addresses', label: 'Sổ địa chỉ', icon: '📍' },
     { href: '/vi-dien-tu', label: 'Ví Affiliate', icon: '💳' },
     { href: '/thanh-vien', label: 'Thành viên thân quen', icon: '👥' },
-    { href: '/khuyen-mai', label: 'Khuyến mãi', icon: '🎁' },
+    { href: '/account/khuyen-mai', label: 'Ví quà / Khuyến mãi', icon: '🎁' },
     { href: '/account/notifications', label: 'Trung tâm thông báo', icon: '🔔' },
     { href: '/account/install-app', label: 'Cài đặt app', icon: '📲' },
     { href: '/tai-khoan-ngan-hang', label: 'Tài khoản ngân hàng', icon: '🏦' },
@@ -75,7 +75,9 @@ export default function AccountLayout({
           <aside className="hidden md:block md:w-56 flex-shrink-0">
             <nav className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
               {nav.map((item) => {
-                const active = pathname === item.href;
+                const active =
+                  pathname === item.href ||
+                  (item.href === '/account/khuyen-mai' && pathname === '/khuyen-mai');
                 return (
                   <Link
                     key={item.href}

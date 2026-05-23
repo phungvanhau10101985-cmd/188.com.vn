@@ -140,6 +140,7 @@ class OrderResponse(BaseModel):
     shipped_at: Optional[datetime]
     delivered_at: Optional[datetime]
     completed_at: Optional[datetime]
+    can_confirm_received: bool = False
 
     @field_validator("status", "deposit_type", "payment_method", "payment_status", mode="before")
     @classmethod

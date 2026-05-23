@@ -320,7 +320,7 @@ def confirm_received(
     order_id: int,
     user_id: int
 ) -> Optional[Order]:
-    """Khách hàng xác nhận đã nhận hàng (deposit_paid/confirmed/processing/shipping -> delivered)"""
+    """Khách hàng xác nhận đã nhận hàng (shipping + bước awaiting_confirm active -> delivered)"""
     order = db.query(Order).filter(
         Order.id == order_id,
         Order.user_id == user_id
@@ -328,14 +328,9 @@ def confirm_received(
     if not order:
         return None
     status_val = getattr(order.status, "value", order.status)
-    # Cho phép xác nhận từ các trạng thái trong tab "Chờ nhận hàng"
-    allowed_statuses = [
-        OrderStatus.DEPOSIT_PAID.value,
-        OrderStatus.CONFIRMED.value,
-        OrderStatus.PROCESSING.value,
-        OrderStatus.SHIPPING.value
-    ]
-    if status_val not in allowed_statuses:
+    if status_val != OrderStatus.SHIPPING.value:
+        return None
+    if not shipment_svc.can_customer_confirm_received(db, order):
         return None
     old_status = status_val
     order.status = OrderStatus.DELIVERED.value

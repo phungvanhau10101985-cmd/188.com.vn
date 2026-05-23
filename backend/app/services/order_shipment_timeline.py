@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models.order import Order, OrderStatus
 from app.models.order_shipment import OrderShipmentEvent
+from app.services import ems_tracking as ems_tracking_svc
 from app.utils.display_timeline import to_utc_aware
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,14 @@ STEP_CUSTOMER_HINTS: dict[str, str] = {
         "188.com.vn đang chủ động làm thủ tục tại cửa khẩu để chuyển hàng về cho bạn sớm nhất. "
         "Có bước tiếp theo, shop sẽ cập nhật ngay trên lịch trình này."
     ),
-    "domestic_shipping": "188.com.vn đã hoàn tất thủ tục — hàng đang được giao tới bạn.",
+    "domestic_shipping": (
+        "Hàng đã thông quan và đang được chuyển về 188.com.vn. "
+        "Nhân viên shop sẽ đóng gói và gửi cho shipper giao tới bạn."
+    ),
+    "awaiting_confirm": (
+        "188.com.vn đã đóng hàng và gửi cho shipper. "
+        "Vui lòng bấm «Đã nhận hàng» khi bạn nhận đủ hàng."
+    ),
 }
 
 
@@ -67,12 +75,12 @@ def _step_defs(deposit_flow: bool) -> list[dict[str, Any]]:
         },
         {
             "key": "domestic_shipping",
-            "title": "188.com.vn đã thông quan — đang giao nội địa tới bạn",
+            "title": "188.com.vn đã thông quan — hàng về shop để đóng gói",
             "manual": True,
         },
         {
             "key": "awaiting_confirm",
-            "title": "188.com.vn đã giao — vui lòng xác nhận đã nhận hàng",
+            "title": "188.com.vn đã đóng hàng & gửi shipper — chờ bạn xác nhận nhận hàng",
             "manual": True,
         },
     ]
@@ -268,14 +276,50 @@ def _sync_order_processing_status(db: Session, order: Order, events: list[OrderS
         order.status = OrderStatus.PROCESSING.value
 
 
+def _load_timeline_events(db: Session, order_id: int) -> list[OrderShipmentEvent]:
+    return (
+        db.query(OrderShipmentEvent)
+        .filter(OrderShipmentEvent.order_id == order_id)
+        .order_by(OrderShipmentEvent.sort_order.asc())
+        .all()
+    )
+
+
+def _event_by_key(events: list[OrderShipmentEvent], step_key: str) -> Optional[OrderShipmentEvent]:
+    return next((e for e in events if e.step_key == step_key), None)
+
+
+def can_customer_confirm_received(db: Session, order: Order) -> bool:
+    if _order_status_value(order) != OrderStatus.SHIPPING.value:
+        return False
+    events = _load_timeline_events(db, order.id)
+    awaiting = _event_by_key(events, "awaiting_confirm")
+    return awaiting is not None and awaiting.status == EVENT_ACTIVE
+
+
+def batch_can_confirm_received(db: Session, orders: list[Order]) -> dict[int, bool]:
+    shipping_ids = [o.id for o in orders if _order_status_value(o) == OrderStatus.SHIPPING.value]
+    if not shipping_ids:
+        return {}
+    rows = (
+        db.query(OrderShipmentEvent.order_id)
+        .filter(
+            OrderShipmentEvent.order_id.in_(shipping_ids),
+            OrderShipmentEvent.step_key == "awaiting_confirm",
+            OrderShipmentEvent.status == EVENT_ACTIVE,
+        )
+        .all()
+    )
+    confirmable = {oid for (oid,) in rows}
+    return {oid: oid in confirmable for oid in shipping_ids}
+
+
 def admin_clear_customs_and_ship(
     db: Session,
     order_id: int,
     admin_id: int,
-    *,
-    tracking_number: Optional[str] = None,
-    shipping_provider: Optional[str] = None,
 ) -> Order:
+    """Hàng thông quan — chuyển về shop để đóng gói."""
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise ValueError("Không tìm thấy đơn hàng.")
@@ -301,13 +345,50 @@ def admin_clear_customs_and_ship(
         domestic.status = EVENT_ACTIVE
         domestic.updated_by_admin_id = admin_id
 
+    order.status = OrderStatus.SHIPPING.value
+    db.flush()
+    return order
+
+
+def admin_mark_out_for_customer_confirm(
+    db: Session,
+    order_id: int,
+    admin_id: int,
+    *,
+    tracking_number: Optional[str] = None,
+    shipping_provider: Optional[str] = None,
+) -> Order:
+    """Shop đóng hàng & gửi shipper — mở nút «Đã nhận hàng» cho khách."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise ValueError("Không tìm thấy đơn hàng.")
+
+    advance_auto_milestones(db, order_id)
+    events = _load_timeline_events(db, order_id)
+    domestic = _event_by_key(events, "domestic_shipping")
+    if not domestic or domestic.status != EVENT_ACTIVE:
+        raise ValueError("Đơn chưa ở bước hàng về shop hoặc đã được xử lý.")
+
+    now = _utc_now()
+    domestic.status = EVENT_COMPLETED
+    domestic.completed_at = now
+    domestic.updated_by_admin_id = admin_id
+
+    awaiting = _event_by_key(events, "awaiting_confirm")
+    if awaiting and awaiting.status == EVENT_PENDING:
+        awaiting.status = EVENT_ACTIVE
+        awaiting.updated_by_admin_id = admin_id
+
     if tracking_number:
         order.tracking_number = tracking_number.strip()
     if shipping_provider:
         order.shipping_provider = shipping_provider.strip()
 
-    order.status = OrderStatus.SHIPPING.value
-    order.shipped_at = now
+    if _order_status_value(order) != OrderStatus.SHIPPING.value:
+        order.status = OrderStatus.SHIPPING.value
+    if not order.shipped_at:
+        order.shipped_at = now
+
     db.flush()
     return order
 
@@ -316,13 +397,20 @@ def mark_delivered_on_timeline(db: Session, order: Order, *, admin_id: Optional[
     if not db.query(OrderShipmentEvent.id).filter(OrderShipmentEvent.order_id == order.id).first():
         ensure_shipment_timeline(db, order)
 
-    events = (
-        db.query(OrderShipmentEvent)
-        .filter(OrderShipmentEvent.order_id == order.id)
-        .order_by(OrderShipmentEvent.sort_order.asc())
-        .all()
-    )
+    events = _load_timeline_events(db, order.id)
     now = _utc_now()
+    st = _order_status_value(order)
+    if st in (OrderStatus.DELIVERED.value, OrderStatus.COMPLETED.value):
+        for ev in events:
+            if ev.status == EVENT_COMPLETED:
+                continue
+            ev.status = EVENT_COMPLETED
+            if not ev.completed_at:
+                ev.completed_at = now
+            if admin_id:
+                ev.updated_by_admin_id = admin_id
+        return
+
     for ev in events:
         if ev.step_key == "domestic_shipping" and ev.status == EVENT_ACTIVE:
             ev.status = EVENT_COMPLETED
@@ -332,7 +420,7 @@ def mark_delivered_on_timeline(db: Session, order: Order, *, admin_id: Optional[
         if ev.step_key == "awaiting_confirm":
             if ev.status == EVENT_PENDING:
                 ev.status = EVENT_ACTIVE
-            if _order_status_value(order) in (OrderStatus.DELIVERED.value, OrderStatus.COMPLETED.value):
+            if st in (OrderStatus.DELIVERED.value, OrderStatus.COMPLETED.value):
                 ev.status = EVENT_COMPLETED
                 ev.completed_at = now
 
@@ -358,24 +446,35 @@ def get_timeline_payload(db: Session, order: Order) -> dict[str, Any]:
 
     current_key = None
     waiting_admin = False
+    waiting_domestic = False
     for ev in events:
         if ev.status == EVENT_ACTIVE:
             current_key = ev.step_key
             if ev.step_key == "at_customs":
                 waiting_admin = True
+            if ev.step_key == "domestic_shipping":
+                waiting_domestic = True
             break
 
     step_titles = {s["key"]: s["title"] for s in _step_defs(_deposit_flow(order))}
+    tracking_number = getattr(order, "tracking_number", None)
+    shipping_provider = getattr(order, "shipping_provider", None)
+    ems_payload = ems_tracking_svc.build_ems_tracking_payload(
+        tracking_number=tracking_number,
+        shipping_provider=shipping_provider,
+    )
 
     return {
         "order_id": order.id,
         "order_code": order.order_code,
         "order_status": st,
-        "tracking_number": getattr(order, "tracking_number", None),
-        "shipping_provider": getattr(order, "shipping_provider", None),
+        "tracking_number": tracking_number,
+        "shipping_provider": shipping_provider,
         "footer_note": FOOTER_NOTE,
         "current_step_key": current_key,
         "waiting_admin_at_customs": waiting_admin,
+        "waiting_admin_domestic_delivery": waiting_domestic,
+        "can_confirm_received": can_customer_confirm_received(db, order),
         "events": [
             {
                 "step_key": ev.step_key,
@@ -387,6 +486,7 @@ def get_timeline_payload(db: Session, order: Order) -> dict[str, Any]:
             }
             for ev in events
         ],
+        "ems_tracking": ems_payload,
     }
 
 

@@ -14,6 +14,13 @@ type ShipmentEvent = {
   note?: string | null;
 };
 
+type EmsTrackingEvent = {
+  status_code?: number | null;
+  description: string;
+  address?: string | null;
+  traced_at?: string | null;
+};
+
 type Timeline = {
   order_id: number;
   order_code: string;
@@ -24,6 +31,14 @@ type Timeline = {
   current_step_key?: string | null;
   waiting_admin_at_customs: boolean;
   events: ShipmentEvent[];
+  ems_tracking?: {
+    available: boolean;
+    tracking_code?: string | null;
+    current_status?: number | null;
+    current_status_description?: string | null;
+    events: EmsTrackingEvent[];
+    error?: string | null;
+  } | null;
 };
 
 function formatWhen(iso?: string | null) {
@@ -122,6 +137,65 @@ export default function OrderTrackingPage() {
           ) : null}
         </div>
       )}
+
+      {timeline.ems_tracking?.available ? (
+        <div className="rounded-xl border border-indigo-100 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900">Hành trình EMS</h2>
+              {timeline.ems_tracking.current_status_description ? (
+                <p className="mt-1 text-sm text-indigo-700">
+                  Trạng thái mới nhất: <strong>{timeline.ems_tracking.current_status_description}</strong>
+                </p>
+              ) : null}
+            </div>
+            {timeline.ems_tracking.tracking_code ? (
+              <span className="rounded-full bg-indigo-50 px-3 py-1 font-mono text-xs text-indigo-800">
+                {timeline.ems_tracking.tracking_code}
+              </span>
+            ) : null}
+          </div>
+
+          {timeline.ems_tracking.error ? (
+            <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              {timeline.ems_tracking.error}{' '}
+              <button type="button" onClick={load} className="font-medium underline">
+                Thử lại
+              </button>
+            </div>
+          ) : timeline.ems_tracking.events.length ? (
+            <ol className="relative space-y-0">
+              {timeline.ems_tracking.events.map((ev, idx) => {
+                const when = formatWhen(ev.traced_at);
+                const isLast = idx === timeline.ems_tracking!.events.length - 1;
+                return (
+                  <li key={`${ev.description}-${ev.traced_at || idx}`} className="relative flex gap-4 pb-6 last:pb-0">
+                    {!isLast ? (
+                      <span className="absolute left-[13px] top-8 h-[calc(100%-1.25rem)] w-0.5 bg-indigo-200" aria-hidden />
+                    ) : null}
+                    <span
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                        idx === 0 ? 'bg-indigo-600 text-white ring-4 ring-indigo-100' : 'bg-indigo-100 text-indigo-700'
+                      }`}
+                    >
+                      {idx === 0 ? '●' : '✓'}
+                    </span>
+                    <div className="min-w-0 flex-1 pt-0.5">
+                      <p className={`text-sm font-medium leading-snug ${idx === 0 ? 'text-indigo-700' : 'text-gray-900'}`}>
+                        {ev.description}
+                      </p>
+                      {when ? <p className="mt-1 text-xs text-gray-500">{when}</p> : null}
+                      {ev.address ? <p className="mt-1 text-xs text-gray-400">{ev.address}</p> : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : (
+            <p className="text-sm text-gray-500">Chưa có cập nhật hành trình từ EMS.</p>
+          )}
+        </div>
+      ) : null}
 
       <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
         <ol className="relative space-y-0">

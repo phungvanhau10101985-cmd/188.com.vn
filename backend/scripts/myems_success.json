@@ -1,0 +1,489 @@
+{
+  "List_TBL_DINH_VI": [
+    {
+      "NGAY_TRANG_THAI": "4/28/2026 11:12:00 PM",
+      "NGAY": "28/04/2026",
+      "GIO": "23:12:00",
+      "TRANG_THAI": "EMA - Chấp nhận gửi (Posting / Collection) (130658: EMS Bắc Từ Liêm - Hà Nội                        ) (Đầu mối CSKH: 1900 545433)",
+      "VI_TRI": "Sô´Ngõ 84,   Đường Xuân Phương, Phường Xuân Phương, Nam Từ Liêm, Hà Nội        ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "4/28/2026 11:47:59 PM",
+      "NGAY": "28/04/2026",
+      "GIO": "23:47:59",
+      "TRANG_THAI": "Đã vận chuyển đi khỏi bưu cục (Transport departure from PO) (130658: EMS Bắc Từ Liêm - Hà Nội                        )",
+      "VI_TRI": "Sô´Ngõ 84,   Đường Xuân Phương, Phường Xuân Phương, Nam Từ Liêm, Hà Nội        ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "4/29/2026 12:06:07 AM",
+      "NGAY": "29/04/2026",
+      "GIO": "00:06:07",
+      "TRANG_THAI": "[COD]Phát hành phiếu nhờ thu (130658: EMS Bắc Từ Liêm - Hà Nội                        )",
+      "VI_TRI": "Sô´Ngõ 84,   Đường Xuân Phương, Phường Xuân Phương, Nam Từ Liêm, Hà Nội        ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "4/29/2026 2:20:00 AM",
+      "NGAY": "29/04/2026",
+      "GIO": "02:20:00",
+      "TRANG_THAI": "Đã đến bưu cục (Arrival at PO) (100916: EMS HN LT - Hà Nội                        )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "4/29/2026 2:20:39 AM",
+      "NGAY": "29/04/2026",
+      "GIO": "02:20:39",
+      "TRANG_THAI": "Đã vận chuyển đến bưu cục (Transport arrival at PO) (100916: EMS HN LT - Hà Nội                        )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "4/29/2026 11:18:00 AM",
+      "NGAY": "29/04/2026",
+      "GIO": "11:18:00",
+      "TRANG_THAI": "Đi khỏi bưu cục (Departure from PO) (100916: EMS HN LT - Hà Nội                        )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "4/29/2026 11:42:03 PM",
+      "NGAY": "29/04/2026",
+      "GIO": "23:42:03",
+      "TRANG_THAI": "Đã vận chuyển đi khỏi bưu cục (Transport departure from PO) (100916: EMS HN LT - Hà Nội                        )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/1/2026 1:32:00 PM",
+      "NGAY": "01/05/2026",
+      "GIO": "13:32:00",
+      "TRANG_THAI": "Đã vận chuyển đến bưu cục (Transport arrival at PO) (700916: EMS HCM LT - Hồ Chí Minh                )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/1/2026 2:16:00 PM",
+      "NGAY": "01/05/2026",
+      "GIO": "14:16:00",
+      "TRANG_THAI": "Đã đến bưu cục (Arrival at PO) (700916: EMS HCM LT - Hồ Chí Minh                )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/1/2026 5:12:00 PM",
+      "NGAY": "01/05/2026",
+      "GIO": "17:12:00",
+      "TRANG_THAI": "Đi khỏi bưu cục (Departure from PO) (700916: EMS HCM LT - Hồ Chí Minh                )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/2/2026 3:11:36 AM",
+      "NGAY": "02/05/2026",
+      "GIO": "03:11:36",
+      "TRANG_THAI": "Đã vận chuyển đi khỏi bưu cục (Transport departure from PO) (700916: EMS HCM LT - Hồ Chí Minh                )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/2/2026 9:09:56 AM",
+      "NGAY": "02/05/2026",
+      "GIO": "09:09:56",
+      "TRANG_THAI": "Xác nhận đến bưu gửi theo túi, Arrival at PO by Postbag (880100: KT C1 An Giang - An Giang                      )",
+      "VI_TRI": "Quốc lộ 91 Khóm Đông Thạnh A, Long xuyên, An Giang                      ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/2/2026 9:09:56 AM",
+      "NGAY": "02/05/2026",
+      "GIO": "09:09:56",
+      "TRANG_THAI": "Đã vận chuyển đến bưu cục (Transport arrival at PO) (880100: KT C1 An Giang - An Giang                      )",
+      "VI_TRI": "Quốc lộ 91 Khóm Đông Thạnh A, Long xuyên, An Giang                      ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/2/2026 9:18:13 AM",
+      "NGAY": "02/05/2026",
+      "GIO": "09:18:13",
+      "TRANG_THAI": "Đã đến bưu cục (Arrival at PO) (880100: KT C1 An Giang - An Giang                      )",
+      "VI_TRI": "Quốc lộ 91 Khóm Đông Thạnh A, Long xuyên, An Giang                      ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/2/2026 12:07:39 PM",
+      "NGAY": "02/05/2026",
+      "GIO": "12:07:39",
+      "TRANG_THAI": "Đi khỏi bưu cục (Departure from PO) (880100: KT C1 An Giang - An Giang                      )",
+      "VI_TRI": "Quốc lộ 91 Khóm Đông Thạnh A, Long xuyên, An Giang                      ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/2/2026 12:15:17 PM",
+      "NGAY": "02/05/2026",
+      "GIO": "12:15:17",
+      "TRANG_THAI": "Đã vận chuyển đi khỏi bưu cục (Transport departure from PO) (880100: KT C1 An Giang - An Giang                      )",
+      "VI_TRI": "Quốc lộ 91 Khóm Đông Thạnh A, Long xuyên, An Giang                      ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/2/2026 4:19:08 PM",
+      "NGAY": "02/05/2026",
+      "GIO": "16:19:08",
+      "TRANG_THAI": "Đã đến bưu cục (Arrival at PO) (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/4/2026 2:46:51 PM",
+      "NGAY": "04/05/2026",
+      "GIO": "14:46:51",
+      "TRANG_THAI": "EDG - Đã giao bưu tá phát - Item out for physical delivery (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/4/2026 2:46:51 PM",
+      "NGAY": "04/05/2026",
+      "GIO": "14:46:51",
+      "TRANG_THAI": "Routed (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/4/2026 3:38:27 PM",
+      "NGAY": "04/05/2026",
+      "GIO": "15:38:27",
+      "TRANG_THAI": "EMH - Phát không thành công (Attempted / Unsuccessful delivery) (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/8/2026 3:34:26 PM",
+      "NGAY": "08/05/2026",
+      "GIO": "15:34:26",
+      "TRANG_THAI": "Chuyển hoàn (Return) (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/8/2026 3:34:26 PM",
+      "NGAY": "08/05/2026",
+      "GIO": "15:34:26",
+      "TRANG_THAI": "EMH - Phát không thành công (Attempted / Unsuccessful delivery) (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/8/2026 3:46:00 PM",
+      "NGAY": "08/05/2026",
+      "GIO": "15:46:00",
+      "TRANG_THAI": "EMH - Phát không thành công (Attempted / Unsuccessful delivery) (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/8/2026 6:54:58 PM",
+      "NGAY": "08/05/2026",
+      "GIO": "18:54:58",
+      "TRANG_THAI": "Đi khỏi bưu cục (Departure from PO) (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/8/2026 7:15:22 PM",
+      "NGAY": "08/05/2026",
+      "GIO": "19:15:22",
+      "TRANG_THAI": "Đã đến bưu cục (Arrival at PO) (880100: KT C1 An Giang - An Giang                      )",
+      "VI_TRI": "Quốc lộ 91 Khóm Đông Thạnh A, Long xuyên, An Giang                      ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/8/2026 7:54:12 PM",
+      "NGAY": "08/05/2026",
+      "GIO": "19:54:12",
+      "TRANG_THAI": "Đi khỏi bưu cục (Departure from PO) (880100: KT C1 An Giang - An Giang                      )",
+      "VI_TRI": "Quốc lộ 91 Khóm Đông Thạnh A, Long xuyên, An Giang                      ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/8/2026 8:12:14 PM",
+      "NGAY": "08/05/2026",
+      "GIO": "20:12:14",
+      "TRANG_THAI": "Đã vận chuyển đi khỏi bưu cục (Transport departure from PO) (880100: KT C1 An Giang - An Giang                      )",
+      "VI_TRI": "Quốc lộ 91 Khóm Đông Thạnh A, Long xuyên, An Giang                      ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/9/2026 3:42:59 AM",
+      "NGAY": "09/05/2026",
+      "GIO": "03:42:59",
+      "TRANG_THAI": "Đã vận chuyển đến bưu cục (Transport arrival at PO) (700916: EMS HCM LT - Hồ Chí Minh                )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/9/2026 11:19:57 AM",
+      "NGAY": "09/05/2026",
+      "GIO": "11:19:57",
+      "TRANG_THAI": "Đã vận chuyển đi khỏi bưu cục (Transport departure from PO) (700916: EMS HCM LT - Hồ Chí Minh                )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/9/2026 11:53:56 PM",
+      "NGAY": "09/05/2026",
+      "GIO": "23:53:56",
+      "TRANG_THAI": "Đã vận chuyển đến bưu cục (Transport arrival at PO) (101000: EMS HN NT - Hà Nội                        )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/10/2026 12:02:00 AM",
+      "NGAY": "10/05/2026",
+      "GIO": "00:02:00",
+      "TRANG_THAI": "Đã đến bưu cục (Arrival at PO) (101000: EMS HN NT - Hà Nội                        )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/10/2026 8:49:00 AM",
+      "NGAY": "10/05/2026",
+      "GIO": "08:49:00",
+      "TRANG_THAI": "Đã đến bưu cục (Arrival at PO) (101000: EMS HN NT - Hà Nội                        )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/10/2026 2:29:00 PM",
+      "NGAY": "10/05/2026",
+      "GIO": "14:29:00",
+      "TRANG_THAI": "Đã đến bưu cục (Arrival at PO) (100916: EMS HN LT - Hà Nội                        )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/11/2026 1:16:00 AM",
+      "NGAY": "11/05/2026",
+      "GIO": "01:16:00",
+      "TRANG_THAI": "Đi khỏi bưu cục (Departure from PO) (100916: EMS HN LT - Hà Nội                        )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/11/2026 2:05:44 AM",
+      "NGAY": "11/05/2026",
+      "GIO": "02:05:44",
+      "TRANG_THAI": "Đã vận chuyển đi khỏi bưu cục (Transport departure from PO) (100916: EMS HN LT - Hà Nội                        )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/11/2026 10:54:31 PM",
+      "NGAY": "11/05/2026",
+      "GIO": "22:54:31",
+      "TRANG_THAI": "Đã vận chuyển đến bưu cục (Transport arrival at PO) (700916: EMS HCM LT - Hồ Chí Minh                )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/12/2026 7:06:00 AM",
+      "NGAY": "12/05/2026",
+      "GIO": "07:06:00",
+      "TRANG_THAI": "Đã đến bưu cục (Arrival at PO) (700916: EMS HCM LT - Hồ Chí Minh                )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/12/2026 9:37:00 AM",
+      "NGAY": "12/05/2026",
+      "GIO": "09:37:00",
+      "TRANG_THAI": "Đi khỏi bưu cục (Departure from PO) (700916: EMS HCM LT - Hồ Chí Minh                )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/12/2026 10:07:51 PM",
+      "NGAY": "12/05/2026",
+      "GIO": "22:07:51",
+      "TRANG_THAI": "Đã vận chuyển đi khỏi bưu cục (Transport departure from PO) (700916: EMS HCM LT - Hồ Chí Minh                )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/13/2026 3:16:20 AM",
+      "NGAY": "13/05/2026",
+      "GIO": "03:16:20",
+      "TRANG_THAI": "Xác nhận đến bưu gửi theo túi, Arrival at PO by Postbag (880100: KT C1 An Giang - An Giang                      )",
+      "VI_TRI": "Quốc lộ 91 Khóm Đông Thạnh A, Long xuyên, An Giang                      ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/13/2026 3:16:20 AM",
+      "NGAY": "13/05/2026",
+      "GIO": "03:16:20",
+      "TRANG_THAI": "Đã vận chuyển đến bưu cục (Transport arrival at PO) (880100: KT C1 An Giang - An Giang                      )",
+      "VI_TRI": "Quốc lộ 91 Khóm Đông Thạnh A, Long xuyên, An Giang                      ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/13/2026 3:59:23 AM",
+      "NGAY": "13/05/2026",
+      "GIO": "03:59:23",
+      "TRANG_THAI": "Đã đến bưu cục (Arrival at PO) (880100: KT C1 An Giang - An Giang                      )",
+      "VI_TRI": "Quốc lộ 91 Khóm Đông Thạnh A, Long xuyên, An Giang                      ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/13/2026 6:38:43 AM",
+      "NGAY": "13/05/2026",
+      "GIO": "06:38:43",
+      "TRANG_THAI": "Đi khỏi bưu cục (Departure from PO) (880100: KT C1 An Giang - An Giang                      )",
+      "VI_TRI": "Quốc lộ 91 Khóm Đông Thạnh A, Long xuyên, An Giang                      ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/13/2026 6:48:27 AM",
+      "NGAY": "13/05/2026",
+      "GIO": "06:48:27",
+      "TRANG_THAI": "Đã vận chuyển đi khỏi bưu cục (Transport departure from PO) (880100: KT C1 An Giang - An Giang                      )",
+      "VI_TRI": "Quốc lộ 91 Khóm Đông Thạnh A, Long xuyên, An Giang                      ",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/13/2026 7:49:53 AM",
+      "NGAY": "13/05/2026",
+      "GIO": "07:49:53",
+      "TRANG_THAI": "Đã đến bưu cục (Arrival at PO) (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/14/2026 8:51:01 AM",
+      "NGAY": "14/05/2026",
+      "GIO": "08:51:01",
+      "TRANG_THAI": "Routed (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/14/2026 8:51:02 AM",
+      "NGAY": "14/05/2026",
+      "GIO": "08:51:02",
+      "TRANG_THAI": "EDG - Đã giao bưu tá phát - Item out for physical delivery (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/14/2026 9:18:58 AM",
+      "NGAY": "14/05/2026",
+      "GIO": "09:18:58",
+      "TRANG_THAI": "EMI - Phát thành công (Delivered) (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/15/2026 2:48:37 PM",
+      "NGAY": "15/05/2026",
+      "GIO": "14:48:37",
+      "TRANG_THAI": "Successful Delivery Cancellation (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/15/2026 3:11:45 PM",
+      "NGAY": "15/05/2026",
+      "GIO": "15:11:45",
+      "TRANG_THAI": "[COD]Đã thu tiền (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/15/2026 3:11:45 PM",
+      "NGAY": "15/05/2026",
+      "GIO": "15:11:45",
+      "TRANG_THAI": "EMI - Phát thành công (Delivered) (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/15/2026 7:04:08 PM",
+      "NGAY": "15/05/2026",
+      "GIO": "19:04:08",
+      "TRANG_THAI": "Đã thu tiền bưu tá (881110: BCVH Long Xuyên - An Giang                      )",
+      "VI_TRI": "",
+      "DIEN_THOAI": ""
+    },
+    {
+      "NGAY_TRANG_THAI": "5/19/2026 3:46:23 PM",
+      "NGAY": "19/05/2026",
+      "GIO": "15:46:23",
+      "TRANG_THAI": "[COD]Trả tiền cho người gửi (130658: EMS Bắc Từ Liêm - Hà Nội                        )",
+      "VI_TRI": "Sô´Ngõ 84,   Đường Xuân Phương, Phường Xuân Phương, Nam Từ Liêm, Hà Nội                        ",
+      "DIEN_THOAI": ""
+    }
+  ],
+  "List_TBL_DELIVERY": [
+    {
+      "NGAY_TRANG_THAI": "04/05/2026",
+      "GIO_TRANG_THAI": "15:34:33",
+      "NGAY_PHAT": "04/05/2026",
+      "NGAY_NHAP": null,
+      "VI_TRI": "881110 - BCVH Long Xuyên",
+      "TRANG_THAI": "Chưa phát được. 25.Không liên lạc được với người nhận/6.Liên hệ với người gửi, chờ trả lời"
+    },
+    {
+      "NGAY_TRANG_THAI": "08/05/2026",
+      "GIO_TRANG_THAI": "15:33:02",
+      "NGAY_PHAT": "08/05/2026",
+      "NGAY_NHAP": null,
+      "VI_TRI": "881110 - BCVH Long Xuyên",
+      "TRANG_THAI": "Chưa phát được. 11. Bưu gửi hết thời gian lưu giữ/4.Chuyển hoàn cho người gửi"
+    },
+    {
+      "NGAY_TRANG_THAI": "14/05/2026",
+      "GIO_TRANG_THAI": "09:18:00",
+      "NGAY_PHAT": "14/05/2026",
+      "NGAY_NHAP": null,
+      "VI_TRI": "881110 - BCVH Long Xuyên",
+      "TRANG_THAI": "Đã phát hoàn thành công. Người nhận:()+++++HÁI VŨ.Ghi chú: (DingDong) "
+    },
+    {
+      "NGAY_TRANG_THAI": "15/05/2026",
+      "GIO_TRANG_THAI": "14:48:37",
+      "NGAY_PHAT": "15/05/2026",
+      "NGAY_NHAP": null,
+      "VI_TRI": "881110 - BCVH Long Xuyên",
+      "TRANG_THAI": "Chưa phát được. 26.Lý do khác/Xử lý khác"
+    },
+    {
+      "NGAY_TRANG_THAI": "15/05/2026",
+      "GIO_TRANG_THAI": "15:11:35",
+      "NGAY_PHAT": "15/05/2026",
+      "NGAY_NHAP": null,
+      "VI_TRI": "881110 - BCVH Long Xuyên",
+      "TRANG_THAI": "Đã phát thành công . Người nhận:()+++++HÁI VŨ"
+    }
+  ],
+  "List_TBL_DELIVERY_lIST": null,
+  "Code": "00",
+  "Message": "Lấy dữ liệu thành công",
+  "TBL_INFO": {
+    "Nuoc_Chapnhan": "VN - VIETNAM",
+    "Nuoc_Phat": "VN - VIETNAM",
+    "BC_GUI": "130658 - EMS Bắc Từ Liêm",
+    "BC_PHAT": "88 - An Giang                      ",
+    "HO_TEN_GUI": "Shop 188",
+    "DIA_CHI_GUI": "",
+    "HO_TEN_NHAN": "",
+    "DIA_CHI_NHAN": "Mỹ Thới - Long xuyên - An Giang                      ",
+    "LO": "",
+    "MA_KH": "11306588435485",
+    "MA_THAM_CHIEU": "H28042607",
+    "KHOI_LUONG": "225",
+    "MAE1": "EH042737692VN",
+    "TRANG_THAI": "Đã phát thành công . Người nhận:()+++++HÁI VŨ"
+  }
+}

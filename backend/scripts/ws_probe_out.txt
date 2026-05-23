@@ -1,0 +1,164 @@
+﻿--- GET http://ws.ems.com.vn/api/v1/orders/tracking/EH042737692VN 200
+{"code":"error","error_code":"000","message":"H\u1ec7 th\u1ed1ng \u0111ang g\u1eb7p s\u1ef1 c\u1ed1, h\u00e3y th\u1eed l\u1ea1i sau"}
+--- GET http://ws.ems.com.vn/api/v1/orders 404
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>An Error Occurred: Not Found</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 128 128%22><text y=%221.2em%22 font-size=%2296%22>Γ¥î</text></svg>" />
+    <style>body { background-color: #fff; color: #222; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; }
+.container { margin: 30px; max-width: 600px; }
+h1 { color: #dc3545; font-size: 24px; }
+h2 { font-size: 18px; }</style>
+</head>
+<body>
+<div class="container">
+    <h1>Oops! An Error Occurred</h1>
+    <h2>The server returned a "404 Not Found".</h2>
+
+    <p>
+        Someth
+--- GET http://ws.ems.com.vn/api/v1/orders/search 404
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>An Error Occurred: Not Found</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 128 128%22><text y=%221.2em%22 font-size=%2296%22>Γ¥î</text></svg>" />
+    <style>body { background-color: #fff; color: #222; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; }
+.container { margin: 30px; max-width: 600px; }
+h1 { color: #dc3545; font-size: 24px; }
+h2 { font-size: 18px; }</style>
+</head>
+<body>
+<div class="container">
+    <h1>Oops! An Error Occurred</h1>
+    <h2>The server returned a "404 Not Found".</h2>
+
+    <p>
+        Someth
+--- GET http://ws.ems.com.vn/api/v1/orders/detail 404
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>An Error Occurred: Not Found</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 128 128%22><text y=%221.2em%22 font-size=%2296%22>Γ¥î</text></svg>" />
+    <style>body { background-color: #fff; color: #222; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; }
+.container { margin: 30px; max-width: 600px; }
+h1 { color: #dc3545; font-size: 24px; }
+h2 { font-size: 18px; }</style>
+</head>
+<body>
+<div class="container">
+    <h1>Oops! An Error Occurred</h1>
+    <h2>The server returned a "404 Not Found".</h2>
+
+    <p>
+        Someth
+--- POST http://ws.ems.com.vn/api/v1/orders/detail 404
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>An Error Occurred: Not Found</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 128 128%22><text y=%221.2em%22 font-size=%2296%22>Γ¥î</text></svg>" />
+    <style>body { background-color: #fff; color: #222; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; }
+.container { margin: 30px; max-width: 600px; }
+h1 { color: #dc3545; font-size: 24px; }
+h2 { font-size: 18px; }</style>
+</head>
+<body>
+<div class="container">
+    <h1>Oops! An Error Occurred</h1>
+    <h2>The server returned a "404 Not Found".</h2>
+
+    <p>
+        Someth
+--- GET http://ws.ems.com.vn/api/v1/orders/get-detail 404
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>An Error Occurred: Not Found</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 128 128%22><text y=%221.2em%22 font-size=%2296%22>Γ¥î</text></svg>" />
+    <style>body { background-color: #fff; color: #222; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; }
+.container { margin: 30px; max-width: 600px; }
+h1 { color: #dc3545; font-size: 24px; }
+h2 { font-size: 18px; }</style>
+</head>
+<body>
+<div class="container">
+    <h1>Oops! An Error Occurred</h1>
+    <h2>The server returned a "404 Not Found".</h2>
+
+    <p>
+        Someth
+--- GET http://ws.ems.com.vn/api/v1/orders/info 404
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>An Error Occurred: Not Found</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 128 128%22><text y=%221.2em%22 font-size=%2296%22>Γ¥î</text></svg>" />
+    <style>body { background-color: #fff; color: #222; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; }
+.container { margin: 30px; max-width: 600px; }
+h1 { color: #dc3545; font-size: 24px; }
+h2 { font-size: 18px; }</style>
+</head>
+<body>
+<div class="container">
+    <h1>Oops! An Error Occurred</h1>
+    <h2>The server returned a "404 Not Found".</h2>
+
+    <p>
+        Someth
+--- GET http://ws.ems.com.vn/api/v1/orders/get-order 404
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>An Error Occurred: Not Found</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 128 128%22><text y=%221.2em%22 font-size=%2296%22>Γ¥î</text></svg>" />
+    <style>body { background-color: #fff; color: #222; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; }
+.container { margin: 30px; max-width: 600px; }
+h1 { color: #dc3545; font-size: 24px; }
+h2 { font-size: 18px; }</style>
+</head>
+<body>
+<div class="container">
+    <h1>Oops! An Error Occurred</h1>
+    <h2>The server returned a "404 Not Found".</h2>
+
+    <p>
+        Someth
+--- GET http://ws.ems.com.vn/api/v1/orders/get-order-by-tracking-code 404
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>An Error Occurred: Not Found</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 128 128%22><text y=%221.2em%22 font-size=%2296%22>Γ¥î</text></svg>" />
+    <style>body { background-color: #fff; color: #222; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; }
+.container { margin: 30px; max-width: 600px; }
+h1 { color: #dc3545; font-size: 24px; }
+h2 { font-size: 18px; }</style>
+</head>
+<body>
+<div class="container">
+    <h1>Oops! An Error Occurred</h1>
+    <h2>The server returned a "404 Not Found".</h2>
+
+    <p>
+        Someth
+ERR https://api.my.ems.com.vn/api/v1/shipments HTTPSConnectionPool(host='api.my.ems.com.vn', port=443): Max retries exceeded with url: /api/v1/shipments?merchant_token=d3196f828f8a9ef0f689b0aa9e80023d&tracking_code=EH042737692VN (Caused by NameResolutionError("HTTPSConnection(host='api.my.ems.com.vn', port=443): Failed to resolve 'api.my.ems.com.vn' ([Errno 11002] getaddrinfo failed)"))
+ERR https://api.my.ems.com.vn/api/v1/shipments/EH042737692VN HTTPSConnectionPool(host='api.my.ems.com.vn', port=443): Max retries exceeded with url: /api/v1/shipments/EH042737692VN?merchant_token=d3196f828f8a9ef0f689b0aa9e80023d (Caused by NameResolutionError("HTTPSConnection(host='api.my.ems.com.vn', port=443): Failed to resolve 'api.my.ems.com.vn' ([Errno 11002] getaddrinfo failed)"))

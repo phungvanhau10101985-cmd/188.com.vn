@@ -1,6 +1,6 @@
 # backend/app/api/endpoints/orders.py - COMPLETE ORDER API WITH DEPOSIT
 import re
-from fastapi import APIRouter, Depends, HTTPException, Query, Body, status, BackgroundTasks, Header
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, status, BackgroundTasks, Header, UploadFile, File
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -25,7 +25,25 @@ from app.services import promotion_grants as grant_svc
 from app.services.order_discounts import calculate_order_discounts
 from app.services import affiliate_wallet as affiliate_svc
 from app.services import order_shipment_timeline as shipment_svc
+from app.services import ems_shipment_import as ems_import_svc
 from app.schemas import order_shipment as shipment_schemas
+
+
+def _serialize_user_order(db: Session, order: models.Order) -> schemas.OrderResponse:
+    base = schemas.OrderResponse.model_validate(order)
+    return base.model_copy(
+        update={"can_confirm_received": shipment_svc.can_customer_confirm_received(db, order)}
+    )
+
+
+def _serialize_user_orders(db: Session, orders: List[models.Order]) -> List[schemas.OrderResponse]:
+    flags = shipment_svc.batch_can_confirm_received(db, orders)
+    return [
+        schemas.OrderResponse.model_validate(order).model_copy(
+            update={"can_confirm_received": flags.get(order.id, False)}
+        )
+        for order in orders
+    ]
 
 
 def _dec(v) -> Decimal:
@@ -283,10 +301,11 @@ def read_orders(
     """
     Get user's orders
     """
-    return crud.order.get_user_orders(
+    orders = crud.order.get_user_orders(
         db, user_id=current_user.id,
         skip=skip, limit=limit, status=status
     )
+    return _serialize_user_orders(db, orders)
 
 # ========== PAYMENT/DEPOSIT ENDPOINTS (specific paths before /{order_id}) ==========
 @router.patch("/{order_id}/deposit-type", response_model=schemas.OrderResponse)
@@ -495,15 +514,23 @@ def confirm_received(
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Khách hàng xác nhận đã nhận hàng (chuyển trạng thái Đang giao -> Đã nhận hàng)
+    Khách hàng xác nhận đã nhận hàng (chỉ khi bước awaiting_confirm đang active)
     """
+    order = crud.order.get_order_with_items(db, order_id=order_id)
+    if not order or order.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if not shipment_svc.can_customer_confirm_received(db, order):
+        raise HTTPException(
+            status_code=400,
+            detail="Đơn hàng chưa sẵn sàng để xác nhận nhận hàng. Vui lòng đợi 188.com.vn hoàn tất giao hàng.",
+        )
     order = crud.order.confirm_received(
         db=db,
         order_id=order_id,
         user_id=current_user.id
     )
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found or cannot confirm")
+        raise HTTPException(status_code=400, detail="Không thể xác nhận đơn hàng lúc này")
     background_tasks.add_task(send_order_received_confirmed_email_task, order.id)
     return order
 
@@ -533,7 +560,7 @@ def read_order(
         raise HTTPException(status_code=404, detail="Order not found")
     if order.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    return order
+    return _serialize_user_order(db, order)
 
 # ========== ADMIN ORDER ENDPOINTS ==========
 @router.get("/admin/all", response_model=List[schemas.AdminOrderResponse])
@@ -812,6 +839,27 @@ def admin_clear_customs_shipment(
             db,
             order_id,
             current_admin.id,
+        )
+        db.commit()
+        db.refresh(order)
+        return order
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/admin/{order_id}/shipment/mark-out-for-confirm", response_model=schemas.AdminOrderResponse)
+def admin_mark_out_for_customer_confirm(
+    order_id: int,
+    payload: shipment_schemas.AdminMarkOutForConfirmIn,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Shop đóng hàng & gửi shipper — mở nút «Đã nhận hàng» cho khách."""
+    try:
+        order = shipment_svc.admin_mark_out_for_customer_confirm(
+            db,
+            order_id,
+            current_admin.id,
             tracking_number=payload.tracking_number,
             shipping_provider=payload.shipping_provider,
         )
@@ -829,6 +877,31 @@ def _require_shipment_cron_secret(authorization: Optional[str]) -> None:
     scheme, _, token = (authorization or "").partition(" ")
     if scheme.lower() != "bearer" or token.strip() != expected:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@router.post("/admin/shipping/ems-import", response_model=shipment_schemas.EmsShippingImportResponse)
+async def admin_import_ems_shipment_excel(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Import file gui ems.xlsx — cột D (MA_DON_HANG) tra EMS, cột J (TEN_NGUOI_NHAN) tách mã DHxxx."""
+    filename = (file.filename or "").lower()
+    if not filename.endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file Excel .xlsx")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="File trống.")
+    if len(raw) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File quá lớn (tối đa 10MB).")
+
+    try:
+        payload = ems_import_svc.import_ems_shipment_excel(db, raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Không đọc được file Excel: {exc}") from exc
+
+    return payload
 
 
 @router.get("/cron/advance-shipment-timelines")

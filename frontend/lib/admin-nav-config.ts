@@ -9,6 +9,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     title: 'Bán hàng & sản phẩm',
     items: [
       { href: '/admin/orders', label: 'Đơn hàng' },
+      { href: '/admin/orders/shipping', label: 'Vận chuyển EMS' },
       { href: '/admin/products', label: 'Sản phẩm' },
       { href: '/admin/test', label: 'Test & thử nghiệm', privilegedOnly: true },
       { href: '/admin/products/source-stock-check', label: 'Kiểm tra nguồn hàng' },

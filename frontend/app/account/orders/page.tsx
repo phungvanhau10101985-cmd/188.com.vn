@@ -39,6 +39,7 @@ interface Order {
   created_at: string;
   items: OrderItem[];
   tracking_number?: string | null;
+  can_confirm_received?: boolean;
 }
 
 const CUSTOMER_TABS = [
@@ -424,7 +425,7 @@ export default function AccountOrdersPage() {
                     </button>
                   </>
                 )}
-                {['deposit_paid', 'confirmed', 'processing', 'shipping'].includes(order.status) && (
+                {order.can_confirm_received && (
                   <button
                     type="button"
                     onClick={() => handleConfirmReceived(order)}

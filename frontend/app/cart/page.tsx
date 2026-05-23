@@ -635,13 +635,13 @@ export default function CartPage() {
                   ? `Còn ${welcomeVoucher.days_remaining} ngày — chọn mã bên dưới`
                   : 'Hết hạn hôm nay — dùng ngay'}
                 {' · '}
-                <Link href="/khuyen-mai" className="underline">
+                <Link href="/account/khuyen-mai" className="underline">
                   Ví khuyến mãi
                 </Link>
               </p>
             ) : (
               <p className="mt-1.5 text-emerald-700">
-                <Link href="/khuyen-mai" className="underline font-medium">
+                <Link href="/account/khuyen-mai" className="underline font-medium">
                   Xem ví khuyến mãi
                 </Link>
               </p>

@@ -35,6 +35,7 @@ export default function AccountPage() {
   const { pushToast } = useToast();
   const router = useRouter();
   const [orders, setOrders] = useState<OrderLite[]>([]);
+  const [promoWalletCount, setPromoWalletCount] = useState(0);
   const [adminNavBusy, setAdminNavBusy] = useState(false);
 
   useEffect(() => {
@@ -49,6 +50,10 @@ export default function AccountPage() {
           if (profile && typeof profile.id === 'number') updateUser(profile);
         })
         .catch(() => {});
+      apiClient
+        .getWelcomePromoProgram()
+        .then((res) => setPromoWalletCount((res.items ?? []).filter((v) => v.eligible).length))
+        .catch(() => setPromoWalletCount(0));
     }
   }, [isAuthenticated, updateUser]);
 
@@ -158,6 +163,16 @@ export default function AccountPage() {
           <Link href="/thanh-vien" className={menuRowClass}>
             <span className="flex-1 text-left">👥 Thành viên thân quen</span>
             <span className="shrink-0 text-gray-400" aria-hidden>›</span>
+          </Link>
+          <Link href="/account/khuyen-mai" className={menuRowClass}>
+            <span className="flex-1 text-left">🎁 Ví quà / Khuyến mãi</span>
+            {promoWalletCount > 0 ? (
+              <span className="shrink-0 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                {promoWalletCount}
+              </span>
+            ) : (
+              <span className="shrink-0 text-gray-400" aria-hidden>›</span>
+            )}
           </Link>
           <Link href="/account/notifications" className={menuRowClass}>
             <span className="flex-1 text-left">🔔 Trung tâm thông báo</span>

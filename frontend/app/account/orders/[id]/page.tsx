@@ -40,6 +40,7 @@ interface Order {
   created_at: string;
   items: OrderItem[];
   tracking_number?: string | null;
+  can_confirm_received?: boolean;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -457,21 +458,21 @@ export default function AccountOrderDetailPage() {
              </button>
           )}
           {['deposit_paid', 'confirmed', 'processing', 'shipping'].includes(order.status) && (
-            <>
-              <Link
-                href={`/account/orders/${order.id}/tracking`}
-                className="inline-flex min-h-[44px] items-center px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-50"
-              >
-                Lịch trình đơn hàng
-              </Link>
-              <button
-                onClick={() => setShowConfirmReceivedModal(true)}
-                disabled={confirming}
-                className="px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-[#c2410c] disabled:opacity-50"
-              >
-                Đã nhận hàng
-              </button>
-            </>
+            <Link
+              href={`/account/orders/${order.id}/tracking`}
+              className="inline-flex min-h-[44px] items-center px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-50"
+            >
+              Lịch trình đơn hàng
+            </Link>
+          )}
+          {order.can_confirm_received && (
+            <button
+              onClick={() => setShowConfirmReceivedModal(true)}
+              disabled={confirming}
+              className="px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-[#c2410c] disabled:opacity-50"
+            >
+              Đã nhận hàng
+            </button>
           )}
         </div>
       </div>

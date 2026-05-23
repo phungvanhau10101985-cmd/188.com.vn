@@ -78,7 +78,7 @@ export default function AdminPromotionsPage() {
       <h1 className="text-2xl font-bold text-gray-900 mb-2">Khuyến mãi</h1>
       <p className="text-sm text-gray-600 mb-6">
         Cấu hình chương trình chào mừng khách mới (mã WELCOME188). Khách thấy số ngày còn lại tại trang{' '}
-        <span className="font-mono text-gray-800">/khuyen-mai</span> và giỏ hàng.
+        <span className="font-mono text-gray-800">/account/khuyen-mai</span> và giỏ hàng.
       </p>
 
       {toast ? (
