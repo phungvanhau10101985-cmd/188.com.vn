@@ -135,12 +135,20 @@ class EmsShippingImportStatsResponse(BaseModel):
     orders_synced: int = 0
 
 
+class EmsShippingListPaginationResponse(BaseModel):
+    skip: int = 0
+    limit: int = 50
+    total: int = 0
+    filtered_total: int = 0
+
+
 class EmsShippingImportResponse(BaseModel):
     ok: bool = True
     warnings: List[str] = []
     summary: EmsShippingImportSummaryResponse
     import_stats: Optional[EmsShippingImportStatsResponse] = None
     tracking_refresh_job_id: Optional[str] = None
+    pagination: Optional[EmsShippingListPaginationResponse] = None
     rows: List[EmsShippingImportRowResponse]
 
 

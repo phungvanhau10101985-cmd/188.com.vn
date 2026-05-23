@@ -623,11 +623,19 @@ def admin_lookup_order_by_code(
 
 @router.get("/admin/shipping/ems-records", response_model=shipment_schemas.EmsShippingImportResponse)
 def admin_list_ems_shipping_records(
+    skip: int = 0,
+    limit: int = 50,
+    sync_status: Optional[str] = None,
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("orders")),
 ):
-    """Danh sách bảng quản lý vận chuyển EMS đã lưu."""
-    return ems_import_svc.list_ems_shipping_records(db)
+    """Danh sách bảng quản lý vận chuyển EMS đã lưu (phân trang)."""
+    return ems_import_svc.list_ems_shipping_records(
+        db,
+        skip=skip,
+        limit=limit,
+        sync_status=sync_status,
+    )
 
 
 @router.post("/admin/shipping/ems-import", response_model=shipment_schemas.EmsShippingImportResponse)

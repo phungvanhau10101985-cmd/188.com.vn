@@ -18,6 +18,8 @@ import {
   type EmsTrackingRefreshJob,
 } from '@/lib/admin-api';
 
+const EMS_LIST_PAGE_SIZES = [25, 50, 100] as const;
+const EMS_LIST_DEFAULT_PAGE_SIZE = 50;
 const EMS_TRACKING_JOB_STORAGE_KEY = 'admin_ems_tracking_job_id';
 
 function formatStaleSeconds(seconds?: number | null): string {
@@ -163,6 +165,8 @@ export default function AdminShippingPage() {
   const [codResult, setCodResult] = useState<EmsCodSettlementImportResult | null>(null);
   const [freightResult, setFreightResult] = useState<EmsFreightSettlementImportResult | null>(null);
   const [filter, setFilter] = useState<FilterKey>('all');
+  const [listPage, setListPage] = useState(1);
+  const [listPageSize, setListPageSize] = useState<number>(EMS_LIST_DEFAULT_PAGE_SIZE);
   const [codFilter, setCodFilter] = useState<CodFilterKey>('all');
   const [freightFilter, setFreightFilter] = useState<FreightFilterKey>('all');
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
@@ -181,14 +185,25 @@ export default function AdminShippingPage() {
     setListLoading(true);
     setError(null);
     try {
-      const data = await adminShippingAPI.listEmsRecords();
+      const skip = (listPage - 1) * listPageSize;
+      const data = await adminShippingAPI.listEmsRecords({
+        skip,
+        limit: listPageSize,
+        sync_status: filter === 'all' ? undefined : filter,
+      });
+      const filteredTotal = data.pagination?.filtered_total ?? data.rows.length;
+      const maxPage = Math.max(1, Math.ceil(filteredTotal / listPageSize));
+      if (filteredTotal > 0 && listPage > maxPage) {
+        setListPage(maxPage);
+        return;
+      }
       setResult(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không tải được bảng vận chuyển');
     } finally {
       setListLoading(false);
     }
-  }, []);
+  }, [filter, listPage, listPageSize]);
 
   const loadCodSettlements = useCallback(async () => {
     setCodListLoading(true);
@@ -319,14 +334,27 @@ export default function AdminShippingPage() {
     void loadOpsStats();
   }, [loadRecords, loadCodSettlements, loadFreightSettlements, loadOpsStats]);
 
-  const filteredRows = useMemo(() => {
-    if (!result) return [];
-    if (filter === 'all') return result.rows;
-    if (filter === 'unlinked') {
-      return result.rows.filter((row) => row.sync_status === 'unlinked' || row.sync_status === 'order_not_found');
-    }
-    return result.rows.filter((row) => row.sync_status === filter);
-  }, [result, filter]);
+  const applyFilter = useCallback((next: FilterKey) => {
+    setFilter(next);
+    setListPage(1);
+    setSelectedKeys(new Set());
+  }, []);
+
+  const pageRows = result?.rows ?? [];
+
+  const listPagination = result?.pagination;
+  const filteredTotal = listPagination?.filtered_total ?? pageRows.length;
+  const totalRows = listPagination?.total ?? result?.summary.total_rows ?? 0;
+  const totalPages = Math.max(1, Math.ceil(filteredTotal / listPageSize));
+  const displayFrom = filteredTotal === 0 ? 0 : (listPage - 1) * listPageSize + 1;
+  const displayTo = Math.min(listPage * listPageSize, filteredTotal);
+
+  const pageKeyList = useMemo(() => pageRows.map(rowKey), [pageRows]);
+
+  const allPageSelected =
+    pageKeyList.length > 0 && pageKeyList.every((key) => selectedKeys.has(key));
+
+  const somePageSelected = pageKeyList.some((key) => selectedKeys.has(key));
 
   const activeCodBatch = useMemo(() => {
     if (!codResult?.batches.length) return null;
@@ -386,14 +414,6 @@ export default function AdminShippingPage() {
     }
     return freightResult?.summary ?? null;
   }, [activeFreightBatch, freightResult]);
-
-  const filteredKeyList = useMemo(() => filteredRows.map(rowKey), [filteredRows]);
-
-  const allFilteredSelected =
-    filteredKeyList.length > 0 && filteredKeyList.every((key) => selectedKeys.has(key));
-
-  const someFilteredSelected = filteredKeyList.some((key) => selectedKeys.has(key));
-
   const runImport = useCallback(async () => {
     if (!file) {
       setError('Chọn file Excel trước.');
@@ -404,9 +424,10 @@ export default function AdminShippingPage() {
     setDeleteConfirmKeys(null);
     try {
       const data = await adminShippingAPI.importEmsExcel(file);
-      setResult(data);
+      setListPage(1);
       setFilter('all');
       setSelectedKeys(new Set());
+      setResult(data);
       if (data.tracking_refresh_job_id) {
         startTrackingPoll(data.tracking_refresh_job_id);
       }
@@ -471,10 +492,10 @@ export default function AdminShippingPage() {
   const toggleAllFiltered = () => {
     setSelectedKeys((prev) => {
       const next = new Set(prev);
-      if (allFilteredSelected) {
-        filteredKeyList.forEach((key) => next.delete(key));
+      if (allPageSelected) {
+        pageKeyList.forEach((key) => next.delete(key));
       } else {
-        filteredKeyList.forEach((key) => next.add(key));
+        pageKeyList.forEach((key) => next.add(key));
       }
       return next;
     });
@@ -1136,7 +1157,7 @@ export default function AdminShippingPage() {
               <button
                 key={String(key)}
                 type="button"
-                onClick={() => setFilter(key as FilterKey)}
+                onClick={() => applyFilter(key as FilterKey)}
                 className={`rounded-xl border px-3 py-3 text-left transition ${
                   filter === key ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-gray-200 bg-white'
                 }`}
@@ -1169,7 +1190,7 @@ export default function AdminShippingPage() {
                       <tr
                         key={item.key}
                         className={`cursor-pointer hover:bg-gray-50 ${filter === item.key ? 'bg-emerald-50/50' : ''}`}
-                        onClick={() => setFilter(item.key as FilterKey)}
+                        onClick={() => applyFilter(item.key as FilterKey)}
                       >
                         <td className="px-4 py-2.5">
                           <span
@@ -1208,34 +1229,59 @@ export default function AdminShippingPage() {
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Bảng vận chuyển EMS</h2>
                 <span className="text-sm text-gray-500">
-                  {filteredRows.length} dòng
+                  {filter === 'all'
+                    ? `${totalRows} dòng`
+                    : `${filteredTotal} / ${totalRows} dòng`}
+                  {filteredTotal > 0
+                    ? ` · hiển thị ${displayFrom}–${displayTo}`
+                    : ''}
                   {selectedKeys.size > 0 ? ` · đã chọn ${selectedKeys.size}` : ''}
                 </span>
               </div>
-              {selectedKeys.size > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => requestDelete([...selectedKeys])}
-                  disabled={deleting}
-                  className="inline-flex items-center rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
-                >
-                  Xóa đã chọn ({selectedKeys.size})
-                </button>
-              ) : null}
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-sm text-gray-600 flex items-center gap-1.5">
+                  <span className="whitespace-nowrap">Dòng/trang</span>
+                  <select
+                    value={listPageSize}
+                    onChange={(e) => {
+                      setListPageSize(Number(e.target.value));
+                      setListPage(1);
+                      setSelectedKeys(new Set());
+                    }}
+                    className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm"
+                  >
+                    {EMS_LIST_PAGE_SIZES.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {selectedKeys.size > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => requestDelete([...selectedKeys])}
+                    disabled={deleting}
+                    className="inline-flex items-center rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+                  >
+                    Xóa đã chọn ({selectedKeys.size})
+                  </button>
+                ) : null}
+              </div>
             </div>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto max-h-[min(70vh,720px)] overflow-y-auto">
               <table className="min-w-full text-sm">
-                <thead className="bg-gray-50 text-gray-600">
+                <thead className="bg-gray-50 text-gray-600 sticky top-0 z-10 shadow-[0_1px_0_0_rgb(229,231,235)]">
                   <tr>
-                    <th className="px-3 py-2 w-10">
+                    <th className="px-3 py-2 w-10 bg-gray-50">
                       <input
                         type="checkbox"
-                        checked={allFilteredSelected}
+                        checked={allPageSelected}
                         ref={(el) => {
-                          if (el) el.indeterminate = !allFilteredSelected && someFilteredSelected;
+                          if (el) el.indeterminate = !allPageSelected && somePageSelected;
                         }}
                         onChange={toggleAllFiltered}
-                        aria-label="Chọn tất cả dòng đang hiển thị"
+                        aria-label="Chọn tất cả dòng trên trang này"
                         className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
                       />
                     </th>
@@ -1253,16 +1299,16 @@ export default function AdminShippingPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filteredRows.length === 0 ? (
+                  {pageRows.length === 0 ? (
                     <tr>
                       <td colSpan={13} className="px-4 py-8 text-center text-gray-500">
-                        {result.rows.length === 0
+                        {totalRows === 0
                           ? 'Chưa có dòng nào. Upload file Excel EMS để bắt đầu.'
                           : 'Không có dòng nào trong bộ lọc này.'}
                       </td>
                     </tr>
                   ) : (
-                    filteredRows.map((row) => {
+                    pageRows.map((row) => {
                       const key = rowKey(row);
                       const checked = selectedKeys.has(key);
                       return (
@@ -1395,6 +1441,48 @@ export default function AdminShippingPage() {
                 </tbody>
               </table>
             </div>
+            {filteredTotal > 0 ? (
+              <div className="px-4 py-3 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
+                <span>
+                  Trang {listPage} / {totalPages} · {filteredTotal} dòng
+                  {filter !== 'all' ? ' (đã lọc)' : ''}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setListPage(1)}
+                    disabled={listPage <= 1 || listLoading}
+                    className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    Đầu
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setListPage((p) => Math.max(1, p - 1))}
+                    disabled={listPage <= 1 || listLoading}
+                    className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    Trước
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setListPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={listPage >= totalPages || listLoading}
+                    className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    Sau
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setListPage(totalPages)}
+                    disabled={listPage >= totalPages || listLoading}
+                    className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    Cuối
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </section>
         </>
       ) : null}

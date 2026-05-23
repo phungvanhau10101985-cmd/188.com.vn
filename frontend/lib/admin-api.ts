@@ -2671,6 +2671,13 @@ export interface EmsShippingImportRow {
   freight_high_fee_warning?: string | null;
 }
 
+export interface EmsShippingListPagination {
+  skip: number;
+  limit: number;
+  total: number;
+  filtered_total: number;
+}
+
 export interface EmsShippingImportResult {
   ok: boolean;
   warnings: string[];
@@ -2694,6 +2701,7 @@ export interface EmsShippingImportResult {
     orders_synced: number;
   } | null;
   tracking_refresh_job_id?: string | null;
+  pagination?: EmsShippingListPagination | null;
   rows: EmsShippingImportRow[];
 }
 
@@ -2716,9 +2724,23 @@ export interface EmsTrackingRefreshJob {
   resume_message?: string | null;
 }
 
+export type EmsShippingListParams = {
+  skip?: number;
+  limit?: number;
+  sync_status?: string;
+};
+
 export const adminShippingAPI = {
-  listEmsRecords: () =>
-    fetchAdmin<EmsShippingImportResult>('/orders/admin/shipping/ems-records'),
+  listEmsRecords: (params: EmsShippingListParams = {}) => {
+    const qs = new URLSearchParams();
+    if (params.skip != null && params.skip > 0) qs.set('skip', String(params.skip));
+    if (params.limit != null) qs.set('limit', String(params.limit));
+    if (params.sync_status && params.sync_status !== 'all') qs.set('sync_status', params.sync_status);
+    const query = qs.toString();
+    return fetchAdmin<EmsShippingImportResult>(
+      `/orders/admin/shipping/ems-records${query ? `?${query}` : ''}`,
+    );
+  },
 
   getOperationsStats: () =>
     fetchAdmin<EmsShippingOperationsStats>('/orders/admin/shipping/operations-stats'),

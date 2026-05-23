@@ -6,6 +6,7 @@ import unicodedata
 from typing import Any, Optional
 
 from openpyxl import load_workbook
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -750,17 +751,99 @@ def _enrich_row_from_live_order(db: Session, row: dict[str, Any]) -> dict[str, A
     return row
 
 
-def list_ems_shipping_records(db: Session) -> dict[str, Any]:
+def _build_summary_from_db(db: Session) -> dict[str, Any]:
+    rows = (
+        db.query(
+            EmsShippingRecord.sync_status,
+            func.count(EmsShippingRecord.id),
+            func.coalesce(func.sum(EmsShippingRecord.cod_amount), 0),
+        )
+        .group_by(EmsShippingRecord.sync_status)
+        .all()
+    )
+    counts: dict[str, int] = {k: 0 for k in _SYNC_STATUS_ORDER}
+    cod_totals: dict[str, int] = {k: 0 for k in _SYNC_STATUS_ORDER}
+    for status_raw, count_raw, cod_raw in rows:
+        status = (status_raw or "pending").strip()
+        if status not in counts:
+            counts[status] = 0
+            cod_totals[status] = 0
+        counts[status] += int(count_raw or 0)
+        cod_totals[status] += int(cod_raw or 0)
+
+    breakdown: list[dict[str, Any]] = [
+        {"key": key, "count": counts.get(key, 0), "cod_total": cod_totals.get(key, 0)}
+        for key in _SYNC_STATUS_ORDER
+        if counts.get(key, 0) > 0
+    ]
+    for key, count in counts.items():
+        if count > 0 and key not in _SYNC_STATUS_ORDER:
+            breakdown.append({"key": key, "count": count, "cod_total": cod_totals.get(key, 0)})
+
+    unlinked_count = counts.get("unlinked", 0) + counts.get("order_not_found", 0)
+    return {
+        "total_rows": sum(counts.values()),
+        "matched": counts.get("matched", 0),
+        "in_progress": counts.get("in_progress", 0),
+        "mismatch": counts.get("mismatch", 0),
+        "unlinked": unlinked_count,
+        "order_not_found": counts.get("order_not_found", 0),
+        "ems_not_found": counts.get("ems_not_found", 0),
+        "parse_error": counts.get("parse_error", 0),
+        "total_cod_amount": sum(cod_totals.values()),
+        "breakdown": breakdown,
+    }
+
+
+def _apply_sync_status_filter(query, sync_status: Optional[str]):
+    status = (sync_status or "").strip()
+    if not status or status == "all":
+        return query
+    if status == "unlinked":
+        return query.filter(
+            or_(
+                EmsShippingRecord.sync_status == "unlinked",
+                EmsShippingRecord.sync_status == "order_not_found",
+            )
+        )
+    return query.filter(EmsShippingRecord.sync_status == status)
+
+
+def list_ems_shipping_records(
+    db: Session,
+    *,
+    skip: int = 0,
+    limit: int = 50,
+    sync_status: Optional[str] = None,
+) -> dict[str, Any]:
+    skip = max(0, int(skip or 0))
+    limit = max(1, min(int(limit or 50), 200))
+
+    base_query = db.query(EmsShippingRecord)
+    filtered_query = _apply_sync_status_filter(base_query, sync_status)
+    total = int(base_query.count() or 0)
+    filtered_total = int(filtered_query.count() or 0)
+
     records = (
-        db.query(EmsShippingRecord)
-        .order_by(EmsShippingRecord.updated_at.desc(), EmsShippingRecord.id.desc())
+        filtered_query.order_by(
+            EmsShippingRecord.updated_at.desc(),
+            EmsShippingRecord.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
         .all()
     )
     rows = [_enrich_row_from_live_order(db, _record_to_dict(r)) for r in records]
     return {
         "ok": True,
         "warnings": [],
-        "summary": _build_summary(rows),
+        "summary": _build_summary_from_db(db),
+        "pagination": {
+            "skip": skip,
+            "limit": limit,
+            "total": total,
+            "filtered_total": filtered_total,
+        },
         "rows": rows,
     }
 
@@ -834,7 +917,7 @@ def import_ems_shipment_excel(
     except Exception as exc:
         warnings.append(f"Không khởi chạy job tra EMS nền: {exc}")
 
-    payload = list_ems_shipping_records(db)
+    payload = list_ems_shipping_records(db, skip=0, limit=50)
     payload["warnings"] = warnings
     payload["import_stats"] = {
         "file_rows_processed": len(results),
