@@ -19,6 +19,8 @@ import {
 } from '@/lib/admin-api';
 
 const EMS_TRACKING_JOB_STORAGE_KEY = 'admin_ems_tracking_job_id';
+
+const SYNC_LABELS: Record<string, string> = {
   matched: 'Khớp',
   in_progress: 'Đang xử lý',
   mismatch: 'Lệch trạng thái',
