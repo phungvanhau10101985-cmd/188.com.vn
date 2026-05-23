@@ -5,7 +5,8 @@ from app.api.endpoints import (
     debug, fallback, filters, 
     import_export, import_1688, user_behavior, analytics,
     orders, category_seo, loyalty,
-    notifications, push, nanoai_search, image_localization, birthday_promo
+    notifications, push, nanoai_search, image_localization, birthday_promo,
+    promotions,
 )
 
 api_router = APIRouter()
@@ -13,6 +14,7 @@ api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["authentication"])
 api_router.include_router(loyalty.router, prefix="/loyalty", tags=["loyalty"])
 api_router.include_router(birthday_promo.router, prefix="/birthday-promo", tags=["birthday-promo"])
+api_router.include_router(promotions.router, prefix="/promotions", tags=["promotions"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(push.router, prefix="/push", tags=["push"])
 api_router.include_router(products.router, prefix="/products", tags=["products"])

@@ -109,6 +109,12 @@ def create_user(db: Session, user: UserCreate) -> Optional[User]:
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
+    try:
+        from app.services import promotion_grants as grant_svc
+
+        grant_svc.process_signup_grants(db, db_user.id)
+    except Exception:
+        pass
     return db_user
 
 

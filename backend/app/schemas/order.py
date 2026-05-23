@@ -80,6 +80,7 @@ class OrderCreate(BaseModel):
     deposit_type: Optional[DepositType] = None
     wallet_amount: Optional[Decimal] = Field(default=None, ge=0, description="Số tiền trả bằng ví affiliate")
     referral_code: Optional[str] = Field(default=None, max_length=32, description="Mã ref từ cookie/link affiliate")
+    promo_code: Optional[str] = Field(default=None, max_length=50, description="Mã khuyến mãi (vd: WELCOME188)")
 
 class OrderUpdate(BaseModel):
     """Schema for updating order (admin only)"""

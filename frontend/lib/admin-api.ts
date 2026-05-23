@@ -2446,6 +2446,73 @@ export const adminLoyaltyAPI = {
     fetchAdmin<void>(`/loyalty/tiers/${id}`, { method: 'DELETE' }),
 };
 
+export interface AdminWelcomePromoSettings {
+  code: string;
+  name: string;
+  description?: string | null;
+  discount_percent: number;
+  max_discount_amount: number;
+  eligible_within_days?: number | null;
+  show_days_remaining: boolean;
+  is_active: boolean;
+  first_order_only: boolean;
+}
+
+export const adminPromotionsAPI = {
+  getWelcomeSettings: () => fetchAdmin<AdminWelcomePromoSettings>('/promotions/admin/welcome'),
+  updateWelcomeSettings: (data: {
+    name?: string;
+    description?: string;
+    discount_percent?: number;
+    max_discount_amount?: number;
+    eligible_within_days?: number;
+    is_active?: boolean;
+  }) =>
+    fetchAdmin<AdminWelcomePromoSettings>('/promotions/admin/welcome', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  grantToUser: (data: {
+    user_id: number;
+    promo_code: string;
+    expires_in_days?: number;
+    message?: string;
+    notify?: boolean;
+  }) =>
+    fetchAdmin<AdminUserGrantRow>('/promotions/admin/grant', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  grantComebackSegment: (inactive_days?: number) =>
+    fetchAdmin<{ granted: number; skipped: number }>('/promotions/admin/grant-segment', {
+      method: 'POST',
+      body: JSON.stringify({ segment: 'comeback', inactive_days: inactive_days ?? 30 }),
+    }),
+  backfillWelcome: () =>
+    fetchAdmin<{ granted: number; skipped: number }>('/promotions/admin/grant-segment', {
+      method: 'POST',
+      body: JSON.stringify({ segment: 'welcome_backfill' }),
+    }),
+  runCartAbandon: (abandon_hours?: number) =>
+    fetchAdmin<{ granted: number; skipped: number }>('/promotions/admin/grant-segment', {
+      method: 'POST',
+      body: JSON.stringify({ segment: 'cart_abandon', abandon_hours: abandon_hours ?? 24 }),
+    }),
+  listUserGrants: (user_id: number) =>
+    fetchAdmin<AdminUserGrantRow[]>(`/promotions/admin/grants?user_id=${user_id}`),
+};
+
+export interface AdminUserGrantRow {
+  id: number;
+  user_id: number;
+  code: string;
+  name: string;
+  status: string;
+  source: string;
+  granted_at?: string | null;
+  expires_at?: string | null;
+}
+
 export interface AdminWalletWithdrawal {
   id: number;
   user_id: number;

@@ -267,6 +267,13 @@ def admin_update_order(
         commission_confirmed = affiliate_svc.handle_order_status_change(db, order, old_status, update_data['status'])
         if update_data['status'] == OrderStatus.DELIVERED.value:
             shipment_svc.mark_delivered_on_timeline(db, order, admin_id=admin_id)
+            if order.user_id:
+                try:
+                    from app.services import promotion_grants as grant_svc
+
+                    grant_svc.process_first_delivered_grants(db, order.user_id)
+                except Exception:
+                    pass
     if 'payment_status' in update_data:
         affiliate_svc.handle_order_payment_status_change(db, order, update_data['payment_status'])
     
@@ -338,6 +345,13 @@ def confirm_received(
     shipment_svc.mark_delivered_on_timeline(db, order)
     db.commit()
     db.refresh(order)
+    if order.user_id:
+        try:
+            from app.services import promotion_grants as grant_svc
+
+            grant_svc.process_first_delivered_grants(db, order.user_id)
+        except Exception:
+            pass
     if commission_confirmed:
         affiliate_svc.notify_referrer_commission_confirmed_task(order.id)
     return order

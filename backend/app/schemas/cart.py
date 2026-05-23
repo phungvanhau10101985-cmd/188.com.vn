@@ -64,6 +64,13 @@ class CartResponse(BaseModel):
     birthday_discount_percent: float = 0.0
     birthday_discount_amount: float = 0.0
     birthday_next_date: Optional[str] = None
+
+    # Welcome promo (WELCOME188)
+    welcome_promo_eligible: bool = False
+    welcome_promo_applied: bool = False
+    welcome_discount_percent: float = 0.0
+    welcome_discount_amount: float = 0.0
+    welcome_promo_code: Optional[str] = None
     
     class Config:
         from_attributes = True

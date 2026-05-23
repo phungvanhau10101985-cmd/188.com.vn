@@ -1,5 +1,5 @@
 # backend/app/api/endpoints/cart.py - COMPLETE FIXED VERSION
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
@@ -8,11 +8,11 @@ from app.db.session import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.crud.cart import cart as cart_crud
-from app.crud import loyalty as crud_loyalty
 import app.schemas as schemas
 from app.schemas.cart import CartItemCreate, CartItemUpdate, CartResponse, CartItemResponse
 from app.models.cart import CartItem, Cart
 from app.services.birthday_discount import get_birthday_discount_for_user
+from app.services.cart_discounts import build_cart_discount_fields
 
 router = APIRouter()
 
@@ -43,6 +43,7 @@ def _cart_item_to_response(item: CartItem) -> CartItemResponse:
 @router.get("", response_model=CartResponse, include_in_schema=False)
 @router.get("/", response_model=CartResponse)
 def get_user_cart(
+    promo_code: Optional[str] = Query(default=None, max_length=50),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -58,25 +59,14 @@ def get_user_cart(
     items = cart_crud.get_user_cart_items(db, user_id=current_user.id)
     summary = cart_crud.get_cart_summary(db, user_id=current_user.id)
     
-    birthday_discount = get_birthday_discount_for_user(db, current_user)
-
-    # Calculate loyalty discount
-    total_spent = crud_loyalty.calculate_user_spend_6_months(db, current_user.id)
-    current_tier = crud_loyalty.get_tier_by_spend(db, total_spent)
-    
-    loyalty_discount_percent = 0.0
-    loyalty_tier_name = None
-    
-    if current_tier:
-        loyalty_discount_percent = current_tier.discount_percent
-        loyalty_tier_name = current_tier.name
-        
     total_price = float(summary["total_price"])
-    birthday_discount_percent = float(birthday_discount.percent)
-    birthday_discount_amount = (total_price * birthday_discount_percent) / 100
-    remaining_after_birthday = max(0.0, total_price - birthday_discount_amount)
-    loyalty_discount_amount = (remaining_after_birthday * loyalty_discount_percent) / 100
-    final_price = max(0.0, remaining_after_birthday - loyalty_discount_amount)
+    birthday_discount = get_birthday_discount_for_user(db, current_user)
+    discount_fields = build_cart_discount_fields(
+        db,
+        user=current_user,
+        total_price=total_price,
+        promo_code=promo_code,
+    )
     
     # Convert CartItem models to CartItemResponse schema
     cart_items_response = [_cart_item_to_response(item) for item in items]
@@ -91,14 +81,8 @@ def get_user_cart(
         requires_deposit=summary["requires_deposit"],
         created_at=cart_record.created_at,
         updated_at=cart_record.updated_at,
-        loyalty_discount_percent=loyalty_discount_percent,
-        loyalty_discount_amount=loyalty_discount_amount,
-        final_price=final_price,
-        loyalty_tier_name=loyalty_tier_name,
-        birthday_discount_active=birthday_discount.active,
-        birthday_discount_percent=birthday_discount_percent,
-        birthday_discount_amount=birthday_discount_amount,
         birthday_next_date=birthday_discount.next_birthday.isoformat() if birthday_discount.next_birthday else None,
+        **discount_fields,
     )
 
 @router.post("/items", response_model=CartItemResponse)
@@ -189,24 +173,12 @@ def migrate_guest_cart(
         summary = cart_crud.get_cart_summary(db, user_id=current_user.id)
         
         birthday_discount = get_birthday_discount_for_user(db, current_user)
-
-        # Calculate loyalty discount
-        total_spent = crud_loyalty.calculate_user_spend_6_months(db, current_user.id)
-        current_tier = crud_loyalty.get_tier_by_spend(db, total_spent)
-        
-        loyalty_discount_percent = 0.0
-        loyalty_tier_name = None
-        
-        if current_tier:
-            loyalty_discount_percent = current_tier.discount_percent
-            loyalty_tier_name = current_tier.name
-            
         total_price = float(summary["total_price"])
-        birthday_discount_percent = float(birthday_discount.percent)
-        birthday_discount_amount = (total_price * birthday_discount_percent) / 100
-        remaining_after_birthday = max(0.0, total_price - birthday_discount_amount)
-        loyalty_discount_amount = (remaining_after_birthday * loyalty_discount_percent) / 100
-        final_price = max(0.0, remaining_after_birthday - loyalty_discount_amount)
+        discount_fields = build_cart_discount_fields(
+            db,
+            user=current_user,
+            total_price=total_price,
+        )
         
         return schemas.CartMergeResponse(
             message=result.get("message", "Migration completed"),
@@ -222,14 +194,8 @@ def migrate_guest_cart(
                 requires_deposit=summary["requires_deposit"],
                 created_at=cart_record.created_at,
                 updated_at=cart_record.updated_at,
-                loyalty_discount_percent=loyalty_discount_percent,
-                loyalty_discount_amount=loyalty_discount_amount,
-                final_price=final_price,
-                loyalty_tier_name=loyalty_tier_name,
-                birthday_discount_active=birthday_discount.active,
-                birthday_discount_percent=birthday_discount_percent,
-                birthday_discount_amount=birthday_discount_amount,
                 birthday_next_date=birthday_discount.next_birthday.isoformat() if birthday_discount.next_birthday else None,
+                **discount_fields,
             )
         )
     except ValueError as e:

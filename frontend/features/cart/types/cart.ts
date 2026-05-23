@@ -47,6 +47,11 @@ export interface Cart {
   birthday_discount_percent?: number;
   birthday_discount_amount?: number;
   birthday_next_date?: string | null;
+  welcome_promo_eligible?: boolean;
+  welcome_promo_applied?: boolean;
+  welcome_discount_percent?: number;
+  welcome_discount_amount?: number;
+  welcome_promo_code?: string | null;
 }
 
 export interface CartState {

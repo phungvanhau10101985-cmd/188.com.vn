@@ -9,7 +9,8 @@ from decimal import Decimal
 
 from app.db.session import get_db
 from app import crud, models, schemas
-from app.crud import loyalty as crud_loyalty
+from app.crud import promotion as crud_promotion
+from app.crud.promotion import PromoValidationError
 from app.models.order import OrderStatus as OrderStatusEnum, DepositType as DepositTypeEnum, PaymentStatus as PaymentStatusEnum
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission
 from app.core.config import settings
@@ -20,7 +21,8 @@ from app.services.email_service import (
     send_order_received_confirmed_email_task,
 )
 from app.services import sepay as sepay_svc
-from app.services.birthday_discount import get_birthday_discount_for_user
+from app.services import promotion_grants as grant_svc
+from app.services.order_discounts import calculate_order_discounts
 from app.services import affiliate_wallet as affiliate_svc
 from app.services import order_shipment_timeline as shipment_svc
 from app.schemas import order_shipment as shipment_schemas
@@ -122,33 +124,34 @@ def create_order(
                 "deposit_amount": unit_price * Decimal('0.3') if product.deposit_require else Decimal('0')
             })
         
-        # --- BIRTHDAY + LOYALTY DISCOUNT (chỉ khi đã đăng nhập) ---
+        # --- PROMO + BIRTHDAY + LOYALTY DISCOUNT (chỉ khi đã đăng nhập) ---
         birthday_discount_amount = Decimal('0')
         loyalty_discount_amount = Decimal('0')
+        welcome_discount_amount = Decimal('0')
         discount_notes = []
+        applied_promotion = None
+        applied_grant_id = None
 
         if current_user is not None:
-            birthday_discount = get_birthday_discount_for_user(db, current_user)
-            if birthday_discount.active and birthday_discount.percent > 0:
-                birthday_percent = Decimal(str(birthday_discount.percent))
-                birthday_discount_amount = (total_amount * birthday_percent) / 100
-                discount_notes.append(
-                    f"Ưu đãi sinh nhật ({birthday_discount.percent}%): -{birthday_discount_amount:,.0f} đ"
+            try:
+                breakdown = calculate_order_discounts(
+                    db,
+                    user=current_user,
+                    subtotal=total_amount,
+                    promo_code=order_data.promo_code,
                 )
+            except PromoValidationError as exc:
+                raise HTTPException(status_code=400, detail=exc.message) from exc
 
-            total_spent_6_months = crud_loyalty.calculate_user_spend_6_months(db, current_user.id)
-            current_tier = crud_loyalty.get_tier_by_spend(db, total_spent_6_months)
-
-            if current_tier and current_tier.discount_percent > 0:
-                discount_percent = Decimal(str(current_tier.discount_percent))
-                remaining_after_birthday = max(Decimal('0'), total_amount - birthday_discount_amount)
-                loyalty_discount_amount = (remaining_after_birthday * discount_percent) / 100
-                discount_notes.append(
-                    f"Giảm giá thành viên {current_tier.name} ({current_tier.discount_percent}%): -{loyalty_discount_amount:,.0f} đ"
-                )
+            birthday_discount_amount = breakdown.birthday_discount_amount
+            loyalty_discount_amount = breakdown.loyalty_discount_amount
+            welcome_discount_amount = breakdown.welcome_discount_amount
+            discount_notes = list(breakdown.discount_notes)
+            applied_promotion = breakdown.applied_promotion
+            applied_grant_id = breakdown.applied_grant_id
             
         # Apply discount
-        total_discount_amount = birthday_discount_amount + loyalty_discount_amount
+        total_discount_amount = birthday_discount_amount + loyalty_discount_amount + welcome_discount_amount
         total_amount_after_discount = max(Decimal('0'), total_amount - total_discount_amount)
 
         # 2. Calculate deposit
@@ -204,6 +207,24 @@ def create_order(
             items=items,
             referrer_user_id=referrer_user_id,
         )
+
+        if current_user is not None and applied_promotion and welcome_discount_amount > 0:
+            grant_svc.mark_grant_used(
+                db,
+                user_id=current_user.id,
+                promotion_id=applied_promotion.id,
+                order_id=order.id,
+            )
+            crud_promotion.record_promotion_usage(
+                db,
+                promotion=applied_promotion,
+                user_id=current_user.id,
+                order_id=order.id,
+                discount_amount=welcome_discount_amount,
+                grant_id=applied_grant_id,
+            )
+            db.commit()
+            db.refresh(order)
 
         wallet_note = ""
         if current_user is not None and order_data.wallet_amount and Decimal(str(order_data.wallet_amount)) > 0:

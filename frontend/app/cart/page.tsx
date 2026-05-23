@@ -26,7 +26,15 @@ import type { CartLineRef } from '@/features/cart/types/cart';
 import CartEmptySameShopSection from '@/components/cart/CartEmptySameShopSection';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
+import CartVoucherPicker from '@/components/cart/CartVoucherPicker';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
+import type { PromotionVoucherItem } from '@/lib/api-client';
+import {
+  calculateWelcomeDiscount,
+  WELCOME_PROMO_CODE,
+  type AppliedWelcomePromo,
+} from '@/lib/welcome-promo';
+import { applyTotalOrderDiscountCap } from '@/lib/order-discount-limits';
 import { useToast } from '@/components/ToastProvider';
 
 function formatAddressLine(addr: UserAddress): string {
@@ -75,6 +83,11 @@ export default function CartPage() {
   const prevCartLineIdsRef = useRef<Set<number>>(new Set());
   const [walletBalance, setWalletBalance] = useState(0);
   const [useWallet, setUseWallet] = useState(false);
+  const [appliedPromo, setAppliedPromo] = useState<AppliedWelcomePromo | null>(null);
+  const [promoApplying, setPromoApplying] = useState(false);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoVouchers, setPromoVouchers] = useState<PromotionVoucherItem[]>([]);
+  const [promoVouchersLoading, setPromoVouchersLoading] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -141,6 +154,7 @@ export default function CartPage() {
     () => cartItems.filter((i) => selectionForTotals.has(i.id)),
     [cartItems, selectionForTotals]
   );
+  const noneSelected = selectedCartItems.length === 0;
 
   const selectedSubtotal = useMemo(
     () => selectedCartItems.reduce((sum, item) => sum + cartLineTotal(item), 0),
@@ -150,21 +164,65 @@ export default function CartPage() {
   const loyaltyPercent = cart?.loyalty_discount_percent ?? 0;
   const birthdayActive = cart?.birthday_discount_active === true;
   const birthdayPercent = cart?.birthday_discount_percent ?? 0;
-  const selectedBirthdayDiscount =
-    birthdayActive && birthdayPercent > 0 ? (selectedSubtotal * birthdayPercent) / 100 : 0;
-  const selectedSubtotalAfterBirthday = Math.max(0, selectedSubtotal - selectedBirthdayDiscount);
-  const selectedLoyaltyDiscount =
-    loyaltyPercent > 0 ? (selectedSubtotalAfterBirthday * loyaltyPercent) / 100 : 0;
-  const selectedFinalPrice = Math.max(0, selectedSubtotalAfterBirthday - selectedLoyaltyDiscount);
+  const welcomeApplied = appliedPromo !== null;
+  const rawWelcomeDiscount = calculateWelcomeDiscount(selectedSubtotal, appliedPromo);
+  const rawBirthdayDiscount =
+    !welcomeApplied && birthdayActive && birthdayPercent > 0
+      ? (selectedSubtotal * birthdayPercent) / 100
+      : 0;
+  const subtotalAfterPrimary = Math.max(0, selectedSubtotal - rawWelcomeDiscount - rawBirthdayDiscount);
+  const rawLoyaltyDiscount =
+    loyaltyPercent > 0 ? (subtotalAfterPrimary * loyaltyPercent) / 100 : 0;
+  const cappedDiscounts = applyTotalOrderDiscountCap(
+    selectedSubtotal,
+    rawWelcomeDiscount,
+    rawBirthdayDiscount,
+    rawLoyaltyDiscount
+  );
+  const selectedWelcomeDiscount = cappedDiscounts.welcome;
+  const selectedBirthdayDiscount = cappedDiscounts.birthday;
+  const selectedLoyaltyDiscount = cappedDiscounts.loyalty;
+  const discountCapped = cappedDiscounts.capped;
+  const selectedFinalPrice = Math.max(
+    0,
+    selectedSubtotal - selectedWelcomeDiscount - selectedBirthdayDiscount - selectedLoyaltyDiscount
+  );
   const walletUsable = useWallet
     ? Math.min(walletBalance, selectedCartItems.length > 0 ? selectedFinalPrice : 0)
     : 0;
   const payableAfterWallet = Math.max(0, selectedFinalPrice - walletUsable);
 
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setPromoVouchers([]);
+      return;
+    }
+    let cancelled = false;
+    setPromoVouchersLoading(true);
+    apiClient
+      .getMyPromoVouchers(selectedSubtotal > 0 ? selectedSubtotal : undefined)
+      .then((res) => {
+        if (!cancelled) setPromoVouchers(res.items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setPromoVouchers([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPromoVouchersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, selectedSubtotal]);
+
   const allLineIds = useMemo(() => cartItems.map((i) => i.id), [cartItems]);
   const allSelected =
     cartItems.length > 0 && allLineIds.every((id) => selectionForTotals.has(id));
-  const noneSelected = selectedCartItems.length === 0;
+  const welcomeVoucher = useMemo(
+    () => promoVouchers.find((v) => v.code === WELCOME_PROMO_CODE && v.eligible) ?? null,
+    [promoVouchers]
+  );
+  const hasWalletPromo = promoVouchers.some((v) => v.eligible);
 
   const cartTotalAll = useMemo(
     () => cartItems.reduce((sum, item) => sum + cartLineTotal(item), 0),
@@ -305,8 +363,45 @@ export default function CartPage() {
     }
   };
 
+  const handleSelectPromoVoucher = async (voucher: PromotionVoucherItem) => {
+    if (!voucher.eligible) return;
+    if (selectedSubtotal <= 0) {
+      setPromoError('Vui lòng chọn sản phẩm để áp dụng mã.');
+      return;
+    }
+    setPromoApplying(true);
+    setPromoError(null);
+    try {
+      const res = await apiClient.validatePromoCode({
+        code: voucher.code,
+        subtotal: selectedSubtotal,
+      });
+      setAppliedPromo({
+        code: res.code,
+        discountPercent: res.discount_percent,
+        maxDiscount: res.max_discount_amount,
+      });
+      pushToast({
+        title: 'Đã áp dụng mã khuyến mãi',
+        description: `Tiết kiệm ${new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(res.estimated_discount)}`,
+        variant: 'success',
+        durationMs: 3000,
+      });
+    } catch (err: unknown) {
+      setAppliedPromo(null);
+      const message = err instanceof Error ? err.message : 'Mã khuyến mãi không hợp lệ.';
+      setPromoError(message);
+    } finally {
+      setPromoApplying(false);
+    }
+  };
+
+  const handleRemovePromo = () => {
+    setAppliedPromo(null);
+    setPromoError(null);
+  };
+
   const handleCheckout = async () => {
-    if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) return;
     if (!selectedAddress) {
       pushToast({ title: 'Vui lòng chọn địa chỉ giao hàng', variant: 'info', durationMs: 2500 });
       return;
@@ -350,6 +445,7 @@ export default function CartPage() {
         deposit_type: depositType,
         wallet_amount: useWallet && walletUsable > 0 ? walletUsable : undefined,
         referral_code: referralCode || undefined,
+        promo_code: appliedPromo?.code,
         items: linesToOrder.map((item) => ({
           product_id: item.product_id,
           quantity: item.quantity,
@@ -516,11 +612,47 @@ export default function CartPage() {
         </div>
 
         <BirthdayPromoBanner
-          active={birthdayActive}
+          active={birthdayActive && !welcomeApplied}
           percent={birthdayPercent || 10}
           nextBirthdayLabel={cart?.birthday_next_date ?? null}
           className="mb-4"
         />
+
+        {welcomeVoucher && !appliedPromo ? (
+          <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+            <p className="font-semibold">Bạn có quà trong ví!</p>
+            <p className="mt-1 text-emerald-800">
+              Mã <span className="font-mono font-bold">{welcomeVoucher.code}</span> — giảm{' '}
+              <span className="font-bold">{welcomeVoucher.discount_percent}%</span> (tối đa{' '}
+              {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(
+                welcomeVoucher.max_discount_amount
+              )}
+              )
+            </p>
+            {welcomeVoucher.show_days_remaining && welcomeVoucher.days_remaining != null ? (
+              <p className="mt-1.5 text-emerald-700 font-medium">
+                {welcomeVoucher.days_remaining > 0
+                  ? `Còn ${welcomeVoucher.days_remaining} ngày — chọn mã bên dưới`
+                  : 'Hết hạn hôm nay — dùng ngay'}
+                {' · '}
+                <Link href="/khuyen-mai" className="underline">
+                  Ví khuyến mãi
+                </Link>
+              </p>
+            ) : (
+              <p className="mt-1.5 text-emerald-700">
+                <Link href="/khuyen-mai" className="underline font-medium">
+                  Xem ví khuyến mãi
+                </Link>
+              </p>
+            )}
+          </div>
+        ) : hasWalletPromo && !appliedPromo ? (
+          <div className="mb-4 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-900">
+            Bạn có mã quà chưa dùng — chọn trong phần <span className="font-semibold">Chọn mã giảm giá</span>{' '}
+            bên dưới.
+          </div>
+        ) : null}
 
         <div className="space-y-4 md:space-y-6">
         {error && (
@@ -720,7 +852,34 @@ export default function CartPage() {
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 md:px-5 md:py-4">
-            {birthdayActive && selectedBirthdayDiscount > 0 ? (
+            <CartVoucherPicker
+              vouchers={promoVouchers}
+              loading={promoVouchersLoading}
+              appliedCode={appliedPromo?.code ?? null}
+              applying={promoApplying}
+              disabled={noneSelected}
+              onSelect={handleSelectPromoVoucher}
+              onClear={handleRemovePromo}
+            />
+            {promoError ? <p className="mb-3 text-xs text-red-600">{promoError}</p> : null}
+
+            {welcomeApplied && selectedWelcomeDiscount > 0 ? (
+              <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
+                <span className="text-gray-500">
+                  Ưu đãi chào mừng{' '}
+                  <span className="font-bold text-emerald-600">{appliedPromo?.code}</span>{' '}
+                  ({appliedPromo?.discountPercent}%)
+                </span>
+                <span className="font-medium text-emerald-600">
+                  -
+                  {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(
+                    selectedWelcomeDiscount
+                  )}
+                </span>
+              </div>
+            ) : null}
+
+            {birthdayActive && !welcomeApplied && selectedBirthdayDiscount > 0 ? (
               <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
                 <span className="text-gray-500">
                   Ưu đãi sinh nhật <span className="font-bold text-pink-600">{birthdayPercent}%</span>
@@ -741,6 +900,12 @@ export default function CartPage() {
                   -{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(selectedLoyaltyDiscount)}
                 </span>
               </div>
+            ) : null}
+
+            {discountCapped ? (
+              <p className="mb-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
+                Tổng ưu đãi được giới hạn tối đa 15% giá trị đơn hàng.
+              </p>
             ) : null}
 
             {walletBalance > 0 ? (

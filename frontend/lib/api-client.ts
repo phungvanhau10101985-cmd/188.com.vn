@@ -79,6 +79,33 @@ export interface CreateOrderRequest {
   shipping_name?: string;
 }
 
+export interface WelcomePromoStatus {
+  eligible: boolean;
+  code: string;
+  name: string;
+  description?: string | null;
+  discount_percent: number;
+  max_discount_amount: number;
+  eligible_within_days?: number | null;
+  show_days_remaining: boolean;
+  days_remaining?: number | null;
+  expires_at?: string | null;
+  reason?: string | null;
+  is_active: boolean;
+}
+
+export interface PromotionVoucherItem extends WelcomePromoStatus {
+  grant_id?: number | null;
+  granted_at?: string | null;
+  source?: string | null;
+  is_new?: boolean;
+  estimated_discount?: number | null;
+}
+
+export interface PromotionVoucherListResponse {
+  items: PromotionVoucherItem[];
+}
+
 /** Payload đúng schema backend OrderCreate */
 export interface OrderCreateRequest {
   customer_name: string;
@@ -92,6 +119,7 @@ export interface OrderCreateRequest {
   deposit_type?: 'none' | 'percent_30' | 'percent_100';
   wallet_amount?: number;
   referral_code?: string;
+  promo_code?: string;
 }
 
 export interface OrderResponse {
@@ -881,6 +909,38 @@ class ApiClient {
     next_birthday: string | null;
   }> {
     return this.fetch('/birthday-promo/me');
+  }
+
+  async getWelcomePromoEligibility(): Promise<WelcomePromoStatus> {
+    return this.fetch('/promotions/welcome-eligibility');
+  }
+
+  async getWelcomePromoProgram(): Promise<PromotionVoucherListResponse> {
+    return this.fetch('/promotions/welcome');
+  }
+
+  async getMyPromoVouchers(subtotal?: number): Promise<PromotionVoucherListResponse> {
+    const sp = new URLSearchParams();
+    if (subtotal != null && subtotal > 0) sp.set('subtotal', String(subtotal));
+    const qs = sp.toString();
+    return this.fetch(`/promotions/my-vouchers${qs ? `?${qs}` : ''}`);
+  }
+
+  async validatePromoCode(payload: {
+    code: string;
+    subtotal?: number;
+  }): Promise<{
+    valid: boolean;
+    code: string;
+    discount_percent: number;
+    max_discount_amount: number;
+    estimated_discount: number;
+    message: string;
+  }> {
+    return this.fetch('/promotions/validate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   async getLoyaltyTiers(): Promise<any[]> {

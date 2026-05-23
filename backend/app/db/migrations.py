@@ -20,6 +20,7 @@ from app.models.push_subscription import UserPushSubscription
 from app.models.email_login_challenge import EmailLoginChallenge
 from app.models.email_trusted_device import EmailTrustedDevice
 from app.models.birthday_promo import BirthdayPromoEmailLog
+from app.models.promotion import Promotion, PromotionUsage, UserPromotionGrant
 from app.models.admin_feature_test import AdminFeatureTestSetting
 from app.models.order_shipment import OrderShipmentEvent
 from app.models.affiliate import (
@@ -656,8 +657,59 @@ class MigrationManager:
             "order_shipment_events", OrderShipmentEvent
         )
         results['order_shipment_backfill'] = self._backfill_order_shipment_timelines()
+        results['promotions_create'] = self._create_table_if_not_exists("promotions", Promotion)
+        results['promotion_usages_create'] = self._create_table_if_not_exists(
+            "promotion_usages", PromotionUsage
+        )
+        results['promotions_sync_columns'] = self._sync_table_columns("promotions", Promotion)
+        results['user_promotion_grants_create'] = self._create_table_if_not_exists(
+            "user_promotion_grants", UserPromotionGrant
+        )
+        results['promotion_usages_sync'] = self._sync_table_columns("promotion_usages", PromotionUsage)
+        results['welcome_promo_seed'] = self._seed_welcome_promotion()
+        results['welcome_grants_backfill'] = self._backfill_welcome_promotion_grants()
 
         return results
+
+    def _seed_welcome_promotion(self) -> bool:
+        try:
+            from app.db.session import SessionLocal
+            from app.services import promotion_grants as grant_svc
+
+            db = SessionLocal()
+            try:
+                grant_svc.ensure_promotion_templates(db)
+                logger.info("✅ welcome_promo_seed: promotion templates ready")
+                return True
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning("  _seed_welcome_promotion: %s", e)
+            return False
+
+    def _backfill_welcome_promotion_grants(self) -> bool:
+        """Tặng WELCOME188 cho user cũ chưa có đơn — idempotent, chạy mỗi lần deploy."""
+        try:
+            from app.db.session import SessionLocal
+            from app.services import promotion_grants as grant_svc
+
+            db = SessionLocal()
+            try:
+                result = grant_svc.process_welcome_backfill(db)
+                granted = int(result.get("granted") or 0)
+                skipped = int(result.get("skipped") or 0)
+                if granted:
+                    logger.info(
+                        "✅ welcome_grants_backfill: granted=%s skipped=%s",
+                        granted,
+                        skipped,
+                    )
+                return True
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning("  _backfill_welcome_promotion_grants: %s", e)
+            return False
 
     def _backfill_order_shipment_timelines(self) -> bool:
         try:
