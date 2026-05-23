@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
 from app.models.order import Order, OrderStatus
 from app.models.order_shipment import OrderShipmentEvent
+from app.utils.display_timeline import to_utc_aware
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,10 @@ STEP_CUSTOMER_HINTS: dict[str, str] = {
     ),
     "domestic_shipping": "188.com.vn đã hoàn tất thủ tục — hàng đang được giao tới bạn.",
 }
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _step_defs(deposit_flow: bool) -> list[dict[str, Any]]:
@@ -103,7 +108,7 @@ def ensure_shipment_timeline(db: Session, order: Order, *, force: bool = False) 
     if force:
         db.query(OrderShipmentEvent).filter(OrderShipmentEvent.order_id == order.id).delete()
 
-    now = datetime.utcnow()
+    now = _utc_now()
     steps = _step_defs(_deposit_flow(order))
     for idx, step in enumerate(steps):
         db.add(
@@ -150,21 +155,21 @@ def _activate_next(db: Session, order: Order, events: list[OrderShipmentEvent], 
     auto_h = int(step_def.get("auto_hours") or 0)
     if step_def.get("pause_here") and auto_h > 0:
         nxt.status = EVENT_PENDING
-        nxt.scheduled_at = datetime.utcnow() + timedelta(hours=auto_h)
+        nxt.scheduled_at = _utc_now() + timedelta(hours=auto_h)
         return
     if step_def.get("manual") or step_def.get("pause_here"):
         nxt.status = EVENT_ACTIVE
         nxt.scheduled_at = None
         return
     nxt.status = EVENT_ACTIVE
-    nxt.scheduled_at = datetime.utcnow() + timedelta(hours=auto_h) if auto_h > 0 else datetime.utcnow()
+    nxt.scheduled_at = _utc_now() + timedelta(hours=auto_h) if auto_h > 0 else _utc_now()
 
 
 def _activate_due_pending(events: list[OrderShipmentEvent]) -> int:
-    now = datetime.utcnow()
+    now = _utc_now()
     activated = 0
     for ev in events:
-        if ev.status != EVENT_PENDING or not ev.scheduled_at or ev.scheduled_at > now:
+        if ev.status != EVENT_PENDING or not ev.scheduled_at or to_utc_aware(ev.scheduled_at) > now:
             continue
         ev.status = EVENT_ACTIVE
         ev.scheduled_at = None
@@ -193,7 +198,7 @@ def advance_auto_milestones(db: Session, order_id: int) -> int:
 
     steps = _step_defs(_deposit_flow(order))
     step_by_key = {s["key"]: s for s in steps}
-    now = datetime.utcnow()
+    now = _utc_now()
 
     for idx, ev in enumerate(events):
         if ev.status != EVENT_ACTIVE:
@@ -203,7 +208,7 @@ def advance_auto_milestones(db: Session, order_id: int) -> int:
             continue
         if step_def.get("pause_here"):
             continue
-        if ev.scheduled_at and ev.scheduled_at > now:
+        if ev.scheduled_at and to_utc_aware(ev.scheduled_at) > now:
             continue
 
         ev.status = EVENT_COMPLETED
@@ -227,7 +232,7 @@ def advance_auto_milestones_batch(db: Session, limit: int = 200) -> int:
         db.query(OrderShipmentEvent.order_id)
         .filter(OrderShipmentEvent.status == EVENT_PENDING)
         .filter(OrderShipmentEvent.scheduled_at.isnot(None))
-        .filter(OrderShipmentEvent.scheduled_at <= datetime.utcnow())
+        .filter(OrderShipmentEvent.scheduled_at <= _utc_now())
         .distinct()
         .limit(limit)
         .all()
@@ -236,7 +241,7 @@ def advance_auto_milestones_batch(db: Session, limit: int = 200) -> int:
         db.query(OrderShipmentEvent.order_id)
         .filter(OrderShipmentEvent.status == EVENT_ACTIVE)
         .filter(OrderShipmentEvent.scheduled_at.isnot(None))
-        .filter(OrderShipmentEvent.scheduled_at <= datetime.utcnow())
+        .filter(OrderShipmentEvent.scheduled_at <= _utc_now())
         .distinct()
         .limit(limit)
         .all()
@@ -286,7 +291,7 @@ def admin_clear_customs_and_ship(
     if not customs or customs.status != EVENT_ACTIVE:
         raise ValueError("Đơn chưa ở bước cửa khẩu hoặc đã được xử lý.")
 
-    now = datetime.utcnow()
+    now = _utc_now()
     customs.status = EVENT_COMPLETED
     customs.completed_at = now
     customs.updated_by_admin_id = admin_id
@@ -317,7 +322,7 @@ def mark_delivered_on_timeline(db: Session, order: Order, *, admin_id: Optional[
         .order_by(OrderShipmentEvent.sort_order.asc())
         .all()
     )
-    now = datetime.utcnow()
+    now = _utc_now()
     for ev in events:
         if ev.step_key == "domestic_shipping" and ev.status == EVENT_ACTIVE:
             ev.status = EVENT_COMPLETED

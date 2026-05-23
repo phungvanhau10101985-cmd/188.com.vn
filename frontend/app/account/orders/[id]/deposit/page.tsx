@@ -58,6 +58,29 @@ function orderMoney(
   return Number.isFinite(n) ? n : 0;
 }
 
+const POST_DEPOSIT_STATUSES = new Set([
+  'deposit_paid',
+  'confirmed',
+  'processing',
+  'shipping',
+  'delivered',
+  'completed',
+]);
+
+/** Đơn đã cọc xong — kể cả khi timeline đẩy status sang processing ngay sau webhook. */
+function shouldShowDepositSuccessPage(order: Order): boolean {
+  if (!order.requires_deposit) return false;
+  if (order.status === 'cancelled' || order.status === 'pending') return false;
+  if (orderMoney(order, 'deposit_paid') > 0) return true;
+  return POST_DEPOSIT_STATUSES.has(order.status);
+}
+
+function depositSuccessStatusLabel(order: Order): string {
+  if (order.status === 'confirmed') return 'Đã xác nhận đơn (cọc 100%)';
+  if (order.status === 'processing') return 'Đã đặt cọc — đang xử lý đơn';
+  return 'Đã đặt cọc';
+}
+
 // --- Helper Components ---
 
 const InfoRow = ({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) => (
@@ -389,7 +412,12 @@ export default function OrderDepositPage() {
   useEffect(() => {
     if (!order) return;
     const prev = prevStatusRef.current;
-    const nowDone = order.status === 'deposit_paid' || order.status === 'confirmed';
+    const depositSettled = shouldShowDepositSuccessPage(order);
+    const nowDone =
+      depositSettled &&
+      (order.status === 'deposit_paid' ||
+        order.status === 'confirmed' ||
+        order.status === 'processing');
     const wasWaiting = prev === 'waiting_deposit';
     /** Vào trang khi đơn đã cọc (refresh / link): prev chưa từng là waiting trong phiên — vẫn cần bắn purchase. */
     const landedAlreadyPaid = nowDone && (prev === null || prev === '');
@@ -535,10 +563,10 @@ export default function OrderDepositPage() {
     );
   }
 
-  const depositConfirmed = order.status === 'deposit_paid' || order.status === 'confirmed';
+  const depositConfirmed = shouldShowDepositSuccessPage(order);
 
   if (depositConfirmed) {
-    const statusLabel = order.status === 'confirmed' ? 'Đã xác nhận đơn (cọc 100%)' : 'Đã đặt cọc';
+    const statusLabel = depositSuccessStatusLabel(order);
     return (
       <div className="bg-gray-50 min-h-0 pt-0 pb-6 md:pb-8">
         <div className="mx-auto px-3 sm:px-4 max-w-2xl">
@@ -571,11 +599,11 @@ export default function OrderDepositPage() {
                         : orderMoney(order, 'deposit_amount')
                     )}
                   </strong>
-                  {order.status === 'deposit_paid' && (
+                  {order.status === 'deposit_paid' || order.status === 'processing' ? (
                     <span className="block text-emerald-900/90 mt-0.5 text-xs">
                       Số còn lại khi nhận hàng: {formatVnd(orderMoney(order, 'remaining_amount'))}
                     </span>
-                  )}
+                  ) : null}
                 </p>
               </div>
               <p className="text-sm text-gray-600 leading-relaxed">

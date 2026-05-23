@@ -425,24 +425,14 @@ export default function AccountOrdersPage() {
                   </>
                 )}
                 {['deposit_paid', 'confirmed', 'processing', 'shipping'].includes(order.status) && (
-                  <>
-                    {canShowTracking(order.status) && (
-                      <Link
-                        href={`/account/orders/${order.id}/tracking`}
-                        className="inline-flex min-h-[44px] items-center px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-50 active:bg-gray-100"
-                      >
-                        Lịch trình đơn hàng
-                      </Link>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmReceived(order)}
-                      disabled={!!confirmingId}
-                      className="inline-flex min-h-[44px] items-center px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-[#c2410c] disabled:opacity-50 active:bg-[#c2410c]"
-                    >
-                      Đã nhận hàng
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    onClick={() => handleConfirmReceived(order)}
+                    disabled={!!confirmingId}
+                    className="inline-flex min-h-[44px] items-center px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-[#c2410c] disabled:opacity-50 active:bg-[#c2410c]"
+                  >
+                    Đã nhận hàng
+                  </button>
                 )}
               </div>
             </li>
