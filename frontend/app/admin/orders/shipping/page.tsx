@@ -279,10 +279,15 @@ export default function AdminShippingPage() {
   const resumeTrackingJob = useCallback(async () => {
     if (!trackingJob?.job_id) return;
     setTrackingResumeLoading(true);
+    setError(null);
     try {
       const job = await adminShippingAPI.resumeEmsTrackingRefreshJob(trackingJob.job_id);
       setTrackingJob(job);
-      startTrackingPoll(job.job_id);
+      if (job.resume_ok) {
+        startTrackingPoll(job.job_id);
+      } else {
+        setError(job.resume_message || 'Không thể tiếp tục job tra EMS trên server.');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể tiếp tục job tra EMS');
     } finally {

@@ -2712,6 +2712,8 @@ export interface EmsTrackingRefreshJob {
   finished_at?: string | null;
   seconds_since_update?: number | null;
   is_stale?: boolean;
+  resume_ok?: boolean | null;
+  resume_message?: string | null;
 }
 
 export const adminShippingAPI = {
