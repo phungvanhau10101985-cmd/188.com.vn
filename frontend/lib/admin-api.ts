@@ -285,6 +285,7 @@ export interface AdminOrderStats {
   shipping_orders: number;
   delivered_orders: number;
   completed_orders: number;
+  returned_orders: number;
   cancelled_orders: number;
 }
 
@@ -1951,6 +1952,9 @@ export const adminOrderAPI = {
   getOrderPayments: (orderId: number) =>
     fetchAdmin<PaymentRecord[]>(`/orders/admin/${orderId}/payments`),
 
+  lookupOrderByCode: (orderCode: string) =>
+    fetchAdmin<AdminOrder>(`/orders/admin/lookup-by-code/${encodeURIComponent(orderCode.trim())}`),
+
   confirmDeposit: (orderId: number, data: { payment_id: number; is_confirmed: boolean; confirmation_note?: string }) =>
     fetchAdmin<AdminOrder>(`/orders/admin/${orderId}/confirm-deposit`, {
       method: 'POST',
@@ -1966,6 +1970,12 @@ export const adminOrderAPI = {
 
   refundDeposit: (orderId: number, data?: { refund_note?: string }) =>
     fetchAdmin<AdminOrder>(`/orders/admin/${orderId}/refund-deposit`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    }),
+
+  approveReturnReceived: (orderId: number, data?: { note?: string }) =>
+    fetchAdmin<AdminOrder>(`/orders/admin/${orderId}/approve-return-received`, {
       method: 'POST',
       body: JSON.stringify(data || {}),
     }),
@@ -2626,12 +2636,14 @@ export type EmsShippingSyncStatus =
   | 'matched'
   | 'in_progress'
   | 'mismatch'
+  | 'unlinked'
   | 'order_not_found'
   | 'ems_not_found'
   | 'parse_error'
   | 'pending';
 
 export interface EmsShippingImportRow {
+  id?: number | null;
   row_number: number;
   reference_code: string;
   recipient_label: string;
@@ -2646,7 +2658,17 @@ export interface EmsShippingImportRow {
   ems_phase?: string | null;
   sync_status: EmsShippingSyncStatus;
   sync_message: string;
-  ems_error?: string | null;
+    ems_error?: string | null;
+    cod_amount?: number | null;
+    cod_paid_amount?: number | null;
+  cod_paid_date?: string | null;
+  cod_settlement_status?: string | null;
+  cod_settlement_message?: string | null;
+  freight_amount?: number | null;
+  freight_settled_at?: string | null;
+  freight_settlement_status?: string | null;
+  freight_settlement_message?: string | null;
+  freight_high_fee_warning?: string | null;
 }
 
 export interface EmsShippingImportResult {
@@ -2657,14 +2679,46 @@ export interface EmsShippingImportResult {
     matched: number;
     in_progress: number;
     mismatch: number;
+    unlinked?: number;
     order_not_found: number;
     ems_not_found: number;
     parse_error: number;
+    total_cod_amount?: number;
+    breakdown?: Array<{ key: string; count: number; cod_total: number }>;
   };
+  import_stats?: {
+    file_rows_processed: number;
+    created: number;
+    updated: number;
+    skipped_no_reference: number;
+    orders_synced: number;
+  } | null;
+  tracking_refresh_job_id?: string | null;
   rows: EmsShippingImportRow[];
 }
 
+export interface EmsTrackingRefreshJob {
+  job_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  source?: string | null;
+  total: number;
+  processed: number;
+  ok: number;
+  errors: number;
+  message: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
 export const adminShippingAPI = {
+  listEmsRecords: () =>
+    fetchAdmin<EmsShippingImportResult>('/orders/admin/shipping/ems-records'),
+
+  getOperationsStats: () =>
+    fetchAdmin<EmsShippingOperationsStats>('/orders/admin/shipping/operations-stats'),
+
   importEmsExcel: async (file: File): Promise<EmsShippingImportResult> => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
@@ -2679,6 +2733,194 @@ export const adminShippingAPI = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
       throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Import EMS thất bại');
+    }
+    return res.json();
+  },
+
+  deleteEmsRecords: (ids: number[]) =>
+    fetchAdmin<{ ok: boolean; deleted: number }>('/orders/admin/shipping/ems-records', {
+      method: 'DELETE',
+      body: JSON.stringify({ ids }),
+    }),
+
+  getEmsTrackingRefreshJob: (jobId: string) =>
+    fetchAdmin<EmsTrackingRefreshJob>(`/orders/admin/shipping/ems-tracking-refresh/job/${encodeURIComponent(jobId)}`),
+
+  enqueueEmsTrackingRefresh: (ids: number[]) =>
+    fetchAdmin<{ ok: boolean; job_id?: string | null; queued: number; message: string }>(
+      '/orders/admin/shipping/ems-tracking-refresh',
+      { method: 'POST', body: JSON.stringify({ ids }) },
+    ),
+};
+
+export interface EmsShippingOperationsStats {
+  shipping_orders: number;
+  delivered_success_orders: number;
+  returned_orders: number;
+  cod_success_unpaid_count: number;
+  cod_success_unpaid_total: number;
+  cod_success_paid_count: number;
+  cod_success_paid_total: number;
+  shipping_cod_unpaid_count: number;
+  freight_unsettled_count: number;
+}
+
+export type EmsCodReconcileStatus = 'matched' | 'amount_mismatch' | 'record_not_found' | 'parse_error';
+
+export interface EmsCodSettlementRow {
+  id?: number | null;
+  batch_id?: number | null;
+  row_number: number;
+  ems_reference_code?: string | null;
+  ems_tracking_code?: string | null;
+  paid_amount?: number | null;
+  ems_shipping_record_id?: number | null;
+  db_cod_amount?: number | null;
+  amount_difference?: number | null;
+  reconcile_status: EmsCodReconcileStatus | string;
+  reconcile_message: string;
+}
+
+export interface EmsCodSettlementImportResult {
+  ok: boolean;
+  warnings: string[];
+  summary: {
+    total_rows: number;
+    matched: number;
+    amount_mismatch: number;
+    record_not_found: number;
+    parse_error: number;
+    total_paid_amount: number;
+    total_db_cod_amount: number;
+    total_amount_difference: number;
+    breakdown?: Array<{ key: string; count: number; paid_total: number; db_cod_total: number }>;
+  };
+  import_batch?: {
+    id: number;
+    payment_date?: string | null;
+    source_filename?: string | null;
+    total_rows: number;
+    matched_count: number;
+    amount_mismatch_count: number;
+    record_not_found_count: number;
+    parse_error_count: number;
+    total_paid_amount: number;
+    total_db_cod_amount: number;
+    total_amount_difference: number;
+    rows: EmsCodSettlementRow[];
+  } | null;
+  batches: Array<{
+    id: number;
+    payment_date?: string | null;
+    source_filename?: string | null;
+    total_rows: number;
+    matched_count: number;
+    amount_mismatch_count: number;
+    record_not_found_count: number;
+    parse_error_count: number;
+    total_paid_amount: number;
+    total_db_cod_amount: number;
+    total_amount_difference: number;
+    created_at?: string | null;
+    rows: EmsCodSettlementRow[];
+  }>;
+}
+
+export const adminCodSettlementAPI = {
+  listBatches: () =>
+    fetchAdmin<EmsCodSettlementImportResult>('/orders/admin/shipping/cod-settlement-batches'),
+
+  importExcel: async (file: File): Promise<EmsCodSettlementImportResult> => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const form = new FormData();
+    form.append('file', file);
+    const url = `${getApiBaseUrl()}/orders/admin/shipping/cod-settlement-import`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+      body: form,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Import đối soát COD thất bại');
+    }
+    return res.json();
+  },
+};
+
+export type EmsFreightReconcileStatus = 'settled' | 'already_settled' | 'record_not_found' | 'parse_error';
+
+export interface EmsFreightSettlementRow {
+  id?: number | null;
+  batch_id?: number | null;
+  row_number: number;
+  ems_tracking_code?: string | null;
+  freight_amount?: number | null;
+  ems_shipping_record_id?: number | null;
+  high_fee_warning?: string | null;
+  reconcile_status: EmsFreightReconcileStatus | string;
+  reconcile_message: string;
+}
+
+export interface EmsFreightSettlementImportResult {
+  ok: boolean;
+  warnings: string[];
+  summary: {
+    total_rows: number;
+    settled: number;
+    already_settled: number;
+    record_not_found: number;
+    parse_error: number;
+    high_fee_warning_count: number;
+    total_freight_amount: number;
+    breakdown?: Array<{ key: string; count: number; freight_total: number }>;
+  };
+  import_batch?: {
+    id: number;
+    source_filename?: string | null;
+    total_rows: number;
+    settled_count: number;
+    record_not_found_count: number;
+    already_settled_count: number;
+    parse_error_count: number;
+    high_fee_warning_count: number;
+    total_freight_amount: number;
+    rows: EmsFreightSettlementRow[];
+  } | null;
+  batches: Array<{
+    id: number;
+    source_filename?: string | null;
+    total_rows: number;
+    settled_count: number;
+    record_not_found_count: number;
+    already_settled_count: number;
+    parse_error_count: number;
+    high_fee_warning_count: number;
+    total_freight_amount: number;
+    created_at?: string | null;
+    rows: EmsFreightSettlementRow[];
+  }>;
+}
+
+export const adminFreightSettlementAPI = {
+  listBatches: () =>
+    fetchAdmin<EmsFreightSettlementImportResult>('/orders/admin/shipping/freight-settlement-batches'),
+
+  importExcel: async (file: File): Promise<EmsFreightSettlementImportResult> => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const form = new FormData();
+    form.append('file', file);
+    const url = `${getApiBaseUrl()}/orders/admin/shipping/freight-settlement-import`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+      body: form,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Import đối soát cước thất bại');
     }
     return res.json();
   },

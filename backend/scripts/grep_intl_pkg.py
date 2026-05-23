@@ -1,6 +1,8 @@
 import re
 
-js = open("scripts/tra-cuu.js", encoding="utf-8").read()
+from _load_tra_cuu_js import load_tra_cuu_js
+
+js = load_tra_cuu_js()
 for needle in ["internationalpackage", "queryString", "TrackAndTraceItemCode", "List_TBL_DELIVERY", "TBL_INFO", "MA_E1"]:
     idx = 0
     n = 0

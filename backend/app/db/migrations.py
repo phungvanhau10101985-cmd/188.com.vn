@@ -22,7 +22,14 @@ from app.models.email_trusted_device import EmailTrustedDevice
 from app.models.birthday_promo import BirthdayPromoEmailLog
 from app.models.promotion import Promotion, PromotionUsage, UserPromotionGrant
 from app.models.admin_feature_test import AdminFeatureTestSetting
-from app.models.order_shipment import OrderShipmentEvent
+from app.models.order_shipment import (
+    EmsCodSettlementBatch,
+    EmsCodSettlementRow,
+    EmsFreightSettlementBatch,
+    EmsFreightSettlementRow,
+    EmsShippingRecord,
+    OrderShipmentEvent,
+)
 from app.models.affiliate import (
     AffiliateApplication,
     AffiliateBankAccountOtp,
@@ -655,6 +662,24 @@ class MigrationManager:
         results['affiliate_commission_repair'] = self._repair_premature_commission_confirmations()
         results['order_shipment_events_create'] = self._create_table_if_not_exists(
             "order_shipment_events", OrderShipmentEvent
+        )
+        results['ems_shipping_records_create'] = self._create_table_if_not_exists(
+            "ems_shipping_records", EmsShippingRecord
+        )
+        results['ems_shipping_records_sync'] = self._sync_table_columns(
+            "ems_shipping_records", EmsShippingRecord
+        )
+        results['ems_cod_settlement_batches_create'] = self._create_table_if_not_exists(
+            "ems_cod_settlement_batches", EmsCodSettlementBatch
+        )
+        results['ems_cod_settlement_rows_create'] = self._create_table_if_not_exists(
+            "ems_cod_settlement_rows", EmsCodSettlementRow
+        )
+        results['ems_freight_settlement_batches_create'] = self._create_table_if_not_exists(
+            "ems_freight_settlement_batches", EmsFreightSettlementBatch
+        )
+        results['ems_freight_settlement_rows_create'] = self._create_table_if_not_exists(
+            "ems_freight_settlement_rows", EmsFreightSettlementRow
         )
         results['order_shipment_backfill'] = self._backfill_order_shipment_timelines()
         results['promotions_create'] = self._create_table_if_not_exists("promotions", Promotion)

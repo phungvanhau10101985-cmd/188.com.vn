@@ -518,9 +518,12 @@ def _resolve_commission_display(
     st = _order_status_value(order)
     if comm:
         if comm.status == COMMISSION_STATUS_CANCELLED:
+            label = _COMMISSION_STATUS_LABELS["cancelled"]
+            if st == OrderStatus.RETURNED.value:
+                label = "Hủy — đơn hoàn"
             return {
                 "commission_status": "cancelled",
-                "commission_status_label": _COMMISSION_STATUS_LABELS["cancelled"],
+                "commission_status_label": label,
                 "withdrawable": False,
                 "commission_created_at": comm.created_at,
                 "commission_confirmed_at": None,
@@ -540,10 +543,11 @@ def _resolve_commission_display(
             "commission_created_at": comm.created_at,
             "commission_confirmed_at": None,
         }
-    if st == "cancelled":
+    if st == "cancelled" or st == OrderStatus.RETURNED.value:
+        label = "Hủy — đơn hoàn" if st == OrderStatus.RETURNED.value else _COMMISSION_STATUS_LABELS["cancelled"]
         return {
             "commission_status": "cancelled",
-            "commission_status_label": _COMMISSION_STATUS_LABELS["cancelled"],
+            "commission_status_label": label,
             "withdrawable": False,
             "commission_created_at": None,
             "commission_confirmed_at": None,
@@ -575,6 +579,7 @@ def _order_status_label(status_val: str) -> str:
         "shipping": "Đang giao",
         "delivered": "Đã giao",
         "completed": "Hoàn tất",
+        "returned": "Đã hoàn hàng",
         "cancelled": "Đã hủy",
     }
     return labels.get(status_val, status_val)
@@ -640,6 +645,9 @@ def list_referred_orders_for_affiliate(
                 "order_id": order.id,
                 "order_code": order.order_code,
                 "buyer_label": mask_buyer_label(order),
+                "buyer_name": (order.customer_name or "").strip(),
+                "buyer_phone": (order.customer_phone or "").strip(),
+                "buyer_address": (order.customer_address or "").strip(),
                 "product_summary": _product_summary(order),
                 "order_total": _dec(order.total_amount),
                 "order_status": st,
@@ -874,9 +882,10 @@ def handle_order_status_change(db: Session, order: Order, old_status: Optional[s
     if old_val == new_val:
         return False
 
-    if new_val == OrderStatus.CANCELLED.value:
+    if new_val in (OrderStatus.CANCELLED.value, OrderStatus.RETURNED.value):
         cancel_commission_for_order(db, order.id)
-        refund_wallet_for_order(db, order)
+        if new_val == OrderStatus.CANCELLED.value:
+            refund_wallet_for_order(db, order)
         return False
 
     if new_val in (OrderStatus.DELIVERED.value, OrderStatus.COMPLETED.value):

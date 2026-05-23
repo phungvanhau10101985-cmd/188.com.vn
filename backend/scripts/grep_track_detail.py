@@ -1,6 +1,8 @@
 import re
 
-js = open("scripts/tra-cuu.js", encoding="utf-8").read()
+from _load_tra_cuu_js import load_tra_cuu_js
+
+js = load_tra_cuu_js()
 # find module that exports i.d
 for pat in [r'i\.d="[^"]+"', r'i\.d=t\.env[^;]+', r'\.d="https://api[^"]+"', r'TrackAndTraceItemCode\?[^"]+']:
     hits = re.findall(pat, js)

@@ -159,7 +159,14 @@ except ImportError:
     print("[INFO] Affiliate/Wallet models not available")
 
 try:
-    from app.models.order_shipment import OrderShipmentEvent
+    from app.models.order_shipment import (
+        EmsCodSettlementBatch,
+        EmsCodSettlementRow,
+        EmsFreightSettlementBatch,
+        EmsFreightSettlementRow,
+        EmsShippingRecord,
+        OrderShipmentEvent,
+    )
     print("[OK] OrderShipmentEvent model loaded")
 except ImportError:
     print("[INFO] OrderShipmentEvent model not available")

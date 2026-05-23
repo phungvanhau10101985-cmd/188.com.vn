@@ -142,6 +142,9 @@ class AffiliateReferredOrderResponse(BaseModel):
     order_id: int
     order_code: Optional[str] = None
     buyer_label: str
+    buyer_name: str = ""
+    buyer_phone: str = ""
+    buyer_address: str = ""
     product_summary: str
     order_total: Decimal
     order_status: str

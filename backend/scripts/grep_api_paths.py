@@ -1,6 +1,8 @@
 import re
 
-js = open("scripts/tra-cuu.js", encoding="utf-8").read()
+from _load_tra_cuu_js import load_tra_cuu_js
+
+js = load_tra_cuu_js()
 paths = sorted(set(re.findall(r"/api/[a-zA-Z0-9_./-]+", js)))
 for p in paths:
     print(p)

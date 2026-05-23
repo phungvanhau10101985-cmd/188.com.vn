@@ -253,6 +253,8 @@ def admin_update_order(
             order.completed_at = now
         elif new_status == OrderStatus.CANCELLED.value:
             order.cancelled_at = now
+        elif new_status == OrderStatus.RETURNED.value:
+            order.returned_at = now
     
     # Update fields
     for field, value in update_data.items():
@@ -300,7 +302,11 @@ def cancel_order(
     status_val = getattr(order.status, "value", order.status)
     
     # Check if order can be cancelled
-    if status_val in [OrderStatus.DELIVERED.value, OrderStatus.COMPLETED.value]:
+    if status_val in (
+        OrderStatus.DELIVERED.value,
+        OrderStatus.COMPLETED.value,
+        OrderStatus.RETURNED.value,
+    ):
         return None
     
     order.status = OrderStatus.CANCELLED.value

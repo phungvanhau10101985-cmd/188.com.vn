@@ -52,6 +52,7 @@ const STATUS_LABELS: Record<string, string> = {
   shipping: 'Đang giao hàng',
   delivered: 'Đã nhận hàng',
   completed: 'Đã đánh giá',
+  returned: 'Đã hoàn hàng',
   cancelled: 'Đã hủy',
 };
 

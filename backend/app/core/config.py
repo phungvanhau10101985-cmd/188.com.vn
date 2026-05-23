@@ -315,6 +315,22 @@ class Settings:
         self.SOURCE_STOCK_CHECK_HEADLESS: bool = os.getenv(
             "SOURCE_STOCK_CHECK_HEADLESS", "True"
         ).strip().lower() not in ("0", "false", "no", "off")
+        # Tra EMS nền sau import file gui ems + cron hàng ngày.
+        self.EMS_TRACKING_REFRESH_ENABLED: bool = os.getenv(
+            "EMS_TRACKING_REFRESH_ENABLED", "True"
+        ).strip().lower() not in ("0", "false", "no", "off")
+        self.EMS_TRACKING_REFRESH_DELAY_SECONDS: float = max(
+            0.2,
+            float(os.getenv("EMS_TRACKING_REFRESH_DELAY_SECONDS", "0.6") or "0.6"),
+        )
+        self.EMS_TRACKING_DAILY_BATCH_LIMIT: int = max(
+            1,
+            int(os.getenv("EMS_TRACKING_DAILY_BATCH_LIMIT", "400") or "400"),
+        )
+        self.EMS_TRACKING_STALE_HOURS: int = max(
+            1,
+            int(os.getenv("EMS_TRACKING_STALE_HOURS", "24") or "24"),
+        )
         # Admin Kiểm tra nguồn (DB): sau khi chạy một SP, không chọn lại cho đến khi qua N ngày (queue vòng tròn).
         self.ADMIN_SOURCE_BATCH_SCAN_COOLDOWN_DAYS: int = max(
             1,

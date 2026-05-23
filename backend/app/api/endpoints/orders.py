@@ -26,6 +26,10 @@ from app.services.order_discounts import calculate_order_discounts
 from app.services import affiliate_wallet as affiliate_svc
 from app.services import order_shipment_timeline as shipment_svc
 from app.services import ems_shipment_import as ems_import_svc
+from app.services import ems_tracking_refresh as ems_refresh_svc
+from app.services import ems_cod_settlement_import as cod_settlement_svc
+from app.services import ems_freight_settlement_import as freight_settlement_svc
+from app.services import shipping_operations as shipping_ops_svc
 from app.schemas import order_shipment as shipment_schemas
 
 
@@ -600,6 +604,239 @@ def admin_order_stats(
     """
     return crud.order.get_order_stats(db, period=period)
 
+
+@router.get("/admin/lookup-by-code/{order_code}", response_model=schemas.AdminOrderResponse)
+def admin_lookup_order_by_code(
+    order_code: str,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Tra cứu đơn theo mã DHxxx (dùng từ trang vận chuyển EMS)."""
+    code = order_code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Thiếu mã đơn")
+    order = crud.order.get_order_by_code(db, code)
+    if not order:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy đơn {code} trên 188.com.vn")
+    return order
+
+
+@router.get("/admin/shipping/ems-records", response_model=shipment_schemas.EmsShippingImportResponse)
+def admin_list_ems_shipping_records(
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Danh sách bảng quản lý vận chuyển EMS đã lưu."""
+    return ems_import_svc.list_ems_shipping_records(db)
+
+
+@router.post("/admin/shipping/ems-import", response_model=shipment_schemas.EmsShippingImportResponse)
+async def admin_import_ems_shipment_excel(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Import file gui ems.xlsx — cột A mã vận đơn, I đơn hàng (DHxxx), G COD, D tên khách."""
+    filename = (file.filename or "").lower()
+    if not filename.endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file Excel .xlsx")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="File trống.")
+    if len(raw) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File quá lớn (tối đa 10MB).")
+
+    try:
+        payload = ems_import_svc.import_ems_shipment_excel(
+            db,
+            raw,
+            admin_id=current_admin.id,
+            source_filename=file.filename,
+        )
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Không đọc được file Excel: {exc}") from exc
+
+    return payload
+
+
+@router.get(
+    "/admin/shipping/ems-tracking-refresh/job/{job_id}",
+    response_model=shipment_schemas.EmsTrackingRefreshJobResponse,
+)
+def admin_get_ems_tracking_refresh_job(
+    job_id: str,
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Poll tiến trình tra EMS nền sau import / cron."""
+    job = ems_refresh_svc.get_tracking_refresh_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Không tìm thấy job tra EMS.")
+    return job
+
+
+@router.post(
+    "/admin/shipping/ems-tracking-refresh",
+    response_model=shipment_schemas.EmsTrackingRefreshEnqueueResponse,
+)
+def admin_enqueue_ems_tracking_refresh(
+    body: shipment_schemas.EmsShippingDeleteRequest,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Tra lại EMS cho các dòng đã chọn (chạy nền, có poll job)."""
+    ids = [int(x) for x in (body.ids or []) if int(x) > 0]
+    if not ids:
+        raise HTTPException(status_code=400, detail="Chọn ít nhất một dòng vận chuyển.")
+    job_id = ems_refresh_svc.enqueue_tracking_refresh(
+        ids,
+        admin_id=current_admin.id,
+        source="manual",
+    )
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "queued": len(ids),
+        "message": f"Đã xếp hàng tra EMS cho {len(ids)} dòng.",
+    }
+
+
+@router.delete("/admin/shipping/ems-records", response_model=shipment_schemas.EmsShippingDeleteResponse)
+def admin_delete_ems_shipping_records(
+    body: shipment_schemas.EmsShippingDeleteRequest,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Xóa vĩnh viễn các dòng khỏi bảng vận chuyển EMS."""
+    deleted = ems_import_svc.delete_ems_shipping_records(db, body.ids)
+    return {"ok": True, "deleted": deleted}
+
+
+@router.get(
+    "/admin/shipping/cod-settlement-batches",
+    response_model=shipment_schemas.EmsCodSettlementImportResponse,
+)
+def admin_list_cod_settlement_batches(
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Danh sách các lần import đối soát COD đã thanh toán."""
+    return cod_settlement_svc.list_cod_settlement_batches(db)
+
+
+@router.post(
+    "/admin/shipping/cod-settlement-import",
+    response_model=shipment_schemas.EmsCodSettlementImportResponse,
+)
+async def admin_import_cod_settlement_excel(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Import file Doi soat cod — cột C mã vận chuyển EMS, cột D số tiền đã trả, E1 ngày trả tiền."""
+    filename = (file.filename or "").lower()
+    if not filename.endswith((".xls", ".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file Excel .xls / .xlsx")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="File trống.")
+    if len(raw) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File quá lớn (tối đa 10MB).")
+
+    try:
+        payload = cod_settlement_svc.import_cod_settlement_excel(
+            db,
+            raw,
+            admin_id=current_admin.id,
+            source_filename=file.filename,
+        )
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Không đọc được file đối soát COD: {exc}") from exc
+
+    return payload
+
+
+@router.get(
+    "/admin/shipping/operations-stats",
+    response_model=shipment_schemas.EmsShippingOperationsStatsResponse,
+)
+def admin_shipping_operations_stats(
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Thống kê vận hành: đang giao, COD đã/chưa trả, đơn hoàn."""
+    return shipping_ops_svc.get_shipping_operations_stats(db)
+
+
+@router.post("/admin/{order_id}/approve-return-received", response_model=schemas.AdminOrderResponse)
+def admin_approve_return_received(
+    order_id: int,
+    body: shipment_schemas.AdminApproveReturnReceivedIn,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Shop xác nhận đã nhận hàng hoàn — hủy hoa hồng affiliate."""
+    try:
+        order = shipping_ops_svc.admin_approve_return_received(
+            db,
+            order_id,
+            admin_id=current_admin.id,
+            note=body.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return order
+
+
+@router.get(
+    "/admin/shipping/freight-settlement-batches",
+    response_model=shipment_schemas.EmsFreightSettlementImportResponse,
+)
+def admin_list_freight_settlement_batches(
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Danh sách các lần import đối soát cước EMS."""
+    return freight_settlement_svc.list_freight_settlement_batches(db)
+
+
+@router.post(
+    "/admin/shipping/freight-settlement-import",
+    response_model=shipment_schemas.EmsFreightSettlementImportResponse,
+)
+async def admin_import_freight_settlement_excel(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Import file Doi soat cuoc — cột A mã vận chuyển EMS, cột L cước phí."""
+    filename = (file.filename or "").lower()
+    if not filename.endswith((".xls", ".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file Excel .xls / .xlsx")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="File trống.")
+    if len(raw) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File quá lớn (tối đa 10MB).")
+
+    try:
+        payload = freight_settlement_svc.import_freight_settlement_excel(
+            db,
+            raw,
+            admin_id=current_admin.id,
+            source_filename=file.filename,
+        )
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Không đọc được file đối soát cước: {exc}") from exc
+
+    return payload
+
+
 @router.put("/admin/{order_id}", response_model=schemas.AdminOrderResponse)
 def admin_update_order(
     order_id: int,
@@ -879,31 +1116,6 @@ def _require_shipment_cron_secret(authorization: Optional[str]) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-@router.post("/admin/shipping/ems-import", response_model=shipment_schemas.EmsShippingImportResponse)
-async def admin_import_ems_shipment_excel(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
-):
-    """Import file gui ems.xlsx — cột D (MA_DON_HANG) tra EMS, cột J (TEN_NGUOI_NHAN) tách mã DHxxx."""
-    filename = (file.filename or "").lower()
-    if not filename.endswith((".xlsx", ".xlsm")):
-        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file Excel .xlsx")
-
-    raw = await file.read()
-    if not raw:
-        raise HTTPException(status_code=400, detail="File trống.")
-    if len(raw) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File quá lớn (tối đa 10MB).")
-
-    try:
-        payload = ems_import_svc.import_ems_shipment_excel(db, raw)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Không đọc được file Excel: {exc}") from exc
-
-    return payload
-
-
 @router.get("/cron/advance-shipment-timelines")
 def cron_advance_shipment_timelines(
     db: Session = Depends(get_db),
@@ -912,3 +1124,16 @@ def cron_advance_shipment_timelines(
     _require_shipment_cron_secret(authorization)
     advanced = shipment_svc.advance_auto_milestones_batch(db)
     return {"ok": True, "advanced": advanced}
+
+
+@router.get("/cron/refresh-ems-tracking", response_model=shipment_schemas.EmsTrackingRefreshEnqueueResponse)
+def cron_refresh_ems_tracking(
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """
+    Cron hàng ngày — tra EMS các bản ghi chưa giao / chưa có mã tracking.
+    Crontab ví dụ: 0 6 * * * curl -H "Authorization: Bearer $CRON_SECRET" ...
+    """
+    _require_shipment_cron_secret(authorization)
+    return ems_refresh_svc.run_daily_ems_tracking_refresh(db)

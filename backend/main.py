@@ -456,6 +456,19 @@ async def startup_event():
         print(f"   ⚠️  source stock checker startup: {_e_ssc}")
 
     try:
+        from app.services.ems_tracking_refresh import start_ems_tracking_refresh_worker_if_enabled
+
+        start_ems_tracking_refresh_worker_if_enabled()
+        from app.core.config import settings as _ems_refresh_settings
+        if getattr(_ems_refresh_settings, "EMS_TRACKING_REFRESH_ENABLED", True):
+            print(
+                "   📦 EMS_TRACKING_REFRESH: worker tra EMS nền sau import + cron hàng ngày "
+                f"(delay {_ems_refresh_settings.EMS_TRACKING_REFRESH_DELAY_SECONDS}s/dòng)."
+            )
+    except Exception as _e_ems_r:
+        print(f"   ⚠️  EMS tracking refresh worker startup: {_e_ems_r}")
+
+    try:
         from app.services.home_hero_category_startup import start_home_hero_cache_daemon_if_needed
 
         start_home_hero_cache_daemon_if_needed(delay_seconds=4.0)

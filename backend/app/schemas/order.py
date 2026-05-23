@@ -14,6 +14,7 @@ class OrderStatus(str, Enum):
     SHIPPING = "shipping"
     DELIVERED = "delivered"
     COMPLETED = "completed"
+    RETURNED = "returned"
     CANCELLED = "cancelled"
 
 class PaymentStatus(str, Enum):
@@ -184,6 +185,7 @@ class AdminOrderStats(BaseModel):
     shipping_orders: int
     delivered_orders: int
     completed_orders: int
+    returned_orders: int = 0
     cancelled_orders: int
 
 # ========== PAYMENT SCHEMAS ==========

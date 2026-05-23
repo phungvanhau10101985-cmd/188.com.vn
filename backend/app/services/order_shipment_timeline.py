@@ -517,3 +517,152 @@ def backfill_timelines(db: Session, limit: int = 500) -> int:
     if created:
         db.commit()
     return created
+
+
+EMS_IMPORT_SYNC_PHASES = frozenset({
+    "posted",
+    "in_transit",
+    "out_for_delivery",
+    "delivered",
+    "cod_collected",
+    "cod_settled",
+})
+
+EMS_IMPORT_DELIVERED_PHASES = frozenset({
+    "delivered",
+    "cod_collected",
+    "cod_settled",
+})
+
+
+def _active_step_key(events: list[OrderShipmentEvent]) -> Optional[str]:
+    for ev in events:
+        if ev.status == EVENT_ACTIVE:
+            return ev.step_key
+    return None
+
+
+def _force_complete_auto_steps_until_pause(db: Session, order: Order) -> None:
+    """Hoàn thành nhanh các bước tự động trước cửa khẩu khi EMS đã có hành trình."""
+    if not should_have_timeline(order):
+        return
+    ensure_shipment_timeline(db, order)
+    steps = _step_defs(_deposit_flow(order))
+    step_by_key = {s["key"]: s for s in steps}
+    now = _utc_now()
+
+    for _ in range(len(steps) + 2):
+        events = _load_timeline_events(db, order.id)
+        active_key = _active_step_key(events)
+        if not active_key or active_key in ("at_customs", "domestic_shipping", "awaiting_confirm"):
+            break
+        step_def = step_by_key.get(active_key) or {}
+        if step_def.get("manual") or step_def.get("pause_here"):
+            break
+
+        active_ev = _event_by_key(events, active_key)
+        if not active_ev or active_ev.status != EVENT_ACTIVE:
+            break
+        idx = next(i for i, ev in enumerate(events) if ev.id == active_ev.id)
+        active_ev.status = EVENT_COMPLETED
+        active_ev.completed_at = now
+        _activate_next(db, order, events, idx)
+        db.flush()
+
+    _sync_order_processing_status(db, order, _load_timeline_events(db, order.id))
+
+
+def _set_awaiting_confirm_ems_note(
+    db: Session,
+    order_id: int,
+    *,
+    admin_id: Optional[int],
+    ems_status_description: Optional[str],
+) -> None:
+    events = _load_timeline_events(db, order_id)
+    awaiting = _event_by_key(events, "awaiting_confirm")
+    if not awaiting:
+        return
+    note = "188.com.vn đã gửi hàng cho EMS giao hàng."
+    if ems_status_description:
+        note = f"{note} Trạng thái EMS: {ems_status_description.strip()}"
+    awaiting.note = note
+    if admin_id:
+        awaiting.updated_by_admin_id = admin_id
+    db.flush()
+
+
+def apply_ems_import_shipping_sync(
+    db: Session,
+    order: Order,
+    admin_id: Optional[int],
+    *,
+    ems_phase: str,
+    ems_tracking_code: Optional[str] = None,
+    ems_status_description: Optional[str] = None,
+) -> tuple[bool, str]:
+    """
+    Đồng bộ đơn shop theo trạng thái EMS khi import khớp mã DHxxx.
+    Mục tiêu: timeline hiển thị shop đã gửi cho EMS giao hàng.
+    """
+    st = _order_status_value(order)
+    if st in (OrderStatus.CANCELLED.value, OrderStatus.PENDING.value, OrderStatus.WAITING_DEPOSIT.value):
+        return False, "Đơn chưa sẵn sàng đồng bộ EMS."
+    if ems_phase not in EMS_IMPORT_SYNC_PHASES:
+        return False, "EMS chưa có trạng thái vận chuyển để đồng bộ."
+    if st in (OrderStatus.DELIVERED.value, OrderStatus.COMPLETED.value):
+        if ems_phase in EMS_IMPORT_DELIVERED_PHASES:
+            return False, "Đơn và EMS đã giao — không cần cập nhật."
+        return False, "Đơn đã giao — bỏ qua đồng bộ EMS."
+
+    aid = admin_id or 0
+    _force_complete_auto_steps_until_pause(db, order)
+    messages: list[str] = []
+
+    active_key = _active_step_key(_load_timeline_events(db, order.id))
+
+    if active_key == "at_customs":
+        try:
+            admin_clear_customs_and_ship(db, order.id, aid)
+            messages.append("Đã cập nhật thông quan.")
+            active_key = "domestic_shipping"
+        except ValueError as exc:
+            return False, str(exc)
+
+    active_key = _active_step_key(_load_timeline_events(db, order.id))
+    if active_key == "domestic_shipping":
+        try:
+            admin_mark_out_for_customer_confirm(
+                db,
+                order.id,
+                aid,
+                tracking_number=ems_tracking_code,
+                shipping_provider="EMS",
+            )
+            messages.append("Shop đã gửi hàng cho EMS giao.")
+        except ValueError as exc:
+            return False, str(exc)
+    elif active_key == "awaiting_confirm":
+        if ems_tracking_code:
+            order.tracking_number = ems_tracking_code.strip()
+        order.shipping_provider = "EMS"
+        if _order_status_value(order) != OrderStatus.SHIPPING.value:
+            order.status = OrderStatus.SHIPPING.value
+        messages.append("Đã cập nhật mã EMS trên đơn đang giao.")
+    else:
+        return False, f"Đơn đang ở bước {active_key or '—'} — không thể đồng bộ EMS tự động."
+
+    _set_awaiting_confirm_ems_note(
+        db,
+        order.id,
+        admin_id=admin_id,
+        ems_status_description=ems_status_description,
+    )
+
+    if ems_phase in EMS_IMPORT_DELIVERED_PHASES:
+        order.status = OrderStatus.DELIVERED.value
+        mark_delivered_on_timeline(db, order, admin_id=admin_id)
+        messages.append("EMS đã phát — đơn shop cập nhật đã giao.")
+
+    db.flush()
+    return True, " ".join(messages)

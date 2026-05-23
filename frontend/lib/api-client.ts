@@ -1009,6 +1009,9 @@ class ApiClient {
     order_id: number;
     order_code: string | null;
     buyer_label: string;
+    buyer_name: string;
+    buyer_phone: string;
+    buyer_address: string;
     product_summary: string;
     order_total: number;
     order_status: string;

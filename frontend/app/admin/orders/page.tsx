@@ -16,6 +16,7 @@ const STATUS_TEXTS: Record<string, string> = {
   shipping: 'Chờ nhận hàng',
   delivered: 'Đã nhận hàng',
   completed: 'Đã đánh giá',
+  returned: 'Đã hoàn hàng',
   cancelled: 'Đã hủy',
 };
 
@@ -372,6 +373,20 @@ export default function AdminOrdersPage() {
     }
   };
 
+  const handleApproveReturn = async (order: AdminOrder) => {
+    try {
+      const updated = await adminOrderAPI.approveReturnReceived(order.id, {
+        note: 'Shop đã nhận hàng hoàn',
+      });
+      showToast('ok', 'Đã ghi nhận nhận hàng hoàn — hoa hồng affiliate đã hủy');
+      setSelectedOrder(updated);
+      fetchOrders();
+      fetchStats();
+    } catch (err: unknown) {
+      showToast('err', err instanceof Error ? err.message : 'Không thể duyệt hoàn hàng');
+    }
+  };
+
   const handleConsultationToggle = async (order: AdminOrder, checked: boolean) => {
     setConsultSavingId(order.id);
     try {
@@ -394,6 +409,7 @@ export default function AdminOrdersPage() {
     { key: 'shipping', label: 'Chờ nhận hàng', countKey: 'shipping_orders' as const },
     { key: 'delivered', label: 'Đã nhận hàng', countKey: 'delivered_orders' as const },
     { key: 'completed', label: 'Đã đánh giá', countKey: 'completed_orders' as const },
+    { key: 'returned', label: 'Đã hoàn hàng', countKey: 'returned_orders' as const },
     { key: 'cancelled', label: 'Đã hủy', countKey: 'cancelled_orders' as const },
   ];
 
@@ -900,14 +916,23 @@ export default function AdminOrdersPage() {
                     Hoàn thành
                   </button>
                 )}
-                {!['cancelled', 'completed'].includes(selectedOrder.status) && (
+                {!['cancelled', 'completed', 'returned'].includes(selectedOrder.status) && (
                   <button onClick={() => handleUpdateStatus(selectedOrder.id, 'cancelled')} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
                     Hủy đơn hàng
                   </button>
                 )}
-                {parseMoney(selectedOrder.deposit_paid) > 0 && !['cancelled', 'completed'].includes(selectedOrder.status) && selectedOrder.payment_status !== 'refunded' && (
+                {parseMoney(selectedOrder.deposit_paid) > 0 && !['cancelled', 'completed', 'returned'].includes(selectedOrder.status) && selectedOrder.payment_status !== 'refunded' && (
                   <button onClick={() => handleRefundDeposit(selectedOrder)} className="px-4 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100">
                     Duyệt hoàn cọc
+                  </button>
+                )}
+                {['shipping', 'delivered', 'completed'].includes(selectedOrder.status) && (
+                  <button
+                    type="button"
+                    onClick={() => handleApproveReturn(selectedOrder)}
+                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700"
+                  >
+                    Duyệt đã nhận hàng hoàn
                   </button>
                 )}
                 <button onClick={() => setDetailOpen(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">

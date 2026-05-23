@@ -371,7 +371,8 @@ export default function WalletPage() {
             </button>
           </div>
           <p className="text-xs text-gray-500 mb-4">
-            Chỉ hiển thị mã đơn, trạng thái và hoa hồng — không hiện họ tên, SĐT, email hay địa chỉ khách.
+            Hiển thị thông tin khách để CTV tự liên hệ đối chiếu. Hoa hồng đơn hoàn sẽ hiện trạng thái{' '}
+            <strong>Hủy — đơn hoàn</strong>.
           </p>
           {referredOrdersLoading && referredOrders.length === 0 ? (
             <div className="py-8 flex justify-center">
@@ -388,6 +389,7 @@ export default function WalletPage() {
                       <th className="py-2 pr-3 font-medium">Ngày</th>
                       <th className="py-2 pr-3 font-medium">Mã đơn</th>
                       <th className="py-2 pr-3 font-medium">Người mua</th>
+                      <th className="py-2 pr-3 font-medium">Liên hệ</th>
                       <th className="py-2 pr-3 font-medium">Sản phẩm</th>
                       <th className="py-2 pr-3 font-medium">Trạng thái đơn</th>
                       <th className="py-2 pr-3 font-medium">Hoa hồng</th>
@@ -401,7 +403,15 @@ export default function WalletPage() {
                           {row.order_created_at ? new Date(row.order_created_at).toLocaleDateString('vi-VN') : '—'}
                         </td>
                         <td className="py-3 pr-3 font-medium text-gray-900">{row.order_code || `#${row.order_id}`}</td>
-                        <td className="py-3 pr-3 text-gray-700">{row.buyer_label}</td>
+                        <td className="py-3 pr-3 text-gray-700">{row.buyer_name || row.buyer_label}</td>
+                        <td className="py-3 pr-3 text-gray-600 text-xs">
+                          <div>{row.buyer_phone || '—'}</div>
+                          {row.buyer_address ? (
+                            <div className="text-gray-500 mt-1 max-w-[160px] truncate" title={row.buyer_address}>
+                              {row.buyer_address}
+                            </div>
+                          ) : null}
+                        </td>
                         <td className="py-3 pr-3 text-gray-600 max-w-[180px] truncate" title={row.product_summary}>
                           {row.product_summary}
                         </td>
@@ -449,7 +459,10 @@ export default function WalletPage() {
                         {row.commission_status_label}
                       </span>
                     </div>
-                    <p className="text-gray-600">{row.buyer_label} · {row.order_status_label}</p>
+                    <p className="text-gray-600">
+                      {row.buyer_name || row.buyer_label}
+                      {row.buyer_phone ? ` · ${row.buyer_phone}` : ''} · {row.order_status_label}
+                    </p>
                     <p className="text-gray-500 truncate">{row.product_summary}</p>
                     <p className="font-semibold text-gray-900">Hoa hồng: {fmt(Number(row.commission_amount))}</p>
                   </li>
