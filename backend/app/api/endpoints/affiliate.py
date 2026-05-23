@@ -87,17 +87,7 @@ def list_wallet_transactions(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
 ):
-    from app.models.affiliate import WalletTransaction
-
-    rows = (
-        db.query(WalletTransaction)
-        .filter(WalletTransaction.user_id == current_user.id)
-        .order_by(WalletTransaction.created_at.desc())
-        .offset(skip)
-        .limit(limit)
-        .all()
-    )
-    return rows
+    return svc.list_wallet_transactions_for_user(db, current_user.id, skip=skip, limit=limit)
 
 
 @router.get("/bank-account", response_model=Optional[schemas.UserBankAccountResponse])

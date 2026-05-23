@@ -10,6 +10,7 @@ from app.models.order import Order, OrderItem, OrderStatus, PaymentStatus, Payme
 from app.models.product import Product
 from app.schemas.order import OrderCreate, OrderUpdate
 from app.services import affiliate_wallet as affiliate_svc
+from app.services import order_shipment_timeline as shipment_svc
 
 logger = logging.getLogger(__name__)
 
@@ -264,6 +265,8 @@ def admin_update_order(
     commission_confirmed = False
     if 'status' in update_data:
         commission_confirmed = affiliate_svc.handle_order_status_change(db, order, old_status, update_data['status'])
+        if update_data['status'] == OrderStatus.DELIVERED.value:
+            shipment_svc.mark_delivered_on_timeline(db, order, admin_id=admin_id)
     if 'payment_status' in update_data:
         affiliate_svc.handle_order_payment_status_change(db, order, update_data['payment_status'])
     
@@ -332,6 +335,7 @@ def confirm_received(
     order.delivered_at = datetime.now()
     order.updated_at = datetime.now()
     commission_confirmed = affiliate_svc.handle_order_status_change(db, order, old_status, OrderStatus.DELIVERED.value)
+    shipment_svc.mark_delivered_on_timeline(db, order)
     db.commit()
     db.refresh(order)
     if commission_confirmed:

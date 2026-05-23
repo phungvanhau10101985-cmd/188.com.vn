@@ -1,14 +1,21 @@
 'use client';
 
+import Link from 'next/link';
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
 type ToastVariant = 'success' | 'error' | 'info';
 
+interface ToastAction {
+  label: string;
+  href: string;
+}
+
 interface Toast {
   id: string;
   title: string;
   description?: string;
+  action?: ToastAction;
   variant: ToastVariant;
   durationMs?: number;
 }
@@ -70,7 +77,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <div>
                 <p className="text-sm font-semibold">{toast.title}</p>
                 {toast.description && (
-                  <p className="text-sm text-gray-600">{toast.description}</p>
+                  <p className="mt-1 text-sm text-gray-600">{toast.description}</p>
+                )}
+                {toast.action && (
+                  <Link
+                    href={toast.action.href}
+                    onClick={() => dismissToast(toast.id)}
+                    className="mt-2 inline-flex min-h-[44px] items-center text-sm font-medium underline underline-offset-2 hover:opacity-80"
+                  >
+                    {toast.action.label}
+                  </Link>
                 )}
               </div>
               <button

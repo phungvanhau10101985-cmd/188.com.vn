@@ -420,6 +420,27 @@ class ApiClient {
     return this.fetch<any>(`/orders/${orderId}`);
   }
 
+  async getOrderShipmentTimeline(orderId: number): Promise<{
+    order_id: number;
+    order_code: string;
+    order_status: string;
+    tracking_number?: string | null;
+    shipping_provider?: string | null;
+    footer_note: string;
+    current_step_key?: string | null;
+    waiting_admin_at_customs: boolean;
+    events: Array<{
+      step_key: string;
+      title: string;
+      status: string;
+      scheduled_at?: string | null;
+      completed_at?: string | null;
+      note?: string | null;
+    }>;
+  }> {
+    return this.fetch(`/orders/${orderId}/shipment-timeline`);
+  }
+
   async cancelOrder(orderId: number, reason: string): Promise<any> {
     return this.fetch<any>(`/orders/${orderId}/cancel?reason=${encodeURIComponent(reason)}`, { method: 'POST' });
   }
@@ -929,7 +950,23 @@ class ApiClient {
     return this.fetch(`/affiliate/referred-orders?skip=${skip}&limit=${limit}`);
   }
 
-  async getWalletTransactions(skip = 0, limit = 50): Promise<any[]> {
+  async getWalletTransactions(skip = 0, limit = 50): Promise<Array<{
+    id: number;
+    tx_type: string;
+    tx_type_label?: string | null;
+    amount: number;
+    balance_after: number;
+    pending_after: number;
+    description?: string | null;
+    reference_type?: string | null;
+    reference_id?: number | null;
+    order_code?: string | null;
+    order_status?: string | null;
+    order_status_label?: string | null;
+    product_summary?: string | null;
+    affects_bucket?: 'withdrawable' | 'pending' | 'both' | null;
+    created_at: string;
+  }>> {
     return this.fetch(`/affiliate/wallet/transactions?skip=${skip}&limit=${limit}`);
   }
 

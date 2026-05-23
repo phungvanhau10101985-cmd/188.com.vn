@@ -10,6 +10,8 @@ import { buildSepayTransferContent } from '@/lib/sepay-transfer-content';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import ProductReviewFormModal from '@/app/products/[slug]/components/ProductReviewFormModal/ProductReviewFormModal';
+import OrderReviewActions from '@/app/account/orders/components/OrderReviewActions';
+import { pushOrderReceivedConfirmedToast } from '@/app/account/orders/components/orderReceivedToast';
 
 interface OrderItem {
   id: number;
@@ -67,6 +69,12 @@ function formatDate(s: string) {
 
 function formatVnd(n: number) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
+}
+
+const TRACKING_VISIBLE_STATUSES = ['deposit_paid', 'confirmed', 'processing', 'shipping', 'delivered', 'completed'];
+
+function canShowTracking(status: string) {
+  return TRACKING_VISIBLE_STATUSES.includes(status);
 }
 
 function matchTab(order: Order, tab: (typeof CUSTOMER_TABS)[0]): boolean {
@@ -203,7 +211,7 @@ export default function AccountOrdersPage() {
       loadOrders();
       setConfirmReceivedModalOrder(null);
       trackEvent('order_confirm_received', { order_id: confirmReceivedModalOrder.id });
-      pushToast({ title: 'Đã xác nhận nhận hàng', variant: 'success', durationMs: 2500 });
+      pushOrderReceivedConfirmedToast(pushToast, confirmReceivedModalOrder.id);
     } catch (e) {
       pushToast({ title: 'Không thể xác nhận', description: (e as Error).message || 'Vui lòng thử lại', variant: 'error', durationMs: 3500 });
     } finally {
@@ -386,6 +394,19 @@ export default function AccountOrdersPage() {
                 >
                   Chi tiết đơn hàng
                 </Link>
+                <OrderReviewActions
+                  order={order}
+                  reviewedProductIds={reviewedProductIds}
+                  onReviewProduct={(productId) => setReviewModalProductId(productId)}
+                />
+                {canShowTracking(order.status) && (
+                  <Link
+                    href={`/account/orders/${order.id}/tracking`}
+                    className="inline-flex min-h-[44px] items-center px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-50 active:bg-gray-100"
+                  >
+                    Lịch trình đơn hàng
+                  </Link>
+                )}
                 {order.status === 'waiting_deposit' && (
                   <>
                     <Link
@@ -405,10 +426,13 @@ export default function AccountOrdersPage() {
                 )}
                 {['deposit_paid', 'confirmed', 'processing', 'shipping'].includes(order.status) && (
                   <>
-                    {order.tracking_number && (
-                      <a href="#" className="inline-flex min-h-[44px] items-center px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 active:bg-gray-300">
+                    {canShowTracking(order.status) && (
+                      <Link
+                        href={`/account/orders/${order.id}/tracking`}
+                        className="inline-flex min-h-[44px] items-center px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-50 active:bg-gray-100"
+                      >
                         Lịch trình đơn hàng
-                      </a>
+                      </Link>
                     )}
                     <button
                       type="button"

@@ -87,6 +87,90 @@ def send_order_email(to_email: str, subject: str, message: str) -> None:
     send_email(to_email, subject, text_body, html_body)
 
 
+def send_order_received_confirmed_email_task(order_id: int) -> None:
+    """Email sau khi khách xác nhận đã nhận hàng — kèm lời nhắc đánh giá nhẹ nhàng."""
+    from sqlalchemy.orm import joinedload
+
+    from app.db.session import SessionLocal
+    from app.models.order import Order
+
+    db = SessionLocal()
+    try:
+        order = (
+            db.query(Order)
+            .options(joinedload(Order.user))
+            .filter(Order.id == order_id)
+            .first()
+        )
+        if not order:
+            logger.warning("order_received_confirmed_email skip: order not found id=%s", order_id)
+            return
+
+        customer_to = (order.customer_email or "").strip()
+        if not customer_to and order.user and (order.user.email or "").strip():
+            customer_to = (order.user.email or "").strip()
+        if not customer_to:
+            logger.info("order_received_confirmed_email skip: no email order_id=%s", order_id)
+            return
+
+        name = (order.customer_name or "Quý khách").strip()
+        code = order.order_code or f"#{order.id}"
+        fe = (settings.FRONTEND_BASE_URL or "").strip().rstrip("/")
+        review_url = f"{fe}/account/orders/{order.id}/review" if fe else ""
+        detail_url = f"{fe}/account/orders/{order.id}" if fe else ""
+
+        subject = f"Đã xác nhận nhận hàng {code} · 188.com.vn"
+        if settings.EMAIL_SUBJECT_PREFIX:
+            subject = f"{settings.EMAIL_SUBJECT_PREFIX} {subject}"
+
+        review_hint = (
+            "Nếu bạn hài lòng với sản phẩm và dịch vụ, rất mong bạn dành chút thời gian "
+            "đánh giá đơn hàng — ý kiến của bạn giúp 188.com.vn cải thiện chất lượng "
+            "sản phẩm và phục vụ khách hàng tốt hơn mỗi ngày."
+        )
+
+        text_lines = [
+            f"Kính gửi {name},",
+            "",
+            "Cảm ơn bạn đã xác nhận nhận hàng.",
+            f"Mã đơn hàng: {code}",
+            "",
+            review_hint,
+            *(["", f"Đánh giá đơn hàng: {review_url}"] if review_url else []),
+            "",
+            "Nếu có vấn đề cần hỗ trợ, vui lòng liên hệ 188.com.vn.",
+            *(["", f"Xem chi tiết đơn: {detail_url}"] if detail_url else []),
+            "",
+            "Trân trọng,",
+            "188.com.vn",
+        ]
+        text_body = "\n".join(text_lines)
+
+        review_html = (
+            f'<p><a href="{review_url}">Đánh giá đơn hàng</a></p>' if review_url else ""
+        )
+        detail_html = (
+            f'<p><a href="{detail_url}">Xem chi tiết đơn hàng</a></p>' if detail_url else ""
+        )
+        html_body = (
+            f"<p>Kính gửi <strong>{name}</strong>,</p>"
+            "<p>Cảm ơn bạn đã <strong>xác nhận nhận hàng</strong>.</p>"
+            f"<p>Mã đơn: <strong>{code}</strong></p>"
+            f"<p>{review_hint}</p>"
+            f"{review_html}"
+            "<p>Nếu có vấn đề cần hỗ trợ, vui lòng liên hệ <strong>188.com.vn</strong>.</p>"
+            f"{detail_html}"
+            "<p>Trân trọng,<br>188.com.vn</p>"
+        )
+
+        send_email(customer_to, subject, text_body, html_body)
+        logger.info("order_received_confirmed_email sent order_id=%s to=%s", order_id, customer_to)
+    except Exception:
+        logger.exception("order_received_confirmed_email failed order_id=%s", order_id)
+    finally:
+        db.close()
+
+
 def send_order_created_email_task(order_id: int) -> None:
     """Email xác nhận đơn mới — kèm QR + nhắc đặt cọc nếu đơn chờ cọc."""
     from sqlalchemy.orm import joinedload

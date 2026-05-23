@@ -297,6 +297,18 @@ def _merge_excel_overlay_for_job(db: Session, job_id: str, product_data: Dict[st
     merge_import_excel_overlay_into_product_data(product_data, ov)
 
 
+def _reapply_excel_locale_overlay_for_job(db: Session, job_id: str, product_data: Dict[str, Any]) -> None:
+    """Giữ tên tiếng Trung / shop Trung Quốc từ Excel sau scrape + AI (không dùng placeholder nguồn)."""
+    d = draft_crud.get_by_job_id(db, job_id)
+    ov = getattr(d, "excel_overlays", None) if d else None
+    if not ov or not isinstance(ov, dict):
+        return
+    for key in ("shop_name_chinese", "chinese_name"):
+        val = ov.get(key)
+        if val is not None and str(val).strip():
+            product_data[key] = str(val).strip()
+
+
 def _run_import_1688_chain_from_meta(meta_path_str: str) -> None:
     """
     Chạy tuần tự job trong file meta.
@@ -839,6 +851,7 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             _prefer_excel_chinese_name_for_import_ai(product_data)
             _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
             _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
+            _reapply_excel_locale_overlay_for_job(db, job_id, product_data)
             draft_crud.mark_done(
                 db,
                 draft,
@@ -856,6 +869,7 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             _prefer_excel_chinese_name_for_import_ai(product_data)
             _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
             _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
+            _reapply_excel_locale_overlay_for_job(db, job_id, product_data)
             draft_crud.mark_done(
                 db,
                 draft,

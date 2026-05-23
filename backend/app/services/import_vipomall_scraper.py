@@ -566,7 +566,7 @@ def vipomall_row_to_product_data(row: Dict[str, Any], source_url: str, offer_id:
         "description": desc[:20000],
         "price": float(price_vnd),
         "shop_name": "Vipomall",
-        "shop_name_chinese": "Vipomall",
+        "shop_name_chinese": None,
         "shop_id": offer_id,
         "pro_lower_price": cny_for_excel,
         "pro_high_price": cny_for_excel,

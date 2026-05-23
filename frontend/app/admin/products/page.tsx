@@ -3100,10 +3100,36 @@ export default function AdminProductsPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">Shop</label>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Tên shop (VN)
+                        <span className="text-gray-500 font-normal"> — cột Excel «Tên shop»</span>
+                      </label>
                       <input
                         value={String(import1688Draft.product_data.shop_name || '')}
                         onChange={(e) => updateImport1688ProductField('shop_name', e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Shop Trung Quốc
+                        <span className="text-gray-500 font-normal"> — cột Excel «Shop Trung Quốc»</span>
+                      </label>
+                      <input
+                        value={String(import1688Draft.product_data.shop_name_chinese ?? '')}
+                        onChange={(e) => updateImport1688ProductField('shop_name_chinese', e.target.value)}
+                        placeholder="VD: 义乌市××商行"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Tên tiếng Trung
+                        <span className="text-gray-500 font-normal"> — cột Excel «Tên tiếng trung»</span>
+                      </label>
+                      <input
+                        value={String(import1688Draft.product_data.chinese_name ?? '')}
+                        onChange={(e) => updateImport1688ProductField('chinese_name', e.target.value)}
                         className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                       />
                     </div>

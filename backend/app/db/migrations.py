@@ -21,6 +21,7 @@ from app.models.email_login_challenge import EmailLoginChallenge
 from app.models.email_trusted_device import EmailTrustedDevice
 from app.models.birthday_promo import BirthdayPromoEmailLog
 from app.models.admin_feature_test import AdminFeatureTestSetting
+from app.models.order_shipment import OrderShipmentEvent
 from app.models.affiliate import (
     AffiliateApplication,
     AffiliateBankAccountOtp,
@@ -650,8 +651,48 @@ class MigrationManager:
             "affiliate_settings", AffiliateSettings
         )
         results['orders_affiliate_sync'] = self._sync_table_columns("orders", Order)
+        results['affiliate_commission_repair'] = self._repair_premature_commission_confirmations()
+        results['order_shipment_events_create'] = self._create_table_if_not_exists(
+            "order_shipment_events", OrderShipmentEvent
+        )
+        results['order_shipment_backfill'] = self._backfill_order_shipment_timelines()
 
         return results
+
+    def _backfill_order_shipment_timelines(self) -> bool:
+        try:
+            from app.db.session import SessionLocal
+            from app.services import order_shipment_timeline as shipment_svc
+
+            db = SessionLocal()
+            try:
+                created = shipment_svc.backfill_timelines(db)
+                if created:
+                    logger.info("✅ order_shipment_backfill: created %s timelines", created)
+                return True
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning("  _backfill_order_shipment_timelines: %s", e)
+            return False
+
+    def _repair_premature_commission_confirmations(self) -> bool:
+        """Hoàn tác hoa hồng bị xác nhận sớm trước khi giao hàng (legacy bug)."""
+        try:
+            from app.db.session import SessionLocal
+            from app.services import affiliate_wallet as affiliate_svc
+
+            db = SessionLocal()
+            try:
+                fixed = affiliate_svc.repair_premature_commission_confirmations(db)
+                if fixed:
+                    logger.info("✅ affiliate_commission_repair: fixed %s rows", fixed)
+                return True
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning("  _repair_premature_commission_confirmations: %s", e)
+            return False
 
     def migrate_source_stock_worker_state_seed_row(self) -> bool:
         """Một hàng singleton id=1 để không cần NULL-as-default khi pause."""

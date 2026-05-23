@@ -268,6 +268,8 @@ export interface AdminOrder {
   deposit_percentage?: number;
   deposit_type?: string | null;
   remaining_amount?: number;
+  tracking_number?: string | null;
+  shipping_provider?: string | null;
   created_at: string;
   items: AdminOrderItem[];
 }
@@ -1887,10 +1889,42 @@ export const adminOrderAPI = {
   getStats: (period: 'today' | 'week' | 'month' | 'year' | 'all' = 'today') =>
     fetchAdmin<AdminOrderStats>(`/orders/admin/stats?period=${period}`),
 
-  updateOrder: (orderId: number, data: { status?: string; payment_status?: string; staff_consultation_contacted?: boolean }) =>
+  updateOrder: (orderId: number, data: {
+    status?: string;
+    payment_status?: string;
+    staff_consultation_contacted?: boolean;
+    tracking_number?: string;
+    shipping_provider?: string;
+  }) =>
     fetchAdmin<AdminOrder>(`/orders/admin/${orderId}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    }),
+
+  getOrderShipmentTimeline: (orderId: number) =>
+    fetchAdmin<{
+      order_id: number;
+      order_code: string;
+      order_status: string;
+      tracking_number?: string | null;
+      shipping_provider?: string | null;
+      footer_note: string;
+      current_step_key?: string | null;
+      waiting_admin_at_customs: boolean;
+      events: Array<{
+        step_key: string;
+        title: string;
+        status: string;
+        scheduled_at?: string | null;
+        completed_at?: string | null;
+        note?: string | null;
+      }>;
+    }>(`/orders/admin/${orderId}/shipment-timeline`),
+
+  clearCustomsShipment: (orderId: number, data?: { tracking_number?: string; shipping_provider?: string }) =>
+    fetchAdmin<AdminOrder>(`/orders/admin/${orderId}/shipment/clear-customs`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
     }),
 
   getOrderPayments: (orderId: number) =>

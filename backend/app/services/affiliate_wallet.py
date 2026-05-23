@@ -33,6 +33,18 @@ COMMISSION_STATUS_PENDING = "pending"
 COMMISSION_STATUS_CONFIRMED = "confirmed"
 COMMISSION_STATUS_CANCELLED = "cancelled"
 
+_COMMISSION_WITHDRAWABLE_ORDER_STATUSES = frozenset({
+    OrderStatus.DELIVERED.value,
+    OrderStatus.COMPLETED.value,
+})
+
+_COMMISSION_STATUS_LABELS = {
+    "pending": "Chờ giao hàng",
+    "confirmed": "Đã cộng — rút được",
+    "cancelled": "Đã hủy",
+    "awaiting_deposit": "Chờ khách đặt cọc",
+}
+
 WITHDRAWAL_STATUS_PENDING = "pending"
 WITHDRAWAL_STATUS_APPROVED = "approved"
 WITHDRAWAL_STATUS_REJECTED = "rejected"
@@ -489,6 +501,70 @@ def notify_referrer_commission_confirmed(db: Session, order: Order, commission: 
     )
 
 
+def _order_status_value(order: Order | str) -> str:
+    if isinstance(order, str):
+        return order
+    return getattr(order.status, "value", order.status) or ""
+
+
+def _order_allows_commission_withdrawal(order_status: str) -> bool:
+    return order_status in _COMMISSION_WITHDRAWABLE_ORDER_STATUSES
+
+
+def _resolve_commission_display(
+    comm: Optional[AffiliateCommission],
+    order: Order,
+) -> dict:
+    st = _order_status_value(order)
+    if comm:
+        if comm.status == COMMISSION_STATUS_CANCELLED:
+            return {
+                "commission_status": "cancelled",
+                "commission_status_label": _COMMISSION_STATUS_LABELS["cancelled"],
+                "withdrawable": False,
+                "commission_created_at": comm.created_at,
+                "commission_confirmed_at": None,
+            }
+        if comm.status == COMMISSION_STATUS_CONFIRMED and _order_allows_commission_withdrawal(st):
+            return {
+                "commission_status": "confirmed",
+                "commission_status_label": _COMMISSION_STATUS_LABELS["confirmed"],
+                "withdrawable": True,
+                "commission_created_at": comm.created_at,
+                "commission_confirmed_at": comm.confirmed_at,
+            }
+        return {
+            "commission_status": "pending",
+            "commission_status_label": _COMMISSION_STATUS_LABELS["pending"],
+            "withdrawable": False,
+            "commission_created_at": comm.created_at,
+            "commission_confirmed_at": None,
+        }
+    if st == "cancelled":
+        return {
+            "commission_status": "cancelled",
+            "commission_status_label": _COMMISSION_STATUS_LABELS["cancelled"],
+            "withdrawable": False,
+            "commission_created_at": None,
+            "commission_confirmed_at": None,
+        }
+    if order.requires_deposit and st == "waiting_deposit":
+        return {
+            "commission_status": "awaiting_deposit",
+            "commission_status_label": _COMMISSION_STATUS_LABELS["awaiting_deposit"],
+            "withdrawable": False,
+            "commission_created_at": None,
+            "commission_confirmed_at": None,
+        }
+    return {
+        "commission_status": "pending",
+        "commission_status_label": _COMMISSION_STATUS_LABELS["pending"],
+        "withdrawable": False,
+        "commission_created_at": order.created_at,
+        "commission_confirmed_at": None,
+    }
+
+
 def _order_status_label(status_val: str) -> str:
     labels = {
         "pending": "Chờ xác nhận",
@@ -557,26 +633,7 @@ def list_referred_orders_for_affiliate(
             (base * pct / Decimal("100")).quantize(Decimal("0.01")) if base > 0 else Decimal("0")
         )
         comm_pct = float(comm.commission_percent) if comm else float(pct)
-        if comm:
-            comm_status = comm.status
-            withdrawable = comm.status == COMMISSION_STATUS_CONFIRMED
-            comm_created = comm.created_at
-            comm_confirmed = comm.confirmed_at
-        elif st == "cancelled":
-            comm_status = "cancelled"
-            withdrawable = False
-            comm_created = None
-            comm_confirmed = None
-        elif order.requires_deposit and st == "waiting_deposit":
-            comm_status = "awaiting_deposit"
-            withdrawable = False
-            comm_created = None
-            comm_confirmed = None
-        else:
-            comm_status = "pending"
-            withdrawable = False
-            comm_created = order.created_at
-            comm_confirmed = None
+        display = _resolve_commission_display(comm, order)
 
         rows.append(
             {
@@ -589,17 +646,12 @@ def list_referred_orders_for_affiliate(
                 "order_status_label": _order_status_label(st),
                 "commission_amount": comm_amt,
                 "commission_percent": comm_pct,
-                "commission_status": comm_status,
-                "commission_status_label": {
-                    "pending": "Chờ giao hàng",
-                    "confirmed": "Đã cộng — rút được",
-                    "cancelled": "Đã hủy",
-                    "awaiting_deposit": "Chờ khách đặt cọc",
-                }.get(comm_status, comm_status),
-                "withdrawable": withdrawable,
+                "commission_status": display["commission_status"],
+                "commission_status_label": display["commission_status_label"],
+                "withdrawable": display["withdrawable"],
                 "order_created_at": order.created_at,
-                "commission_created_at": comm_created,
-                "commission_confirmed_at": comm_confirmed,
+                "commission_created_at": display["commission_created_at"],
+                "commission_confirmed_at": display["commission_confirmed_at"],
             }
         )
     return rows
@@ -689,6 +741,12 @@ def grant_deposit_commission_for_order(db: Session, order: Order) -> Optional[Af
 
 
 def confirm_commission_for_order(db: Session, order_id: int) -> bool:
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        return False
+    if not _order_allows_commission_withdrawal(_order_status_value(order)):
+        return False
+
     commission = (
         db.query(AffiliateCommission)
         .filter(AffiliateCommission.order_id == order_id)
@@ -704,7 +762,6 @@ def confirm_commission_for_order(db: Session, order_id: int) -> bool:
     wallet.balance = _dec(wallet.balance) + amount
     commission.status = COMMISSION_STATUS_CONFIRMED
     commission.confirmed_at = datetime.utcnow()
-    order = db.query(Order).filter(Order.id == order_id).first()
     order_code = order.order_code if order else str(order_id)
     _append_tx(
         db,
@@ -714,7 +771,7 @@ def confirm_commission_for_order(db: Session, order_id: int) -> bool:
         wallet=wallet,
         reference_type="commission",
         reference_id=commission.id,
-        description=f"Hoa hồng đã duyệt đơn #{order_code}",
+        description=f"Hoa hồng đã giao thành công đơn #{order_code}",
     )
     return True
 
@@ -1010,6 +1067,162 @@ def reject_withdrawal(db: Session, withdrawal_id: int, admin_id: int, admin_note
         description=row.admin_note or "Yêu cầu rút tiền bị từ chối — hoàn vào ví",
     )
     return row
+
+
+_TX_TYPE_LABELS = {
+    "commission_pending": "Hoa hồng chờ giao hàng",
+    "commission_credit": "Chuyển sang có thể rút",
+    "commission_cancel_pending": "Hủy hoa hồng chờ giao",
+    "commission_cancel": "Thu hồi hoa hồng",
+    "commission_revert_premature": "Điều chỉnh chờ giao hàng",
+    "order_payment": "Thanh toán đơn bằng ví",
+    "order_refund": "Hoàn ví đơn hủy",
+    "withdrawal_hold": "Giữ tiền chờ rút",
+    "withdrawal_paid": "Đã chuyển khoản rút",
+    "withdrawal_rejected": "Hoàn tiền rút bị từ chối",
+}
+
+_TX_AFFECTS_BUCKET = {
+    "commission_pending": "pending",
+    "commission_credit": "both",
+    "commission_cancel_pending": "pending",
+    "commission_cancel": "withdrawable",
+    "order_payment": "withdrawable",
+    "order_refund": "withdrawable",
+    "withdrawal_hold": "withdrawable",
+    "withdrawal_paid": "withdrawable",
+    "withdrawal_rejected": "withdrawable",
+}
+
+
+def list_wallet_transactions_for_user(
+    db: Session,
+    user_id: int,
+    skip: int = 0,
+    limit: int = 50,
+) -> list[dict]:
+    from sqlalchemy.orm import joinedload
+
+    txs = (
+        db.query(WalletTransaction)
+        .filter(WalletTransaction.user_id == user_id)
+        .order_by(WalletTransaction.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    if not txs:
+        return []
+
+    commission_ids = [
+        tx.reference_id for tx in txs if tx.reference_type == "commission" and tx.reference_id
+    ]
+    order_ids = [tx.reference_id for tx in txs if tx.reference_type == "order" and tx.reference_id]
+
+    commission_order_map: dict[int, int] = {}
+    if commission_ids:
+        for comm in db.query(AffiliateCommission).filter(AffiliateCommission.id.in_(commission_ids)).all():
+            commission_order_map[comm.id] = comm.order_id
+            order_ids.append(comm.order_id)
+
+    order_ids = list({oid for oid in order_ids if oid})
+    orders_by_id: dict[int, Order] = {}
+    if order_ids:
+        for order in (
+            db.query(Order)
+            .options(joinedload(Order.items))
+            .filter(Order.id.in_(order_ids))
+            .all()
+        ):
+            orders_by_id[order.id] = order
+
+    rows: list[dict] = []
+    for tx in txs:
+        order: Optional[Order] = None
+        if tx.reference_type == "order" and tx.reference_id:
+            order = orders_by_id.get(tx.reference_id)
+        elif tx.reference_type == "commission" and tx.reference_id:
+            order_id = commission_order_map.get(tx.reference_id)
+            if order_id:
+                order = orders_by_id.get(order_id)
+
+        order_status = None
+        order_status_label = None
+        product_summary = None
+        order_code = None
+        if order:
+            order_status = getattr(order.status, "value", order.status) or ""
+            order_status_label = _order_status_label(order_status)
+            product_summary = _product_summary(order)
+            order_code = order.order_code
+
+        rows.append(
+            {
+                "id": tx.id,
+                "tx_type": tx.tx_type,
+                "tx_type_label": _TX_TYPE_LABELS.get(tx.tx_type, tx.tx_type),
+                "amount": _dec(tx.amount),
+                "balance_after": _dec(tx.balance_after),
+                "pending_after": _dec(tx.pending_after),
+                "description": tx.description,
+                "reference_type": tx.reference_type,
+                "reference_id": tx.reference_id,
+                "order_code": order_code,
+                "order_status": order_status,
+                "order_status_label": order_status_label,
+                "product_summary": product_summary,
+                "affects_bucket": _TX_AFFECTS_BUCKET.get(tx.tx_type),
+                "created_at": tx.created_at,
+            }
+        )
+    return rows
+
+
+def repair_premature_commission_confirmations(db: Session) -> int:
+    """Hoàn tác hoa hồng bị xác nhận sớm (legacy: cộng ngay khi đặt cọc)."""
+    commissions = (
+        db.query(AffiliateCommission)
+        .filter(AffiliateCommission.status == COMMISSION_STATUS_CONFIRMED)
+        .all()
+    )
+    if not commissions:
+        return 0
+
+    order_ids = [c.order_id for c in commissions]
+    orders_by_id = {
+        o.id: o for o in db.query(Order).filter(Order.id.in_(order_ids)).all()
+    }
+
+    fixed = 0
+    for commission in commissions:
+        order = orders_by_id.get(commission.order_id)
+        if not order:
+            continue
+        if _order_allows_commission_withdrawal(_order_status_value(order)):
+            continue
+
+        wallet = get_or_create_wallet(db, commission.referrer_user_id)
+        amount = _dec(commission.commission_amount)
+        wallet.balance = _dec(wallet.balance) - amount
+        wallet.pending_balance = _dec(wallet.pending_balance) + amount
+        commission.status = COMMISSION_STATUS_PENDING
+        commission.confirmed_at = None
+        _append_tx(
+            db,
+            user_id=commission.referrer_user_id,
+            tx_type="commission_revert_premature",
+            amount=Decimal("0"),
+            wallet=wallet,
+            reference_type="commission",
+            reference_id=commission.id,
+            description=f"Điều chỉnh hoa hồng chờ giao đơn #{order.order_code or order.id}",
+        )
+        fixed += 1
+
+    if fixed:
+        db.commit()
+        logger.info("repair_premature_commission_confirmations fixed=%s", fixed)
+    return fixed
 
 
 def build_me_payload(db: Session, user_id: int) -> dict:

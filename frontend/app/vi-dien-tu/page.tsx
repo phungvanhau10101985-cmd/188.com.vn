@@ -12,13 +12,20 @@ function fmt(amount: number) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount || 0);
 }
 
+function bucketLabel(bucket?: string | null) {
+  if (bucket === 'withdrawable') return 'Có thể rút';
+  if (bucket === 'pending') return 'Chờ giao hàng';
+  if (bucket === 'both') return 'Chờ giao → Có thể rút';
+  return null;
+}
+
 export default function WalletPage() {
   const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   const { pushToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [affiliate, setAffiliate] = useState<Awaited<ReturnType<typeof apiClient.getAffiliateMe>> | null>(null);
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<Awaited<ReturnType<typeof apiClient.getWalletTransactions>>>([]);
   const [referredOrders, setReferredOrders] = useState<Awaited<ReturnType<typeof apiClient.getAffiliateReferredOrders>>>([]);
   const [referredOrdersLoading, setReferredOrdersLoading] = useState(false);
   const [referredOrdersSkip, setReferredOrdersSkip] = useState(0);
@@ -288,6 +295,20 @@ export default function WalletPage() {
               </div>
 
               <div className="border-t border-gray-100 pt-4">
+                <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3">
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-medium text-green-800">Số tiền có thể rút</p>
+                      <p className="text-2xl font-bold text-green-900">{fmt(Number(affiliate.balance))}</p>
+                    </div>
+                    {Number(affiliate.pending_balance) > 0 ? (
+                      <div className="text-right">
+                        <p className="text-xs text-orange-700">Chờ giao hàng</p>
+                        <p className="text-sm font-semibold text-orange-800">{fmt(Number(affiliate.pending_balance))}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
                 <label htmlFor="withdraw-amount" className="block text-sm font-medium text-gray-800 mb-2">
                   Rút tiền về ngân hàng
                 </label>
@@ -300,15 +321,29 @@ export default function WalletPage() {
                     placeholder={`Tối thiểu ${fmt(Number(affiliate.min_withdrawal))}`}
                     className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"
                   />
+                  {Number(affiliate.balance) >= Number(affiliate.min_withdrawal) ? (
+                    <button
+                      type="button"
+                      onClick={() => setWithdrawAmount(String(Math.floor(Number(affiliate.balance))))}
+                      className="rounded-lg border border-green-300 bg-green-50 px-4 py-2 text-sm font-semibold text-green-800 hover:bg-green-100"
+                    >
+                      Rút tối đa
+                    </button>
+                  ) : null}
                   <button
                     type="button"
-                    disabled={withdrawing}
+                    disabled={withdrawing || Number(affiliate.balance) < Number(affiliate.min_withdrawal)}
                     onClick={() => void handleWithdraw()}
                     className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold hover:bg-gray-50 disabled:opacity-60"
                   >
                     {withdrawing ? 'Đang gửi…' : 'Gửi yêu cầu rút'}
                   </button>
                 </div>
+                {Number(affiliate.balance) > 0 && Number(affiliate.balance) < Number(affiliate.min_withdrawal) ? (
+                  <p className="text-xs text-orange-600 mt-2">
+                    Số dư chưa đủ mức rút tối thiểu ({fmt(Number(affiliate.min_withdrawal))}).
+                  </p>
+                ) : null}
                 <p className="text-xs text-gray-500 mt-2">
                   Cần cập nhật{' '}
                   <Link href="/tai-khoan-ngan-hang" className="text-[#ea580c] underline">
@@ -438,26 +473,110 @@ export default function WalletPage() {
       ) : null}
 
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-        <h2 className="font-semibold text-gray-900 mb-3">Lịch sử ví</h2>
+        <h2 className="font-semibold text-gray-900 mb-1">Lịch sử ví</h2>
+        <p className="text-xs text-gray-500 mb-4">
+          Mỗi giao dịch hiển thị số dư sau thay đổi: <strong>Có thể rút</strong> và <strong>Chờ giao hàng</strong>.
+        </p>
         {transactions.length === 0 ? (
           <p className="text-sm text-gray-500">Chưa có giao dịch.</p>
         ) : (
-          <ul className="divide-y divide-gray-100">
-            {transactions.map((tx) => (
-              <li key={tx.id} className="py-3 flex items-start justify-between gap-3 text-sm">
-                <div>
-                  <p className="font-medium text-gray-800">{tx.description || tx.tx_type}</p>
-                  <p className="text-xs text-gray-500">
-                    {tx.created_at ? new Date(tx.created_at).toLocaleString('vi-VN') : ''}
-                  </p>
-                </div>
-                <span className={`font-semibold ${Number(tx.amount) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {Number(tx.amount) >= 0 ? '+' : ''}
-                  {fmt(Number(tx.amount))}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-500 border-b border-gray-100">
+                    <th className="py-2 pr-3 font-medium">Thời gian</th>
+                    <th className="py-2 pr-3 font-medium">Loại</th>
+                    <th className="py-2 pr-3 font-medium">Đơn / Sản phẩm</th>
+                    <th className="py-2 pr-3 font-medium">Trạng thái đơn</th>
+                    <th className="py-2 pr-3 font-medium text-right">Số tiền</th>
+                    <th className="py-2 font-medium text-right">Số dư sau</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {transactions.map((tx) => {
+                    const bucket = bucketLabel(tx.affects_bucket);
+                    return (
+                      <tr key={tx.id} className="border-b border-gray-50 align-top">
+                        <td className="py-3 pr-3 text-gray-500 whitespace-nowrap">
+                          {tx.created_at ? new Date(tx.created_at).toLocaleString('vi-VN') : '—'}
+                        </td>
+                        <td className="py-3 pr-3">
+                          <p className="font-medium text-gray-800">{tx.tx_type_label || tx.tx_type}</p>
+                          {bucket ? (
+                            <span className="mt-1 inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                              {bucket}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="py-3 pr-3 text-gray-600 max-w-[220px]">
+                          {tx.order_code ? (
+                            <p className="font-medium text-gray-800">#{tx.order_code}</p>
+                          ) : null}
+                          {tx.product_summary ? (
+                            <p className="truncate" title={tx.product_summary}>
+                              {tx.product_summary}
+                            </p>
+                          ) : (
+                            <p className="text-gray-400">{tx.description || '—'}</p>
+                          )}
+                        </td>
+                        <td className="py-3 pr-3 text-gray-700">{tx.order_status_label || '—'}</td>
+                        <td
+                          className={`py-3 pr-3 text-right font-semibold whitespace-nowrap ${
+                            Number(tx.amount) >= 0 ? 'text-green-600' : 'text-red-600'
+                          }`}
+                        >
+                          {Number(tx.amount) >= 0 ? '+' : ''}
+                          {fmt(Number(tx.amount))}
+                        </td>
+                        <td className="py-3 text-right text-xs text-gray-600 whitespace-nowrap">
+                          <p>Rút: {fmt(Number(tx.balance_after))}</p>
+                          <p>Chờ: {fmt(Number(tx.pending_after))}</p>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <ul className="md:hidden divide-y divide-gray-100">
+              {transactions.map((tx) => {
+                const bucket = bucketLabel(tx.affects_bucket);
+                return (
+                  <li key={tx.id} className="py-3 space-y-1 text-sm">
+                    <p className="text-xs text-gray-400">
+                      {tx.created_at ? new Date(tx.created_at).toLocaleString('vi-VN') : ''}
+                    </p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-medium text-gray-800">{tx.tx_type_label || tx.tx_type}</p>
+                      <span
+                        className={`shrink-0 font-semibold ${
+                          Number(tx.amount) >= 0 ? 'text-green-600' : 'text-red-600'
+                        }`}
+                      >
+                        {Number(tx.amount) >= 0 ? '+' : ''}
+                        {fmt(Number(tx.amount))}
+                      </span>
+                    </div>
+                    {bucket ? <p className="text-xs text-gray-500">{bucket}</p> : null}
+                    {tx.order_code ? <p className="text-gray-700">Đơn #{tx.order_code}</p> : null}
+                    {tx.product_summary ? (
+                      <p className="text-gray-500 truncate">{tx.product_summary}</p>
+                    ) : tx.description ? (
+                      <p className="text-gray-500">{tx.description}</p>
+                    ) : null}
+                    {tx.order_status_label ? (
+                      <p className="text-gray-600">Trạng thái đơn: {tx.order_status_label}</p>
+                    ) : null}
+                    <p className="text-xs text-gray-500">
+                      Sau GD — Rút: {fmt(Number(tx.balance_after))} · Chờ: {fmt(Number(tx.pending_after))}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         )}
       </div>
     </div>

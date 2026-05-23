@@ -646,6 +646,9 @@ def _finalize_sepay_deposit_success(
         order.status = OrderStatus.DEPOSIT_PAID
 
     commission = affiliate_svc.grant_deposit_commission_for_order(db, order)
+    from app.services import order_shipment_timeline as shipment_svc
+
+    shipment_svc.ensure_shipment_timeline(db, order)
     db.commit()
     if commission and order.id:
         affiliate_svc.notify_referrer_deposit_commission_task(order.id)

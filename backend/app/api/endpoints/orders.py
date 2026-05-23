@@ -1,6 +1,6 @@
 # backend/app/api/endpoints/orders.py - COMPLETE ORDER API WITH DEPOSIT
 import re
-from fastapi import APIRouter, Depends, HTTPException, Query, Body, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, status, BackgroundTasks, Header
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -13,10 +13,17 @@ from app.crud import loyalty as crud_loyalty
 from app.models.order import OrderStatus as OrderStatusEnum, DepositType as DepositTypeEnum, PaymentStatus as PaymentStatusEnum
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission
 from app.core.config import settings
-from app.services.email_service import send_order_email, send_deposit_confirmed_email_task, send_order_created_email_task
+from app.services.email_service import (
+    send_order_email,
+    send_deposit_confirmed_email_task,
+    send_order_created_email_task,
+    send_order_received_confirmed_email_task,
+)
 from app.services import sepay as sepay_svc
 from app.services.birthday_discount import get_birthday_discount_for_user
 from app.services import affiliate_wallet as affiliate_svc
+from app.services import order_shipment_timeline as shipment_svc
+from app.schemas import order_shipment as shipment_schemas
 
 
 def _dec(v) -> Decimal:
@@ -213,6 +220,9 @@ def create_order(
 
         if not requires_deposit:
             affiliate_svc.create_pending_commission_for_order(db, order)
+
+        if shipment_svc.should_have_timeline(order):
+            shipment_svc.ensure_shipment_timeline(db, order)
 
         db.commit()
         db.refresh(order)
@@ -473,15 +483,22 @@ def confirm_received(
     )
     if not order:
         raise HTTPException(status_code=404, detail="Order not found or cannot confirm")
-    recipient = order.customer_email or getattr(current_user, "email", None)
-    if recipient:
-        background_tasks.add_task(
-            send_order_email,
-            recipient,
-            f"Đã xác nhận nhận hàng {order.order_code}",
-            "Cảm ơn bạn đã xác nhận nhận hàng. Nếu có vấn đề, vui lòng liên hệ 188.com.vn.",
-        )
+    background_tasks.add_task(send_order_received_confirmed_email_task, order.id)
     return order
+
+@router.get("/{order_id}/shipment-timeline", response_model=shipment_schemas.OrderShipmentTimelineResponse)
+def get_order_shipment_timeline(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    order = crud.order.get_order(db, order_id=order_id)
+    if not order or order.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Order not found")
+    payload = shipment_svc.get_timeline_payload(db, order)
+    db.commit()
+    return payload
+
 
 @router.get("/{order_id}", response_model=schemas.OrderResponse)
 def read_order(
@@ -620,6 +637,7 @@ def admin_confirm_deposit(
         # Update remaining amount
         order.remaining_amount = order.total_amount - order.deposit_paid
         commission = affiliate_svc.grant_deposit_commission_for_order(db, order)
+        shipment_svc.ensure_shipment_timeline(db, order)
     else:
         # Payment rejected
         order.status = OrderStatusEnum.WAITING_DEPOSIT
@@ -681,6 +699,7 @@ def admin_confirm_deposit_manual(
         order.payment_status = PaymentStatusEnum.DEPOSIT_PAID
         order.status = OrderStatusEnum.DEPOSIT_PAID
     commission = affiliate_svc.grant_deposit_commission_for_order(db, order)
+    shipment_svc.ensure_shipment_timeline(db, order)
     if body.get("confirmation_note"):
         order.admin_notes = (order.admin_notes or "") + "\n[Xác nhận cọc thủ công] " + str(body.get("confirmation_note"))
     db.commit()
@@ -744,3 +763,58 @@ def admin_get_order_payments(
         raise HTTPException(status_code=404, detail="Order not found")
     
     return crud.payment.get_order_payments(db, order_id=order_id)
+
+
+@router.get("/admin/{order_id}/shipment-timeline", response_model=shipment_schemas.OrderShipmentTimelineResponse)
+def admin_get_order_shipment_timeline(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    order = crud.order.get_order(db, order_id=order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    payload = shipment_svc.get_timeline_payload(db, order)
+    db.commit()
+    return payload
+
+
+@router.post("/admin/{order_id}/shipment/clear-customs", response_model=schemas.AdminOrderResponse)
+def admin_clear_customs_shipment(
+    order_id: int,
+    payload: shipment_schemas.AdminClearCustomsIn,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    try:
+        order = shipment_svc.admin_clear_customs_and_ship(
+            db,
+            order_id,
+            current_admin.id,
+            tracking_number=payload.tracking_number,
+            shipping_provider=payload.shipping_provider,
+        )
+        db.commit()
+        db.refresh(order)
+        return order
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def _require_shipment_cron_secret(authorization: Optional[str]) -> None:
+    expected = (settings.CRON_SECRET or "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="CRON_SECRET is not configured")
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or token.strip() != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@router.get("/cron/advance-shipment-timelines")
+def cron_advance_shipment_timelines(
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    _require_shipment_cron_secret(authorization)
+    advanced = shipment_svc.advance_auto_milestones_batch(db)
+    return {"ok": True, "advanced": advanced}

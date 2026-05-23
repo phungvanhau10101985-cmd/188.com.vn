@@ -158,6 +158,12 @@ try:
 except ImportError:
     print("[INFO] Affiliate/Wallet models not available")
 
+try:
+    from app.models.order_shipment import OrderShipmentEvent
+    print("[OK] OrderShipmentEvent model loaded")
+except ImportError:
+    print("[INFO] OrderShipmentEvent model not available")
+
 # 11. Notification
 try:
     from app.models.notification import Notification

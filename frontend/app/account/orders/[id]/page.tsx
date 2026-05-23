@@ -7,6 +7,8 @@ import { useParams } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import type { BankAccountInfo } from '@/lib/api-client';
 import ProductReviewFormModal from '@/app/products/[slug]/components/ProductReviewFormModal/ProductReviewFormModal';
+import OrderReviewActions from '@/app/account/orders/components/OrderReviewActions';
+import { pushOrderReceivedConfirmedToast } from '@/app/account/orders/components/orderReceivedToast';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
@@ -187,7 +189,7 @@ export default function AccountOrderDetailPage() {
       loadOrder();
       setShowConfirmReceivedModal(false);
       trackEvent('order_confirm_received', { order_id: order.id });
-      pushToast({ title: 'Đã xác nhận nhận hàng', variant: 'success', durationMs: 2500 });
+      pushOrderReceivedConfirmedToast(pushToast, order.id);
     } catch (e) {
       pushToast({ title: 'Không thể xác nhận', description: (e as Error).message || 'Vui lòng thử lại', variant: 'error', durationMs: 3500 });
     } finally {
@@ -439,6 +441,13 @@ export default function AccountOrderDetailPage() {
 
         {/* Nút theo trạng thái */}
         <div className="pt-4 border-t flex flex-wrap gap-2">
+          <OrderReviewActions
+            order={order}
+            reviewedProductIds={reviewedProductIds}
+            onReviewProduct={(productId) => setReviewModalProductId(productId)}
+            primaryClassName="inline-flex min-h-[44px] items-center px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-[#c2410c] disabled:opacity-50"
+            secondaryClassName="inline-flex min-h-[44px] items-center px-4 py-2 bg-gray-200 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-300"
+          />
           {order.status === 'waiting_deposit' && (
              <button 
                onClick={() => setShowCancelModal(true)}
@@ -449,11 +458,12 @@ export default function AccountOrderDetailPage() {
           )}
           {['deposit_paid', 'confirmed', 'processing', 'shipping'].includes(order.status) && (
             <>
-              {order.tracking_number && (
-                <a href="#" className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300">
-                  Lịch trình đơn hàng
-                </a>
-              )}
+              <Link
+                href={`/account/orders/${order.id}/tracking`}
+                className="inline-flex min-h-[44px] items-center px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-50"
+              >
+                Lịch trình đơn hàng
+              </Link>
               <button
                 onClick={() => setShowConfirmReceivedModal(true)}
                 disabled={confirming}

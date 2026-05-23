@@ -52,12 +52,18 @@ class AdminAffiliateApplicationDecisionIn(BaseModel):
 class WalletTransactionResponse(BaseModel):
     id: int
     tx_type: str
+    tx_type_label: Optional[str] = None
     amount: Decimal
     balance_after: Decimal
     pending_after: Decimal
     description: Optional[str] = None
     reference_type: Optional[str] = None
     reference_id: Optional[int] = None
+    order_code: Optional[str] = None
+    order_status: Optional[str] = None
+    order_status_label: Optional[str] = None
+    product_summary: Optional[str] = None
+    affects_bucket: Optional[str] = None
     created_at: datetime
 
     class Config:
