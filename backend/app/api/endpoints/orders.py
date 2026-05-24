@@ -1194,8 +1194,9 @@ def cron_refresh_ems_tracking(
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
     """
-    Cron hàng ngày — tra EMS các bản ghi chưa giao / chưa có mã tracking.
-    Crontab ví dụ: 0 6 * * * curl -H "Authorization: Bearer $CRON_SECRET" ...
+    Cron tra EMS — đơn đang vận chuyển (chưa delivered/COD xong).
+    Khuyến nghị 2 lần/ngày (sáng + chiều), ví dụ crontab:
+      0 6,15 * * * curl -H "Authorization: Bearer $CRON_SECRET" ...
     """
     _require_shipment_cron_secret(authorization)
     return ems_refresh_svc.run_daily_ems_tracking_refresh(db)

@@ -192,7 +192,10 @@ body {
     touch-action: manipulation;
   }
 
-  [data-nanoai188-mobile-adjusted="1"] {
+  [data-nanoai188-mobile-adjusted="1"][data-nanoai-chat-bubble],
+  [data-nanoai188-mobile-adjusted="1"][data-nanoai-launcher],
+  [data-nanoai188-mobile-adjusted="1"][data-nanoai-chat-launcher],
+  [data-nanoai188-mobile-adjusted="1"].nanoai-chat-launcher {
     top: auto !important;
     left: auto !important;
     margin: 0 !important;

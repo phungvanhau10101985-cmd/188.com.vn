@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.order_shipment import EmsShippingRecord
 from app.services import ems_shipment_import as ems_import_svc
+from app.services import ems_shipment_notify as ems_notify_svc
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +263,8 @@ def refresh_ems_record_by_id(db: Session, record_id: int, *, admin_id: Optional[
     if not record:
         return {"ok": False, "record_id": record_id, "error": "record_not_found"}
 
+    before = ems_notify_svc.snapshot_from_record(db, record)
+
     row = {
         "row_number": record.excel_row_number or 0,
         "reference_code": record.reference_code,
@@ -276,6 +279,14 @@ def refresh_ems_record_by_id(db: Session, record_id: int, *, admin_id: Optional[
         skip_ems_tracking=False,
     )
     ems_import_svc._upsert_record(db, result, admin_id=admin_id)
+
+    after = ems_notify_svc.snapshot_from_result(result)
+    if after.get("order_id"):
+        try:
+            ems_notify_svc.maybe_notify_customer_after_ems_refresh(db, before=before, after=after)
+        except Exception as exc:
+            logger.warning("EMS customer notify skipped record_id=%s: %s", record_id, exc)
+
     db.commit()
     return {
         "ok": True,

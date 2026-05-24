@@ -327,6 +327,9 @@ class Settings:
             1,
             int(os.getenv("EMS_TRACKING_DAILY_BATCH_LIMIT", "400") or "400"),
         )
+        self.EMS_SHIPPING_NOTIFY_ENABLED: bool = os.getenv(
+            "EMS_SHIPPING_NOTIFY_ENABLED", "True"
+        ).strip().lower() not in ("0", "false", "no", "off")
         self.EMS_TRACKING_STALE_HOURS: int = max(
             1,
             int(os.getenv("EMS_TRACKING_STALE_HOURS", "24") or "24"),

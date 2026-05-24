@@ -16,13 +16,11 @@ const MOBILE_NAV_PX = 60;
 const NANOAI_Z_INDEX = 75;
 const MAX_LAUNCHER_PX = 280;
 
-const LAUNCHER_SELECTORS = [
+/** Chỉ bubble launcher — marker chính thức từ nanoai-chat-widget.js */
+const EXPLICIT_LAUNCHER_SELECTORS = [
+  '[data-nanoai-chat-bubble]',
   '[data-nanoai-launcher]',
   '[data-nanoai-chat-launcher]',
-  '#nanoai-chat-widget-v1 > button',
-  '#nanoai-chat-widget-v1 button',
-  '[id^="nanoai-chat-widget"] button',
-  '[id*="nanoai-chat"] button',
   'button.nanoai-chat-launcher',
 ];
 
@@ -63,25 +61,74 @@ function isLauncherSized(el: HTMLElement): boolean {
   return true;
 }
 
-/** Chỉ chỉnh nút launcher nhỏ — tránh container full-screen che trang /account. */
+function isVisibleEl(el: HTMLElement): boolean {
+  const cs = getComputedStyle(el);
+  if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}
+
+function isInsideChatPanelChrome(el: HTMLElement): boolean {
+  if (el.closest('iframe')) return true;
+  if (el.closest('[role="dialog"]')) return true;
+  return false;
+}
+
+function isExplicitNanoAiLauncher(el: HTMLElement): boolean {
+  return el.matches(
+    '[data-nanoai-chat-bubble], [data-nanoai-launcher], [data-nanoai-chat-launcher], .nanoai-chat-launcher',
+  );
+}
+
+/** Khung chat full-screen đang mở — không chỉnh launcher, gỡ override header (X, giỏ). */
+function isNanoAiChatPanelOpen(): boolean {
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 0;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 0;
+  if (!vw || !vh) return false;
+
+  for (const sel of ROOT_SELECTORS) {
+    for (const root of document.querySelectorAll<HTMLElement>(sel)) {
+      for (const child of Array.from(root.children)) {
+        if (!(child instanceof HTMLElement)) continue;
+        if (isExplicitNanoAiLauncher(child)) continue;
+        const cs = getComputedStyle(child);
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+        const r = child.getBoundingClientRect();
+        if (r.width >= vw * 0.5 && r.height >= vh * 0.35) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function isLikelyNanoAiLauncher(el: HTMLElement): boolean {
+  if (!isExplicitNanoAiLauncher(el)) return false;
+  if (!isLauncherSized(el) || !isVisibleEl(el)) return false;
+  if (isInsideChatPanelChrome(el)) return false;
+  return true;
+}
+
+/** Gỡ style mobile-adjusted khỏi nút header / control trong panel (X, giỏ, đơn hàng…). */
+function clearWronglyAdjustedChatControls() {
+  for (const sel of ROOT_SELECTORS) {
+    document.querySelectorAll<HTMLElement>(sel).forEach((root) => {
+      root.querySelectorAll<HTMLElement>('button, [role="button"]').forEach((el) => {
+        if (isExplicitNanoAiLauncher(el)) return;
+        if (el.dataset.nanoai188MobileAdjusted === '1') {
+          clearMobileLayoutOn(el);
+        }
+      });
+    });
+  }
+}
+
+/** Chỉ bubble launcher — không đụng nút trong header panel chat. */
 function findNanoAiLaunchers(): HTMLElement[] {
   const found = new Set<HTMLElement>();
 
-  for (const sel of LAUNCHER_SELECTORS) {
+  for (const sel of EXPLICIT_LAUNCHER_SELECTORS) {
     document.querySelectorAll<HTMLElement>(sel).forEach((el) => {
-      if (isLauncherSized(el)) found.add(el);
-    });
-  }
-
-  for (const sel of ROOT_SELECTORS) {
-    document.querySelectorAll<HTMLElement>(sel).forEach((root) => {
-      const cs = getComputedStyle(root);
-      if (cs.position === 'fixed' && isLauncherSized(root)) {
-        found.add(root);
-      }
-      root.querySelectorAll<HTMLElement>('[role="button"], a, div, span').forEach((el) => {
-        if (isLauncherSized(el)) found.add(el);
-      });
+      if (isLikelyNanoAiLauncher(el)) found.add(el);
     });
   }
 
@@ -224,14 +271,21 @@ function computeMobileRightPx(
 function applyMobileLayout(pathname: string | null, fab: ShopVideoFabPublicSettings) {
   if (!isMobileViewport()) return;
 
+  releaseNanoAiClickBlockers();
+  clearWronglyAdjustedChatControls();
+
+  if (isNanoAiChatPanelOpen()) {
+    clearMobileLayout();
+    return;
+  }
+
   const bottomPx = computeMobileBottomPx(pathname, fab);
   const rightPx = computeMobileRightPx(pathname, fab);
 
-  releaseNanoAiClickBlockers();
-
   const adjusted = new Set<HTMLElement>();
+  const launchers = findNanoAiLaunchers();
 
-  for (const launcher of findNanoAiLaunchers()) {
+  for (const launcher of launchers) {
     const anchor = resolveLauncherAnchor(launcher);
     if (adjusted.has(anchor)) continue;
     adjusted.add(anchor);
@@ -259,24 +313,34 @@ function applyMobileLayout(pathname: string | null, fab: ShopVideoFabPublicSetti
     );
     anchor.dataset.nanoai188MobileAdjusted = '1';
   }
+
+  clearStaleMobileLayout(adjusted);
+}
+
+function clearMobileLayoutOn(el: HTMLElement) {
+  el.style.removeProperty('display');
+  el.style.removeProperty('visibility');
+  el.style.removeProperty('opacity');
+  el.style.removeProperty('pointer-events');
+  el.style.removeProperty('transform');
+  el.style.removeProperty('margin');
+  el.style.removeProperty('inset');
+  el.style.removeProperty('position');
+  el.style.removeProperty('top');
+  el.style.removeProperty('left');
+  el.style.removeProperty('z-index');
+  el.style.removeProperty('bottom');
+  el.style.removeProperty('right');
+  delete el.dataset.nanoai188MobileAdjusted;
 }
 
 function clearMobileLayout() {
+  document.querySelectorAll<HTMLElement>('[data-nanoai188-mobile-adjusted="1"]').forEach(clearMobileLayoutOn);
+}
+
+function clearStaleMobileLayout(validAnchors: Set<HTMLElement>) {
   document.querySelectorAll<HTMLElement>('[data-nanoai188-mobile-adjusted="1"]').forEach((el) => {
-    el.style.removeProperty('display');
-    el.style.removeProperty('visibility');
-    el.style.removeProperty('opacity');
-    el.style.removeProperty('pointer-events');
-    el.style.removeProperty('transform');
-    el.style.removeProperty('margin');
-    el.style.removeProperty('inset');
-    el.style.removeProperty('position');
-    el.style.removeProperty('top');
-    el.style.removeProperty('left');
-    el.style.removeProperty('z-index');
-    el.style.removeProperty('bottom');
-    el.style.removeProperty('right');
-    delete el.dataset.nanoai188MobileAdjusted;
+    if (!validAnchors.has(el)) clearMobileLayoutOn(el);
   });
 }
 
