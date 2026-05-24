@@ -25,6 +25,7 @@ from app.services import promotion_grants as grant_svc
 from app.services.order_discounts import calculate_order_discounts
 from app.services import affiliate_wallet as affiliate_svc
 from app.services import order_shipment_timeline as shipment_svc
+from app.services import order_shipper_notify as shipper_notify_svc
 from app.services import ems_shipment_import as ems_import_svc
 from app.services import ems_tracking_refresh as ems_refresh_svc
 from app.services import ems_cod_settlement_import as cod_settlement_svc
@@ -535,6 +536,7 @@ def confirm_received(
     )
     if not order:
         raise HTTPException(status_code=400, detail="Không thể xác nhận đơn hàng lúc này")
+    background_tasks.add_task(shipper_notify_svc.notify_customer_review_after_received, order.id)
     background_tasks.add_task(send_order_received_confirmed_email_task, order.id)
     return order
 
@@ -720,24 +722,44 @@ def admin_get_ems_tracking_refresh_job(
     response_model=shipment_schemas.EmsTrackingRefreshEnqueueResponse,
 )
 def admin_enqueue_ems_tracking_refresh(
-    body: shipment_schemas.EmsShippingDeleteRequest,
+    body: shipment_schemas.EmsTrackingRefreshRequest,
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("orders")),
 ):
-    """Tra lại EMS cho các dòng đã chọn (chạy nền, có poll job)."""
+    """Tra lại EMS cho dòng đã chọn, kết quả tìm kiếm, hoặc bộ lọc trạng thái (chạy nền)."""
     ids = [int(x) for x in (body.ids or []) if int(x) > 0]
+    search_q = (body.q or "").strip()
+    filter_status = (body.sync_status or "").strip()
+
     if not ids:
-        raise HTTPException(status_code=400, detail="Chọn ít nhất một dòng vận chuyển.")
+        if search_q:
+            ids = ems_import_svc.collect_record_ids_for_refresh(
+                db,
+                search=search_q,
+                sync_status=filter_status if filter_status and filter_status != "all" else None,
+            )
+        elif filter_status and filter_status != "all":
+            ids = ems_import_svc.collect_record_ids_for_refresh(db, sync_status=filter_status)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Chọn dòng, nhập mã tra cứu, hoặc chọn bộ lọc trạng thái.",
+            )
+
+    if not ids:
+        raise HTTPException(status_code=404, detail="Không tìm thấy dòng vận chuyển nào để tra EMS.")
+
     job_id = ems_refresh_svc.enqueue_tracking_refresh(
         ids,
         admin_id=current_admin.id,
-        source="manual",
+        source="manual_search" if search_q else "manual",
     )
+    label = f"«{search_q}»" if search_q else f"{len(ids)} dòng"
     return {
         "ok": True,
         "job_id": job_id,
         "queued": len(ids),
-        "message": f"Đã xếp hàng tra EMS cho {len(ids)} dòng.",
+        "message": f"Đã xếp hàng tra EMS cho {label}.",
     }
 
 

@@ -77,8 +77,31 @@ const TIMELINE_STEP_LABELS: Record<string, string> = {
   international_shipping: 'Vận chuyển quốc tế (TQ → VN)',
   at_customs: 'Thủ tục cửa khẩu',
   domestic_shipping: 'Hàng về shop đóng gói',
-  awaiting_confirm: 'Shop đã gửi shipper — chờ khách nhận',
+  awaiting_confirm: 'EMS đang giao — chờ bạn nhận hàng',
 };
+
+function orderStatusLabel(status: string | null | undefined): string {
+  if (!status) return '—';
+  return ORDER_STATUS_TEXTS[status] || status;
+}
+
+function emsShopOrderStatusLabel(row: EmsShippingImportRow): string {
+  if (!row.order_status) return '—';
+  if (row.order_id && (row.reference_code || row.ems_reference_code)) {
+    const st = row.order_status;
+    if (st === 'shipping') return 'EMS đang giao tới bạn';
+    if (st === 'delivered' || st === 'completed') return orderStatusLabel(st);
+    if (st === 'deposit_paid' || st === 'confirmed' || st === 'processing') {
+      return 'Đã gửi EMS';
+    }
+  }
+  return orderStatusLabel(row.order_status);
+}
+
+function emsTimelineLabel(stepKey: string | null | undefined): string {
+  if (!stepKey) return '—';
+  return TIMELINE_STEP_LABELS[stepKey] || stepKey;
+}
 
 type ShipmentTimeline = Awaited<ReturnType<typeof adminOrderAPI.getOrderShipmentTimeline>>;
 
@@ -226,11 +249,6 @@ function OpsStatCard({
   );
 }
 
-function orderStatusLabel(status: string | null | undefined): string {
-  if (!status) return '—';
-  return ORDER_STATUS_TEXTS[status] || status;
-}
-
 function DetailField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="min-w-0">
@@ -243,9 +261,13 @@ function DetailField({ label, children }: { label: string; children: ReactNode }
 function EmsSearchResultCard({
   row,
   onViewStatus,
+  onRefresh,
+  refreshing,
 }: {
   row: EmsShippingImportRow;
   onViewStatus: (row: EmsShippingImportRow) => void;
+  onRefresh?: (row: EmsShippingImportRow) => void;
+  refreshing?: boolean;
 }) {
   return (
     <article className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-3">
@@ -292,14 +314,14 @@ function EmsSearchResultCard({
           {row.ems_phase ? ` (${row.ems_phase})` : ''}
         </DetailField>
         <DetailField label="Trạng thái đơn shop">
-          {row.order_status ? orderStatusLabel(row.order_status) : '—'}
+          {row.order_status ? emsShopOrderStatusLabel(row) : '—'}
         </DetailField>
         <DetailField label="Người nhận">
           <span className="line-clamp-2">{row.recipient_label || '—'}</span>
         </DetailField>
         {row.current_step_key ? (
           <DetailField label="Timeline shop">
-            {TIMELINE_STEP_LABELS[row.current_step_key] || row.current_step_key}
+            {emsTimelineLabel(row.current_step_key)}
           </DetailField>
         ) : null}
       </dl>
@@ -311,12 +333,33 @@ function EmsSearchResultCard({
       ) : null}
 
       {row.order_code ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => onViewStatus(row)}
+            className="text-sm font-medium text-emerald-700 hover:text-emerald-900 hover:underline"
+          >
+            Xem chi tiết trạng thái đơn shop →
+          </button>
+          {row.id != null && onRefresh ? (
+            <button
+              type="button"
+              onClick={() => onRefresh(row)}
+              disabled={refreshing}
+              className="text-sm font-medium text-indigo-700 hover:text-indigo-900 hover:underline disabled:opacity-50"
+            >
+              {refreshing ? 'Đang tra EMS…' : 'Tra lại EMS'}
+            </button>
+          ) : null}
+        </div>
+      ) : row.id != null && onRefresh ? (
         <button
           type="button"
-          onClick={() => onViewStatus(row)}
-          className="text-sm font-medium text-emerald-700 hover:text-emerald-900 hover:underline"
+          onClick={() => onRefresh(row)}
+          disabled={refreshing}
+          className="text-sm font-medium text-indigo-700 hover:text-indigo-900 hover:underline disabled:opacity-50"
         >
-          Xem chi tiết trạng thái đơn shop →
+          {refreshing ? 'Đang tra EMS…' : 'Tra lại EMS'}
         </button>
       ) : null}
     </article>
@@ -369,6 +412,7 @@ export default function AdminShippingPage() {
   const [orderStatusModal, setOrderStatusModal] = useState<OrderStatusModalState | null>(null);
   const [trackingJob, setTrackingJob] = useState<EmsTrackingRefreshJob | null>(null);
   const [trackingResumeLoading, setTrackingResumeLoading] = useState(false);
+  const [refreshingEms, setRefreshingEms] = useState(false);
   const trackingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const trackingLastProcessedRef = useRef(0);
 
@@ -505,6 +549,7 @@ export default function AdminShippingPage() {
           if (job.processed !== trackingLastProcessedRef.current) {
             trackingLastProcessedRef.current = job.processed;
             void loadOpsStats();
+            void loadRecords();
           }
           if (job.status === 'completed' || job.status === 'failed') {
             stopTrackingPoll();
@@ -522,6 +567,34 @@ export default function AdminShippingPage() {
       trackingPollRef.current = setInterval(() => void poll(), 2500);
     },
     [loadOpsStats, loadRecords, stopTrackingPoll],
+  );
+
+  const runEmsTrackingRefresh = useCallback(
+    async (payload: { ids?: number[]; q?: string; sync_status?: string }) => {
+      setRefreshingEms(true);
+      setError(null);
+      try {
+        const data = await adminShippingAPI.enqueueEmsTrackingRefresh(payload);
+        if (data.job_id) {
+          startTrackingPoll(data.job_id);
+        } else {
+          setError(data.message || 'Không khởi chạy được tra EMS.');
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Không thể tra lại EMS');
+      } finally {
+        setRefreshingEms(false);
+      }
+    },
+    [startTrackingPoll],
+  );
+
+  const refreshEmsRow = useCallback(
+    (row: EmsShippingImportRow) => {
+      if (row.id == null) return;
+      void runEmsTrackingRefresh({ ids: [row.id] });
+    },
+    [runEmsTrackingRefresh],
   );
 
   const resumeTrackingJob = useCallback(async () => {
@@ -580,8 +653,11 @@ export default function AdminShippingPage() {
       setAppliedSearch(next);
       setListPage(1);
       setSelectedKeys(new Set());
+      if (next) {
+        void runEmsTrackingRefresh({ q: next });
+      }
     },
-    [searchInput],
+    [runEmsTrackingRefresh, searchInput],
   );
 
   const clearSearch = useCallback(() => {
@@ -606,6 +682,30 @@ export default function AdminShippingPage() {
     pageKeyList.length > 0 && pageKeyList.every((key) => selectedKeys.has(key));
 
   const somePageSelected = pageKeyList.some((key) => selectedKeys.has(key));
+
+  const selectedRecordIds = useMemo(
+    () =>
+      pageRows
+        .filter((row) => selectedKeys.has(rowKey(row)) && row.id != null)
+        .map((row) => row.id as number),
+    [pageRows, selectedKeys],
+  );
+
+  const runManualEmsRefresh = useCallback(() => {
+    if (selectedRecordIds.length > 0) {
+      void runEmsTrackingRefresh({ ids: selectedRecordIds });
+      return;
+    }
+    if (appliedSearch.trim()) {
+      void runEmsTrackingRefresh({ q: appliedSearch.trim() });
+      return;
+    }
+    if (filter !== 'all') {
+      void runEmsTrackingRefresh({ sync_status: filter });
+      return;
+    }
+    setError('Chọn dòng, nhập mã tra cứu, hoặc chọn bộ lọc trạng thái trước khi tra EMS.');
+  }, [appliedSearch, filter, runEmsTrackingRefresh, selectedRecordIds]);
 
   const activeCodBatch = useMemo(() => {
     if (!codResult?.batches.length) return null;
@@ -863,7 +963,8 @@ export default function AdminShippingPage() {
         <h2 className="text-base font-semibold text-gray-900">Tra cứu vận đơn</h2>
         <p className="mt-1 text-sm text-gray-500">
           Tìm theo <strong>mã đơn shop</strong> (DH/DC), <strong>mã tham chiếu</strong> (cột A file EMS),{' '}
-          <strong>mã EMS</strong> hoặc mã vận đơn đã lưu trên đơn shop.
+          <strong>mã EMS</strong> hoặc mã vận đơn đã lưu trên đơn shop. Tra cứu sẽ{' '}
+          <strong>tự chạy lại kiểm tra EMS</strong> và cập nhật trạng thái mới nhất.
         </p>
         <form onSubmit={submitSearch} className="mt-3 flex flex-col sm:flex-row gap-2">
           <input
@@ -877,11 +978,21 @@ export default function AdminShippingPage() {
           <div className="flex gap-2 shrink-0">
             <button
               type="submit"
-              disabled={listLoading}
+              disabled={listLoading || refreshingEms}
               className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
             >
-              Tra cứu
+              {refreshingEms && appliedSearch === searchInput.trim() ? 'Đang tra EMS…' : 'Tra cứu'}
             </button>
+            {appliedSearch ? (
+              <button
+                type="button"
+                onClick={() => void runEmsTrackingRefresh({ q: appliedSearch })}
+                disabled={refreshingEms || listLoading}
+                className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
+              >
+                Tra lại EMS
+              </button>
+            ) : null}
             {appliedSearch ? (
               <button
                 type="button"
@@ -897,7 +1008,9 @@ export default function AdminShippingPage() {
         {appliedSearch ? (
           <div className="mt-4 border-t border-gray-100 pt-4">
             {listLoading ? (
-              <p className="text-sm text-gray-500 py-2">Đang tra cứu «{appliedSearch}»…</p>
+              <p className="text-sm text-gray-500 py-2">
+                Đang tra cứu «{appliedSearch}»{refreshingEms ? ' và kiểm tra EMS mới nhất…' : '…'}
+              </p>
             ) : pageRows.length === 0 ? (
               <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-sm text-gray-600">
                 Không tìm thấy dòng nào khớp <strong className="font-mono text-gray-900">{appliedSearch}</strong>.
@@ -916,6 +1029,8 @@ export default function AdminShippingPage() {
                     key={rowKey(row)}
                     row={row}
                     onViewStatus={(r) => void openOrderStatusModal(r)}
+                    onRefresh={refreshEmsRow}
+                    refreshing={refreshingEms}
                   />
                 ))}
                 {filteredTotal > EMS_SEARCH_PREVIEW_LIMIT ? (
@@ -1754,6 +1869,24 @@ export default function AdminShippingPage() {
                     {selectedKeys.size > 0 ? (
                       <button
                         type="button"
+                        onClick={() => void runEmsTrackingRefresh({ ids: selectedRecordIds })}
+                        disabled={refreshingEms || selectedRecordIds.length === 0}
+                        className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
+                      >
+                        Tra EMS đã chọn ({selectedRecordIds.length})
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={runManualEmsRefresh}
+                      disabled={refreshingEms}
+                      className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
+                    >
+                      {refreshingEms ? 'Đang tra EMS…' : 'Tra lại EMS'}
+                    </button>
+                    {selectedKeys.size > 0 ? (
+                      <button
+                        type="button"
                         onClick={() => requestDelete([...selectedKeys])}
                         disabled={deleting}
                         className="inline-flex items-center rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
@@ -1890,7 +2023,7 @@ export default function AdminShippingPage() {
                                   ORDER_STATUS_BADGE[row.order_status] || 'bg-gray-100 text-gray-800 border-gray-200'
                                 }`}
                               >
-                                {orderStatusLabel(row.order_status)}
+                                {emsShopOrderStatusLabel(row)}
                               </span>
                             ) : row.order_code ? (
                               <span className="text-xs text-amber-700">Không khớp đơn khách</span>
@@ -1899,7 +2032,7 @@ export default function AdminShippingPage() {
                             )}
                             {row.current_step_key ? (
                               <div className="text-xs text-gray-500 mt-1.5">
-                                {TIMELINE_STEP_LABELS[row.current_step_key] || row.current_step_key}
+                                {emsTimelineLabel(row.current_step_key)}
                               </div>
                             ) : null}
                           </td>
@@ -1917,6 +2050,16 @@ export default function AdminShippingPage() {
                           </td>
                           <td className="px-3 py-3 text-right">
                             <div className="flex flex-col items-end gap-1.5">
+                              {row.id != null ? (
+                                <button
+                                  type="button"
+                                  onClick={() => refreshEmsRow(row)}
+                                  disabled={refreshingEms}
+                                  className="text-xs font-medium text-indigo-700 hover:text-indigo-900 hover:underline whitespace-nowrap disabled:opacity-50"
+                                >
+                                  Tra lại EMS
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 onClick={() => void openOrderStatusModal(row)}

@@ -171,6 +171,108 @@ def send_order_received_confirmed_email_task(order_id: int) -> None:
         db.close()
 
 
+def send_order_shipper_confirmed_email_task(order_id: int) -> None:
+    """Email khi shop đóng hàng & gửi shipper — kèm link đơn và nhắc đánh giá sau khi nhận."""
+    from sqlalchemy.orm import joinedload
+
+    from app.db.session import SessionLocal
+    from app.models.order import Order
+
+    db = SessionLocal()
+    try:
+        order = (
+            db.query(Order)
+            .options(joinedload(Order.user))
+            .filter(Order.id == order_id)
+            .first()
+        )
+        if not order:
+            logger.warning("order_shipper_confirmed_email skip: order not found id=%s", order_id)
+            return
+
+        customer_to = (order.customer_email or "").strip()
+        if not customer_to and order.user and (order.user.email or "").strip():
+            customer_to = (order.user.email or "").strip()
+        if not customer_to:
+            logger.info("order_shipper_confirmed_email skip: no email order_id=%s", order_id)
+            return
+
+        name = (order.customer_name or "Quý khách").strip()
+        code = order.order_code or f"#{order.id}"
+        tracking = (order.tracking_number or "").strip()
+        provider = (order.shipping_provider or "").strip()
+        fe = (settings.FRONTEND_BASE_URL or "").strip().rstrip("/")
+        detail_url = f"{fe}/account/orders/{order.id}" if fe else ""
+        tracking_url = f"{fe}/account/orders/{order.id}/tracking" if fe else ""
+
+        subject = f"Đơn {code} đã gửi shipper · 188.com.vn"
+        if settings.EMAIL_SUBJECT_PREFIX:
+            subject = f"{settings.EMAIL_SUBJECT_PREFIX} {subject}"
+
+        review_hint = (
+            "Khi nhận đủ hàng, vui lòng bấm «Đã nhận hàng» trên trang đơn. "
+            "Nếu bạn hài lòng với sản phẩm và dịch vụ, rất mong bạn dành chút thời gian "
+            "đánh giá — ý kiến của bạn giúp 188.com.vn nâng cao chất lượng và phục vụ khách hàng tốt hơn."
+        )
+
+        text_lines = [
+            f"Kính gửi {name},",
+            "",
+            "188.com.vn đã đóng hàng và gửi cho shipper giao đến bạn.",
+            f"Mã đơn hàng: {code}",
+        ]
+        if tracking:
+            ship_line = f"Mã vận đơn: {tracking}"
+            if provider:
+                ship_line += f" ({provider})"
+            text_lines.append(ship_line)
+        text_lines.extend(
+            [
+                "",
+                review_hint,
+                *(["", f"Xem đơn hàng: {detail_url}"] if detail_url else []),
+                *(["", f"Theo dõi vận chuyển: {tracking_url}"] if tracking_url and tracking else []),
+                "",
+                "Trân trọng,",
+                "188.com.vn",
+            ]
+        )
+        text_body = "\n".join(text_lines)
+
+        tracking_html = ""
+        if tracking:
+            tracking_html = f"<p>Mã vận đơn: <strong>{tracking}</strong>"
+            if provider:
+                tracking_html += f" ({provider})"
+            tracking_html += "</p>"
+
+        detail_html = (
+            f'<p><a href="{detail_url}">Xem chi tiết đơn hàng</a></p>' if detail_url else ""
+        )
+        track_link_html = (
+            f'<p><a href="{tracking_url}">Theo dõi vận chuyển</a></p>'
+            if tracking_url and tracking
+            else ""
+        )
+        html_body = (
+            f"<p>Kính gửi <strong>{name}</strong>,</p>"
+            "<p>188.com.vn đã <strong>đóng hàng và gửi shipper</strong> giao đến bạn.</p>"
+            f"<p>Mã đơn: <strong>{code}</strong></p>"
+            f"{tracking_html}"
+            f"<p>{review_hint}</p>"
+            f"{detail_html}"
+            f"{track_link_html}"
+            "<p>Trân trọng,<br>188.com.vn</p>"
+        )
+
+        send_email(customer_to, subject, text_body, html_body)
+        logger.info("order_shipper_confirmed_email sent order_id=%s to=%s", order_id, customer_to)
+    except Exception:
+        logger.exception("order_shipper_confirmed_email failed order_id=%s", order_id)
+    finally:
+        db.close()
+
+
 def send_order_created_email_task(order_id: int) -> None:
     """Email xác nhận đơn mới — kèm QR + nhắc đặt cọc nếu đơn chờ cọc."""
     from sqlalchemy.orm import joinedload

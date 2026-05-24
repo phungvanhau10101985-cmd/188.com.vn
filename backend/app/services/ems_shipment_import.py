@@ -320,6 +320,44 @@ def _ems_only_status_message(ems_phase: str, ems_status: str) -> str:
     return "EMS chưa có cập nhật hành trình rõ ràng."
 
 
+EMS_SHOP_HANDOFF_MESSAGE = "Đã gửi EMS — đang giao tới bạn."
+
+
+def _shop_ems_handoff_message(order_code: Optional[str] = None) -> str:
+    code = (order_code or "").strip().upper()
+    if code:
+        return f"{code} · {EMS_SHOP_HANDOFF_MESSAGE}"
+    return EMS_SHOP_HANDOFF_MESSAGE
+
+
+def _try_sync_shop_on_ems_import(
+    db: Session,
+    order: Order,
+    *,
+    admin_id: Optional[int],
+    reference_code: str,
+    ems_tracking_code: Optional[str] = None,
+    ems_status_description: Optional[str] = None,
+    ems_phase: str = "posted",
+) -> tuple[bool, str]:
+    """Cập nhật đơn shop → đã gửi EMS giao nội địa khi import vào danh sách vận chuyển."""
+    phase = (ems_phase or "posted").strip().lower()
+    if phase not in shipment_svc.EMS_IMPORT_SYNC_PHASES:
+        phase = "posted"
+    tracking = (ems_tracking_code or reference_code or "").strip() or None
+    synced, sync_msg = shipment_svc.apply_ems_import_shipping_sync(
+        db,
+        order,
+        admin_id,
+        ems_phase=phase,
+        ems_tracking_code=tracking,
+        ems_status_description=ems_status_description,
+    )
+    if synced:
+        return True, _shop_ems_handoff_message(order.order_code)
+    return False, sync_msg
+
+
 def _order_not_found_message(*, order_code: Optional[str], ems_phase: str, ems_status: str) -> str:
     code = (order_code or "").strip().upper()
     ems_part = _ems_only_status_message(ems_phase, ems_status)
@@ -391,7 +429,7 @@ def _compare_ems_with_order(
     if st in (OrderStatus.DELIVERED.value, OrderStatus.COMPLETED.value):
         return "mismatch", "Đơn shop đã giao nhưng EMS chưa báo phát thành công."
 
-    return "in_progress", "Chưa đủ dữ liệu để kết luận — cần kiểm tra thủ công."
+    return "in_progress", "Đã gửi EMS — đang giao tới bạn."
 
 
 def _order_timeline_summary(db: Session, order: Order) -> tuple[Optional[str], Optional[str]]:
@@ -506,10 +544,22 @@ def process_ems_import_row(
             result["tracking_number_saved"] = order.tracking_number
             step_key, _ = _order_timeline_summary(db, order)
             result["current_step_key"] = step_key
-            result["sync_status"] = "in_progress"
-            result["sync_message"] = (
-                f"Đã lưu — ghép đơn {order_code}. Chưa tra EMS (import nhanh file lớn)."
+            synced, handoff_msg = _try_sync_shop_on_ems_import(
+                db,
+                order,
+                admin_id=admin_id,
+                reference_code=reference_code,
             )
+            result["order_synced"] = synced
+            result["order_sync_message"] = handoff_msg
+            if synced:
+                db.refresh(order)
+                result["order_status"] = getattr(order.status, "value", order.status)
+                result["tracking_number_saved"] = order.tracking_number
+                step_key, _ = _order_timeline_summary(db, order)
+                result["current_step_key"] = step_key
+            result["sync_status"] = "in_progress"
+            result["sync_message"] = handoff_msg
             return result
         return _apply_unlinked_result(
             result,
@@ -550,20 +600,33 @@ def process_ems_import_row(
     result["current_step_key"] = step_key
 
     if not has_ems:
-        result["sync_status"] = "in_progress"
-        result["sync_message"] = (
-            f"Đã ghép đơn {order_code} — chưa tra được hành trình EMS cho mã {reference_code}."
+        synced, handoff_msg = _try_sync_shop_on_ems_import(
+            db,
+            order,
+            admin_id=admin_id,
+            reference_code=reference_code,
         )
+        result["order_synced"] = synced
+        result["order_sync_message"] = handoff_msg
+        if synced:
+            db.refresh(order)
+            result["order_status"] = getattr(order.status, "value", order.status)
+            result["tracking_number_saved"] = order.tracking_number
+            step_key, _ = _order_timeline_summary(db, order)
+            result["current_step_key"] = step_key
+        result["sync_status"] = "in_progress"
+        result["sync_message"] = handoff_msg
         return result
 
     if ems_phase != "unknown":
-        synced, sync_msg = shipment_svc.apply_ems_import_shipping_sync(
+        synced, sync_msg = _try_sync_shop_on_ems_import(
             db,
             order,
-            admin_id,
-            ems_phase=ems_phase,
+            admin_id=admin_id,
+            reference_code=reference_code,
             ems_tracking_code=result.get("ems_tracking_code"),
             ems_status_description=ems_status,
+            ems_phase=ems_phase,
         )
         result["order_synced"] = synced
         result["order_sync_message"] = sync_msg
@@ -580,12 +643,13 @@ def process_ems_import_row(
         current_step_key=result["current_step_key"],
     )
     result["sync_status"] = sync_status
-    result["sync_message"] = sync_message
-    if result.get("order_sync_message"):
-        if result.get("order_synced"):
-            result["sync_message"] = f"{result['order_sync_message']} {sync_message}".strip()
-        elif result.get("order_id"):
-            result["sync_message"] = f"{result['order_sync_message']} ({sync_message})".strip()
+    result["sync_message"] = (
+        result["order_sync_message"]
+        if result.get("order_synced") and result.get("order_sync_message")
+        else sync_message
+    )
+    if result.get("order_sync_message") and not result.get("order_synced"):
+        result["sync_message"] = result["order_sync_message"]
 
     saved_tracking = (order.tracking_number or "").strip().upper()
     ems_tracking = (result["ems_tracking_code"] or "").strip().upper()
@@ -751,11 +815,9 @@ def _enrich_row_from_live_order(db: Session, row: dict[str, Any]) -> dict[str, A
         )
         row["sync_status"] = sync_status
         row["sync_message"] = sync_message
-    elif (row.get("sync_status") or "") in ("unlinked", "order_not_found"):
+    elif row.get("order_id") and (row.get("reference_code") or row.get("ems_reference_code")):
         row["sync_status"] = "in_progress"
-        row["sync_message"] = (
-            f"Đã ghép đơn {order_code} — chưa có hành trình EMS hoặc cần import lại để tra EMS."
-        )
+        row["sync_message"] = _shop_ems_handoff_message(order_code)
     return row
 
 
@@ -831,6 +893,35 @@ def _apply_sync_status_filter(query, sync_status: Optional[str]):
             )
         )
     return query.filter(EmsShippingRecord.sync_status == status)
+
+
+_EMS_REFRESH_MAX_IDS = 500
+
+
+def collect_record_ids_for_refresh(
+    db: Session,
+    *,
+    search: Optional[str] = None,
+    sync_status: Optional[str] = None,
+    limit: int = _EMS_REFRESH_MAX_IDS,
+) -> list[int]:
+    """Lấy id các dòng EMS cần tra lại (theo tìm kiếm / bộ lọc)."""
+    query = db.query(EmsShippingRecord.id)
+    status = (sync_status or "").strip()
+    if status and status != "all":
+        query = _apply_sync_status_filter(query, status)
+    search_term = (search or "").strip() or None
+    query = _apply_search_filter(query, search_term)
+    cap = max(1, min(int(limit or _EMS_REFRESH_MAX_IDS), _EMS_REFRESH_MAX_IDS))
+    rows = (
+        query.order_by(
+            EmsShippingRecord.updated_at.asc(),
+            EmsShippingRecord.id.asc(),
+        )
+        .limit(cap)
+        .all()
+    )
+    return [int(row[0]) for row in rows]
 
 
 def list_ems_shipping_records(

@@ -93,6 +93,14 @@ class EmsShippingDeleteRequest(BaseModel):
     ids: List[int] = Field(..., min_length=1)
 
 
+class EmsTrackingRefreshRequest(BaseModel):
+    """Tra lại EMS theo id dòng, theo từ khóa tìm kiếm, hoặc theo bộ lọc trạng thái."""
+
+    ids: Optional[List[int]] = None
+    q: Optional[str] = None
+    sync_status: Optional[str] = None
+
+
 class EmsShippingDeleteResponse(BaseModel):
     ok: bool = True
     deleted: int

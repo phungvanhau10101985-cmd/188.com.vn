@@ -12,6 +12,11 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+_EMS_CONNECTION_ERROR = (
+    "Không kết nối được EMS. Hệ thống tự tra lại sau import, "
+    "lúc 6:00 & 15:00 hàng ngày, hoặc bấm «Tiếp tục tra EMS» trên trang vận chuyển."
+)
+
 _EMS_TRACKING_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{6,}VN$", re.IGNORECASE)
 _CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _CACHE_TTL_SECONDS = 120
@@ -179,7 +184,7 @@ def _fetch_myems_public_tracking(code: str) -> dict[str, Any]:
             "available": True,
             "tracking_code": code,
             "events": [],
-            "error": "Không thể kết nối EMS lúc này. Vui lòng thử lại sau.",
+            "error": _EMS_CONNECTION_ERROR,
         }
     except ValueError:
         logger.warning("MyEMS tracking returned invalid JSON for %s", code)

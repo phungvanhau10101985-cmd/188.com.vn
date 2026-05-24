@@ -2799,10 +2799,10 @@ export const adminShippingAPI = {
     }
   },
 
-  enqueueEmsTrackingRefresh: (ids: number[]) =>
+  enqueueEmsTrackingRefresh: (payload: { ids?: number[]; q?: string; sync_status?: string }) =>
     fetchAdmin<{ ok: boolean; job_id?: string | null; queued: number; message: string }>(
       '/orders/admin/shipping/ems-tracking-refresh',
-      { method: 'POST', body: JSON.stringify({ ids }) },
+      { method: 'POST', body: JSON.stringify(payload) },
     ),
 };
 

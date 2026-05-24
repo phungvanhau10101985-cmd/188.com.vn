@@ -390,6 +390,11 @@ def admin_mark_out_for_customer_confirm(
         order.shipped_at = now
 
     db.flush()
+
+    from app.services import order_shipper_notify as shipper_notify_svc
+
+    shipper_notify_svc.schedule_customer_shipper_confirmed_notify(order.id)
+
     return order
 
 
@@ -583,7 +588,7 @@ def _set_awaiting_confirm_ems_note(
     awaiting = _event_by_key(events, "awaiting_confirm")
     if not awaiting:
         return
-    note = "188.com.vn đã gửi hàng cho EMS giao hàng."
+    note = "EMS đang giao hàng tới bạn."
     if ems_status_description:
         note = f"{note} Trạng thái EMS: {ems_status_description.strip()}"
     awaiting.note = note
