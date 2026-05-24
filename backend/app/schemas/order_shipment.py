@@ -99,6 +99,7 @@ class EmsTrackingRefreshRequest(BaseModel):
     ids: Optional[List[int]] = None
     q: Optional[str] = None
     sync_status: Optional[str] = None
+    non_terminal_only: bool = False
 
 
 class EmsShippingDeleteResponse(BaseModel):

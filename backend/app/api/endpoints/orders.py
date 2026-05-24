@@ -737,9 +737,14 @@ def admin_enqueue_ems_tracking_refresh(
                 db,
                 search=search_q,
                 sync_status=filter_status if filter_status and filter_status != "all" else None,
+                non_terminal_only=bool(body.non_terminal_only),
             )
         elif filter_status and filter_status != "all":
-            ids = ems_import_svc.collect_record_ids_for_refresh(db, sync_status=filter_status)
+            ids = ems_import_svc.collect_record_ids_for_refresh(
+                db,
+                sync_status=filter_status,
+                non_terminal_only=bool(body.non_terminal_only),
+            )
         else:
             raise HTTPException(
                 status_code=400,
@@ -747,6 +752,13 @@ def admin_enqueue_ems_tracking_refresh(
             )
 
     if not ids:
+        if search_q and body.non_terminal_only:
+            return {
+                "ok": True,
+                "job_id": None,
+                "queued": 0,
+                "message": "Đơn đã hoàn tất — không cần tra EMS lại.",
+            }
         raise HTTPException(status_code=404, detail="Không tìm thấy dòng vận chuyển nào để tra EMS.")
 
     job_id = ems_refresh_svc.enqueue_tracking_refresh(

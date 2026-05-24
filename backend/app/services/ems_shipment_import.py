@@ -3,10 +3,11 @@ from __future__ import annotations
 import io
 import re
 import unicodedata
+from datetime import date, datetime
 from typing import Any, Optional
 
 from openpyxl import load_workbook
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -308,6 +309,64 @@ def _ems_phase(description: Optional[str]) -> str:
     return "unknown"
 
 
+def _parse_traced_at_date(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(text[:10] if fmt == "%Y-%m-%d" else text, fmt).date()
+        except ValueError:
+            continue
+    if len(text) >= 10 and text[4:5] == "-":
+        try:
+            return date.fromisoformat(text[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def _merge_cod_paid_from_ems_tracking(result: dict[str, Any], ems: dict[str, Any]) -> None:
+    """Lấy ngày COD đã thu từ hành trình EMS (ưu tiên sự kiện [COD]Đã thu tiền)."""
+    events = ems.get("events") or []
+    cod_amount = result.get("cod_amount")
+    paid_date: Optional[date] = None
+
+    for ev in events:
+        desc = (ev.get("description") or "")
+        compact = desc.lower().replace(" ", "")
+        if (
+            "[cod]đãthutiền" in compact
+            or "[cod]trảtiền" in compact
+            or "đãthutiềnbưutá" in compact
+        ):
+            paid_date = _parse_traced_at_date(ev.get("traced_at"))
+            if paid_date:
+                break
+
+    if not paid_date:
+        phase = (result.get("ems_phase") or _ems_phase(ems.get("current_status_description")) or "").strip().lower()
+        if phase in ("cod_collected", "cod_settled") and cod_amount is not None and int(cod_amount) > 0:
+            for ev in events:
+                traced = _parse_traced_at_date(ev.get("traced_at"))
+                if traced:
+                    paid_date = traced
+                    break
+
+    if not paid_date:
+        return
+
+    result["cod_paid_date"] = paid_date.isoformat()
+    if cod_amount is not None and int(cod_amount) > 0 and result.get("cod_paid_amount") is None:
+        result["cod_paid_amount"] = int(cod_amount)
+
+
 def _ems_only_status_message(ems_phase: str, ems_status: str) -> str:
     """Mô tả trạng thái EMS khi không có / không khớp đơn shop."""
     status = (ems_status or "").strip()
@@ -578,6 +637,7 @@ def process_ems_import_row(
         result["ems_reference_code"] = ems.get("reference_code") or reference_code
         result["ems_status"] = ems_status
         result["ems_phase"] = ems_phase
+        _merge_cod_paid_from_ems_tracking(result, ems)
     else:
         ems_status = ""
         ems_phase = "unknown"
@@ -785,6 +845,15 @@ def _upsert_record(
     record.ems_error = result.get("ems_error")
     cod = result.get("cod_amount")
     record.cod_amount = int(cod) if cod is not None else None
+    settlement = (record.cod_settlement_status or "").strip().lower()
+    cod_paid = result.get("cod_paid_amount")
+    if cod_paid is not None:
+        if settlement != "matched" or record.cod_paid_amount is None:
+            record.cod_paid_amount = int(cod_paid)
+    cod_paid_date_raw = result.get("cod_paid_date")
+    parsed_paid_date = _parse_traced_at_date(cod_paid_date_raw)
+    if parsed_paid_date and (settlement != "matched" or record.cod_paid_date is None):
+        record.cod_paid_date = parsed_paid_date
     if source_filename:
         record.import_source_filename = source_filename
     if admin_id:
@@ -896,6 +965,24 @@ def _apply_sync_status_filter(query, sync_status: Optional[str]):
 
 
 _EMS_REFRESH_MAX_IDS = 500
+_EMS_TERMINAL_PHASES = frozenset({"delivered", "cod_collected", "cod_settled"})
+
+
+def _apply_non_terminal_refresh_filter(query):
+    """Chỉ tra lại đơn chưa ở trạng thái EMS cuối (đã giao / thu COD xong)."""
+    terminal = tuple(_EMS_TERMINAL_PHASES)
+    return query.filter(
+        or_(
+            EmsShippingRecord.ems_phase.is_(None),
+            EmsShippingRecord.ems_phase == "",
+            func.lower(EmsShippingRecord.ems_phase) == "unknown",
+            ~func.lower(EmsShippingRecord.ems_phase).in_(terminal),
+            and_(
+                EmsShippingRecord.ems_error.isnot(None),
+                EmsShippingRecord.ems_error != "",
+            ),
+        )
+    )
 
 
 def collect_record_ids_for_refresh(
@@ -903,6 +990,7 @@ def collect_record_ids_for_refresh(
     *,
     search: Optional[str] = None,
     sync_status: Optional[str] = None,
+    non_terminal_only: bool = False,
     limit: int = _EMS_REFRESH_MAX_IDS,
 ) -> list[int]:
     """Lấy id các dòng EMS cần tra lại (theo tìm kiếm / bộ lọc)."""
@@ -912,6 +1000,8 @@ def collect_record_ids_for_refresh(
         query = _apply_sync_status_filter(query, status)
     search_term = (search or "").strip() or None
     query = _apply_search_filter(query, search_term)
+    if non_terminal_only:
+        query = _apply_non_terminal_refresh_filter(query)
     cap = max(1, min(int(limit or _EMS_REFRESH_MAX_IDS), _EMS_REFRESH_MAX_IDS))
     rows = (
         query.order_by(

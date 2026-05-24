@@ -171,6 +171,27 @@ function formatCodAmount(amount: number | null | undefined): string {
   return formatVnd(amount);
 }
 
+function formatCodPaidDate(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw.trim());
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  return raw.trim();
+}
+
+function formatCodPaidDisplay(row: EmsShippingImportRow): ReactNode {
+  const amount = row.cod_paid_amount ?? (row.cod_paid_date ? row.cod_amount : null);
+  const paidDate = formatCodPaidDate(row.cod_paid_date);
+  if (amount == null && !paidDate) return '—';
+  return (
+    <>
+      <span>{formatVnd(amount)}</span>
+      {paidDate ? (
+        <span className="block text-xs text-emerald-700 mt-0.5 font-medium">Ngày trả: {paidDate}</span>
+      ) : null}
+    </>
+  );
+}
+
 function CollapsibleListPanel({
   title,
   summary,
@@ -304,10 +325,7 @@ function EmsSearchResultCard({
         <DetailField label="Mã EMS">{row.ems_tracking_code || '—'}</DetailField>
         <DetailField label="Mã vận đơn shop (đã lưu)">{row.tracking_number_saved || '—'}</DetailField>
         <DetailField label="Thu hộ (COD)">{formatCodAmount(row.cod_amount)}</DetailField>
-        <DetailField label="COD đã trả">
-          {formatVnd(row.cod_paid_amount)}
-          {row.cod_paid_date ? ` · ${row.cod_paid_date}` : ''}
-        </DetailField>
+        <DetailField label="COD đã trả">{formatCodPaidDisplay(row)}</DetailField>
         <DetailField label="Cước EMS">{formatVnd(row.freight_amount)}</DetailField>
         <DetailField label="Trạng thái EMS">
           {row.ems_status || row.ems_error || '—'}
@@ -425,7 +443,7 @@ export default function AdminShippingPage() {
         skip,
         limit: listPageSize,
         sync_status: filter === 'all' ? undefined : filter,
-        q: appliedSearch || undefined,
+        q: appliedSearch.trim() || undefined,
       });
       const filteredTotal = data.pagination?.filtered_total ?? data.rows.length;
       const maxPage = Math.max(1, Math.ceil(filteredTotal / listPageSize));
@@ -570,13 +588,20 @@ export default function AdminShippingPage() {
   );
 
   const runEmsTrackingRefresh = useCallback(
-    async (payload: { ids?: number[]; q?: string; sync_status?: string }) => {
+    async (payload: {
+      ids?: number[];
+      q?: string;
+      sync_status?: string;
+      non_terminal_only?: boolean;
+    }) => {
       setRefreshingEms(true);
       setError(null);
       try {
         const data = await adminShippingAPI.enqueueEmsTrackingRefresh(payload);
         if (data.job_id) {
           startTrackingPoll(data.job_id);
+        } else if (data.queued === 0 && payload.non_terminal_only) {
+          setError(null);
         } else {
           setError(data.message || 'Không khởi chạy được tra EMS.');
         }
@@ -654,7 +679,7 @@ export default function AdminShippingPage() {
       setListPage(1);
       setSelectedKeys(new Set());
       if (next) {
-        void runEmsTrackingRefresh({ q: next });
+        void runEmsTrackingRefresh({ q: next, non_terminal_only: true });
       }
     },
     [runEmsTrackingRefresh, searchInput],
@@ -963,8 +988,8 @@ export default function AdminShippingPage() {
         <h2 className="text-base font-semibold text-gray-900">Tra cứu vận đơn</h2>
         <p className="mt-1 text-sm text-gray-500">
           Tìm theo <strong>mã đơn shop</strong> (DH/DC), <strong>mã tham chiếu</strong> (cột A file EMS),{' '}
-          <strong>mã EMS</strong> hoặc mã vận đơn đã lưu trên đơn shop. Tra cứu sẽ{' '}
-          <strong>tự chạy lại kiểm tra EMS</strong> và cập nhật trạng thái mới nhất.
+          <strong>mã EMS</strong> hoặc mã vận đơn đã lưu trên đơn shop. Nếu đơn{' '}
+          <strong>chưa giao / chưa thu COD xong</strong>, hệ thống tự tra EMS ngay.
         </p>
         <form onSubmit={submitSearch} className="mt-3 flex flex-col sm:flex-row gap-2">
           <input
@@ -1983,10 +2008,7 @@ export default function AdminShippingPage() {
                             {formatCodAmount(row.cod_amount)}
                           </td>
                           <td className="px-3 py-3 text-right tabular-nums whitespace-nowrap">
-                            <div>{formatVnd(row.cod_paid_amount)}</div>
-                            {row.cod_paid_date ? (
-                              <div className="text-xs text-gray-500 mt-1">{row.cod_paid_date}</div>
-                            ) : null}
+                            <div>{formatCodPaidDisplay(row)}</div>
                             {row.cod_settlement_status ? (
                               <span
                                 className={`inline-flex mt-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
