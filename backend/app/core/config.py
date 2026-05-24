@@ -781,6 +781,8 @@ class Settings:
         )
         self.EMS_TRACKING_LANGUAGE: int = int(os.getenv("EMS_TRACKING_LANGUAGE", "0") or "0")
         self.EMS_API_TIMEOUT_SECONDS: int = int(os.getenv("EMS_API_TIMEOUT_SECONDS", "15") or "15")
+        # api.myems.vn thường thiếu intermediate CA — mặc định tắt verify để tra cứu không bị SSL lỗi.
+        self.EMS_API_VERIFY_SSL: bool = os.getenv("EMS_API_VERIFY_SSL", "False").lower() == "true"
 
         # ========================
         # RATE LIMITING

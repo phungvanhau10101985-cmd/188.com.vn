@@ -162,11 +162,13 @@ def _fetch_myems_public_tracking(code: str) -> dict[str, Any]:
     language = int(getattr(settings, "EMS_TRACKING_LANGUAGE", 0) or 0)
     timeout = int(getattr(settings, "EMS_API_TIMEOUT_SECONDS", 15) or 15)
 
+    verify_ssl = bool(getattr(settings, "EMS_API_VERIFY_SSL", False))
     try:
         resp = requests.get(
             f"{base_url}/TrackAndTraceItemCode",
             params={"itemcode": _myems_item_code(code), "language": language},
             timeout=timeout,
+            verify=verify_ssl,
             headers={"Accept": "application/json", "User-Agent": "188.com.vn/ems-tracking"},
         )
         resp.raise_for_status()
@@ -228,11 +230,13 @@ def _fetch_legacy_merchant_tracking(code: str) -> Optional[dict[str, Any]]:
 
     base_url = (getattr(settings, "EMS_LEGACY_API_BASE_URL", "") or "http://ws.ems.com.vn").strip().rstrip("/")
     timeout = int(getattr(settings, "EMS_API_TIMEOUT_SECONDS", 15) or 15)
+    verify_ssl = bool(getattr(settings, "EMS_API_VERIFY_SSL", False))
     try:
         resp = requests.get(
             f"{base_url}/api/v1/orders/tracking/{code}",
             params={"merchant_token": token},
             timeout=timeout,
+            verify=verify_ssl,
             headers={"Accept": "application/json", "User-Agent": "188.com.vn/ems-tracking"},
         )
         resp.raise_for_status()
