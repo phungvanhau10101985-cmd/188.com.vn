@@ -58,6 +58,27 @@ class AdminMarkOutForConfirmIn(BaseModel):
 
 
 class EmsShippingOperationsStatsResponse(BaseModel):
+    total_ems_records: int = 0
+    total_with_cod: int = 0
+    in_transit_count: int = 0
+    delivered_count: int = 0
+    returned_count: int = 0
+    pending_status_count: int = 0
+    cod_in_transit_unpaid_count: int = 0
+    cod_delivered_unpaid_count: int = 0
+    cod_paid_count: int = 0
+    cod_returned_unpaid_count: int = 0
+    cod_pending_unpaid_count: int = 0
+    cod_in_transit_unpaid_total: int = 0
+    cod_delivered_unpaid_total: int = 0
+    cod_paid_total: int = 0
+    shop_linked_count: int = 0
+    shop_return_received_count: int = 0
+    freight_unsettled_count: int = 0
+    shop_shipping_orders: int = 0
+    shop_delivered_orders: int = 0
+    shop_returned_orders: int = 0
+    # Legacy
     shipping_orders: int = 0
     delivered_success_orders: int = 0
     returned_orders: int = 0
@@ -66,7 +87,6 @@ class EmsShippingOperationsStatsResponse(BaseModel):
     cod_success_paid_count: int = 0
     cod_success_paid_total: int = 0
     shipping_cod_unpaid_count: int = 0
-    freight_unsettled_count: int = 0
 
 
 class EmsShippingDeleteRequest(BaseModel):
@@ -140,6 +160,7 @@ class EmsShippingListPaginationResponse(BaseModel):
     limit: int = 50
     total: int = 0
     filtered_total: int = 0
+    search: Optional[str] = None
 
 
 class EmsShippingImportResponse(BaseModel):
@@ -150,6 +171,14 @@ class EmsShippingImportResponse(BaseModel):
     tracking_refresh_job_id: Optional[str] = None
     pagination: Optional[EmsShippingListPaginationResponse] = None
     rows: List[EmsShippingImportRowResponse]
+
+
+class EmsShippingOperationsRecordsResponse(BaseModel):
+    ok: bool = True
+    bucket: str
+    bucket_label: str
+    pagination: EmsShippingListPaginationResponse
+    rows: List[EmsShippingImportRowResponse] = []
 
 
 class EmsTrackingRefreshJobResponse(BaseModel):

@@ -2676,6 +2676,7 @@ export interface EmsShippingListPagination {
   limit: number;
   total: number;
   filtered_total: number;
+  search?: string | null;
 }
 
 export interface EmsShippingImportResult {
@@ -2728,6 +2729,7 @@ export type EmsShippingListParams = {
   skip?: number;
   limit?: number;
   sync_status?: string;
+  q?: string;
 };
 
 export const adminShippingAPI = {
@@ -2736,6 +2738,7 @@ export const adminShippingAPI = {
     if (params.skip != null && params.skip > 0) qs.set('skip', String(params.skip));
     if (params.limit != null) qs.set('limit', String(params.limit));
     if (params.sync_status && params.sync_status !== 'all') qs.set('sync_status', params.sync_status);
+    if (params.q?.trim()) qs.set('q', params.q.trim());
     const query = qs.toString();
     return fetchAdmin<EmsShippingImportResult>(
       `/orders/admin/shipping/ems-records${query ? `?${query}` : ''}`,
@@ -2744,6 +2747,16 @@ export const adminShippingAPI = {
 
   getOperationsStats: () =>
     fetchAdmin<EmsShippingOperationsStats>('/orders/admin/shipping/operations-stats'),
+
+  listOperationsRecords: (params: { bucket: string; skip?: number; limit?: number }) => {
+    const qs = new URLSearchParams();
+    qs.set('bucket', params.bucket);
+    if (params.skip != null && params.skip > 0) qs.set('skip', String(params.skip));
+    if (params.limit != null) qs.set('limit', String(params.limit));
+    return fetchAdmin<EmsShippingOperationsRecords>(
+      `/orders/admin/shipping/operations-stats/records?${qs.toString()}`,
+    );
+  },
 
   importEmsExcel: async (file: File): Promise<EmsShippingImportResult> => {
     const token = getAdminToken();
@@ -2794,6 +2807,27 @@ export const adminShippingAPI = {
 };
 
 export interface EmsShippingOperationsStats {
+  total_ems_records: number;
+  total_with_cod: number;
+  in_transit_count: number;
+  delivered_count: number;
+  returned_count: number;
+  pending_status_count: number;
+  cod_in_transit_unpaid_count: number;
+  cod_delivered_unpaid_count: number;
+  cod_paid_count: number;
+  cod_returned_unpaid_count: number;
+  cod_pending_unpaid_count: number;
+  cod_in_transit_unpaid_total: number;
+  cod_delivered_unpaid_total: number;
+  cod_paid_total: number;
+  shop_linked_count: number;
+  shop_return_received_count: number;
+  freight_unsettled_count: number;
+  shop_shipping_orders: number;
+  shop_delivered_orders: number;
+  shop_returned_orders: number;
+  /** @deprecated legacy aliases */
   shipping_orders: number;
   delivered_success_orders: number;
   returned_orders: number;
@@ -2802,7 +2836,31 @@ export interface EmsShippingOperationsStats {
   cod_success_paid_count: number;
   cod_success_paid_total: number;
   shipping_cod_unpaid_count: number;
-  freight_unsettled_count: number;
+}
+
+export type OpsBucketKey =
+  | 'total'
+  | 'in_transit'
+  | 'delivered'
+  | 'returned'
+  | 'pending'
+  | 'has_cod'
+  | 'cod_in_transit_unpaid'
+  | 'cod_delivered_unpaid'
+  | 'cod_paid'
+  | 'cod_returned_unpaid'
+  | 'cod_pending_unpaid'
+  | 'freight_unsettled'
+  | 'shop_linked'
+  | 'shop_return_received'
+  | 'shop_shipping';
+
+export interface EmsShippingOperationsRecords {
+  ok: boolean;
+  bucket: OpsBucketKey;
+  bucket_label: string;
+  pagination: EmsShippingListPagination;
+  rows: EmsShippingImportRow[];
 }
 
 export type EmsCodReconcileStatus = 'matched' | 'amount_mismatch' | 'record_not_found' | 'parse_error';

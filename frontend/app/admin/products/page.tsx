@@ -2264,222 +2264,8 @@ export default function AdminProductsPage() {
       <div className="p-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-6">Quản lý sản phẩm</h1>
 
-        {/* Toolbar: search, import, export */}
+        {/* Import Hibox & catalogue feeds */}
         <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
-          <form onSubmit={handleSearch} className="flex flex-wrap items-end gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Tên sản phẩm</label>
-              <input
-                type="text"
-                value={searchName}
-                onChange={(e) => setSearchName(e.target.value)}
-                placeholder="Tìm theo tên..."
-                className="w-56 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ID hoặc SKU</label>
-              <input
-                type="text"
-                value={searchId}
-                onChange={(e) => setSearchId(e.target.value)}
-                placeholder="ID sản phẩm hoặc mã SKU..."
-                className="w-48 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label htmlFor="admin-products-sort" className="block text-sm font-medium text-gray-700 mb-1">
-                Sắp xếp
-              </label>
-              <select
-                id="admin-products-sort"
-                value={listSort}
-                onChange={(e) => {
-                  const v = e.target.value as AdminProductListSort;
-                  setListSort(v);
-                  setPage(1);
-                  try {
-                    localStorage.setItem(ADMIN_PRODUCTS_LIST_SORT_KEY, v);
-                  } catch {
-                    /* ignore */
-                  }
-                }}
-                className="w-52 rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
-                aria-label="Sắp xếp danh sách sản phẩm"
-              >
-                <option value="default">ID sản phẩm (mặc định)</option>
-                <option value="views_desc">Nhiều lượt xem nhất</option>
-                <option value="newest">Từ mới đến cũ</option>
-                <option value="oldest">Từ cũ đến mới</option>
-              </select>
-            </div>
-            <button type="submit" className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 text-sm font-medium">
-              Tìm kiếm
-            </button>
-            <button
-              type="button"
-              onClick={toggleSelectAllOnPage}
-              disabled={!data?.products?.length}
-              className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium disabled:opacity-70"
-            >
-              {allSelectedOnPage ? 'Bỏ chọn trang' : 'Chọn tất trang'}
-            </button>
-            <button
-              type="button"
-              onClick={handleDeleteSelected}
-              disabled={selectedProductIds.size === 0 || deleting}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium disabled:opacity-70"
-            >
-              {deleting ? 'Đang xóa...' : `Xóa (${selectedProductIds.size})`}
-            </button>
-            <div className="flex-1" />
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              onChange={handleImport}
-            />
-            <button
-              type="button"
-              onClick={handleDownloadTemplate}
-              disabled={downloadingTemplate}
-              className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 text-sm font-medium disabled:opacity-70"
-            >
-              {downloadingTemplate ? 'Đang tải...' : 'Tải file mẫu'}
-            </button>
-            <div className="flex flex-col items-end gap-1 min-w-[10rem]">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={importing}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium disabled:opacity-70 w-full sm:w-auto"
-              >
-                {importing ? 'Đang import...' : 'Import Excel'}
-              </button>
-              {importing && importProgress ? (
-                <div className="w-full max-w-[22rem] space-y-1">
-                  <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
-                    {importProgress.percent != null ? (
-                      <div
-                        className="h-full rounded-full bg-emerald-600 transition-[width] duration-300 ease-out"
-                        style={{ width: `${Math.min(100, importProgress.percent)}%` }}
-                      />
-                    ) : (
-                      <div className="h-full w-full bg-emerald-500/70 animate-pulse rounded-full" />
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-600 leading-snug text-right line-clamp-3">
-                    {importProgress.message}
-                  </p>
-                  {importProgress.current != null && importProgress.total != null ? (
-                    <p className="text-[11px] text-gray-500 text-right">
-                      Dòng: {importProgress.current.toLocaleString()} / {importProgress.total.toLocaleString()}
-                      {importProgress.phase ? ` · ${importProgress.phase}` : ''}
-                    </p>
-                  ) : importProgress.phase ? (
-                    <p className="text-[11px] text-gray-500 text-right">{importProgress.phase}</p>
-                  ) : null}
-                  {importProgress.warn ? (
-                    <p className="text-[11px] text-amber-700 leading-snug text-right">
-                      {importProgress.warn}
-                    </p>
-                  ) : null}
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        cancelTrackRef.current = true;
-                      }}
-                      className="text-[11px] text-gray-500 underline hover:text-gray-700"
-                    >
-                      Ẩn theo dõi (job vẫn chạy ở server)
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-            <button
-              type="button"
-              onClick={handleExport}
-              disabled={exporting}
-              className="px-4 py-2 bg-[#ea580c] text-white rounded-lg hover:bg-[#c2410c] text-sm font-medium disabled:opacity-70"
-            >
-              {exporting ? 'Đang export...' : 'Export Excel'}
-            </button>
-            {showAdminGoogleSheetSync ? (
-              <div className="flex flex-col items-stretch gap-1 sm:items-end">
-                <button
-                  type="button"
-                  onClick={() => void handleSyncGoogleSheet()}
-                  disabled={googleSheetSyncing || googleSheetRateLimitSec !== null}
-                  className="px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 text-sm font-medium disabled:opacity-70 disabled:cursor-not-allowed"
-                  title={
-                    googleSheetRateLimitSec !== null
-                      ? 'Quota Google Sheet (429): chờ hết đếm ngược rồi thử lại.'
-                      : 'Cập nhật Google Sheet theo dữ liệu cửa hàng (cần bật đồng bộ trên server và share sheet cho service account).'
-                  }
-                  aria-busy={googleSheetSyncing}
-                  aria-label="Đồng bộ danh sách sản phẩm lên Google Sheet"
-                >
-                  {googleSheetSyncing
-                    ? 'Đang đồng bộ…'
-                    : googleSheetRateLimitSec !== null && googleSheetRateLimitSec > 0
-                      ? `Chờ ${googleSheetRateLimitSec}s (429)…`
-                      : googleSheetRateLimitSec === 0
-                        ? 'Đang mở khóa…'
-                        : 'Đồng bộ Google Sheet'}
-                </button>
-                {googleSheetsEditorUrl ? (
-                  <a
-                    href={googleSheetsEditorUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-sky-800 hover:underline text-center sm:text-right"
-                    title="Bảng primary trên backend (GOOGLE_SHEETS_SKU_SPREADSHEET_ID)"
-                  >
-                    {googleSheetsEditorUrl2 ? 'Mở Sheet (prefix / trước a188)' : 'Mở Google Sheet'}
-                  </a>
-                ) : null}
-                {googleSheetsEditorUrl2 ? (
-                  <a
-                    href={googleSheetsEditorUrl2}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-sky-800 hover:underline text-center sm:text-right"
-                    title="Bảng phụ _2 (GOOGLE_SHEETS_SKU_*_2, thường cột A = SKU)"
-                  >
-                    Mở Sheet (SKU)
-                  </a>
-                ) : null}
-              </div>
-            ) : null}
-          </form>
-          {importDetailPanel ? (
-            <div
-              className={`mt-3 rounded-lg border p-3 text-sm ${
-                importDetailPanel.variant === 'err'
-                  ? 'border-red-300 bg-red-50 text-gray-900'
-                  : importDetailPanel.variant === 'warn'
-                    ? 'border-amber-300 bg-amber-50 text-gray-900'
-                    : 'border-sky-200 bg-sky-50 text-gray-900'
-              }`}
-            >
-              <div className="flex justify-between gap-2 items-start mb-2">
-                <span className="font-semibold">{importDetailPanel.title}</span>
-                <button
-                  type="button"
-                  onClick={() => setImportDetailPanel(null)}
-                  className="text-xs shrink-0 px-2 py-1 rounded border border-gray-400/60 hover:bg-white/80 text-gray-700"
-                >
-                  Đóng
-                </button>
-              </div>
-              <pre className="whitespace-pre-wrap break-words max-h-[22rem] overflow-y-auto font-mono text-xs leading-relaxed text-gray-800">
-                {importDetailPanel.body}
-              </pre>
-            </div>
-          ) : null}
           <section
             id="import-hibox"
             aria-labelledby="import-hibox-heading"
@@ -4037,6 +3823,234 @@ export default function AdminProductsPage() {
               )}
             </div>
           </div>
+        </div>
+
+        {/* Toolbar: tìm kiếm & thao tác — ngay trên danh sách sản phẩm */}
+        <div id="admin-products-list-toolbar" className="bg-white rounded-xl border border-gray-200 p-4 mb-4 scroll-mt-24">
+          <form onSubmit={handleSearch} className="space-y-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={handleImport}
+            />
+
+            {/* Hàng 1: lọc + thao tác danh sách */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 items-end">
+              <div className="min-w-0">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Tên sản phẩm</label>
+                <input
+                  type="text"
+                  value={searchName}
+                  onChange={(e) => setSearchName(e.target.value)}
+                  placeholder="Tìm theo tên..."
+                  className="w-full h-9 rounded-lg border border-gray-300 px-3 text-sm"
+                />
+              </div>
+              <div className="min-w-0">
+                <label className="block text-xs font-medium text-gray-600 mb-1">ID hoặc SKU</label>
+                <input
+                  type="text"
+                  value={searchId}
+                  onChange={(e) => setSearchId(e.target.value)}
+                  placeholder="ID sản phẩm hoặc mã SKU..."
+                  className="w-full h-9 rounded-lg border border-gray-300 px-3 text-sm"
+                />
+              </div>
+              <div className="min-w-0">
+                <label htmlFor="admin-products-sort" className="block text-xs font-medium text-gray-600 mb-1">
+                  Sắp xếp
+                </label>
+                <select
+                  id="admin-products-sort"
+                  value={listSort}
+                  onChange={(e) => {
+                    const v = e.target.value as AdminProductListSort;
+                    setListSort(v);
+                    setPage(1);
+                    try {
+                      localStorage.setItem(ADMIN_PRODUCTS_LIST_SORT_KEY, v);
+                    } catch {
+                      /* ignore */
+                    }
+                  }}
+                  className="w-full h-9 rounded-lg border border-gray-300 px-3 text-sm bg-white"
+                  aria-label="Sắp xếp danh sách sản phẩm"
+                >
+                  <option value="default">ID sản phẩm (mặc định)</option>
+                  <option value="views_desc">Nhiều lượt xem nhất</option>
+                  <option value="newest">Từ mới đến cũ</option>
+                  <option value="oldest">Từ cũ đến mới</option>
+                </select>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-1 xl:justify-end">
+                <button
+                  type="submit"
+                  className="inline-flex h-9 items-center px-4 bg-slate-700 text-white rounded-lg hover:bg-slate-800 text-sm font-medium"
+                >
+                  Tìm kiếm
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleSelectAllOnPage}
+                  disabled={!data?.products?.length}
+                  className="inline-flex h-9 items-center px-3 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium disabled:opacity-70"
+                >
+                  {allSelectedOnPage ? 'Bỏ chọn trang' : 'Chọn tất trang'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteSelected}
+                  disabled={selectedProductIds.size === 0 || deleting}
+                  className="inline-flex h-9 items-center px-3 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium disabled:opacity-70"
+                >
+                  {deleting ? 'Đang xóa...' : `Xóa (${selectedProductIds.size})`}
+                </button>
+              </div>
+            </div>
+
+            {/* Hàng 2: Excel / Google Sheet — cùng chiều cao, một dòng */}
+            <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={handleDownloadTemplate}
+                disabled={downloadingTemplate}
+                className="inline-flex h-9 items-center px-3 bg-amber-500 text-white rounded-lg hover:bg-amber-600 text-sm font-medium disabled:opacity-70"
+              >
+                {downloadingTemplate ? 'Đang tải...' : 'Tải file mẫu'}
+              </button>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={importing}
+                className="inline-flex h-9 items-center px-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium disabled:opacity-70"
+              >
+                {importing ? 'Đang import...' : 'Import Excel'}
+              </button>
+              <button
+                type="button"
+                onClick={handleExport}
+                disabled={exporting}
+                className="inline-flex h-9 items-center px-3 bg-[#ea580c] text-white rounded-lg hover:bg-[#c2410c] text-sm font-medium disabled:opacity-70"
+              >
+                {exporting ? 'Đang export...' : 'Export Excel'}
+              </button>
+              {showAdminGoogleSheetSync ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void handleSyncGoogleSheet()}
+                    disabled={googleSheetSyncing || googleSheetRateLimitSec !== null}
+                    className="inline-flex h-9 items-center px-3 bg-sky-600 text-white rounded-lg hover:bg-sky-700 text-sm font-medium disabled:opacity-70 disabled:cursor-not-allowed"
+                    title={
+                      googleSheetRateLimitSec !== null
+                        ? 'Quota Google Sheet (429): chờ hết đếm ngược rồi thử lại.'
+                        : 'Cập nhật Google Sheet theo dữ liệu cửa hàng'
+                    }
+                    aria-busy={googleSheetSyncing}
+                    aria-label="Đồng bộ danh sách sản phẩm lên Google Sheet"
+                  >
+                    {googleSheetSyncing
+                      ? 'Đang đồng bộ…'
+                      : googleSheetRateLimitSec !== null && googleSheetRateLimitSec > 0
+                        ? `Chờ ${googleSheetRateLimitSec}s…`
+                        : googleSheetRateLimitSec === 0
+                          ? 'Đang mở khóa…'
+                          : 'Đồng bộ Google Sheet'}
+                  </button>
+                  {(googleSheetsEditorUrl || googleSheetsEditorUrl2) ? (
+                    <span className="hidden sm:inline text-gray-300" aria-hidden>
+                      |
+                    </span>
+                  ) : null}
+                  {googleSheetsEditorUrl ? (
+                    <a
+                      href={googleSheetsEditorUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-9 items-center text-xs text-sky-800 hover:underline px-1"
+                      title="Bảng primary trên backend"
+                    >
+                      {googleSheetsEditorUrl2 ? 'Sheet prefix' : 'Mở Google Sheet'}
+                    </a>
+                  ) : null}
+                  {googleSheetsEditorUrl2 ? (
+                    <a
+                      href={googleSheetsEditorUrl2}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-9 items-center text-xs text-sky-800 hover:underline px-1"
+                      title="Bảng phụ SKU"
+                    >
+                      Sheet SKU
+                    </a>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+
+            {importing && importProgress ? (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2.5 space-y-1.5">
+                <div className="h-1.5 rounded-full bg-gray-200 overflow-hidden">
+                  {importProgress.percent != null ? (
+                    <div
+                      className="h-full rounded-full bg-emerald-600 transition-[width] duration-300 ease-out"
+                      style={{ width: `${Math.min(100, importProgress.percent)}%` }}
+                    />
+                  ) : (
+                    <div className="h-full w-full bg-emerald-500/70 animate-pulse rounded-full" />
+                  )}
+                </div>
+                <p className="text-xs text-gray-700 leading-snug">{importProgress.message}</p>
+                {importProgress.current != null && importProgress.total != null ? (
+                  <p className="text-[11px] text-gray-500">
+                    Dòng: {importProgress.current.toLocaleString()} / {importProgress.total.toLocaleString()}
+                    {importProgress.phase ? ` · ${importProgress.phase}` : ''}
+                  </p>
+                ) : importProgress.phase ? (
+                  <p className="text-[11px] text-gray-500">{importProgress.phase}</p>
+                ) : null}
+                {importProgress.warn ? (
+                  <p className="text-[11px] text-amber-800">{importProgress.warn}</p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    cancelTrackRef.current = true;
+                  }}
+                  className="text-[11px] text-gray-500 underline hover:text-gray-700"
+                >
+                  Ẩn theo dõi (job vẫn chạy ở server)
+                </button>
+              </div>
+            ) : null}
+          </form>
+          {importDetailPanel ? (
+            <div
+              className={`mt-3 rounded-lg border p-3 text-sm ${
+                importDetailPanel.variant === 'err'
+                  ? 'border-red-300 bg-red-50 text-gray-900'
+                  : importDetailPanel.variant === 'warn'
+                    ? 'border-amber-300 bg-amber-50 text-gray-900'
+                    : 'border-sky-200 bg-sky-50 text-gray-900'
+              }`}
+            >
+              <div className="flex justify-between gap-2 items-start mb-2">
+                <span className="font-semibold">{importDetailPanel.title}</span>
+                <button
+                  type="button"
+                  onClick={() => setImportDetailPanel(null)}
+                  className="text-xs shrink-0 px-2 py-1 rounded border border-gray-400/60 hover:bg-white/80 text-gray-700"
+                >
+                  Đóng
+                </button>
+              </div>
+              <pre className="whitespace-pre-wrap break-words max-h-[22rem] overflow-y-auto font-mono text-xs leading-relaxed text-gray-800">
+                {importDetailPanel.body}
+              </pre>
+            </div>
+          ) : null}
         </div>
 
         {/* Table */}

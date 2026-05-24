@@ -22,6 +22,17 @@ _PAYMENT_DATE_CELL = (0, 4)  # E1
 _DATA_START_ROW = 2  # hàng 3 trong Excel (0-indexed)
 
 
+def _isoformat_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        return iso()
+    return str(value)
+
+
 def _parse_payment_date(value: Any) -> Optional[date]:
     text = _cell_str(value)
     if not text:
@@ -183,7 +194,21 @@ def _reconcile_row(
         }
 
     db_cod = int(record.cod_amount) if record.cod_amount is not None else None
-    diff = paid - db_cod if db_cod is not None else paid
+    effective_db = db_cod if db_cod is not None else 0
+
+    if paid == 0 and effective_db == 0:
+        return {
+            **row,
+            "reconcile_status": "matched",
+            "reconcile_message": "Đơn không thu hộ (0 ₫) — khớp.",
+            "ems_shipping_record_id": record.id,
+            "db_cod_amount": db_cod if db_cod is not None else 0,
+            "amount_difference": 0,
+            "order_code": record.order_code,
+            "reference_code": record.reference_code,
+        }
+
+    diff = paid - effective_db
 
     if db_cod is None:
         status = "amount_mismatch"
@@ -230,7 +255,7 @@ def _row_to_dict(row: EmsCodSettlementRow) -> dict[str, Any]:
 def _batch_to_dict(batch: EmsCodSettlementBatch, rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "id": batch.id,
-        "payment_date": batch.payment_date.isoformat() if batch.payment_date else None,
+        "payment_date": _isoformat_value(batch.payment_date),
         "source_filename": batch.source_filename,
         "total_rows": batch.total_rows,
         "matched_count": batch.matched_count,
@@ -240,7 +265,7 @@ def _batch_to_dict(batch: EmsCodSettlementBatch, rows: list[dict[str, Any]]) -> 
         "total_paid_amount": int(batch.total_paid_amount or 0),
         "total_db_cod_amount": int(batch.total_db_cod_amount or 0),
         "total_amount_difference": int(batch.total_amount_difference or 0),
-        "created_at": batch.created_at.isoformat() if batch.created_at else None,
+        "created_at": _isoformat_value(batch.created_at),
         "rows": rows,
     }
 
@@ -314,7 +339,73 @@ def _apply_settlement_to_shipping_record(
     shipping.cod_settlement_message = message
 
 
+def _cleanup_duplicate_batches_keep_latest(db: Session) -> int:
+    """Xóa batch trùng ngày — giữ lại lần import sau (id lớn nhất)."""
+    all_batches = (
+        db.query(EmsCodSettlementBatch)
+        .order_by(EmsCodSettlementBatch.payment_date.asc(), EmsCodSettlementBatch.id.asc())
+        .all()
+    )
+    keep_ids: set[int] = set()
+    latest_by_date: dict[date, EmsCodSettlementBatch] = {}
+    for batch in all_batches:
+        prev = latest_by_date.get(batch.payment_date)
+        if prev is None or batch.id > prev.id:
+            latest_by_date[batch.payment_date] = batch
+    keep_ids = {int(b.id) for b in latest_by_date.values()}
+
+    removed = 0
+    for batch in all_batches:
+        if int(batch.id) in keep_ids:
+            continue
+        db.delete(batch)
+        removed += 1
+    if removed:
+        db.flush()
+    return removed
+
+
+def _remove_existing_batches_for_payment_date(db: Session, payment_date: date) -> int:
+    """Một ngày trả COD chỉ giữ một lần import — xóa batch cũ cùng ngày trước khi ghi mới."""
+    old_batches = (
+        db.query(EmsCodSettlementBatch)
+        .filter(EmsCodSettlementBatch.payment_date == payment_date)
+        .all()
+    )
+    if not old_batches:
+        return 0
+
+    affected_record_ids: set[int] = set()
+    for batch in old_batches:
+        rows = (
+            db.query(EmsCodSettlementRow)
+            .filter(EmsCodSettlementRow.batch_id == batch.id)
+            .all()
+        )
+        for row in rows:
+            if row.ems_shipping_record_id:
+                affected_record_ids.add(int(row.ems_shipping_record_id))
+        db.delete(batch)
+
+    db.flush()
+
+    for record_id in affected_record_ids:
+        shipping = db.query(EmsShippingRecord).filter(EmsShippingRecord.id == record_id).first()
+        if not shipping or shipping.cod_paid_date != payment_date:
+            continue
+        shipping.cod_paid_amount = None
+        shipping.cod_paid_date = None
+        shipping.cod_settlement_status = None
+        shipping.cod_settlement_message = None
+
+    return len(old_batches)
+
+
 def list_cod_settlement_batches(db: Session, *, limit: int = 20) -> dict[str, Any]:
+    removed = _cleanup_duplicate_batches_keep_latest(db)
+    if removed:
+        db.commit()
+
     batches = (
         db.query(EmsCodSettlementBatch)
         .order_by(EmsCodSettlementBatch.payment_date.desc(), EmsCodSettlementBatch.id.desc())
@@ -355,8 +446,16 @@ def import_cod_settlement_excel(
     reconciled = [_reconcile_row(db, row) for row in rows]
     summary = _build_summary(reconciled)
 
+    effective_payment_date = payment_date or date.today()
+    removed_batches = _remove_existing_batches_for_payment_date(db, effective_payment_date)
+    if removed_batches:
+        warnings.append(
+            f"Đã thay thế {removed_batches} lần import COD cũ cho ngày "
+            f"{effective_payment_date.strftime('%d/%m/%Y')} — giữ lần import mới nhất."
+        )
+
     batch = EmsCodSettlementBatch(
-        payment_date=payment_date or date.today(),
+        payment_date=effective_payment_date,
         source_filename=source_filename,
         imported_by_admin_id=admin_id,
         total_rows=summary["total_rows"],
@@ -390,7 +489,7 @@ def import_cod_settlement_excel(
             db,
             row.get("ems_shipping_record_id"),
             paid_amount=row.get("paid_amount"),
-            payment_date=payment_date,
+            payment_date=effective_payment_date,
             status=row.get("reconcile_status") or "pending",
             message=row.get("reconcile_message") or "",
         )

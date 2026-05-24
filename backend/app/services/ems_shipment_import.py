@@ -147,17 +147,25 @@ def _build_recipient_label(*, customer_name: str = "", phone: str = "", address:
     return label
 
 
+def _isoformat_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        return iso()
+    return str(value)
+
+
 def _parse_cod_amount(value: Any) -> Optional[int]:
-    """Parse cột P TONG_TIEN_THU_HO — tổng tiền thu hộ (VND)."""
+    """Parse cột tiền thu hộ (VND). 0 ₫ là hợp lệ (đơn không thu hộ); ô trống → None."""
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, float):
         if value != value:  # NaN
             return None
-        amt = float(value)
-        if amt <= 0:
-            return None
-        return int(round(amt))
+        return int(round(value)) if value >= 0 else None
     text = _cell_str(value)
     if not text:
         return None
@@ -174,7 +182,7 @@ def _parse_cod_amount(value: Any) -> Optional[int]:
         amt = float(cleaned)
     except ValueError:
         return None
-    if amt <= 0:
+    if amt < 0:
         return None
     return int(round(amt))
 
@@ -667,11 +675,11 @@ def _record_to_dict(record: EmsShippingRecord) -> dict[str, Any]:
         "ems_error": record.ems_error,
         "cod_amount": int(record.cod_amount) if record.cod_amount is not None else None,
         "cod_paid_amount": int(record.cod_paid_amount) if record.cod_paid_amount is not None else None,
-        "cod_paid_date": record.cod_paid_date.isoformat() if record.cod_paid_date else None,
+        "cod_paid_date": _isoformat_value(record.cod_paid_date),
         "cod_settlement_status": record.cod_settlement_status,
         "cod_settlement_message": record.cod_settlement_message,
         "freight_amount": int(record.freight_amount) if record.freight_amount is not None else None,
-        "freight_settled_at": record.freight_settled_at.isoformat() if record.freight_settled_at else None,
+        "freight_settled_at": _isoformat_value(record.freight_settled_at),
         "freight_settlement_status": record.freight_settlement_status,
         "freight_settlement_message": record.freight_settlement_message,
         "freight_high_fee_warning": record.freight_high_fee_warning,
@@ -795,6 +803,22 @@ def _build_summary_from_db(db: Session) -> dict[str, Any]:
     }
 
 
+def _apply_search_filter(query, search: Optional[str]):
+    term = (search or "").strip()
+    if not term:
+        return query
+    like = f"%{term.upper()}%"
+    return query.filter(
+        or_(
+            func.upper(EmsShippingRecord.reference_code).like(like),
+            func.upper(EmsShippingRecord.order_code).like(like),
+            func.upper(EmsShippingRecord.ems_tracking_code).like(like),
+            func.upper(EmsShippingRecord.ems_reference_code).like(like),
+            func.upper(EmsShippingRecord.tracking_number_saved).like(like),
+        )
+    )
+
+
 def _apply_sync_status_filter(query, sync_status: Optional[str]):
     status = (sync_status or "").strip()
     if not status or status == "all":
@@ -815,12 +839,15 @@ def list_ems_shipping_records(
     skip: int = 0,
     limit: int = 50,
     sync_status: Optional[str] = None,
+    search: Optional[str] = None,
 ) -> dict[str, Any]:
     skip = max(0, int(skip or 0))
     limit = max(1, min(int(limit or 50), 200))
+    search_term = (search or "").strip() or None
 
     base_query = db.query(EmsShippingRecord)
     filtered_query = _apply_sync_status_filter(base_query, sync_status)
+    filtered_query = _apply_search_filter(filtered_query, search_term)
     total = int(base_query.count() or 0)
     filtered_total = int(filtered_query.count() or 0)
 
@@ -843,6 +870,7 @@ def list_ems_shipping_records(
             "limit": limit,
             "total": total,
             "filtered_total": filtered_total,
+            "search": search_term,
         },
         "rows": rows,
     }

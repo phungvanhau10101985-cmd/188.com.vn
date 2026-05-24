@@ -626,15 +626,17 @@ def admin_list_ems_shipping_records(
     skip: int = 0,
     limit: int = 50,
     sync_status: Optional[str] = None,
+    q: Optional[str] = None,
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("orders")),
 ):
-    """Danh sách bảng quản lý vận chuyển EMS đã lưu (phân trang)."""
+    """Danh sách bảng quản lý vận chuyển EMS đã lưu (phân trang + tra cứu)."""
     return ems_import_svc.list_ems_shipping_records(
         db,
         skip=skip,
         limit=limit,
         sync_status=sync_status,
+        search=q,
     )
 
 
@@ -806,6 +808,29 @@ def admin_shipping_operations_stats(
 ):
     """Thống kê vận hành: đang giao, COD đã/chưa trả, đơn hoàn."""
     return shipping_ops_svc.get_shipping_operations_stats(db)
+
+
+@router.get(
+    "/admin/shipping/operations-stats/records",
+    response_model=shipment_schemas.EmsShippingOperationsRecordsResponse,
+)
+def admin_shipping_operations_records(
+    bucket: str,
+    skip: int = 0,
+    limit: int = 25,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Danh sách vận đơn EMS theo nhóm thống kê vận hành."""
+    try:
+        return shipping_ops_svc.list_operations_bucket_records(
+            db,
+            bucket,
+            skip=skip,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/admin/{order_id}/approve-return-received", response_model=schemas.AdminOrderResponse)

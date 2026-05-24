@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   adminCodSettlementAPI,
   adminFreightSettlementAPI,
@@ -16,10 +16,13 @@ import {
   type EmsShippingImportRow,
   type EmsShippingOperationsStats,
   type EmsTrackingRefreshJob,
+  type OpsBucketKey,
 } from '@/lib/admin-api';
 
 const EMS_LIST_PAGE_SIZES = [25, 50, 100] as const;
 const EMS_LIST_DEFAULT_PAGE_SIZE = 50;
+const EMS_SEARCH_PREVIEW_LIMIT = 5;
+const OPS_LIST_PAGE_SIZE = 25;
 const EMS_TRACKING_JOB_STORAGE_KEY = 'admin_ems_tracking_job_id';
 
 function formatStaleSeconds(seconds?: number | null): string {
@@ -139,9 +142,185 @@ function formatVnd(amount: number | null | undefined): string {
   return `${Math.round(amount).toLocaleString('vi-VN')} ₫`;
 }
 
+function formatCodAmount(amount: number | null | undefined): string {
+  if (amount == null || !Number.isFinite(amount)) return '—';
+  if (amount === 0) return 'Không thu hộ (0 ₫)';
+  return formatVnd(amount);
+}
+
+function CollapsibleListPanel({
+  title,
+  summary,
+  expanded,
+  onToggle,
+  children,
+}: {
+  title: string;
+  summary: string;
+  expanded: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="pt-2 border-t border-gray-100">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="w-full flex items-start sm:items-center justify-between gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-gray-50 transition"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-flex h-5 w-5 shrink-0 items-center justify-center text-gray-500 transition-transform ${
+                expanded ? 'rotate-90' : ''
+              }`}
+              aria-hidden
+            >
+              ▶
+            </span>
+            <span className="text-base font-semibold text-gray-900">{title}</span>
+          </div>
+          {!expanded && summary ? (
+            <p className="text-sm text-gray-500 mt-1 ml-7 line-clamp-2">{summary}</p>
+          ) : null}
+        </div>
+        <span className="text-sm text-emerald-700 shrink-0 font-medium whitespace-nowrap">
+          {expanded ? 'Thu gọn' : 'Mở rộng'}
+        </span>
+      </button>
+      {expanded ? <div className="space-y-4 mt-2">{children}</div> : null}
+    </div>
+  );
+}
+
+function OpsStatCard({
+  label,
+  count,
+  color,
+  active,
+  onClick,
+  compact = false,
+}: {
+  label: string;
+  count: number;
+  color: string;
+  active: boolean;
+  onClick: () => void;
+  compact?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-xl border px-3 py-3 text-left transition hover:ring-2 hover:ring-emerald-100 w-full ${
+        active ? 'border-emerald-500 ring-2 ring-emerald-100 bg-white' : 'border-gray-200 bg-gray-50'
+      } ${compact ? 'py-2' : ''}`}
+    >
+      <div className="text-xs text-gray-500">{label}</div>
+      <div className={`${compact ? 'text-lg' : 'text-2xl'} font-semibold tabular-nums ${color}`}>
+        {Number(count).toLocaleString('vi-VN')}
+      </div>
+    </button>
+  );
+}
+
 function orderStatusLabel(status: string | null | undefined): string {
   if (!status) return '—';
   return ORDER_STATUS_TEXTS[status] || status;
+}
+
+function DetailField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-gray-500">{label}</dt>
+      <dd className="mt-0.5 text-sm text-gray-900 break-words">{children}</dd>
+    </div>
+  );
+}
+
+function EmsSearchResultCard({
+  row,
+  onViewStatus,
+}: {
+  row: EmsShippingImportRow;
+  onViewStatus: (row: EmsShippingImportRow) => void;
+}) {
+  return (
+    <article className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="font-semibold text-gray-900 font-mono">{row.reference_code || '—'}</div>
+          <div className="text-sm text-gray-600 mt-0.5">
+            {row.order_code ? (
+              row.order_id ? (
+                <Link
+                  href={`/admin/orders?q=${encodeURIComponent(row.order_code)}`}
+                  className="text-emerald-700 hover:underline font-medium"
+                >
+                  {row.order_code}
+                </Link>
+              ) : (
+                <span className="font-medium">{row.order_code}</span>
+              )
+            ) : (
+              <span className="text-gray-500">Chưa có mã đơn shop</span>
+            )}
+          </div>
+        </div>
+        <span
+          className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+            SYNC_BADGE[row.sync_status] || SYNC_BADGE.parse_error
+          }`}
+        >
+          {SYNC_LABELS[row.sync_status] || row.sync_status}
+        </span>
+      </div>
+
+      <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-3">
+        <DetailField label="Mã EMS">{row.ems_tracking_code || '—'}</DetailField>
+        <DetailField label="Mã vận đơn shop (đã lưu)">{row.tracking_number_saved || '—'}</DetailField>
+        <DetailField label="Thu hộ (COD)">{formatCodAmount(row.cod_amount)}</DetailField>
+        <DetailField label="COD đã trả">
+          {formatVnd(row.cod_paid_amount)}
+          {row.cod_paid_date ? ` · ${row.cod_paid_date}` : ''}
+        </DetailField>
+        <DetailField label="Cước EMS">{formatVnd(row.freight_amount)}</DetailField>
+        <DetailField label="Trạng thái EMS">
+          {row.ems_status || row.ems_error || '—'}
+          {row.ems_phase ? ` (${row.ems_phase})` : ''}
+        </DetailField>
+        <DetailField label="Trạng thái đơn shop">
+          {row.order_status ? orderStatusLabel(row.order_status) : '—'}
+        </DetailField>
+        <DetailField label="Người nhận">
+          <span className="line-clamp-2">{row.recipient_label || '—'}</span>
+        </DetailField>
+        {row.current_step_key ? (
+          <DetailField label="Timeline shop">
+            {TIMELINE_STEP_LABELS[row.current_step_key] || row.current_step_key}
+          </DetailField>
+        ) : null}
+      </dl>
+
+      {row.sync_message ? (
+        <p className="text-xs text-gray-600 bg-white/70 rounded-lg px-3 py-2 border border-emerald-100">
+          {row.sync_message}
+        </p>
+      ) : null}
+
+      {row.order_code ? (
+        <button
+          type="button"
+          onClick={() => onViewStatus(row)}
+          className="text-sm font-medium text-emerald-700 hover:text-emerald-900 hover:underline"
+        >
+          Xem chi tiết trạng thái đơn shop →
+        </button>
+      ) : null}
+    </article>
+  );
 }
 
 export default function AdminShippingPage() {
@@ -167,12 +346,24 @@ export default function AdminShippingPage() {
   const [filter, setFilter] = useState<FilterKey>('all');
   const [listPage, setListPage] = useState(1);
   const [listPageSize, setListPageSize] = useState<number>(EMS_LIST_DEFAULT_PAGE_SIZE);
+  const [searchInput, setSearchInput] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [codFilter, setCodFilter] = useState<CodFilterKey>('all');
   const [freightFilter, setFreightFilter] = useState<FreightFilterKey>('all');
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
   const [selectedFreightBatchId, setSelectedFreightBatchId] = useState<number | null>(null);
+  const [codListExpanded, setCodListExpanded] = useState(false);
+  const [freightListExpanded, setFreightListExpanded] = useState(false);
+  const [emsTableExpanded, setEmsTableExpanded] = useState(true);
   const [opsStats, setOpsStats] = useState<EmsShippingOperationsStats | null>(null);
   const [opsStatsLoading, setOpsStatsLoading] = useState(true);
+  const [activeOpsBucket, setActiveOpsBucket] = useState<OpsBucketKey | null>(null);
+  const [opsBucketLabel, setOpsBucketLabel] = useState('');
+  const [opsBucketRows, setOpsBucketRows] = useState<EmsShippingImportRow[]>([]);
+  const [opsBucketTotal, setOpsBucketTotal] = useState(0);
+  const [opsBucketPage, setOpsBucketPage] = useState(1);
+  const [opsBucketLoading, setOpsBucketLoading] = useState(false);
+  const [opsBucketError, setOpsBucketError] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [deleteConfirmKeys, setDeleteConfirmKeys] = useState<string[] | null>(null);
   const [orderStatusModal, setOrderStatusModal] = useState<OrderStatusModalState | null>(null);
@@ -190,6 +381,7 @@ export default function AdminShippingPage() {
         skip,
         limit: listPageSize,
         sync_status: filter === 'all' ? undefined : filter,
+        q: appliedSearch || undefined,
       });
       const filteredTotal = data.pagination?.filtered_total ?? data.rows.length;
       const maxPage = Math.max(1, Math.ceil(filteredTotal / listPageSize));
@@ -203,7 +395,7 @@ export default function AdminShippingPage() {
     } finally {
       setListLoading(false);
     }
-  }, [filter, listPage, listPageSize]);
+  }, [appliedSearch, filter, listPage, listPageSize]);
 
   const loadCodSettlements = useCallback(async () => {
     setCodListLoading(true);
@@ -250,6 +442,47 @@ export default function AdminShippingPage() {
       setOpsStatsLoading(false);
     }
   }, []);
+
+  const loadOpsBucketRecords = useCallback(async (bucket: OpsBucketKey, page: number) => {
+    setOpsBucketLoading(true);
+    setOpsBucketError(null);
+    try {
+      const skip = (page - 1) * OPS_LIST_PAGE_SIZE;
+      const data = await adminShippingAPI.listOperationsRecords({
+        bucket,
+        skip,
+        limit: OPS_LIST_PAGE_SIZE,
+      });
+      setActiveOpsBucket(bucket);
+      setOpsBucketLabel(data.bucket_label);
+      setOpsBucketRows(data.rows);
+      setOpsBucketTotal(data.pagination.filtered_total ?? data.rows.length);
+      setOpsBucketPage(page);
+    } catch (err) {
+      setOpsBucketError(err instanceof Error ? err.message : 'Không tải được danh sách');
+      setOpsBucketRows([]);
+    } finally {
+      setOpsBucketLoading(false);
+    }
+  }, []);
+
+  const closeOpsBucketModal = useCallback(() => {
+    setActiveOpsBucket(null);
+    setOpsBucketRows([]);
+    setOpsBucketError(null);
+    setOpsBucketPage(1);
+  }, []);
+
+  const openOpsBucket = useCallback(
+    (bucket: OpsBucketKey, label: string) => {
+      setOpsBucketLabel(label);
+      setActiveOpsBucket(bucket);
+      void loadOpsBucketRecords(bucket, 1);
+    },
+    [loadOpsBucketRecords],
+  );
+
+  const opsBucketTotalPages = Math.max(1, Math.ceil(opsBucketTotal / OPS_LIST_PAGE_SIZE));
 
   const stopTrackingPoll = useCallback(() => {
     if (trackingPollRef.current) {
@@ -340,6 +573,24 @@ export default function AdminShippingPage() {
     setSelectedKeys(new Set());
   }, []);
 
+  const submitSearch = useCallback(
+    (e?: FormEvent) => {
+      e?.preventDefault();
+      const next = searchInput.trim();
+      setAppliedSearch(next);
+      setListPage(1);
+      setSelectedKeys(new Set());
+    },
+    [searchInput],
+  );
+
+  const clearSearch = useCallback(() => {
+    setSearchInput('');
+    setAppliedSearch('');
+    setListPage(1);
+    setSelectedKeys(new Set());
+  }, []);
+
   const pageRows = result?.rows ?? [];
 
   const listPagination = result?.pagination;
@@ -414,6 +665,17 @@ export default function AdminShippingPage() {
     }
     return freightResult?.summary ?? null;
   }, [activeFreightBatch, freightResult]);
+
+  const codListCollapseSummary = useMemo(() => {
+    if (!codSummary) return '';
+    return `${codSummary.total_rows.toLocaleString('vi-VN')} mã · ${codSummary.matched.toLocaleString('vi-VN')} khớp · ${codSummary.amount_mismatch.toLocaleString('vi-VN')} lệch · ${formatVnd(codSummary.total_paid_amount)} đã trả`;
+  }, [codSummary]);
+
+  const freightListCollapseSummary = useMemo(() => {
+    if (!freightSummary) return '';
+    return `${freightSummary.total_rows.toLocaleString('vi-VN')} mã · ${freightSummary.settled.toLocaleString('vi-VN')} đối soát · ${formatVnd(freightSummary.total_freight_amount)} tổng cước`;
+  }, [freightSummary]);
+
   const runImport = useCallback(async () => {
     if (!file) {
       setError('Chọn file Excel trước.');
@@ -426,8 +688,11 @@ export default function AdminShippingPage() {
       const data = await adminShippingAPI.importEmsExcel(file);
       setListPage(1);
       setFilter('all');
+      setSearchInput('');
+      setAppliedSearch('');
       setSelectedKeys(new Set());
       setResult(data);
+      setEmsTableExpanded(true);
       if (data.tracking_refresh_job_id) {
         startTrackingPoll(data.tracking_refresh_job_id);
       }
@@ -450,6 +715,7 @@ export default function AdminShippingPage() {
       setCodResult(data);
       setSelectedBatchId(data.import_batch?.id ?? data.batches[0]?.id ?? null);
       setCodFilter('all');
+      setCodListExpanded(true);
       await loadRecords();
       await loadOpsStats();
     } catch (err) {
@@ -471,6 +737,7 @@ export default function AdminShippingPage() {
       setFreightResult(data);
       setSelectedFreightBatchId(data.import_batch?.id ?? data.batches[0]?.id ?? null);
       setFreightFilter('all');
+      setFreightListExpanded(true);
       await loadRecords();
       await loadOpsStats();
     } catch (err) {
@@ -592,6 +859,80 @@ export default function AdminShippingPage() {
         </p>
       </div>
 
+      <section className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 shadow-sm">
+        <h2 className="text-base font-semibold text-gray-900">Tra cứu vận đơn</h2>
+        <p className="mt-1 text-sm text-gray-500">
+          Tìm theo <strong>mã đơn shop</strong> (DH/DC), <strong>mã tham chiếu</strong> (cột A file EMS),{' '}
+          <strong>mã EMS</strong> hoặc mã vận đơn đã lưu trên đơn shop.
+        </p>
+        <form onSubmit={submitSearch} className="mt-3 flex flex-col sm:flex-row gap-2">
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="VD: DH033, H19052609, EH044086535VN, DC37667…"
+            className="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+            aria-label="Tra cứu mã đơn, mã tham chiếu hoặc mã EMS"
+          />
+          <div className="flex gap-2 shrink-0">
+            <button
+              type="submit"
+              disabled={listLoading}
+              className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              Tra cứu
+            </button>
+            {appliedSearch ? (
+              <button
+                type="button"
+                onClick={clearSearch}
+                disabled={listLoading}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Xóa lọc
+              </button>
+            ) : null}
+          </div>
+        </form>
+        {appliedSearch ? (
+          <div className="mt-4 border-t border-gray-100 pt-4">
+            {listLoading ? (
+              <p className="text-sm text-gray-500 py-2">Đang tra cứu «{appliedSearch}»…</p>
+            ) : pageRows.length === 0 ? (
+              <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-sm text-gray-600">
+                Không tìm thấy dòng nào khớp <strong className="font-mono text-gray-900">{appliedSearch}</strong>.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-gray-700">
+                  <strong>{filteredTotal}</strong> kết quả cho{' '}
+                  <strong className="font-mono text-emerald-800">{appliedSearch}</strong>
+                  {filteredTotal > EMS_SEARCH_PREVIEW_LIMIT
+                    ? ` · hiển thị ${EMS_SEARCH_PREVIEW_LIMIT} dòng đầu`
+                    : null}
+                </p>
+                {pageRows.slice(0, EMS_SEARCH_PREVIEW_LIMIT).map((row) => (
+                  <EmsSearchResultCard
+                    key={rowKey(row)}
+                    row={row}
+                    onViewStatus={(r) => void openOrderStatusModal(r)}
+                  />
+                ))}
+                {filteredTotal > EMS_SEARCH_PREVIEW_LIMIT ? (
+                  <p className="text-sm text-gray-500">
+                    Còn {filteredTotal - EMS_SEARCH_PREVIEW_LIMIT} dòng — xem trong{' '}
+                    <a href="#ems-shipping-table" className="text-emerald-700 hover:underline font-medium">
+                      bảng vận chuyển bên dưới
+                    </a>
+                    .
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </div>
+        ) : null}
+      </section>
+
       <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-gray-900">Tổng quan vận hành</h2>
@@ -607,33 +948,143 @@ export default function AdminShippingPage() {
         {opsStatsLoading && !opsStats ? (
           <p className="text-sm text-gray-500 py-4 text-center">Đang tải thống kê…</p>
         ) : opsStats ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
-            {[
-              ['Đang giao', opsStats.shipping_orders, 'text-blue-800'],
-              ['Giao thành công', opsStats.delivered_success_orders, 'text-emerald-800'],
-              ['Đã hoàn hàng', opsStats.returned_orders, 'text-orange-800'],
-              ['COD chưa trả (đã giao)', opsStats.cod_success_unpaid_count, 'text-amber-800'],
-              ['COD đã trả', opsStats.cod_success_paid_count, 'text-emerald-800'],
-              ['COD đang giao', opsStats.shipping_cod_unpaid_count, 'text-indigo-800'],
-              ['Chưa đối soát cước', opsStats.freight_unsettled_count, 'text-violet-800'],
-            ].map(([label, count, color]) => (
-              <div key={String(label)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3">
-                <div className="text-xs text-gray-500">{label}</div>
-                <div className={`text-2xl font-semibold tabular-nums ${color}`}>{count}</div>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Theo <strong>{opsStats.total_ems_records.toLocaleString('vi-VN')}</strong> dòng vận đơn EMS ·{' '}
+              <strong>{opsStats.total_with_cod.toLocaleString('vi-VN')}</strong> dòng có thu hộ COD
+            </p>
+
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                Trạng thái vận chuyển (cộng = tổng dòng)
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                {(
+                  [
+                    ['total', 'Tổng vận đơn', opsStats.total_ems_records, 'text-gray-900'],
+                    ['in_transit', 'Đang giao', opsStats.in_transit_count, 'text-blue-800'],
+                    ['delivered', 'Giao thành công', opsStats.delivered_count, 'text-emerald-800'],
+                    ['returned', 'Hoàn hàng', opsStats.returned_count, 'text-orange-800'],
+                    ['pending', 'Chưa rõ EMS', opsStats.pending_status_count, 'text-slate-600'],
+                  ] as const
+                ).map(([bucket, label, count, color]) => (
+                  <OpsStatCard
+                    key={bucket}
+                    label={label}
+                    count={count}
+                    color={color}
+                    active={activeOpsBucket === bucket}
+                    onClick={() => openOpsBucket(bucket, label)}
+                  />
+                ))}
               </div>
-            ))}
-          </div>
-        ) : null}
-        {opsStats ? (
-          <div className="flex flex-wrap gap-4 text-sm text-gray-600 pt-1 border-t border-gray-100">
-            <span>
-              Tổng thu hộ chưa trả:{' '}
-              <strong className="text-amber-800">{formatVnd(opsStats.cod_success_unpaid_total)}</strong>
-            </span>
-            <span>
-              Tổng COD đã trả:{' '}
-              <strong className="text-emerald-800">{formatVnd(opsStats.cod_success_paid_total)}</strong>
-            </span>
+              <p className="mt-1.5 text-xs text-gray-500 tabular-nums">
+                {opsStats.in_transit_count + opsStats.delivered_count + opsStats.returned_count + opsStats.pending_status_count}
+                {' = '}
+                {opsStats.in_transit_count} + {opsStats.delivered_count} + {opsStats.returned_count} +{' '}
+                {opsStats.pending_status_count}
+                {opsStats.in_transit_count +
+                  opsStats.delivered_count +
+                  opsStats.returned_count +
+                  opsStats.pending_status_count ===
+                opsStats.total_ems_records
+                  ? ' ✓'
+                  : ' (lệch — F5)'}
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                Thu hộ COD (cộng = dòng có COD)
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                {(
+                  [
+                    ['has_cod', 'Có COD', opsStats.total_with_cod, 'text-gray-900'],
+                    ['cod_in_transit_unpaid', 'Đang giao · chưa trả', opsStats.cod_in_transit_unpaid_count, 'text-indigo-800'],
+                    ['cod_delivered_unpaid', 'Giao OK · chưa trả', opsStats.cod_delivered_unpaid_count, 'text-amber-800'],
+                    ['cod_paid', 'Đã trả COD', opsStats.cod_paid_count, 'text-emerald-800'],
+                    ['cod_returned_unpaid', 'Hoàn · chưa trả', opsStats.cod_returned_unpaid_count, 'text-orange-800'],
+                    ...(opsStats.cod_pending_unpaid_count > 0
+                      ? ([
+                          [
+                            'cod_pending_unpaid',
+                            'COD chưa rõ EMS',
+                            opsStats.cod_pending_unpaid_count,
+                            'text-slate-600',
+                          ],
+                        ] as const)
+                      : []),
+                  ] as const
+                ).map(([bucket, label, count, color]) => (
+                  <OpsStatCard
+                    key={bucket}
+                    label={label}
+                    count={count}
+                    color={color}
+                    active={activeOpsBucket === bucket}
+                    onClick={() => openOpsBucket(bucket, label)}
+                  />
+                ))}
+              </div>
+              <p className="mt-1.5 text-xs text-gray-500 tabular-nums">
+                {opsStats.cod_in_transit_unpaid_count +
+                  opsStats.cod_delivered_unpaid_count +
+                  opsStats.cod_paid_count +
+                  opsStats.cod_returned_unpaid_count +
+                  opsStats.cod_pending_unpaid_count}{' '}
+                = {opsStats.cod_in_transit_unpaid_count} + {opsStats.cod_delivered_unpaid_count} +{' '}
+                {opsStats.cod_paid_count} + {opsStats.cod_returned_unpaid_count} +{' '}
+                {opsStats.cod_pending_unpaid_count}
+                {opsStats.cod_in_transit_unpaid_count +
+                  opsStats.cod_delivered_unpaid_count +
+                  opsStats.cod_paid_count +
+                  opsStats.cod_returned_unpaid_count +
+                  opsStats.cod_pending_unpaid_count ===
+                opsStats.total_with_cod
+                  ? ' ✓'
+                  : ' (lệch — F5)'}
+                {opsStats.cod_pending_unpaid_count > 0
+                  ? ` · ${opsStats.cod_pending_unpaid_count} dòng COD chưa rõ trạng thái EMS`
+                  : ''}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1 border-t border-gray-100">
+              {(
+                [
+                  ['shop_return_received', 'Hoàn · shop đã nhận', opsStats.shop_return_received_count, 'text-orange-900'],
+                  ['shop_linked', 'Ghép đơn shop', opsStats.shop_linked_count, 'text-emerald-800'],
+                  ['freight_unsettled', 'Chưa đối soát cước', opsStats.freight_unsettled_count, 'text-violet-800'],
+                  ['shop_shipping', 'Đơn shop đang giao', opsStats.shop_shipping_orders, 'text-blue-700'],
+                ] as const
+              ).map(([bucket, label, count, color]) => (
+                <OpsStatCard
+                  key={bucket}
+                  label={label}
+                  count={count}
+                  color={color}
+                  compact
+                  active={activeOpsBucket === bucket}
+                  onClick={() => openOpsBucket(bucket, label)}
+                />
+              ))}
+            </div>
+
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-600 pt-1 border-t border-gray-100">
+              <span>
+                COD giao OK chưa trả:{' '}
+                <strong className="text-amber-800">{formatVnd(opsStats.cod_delivered_unpaid_total)}</strong>
+              </span>
+              <span>
+                COD đang giao chưa trả:{' '}
+                <strong className="text-indigo-800">{formatVnd(opsStats.cod_in_transit_unpaid_total)}</strong>
+              </span>
+              <span>
+                COD đã trả:{' '}
+                <strong className="text-emerald-800">{formatVnd(opsStats.cod_paid_total)}</strong>
+              </span>
+            </div>
           </div>
         ) : null}
       </section>
@@ -696,6 +1147,173 @@ export default function AdminShippingPage() {
           </button>
         </div>
         {codFile ? <p className="text-xs text-gray-500">Đã chọn: {codFile.name}</p> : null}
+
+        {codError ? (
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+            {codError}{' '}
+            <button type="button" onClick={() => void loadCodSettlements()} className="underline font-medium">
+              Thử lại
+            </button>
+          </div>
+        ) : null}
+
+        {codResult?.import_batch && !codLoading ? (
+          <div className="bg-blue-50 border border-blue-200 text-blue-900 rounded-lg px-4 py-3 text-sm">
+            Đối soát ngày{' '}
+            <strong>{codResult.import_batch.payment_date || '—'}</strong>:{' '}
+            <strong>{codResult.import_batch.matched_count}</strong> khớp ·{' '}
+            <strong>{codResult.import_batch.amount_mismatch_count}</strong> lệch tiền ·{' '}
+            <strong>{codResult.import_batch.record_not_found_count}</strong> không có trong DB · tổng trả{' '}
+            <strong>{formatVnd(codResult.import_batch.total_paid_amount)}</strong>
+            {codResult.import_batch.total_amount_difference !== 0 ? (
+              <>
+                {' '}
+                · chênh lệch tổng{' '}
+                <strong>{formatVnd(Math.abs(codResult.import_batch.total_amount_difference))}</strong>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+
+        {codResult?.warnings?.length ? (
+          <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-4 py-3 text-sm space-y-1">
+            {codResult.warnings.map((w) => (
+              <p key={w}>{w}</p>
+            ))}
+          </div>
+        ) : null}
+
+        {codListLoading ? (
+          <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-8 text-center text-sm text-gray-500">
+            Đang tải lịch sử đối soát COD…
+          </div>
+        ) : codResult?.batches.length ? (
+          <CollapsibleListPanel
+            title="Danh sách đối soát COD"
+            summary={codListCollapseSummary}
+            expanded={codListExpanded}
+            onToggle={() => setCodListExpanded((v) => !v)}
+          >
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {[
+                ['Tổng mã', codSummary?.total_rows ?? 0, 'all'],
+                ['Khớp tiền', codSummary?.matched ?? 0, 'matched'],
+                ['Lệch tiền', codSummary?.amount_mismatch ?? 0, 'amount_mismatch'],
+                ['Không có DB', codSummary?.record_not_found ?? 0, 'record_not_found'],
+                ['Lỗi parse', codSummary?.parse_error ?? 0, 'parse_error'],
+              ].map(([label, count, key]) => (
+                <button
+                  key={String(key)}
+                  type="button"
+                  onClick={() => setCodFilter(key as CodFilterKey)}
+                  className={`rounded-xl border px-3 py-3 text-left transition ${
+                    codFilter === key ? 'border-blue-500 ring-2 ring-blue-100' : 'border-gray-200 bg-white'
+                  }`}
+                >
+                  <div className="text-xs text-gray-500">{label}</div>
+                  <div className="text-xl font-semibold text-gray-900">{count}</div>
+                </button>
+              ))}
+              <div className="rounded-xl border border-gray-200 bg-white px-3 py-3">
+                <div className="text-xs text-gray-500">Tổng đã trả</div>
+                <div className="text-lg font-semibold text-blue-800">{formatVnd(codSummary?.total_paid_amount ?? 0)}</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  DB thu hộ: {formatVnd(codSummary?.total_db_cod_amount ?? 0)}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-semibold text-gray-900">Bảng đối soát COD</h3>
+                  <span className="text-sm text-gray-500">{filteredCodRows.length} dòng</span>
+                </div>
+                {codResult.batches.length > 1 ? (
+                  <label className="text-sm text-gray-600 flex items-center gap-2">
+                    Ngày trả tiền
+                    <select
+                      value={selectedBatchId ?? ''}
+                      onChange={(e) => setSelectedBatchId(Number(e.target.value))}
+                      className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                    >
+                      {codResult.batches.map((batch) => (
+                        <option key={batch.id} value={batch.id}>
+                          {batch.payment_date || batch.created_at?.slice(0, 10) || `#${batch.id}`}
+                          {batch.source_filename ? ` · ${batch.source_filename}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : activeCodBatch?.payment_date ? (
+                  <span className="text-sm text-gray-600">
+                    Ngày trả: <strong>{activeCodBatch.payment_date}</strong>
+                  </span>
+                ) : null}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium">#</th>
+                      <th className="px-3 py-2 text-left font-medium">Mã EMS</th>
+                      <th className="px-3 py-2 text-left font-medium">Mã vận đơn</th>
+                      <th className="px-3 py-2 text-right font-medium">Đã trả (file)</th>
+                      <th className="px-3 py-2 text-right font-medium">Thu hộ (DB)</th>
+                      <th className="px-3 py-2 text-right font-medium">Chênh</th>
+                      <th className="px-3 py-2 text-left font-medium">Kết quả</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredCodRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                          Không có dòng trong bộ lọc này.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredCodRows.map((row) => (
+                        <tr key={row.id ?? `${row.row_number}:${row.ems_tracking_code}`} className="align-top">
+                          <td className="px-3 py-3 text-gray-500">{row.row_number}</td>
+                          <td className="px-3 py-3 font-medium text-gray-900">{row.ems_tracking_code || '—'}</td>
+                          <td className="px-3 py-3 text-gray-700">{row.ems_reference_code || '—'}</td>
+                          <td className="px-3 py-3 text-right tabular-nums">{formatVnd(row.paid_amount)}</td>
+                          <td className="px-3 py-3 text-right tabular-nums">{formatCodAmount(row.db_cod_amount)}</td>
+                          <td className="px-3 py-3 text-right tabular-nums">
+                            {row.amount_difference != null && row.amount_difference !== 0 ? (
+                              <span className="text-amber-800 font-medium">
+                                {row.amount_difference > 0 ? '+' : ''}
+                                {row.amount_difference.toLocaleString('vi-VN')} ₫
+                              </span>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td className="px-3 py-3">
+                            <span
+                              className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${
+                                COD_RECONCILE_BADGE[row.reconcile_status] || COD_RECONCILE_BADGE.parse_error
+                              }`}
+                            >
+                              {COD_RECONCILE_LABELS[row.reconcile_status] || row.reconcile_status}
+                            </span>
+                            {row.reconcile_message ? (
+                              <p className="text-xs text-gray-600 mt-2 max-w-sm">{row.reconcile_message}</p>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </CollapsibleListPanel>
+        ) : (
+          <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-8 text-center text-sm text-gray-500">
+            Chưa có lần đối soát COD nào. Upload file <strong>Doi soat cod</strong> để bắt đầu.
+          </div>
+        )}
       </section>
 
       <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
@@ -726,328 +1344,171 @@ export default function AdminShippingPage() {
           </button>
         </div>
         {freightFile ? <p className="text-xs text-gray-500">Đã chọn: {freightFile.name}</p> : null}
+
+        {freightError ? (
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+            {freightError}{' '}
+            <button type="button" onClick={() => void loadFreightSettlements()} className="underline font-medium">
+              Thử lại
+            </button>
+          </div>
+        ) : null}
+
+        {freightResult?.import_batch && !freightLoading ? (
+          <div className="bg-violet-50 border border-violet-200 text-violet-900 rounded-lg px-4 py-3 text-sm">
+            Đối soát cước: <strong>{freightResult.import_batch.settled_count}</strong> thành công ·{' '}
+            <strong>{freightResult.import_batch.already_settled_count}</strong> đã đối soát trước ·{' '}
+            <strong>{freightResult.import_batch.record_not_found_count}</strong> không có trong DB · tổng cước{' '}
+            <strong>{formatVnd(freightResult.import_batch.total_freight_amount)}</strong>
+            {freightResult.import_batch.high_fee_warning_count > 0 ? (
+              <>
+                {' '}
+                · <strong className="text-amber-800">{freightResult.import_batch.high_fee_warning_count}</strong> mã cước
+                &gt; 70.000 ₫
+              </>
+            ) : null}
+          </div>
+        ) : null}
+
+        {freightResult?.warnings?.length ? (
+          <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-4 py-3 text-sm space-y-1">
+            {freightResult.warnings.map((w) => (
+              <p key={w}>{w}</p>
+            ))}
+          </div>
+        ) : null}
+
+        {freightListLoading ? (
+          <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-8 text-center text-sm text-gray-500">
+            Đang tải lịch sử đối soát cước…
+          </div>
+        ) : freightResult?.batches.length ? (
+          <CollapsibleListPanel
+            title="Danh sách đối soát cước"
+            summary={freightListCollapseSummary}
+            expanded={freightListExpanded}
+            onToggle={() => setFreightListExpanded((v) => !v)}
+          >
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+              {[
+                ['Tổng mã', freightSummary?.total_rows ?? 0, 'all'],
+                ['Đã đối soát', freightSummary?.settled ?? 0, 'settled'],
+                ['Đã DS trước', freightSummary?.already_settled ?? 0, 'already_settled'],
+                ['Không có DB', freightSummary?.record_not_found ?? 0, 'record_not_found'],
+                ['Lỗi parse', freightSummary?.parse_error ?? 0, 'parse_error'],
+              ].map(([label, count, key]) => (
+                <button
+                  key={String(key)}
+                  type="button"
+                  onClick={() => setFreightFilter(key as FreightFilterKey)}
+                  className={`rounded-xl border px-3 py-3 text-left transition ${
+                    freightFilter === key ? 'border-violet-500 ring-2 ring-violet-100' : 'border-gray-200 bg-white'
+                  }`}
+                >
+                  <div className="text-xs text-gray-500">{label}</div>
+                  <div className="text-xl font-semibold text-gray-900">{count}</div>
+                </button>
+              ))}
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
+                <div className="text-xs text-amber-800">Cảnh báo &gt; 70k</div>
+                <div className="text-xl font-semibold text-amber-900">
+                  {freightSummary?.high_fee_warning_count ?? 0}
+                </div>
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-white px-3 py-3">
+                <div className="text-xs text-gray-500">Tổng cước (OK)</div>
+                <div className="text-lg font-semibold text-violet-800">
+                  {formatVnd(freightSummary?.total_freight_amount ?? 0)}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-semibold text-gray-900">Bảng đối soát cước</h3>
+                  <span className="text-sm text-gray-500">{filteredFreightRows.length} dòng</span>
+                </div>
+                {freightResult.batches.length > 1 ? (
+                  <label className="text-sm text-gray-600 flex items-center gap-2">
+                    Lần import
+                    <select
+                      value={selectedFreightBatchId ?? ''}
+                      onChange={(e) => setSelectedFreightBatchId(Number(e.target.value))}
+                      className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                    >
+                      {freightResult.batches.map((batch) => (
+                        <option key={batch.id} value={batch.id}>
+                          {batch.created_at?.slice(0, 16).replace('T', ' ') || `#${batch.id}`}
+                          {batch.source_filename ? ` · ${batch.source_filename}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium">#</th>
+                      <th className="px-3 py-2 text-left font-medium">Mã EMS</th>
+                      <th className="px-3 py-2 text-right font-medium">Cước phí</th>
+                      <th className="px-3 py-2 text-left font-medium">Cảnh báo</th>
+                      <th className="px-3 py-2 text-left font-medium">Kết quả</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredFreightRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                          Không có dòng trong bộ lọc này.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredFreightRows.map((row) => (
+                        <tr
+                          key={row.id ?? `${row.row_number}:${row.ems_tracking_code}`}
+                          className={`align-top ${row.high_fee_warning === 'yes' ? 'bg-amber-50/60' : ''}`}
+                        >
+                          <td className="px-3 py-3 text-gray-500">{row.row_number}</td>
+                          <td className="px-3 py-3 font-medium text-gray-900">{row.ems_tracking_code || '—'}</td>
+                          <td className="px-3 py-3 text-right tabular-nums">{formatVnd(row.freight_amount)}</td>
+                          <td className="px-3 py-3">
+                            {row.high_fee_warning === 'yes' ? (
+                              <span className="inline-flex rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                                Cước &gt; 70.000 ₫ — xem lại
+                              </span>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td className="px-3 py-3">
+                            <span
+                              className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${
+                                FREIGHT_RECONCILE_BADGE[row.reconcile_status] || FREIGHT_RECONCILE_BADGE.parse_error
+                              }`}
+                            >
+                              {FREIGHT_RECONCILE_LABELS[row.reconcile_status] || row.reconcile_status}
+                            </span>
+                            {row.reconcile_message ? (
+                              <p className="text-xs text-gray-600 mt-2 max-w-sm">{row.reconcile_message}</p>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </CollapsibleListPanel>
+        ) : (
+          <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-8 text-center text-sm text-gray-500">
+            Chưa có lần đối soát cước nào. Upload file <strong>Doi soat cuoc</strong> để bắt đầu.
+          </div>
+        )}
       </section>
-
-      {freightError ? (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
-          {freightError}{' '}
-          <button type="button" onClick={() => void loadFreightSettlements()} className="underline font-medium">
-            Thử lại
-          </button>
-        </div>
-      ) : null}
-
-      {codError ? (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
-          {codError}{' '}
-          <button type="button" onClick={() => void loadCodSettlements()} className="underline font-medium">
-            Thử lại
-          </button>
-        </div>
-      ) : null}
-
-      {codResult?.import_batch && !codLoading ? (
-        <div className="bg-blue-50 border border-blue-200 text-blue-900 rounded-lg px-4 py-3 text-sm">
-          Đối soát ngày{' '}
-          <strong>{codResult.import_batch.payment_date || '—'}</strong>:{' '}
-          <strong>{codResult.import_batch.matched_count}</strong> khớp ·{' '}
-          <strong>{codResult.import_batch.amount_mismatch_count}</strong> lệch tiền ·{' '}
-          <strong>{codResult.import_batch.record_not_found_count}</strong> không có trong DB · tổng trả{' '}
-          <strong>{formatVnd(codResult.import_batch.total_paid_amount)}</strong>
-          {codResult.import_batch.total_amount_difference !== 0 ? (
-            <>
-              {' '}
-              · chênh lệch tổng{' '}
-              <strong>{formatVnd(Math.abs(codResult.import_batch.total_amount_difference))}</strong>
-            </>
-          ) : null}
-        </div>
-      ) : null}
-
-      {codResult?.warnings?.length ? (
-        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-4 py-3 text-sm space-y-1">
-          {codResult.warnings.map((w) => (
-            <p key={w}>{w}</p>
-          ))}
-        </div>
-      ) : null}
-
-      {codListLoading ? (
-        <section className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-8 text-center text-sm text-gray-500">
-          Đang tải lịch sử đối soát COD…
-        </section>
-      ) : codResult?.batches.length ? (
-        <>
-          <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {[
-              ['Tổng mã', codSummary?.total_rows ?? 0, 'all'],
-              ['Khớp tiền', codSummary?.matched ?? 0, 'matched'],
-              ['Lệch tiền', codSummary?.amount_mismatch ?? 0, 'amount_mismatch'],
-              ['Không có DB', codSummary?.record_not_found ?? 0, 'record_not_found'],
-              ['Lỗi parse', codSummary?.parse_error ?? 0, 'parse_error'],
-            ].map(([label, count, key]) => (
-              <button
-                key={String(key)}
-                type="button"
-                onClick={() => setCodFilter(key as CodFilterKey)}
-                className={`rounded-xl border px-3 py-3 text-left transition ${
-                  codFilter === key ? 'border-blue-500 ring-2 ring-blue-100' : 'border-gray-200 bg-white'
-                }`}
-              >
-                <div className="text-xs text-gray-500">{label}</div>
-                <div className="text-xl font-semibold text-gray-900">{count}</div>
-              </button>
-            ))}
-            <div className="rounded-xl border border-gray-200 bg-white px-3 py-3">
-              <div className="text-xs text-gray-500">Tổng đã trả</div>
-              <div className="text-lg font-semibold text-blue-800">{formatVnd(codSummary?.total_paid_amount ?? 0)}</div>
-              <div className="text-xs text-gray-500 mt-1">
-                DB thu hộ: {formatVnd(codSummary?.total_db_cod_amount ?? 0)}
-              </div>
-            </div>
-          </section>
-
-          <section className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-            <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">Bảng đối soát COD</h2>
-                <span className="text-sm text-gray-500">{filteredCodRows.length} dòng</span>
-              </div>
-              {codResult.batches.length > 1 ? (
-                <label className="text-sm text-gray-600 flex items-center gap-2">
-                  Ngày trả tiền
-                  <select
-                    value={selectedBatchId ?? ''}
-                    onChange={(e) => setSelectedBatchId(Number(e.target.value))}
-                    className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                  >
-                    {codResult.batches.map((batch) => (
-                      <option key={batch.id} value={batch.id}>
-                        {batch.payment_date || batch.created_at?.slice(0, 10) || `#${batch.id}`}
-                        {batch.source_filename ? ` · ${batch.source_filename}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : activeCodBatch?.payment_date ? (
-                <span className="text-sm text-gray-600">
-                  Ngày trả: <strong>{activeCodBatch.payment_date}</strong>
-                </span>
-              ) : null}
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50 text-gray-600">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium">#</th>
-                    <th className="px-3 py-2 text-left font-medium">Mã EMS</th>
-                    <th className="px-3 py-2 text-left font-medium">Mã vận đơn</th>
-                    <th className="px-3 py-2 text-right font-medium">Đã trả (file)</th>
-                    <th className="px-3 py-2 text-right font-medium">Thu hộ (DB)</th>
-                    <th className="px-3 py-2 text-right font-medium">Chênh</th>
-                    <th className="px-3 py-2 text-left font-medium">Kết quả</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {filteredCodRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                        Không có dòng trong bộ lọc này.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredCodRows.map((row) => (
-                      <tr key={row.id ?? `${row.row_number}:${row.ems_tracking_code}`} className="align-top">
-                        <td className="px-3 py-3 text-gray-500">{row.row_number}</td>
-                        <td className="px-3 py-3 font-medium text-gray-900">{row.ems_tracking_code || '—'}</td>
-                        <td className="px-3 py-3 text-gray-700">{row.ems_reference_code || '—'}</td>
-                        <td className="px-3 py-3 text-right tabular-nums">{formatVnd(row.paid_amount)}</td>
-                        <td className="px-3 py-3 text-right tabular-nums">{formatVnd(row.db_cod_amount)}</td>
-                        <td className="px-3 py-3 text-right tabular-nums">
-                          {row.amount_difference != null && row.amount_difference !== 0 ? (
-                            <span className="text-amber-800 font-medium">
-                              {row.amount_difference > 0 ? '+' : ''}
-                              {row.amount_difference.toLocaleString('vi-VN')} ₫
-                            </span>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td className="px-3 py-3">
-                          <span
-                            className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${
-                              COD_RECONCILE_BADGE[row.reconcile_status] || COD_RECONCILE_BADGE.parse_error
-                            }`}
-                          >
-                            {COD_RECONCILE_LABELS[row.reconcile_status] || row.reconcile_status}
-                          </span>
-                          {row.reconcile_message ? (
-                            <p className="text-xs text-gray-600 mt-2 max-w-sm">{row.reconcile_message}</p>
-                          ) : null}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </>
-      ) : (
-        <section className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-8 text-center text-sm text-gray-500">
-          Chưa có lần đối soát COD nào. Upload file <strong>Doi soat cod</strong> để bắt đầu.
-        </section>
-      )}
-
-      {freightResult?.import_batch && !freightLoading ? (
-        <div className="bg-violet-50 border border-violet-200 text-violet-900 rounded-lg px-4 py-3 text-sm">
-          Đối soát cước: <strong>{freightResult.import_batch.settled_count}</strong> thành công ·{' '}
-          <strong>{freightResult.import_batch.already_settled_count}</strong> đã đối soát trước ·{' '}
-          <strong>{freightResult.import_batch.record_not_found_count}</strong> không có trong DB · tổng cước{' '}
-          <strong>{formatVnd(freightResult.import_batch.total_freight_amount)}</strong>
-          {freightResult.import_batch.high_fee_warning_count > 0 ? (
-            <>
-              {' '}
-              · <strong className="text-amber-800">{freightResult.import_batch.high_fee_warning_count}</strong> mã cước
-              &gt; 70.000 ₫
-            </>
-          ) : null}
-        </div>
-      ) : null}
-
-      {freightResult?.warnings?.length ? (
-        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-4 py-3 text-sm space-y-1">
-          {freightResult.warnings.map((w) => (
-            <p key={w}>{w}</p>
-          ))}
-        </div>
-      ) : null}
-
-      {freightListLoading ? (
-        <section className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-8 text-center text-sm text-gray-500">
-          Đang tải lịch sử đối soát cước…
-        </section>
-      ) : freightResult?.batches.length ? (
-        <>
-          <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
-            {[
-              ['Tổng mã', freightSummary?.total_rows ?? 0, 'all'],
-              ['Đã đối soát', freightSummary?.settled ?? 0, 'settled'],
-              ['Đã DS trước', freightSummary?.already_settled ?? 0, 'already_settled'],
-              ['Không có DB', freightSummary?.record_not_found ?? 0, 'record_not_found'],
-              ['Lỗi parse', freightSummary?.parse_error ?? 0, 'parse_error'],
-            ].map(([label, count, key]) => (
-              <button
-                key={String(key)}
-                type="button"
-                onClick={() => setFreightFilter(key as FreightFilterKey)}
-                className={`rounded-xl border px-3 py-3 text-left transition ${
-                  freightFilter === key ? 'border-violet-500 ring-2 ring-violet-100' : 'border-gray-200 bg-white'
-                }`}
-              >
-                <div className="text-xs text-gray-500">{label}</div>
-                <div className="text-xl font-semibold text-gray-900">{count}</div>
-              </button>
-            ))}
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
-              <div className="text-xs text-amber-800">Cảnh báo &gt; 70k</div>
-              <div className="text-xl font-semibold text-amber-900">
-                {freightSummary?.high_fee_warning_count ?? 0}
-              </div>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-white px-3 py-3">
-              <div className="text-xs text-gray-500">Tổng cước (OK)</div>
-              <div className="text-lg font-semibold text-violet-800">
-                {formatVnd(freightSummary?.total_freight_amount ?? 0)}
-              </div>
-            </div>
-          </section>
-
-          <section className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-            <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">Bảng đối soát cước</h2>
-                <span className="text-sm text-gray-500">{filteredFreightRows.length} dòng</span>
-              </div>
-              {freightResult.batches.length > 1 ? (
-                <label className="text-sm text-gray-600 flex items-center gap-2">
-                  Lần import
-                  <select
-                    value={selectedFreightBatchId ?? ''}
-                    onChange={(e) => setSelectedFreightBatchId(Number(e.target.value))}
-                    className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                  >
-                    {freightResult.batches.map((batch) => (
-                      <option key={batch.id} value={batch.id}>
-                        {batch.created_at?.slice(0, 16).replace('T', ' ') || `#${batch.id}`}
-                        {batch.source_filename ? ` · ${batch.source_filename}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50 text-gray-600">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium">#</th>
-                    <th className="px-3 py-2 text-left font-medium">Mã EMS</th>
-                    <th className="px-3 py-2 text-right font-medium">Cước phí</th>
-                    <th className="px-3 py-2 text-left font-medium">Cảnh báo</th>
-                    <th className="px-3 py-2 text-left font-medium">Kết quả</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {filteredFreightRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
-                        Không có dòng trong bộ lọc này.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredFreightRows.map((row) => (
-                      <tr
-                        key={row.id ?? `${row.row_number}:${row.ems_tracking_code}`}
-                        className={`align-top ${row.high_fee_warning === 'yes' ? 'bg-amber-50/60' : ''}`}
-                      >
-                        <td className="px-3 py-3 text-gray-500">{row.row_number}</td>
-                        <td className="px-3 py-3 font-medium text-gray-900">{row.ems_tracking_code || '—'}</td>
-                        <td className="px-3 py-3 text-right tabular-nums">{formatVnd(row.freight_amount)}</td>
-                        <td className="px-3 py-3">
-                          {row.high_fee_warning === 'yes' ? (
-                            <span className="inline-flex rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
-                              Cước &gt; 70.000 ₫ — xem lại
-                            </span>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td className="px-3 py-3">
-                          <span
-                            className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${
-                              FREIGHT_RECONCILE_BADGE[row.reconcile_status] || FREIGHT_RECONCILE_BADGE.parse_error
-                            }`}
-                          >
-                            {FREIGHT_RECONCILE_LABELS[row.reconcile_status] || row.reconcile_status}
-                          </span>
-                          {row.reconcile_message ? (
-                            <p className="text-xs text-gray-600 mt-2 max-w-sm">{row.reconcile_message}</p>
-                          ) : null}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </>
-      ) : (
-        <section className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-8 text-center text-sm text-gray-500">
-          Chưa có lần đối soát cước nào. Upload file <strong>Doi soat cuoc</strong> để bắt đầu.
-        </section>
-      )}
 
       {error ? (
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
@@ -1224,53 +1685,90 @@ export default function AdminShippingPage() {
             </section>
           ) : null}
 
-          <section className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+          <section id="ems-shipping-table" className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
             <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">Bảng vận chuyển EMS</h2>
-                <span className="text-sm text-gray-500">
-                  {filter === 'all'
-                    ? `${totalRows} dòng`
-                    : `${filteredTotal} / ${totalRows} dòng`}
-                  {filteredTotal > 0
-                    ? ` · hiển thị ${displayFrom}–${displayTo}`
-                    : ''}
-                  {selectedKeys.size > 0 ? ` · đã chọn ${selectedKeys.size}` : ''}
-                </span>
+              <div className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => setEmsTableExpanded((v) => !v)}
+                  aria-expanded={emsTableExpanded}
+                  className="flex items-start sm:items-center gap-2 text-left hover:opacity-90"
+                >
+                  <span
+                    className={`inline-flex h-5 w-5 shrink-0 items-center justify-center text-gray-500 transition-transform ${
+                      emsTableExpanded ? 'rotate-90' : ''
+                    }`}
+                    aria-hidden
+                  >
+                    ▶
+                  </span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Bảng vận chuyển EMS</h2>
+                    <span className="text-sm text-gray-500">
+                      {appliedSearch ? (
+                        <>
+                          Tra «{appliedSearch}»: {filteredTotal} kết quả
+                          {filter !== 'all' ? ' (đã lọc trạng thái)' : ''}
+                        </>
+                      ) : filter === 'all' ? (
+                        `${totalRows} dòng`
+                      ) : (
+                        `${filteredTotal} / ${totalRows} dòng`
+                      )}
+                      {filteredTotal > 0 && emsTableExpanded
+                        ? ` · hiển thị ${displayFrom}–${displayTo}`
+                        : ''}
+                      {selectedKeys.size > 0 ? ` · đã chọn ${selectedKeys.size}` : ''}
+                    </span>
+                  </div>
+                </button>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <label className="text-sm text-gray-600 flex items-center gap-1.5">
-                  <span className="whitespace-nowrap">Dòng/trang</span>
-                  <select
-                    value={listPageSize}
-                    onChange={(e) => {
-                      setListPageSize(Number(e.target.value));
-                      setListPage(1);
-                      setSelectedKeys(new Set());
-                    }}
-                    className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm"
-                  >
-                    {EMS_LIST_PAGE_SIZES.map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {selectedKeys.size > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => requestDelete([...selectedKeys])}
-                    disabled={deleting}
-                    className="inline-flex items-center rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
-                  >
-                    Xóa đã chọn ({selectedKeys.size})
-                  </button>
+                <button
+                  type="button"
+                  onClick={() => setEmsTableExpanded((v) => !v)}
+                  className="text-sm text-emerald-700 hover:underline font-medium whitespace-nowrap"
+                >
+                  {emsTableExpanded ? 'Thu gọn' : 'Mở rộng'}
+                </button>
+                {emsTableExpanded ? (
+                  <>
+                    <label className="text-sm text-gray-600 flex items-center gap-1.5">
+                      <span className="whitespace-nowrap">Dòng/trang</span>
+                      <select
+                        value={listPageSize}
+                        onChange={(e) => {
+                          setListPageSize(Number(e.target.value));
+                          setListPage(1);
+                          setSelectedKeys(new Set());
+                        }}
+                        className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm"
+                      >
+                        {EMS_LIST_PAGE_SIZES.map((size) => (
+                          <option key={size} value={size}>
+                            {size}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {selectedKeys.size > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => requestDelete([...selectedKeys])}
+                        disabled={deleting}
+                        className="inline-flex items-center rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+                      >
+                        Xóa đã chọn ({selectedKeys.size})
+                      </button>
+                    ) : null}
+                  </>
                 ) : null}
               </div>
             </div>
-            <div className="overflow-x-auto max-h-[min(70vh,720px)] overflow-y-auto">
-              <table className="min-w-full text-sm">
+            {emsTableExpanded ? (
+              <>
+                <div className="overflow-x-auto max-h-[min(70vh,720px)] overflow-y-auto">
+                  <table className="min-w-full text-sm">
                 <thead className="bg-gray-50 text-gray-600 sticky top-0 z-10 shadow-[0_1px_0_0_rgb(229,231,235)]">
                   <tr>
                     <th className="px-3 py-2 w-10 bg-gray-50">
@@ -1304,7 +1802,9 @@ export default function AdminShippingPage() {
                       <td colSpan={13} className="px-4 py-8 text-center text-gray-500">
                         {totalRows === 0
                           ? 'Chưa có dòng nào. Upload file Excel EMS để bắt đầu.'
-                          : 'Không có dòng nào trong bộ lọc này.'}
+                          : appliedSearch
+                            ? `Không tìm thấy dòng nào khớp «${appliedSearch}».`
+                            : 'Không có dòng nào trong bộ lọc này.'}
                       </td>
                     </tr>
                   ) : (
@@ -1347,7 +1847,7 @@ export default function AdminShippingPage() {
                             ) : null}
                           </td>
                           <td className="px-3 py-3 text-right tabular-nums whitespace-nowrap">
-                            {formatVnd(row.cod_amount)}
+                            {formatCodAmount(row.cod_amount)}
                           </td>
                           <td className="px-3 py-3 text-right tabular-nums whitespace-nowrap">
                             <div>{formatVnd(row.cod_paid_amount)}</div>
@@ -1439,57 +1939,160 @@ export default function AdminShippingPage() {
                     })
                   )}
                 </tbody>
-              </table>
+                  </table>
+                </div>
+                {filteredTotal > 0 ? (
+                  <div className="px-4 py-3 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
+                    <span>
+                      Trang {listPage} / {totalPages} · {filteredTotal} dòng
+                      {filter !== 'all' ? ' (đã lọc trạng thái)' : ''}
+                      {appliedSearch ? ` · tra «${appliedSearch}»` : ''}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setListPage(1)}
+                        disabled={listPage <= 1 || listLoading}
+                        className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
+                      >
+                        Đầu
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setListPage((p) => Math.max(1, p - 1))}
+                        disabled={listPage <= 1 || listLoading}
+                        className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
+                      >
+                        Trước
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setListPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={listPage >= totalPages || listLoading}
+                        className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
+                      >
+                        Sau
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setListPage(totalPages)}
+                        disabled={listPage >= totalPages || listLoading}
+                        className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
+                      >
+                        Cuối
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="px-4 py-3 text-sm text-gray-500 border-b border-gray-50">
+                Bấm <strong className="text-gray-700">Mở rộng</strong> để xem bảng chi tiết và phân trang.
+              </div>
+            )}
+          </section>
+        </>
+      ) : null}
+
+      {activeOpsBucket ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ops-bucket-title"
+          onClick={() => closeOpsBucketModal()}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && !opsBucketLoading) closeOpsBucketModal();
+          }}
+        >
+          <div
+            className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-xl bg-white shadow-xl border border-gray-200 flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-3 shrink-0">
+              <div>
+                <h3 id="ops-bucket-title" className="text-lg font-semibold text-gray-900">
+                  {opsBucketLabel}
+                </h3>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {opsBucketTotal.toLocaleString('vi-VN')} vận đơn
+                  {opsBucketTotal > 0
+                    ? ` · trang ${opsBucketPage}/${opsBucketTotalPages}`
+                    : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => closeOpsBucketModal()}
+                disabled={opsBucketLoading}
+                className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                aria-label="Đóng"
+              >
+                ✕
+              </button>
             </div>
-            {filteredTotal > 0 ? (
-              <div className="px-4 py-3 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
+
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+              {opsBucketError ? (
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+                  {opsBucketError}{' '}
+                  <button
+                    type="button"
+                    onClick={() => activeOpsBucket && void loadOpsBucketRecords(activeOpsBucket, opsBucketPage)}
+                    className="underline font-medium"
+                  >
+                    Thử lại
+                  </button>
+                </div>
+              ) : null}
+              {opsBucketLoading ? (
+                <p className="text-sm text-gray-500 py-10 text-center">Đang tải danh sách…</p>
+              ) : opsBucketRows.length === 0 ? (
+                <p className="text-sm text-gray-500 py-10 text-center">Không có dòng trong nhóm này.</p>
+              ) : (
+                opsBucketRows.map((row) => (
+                  <EmsSearchResultCard
+                    key={rowKey(row)}
+                    row={row}
+                    onViewStatus={(r) => void openOrderStatusModal(r)}
+                  />
+                ))
+              )}
+            </div>
+
+            {opsBucketTotal > OPS_LIST_PAGE_SIZE ? (
+              <div className="px-5 py-3 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600 shrink-0">
                 <span>
-                  Trang {listPage} / {totalPages} · {filteredTotal} dòng
-                  {filter !== 'all' ? ' (đã lọc)' : ''}
+                  {(opsBucketPage - 1) * OPS_LIST_PAGE_SIZE + 1}–
+                  {Math.min(opsBucketPage * OPS_LIST_PAGE_SIZE, opsBucketTotal)} / {opsBucketTotal}
                 </span>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setListPage(1)}
-                    disabled={listPage <= 1 || listLoading}
-                    className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
-                  >
-                    Đầu
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setListPage((p) => Math.max(1, p - 1))}
-                    disabled={listPage <= 1 || listLoading}
+                    disabled={opsBucketPage <= 1 || opsBucketLoading}
+                    onClick={() => activeOpsBucket && void loadOpsBucketRecords(activeOpsBucket, opsBucketPage - 1)}
                     className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
                   >
                     Trước
                   </button>
                   <button
                     type="button"
-                    onClick={() => setListPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={listPage >= totalPages || listLoading}
+                    disabled={opsBucketPage >= opsBucketTotalPages || opsBucketLoading}
+                    onClick={() => activeOpsBucket && void loadOpsBucketRecords(activeOpsBucket, opsBucketPage + 1)}
                     className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
                   >
                     Sau
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setListPage(totalPages)}
-                    disabled={listPage >= totalPages || listLoading}
-                    className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
-                  >
-                    Cuối
-                  </button>
                 </div>
               </div>
             ) : null}
-          </section>
-        </>
+          </div>
+        </div>
       ) : null}
 
       {orderStatusModal ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="order-status-title"

@@ -21,6 +21,31 @@ _HIGH_FEE_THRESHOLD = 70_000
 _HEADER_TRACKING_NAMES = ("MA_E1", "MA E1", "MA_VAN_CHUYEN", "MA VAN CHUYEN")
 
 
+def _isoformat_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        return iso()
+    return str(value)
+
+
+def _date_label(value: Any, *, fallback: str = "trước đó") -> str:
+    if value is None:
+        return fallback
+    if isinstance(value, str):
+        return value[:10] if len(value) >= 10 else value
+    date_fn = getattr(value, "date", None)
+    if callable(date_fn):
+        return date_fn().isoformat()
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        return iso()
+    return str(value)
+
+
 def _find_header_row(raw_rows: list[tuple[Any, ...]]) -> int:
     for idx, row in enumerate(raw_rows[:5]):
         tracking_header = _cell_str(row[_COL_TRACKING] if _COL_TRACKING < len(row) else "").upper()
@@ -139,8 +164,7 @@ def _reconcile_row(db: Session, row: dict[str, Any]) -> dict[str, Any]:
         }
 
     if _is_already_freight_settled(record):
-        settled_at = record.freight_settled_at
-        when = settled_at.date().isoformat() if settled_at else "trước đó"
+        when = _date_label(record.freight_settled_at)
         return {
             **row,
             "reconcile_status": "already_settled",
@@ -191,7 +215,7 @@ def _batch_to_dict(batch: EmsFreightSettlementBatch, rows: list[dict[str, Any]])
         "parse_error_count": batch.parse_error_count,
         "high_fee_warning_count": batch.high_fee_warning_count,
         "total_freight_amount": int(batch.total_freight_amount or 0),
-        "created_at": batch.created_at.isoformat() if batch.created_at else None,
+        "created_at": _isoformat_value(batch.created_at),
         "rows": rows,
     }
 
