@@ -1,217 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { adminPromotionsAPI, AdminWelcomePromoSettings } from '@/lib/admin-api';
+import PromoCodesManager from '@/components/admin/PromoCodesManager';
+import { useEffect, useState } from 'react';
+import { adminPromotionsAPI, AdminPromotionCode } from '@/lib/admin-api';
 
 export default function AdminPromotionsPage() {
-  const [settings, setSettings] = useState<AdminWelcomePromoSettings | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
-  const [form, setForm] = useState({
-    name: '',
-    description: '',
-    discount_percent: 10,
-    max_discount_amount: 200000,
-    eligible_within_days: 7,
-    unlimited_days: false,
-    is_active: true,
-  });
-
-  const showToast = (type: 'ok' | 'err', msg: string) => {
-    setToast({ type, msg });
-    setTimeout(() => setToast(null), 3000);
-  };
-
-  const applySettings = useCallback((data: AdminWelcomePromoSettings) => {
-    setSettings(data);
-    setForm({
-      name: data.name,
-      description: data.description || '',
-      discount_percent: data.discount_percent,
-      max_discount_amount: data.max_discount_amount,
-      eligible_within_days: data.eligible_within_days ?? 7,
-      unlimited_days: !data.show_days_remaining,
-      is_active: data.is_active,
-    });
-  }, []);
-
-  const fetchSettings = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await adminPromotionsAPI.getWelcomeSettings();
-      applySettings(data);
-    } catch {
-      showToast('err', 'Không tải được cấu hình khuyến mãi');
-    } finally {
-      setLoading(false);
-    }
-  }, [applySettings]);
-
-  useEffect(() => {
-    void fetchSettings();
-  }, [fetchSettings]);
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      const updated = await adminPromotionsAPI.updateWelcomeSettings({
-        name: form.name.trim() || undefined,
-        description: form.description.trim() || undefined,
-        discount_percent: form.discount_percent,
-        max_discount_amount: form.max_discount_amount,
-        eligible_within_days: form.unlimited_days ? 0 : form.eligible_within_days,
-        is_active: form.is_active,
-      });
-      applySettings(updated);
-      showToast('ok', 'Đã lưu cấu hình WELCOME188');
-    } catch {
-      showToast('err', 'Lưu thất bại');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
-    <div className="p-6 max-w-3xl">
+    <div className="p-6 max-w-6xl">
       <h1 className="text-2xl font-bold text-gray-900 mb-2">Khuyến mãi</h1>
       <p className="text-sm text-gray-600 mb-6">
-        Cấu hình chương trình chào mừng khách mới (mã WELCOME188). Khách thấy số ngày còn lại tại trang{' '}
-        <span className="font-mono text-gray-800">/account/khuyen-mai</span> và giỏ hàng.
+        Quản lý toàn bộ mã khuyến mãi, tặng mã vào ví khách và chạy chiến dịch tự động.
       </p>
 
-      {toast ? (
-        <div
-          className={`mb-4 rounded-lg px-4 py-3 text-sm ${
-            toast.type === 'ok'
-              ? 'bg-green-50 text-green-800 border border-green-200'
-              : 'bg-red-50 text-red-800 border border-red-200'
-          }`}
-        >
-          {toast.msg}
-        </div>
-      ) : null}
-
-      {loading ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-500">
-          Đang tải...
-        </div>
-      ) : (
-        <form onSubmit={handleSave} className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Mã (cố định)</label>
-            <input
-              type="text"
-              value={settings?.code || 'WELCOME188'}
-              disabled
-              className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-mono"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Tên chương trình</label>
-            <input
-              type="text"
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Mô tả (hiển thị khách)</label>
-            <textarea
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              rows={3}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Giảm (%)</label>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step={0.5}
-                value={form.discount_percent}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, discount_percent: Number(e.target.value) || 0 }))
-                }
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Giảm tối đa (đ)</label>
-              <input
-                type="number"
-                min={0}
-                step={1000}
-                value={form.max_discount_amount}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, max_discount_amount: Number(e.target.value) || 0 }))
-                }
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
-              />
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4 space-y-3">
-            <p className="text-sm font-semibold text-emerald-900">Thời hạn sử dụng mã</p>
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.unlimited_days}
-                onChange={(e) => setForm((f) => ({ ...f, unlimited_days: e.target.checked }))}
-              />
-              Không giới hạn số ngày (ẩn countdown trên UI)
-            </label>
-            {!form.unlimited_days ? (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Số ngày kể từ đăng ký
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={365}
-                  value={form.eligible_within_days}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      eligible_within_days: Math.max(1, Number(e.target.value) || 1),
-                    }))
-                  }
-                  className="w-full max-w-xs rounded-lg border border-gray-200 px-3 py-2 text-sm"
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  Ví dụ: 7 = khách có 7 ngày từ lúc tạo tài khoản để dùng mã trên đơn đầu tiên.
-                </p>
-              </div>
-            ) : null}
-          </div>
-
-          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={form.is_active}
-              onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))}
-            />
-            Bật chương trình
-          </label>
-
-          <button
-            type="submit"
-            disabled={saving}
-            className="px-5 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
-          >
-            {saving ? 'Đang lưu...' : 'Lưu cấu hình'}
-          </button>
-        </form>
-      )}
+      <PromoCodesManager />
 
       <div className="mt-8 bg-white rounded-xl border border-gray-200 p-6 space-y-3">
         <h2 className="text-lg font-bold text-gray-900">Cron tự động (VPS)</h2>
@@ -250,10 +51,24 @@ export default function AdminPromotionsPage() {
 function GrantToUserForm() {
   const [userId, setUserId] = useState('');
   const [code, setCode] = useState('WELCOME188');
+  const [promoCodes, setPromoCodes] = useState<AdminPromotionCode[]>([]);
   const [days, setDays] = useState('7');
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    void adminPromotionsAPI
+      .listPromotions()
+      .then((res) => {
+        const active = res.items.filter((item) => item.is_active);
+        setPromoCodes(active);
+        if (active.length > 0) {
+          setCode((prev) => (active.some((item) => item.code === prev) ? prev : active[0].code));
+        }
+      })
+      .catch(() => setPromoCodes([]));
+  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -294,10 +109,15 @@ function GrantToUserForm() {
           onChange={(e) => setCode(e.target.value)}
           className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
         >
-          <option value="WELCOME188">WELCOME188 — Chào mừng</option>
-          <option value="THANKYOU188">THANKYOU188 — Cảm ơn</option>
-          <option value="COMEBACK10">COMEBACK10 — Quay lại</option>
-          <option value="CARTSAVE188">CARTSAVE188 — Nhắc giỏ hàng</option>
+          {promoCodes.length > 0 ? (
+            promoCodes.map((promo) => (
+              <option key={promo.id} value={promo.code}>
+                {promo.code} — {promo.name}
+              </option>
+            ))
+          ) : (
+            <option value="WELCOME188">WELCOME188 — Chào mừng</option>
+          )}
         </select>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

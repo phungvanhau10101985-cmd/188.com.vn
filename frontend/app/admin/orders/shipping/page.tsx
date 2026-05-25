@@ -492,9 +492,12 @@ export default function AdminShippingPage() {
   const trackingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const trackingLastProcessedRef = useRef(0);
 
-  const loadRecords = useCallback(async () => {
-    setListLoading(true);
-    setError(null);
+  const loadRecords = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setListLoading(true);
+      setError(null);
+    }
     try {
       const skip = (listPage - 1) * listPageSize;
       const data = await adminShippingAPI.listEmsRecords({
@@ -511,9 +514,13 @@ export default function AdminShippingPage() {
       }
       setResult(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Không tải được bảng vận chuyển');
+      if (!silent) {
+        setError(err instanceof Error ? err.message : 'Không tải được bảng vận chuyển');
+      }
     } finally {
-      setListLoading(false);
+      if (!silent) {
+        setListLoading(false);
+      }
     }
   }, [appliedSearch, filter, listPage, listPageSize]);
 
@@ -570,10 +577,13 @@ export default function AdminShippingPage() {
     [timelineFilter],
   );
 
-  const loadOpsStats = useCallback(async () => {
-    setOpsStatsLoading(true);
-    setTimelineLoading(true);
-    setTimelineError(null);
+  const loadOpsStats = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setOpsStatsLoading(true);
+      setTimelineLoading(true);
+      setTimelineError(null);
+    }
     try {
       const [ops, timeline] = await Promise.all([
         adminShippingAPI.getOperationsStats(),
@@ -582,11 +592,15 @@ export default function AdminShippingPage() {
       setOpsStats(ops);
       setTimelineStats(timeline);
     } catch (err) {
-      setOpsStats(null);
-      setTimelineError(err instanceof Error ? err.message : 'Không tải được thống kê theo thời gian');
+      if (!silent) {
+        setOpsStats(null);
+        setTimelineError(err instanceof Error ? err.message : 'Không tải được thống kê theo thời gian');
+      }
     } finally {
-      setOpsStatsLoading(false);
-      setTimelineLoading(false);
+      if (!silent) {
+        setOpsStatsLoading(false);
+        setTimelineLoading(false);
+      }
     }
   }, [timelineFilter, timelineGranularity]);
 
@@ -651,16 +665,16 @@ export default function AdminShippingPage() {
           setTrackingJob(job);
           if (job.processed !== trackingLastProcessedRef.current) {
             trackingLastProcessedRef.current = job.processed;
-            void loadOpsStats();
-            void loadRecords();
+            void loadOpsStats({ silent: true });
+            void loadRecords({ silent: true });
           }
           if (job.status === 'completed' || job.status === 'failed') {
             stopTrackingPoll();
             if (typeof window !== 'undefined') {
               sessionStorage.removeItem(EMS_TRACKING_JOB_STORAGE_KEY);
             }
-            await loadRecords();
-            await loadOpsStats();
+            await loadRecords({ silent: true });
+            await loadOpsStats({ silent: true });
           }
         } catch {
           /* thử lại lần poll sau */
@@ -1167,7 +1181,7 @@ export default function AdminShippingPage() {
         </form>
         {appliedSearch ? (
           <div className="mt-4 border-t border-gray-100 pt-4">
-            {listLoading ? (
+            {listLoading && !result ? (
               <p className="text-sm text-gray-500 py-2">
                 Đang tra cứu «{appliedSearch}»{refreshingEms ? ' và kiểm tra EMS mới nhất…' : '…'}
               </p>
@@ -2193,7 +2207,7 @@ export default function AdminShippingPage() {
         </div>
       ) : null}
 
-      {listLoading ? (
+      {listLoading && !result ? (
         <section className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-10 text-center text-sm text-gray-500">
           Đang tải bảng vận chuyển…
         </section>

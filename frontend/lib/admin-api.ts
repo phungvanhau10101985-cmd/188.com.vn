@@ -2489,7 +2489,68 @@ export interface AdminWelcomePromoSettings {
   first_order_only: boolean;
 }
 
+export interface AdminPromotionCode {
+  id: number;
+  code: string;
+  name: string;
+  description?: string | null;
+  discount_percent: number;
+  max_discount_amount?: number | null;
+  first_order_only: boolean;
+  stack_with_birthday: boolean;
+  stack_with_loyalty: boolean;
+  is_active: boolean;
+  valid_from?: string | null;
+  valid_to?: string | null;
+  usage_limit?: number | null;
+  per_user_limit: number;
+  eligible_within_days?: number | null;
+  grant_valid_days?: number | null;
+  requires_wallet_grant: boolean;
+  auto_grant_trigger: string;
+  grants_count: number;
+  usages_count: number;
+  is_system_template: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export type AdminPromotionCodeInput = {
+  code: string;
+  name: string;
+  description?: string;
+  discount_percent: number;
+  max_discount_amount?: number | null;
+  first_order_only?: boolean;
+  stack_with_birthday?: boolean;
+  stack_with_loyalty?: boolean;
+  is_active?: boolean;
+  valid_from?: string | null;
+  valid_to?: string | null;
+  usage_limit?: number | null;
+  per_user_limit?: number;
+  eligible_within_days?: number | null;
+  grant_valid_days?: number | null;
+  requires_wallet_grant?: boolean;
+  auto_grant_trigger?: string;
+  is_system_template?: boolean;
+};
+
 export const adminPromotionsAPI = {
+  listPromotions: () =>
+    fetchAdmin<{ items: AdminPromotionCode[] }>('/promotions/admin/promotions'),
+  getPromotion: (id: number) =>
+    fetchAdmin<AdminPromotionCode>(`/promotions/admin/promotions/${id}`),
+  createPromotion: (data: AdminPromotionCodeInput) =>
+    fetchAdmin<AdminPromotionCode>('/promotions/admin/promotions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updatePromotion: (id: number, data: Partial<AdminPromotionCodeInput>) =>
+    fetchAdmin<AdminPromotionCode>(`/promotions/admin/promotions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
   getWelcomeSettings: () => fetchAdmin<AdminWelcomePromoSettings>('/promotions/admin/welcome'),
   updateWelcomeSettings: (data: {
     name?: string;

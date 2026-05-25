@@ -17,6 +17,10 @@ from app.schemas.promotion import (
     AdminGrantSegmentRequest,
     AdminGrantSegmentResponse,
     AdminGrantVoucherRequest,
+    AdminPromotionCreate,
+    AdminPromotionListResponse,
+    AdminPromotionOut,
+    AdminPromotionUpdate,
     AdminUserGrantOut,
     AdminWelcomePromoOut,
     AdminWelcomePromoUpdate,
@@ -42,6 +46,41 @@ def _require_cron_secret(authorization: str | None) -> None:
 
 def _welcome_to_eligibility(status: dict) -> WelcomeEligibilityResponse:
     return WelcomeEligibilityResponse(**status)
+
+
+def _system_template_codes() -> set[str]:
+    codes = {tpl["code"] for tpl in grant_svc.PROMO_TEMPLATES}
+    codes.update(grant_svc.RETIRED_PROMO_CODES)
+    return codes
+
+
+def _promotion_to_admin_out(db: Session, promo) -> AdminPromotionOut:
+    grants_count, usages_count = crud_promotion.get_promotion_stats(db, promo.id)
+    return AdminPromotionOut(
+        id=promo.id,
+        code=promo.code,
+        name=promo.name,
+        description=promo.description,
+        discount_percent=float(promo.discount_percent),
+        max_discount_amount=float(promo.max_discount_amount) if promo.max_discount_amount is not None else None,
+        first_order_only=bool(promo.first_order_only),
+        stack_with_birthday=bool(promo.stack_with_birthday),
+        stack_with_loyalty=bool(promo.stack_with_loyalty),
+        is_active=bool(promo.is_active),
+        valid_from=promo.valid_from.isoformat() if promo.valid_from else None,
+        valid_to=promo.valid_to.isoformat() if promo.valid_to else None,
+        usage_limit=promo.usage_limit,
+        per_user_limit=int(promo.per_user_limit or 1),
+        eligible_within_days=promo.eligible_within_days,
+        grant_valid_days=promo.grant_valid_days,
+        requires_wallet_grant=bool(promo.requires_wallet_grant),
+        auto_grant_trigger=str(promo.auto_grant_trigger or "none"),
+        grants_count=grants_count,
+        usages_count=usages_count,
+        is_system_template=promo.code in _system_template_codes(),
+        created_at=promo.created_at.isoformat() if promo.created_at else None,
+        updated_at=promo.updated_at.isoformat() if promo.updated_at else None,
+    )
 
 
 @router.get("/my-vouchers", response_model=PromotionVoucherListResponse)
@@ -100,6 +139,60 @@ def validate_promo_code(
         estimated_discount=float(amount),
         message=message,
     )
+
+
+@router.get("/admin/promotions", response_model=AdminPromotionListResponse)
+def admin_list_promotions(
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("promotions")),
+):
+    rows = crud_promotion.list_all_promotions(db)
+    return AdminPromotionListResponse(
+        items=[_promotion_to_admin_out(db, promo) for promo in rows]
+    )
+
+
+@router.get("/admin/promotions/{promotion_id}", response_model=AdminPromotionOut)
+def admin_get_promotion(
+    promotion_id: int,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("promotions")),
+):
+    promo = crud_promotion.get_promotion_by_id(db, promotion_id)
+    if not promo:
+        raise HTTPException(status_code=404, detail="Không tìm thấy mã khuyến mãi.")
+    return _promotion_to_admin_out(db, promo)
+
+
+@router.post("/admin/promotions", response_model=AdminPromotionOut)
+def admin_create_promotion(
+    payload: AdminPromotionCreate,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("promotions")),
+):
+    try:
+        promo = crud_promotion.create_promotion(db, payload.model_dump())
+    except PromoValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    return _promotion_to_admin_out(db, promo)
+
+
+@router.patch("/admin/promotions/{promotion_id}", response_model=AdminPromotionOut)
+def admin_update_promotion(
+    promotion_id: int,
+    payload: AdminPromotionUpdate,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("promotions")),
+):
+    try:
+        promo = crud_promotion.update_promotion(
+            db,
+            promotion_id,
+            payload.model_dump(exclude_unset=True),
+        )
+    except PromoValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    return _promotion_to_admin_out(db, promo)
 
 
 @router.get("/admin/welcome", response_model=AdminWelcomePromoOut)

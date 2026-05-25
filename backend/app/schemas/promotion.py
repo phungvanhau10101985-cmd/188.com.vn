@@ -118,3 +118,75 @@ class AdminUserGrantOut(BaseModel):
     source: str
     granted_at: Optional[str] = None
     expires_at: Optional[str] = None
+
+
+class AdminPromotionOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    description: Optional[str] = None
+    discount_percent: float
+    max_discount_amount: Optional[float] = None
+    first_order_only: bool
+    stack_with_birthday: bool
+    stack_with_loyalty: bool
+    is_active: bool
+    valid_from: Optional[str] = None
+    valid_to: Optional[str] = None
+    usage_limit: Optional[int] = None
+    per_user_limit: int
+    eligible_within_days: Optional[int] = None
+    grant_valid_days: Optional[int] = None
+    requires_wallet_grant: bool
+    auto_grant_trigger: str
+    grants_count: int = 0
+    usages_count: int = 0
+    is_system_template: bool = False
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AdminPromotionCreate(BaseModel):
+    code: str = Field(..., min_length=2, max_length=50)
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    discount_percent: float = Field(..., ge=0, le=100)
+    max_discount_amount: Optional[float] = Field(None, ge=0)
+    first_order_only: bool = True
+    stack_with_birthday: bool = False
+    stack_with_loyalty: bool = True
+    is_active: bool = True
+    valid_from: Optional[str] = None
+    valid_to: Optional[str] = None
+    usage_limit: Optional[int] = Field(None, ge=1)
+    per_user_limit: int = Field(1, ge=1, le=100)
+    eligible_within_days: Optional[int] = Field(None, ge=0, le=365)
+    grant_valid_days: Optional[int] = Field(None, ge=1, le=365)
+    requires_wallet_grant: bool = True
+    auto_grant_trigger: str = Field("none", max_length=50)
+
+
+class AdminPromotionUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    discount_percent: Optional[float] = Field(None, ge=0, le=100)
+    max_discount_amount: Optional[float] = Field(None, ge=0)
+    first_order_only: Optional[bool] = None
+    stack_with_birthday: Optional[bool] = None
+    stack_with_loyalty: Optional[bool] = None
+    is_active: Optional[bool] = None
+    valid_from: Optional[str] = None
+    valid_to: Optional[str] = None
+    usage_limit: Optional[int] = Field(None, ge=1)
+    per_user_limit: Optional[int] = Field(None, ge=1, le=100)
+    eligible_within_days: Optional[int] = Field(None, ge=0, le=365)
+    grant_valid_days: Optional[int] = Field(None, ge=1, le=365)
+    requires_wallet_grant: Optional[bool] = None
+    auto_grant_trigger: Optional[str] = Field(None, max_length=50)
+
+
+class AdminPromotionListResponse(BaseModel):
+    items: List[AdminPromotionOut] = []

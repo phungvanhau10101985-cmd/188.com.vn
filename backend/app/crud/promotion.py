@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
 from app.models.order import Order, OrderStatus
-from app.models.promotion import GrantStatus, Promotion, PromotionUsage, UserPromotionGrant
+from app.models.promotion import AutoGrantTrigger, GrantStatus, Promotion, PromotionUsage, UserPromotionGrant
 from app.models.user import User
 from app.services import promotion_grants as grant_svc
+
+PROMO_CODE_PATTERN = re.compile(r"^[A-Z0-9_]{2,50}$")
+VALID_AUTO_GRANT_TRIGGERS = {t.value for t in AutoGrantTrigger}
 
 WELCOME_PROMO_CODE = "WELCOME188"
 WELCOME_DISCOUNT_PERCENT = Decimal("10")
@@ -32,6 +36,148 @@ def get_promotion_by_code(db: Session, code: str) -> Optional[Promotion]:
     if not normalized:
         return None
     return db.query(Promotion).filter(Promotion.code == normalized).first()
+
+
+def get_promotion_by_id(db: Session, promotion_id: int) -> Optional[Promotion]:
+    return db.query(Promotion).filter(Promotion.id == promotion_id).first()
+
+
+def _validate_promo_code(code: str) -> str:
+    normalized = normalize_promo_code(code)
+    if not normalized or not PROMO_CODE_PATTERN.match(normalized):
+        raise PromoValidationError("Mã chỉ gồm chữ in hoa, số và dấu gạch dưới (2–50 ký tự).")
+    return normalized
+
+
+def _parse_optional_datetime(value: Any) -> Optional[datetime]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return _as_utc(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise PromoValidationError("Ngày giờ không hợp lệ.") from exc
+    return _as_utc(parsed)
+
+
+def _validate_auto_grant_trigger(value: str) -> str:
+    trigger = (value or AutoGrantTrigger.NONE.value).strip().lower()
+    if trigger not in VALID_AUTO_GRANT_TRIGGERS:
+        raise PromoValidationError("Trigger tự động tặng mã không hợp lệ.")
+    return trigger
+
+
+def list_all_promotions(db: Session) -> List[Promotion]:
+    grant_svc.ensure_promotion_templates(db)
+    return db.query(Promotion).order_by(Promotion.is_active.desc(), Promotion.code.asc()).all()
+
+
+def get_promotion_stats(db: Session, promotion_id: int) -> Tuple[int, int]:
+    grants_count = (
+        db.query(UserPromotionGrant)
+        .filter(UserPromotionGrant.promotion_id == promotion_id)
+        .count()
+    )
+    usages_count = (
+        db.query(PromotionUsage)
+        .filter(PromotionUsage.promotion_id == promotion_id)
+        .count()
+    )
+    return grants_count, usages_count
+
+
+def create_promotion(db: Session, data: Dict[str, Any]) -> Promotion:
+    code = _validate_promo_code(data["code"])
+    if get_promotion_by_code(db, code):
+        raise PromoValidationError(f"Mã {code} đã tồn tại.")
+
+    trigger = _validate_auto_grant_trigger(data.get("auto_grant_trigger", AutoGrantTrigger.NONE.value))
+    promo = Promotion(
+        code=code,
+        name=(data.get("name") or "").strip(),
+        description=data.get("description"),
+        discount_percent=Decimal(str(data["discount_percent"])),
+        max_discount_amount=(
+            Decimal(str(data["max_discount_amount"]))
+            if data.get("max_discount_amount") is not None
+            else None
+        ),
+        first_order_only=bool(data.get("first_order_only", True)),
+        stack_with_birthday=bool(data.get("stack_with_birthday", False)),
+        stack_with_loyalty=bool(data.get("stack_with_loyalty", True)),
+        is_active=bool(data.get("is_active", True)),
+        valid_from=_parse_optional_datetime(data.get("valid_from")),
+        valid_to=_parse_optional_datetime(data.get("valid_to")),
+        usage_limit=data.get("usage_limit"),
+        per_user_limit=int(data.get("per_user_limit") or 1),
+        eligible_within_days=data.get("eligible_within_days"),
+        grant_valid_days=data.get("grant_valid_days"),
+        requires_wallet_grant=bool(data.get("requires_wallet_grant", True)),
+        auto_grant_trigger=trigger,
+    )
+    if not promo.name:
+        raise PromoValidationError("Tên chương trình không được để trống.")
+    db.add(promo)
+    db.commit()
+    db.refresh(promo)
+    return promo
+
+
+def update_promotion(db: Session, promotion_id: int, data: Dict[str, Any]) -> Promotion:
+    promo = get_promotion_by_id(db, promotion_id)
+    if not promo:
+        raise PromoValidationError("Không tìm thấy mã khuyến mãi.")
+
+    if "name" in data and data["name"] is not None:
+        name = str(data["name"]).strip()
+        if not name:
+            raise PromoValidationError("Tên chương trình không được để trống.")
+        promo.name = name
+    if "description" in data:
+        promo.description = data["description"]
+    if "discount_percent" in data and data["discount_percent"] is not None:
+        promo.discount_percent = Decimal(str(data["discount_percent"]))
+    if "max_discount_amount" in data:
+        promo.max_discount_amount = (
+            Decimal(str(data["max_discount_amount"]))
+            if data["max_discount_amount"] is not None
+            else None
+        )
+    if "first_order_only" in data and data["first_order_only"] is not None:
+        promo.first_order_only = bool(data["first_order_only"])
+    if "stack_with_birthday" in data and data["stack_with_birthday"] is not None:
+        promo.stack_with_birthday = bool(data["stack_with_birthday"])
+    if "stack_with_loyalty" in data and data["stack_with_loyalty"] is not None:
+        promo.stack_with_loyalty = bool(data["stack_with_loyalty"])
+    if "is_active" in data and data["is_active"] is not None:
+        promo.is_active = bool(data["is_active"])
+    if "valid_from" in data:
+        promo.valid_from = _parse_optional_datetime(data["valid_from"])
+    if "valid_to" in data:
+        promo.valid_to = _parse_optional_datetime(data["valid_to"])
+    if "usage_limit" in data:
+        promo.usage_limit = data["usage_limit"]
+    if "per_user_limit" in data and data["per_user_limit"] is not None:
+        promo.per_user_limit = int(data["per_user_limit"])
+    if "eligible_within_days" in data:
+        raw_days = data["eligible_within_days"]
+        promo.eligible_within_days = None if raw_days in (None, 0) else int(raw_days)
+    if "grant_valid_days" in data:
+        promo.grant_valid_days = data["grant_valid_days"]
+    if "requires_wallet_grant" in data and data["requires_wallet_grant"] is not None:
+        promo.requires_wallet_grant = bool(data["requires_wallet_grant"])
+    if "auto_grant_trigger" in data and data["auto_grant_trigger"] is not None:
+        promo.auto_grant_trigger = _validate_auto_grant_trigger(data["auto_grant_trigger"])
+
+    db.commit()
+    db.refresh(promo)
+    return promo
 
 
 def _as_utc(dt: datetime) -> datetime:
