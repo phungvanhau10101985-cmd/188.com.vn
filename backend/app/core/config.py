@@ -327,6 +327,15 @@ class Settings:
             1,
             int(os.getenv("EMS_TRACKING_DAILY_BATCH_LIMIT", "400") or "400"),
         )
+        # Fallback scheduler nội bộ: tự enqueue tra EMS định kỳ ngay trong backend process
+        # (để vẫn chạy mượt khi chưa cấu hình cron ngoài hoặc CRON_SECRET).
+        self.EMS_TRACKING_INTERNAL_SCHEDULER_ENABLED: bool = os.getenv(
+            "EMS_TRACKING_INTERNAL_SCHEDULER_ENABLED", "True"
+        ).strip().lower() not in ("0", "false", "no", "off")
+        self.EMS_TRACKING_INTERNAL_INTERVAL_MINUTES: int = max(
+            5,
+            int(os.getenv("EMS_TRACKING_INTERNAL_INTERVAL_MINUTES", "30") or "30"),
+        )
         self.EMS_SHIPPING_NOTIFY_ENABLED: bool = os.getenv(
             "EMS_SHIPPING_NOTIFY_ENABLED", "True"
         ).strip().lower() not in ("0", "false", "no", "off")

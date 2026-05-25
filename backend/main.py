@@ -465,6 +465,13 @@ async def startup_event():
                 "   📦 EMS_TRACKING_REFRESH: worker tra EMS nền sau import + cron hàng ngày "
                 f"(delay {_ems_refresh_settings.EMS_TRACKING_REFRESH_DELAY_SECONDS}s/dòng)."
             )
+            if getattr(_ems_refresh_settings, "EMS_TRACKING_INTERNAL_SCHEDULER_ENABLED", True):
+                print(
+                    "   ⏱️  EMS internal scheduler: tự enqueue tra EMS mỗi "
+                    f"{_ems_refresh_settings.EMS_TRACKING_INTERNAL_INTERVAL_MINUTES} phút."
+                )
+            if not (_ems_refresh_settings.CRON_SECRET or "").strip():
+                print("   ⚠️  CRON_SECRET chưa cấu hình — cron endpoint sẽ yêu cầu cấu hình secret.")
     except Exception as _e_ems_r:
         print(f"   ⚠️  EMS tracking refresh worker startup: {_e_ems_r}")
 

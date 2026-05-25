@@ -37,6 +37,8 @@ _JOBS: dict[str, dict[str, Any]] = {}
 _RESUME_COOLDOWN: dict[str, float] = {}
 _WORKER_THREAD: Optional[threading.Thread] = None
 _WATCHDOG_THREAD: Optional[threading.Thread] = None
+_INTERNAL_SCHEDULER_THREAD: Optional[threading.Thread] = None
+_INTERNAL_SCHEDULER_LAST_RUN_TS: float = 0.0
 
 
 def _jobs_root() -> Path:
@@ -523,8 +525,75 @@ def _watchdog_loop() -> None:
             logger.warning("EMS tracking watchdog error: %s", exc)
 
 
+def _internal_scheduler_interval_seconds() -> int:
+    mins = int(getattr(settings, "EMS_TRACKING_INTERNAL_INTERVAL_MINUTES", 30) or 30)
+    return max(5, mins) * 60
+
+
+def _run_internal_scheduled_refresh() -> None:
+    """Fallback scheduler chạy nội bộ trong process backend (không phụ thuộc cron ngoài)."""
+    lock_path = _jobs_root() / ".auto_refresh.lock"
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return
+    try:
+        try:
+            os.write(fd, str(os.getpid()).encode())
+        except OSError:
+            pass
+
+        active = get_active_tracking_refresh_job(auto_resume=True)
+        if active and (active.get("status") or "").strip() in ("queued", "running"):
+            return
+
+        db = SessionLocal()
+        try:
+            out = run_daily_ems_tracking_refresh(db)
+            queued = int(out.get("queued") or 0)
+            if queued > 0:
+                logger.info(
+                    "EMS internal scheduler enqueued queued=%s job_id=%s",
+                    queued,
+                    out.get("job_id"),
+                )
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("EMS internal scheduler error: %s", exc)
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            lock_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _internal_scheduler_loop() -> None:
+    global _INTERNAL_SCHEDULER_LAST_RUN_TS
+    # Startup đợi backend ổn định rồi mới quét
+    time.sleep(15)
+    while True:
+        if not getattr(settings, "EMS_TRACKING_REFRESH_ENABLED", True):
+            time.sleep(30)
+            continue
+        if not getattr(settings, "EMS_TRACKING_INTERNAL_SCHEDULER_ENABLED", True):
+            time.sleep(60)
+            continue
+
+        interval = _internal_scheduler_interval_seconds()
+        now = time.time()
+        if _INTERNAL_SCHEDULER_LAST_RUN_TS <= 0 or now - _INTERNAL_SCHEDULER_LAST_RUN_TS >= interval:
+            _run_internal_scheduled_refresh()
+            _INTERNAL_SCHEDULER_LAST_RUN_TS = time.time()
+        time.sleep(15)
+
+
 def _ensure_worker_started() -> None:
-    global _WORKER_STARTED, _WORKER_THREAD, _WATCHDOG_THREAD
+    global _WORKER_STARTED, _WORKER_THREAD, _WATCHDOG_THREAD, _INTERNAL_SCHEDULER_THREAD
     with _WORKER_LOCK:
         if _WORKER_THREAD is not None and not _WORKER_THREAD.is_alive():
             logger.warning("EMS tracking worker thread died — restarting")
@@ -532,12 +601,21 @@ def _ensure_worker_started() -> None:
             _WORKER_THREAD = None
         if _WATCHDOG_THREAD is not None and not _WATCHDOG_THREAD.is_alive():
             _WATCHDOG_THREAD = None
+        if _INTERNAL_SCHEDULER_THREAD is not None and not _INTERNAL_SCHEDULER_THREAD.is_alive():
+            _INTERNAL_SCHEDULER_THREAD = None
         if _WORKER_STARTED:
             return
         _WORKER_THREAD = threading.Thread(target=_worker_loop, name="ems-tracking-refresh", daemon=True)
         _WORKER_THREAD.start()
         _WATCHDOG_THREAD = threading.Thread(target=_watchdog_loop, name="ems-tracking-watchdog", daemon=True)
         _WATCHDOG_THREAD.start()
+        if getattr(settings, "EMS_TRACKING_INTERNAL_SCHEDULER_ENABLED", True):
+            _INTERNAL_SCHEDULER_THREAD = threading.Thread(
+                target=_internal_scheduler_loop,
+                name="ems-tracking-internal-scheduler",
+                daemon=True,
+            )
+            _INTERNAL_SCHEDULER_THREAD.start()
         _WORKER_STARTED = True
         logger.info("EMS tracking worker started (thread=%s)", _WORKER_THREAD.ident)
 
@@ -547,6 +625,16 @@ def start_ems_tracking_refresh_worker_if_enabled() -> None:
         return
     _ensure_worker_started()
     _resume_interrupted_jobs()
+    if not (getattr(settings, "CRON_SECRET", "") or "").strip():
+        if getattr(settings, "EMS_TRACKING_INTERNAL_SCHEDULER_ENABLED", True):
+            logger.warning(
+                "CRON_SECRET chưa cấu hình — dùng EMS internal scheduler mỗi %s phút.",
+                int(getattr(settings, "EMS_TRACKING_INTERNAL_INTERVAL_MINUTES", 30) or 30),
+            )
+        else:
+            logger.warning(
+                "CRON_SECRET chưa cấu hình và internal scheduler đang tắt — cron EMS tự động có thể không chạy."
+            )
 
 
 def run_daily_ems_tracking_refresh(db: Session) -> dict[str, Any]:
