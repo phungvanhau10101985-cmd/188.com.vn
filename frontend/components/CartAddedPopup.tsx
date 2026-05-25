@@ -1,20 +1,87 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { useCart } from '@/features/cart/hooks/useCart';
+import {
+  clearNanoAiOverlayPassThrough,
+  releaseNanoAiClickBlockers,
+} from '@/lib/nanoai-overlay-pass-through';
+import {
+  clearCartAddFromNanoAiFlow,
+  isCartAddFromNanoAiFlow,
+  returnToNanoAiChatWidget,
+} from '@/lib/nanoai-hosted-chat';
 
 export default function CartAddedPopup() {
+  const router = useRouter();
   const { showAddToCartPopup, lastAddedItem, hideAddToCartPopup } = useCart();
+  const [portalReady, setPortalReady] = useState(false);
+
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!showAddToCartPopup) return;
+    releaseNanoAiClickBlockers();
+    const mo = new MutationObserver(() => releaseNanoAiClickBlockers());
+    mo.observe(document.body, { childList: true, subtree: true });
+
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      mo.disconnect();
+      clearNanoAiOverlayPassThrough();
+      document.body.style.overflow = prev;
+    };
+  }, [showAddToCartPopup]);
 
   if (!showAddToCartPopup) return null;
 
   const name = lastAddedItem?.product_data?.name || 'Sản phẩm';
   const image = lastAddedItem?.product_data?.main_image || '';
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center p-3 md:p-4 bg-black/40" role="dialog" aria-modal="true" onClick={hideAddToCartPopup}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md md:max-w-lg" onClick={(e) => e.stopPropagation()}>
+  const handleClose = () => {
+    hideAddToCartPopup();
+    if (isCartAddFromNanoAiFlow()) {
+      returnToNanoAiChatWidget();
+    }
+  };
+
+  const handleContinueShopping = () => {
+    hideAddToCartPopup();
+    if (isCartAddFromNanoAiFlow()) {
+      returnToNanoAiChatWidget();
+      return;
+    }
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      router.back();
+      return;
+    }
+    router.push('/');
+  };
+
+  const modal = (
+    <div
+      className="fixed inset-0 z-[220] flex items-end md:items-center justify-center p-3 md:p-4 pointer-events-none"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="cart-added-popup-title"
+    >
+      <div
+        className="absolute inset-0 z-0 bg-black/40 pointer-events-auto"
+        onClick={handleClose}
+        aria-hidden
+      />
+      <div
+        className="relative z-10 bg-white rounded-xl shadow-xl w-full max-w-md md:max-w-lg pointer-events-auto touch-manipulation"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center gap-3 p-3 md:p-4 border-b border-gray-100">
           <div className="h-12 w-12 rounded bg-gray-100 overflow-hidden flex-shrink-0">
             {image ? (
@@ -24,12 +91,14 @@ export default function CartAddedPopup() {
             )}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm md:text-base font-semibold text-gray-900 truncate">Đã thêm vào giỏ hàng</p>
+            <p id="cart-added-popup-title" className="text-sm md:text-base font-semibold text-gray-900 truncate">
+              Đã thêm vào giỏ hàng
+            </p>
             <p className="text-xs md:text-sm text-gray-600 truncate">{name}</p>
           </div>
           <button
             type="button"
-            onClick={hideAddToCartPopup}
+            onClick={handleClose}
             className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition"
             aria-label="Đóng"
           >
@@ -41,24 +110,28 @@ export default function CartAddedPopup() {
         <div className="p-3 md:p-4 flex flex-col sm:flex-row gap-2">
           <Link
             href="/cart"
-            onClick={() => hideAddToCartPopup()}
-            className="w-full sm:w-1/2 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-semibold text-sm bg-[#ea580c] text-white hover:bg-[#c2410c] transition-colors"
+            onClick={() => {
+              clearCartAddFromNanoAiFlow();
+              hideAddToCartPopup();
+            }}
+            className="w-full sm:w-1/2 inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-semibold text-sm bg-[#ea580c] text-white hover:bg-[#c2410c] transition-colors"
           >
-            <span>🛒</span>
+            <span aria-hidden>🛒</span>
             <span>Vào giỏ hàng</span>
           </Link>
           <button
             type="button"
-            onClick={() => {
-              hideAddToCartPopup();
-            }}
-            className="w-full sm:w-1/2 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-semibold text-sm bg-gray-100 text-gray-800 hover:bg-gray-200 transition-colors"
+            onClick={handleContinueShopping}
+            className="w-full sm:w-1/2 inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-semibold text-sm bg-gray-100 text-gray-800 hover:bg-gray-200 transition-colors"
           >
-            <span>🛍️</span>
+            <span aria-hidden>🛍️</span>
             <span>Mua sắm tiếp</span>
           </button>
         </div>
       </div>
     </div>
   );
+
+  if (!portalReady || typeof document === 'undefined') return null;
+  return createPortal(modal, document.body);
 }

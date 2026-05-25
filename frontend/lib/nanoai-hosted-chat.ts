@@ -393,6 +393,39 @@ export function openNanoAiTryOnHosted(ctx: NanoAiTryOnCtx): boolean {
 }
 
 export const OPEN_NANOAI_CHAT_SESSION_KEY = '188_open_nanoai_chat';
+export const CART_ADD_FROM_NANOAI_SESSION_KEY = '188_cart_add_from_nanoai';
+export const NANOAI_SHOP_RETURN_PATH_KEY = '188_nanoai_shop_return_path';
+
+/** Đánh dấu luồng mở /cart/add từ NanoAI — dùng khi đóng popup sau thêm giỏ. */
+export function markCartAddFromNanoAiFlow(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.setItem(CART_ADD_FROM_NANOAI_SESSION_KEY, '1');
+    const refPath = sameOriginReferrerPath();
+    if (refPath) sessionStorage.setItem(NANOAI_SHOP_RETURN_PATH_KEY, refPath);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isCartAddFromNanoAiFlow(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return sessionStorage.getItem(CART_ADD_FROM_NANOAI_SESSION_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function clearCartAddFromNanoAiFlow(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.removeItem(CART_ADD_FROM_NANOAI_SESSION_KEY);
+    sessionStorage.removeItem(NANOAI_SHOP_RETURN_PATH_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 /** Sau điều hướng về trang shop, mở launcher chat (gọi từ AppShell). */
 export function consumeOpenNanoAiChatPending(): boolean {
@@ -445,11 +478,44 @@ function sameOriginReferrerPath(): string | null {
 }
 
 /**
- * Đóng trang /cart/add → quay lại khung chat NanoAI trên shop.
- * Ưu tiên history.back() nếu mở cùng tab từ trang shop; không thì về trang trước + mở launcher.
+ * Đóng trang /cart/add hoặc popup sau thêm giỏ → quay lại khung chat NanoAI trên shop.
+ * Ưu tiên history.back() nếu mở cùng tab từ trang shop; không thì về trang đã lưu + mở launcher.
  */
 export function returnToNanoAiChatWidget(): void {
   if (typeof window === 'undefined') return;
+
+  let fromNanoAi = false;
+  let storedDest: string | null = null;
+  try {
+    fromNanoAi = sessionStorage.getItem(CART_ADD_FROM_NANOAI_SESSION_KEY) === '1';
+    storedDest = sessionStorage.getItem(NANOAI_SHOP_RETURN_PATH_KEY);
+  } catch {
+    /* ignore */
+  }
+
+  const clearFlowFlags = () => clearCartAddFromNanoAiFlow();
+
+  const path = window.location.pathname;
+
+  if (path === '/cart' && fromNanoAi) {
+    clearFlowFlags();
+    markOpenNanoAiChatAfterNav();
+    window.location.assign(storedDest || '/');
+    return;
+  }
+
+  if (path.startsWith('/cart/add/') && fromNanoAi && canHistoryBackToShopChat()) {
+    clearFlowFlags();
+    window.history.back();
+    return;
+  }
+
+  if (fromNanoAi && storedDest) {
+    clearFlowFlags();
+    markOpenNanoAiChatAfterNav();
+    window.location.assign(storedDest);
+    return;
+  }
 
   if (canHistoryBackToShopChat()) {
     window.history.back();

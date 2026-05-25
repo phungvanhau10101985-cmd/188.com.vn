@@ -18,14 +18,11 @@ import {
   releaseNanoAiClickBlockers,
 } from '@/lib/nanoai-overlay-pass-through';
 import { parseCartAddCloseMode, type CartAddCloseMode } from '@/lib/cart-add-return';
-import { returnToNanoAiChatWidget } from '@/lib/nanoai-hosted-chat';
-
-type CartAddAction = 'add' | 'buy' | 'both';
+import { returnToNanoAiChatWidget, markCartAddFromNanoAiFlow } from '@/lib/nanoai-hosted-chat';
 
 interface CartAddClientProps {
   product: Product;
   sku: string;
-  action: CartAddAction;
   closeMode: CartAddCloseMode;
   closePath?: string;
 }
@@ -58,7 +55,7 @@ function buildCartPayload(
   };
 }
 
-export default function CartAddClient({ product, sku, action, closeMode, closePath }: CartAddClientProps) {
+export default function CartAddClient({ product, sku, closeMode, closePath }: CartAddClientProps) {
   const router = useRouter();
   const { addToCart, isLoading: cartLoading } = useCart();
   const { isAuthenticated } = useAuth();
@@ -99,6 +96,9 @@ export default function CartAddClient({ product, sku, action, closeMode, closePa
   }, [router, productHref, closeMode, closePath]);
 
   useEffect(() => {
+    if (closeMode === 'nanoai') {
+      markCartAddFromNanoAiFlow();
+    }
     releaseNanoAiClickBlockers();
     const mo = new MutationObserver(() => releaseNanoAiClickBlockers());
     mo.observe(document.body, { childList: true, subtree: true });
@@ -106,7 +106,7 @@ export default function CartAddClient({ product, sku, action, closeMode, closePa
       mo.disconnect();
       clearNanoAiOverlayPassThrough();
     };
-  }, []);
+  }, [closeMode]);
 
   const handleAddToCart = async (
     p: Product,
@@ -129,7 +129,6 @@ export default function CartAddClient({ product, sku, action, closeMode, closePa
     }
     try {
       await addToCart(payload);
-      pushToast({ title: 'Đã thêm vào giỏ hàng', variant: 'success', durationMs: 2000 });
       trackEvent('add_to_cart_click', { product_id: p.id, quantity, source: 'cart_add_sku' });
       router.push('/cart');
     } catch (err: unknown) {
@@ -206,7 +205,7 @@ export default function CartAddClient({ product, sku, action, closeMode, closePa
         onAddToCart={handleAddToCart}
         onBuyNow={handleBuyNow}
         isCartLoading={cartLoading}
-        action={action}
+        action="both"
         displayStockByVariant={displayStockByVariant}
         setDisplayStockByVariant={setDisplayStockByVariant}
         overlayZClassName="z-[210]"

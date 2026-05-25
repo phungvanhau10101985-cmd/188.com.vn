@@ -5,20 +5,13 @@ import CartAddClient from './CartAddClient';
 
 type Props = {
   params: Promise<{ sku: string }>;
-  searchParams: Promise<{ action?: string; return?: string; from?: string }>;
+  searchParams: Promise<{ return?: string; from?: string }>;
 };
-
-function parseAction(raw?: string): 'add' | 'buy' | 'both' {
-  const v = (raw || '').trim().toLowerCase();
-  if (v === 'add' || v === 'buy') return v;
-  return 'both';
-}
 
 export default async function CartAddBySkuPage({ params, searchParams }: Props) {
   const { sku: rawSku } = await params;
-  const { action: rawAction, return: rawReturn, from: rawFrom } = await searchParams;
+  const { return: rawReturn, from: rawFrom } = await searchParams;
   const sku = decodeURIComponent(rawSku || '').trim();
-  const action = parseAction(rawAction);
   const fromNanoAi = (rawFrom || '').trim().toLowerCase() === 'nanoai';
   const close = parseCartAddCloseMode(rawReturn, fromNanoAi);
 
@@ -65,7 +58,6 @@ export default async function CartAddBySkuPage({ params, searchParams }: Props) 
     <CartAddClient
       product={product}
       sku={sku}
-      action={action}
       closeMode={close.mode}
       closePath={close.path}
     />

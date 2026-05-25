@@ -55,8 +55,8 @@ interface ProductVariantModalProps {
   setDisplayStockByVariant?: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   /** z-index lớp overlay — mặc định z-50; trang /cart/add nên cao hơn header site. */
   overlayZClassName?: string;
-  /** Gọi onClose sau khi xác nhận thêm/mua — tắt nếu parent tự điều hướng. */
-  closeAfterConfirm?: boolean;
+  /** Gọi onClose sau khi xác nhận thêm/mua — `add-only`: chỉ sau Thêm giỏ (Mua hàng tự điều hướng). */
+  closeAfterConfirm?: boolean | 'add-only';
 }
 
 export default function ProductVariantModal({
@@ -199,7 +199,7 @@ export default function ProductVariantModal({
       [fullKey]: Math.max(0, (prev[fullKey] ?? 0) - qty),
     }));
     onAddToCart(product, qty, selectedSize || undefined, cartColorLabel || undefined);
-    if (closeAfterConfirm) onClose();
+    if (closeAfterConfirm === true || closeAfterConfirm === 'add-only') onClose();
   }, [fullKey, quantity, maxQty, product, selectedSize, cartColorLabel, onAddToCart, onClose, setDisplayStockByVariant, closeAfterConfirm]);
 
   const handleConfirmBuyNow = useCallback(() => {
@@ -209,7 +209,7 @@ export default function ProductVariantModal({
       [fullKey]: Math.max(0, (prev[fullKey] ?? 0) - qty),
     }));
     onBuyNow(product, qty, selectedSize || undefined, cartColorLabel || undefined);
-    if (closeAfterConfirm) onClose();
+    if (closeAfterConfirm === true) onClose();
   }, [fullKey, quantity, maxQty, product, selectedSize, cartColorLabel, onBuyNow, onClose, setDisplayStockByVariant, closeAfterConfirm]);
 
   if (!isOpen) return null;
