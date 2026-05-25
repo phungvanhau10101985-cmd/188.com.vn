@@ -321,6 +321,11 @@ class ApiClient {
     return this.fetch<Product>(`/products/${encodeURIComponent(productId)}`);
   }
 
+  /** Tra SP theo product_id, slug hoặc code (SKU NanoAI). */
+  async getProductBySku(sku: string): Promise<Product> {
+    return this.getProductByProductId(sku);
+  }
+
   // CATEGORY
   async getCategories(): Promise<Category[]> {
     return this.fetch<Category[]>('/categories/');

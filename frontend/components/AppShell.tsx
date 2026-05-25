@@ -37,6 +37,10 @@ import {
   markReferralAttributed,
   shouldTryAttributeReferral,
 } from '@/lib/affiliate-ref';
+import {
+  consumeOpenNanoAiChatPending,
+  tryOpenNanoAiChatLauncherWithRetry,
+} from '@/lib/nanoai-hosted-chat';
 
 /** Chiều cao thanh cam mỏng (logo + tìm + icon) khi trang listing ghim header đã thu gọn — khớp offset sticky bộ lọc. */
 const DESKTOP_LISTING_THIN_CHROME_PX = 54;
@@ -61,6 +65,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
 
   const qFromUrl = searchParams.get('q') ?? '';
   const isAuthPage = pathname?.startsWith('/auth/');
+  const isCartAddLandingPage = pathname?.startsWith('/cart/add/');
   const isProductDetailPage = pathname?.match(/^\/products\/[^/]+$/);
   const pathNorm = pathname != null ? pathname.replace(/\/$/, '') || '/' : '/';
   const isShopVideoFeedPage = pathNorm === '/luot-video-cung-shop';
@@ -254,6 +259,13 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     };
   }, [isAuthenticated, pathname]);
 
+  /** Sau khi đóng /cart/add → về shop và mở lại khung chat NanoAI. */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!consumeOpenNanoAiChatPending()) return;
+    return tryOpenNanoAiChatLauncherWithRetry();
+  }, [pathname]);
+
   /** Đăng nhập/đăng xuất qua event: refetch vì `user` trong LS đổi trước khi React cập nhật isAuthenticated (vd. logout). */
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -332,11 +344,12 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     router.push('/?' + searchParamsToEncodedQueryString(params));
   };
 
-  const showMobileBottomNav = !isProductDetailPage && !isShopVideoFeedPage;
+  const showMobileBottomNav =
+    !isProductDetailPage && !isShopVideoFeedPage && !isCartAddLandingPage;
 
   return (
     <div
-      className="min-h-screen flex flex-col bg-gray-50"
+      className={`min-h-screen flex flex-col ${isCartAddLandingPage ? 'bg-black/50' : 'bg-gray-50'}`}
       style={
         {
           '--listing-chrome-height': keepDesktopHeaderPinned ? `${listingChromeHeight}px` : '0px',
@@ -349,7 +362,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
         } as CSSProperties
       }
     >
-      {!isShopVideoFeedPage && (
+      {!isShopVideoFeedPage && !isCartAddLandingPage && (
       <div className="hidden md:block">
       {keepDesktopHeaderPinned ? (
         <>
@@ -412,7 +425,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       </div>
       )}
       {/* Mobile: header site — gồm /auth/* để đồng bộ với bottom nav */}
-      {!isShopVideoFeedPage && (
+      {!isShopVideoFeedPage && !isCartAddLandingPage && (
         <MobileHeader
           cartItemsCount={getCartItemCount()}
           viewedProductsCount={viewedProductsCount}
@@ -423,23 +436,23 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       )}
 
       <main
-        className={`flex-1 md:pb-0 ${showMobileBottomNav ? 'pb-16' : ''} ${isShopVideoFeedPage ? 'bg-black' : ''}`}
+        className={`flex-1 md:pb-0 ${showMobileBottomNav ? 'pb-16' : ''} ${isShopVideoFeedPage ? 'bg-black' : ''} ${isCartAddLandingPage ? 'min-h-0 p-0' : ''}`}
       >
         {children}
       </main>
 
       {/* Footer: hiển thị cả mobile và desktop */}
-      {!isShopVideoFeedPage && <Footer />}
-      {!isShopVideoFeedPage && <BackToTopButton />}
+      {!isShopVideoFeedPage && !isCartAddLandingPage && <Footer />}
+      {!isShopVideoFeedPage && !isCartAddLandingPage && <BackToTopButton />}
       {/* Mobile: Bottom nav — hiển thị trên /auth/* để điều hướng giống các trang khác */}
       {showMobileBottomNav && <MobileBottomNav notificationCount={0} />}
-      {!isAuthPage && !isShopVideoFeedPage && !pathname?.startsWith('/admin') && (
+      {!isAuthPage && !isShopVideoFeedPage && !isCartAddLandingPage && !pathname?.startsWith('/admin') && (
         <FloatingShopVideoFeedButton />
       )}
-      <PwaInstallPrompt />
+      {!isCartAddLandingPage && <PwaInstallPrompt />}
       <CartAddedPopup />
-      {!isAuthPage && <BirthGenderSalePromptModal />}
-      {!isAuthPage && !pathname?.startsWith('/admin') && <BirthdayPromoWelcomeModal />}
+      {!isAuthPage && !isCartAddLandingPage && <BirthGenderSalePromptModal />}
+      {!isAuthPage && !isCartAddLandingPage && !pathname?.startsWith('/admin') && <BirthdayPromoWelcomeModal />}
     </div>
   );
 }

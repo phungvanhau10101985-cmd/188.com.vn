@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import type { Product, ProductColor } from '@/types/api';
 import { formatPrice } from '@/lib/utils';
@@ -52,6 +53,10 @@ interface ProductVariantModalProps {
   /** Tồn ảo theo biến thể (key = productId_variantKey); từ parent để sau khi mua tồn = 0 vẫn giữ. */
   displayStockByVariant?: Record<string, number>;
   setDisplayStockByVariant?: React.Dispatch<React.SetStateAction<Record<string, number>>>;
+  /** z-index lớp overlay — mặc định z-50; trang /cart/add nên cao hơn header site. */
+  overlayZClassName?: string;
+  /** Gọi onClose sau khi xác nhận thêm/mua — tắt nếu parent tự điều hướng. */
+  closeAfterConfirm?: boolean;
 }
 
 export default function ProductVariantModal({
@@ -64,6 +69,8 @@ export default function ProductVariantModal({
   action = 'both',
   displayStockByVariant: displayStockByVariantProp,
   setDisplayStockByVariant: setDisplayStockByVariantProp,
+  overlayZClassName = 'z-50',
+  closeAfterConfirm = true,
 }: ProductVariantModalProps) {
   const [selectedSize, setSelectedSize] = useState('');
   /** Chỉ số vào `product.colors`; luôn phân biệt từng ô dù trùng `name`. */
@@ -81,11 +88,25 @@ export default function ProductVariantModal({
   const realStock = product.available ?? 0;
   const available = realStock > 0;
   const [sizeGuideOpen, setSizeGuideOpen] = useState(false);
+  const [portalReady, setPortalReady] = useState(false);
   const catLevel1Slug = product.category_level1_slug ?? null;
   const catLevel2Slug = product.category_level2_slug ?? null;
 
   useEffect(() => {
+    setPortalReady(true);
+  }, []);
+
+  useEffect(() => {
     if (!isOpen) setSizeGuideOpen(false);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
   }, [isOpen]);
 
   useEffect(() => {
@@ -155,6 +176,15 @@ export default function ProductVariantModal({
   }, [isOpen, colors, sizes, product.id, available, setDisplayStockByVariant]);
 
   useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, onClose]);
+
+  useEffect(() => {
     setQuantity(1);
   }, [selectedColorIndex, selectedSize]);
 
@@ -169,8 +199,8 @@ export default function ProductVariantModal({
       [fullKey]: Math.max(0, (prev[fullKey] ?? 0) - qty),
     }));
     onAddToCart(product, qty, selectedSize || undefined, cartColorLabel || undefined);
-    onClose();
-  }, [fullKey, quantity, maxQty, product, selectedSize, cartColorLabel, onAddToCart, onClose, setDisplayStockByVariant]);
+    if (closeAfterConfirm) onClose();
+  }, [fullKey, quantity, maxQty, product, selectedSize, cartColorLabel, onAddToCart, onClose, setDisplayStockByVariant, closeAfterConfirm]);
 
   const handleConfirmBuyNow = useCallback(() => {
     const qty = Math.min(Math.max(1, quantity), maxQty);
@@ -179,8 +209,8 @@ export default function ProductVariantModal({
       [fullKey]: Math.max(0, (prev[fullKey] ?? 0) - qty),
     }));
     onBuyNow(product, qty, selectedSize || undefined, cartColorLabel || undefined);
-    onClose();
-  }, [fullKey, quantity, maxQty, product, selectedSize, cartColorLabel, onBuyNow, onClose, setDisplayStockByVariant]);
+    if (closeAfterConfirm) onClose();
+  }, [fullKey, quantity, maxQty, product, selectedSize, cartColorLabel, onBuyNow, onClose, setDisplayStockByVariant, closeAfterConfirm]);
 
   if (!isOpen) return null;
 
@@ -194,16 +224,16 @@ export default function ProductVariantModal({
     />
   );
 
-  return (
+  const modalTree = (
     <>
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+    <div className={`fixed inset-0 ${overlayZClassName} flex items-end sm:items-center justify-center pointer-events-none`}>
       <div
-        className="absolute inset-0 bg-black/50"
+        className="absolute inset-0 z-0 bg-black/50 pointer-events-auto"
         onClick={onClose}
         aria-hidden
       />
       <div
-        className="relative w-full max-w-3xl max-h-[85vh] overflow-y-auto bg-white rounded-t-2xl sm:rounded-2xl shadow-xl animate-in slide-in-from-bottom duration-200"
+        className="relative z-10 w-full max-w-3xl max-h-[85vh] overflow-y-auto bg-white rounded-t-2xl sm:rounded-2xl shadow-xl animate-in slide-in-from-bottom duration-200 pointer-events-auto touch-manipulation"
         role="dialog"
         aria-modal="true"
         aria-labelledby="variant-modal-title"
@@ -583,4 +613,10 @@ export default function ProductVariantModal({
     {sizeGuidePanel}
     </>
   );
+
+  if (!portalReady || typeof document === 'undefined') {
+    return null;
+  }
+
+  return createPortal(modalTree, document.body);
 }

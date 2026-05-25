@@ -106,8 +106,8 @@ def _notify_customer_shipper_confirmed(order_id: int) -> None:
         db.close()
 
 
-def notify_customer_review_after_received(order_id: int) -> None:
-    """In-app + push nhắc đánh giá ngay sau khi khách xác nhận nhận hàng."""
+def notify_customer_delivered_with_review(order_id: int, *, source: str = "customer_confirm") -> None:
+    """In-app + push: giao hàng thành công + mời đánh giá (không gửi email — email gửi riêng 1 lần)."""
     db = SessionLocal()
     try:
         order = (
@@ -120,12 +120,20 @@ def notify_customer_review_after_received(order_id: int) -> None:
             return
 
         code = (order.order_code or "").strip() or f"#{order.id}"
-        title = "Cảm ơn bạn đã nhận hàng"
-        content = (
-            f"Đơn {code} đã được xác nhận nhận hàng. "
-            "Nếu hài lòng, rất mong bạn đánh giá sản phẩm — "
-            "ý kiến của bạn giúp 188.com.vn cải thiện chất lượng và dịch vụ mỗi ngày."
-        )
+        if source == "ems_auto":
+            title = "Đã giao hàng thành công"
+            content = (
+                f"Đơn {code} đã được giao thành công. "
+                "Nếu hài lòng, mong bạn đánh giá sản phẩm — "
+                "ý kiến của bạn giúp 188.com.vn cải thiện dịch vụ."
+            )
+        else:
+            title = "Cảm ơn bạn đã nhận hàng"
+            content = (
+                f"Đơn {code} đã được xác nhận nhận hàng. "
+                "Nếu hài lòng, rất mong bạn đánh giá sản phẩm — "
+                "ý kiến của bạn giúp 188.com.vn cải thiện chất lượng và dịch vụ mỗi ngày."
+            )
         review_path = f"/account/orders/{order.id}/review"
 
         try:
@@ -148,12 +156,17 @@ def notify_customer_review_after_received(order_id: int) -> None:
                     notification_id=notif.id,
                 )
             except Exception:
-                logger.debug("review_notify push failed order_id=%s", order.id, exc_info=True)
+                logger.debug("delivered_review push failed order_id=%s", order.id, exc_info=True)
             db.commit()
         except Exception:
-            logger.exception("review_notify in-app failed order_id=%s", order.id)
+            logger.exception("delivered_review in-app failed order_id=%s", order.id)
             db.rollback()
     except Exception:
-        logger.exception("review_notify failed order_id=%s", order_id)
+        logger.exception("delivered_review notify failed order_id=%s", order_id)
     finally:
         db.close()
+
+
+def notify_customer_review_after_received(order_id: int) -> None:
+    """Alias — giữ tương thích code cũ."""
+    notify_customer_delivered_with_review(order_id, source="customer_confirm")

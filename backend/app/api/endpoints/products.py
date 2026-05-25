@@ -759,11 +759,9 @@ def read_product(
     db: Session = Depends(get_db)
 ):
     """
-    Get product by PRODUCT_ID (string from Excel column A)
+    Get product by product_id, slug, or internal code (SKU).
     """
-    db_product = crud.product.get_product_by_product_id(db, product_id=product_id)
-    if db_product is None:
-        db_product = crud.product.get_product_by_slug(db, slug=product_id)
+    db_product = crud.product.resolve_product_by_sku(db, sku=product_id)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return _product_to_response(db, db_product)
@@ -839,9 +837,9 @@ def read_product_by_code(
     db: Session = Depends(get_db)
 ):
     """
-    Get product by product_id (Excel column A)
+    Get product by product_id, slug, or internal code (SKU).
     """
-    db_product = crud.product.get_product_by_product_id(db, product_id=product_code)
+    db_product = crud.product.resolve_product_by_sku(db, sku=product_code)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return _product_to_response(db, db_product)

@@ -536,7 +536,7 @@ def confirm_received(
     )
     if not order:
         raise HTTPException(status_code=400, detail="Không thể xác nhận đơn hàng lúc này")
-    background_tasks.add_task(shipper_notify_svc.notify_customer_review_after_received, order.id)
+    background_tasks.add_task(shipper_notify_svc.notify_customer_delivered_with_review, order.id)
     background_tasks.add_task(send_order_received_confirmed_email_task, order.id)
     return order
 

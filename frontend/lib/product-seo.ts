@@ -5,6 +5,7 @@
 import type { Product } from "@/types/api";
 import { displayableBrandWithDefault } from "@/lib/utils";
 import { productPublicPdpUrl } from "@/lib/product-path-slug";
+import { getApiBaseUrl } from "@/lib/api-base";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001/api/v1";
@@ -82,6 +83,38 @@ export async function getProductBySlugForSSR(slug: string): Promise<Product | nu
     }
     const data = await res.json();
     return data as Product;
+  } catch {
+    return null;
+  }
+}
+
+/** Server-side: lấy full product theo SKU (product_id, slug hoặc code). */
+export async function getProductBySkuForSSR(sku: string): Promise<Product | null> {
+  const key = (sku || "").trim();
+  if (!key) return null;
+  const apiBase = typeof window === "undefined" ? getApiBaseUrl() : API_BASE;
+  const headers = { "Content-Type": "application/json" };
+
+  try {
+    const directUrl = `${apiBase}/products/${encodeURIComponent(key)}`;
+    const res = await fetch(directUrl, {
+      next: { revalidate: 60 },
+      headers,
+    });
+    if (res.ok) {
+      return (await res.json()) as Product;
+    }
+
+    // Fallback: API list đã hỗ trợ lọc theo product_id hoặc mã code (SKU nội bộ).
+    const listUrl = `${apiBase}/products/?product_id=${encodeURIComponent(key)}&limit=1`;
+    const listRes = await fetch(listUrl, {
+      next: { revalidate: 60 },
+      headers,
+    });
+    if (!listRes.ok) return null;
+    const data = (await listRes.json()) as { products?: Product[] };
+    const first = data?.products?.[0];
+    return first ?? null;
   } catch {
     return null;
   }

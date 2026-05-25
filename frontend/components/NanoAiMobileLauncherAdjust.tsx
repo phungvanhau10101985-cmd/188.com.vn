@@ -8,6 +8,10 @@ import {
   type ShopVideoFabPublicSettings,
 } from '@/lib/shop-video-fab-settings';
 import { SHOP_VIDEO_FEED_PATH } from '@/lib/shop-video-feed';
+import {
+  clearNanoAiOverlayPassThrough,
+  releaseNanoAiClickBlockers,
+} from '@/lib/nanoai-overlay-pass-through';
 
 const MOBILE_MQ = '(max-width: 767px)';
 const VIDEO_FAB_SIZE_PX = 52;
@@ -143,52 +147,6 @@ function isLargeFixedOverlay(el: HTMLElement): boolean {
   const vh = typeof window !== 'undefined' ? window.innerHeight : 0;
   if (!vw || !vh) return false;
   return r.width >= vw * 0.72 || r.height >= vh * 0.72;
-}
-
-function isInteractiveNanoAiNode(el: HTMLElement): boolean {
-  const tag = el.tagName;
-  if (/^(BUTTON|A|IFRAME|INPUT|TEXTAREA|SELECT)$/i.test(tag)) return true;
-  const role = el.getAttribute('role');
-  if (role === 'button' || role === 'dialog' || role === 'textbox') return true;
-  if (el.isContentEditable) return true;
-  return isLauncherSized(el);
-}
-
-/** Container NanoAI full-screen không nuốt tap trang — chỉ phần tử tương tác nhận click. */
-function releaseNanoAiClickBlockers() {
-  if (!isMobileViewport()) return;
-
-  for (const sel of ROOT_SELECTORS) {
-    document.querySelectorAll<HTMLElement>(sel).forEach((root) => {
-      if (!isLargeFixedOverlay(root)) return;
-
-      root.style.setProperty('pointer-events', 'none', 'important');
-      root.dataset.nanoai188OverlayPass = '1';
-
-      const stack: HTMLElement[] = [root];
-      while (stack.length > 0) {
-        const node = stack.pop()!;
-        for (const child of Array.from(node.children)) {
-          if (!(child instanceof HTMLElement)) continue;
-          stack.push(child);
-          if (isInteractiveNanoAiNode(child) || !isLargeFixedOverlay(child)) {
-            child.style.setProperty('pointer-events', 'auto', 'important');
-            child.dataset.nanoai188OverlayPass = '1';
-          } else {
-            child.style.setProperty('pointer-events', 'none', 'important');
-            child.dataset.nanoai188OverlayPass = '1';
-          }
-        }
-      }
-    });
-  }
-}
-
-function clearOverlayPass() {
-  document.querySelectorAll<HTMLElement>('[data-nanoai188-overlay-pass="1"]').forEach((el) => {
-    el.style.removeProperty('pointer-events');
-    delete el.dataset.nanoai188OverlayPass;
-  });
 }
 
 /** Phần tử cần gắn bottom/right — thoát container fixed full-screen của widget. */
@@ -356,11 +314,18 @@ export default function NanoAiMobileLauncherAdjust() {
     let fab = DEFAULT_SHOP_VIDEO_FAB_SETTINGS;
     let cancelled = false;
 
+    const isCartAddPage = pathname?.startsWith('/cart/add/');
+
     const run = () => {
       if (cancelled) return;
+      if (isCartAddPage) {
+        clearMobileLayout();
+        releaseNanoAiClickBlockers();
+        return;
+      }
       if (!isMobileViewport()) {
         clearMobileLayout();
-        clearOverlayPass();
+        clearNanoAiOverlayPassThrough();
         return;
       }
       applyMobileLayout(pathname, fab);
@@ -398,7 +363,7 @@ export default function NanoAiMobileLauncherAdjust() {
       window.removeEventListener('resize', schedule);
       if (scanTimer) clearTimeout(scanTimer);
       clearMobileLayout();
-      clearOverlayPass();
+      clearNanoAiOverlayPassThrough();
     };
   }, [pathname]);
 

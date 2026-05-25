@@ -391,3 +391,85 @@ export function openNanoAiTryOnHosted(ctx: NanoAiTryOnCtx): boolean {
   window.open(url, '_blank', 'noopener,noreferrer');
   return true;
 }
+
+export const OPEN_NANOAI_CHAT_SESSION_KEY = '188_open_nanoai_chat';
+
+/** Sau điều hướng về trang shop, mở launcher chat (gọi từ AppShell). */
+export function consumeOpenNanoAiChatPending(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const v = sessionStorage.getItem(OPEN_NANOAI_CHAT_SESSION_KEY);
+    if (v !== '1') return false;
+    sessionStorage.removeItem(OPEN_NANOAI_CHAT_SESSION_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function markOpenNanoAiChatAfterNav(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.setItem(OPEN_NANOAI_CHAT_SESSION_KEY, '1');
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Cùng tab, referrer cùng origin và không phải trang cart/add → có thể back về trang chat. */
+function canHistoryBackToShopChat(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (window.history.length <= 1) return false;
+  const ref = (document.referrer || '').trim();
+  if (!ref || !ref.startsWith(window.location.origin)) return false;
+  try {
+    const u = new URL(ref);
+    if (u.pathname.startsWith('/cart/add/')) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sameOriginReferrerPath(): string | null {
+  if (typeof window === 'undefined') return null;
+  const ref = (document.referrer || '').trim();
+  if (!ref || !ref.startsWith(window.location.origin)) return null;
+  try {
+    const u = new URL(ref);
+    if (u.pathname.startsWith('/cart/add/')) return null;
+    return `${u.pathname}${u.search}${u.hash}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Đóng trang /cart/add → quay lại khung chat NanoAI trên shop.
+ * Ưu tiên history.back() nếu mở cùng tab từ trang shop; không thì về trang trước + mở launcher.
+ */
+export function returnToNanoAiChatWidget(): void {
+  if (typeof window === 'undefined') return;
+
+  if (canHistoryBackToShopChat()) {
+    window.history.back();
+    return;
+  }
+
+  const dest = sameOriginReferrerPath() || '/';
+  markOpenNanoAiChatAfterNav();
+  window.location.assign(dest);
+}
+
+/** Thử mở launcher sau hydrate (khi vừa quay từ /cart/add). */
+export function tryOpenNanoAiChatLauncherWithRetry(maxAttempts = 12, intervalMs = 250): () => void {
+  if (typeof window === 'undefined') return () => {};
+  let attempts = 0;
+  const tick = () => {
+    attempts += 1;
+    if (clickNanoAiChatLauncher()) return;
+    if (attempts < maxAttempts) window.setTimeout(tick, intervalMs);
+  };
+  const id = window.setTimeout(tick, 120);
+  return () => window.clearTimeout(id);
+}

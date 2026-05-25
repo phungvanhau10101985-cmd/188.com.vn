@@ -1517,6 +1517,31 @@ def get_product(db: Session, product_id: int):
 def get_product_by_product_id(db: Session, product_id: str):
     return db.query(Product).filter(Product.product_id == product_id).first()
 
+
+def get_product_by_code(db: Session, code: str) -> Optional[Product]:
+    c = (code or "").strip()
+    if not c:
+        return None
+    try:
+        return db.query(Product).filter(sql_func.lower(Product.code) == c.lower()).first()
+    except Exception as e:
+        logger.error(f"Database error get_product_by_code: {str(e)}")
+        return None
+
+
+def resolve_product_by_sku(db: Session, sku: str) -> Optional[Product]:
+    """Tra SP theo product_id, slug hoặc mã code (SKU nội bộ / NanoAI)."""
+    s = (sku or "").strip()
+    if not s:
+        return None
+    product = get_product_by_product_id(db, product_id=s)
+    if product is not None:
+        return product
+    product = get_product_by_slug(db, slug=s)
+    if product is not None:
+        return product
+    return get_product_by_code(db, code=s)
+
 _LISTING_PARSER_AT_NUMERIC_ONLY = re.compile(r"^[AT]\d+$", re.IGNORECASE)
 
 

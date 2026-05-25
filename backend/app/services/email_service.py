@@ -87,8 +87,11 @@ def send_order_email(to_email: str, subject: str, message: str) -> None:
     send_email(to_email, subject, text_body, html_body)
 
 
-def send_order_received_confirmed_email_task(order_id: int) -> None:
-    """Email sau khi khách xác nhận đã nhận hàng — kèm lời nhắc đánh giá nhẹ nhàng."""
+def send_order_delivered_email_task(order_id: int, *, source: str = "customer_confirm") -> None:
+    """
+    Một email duy nhất: thông báo giao hàng + mời đánh giá.
+    source: customer_confirm (khách bấm xác nhận) | ems_auto (EMS báo giao thành công)
+    """
     from sqlalchemy.orm import joinedload
 
     from app.db.session import SessionLocal
@@ -103,23 +106,32 @@ def send_order_received_confirmed_email_task(order_id: int) -> None:
             .first()
         )
         if not order:
-            logger.warning("order_received_confirmed_email skip: order not found id=%s", order_id)
+            logger.warning("order_delivered_email skip: order not found id=%s", order_id)
             return
 
         customer_to = (order.customer_email or "").strip()
         if not customer_to and order.user and (order.user.email or "").strip():
             customer_to = (order.user.email or "").strip()
         if not customer_to:
-            logger.info("order_received_confirmed_email skip: no email order_id=%s", order_id)
+            logger.info("order_delivered_email skip: no email order_id=%s", order_id)
             return
 
         name = (order.customer_name or "Quý khách").strip()
         code = order.order_code or f"#{order.id}"
+        tracking = (order.tracking_number or "").strip()
+        provider = (order.shipping_provider or "").strip()
         fe = (settings.FRONTEND_BASE_URL or "").strip().rstrip("/")
         review_url = f"{fe}/account/orders/{order.id}/review" if fe else ""
         detail_url = f"{fe}/account/orders/{order.id}" if fe else ""
+        tracking_url = f"{fe}/account/orders/{order.id}/tracking" if fe else ""
 
-        subject = f"Đã xác nhận nhận hàng {code} · 188.com.vn"
+        if source == "ems_auto":
+            intro = "Đơn hàng của bạn đã được EMS giao thành công."
+            subject = f"Đã giao hàng thành công {code} · 188.com.vn"
+        else:
+            intro = "Cảm ơn bạn đã xác nhận nhận hàng."
+            subject = f"Đã giao hàng {code} · 188.com.vn"
+
         if settings.EMAIL_SUBJECT_PREFIX:
             subject = f"{settings.EMAIL_SUBJECT_PREFIX} {subject}"
 
@@ -132,19 +144,40 @@ def send_order_received_confirmed_email_task(order_id: int) -> None:
         text_lines = [
             f"Kính gửi {name},",
             "",
-            "Cảm ơn bạn đã xác nhận nhận hàng.",
+            intro,
             f"Mã đơn hàng: {code}",
-            "",
-            review_hint,
-            *(["", f"Đánh giá đơn hàng: {review_url}"] if review_url else []),
-            "",
-            "Nếu có vấn đề cần hỗ trợ, vui lòng liên hệ 188.com.vn.",
-            *(["", f"Xem chi tiết đơn: {detail_url}"] if detail_url else []),
-            "",
-            "Trân trọng,",
-            "188.com.vn",
         ]
+        if tracking:
+            ship_line = f"Mã vận đơn: {tracking}"
+            if provider:
+                ship_line += f" ({provider})"
+            text_lines.append(ship_line)
+        text_lines.extend(
+            [
+                "",
+                review_hint,
+                *(["", f"Đánh giá đơn hàng: {review_url}"] if review_url else []),
+                "",
+                "Nếu có vấn đề cần hỗ trợ, vui lòng liên hệ 188.com.vn.",
+                *(["", f"Xem chi tiết đơn: {detail_url}"] if detail_url else []),
+                *(
+                    ["", f"Theo dõi vận chuyển: {tracking_url}"]
+                    if tracking_url and tracking
+                    else []
+                ),
+                "",
+                "Trân trọng,",
+                "188.com.vn",
+            ]
+        )
         text_body = "\n".join(text_lines)
+
+        tracking_html = ""
+        if tracking:
+            tracking_html = f"<p>Mã vận đơn: <strong>{tracking}</strong>"
+            if provider:
+                tracking_html += f" ({provider})"
+            tracking_html += "</p>"
 
         review_html = (
             f'<p><a href="{review_url}">Đánh giá đơn hàng</a></p>' if review_url else ""
@@ -152,23 +185,40 @@ def send_order_received_confirmed_email_task(order_id: int) -> None:
         detail_html = (
             f'<p><a href="{detail_url}">Xem chi tiết đơn hàng</a></p>' if detail_url else ""
         )
+        track_link_html = (
+            f'<p><a href="{tracking_url}">Theo dõi vận chuyển</a></p>'
+            if tracking_url and tracking
+            else ""
+        )
         html_body = (
             f"<p>Kính gửi <strong>{name}</strong>,</p>"
-            "<p>Cảm ơn bạn đã <strong>xác nhận nhận hàng</strong>.</p>"
+            f"<p>{intro}</p>"
             f"<p>Mã đơn: <strong>{code}</strong></p>"
+            f"{tracking_html}"
             f"<p>{review_hint}</p>"
             f"{review_html}"
             "<p>Nếu có vấn đề cần hỗ trợ, vui lòng liên hệ <strong>188.com.vn</strong>.</p>"
             f"{detail_html}"
+            f"{track_link_html}"
             "<p>Trân trọng,<br>188.com.vn</p>"
         )
 
         send_email(customer_to, subject, text_body, html_body)
-        logger.info("order_received_confirmed_email sent order_id=%s to=%s", order_id, customer_to)
+        logger.info(
+            "order_delivered_email sent order_id=%s to=%s source=%s",
+            order_id,
+            customer_to,
+            source,
+        )
     except Exception:
-        logger.exception("order_received_confirmed_email failed order_id=%s", order_id)
+        logger.exception("order_delivered_email failed order_id=%s source=%s", order_id, source)
     finally:
         db.close()
+
+
+def send_order_received_confirmed_email_task(order_id: int) -> None:
+    """Alias — gửi email giao hàng + nhắc đánh giá sau khi khách xác nhận nhận hàng."""
+    send_order_delivered_email_task(order_id, source="customer_confirm")
 
 
 def send_order_shipper_confirmed_email_task(order_id: int) -> None:

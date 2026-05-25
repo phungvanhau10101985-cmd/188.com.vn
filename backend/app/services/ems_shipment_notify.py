@@ -162,7 +162,11 @@ def _resolve_notification(before: dict[str, Any], after: dict[str, Any]) -> Opti
                 priority=90,
                 event_key="order_delivered",
                 title="Đã giao hàng thành công",
-                content=f"Đơn {code} đã được giao thành công. Bạn có thể xác nhận đã nhận hàng trên trang đơn hàng.",
+                content=(
+                    f"Đơn {code} đã được giao thành công. "
+                    "Nếu hài lòng, mong bạn đánh giá sản phẩm — "
+                    "ý kiến của bạn giúp 188.com.vn cải thiện dịch vụ."
+                ),
             )
         )
 
@@ -208,14 +212,18 @@ def maybe_notify_customer_after_ems_refresh(
                 type="order",
             ),
         )
-        tracking_url = f"/account/orders/{order_id}/tracking"
+        notify_url = (
+            f"/account/orders/{order_id}/review"
+            if event.event_key == "order_delivered"
+            else f"/account/orders/{order_id}/tracking"
+        )
         try:
             push_service.send_push_to_user(
                 db,
                 order.user_id,
                 event.title,
                 event.content[:500],
-                url=tracking_url,
+                url=notify_url,
                 notification_id=notif.id,
             )
         except Exception:
@@ -225,7 +233,12 @@ def maybe_notify_customer_after_ems_refresh(
         logger.exception("ems_shipment in-app notify failed order_id=%s event=%s", order_id, event.event_key)
         return False
 
-    send_ems_status_notification_email_task(order_id, event.title, event.content)
+    if event.event_key == "order_delivered":
+        from app.services.email_service import send_order_delivered_email_task
+
+        send_order_delivered_email_task(order_id, source="ems_auto")
+    else:
+        send_ems_status_notification_email_task(order_id, event.title, event.content)
     logger.info(
         "ems_shipment notify order_id=%s user_id=%s event=%s",
         order_id,
