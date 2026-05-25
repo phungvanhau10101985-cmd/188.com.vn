@@ -832,15 +832,32 @@ async def admin_import_cod_settlement_excel(
     return payload
 
 
-@router.get(
-    "/admin/shipping/operations-stats",
-    response_model=shipment_schemas.EmsShippingOperationsStatsResponse,
-)
+@router.get("/admin/shipping/operations-stats")
 def admin_shipping_operations_stats(
+    view: str | None = None,
+    granularity: str = "month",
+    limit: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    preset: str | None = None,
+    year: int | None = None,
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("orders")),
 ):
-    """Thống kê vận hành: đang giao, COD đã/chưa trả, đơn hoàn."""
+    """Thống kê vận hành hoặc timeline (`view=timeline`)."""
+    if (view or "").strip().lower() == "timeline":
+        try:
+            return shipping_ops_svc.get_shipping_timeline_stats(
+                db,
+                granularity=granularity,
+                limit=limit,
+                date_from=date_from,
+                date_to=date_to,
+                preset=preset,
+                year=year,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     return shipping_ops_svc.get_shipping_operations_stats(db)
 
 
@@ -851,6 +868,10 @@ def admin_shipping_operations_stats(
 def admin_shipping_timeline_stats(
     granularity: str = "month",
     limit: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    preset: str | None = None,
+    year: int | None = None,
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("orders")),
 ):
@@ -860,6 +881,10 @@ def admin_shipping_timeline_stats(
             db,
             granularity=granularity,
             limit=limit,
+            date_from=date_from,
+            date_to=date_to,
+            preset=preset,
+            year=year,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

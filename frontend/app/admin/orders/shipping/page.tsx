@@ -16,6 +16,8 @@ import {
   type EmsShippingImportRow,
   type EmsShippingOperationsStats,
   type EmsShippingTimelineGranularity,
+  type EmsShippingTimelineParams,
+  type EmsShippingTimelinePreset,
   type EmsShippingTimelineStats,
   type EmsTrackingRefreshJob,
   type OpsBucketKey,
@@ -32,6 +34,48 @@ const TIMELINE_GRANULARITY_LABELS: Record<EmsShippingTimelineGranularity, string
   week: 'Tuần',
   day: 'Ngày',
 };
+
+type TimelineFilterState = {
+  dateFrom: string;
+  dateTo: string;
+  year: string;
+  preset: EmsShippingTimelinePreset | null;
+};
+
+const EMPTY_TIMELINE_FILTER: TimelineFilterState = {
+  dateFrom: '',
+  dateTo: '',
+  year: '',
+  preset: null,
+};
+
+function buildTimelineApiParams(
+  granularity: EmsShippingTimelineGranularity,
+  filter: TimelineFilterState,
+): EmsShippingTimelineParams {
+  const params: EmsShippingTimelineParams = { granularity };
+  if (filter.preset) {
+    params.preset = filter.preset;
+    return params;
+  }
+  if (granularity === 'year' && filter.year) {
+    params.year = Number(filter.year);
+    return params;
+  }
+  if (filter.dateFrom) params.date_from = filter.dateFrom;
+  if (filter.dateTo) params.date_to = filter.dateTo;
+  return params;
+}
+
+function monthInputToDateRange(value: string): { from: string; to: string } | null {
+  if (!/^\d{4}-\d{2}$/.test(value)) return null;
+  const [year, month] = value.split('-').map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  return {
+    from: `${value}-01`,
+    to: `${value}-${String(lastDay).padStart(2, '0')}`,
+  };
+}
 
 function formatStaleSeconds(seconds?: number | null): string {
   if (seconds == null || seconds < 0) return '—';
@@ -427,8 +471,11 @@ export default function AdminShippingPage() {
   const [opsStats, setOpsStats] = useState<EmsShippingOperationsStats | null>(null);
   const [opsStatsLoading, setOpsStatsLoading] = useState(true);
   const [timelineGranularity, setTimelineGranularity] = useState<EmsShippingTimelineGranularity>('month');
+  const [timelineFilter, setTimelineFilter] = useState<TimelineFilterState>(EMPTY_TIMELINE_FILTER);
+  const [timelineMonthPick, setTimelineMonthPick] = useState('');
   const [timelineStats, setTimelineStats] = useState<EmsShippingTimelineStats | null>(null);
   const [timelineLoading, setTimelineLoading] = useState(true);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
   const [activeOpsBucket, setActiveOpsBucket] = useState<OpsBucketKey | null>(null);
   const [opsBucketLabel, setOpsBucketLabel] = useState('');
   const [opsBucketRows, setOpsBucketRows] = useState<EmsShippingImportRow[]>([]);
@@ -504,39 +551,44 @@ export default function AdminShippingPage() {
     }
   }, []);
 
-  const loadOpsStats = useCallback(async () => {
-    setOpsStatsLoading(true);
-    setTimelineLoading(true);
-    try {
-      const [ops, timeline] = await Promise.all([
-        adminShippingAPI.getOperationsStats(),
-        adminShippingAPI.getTimelineStats({ granularity: timelineGranularity }),
-      ]);
-      setOpsStats(ops);
-      setTimelineStats(timeline);
-    } catch {
-      setOpsStats(null);
-      setTimelineStats(null);
-    } finally {
-      setOpsStatsLoading(false);
-      setTimelineLoading(false);
-    }
-  }, [timelineGranularity]);
-
   const loadTimelineStats = useCallback(
-    async (granularity: EmsShippingTimelineGranularity) => {
+    async (
+      granularity: EmsShippingTimelineGranularity,
+      filter: TimelineFilterState = timelineFilter,
+    ) => {
       setTimelineLoading(true);
+      setTimelineError(null);
       try {
-        const data = await adminShippingAPI.getTimelineStats({ granularity });
+        const data = await adminShippingAPI.getTimelineStats(buildTimelineApiParams(granularity, filter));
         setTimelineStats(data);
-      } catch {
-        setTimelineStats(null);
+      } catch (err) {
+        setTimelineError(err instanceof Error ? err.message : 'Không tải được thống kê theo thời gian');
       } finally {
         setTimelineLoading(false);
       }
     },
-    [],
+    [timelineFilter],
   );
+
+  const loadOpsStats = useCallback(async () => {
+    setOpsStatsLoading(true);
+    setTimelineLoading(true);
+    setTimelineError(null);
+    try {
+      const [ops, timeline] = await Promise.all([
+        adminShippingAPI.getOperationsStats(),
+        adminShippingAPI.getTimelineStats(buildTimelineApiParams(timelineGranularity, timelineFilter)),
+      ]);
+      setOpsStats(ops);
+      setTimelineStats(timeline);
+    } catch (err) {
+      setOpsStats(null);
+      setTimelineError(err instanceof Error ? err.message : 'Không tải được thống kê theo thời gian');
+    } finally {
+      setOpsStatsLoading(false);
+      setTimelineLoading(false);
+    }
+  }, [timelineFilter, timelineGranularity]);
 
   const loadOpsBucketRecords = useCallback(async (bucket: OpsBucketKey, page: number) => {
     setOpsBucketLoading(true);
@@ -700,11 +752,53 @@ export default function AdminShippingPage() {
 
   const selectTimelineGranularity = useCallback(
     (granularity: EmsShippingTimelineGranularity) => {
+      const nextFilter = { ...EMPTY_TIMELINE_FILTER };
       setTimelineGranularity(granularity);
-      void loadTimelineStats(granularity);
+      setTimelineFilter(nextFilter);
+      setTimelineMonthPick('');
+      void loadTimelineStats(granularity, nextFilter);
     },
     [loadTimelineStats],
   );
+
+  const applyTimelinePreset = useCallback(
+    (preset: EmsShippingTimelinePreset) => {
+      const nextFilter: TimelineFilterState = { ...EMPTY_TIMELINE_FILTER, preset };
+      setTimelineFilter(nextFilter);
+      setTimelineMonthPick('');
+      void loadTimelineStats(timelineGranularity, nextFilter);
+    },
+    [loadTimelineStats, timelineGranularity],
+  );
+
+  const applyTimelineDateRange = useCallback(
+    (dateFrom: string, dateTo: string) => {
+      const nextFilter: TimelineFilterState = {
+        ...EMPTY_TIMELINE_FILTER,
+        dateFrom,
+        dateTo: dateTo || dateFrom,
+      };
+      setTimelineFilter(nextFilter);
+      void loadTimelineStats(timelineGranularity, nextFilter);
+    },
+    [loadTimelineStats, timelineGranularity],
+  );
+
+  const applyTimelineYear = useCallback(
+    (year: string) => {
+      const nextFilter: TimelineFilterState = { ...EMPTY_TIMELINE_FILTER, year };
+      setTimelineFilter(nextFilter);
+      void loadTimelineStats('year', nextFilter);
+    },
+    [loadTimelineStats],
+  );
+
+  const clearTimelineFilter = useCallback(() => {
+    const nextFilter = { ...EMPTY_TIMELINE_FILTER };
+    setTimelineFilter(nextFilter);
+    setTimelineMonthPick('');
+    void loadTimelineStats(timelineGranularity, nextFilter);
+  }, [loadTimelineStats, timelineGranularity]);
 
   const applyFilter = useCallback((next: FilterKey) => {
     setFilter(next);
@@ -1296,6 +1390,194 @@ export default function AdminShippingPage() {
           </div>
         </div>
 
+        <div className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-100 bg-gray-50/80 px-4 py-3">
+          {timelineGranularity === 'day' ? (
+            <>
+              <label className="text-sm text-gray-700">
+                Từ ngày
+                <input
+                  type="date"
+                  value={timelineFilter.dateFrom}
+                  onChange={(e) => setTimelineFilter((prev) => ({ ...prev, dateFrom: e.target.value, preset: null }))}
+                  className="mt-1 block rounded-lg border border-gray-200 px-3 py-1.5 text-sm"
+                />
+              </label>
+              <label className="text-sm text-gray-700">
+                Đến ngày
+                <input
+                  type="date"
+                  value={timelineFilter.dateTo}
+                  onChange={(e) => setTimelineFilter((prev) => ({ ...prev, dateTo: e.target.value, preset: null }))}
+                  className="mt-1 block rounded-lg border border-gray-200 px-3 py-1.5 text-sm"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => applyTimelineDateRange(timelineFilter.dateFrom, timelineFilter.dateTo || timelineFilter.dateFrom)}
+                disabled={!timelineFilter.dateFrom || timelineLoading}
+                className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Xem theo ngày
+              </button>
+            </>
+          ) : null}
+
+          {timelineGranularity === 'week' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => applyTimelinePreset('this_week')}
+                className={`rounded-lg px-3 py-2 text-sm font-medium border ${
+                  timelineFilter.preset === 'this_week'
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                Tuần này
+              </button>
+              <button
+                type="button"
+                onClick={() => applyTimelinePreset('last_week')}
+                className={`rounded-lg px-3 py-2 text-sm font-medium border ${
+                  timelineFilter.preset === 'last_week'
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                Tuần trước
+              </button>
+              <label className="text-sm text-gray-700">
+                Từ
+                <input
+                  type="date"
+                  value={timelineFilter.dateFrom}
+                  onChange={(e) => setTimelineFilter((prev) => ({ ...prev, dateFrom: e.target.value, preset: null }))}
+                  className="mt-1 block rounded-lg border border-gray-200 px-3 py-1.5 text-sm"
+                />
+              </label>
+              <label className="text-sm text-gray-700">
+                Đến
+                <input
+                  type="date"
+                  value={timelineFilter.dateTo}
+                  onChange={(e) => setTimelineFilter((prev) => ({ ...prev, dateTo: e.target.value, preset: null }))}
+                  className="mt-1 block rounded-lg border border-gray-200 px-3 py-1.5 text-sm"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => applyTimelineDateRange(timelineFilter.dateFrom, timelineFilter.dateTo)}
+                disabled={!timelineFilter.dateFrom || !timelineFilter.dateTo || timelineLoading}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Áp dụng khoảng
+              </button>
+            </>
+          ) : null}
+
+          {timelineGranularity === 'month' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => applyTimelinePreset('this_month')}
+                className={`rounded-lg px-3 py-2 text-sm font-medium border ${
+                  timelineFilter.preset === 'this_month'
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                Tháng này
+              </button>
+              <button
+                type="button"
+                onClick={() => applyTimelinePreset('last_month')}
+                className={`rounded-lg px-3 py-2 text-sm font-medium border ${
+                  timelineFilter.preset === 'last_month'
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                Tháng trước
+              </button>
+              <label className="text-sm text-gray-700">
+                Chọn tháng
+                <input
+                  type="month"
+                  value={timelineMonthPick}
+                  onChange={(e) => setTimelineMonthPick(e.target.value)}
+                  className="mt-1 block rounded-lg border border-gray-200 px-3 py-1.5 text-sm"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  const range = monthInputToDateRange(timelineMonthPick);
+                  if (!range) return;
+                  applyTimelineDateRange(range.from, range.to);
+                }}
+                disabled={!timelineMonthPick || timelineLoading}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Xem tháng
+              </button>
+            </>
+          ) : null}
+
+          {timelineGranularity === 'year' ? (
+            <label className="text-sm text-gray-700">
+              Chọn năm
+              <select
+                value={timelineFilter.year}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (!value) {
+                    clearTimelineFilter();
+                    return;
+                  }
+                  applyTimelineYear(value);
+                }}
+                className="mt-1 block min-w-[140px] rounded-lg border border-gray-200 px-3 py-1.5 text-sm bg-white"
+              >
+                <option value="">Tất cả các năm</option>
+                {(timelineStats?.available_years ?? []).map((y) => (
+                  <option key={y} value={String(y)}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          {timelineFilter.preset || timelineFilter.dateFrom || timelineFilter.dateTo || timelineFilter.year ? (
+            <button
+              type="button"
+              onClick={clearTimelineFilter}
+              className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:underline"
+            >
+              Xóa lọc
+            </button>
+          ) : null}
+        </div>
+
+        {timelineStats?.filter_label ? (
+          <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+            Đang lọc: <strong>{timelineStats.filter_label}</strong>
+          </p>
+        ) : null}
+
+        {timelineError ? (
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+            {timelineError}{' '}
+            <button
+              type="button"
+              onClick={() => void loadTimelineStats(timelineGranularity)}
+              className="underline font-medium"
+            >
+              Thử lại
+            </button>
+          </div>
+        ) : null}
+
         {timelineLoading && !timelineStats ? (
           <p className="text-sm text-gray-500 py-4 text-center">Đang tải thống kê theo thời gian…</p>
         ) : timelineStats?.items.length ? (
@@ -1392,7 +1674,11 @@ export default function AdminShippingPage() {
             </p>
           </div>
         ) : (
-          <p className="text-sm text-gray-500 py-4 text-center">Chưa có dữ liệu vận đơn để thống kê.</p>
+          <p className="text-sm text-gray-500 py-4 text-center">
+            {timelineStats?.filter_label
+              ? 'Không có vận đơn nào trong khoảng thời gian đã chọn.'
+              : 'Chưa có dữ liệu vận đơn để thống kê.'}
+          </p>
         )}
       </section>
 

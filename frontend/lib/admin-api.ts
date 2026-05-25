@@ -2748,14 +2748,24 @@ export const adminShippingAPI = {
   getOperationsStats: () =>
     fetchAdmin<EmsShippingOperationsStats>('/orders/admin/shipping/operations-stats'),
 
-  getTimelineStats: (params: { granularity?: EmsShippingTimelineGranularity; limit?: number } = {}) => {
+  getTimelineStats: async (params: EmsShippingTimelineParams = {}) => {
     const qs = new URLSearchParams();
+    qs.set('view', 'timeline');
     if (params.granularity) qs.set('granularity', params.granularity);
     if (params.limit != null) qs.set('limit', String(params.limit));
-    const query = qs.toString();
-    return fetchAdmin<EmsShippingTimelineStats>(
-      `/orders/admin/shipping/operations-stats/timeline${query ? `?${query}` : ''}`,
+    if (params.date_from) qs.set('date_from', params.date_from);
+    if (params.date_to) qs.set('date_to', params.date_to);
+    if (params.preset) qs.set('preset', params.preset);
+    if (params.year != null) qs.set('year', String(params.year));
+    const data = await fetchAdmin<EmsShippingTimelineStats>(
+      `/orders/admin/shipping/operations-stats?${qs.toString()}`,
     );
+    if (!Array.isArray(data.items) || typeof data.granularity !== 'string') {
+      throw new Error(
+        'Backend chưa cập nhật API thống kê timeline. Restart FastAPI (port 8001) rồi thử lại.',
+      );
+    }
+    return data;
   },
 
   listOperationsRecords: (params: { bucket: string; skip?: number; limit?: number }) => {
@@ -2855,6 +2865,17 @@ export interface EmsShippingOperationsStats {
 
 export type EmsShippingTimelineGranularity = 'year' | 'month' | 'week' | 'day';
 
+export type EmsShippingTimelinePreset = 'this_week' | 'last_week' | 'this_month' | 'last_month';
+
+export interface EmsShippingTimelineParams {
+  granularity?: EmsShippingTimelineGranularity;
+  limit?: number;
+  date_from?: string;
+  date_to?: string;
+  preset?: EmsShippingTimelinePreset;
+  year?: number;
+}
+
 export interface EmsShippingTimelineItem {
   period_key: string;
   period_label: string;
@@ -2875,6 +2896,12 @@ export interface EmsShippingTimelineStats {
   timezone: string;
   date_field: string;
   limit: number;
+  filter_from?: string | null;
+  filter_to?: string | null;
+  filter_label?: string | null;
+  preset?: string | null;
+  year?: number | null;
+  available_years: number[];
   items: EmsShippingTimelineItem[];
   totals: Pick<
     EmsShippingTimelineItem,

@@ -207,6 +207,94 @@ def _to_vn_datetime(value: datetime | None) -> datetime | None:
     return value.astimezone(_VN_TZ)
 
 
+def _vn_today() -> date:
+    return datetime.now(_VN_TZ).date()
+
+
+def _parse_iso_date(value: str | None) -> date | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError as exc:
+        raise ValueError(f"Ngày không hợp lệ: {value}") from exc
+
+
+def _month_bounds(year: int, month: int) -> tuple[date, date]:
+    start = date(year, month, 1)
+    if month == 12:
+        end = date(year, 12, 31)
+    else:
+        end = date(year, month + 1, 1) - timedelta(days=1)
+    return start, end
+
+
+_TIMELINE_PRESETS = frozenset({"this_week", "last_week", "this_month", "last_month"})
+
+
+def _resolve_timeline_filter(
+    *,
+    preset: str | None = None,
+    year: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> tuple[date | None, date | None, str | None]:
+    key = (preset or "").strip().lower()
+    if key:
+        if key not in _TIMELINE_PRESETS:
+            raise ValueError("preset phải là this_week, last_week, this_month hoặc last_month.")
+        today = _vn_today()
+        if key == "this_week":
+            start = today - timedelta(days=today.weekday())
+            end = start + timedelta(days=6)
+            return start, end, f"Tuần này ({start.strftime('%d/%m')} – {end.strftime('%d/%m/%Y')})"
+        if key == "last_week":
+            this_monday = today - timedelta(days=today.weekday())
+            start = this_monday - timedelta(days=7)
+            end = start + timedelta(days=6)
+            return start, end, f"Tuần trước ({start.strftime('%d/%m')} – {end.strftime('%d/%m/%Y')})"
+        if key == "this_month":
+            start, end = _month_bounds(today.year, today.month)
+            return start, end, f"Tháng này ({today.month:02d}/{today.year})"
+        prev_year = today.year - 1 if today.month == 1 else today.year
+        prev_month = 12 if today.month == 1 else today.month - 1
+        start, end = _month_bounds(prev_year, prev_month)
+        return start, end, f"Tháng trước ({prev_month:02d}/{prev_year})"
+
+    if year is not None:
+        y = int(year)
+        if y < 1970 or y > 2100:
+            raise ValueError("Năm không hợp lệ.")
+        start = date(y, 1, 1)
+        end = date(y, 12, 31)
+        return start, end, str(y)
+
+    parsed_from = _parse_iso_date(date_from) if date_from else None
+    parsed_to = _parse_iso_date(date_to) if date_to else None
+    if parsed_from or parsed_to:
+        start = parsed_from or parsed_to
+        end = parsed_to or parsed_from
+        assert start is not None and end is not None
+        if start > end:
+            start, end = end, start
+        if start == end:
+            return start, end, start.strftime("%d/%m/%Y")
+        return start, end, f"{start.strftime('%d/%m/%Y')} – {end.strftime('%d/%m/%Y')}"
+
+    return None, None, None
+
+
+def _record_import_date(record: EmsShippingRecord) -> date | None:
+    local_dt = _to_vn_datetime(record.created_at or record.updated_at)
+    return local_dt.date() if local_dt else None
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(_VN_TZ)
+
+
 def _timeline_period_key(local_dt: datetime, granularity: TimelineGranularity) -> str:
     if granularity == "year":
         return f"{local_dt.year:04d}"
@@ -292,19 +380,40 @@ def get_shipping_timeline_stats(
     *,
     granularity: str = "month",
     limit: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    preset: str | None = None,
+    year: int | None = None,
 ) -> dict[str, Any]:
     """Thống kê vận đơn EMS theo thời gian import (created_at, múi giờ VN)."""
     key = (granularity or "month").strip().lower()
     if key not in _TIMELINE_GRANULARITIES:
         raise ValueError("granularity phải là year, month, week hoặc day.")
 
+    filter_start, filter_end, filter_label = _resolve_timeline_filter(
+        preset=preset,
+        year=year,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
     max_items = limit if limit is not None else _TIMELINE_DEFAULT_LIMITS[key]
     max_items = max(1, min(int(max_items), 200))
 
     records = db.query(EmsShippingRecord).order_by(EmsShippingRecord.created_at.desc()).all()
+    available_years: set[int] = set()
     grouped: dict[str, dict[str, Any]] = {}
 
     for record in records:
+        rec_date = _record_import_date(record)
+        if rec_date is None:
+            continue
+        available_years.add(rec_date.year)
+        if filter_start and rec_date < filter_start:
+            continue
+        if filter_end and rec_date > filter_end:
+            continue
+
         local_dt = _to_vn_datetime(record.created_at or record.updated_at)
         if local_dt is None:
             continue
@@ -336,6 +445,12 @@ def get_shipping_timeline_stats(
         "timezone": "Asia/Ho_Chi_Minh",
         "date_field": "created_at",
         "limit": max_items,
+        "filter_from": filter_start.isoformat() if filter_start else None,
+        "filter_to": filter_end.isoformat() if filter_end else None,
+        "filter_label": filter_label,
+        "preset": (preset or "").strip().lower() or None,
+        "year": int(year) if year is not None else None,
+        "available_years": sorted(available_years, reverse=True),
         "items": items,
         "totals": totals,
     }
