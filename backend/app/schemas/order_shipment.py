@@ -89,6 +89,41 @@ class EmsShippingOperationsStatsResponse(BaseModel):
     shipping_cod_unpaid_count: int = 0
 
 
+class EmsShippingTimelineItemResponse(BaseModel):
+    period_key: str
+    period_label: str
+    period_start: str
+    period_end: str
+    total: int = 0
+    in_transit_count: int = 0
+    delivered_count: int = 0
+    returned_count: int = 0
+    pending_status_count: int = 0
+    total_with_cod: int = 0
+    cod_paid_count: int = 0
+    total_cod_amount: int = 0
+
+
+class EmsShippingTimelineTotalsResponse(BaseModel):
+    total: int = 0
+    in_transit_count: int = 0
+    delivered_count: int = 0
+    returned_count: int = 0
+    pending_status_count: int = 0
+    total_with_cod: int = 0
+    cod_paid_count: int = 0
+    total_cod_amount: int = 0
+
+
+class EmsShippingTimelineStatsResponse(BaseModel):
+    granularity: str
+    timezone: str = "Asia/Ho_Chi_Minh"
+    date_field: str = "created_at"
+    limit: int = 36
+    items: List[EmsShippingTimelineItemResponse] = []
+    totals: EmsShippingTimelineTotalsResponse = Field(default_factory=EmsShippingTimelineTotalsResponse)
+
+
 class EmsShippingDeleteRequest(BaseModel):
     ids: List[int] = Field(..., min_length=1)
 

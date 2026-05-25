@@ -67,6 +67,7 @@ _EMS_EXPORT_DEFAULTS: dict[str, int] = {
 def _norm_header(value: Any) -> str:
     text = unicodedata.normalize("NFD", str(value or "").strip())
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    text = text.replace("đ", "d").replace("Đ", "D")
     text = text.upper()
     return re.sub(r"\s+", "_", text)
 
@@ -812,6 +813,15 @@ def _record_to_dict(record: EmsShippingRecord) -> dict[str, Any]:
     }
 
 
+def _result_has_ems_tracking_payload(result: dict[str, Any]) -> bool:
+    """True khi đã tra EMS thật (không phải import nhanh chỉ lưu Excel)."""
+    return bool(
+        (result.get("ems_tracking_code") or "").strip()
+        or (result.get("ems_status") or "").strip()
+        or (result.get("ems_phase") or "").strip()
+    )
+
+
 def _upsert_record(
     db: Session,
     result: dict[str, Any],
@@ -836,13 +846,35 @@ def _upsert_record(
     record.order_status = result.get("order_status")
     record.current_step_key = result.get("current_step_key")
     record.tracking_number_saved = result.get("tracking_number_saved")
-    record.ems_tracking_code = result.get("ems_tracking_code")
-    record.ems_reference_code = result.get("ems_reference_code")
-    record.ems_status = result.get("ems_status")
-    record.ems_phase = result.get("ems_phase")
-    record.sync_status = result.get("sync_status") or "pending"
-    record.sync_message = result.get("sync_message")
-    record.ems_error = result.get("ems_error")
+
+    has_ems = _result_has_ems_tracking_payload(result)
+    if created:
+        record.ems_tracking_code = result.get("ems_tracking_code")
+        record.ems_status = result.get("ems_status")
+        record.ems_phase = result.get("ems_phase")
+        record.ems_error = result.get("ems_error")
+        record.sync_status = result.get("sync_status") or "pending"
+        record.sync_message = result.get("sync_message")
+    elif has_ems:
+        tracking = (result.get("ems_tracking_code") or "").strip()
+        if tracking:
+            record.ems_tracking_code = tracking
+        if result.get("ems_status") is not None:
+            record.ems_status = result.get("ems_status")
+        if result.get("ems_phase") is not None:
+            record.ems_phase = result.get("ems_phase")
+        record.ems_error = result.get("ems_error")
+        if result.get("sync_status"):
+            record.sync_status = result.get("sync_status") or "pending"
+        if result.get("sync_message") is not None:
+            record.sync_message = result.get("sync_message")
+    elif not (record.sync_status or "").strip():
+        record.sync_status = result.get("sync_status") or "pending"
+        record.sync_message = result.get("sync_message")
+
+    ems_ref = (result.get("ems_reference_code") or ref or "").strip() or None
+    if ems_ref and (created or has_ems or not (record.ems_reference_code or "").strip()):
+        record.ems_reference_code = ems_ref
     cod = result.get("cod_amount")
     record.cod_amount = int(cod) if cod is not None else None
     settlement = (record.cod_settlement_status or "").strip().lower()

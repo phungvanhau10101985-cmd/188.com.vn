@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
 from sqlalchemy import func
@@ -9,6 +9,16 @@ from sqlalchemy.orm import Session
 from app.models.order import Order, OrderStatus
 from app.models.order_shipment import EmsShippingRecord
 from app.services import affiliate_wallet as affiliate_svc
+
+_VN_TZ = timezone(timedelta(hours=7))
+TimelineGranularity = Literal["year", "month", "week", "day"]
+_TIMELINE_GRANULARITIES = frozenset({"year", "month", "week", "day"})
+_TIMELINE_DEFAULT_LIMITS: dict[str, int] = {
+    "year": 20,
+    "month": 36,
+    "week": 52,
+    "day": 90,
+}
 
 _EMS_DELIVERED_PHASES = frozenset({"delivered", "cod_collected", "cod_settled"})
 _EMS_IN_TRANSIT_PHASES = frozenset({"posted", "in_transit", "out_for_delivery"})
@@ -186,6 +196,148 @@ def get_shipping_operations_stats(db: Session) -> dict[str, Any]:
         "cod_success_paid_count": cod_counts["paid"],
         "cod_success_paid_total": cod_paid_total,
         "shipping_cod_unpaid_count": cod_counts["in_transit_unpaid"],
+    }
+
+
+def _to_vn_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(_VN_TZ)
+
+
+def _timeline_period_key(local_dt: datetime, granularity: TimelineGranularity) -> str:
+    if granularity == "year":
+        return f"{local_dt.year:04d}"
+    if granularity == "month":
+        return f"{local_dt.year:04d}-{local_dt.month:02d}"
+    if granularity == "week":
+        iso = local_dt.isocalendar()
+        return f"{iso.year:04d}-W{iso.week:02d}"
+    return local_dt.date().isoformat()
+
+
+def _timeline_period_bounds(
+    period_key: str,
+    granularity: TimelineGranularity,
+) -> tuple[date, date, str]:
+    if granularity == "year":
+        year = int(period_key)
+        start = date(year, 1, 1)
+        end = date(year, 12, 31)
+        return start, end, str(year)
+
+    if granularity == "month":
+        year_s, month_s = period_key.split("-", 1)
+        year = int(year_s)
+        month = int(month_s)
+        start = date(year, month, 1)
+        if month == 12:
+            end = date(year, 12, 31)
+        else:
+            end = date(year, month + 1, 1) - timedelta(days=1)
+        return start, end, f"{month:02d}/{year}"
+
+    if granularity == "week":
+        year_s, week_s = period_key.split("-W", 1)
+        year = int(year_s)
+        week = int(week_s)
+        start = date.fromisocalendar(year, week, 1)
+        end = date.fromisocalendar(year, week, 7)
+        return start, end, f"Tuần {week:02d}/{year}"
+
+    day = date.fromisoformat(period_key)
+    return day, day, day.strftime("%d/%m/%Y")
+
+
+def _empty_timeline_bucket() -> dict[str, Any]:
+    return {
+        "total": 0,
+        "in_transit_count": 0,
+        "delivered_count": 0,
+        "returned_count": 0,
+        "pending_status_count": 0,
+        "total_with_cod": 0,
+        "cod_paid_count": 0,
+        "total_cod_amount": 0,
+    }
+
+
+def _accumulate_timeline_bucket(bucket: dict[str, Any], record: EmsShippingRecord) -> None:
+    delivery = _delivery_bucket(record)
+    bucket["total"] += 1
+    delivery_field = {
+        "returned": "returned_count",
+        "delivered": "delivered_count",
+        "in_transit": "in_transit_count",
+        "pending": "pending_status_count",
+    }[delivery]
+    bucket[delivery_field] += 1
+
+    cod_bucket = _cod_bucket(record, delivery)
+    if cod_bucket is None:
+        return
+    bucket["total_with_cod"] += 1
+    if cod_bucket == "paid":
+        bucket["cod_paid_count"] += 1
+    try:
+        bucket["total_cod_amount"] += int(record.cod_amount or 0)
+    except (TypeError, ValueError):
+        pass
+
+
+def get_shipping_timeline_stats(
+    db: Session,
+    *,
+    granularity: str = "month",
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Thống kê vận đơn EMS theo thời gian import (created_at, múi giờ VN)."""
+    key = (granularity or "month").strip().lower()
+    if key not in _TIMELINE_GRANULARITIES:
+        raise ValueError("granularity phải là year, month, week hoặc day.")
+
+    max_items = limit if limit is not None else _TIMELINE_DEFAULT_LIMITS[key]
+    max_items = max(1, min(int(max_items), 200))
+
+    records = db.query(EmsShippingRecord).order_by(EmsShippingRecord.created_at.desc()).all()
+    grouped: dict[str, dict[str, Any]] = {}
+
+    for record in records:
+        local_dt = _to_vn_datetime(record.created_at or record.updated_at)
+        if local_dt is None:
+            continue
+        period_key = _timeline_period_key(local_dt, key)  # type: ignore[arg-type]
+        if period_key not in grouped:
+            grouped[period_key] = _empty_timeline_bucket()
+        _accumulate_timeline_bucket(grouped[period_key], record)
+
+    sorted_keys = sorted(grouped.keys(), reverse=True)[:max_items]
+    items: list[dict[str, Any]] = []
+    totals = _empty_timeline_bucket()
+
+    for period_key in sorted_keys:
+        bucket = grouped[period_key]
+        start, end, label = _timeline_period_bounds(period_key, key)  # type: ignore[arg-type]
+        item = {
+            "period_key": period_key,
+            "period_label": label,
+            "period_start": start.isoformat(),
+            "period_end": end.isoformat(),
+            **bucket,
+        }
+        items.append(item)
+        for field in totals:
+            totals[field] += int(bucket.get(field) or 0)
+
+    return {
+        "granularity": key,
+        "timezone": "Asia/Ho_Chi_Minh",
+        "date_field": "created_at",
+        "limit": max_items,
+        "items": items,
+        "totals": totals,
     }
 
 

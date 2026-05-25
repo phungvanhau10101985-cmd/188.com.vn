@@ -15,6 +15,8 @@ import {
   type EmsShippingImportResult,
   type EmsShippingImportRow,
   type EmsShippingOperationsStats,
+  type EmsShippingTimelineGranularity,
+  type EmsShippingTimelineStats,
   type EmsTrackingRefreshJob,
   type OpsBucketKey,
 } from '@/lib/admin-api';
@@ -24,6 +26,12 @@ const EMS_LIST_DEFAULT_PAGE_SIZE = 50;
 const EMS_SEARCH_PREVIEW_LIMIT = 5;
 const OPS_LIST_PAGE_SIZE = 25;
 const EMS_TRACKING_JOB_STORAGE_KEY = 'admin_ems_tracking_job_id';
+const TIMELINE_GRANULARITY_LABELS: Record<EmsShippingTimelineGranularity, string> = {
+  year: 'Năm',
+  month: 'Tháng',
+  week: 'Tuần',
+  day: 'Ngày',
+};
 
 function formatStaleSeconds(seconds?: number | null): string {
   if (seconds == null || seconds < 0) return '—';
@@ -418,6 +426,9 @@ export default function AdminShippingPage() {
   const [emsTableExpanded, setEmsTableExpanded] = useState(true);
   const [opsStats, setOpsStats] = useState<EmsShippingOperationsStats | null>(null);
   const [opsStatsLoading, setOpsStatsLoading] = useState(true);
+  const [timelineGranularity, setTimelineGranularity] = useState<EmsShippingTimelineGranularity>('month');
+  const [timelineStats, setTimelineStats] = useState<EmsShippingTimelineStats | null>(null);
+  const [timelineLoading, setTimelineLoading] = useState(true);
   const [activeOpsBucket, setActiveOpsBucket] = useState<OpsBucketKey | null>(null);
   const [opsBucketLabel, setOpsBucketLabel] = useState('');
   const [opsBucketRows, setOpsBucketRows] = useState<EmsShippingImportRow[]>([]);
@@ -495,15 +506,37 @@ export default function AdminShippingPage() {
 
   const loadOpsStats = useCallback(async () => {
     setOpsStatsLoading(true);
+    setTimelineLoading(true);
     try {
-      const data = await adminShippingAPI.getOperationsStats();
-      setOpsStats(data);
+      const [ops, timeline] = await Promise.all([
+        adminShippingAPI.getOperationsStats(),
+        adminShippingAPI.getTimelineStats({ granularity: timelineGranularity }),
+      ]);
+      setOpsStats(ops);
+      setTimelineStats(timeline);
     } catch {
       setOpsStats(null);
+      setTimelineStats(null);
     } finally {
       setOpsStatsLoading(false);
+      setTimelineLoading(false);
     }
-  }, []);
+  }, [timelineGranularity]);
+
+  const loadTimelineStats = useCallback(
+    async (granularity: EmsShippingTimelineGranularity) => {
+      setTimelineLoading(true);
+      try {
+        const data = await adminShippingAPI.getTimelineStats({ granularity });
+        setTimelineStats(data);
+      } catch {
+        setTimelineStats(null);
+      } finally {
+        setTimelineLoading(false);
+      }
+    },
+    [],
+  );
 
   const loadOpsBucketRecords = useCallback(async (bucket: OpsBucketKey, page: number) => {
     setOpsBucketLoading(true);
@@ -664,6 +697,14 @@ export default function AdminShippingPage() {
     void loadFreightSettlements();
     void loadOpsStats();
   }, [loadRecords, loadCodSettlements, loadFreightSettlements, loadOpsStats]);
+
+  const selectTimelineGranularity = useCallback(
+    (granularity: EmsShippingTimelineGranularity) => {
+      setTimelineGranularity(granularity);
+      void loadTimelineStats(granularity);
+    },
+    [loadTimelineStats],
+  );
 
   const applyFilter = useCallback((next: FilterKey) => {
     setFilter(next);
@@ -1230,10 +1271,137 @@ export default function AdminShippingPage() {
       </section>
 
       <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Theo dõi theo thời gian</h2>
+            <p className="text-sm text-gray-600 mt-1">
+              Thống kê vận đơn EMS theo ngày import vào hệ thống (múi giờ Việt Nam).
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(TIMELINE_GRANULARITY_LABELS) as EmsShippingTimelineGranularity[]).map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => selectTimelineGranularity(key)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium border transition-colors ${
+                  timelineGranularity === key
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                {TIMELINE_GRANULARITY_LABELS[key]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {timelineLoading && !timelineStats ? (
+          <p className="text-sm text-gray-500 py-4 text-center">Đang tải thống kê theo thời gian…</p>
+        ) : timelineStats?.items.length ? (
+          <div className="space-y-3">
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">
+                      {TIMELINE_GRANULARITY_LABELS[timelineStats.granularity]}
+                    </th>
+                    <th className="px-3 py-2 text-right font-medium">Tổng</th>
+                    <th className="px-3 py-2 text-right font-medium">Đang giao</th>
+                    <th className="px-3 py-2 text-right font-medium">Giao OK</th>
+                    <th className="px-3 py-2 text-right font-medium">Hoàn</th>
+                    <th className="px-3 py-2 text-right font-medium">Chưa rõ</th>
+                    <th className="px-3 py-2 text-right font-medium">Có COD</th>
+                    <th className="px-3 py-2 text-right font-medium">COD đã trả</th>
+                    <th className="px-3 py-2 text-right font-medium">Tổng COD</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {timelineStats.items.map((item) => (
+                    <tr key={item.period_key} className="hover:bg-gray-50/80">
+                      <td className="px-3 py-2.5 text-gray-900">
+                        <div className="font-medium">{item.period_label}</div>
+                        {item.period_start !== item.period_end ? (
+                          <div className="text-xs text-gray-500">
+                            {item.period_start.slice(8, 10)}/{item.period_start.slice(5, 7)} –{' '}
+                            {item.period_end.slice(8, 10)}/{item.period_end.slice(5, 7)}/{item.period_end.slice(0, 4)}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-medium">{item.total.toLocaleString('vi-VN')}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-blue-800">
+                        {item.in_transit_count.toLocaleString('vi-VN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-emerald-800">
+                        {item.delivered_count.toLocaleString('vi-VN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-orange-800">
+                        {item.returned_count.toLocaleString('vi-VN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
+                        {item.pending_status_count.toLocaleString('vi-VN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">{item.total_with_cod.toLocaleString('vi-VN')}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">
+                        {item.cod_paid_count.toLocaleString('vi-VN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                        {formatVnd(item.total_cod_amount)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                {timelineStats.totals.total > 0 ? (
+                  <tfoot className="bg-emerald-50/70 text-emerald-950">
+                    <tr>
+                      <td className="px-3 py-2.5 font-semibold">
+                        Tổng ({timelineStats.items.length} kỳ hiển thị)
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                        {timelineStats.totals.total.toLocaleString('vi-VN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                        {timelineStats.totals.in_transit_count.toLocaleString('vi-VN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                        {timelineStats.totals.delivered_count.toLocaleString('vi-VN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                        {timelineStats.totals.returned_count.toLocaleString('vi-VN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                        {timelineStats.totals.pending_status_count.toLocaleString('vi-VN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                        {timelineStats.totals.total_with_cod.toLocaleString('vi-VN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                        {timelineStats.totals.cod_paid_count.toLocaleString('vi-VN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold whitespace-nowrap">
+                        {formatVnd(timelineStats.totals.total_cod_amount)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                ) : null}
+              </table>
+            </div>
+            <p className="text-xs text-gray-500">
+              Hiển thị tối đa {timelineStats.limit} kỳ gần nhất · múi giờ {timelineStats.timezone}
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500 py-4 text-center">Chưa có dữ liệu vận đơn để thống kê.</p>
+        )}
+      </section>
+
+      <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
         <h2 className="text-lg font-semibold text-gray-900">1. Upload file Excel gửi EMS</h2>
         <p className="text-sm text-gray-600">
           File <strong>file gui ems.xlsx</strong>: cột <strong>A</strong> mã vận đơn, <strong>I</strong> mã đơn shop
-          (DHxxx/DCxxx), <strong>G</strong> COD, <strong>D</strong> tên khách. Import lưu ngay; tra EMS chạy{' '}
+          (DHxxx/DCxxx), <strong>G</strong> COD, <strong>D</strong> tên khách. Import lần 2: mã cột A đã có thì{' '}
+          <strong>cập nhật</strong> COD/đơn/tên; mã mới thì <strong>thêm dòng</strong>. Tra EMS chạy{' '}
           <strong>nền trên server</strong> theo thứ tự (progress bar bên dưới). Cron hàng ngày cập nhật đơn đang giao.
         </p>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">

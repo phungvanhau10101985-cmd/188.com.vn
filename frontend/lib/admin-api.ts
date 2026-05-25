@@ -2748,6 +2748,16 @@ export const adminShippingAPI = {
   getOperationsStats: () =>
     fetchAdmin<EmsShippingOperationsStats>('/orders/admin/shipping/operations-stats'),
 
+  getTimelineStats: (params: { granularity?: EmsShippingTimelineGranularity; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.granularity) qs.set('granularity', params.granularity);
+    if (params.limit != null) qs.set('limit', String(params.limit));
+    const query = qs.toString();
+    return fetchAdmin<EmsShippingTimelineStats>(
+      `/orders/admin/shipping/operations-stats/timeline${query ? `?${query}` : ''}`,
+    );
+  },
+
   listOperationsRecords: (params: { bucket: string; skip?: number; limit?: number }) => {
     const qs = new URLSearchParams();
     qs.set('bucket', params.bucket);
@@ -2841,6 +2851,42 @@ export interface EmsShippingOperationsStats {
   cod_success_paid_count: number;
   cod_success_paid_total: number;
   shipping_cod_unpaid_count: number;
+}
+
+export type EmsShippingTimelineGranularity = 'year' | 'month' | 'week' | 'day';
+
+export interface EmsShippingTimelineItem {
+  period_key: string;
+  period_label: string;
+  period_start: string;
+  period_end: string;
+  total: number;
+  in_transit_count: number;
+  delivered_count: number;
+  returned_count: number;
+  pending_status_count: number;
+  total_with_cod: number;
+  cod_paid_count: number;
+  total_cod_amount: number;
+}
+
+export interface EmsShippingTimelineStats {
+  granularity: EmsShippingTimelineGranularity;
+  timezone: string;
+  date_field: string;
+  limit: number;
+  items: EmsShippingTimelineItem[];
+  totals: Pick<
+    EmsShippingTimelineItem,
+    | 'total'
+    | 'in_transit_count'
+    | 'delivered_count'
+    | 'returned_count'
+    | 'pending_status_count'
+    | 'total_with_cod'
+    | 'cod_paid_count'
+    | 'total_cod_amount'
+  >;
 }
 
 export type OpsBucketKey =

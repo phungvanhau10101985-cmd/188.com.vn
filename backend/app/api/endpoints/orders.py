@@ -845,6 +845,27 @@ def admin_shipping_operations_stats(
 
 
 @router.get(
+    "/admin/shipping/operations-stats/timeline",
+    response_model=shipment_schemas.EmsShippingTimelineStatsResponse,
+)
+def admin_shipping_timeline_stats(
+    granularity: str = "month",
+    limit: int | None = None,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Thống kê vận đơn EMS theo năm / tháng / tuần / ngày (theo ngày import)."""
+    try:
+        return shipping_ops_svc.get_shipping_timeline_stats(
+            db,
+            granularity=granularity,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
     "/admin/shipping/operations-stats/records",
     response_model=shipment_schemas.EmsShippingOperationsRecordsResponse,
 )
