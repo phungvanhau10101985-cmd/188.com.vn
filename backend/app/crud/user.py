@@ -6,6 +6,7 @@ AttributeError: module 'app.crud.user' has no attribute 'get_user'
 """
 
 import random
+from collections import defaultdict
 from sqlalchemy.orm import Session
 from sqlalchemy import extract, func, or_
 from datetime import datetime, date
@@ -333,6 +334,127 @@ def get_products_viewed_by_same_age_gender(
     return popular, "popular_fallback"
 
 
+SAME_SHOP_MAX_POOL = 8000
+SAME_SHOP_MAX_PER_SHOP_PER_PAGE = 8
+
+
+def _same_shop_key(product: Product) -> str:
+    return (product.shop_name_chinese or "").strip().lower()
+
+
+def _balance_same_shop_products(
+    candidates: List[Product],
+    recent_product_ids: List[int],
+    product_by_id: Dict[int, Product],
+    subs_lower: set[str],
+    shops_lower: set[str],
+    *,
+    seed: int,
+    page_size: int,
+    offset: int = 0,
+    limit: int = 60,
+    max_per_shop_per_page: int = SAME_SHOP_MAX_PER_SHOP_PER_PAGE,
+    total_items: Optional[int] = None,
+) -> tuple[List[Product], int]:
+    """
+    Round-robin theo shop (trọng số = số lần shop xuất hiện trong 8 SP xem gần nhất).
+    Mỗi trang nội bộ (page_size): tối đa max_per_shop_per_page SP/shop; trong shop ưu tiên cùng subcategory.
+    Pagination: offset/limit áp dụng theo từng trang nội bộ (không gộp nhiều trang vào một response).
+    """
+    shop_seen_order: List[str] = []
+    shop_freq: Dict[str, int] = {}
+    for pid in recent_product_ids:
+        recent = product_by_id.get(pid)
+        if not recent:
+            continue
+        shop_cn = _same_shop_key(recent)
+        if not shop_cn or shop_cn not in shops_lower:
+            continue
+        shop_freq[shop_cn] = shop_freq.get(shop_cn, 0) + 1
+        if shop_cn not in shop_seen_order:
+            shop_seen_order.append(shop_cn)
+
+    weighted_cycle: List[str] = []
+    for shop in shop_seen_order:
+        weighted_cycle.extend([shop] * shop_freq[shop])
+    if not weighted_cycle:
+        return [], 0
+
+    shop_tier_same: Dict[str, List[Product]] = defaultdict(list)
+    shop_tier_only: Dict[str, List[Product]] = defaultdict(list)
+    for product in candidates:
+        shop_cn = _same_shop_key(product)
+        if shop_cn not in shops_lower:
+            continue
+        sub = (product.subcategory or "").strip().lower()
+        if sub and sub in subs_lower:
+            shop_tier_same[shop_cn].append(product)
+        else:
+            shop_tier_only[shop_cn].append(product)
+
+    rng = random.Random(seed)
+    shop_queues: Dict[str, List[Product]] = {}
+    for shop in shop_seen_order:
+        same = shop_tier_same[shop]
+        only = shop_tier_only[shop]
+        rng.shuffle(same)
+        rng.shuffle(only)
+        combined = same + only
+        if combined:
+            shop_queues[shop] = combined
+
+    if not shop_queues:
+        return [], 0
+
+    page_size = max(1, page_size)
+    limit = max(1, limit)
+    offset = max(0, offset)
+    max_per_shop_per_page = max(1, max_per_shop_per_page)
+    start_page = offset // page_size
+
+    pages: List[List[Product]] = []
+    cycle_idx = 0
+
+    while any(shop_queues.values()):
+        page_shop_counts: Dict[str, int] = defaultdict(int)
+        page: List[Product] = []
+        no_progress_cycles = 0
+
+        while len(page) < page_size:
+            if no_progress_cycles >= len(weighted_cycle):
+                break
+
+            shop = weighted_cycle[cycle_idx % len(weighted_cycle)]
+            cycle_idx += 1
+
+            queue = shop_queues.get(shop)
+            if not queue:
+                no_progress_cycles += 1
+                continue
+            if page_shop_counts[shop] >= max_per_shop_per_page:
+                no_progress_cycles += 1
+                continue
+
+            page.append(queue.pop(0))
+            page_shop_counts[shop] += 1
+            no_progress_cycles = 0
+
+        if not page:
+            break
+
+        pages.append(page)
+        if len(pages) >= start_page + 1:
+            break
+
+    if not pages or start_page >= len(pages):
+        return [], total_items if total_items is not None else 0
+
+    slice_start = offset % page_size
+    page_items = pages[start_page]
+    flat_total = total_items if total_items is not None else sum(len(p) for p in pages)
+    return page_items[slice_start : slice_start + limit], flat_total
+
+
 def get_products_same_shop_as_recent_views(
     db: Session,
     user_id: Optional[int] = None,
@@ -343,12 +465,13 @@ def get_products_same_shop_as_recent_views(
     require_video: bool = False,
 ) -> tuple[List[Product], int, Optional[int]]:
     """
-    Sản phẩm cùng `shop_name_chinese` (cột AM / Shop Trung Quốc từ import Excel) với các shop của tối đa 8 SP xem gần nhất.
-    Ưu tiên SP cùng `subcategory` (cột AC / Danh mục cấp 2) trước khi trộn ngẫu nhiên trong từng nhóm.
+    Sản phẩm cùng `shop_name_chinese` (cột AM / Shop Trung Quốc) với các shop của tối đa 8 SP xem gần nhất.
+    Cân bằng hiển thị: round-robin theo shop (trọng số lượt xem gần nhất), tối đa 8 SP/shop/trang (`limit`).
+    Trong từng shop: ưu tiên cùng `subcategory` (cột AC) rồi trộn ngẫu nhiên (theo `seed`).
     Trả về (danh_sách_slice, total, seed). Không gửi `seed`: random mới mỗi lần; có `seed` + offset: pagination ổn định.
     `require_video`: chỉ SP có link video phát được (YouTube watch/embed/short hoặc URL chứa `.mp4`), khớp frontend.
     Ưu tiên user_id; nếu không có thì guest_session_id (bảng guest_product_views).
-    Khi tổng SP khớp shop vượt ngưỡng, chỉ lấy tối đa 8000 bản ghi (theo id) để xáo trộn — tránh quá tải bộ nhớ; `total` vẫn là tổng đầy đủ.
+    Pool DB tối đa 8000 SP trước khi cân bằng — tránh quá tải bộ nhớ.
     """
     recent_product_ids: List[int] = []
     if user_id is not None:
@@ -370,12 +493,13 @@ def get_products_same_shop_as_recent_views(
         return [], 0, None
 
     recent_products = db.query(Product).filter(Product.id.in_(recent_product_ids)).all()
+    product_by_id = {p.id: p for p in recent_products}
     shops_lower: set[str] = set()
     subs_lower: set[str] = set()
     for p in recent_products:
-        shop_cn = (p.shop_name_chinese or "").strip()
+        shop_cn = _same_shop_key(p)
         if shop_cn:
-            shops_lower.add(shop_cn.lower())
+            shops_lower.add(shop_cn)
         sub = (p.subcategory or "").strip()
         if sub:
             subs_lower.add(sub.lower())
@@ -390,37 +514,35 @@ def get_products_same_shop_as_recent_views(
         or_(*shop_conditions),
         Product.is_active == True,  # noqa: E712
     )
-    total = db.query(Product).filter(*filt).count()
-    if total <= 0:
+    db_total = db.query(Product).filter(*filt).count()
+    if db_total <= 0:
         return [], 0, None
-    SAME_SHOP_MAX_POOL = 8000
     q = db.query(Product).filter(*filt).order_by(Product.id)
-    products = q.limit(SAME_SHOP_MAX_POOL).all() if total > SAME_SHOP_MAX_POOL else q.all()
-    if not products:
+    candidates = q.limit(SAME_SHOP_MAX_POOL).all() if db_total > SAME_SHOP_MAX_POOL else q.all()
+    if not candidates:
         return [], 0, None
     if require_video:
-        products = [p for p in products if is_playable_product_video_link(getattr(p, "video_link", None))]
-    if not products:
+        candidates = [
+            p for p in candidates if is_playable_product_video_link(getattr(p, "video_link", None))
+        ]
+    if not candidates:
         return [], 0, None
-
-    tier_same_sub: List[Product] = []
-    tier_shop_only: List[Product] = []
-    for p in products:
-        shop_cn = (p.shop_name_chinese or "").strip().lower()
-        sub = (p.subcategory or "").strip().lower()
-        if shop_cn in shops_lower and sub and sub in subs_lower:
-            tier_same_sub.append(p)
-        elif shop_cn in shops_lower:
-            tier_shop_only.append(p)
 
     if seed is None:
         seed = random.randint(0, 2**31 - 1)
-    rng = random.Random(seed)
-    rng.shuffle(tier_same_sub)
-    rng.shuffle(tier_shop_only)
-    products = tier_same_sub + tier_shop_only
-    total = len(products)
-    page = products[offset : offset + limit]
+    candidate_total = len(candidates)
+    page, total = _balance_same_shop_products(
+        candidates,
+        recent_product_ids,
+        product_by_id,
+        subs_lower,
+        shops_lower,
+        seed=seed,
+        page_size=max(1, limit),
+        offset=offset,
+        limit=limit,
+        total_items=candidate_total,
+    )
     return page, total, seed
 
 

@@ -582,7 +582,7 @@ class ApiClient {
     return this.fetch<ProductListResponse>(`/user-behavior/products/home-feed?${params}`);
   }
 
-  /** Sản phẩm cùng shop TQ (shop_name_chinese / cột AM) với 8 SP xem gần nhất; ưu tiên cùng subcategory (AC). */
+  /** Sản phẩm cùng shop TQ (AM): round-robin theo shop, tối đa 8 SP/shop/trang, ưu tiên subcategory (AC). */
   async getProductsSameShopAsRecentViews(
     limit = 60,
     offset = 0,

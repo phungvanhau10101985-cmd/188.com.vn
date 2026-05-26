@@ -154,8 +154,8 @@ def get_products_same_shop_as_recent_views_endpoint(
     x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
     """
-    Sản phẩm cùng shop_name_chinese (cột AM / Shop Trung Quốc) với các shop của tối đa 8 SP xem gần nhất;
-    ưu tiên cùng subcategory (cột AC / Danh mục cấp 2).
+    Sản phẩm cùng shop_name_chinese (cột AM) với shop của tối đa 8 SP xem gần nhất;
+    round-robin theo shop (trọng số lượt xem), tối đa 8 SP/shop/trang, ưu tiên subcategory (AC).
     Không gửi seed: mỗi lần tạo seed mới ⇒ thứ tự khác nhau mỗi lần tải.
 
     Phân trang: limit (mặc định 60), offset, seed («Xem thêm» giữ cùng thứ tự).
