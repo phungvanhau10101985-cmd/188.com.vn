@@ -1,12 +1,19 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { SimpleProductCard } from '@/components/ProductCard';
 import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import type { Product } from '@/types/api';
+import {
+  mergeSameShopProductBatch,
+  normalizeSameShopTotal,
+  sameShopTotalWhenExhausted,
+} from '@/lib/same-shop-pagination';
+
+const SAME_SHOP_PAGE_LIMIT = 60;
 
 function favoritePayloadFromProduct(p: Product): Record<string, unknown> {
   return {
@@ -54,10 +61,11 @@ export default function CartEmptySameShopSection() {
   useEffect(() => {
     setSameShopLoading(true);
     apiClient
-      .getProductsSameShopAsRecentViews(60, 0)
+      .getProductsSameShopAsRecentViews(SAME_SHOP_PAGE_LIMIT, 0)
       .then(({ products, total, seed }) => {
-        setSameShopProducts(products || []);
-        setSameShopTotal(total ?? 0);
+        const list = products || [];
+        setSameShopProducts(list);
+        setSameShopTotal(normalizeSameShopTotal(list.length, total ?? 0, SAME_SHOP_PAGE_LIMIT));
         setSameShopSeed(seed ?? null);
       })
       .catch(() => {
@@ -71,31 +79,30 @@ export default function CartEmptySameShopSection() {
   const loadMoreSameShop = useCallback(() => {
     if (!sameShopHasMore || sameShopLoadMoreLoading) return;
     setSameShopLoadMoreLoading(true);
+    const prevLen = sameShopProducts.length;
     apiClient
-      .getProductsSameShopAsRecentViews(60, sameShopProducts.length, sameShopSeed ?? undefined)
-      .then(({ products }) => {
-        setSameShopProducts((prev) => [...prev, ...(products || [])]);
+      .getProductsSameShopAsRecentViews(SAME_SHOP_PAGE_LIMIT, prevLen, sameShopSeed ?? undefined)
+      .then(({ products, total }) => {
+        const batch = products || [];
+        if (batch.length === 0) {
+          setSameShopTotal(sameShopTotalWhenExhausted(prevLen));
+          return;
+        }
+        setSameShopProducts((prev) => {
+          const { merged, addedCount } = mergeSameShopProductBatch(prev, batch);
+          if (addedCount === 0) {
+            setSameShopTotal(sameShopTotalWhenExhausted(prev.length));
+            return prev;
+          }
+          const reported = total ?? 0;
+          setSameShopTotal(
+            normalizeSameShopTotal(merged.length, Math.max(reported, merged.length), SAME_SHOP_PAGE_LIMIT)
+          );
+          return merged;
+        });
       })
       .finally(() => setSameShopLoadMoreLoading(false));
   }, [sameShopHasMore, sameShopLoadMoreLoading, sameShopProducts.length, sameShopSeed]);
-
-  const sameShopSentinelRef = useRef<HTMLDivElement>(null);
-  const sameShopLoadingRef = useRef(false);
-  sameShopLoadingRef.current = sameShopLoadMoreLoading;
-  useEffect(() => {
-    if (!sameShopHasMore || sameShopProducts.length === 0) return;
-    const el = sameShopSentinelRef.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        if (!entries[0]?.isIntersecting || sameShopLoadingRef.current) return;
-        loadMoreSameShop();
-      },
-      { rootMargin: '200px', threshold: 0.1 }
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [sameShopHasMore, sameShopProducts.length, loadMoreSameShop]);
 
   const handleFavorite = async (productId: number, e: React.MouseEvent) => {
     e.preventDefault();
@@ -149,7 +156,7 @@ export default function CartEmptySameShopSection() {
           </Link>
         )}
       </div>
-      <div className="mt-4 min-h-[min(28rem,75vh)]">
+      <div className="mt-4">
         {sameShopLoading ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
             {[...Array(12)].map((_, i) => (
@@ -177,19 +184,16 @@ export default function CartEmptySameShopSection() {
               ))}
             </div>
             {sameShopHasMore && (
-              <>
-                <div ref={sameShopSentinelRef} className="h-4 w-full" aria-hidden />
-                <div className="flex justify-center py-6">
-                  <button
-                    type="button"
-                    onClick={loadMoreSameShop}
-                    disabled={sameShopLoadMoreLoading}
-                    className="bg-[#ea580c] hover:bg-[#c2410c] disabled:opacity-60 text-white px-6 py-2.5 rounded-xl font-medium transition-colors text-sm shadow-sm"
-                  >
-                    {sameShopLoadMoreLoading ? 'Đang tải...' : 'Xem thêm'}
-                  </button>
-                </div>
-              </>
+              <div className="flex justify-center py-6">
+                <button
+                  type="button"
+                  onClick={loadMoreSameShop}
+                  disabled={sameShopLoadMoreLoading}
+                  className="bg-[#ea580c] hover:bg-[#c2410c] disabled:opacity-60 text-white px-6 py-2.5 rounded-xl font-medium transition-colors text-sm shadow-sm"
+                >
+                  {sameShopLoadMoreLoading ? 'Đang tải...' : 'Xem thêm'}
+                </button>
+              </div>
             )}
           </>
         )}
