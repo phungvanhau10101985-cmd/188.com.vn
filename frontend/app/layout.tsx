@@ -1,7 +1,7 @@
 // app/layout.tsx - HOÀN CHỈNH
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
-import { Inter, Roboto_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/features/auth/hooks/useAuth";
 import { CartProvider } from "@/features/cart/hooks/useCart";
@@ -9,15 +9,17 @@ import { FavoriteProvider } from "@/features/favorites/hooks/useFavorites";
 import AppShell from "@/components/AppShell";
 import SiteEmbedsRoot from "@/components/SiteEmbedsRoot";
 import SiteEmbedsSsrScripts from "@/components/SiteEmbedsSsrScripts";
-import DraggableThirdPartyFloaters from "@/components/DraggableThirdPartyFloaters";
-import NanoAiMobileLauncherAdjust from "@/components/NanoAiMobileLauncherAdjust";
+import {
+  DeferredLayoutFloaters,
+  DeferredPwaPushRegister,
+} from "@/components/DeferredLayoutBoot.client";
 import AnalyticsTracker from "@/components/AnalyticsTracker";
 import { fetchPublicSiteEmbeds } from "@/lib/site-embeds-public";
 import { partitionHeadEmbedsForSsr } from "@/lib/site-embed-head-ssr";
 import { ToastProvider } from "@/components/ToastProvider";
-import PwaPushRegister from "@/components/PwaPushRegister";
 import { getCategoryTreeForLayout } from "@/lib/category-seo";
 import { APP_WEB_ICON_URL } from "@/lib/app-web-icon";
+import { getCdnPublicBase } from "@/lib/site-config";
 
 /** Origin cho metadata (OG, icons). Luôn có scheme — `new URL("188.com.vn")` throw → SSR 500 / trắng trang nếu env prod thiếu https:// */
 function normalizeAbsoluteSiteUrl(raw: string): string {
@@ -41,12 +43,7 @@ const inter = Inter({
   variable: "--font-inter",
 });
 
-const robotoMono = Roboto_Mono({
-  subsets: ["latin", "vietnamese"],
-  display: "swap",
-  variable: "--font-roboto-mono",
-  weight: ["400"],
-});
+const CDN_ORIGIN = getCdnPublicBase();
 
 // Fonts: next/font — tối ưu tải, giảm CSS chặn render và CLS so với @fontsource toàn trang.
 
@@ -156,20 +153,23 @@ export default async function RootLayout({
   return (
     <html
       lang="vi"
-      className={`${inter.variable} ${robotoMono.variable}`}
+      className={`${inter.variable}`}
       suppressHydrationWarning
     >
       <head>
+        <link rel="preconnect" href={CDN_ORIGIN} crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href={CDN_ORIGIN} />
+        <link rel="preconnect" href="https://img.alicdn.com" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://img.alicdn.com" />
         <SiteEmbedsSsrScripts specs={ssrScripts} />
       </head>
       <body className="antialiased font-sans bg-[#fafafa] text-gray-900 min-h-screen" suppressHydrationWarning>
         <SiteEmbedsRoot embeds={siteEmbeds} headClientRemainders={headClientRemainders} />
-        <DraggableThirdPartyFloaters />
-        <NanoAiMobileLauncherAdjust />
+        <DeferredLayoutFloaters />
         {/* Global Providers + Header/Footer xuyên suốt */}
         <ToastProvider>
           <AuthProvider>
-            <PwaPushRegister />
+            <DeferredPwaPushRegister />
             <CartProvider>
               <FavoriteProvider>
                 <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>

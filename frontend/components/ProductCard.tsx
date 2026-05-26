@@ -357,6 +357,7 @@ export const SimpleProductCard = ({
             onError={handleImageError}
             sizes="(max-width: 768px) 50vw, 25vw"
             priority={priority}
+            fetchPriority={priority ? 'high' : undefined}
             placeholder="blur"
             blurDataURL={blurDataUrl}
           />

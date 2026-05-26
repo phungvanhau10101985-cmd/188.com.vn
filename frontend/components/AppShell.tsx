@@ -9,11 +9,14 @@ import Footer from '@/components/Footer';
 import Navigation from '@/components/Navigation';
 import MobileHeader from '@/components/mobile/MobileHeader';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
-import BackToTopButton from '@/components/BackToTopButton';
-import FloatingShopVideoFeedButton from '@/components/FloatingShopVideoFeedButton';
-import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 
 const CartAddedPopup = dynamic(() => import('@/components/CartAddedPopup'), { ssr: false });
+const BackToTopButton = dynamic(() => import('@/components/BackToTopButton'), { ssr: false });
+const FloatingShopVideoFeedButton = dynamic(
+  () => import('@/components/FloatingShopVideoFeedButton'),
+  { ssr: false }
+);
+const PwaInstallPrompt = dynamic(() => import('@/components/PwaInstallPrompt'), { ssr: false });
 const BirthGenderSalePromptModal = dynamic(
   () => import('@/components/BirthGenderSalePromptModal'),
   { ssr: false }

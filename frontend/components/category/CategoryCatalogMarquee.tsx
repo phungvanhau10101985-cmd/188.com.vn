@@ -57,7 +57,15 @@ function chunkTiles(list: HeroCategoryTile[], cols: number, padLastRow: boolean)
   return rows;
 }
 
-function CategoryGridTile({ tile, isLastInRow }: { tile: HeroCategoryTile; isLastInRow?: boolean }) {
+function CategoryGridTile({
+  tile,
+  isLastInRow,
+  priorityImage = false,
+}: {
+  tile: HeroCategoryTile;
+  isLastInRow?: boolean;
+  priorityImage?: boolean;
+}) {
   const href = categoryTileHref(tile);
   const title = tileTitle(tile);
   const itemCountLabel = formatItemCount(tile.product_count);
@@ -83,6 +91,8 @@ function CategoryGridTile({ tile, isLastInRow }: { tile: HeroCategoryTile; isLas
             alt={title}
             fill
             sizes="(max-width: 767px) 50vw, 20vw"
+            priority={priorityImage}
+            fetchPriority={priorityImage ? 'high' : undefined}
             className="object-contain object-center p-1 transition-transform duration-500 ease-out group-hover:scale-105"
           />
         ) : (
@@ -188,6 +198,7 @@ export default function CategoryCatalogMarquee({
                   key={`${rowIndex}-${tile.level}-${tile.name}-${tile.category}`}
                   tile={tile}
                   isLastInRow={colIndex === rowTiles.length - 1}
+                  priorityImage={rowIndex === 0 && colIndex === 0}
                 />
               ))}
             </div>
@@ -221,6 +232,7 @@ export default function CategoryCatalogMarquee({
                 key={`${rowIndex}-${tile.level}-${tile.name}-${tile.category}`}
                 tile={tile}
                 isLastInRow={colIndex === rowTiles.length - 1}
+                priorityImage={rowIndex === 0 && colIndex === 0}
               />
             ))}
           </div>

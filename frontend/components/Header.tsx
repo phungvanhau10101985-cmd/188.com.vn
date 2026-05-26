@@ -10,6 +10,13 @@ import { useCart } from '@/features/cart/hooks/useCart';
 import { apiClient } from '@/lib/api-client';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
+import { getOptimizedImage } from '@/lib/image-utils';
+
+const LOGO_URL = getOptimizedImage('https://188comvn.b-cdn.net/logo%20head%20188.png', {
+  width: 320,
+  height: 80,
+  quality: 95,
+});
 
 interface HeaderProps {
   onSearch?: (searchTerm: string) => void;
@@ -154,11 +161,12 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
           {/* Logo */}
           <Link href="/" className="flex items-center h-full group">
             <Image
-              src="https://188comvn.b-cdn.net/logo%20head%20188.png"
+              src={LOGO_URL}
               alt="188.com.vn - Xem là thích click là mê"
               width={320}
               height={80}
               priority
+              sizes="(max-width: 768px) 160px, 320px"
               className="h-full max-h-20 w-auto object-contain transform group-hover:scale-[1.02] transition-transform duration-200"
             />
           </Link>

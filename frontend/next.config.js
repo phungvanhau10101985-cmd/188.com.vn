@@ -20,7 +20,21 @@ const nextConfig = {
         value: "noindex, nofollow, noarchive, noimageindex",
       },
     ];
+    const longCache = [
+      {
+        key: "Cache-Control",
+        value: "public, max-age=31536000, immutable",
+      },
+    ];
     return [
+      {
+        source: "/_next/static/:path*",
+        headers: longCache,
+      },
+      {
+        source: "/favicon.png",
+        headers: longCache,
+      },
       {
         source: "/luot-video-cung-shop",
         headers: videoFeedRobots,

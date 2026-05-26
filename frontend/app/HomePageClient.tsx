@@ -9,6 +9,7 @@ import Image from 'next/image';
 import { SimpleProductCard } from '@/components/ProductCard';
 
 const NanoaiSimilarProductCard = dynamic(() => import('@/components/NanoaiSimilarProductCard'));
+const CategoryProductFilters = dynamic(() => import('@/components/CategoryProductFilters'));
 import PersonalizedHeroBanner from '@/components/home/PersonalizedHeroBanner';
 import { apiClient, NANOAI_TEXT_SEARCH_LIMIT } from '@/lib/api-client';
 import { useLazyRevealList } from '@/hooks/useLazyRevealList';
@@ -36,7 +37,6 @@ import {
   urlSearchParamsSemanticsEqual,
   shopNameChineseFromListingUrlQuery,
 } from '@/lib/product-related-tabs';
-import CategoryProductFilters from '@/components/CategoryProductFilters';
 import type { CategoryProductFacets } from '@/lib/category-seo';
 
 function favoritePayloadFromProduct(p: Product): Record<string, unknown> {
@@ -1132,7 +1132,7 @@ export default function HomePageClient({
                       product={product}
                       onFavorite={handleFavorite}
                       isFavorited={favoriteIds.has(product.id)}
-                      priority={index < 6}
+                      priority={index < 2}
                     />
                   ))}
                 </div>
@@ -1259,7 +1259,7 @@ export default function HomePageClient({
                   product={product}
                   onFavorite={handleFavorite}
                   isFavorited={favoriteIds.has(product.id)}
-                  priority={index < 4}
+                  priority={index < 2}
                 />
               ))}
             </div>
@@ -1320,7 +1320,7 @@ export default function HomePageClient({
                       product={product}
                       onFavorite={handleFavorite}
                       isFavorited={favoriteIds.has(product.id)}
-                      priority={index < 4 && sameShopProducts.length === 0}
+                      priority={index < 2 && sameShopProducts.length === 0}
                     />
                   ))}
                 </div>

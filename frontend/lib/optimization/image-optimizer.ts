@@ -1,16 +1,16 @@
+import { getOptimizedImage } from '@/lib/image-utils';
 import { cdnUrl } from '@/lib/cdn-url';
-import { getCdnPublicBase } from '@/lib/site-config';
 
-const CDN_BASE = getCdnPublicBase();
-
-/** CDN nội bộ: giữ nguyên file gốc, không gắn tham số resize/nén. */
+/** CDN nội bộ + alicdn: resize theo kích thước hiển thị, chất lượng cao. */
 export function optimizeImageUrl(
   url: string,
-  _options?: { width?: number; height?: number; quality?: number }
+  options?: { width?: number; height?: number; quality?: number }
 ): string {
   if (!url) return cdnUrl('/images/placeholder-product.jpg');
-  if (url.includes(CDN_BASE)) {
-    return url;
-  }
-  return url;
+  return getOptimizedImage(url, {
+    width: options?.width ?? 400,
+    height: options?.height ?? 400,
+    quality: options?.quality ?? 90,
+    fallbackStrategy: 'local',
+  });
 }

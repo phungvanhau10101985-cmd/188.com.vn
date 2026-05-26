@@ -25,7 +25,7 @@ module.exports = {
       },
       fontFamily: {
         sans: ['var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        mono: ['var(--font-roboto-mono)', 'ui-monospace', 'monospace'],
+        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
     },
   },
