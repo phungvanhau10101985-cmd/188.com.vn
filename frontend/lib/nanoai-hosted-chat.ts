@@ -114,6 +114,15 @@ export function buildNanoAiGatewayPayloadFrom188Product(
   };
 }
 
+const NANOAI_GATEWAY_ATTRS = [
+  'data-nanoai-consult',
+  'data-nanoai-try-on',
+  'data-nanoai-sku',
+  'data-nanoai-image',
+  'data-nanoai-product-url',
+  'data-nanoai-inventory-id',
+] as const;
+
 /** data-nanoai-* trên nút PDP — widget bắt click khi không gọi JS gateway. */
 export function nanoAiGatewayButtonDataset(
   payload: NanoAiGatewayPayload,
@@ -121,12 +130,122 @@ export function nanoAiGatewayButtonDataset(
 ): Record<string, string> {
   const out: Record<string, string> =
     kind === 'consult' ? { 'data-nanoai-consult': '' } : { 'data-nanoai-try-on': '' };
-  if (payload.sku) out['data-nanoai-sku'] = payload.sku;
+  if (kind === 'consult' && payload.sku) out['data-nanoai-sku'] = payload.sku;
   if (payload.imageUrl) out['data-nanoai-image'] = payload.imageUrl;
   if (payload.productUrl) out['data-nanoai-product-url'] = payload.productUrl;
   const inv = (payload.inventoryId ?? '').trim();
   if (inv) out['data-nanoai-inventory-id'] = inv;
   return out;
+}
+
+function clearNanoAiGatewayAttrs(el: HTMLElement): void {
+  for (const attr of NANOAI_GATEWAY_ATTRS) el.removeAttribute(attr);
+}
+
+/** Gắn data-nanoai-* lên phần tử (xóa attrs cổng cũ trước). */
+export function applyNanoAiGatewayButtonDataset(
+  el: HTMLElement,
+  payload: NanoAiGatewayPayload,
+  kind: 'consult' | 'try_on',
+): void {
+  clearNanoAiGatewayAttrs(el);
+  const dataset = nanoAiGatewayButtonDataset(payload, kind);
+  for (const [attr, value] of Object.entries(dataset)) {
+    el.setAttribute(attr, value);
+  }
+}
+
+const NANOAI_CONSULT_LAUNCHER_SELECTORS = [
+  '[data-nanoai-consult-launcher]',
+  '[data-nanoai-chat-bubble]',
+  '[data-nanoai-launcher]',
+  '[data-nanoai-chat-launcher]',
+  'button.nanoai-chat-launcher',
+] as const;
+
+const NANOAI_TRY_ON_LAUNCHER_SELECTORS = [
+  '[data-nanoai-try-on-launcher]',
+  '[data-nanoai-try-on-launcher] button',
+] as const;
+
+function queryElementsDeep(selector: string, root: Document | ShadowRoot = document): HTMLElement[] {
+  const found: HTMLElement[] = [];
+  try {
+    root.querySelectorAll(selector).forEach((el) => {
+      if (el instanceof HTMLElement) found.push(el);
+    });
+    root.querySelectorAll('*').forEach((host) => {
+      if (host instanceof Element && host.shadowRoot) {
+        found.push(...queryElementsDeep(selector, host.shadowRoot));
+      }
+    });
+  } catch {
+    /* closed shadow / perm denied */
+  }
+  return found;
+}
+
+function isVisibleLauncher(el: HTMLElement): boolean {
+  const cs = getComputedStyle(el);
+  if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+  const r = el.getBoundingClientRect();
+  return r.width >= 28 && r.height >= 28;
+}
+
+function looksLikeConsultLauncher(el: HTMLElement): boolean {
+  if (el.hasAttribute('data-nanoai-try-on-launcher')) return false;
+  if (el.closest('[data-nanoai-try-on-launcher]')) return false;
+  const label = (el.getAttribute('aria-label') || el.textContent || '').toLowerCase();
+  if (/thử đồ|try[\s-]?on|camera|video/i.test(label)) return false;
+  return true;
+}
+
+function findNanoAiConsultLaunchers(): HTMLElement[] {
+  const found = new Set<HTMLElement>();
+  for (const sel of NANOAI_CONSULT_LAUNCHER_SELECTORS) {
+    for (const el of queryElementsDeep(sel)) {
+      if (!isVisibleLauncher(el)) continue;
+      if (!looksLikeConsultLauncher(el)) continue;
+      found.add(el);
+    }
+  }
+  return Array.from(found);
+}
+
+function findNanoAiTryOnLaunchers(): HTMLElement[] {
+  const found = new Set<HTMLElement>();
+  for (const sel of NANOAI_TRY_ON_LAUNCHER_SELECTORS) {
+    for (const el of queryElementsDeep(sel)) {
+      if (!isVisibleLauncher(el)) continue;
+      found.add(el);
+    }
+  }
+  for (const el of queryElementsDeep('[data-nanoai-try-on]')) {
+    if (!(el instanceof HTMLElement)) continue;
+    if (el.matches('button, [role="button"]') && isVisibleLauncher(el)) {
+      found.add(el);
+    }
+  }
+  return Array.from(found);
+}
+
+/**
+ * FAB widget NanoAI (Tư vấn nhắn tin / Thử đồ camera) — gắn data-nanoai-consult vs data-nanoai-try-on
+ * theo SP đang xem. Không trộn attrs consult/try-on trên cùng một nút.
+ */
+export function syncNanoAiWidgetLauncherGatewayButtons(payload: NanoAiGatewayPayload): void {
+  if (typeof window === 'undefined') return;
+
+  const consultLaunchers = findNanoAiConsultLaunchers();
+  for (const el of consultLaunchers) {
+    applyNanoAiGatewayButtonDataset(el, payload, 'consult');
+  }
+
+  const tryOnLaunchers = findNanoAiTryOnLaunchers();
+  for (const el of tryOnLaunchers) {
+    if (consultLaunchers.includes(el)) continue;
+    applyNanoAiGatewayButtonDataset(el, payload, 'try_on');
+  }
 }
 
 /** Cổng tư vấn — iframe có ctx_sku, ctx_image, auto_consult=1 (không open_try_on=1). */

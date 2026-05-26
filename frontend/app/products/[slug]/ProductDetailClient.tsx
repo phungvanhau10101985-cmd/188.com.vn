@@ -37,6 +37,8 @@ import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
+import NanoAiLauncherGatewaySync from '@/components/NanoAiLauncherGatewaySync';
+import { buildNanoAiGatewayPayloadFrom188Product } from '@/lib/nanoai-hosted-chat';
 
 interface ProductDetailClientProps {
   initialProduct: Product;
@@ -343,6 +345,13 @@ export default function ProductDetailClient({
   const nanoSku = (product.code?.trim() || product.product_id || String(product.id)).trim();
   const nanoSeg = productPathSlugFromApi(product.slug, product.product_id) || slug;
   const nanoProductPath = `/products/${nanoSeg}`;
+  const nanoGatewayPayload = useMemo(
+    () =>
+      buildNanoAiGatewayPayloadFrom188Product(product, {
+        imageUrl: nanoPrimaryImage,
+      }),
+    [product, nanoPrimaryImage],
+  );
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -353,6 +362,7 @@ export default function ProductDetailClient({
         productPath={nanoProductPath}
         inventoryId={product.inventory_id ?? null}
       />
+      <NanoAiLauncherGatewaySync payload={nanoGatewayPayload} />
       {/* Mobile: giao diện chi tiết sản phẩm theo bản mobile (chỉ trang này) */}
       <div className="md:hidden">
         <ProductDetailMobile

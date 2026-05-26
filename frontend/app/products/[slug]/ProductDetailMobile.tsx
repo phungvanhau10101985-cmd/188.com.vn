@@ -25,6 +25,7 @@ import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import AffiliateShareBar, { ProductShareIconButton } from '@/components/affiliate/AffiliateShareBar';
 import { useAffiliatePageShare } from '@/lib/use-affiliate-page-share';
 import { trackEvent } from '@/lib/analytics';
+import NanoAiLauncherGatewaySync from '@/components/NanoAiLauncherGatewaySync';
 import {
   buildNanoAiGatewayPayloadFrom188Product,
   nanoAiGatewayButtonDataset,
@@ -210,6 +211,7 @@ export default function ProductDetailMobile({
 
   return (
     <div className="md:hidden min-h-screen bg-white pb-32">
+      <NanoAiLauncherGatewaySync payload={nanoPayload} />
       <div className="px-4 py-3">
         <BirthdayPromoBanner
           active={birthdayDiscount.active}

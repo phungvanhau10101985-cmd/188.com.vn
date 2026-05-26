@@ -18,6 +18,7 @@ import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session
 import { trackEvent } from '@/lib/analytics';
 import ProductVariantModal from '@/app/products/[slug]/components/ProductVariantModal/ProductVariantModal';
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
+import NanoAiLauncherGatewaySync from '@/components/NanoAiLauncherGatewaySync';
 import { SHOP_VIDEO_START_SLUG_PARAM } from '@/lib/shop-video-feed';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import {
@@ -665,6 +666,15 @@ export default function ShopVideoFeedClient() {
     ? `/products/${productPathSlugFromApi(nanoCtxProduct.slug, nanoCtxProduct.product_id) || nanoCtxProduct.product_id}`
     : '';
 
+  const nanoGatewayPayload = useMemo(() => {
+    if (!nanoCtxProduct) {
+      return { sku: '', imageUrl: '', productUrl: '', inventoryId: null };
+    }
+    return buildNanoAiGatewayPayloadFrom188Product(nanoCtxProduct, {
+      imageUrl: nanoPrimaryImage,
+    });
+  }, [nanoCtxProduct, nanoPrimaryImage]);
+
   return (
     <div className="relative flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden bg-black w-full md:max-w-lg md:mx-auto md:rounded-xl md:overflow-hidden md:shadow-xl md:my-4 md:h-[min(100dvh,52rem)] md:max-h-[min(100dvh,52rem)] border border-white/10">
       {nanoCtxProduct ? (
@@ -676,6 +686,7 @@ export default function ShopVideoFeedClient() {
             productPath={nanoProductPath}
             inventoryId={nanoCtxProduct.inventory_id ?? null}
           />
+          <NanoAiLauncherGatewaySync payload={nanoGatewayPayload} />
           {/*
             Giống ProductDetailMobile / ProductGallery: class image_list để widget NanoAI quét ảnh
             nếu không chỉ dựa vào data-ctx-* trên script.
