@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useCart } from '@/features/cart/hooks/useCart';
 import {
   clearNanoAiOverlayPassThrough,
+  markNanoAiCheckoutOnCart,
   releaseNanoAiClickBlockers,
 } from '@/lib/nanoai-overlay-pass-through';
 import {
@@ -27,8 +28,8 @@ export default function CartAddedPopup() {
 
   useEffect(() => {
     if (!showAddToCartPopup) return;
-    releaseNanoAiClickBlockers();
-    const mo = new MutationObserver(() => releaseNanoAiClickBlockers());
+    releaseNanoAiClickBlockers({ mode: 'fullSuppress' });
+    const mo = new MutationObserver(() => releaseNanoAiClickBlockers({ mode: 'fullSuppress' }));
     mo.observe(document.body, { childList: true, subtree: true });
 
     const prev = document.body.style.overflow;
@@ -36,7 +37,6 @@ export default function CartAddedPopup() {
 
     return () => {
       mo.disconnect();
-      clearNanoAiOverlayPassThrough();
       document.body.style.overflow = prev;
     };
   }, [showAddToCartPopup]);
@@ -68,7 +68,7 @@ export default function CartAddedPopup() {
 
   const modal = (
     <div
-      className="fixed inset-0 z-[220] flex items-end md:items-center justify-center p-3 md:p-4 pointer-events-none"
+      className="fixed inset-0 z-[50000] flex items-end md:items-center justify-center p-3 md:p-4 pointer-events-none"
       role="dialog"
       aria-modal="true"
       aria-labelledby="cart-added-popup-title"
@@ -111,6 +111,7 @@ export default function CartAddedPopup() {
           <Link
             href="/cart"
             onClick={() => {
+              markNanoAiCheckoutOnCart();
               clearCartAddFromNanoAiFlow();
               hideAddToCartPopup();
             }}

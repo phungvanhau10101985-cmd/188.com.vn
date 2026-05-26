@@ -4,9 +4,9 @@
  * Copy nội dung này vào: frontend/features/cart/api/cart-api.ts
  */
 
-import { 
-  Cart, 
-  AddToCartRequest, 
+import {
+  Cart,
+  AddToCartRequest,
   UpdateCartItemRequest,
   GuestCartItem,
   CartMigrationResponse
@@ -17,12 +17,13 @@ class CartAPI {
   private async fetchWithAuth(path: string, options: RequestInit = {}) {
     const base = getApiBaseUrl();
     const url = path.startsWith('http') ? path : `${base}${path}`;
-    const token = localStorage.getItem('access_token');
-    
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    const sentBearer = Boolean(token?.trim());
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...ngrokFetchHeaders(),
-      ...(token && { 'Authorization': `Bearer ${token}` }),
+      ...(sentBearer && { Authorization: `Bearer ${token}` }),
       ...(options.headers as Record<string, string> | undefined),
     };
 
@@ -30,18 +31,21 @@ class CartAPI {
       const response = await fetch(url, {
         ...options,
         headers,
+        credentials: 'include',
       });
 
       if (!response.ok) {
         if (response.status === 401) {
-          // Token expired or invalid — quay lại đúng trang sau đăng nhập lại
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('user');
-          const { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } = await import('@/lib/auth-redirect');
-          window.location.href = buildAuthLoginHrefFromFullPath(getBrowserReturnLocation());
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('access_token');
+            // Chỉ xoá user khi request từng gửi Bearer — giữ phiên chỉ-cookie httpOnly
+            if (sentBearer) {
+              localStorage.removeItem('user');
+            }
+          }
           throw new Error('Authentication required');
         }
-        
+
         const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
         throw new Error(errorData.detail || 'Request failed');
       }

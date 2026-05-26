@@ -38,6 +38,7 @@ import {
   shouldTryAttributeReferral,
 } from '@/lib/affiliate-ref';
 import { consumeAndOpenNanoAiChatLauncher } from '@/lib/nanoai-hosted-chat';
+import NanoAiShopOverlayGuard from '@/components/NanoAiShopOverlayGuard';
 
 /** Chiều cao thanh cam mỏng (logo + tìm + icon) khi trang listing ghim header đã thu gọn — khớp offset sticky bộ lọc. */
 const DESKTOP_LISTING_THIN_CHROME_PX = 54;
@@ -455,6 +456,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
         <FloatingShopVideoFeedButton />
       )}
       {!isCartAddLandingPage && <PwaInstallPrompt />}
+      <NanoAiShopOverlayGuard />
       <CartAddedPopup />
       {!isAuthPage && !isCartAddLandingPage && <BirthGenderSalePromptModal />}
       {!isAuthPage && !isCartAddLandingPage && !pathname?.startsWith('/admin') && <BirthdayPromoWelcomeModal />}

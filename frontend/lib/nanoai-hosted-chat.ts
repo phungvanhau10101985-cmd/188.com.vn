@@ -4,6 +4,7 @@
  */
 
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import { clearNanoAiCheckoutOnCart } from '@/lib/nanoai-overlay-pass-through';
 
 export type NanoAiTryOnCtx = {
   sku: string;
@@ -425,6 +426,7 @@ export function clearCartAddFromNanoAiFlow(): void {
   } catch {
     /* ignore */
   }
+  clearNanoAiCheckoutOnCart();
 }
 
 /** Sau điều hướng về trang shop, mở launcher chat (gọi từ AppShell). */

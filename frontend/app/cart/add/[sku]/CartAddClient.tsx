@@ -11,6 +11,7 @@ import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
+import { isClientAuthLikelyLoggedIn } from '@/lib/client-auth-session';
 import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import {
@@ -58,7 +59,7 @@ function buildCartPayload(
 export default function CartAddClient({ product, sku, closeMode, closePath }: CartAddClientProps) {
   const router = useRouter();
   const { addToCart, isLoading: cartLoading } = useCart();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { pushToast } = useToast();
   const [displayStockByVariant, setDisplayStockByVariant] = useState<Record<string, number>>({});
 
@@ -96,14 +97,47 @@ export default function CartAddClient({ product, sku, closeMode, closePath }: Ca
   }, [closeMode]);
 
   useEffect(() => {
-    releaseNanoAiClickBlockers();
-    const mo = new MutationObserver(() => releaseNanoAiClickBlockers());
+    releaseNanoAiClickBlockers({ mode: 'fullSuppress' });
+    const mo = new MutationObserver(() => releaseNanoAiClickBlockers({ mode: 'fullSuppress' }));
     mo.observe(document.body, { childList: true, subtree: true });
     return () => {
       mo.disconnect();
       clearNanoAiOverlayPassThrough();
     };
   }, []);
+
+  const requireLoginForCartAction = useCallback(
+    (payload: ReturnType<typeof buildCartPayload>, intent: 'add' | 'buy') => {
+      if (isClientAuthLikelyLoggedIn(isAuthenticated, authLoading)) {
+        return false;
+      }
+      if (authLoading) {
+        pushToast({
+          title: 'Đang kiểm tra đăng nhập',
+          description: 'Vui lòng thử lại sau vài giây.',
+          variant: 'info',
+          durationMs: 2200,
+        });
+        return true;
+      }
+      queuePendingCartAfterLogin(payload);
+      pushToast({
+        title: intent === 'buy' ? 'Đăng nhập để mua hàng' : 'Đăng nhập để thêm giỏ',
+        description: 'Sau đăng nhập bạn sẽ được chuyển tới giỏ hàng với sản phẩm đã chọn.',
+        variant: 'info',
+        durationMs: 3200,
+      });
+      router.push(buildAuthLoginHrefFromFullPath('/cart'));
+      trackEvent(intent === 'buy' ? 'buy_now' : 'add_to_cart_click', {
+        product_id: payload.product_id,
+        quantity: payload.quantity,
+        status: 'requires_login',
+        source: 'cart_add_sku',
+      });
+      return true;
+    },
+    [authLoading, isAuthenticated, pushToast, router],
+  );
 
   const handleAddToCart = async (
     p: Product,
@@ -112,18 +146,7 @@ export default function CartAddClient({ product, sku, closeMode, closePath }: Ca
     selectedColor?: string,
   ) => {
     const payload = buildCartPayload(p, quantity, selectedSize, selectedColor);
-    if (!isAuthenticated) {
-      queuePendingCartAfterLogin(payload);
-      pushToast({
-        title: 'Đăng nhập để thêm giỏ',
-        description: 'Sau đăng nhập bạn sẽ được chuyển tới giỏ hàng với sản phẩm đã chọn.',
-        variant: 'info',
-        durationMs: 3200,
-      });
-      router.push(buildAuthLoginHrefFromFullPath('/cart'));
-      trackEvent('add_to_cart_click', { product_id: p.id, quantity, status: 'requires_login', source: 'cart_add_sku' });
-      return;
-    }
+    if (requireLoginForCartAction(payload, 'add')) return;
     try {
       await addToCart(payload);
       trackEvent('add_to_cart_click', { product_id: p.id, quantity, source: 'cart_add_sku' });
@@ -156,18 +179,7 @@ export default function CartAddClient({ product, sku, closeMode, closePath }: Ca
     selectedColor?: string,
   ) => {
     const payload = buildCartPayload(p, quantity, selectedSize, selectedColor);
-    if (!isAuthenticated) {
-      queuePendingCartAfterLogin(payload);
-      pushToast({
-        title: 'Đăng nhập để mua hàng',
-        description: 'Sau đăng nhập bạn sẽ được chuyển tới giỏ hàng với sản phẩm đã chọn.',
-        variant: 'info',
-        durationMs: 3200,
-      });
-      router.push(buildAuthLoginHrefFromFullPath('/cart'));
-      trackEvent('buy_now', { product_id: p.id, quantity, status: 'requires_login', source: 'cart_add_sku' });
-      return;
-    }
+    if (requireLoginForCartAction(payload, 'buy')) return;
     try {
       await addToCart(payload, { skipAddedPopup: true });
       trackEvent('buy_now', { product_id: p.id, quantity, source: 'cart_add_sku' });
@@ -205,7 +217,7 @@ export default function CartAddClient({ product, sku, closeMode, closePath }: Ca
         action="both"
         displayStockByVariant={displayStockByVariant}
         setDisplayStockByVariant={setDisplayStockByVariant}
-        overlayZClassName="z-[210]"
+        overlayZClassName="z-[50000]"
         closeAfterConfirm={false}
       />
       <div className="sr-only" aria-live="polite">

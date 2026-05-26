@@ -191,7 +191,19 @@ body {
     pointer-events: auto !important;
     touch-action: manipulation;
   }
+}
 
+/* Popup/trang shop từ NanoAI: tắt hết pointer-events khung chat (desktop + mobile). */
+html[data-nanoai188-shop-overlay="1"] #nanoai-chat-widget-v1,
+html[data-nanoai188-shop-overlay="1"] [id^="nanoai-chat-widget"],
+html[data-nanoai188-shop-overlay="1"] [id*="nanoai-chat-widget"],
+html[data-nanoai188-shop-overlay="1"] #nanoai-chat-widget-v1 *,
+html[data-nanoai188-shop-overlay="1"] [id^="nanoai-chat-widget"] *,
+html[data-nanoai188-shop-overlay="1"] [id*="nanoai-chat-widget"] * {
+  pointer-events: none !important;
+}
+
+@media (max-width: 767px) {
   [data-nanoai188-mobile-adjusted="1"][data-nanoai-chat-bubble],
   [data-nanoai188-mobile-adjusted="1"][data-nanoai-launcher],
   [data-nanoai188-mobile-adjusted="1"][data-nanoai-chat-launcher],
