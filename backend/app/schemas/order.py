@@ -187,6 +187,9 @@ class AdminOrderStats(BaseModel):
     completed_orders: int
     returned_orders: int = 0
     cancelled_orders: int
+    period_label: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
 
 # ========== PAYMENT SCHEMAS ==========
 class PaymentCreate(BaseModel):

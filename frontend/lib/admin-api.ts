@@ -287,7 +287,26 @@ export interface AdminOrderStats {
   completed_orders: number;
   returned_orders: number;
   cancelled_orders: number;
+  period_label?: string | null;
+  date_from?: string | null;
+  date_to?: string | null;
 }
+
+export type AdminOrderStatsPreset =
+  | 'today'
+  | 'this_week'
+  | 'last_week'
+  | 'this_month'
+  | 'last_month';
+
+export type AdminOrderStatsQuery = {
+  period?: 'today' | 'week' | 'month' | 'year' | 'all';
+  preset?: AdminOrderStatsPreset;
+  date?: string;
+  year?: number;
+  date_from?: string;
+  date_to?: string;
+};
 
 export interface PaymentRecord {
   id: number;
@@ -1887,8 +1906,22 @@ export const adminOrderAPI = {
     return fetchAdmin<AdminOrder[]>(`/orders/admin/all?${sp.toString()}`);
   },
 
-  getStats: (period: 'today' | 'week' | 'month' | 'year' | 'all' = 'today') =>
-    fetchAdmin<AdminOrderStats>(`/orders/admin/stats?period=${period}`),
+  getStats: (params?: AdminOrderStatsQuery | 'today' | 'week' | 'month' | 'year' | 'all') => {
+    const sp = new URLSearchParams();
+    if (typeof params === 'string') {
+      sp.set('period', params);
+    } else if (params) {
+      if (params.period) sp.set('period', params.period);
+      if (params.preset) sp.set('preset', params.preset);
+      if (params.date) sp.set('date', params.date);
+      if (params.year != null) sp.set('year', String(params.year));
+      if (params.date_from) sp.set('date_from', params.date_from);
+      if (params.date_to) sp.set('date_to', params.date_to);
+    } else {
+      sp.set('period', 'today');
+    }
+    return fetchAdmin<AdminOrderStats>(`/orders/admin/stats?${sp.toString()}`);
+  },
 
   updateOrder: (orderId: number, data: {
     status?: string;

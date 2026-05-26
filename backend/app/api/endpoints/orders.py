@@ -599,12 +599,31 @@ def admin_get_orders(
 def admin_order_stats(
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("orders")),
-    period: str = Query("today", pattern="^(today|week|month|year|all)$")
+    period: str = Query("today", pattern="^(today|week|month|year|all)$"),
+    preset: Optional[str] = Query(
+        None,
+        description="today | this_week | last_week | this_month | last_month",
+    ),
+    date: Optional[str] = Query(None, description="Một ngày cụ thể (YYYY-MM-DD)"),
+    year: Optional[int] = Query(None, ge=1970, le=2100),
+    date_from: Optional[str] = Query(None, description="Từ ngày (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="Đến ngày (YYYY-MM-DD)"),
 ):
     """
-    Admin: Get order statistics
+    Admin: thống kê đơn + doanh thu theo ngày/tuần/tháng/năm hoặc khoảng ngày tùy chọn.
     """
-    return crud.order.get_order_stats(db, period=period)
+    try:
+        return crud.order.get_order_stats(
+            db,
+            period=period,
+            preset=preset,
+            on_date=date,
+            year=year,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/admin/lookup-by-code/{order_code}", response_model=schemas.AdminOrderResponse)

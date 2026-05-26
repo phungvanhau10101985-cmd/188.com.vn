@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { adminOrderAPI, type AdminOrder, type PaymentRecord } from '@/lib/admin-api';
+import { adminOrderAPI, type AdminOrder, type AdminOrderStats, type AdminOrderStatsPreset, type PaymentRecord } from '@/lib/admin-api';
 import { cdnUrl, normalizeRemoteImageUrlForDisplay } from '@/lib/cdn-url';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 
@@ -127,6 +127,36 @@ function colorDisplay(item: {
   return name || code || null;
 }
 
+type RevenueReportMode = 'day' | 'week' | 'month' | 'year' | 'range';
+
+type RevenueFilterState = {
+  date: string;
+  dateFrom: string;
+  dateTo: string;
+  year: string;
+  month: string;
+  preset: AdminOrderStatsPreset | null;
+};
+
+const EMPTY_REVENUE_FILTER: RevenueFilterState = {
+  date: '',
+  dateFrom: '',
+  dateTo: '',
+  year: String(new Date().getFullYear()),
+  month: '',
+  preset: null,
+};
+
+function monthInputToDateRange(value: string): { from: string; to: string } | null {
+  if (!/^\d{4}-\d{2}$/.test(value)) return null;
+  const [year, month] = value.split('-').map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  return {
+    from: `${value}-01`,
+    to: `${value}-${String(lastDay).padStart(2, '0')}`,
+  };
+}
+
 export default function AdminOrdersPage() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
@@ -152,6 +182,11 @@ export default function AdminOrdersPage() {
   const [shippingProvider, setShippingProvider] = useState('');
   const [clearCustomsBusy, setClearCustomsBusy] = useState(false);
   const [markOutForConfirmBusy, setMarkOutForConfirmBusy] = useState(false);
+  const [revenueMode, setRevenueMode] = useState<RevenueReportMode>('day');
+  const [revenueFilter, setRevenueFilter] = useState<RevenueFilterState>(EMPTY_REVENUE_FILTER);
+  const [revenueReport, setRevenueReport] = useState<AdminOrderStats | null>(null);
+  const [revenueLoading, setRevenueLoading] = useState(false);
+  const [revenueError, setRevenueError] = useState<string | null>(null);
 
   const showToast = (type: 'ok' | 'err', msg: string) => {
     setToast({ type, msg });
@@ -205,10 +240,82 @@ export default function AdminOrdersPage() {
     }
   }, []);
 
+  const loadRevenueReport = useCallback(
+    async (mode: RevenueReportMode = revenueMode, filter: RevenueFilterState = revenueFilter) => {
+      setRevenueLoading(true);
+      setRevenueError(null);
+      try {
+        let data: AdminOrderStats;
+        if (mode === 'day') {
+          if (filter.preset === 'today') {
+            data = await adminOrderAPI.getStats({ preset: 'today' });
+          } else if (filter.date) {
+            data = await adminOrderAPI.getStats({ date: filter.date });
+          } else {
+            setRevenueError('Chọn ngày hoặc bấm «Hôm nay».');
+            setRevenueLoading(false);
+            return;
+          }
+        } else if (mode === 'week') {
+          if (!filter.preset || (filter.preset !== 'this_week' && filter.preset !== 'last_week')) {
+            setRevenueError('Chọn «Tuần này» hoặc «Tuần trước».');
+            setRevenueLoading(false);
+            return;
+          }
+          data = await adminOrderAPI.getStats({ preset: filter.preset });
+        } else if (mode === 'month') {
+          if (filter.preset === 'this_month' || filter.preset === 'last_month') {
+            data = await adminOrderAPI.getStats({ preset: filter.preset });
+          } else if (filter.month) {
+            const range = monthInputToDateRange(filter.month);
+            if (!range) {
+              setRevenueError('Tháng không hợp lệ.');
+              setRevenueLoading(false);
+              return;
+            }
+            data = await adminOrderAPI.getStats({ date_from: range.from, date_to: range.to });
+          } else {
+            setRevenueError('Chọn tháng hoặc bấm «Tháng này» / «Tháng trước».');
+            setRevenueLoading(false);
+            return;
+          }
+        } else if (mode === 'year') {
+          const y = Number(filter.year);
+          if (!Number.isFinite(y) || y < 1970 || y > 2100) {
+            setRevenueError('Năm không hợp lệ.');
+            setRevenueLoading(false);
+            return;
+          }
+          data = await adminOrderAPI.getStats({ year: y });
+        } else {
+          const from = filter.dateFrom.trim();
+          const to = (filter.dateTo || filter.dateFrom).trim();
+          if (!from) {
+            setRevenueError('Chọn ít nhất ngày bắt đầu.');
+            setRevenueLoading(false);
+            return;
+          }
+          data = await adminOrderAPI.getStats({ date_from: from, date_to: to });
+        }
+        setRevenueReport(data);
+      } catch (e) {
+        setRevenueReport(null);
+        setRevenueError(e instanceof Error ? e.message : 'Không tải được báo cáo doanh thu');
+      } finally {
+        setRevenueLoading(false);
+      }
+    },
+    [revenueMode, revenueFilter],
+  );
+
   useEffect(() => {
     fetchOrders();
     fetchStats();
   }, [fetchOrders, fetchStats]);
+
+  useEffect(() => {
+    void adminOrderAPI.getStats({ preset: 'today' }).then(setRevenueReport).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const q = (searchParams.get('q') || searchParams.get('highlight') || '').trim();
@@ -458,6 +565,288 @@ export default function AdminOrdersPage() {
             </div>
           </div>
         )}
+
+        <section className="bg-white rounded-lg shadow mb-6 overflow-hidden" aria-label="Báo cáo doanh thu">
+          <div className="border-b px-4 py-3">
+            <h2 className="text-lg font-semibold text-gray-900">Báo cáo doanh thu</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Tổng doanh thu và số đơn theo ngày, tuần, tháng, năm hoặc khoảng ngày tùy chọn.
+            </p>
+          </div>
+
+          <div className="px-4 py-3 border-b flex flex-wrap gap-2">
+            {(
+              [
+                ['day', 'Theo ngày'],
+                ['week', 'Theo tuần'],
+                ['month', 'Theo tháng'],
+                ['year', 'Theo năm'],
+                ['range', 'Khoảng ngày'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => {
+                  setRevenueMode(key);
+                  setRevenueFilter(EMPTY_REVENUE_FILTER);
+                  setRevenueReport(null);
+                  setRevenueError(null);
+                }}
+                className={`rounded-lg px-3 py-2 text-sm font-medium border ${
+                  revenueMode === key
+                    ? 'bg-[#ea580c] text-white border-[#ea580c]'
+                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="px-4 py-3 flex flex-wrap items-end gap-3 bg-gray-50/80 border-b">
+            {revenueMode === 'day' ? (
+              <>
+                <label className="text-sm text-gray-700">
+                  Chọn ngày
+                  <input
+                    type="date"
+                    value={revenueFilter.date}
+                    onChange={(e) =>
+                      setRevenueFilter({ ...EMPTY_REVENUE_FILTER, date: e.target.value, preset: null })
+                    }
+                    className="mt-1 block rounded-lg border border-gray-200 px-3 py-1.5 text-sm"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = { ...EMPTY_REVENUE_FILTER, preset: 'today' as const };
+                    setRevenueFilter(next);
+                    void loadRevenueReport('day', next);
+                  }}
+                  disabled={revenueLoading}
+                  className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Hôm nay
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void loadRevenueReport('day', revenueFilter)}
+                  disabled={revenueLoading || !revenueFilter.date}
+                  className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  Xem báo cáo
+                </button>
+              </>
+            ) : null}
+
+            {revenueMode === 'week' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = { ...EMPTY_REVENUE_FILTER, preset: 'this_week' as const };
+                    setRevenueFilter(next);
+                    void loadRevenueReport('week', next);
+                  }}
+                  disabled={revenueLoading}
+                  className={`rounded-lg px-3 py-2 text-sm font-medium border ${
+                    revenueFilter.preset === 'this_week'
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  Tuần này
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = { ...EMPTY_REVENUE_FILTER, preset: 'last_week' as const };
+                    setRevenueFilter(next);
+                    void loadRevenueReport('week', next);
+                  }}
+                  disabled={revenueLoading}
+                  className={`rounded-lg px-3 py-2 text-sm font-medium border ${
+                    revenueFilter.preset === 'last_week'
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  Tuần trước
+                </button>
+              </>
+            ) : null}
+
+            {revenueMode === 'month' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = { ...EMPTY_REVENUE_FILTER, preset: 'this_month' as const };
+                    setRevenueFilter(next);
+                    void loadRevenueReport('month', next);
+                  }}
+                  disabled={revenueLoading}
+                  className={`rounded-lg px-3 py-2 text-sm font-medium border ${
+                    revenueFilter.preset === 'this_month'
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  Tháng này
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = { ...EMPTY_REVENUE_FILTER, preset: 'last_month' as const };
+                    setRevenueFilter(next);
+                    void loadRevenueReport('month', next);
+                  }}
+                  disabled={revenueLoading}
+                  className={`rounded-lg px-3 py-2 text-sm font-medium border ${
+                    revenueFilter.preset === 'last_month'
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  Tháng trước
+                </button>
+                <label className="text-sm text-gray-700">
+                  Chọn tháng
+                  <input
+                    type="month"
+                    value={revenueFilter.month}
+                    onChange={(e) =>
+                      setRevenueFilter({ ...EMPTY_REVENUE_FILTER, month: e.target.value, preset: null })
+                    }
+                    className="mt-1 block rounded-lg border border-gray-200 px-3 py-1.5 text-sm"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void loadRevenueReport('month', revenueFilter)}
+                  disabled={revenueLoading || !revenueFilter.month}
+                  className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  Xem tháng
+                </button>
+              </>
+            ) : null}
+
+            {revenueMode === 'year' ? (
+              <>
+                <label className="text-sm text-gray-700">
+                  Năm
+                  <input
+                    type="number"
+                    min={1970}
+                    max={2100}
+                    value={revenueFilter.year}
+                    onChange={(e) =>
+                      setRevenueFilter({ ...EMPTY_REVENUE_FILTER, year: e.target.value, preset: null })
+                    }
+                    className="mt-1 block w-28 rounded-lg border border-gray-200 px-3 py-1.5 text-sm"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void loadRevenueReport('year', revenueFilter)}
+                  disabled={revenueLoading}
+                  className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  Xem theo năm
+                </button>
+              </>
+            ) : null}
+
+            {revenueMode === 'range' ? (
+              <>
+                <label className="text-sm text-gray-700">
+                  Từ ngày
+                  <input
+                    type="date"
+                    value={revenueFilter.dateFrom}
+                    onChange={(e) =>
+                      setRevenueFilter((prev) => ({
+                        ...prev,
+                        dateFrom: e.target.value,
+                        preset: null,
+                      }))
+                    }
+                    className="mt-1 block rounded-lg border border-gray-200 px-3 py-1.5 text-sm"
+                  />
+                </label>
+                <label className="text-sm text-gray-700">
+                  Đến ngày
+                  <input
+                    type="date"
+                    value={revenueFilter.dateTo}
+                    onChange={(e) =>
+                      setRevenueFilter((prev) => ({
+                        ...prev,
+                        dateTo: e.target.value,
+                        preset: null,
+                      }))
+                    }
+                    className="mt-1 block rounded-lg border border-gray-200 px-3 py-1.5 text-sm"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void loadRevenueReport('range', revenueFilter)}
+                  disabled={revenueLoading || !revenueFilter.dateFrom}
+                  className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  Xem khoảng ngày
+                </button>
+              </>
+            ) : null}
+          </div>
+
+          <div className="p-4">
+            {revenueError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {revenueError}
+              </div>
+            ) : null}
+            {revenueLoading ? (
+              <p className="text-sm text-gray-500">Đang tải báo cáo…</p>
+            ) : revenueReport ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-4 sm:col-span-3">
+                  <p className="text-sm text-gray-500">Kỳ báo cáo</p>
+                  <p className="text-base font-semibold text-gray-900">
+                    {revenueReport.period_label || '—'}
+                    {revenueReport.date_from && revenueReport.date_to && revenueReport.date_from !== revenueReport.date_to ? (
+                      <span className="text-sm font-normal text-gray-500 ml-2">
+                        ({revenueReport.date_from} → {revenueReport.date_to})
+                      </span>
+                    ) : null}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-emerald-100 bg-emerald-50/40 p-4">
+                  <p className="text-sm text-gray-600">Doanh thu</p>
+                  <p className="text-2xl font-bold text-emerald-700">
+                    {formatVnd(Number(revenueReport.total_revenue))}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-100 p-4">
+                  <p className="text-sm text-gray-600">Số đơn hàng</p>
+                  <p className="text-2xl font-bold text-gray-900">{revenueReport.total_orders}</p>
+                </div>
+                <div className="rounded-lg border border-gray-100 p-4">
+                  <p className="text-sm text-gray-600">Đã hủy / hoàn</p>
+                  <p className="text-lg font-semibold text-gray-800">
+                    {revenueReport.cancelled_orders} hủy · {revenueReport.returned_orders ?? 0} hoàn
+                  </p>
+                </div>
+              </div>
+            ) : !revenueError ? (
+              <p className="text-sm text-gray-500">Chọn kỳ và bấm xem báo cáo.</p>
+            ) : null}
+          </div>
+        </section>
 
         <div className="bg-white rounded-lg shadow">
           <div className="border-b flex flex-wrap gap-2 p-2">

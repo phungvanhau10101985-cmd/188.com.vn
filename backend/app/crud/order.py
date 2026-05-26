@@ -2,7 +2,7 @@
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import and_, or_, func, desc
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import logging
 
@@ -357,49 +357,217 @@ def confirm_received(
         affiliate_svc.notify_referrer_commission_confirmed_task(order.id)
     return order
 
-def get_order_stats(db: Session, period: str = "today") -> Dict[str, Any]:
-    """Get order statistics"""
-    today = datetime.now().date()
-    
-    if period == "today":
-        start_date = datetime.combine(today, datetime.min.time())
-        end_date = datetime.combine(today, datetime.max.time())
-    elif period == "week":
-        start_date = today - timedelta(days=today.weekday())
-        end_date = start_date + timedelta(days=6)
-    elif period == "month":
-        start_date = today.replace(day=1)
-        end_date = (start_date + timedelta(days=32)).replace(day=1) - timedelta(days=1)
-    elif period == "year":
-        start_date = today.replace(month=1, day=1)
-        end_date = today.replace(month=12, day=31)
-    else:  # all
-        start_date = None
-        end_date = None
-    
-    query = db.query(Order)
-    
-    if start_date and end_date:
-        query = query.filter(
-            Order.created_at >= start_date,
-            Order.created_at <= end_date
+_VN_TZ = timezone(timedelta(hours=7))
+_ORDER_STATS_PRESETS = frozenset(
+    {"today", "this_week", "last_week", "this_month", "last_month"}
+)
+
+
+def _vn_today() -> date:
+    return datetime.now(_VN_TZ).date()
+
+
+def _parse_iso_date(value: str | None) -> date | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError as exc:
+        raise ValueError(f"Ngày không hợp lệ: {value}") from exc
+
+
+def _month_bounds(year: int, month: int) -> tuple[date, date]:
+    start = date(year, month, 1)
+    if month == 12:
+        end = date(year, 12, 31)
+    else:
+        end = date(year, month + 1, 1) - timedelta(days=1)
+    return start, end
+
+
+def _datetime_start(day: date) -> datetime:
+    return datetime.combine(day, datetime.min.time())
+
+
+def _datetime_end(day: date) -> datetime:
+    return datetime.combine(day, datetime.max.time())
+
+
+def resolve_order_stats_range(
+    *,
+    period: str = "today",
+    preset: str | None = None,
+    on_date: str | None = None,
+    year: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> tuple[datetime | None, datetime | None, str, str | None, str | None]:
+    """
+    Trả về (start_dt, end_dt, period_label, iso_from, iso_to).
+    start/end None = không lọc theo ngày (period=all).
+    """
+    preset_key = (preset or "").strip().lower()
+    if preset_key and preset_key not in _ORDER_STATS_PRESETS:
+        raise ValueError(
+            "preset phải là today, this_week, last_week, this_month hoặc last_month."
         )
-    
-    # Total orders and revenue
+
+    if on_date and not date_from and not date_to:
+        day = _parse_iso_date(on_date)
+        assert day is not None
+        return (
+            _datetime_start(day),
+            _datetime_end(day),
+            day.strftime("%d/%m/%Y"),
+            day.isoformat(),
+            day.isoformat(),
+        )
+
+    if preset_key == "today":
+        today = _vn_today()
+        return (
+            _datetime_start(today),
+            _datetime_end(today),
+            f"Hôm nay ({today.strftime('%d/%m/%Y')})",
+            today.isoformat(),
+            today.isoformat(),
+        )
+
+    if preset_key == "this_week":
+        today = _vn_today()
+        start = today - timedelta(days=today.weekday())
+        end = start + timedelta(days=6)
+        label = f"Tuần này ({start.strftime('%d/%m')} – {end.strftime('%d/%m/%Y')})"
+        return _datetime_start(start), _datetime_end(end), label, start.isoformat(), end.isoformat()
+
+    if preset_key == "last_week":
+        today = _vn_today()
+        this_monday = today - timedelta(days=today.weekday())
+        start = this_monday - timedelta(days=7)
+        end = start + timedelta(days=6)
+        label = f"Tuần trước ({start.strftime('%d/%m')} – {end.strftime('%d/%m/%Y')})"
+        return _datetime_start(start), _datetime_end(end), label, start.isoformat(), end.isoformat()
+
+    if preset_key == "this_month":
+        today = _vn_today()
+        start, end = _month_bounds(today.year, today.month)
+        label = f"Tháng này ({today.month:02d}/{today.year})"
+        return _datetime_start(start), _datetime_end(end), label, start.isoformat(), end.isoformat()
+
+    if preset_key == "last_month":
+        today = _vn_today()
+        prev_year = today.year - 1 if today.month == 1 else today.year
+        prev_month = 12 if today.month == 1 else today.month - 1
+        start, end = _month_bounds(prev_year, prev_month)
+        label = f"Tháng trước ({prev_month:02d}/{prev_year})"
+        return _datetime_start(start), _datetime_end(end), label, start.isoformat(), end.isoformat()
+
+    if year is not None:
+        y = int(year)
+        if y < 1970 or y > 2100:
+            raise ValueError("Năm không hợp lệ.")
+        start = date(y, 1, 1)
+        end = date(y, 12, 31)
+        return _datetime_start(start), _datetime_end(end), str(y), start.isoformat(), end.isoformat()
+
+    parsed_from = _parse_iso_date(date_from) if date_from else None
+    parsed_to = _parse_iso_date(date_to) if date_to else None
+    if parsed_from or parsed_to:
+        start = parsed_from or parsed_to
+        end = parsed_to or parsed_from
+        assert start is not None and end is not None
+        if start > end:
+            start, end = end, start
+        if start == end:
+            label = start.strftime("%d/%m/%Y")
+        else:
+            label = f"{start.strftime('%d/%m/%Y')} – {end.strftime('%d/%m/%Y')}"
+        return _datetime_start(start), _datetime_end(end), label, start.isoformat(), end.isoformat()
+
+    legacy = (period or "today").strip().lower()
+    if legacy == "week":
+        today = _vn_today()
+        start = today - timedelta(days=today.weekday())
+        end = start + timedelta(days=6)
+        label = f"Tuần này ({start.strftime('%d/%m')} – {end.strftime('%d/%m/%Y')})"
+        return _datetime_start(start), _datetime_end(end), label, start.isoformat(), end.isoformat()
+
+    if legacy == "month":
+        today = _vn_today()
+        start, end = _month_bounds(today.year, today.month)
+        label = f"Tháng này ({today.month:02d}/{today.year})"
+        return _datetime_start(start), _datetime_end(end), label, start.isoformat(), end.isoformat()
+
+    if legacy == "year":
+        today = _vn_today()
+        start = date(today.year, 1, 1)
+        end = date(today.year, 12, 31)
+        return (
+            _datetime_start(start),
+            _datetime_end(end),
+            f"Năm {today.year}",
+            start.isoformat(),
+            end.isoformat(),
+        )
+
+    if legacy == "all":
+        return None, None, "Tất cả", None, None
+
+    today = _vn_today()
+    return (
+        _datetime_start(today),
+        _datetime_end(today),
+        f"Hôm nay ({today.strftime('%d/%m/%Y')})",
+        today.isoformat(),
+        today.isoformat(),
+    )
+
+
+def get_order_stats(
+    db: Session,
+    period: str = "today",
+    *,
+    preset: str | None = None,
+    on_date: str | None = None,
+    year: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> Dict[str, Any]:
+    """Thống kê đơn hàng + doanh thu theo khoảng thời gian."""
+    start_dt, end_dt, period_label, iso_from, iso_to = resolve_order_stats_range(
+        period=period,
+        preset=preset,
+        on_date=on_date,
+        year=year,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+    query = db.query(Order)
+
+    if start_dt is not None and end_dt is not None:
+        query = query.filter(
+            Order.created_at >= start_dt,
+            Order.created_at <= end_dt,
+        )
+
     total_orders = query.count()
     total_revenue_result = query.with_entities(func.sum(Order.total_amount)).scalar()
-    total_revenue = total_revenue_result if total_revenue_result else Decimal('0')
-    
-    # Count by status
-    status_counts = {}
+    total_revenue = total_revenue_result if total_revenue_result else Decimal("0")
+
+    status_counts: Dict[str, int] = {}
     for status in OrderStatus:
         count = query.filter(Order.status == status.value).count()
         status_counts[f"{status.value}_orders"] = count
-    
+
     return {
         "total_orders": total_orders,
         "total_revenue": total_revenue,
-        **status_counts
+        "period_label": period_label,
+        "date_from": iso_from,
+        "date_to": iso_to,
+        **status_counts,
     }
 
 
