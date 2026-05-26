@@ -336,47 +336,140 @@ def get_products_viewed_by_same_age_gender(
 
 SAME_SHOP_MAX_POOL = 8000
 SAME_SHOP_MAX_PER_SHOP_PER_PAGE = 8
+SAME_SHOP_RECENT_WINDOW = 8
+SAME_SHOP_HISTORY_WINDOW = 40
+SAME_SHOP_STREAK_THRESHOLD = 8
+SAME_SHOP_STREAK_DOMINANT_CYCLE_WEIGHT = 5
+SAME_SHOP_DOMINANT_MAX_PER_PAGE = 14
 
 
 def _same_shop_key(product: Product) -> str:
     return (product.shop_name_chinese or "").strip().lower()
 
 
-def _balance_same_shop_products(
-    candidates: List[Product],
+def _fetch_same_shop_view_history(
+    db: Session,
+    *,
+    user_id: Optional[int] = None,
+    guest_session_id: Optional[str] = None,
+    history_limit: int = SAME_SHOP_HISTORY_WINDOW,
+) -> List[int]:
+    if user_id is not None:
+        rows = (
+            db.query(UserProductView.product_id)
+            .filter(UserProductView.user_id == user_id)
+            .order_by(UserProductView.viewed_at.desc())
+            .limit(history_limit)
+            .all()
+        )
+        return [r[0] for r in rows]
+    sid = (guest_session_id or "").strip()
+    if sid:
+        from app.crud import guest_behavior as guest_behavior_crud
+
+        return guest_behavior_crud.recent_guest_view_product_ids(db, sid, limit=history_limit)
+    return []
+
+
+def _detect_leading_shop_streak(
     recent_product_ids: List[int],
     product_by_id: Dict[int, Product],
-    subs_lower: set[str],
+) -> Tuple[Optional[str], int]:
+    """Chuỗi shop liên tiếp từ lượt xem gần nhất (recent_product_ids đã sort mới → cũ)."""
+    streak_shop: Optional[str] = None
+    streak_len = 0
+    for pid in recent_product_ids:
+        product = product_by_id.get(pid)
+        shop_cn = _same_shop_key(product) if product else ""
+        if not shop_cn:
+            break
+        if streak_shop is None:
+            streak_shop = shop_cn
+            streak_len = 1
+        elif shop_cn == streak_shop:
+            streak_len += 1
+        else:
+            break
+    return streak_shop, streak_len
+
+
+def _history_shop_order(
+    history_product_ids: List[int],
+    product_by_id: Dict[int, Product],
+) -> List[str]:
+    order: List[str] = []
+    seen: set[str] = set()
+    for pid in history_product_ids:
+        product = product_by_id.get(pid)
+        shop_cn = _same_shop_key(product) if product else ""
+        if not shop_cn or shop_cn in seen:
+            continue
+        seen.add(shop_cn)
+        order.append(shop_cn)
+    return order
+
+
+def _build_same_shop_weighted_cycle(
+    recent_product_ids: List[int],
+    history_shop_order: List[str],
+    product_by_id: Dict[int, Product],
     shops_lower: set[str],
-    *,
-    seed: int,
-    page_size: int,
-    offset: int = 0,
-    limit: int = 60,
-    max_per_shop_per_page: int = SAME_SHOP_MAX_PER_SHOP_PER_PAGE,
-    total_items: Optional[int] = None,
-) -> tuple[List[Product], int]:
+) -> Tuple[List[str], Dict[str, int]]:
     """
-    Round-robin theo shop (trọng số = số lần shop xuất hiện trong 8 SP xem gần nhất).
-    Mỗi trang nội bộ (page_size): tối đa max_per_shop_per_page SP/shop; trong shop ưu tiên cùng subcategory.
-    Pagination: offset/limit áp dụng theo từng trang nội bộ (không gộp nhiều trang vào một response).
+    Trọng số round-robin theo shop.
+    Nếu 8 SP gần nhất cùng một shop: shop đó chiếm ưu thế nhưng vẫn xen shop khác từ lịch sử xem.
     """
+    max_per_shop_overrides: Dict[str, int] = {}
+    streak_shop, streak_len = _detect_leading_shop_streak(recent_product_ids, product_by_id)
+
+    if (
+        streak_len >= SAME_SHOP_STREAK_THRESHOLD
+        and streak_shop
+        and streak_shop in shops_lower
+    ):
+        other_shops = [s for s in history_shop_order if s != streak_shop and s in shops_lower]
+        if other_shops:
+            weighted_cycle: List[str] = [streak_shop] * SAME_SHOP_STREAK_DOMINANT_CYCLE_WEIGHT
+            weighted_cycle.extend(other_shops)
+            max_per_shop_overrides[streak_shop] = SAME_SHOP_DOMINANT_MAX_PER_PAGE
+            return weighted_cycle, max_per_shop_overrides
+
     shop_seen_order: List[str] = []
     shop_freq: Dict[str, int] = {}
     for pid in recent_product_ids:
-        recent = product_by_id.get(pid)
-        if not recent:
-            continue
-        shop_cn = _same_shop_key(recent)
+        product = product_by_id.get(pid)
+        shop_cn = _same_shop_key(product) if product else ""
         if not shop_cn or shop_cn not in shops_lower:
             continue
         shop_freq[shop_cn] = shop_freq.get(shop_cn, 0) + 1
         if shop_cn not in shop_seen_order:
             shop_seen_order.append(shop_cn)
 
-    weighted_cycle: List[str] = []
+    weighted_cycle = []
     for shop in shop_seen_order:
         weighted_cycle.extend([shop] * shop_freq[shop])
+    return weighted_cycle, max_per_shop_overrides
+
+
+def _balance_same_shop_products(
+    candidates: List[Product],
+    subs_lower: set[str],
+    shops_lower: set[str],
+    *,
+    weighted_cycle: List[str],
+    shop_queue_order: List[str],
+    seed: int,
+    page_size: int,
+    offset: int = 0,
+    limit: int = 60,
+    max_per_shop_per_page: int = SAME_SHOP_MAX_PER_SHOP_PER_PAGE,
+    max_per_shop_overrides: Optional[Dict[str, int]] = None,
+    total_items: Optional[int] = None,
+) -> tuple[List[Product], int]:
+    """
+    Round-robin theo weighted_cycle; mỗi trang: cap SP/shop (có thể override cho shop ưu tiên).
+    Trong từng shop: ưu tiên cùng subcategory rồi trộn ngẫu nhiên.
+    """
     if not weighted_cycle:
         return [], 0
 
@@ -394,7 +487,9 @@ def _balance_same_shop_products(
 
     rng = random.Random(seed)
     shop_queues: Dict[str, List[Product]] = {}
-    for shop in shop_seen_order:
+    for shop in shop_queue_order:
+        if shop not in shops_lower:
+            continue
         same = shop_tier_same[shop]
         only = shop_tier_only[shop]
         rng.shuffle(same)
@@ -406,10 +501,14 @@ def _balance_same_shop_products(
     if not shop_queues:
         return [], 0
 
+    overrides = max_per_shop_overrides or {}
+
+    def _cap_for_shop(shop: str) -> int:
+        return max(1, overrides.get(shop, max_per_shop_per_page))
+
     page_size = max(1, page_size)
     limit = max(1, limit)
     offset = max(0, offset)
-    max_per_shop_per_page = max(1, max_per_shop_per_page)
     start_page = offset // page_size
 
     pages: List[List[Product]] = []
@@ -431,7 +530,7 @@ def _balance_same_shop_products(
             if not queue:
                 no_progress_cycles += 1
                 continue
-            if page_shop_counts[shop] >= max_per_shop_per_page:
+            if page_shop_counts[shop] >= _cap_for_shop(shop):
                 no_progress_cycles += 1
                 continue
 
@@ -465,46 +564,55 @@ def get_products_same_shop_as_recent_views(
     require_video: bool = False,
 ) -> tuple[List[Product], int, Optional[int]]:
     """
-    Sản phẩm cùng `shop_name_chinese` (cột AM / Shop Trung Quốc) với các shop của tối đa 8 SP xem gần nhất.
-    Cân bằng hiển thị: round-robin theo shop (trọng số lượt xem gần nhất), tối đa 8 SP/shop/trang (`limit`).
-    Trong từng shop: ưu tiên cùng `subcategory` (cột AC) rồi trộn ngẫu nhiên (theo `seed`).
-    Trả về (danh_sách_slice, total, seed). Không gửi `seed`: random mới mỗi lần; có `seed` + offset: pagination ổn định.
-    `require_video`: chỉ SP có link video phát được (YouTube watch/embed/short hoặc URL chứa `.mp4`), khớp frontend.
-    Ưu tiên user_id; nếu không có thì guest_session_id (bảng guest_product_views).
-    Pool DB tối đa 8000 SP trước khi cân bằng — tránh quá tải bộ nhớ.
+    Sản phẩm cùng `shop_name_chinese` (cột AM) từ các shop trong lịch sử xem (tối đa 40 lượt).
+    8 SP gần nhất: dùng subcategory (AC) + phát hiện xem liên tiếp cùng shop.
+    Nếu 8 SP liên tiếp cùng shop: ưu tiên shop đó (~5/8 vòng round-robin, tối đa 14 SP/trang)
+    nhưng vẫn xen shop khác đã xem trước đó (tối đa 8 SP/shop/trang).
+    Trường hợp thường: round-robin theo tần suất 8 SP gần nhất, tối đa 8 SP/shop/trang.
     """
-    recent_product_ids: List[int] = []
-    if user_id is not None:
-        recent_views = (
-            db.query(UserProductView.product_id)
-            .filter(UserProductView.user_id == user_id)
-            .order_by(UserProductView.viewed_at.desc())
-            .limit(8)
-            .all()
-        )
-        recent_product_ids = [r[0] for r in recent_views]
-    elif guest_session_id and str(guest_session_id).strip():
-        from app.crud import guest_behavior as guest_behavior_crud
-
-        recent_product_ids = guest_behavior_crud.recent_guest_view_product_ids(
-            db, str(guest_session_id).strip(), limit=8
-        )
-    if not recent_product_ids:
+    history_product_ids = _fetch_same_shop_view_history(
+        db, user_id=user_id, guest_session_id=guest_session_id
+    )
+    if not history_product_ids:
         return [], 0, None
 
-    recent_products = db.query(Product).filter(Product.id.in_(recent_product_ids)).all()
-    product_by_id = {p.id: p for p in recent_products}
+    recent_product_ids = history_product_ids[:SAME_SHOP_RECENT_WINDOW]
+
+    history_products = db.query(Product).filter(Product.id.in_(history_product_ids)).all()
+    product_by_id = {p.id: p for p in history_products}
     shops_lower: set[str] = set()
     subs_lower: set[str] = set()
-    for p in recent_products:
+    for pid in recent_product_ids:
+        p = product_by_id.get(pid)
+        if not p:
+            continue
         shop_cn = _same_shop_key(p)
         if shop_cn:
             shops_lower.add(shop_cn)
         sub = (p.subcategory or "").strip()
         if sub:
             subs_lower.add(sub.lower())
+
+    history_shop_order = _history_shop_order(history_product_ids, product_by_id)
+    for shop in history_shop_order:
+        shops_lower.add(shop)
+
     if not shops_lower:
         return [], 0, None
+
+    weighted_cycle, max_per_shop_overrides = _build_same_shop_weighted_cycle(
+        recent_product_ids,
+        history_shop_order,
+        product_by_id,
+        shops_lower,
+    )
+    if not weighted_cycle:
+        return [], 0, None
+
+    shop_queue_order = [s for s in history_shop_order if s in shops_lower]
+    for shop in shops_lower:
+        if shop not in shop_queue_order:
+            shop_queue_order.append(shop)
 
     shop_conditions = [
         func.lower(func.trim(Product.shop_name_chinese)) == shop_lower for shop_lower in shops_lower
@@ -533,14 +641,15 @@ def get_products_same_shop_as_recent_views(
     candidate_total = len(candidates)
     page, total = _balance_same_shop_products(
         candidates,
-        recent_product_ids,
-        product_by_id,
         subs_lower,
         shops_lower,
+        weighted_cycle=weighted_cycle,
+        shop_queue_order=shop_queue_order,
         seed=seed,
         page_size=max(1, limit),
         offset=offset,
         limit=limit,
+        max_per_shop_overrides=max_per_shop_overrides,
         total_items=candidate_total,
     )
     return page, total, seed
