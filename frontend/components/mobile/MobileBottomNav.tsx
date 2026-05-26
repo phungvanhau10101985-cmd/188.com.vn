@@ -2,10 +2,15 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { apiClient } from '@/lib/api-client';
+import {
+  NANO_AI_TRY_ON_HOME_CTX,
+  NANO_AI_CTX_SOURCE_SHOP_HOME,
+} from '@/lib/nanoai-hosted-chat';
+import { useNanoAiTryOnOpener } from '@/lib/use-nanoai-try-on';
 
 interface MobileBottomNavProps {
   notificationCount?: number;
@@ -39,7 +44,14 @@ export default function MobileBottomNav({ notificationCount: initialNotifCount =
   const pathKey = pathNorm(pathname);
   const { isAuthenticated } = useAuth();
   const { favoriteCount } = useFavorites();
+  const { openTryOn } = useNanoAiTryOnOpener();
   const [unreadNotifCount, setUnreadNotifCount] = useState(initialNotifCount);
+
+  const handleBottomNavTryOn = useCallback(() => {
+    void openTryOn(NANO_AI_TRY_ON_HOME_CTX, NANO_AI_CTX_SOURCE_SHOP_HOME, {
+      source: 'mobile_bottom_nav_try_on',
+    });
+  }, [openTryOn]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -142,6 +154,7 @@ export default function MobileBottomNav({ notificationCount: initialNotifCount =
         <button
           type="button"
           data-nanoai-try-on
+          onClick={handleBottomNavTryOn}
           className={`flex flex-col items-center justify-center flex-1 h-full min-w-0 gap-1 transition-colors ${NAV_ACTIVE} active:opacity-80`}
           aria-label="Thử đồ với NanoAI"
         >

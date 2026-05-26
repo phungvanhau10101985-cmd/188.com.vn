@@ -637,6 +637,7 @@ export default function ProductDetailClient({
               </div>
               <ProductInfo
                 product={product}
+                viewingImageUrl={nanoPrimaryImage}
                 onAddToCart={handleAddToCart}
                 onToggleFavorite={handleToggleFavorite}
                 onBuyNow={handleBuyNow}

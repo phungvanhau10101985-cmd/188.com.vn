@@ -1,7 +1,7 @@
 // frontend/app/products/[slug]/components/ProductInfo/ProductInfo.tsx - ĐÃ SỬA LỖI PROPS
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
@@ -16,10 +16,18 @@ import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
+import {
+  buildNanoAiGatewayPayloadFrom188Product,
+  nanoAiGatewayButtonDataset,
+  NANO_AI_CTX_SOURCE_PRODUCT_PDP,
+} from '@/lib/nanoai-hosted-chat';
+import { useNanoAiMessaging } from '@/lib/use-nanoai-messaging';
 import AffiliateShareBar from '@/components/affiliate/AffiliateShareBar';
 
 interface ProductInfoProps {
   product: Product;
+  /** Ảnh SP đang xem trên gallery / màu — đồng bộ với cổng NanoAI. */
+  viewingImageUrl?: string | null;
   onAddToCart: (product: Product, quantity: number, selectedSize?: string, selectedColor?: string) => void;
   onToggleFavorite: (product: Product) => void;
   onBuyNow: (product: Product, quantity: number, selectedSize?: string, selectedColor?: string) => void;
@@ -31,7 +39,8 @@ interface ProductInfoProps {
 }
 
 export default function ProductInfo({ 
-  product, 
+  product,
+  viewingImageUrl,
   onAddToCart, 
   onToggleFavorite, 
   onBuyNow,
@@ -50,7 +59,21 @@ export default function ProductInfo({
   const [variantModalAction, setVariantModalAction] = useState<'add' | 'buy' | 'both'>('both');
   const [displayStockByVariant, setDisplayStockByVariant] = useState<Record<string, number>>({});
   const { isAuthenticated } = useAuth();
+  const { openTryOnForProduct } = useNanoAiMessaging();
   const [loyaltyStatus, setLoyaltyStatus] = useState<any>(null);
+
+  const nanoPayload = buildNanoAiGatewayPayloadFrom188Product(product, {
+    imageUrl: viewingImageUrl,
+  });
+  const tryOnStickyAttrs = nanoAiGatewayButtonDataset(nanoPayload, 'try_on');
+
+  const handleNanoAiTryOn = useCallback(() => {
+    void openTryOnForProduct(product, {
+      imageUrl: viewingImageUrl,
+      ctxSource: NANO_AI_CTX_SOURCE_PRODUCT_PDP,
+      source: 'product_detail_desktop_sticky',
+    });
+  }, [openTryOnForProduct, product, viewingImageUrl]);
 
   const available = (product.available || 0) > 0;
   const hasDiscount = product.original_price && product.original_price > product.price;
@@ -258,6 +281,7 @@ export default function ProductInfo({
       <div ref={actionsRef}>
         <ProductActions
           product={product}
+          viewingImageUrl={viewingImageUrl}
           quantity={quantity}
           selectedSize={selectedSize}
           selectedColor={selectedColorForCart}
@@ -345,7 +369,8 @@ export default function ProductInfo({
                   </Link>
                   <button
                     type="button"
-                    data-nanoai-try-on
+                    {...tryOnStickyAttrs}
+                    onClick={handleNanoAiTryOn}
                     className="flex flex-col items-center justify-center flex-shrink-0 w-14 text-[#ea580c] hover:opacity-90 active:opacity-75"
                     aria-label="Thử đồ với NanoAI"
                   >

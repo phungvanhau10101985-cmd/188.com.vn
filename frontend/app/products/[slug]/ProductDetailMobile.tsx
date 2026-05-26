@@ -25,6 +25,12 @@ import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import AffiliateShareBar, { ProductShareIconButton } from '@/components/affiliate/AffiliateShareBar';
 import { useAffiliatePageShare } from '@/lib/use-affiliate-page-share';
 import { trackEvent } from '@/lib/analytics';
+import {
+  buildNanoAiGatewayPayloadFrom188Product,
+  nanoAiGatewayButtonDataset,
+  NANO_AI_CTX_SOURCE_PRODUCT_PDP,
+} from '@/lib/nanoai-hosted-chat';
+import { useNanoAiMessaging } from '@/lib/use-nanoai-messaging';
 
 function formatLikeCount(n: unknown): string {
   const v = Math.max(0, Math.floor(Number(n)) || 0);
@@ -59,6 +65,7 @@ export default function ProductDetailMobile({
   const [displayStockByVariant, setDisplayStockByVariant] = useState<Record<string, number>>({});
   const { isAuthenticated } = useAuth();
   const { copyShareUrl, isApproved: isAffiliateApproved } = useAffiliatePageShare({ shareTitle: product.name });
+  const { openTryOnForProduct } = useNanoAiMessaging();
   const [loyaltyStatus, setLoyaltyStatus] = useState<any>(null);
 
   const quantity = 1;
@@ -174,6 +181,19 @@ export default function ProductDetailMobile({
     ? null
     : (visiblePhotoUrls[hasVideo ? selectedImage - 1 : selectedImage] ?? null);
   const videoThumb = parsedVideo?.thumbUrl ?? null;
+
+  const nanoPayload = buildNanoAiGatewayPayloadFrom188Product(product, {
+    imageUrl: mainImageRaw,
+  });
+  const tryOnStickyAttrs = nanoAiGatewayButtonDataset(nanoPayload, 'try_on');
+
+  const handleNanoAiTryOn = useCallback(() => {
+    void openTryOnForProduct(product, {
+      imageUrl: mainImageRaw,
+      ctxSource: NANO_AI_CTX_SOURCE_PRODUCT_PDP,
+      source: 'product_detail_mobile',
+    });
+  }, [openTryOnForProduct, product, mainImageRaw]);
 
   const handleCopyLink = () => {
     void copyShareUrl().then((ok) => {
@@ -504,7 +524,8 @@ export default function ProductDetailMobile({
             </Link>
             <button
               type="button"
-              data-nanoai-try-on
+              {...tryOnStickyAttrs}
+              onClick={handleNanoAiTryOn}
               className="flex w-12 flex-none flex-col items-center justify-center gap-px py-0 text-[#ea580c] active:opacity-70"
               aria-label="Thử đồ với NanoAI"
             >

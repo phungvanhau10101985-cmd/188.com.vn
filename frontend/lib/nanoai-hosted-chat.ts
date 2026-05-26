@@ -24,8 +24,53 @@ export const NANO_AI_CTX_SOURCE_PRODUCT_PDP = 'product_detail';
 /** Nguồn ctx_* khi mở thử đồ từ tab trên trang chủ (không gắn SP cụ thể). */
 export const NANO_AI_CTX_SOURCE_SHOP_HOME = 'shop_home';
 
-/** Chuẩn hóa SP 188 → payload thử đồ NanoAI (hosted). */
-export function buildNanoAiTryOnCtxFrom188Product(p: {
+export type NanoAiGatewayPayload = {
+  sku: string;
+  imageUrl: string;
+  productUrl?: string;
+  inventoryId?: string | null;
+};
+
+export type NanoAiConsultOpenResult =
+  | { ok: true; mode: 'gateway' }
+  | { ok: false; reason: 'no_gateway' | 'missing_sku' | 'missing_image' };
+
+declare global {
+  interface Window {
+    NanoAIMessagingGateway?: {
+      openConsult?: (payload: {
+        sku: string;
+        imageUrl: string;
+        productUrl?: string;
+        inventoryId?: string;
+      }) => void;
+      openTryOn?: (payload: {
+        imageUrl: string;
+        sku?: string;
+        productUrl?: string;
+        inventoryId?: string;
+      }) => void;
+    };
+  }
+}
+
+const NANOAI_VIDEO_IMAGE_RE = /\.(mp4|webm|mov|m4v)(\?|$)/i;
+
+/** Ảnh hợp lệ cho NanoAI: HTTPS/URL tuyệt đối, không phải link video. */
+export function isNanoAiEligibleImageUrl(raw: string): boolean {
+  const t = raw.trim();
+  if (!t) return false;
+  return !NANOAI_VIDEO_IMAGE_RE.test(t);
+}
+
+export function getNanoAiMessagingGateway(): Window['NanoAIMessagingGateway'] | null {
+  if (typeof window === 'undefined') return null;
+  const gw = window.NanoAIMessagingGateway;
+  if (!gw || typeof gw !== 'object') return null;
+  return gw;
+}
+
+type NanoAi188ProductRef = {
   id: number;
   code?: string | null;
   product_id?: string | null;
@@ -33,12 +78,91 @@ export function buildNanoAiTryOnCtxFrom188Product(p: {
   main_image?: string | null;
   images?: string[] | null;
   inventory_id?: string | null;
-}): NanoAiTryOnCtx {
+};
+
+function pickNanoAiProductImageUrl(
+  p: NanoAi188ProductRef,
+  opts?: { imageUrl?: string | null; origin?: string },
+): string {
+  const ordered = [opts?.imageUrl, p.main_image, ...(p.images || [])].filter(Boolean) as string[];
+  const uniq = [...new Set(ordered.map((u) => u.trim()).filter(Boolean))];
+  const origin = opts?.origin ?? (typeof window !== 'undefined' ? window.location.origin : '');
+  for (const raw of uniq) {
+    if (!isNanoAiEligibleImageUrl(raw)) continue;
+    return origin ? absolutizeUrl(raw, origin) : raw;
+  }
+  return '';
+}
+
+/** Chuẩn hóa SP 188 → payload cổng NanoAIMessagingGateway (consult / try-on). */
+export function buildNanoAiGatewayPayloadFrom188Product(
+  p: NanoAi188ProductRef,
+  opts?: { imageUrl?: string | null },
+): NanoAiGatewayPayload {
   const sku = (String(p.code ?? '').trim() || String(p.product_id ?? '').trim() || String(p.id)).trim();
-  const ordered = [p.main_image, ...(p.images || [])].filter(Boolean) as string[];
-  const uniq = [...new Set(ordered)];
-  const primary = uniq[0] || '';
-  const secondary = uniq.find((u) => u !== primary) || null;
+  const slugPart =
+    productPathSlugFromApi(p.slug ?? undefined, p.product_id ?? undefined) ||
+    String(p.product_id ?? '').trim() ||
+    String(p.id);
+  const productPath = `/products/${slugPart}`;
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  return {
+    sku,
+    imageUrl: pickNanoAiProductImageUrl(p, { imageUrl: opts?.imageUrl, origin }),
+    productUrl: origin ? absolutizeUrl(productPath, origin) : productPath,
+    inventoryId: p.inventory_id ?? null,
+  };
+}
+
+/** data-nanoai-* trên nút PDP — widget bắt click khi không gọi JS gateway. */
+export function nanoAiGatewayButtonDataset(
+  payload: NanoAiGatewayPayload,
+  kind: 'consult' | 'try_on',
+): Record<string, string> {
+  const out: Record<string, string> =
+    kind === 'consult' ? { 'data-nanoai-consult': '' } : { 'data-nanoai-try-on': '' };
+  if (payload.sku) out['data-nanoai-sku'] = payload.sku;
+  if (payload.imageUrl) out['data-nanoai-image'] = payload.imageUrl;
+  if (payload.productUrl) out['data-nanoai-product-url'] = payload.productUrl;
+  const inv = (payload.inventoryId ?? '').trim();
+  if (inv) out['data-nanoai-inventory-id'] = inv;
+  return out;
+}
+
+/** Cổng tư vấn — iframe có ctx_sku, ctx_image, auto_consult=1 (không open_try_on=1). */
+export function openNanoAiConsultEmbed(payload: NanoAiGatewayPayload): NanoAiConsultOpenResult {
+  if (typeof window === 'undefined') return { ok: false, reason: 'no_gateway' };
+  const sku = (payload.sku || '').trim();
+  const imageUrl = (payload.imageUrl || '').trim();
+  if (!sku) {
+    console.warn('[NanoAI] NanoAIMessagingGateway.openConsult thiếu sku');
+    return { ok: false, reason: 'missing_sku' };
+  }
+  if (!imageUrl || !isNanoAiEligibleImageUrl(imageUrl)) {
+    console.warn('[NanoAI] NanoAIMessagingGateway.openConsult thiếu imageUrl hợp lệ (HTTPS, không video)');
+    return { ok: false, reason: 'missing_image' };
+  }
+  const gw = getNanoAiMessagingGateway();
+  if (!gw?.openConsult) return { ok: false, reason: 'no_gateway' };
+  gw.openConsult({
+    sku,
+    imageUrl,
+    productUrl: payload.productUrl || undefined,
+    inventoryId: (payload.inventoryId ?? '').trim() || undefined,
+  });
+  return { ok: true, mode: 'gateway' };
+}
+
+/** Chuẩn hóa SP 188 → payload thử đồ NanoAI (hosted). */
+export function buildNanoAiTryOnCtxFrom188Product(
+  p: NanoAi188ProductRef,
+  opts?: { imageUrl?: string | null },
+): NanoAiTryOnCtx {
+  const sku = (String(p.code ?? '').trim() || String(p.product_id ?? '').trim() || String(p.id)).trim();
+  const ordered = [opts?.imageUrl, p.main_image, ...(p.images || [])].filter(Boolean) as string[];
+  const uniq = [...new Set(ordered.map((u) => u.trim()).filter(Boolean))];
+  const primary = uniq.find((u) => isNanoAiEligibleImageUrl(u)) || '';
+  const secondary = uniq.find((u) => u !== primary && isNanoAiEligibleImageUrl(u)) || null;
   const slugPart =
     productPathSlugFromApi(p.slug ?? undefined, p.product_id ?? undefined) ||
     String(p.product_id ?? '').trim() ||
@@ -269,8 +393,8 @@ export function applyTryOnUrlToNanoAiMessagingIframes(
 }
 
 export type NanoAiTryOnEmbedOpenResult =
-  | { ok: true; mode: 'launcher' | 'new_tab' }
-  | { ok: false; reason: 'no_chat_config' | 'launcher_unknown' };
+  | { ok: true; mode: 'gateway' | 'launcher' | 'new_tab' }
+  | { ok: false; reason: 'no_chat_config' | 'launcher_unknown' | 'missing_image' };
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -285,13 +409,32 @@ export async function openNanoAiTryOnEmbed(
   ctxSource: string = NANO_AI_CTX_SOURCE_VIDEO_FEED
 ): Promise<NanoAiTryOnEmbedOpenResult> {
   if (typeof window === 'undefined') return { ok: false, reason: 'no_chat_config' };
+
+  const origin = window.location.origin;
+  const imageUrl = absolutizeUrl(ctx.primaryImageUrl, origin);
+  syncNanoAiLoaderScriptProductContext(ctx);
+
+  const gw = getNanoAiMessagingGateway();
+  if (gw?.openTryOn && imageUrl && isNanoAiEligibleImageUrl(imageUrl)) {
+    gw.openTryOn({
+      imageUrl,
+      sku: (ctx.sku || '').trim() || undefined,
+      productUrl: absolutizeUrl(ctx.productPath, origin) || undefined,
+      inventoryId: (ctx.inventoryId ?? '').trim() || undefined,
+    });
+    return { ok: true, mode: 'gateway' };
+  }
+  if (gw?.openTryOn && imageUrl && !isNanoAiEligibleImageUrl(imageUrl)) {
+    console.warn('[NanoAI] NanoAIMessagingGateway.openTryOn thiếu imageUrl hợp lệ (HTTPS, không video)');
+    return { ok: false, reason: 'missing_image' };
+  }
+
   const base = resolveNanoAiHostedChatBaseUrl();
   if (!base) return { ok: false, reason: 'no_chat_config' };
 
   const targetUrl = buildNanoAiTryOnHostedUrl(ctx, ctxSource);
   if (!targetUrl) return { ok: false, reason: 'no_chat_config' };
 
-  syncNanoAiLoaderScriptProductContext(ctx);
   dispatchNanoAiEmbedOpenTryOnSignals();
 
   const patchAll = () => applyTryOnUrlToNanoAiMessagingIframes(targetUrl, base);
