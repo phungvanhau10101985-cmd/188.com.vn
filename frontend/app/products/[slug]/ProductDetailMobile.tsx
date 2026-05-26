@@ -24,6 +24,7 @@ import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import AffiliateShareBar, { ProductShareIconButton } from '@/components/affiliate/AffiliateShareBar';
 import { useAffiliatePageShare } from '@/lib/use-affiliate-page-share';
+import { trackEvent } from '@/lib/analytics';
 
 function formatLikeCount(n: unknown): string {
   const v = Math.max(0, Math.floor(Number(n)) || 0);
