@@ -18,17 +18,10 @@ import ProductVariantModal from './components/ProductVariantModal/ProductVariant
 import ProductQAReviewCards from './components/ProductQAReviewCards/ProductQAReviewCards';
 import ProductQASection from './components/ProductQASection/ProductQASection';
 import ProductReviewSection from './components/ProductReviewSection/ProductReviewSection';
-import { useToast } from '@/components/ToastProvider';
-import { trackEvent } from '@/lib/analytics';
 import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
-import {
-  openNanoAiTryOnEmbed,
-  buildNanoAiTryOnCtxFrom188Product,
-  NANO_AI_CTX_SOURCE_PRODUCT_PDP,
-} from '@/lib/nanoai-hosted-chat';
 import AffiliateShareBar, { ProductShareIconButton } from '@/components/affiliate/AffiliateShareBar';
 import { useAffiliatePageShare } from '@/lib/use-affiliate-page-share';
 
@@ -64,7 +57,6 @@ export default function ProductDetailMobile({
   /** Tồn ảo theo biến thể (key = productId_variantKey); lưu ở parent để sau khi mua tồn = 0 vẫn giữ, mở lại không mua thêm được. */
   const [displayStockByVariant, setDisplayStockByVariant] = useState<Record<string, number>>({});
   const { isAuthenticated } = useAuth();
-  const { pushToast } = useToast();
   const { copyShareUrl, isApproved: isAffiliateApproved } = useAffiliatePageShare({ shareTitle: product.name });
   const [loyaltyStatus, setLoyaltyStatus] = useState<any>(null);
 
@@ -101,35 +93,6 @@ export default function ProductDetailMobile({
   const loyaltyTierName = loyaltyStatus?.current_tier?.name || 'L0';
 
   const openVariantModal = () => setVariantModalOpen(true);
-
-  const handleNanoAiTryOn = useCallback(async () => {
-    const ctx = buildNanoAiTryOnCtxFrom188Product(product);
-    const result = await openNanoAiTryOnEmbed(ctx, NANO_AI_CTX_SOURCE_PRODUCT_PDP);
-    if (!result.ok) {
-      if (result.reason === 'no_chat_config') {
-        pushToast({
-          title: 'Chưa mở được thử đồ',
-          description:
-            'Kiểm tra mã nhúng NanoAI (data-chat-url trên script) hoặc biến NEXT_PUBLIC_NANOAI_CHAT_URL trong frontend.',
-          variant: 'info',
-          durationMs: 4200,
-        });
-      } else {
-        pushToast({
-          title: 'Chưa mở được khung chat',
-          description: 'Bấm biểu tượng chat NanoAI góc màn hình — ngữ cảnh sản phẩm đã được gửi kèm.',
-          variant: 'info',
-          durationMs: 4200,
-        });
-      }
-      return;
-    }
-    trackEvent('nanoai_try_on_open', {
-      product_id: product.id,
-      source: 'product_detail_mobile',
-      mode: result.mode,
-    });
-  }, [product, pushToast]);
 
   const hasVideo = hasVideoLink(product.video_link);
   const parsedVideo = parseVideoLink(product.video_link);
@@ -540,7 +503,7 @@ export default function ProductDetailMobile({
             </Link>
             <button
               type="button"
-              onClick={() => void handleNanoAiTryOn()}
+              data-nanoai-try-on
               className="flex w-12 flex-none flex-col items-center justify-center gap-px py-0 text-[#ea580c] active:opacity-70"
               aria-label="Thử đồ với NanoAI"
             >

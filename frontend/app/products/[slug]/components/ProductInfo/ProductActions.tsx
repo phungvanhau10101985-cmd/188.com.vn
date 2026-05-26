@@ -57,7 +57,24 @@ export default function ProductActions({
   };
 
   return (
-    <div className="flex flex-col sm:flex-row gap-2 pt-3">
+    <div className="space-y-2 pt-3">
+      <div className="flex flex-col sm:flex-row gap-2">
+        <button
+          type="button"
+          data-nanoai-consult
+          className="flex-1 py-2.5 px-4 rounded-lg font-semibold text-sm border-2 border-[#ea580c] text-[#ea580c] bg-white hover:bg-orange-50 transition-colors"
+        >
+          Tư vấn nhắn tin
+        </button>
+        <button
+          type="button"
+          data-nanoai-try-on
+          className="flex-1 py-2.5 px-4 rounded-lg font-semibold text-sm bg-[#ea580c] hover:bg-[#c2410c] text-white transition-colors"
+        >
+          Thử đồ
+        </button>
+      </div>
+      <div className="flex flex-col sm:flex-row gap-2">
       <button
         type="button"
         onClick={handleAddToCart}
@@ -103,6 +120,7 @@ export default function ProductActions({
       >
         {isFavorited ? '❤️' : '🤍'}
       </button>
+      </div>
     </div>
   );
 }

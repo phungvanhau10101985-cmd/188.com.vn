@@ -2,17 +2,10 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { apiClient } from '@/lib/api-client';
-import { useToast } from '@/components/ToastProvider';
-import { trackEvent } from '@/lib/analytics';
-import {
-  openNanoAiTryOnEmbed,
-  NANO_AI_TRY_ON_HOME_CTX,
-  NANO_AI_CTX_SOURCE_SHOP_HOME,
-} from '@/lib/nanoai-hosted-chat';
 
 interface MobileBottomNavProps {
   notificationCount?: number;
@@ -44,34 +37,9 @@ const linkNavItems: Array<{
 export default function MobileBottomNav({ notificationCount: initialNotifCount = 0 }: MobileBottomNavProps) {
   const pathname = usePathname();
   const pathKey = pathNorm(pathname);
-  const { pushToast } = useToast();
   const { isAuthenticated } = useAuth();
   const { favoriteCount } = useFavorites();
   const [unreadNotifCount, setUnreadNotifCount] = useState(initialNotifCount);
-
-  const handleBottomNavTryOn = useCallback(async () => {
-    const result = await openNanoAiTryOnEmbed(NANO_AI_TRY_ON_HOME_CTX, NANO_AI_CTX_SOURCE_SHOP_HOME);
-    if (!result.ok) {
-      if (result.reason === 'no_chat_config') {
-        pushToast({
-          title: 'Chưa mở được thử đồ',
-          description:
-            'Kiểm tra mã nhúng NanoAI (data-chat-url trên script) hoặc biến NEXT_PUBLIC_NANOAI_CHAT_URL trong frontend.',
-          variant: 'info',
-          durationMs: 4200,
-        });
-      } else {
-        pushToast({
-          title: 'Chưa mở được khung chat',
-          description: 'Bấm biểu tượng chat NanoAI góc màn hình — có thể mở thử đồ từ đó.',
-          variant: 'info',
-          durationMs: 4200,
-        });
-      }
-      return;
-    }
-    trackEvent('nanoai_try_on_open', { source: 'mobile_bottom_nav_try_on', mode: result.mode });
-  }, [pushToast]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -173,7 +141,7 @@ export default function MobileBottomNav({ notificationCount: initialNotifCount =
         {renderLinkItem(homeItem)}
         <button
           type="button"
-          onClick={() => void handleBottomNavTryOn()}
+          data-nanoai-try-on
           className={`flex flex-col items-center justify-center flex-1 h-full min-w-0 gap-1 transition-colors ${NAV_ACTIVE} active:opacity-80`}
           aria-label="Thử đồ với NanoAI"
         >

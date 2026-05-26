@@ -1,7 +1,7 @@
 // frontend/app/products/[slug]/components/ProductInfo/ProductInfo.tsx - ĐÃ SỬA LỖI PROPS
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
@@ -12,17 +12,10 @@ import { colorLabelForCart } from '@/lib/product-color-variant';
 import ProductActions from './ProductActions';
 import ProductQAReviewCards from '../ProductQAReviewCards/ProductQAReviewCards';
 import ProductVariantModal from '../ProductVariantModal/ProductVariantModal';
-import { useToast } from '@/components/ToastProvider';
-import { trackEvent } from '@/lib/analytics';
 import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
-import {
-  openNanoAiTryOnEmbed,
-  buildNanoAiTryOnCtxFrom188Product,
-  NANO_AI_CTX_SOURCE_PRODUCT_PDP,
-} from '@/lib/nanoai-hosted-chat';
 import AffiliateShareBar from '@/components/affiliate/AffiliateShareBar';
 
 interface ProductInfoProps {
@@ -57,37 +50,7 @@ export default function ProductInfo({
   const [variantModalAction, setVariantModalAction] = useState<'add' | 'buy' | 'both'>('both');
   const [displayStockByVariant, setDisplayStockByVariant] = useState<Record<string, number>>({});
   const { isAuthenticated } = useAuth();
-  const { pushToast } = useToast();
   const [loyaltyStatus, setLoyaltyStatus] = useState<any>(null);
-
-  const handleNanoAiTryOn = useCallback(async () => {
-    const ctx = buildNanoAiTryOnCtxFrom188Product(product);
-    const result = await openNanoAiTryOnEmbed(ctx, NANO_AI_CTX_SOURCE_PRODUCT_PDP);
-    if (!result.ok) {
-      if (result.reason === 'no_chat_config') {
-        pushToast({
-          title: 'Chưa mở được thử đồ',
-          description:
-            'Kiểm tra mã nhúng NanoAI (data-chat-url trên script) hoặc biến NEXT_PUBLIC_NANOAI_CHAT_URL trong frontend.',
-          variant: 'info',
-          durationMs: 4200,
-        });
-      } else {
-        pushToast({
-          title: 'Chưa mở được khung chat',
-          description: 'Bấm biểu tượng chat NanoAI góc màn hình — ngữ cảnh sản phẩm đã được gửi kèm.',
-          variant: 'info',
-          durationMs: 4200,
-        });
-      }
-      return;
-    }
-    trackEvent('nanoai_try_on_open', {
-      product_id: product.id,
-      source: 'product_detail_desktop_sticky',
-      mode: result.mode,
-    });
-  }, [product, pushToast]);
 
   const available = (product.available || 0) > 0;
   const hasDiscount = product.original_price && product.original_price > product.price;
@@ -382,7 +345,7 @@ export default function ProductInfo({
                   </Link>
                   <button
                     type="button"
-                    onClick={() => void handleNanoAiTryOn()}
+                    data-nanoai-try-on
                     className="flex flex-col items-center justify-center flex-shrink-0 w-14 text-[#ea580c] hover:opacity-90 active:opacity-75"
                     aria-label="Thử đồ với NanoAI"
                   >
