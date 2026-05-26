@@ -37,10 +37,7 @@ import {
   markReferralAttributed,
   shouldTryAttributeReferral,
 } from '@/lib/affiliate-ref';
-import {
-  consumeOpenNanoAiChatPending,
-  tryOpenNanoAiChatLauncherWithRetry,
-} from '@/lib/nanoai-hosted-chat';
+import { consumeAndOpenNanoAiChatLauncher } from '@/lib/nanoai-hosted-chat';
 
 /** Chiều cao thanh cam mỏng (logo + tìm + icon) khi trang listing ghim header đã thu gọn — khớp offset sticky bộ lọc. */
 const DESKTOP_LISTING_THIN_CHROME_PX = 54;
@@ -259,11 +256,19 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     };
   }, [isAuthenticated, pathname]);
 
-  /** Sau khi đóng /cart/add → về shop và mở lại khung chat NanoAI. */
+  /** Sau khi đóng /cart/add hoặc popup thêm giỏ → về shop và mở lại khung chat NanoAI. */
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!consumeOpenNanoAiChatPending()) return;
-    return tryOpenNanoAiChatLauncherWithRetry();
+    const cancel = consumeAndOpenNanoAiChatLauncher();
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      consumeAndOpenNanoAiChatLauncher();
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => {
+      cancel?.();
+      window.removeEventListener('pageshow', onPageShow);
+    };
   }, [pathname]);
 
   /** Đăng nhập/đăng xuất qua event: refetch vì `user` trong LS đổi trước khi React cập nhật isAuthenticated (vd. logout). */

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { Product } from '@/types/api';
@@ -73,16 +73,10 @@ export default function CartAddClient({ product, sku, closeMode, closePath }: Ca
       return;
     }
 
-    if (closeMode === 'back') {
-      if (window.history.length > 1) {
-        window.history.back();
-        return;
+    if (closeMode === 'back' || closeMode === 'nanoai') {
+      if (closeMode === 'nanoai') {
+        markCartAddFromNanoAiFlow();
       }
-      returnToNanoAiChatWidget();
-      return;
-    }
-
-    if (closeMode === 'nanoai') {
       returnToNanoAiChatWidget();
       return;
     }
@@ -95,10 +89,13 @@ export default function CartAddClient({ product, sku, closeMode, closePath }: Ca
     window.location.assign(productHref || '/');
   }, [router, productHref, closeMode, closePath]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (closeMode === 'nanoai') {
       markCartAddFromNanoAiFlow();
     }
+  }, [closeMode]);
+
+  useEffect(() => {
     releaseNanoAiClickBlockers();
     const mo = new MutationObserver(() => releaseNanoAiClickBlockers());
     mo.observe(document.body, { childList: true, subtree: true });
@@ -106,7 +103,7 @@ export default function CartAddClient({ product, sku, closeMode, closePath }: Ca
       mo.disconnect();
       clearNanoAiOverlayPassThrough();
     };
-  }, [closeMode]);
+  }, []);
 
   const handleAddToCart = async (
     p: Product,

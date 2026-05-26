@@ -506,6 +506,7 @@ export function returnToNanoAiChatWidget(): void {
 
   if (path.startsWith('/cart/add/') && fromNanoAi && canHistoryBackToShopChat()) {
     clearFlowFlags();
+    markOpenNanoAiChatAfterNav();
     window.history.back();
     return;
   }
@@ -518,6 +519,7 @@ export function returnToNanoAiChatWidget(): void {
   }
 
   if (canHistoryBackToShopChat()) {
+    markOpenNanoAiChatAfterNav();
     window.history.back();
     return;
   }
@@ -525,6 +527,16 @@ export function returnToNanoAiChatWidget(): void {
   const dest = sameOriginReferrerPath() || '/';
   markOpenNanoAiChatAfterNav();
   window.location.assign(dest);
+}
+
+/** Đọc cờ pending và mở launcher chat (AppShell / pageshow). */
+export function consumeAndOpenNanoAiChatLauncher(
+  maxAttempts = 12,
+  intervalMs = 250,
+): (() => void) | undefined {
+  if (typeof window === 'undefined') return undefined;
+  if (!consumeOpenNanoAiChatPending()) return undefined;
+  return tryOpenNanoAiChatLauncherWithRetry(maxAttempts, intervalMs);
 }
 
 /** Thử mở launcher sau hydrate (khi vừa quay từ /cart/add). */
