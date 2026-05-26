@@ -11,15 +11,20 @@ import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
-import { isClientAuthLikelyLoggedIn } from '@/lib/client-auth-session';
+import { isClientAuthLikelyLoggedIn, probeCookieAuthSession } from '@/lib/client-auth-session';
 import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import {
   clearNanoAiOverlayPassThrough,
+  markNanoAiCheckoutOnCart,
   releaseNanoAiClickBlockers,
 } from '@/lib/nanoai-overlay-pass-through';
 import { parseCartAddCloseMode, type CartAddCloseMode } from '@/lib/cart-add-return';
-import { returnToNanoAiChatWidget, markCartAddFromNanoAiFlow } from '@/lib/nanoai-hosted-chat';
+import {
+  returnToNanoAiChatWidget,
+  markCartAddFromNanoAiFlow,
+  clearCartAddFromNanoAiFlow,
+} from '@/lib/nanoai-hosted-chat';
 
 interface CartAddClientProps {
   product: Product;
@@ -106,8 +111,8 @@ export default function CartAddClient({ product, sku, closeMode, closePath }: Ca
     };
   }, []);
 
-  const requireLoginForCartAction = useCallback(
-    (payload: ReturnType<typeof buildCartPayload>, intent: 'add' | 'buy') => {
+  const ensureAuthenticatedForCartAction = useCallback(
+    async (payload: ReturnType<typeof buildCartPayload>, intent: 'add' | 'buy') => {
       if (isClientAuthLikelyLoggedIn(isAuthenticated, authLoading)) {
         return false;
       }
@@ -120,6 +125,13 @@ export default function CartAddClient({ product, sku, closeMode, closePath }: Ca
         });
         return true;
       }
+
+      const probed = await probeCookieAuthSession();
+      if (probed?.user) {
+        window.dispatchEvent(new Event('188-auth-session-changed'));
+        return false;
+      }
+
       queuePendingCartAfterLogin(payload);
       pushToast({
         title: intent === 'buy' ? 'Đăng nhập để mua hàng' : 'Đăng nhập để thêm giỏ',
@@ -146,10 +158,14 @@ export default function CartAddClient({ product, sku, closeMode, closePath }: Ca
     selectedColor?: string,
   ) => {
     const payload = buildCartPayload(p, quantity, selectedSize, selectedColor);
-    if (requireLoginForCartAction(payload, 'add')) return;
+    if (await ensureAuthenticatedForCartAction(payload, 'add')) return;
     try {
-      await addToCart(payload);
+      await addToCart(payload, { skipAddedPopup: true });
       trackEvent('add_to_cart_click', { product_id: p.id, quantity, source: 'cart_add_sku' });
+      if (closeMode === 'nanoai') {
+        markNanoAiCheckoutOnCart();
+        clearCartAddFromNanoAiFlow();
+      }
       router.push('/cart');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -179,10 +195,14 @@ export default function CartAddClient({ product, sku, closeMode, closePath }: Ca
     selectedColor?: string,
   ) => {
     const payload = buildCartPayload(p, quantity, selectedSize, selectedColor);
-    if (requireLoginForCartAction(payload, 'buy')) return;
+    if (await ensureAuthenticatedForCartAction(payload, 'buy')) return;
     try {
       await addToCart(payload, { skipAddedPopup: true });
       trackEvent('buy_now', { product_id: p.id, quantity, source: 'cart_add_sku' });
+      if (closeMode === 'nanoai') {
+        markNanoAiCheckoutOnCart();
+        clearCartAddFromNanoAiFlow();
+      }
       router.push('/cart');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -217,7 +237,7 @@ export default function CartAddClient({ product, sku, closeMode, closePath }: Ca
         action="both"
         displayStockByVariant={displayStockByVariant}
         setDisplayStockByVariant={setDisplayStockByVariant}
-        overlayZClassName="z-[50000]"
+        overlayZClassName="z-[2147483646]"
         closeAfterConfirm={false}
       />
       <div className="sr-only" aria-live="polite">

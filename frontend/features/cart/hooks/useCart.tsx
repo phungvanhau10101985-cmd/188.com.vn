@@ -9,7 +9,7 @@ import { trackMetaAddToCart } from '@/lib/meta-pixel';
 import { trackGoogleAdsAddToCart } from '@/lib/google-ads-gtag';
 import { CartRequiresLoginError } from '../cart-errors';
 import { readPendingCartAfterLogin, clearPendingCartAfterLogin } from '../pending-cart-session';
-import { hasClientAuthUser } from '@/lib/client-auth-session';
+import { hasClientAuthUser, hasClientBearerToken } from '@/lib/client-auth-session';
 import type {
   AddToCartRequest,
   UpdateCartItemRequest,
@@ -114,7 +114,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   };
 
   const addToCart = async (itemData: AddToCartRequest, options?: AddToCartOptions) => {
-    if (!isAuthenticated && !hasClientAuthUser()) {
+    if (!isAuthenticated && !hasClientAuthUser() && !hasClientBearerToken()) {
       throw new CartRequiresLoginError();
     }
 

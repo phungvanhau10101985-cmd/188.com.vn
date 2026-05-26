@@ -569,7 +569,23 @@ export function clearCartAddFromNanoAiFlow(): void {
   } catch {
     /* ignore */
   }
+}
+
+/** Xóa cờ luồng NanoAI + cờ checkout giỏ (khi quay chat hoặc rời trang giỏ). */
+export function clearNanoAiCartFlowState(): void {
+  clearCartAddFromNanoAiFlow();
   clearNanoAiCheckoutOnCart();
+}
+
+export function getNanoAiShopReturnPath(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const stored = sessionStorage.getItem(NANOAI_SHOP_RETURN_PATH_KEY);
+    if (stored && stored.startsWith('/') && !stored.startsWith('//')) return stored;
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 /** Sau điều hướng về trang shop, mở launcher chat (gọi từ AppShell). */
@@ -638,7 +654,7 @@ export function returnToNanoAiChatWidget(): void {
     /* ignore */
   }
 
-  const clearFlowFlags = () => clearCartAddFromNanoAiFlow();
+  const clearFlowFlags = () => clearNanoAiCartFlowState();
 
   const path = window.location.pathname;
 

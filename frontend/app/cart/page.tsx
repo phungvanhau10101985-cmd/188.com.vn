@@ -22,6 +22,7 @@ import {
 } from '@/lib/google-ads-gtag';
 import { shouldRedirectToDepositAfterCreate } from '@/lib/order-deposit';
 import { buildAuthLoginHrefFromFullPath } from '@/lib/auth-redirect';
+import { isClientAuthLikelyLoggedIn, probeCookieAuthSession } from '@/lib/client-auth-session';
 import type { CartLineRef } from '@/features/cart/types/cart';
 import CartEmptySameShopSection from '@/components/cart/CartEmptySameShopSection';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
@@ -60,7 +61,7 @@ function cartLineTotal(item: {
 
 export default function CartPage() {
   const { cart, updateCartItem, removeFromCart, clearCart, isLoading, error } = useCart();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const { pushToast } = useToast();
   const [isCheckingOut, setIsCheckingOut] = useState(false);
@@ -90,16 +91,37 @@ export default function CartPage() {
   const [promoVouchersLoading, setPromoVouchersLoading] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    let cancelled = false;
+
+    const loadCartAccountData = () => {
+      apiClient.getAddresses().then(setAddresses).catch(() => setAddresses([]));
+      apiClient
+        .getAffiliateMe()
+        .then((me) => setWalletBalance(Number(me.balance) || 0))
+        .catch(() => setWalletBalance(0));
+    };
+
+    (async () => {
+      if (isClientAuthLikelyLoggedIn(isAuthenticated, authLoading)) {
+        loadCartAccountData();
+        return;
+      }
+      if (authLoading) return;
+
+      const probed = await probeCookieAuthSession();
+      if (cancelled) return;
+      if (probed?.user) {
+        window.dispatchEvent(new Event('188-auth-session-changed'));
+        return;
+      }
+
       router.replace(buildAuthLoginHrefFromFullPath('/cart'));
-      return;
-    }
-    apiClient.getAddresses().then(setAddresses).catch(() => setAddresses([]));
-    apiClient
-      .getAffiliateMe()
-      .then((me) => setWalletBalance(Number(me.balance) || 0))
-      .catch(() => setWalletBalance(0));
-  }, [isAuthenticated, router]);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, authLoading, router]);
 
   useEffect(() => {
     if (addresses.length > 0 && selectedAddressId == null) {
@@ -243,10 +265,12 @@ export default function CartPage() {
     trackGoogleAdsCartPageView(cartItems, cartTotalAll);
   }, [isAuthenticated, cartAdsFingerprint, cartTotalAll]);
 
-  if (!isAuthenticated) {
+  if (!isClientAuthLikelyLoggedIn(isAuthenticated, authLoading)) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center px-6">
-        <p className="text-sm text-gray-600">Đang chuyển đến đăng nhập...</p>
+        <p className="text-sm text-gray-600">
+          {authLoading ? 'Đang tải phiên đăng nhập…' : 'Đang chuyển đến đăng nhập...'}
+        </p>
       </div>
     );
   }

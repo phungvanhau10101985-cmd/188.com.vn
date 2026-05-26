@@ -4,21 +4,23 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useCart } from '@/features/cart/hooks/useCart';
 import {
-  clearNanoAiOverlayPassThrough,
   markNanoAiCheckoutOnCart,
   releaseNanoAiClickBlockers,
 } from '@/lib/nanoai-overlay-pass-through';
 import {
   clearCartAddFromNanoAiFlow,
+  getNanoAiShopReturnPath,
   isCartAddFromNanoAiFlow,
-  returnToNanoAiChatWidget,
 } from '@/lib/nanoai-hosted-chat';
+
+const POPUP_Z = 'z-[2147483646]';
 
 export default function CartAddedPopup() {
   const router = useRouter();
+  const pathname = usePathname();
   const { showAddToCartPopup, lastAddedItem, hideAddToCartPopup } = useCart();
   const [portalReady, setPortalReady] = useState(false);
 
@@ -46,19 +48,34 @@ export default function CartAddedPopup() {
   const name = lastAddedItem?.product_data?.name || 'Sản phẩm';
   const image = lastAddedItem?.product_data?.main_image || '';
 
-  const handleClose = () => {
+  const finishPopup = (opts?: { keepCartCheckoutGuard?: boolean }) => {
     hideAddToCartPopup();
+    if (opts?.keepCartCheckoutGuard) {
+      markNanoAiCheckoutOnCart();
+    }
     if (isCartAddFromNanoAiFlow()) {
-      returnToNanoAiChatWidget();
+      clearCartAddFromNanoAiFlow();
     }
   };
 
+  const handleClose = () => {
+    finishPopup({ keepCartCheckoutGuard: pathname === '/cart' || pathname === '/cart/' });
+  };
+
   const handleContinueShopping = () => {
-    hideAddToCartPopup();
-    if (isCartAddFromNanoAiFlow()) {
-      returnToNanoAiChatWidget();
+    const fromNanoAi = isCartAddFromNanoAiFlow();
+    const returnPath = getNanoAiShopReturnPath();
+    finishPopup();
+
+    if (fromNanoAi) {
+      const dest =
+        returnPath && returnPath !== '/cart' && !returnPath.startsWith('/cart/add/')
+          ? returnPath
+          : '/';
+      router.push(dest);
       return;
     }
+
     if (typeof window !== 'undefined' && window.history.length > 1) {
       router.back();
       return;
@@ -66,20 +83,26 @@ export default function CartAddedPopup() {
     router.push('/');
   };
 
+  const handleViewCart = () => {
+    markNanoAiCheckoutOnCart();
+    clearCartAddFromNanoAiFlow();
+    hideAddToCartPopup();
+  };
+
   const modal = (
     <div
-      className="fixed inset-0 z-[50000] flex items-end md:items-center justify-center p-3 md:p-4 pointer-events-none"
+      className={`fixed inset-0 ${POPUP_Z} flex items-end md:items-center justify-center p-3 md:p-4`}
       role="dialog"
       aria-modal="true"
       aria-labelledby="cart-added-popup-title"
     >
       <div
-        className="absolute inset-0 z-0 bg-black/40 pointer-events-auto"
+        className="absolute inset-0 z-0 bg-black/40"
         onClick={handleClose}
         aria-hidden
       />
       <div
-        className="relative z-10 bg-white rounded-xl shadow-xl w-full max-w-md md:max-w-lg pointer-events-auto touch-manipulation"
+        className="relative z-10 bg-white rounded-xl shadow-xl w-full max-w-md md:max-w-lg touch-manipulation"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 p-3 md:p-4 border-b border-gray-100">
@@ -110,11 +133,7 @@ export default function CartAddedPopup() {
         <div className="p-3 md:p-4 flex flex-col sm:flex-row gap-2">
           <Link
             href="/cart"
-            onClick={() => {
-              markNanoAiCheckoutOnCart();
-              clearCartAddFromNanoAiFlow();
-              hideAddToCartPopup();
-            }}
+            onClick={handleViewCart}
             className="w-full sm:w-1/2 inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-semibold text-sm bg-[#ea580c] text-white hover:bg-[#c2410c] transition-colors"
           >
             <span aria-hidden>🛒</span>

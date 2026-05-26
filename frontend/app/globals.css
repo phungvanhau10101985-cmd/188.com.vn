@@ -203,6 +203,15 @@ html[data-nanoai188-shop-overlay="1"] [id*="nanoai-chat-widget"] * {
   pointer-events: none !important;
 }
 
+/* Desktop: khung chat mở thường phủ full màn — ẩn tạm khi modal shop (thêm giỏ / giỏ) đang active. */
+@media (min-width: 768px) {
+  html[data-nanoai188-shop-overlay="1"] #nanoai-chat-widget-v1,
+  html[data-nanoai188-shop-overlay="1"] [id^="nanoai-chat-widget"],
+  html[data-nanoai188-shop-overlay="1"] [id*="nanoai-chat-widget"] {
+    visibility: hidden !important;
+  }
+}
+
 @media (max-width: 767px) {
   [data-nanoai188-mobile-adjusted="1"][data-nanoai-chat-bubble],
   [data-nanoai188-mobile-adjusted="1"][data-nanoai-launcher],

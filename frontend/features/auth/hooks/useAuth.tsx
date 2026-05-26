@@ -7,6 +7,7 @@ import { UserResponse, AuthState, Token } from '../types/auth';
 import { authAPI } from '../api/auth-api';
 import { getLoginRedirectFromUrl } from '@/lib/auth-redirect';
 import { markFreshLoginSession } from '@/lib/birthday-prompt-session';
+import { probeCookieAuthSession, readClientAuthUser } from '@/lib/client-auth-session';
 
 interface AuthContextType extends AuthState {
   /** Gửi kèm deviceId để coi trình duyệt này là thiết bị đã xác thực (cùng logic đăng nhập bằng mã email) */
@@ -36,23 +37,86 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
-    const token = localStorage.getItem('access_token');
-    const userRaw = localStorage.getItem('user');
+    let cancelled = false;
 
-    if (userRaw) {
-      try {
+    const applySession = (user: UserResponse, token: string | null) => {
+      if (cancelled) return;
+      setAuthState({
+        user,
+        token,
+        isAuthenticated: true,
+        isLoading: false,
+      });
+    };
+
+    const finishGuest = () => {
+      if (cancelled) return;
+      setAuthState((prev) => ({ ...prev, isLoading: false }));
+    };
+
+    (async () => {
+      const token = localStorage.getItem('access_token');
+      const cachedUser = readClientAuthUser<UserResponse>();
+      if (cachedUser) {
+        applySession(cachedUser, token);
+        return;
+      }
+
+      if (token?.trim()) {
+        const probed = await probeCookieAuthSession();
+        if (cancelled) return;
+        if (probed?.user && typeof probed.user === 'object') {
+          applySession(probed.user as UserResponse, token);
+        } else {
+          localStorage.removeItem('access_token');
+          finishGuest();
+        }
+        return;
+      }
+
+      const probed = await probeCookieAuthSession();
+      if (cancelled) return;
+      if (probed?.user && typeof probed.user === 'object') {
+        applySession(probed.user as UserResponse, null);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('188-auth-session-changed'));
+        }
+        return;
+      }
+
+      finishGuest();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const syncFromStorage = () => {
+      const token = localStorage.getItem('access_token');
+      const cachedUser = readClientAuthUser<UserResponse>();
+      if (cachedUser) {
         setAuthState({
-          user: JSON.parse(userRaw),
-          token: token,
+          user: cachedUser,
+          token,
           isAuthenticated: true,
           isLoading: false,
         });
         return;
-      } catch {
-        localStorage.removeItem('user');
       }
-    }
-    setAuthState((prev) => ({ ...prev, isLoading: false }));
+      if (!token?.trim()) {
+        setAuthState({
+          user: null,
+          token: null,
+          isAuthenticated: false,
+          isLoading: false,
+        });
+      }
+    };
+    window.addEventListener('188-auth-session-changed', syncFromStorage);
+    return () => window.removeEventListener('188-auth-session-changed', syncFromStorage);
   }, []);
 
   const mergeGuestBehavior = async (): Promise<void> => {

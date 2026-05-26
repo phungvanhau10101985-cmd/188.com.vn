@@ -9,6 +9,7 @@ import {
   isNanoAiCheckoutOnCart,
   releaseNanoAiClickBlockers,
 } from '@/lib/nanoai-overlay-pass-through';
+import { clearNanoAiCartFlowState } from '@/lib/nanoai-hosted-chat';
 
 /**
  * Giữ khung NanoAI không chặn click/cuộn khi popup shop hoặc trang giỏ (sau luồng chat) đang active.
@@ -48,7 +49,14 @@ export default function NanoAiShopOverlayGuard() {
     if (isNanoAiCheckoutOnCart()) {
       clearNanoAiCheckoutOnCart();
     }
-  }, [isCartPage]);
+  }, [isCartPage, pathname]);
+
+  useEffect(() => {
+    if (pathname !== '/cart' && pathname !== '/cart/') return;
+    return () => {
+      clearNanoAiCartFlowState();
+    };
+  }, [pathname]);
 
   return null;
 }
