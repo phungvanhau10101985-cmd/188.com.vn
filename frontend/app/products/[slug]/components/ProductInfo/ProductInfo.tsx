@@ -281,7 +281,6 @@ export default function ProductInfo({
       <div ref={actionsRef}>
         <ProductActions
           product={product}
-          viewingImageUrl={viewingImageUrl}
           quantity={quantity}
           selectedSize={selectedSize}
           selectedColor={selectedColorForCart}
