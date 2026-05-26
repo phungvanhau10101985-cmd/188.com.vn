@@ -343,7 +343,8 @@ def get_products_same_shop_as_recent_views(
     require_video: bool = False,
 ) -> tuple[List[Product], int, Optional[int]]:
     """
-    Sản phẩm cùng `shop_name` (tên shop từ import Excel → DB) với các shop của tối đa 8 sản phẩm xem gần nhất.
+    Sản phẩm cùng `shop_name_chinese` (cột AM / Shop Trung Quốc từ import Excel) với các shop của tối đa 8 SP xem gần nhất.
+    Ưu tiên SP cùng `subcategory` (cột AC / Danh mục cấp 2) trước khi trộn ngẫu nhiên trong từng nhóm.
     Trả về (danh_sách_slice, total, seed). Không gửi `seed`: random mới mỗi lần; có `seed` + offset: pagination ổn định.
     `require_video`: chỉ SP có link video phát được (YouTube watch/embed/short hoặc URL chứa `.mp4`), khớp frontend.
     Ưu tiên user_id; nếu không có thì guest_session_id (bảng guest_product_views).
@@ -367,21 +368,26 @@ def get_products_same_shop_as_recent_views(
         )
     if not recent_product_ids:
         return [], 0, None
-    shop_names_subq = (
-        db.query(Product.shop_name)
-        .filter(
-            Product.id.in_(recent_product_ids),
-            Product.shop_name.isnot(None),
-            Product.shop_name != "",
-        )
-        .distinct()
-    )
-    shop_names = [r[0] for r in shop_names_subq.all()]
-    if not shop_names:
+
+    recent_products = db.query(Product).filter(Product.id.in_(recent_product_ids)).all()
+    shops_lower: set[str] = set()
+    subs_lower: set[str] = set()
+    for p in recent_products:
+        shop_cn = (p.shop_name_chinese or "").strip()
+        if shop_cn:
+            shops_lower.add(shop_cn.lower())
+        sub = (p.subcategory or "").strip()
+        if sub:
+            subs_lower.add(sub.lower())
+    if not shops_lower:
         return [], 0, None
+
+    shop_conditions = [
+        func.lower(func.trim(Product.shop_name_chinese)) == shop_lower for shop_lower in shops_lower
+    ]
     # Tránh .all() không giới hạn — vài shop lớn → OOM / timeout → 500 trên production.
     filt = (
-        Product.shop_name.in_(shop_names),
+        or_(*shop_conditions),
         Product.is_active == True,  # noqa: E712
     )
     total = db.query(Product).filter(*filt).count()
@@ -396,12 +402,24 @@ def get_products_same_shop_as_recent_views(
         products = [p for p in products if is_playable_product_video_link(getattr(p, "video_link", None))]
     if not products:
         return [], 0, None
-    total = len(products)
-    products = list(products)
+
+    tier_same_sub: List[Product] = []
+    tier_shop_only: List[Product] = []
+    for p in products:
+        shop_cn = (p.shop_name_chinese or "").strip().lower()
+        sub = (p.subcategory or "").strip().lower()
+        if shop_cn in shops_lower and sub and sub in subs_lower:
+            tier_same_sub.append(p)
+        elif shop_cn in shops_lower:
+            tier_shop_only.append(p)
+
     if seed is None:
         seed = random.randint(0, 2**31 - 1)
     rng = random.Random(seed)
-    rng.shuffle(products)
+    rng.shuffle(tier_same_sub)
+    rng.shuffle(tier_shop_only)
+    products = tier_same_sub + tier_shop_only
+    total = len(products)
     page = products[offset : offset + limit]
     return page, total, seed
 

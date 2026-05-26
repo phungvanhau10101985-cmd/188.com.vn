@@ -97,7 +97,6 @@ function VideoFeedProductBar({
   canAddToCart,
   onOpenCartModal,
   onToggleFavorite,
-  onConsult,
   onTryOn,
   consultAttrs,
   tryOnAttrs,
@@ -111,7 +110,6 @@ function VideoFeedProductBar({
   canAddToCart: boolean;
   onOpenCartModal: () => void;
   onToggleFavorite: () => void;
-  onConsult: () => void;
   onTryOn: () => void;
   consultAttrs: Record<string, string>;
   tryOnAttrs: Record<string, string>;
@@ -154,10 +152,7 @@ function VideoFeedProductBar({
         <button
           type="button"
           {...consultAttrs}
-          onClick={(e) => {
-            e.stopPropagation();
-            onConsult();
-          }}
+          onClick={(e) => e.stopPropagation()}
           className="shrink-0 rounded-full border border-white/40 bg-white/15 px-2.5 py-1 text-[11px] font-semibold text-white shadow-[0_1px_6px_rgba(0,0,0,0.35)] hover:bg-white/25 active:scale-[0.97]"
         >
           Tư vấn
@@ -341,7 +336,7 @@ export default function ShopVideoFeedClient() {
   const { isAuthenticated } = useAuth();
   const { refreshFavorites } = useFavorites();
   const { pushToast } = useToast();
-  const { openConsultForProduct, openTryOnForProduct } = useNanoAiMessaging();
+  const { openTryOnForProduct } = useNanoAiMessaging();
   const [favoriteIds, setFavoriteIds] = useState<Set<number>>(() => new Set());
   const [favoriteBusyId, setFavoriteBusyId] = useState<number | null>(null);
   const [variantModalProduct, setVariantModalProduct] = useState<Product | null>(null);
@@ -583,13 +578,6 @@ export default function ShopVideoFeedClient() {
     }
   }
 
-  const handleConsultProduct = useCallback(
-    (p: Product) => {
-      void openConsultForProduct(p, { source: 'shop_video_feed' });
-    },
-    [openConsultForProduct],
-  );
-
   const handleTryOnProduct = useCallback(
     (p: Product) => {
       void openTryOnForProduct(p, {
@@ -712,7 +700,7 @@ export default function ShopVideoFeedClient() {
         </button>
         <div className="pointer-events-none min-w-0 flex-1">
           <h1 className="text-sm font-semibold truncate">Video cùng shop bạn vừa xem</h1>
-          <p className="text-[11px] text-white/70 truncate">Theo shop_name · tối đa 8 SP xem gần nhất</p>
+          <p className="text-[11px] text-white/70 truncate">Theo shop_name_chinese (AM) · ưu tiên Subcategory (AC)</p>
         </div>
       </header>
 
@@ -785,7 +773,6 @@ export default function ShopVideoFeedClient() {
                   canAddToCart={(product.available ?? 0) > 0}
                   onOpenCartModal={() => openCartVariantModal(product)}
                   onToggleFavorite={() => void handleToggleFavorite(product)}
-                  onConsult={() => handleConsultProduct(product)}
                   onTryOn={() => handleTryOnProduct(product)}
                   consultAttrs={nanoAiGatewayButtonDataset(
                     buildNanoAiGatewayPayloadFrom188Product(product),

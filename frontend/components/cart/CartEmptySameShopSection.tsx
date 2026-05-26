@@ -150,8 +150,8 @@ export default function CartEmptySameShopSection() {
         )}
       </div>
       <p className="text-sm text-gray-600 mt-1">
-        Gợi ý từ shop (shop_name trong dữ liệu import) dựa trên tối đa 8 sản phẩm bạn xem gần nhất — thứ tự
-        được trộn ngẫu nhiên mỗi lần mở trang.
+        Gợi ý từ shop Trung Quốc (shop_name_chinese, cột AM) — ưu tiên cùng danh mục cấp 2 (Subcategory, cột AC)
+        từ tối đa 8 sản phẩm bạn xem gần nhất; thứ tự được trộn ngẫu nhiên trong từng nhóm.
       </p>
       <div className="mt-4 min-h-[min(28rem,75vh)]">
         {sameShopLoading ? (

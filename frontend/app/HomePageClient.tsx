@@ -1014,7 +1014,7 @@ export default function HomePageClient({
 
   const heroShopName = useMemo(() => {
     for (const p of sameShopProducts) {
-      const name = (p.shop_name ?? '').trim();
+      const name = (p.shop_name_chinese ?? p.shop_name ?? '').trim();
       if (name) return name;
     }
     return null;
@@ -1252,8 +1252,8 @@ export default function HomePageClient({
               </h2>
             </div>
           <p className="text-sm text-gray-600 mt-1">
-            Gợi ý từ shop (shop_name trong dữ liệu import) dựa trên tối đa 8 sản phẩm bạn xem gần nhất — thứ tự
-            được trộn ngẫu nhiên mỗi lần mở trang chủ.
+            Gợi ý từ shop Trung Quốc (shop_name_chinese, cột AM) — ưu tiên cùng danh mục cấp 2 (Subcategory, cột
+            AC) từ tối đa 8 sản phẩm bạn xem gần nhất; thứ tự được trộn ngẫu nhiên trong từng nhóm.
           </p>
           <div className="mt-4 min-h-[min(28rem,75vh)]">
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">

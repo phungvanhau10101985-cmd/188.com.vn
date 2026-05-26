@@ -582,7 +582,7 @@ class ApiClient {
     return this.fetch<ProductListResponse>(`/user-behavior/products/home-feed?${params}`);
   }
 
-  /** Sản phẩm cùng shop với 8 sản phẩm xem gần nhất; phân trang: limit, offset, seed. requireVideo: chỉ SP có video_link. */
+  /** Sản phẩm cùng shop TQ (shop_name_chinese / cột AM) với 8 SP xem gần nhất; ưu tiên cùng subcategory (AC). */
   async getProductsSameShopAsRecentViews(
     limit = 60,
     offset = 0,

@@ -25,7 +25,8 @@ export function useNanoAiMessaging() {
         if (result.reason === 'missing_sku' || result.reason === 'missing_image') {
           pushToast({
             title: 'Thiếu thông tin sản phẩm',
-            description: 'Không mở được tư vấn — cần mã SP và ảnh sản phẩm (HTTPS, không phải video).',
+            description:
+              'Không mở được tư vấn — cần mã SP và ảnh (HTTPS, không video). Bấm lại hoặc mở chat góc màn hình.',
             variant: 'error',
             durationMs: 4200,
           });

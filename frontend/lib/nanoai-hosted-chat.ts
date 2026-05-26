@@ -248,28 +248,44 @@ export function syncNanoAiWidgetLauncherGatewayButtons(payload: NanoAiGatewayPay
   }
 }
 
-/** Cổng tư vấn — iframe có ctx_sku, ctx_image, auto_consult=1 (không open_try_on=1). */
+/**
+ * Mở khung chat tư vấn kèm ngữ cảnh SP — **không** gọi `openConsult` / `auto_consult`.
+ * Khách thấy nháp «Gửi mã SP đang xem» và tự gửi; shop trả lời sau khi khách gửi.
+ */
 export function openNanoAiConsultEmbed(payload: NanoAiGatewayPayload): NanoAiConsultOpenResult {
   if (typeof window === 'undefined') return { ok: false, reason: 'no_gateway' };
   const sku = (payload.sku || '').trim();
   const imageUrl = (payload.imageUrl || '').trim();
   if (!sku) {
-    console.warn('[NanoAI] NanoAIMessagingGateway.openConsult thiếu sku');
+    console.warn('[NanoAI] openNanoAiConsultEmbed thiếu sku');
     return { ok: false, reason: 'missing_sku' };
   }
   if (!imageUrl || !isNanoAiEligibleImageUrl(imageUrl)) {
-    console.warn('[NanoAI] NanoAIMessagingGateway.openConsult thiếu imageUrl hợp lệ (HTTPS, không video)');
+    console.warn('[NanoAI] openNanoAiConsultEmbed thiếu imageUrl hợp lệ (HTTPS, không video)');
     return { ok: false, reason: 'missing_image' };
   }
-  const gw = getNanoAiMessagingGateway();
-  if (!gw?.openConsult) return { ok: false, reason: 'no_gateway' };
-  gw.openConsult({
+
+  const origin = window.location.origin;
+  let productPath = '/';
+  if (payload.productUrl) {
+    try {
+      productPath = new URL(payload.productUrl, origin).pathname || '/';
+    } catch {
+      productPath = payload.productUrl.startsWith('/') ? payload.productUrl : `/${payload.productUrl}`;
+    }
+  }
+
+  syncNanoAiLoaderScriptProductContext({
     sku,
-    imageUrl,
-    productUrl: payload.productUrl || undefined,
-    inventoryId: (payload.inventoryId ?? '').trim() || undefined,
+    primaryImageUrl: imageUrl,
+    secondaryImageUrl: null,
+    productPath,
+    inventoryId: payload.inventoryId ?? null,
   });
-  return { ok: true, mode: 'gateway' };
+  syncNanoAiWidgetLauncherGatewayButtons(payload);
+
+  if (clickNanoAiChatLauncher()) return { ok: true, mode: 'gateway' };
+  return { ok: false, reason: 'no_gateway' };
 }
 
 /** Chuẩn hóa SP 188 → payload thử đồ NanoAI (hosted). */

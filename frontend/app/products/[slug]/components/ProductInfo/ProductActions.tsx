@@ -3,6 +3,7 @@
 
 import { useCallback, useLayoutEffect, useState } from 'react';
 import { Product } from '@/types/api';
+import { trackEvent } from '@/lib/analytics';
 import {
   buildNanoAiGatewayPayloadFrom188Product,
   nanoAiGatewayButtonDataset,
@@ -44,7 +45,7 @@ export default function ProductActions({
   isCartLoading = false,
   isFavorited = false
 }: ProductActionsProps) {
-  const { openConsultForProduct, openTryOnForProduct } = useNanoAiMessaging();
+  const { openTryOnForProduct } = useNanoAiMessaging();
   /** Tránh hydration mismatch: server luôn isLoading=false; client có thể còn state từ CartProvider khi soft-nav. */
   const [uiCartLoading, setUiCartLoading] = useState(false);
   useLayoutEffect(() => {
@@ -60,12 +61,12 @@ export default function ProductActions({
   const consultAttrs = nanoAiGatewayButtonDataset(nanoPayload, 'consult');
   const tryOnAttrs = nanoAiGatewayButtonDataset(nanoPayload, 'try_on');
 
-  const handleNanoAiConsult = useCallback(() => {
-    void openConsultForProduct(product, {
-      imageUrl: viewingImageUrl,
+  const handleNanoAiConsultClick = useCallback(() => {
+    trackEvent('nanoai_consult_open', {
+      product_id: product.id,
       source: 'product_detail_actions',
     });
-  }, [openConsultForProduct, product, viewingImageUrl]);
+  }, [product.id]);
 
   const handleNanoAiTryOn = useCallback(() => {
     void openTryOnForProduct(product, {
@@ -93,7 +94,7 @@ export default function ProductActions({
         <button
           type="button"
           {...consultAttrs}
-          onClick={handleNanoAiConsult}
+          onClick={handleNanoAiConsultClick}
           className="flex-1 py-2.5 px-4 rounded-lg font-semibold text-sm border-2 border-[#ea580c] text-[#ea580c] bg-white hover:bg-orange-50 transition-colors"
         >
           Tư vấn nhắn tin
