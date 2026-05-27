@@ -11,8 +11,8 @@ type Props = {
 };
 
 /**
- * PDP / lướt video: đồng bộ FAB widget NanoAI (Tư vấn nhắn tin + Thử đồ camera)
- * với sku/ảnh SP — bổ sung cho data-ctx-* trên script, không thay thế nút 188.
+ * PDP / lướt video: đồng bộ FAB widget NanoAI với sku/ảnh SP qua data-ctx-* trên script.
+ * Nút 188 gọi trực tiếp NanoAIMessagingGateway.openConsult / openTryOn — không dùng data-nanoai-* trên nút shop.
  */
 export default function NanoAiLauncherGatewaySync({ payload }: Props) {
   useEffect(() => {

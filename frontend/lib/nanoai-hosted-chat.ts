@@ -249,8 +249,7 @@ export function syncNanoAiWidgetLauncherGatewayButtons(payload: NanoAiGatewayPay
 }
 
 /**
- * Mở khung chat tư vấn kèm ngữ cảnh SP — **không** gọi `openConsult` / `auto_consult`.
- * Khách thấy nháp «Gửi mã SP đang xem» và tự gửi; shop trả lời sau khi khách gửi.
+ * Mở khung chat tư vấn kèm chip «Gửi mã SP đang xem» — ưu tiên `NanoAIMessagingGateway.openConsult`.
  */
 export function openNanoAiConsultEmbed(payload: NanoAiGatewayPayload): NanoAiConsultOpenResult {
   if (typeof window === 'undefined') return { ok: false, reason: 'no_gateway' };
@@ -282,8 +281,19 @@ export function openNanoAiConsultEmbed(payload: NanoAiGatewayPayload): NanoAiCon
     productPath,
     inventoryId: payload.inventoryId ?? null,
   });
-  syncNanoAiWidgetLauncherGatewayButtons(payload);
 
+  const gw = getNanoAiMessagingGateway();
+  if (gw?.openConsult) {
+    gw.openConsult({
+      sku,
+      imageUrl,
+      productUrl: payload.productUrl || undefined,
+      inventoryId: (payload.inventoryId ?? '').trim() || undefined,
+    });
+    return { ok: true, mode: 'gateway' };
+  }
+
+  syncNanoAiWidgetLauncherGatewayButtons(payload);
   if (clickNanoAiChatLauncher()) return { ok: true, mode: 'gateway' };
   return { ok: false, reason: 'no_gateway' };
 }
@@ -363,6 +373,16 @@ function setCtxAttr(script: HTMLScriptElement, attr: string, value: string | nul
   const v = (value ?? '').trim();
   if (v) script.setAttribute(attr, v);
   else script.removeAttribute(attr);
+}
+
+/** Xóa data-ctx-* trên script widget — dùng khi rời trang SP (trang chủ, danh mục…). */
+export function clearNanoAiLoaderScriptProductContext(): void {
+  if (typeof window === 'undefined') return;
+  for (const script of findNanoAiChatLoaderScripts()) {
+    for (const attr of Object.values(CTX_ATTR)) {
+      script.removeAttribute(attr);
+    }
+  }
 }
 
 /** Đồng bộ ngữ cảnh SP lên thẻ script (widget đọc data-ctx-*). */

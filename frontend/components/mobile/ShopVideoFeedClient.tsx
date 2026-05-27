@@ -23,7 +23,6 @@ import { SHOP_VIDEO_START_SLUG_PARAM } from '@/lib/shop-video-feed';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import {
   buildNanoAiGatewayPayloadFrom188Product,
-  nanoAiGatewayButtonDataset,
   NANO_AI_CTX_SOURCE_VIDEO_FEED,
 } from '@/lib/nanoai-hosted-chat';
 import { useNanoAiMessaging } from '@/lib/use-nanoai-messaging';
@@ -98,8 +97,7 @@ function VideoFeedProductBar({
   onOpenCartModal,
   onToggleFavorite,
   onTryOn,
-  consultAttrs,
-  tryOnAttrs,
+  onConsult,
 }: {
   product: Product;
   href: string;
@@ -111,8 +109,7 @@ function VideoFeedProductBar({
   onOpenCartModal: () => void;
   onToggleFavorite: () => void;
   onTryOn: () => void;
-  consultAttrs: Record<string, string>;
-  tryOnAttrs: Record<string, string>;
+  onConsult: () => void;
 }) {
   const sold = product.purchases != null && product.purchases > 0 ? formatSoldCount(product.purchases) : '';
   const reviewTotal = product.rating_total ?? 0;
@@ -151,15 +148,16 @@ function VideoFeedProductBar({
       <div className="flex flex-wrap items-center gap-2 mb-2">
         <button
           type="button"
-          {...consultAttrs}
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onConsult();
+          }}
           className="shrink-0 rounded-full border border-white/40 bg-white/15 px-2.5 py-1 text-[11px] font-semibold text-white shadow-[0_1px_6px_rgba(0,0,0,0.35)] hover:bg-white/25 active:scale-[0.97]"
         >
           Tư vấn
         </button>
         <button
           type="button"
-          {...tryOnAttrs}
           onClick={(e) => {
             e.stopPropagation();
             onTryOn();
@@ -336,7 +334,7 @@ export default function ShopVideoFeedClient() {
   const { isAuthenticated } = useAuth();
   const { refreshFavorites } = useFavorites();
   const { pushToast } = useToast();
-  const { openTryOnForProduct } = useNanoAiMessaging();
+  const { openTryOnForProduct, openConsultForProduct } = useNanoAiMessaging();
   const [favoriteIds, setFavoriteIds] = useState<Set<number>>(() => new Set());
   const [favoriteBusyId, setFavoriteBusyId] = useState<number | null>(null);
   const [variantModalProduct, setVariantModalProduct] = useState<Product | null>(null);
@@ -588,6 +586,15 @@ export default function ShopVideoFeedClient() {
     [openTryOnForProduct],
   );
 
+  const handleConsultProduct = useCallback(
+    (p: Product) => {
+      void openConsultForProduct(p, {
+        source: 'shop_video_feed',
+      });
+    },
+    [openConsultForProduct],
+  );
+
   const loadMore = useCallback(async () => {
     if (!hasMore || loadingMore || seed == null) return;
     setLoadingMore(true);
@@ -774,14 +781,7 @@ export default function ShopVideoFeedClient() {
                   onOpenCartModal={() => openCartVariantModal(product)}
                   onToggleFavorite={() => void handleToggleFavorite(product)}
                   onTryOn={() => handleTryOnProduct(product)}
-                  consultAttrs={nanoAiGatewayButtonDataset(
-                    buildNanoAiGatewayPayloadFrom188Product(product),
-                    'consult',
-                  )}
-                  tryOnAttrs={nanoAiGatewayButtonDataset(
-                    buildNanoAiGatewayPayloadFrom188Product(product),
-                    'try_on',
-                  )}
+                  onConsult={() => handleConsultProduct(product)}
                 />
               </div>
             </div>

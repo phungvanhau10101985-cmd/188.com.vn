@@ -4,8 +4,6 @@
 import { useCallback, useLayoutEffect, useState } from 'react';
 import { Product } from '@/types/api';
 import {
-  buildNanoAiGatewayPayloadFrom188Product,
-  nanoAiGatewayButtonDataset,
   NANO_AI_CTX_SOURCE_PRODUCT_PDP,
 } from '@/lib/nanoai-hosted-chat';
 import { useNanoAiMessaging } from '@/lib/use-nanoai-messaging';
@@ -53,11 +51,6 @@ export default function ProductActions({
 
   const canPurchase = available && !uiCartLoading && variantsComplete;
   const blockHint = !variantsComplete ? variantSelectionHint : undefined;
-
-  const nanoPayload = buildNanoAiGatewayPayloadFrom188Product(product, {
-    imageUrl: viewingImageUrl,
-  });
-  const tryOnAttrs = nanoAiGatewayButtonDataset(nanoPayload, 'try_on');
 
   const handleNanoAiTryOn = useCallback(() => {
     void openTryOnForProduct(product, {
@@ -112,7 +105,6 @@ export default function ProductActions({
         <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
-            {...tryOnAttrs}
             onClick={handleNanoAiTryOn}
             className="w-11 h-11 rounded-lg font-semibold text-xs bg-[#ea580c] text-white hover:bg-[#c2410c] transition-colors flex flex-col items-center justify-center gap-0.5"
             aria-label="Thử đồ với NanoAI"

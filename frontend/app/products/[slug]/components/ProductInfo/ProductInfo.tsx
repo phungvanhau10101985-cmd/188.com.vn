@@ -17,8 +17,6 @@ import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import {
-  buildNanoAiGatewayPayloadFrom188Product,
-  nanoAiGatewayButtonDataset,
   NANO_AI_CTX_SOURCE_PRODUCT_PDP,
 } from '@/lib/nanoai-hosted-chat';
 import { useNanoAiMessaging } from '@/lib/use-nanoai-messaging';
@@ -61,11 +59,6 @@ export default function ProductInfo({
   const { isAuthenticated } = useAuth();
   const { openTryOnForProduct } = useNanoAiMessaging();
   const [loyaltyStatus, setLoyaltyStatus] = useState<any>(null);
-
-  const nanoPayload = buildNanoAiGatewayPayloadFrom188Product(product, {
-    imageUrl: viewingImageUrl,
-  });
-  const tryOnStickyAttrs = nanoAiGatewayButtonDataset(nanoPayload, 'try_on');
 
   const handleNanoAiTryOn = useCallback(() => {
     void openTryOnForProduct(product, {
@@ -376,7 +369,6 @@ export default function ProductInfo({
                   </Link>
                   <button
                     type="button"
-                    {...tryOnStickyAttrs}
                     onClick={handleNanoAiTryOn}
                     className="flex flex-col items-center justify-center flex-shrink-0 w-14 text-[#ea580c] hover:opacity-90 active:opacity-75"
                     aria-label="Thử đồ với NanoAI"

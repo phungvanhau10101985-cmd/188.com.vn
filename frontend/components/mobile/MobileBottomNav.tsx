@@ -153,7 +153,6 @@ export default function MobileBottomNav({ notificationCount: initialNotifCount =
         {renderLinkItem(homeItem)}
         <button
           type="button"
-          data-nanoai-try-on
           onClick={handleBottomNavTryOn}
           className={`flex flex-col items-center justify-center flex-1 h-full min-w-0 gap-1 transition-colors ${NAV_ACTIVE} active:opacity-80`}
           aria-label="Thử đồ với NanoAI"

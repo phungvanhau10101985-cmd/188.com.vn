@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { findNanoAiChatLoaderScripts } from '@/lib/nanoai-hosted-chat';
+import { findNanoAiChatLoaderScripts, clearNanoAiLoaderScriptProductContext } from '@/lib/nanoai-hosted-chat';
 
 const ATTR = {
   sku: 'data-ctx-sku',
@@ -89,6 +89,12 @@ export default function NanoAiProductPageContext({
       window.clearTimeout(stop);
     };
   }, [sku, primaryImageUrl, secondaryImageUrl, productPath, inventoryId]);
+
+  useEffect(() => {
+    return () => {
+      clearNanoAiLoaderScriptProductContext();
+    };
+  }, []);
 
   return (
     <>

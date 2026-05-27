@@ -28,7 +28,6 @@ import { trackEvent } from '@/lib/analytics';
 import NanoAiLauncherGatewaySync from '@/components/NanoAiLauncherGatewaySync';
 import {
   buildNanoAiGatewayPayloadFrom188Product,
-  nanoAiGatewayButtonDataset,
   NANO_AI_CTX_SOURCE_PRODUCT_PDP,
 } from '@/lib/nanoai-hosted-chat';
 import { useNanoAiMessaging } from '@/lib/use-nanoai-messaging';
@@ -186,7 +185,6 @@ export default function ProductDetailMobile({
   const nanoPayload = buildNanoAiGatewayPayloadFrom188Product(product, {
     imageUrl: mainImageRaw,
   });
-  const tryOnStickyAttrs = nanoAiGatewayButtonDataset(nanoPayload, 'try_on');
 
   const handleNanoAiTryOn = useCallback(() => {
     void openTryOnForProduct(product, {
@@ -526,7 +524,6 @@ export default function ProductDetailMobile({
             </Link>
             <button
               type="button"
-              {...tryOnStickyAttrs}
               onClick={handleNanoAiTryOn}
               className="flex w-12 flex-none flex-col items-center justify-center gap-px py-0 text-[#ea580c] active:opacity-70"
               aria-label="Thử đồ với NanoAI"
