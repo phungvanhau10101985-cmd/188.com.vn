@@ -3,7 +3,6 @@
 
 import { useCallback, useLayoutEffect, useState } from 'react';
 import { Product } from '@/types/api';
-import { trackEvent } from '@/lib/analytics';
 import {
   buildNanoAiGatewayPayloadFrom188Product,
   nanoAiGatewayButtonDataset,
@@ -58,15 +57,7 @@ export default function ProductActions({
   const nanoPayload = buildNanoAiGatewayPayloadFrom188Product(product, {
     imageUrl: viewingImageUrl,
   });
-  const consultAttrs = nanoAiGatewayButtonDataset(nanoPayload, 'consult');
   const tryOnAttrs = nanoAiGatewayButtonDataset(nanoPayload, 'try_on');
-
-  const handleNanoAiConsultClick = useCallback(() => {
-    trackEvent('nanoai_consult_open', {
-      product_id: product.id,
-      source: 'product_detail_actions',
-    });
-  }, [product.id]);
 
   const handleNanoAiTryOn = useCallback(() => {
     void openTryOnForProduct(product, {
@@ -89,71 +80,68 @@ export default function ProductActions({
   };
 
   return (
-    <div className="space-y-2 pt-3">
+    <div className="pt-3">
       <div className="flex flex-col sm:flex-row gap-2">
         <button
           type="button"
-          {...consultAttrs}
-          onClick={handleNanoAiConsultClick}
-          className="flex-1 py-2.5 px-4 rounded-lg font-semibold text-sm border-2 border-[#ea580c] text-[#ea580c] bg-white hover:bg-orange-50 transition-colors"
+          onClick={handleAddToCart}
+          disabled={!canPurchase}
+          title={blockHint}
+          className={`flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all flex items-center justify-center space-x-2 group ${
+            canPurchase
+              ? 'bg-gray-500 hover:bg-gray-600 text-white shadow hover:shadow-md'
+              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+          } ${uiCartLoading ? 'opacity-70' : ''}`}
         >
-          Tư vấn nhắn tin
+          <span className="text-base group-hover:scale-105 transition-transform">🛒</span>
+          <span>{uiCartLoading ? 'Đang thêm...' : 'Thêm Vào Giỏ'}</span>
         </button>
         <button
           type="button"
-          {...tryOnAttrs}
-          onClick={handleNanoAiTryOn}
-          className="flex-1 py-2.5 px-4 rounded-lg font-semibold text-sm bg-[#ea580c] text-white hover:bg-[#c2410c] transition-colors"
+          onClick={handleBuyNow}
+          disabled={!canPurchase}
+          title={blockHint}
+          className={`flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
+            canPurchase
+              ? 'bg-[#ea580c] hover:bg-[#c2410c] text-white shadow hover:shadow-md'
+              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+          } ${uiCartLoading ? 'opacity-70' : ''}`}
         >
-          Thử đồ
+          {uiCartLoading ? 'Đang xử lý...' : 'Mua ngay'}
         </button>
-      </div>
-      <div className="flex flex-col sm:flex-row gap-2">
-      <button
-        type="button"
-        onClick={handleAddToCart}
-        disabled={!canPurchase}
-        title={blockHint}
-        className={`flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all flex items-center justify-center space-x-2 group ${
-          canPurchase
-            ? 'bg-gray-500 hover:bg-gray-600 text-white shadow hover:shadow-md'
-            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-        } ${uiCartLoading ? 'opacity-70' : ''}`}
-      >
-        <span className="text-base group-hover:scale-105 transition-transform">🛒</span>
-        <span>
-          {uiCartLoading ? 'Đang thêm...' : 'Thêm Vào Giỏ'}
-        </span>
-      </button>
-      
-      <button
-        type="button"
-        onClick={handleBuyNow}
-        disabled={!canPurchase}
-        title={blockHint}
-        className={`flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
-          canPurchase
-            ? 'bg-[#ea580c] hover:bg-[#c2410c] text-white shadow hover:shadow-md'
-            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-        } ${uiCartLoading ? 'opacity-70' : ''}`}
-      >
-        {uiCartLoading ? 'Đang xử lý...' : 'Mua ngay'}
-      </button>
-      
-      <button
-        onClick={handleToggleFavorite}
-        disabled={uiCartLoading}
-        className={`w-11 h-11 border-2 rounded-lg flex items-center justify-center transition-all shrink-0 ${
-          uiCartLoading 
-            ? 'border-gray-300 bg-gray-100 cursor-not-allowed opacity-70' 
-            : isFavorited 
-              ? 'border-red-400 bg-red-50 text-red-500' 
-              : 'border-pink-300 hover:bg-pink-50 hover:border-pink-400'
-        }`}
-        title={isFavorited ? 'Bỏ yêu thích' : 'Thêm vào yêu thích'}
-      >
-        {isFavorited ? '❤️' : '🤍'}
-      </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            {...tryOnAttrs}
+            onClick={handleNanoAiTryOn}
+            className="w-11 h-11 rounded-lg font-semibold text-xs bg-[#ea580c] text-white hover:bg-[#c2410c] transition-colors flex flex-col items-center justify-center gap-0.5"
+            aria-label="Thử đồ với NanoAI"
+          >
+            <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
+              />
+            </svg>
+            <span className="text-[9px] leading-none">Thử đồ</span>
+          </button>
+          <button
+            onClick={handleToggleFavorite}
+            disabled={uiCartLoading}
+            className={`w-11 h-11 border-2 rounded-lg flex items-center justify-center transition-all shrink-0 ${
+              uiCartLoading
+                ? 'border-gray-300 bg-gray-100 cursor-not-allowed opacity-70'
+                : isFavorited
+                  ? 'border-red-400 bg-red-50 text-red-500'
+                  : 'border-pink-300 hover:bg-pink-50 hover:border-pink-400'
+            }`}
+            title={isFavorited ? 'Bỏ yêu thích' : 'Thêm vào yêu thích'}
+          >
+            {isFavorited ? '❤️' : '🤍'}
+          </button>
+        </div>
       </div>
     </div>
   );

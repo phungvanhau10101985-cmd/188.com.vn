@@ -44,6 +44,11 @@ app.db
 .DS_Store
 Thumbs.db
 
+# Excel / đối soát nội bộ (chỉ thư mục gốc — không đẩy GitHub)
+/*.xlsx
+/*.xls
+/C3979000
+
 # Generated scan — có thể nhúng nhầm nội dung file nhạy cảm; không commit
 ai_analysis/project_analysis.json
 
