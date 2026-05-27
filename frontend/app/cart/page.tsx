@@ -23,7 +23,8 @@ import {
 import { shouldRedirectToDepositAfterCreate } from '@/lib/order-deposit';
 import { buildAuthLoginHrefFromFullPath } from '@/lib/auth-redirect';
 import { isClientAuthLikelyLoggedIn, probeCookieAuthSession } from '@/lib/client-auth-session';
-import type { CartLineRef } from '@/features/cart/types/cart';
+import type { CartItem, CartLineRef } from '@/features/cart/types/cart';
+import { resolveCartItemImageUrl } from '@/lib/product-color-variant';
 import CartEmptySameShopSection from '@/components/cart/CartEmptySameShopSection';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
@@ -44,6 +45,15 @@ function formatAddressLine(addr: UserAddress): string {
   if (addr.district) parts.push(addr.district);
   if (addr.province) parts.push(addr.province);
   return parts.join(', ');
+}
+
+function cartItemImageSrc(item: CartItem, size: number): string {
+  const raw = resolveCartItemImageUrl(item);
+  return getOptimizedImage(raw || undefined, {
+    width: size,
+    height: size,
+    fallbackStrategy: 'local',
+  });
 }
 
 function cartLineTotal(item: {
@@ -769,26 +779,29 @@ export default function CartPage() {
                           />
                         </div>
                         <div className="flex flex-1 gap-4 items-center min-w-0 md:col-span-1">
-                          <button
-                            type="button"
+                          <div
+                            role="button"
+                            tabIndex={0}
                             onClick={() => handleOpenProduct(item)}
-                            className="flex-shrink-0 w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-xl overflow-hidden relative"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                handleOpenProduct(item);
+                              }
+                            }}
+                            className="flex-shrink-0 w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-xl overflow-hidden relative touch-manipulation cursor-pointer"
                             aria-label="Xem chi tiết sản phẩm"
                           >
-                            {item.product_data?.main_image ? (
-                              <Image
-                                src={getOptimizedImage(item.product_data?.main_image, { width: 80, height: 80, fallbackStrategy: 'local' })}
-                                alt={item.product_data?.name ?? 'Sản phẩm'}
-                                fill
-                                sizes="80px"
-                                className="object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full bg-gray-200 flex items-center justify-center">
-                                <span className="text-xs text-gray-500">No Img</span>
-                              </div>
-                            )}
-                          </button>
+                            <Image
+                              src={cartItemImageSrc(item, 80)}
+                              alt={item.product_data?.name ?? 'Sản phẩm'}
+                              width={80}
+                              height={80}
+                              sizes="(max-width: 768px) 64px, 80px"
+                              className="h-full w-full object-cover"
+                              draggable={false}
+                            />
+                          </div>
                           <div className="min-w-0 flex-1">
                             <button
                               type="button"

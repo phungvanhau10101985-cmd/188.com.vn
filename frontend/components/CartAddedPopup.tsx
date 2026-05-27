@@ -6,6 +6,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCart } from '@/features/cart/hooks/useCart';
+import { getOptimizedImage } from '@/lib/image-utils';
+import { resolveCartItemImageUrl } from '@/lib/product-color-variant';
 import {
   markNanoAiCheckoutOnCart,
   releaseNanoAiClickBlockers,
@@ -46,7 +48,13 @@ export default function CartAddedPopup() {
   if (!showAddToCartPopup) return null;
 
   const name = lastAddedItem?.product_data?.name || 'Sản phẩm';
-  const image = lastAddedItem?.product_data?.main_image || '';
+  const image = lastAddedItem
+    ? getOptimizedImage(resolveCartItemImageUrl(lastAddedItem) || undefined, {
+        width: 96,
+        height: 96,
+        fallbackStrategy: 'local',
+      })
+    : getOptimizedImage(undefined, { width: 96, height: 96, fallbackStrategy: 'local' });
 
   const finishPopup = (opts?: { keepCartCheckoutGuard?: boolean }) => {
     hideAddToCartPopup();
@@ -107,11 +115,7 @@ export default function CartAddedPopup() {
       >
         <div className="flex items-center gap-3 p-3 md:p-4 border-b border-gray-100">
           <div className="h-12 w-12 rounded bg-gray-100 overflow-hidden flex-shrink-0">
-            {image ? (
-              <Image src={image} alt={name} width={48} height={48} className="h-12 w-12 object-cover" />
-            ) : (
-              <div className="h-full w-full bg-gray-200" />
-            )}
+            <Image src={image} alt={name} width={48} height={48} className="h-12 w-12 object-cover" draggable={false} />
           </div>
           <div className="flex-1 min-w-0">
             <p id="cart-added-popup-title" className="text-sm md:text-base font-semibold text-gray-900 truncate">

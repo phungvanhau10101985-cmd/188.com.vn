@@ -67,17 +67,31 @@ export function CartProvider({ children }: { children: ReactNode }) {
       ? {
           ...normalizedCart,
           items: sortedItems.map((item: any) => {
-            const fromApi =
-              item.product_data && typeof item.product_data === 'object' ? { ...item.product_data } : {};
+            let fromApi: Record<string, unknown> = {};
+            const rawPd = item.product_data;
+            if (rawPd && typeof rawPd === 'object') {
+              fromApi = { ...rawPd };
+            } else if (typeof rawPd === 'string' && rawPd.trim()) {
+              try {
+                const parsed = JSON.parse(rawPd);
+                if (parsed && typeof parsed === 'object') fromApi = { ...parsed };
+              } catch {
+                /* ignore */
+              }
+            }
+            const lineImage = String(
+              item.line_image_url || fromApi.main_image || item.product_image || '',
+            ).trim();
             return {
               ...item,
+              product_image: lineImage || item.product_image,
               product_data: {
                 ...fromApi,
                 id: item.product_id,
                 product_id: fromApi.product_id ?? item.product_code,
                 name: fromApi.name ?? item.product_name,
                 price: fromApi.price ?? item.product_price,
-                main_image: fromApi.main_image || item.product_image,
+                main_image: lineImage,
                 deposit_require: fromApi.deposit_require ?? item.requires_deposit,
               },
             };

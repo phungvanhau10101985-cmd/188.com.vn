@@ -95,8 +95,11 @@ class CartItemCRUD:
         return db.query(CartItem).filter(CartItem.id == cart_item_id).first()
     
     def get_user_cart_items(self, db: Session, user_id: int) -> List[CartItem]:
+        from sqlalchemy.orm import joinedload
+
         return (
             db.query(CartItem)
+            .options(joinedload(CartItem.product))
             .filter(CartItem.user_id == user_id)
             .order_by(CartItem.id.asc())
             .all()

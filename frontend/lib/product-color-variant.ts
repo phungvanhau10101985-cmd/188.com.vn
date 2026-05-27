@@ -53,3 +53,21 @@ export function cartLineMainImage(product: Product, selectedColorLabel?: string 
   }
   return fallback;
 }
+
+/** URL ảnh một dòng giỏ — `line_image_url` → `product_data.main_image` → `product_image`. */
+export function resolveCartItemImageUrl(item: {
+  line_image_url?: string | null;
+  product_data?: { main_image?: string } | Record<string, unknown> | null;
+  product_image?: string | null;
+}): string {
+  const explicit = item.line_image_url;
+  if (explicit != null && String(explicit).trim()) return String(explicit).trim();
+  const pd = item.product_data;
+  if (pd && typeof pd === 'object') {
+    const fromPd = (pd as { main_image?: string }).main_image;
+    if (fromPd != null && String(fromPd).trim()) return String(fromPd).trim();
+  }
+  const fromCol = item.product_image;
+  if (fromCol != null && String(fromCol).trim()) return String(fromCol).trim();
+  return '';
+}

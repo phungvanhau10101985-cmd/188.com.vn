@@ -7,6 +7,7 @@
  * - Local placeholder generation
  */
 
+import { cdnUrl } from '@/lib/cdn-url';
 import { getCdnPublicBase } from '@/lib/site-config';
 
 const CDN_CONFIG = {
@@ -136,6 +137,8 @@ export const getOptimizedImage = (
     const firstSegment = processedUrl.slice(1).split('/')[0] || '';
     if (firstSegment.includes('.')) {
       processedUrl = 'https:' + processedUrl;
+    } else {
+      processedUrl = cdnUrl(processedUrl);
     }
   }
 

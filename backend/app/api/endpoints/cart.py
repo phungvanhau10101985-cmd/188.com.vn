@@ -7,7 +7,7 @@ from datetime import datetime
 from app.db.session import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.crud.cart import cart as cart_crud
+from app.crud.cart import cart as cart_crud, _resolve_cart_line_image
 import app.schemas as schemas
 from app.schemas.cart import CartItemCreate, CartItemUpdate, CartResponse, CartItemResponse
 from app.models.cart import CartItem, Cart
@@ -19,7 +19,17 @@ router = APIRouter()
 
 def _cart_item_to_response(item: CartItem) -> CartItemResponse:
     pd_raw = getattr(item, "product_data", None)
-    pd = pd_raw if isinstance(pd_raw, dict) else None
+    pd = dict(pd_raw) if isinstance(pd_raw, dict) else {}
+    line_image = (item.product_image or "").strip() or (pd.get("main_image") or "").strip()
+    if not line_image and item.product is not None:
+        line_image = _resolve_cart_line_image(
+            item.product,
+            item.selected_color,
+            pd,
+            None,
+        )
+    if line_image:
+        pd = {**pd, "main_image": line_image}
     return CartItemResponse(
         id=item.id,
         cart_id=item.cart_id,
@@ -32,8 +42,8 @@ def _cart_item_to_response(item: CartItem) -> CartItemResponse:
         selected_color_name=item.selected_color_name,
         product_name=item.product_name or "",
         product_price=float(item.product_price) if item.product_price is not None else 0.0,
-        product_image=item.product_image,
-        product_data=pd,
+        product_image=line_image or item.product_image,
+        product_data=pd or None,
         requires_deposit=bool(item.requires_deposit) if item.requires_deposit is not None else False,
         created_at=item.created_at,
         updated_at=item.updated_at,
