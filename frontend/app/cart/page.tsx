@@ -10,7 +10,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { UserAddress, AddressCreateInput } from '@/types/api';
 import { VIETNAM_PROVINCES } from '@/lib/vietnam-provinces';
-import { getOptimizedImage } from '@/lib/image-utils';
 import { getStoredReferralCode } from '@/lib/affiliate-ref';
 import { trackEvent } from '@/lib/analytics';
 import { trackMetaOrderAwaitingDeposit, trackMetaPurchase } from '@/lib/meta-pixel';
@@ -23,8 +22,8 @@ import {
 import { shouldRedirectToDepositAfterCreate } from '@/lib/order-deposit';
 import { buildAuthLoginHrefFromFullPath } from '@/lib/auth-redirect';
 import { isClientAuthLikelyLoggedIn, probeCookieAuthSession } from '@/lib/client-auth-session';
-import type { CartItem, CartLineRef } from '@/features/cart/types/cart';
-import { resolveCartItemImageUrl } from '@/lib/product-color-variant';
+import type { CartLineRef } from '@/features/cart/types/cart';
+import CartLineThumbnail from '@/components/cart/CartLineThumbnail';
 import CartEmptySameShopSection from '@/components/cart/CartEmptySameShopSection';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
@@ -45,15 +44,6 @@ function formatAddressLine(addr: UserAddress): string {
   if (addr.district) parts.push(addr.district);
   if (addr.province) parts.push(addr.province);
   return parts.join(', ');
-}
-
-function cartItemImageSrc(item: CartItem, size: number): string {
-  const raw = resolveCartItemImageUrl(item);
-  return getOptimizedImage(raw || undefined, {
-    width: size,
-    height: size,
-    fallbackStrategy: 'local',
-  });
 }
 
 function cartLineTotal(item: {
@@ -792,15 +782,7 @@ export default function CartPage() {
                             className="flex-shrink-0 w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-xl overflow-hidden relative touch-manipulation cursor-pointer"
                             aria-label="Xem chi tiết sản phẩm"
                           >
-                            <Image
-                              src={cartItemImageSrc(item, 80)}
-                              alt={item.product_data?.name ?? 'Sản phẩm'}
-                              width={80}
-                              height={80}
-                              sizes="(max-width: 768px) 64px, 80px"
-                              className="h-full w-full object-cover"
-                              draggable={false}
-                            />
+                            <CartLineThumbnail item={item} size={80} className="h-full w-full object-cover" />
                           </div>
                           <div className="min-w-0 flex-1">
                             <button

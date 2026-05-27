@@ -1,7 +1,7 @@
 import { getCdnPublicBase } from '@/lib/site-config';
 
 /**
- * Chuẩn hoá ảnh từ Taobao/1688 (thường là `//img.alicdn.com/...`).
+ * Chuẩn hoá ảnh Taobao/1688: `//img.alicdn.com/...`, `//cbu01.alicdn.com/img/ibank/...`, v.v.
  * Trường hợp hiếm: `/img.alicdn.com/...` (thiếu một dấu /) → vẫn coi là host tuyệt đối.
  */
 export function normalizeRemoteImageUrlForDisplay(raw: string): string {
@@ -14,6 +14,9 @@ export function normalizeRemoteImageUrlForDisplay(raw: string): string {
     if (firstSegment.includes('.')) {
       return `https:${s}`;
     }
+  }
+  if (!/^https?:\/\//i.test(s) && /alicdn\.com/i.test(s)) {
+    return `https://${s.replace(/^\/+/, '')}`;
   }
   return s;
 }

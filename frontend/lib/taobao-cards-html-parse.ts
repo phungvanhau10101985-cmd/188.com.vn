@@ -1302,7 +1302,7 @@ function collectProductCardRoots(doc: Document): Element[] {
 
   /** Fallback 2: tìm wrapper có cả ảnh alicdn + vùng giá/tiêu đề (HTML bị cắt mất lớp ngoài) */
   const candidates = doc.querySelectorAll(
-    'img[src*="alicdn.com"], img[src*="gw.alicdn.com"], img[src*="img.alicdn.com"]',
+    'img[src*="alicdn.com"], img[src*="cbu01.alicdn.com"], img[src*="gw.alicdn.com"], img[src*="img.alicdn.com"]',
   );
   candidates.forEach((img) => {
     if (!(img instanceof HTMLImageElement)) return;

@@ -1,6 +1,73 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { getOptimizedImage, isAlibabaCdnImageUrl, stripAlicdnToBaseJpg } from '@/lib/image-utils';
+
+function buildRemoteImgSrc(raw: string, size: number, rawOverride?: string): string {
+  const s = (rawOverride || raw).trim();
+  if (!s) return '';
+  if (isAlibabaCdnImageUrl(s)) {
+    return getOptimizedImage(s, { width: size, height: size, fallbackStrategy: 'local' });
+  }
+  return s;
+}
+
+type RemoteProductImgProps = {
+  src: string;
+  alt: string;
+  className?: string;
+  displaySize?: number;
+  onLoad?: (e: React.SyntheticEvent<HTMLImageElement>) => void;
+  onBroken?: () => void;
+};
+
+/** img/alicdn + cbu01.alicdn — resize an toàn, fallback bản .jpg gốc. */
+function RemoteProductImg({
+  src,
+  alt,
+  className,
+  displaySize = 800,
+  onLoad,
+  onBroken,
+}: RemoteProductImgProps) {
+  const [currentSrc, setCurrentSrc] = useState(() => buildRemoteImgSrc(src, displaySize));
+  const [triedBase, setTriedBase] = useState(false);
+
+  useEffect(() => {
+    setCurrentSrc(buildRemoteImgSrc(src, displaySize));
+    setTriedBase(false);
+  }, [src, displaySize]);
+
+  const handleError = () => {
+    if (!triedBase && isAlibabaCdnImageUrl(src)) {
+      const base = stripAlicdnToBaseJpg(src);
+      if (base && base !== stripAlicdnToBaseJpg(currentSrc)) {
+        setTriedBase(true);
+        setCurrentSrc(buildRemoteImgSrc(src, displaySize, base));
+        return;
+      }
+    }
+    onBroken?.();
+  };
+
+  if (!currentSrc.trim()) {
+    onBroken?.();
+    return null;
+  }
+
+  return (
+    <img
+      src={currentSrc}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      className={className}
+      onLoad={onLoad}
+      onError={handleError}
+    />
+  );
+}
 
 type HideOnImageErrorProps = {
   src: string;
@@ -41,14 +108,13 @@ export default function HideOnImageError({
 
   return (
     <div className={wrapperClassName}>
-      <img
+      <RemoteProductImg
         src={src}
         alt={alt}
-        loading="lazy"
-        decoding="async"
         className={className}
+        displaySize={800}
         onLoad={handleLoad}
-        onError={markFailed}
+        onBroken={markFailed}
       />
     </div>
   );
@@ -91,13 +157,13 @@ export function ProductFillImage({
 
   return (
     <div className={frameClassName}>
-      <img
+      <RemoteProductImg
         src={src}
         alt={alt}
         className="absolute inset-0 h-full w-full object-cover"
-        decoding="async"
+        displaySize={960}
         onLoad={handleLoad}
-        onError={markFailed}
+        onBroken={markFailed}
       />
       {children}
     </div>
@@ -151,13 +217,13 @@ export function GalleryThumbImage({
         selected ? selectedClassName : unselectedClassName
       }`}
     >
-      <img
+      <RemoteProductImg
         src={src}
         alt=""
         className="h-full w-full object-cover"
-        decoding="async"
+        displaySize={160}
         onLoad={handleLoad}
-        onError={markFailed}
+        onBroken={markFailed}
       />
     </button>
   );

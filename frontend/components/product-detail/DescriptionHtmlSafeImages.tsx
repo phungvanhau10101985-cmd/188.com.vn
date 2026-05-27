@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { getOptimizedImage, isAlibabaCdnImageUrl } from '@/lib/image-utils';
+import { normalizeRemoteImageUrlForDisplay } from '@/lib/cdn-url';
 
 function hideBrokenImg(img: HTMLImageElement) {
   const block = img.closest('[data-detail-img-block]') as HTMLElement | null;
@@ -12,6 +14,12 @@ function hideBrokenImg(img: HTMLImageElement) {
 }
 
 function wireImage(img: HTMLImageElement) {
+  const raw = (img.getAttribute('src') || '').trim();
+  if (raw && isAlibabaCdnImageUrl(raw)) {
+    const normalized = normalizeRemoteImageUrlForDisplay(raw);
+    img.setAttribute('src', getOptimizedImage(normalized, { width: 600, height: 600, fallbackStrategy: 'local' }));
+    img.setAttribute('referrerpolicy', 'no-referrer');
+  }
   const onFail = () => hideBrokenImg(img);
   const onLoad = () => {
     if (img.naturalWidth < 2 || img.naturalHeight < 2) onFail();

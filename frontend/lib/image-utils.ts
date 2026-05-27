@@ -32,29 +32,67 @@ function truncateAlicdnToFirstJpg(url: string): string {
   return url.slice(0, m.index! + 4);
 }
 
-function hasAlicdnResizeSuffix(url: string): boolean {
-  return /\.jpg_\d+x\d+q\d+\.jpg/i.test(url);
+/** Kích thước resize alicdn (img / cbu01 / imgextra) đã kiểm tra — 256, 512 thường 404. */
+const SAFE_ALICDN_RESIZE_SIDES = [80, 160, 400, 800] as const;
+
+/** imgextra: không vượt 400; ibank/cbu01 có thể dùng 800. */
+const ALICDN_IMGEXTRA_MAX_SIDE = 400;
+
+export function isAlibabaCdnImageUrl(url: string): boolean {
+  const lower = (url || '').trim().toLowerCase();
+  if (!lower) return false;
+  return (
+    lower.includes('alicdn.com') ||
+    lower.includes('alicdn.net') ||
+    lower.includes('tbcdn.cn')
+  );
 }
 
-/** Alibaba CDN: …-cib.jpg → …-cib.jpg_400x400q90.jpg (q90 — chất lượng cao, không nén mạnh). */
+function alicdnMaxDisplaySide(url: string): number {
+  const lower = url.toLowerCase();
+  if (lower.includes('imgextra')) return ALICDN_IMGEXTRA_MAX_SIDE;
+  return MAX_DISPLAY_PIXELS;
+}
+
+/** Chọn cạnh vuông an toàn (≤ cap), tránh hậu tố _256x256 / _512x512 bị CDN trả 404. */
+function pickSafeAlicdnResizeSide(requestedW: number, requestedH: number, maxCap: number): number {
+  const target = Math.min(maxCap, Math.max(1, Math.max(requestedW, requestedH)));
+  let pick: number = SAFE_ALICDN_RESIZE_SIDES[0];
+  for (const side of SAFE_ALICDN_RESIZE_SIDES) {
+    if (side <= target) pick = side;
+  }
+  return pick;
+}
+
+/** Bỏ hậu tố resize cũ (có thể 404) trước khi gắn kích thước mới. */
+export function stripAlicdnToBaseJpg(url: string): string {
+  const u = (url || '').trim();
+  if (!isAlibabaCdnImageUrl(u)) return u;
+  return truncateAlicdnToFirstJpg(u);
+}
+
+/** Alibaba CDN: …jpg → …jpg_WxHq90.jpg — luôn từ bản .jpg gốc, không tin hậu tố sẵn có. */
 function applyAlicdnDisplaySize(
   url: string,
   width: number,
   height: number,
   quality = 90
 ): string {
+  if (!isAlibabaCdnImageUrl(url)) return url;
   const lower = url.toLowerCase();
-  if (!lower.includes('alicdn')) return url;
   if (lower.includes('gw.alicdn.com/mt/')) return url;
-  if (hasAlicdnResizeSuffix(url)) return url;
 
-  const base = truncateAlicdnToFirstJpg(url);
-  if (!/\.jpg$/i.test(base)) return url;
+  const base = stripAlicdnToBaseJpg(url);
+  if (!/\.jpg$/i.test(base)) return base || url;
 
-  const w = Math.max(1, Math.round(width));
-  const h = Math.max(1, Math.round(height));
+  const maxSide = alicdnMaxDisplaySide(base);
+  const side = pickSafeAlicdnResizeSide(
+    Math.max(1, Math.round(width)),
+    Math.max(1, Math.round(height)),
+    maxSide,
+  );
   const q = Math.min(100, Math.max(75, Math.round(quality)));
-  return `${base}_${w}x${h}q${q}.jpg`;
+  return `${base}_${side}x${side}q${q}.jpg`;
 }
 
 function isBunnyCdnUrl(url: string): boolean {
@@ -103,16 +141,25 @@ const getOptimizedImageUrl = (
 ): string => {
   if (!url) return generateLocalPlaceholder(width, height);
 
+  let processed = url.trim();
+  if (processed.startsWith('//')) processed = `https:${processed}`;
+
   const { w, h } = displayPixelSize(width, height);
 
-  if (url.toLowerCase().includes('alicdn')) {
-    return applyAlicdnDisplaySize(url, w, h, quality);
+  if (isAlibabaCdnImageUrl(processed)) {
+    const maxSide = alicdnMaxDisplaySide(processed);
+    return applyAlicdnDisplaySize(
+      processed,
+      Math.min(w, maxSide),
+      Math.min(h, maxSide),
+      quality,
+    );
   }
-  if (isBunnyCdnUrl(url)) {
-    return applyBunnyDisplaySize(url, Math.max(w, h), quality);
+  if (isBunnyCdnUrl(processed)) {
+    return applyBunnyDisplaySize(processed, Math.max(w, h), quality);
   }
 
-  return url;
+  return processed;
 };
 
 export const getOptimizedImage = (
@@ -132,11 +179,11 @@ export const getOptimizedImage = (
 
   let processedUrl = url.trim();
   if (processedUrl.startsWith('//')) {
-    processedUrl = 'https:' + processedUrl;
+    processedUrl = `https:${processedUrl}`;
   } else if (processedUrl.startsWith('/') && processedUrl.length > 1) {
     const firstSegment = processedUrl.slice(1).split('/')[0] || '';
     if (firstSegment.includes('.')) {
-      processedUrl = 'https:' + processedUrl;
+      processedUrl = `https:${processedUrl}`;
     } else {
       processedUrl = cdnUrl(processedUrl);
     }

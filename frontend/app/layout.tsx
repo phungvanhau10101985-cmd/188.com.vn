@@ -161,6 +161,8 @@ export default async function RootLayout({
         <link rel="dns-prefetch" href={CDN_ORIGIN} />
         <link rel="preconnect" href="https://img.alicdn.com" crossOrigin="anonymous" />
         <link rel="dns-prefetch" href="https://img.alicdn.com" />
+        <link rel="preconnect" href="https://cbu01.alicdn.com" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://cbu01.alicdn.com" />
         <SiteEmbedsSsrScripts specs={ssrScripts} />
       </head>
       <body className="antialiased font-sans bg-[#fafafa] text-gray-900 min-h-screen" suppressHydrationWarning>
