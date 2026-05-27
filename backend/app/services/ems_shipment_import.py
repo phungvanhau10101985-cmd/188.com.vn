@@ -334,38 +334,11 @@ def _parse_traced_at_date(value: Any) -> Optional[date]:
 
 
 def _merge_cod_paid_from_ems_tracking(result: dict[str, Any], ems: dict[str, Any]) -> None:
-    """Lấy ngày COD đã thu từ hành trình EMS (ưu tiên sự kiện [COD]Đã thu tiền)."""
-    events = ems.get("events") or []
-    cod_amount = result.get("cod_amount")
-    paid_date: Optional[date] = None
+    """Không ghi cod_paid_* từ hành trình EMS — chỉ file đối soát COD quyết định EMS trả shop.
 
-    for ev in events:
-        desc = (ev.get("description") or "")
-        compact = desc.lower().replace(" ", "")
-        if (
-            "[cod]đãthutiền" in compact
-            or "[cod]trảtiền" in compact
-            or "đãthutiềnbưutá" in compact
-        ):
-            paid_date = _parse_traced_at_date(ev.get("traced_at"))
-            if paid_date:
-                break
-
-    if not paid_date:
-        phase = (result.get("ems_phase") or _ems_phase(ems.get("current_status_description")) or "").strip().lower()
-        if phase in ("cod_collected", "cod_settled") and cod_amount is not None and int(cod_amount) > 0:
-            for ev in events:
-                traced = _parse_traced_at_date(ev.get("traced_at"))
-                if traced:
-                    paid_date = traced
-                    break
-
-    if not paid_date:
-        return
-
-    result["cod_paid_date"] = paid_date.isoformat()
-    if cod_amount is not None and int(cod_amount) > 0 and result.get("cod_paid_amount") is None:
-        result["cod_paid_amount"] = int(cod_amount)
+    [COD]Đã thu tiền / Đã thu tiền bưu tá = khách trả bưu tá, chưa phải EMS trả shop.
+    """
+    return
 
 
 def _ems_only_status_message(ems_phase: str, ems_status: str) -> str:
@@ -780,7 +753,34 @@ def _build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def sanitize_cod_paid_without_settlement(db: Session) -> int:
+    """Xóa cod_paid_* ghi nhầm từ EMS tracking — chỉ giữ sau import file đối soát COD."""
+    rows = (
+        db.query(EmsShippingRecord)
+        .filter(
+            (EmsShippingRecord.cod_paid_amount.isnot(None)) | (EmsShippingRecord.cod_paid_date.isnot(None))
+        )
+        .all()
+    )
+    fixed = 0
+    for record in rows:
+        if (record.cod_settlement_status or "").strip().lower() == "matched":
+            continue
+        record.cod_paid_amount = None
+        record.cod_paid_date = None
+        fixed += 1
+    if fixed:
+        db.commit()
+    return fixed
+
+
 def _record_to_dict(record: EmsShippingRecord) -> dict[str, Any]:
+    settlement = (record.cod_settlement_status or "").strip().lower()
+    cod_paid_amount = int(record.cod_paid_amount) if record.cod_paid_amount is not None else None
+    cod_paid_date = _isoformat_value(record.cod_paid_date)
+    if settlement != "matched":
+        cod_paid_amount = None
+        cod_paid_date = None
     return {
         "id": record.id,
         "row_number": record.excel_row_number or 0,
@@ -799,8 +799,8 @@ def _record_to_dict(record: EmsShippingRecord) -> dict[str, Any]:
         "sync_message": record.sync_message or "",
         "ems_error": record.ems_error,
         "cod_amount": int(record.cod_amount) if record.cod_amount is not None else None,
-        "cod_paid_amount": int(record.cod_paid_amount) if record.cod_paid_amount is not None else None,
-        "cod_paid_date": _isoformat_value(record.cod_paid_date),
+        "cod_paid_amount": cod_paid_amount,
+        "cod_paid_date": cod_paid_date,
         "cod_settlement_status": record.cod_settlement_status,
         "cod_settlement_message": record.cod_settlement_message,
         "freight_amount": int(record.freight_amount) if record.freight_amount is not None else None,
@@ -878,14 +878,10 @@ def _upsert_record(
     cod = result.get("cod_amount")
     record.cod_amount = int(cod) if cod is not None else None
     settlement = (record.cod_settlement_status or "").strip().lower()
-    cod_paid = result.get("cod_paid_amount")
-    if cod_paid is not None:
-        if settlement != "matched" or record.cod_paid_amount is None:
-            record.cod_paid_amount = int(cod_paid)
-    cod_paid_date_raw = result.get("cod_paid_date")
-    parsed_paid_date = _parse_traced_at_date(cod_paid_date_raw)
-    if parsed_paid_date and (settlement != "matched" or record.cod_paid_date is None):
-        record.cod_paid_date = parsed_paid_date
+    # COD EMS trả shop — chỉ từ file đối soát (cod_settlement_status=matched).
+    if settlement != "matched":
+        record.cod_paid_amount = None
+        record.cod_paid_date = None
     if source_filename:
         record.import_source_filename = source_filename
     if admin_id:

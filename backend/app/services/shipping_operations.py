@@ -50,7 +50,9 @@ def _is_delivered(*, ems_phase: str | None, ems_status: str | None) -> bool:
         return True
     text = (ems_status or "").lower()
     compact = text.replace(" ", "")
-    if "[cod]đãthutiền" in compact or "[cod]trảtiền" in compact:
+    if "[cod]đãthutiền" in compact or "đãthutiềnbưutá" in compact:
+        return True
+    if "[cod]trảtiền" in compact or "trảtiềnchongườigửi" in compact:
         return True
     return "phát thành công" in text and "phát hoàn" not in text
 
@@ -69,8 +71,7 @@ def _delivery_bucket(record: EmsShippingRecord) -> DeliveryBucket:
         return "returned"
     if _is_delivered(ems_phase=record.ems_phase, ems_status=record.ems_status):
         return "delivered"
-    # Đã đối soát COD với EMS => chắc chắn đã giao thành công (dù hành trình chưa cập nhật).
-    if _has_cod(record) and _is_cod_paid(record):
+    if (record.cod_settlement_status or "").strip().lower() == "matched":
         return "delivered"
     if _is_in_transit(ems_phase=record.ems_phase, ems_status=record.ems_status):
         return "in_transit"
@@ -85,13 +86,8 @@ def _has_cod(record: EmsShippingRecord) -> bool:
 
 
 def _is_cod_paid(record: EmsShippingRecord) -> bool:
-    if (record.cod_settlement_status or "").strip().lower() == "matched":
-        return True
-    try:
-        paid = record.cod_paid_amount
-        return paid is not None and int(paid) > 0
-    except (TypeError, ValueError):
-        return False
+    """EMS đã trả tiền thu hộ về shop — chỉ khi import file đối soát COD khớp."""
+    return (record.cod_settlement_status or "").strip().lower() == "matched"
 
 
 def _cod_bucket(record: EmsShippingRecord, delivery: DeliveryBucket) -> CodBucket | None:
@@ -479,8 +475,8 @@ _OPS_BUCKET_LABELS: dict[str, str] = {
     "pending": "Chưa rõ EMS",
     "has_cod": "Có COD",
     "cod_in_transit_unpaid": "COD đang giao · chưa trả",
-    "cod_delivered_unpaid": "COD giao OK · chưa trả",
-    "cod_paid": "COD đã trả",
+    "cod_delivered_unpaid": "Giao OK · EMS chưa trả COD cho shop",
+    "cod_paid": "COD EMS đã trả shop",
     "cod_returned_unpaid": "COD hoàn · chưa trả",
     "cod_pending_unpaid": "COD chưa rõ trạng thái",
     "freight_unsettled": "Chưa đối soát cước",

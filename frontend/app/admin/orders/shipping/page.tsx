@@ -45,8 +45,8 @@ const TIMELINE_BUCKET_LABELS: Record<OpsBucketKey, string> = {
   pending: 'Chưa rõ EMS',
   has_cod: 'Có COD',
   cod_in_transit_unpaid: 'COD đang giao · chưa trả',
-  cod_delivered_unpaid: 'Giao OK · chưa trả COD',
-  cod_paid: 'COD đã trả',
+  cod_delivered_unpaid: 'Giao OK · EMS chưa trả COD',
+  cod_paid: 'COD EMS trả shop',
   cod_returned_unpaid: 'COD hoàn · chưa trả',
   cod_pending_unpaid: 'COD chưa rõ trạng thái',
   freight_unsettled: 'Chưa đối soát cước',
@@ -317,16 +317,38 @@ function formatCodPaidDate(raw: string | null | undefined): string | null {
 }
 
 function formatCodPaidDisplay(row: EmsShippingImportRow): ReactNode {
-  const amount = row.cod_paid_amount ?? (row.cod_paid_date ? row.cod_amount : null);
+  if ((row.cod_settlement_status || '').trim().toLowerCase() !== 'matched') {
+    return '—';
+  }
+  const amount = row.cod_paid_amount ?? row.cod_amount ?? null;
   const paidDate = formatCodPaidDate(row.cod_paid_date);
   if (amount == null && !paidDate) return '—';
   return (
     <>
       <span>{formatVnd(amount)}</span>
       {paidDate ? (
-        <span className="block text-xs text-emerald-700 mt-0.5 font-medium">Ngày trả: {paidDate}</span>
+        <span className="block text-xs text-emerald-700 mt-0.5 font-medium">EMS trả shop: {paidDate}</span>
       ) : null}
     </>
+  );
+}
+
+function formatCodCollectedHint(row: EmsShippingImportRow): ReactNode {
+  if ((row.cod_settlement_status || '').trim().toLowerCase() === 'matched') return null;
+  if (!row.cod_amount || row.cod_amount <= 0) return null;
+  const phase = (row.ems_phase || '').trim().toLowerCase();
+  const status = (row.ems_status || '').toLowerCase();
+  const collected =
+    phase === 'cod_collected' ||
+    phase === 'delivered' ||
+    status.includes('phát thành công') ||
+    status.includes('[cod]đã thu tiền') ||
+    status.includes('đã thu tiền bưu tá');
+  if (!collected) return null;
+  return (
+    <span className="block text-xs text-amber-800 mt-0.5 font-medium">
+      EMS đã thu COD từ khách — chưa trả shop (chờ file đối soát)
+    </span>
   );
 }
 
@@ -463,7 +485,10 @@ function EmsSearchResultCard({
         <DetailField label="Mã EMS">{row.ems_tracking_code || '—'}</DetailField>
         <DetailField label="Mã vận đơn shop (đã lưu)">{row.tracking_number_saved || '—'}</DetailField>
         <DetailField label="Thu hộ (COD)">{formatCodAmount(row.cod_amount)}</DetailField>
-        <DetailField label="COD đã trả">{formatCodPaidDisplay(row)}</DetailField>
+        <DetailField label="COD EMS trả shop">
+          {formatCodPaidDisplay(row)}
+          {formatCodCollectedHint(row)}
+        </DetailField>
         <DetailField label="Cước EMS">{formatVnd(row.freight_amount)}</DetailField>
         <DetailField label="Trạng thái EMS">
           {row.ems_status || row.ems_error || '—'}
@@ -1430,7 +1455,7 @@ export default function AdminShippingPage() {
                     ['has_cod', 'Có COD', opsStats.total_with_cod, 'text-gray-900'],
                     ['cod_in_transit_unpaid', 'Đang giao · chưa trả', opsStats.cod_in_transit_unpaid_count, 'text-indigo-800'],
                     ['cod_delivered_unpaid', 'Giao OK · chưa trả', opsStats.cod_delivered_unpaid_count, 'text-amber-800'],
-                    ['cod_paid', 'Đã trả COD', opsStats.cod_paid_count, 'text-emerald-800'],
+                    ['cod_paid', 'COD EMS trả shop', opsStats.cod_paid_count, 'text-emerald-800'],
                     ['cod_returned_unpaid', 'Hoàn · chưa trả', opsStats.cod_returned_unpaid_count, 'text-orange-800'],
                     ...(opsStats.cod_pending_unpaid_count > 0
                       ? ([
@@ -1508,7 +1533,7 @@ export default function AdminShippingPage() {
                 <strong className="text-indigo-800">{formatVnd(opsStats.cod_in_transit_unpaid_total)}</strong>
               </span>
               <span>
-                COD đã trả:{' '}
+                COD EMS trả shop:{' '}
                 <strong className="text-emerald-800">{formatVnd(opsStats.cod_paid_total)}</strong>
               </span>
             </div>
@@ -1748,7 +1773,7 @@ export default function AdminShippingPage() {
                     <th className="px-3 py-2 text-right font-medium">Chưa rõ</th>
                     <th className="px-3 py-2 text-right font-medium">Có COD</th>
                     <th className="px-3 py-2 text-right font-medium">Giao OK · chưa trả COD</th>
-                    <th className="px-3 py-2 text-right font-medium">COD đã trả</th>
+                    <th className="px-3 py-2 text-right font-medium">COD EMS trả shop</th>
                     <th className="px-3 py-2 text-right font-medium">Tổng COD</th>
                   </tr>
                 </thead>
@@ -1899,7 +1924,9 @@ export default function AdminShippingPage() {
             <p className="text-xs text-gray-500">
               Hiển thị tối đa {timelineStats.limit} kỳ gần nhất · múi giờ {timelineStats.timezone}
               {' · '}
-              Bấm số để xem danh sách mã · Giao OK · chưa trả COD = có COD, đã giao, chưa đối soát COD
+              Bấm số để xem danh sách mã · Giao OK · chưa trả COD = đã giao, EMS chưa trả tiền thu hộ về shop
+              {' · '}
+              COD EMS trả shop = chỉ khi import file đối soát COD
             </p>
           </div>
         ) : (
@@ -1943,11 +1970,12 @@ export default function AdminShippingPage() {
       </section>
 
       <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900">2. Import đối soát COD đã trả</h2>
+        <h2 className="text-lg font-semibold text-gray-900">2. Import đối soát COD EMS trả shop</h2>
         <p className="text-sm text-gray-600">
           File <strong>Doi soat cod (Shop 188).xls</strong>: cột <strong>C</strong> mã vận chuyển EMS, cột{' '}
-          <strong>D</strong> số tiền đã trả (vd. 5,200,000), ô <strong>E1</strong> ngày trả tiền.
-          Hệ thống đối chiếu với tiền thu hộ đã lưu trong bảng vận chuyển EMS.
+          <strong>D</strong> số tiền EMS đã trả shop (vd. 5,200,000), ô <strong>E1</strong> ngày trả tiền.
+          Chỉ sau bước này hệ thống mới ghi <strong>COD EMS trả shop</strong> — hành trình «[COD]Đã thu tiền» là
+          bưu tá thu khách, chưa phải trả shop.
         </p>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           <input
@@ -2692,6 +2720,7 @@ export default function AdminShippingPage() {
                           </td>
                           <td className="px-3 py-3 text-right tabular-nums whitespace-nowrap">
                             <div>{formatCodPaidDisplay(row)}</div>
+                            {formatCodCollectedHint(row)}
                             {row.cod_settlement_status ? (
                               <span
                                 className={`inline-flex mt-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
