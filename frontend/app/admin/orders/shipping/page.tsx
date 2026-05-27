@@ -37,6 +37,24 @@ const TIMELINE_GRANULARITY_LABELS: Record<EmsShippingTimelineGranularity, string
   day: 'Ngày',
 };
 
+const TIMELINE_BUCKET_LABELS: Record<OpsBucketKey, string> = {
+  total: 'Tổng vận đơn',
+  in_transit: 'Đang giao',
+  delivered: 'Giao OK',
+  returned: 'Hoàn hàng',
+  pending: 'Chưa rõ EMS',
+  has_cod: 'Có COD',
+  cod_in_transit_unpaid: 'COD đang giao · chưa trả',
+  cod_delivered_unpaid: 'Giao OK · chưa trả COD',
+  cod_paid: 'COD đã trả',
+  cod_returned_unpaid: 'COD hoàn · chưa trả',
+  cod_pending_unpaid: 'COD chưa rõ trạng thái',
+  freight_unsettled: 'Chưa đối soát cước',
+  shop_linked: 'Ghép đơn shop',
+  shop_return_received: 'Hoàn · shop đã nhận',
+  shop_shipping: 'Đơn shop đang giao',
+};
+
 type TimelineFilterState = {
   dateFrom: string;
   dateTo: string;
@@ -730,37 +748,38 @@ export default function AdminShippingPage() {
     [loadOpsBucketRecords],
   );
 
-  const openTimelineCodDeliveredUnpaid = useCallback(
-    (item: EmsShippingTimelineItem) => {
+  const openTimelineBucket = useCallback(
+    (item: EmsShippingTimelineItem, bucket: OpsBucketKey) => {
       const context: TimelineBucketContext = {
         periodKey: item.period_key,
         periodLabel: item.period_label,
       };
       setTimelineBucketContext(context);
-      setOpsBucketLabel(`Giao OK · chưa trả COD — ${item.period_label}`);
-      setActiveOpsBucket('cod_delivered_unpaid');
-      void loadOpsBucketRecords('cod_delivered_unpaid', 1, context);
+      setOpsBucketLabel(`${TIMELINE_BUCKET_LABELS[bucket]} — ${item.period_label}`);
+      setActiveOpsBucket(bucket);
+      void loadOpsBucketRecords(bucket, 1, context);
     },
     [loadOpsBucketRecords],
   );
 
-  const openTimelineCodDeliveredUnpaidTotals = useCallback(() => {
-    const context: TimelineBucketContext = {
-      periodLabel: timelineStats?.filter_label || 'Tổng các kỳ hiển thị',
-      recordsParams: buildTimelineRecordsQuery(
-        timelineGranularity,
-        timelineFilter,
-        null,
-        timelineStats?.items,
-      ),
-    };
-    setTimelineBucketContext(context);
-    setOpsBucketLabel(
-      `Giao OK · chưa trả COD — ${context.periodLabel}`,
-    );
-    setActiveOpsBucket('cod_delivered_unpaid');
-    void loadOpsBucketRecords('cod_delivered_unpaid', 1, context);
-  }, [loadOpsBucketRecords, timelineFilter, timelineGranularity, timelineStats?.filter_label, timelineStats?.items]);
+  const openTimelineBucketTotals = useCallback(
+    (bucket: OpsBucketKey) => {
+      const context: TimelineBucketContext = {
+        periodLabel: timelineStats?.filter_label || 'Tổng các kỳ hiển thị',
+        recordsParams: buildTimelineRecordsQuery(
+          timelineGranularity,
+          timelineFilter,
+          null,
+          timelineStats?.items,
+        ),
+      };
+      setTimelineBucketContext(context);
+      setOpsBucketLabel(`${TIMELINE_BUCKET_LABELS[bucket]} — ${context.periodLabel}`);
+      setActiveOpsBucket(bucket);
+      void loadOpsBucketRecords(bucket, 1, context);
+    },
+    [loadOpsBucketRecords, timelineFilter, timelineGranularity, timelineStats?.filter_label, timelineStats?.items],
+  );
 
   const opsBucketTotalPages = Math.max(1, Math.ceil(opsBucketTotal / OPS_LIST_PAGE_SIZE));
 
@@ -1745,29 +1764,61 @@ export default function AdminShippingPage() {
                           </div>
                         ) : null}
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums font-medium">{item.total.toLocaleString('vi-VN')}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-blue-800">
-                        {item.in_transit_count.toLocaleString('vi-VN')}
+                      <td className="px-3 py-2.5 text-right font-medium">
+                        <TimelineCountButton
+                          count={item.total}
+                          onClick={() => openTimelineBucket(item, 'total')}
+                          className="text-gray-900 hover:text-gray-950"
+                        />
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-emerald-800">
-                        {item.delivered_count.toLocaleString('vi-VN')}
+                      <td className="px-3 py-2.5 text-right text-blue-800">
+                        <TimelineCountButton
+                          count={item.in_transit_count}
+                          onClick={() => openTimelineBucket(item, 'in_transit')}
+                          className="text-blue-800 hover:text-blue-950"
+                        />
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-orange-800">
-                        {item.returned_count.toLocaleString('vi-VN')}
+                      <td className="px-3 py-2.5 text-right text-emerald-800">
+                        <TimelineCountButton
+                          count={item.delivered_count}
+                          onClick={() => openTimelineBucket(item, 'delivered')}
+                          className="text-emerald-800 hover:text-emerald-950"
+                        />
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
-                        {item.pending_status_count.toLocaleString('vi-VN')}
+                      <td className="px-3 py-2.5 text-right text-orange-800">
+                        <TimelineCountButton
+                          count={item.returned_count}
+                          onClick={() => openTimelineBucket(item, 'returned')}
+                          className="text-orange-800 hover:text-orange-950"
+                        />
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{item.total_with_cod.toLocaleString('vi-VN')}</td>
+                      <td className="px-3 py-2.5 text-right text-slate-600">
+                        <TimelineCountButton
+                          count={item.pending_status_count}
+                          onClick={() => openTimelineBucket(item, 'pending')}
+                          className="text-slate-600 hover:text-slate-900"
+                        />
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        <TimelineCountButton
+                          count={item.total_with_cod}
+                          onClick={() => openTimelineBucket(item, 'has_cod')}
+                          className="text-gray-800 hover:text-gray-950"
+                        />
+                      </td>
                       <td className="px-3 py-2.5 text-right text-amber-800">
                         <TimelineCountButton
                           count={item.cod_delivered_unpaid_count ?? 0}
-                          onClick={() => openTimelineCodDeliveredUnpaid(item)}
+                          onClick={() => openTimelineBucket(item, 'cod_delivered_unpaid')}
                           className="text-amber-800 hover:text-amber-950"
                         />
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">
-                        {item.cod_paid_count.toLocaleString('vi-VN')}
+                      <td className="px-3 py-2.5 text-right text-emerald-700">
+                        <TimelineCountButton
+                          count={item.cod_paid_count}
+                          onClick={() => openTimelineBucket(item, 'cod_paid')}
+                          className="text-emerald-700 hover:text-emerald-900"
+                        />
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
                         {formatVnd(item.total_cod_amount)}
@@ -1781,33 +1832,61 @@ export default function AdminShippingPage() {
                       <td className="px-3 py-2.5 font-semibold">
                         Tổng ({timelineStats.items.length} kỳ hiển thị)
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
-                        {timelineStats.totals.total.toLocaleString('vi-VN')}
+                      <td className="px-3 py-2.5 text-right font-semibold">
+                        <TimelineCountButton
+                          count={timelineStats.totals.total}
+                          onClick={() => openTimelineBucketTotals('total')}
+                          className="text-emerald-950 hover:text-emerald-900"
+                        />
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
-                        {timelineStats.totals.in_transit_count.toLocaleString('vi-VN')}
+                      <td className="px-3 py-2.5 text-right font-semibold">
+                        <TimelineCountButton
+                          count={timelineStats.totals.in_transit_count}
+                          onClick={() => openTimelineBucketTotals('in_transit')}
+                          className="text-blue-900 hover:text-blue-950"
+                        />
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
-                        {timelineStats.totals.delivered_count.toLocaleString('vi-VN')}
+                      <td className="px-3 py-2.5 text-right font-semibold">
+                        <TimelineCountButton
+                          count={timelineStats.totals.delivered_count}
+                          onClick={() => openTimelineBucketTotals('delivered')}
+                          className="text-emerald-900 hover:text-emerald-950"
+                        />
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
-                        {timelineStats.totals.returned_count.toLocaleString('vi-VN')}
+                      <td className="px-3 py-2.5 text-right font-semibold">
+                        <TimelineCountButton
+                          count={timelineStats.totals.returned_count}
+                          onClick={() => openTimelineBucketTotals('returned')}
+                          className="text-orange-900 hover:text-orange-950"
+                        />
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
-                        {timelineStats.totals.pending_status_count.toLocaleString('vi-VN')}
+                      <td className="px-3 py-2.5 text-right font-semibold">
+                        <TimelineCountButton
+                          count={timelineStats.totals.pending_status_count}
+                          onClick={() => openTimelineBucketTotals('pending')}
+                          className="text-slate-700 hover:text-slate-900"
+                        />
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
-                        {timelineStats.totals.total_with_cod.toLocaleString('vi-VN')}
+                      <td className="px-3 py-2.5 text-right font-semibold">
+                        <TimelineCountButton
+                          count={timelineStats.totals.total_with_cod}
+                          onClick={() => openTimelineBucketTotals('has_cod')}
+                          className="text-emerald-950 hover:text-emerald-900"
+                        />
                       </td>
                       <td className="px-3 py-2.5 text-right font-semibold text-amber-900">
                         <TimelineCountButton
                           count={timelineStats.totals.cod_delivered_unpaid_count ?? 0}
-                          onClick={() => openTimelineCodDeliveredUnpaidTotals()}
+                          onClick={() => openTimelineBucketTotals('cod_delivered_unpaid')}
                           className="text-amber-900 hover:text-amber-950"
                         />
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
-                        {timelineStats.totals.cod_paid_count.toLocaleString('vi-VN')}
+                      <td className="px-3 py-2.5 text-right font-semibold">
+                        <TimelineCountButton
+                          count={timelineStats.totals.cod_paid_count}
+                          onClick={() => openTimelineBucketTotals('cod_paid')}
+                          className="text-emerald-800 hover:text-emerald-950"
+                        />
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums font-semibold whitespace-nowrap">
                         {formatVnd(timelineStats.totals.total_cod_amount)}
@@ -1819,6 +1898,8 @@ export default function AdminShippingPage() {
             </div>
             <p className="text-xs text-gray-500">
               Hiển thị tối đa {timelineStats.limit} kỳ gần nhất · múi giờ {timelineStats.timezone}
+              {' · '}
+              Bấm số để xem danh sách mã · Giao OK · chưa trả COD = có COD, đã giao, chưa đối soát COD
             </p>
           </div>
         ) : (
@@ -2812,12 +2893,12 @@ export default function AdminShippingPage() {
                   </button>
                 </div>
               ) : null}
-              {!opsBucketLoading && opsBucketRows.length > 0 && timelineBucketContext ? (
-                <div className="rounded-lg border border-amber-100 bg-amber-50/70 px-4 py-3 text-sm text-amber-950">
+              {!opsBucketLoading && opsBucketRows.length > 0 ? (
+                <div className="rounded-lg border border-emerald-100 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-950">
                   <p className="font-medium mb-2">
                     Danh sách mã ({opsBucketRows.length} / {opsBucketTotal.toLocaleString('vi-VN')})
                   </p>
-                  <ul className="space-y-1 font-mono text-xs leading-relaxed">
+                  <ul className="space-y-1 font-mono text-xs leading-relaxed max-h-40 overflow-y-auto">
                     {opsBucketRows.map((row) => (
                       <li key={rowKey(row)}>
                         {row.order_code || '—'}

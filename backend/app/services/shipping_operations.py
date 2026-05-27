@@ -49,6 +49,9 @@ def _is_delivered(*, ems_phase: str | None, ems_status: str | None) -> bool:
     if phase in _EMS_DELIVERED_PHASES:
         return True
     text = (ems_status or "").lower()
+    compact = text.replace(" ", "")
+    if "[cod]đãthutiền" in compact or "[cod]trảtiền" in compact:
+        return True
     return "phát thành công" in text and "phát hoàn" not in text
 
 
@@ -66,6 +69,9 @@ def _delivery_bucket(record: EmsShippingRecord) -> DeliveryBucket:
         return "returned"
     if _is_delivered(ems_phase=record.ems_phase, ems_status=record.ems_status):
         return "delivered"
+    # Đã đối soát COD với EMS => chắc chắn đã giao thành công (dù hành trình chưa cập nhật).
+    if _has_cod(record) and _is_cod_paid(record):
+        return "delivered"
     if _is_in_transit(ems_phase=record.ems_phase, ems_status=record.ems_status):
         return "in_transit"
     return "pending"
@@ -79,9 +85,13 @@ def _has_cod(record: EmsShippingRecord) -> bool:
 
 
 def _is_cod_paid(record: EmsShippingRecord) -> bool:
-    if record.cod_paid_amount is not None:
+    if (record.cod_settlement_status or "").strip().lower() == "matched":
         return True
-    return (record.cod_settlement_status or "").strip().lower() == "matched"
+    try:
+        paid = record.cod_paid_amount
+        return paid is not None and int(paid) > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def _cod_bucket(record: EmsShippingRecord, delivery: DeliveryBucket) -> CodBucket | None:
