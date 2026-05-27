@@ -150,6 +150,57 @@ def expand_google_merchant_center_verification(token: str) -> List[PlacementHtml
     return expand_google_site_verification(token)
 
 
+def _extract_facebook_pixel_id(s: str) -> str | None:
+    """Trích Pixel ID từ token thuần hoặc snippet Meta dán tay."""
+    raw = (s or "").strip()
+    if not raw:
+        return None
+    m = re.search(
+        r"fbq\s*\(\s*['\"]init['\"]\s*,\s*['\"](\d+)['\"]",
+        raw,
+        re.I,
+    )
+    if m:
+        return m.group(1)
+    tr = re.search(r"facebook\.com/tr\?[^\"']*\bid=(\d+)", raw, re.I)
+    if tr:
+        return tr.group(1)
+    digits = re.sub(r"\D", "", raw)
+    return digits if len(digits) >= 10 else None
+
+
+def _sanitize_facebook_pixel_html(html: str) -> str:
+    """Bỏ PageView inline — SPA gửi PageView qua AnalyticsTracker."""
+    out = re.sub(
+        r"fbq\s*\(\s*['\"]track['\"]\s*,\s*['\"]PageView['\"][^)]*\)\s*;?",
+        "",
+        html,
+        flags=re.I,
+    )
+    out = re.sub(
+        r"fbq\s*\(\s*['\"]trackSingle['\"]\s*,\s*['\"]\d+['\"]\s*,\s*['\"]PageView['\"][^)]*\)\s*;?",
+        "",
+        out,
+        flags=re.I,
+    )
+    return out
+
+
+# Dedupe PageView trên stub fbq (trước khi fbevents.js load) — khớp window.__188MetaPv* ở frontend.
+_FB_PIXEL_PV_DEDUPE_JS = (
+    "(function(){var g=window,f=g.fbq;if(!f||f.__188pv)return;"
+    "function w(){var a=arguments;"
+    "if(a[0]==='track'&&a[1]==='PageView'){"
+    "var k=g.location.pathname+g.location.search,t=Date.now();"
+    "if(g.__188MetaPvKey===k&&g.__188MetaPvAt!=null&&t-g.__188MetaPvAt<3500)return;"
+    "g.__188MetaPvKey=k;g.__188MetaPvAt=t;}"
+    "return f.apply(this,a);}"
+    "for(var p in f)if(Object.prototype.hasOwnProperty.call(f,p))w[p]=f[p];"
+    "if(f.queue)w.queue=f.queue;w.callMethod=f.callMethod;w.push=f.push;w.loaded=f.loaded;"
+    "w.version=f.version;g.fbq=w;w.__188pv=1;})();"
+)
+
+
 def expand_facebook_pixel(pixel_id: str) -> List[PlacementHtml]:
     pid = re.sub(r"\D", "", (pixel_id or "").strip())
     if not pid:
@@ -163,6 +214,7 @@ def expand_facebook_pixel(pixel_id: str) -> List[PlacementHtml]:
         "n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;"
         "t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}"
         "(window, document,'script','https://connect.facebook.net/en_US/fbevents.js');"
+        f"{_FB_PIXEL_PV_DEDUPE_JS}"
         f"fbq('init', '{pid}');"
         "</script>"
         f'<noscript><img height="1" width="1" style="display:none" '
@@ -250,6 +302,13 @@ def expand_row(row: SiteEmbedCode) -> List[PlacementHtml]:
         maybe_id = _norm_ga4_measurement_id(raw)
         if maybe_id:
             return expand_ga4(maybe_id)
+
+    # Meta Pixel: snippet dán tay thường có fbq('track','PageView') + AnalyticsTracker → 2× PageView.
+    if plat == "facebook" and cat == "pixel" and raw and looks_like_pasted_html(raw):
+        pid = _extract_facebook_pixel_id(raw)
+        if pid:
+            return expand_facebook_pixel(pid)
+        return [(_pla(row), _sanitize_facebook_pixel_html(raw))]
 
     # Dán full code — giữ một fragment theo đúng placement trong DB
     if raw and looks_like_pasted_html(raw):

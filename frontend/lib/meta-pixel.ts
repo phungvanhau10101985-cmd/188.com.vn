@@ -197,9 +197,28 @@ function cartMetaCustomData(params: {
   };
 }
 
-let lastPageViewRouteKey: string | null = null;
-let lastPageViewAtMs = 0;
-const PAGE_VIEW_DEDUPE_MS = 2500;
+const PAGE_VIEW_DEDUPE_MS = 3500;
+
+type MetaPageViewWindow = Window & {
+  __188MetaPvKey?: string;
+  __188MetaPvAt?: number;
+};
+
+function shouldSkipMetaPageView(key: string, now: number, skipDedupe?: boolean): boolean {
+  if (skipDedupe) return false;
+  if (typeof window === 'undefined') return false;
+  const w = window as MetaPageViewWindow;
+  if (
+    w.__188MetaPvKey === key &&
+    w.__188MetaPvAt != null &&
+    now - w.__188MetaPvAt < PAGE_VIEW_DEDUPE_MS
+  ) {
+    return true;
+  }
+  w.__188MetaPvKey = key;
+  w.__188MetaPvAt = now;
+  return false;
+}
 
 export function trackMetaPageView(
   routeKey?: string,
@@ -210,15 +229,9 @@ export function trackMetaPageView(
     (typeof window !== 'undefined' ? `${window.location.pathname}${window.location.search}` : '') ||
     '/';
   const now = Date.now();
-  if (
-    !opts?.skipDedupe &&
-    lastPageViewRouteKey === key &&
-    now - lastPageViewAtMs < PAGE_VIEW_DEDUPE_MS
-  ) {
+  if (shouldSkipMetaPageView(key, now, opts?.skipDedupe)) {
     return;
   }
-  lastPageViewRouteKey = key;
-  lastPageViewAtMs = now;
   /** Chỉ Pixel — gửi thêm CAPI PageView khiến Pixel Helper thường báo 2× PageView (browser + server). */
   firePixelAndCapi('PageView', {}, { sendCapi: false });
 }

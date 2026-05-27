@@ -20,6 +20,9 @@ import { ToastProvider } from "@/components/ToastProvider";
 import { getCategoryTreeForLayout } from "@/lib/category-seo";
 import { APP_WEB_ICON_URL } from "@/lib/app-web-icon";
 import { getCdnPublicBase } from "@/lib/site-config";
+import { serializeJsonLdForScript } from "@/lib/json-ld-script";
+import { getSiteOrigin } from "@/lib/site-origin";
+import { buildOrganizationJsonLd, buildWebSiteJsonLd } from "@/lib/site-json-ld";
 
 /** Origin cho metadata (OG, icons). Luôn có scheme — `new URL("188.com.vn")` throw → SSR 500 / trắng trang nếu env prod thiếu https:// */
 function normalizeAbsoluteSiteUrl(raw: string): string {
@@ -134,10 +137,6 @@ export const metadata: Metadata = {
   other: {
     "mobile-web-app-capable": "yes",
   },
-  verification: {
-    google: "your-google-verification-code",
-    yandex: "your-yandex-verification-code",
-  },
 };
 
 export default async function RootLayout({
@@ -150,6 +149,9 @@ export default async function RootLayout({
     fetchPublicSiteEmbeds(),
   ]);
   const { ssrScripts, headClientRemainders } = partitionHeadEmbedsForSsr(siteEmbeds.head);
+  const siteOrigin = getSiteOrigin();
+  const organizationJsonLd = buildOrganizationJsonLd(siteOrigin);
+  const webSiteJsonLd = buildWebSiteJsonLd(siteOrigin);
   return (
     <html
       lang="vi"
@@ -164,6 +166,18 @@ export default async function RootLayout({
         <link rel="preconnect" href="https://cbu01.alicdn.com" crossOrigin="anonymous" />
         <link rel="dns-prefetch" href="https://cbu01.alicdn.com" />
         <SiteEmbedsSsrScripts specs={ssrScripts} />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: serializeJsonLdForScript(organizationJsonLd),
+          }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: serializeJsonLdForScript(webSiteJsonLd),
+          }}
+        />
       </head>
       <body className="antialiased font-sans bg-[#fafafa] text-gray-900 min-h-screen" suppressHydrationWarning>
         <SiteEmbedsRoot embeds={siteEmbeds} headClientRemainders={headClientRemainders} />

@@ -1,35 +1,27 @@
 import type { MetadataRoute } from "next";
 
-/** URL tuyệt đối — PSI/Lighthouse báo robots.txt lỗi nếu Sitemap không phải https://... đầy đủ */
-function normalizeSiteOrigin(): string {
-  const raw =
-    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
-    process.env.NEXT_PUBLIC_DOMAIN?.trim() ||
-    "https://188.com.vn";
-  if (!raw) return "https://188.com.vn";
-  if (/^https?:\/\//i.test(raw)) return raw.replace(/\/+$/, "");
-  return `https://${raw.replace(/^\/+/, "").replace(/\/+$/, "")}`;
+import {
+  AI_CRAWLER_USER_AGENTS,
+  CRAWLER_DISALLOW_PATHS,
+  getSiteOrigin,
+} from "@/lib/site-origin";
+
+function publicCrawlRule(userAgent: string) {
+  return {
+    userAgent,
+    allow: "/",
+    disallow: [...CRAWLER_DISALLOW_PATHS],
+  };
 }
 
 export default function robots(): MetadataRoute.Robots {
-  const origin = normalizeSiteOrigin();
+  const origin = getSiteOrigin();
 
   return {
     rules: [
-      {
-        userAgent: "*",
-        allow: "/",
-        disallow: [
-          "/admin/",
-          "/account/",
-          "/api/",
-          "/auth/",
-          "/checkout/",
-          "/cart",
-          "/luot-video-cung-shop",
-        ],
-      },
+      publicCrawlRule("*"),
+      ...AI_CRAWLER_USER_AGENTS.map((ua) => publicCrawlRule(ua)),
     ],
-    sitemap: `${origin}/sitemap.xml`,
+    sitemap: `${origin}/sitemap-index.xml`,
   };
 }

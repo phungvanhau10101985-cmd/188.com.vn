@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 
+import { serializeJsonLdForScript } from "@/lib/json-ld-script";
+import { getSiteOrigin } from "@/lib/site-origin";
+import {
+  buildClusterBreadcrumbJsonLd,
+  buildClusterCollectionJsonLd,
+} from "@/lib/site-json-ld";
 import { getSeoClusterDetail } from "@/lib/seo-cluster";
-
-const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  process.env.NEXT_PUBLIC_DOMAIN ||
-  "https://188.com.vn";
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -15,13 +16,14 @@ type Props = {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const cluster = await getSeoClusterDetail(slug);
+  const siteOrigin = getSiteOrigin();
   if (!cluster) {
     return {
       title: "Trang không tồn tại",
       robots: { index: false, follow: true },
     };
   }
-  const canonical = `${SITE_URL}/c/${cluster.slug}`;
+  const canonical = `${siteOrigin}/c/${cluster.slug}`;
   const isIndex = cluster.index_policy !== "noindex";
   const title = `${cluster.name} - ${cluster.product_count}+ sản phẩm`;
   const description = `${cluster.name} - tổng hợp sản phẩm chính hãng, giá tốt, giao nhanh tại 188.com.vn.`;
@@ -51,6 +53,43 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-export default function ClusterLayout({ children }: Props) {
-  return <>{children}</>;
+export default async function ClusterLayout({ params, children }: Props) {
+  const { slug } = await params;
+  const cluster = await getSeoClusterDetail(slug);
+  if (!cluster || cluster.index_policy === "noindex") {
+    return <>{children}</>;
+  }
+
+  const siteOrigin = getSiteOrigin();
+  const description = `${cluster.name} - tổng hợp ${cluster.product_count}+ sản phẩm chính hãng tại 188.com.vn.`;
+  const breadcrumbJsonLd = buildClusterBreadcrumbJsonLd(
+    cluster.name,
+    cluster.slug,
+    siteOrigin
+  );
+  const collectionJsonLd = buildClusterCollectionJsonLd(
+    cluster.name,
+    cluster.slug,
+    cluster.product_count,
+    description,
+    siteOrigin
+  );
+
+  return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: serializeJsonLdForScript(breadcrumbJsonLd),
+        }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: serializeJsonLdForScript(collectionJsonLd),
+        }}
+      />
+      {children}
+    </>
+  );
 }
