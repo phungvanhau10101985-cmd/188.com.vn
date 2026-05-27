@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import type { Product, ProductColor } from '@/types/api';
@@ -9,6 +9,10 @@ import { getOptimizedImage } from '@/lib/image-utils';
 import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { colorLabelForCart, colorVariantKeyPart, colorEntryImageUrl } from '@/lib/product-color-variant';
+import {
+  clearNanoAiOverlayPassThrough,
+  releaseNanoAiClickBlockers,
+} from '@/lib/nanoai-overlay-pass-through';
 import ProductSizeGuideModal from '@/components/category-size-guide/ProductSizeGuideModal';
 import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
@@ -69,7 +73,7 @@ export default function ProductVariantModal({
   action = 'both',
   displayStockByVariant: displayStockByVariantProp,
   setDisplayStockByVariant: setDisplayStockByVariantProp,
-  overlayZClassName = 'z-50',
+  overlayZClassName = 'z-[120]',
   closeAfterConfirm = true,
 }: ProductVariantModalProps) {
   const [selectedSize, setSelectedSize] = useState('');
@@ -89,6 +93,7 @@ export default function ProductVariantModal({
   const available = realStock > 0;
   const [sizeGuideOpen, setSizeGuideOpen] = useState(false);
   const [portalReady, setPortalReady] = useState(false);
+  const wasOpenRef = useRef(false);
   const catLevel1Slug = product.category_level1_slug ?? null;
   const catLevel2Slug = product.category_level2_slug ?? null;
 
@@ -154,25 +159,41 @@ export default function ProductVariantModal({
       : images[confirmImageIndex] || product.main_image;
 
   useEffect(() => {
-    if (isOpen) {
-      setSelectedSize(sizes[0] || '');
-      setSelectedColorIndex(colors.length > 0 ? 0 : -1);
-      setQuantity(1);
-      setConfirmImageIndex(0);
-      const keys = getAllVariantKeys(colors, sizes);
-      setDisplayStockByVariant((prev) => {
-        const next = { ...prev };
-        keys.forEach((vk) => {
-          const key = `${product.id}_${vk}`;
-          if (next[key] === undefined) {
-            next[key] = getRandomDisplayStock();
-          } else if (available && next[key] < 1) {
-            next[key] = 1;
-          }
-        });
-        return next;
+    if (!isOpen) return;
+    releaseNanoAiClickBlockers({ mode: 'fullSuppress' });
+    const mo = new MutationObserver(() => releaseNanoAiClickBlockers({ mode: 'fullSuppress' }));
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      clearNanoAiOverlayPassThrough();
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    const justOpened = isOpen && !wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+    if (!justOpened) return;
+    setSelectedSize(sizes[0] || '');
+    setSelectedColorIndex(colors.length > 0 ? 0 : -1);
+    setQuantity(1);
+    setConfirmImageIndex(0);
+  }, [isOpen, sizes, colors, product.id]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const keys = getAllVariantKeys(colors, sizes);
+    setDisplayStockByVariant((prev) => {
+      const next = { ...prev };
+      keys.forEach((vk) => {
+        const key = `${product.id}_${vk}`;
+        if (next[key] === undefined) {
+          next[key] = getRandomDisplayStock();
+        } else if (available && next[key] < 1) {
+          next[key] = 1;
+        }
       });
-    }
+      return next;
+    });
   }, [isOpen, colors, sizes, product.id, available, setDisplayStockByVariant]);
 
   useEffect(() => {
@@ -314,24 +335,25 @@ export default function ProductVariantModal({
                         key={`color-${colorIndex}-${swatch || 'n'}`}
                         type="button"
                         onClick={() => setSelectedColorIndex(colorIndex)}
-                        className={`flex items-center gap-1.5 rounded-xl border-2 p-1.5 transition-all ${
+                        className={`flex min-h-[44px] items-center gap-1.5 rounded-xl border-2 p-1.5 transition-all touch-manipulation ${
                           selectedColorIndex === colorIndex
                             ? 'border-[#ea580c] bg-orange-50'
                             : 'border-gray-200 hover:border-gray-300'
                         }`}
                       >
                         {swatch ? (
-                          <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200 relative">
+                          <div className="pointer-events-none w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200 relative">
                             <Image
                               src={getOptimizedImage(swatch, { width: 64, height: 64 })}
                               alt=""
                               width={32}
                               height={32}
-                              className="w-full h-full object-cover"
+                              draggable={false}
+                              className="pointer-events-none w-full h-full object-cover select-none"
                             />
                           </div>
                         ) : (
-                          <div className="w-8 h-8 rounded-lg bg-gray-200 flex-shrink-0" />
+                          <div className="pointer-events-none w-8 h-8 rounded-lg bg-gray-200 flex-shrink-0" />
                         )}
                         <span className="text-xs font-medium text-gray-900 uppercase max-w-[100px] truncate">
                           {color.name}
@@ -466,24 +488,25 @@ export default function ProductVariantModal({
                         key={`color-m-${colorIndex}-${swatch || 'n'}`}
                         type="button"
                         onClick={() => setSelectedColorIndex(colorIndex)}
-                        className={`flex items-center gap-1.5 rounded-lg border p-1 pr-2 transition-all ${
+                        className={`flex min-h-[44px] min-w-[44px] items-center gap-1.5 rounded-lg border p-1 pr-2 transition-all touch-manipulation active:scale-[0.98] ${
                           selectedColorIndex === colorIndex
                             ? 'border-[#ea580c] bg-orange-50 ring-1 ring-[#ea580c]'
                             : 'border-gray-200 hover:border-gray-300'
                         }`}
                       >
                         {swatch ? (
-                          <div className="w-9 h-9 rounded overflow-hidden flex-shrink-0 border border-gray-200 relative">
+                          <div className="pointer-events-none w-9 h-9 rounded overflow-hidden flex-shrink-0 border border-gray-200 relative">
                             <Image
                               src={getOptimizedImage(swatch, { width: 72, height: 72 })}
                               alt=""
                               width={36}
                               height={36}
-                              className="w-full h-full object-cover"
+                              draggable={false}
+                              className="pointer-events-none w-full h-full object-cover select-none"
                             />
                           </div>
                         ) : (
-                          <div className="w-9 h-9 rounded bg-gray-200 flex-shrink-0" />
+                          <div className="pointer-events-none w-9 h-9 rounded bg-gray-200 flex-shrink-0" />
                         )}
                         <span className="text-[11px] font-medium text-gray-900 uppercase max-w-[80px] truncate">
                           {color.name}
