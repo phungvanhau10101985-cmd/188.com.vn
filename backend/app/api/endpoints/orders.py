@@ -932,6 +932,41 @@ def admin_shipping_operations_records(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get(
+    "/admin/shipping/operations-stats/timeline/records",
+    response_model=shipment_schemas.EmsShippingOperationsRecordsResponse,
+)
+def admin_shipping_timeline_records(
+    bucket: str,
+    granularity: str = "week",
+    period_key: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    preset: str | None = None,
+    year: int | None = None,
+    skip: int = 0,
+    limit: int = 25,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Danh sách vận đơn EMS theo kỳ timeline và nhóm thống kê."""
+    try:
+        return shipping_ops_svc.list_timeline_bucket_records(
+            db,
+            bucket,
+            granularity=granularity,
+            period_key=period_key,
+            date_from=date_from,
+            date_to=date_to,
+            preset=preset,
+            year=year,
+            skip=skip,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/admin/{order_id}/approve-return-received", response_model=schemas.AdminOrderResponse)
 def admin_approve_return_received(
     order_id: int,

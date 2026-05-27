@@ -7,7 +7,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.models.order import Order, OrderStatus
-from app.models.order_shipment import OrderShipmentEvent
+from app.models.order_shipment import EmsShippingRecord, OrderShipmentEvent
 from app.services import ems_tracking as ems_tracking_svc
 from app.utils.display_timeline import to_utc_aware
 
@@ -464,6 +464,26 @@ def get_timeline_payload(db: Session, order: Order) -> dict[str, Any]:
     step_titles = {s["key"]: s["title"] for s in _step_defs(_deposit_flow(order))}
     tracking_number = getattr(order, "tracking_number", None)
     shipping_provider = getattr(order, "shipping_provider", None)
+    if not (tracking_number or "").strip():
+        ems_record = (
+            db.query(EmsShippingRecord)
+            .filter(EmsShippingRecord.order_id == order.id)
+            .filter(EmsShippingRecord.ems_tracking_code.isnot(None))
+            .order_by(EmsShippingRecord.updated_at.desc())
+            .first()
+        )
+        if not ems_record and order.order_code:
+            ems_record = (
+                db.query(EmsShippingRecord)
+                .filter(EmsShippingRecord.order_code == order.order_code)
+                .filter(EmsShippingRecord.ems_tracking_code.isnot(None))
+                .order_by(EmsShippingRecord.updated_at.desc())
+                .first()
+            )
+        if ems_record and (ems_record.ems_tracking_code or "").strip():
+            tracking_number = ems_record.ems_tracking_code.strip()
+            if not (shipping_provider or "").strip():
+                shipping_provider = "EMS"
     ems_payload = ems_tracking_svc.build_ems_tracking_payload(
         tracking_number=tracking_number,
         shipping_provider=shipping_provider,

@@ -288,11 +288,13 @@ def _resolve_timeline_filter(
 def _record_import_date(record: EmsShippingRecord) -> date | None:
     local_dt = _to_vn_datetime(record.created_at or record.updated_at)
     return local_dt.date() if local_dt else None
-    if value is None:
+
+
+def _record_timeline_period_key(record: EmsShippingRecord, granularity: TimelineGranularity) -> str | None:
+    local_dt = _to_vn_datetime(record.created_at or record.updated_at)
+    if local_dt is None:
         return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(_VN_TZ)
+    return _timeline_period_key(local_dt, granularity)
 
 
 def _timeline_period_key(local_dt: datetime, granularity: TimelineGranularity) -> str:
@@ -347,6 +349,7 @@ def _empty_timeline_bucket() -> dict[str, Any]:
         "returned_count": 0,
         "pending_status_count": 0,
         "total_with_cod": 0,
+        "cod_delivered_unpaid_count": 0,
         "cod_paid_count": 0,
         "total_cod_amount": 0,
     }
@@ -369,6 +372,8 @@ def _accumulate_timeline_bucket(bucket: dict[str, Any], record: EmsShippingRecor
     bucket["total_with_cod"] += 1
     if cod_bucket == "paid":
         bucket["cod_paid_count"] += 1
+    elif cod_bucket == "delivered_unpaid":
+        bucket["cod_delivered_unpaid_count"] += 1
     try:
         bucket["total_cod_amount"] += int(record.cod_amount or 0)
     except (TypeError, ValueError):
@@ -516,6 +521,88 @@ def _matches_ops_bucket(record: EmsShippingRecord, bucket: str) -> bool:
     if bucket == "shop_shipping":
         return (record.order_status or "").strip().lower() == OrderStatus.SHIPPING.value
     return False
+
+
+def list_timeline_bucket_records(
+    db: Session,
+    bucket: str,
+    *,
+    granularity: str = "week",
+    period_key: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    preset: str | None = None,
+    year: int | None = None,
+    skip: int = 0,
+    limit: int = 25,
+) -> dict[str, Any]:
+    from app.services.ems_shipment_import import _enrich_row_from_live_order, _record_to_dict
+
+    key = (bucket or "").strip().lower()
+    if key not in _VALID_OPS_BUCKETS:
+        raise ValueError(f"Nhóm thống kê không hợp lệ: {bucket}")
+
+    gran = (granularity or "week").strip().lower()
+    if gran not in _TIMELINE_GRANULARITIES:
+        raise ValueError("granularity phải là year, month, week hoặc day.")
+
+    period = (period_key or "").strip() or None
+    filter_start, filter_end, filter_label = _resolve_timeline_filter(
+        preset=preset,
+        year=year,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+    skip = max(0, int(skip or 0))
+    limit = max(1, min(int(limit or 25), 100))
+
+    records = (
+        db.query(EmsShippingRecord)
+        .order_by(EmsShippingRecord.updated_at.desc(), EmsShippingRecord.id.desc())
+        .all()
+    )
+    matched: list[EmsShippingRecord] = []
+    for record in records:
+        rec_date = _record_import_date(record)
+        if rec_date is None:
+            continue
+        if filter_start and rec_date < filter_start:
+            continue
+        if filter_end and rec_date > filter_end:
+            continue
+        if period:
+            record_period = _record_timeline_period_key(record, gran)  # type: ignore[arg-type]
+            if record_period != period:
+                continue
+        if _matches_ops_bucket(record, key):
+            matched.append(record)
+
+    total = len(matched)
+    page_records = matched[skip : skip + limit]
+    rows = [_enrich_row_from_live_order(db, _record_to_dict(record)) for record in page_records]
+
+    bucket_label = _OPS_BUCKET_LABELS[key]
+    if period:
+        _, _, period_label = _timeline_period_bounds(period, gran)  # type: ignore[arg-type]
+        bucket_label = f"{bucket_label} — {period_label}"
+    elif filter_label:
+        bucket_label = f"{bucket_label} — {filter_label}"
+
+    return {
+        "ok": True,
+        "bucket": key,
+        "bucket_label": bucket_label,
+        "period_key": period,
+        "granularity": gran,
+        "pagination": {
+            "skip": skip,
+            "limit": limit,
+            "total": total,
+            "filtered_total": total,
+        },
+        "rows": rows,
+    }
 
 
 def list_operations_bucket_records(

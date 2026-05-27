@@ -2872,6 +2872,22 @@ export const adminShippingAPI = {
     );
   },
 
+  listTimelineRecords: (params: EmsShippingTimelineRecordsParams) => {
+    const qs = new URLSearchParams();
+    qs.set('bucket', params.bucket);
+    if (params.granularity) qs.set('granularity', params.granularity);
+    if (params.period_key) qs.set('period_key', params.period_key);
+    if (params.date_from) qs.set('date_from', params.date_from);
+    if (params.date_to) qs.set('date_to', params.date_to);
+    if (params.preset) qs.set('preset', params.preset);
+    if (params.year != null) qs.set('year', String(params.year));
+    if (params.skip != null && params.skip > 0) qs.set('skip', String(params.skip));
+    if (params.limit != null) qs.set('limit', String(params.limit));
+    return fetchAdmin<EmsShippingOperationsRecords>(
+      `/orders/admin/shipping/operations-stats/timeline/records?${qs.toString()}`,
+    );
+  },
+
   importEmsExcel: async (file: File): Promise<EmsShippingImportResult> => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
@@ -2981,6 +2997,7 @@ export interface EmsShippingTimelineItem {
   returned_count: number;
   pending_status_count: number;
   total_with_cod: number;
+  cod_delivered_unpaid_count: number;
   cod_paid_count: number;
   total_cod_amount: number;
 }
@@ -3005,6 +3022,7 @@ export interface EmsShippingTimelineStats {
     | 'returned_count'
     | 'pending_status_count'
     | 'total_with_cod'
+    | 'cod_delivered_unpaid_count'
     | 'cod_paid_count'
     | 'total_cod_amount'
   >;
@@ -3031,9 +3049,23 @@ export interface EmsShippingOperationsRecords {
   ok: boolean;
   bucket: OpsBucketKey;
   bucket_label: string;
+  period_key?: string | null;
+  granularity?: string | null;
   pagination: EmsShippingListPagination;
   rows: EmsShippingImportRow[];
 }
+
+export type EmsShippingTimelineRecordsParams = {
+  bucket: OpsBucketKey;
+  granularity?: EmsShippingTimelineGranularity;
+  period_key?: string;
+  date_from?: string;
+  date_to?: string;
+  preset?: EmsShippingTimelinePreset;
+  year?: number;
+  skip?: number;
+  limit?: number;
+};
 
 export type EmsCodReconcileStatus = 'matched' | 'amount_mismatch' | 'record_not_found' | 'parse_error';
 

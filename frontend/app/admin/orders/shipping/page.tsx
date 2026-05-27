@@ -16,8 +16,10 @@ import {
   type EmsShippingImportRow,
   type EmsShippingOperationsStats,
   type EmsShippingTimelineGranularity,
+  type EmsShippingTimelineItem,
   type EmsShippingTimelineParams,
   type EmsShippingTimelinePreset,
+  type EmsShippingTimelineRecordsParams,
   type EmsShippingTimelineStats,
   type EmsTrackingRefreshJob,
   type OpsBucketKey,
@@ -65,6 +67,72 @@ function buildTimelineApiParams(
   if (filter.dateFrom) params.date_from = filter.dateFrom;
   if (filter.dateTo) params.date_to = filter.dateTo;
   return params;
+}
+
+type TimelineBucketContext = {
+  periodKey?: string;
+  periodLabel?: string;
+  recordsParams?: Omit<EmsShippingTimelineRecordsParams, 'bucket' | 'skip' | 'limit'>;
+};
+
+function buildTimelineRecordsQuery(
+  granularity: EmsShippingTimelineGranularity,
+  filter: TimelineFilterState,
+  context: TimelineBucketContext | null,
+  items: EmsShippingTimelineItem[] | undefined,
+): Omit<EmsShippingTimelineRecordsParams, 'bucket' | 'skip' | 'limit'> {
+  if (context?.recordsParams) {
+    return { granularity, ...context.recordsParams };
+  }
+  if (context?.periodKey) {
+    return { granularity, period_key: context.periodKey };
+  }
+  const filterParams = buildTimelineApiParams(granularity, filter);
+  if (filterParams.preset || filterParams.year || filterParams.date_from || filterParams.date_to) {
+    return {
+      granularity,
+      preset: filterParams.preset,
+      year: filterParams.year,
+      date_from: filterParams.date_from,
+      date_to: filterParams.date_to,
+    };
+  }
+  if (items?.length) {
+    const starts = items.map((item) => item.period_start).sort();
+    const ends = items.map((item) => item.period_end).sort();
+    return {
+      granularity,
+      date_from: starts[0],
+      date_to: ends[ends.length - 1],
+    };
+  }
+  return { granularity };
+}
+
+function TimelineCountButton({
+  count,
+  onClick,
+  className,
+}: {
+  count: number;
+  onClick?: () => void;
+  className?: string;
+}) {
+  if (count <= 0) {
+    return <span className={`tabular-nums text-gray-400 ${className ?? ''}`}>0</span>;
+  }
+  if (!onClick) {
+    return <span className={`tabular-nums ${className ?? ''}`}>{count.toLocaleString('vi-VN')}</span>;
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`tabular-nums font-medium underline decoration-dotted underline-offset-2 hover:decoration-solid ${className ?? ''}`}
+    >
+      {count.toLocaleString('vi-VN')}
+    </button>
+  );
 }
 
 function monthInputToDateRange(value: string): { from: string; to: string } | null {
@@ -483,6 +551,7 @@ export default function AdminShippingPage() {
   const [opsBucketPage, setOpsBucketPage] = useState(1);
   const [opsBucketLoading, setOpsBucketLoading] = useState(false);
   const [opsBucketError, setOpsBucketError] = useState<string | null>(null);
+  const [timelineBucketContext, setTimelineBucketContext] = useState<TimelineBucketContext | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [deleteConfirmKeys, setDeleteConfirmKeys] = useState<string[] | null>(null);
   const [orderStatusModal, setOrderStatusModal] = useState<OrderStatusModalState | null>(null);
@@ -604,31 +673,48 @@ export default function AdminShippingPage() {
     }
   }, [timelineFilter, timelineGranularity]);
 
-  const loadOpsBucketRecords = useCallback(async (bucket: OpsBucketKey, page: number) => {
-    setOpsBucketLoading(true);
-    setOpsBucketError(null);
-    try {
-      const skip = (page - 1) * OPS_LIST_PAGE_SIZE;
-      const data = await adminShippingAPI.listOperationsRecords({
-        bucket,
-        skip,
-        limit: OPS_LIST_PAGE_SIZE,
-      });
-      setActiveOpsBucket(bucket);
-      setOpsBucketLabel(data.bucket_label);
-      setOpsBucketRows(data.rows);
-      setOpsBucketTotal(data.pagination.filtered_total ?? data.rows.length);
-      setOpsBucketPage(page);
-    } catch (err) {
-      setOpsBucketError(err instanceof Error ? err.message : 'Không tải được danh sách');
-      setOpsBucketRows([]);
-    } finally {
-      setOpsBucketLoading(false);
-    }
-  }, []);
+  const loadOpsBucketRecords = useCallback(
+    async (bucket: OpsBucketKey, page: number, context?: TimelineBucketContext | null) => {
+      setOpsBucketLoading(true);
+      setOpsBucketError(null);
+      try {
+        const skip = (page - 1) * OPS_LIST_PAGE_SIZE;
+        const timelineContext = context === undefined ? timelineBucketContext : context;
+        const data = timelineContext
+          ? await adminShippingAPI.listTimelineRecords({
+              bucket,
+              skip,
+              limit: OPS_LIST_PAGE_SIZE,
+              ...buildTimelineRecordsQuery(
+                timelineGranularity,
+                timelineFilter,
+                timelineContext,
+                timelineStats?.items,
+              ),
+            })
+          : await adminShippingAPI.listOperationsRecords({
+              bucket,
+              skip,
+              limit: OPS_LIST_PAGE_SIZE,
+            });
+        setActiveOpsBucket(bucket);
+        setOpsBucketLabel(data.bucket_label);
+        setOpsBucketRows(data.rows);
+        setOpsBucketTotal(data.pagination.filtered_total ?? data.rows.length);
+        setOpsBucketPage(page);
+      } catch (err) {
+        setOpsBucketError(err instanceof Error ? err.message : 'Không tải được danh sách');
+        setOpsBucketRows([]);
+      } finally {
+        setOpsBucketLoading(false);
+      }
+    },
+    [timelineBucketContext, timelineFilter, timelineGranularity, timelineStats?.items],
+  );
 
   const closeOpsBucketModal = useCallback(() => {
     setActiveOpsBucket(null);
+    setTimelineBucketContext(null);
     setOpsBucketRows([]);
     setOpsBucketError(null);
     setOpsBucketPage(1);
@@ -636,12 +722,45 @@ export default function AdminShippingPage() {
 
   const openOpsBucket = useCallback(
     (bucket: OpsBucketKey, label: string) => {
+      setTimelineBucketContext(null);
       setOpsBucketLabel(label);
       setActiveOpsBucket(bucket);
-      void loadOpsBucketRecords(bucket, 1);
+      void loadOpsBucketRecords(bucket, 1, null);
     },
     [loadOpsBucketRecords],
   );
+
+  const openTimelineCodDeliveredUnpaid = useCallback(
+    (item: EmsShippingTimelineItem) => {
+      const context: TimelineBucketContext = {
+        periodKey: item.period_key,
+        periodLabel: item.period_label,
+      };
+      setTimelineBucketContext(context);
+      setOpsBucketLabel(`Giao OK · chưa trả COD — ${item.period_label}`);
+      setActiveOpsBucket('cod_delivered_unpaid');
+      void loadOpsBucketRecords('cod_delivered_unpaid', 1, context);
+    },
+    [loadOpsBucketRecords],
+  );
+
+  const openTimelineCodDeliveredUnpaidTotals = useCallback(() => {
+    const context: TimelineBucketContext = {
+      periodLabel: timelineStats?.filter_label || 'Tổng các kỳ hiển thị',
+      recordsParams: buildTimelineRecordsQuery(
+        timelineGranularity,
+        timelineFilter,
+        null,
+        timelineStats?.items,
+      ),
+    };
+    setTimelineBucketContext(context);
+    setOpsBucketLabel(
+      `Giao OK · chưa trả COD — ${context.periodLabel}`,
+    );
+    setActiveOpsBucket('cod_delivered_unpaid');
+    void loadOpsBucketRecords('cod_delivered_unpaid', 1, context);
+  }, [loadOpsBucketRecords, timelineFilter, timelineGranularity, timelineStats?.filter_label, timelineStats?.items]);
 
   const opsBucketTotalPages = Math.max(1, Math.ceil(opsBucketTotal / OPS_LIST_PAGE_SIZE));
 
@@ -1609,6 +1728,7 @@ export default function AdminShippingPage() {
                     <th className="px-3 py-2 text-right font-medium">Hoàn</th>
                     <th className="px-3 py-2 text-right font-medium">Chưa rõ</th>
                     <th className="px-3 py-2 text-right font-medium">Có COD</th>
+                    <th className="px-3 py-2 text-right font-medium">Giao OK · chưa trả COD</th>
                     <th className="px-3 py-2 text-right font-medium">COD đã trả</th>
                     <th className="px-3 py-2 text-right font-medium">Tổng COD</th>
                   </tr>
@@ -1639,6 +1759,13 @@ export default function AdminShippingPage() {
                         {item.pending_status_count.toLocaleString('vi-VN')}
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{item.total_with_cod.toLocaleString('vi-VN')}</td>
+                      <td className="px-3 py-2.5 text-right text-amber-800">
+                        <TimelineCountButton
+                          count={item.cod_delivered_unpaid_count ?? 0}
+                          onClick={() => openTimelineCodDeliveredUnpaid(item)}
+                          className="text-amber-800 hover:text-amber-950"
+                        />
+                      </td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">
                         {item.cod_paid_count.toLocaleString('vi-VN')}
                       </td>
@@ -1671,6 +1798,13 @@ export default function AdminShippingPage() {
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
                         {timelineStats.totals.total_with_cod.toLocaleString('vi-VN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-semibold text-amber-900">
+                        <TimelineCountButton
+                          count={timelineStats.totals.cod_delivered_unpaid_count ?? 0}
+                          onClick={() => openTimelineCodDeliveredUnpaidTotals()}
+                          className="text-amber-900 hover:text-amber-950"
+                        />
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
                         {timelineStats.totals.cod_paid_count.toLocaleString('vi-VN')}
@@ -2678,6 +2812,22 @@ export default function AdminShippingPage() {
                   </button>
                 </div>
               ) : null}
+              {!opsBucketLoading && opsBucketRows.length > 0 && timelineBucketContext ? (
+                <div className="rounded-lg border border-amber-100 bg-amber-50/70 px-4 py-3 text-sm text-amber-950">
+                  <p className="font-medium mb-2">
+                    Danh sách mã ({opsBucketRows.length} / {opsBucketTotal.toLocaleString('vi-VN')})
+                  </p>
+                  <ul className="space-y-1 font-mono text-xs leading-relaxed">
+                    {opsBucketRows.map((row) => (
+                      <li key={rowKey(row)}>
+                        {row.order_code || '—'}
+                        {row.ems_tracking_code ? ` · ${row.ems_tracking_code}` : ''}
+                        {row.reference_code ? ` · ${row.reference_code}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               {opsBucketLoading ? (
                 <p className="text-sm text-gray-500 py-10 text-center">Đang tải danh sách…</p>
               ) : opsBucketRows.length === 0 ? (
@@ -2801,7 +2951,7 @@ export default function AdminShippingPage() {
 
                 {orderStatusModal.timeline?.events?.length ? (
                   <div>
-                    <h4 className="text-sm font-semibold text-gray-900 mb-2">Lịch trình giao hàng</h4>
+                    <h4 className="text-sm font-semibold text-gray-900 mb-2">Lịch trình giao hàng (188.com.vn)</h4>
                     <ul className="space-y-2">
                       {orderStatusModal.timeline.events.map((ev) => (
                         <li key={ev.step_key} className="flex items-start gap-2 text-sm">
@@ -2820,6 +2970,60 @@ export default function AdminShippingPage() {
                         </li>
                       ))}
                     </ul>
+                  </div>
+                ) : null}
+
+                {orderStatusModal.timeline?.ems_tracking?.available ? (
+                  <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-4">
+                    <h4 className="text-sm font-semibold text-indigo-900 mb-2">Hành trình EMS</h4>
+                    {orderStatusModal.timeline.ems_tracking.current_status_description ? (
+                      <p className="text-xs text-indigo-700 mb-2">
+                        Mới nhất:{' '}
+                        <strong>{orderStatusModal.timeline.ems_tracking.current_status_description}</strong>
+                      </p>
+                    ) : null}
+                    {orderStatusModal.timeline.ems_tracking.error ? (
+                      <p className="text-xs text-amber-800">{orderStatusModal.timeline.ems_tracking.error}</p>
+                    ) : orderStatusModal.timeline.ems_tracking.events.length ? (
+                      <ul className="space-y-2">
+                        {orderStatusModal.timeline.ems_tracking.events.map((ev, idx) => (
+                          <li key={`${ev.description}-${ev.traced_at || idx}`} className="flex items-start gap-2 text-sm">
+                            <span
+                              className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                                idx === 0 ? 'bg-indigo-600' : 'bg-indigo-300'
+                              }`}
+                            />
+                            <span className={idx === 0 ? 'font-medium text-indigo-800' : 'text-gray-700'}>
+                              {ev.description}
+                              {ev.traced_at ? (
+                                <span className="block text-xs font-normal text-gray-500 mt-0.5">
+                                  {new Date(ev.traced_at).toLocaleString('vi-VN')}
+                                </span>
+                              ) : null}
+                              {ev.address ? (
+                                <span className="block text-xs font-normal text-gray-400 mt-0.5">{ev.address}</span>
+                              ) : null}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : orderStatusModal.row.ems_status ? (
+                      <p className="text-sm text-indigo-800">{orderStatusModal.row.ems_status}</p>
+                    ) : (
+                      <p className="text-sm text-gray-500">Chưa có cập nhật từ EMS.</p>
+                    )}
+                  </div>
+                ) : orderStatusModal.row.ems_tracking_code || orderStatusModal.row.ems_status ? (
+                  <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-4">
+                    <h4 className="text-sm font-semibold text-indigo-900 mb-2">Hành trình EMS</h4>
+                    {orderStatusModal.row.ems_tracking_code ? (
+                      <p className="text-xs text-gray-600 mb-2 font-mono">{orderStatusModal.row.ems_tracking_code}</p>
+                    ) : null}
+                    {orderStatusModal.row.ems_status ? (
+                      <p className="text-sm text-indigo-800">{orderStatusModal.row.ems_status}</p>
+                    ) : (
+                      <p className="text-sm text-gray-500">Chưa có cập nhật từ EMS.</p>
+                    )}
                   </div>
                 ) : null}
 

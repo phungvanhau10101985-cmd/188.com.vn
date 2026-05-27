@@ -100,6 +100,7 @@ class EmsShippingTimelineItemResponse(BaseModel):
     returned_count: int = 0
     pending_status_count: int = 0
     total_with_cod: int = 0
+    cod_delivered_unpaid_count: int = 0
     cod_paid_count: int = 0
     total_cod_amount: int = 0
 
@@ -111,6 +112,7 @@ class EmsShippingTimelineTotalsResponse(BaseModel):
     returned_count: int = 0
     pending_status_count: int = 0
     total_with_cod: int = 0
+    cod_delivered_unpaid_count: int = 0
     cod_paid_count: int = 0
     total_cod_amount: int = 0
 
@@ -227,6 +229,8 @@ class EmsShippingOperationsRecordsResponse(BaseModel):
     ok: bool = True
     bucket: str
     bucket_label: str
+    period_key: Optional[str] = None
+    granularity: Optional[str] = None
     pagination: EmsShippingListPaginationResponse
     rows: List[EmsShippingImportRowResponse] = []
 
