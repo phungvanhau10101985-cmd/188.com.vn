@@ -107,7 +107,9 @@ export default function CartAddClient({ product, sku, closeMode, closePath }: Ca
     mo.observe(document.body, { childList: true, subtree: true });
     return () => {
       mo.disconnect();
-      clearNanoAiOverlayPassThrough();
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/auth/')) {
+        clearNanoAiOverlayPassThrough();
+      }
     };
   }, []);
 

@@ -235,6 +235,13 @@ export default function ProductInfo({
         onColorChange={handleColorChange}
         categoryLevel1Slug={product.category_level1_slug ?? null}
         categoryLevel2Slug={product.category_level2_slug ?? null}
+        colorImageContext={{
+          color_image_urls: product.color_image_urls,
+          color_variants: product.color_variants,
+          images: product.images,
+          gallery: product.gallery,
+          main_image: product.main_image,
+        }}
       />
 
       {/* Quantity Selector */}

@@ -2,9 +2,15 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import ProductSizeGuideModal from '@/components/category-size-guide/ProductSizeGuideModal';
 import { ProductColor } from '@/types/api';
-import { colorLabelForCart, colorEntryImageUrl } from '@/lib/product-color-variant';
+import {
+  colorLabelForCart,
+  resolveColorSwatchImageUrl,
+  type ColorSwatchProductRef,
+} from '@/lib/product-color-variant';
+import { getOptimizedImage } from '@/lib/image-utils';
 
 interface VariantSelectorProps {
   sizes: string[];
@@ -18,6 +24,8 @@ interface VariantSelectorProps {
   categoryLevel1Slug?: string | null;
   /** Segment cấp 2 khi có whitelist override (API `category_level2_slug`). */
   categoryLevel2Slug?: string | null;
+  /** Ngữ cảnh SP để lấy ảnh màu từ gallery / color_image_urls khi entry thiếu `img`. */
+  colorImageContext?: ColorSwatchProductRef;
 }
 
 export default function VariantSelector({
@@ -29,8 +37,18 @@ export default function VariantSelector({
   onColorChange,
   categoryLevel1Slug,
   categoryLevel2Slug,
+  colorImageContext,
 }: VariantSelectorProps) {
   const [sizeGuideOpen, setSizeGuideOpen] = useState(false);
+
+  const swatchProduct: ColorSwatchProductRef = {
+    colors,
+    color_image_urls: colorImageContext?.color_image_urls,
+    color_variants: colorImageContext?.color_variants,
+    images: colorImageContext?.images,
+    gallery: colorImageContext?.gallery,
+    main_image: colorImageContext?.main_image,
+  };
 
   if (sizes.length === 0 && colors.length === 0) {
     return null;
@@ -90,29 +108,33 @@ export default function VariantSelector({
           </div>
           <div className="flex flex-wrap gap-2">
             {colors.map((color, index) => {
-              const swatch = colorEntryImageUrl(color);
+              const swatch = resolveColorSwatchImageUrl(swatchProduct, index);
+              const label = colorLabelForCart(colors, index);
               return (
                 <button
                   key={index}
                   type="button"
                   onClick={() => onColorChange(index, color.name, swatch || undefined)}
-                  className={`flex items-center space-x-1.5 px-3 py-2 border-2 rounded-lg text-sm font-medium transition-all ${
+                  className={`flex items-center gap-2 px-2 py-1.5 border-2 rounded-lg text-sm font-medium transition-all ${
                     selectedColorIndex === index
                       ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-sm'
                       : 'border-gray-300 text-gray-700 hover:border-gray-400 hover:shadow-sm'
                   }`}
                 >
-                  {swatch ? (
-                    <div
-                      className="w-6 h-6 rounded-full border border-gray-300"
-                      style={{
-                        backgroundImage: `url(${swatch})`,
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center',
-                      }}
-                    />
-                  ) : null}
-                  <span>{colorLabelForCart(colors, index)}</span>
+                  <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200 bg-gray-100 relative">
+                    {swatch ? (
+                      <Image
+                        src={getOptimizedImage(swatch, { width: 80, height: 80 })}
+                        alt={label}
+                        width={40}
+                        height={40}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gray-200" aria-hidden />
+                    )}
+                  </div>
+                  <span className="text-left leading-snug">{label}</span>
                 </button>
               );
             })}

@@ -8,7 +8,7 @@ import { formatPrice } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { colorLabelForCart, colorVariantKeyPart, colorEntryImageUrl } from '@/lib/product-color-variant';
+import { colorLabelForCart, colorVariantKeyPart, resolveColorSwatchImageUrl } from '@/lib/product-color-variant';
 import {
   clearNanoAiOverlayPassThrough,
   releaseNanoAiClickBlockers,
@@ -155,7 +155,7 @@ export default function ProductVariantModal({
   ];
   const mainDisplayImage =
     selectedColorIndex >= 0 && colors[selectedColorIndex]
-      ? colorEntryImageUrl(colors[selectedColorIndex]) || images[confirmImageIndex] || product.main_image
+      ? resolveColorSwatchImageUrl(product, selectedColorIndex) || images[confirmImageIndex] || product.main_image
       : images[confirmImageIndex] || product.main_image;
 
   useEffect(() => {
@@ -329,7 +329,7 @@ export default function ProductVariantModal({
                   <p className="text-xs font-semibold text-gray-900 mb-1.5">MÀU</p>
                   <div className="flex flex-wrap gap-1.5">
                     {colors.map((color, colorIndex) => {
-                      const swatch = colorEntryImageUrl(color);
+                      const swatch = resolveColorSwatchImageUrl(product, colorIndex);
                       return (
                       <button
                         key={`color-${colorIndex}-${swatch || 'n'}`}
@@ -482,7 +482,7 @@ export default function ProductVariantModal({
                   <p className="text-[11px] font-semibold text-gray-900 mb-1.5">MÀU</p>
                   <div className="flex flex-wrap gap-1.5">
                     {colors.map((color, colorIndex) => {
-                      const swatch = colorEntryImageUrl(color);
+                      const swatch = resolveColorSwatchImageUrl(product, colorIndex);
                       return (
                       <button
                         key={`color-m-${colorIndex}-${swatch || 'n'}`}

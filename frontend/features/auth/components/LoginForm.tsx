@@ -1,16 +1,31 @@
 // frontend/features/auth/components/LoginForm.tsx - ĐÃ SỬA
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import GoogleLoginButton from './GoogleLoginButton';
 import EmailOtpPanel from './EmailOtpPanel';
 import { getOrCreateDeviceId } from '@/lib/auth-device-id';
+import {
+  clearNanoAiOverlayPassThrough,
+  releaseNanoAiClickBlockers,
+} from '@/lib/nanoai-overlay-pass-through';
 
 export default function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const { loginWithGoogle } = useAuth();
+
+  useEffect(() => {
+    const run = () => releaseNanoAiClickBlockers({ mode: 'fullSuppress' });
+    run();
+    const mo = new MutationObserver(run);
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      clearNanoAiOverlayPassThrough();
+    };
+  }, []);
 
   const handleGoogleCredential = async (idToken: string) => {
     setLoading(true);

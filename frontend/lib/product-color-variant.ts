@@ -1,5 +1,10 @@
 import type { Product, ProductColor } from '@/types/api';
 
+export type ColorSwatchProductRef = Pick<
+  Product,
+  'colors' | 'color_image_urls' | 'color_variants' | 'images' | 'gallery' | 'main_image'
+>;
+
 /** Lấy URL ảnh ô màu — Excel/import có thể dùng `image`, `image_url`, v.v. thay vì `img`. */
 export function colorEntryImageUrl(entry: ProductColor | Record<string, unknown> | null | undefined): string {
   if (!entry || typeof entry !== 'object') return '';
@@ -9,6 +14,49 @@ export function colorEntryImageUrl(entry: ProductColor | Record<string, unknown>
     const v = o[k];
     if (v != null && String(v).trim()) return String(v).trim();
   }
+  return '';
+}
+
+function dedupeTrimmedUrls(urls: (string | null | undefined)[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of urls) {
+    const u = (raw ?? '').trim();
+    if (!u || seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
+}
+
+/** Ảnh thumbnail cho ô màu thứ `index` — thử entry, color_image_urls, color_variants, gallery/images. */
+export function resolveColorSwatchImageUrl(product: ColorSwatchProductRef, index: number): string {
+  if (index < 0) return '';
+  const colors = product.colors || [];
+
+  const fromEntry = colors[index] ? colorEntryImageUrl(colors[index]) : '';
+  if (fromEntry) return fromEntry;
+
+  const colorUrls = product.color_image_urls ?? (product as { colorImageUrls?: string[] }).colorImageUrls;
+  if (Array.isArray(colorUrls)) {
+    const u = (colorUrls[index] ?? '').trim();
+    if (u) return u;
+  }
+
+  const variants = product.color_variants ?? (product as { colorVariants?: ProductColor[] }).colorVariants;
+  if (Array.isArray(variants) && variants[index]) {
+    const fromVariant = colorEntryImageUrl(variants[index]);
+    if (fromVariant) return fromVariant;
+  }
+
+  const galleryPool = dedupeTrimmedUrls([...(product.gallery || []), ...(product.images || [])]);
+  if (galleryPool[index]) return galleryPool[index];
+
+  if (index === 0) {
+    const main = (product.main_image ?? '').trim();
+    if (main) return main;
+  }
+
   return '';
 }
 
@@ -39,7 +87,7 @@ export function cartLineMainImage(product: Product, selectedColorLabel?: string 
   if (!label || colors.length === 0) return fallback;
   for (let i = 0; i < colors.length; i++) {
     if (colorLabelForCart(colors, i) === label) {
-      const img = colorEntryImageUrl(colors[i]);
+      const img = resolveColorSwatchImageUrl(product, i);
       return img || fallback;
     }
   }
@@ -47,7 +95,7 @@ export function cartLineMainImage(product: Product, selectedColorLabel?: string 
   if (m) {
     const idx = parseInt(m[1], 10) - 1;
     if (idx >= 0 && idx < colors.length) {
-      const img = colorEntryImageUrl(colors[idx]);
+      const img = resolveColorSwatchImageUrl(product, idx);
       if (img) return img;
     }
   }

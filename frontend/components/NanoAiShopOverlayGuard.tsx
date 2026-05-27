@@ -9,7 +9,7 @@ import {
   isNanoAiCheckoutOnCart,
   releaseNanoAiClickBlockers,
 } from '@/lib/nanoai-overlay-pass-through';
-import { clearNanoAiCartFlowState } from '@/lib/nanoai-hosted-chat';
+import { clearNanoAiCartFlowState, isCartAddFromNanoAiFlow } from '@/lib/nanoai-hosted-chat';
 
 /**
  * Giữ khung NanoAI không chặn click/cuộn khi popup shop hoặc trang giỏ (sau luồng chat) đang active.
@@ -20,10 +20,12 @@ export default function NanoAiShopOverlayGuard() {
 
   const isCartAddLandingPage = pathname?.startsWith('/cart/add/');
   const isCartPage = pathname === '/cart' || pathname === '/cart/';
+  const isAuthPage = pathname?.startsWith('/auth/');
   const shouldSuppress =
     showAddToCartPopup ||
     isCartAddLandingPage ||
-    (isCartPage && isNanoAiCheckoutOnCart());
+    isAuthPage ||
+    (isCartPage && (isNanoAiCheckoutOnCart() || isCartAddFromNanoAiFlow()));
 
   useEffect(() => {
     if (typeof window === 'undefined' || !shouldSuppress) return;
