@@ -1,4 +1,4 @@
-import type { Product, ProductColor } from '@/types/api';
+import type { Product, ProductColor, NanoaiColorVariant } from '@/types/api';
 
 export type ColorSwatchProductRef = Pick<
   Product,
@@ -6,7 +6,9 @@ export type ColorSwatchProductRef = Pick<
 >;
 
 /** Lấy URL ảnh ô màu — Excel/import có thể dùng `image`, `image_url`, v.v. thay vì `img`. */
-export function colorEntryImageUrl(entry: ProductColor | Record<string, unknown> | null | undefined): string {
+export function colorEntryImageUrl(
+  entry: ProductColor | NanoaiColorVariant | Record<string, unknown> | null | undefined,
+): string {
   if (!entry || typeof entry !== 'object') return '';
   const o = entry as Record<string, unknown>;
   const keys = ['img', 'image', 'image_url', 'imageUrl', 'thumb', 'url', 'picture'] as const;

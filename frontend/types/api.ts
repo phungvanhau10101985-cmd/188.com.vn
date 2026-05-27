@@ -41,6 +41,10 @@ export interface Product {
   pro_high_price?: string;
   sizes?: string[];
   colors?: ProductColor[];
+  /** URL ảnh từng màu (gallery màu / partner enrich). */
+  color_image_urls?: string[];
+  /** Biến thể màu có tên + ảnh (NanoAI / import). */
+  color_variants?: NanoaiColorVariant[];
   content?: string[];
   link_default?: string;
   video_link?: string;
