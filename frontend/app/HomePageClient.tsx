@@ -10,6 +10,7 @@ import { SimpleProductCard } from '@/components/ProductCard';
 const NanoaiSimilarProductCard = dynamic(() => import('@/components/NanoaiSimilarProductCard'));
 const CategoryProductFilters = dynamic(() => import('@/components/CategoryProductFilters'));
 import PersonalizedHeroBanner from '@/components/home/PersonalizedHeroBanner';
+import SameShopRecommendationHeader from '@/components/home/SameShopRecommendationHeader';
 import { apiClient, NANOAI_TEXT_SEARCH_LIMIT } from '@/lib/api-client';
 import { useLazyRevealList } from '@/hooks/useLazyRevealList';
 import { trackEvent } from '@/lib/analytics';
@@ -57,22 +58,32 @@ function favoritePayloadFromProduct(p: Product): Record<string, unknown> {
   };
 }
 
-function sameAgeGenderSectionDescription(
+function sameAgeGenderCompactHint(
   mode: SameAgeGenderCohortMode | null,
   loading: boolean
-): string | null {
+): React.ReactNode {
   if (loading || mode == null) return null;
   switch (mode) {
     case 'requires_login':
-      return 'Đăng nhập và điền ngày sinh cùng giới tính trong Hồ sơ để nhận gợi ý từ nhóm khách tương đồng.';
+      return (
+        <>
+          <Link href="/auth/login" className="font-semibold text-[#ea580c] hover:underline">
+            Đăng nhập
+          </Link>
+          {' '}
+          và điền hồ sơ để nhận ưu đãi sinh nhật & gợi ý hợp gu.
+        </>
+      );
     case 'profile_incomplete':
-      return 'Vui lòng cập nhật đủ ngày sinh và giới tính trong Hồ sơ — sau khi lưu, trang chủ sẽ hiển thị gợi ý theo nhóm tuổi và giới của bạn.';
-    case 'exact_cohort':
-      return 'Gợi ý trộn ngẫu nhiên cùng sản phẩm cùng shop bạn xem và sản phẩm nhóm cùng tuổi, giới tính vừa xem gần đây.';
-    case 'gender_peers':
-      return 'Gợi ý trộn ngẫu nhiên cùng sản phẩm cùng shop bạn xem và sản phẩm cùng giới tính vừa xem gần đây.';
-    case 'popular_fallback':
-      return 'Chưa có lượt xem nhóm để so sánh — đang hiển thị sản phẩm phổ biến; khám phá thêm để gợi ý chính xác hơn.';
+      return (
+        <>
+          <Link href="/account/profile" className="font-semibold text-[#ea580c] hover:underline">
+            Cập nhật ngày sinh & giới tính
+          </Link>
+          {' '}
+          để nhận ưu đãi sinh nhật & gợi ý hợp tuổi, hợp gu.
+        </>
+      );
     default:
       return null;
   }
@@ -1055,7 +1066,7 @@ export default function HomePageClient({
     }
   };
 
-  const sameAgeGenderExplain = sameAgeGenderSectionDescription(sameAgeGenderCohortMode, sameAgeGenderLoading);
+  const sameAgeGenderHint = sameAgeGenderCompactHint(sameAgeGenderCohortMode, sameAgeGenderLoading);
 
   const showMixedRecommendationSection =
     mixedRecommendationProducts.length > 0 ||
@@ -1300,47 +1311,14 @@ export default function HomePageClient({
         {/* Cùng shop + trộn ngẫu nhiên pool tuổi/giới (1 lưới). */}
         {!hasFilterParams && showMixedRecommendationSection && (
           <section className="mb-8" id="san-pham-cung-shop">
-            <div className="mb-2">
-              <h2 className="text-base font-bold text-gray-900 border-b-2 border-[#ea580c] pb-1 w-fit">
-                SẢN PHẨM CÙNG SHOP BẠN VỪA XEM
-              </h2>
-              {sameAgeGenderExplain ? (
-                <p className="text-sm text-gray-600 mt-2 max-w-2xl">{sameAgeGenderExplain}</p>
-              ) : null}
-              {!sameAgeGenderLoading && sameAgeGenderCohortMode === 'requires_login' ? (
-                <div className="mt-3 flex flex-wrap gap-3">
-                  <Link
-                    href="/auth/login"
-                    className="inline-flex items-center justify-center bg-[#ea580c] text-white text-sm font-semibold px-4 py-2.5 rounded-lg hover:bg-[#c2410c] transition-colors"
-                  >
-                    Đăng nhập
-                  </Link>
-                </div>
-              ) : null}
-              {!sameAgeGenderLoading && sameAgeGenderCohortMode === 'profile_incomplete' ? (
-                <div className="mt-3 flex flex-wrap gap-3">
-                  <Link
-                    href="/account/profile"
-                    className="inline-flex items-center justify-center bg-[#ea580c] text-white text-sm font-semibold px-4 py-2.5 rounded-lg hover:bg-[#c2410c] transition-colors"
-                  >
-                    Cập nhật ngày sinh và giới tính
-                  </Link>
-                </div>
-              ) : null}
-              {!sameAgeGenderLoading &&
-              isAuthenticated &&
-              cohortProductsForMix.length > 0 &&
-              sameAgeGenderCohortMode !== 'profile_incomplete' &&
-              sameAgeGenderCohortMode !== 'requires_login' ? (
-                <Link
-                  href="/account/profile"
-                  className="inline-block mt-2 text-xs text-[#ea580c] font-medium hover:underline"
-                >
-                  Chỉnh sửa ngày sinh / giới tính
-                </Link>
-              ) : null}
-            </div>
-            <div className="mt-4">
+            <SameShopRecommendationHeader
+              cohortMode={sameAgeGenderCohortMode}
+              cohortLoading={sameAgeGenderLoading}
+              isAuthenticated={isAuthenticated}
+              hasCohortProducts={cohortProductsForMix.length > 0}
+              hint={sameAgeGenderHint}
+            />
+            <div className="mt-3">
               {sameShopLoading || (isAuthenticated && sameAgeGenderLoading) ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
                   {[...Array(12)].map((_, i) => (

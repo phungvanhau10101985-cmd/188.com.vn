@@ -15,8 +15,7 @@ function normalizeUserFromApi(raw: Record<string, unknown>): UserResponse {
     date_of_birth = String(date_of_birth).slice(0, 10);
   }
   const g = prev.gender;
-  const gender =
-    g === 'male' || g === 'female' || g === 'other' ? g : undefined;
+  const gender = g === 'male' || g === 'female' ? g : undefined;
   return {
     ...prev,
     date_of_birth: date_of_birth as string | undefined,
@@ -35,28 +34,53 @@ function applyUserToForm(
   u: UserResponse | null | undefined,
   setters: {
     setFullName: (v: string) => void;
-    setGender: (v: 'male' | 'female' | 'other' | '') => void;
+    setGender: (v: 'male' | 'female' | '') => void;
     setDob: (v: string) => void;
+    setBirthYear: (v: string) => void;
+    setSavedDobIso: (v: string) => void;
     setAddress: (v: string) => void;
   },
 ) {
   if (!u) return;
   setters.setFullName(u.full_name ?? '');
   const g = u.gender;
-  setters.setGender(g === 'male' || g === 'female' || g === 'other' ? g : '');
-  setters.setDob(dobInputValue(u));
+  setters.setGender(g === 'male' || g === 'female' ? g : '');
+  const iso = dobInputValue(u);
+  setters.setDob(iso);
+  if (iso) {
+    setters.setSavedDobIso(iso);
+    const parts = parseDobParts(iso);
+    setters.setBirthYear(parts?.year ?? '');
+  } else {
+    setters.setSavedDobIso('');
+    setters.setBirthYear('');
+  }
   setters.setAddress(u.address ?? '');
+}
+
+function parseDobParts(iso: string): { year: string; month: string; day: string } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const [year, month, day] = iso.split('-');
+  return { year, month, day };
 }
 
 export default function AccountProfilePage() {
   const { user, updateUser, isAuthenticated, isLoading } = useAuth();
   const { pushToast } = useToast();
   const [fullName, setFullName] = useState('');
-  const [gender, setGender] = useState<'male' | 'female' | 'other' | ''>('');
+  const [gender, setGender] = useState<'male' | 'female' | ''>('');
   const [dob, setDob] = useState('');
+  const [birthYear, setBirthYear] = useState('');
+  const [savedDobIso, setSavedDobIso] = useState('');
   const [address, setAddress] = useState('');
   const [loading, setLoading] = useState(false);
   const profileSyncStarted = useRef(false);
+
+  const savedDobParts = savedDobIso ? parseDobParts(savedDobIso) : null;
+  const hasLockedDob = Boolean(savedDobParts);
+  const currentYear = new Date().getFullYear();
+  const yearOptions: number[] = [];
+  for (let y = currentYear; y >= currentYear - 100; y -= 1) yearOptions.push(y);
 
   /** Một lần khi vào trang: lấy hồ sơ từ server — tránh lệch giữa thiết bị do chỉ tin localStorage sau đăng nhập. */
   useEffect(() => {
@@ -69,11 +93,25 @@ export default function AccountProfilePage() {
         if (cancelled) return;
         const normalized = normalizeUserFromApi(raw as Record<string, unknown>);
         updateUser(normalized);
-        applyUserToForm(normalized, { setFullName, setGender, setDob, setAddress });
+        applyUserToForm(normalized, {
+          setFullName,
+          setGender,
+          setDob,
+          setBirthYear,
+          setSavedDobIso,
+          setAddress,
+        });
       } catch {
         profileSyncStarted.current = false;
         if (!cancelled && user) {
-          applyUserToForm(user, { setFullName, setGender, setDob, setAddress });
+          applyUserToForm(user, {
+            setFullName,
+            setGender,
+            setDob,
+            setBirthYear,
+            setSavedDobIso,
+            setAddress,
+          });
         }
       }
     })();
@@ -85,11 +123,14 @@ export default function AccountProfilePage() {
 
   useEffect(() => {
     if (!user) return;
-    setFullName(user.full_name ?? '');
-    const g = user.gender;
-    setGender(g === 'male' || g === 'female' || g === 'other' ? g : '');
-    setDob(dobInputValue(user));
-    setAddress(user.address ?? '');
+    applyUserToForm(user, {
+      setFullName,
+      setGender,
+      setDob,
+      setBirthYear,
+      setSavedDobIso,
+      setAddress,
+    });
   }, [user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -101,11 +142,25 @@ export default function AccountProfilePage() {
         address: address.trim() || undefined,
       };
       if (gender) payload.gender = gender;
-      if (dob) payload.date_of_birth = dob;
+
+      let dobToSave = '';
+      if (hasLockedDob && savedDobParts && birthYear) {
+        dobToSave = `${birthYear}-${savedDobParts.month}-${savedDobParts.day}`;
+      } else if (dob) {
+        dobToSave = dob;
+      }
+      if (dobToSave) payload.date_of_birth = dobToSave;
 
       const updated = await apiClient.updateProfile(payload);
       const normalized = normalizeUserFromApi(updated as Record<string, unknown>);
       updateUser(normalized);
+      const savedIso = dobInputValue(normalized);
+      if (savedIso) {
+        setSavedDobIso(savedIso);
+        const parts = parseDobParts(savedIso);
+        if (parts) setBirthYear(parts.year);
+        setDob(savedIso);
+      }
       pushToast({
         title: 'Đã lưu hồ sơ',
         variant: 'success',
@@ -184,30 +239,64 @@ export default function AccountProfilePage() {
               id="profile-gender"
               value={gender}
               onChange={(e) =>
-                setGender(e.target.value as 'male' | 'female' | 'other' | '')
+                setGender(e.target.value as 'male' | 'female' | '')
               }
               className="w-full rounded-lg border border-gray-200 px-3 py-2 text-gray-900 text-sm bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
             >
               <option value="">— Chọn —</option>
               <option value="male">Nam</option>
               <option value="female">Nữ</option>
-              <option value="other">Khác</option>
             </select>
           </div>
 
           <div>
-            <label htmlFor="profile-dob" className="block text-sm font-medium text-gray-700 mb-1">
-              Ngày sinh
-            </label>
-            <input
-              id="profile-dob"
-              type="date"
-              value={dob}
-              onChange={(e) => setDob(e.target.value)}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-gray-900 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-            />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Ngày sinh</label>
+            {hasLockedDob && savedDobParts ? (
+              <div className="flex flex-wrap gap-2">
+                <div className="min-w-[7.5rem] flex-1">
+                  <span className="mb-1 block text-[11px] text-gray-500">Ngày / tháng (đã khóa)</span>
+                  <input
+                    type="text"
+                    readOnly
+                    value={`${savedDobParts.day}/${savedDobParts.month}`}
+                    className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-gray-600 text-sm cursor-not-allowed"
+                    aria-label="Ngày và tháng sinh đã khóa"
+                  />
+                </div>
+                <div className="w-32">
+                  <label htmlFor="profile-birth-year" className="mb-1 block text-[11px] text-gray-500">
+                    Năm sinh
+                  </label>
+                  <select
+                    id="profile-birth-year"
+                    value={birthYear}
+                    onChange={(e) => setBirthYear(e.target.value)}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-gray-900 text-sm bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                  >
+                    <option value="">— Năm —</option>
+                    {yearOptions.map((y) => (
+                      <option key={y} value={String(y)}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ) : (
+              <input
+                id="profile-dob"
+                type="date"
+                value={dob}
+                onChange={(e) => setDob(e.target.value)}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-gray-900 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+              />
+            )}
             <p className="mt-1.5 text-xs text-gray-500">
-              Khi đã lưu cả ngày sinh và giới tính, trang chủ sẽ gợi ý sản phẩm theo nhóm tuổi và giới tính trên trang chủ.
+              {hasLockedDob
+                ? 'Sau khi đã lưu, chỉ được sửa năm sinh — ngày/tháng giữ nguyên để tránh lạm dụng ưu đãi sinh nhật.'
+                : 'Lần đầu lưu ngày sinh sẽ khóa ngày/tháng; sau đó chỉ sửa được năm sinh.'}
+              {' '}
+              Khi đủ ngày sinh và giới tính, shop gửi ưu đãi sinh nhật và gợi ý phù hợp.
             </p>
           </div>
 

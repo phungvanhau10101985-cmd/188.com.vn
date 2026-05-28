@@ -6,7 +6,7 @@ export interface UserBase {
   phone?: string;
   full_name?: string;
   date_of_birth?: string;
-  gender?: 'male' | 'female' | 'other';
+  gender?: 'male' | 'female';
   address?: string;
 }
 

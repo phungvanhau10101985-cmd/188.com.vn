@@ -129,6 +129,15 @@ def update_user(db: Session, user_id: int, user_update: UserUpdate) -> Optional[
     
     if "email" in update_data and update_data["email"] is not None:
         update_data["email"] = identity_email(str(update_data["email"])) or str(update_data["email"]).strip().lower()
+
+    if "date_of_birth" in update_data and update_data["date_of_birth"] is not None:
+        new_dob = update_data["date_of_birth"]
+        if db_user.date_of_birth is not None:
+            old_dob = db_user.date_of_birth
+            if (new_dob.month, new_dob.day) != (old_dob.month, old_dob.day):
+                raise ValueError(
+                    "Chỉ được đổi năm sinh; ngày và tháng sinh không thể thay đổi sau khi đã lưu."
+                )
     
     # Xử lý gender Enum nếu có
     if 'gender' in update_data and update_data['gender']:

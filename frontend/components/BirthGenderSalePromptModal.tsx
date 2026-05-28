@@ -33,7 +33,7 @@ function needsBirthOrGender(user: UserResponse | null): boolean {
   const dob = user.date_of_birth;
   const hasDob = typeof dob === 'string' && dob.trim().length > 0;
   const g = user.gender;
-  const hasGender = g === 'male' || g === 'female' || g === 'other';
+  const hasGender = g === 'male' || g === 'female';
   return !hasDob || !hasGender;
 }
 
@@ -44,8 +44,7 @@ function normalizeUserFromApi(raw: Record<string, unknown>): UserResponse {
     date_of_birth = String(date_of_birth).slice(0, 10);
   }
   const g = prev.gender;
-  const gender =
-    g === 'male' || g === 'female' || g === 'other' ? g : undefined;
+  const gender = g === 'male' || g === 'female' ? g : undefined;
   return {
     ...prev,
     date_of_birth: date_of_birth as string | undefined,

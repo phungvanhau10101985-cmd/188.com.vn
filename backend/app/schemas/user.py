@@ -63,6 +63,15 @@ class UserCreate(BaseModel):
             raise ValueError('Ngày sinh không thể ở tương lai')
         return v
 
+    @field_validator('gender', mode='before')
+    @classmethod
+    def validate_gender_create(cls, v):
+        if v is None:
+            return None
+        if v == Gender.OTHER or v == 'other':
+            raise ValueError('Giới tính chỉ hỗ trợ Nam hoặc Nữ')
+        return v
+
 class UserLogin(BaseModel):
     """Legacy login schema (không dùng trong Gmail-only)."""
     phone: Optional[str] = None
@@ -102,6 +111,15 @@ class UserUpdate(BaseModel):
     gender: Optional[Gender] = None
     address: Optional[str] = None
     avatar: Optional[str] = None
+
+    @field_validator('gender', mode='before')
+    @classmethod
+    def validate_gender_update(cls, v):
+        if v is None:
+            return None
+        if v == Gender.OTHER or v == 'other':
+            raise ValueError('Giới tính chỉ hỗ trợ Nam hoặc Nữ')
+        return v
 
     @field_validator('date_of_birth', mode='before')
     @classmethod
