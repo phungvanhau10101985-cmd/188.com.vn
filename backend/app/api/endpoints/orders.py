@@ -117,6 +117,7 @@ def create_order(
         # 1. Validate items and calculate deposit
         items = []
         total_amount = Decimal('0')
+        list_amount = Decimal('0')
         requires_deposit = False
         
         for item in order_data.items:
@@ -131,9 +132,11 @@ def create_order(
             # Calculate item total (product.price is Float in DB → convert to Decimal)
             from app.services.sale_calendar import effective_unit_price
 
+            list_unit = Decimal(str(product.price or 0))
             unit_price = Decimal(str(effective_unit_price(db, float(product.price or 0), user=current_user)))
             item_total = unit_price * item.quantity
             total_amount += item_total
+            list_amount += list_unit * item.quantity
 
             items.append({
                 "product_id": product.id,
@@ -163,6 +166,7 @@ def create_order(
                     db,
                     user=current_user,
                     subtotal=total_amount,
+                    list_subtotal=list_amount,
                     promo_code=order_data.promo_code,
                 )
             except PromoValidationError as exc:

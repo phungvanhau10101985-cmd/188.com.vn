@@ -30,7 +30,7 @@ import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import SiteSaleBanner from '@/components/SiteSaleBanner';
 import SiteSaleLiveCountdown from '@/components/SiteSaleLiveCountdown';
 import CartVoucherPicker from '@/components/cart/CartVoucherPicker';
-import { mergeCartLineSiteSaleFromCalendar, resolveCartLineDisplayPricing, resolveCartLineTotal } from '@/lib/site-sale';
+import { mergeCartLineSiteSaleFromCalendar, resolveCartLineCheckoutTotal, resolveCartLineDisplayPricing } from '@/lib/site-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
 import { formatPrice } from '@/lib/utils';
 import type { PromotionVoucherItem } from '@/lib/api-client';
@@ -39,7 +39,8 @@ import {
   WELCOME_PROMO_CODE,
   type AppliedWelcomePromo,
 } from '@/lib/welcome-promo';
-import { applyTotalOrderDiscountCap } from '@/lib/order-discount-limits';
+import { applyGrandOrderDiscountCap, MAX_ORDER_DISCOUNT_PERCENT, resolveCappedPromoPercentDisplay } from '@/lib/order-discount-limits';
+import CappedPromoPercentLabel from '@/components/cart/CappedPromoPercentLabel';
 import { useToast } from '@/components/ToastProvider';
 
 function formatAddressLine(addr: UserAddress): string {
@@ -182,11 +183,10 @@ export default function CartPage() {
   const selectedSubtotal = useMemo(
     () =>
       selectedCartItems.reduce(
-        (sum, item) =>
-          sum + resolveCartLineTotal(item, birthdayLineActive, birthdayPercent, siteSaleState),
+        (sum, item) => sum + resolveCartLineCheckoutTotal(item, siteSaleState),
         0,
       ),
-    [selectedCartItems, birthdayLineActive, birthdayPercent, siteSaleState]
+    [selectedCartItems, siteSaleState]
   );
 
   const selectedSiteSaleSavings = useMemo(
@@ -197,10 +197,7 @@ export default function CartPage() {
           false,
           0,
         );
-        if (pricing.sitePhase === 'active' && pricing.lineSavings > 0) {
-          return sum + pricing.lineSavings;
-        }
-        return sum;
+        return sum + pricing.siteLineSavings;
       }, 0),
     [selectedCartItems, siteSaleState]
   );
@@ -226,13 +223,12 @@ export default function CartPage() {
       selectedCartItems.reduce((sum, item) => {
         const pricing = resolveCartLineDisplayPricing(
           mergeCartLineSiteSaleFromCalendar(item, siteSaleState),
-          birthdayLineActive,
-          birthdayPercent,
+          false,
+          0,
         );
-        const originalUnit = pricing.compareAt ?? pricing.beforeBirthday;
-        return sum + originalUnit * item.quantity;
+        return sum + pricing.listPrice * item.quantity;
       }, 0),
-    [selectedCartItems, birthdayLineActive, birthdayPercent, siteSaleState]
+    [selectedCartItems, siteSaleState]
   );
   const rawWelcomeDiscount = calculateWelcomeDiscount(selectedSubtotal, appliedPromo);
   const rawBirthdayDiscount =
@@ -242,11 +238,12 @@ export default function CartPage() {
   const subtotalAfterPrimary = Math.max(0, selectedSubtotal - rawWelcomeDiscount - rawBirthdayDiscount);
   const rawLoyaltyDiscount =
     loyaltyPercent > 0 ? (subtotalAfterPrimary * loyaltyPercent) / 100 : 0;
-  const cappedDiscounts = applyTotalOrderDiscountCap(
-    selectedSubtotal,
+  const cappedDiscounts = applyGrandOrderDiscountCap(
+    selectedOriginalSubtotal,
+    selectedSiteSaleSavings,
     rawWelcomeDiscount,
     rawBirthdayDiscount,
-    rawLoyaltyDiscount
+    rawLoyaltyDiscount,
   );
   const selectedWelcomeDiscount = cappedDiscounts.welcome;
   const selectedBirthdayDiscount = cappedDiscounts.birthday;
@@ -256,6 +253,35 @@ export default function CartPage() {
     0,
     selectedSubtotal - selectedWelcomeDiscount - selectedBirthdayDiscount - selectedLoyaltyDiscount
   );
+  const selectedTotalDiscount =
+    selectedSiteSaleSavings +
+    selectedWelcomeDiscount +
+    selectedBirthdayDiscount +
+    selectedLoyaltyDiscount;
+  const cappedLabelBase = {
+    listSubtotal: selectedOriginalSubtotal,
+    siteSaleSavings: selectedSiteSaleSavings,
+    siteSaleActive,
+    discountCapped,
+  };
+  const welcomePercentDisplay = resolveCappedPromoPercentDisplay({
+    ...cappedLabelBase,
+    rawAmount: rawWelcomeDiscount,
+    appliedAmount: selectedWelcomeDiscount,
+    nominalPercent: appliedPromo?.discountPercent ?? 0,
+  });
+  const birthdayPercentDisplay = resolveCappedPromoPercentDisplay({
+    ...cappedLabelBase,
+    rawAmount: rawBirthdayDiscount,
+    appliedAmount: selectedBirthdayDiscount,
+    nominalPercent: birthdayPercent,
+  });
+  const loyaltyPercentDisplay = resolveCappedPromoPercentDisplay({
+    ...cappedLabelBase,
+    rawAmount: rawLoyaltyDiscount,
+    appliedAmount: selectedLoyaltyDiscount,
+    nominalPercent: loyaltyPercent,
+  });
   const walletUsable = useWallet
     ? Math.min(walletBalance, selectedCartItems.length > 0 ? selectedFinalPrice : 0)
     : 0;
@@ -315,23 +341,22 @@ export default function CartPage() {
   const cartTotalAll = useMemo(
     () =>
       cartItems.reduce(
-        (sum, item) =>
-          sum + resolveCartLineTotal(item, birthdayLineActive, birthdayPercent, siteSaleState),
+        (sum, item) => sum + resolveCartLineCheckoutTotal(item, siteSaleState),
         0,
       ),
-    [cartItems, birthdayLineActive, birthdayPercent, siteSaleState]
+    [cartItems, siteSaleState]
   );
 
   const cartAdsFingerprint = useMemo(() => {
     const convCfg = peekGoogleAdsConversionsFingerprint();
     return `${convCfg}|${cartItems
       .map((i) =>
-        `${i.id}:${i.quantity}:${resolveCartLineTotal(i, birthdayLineActive, birthdayPercent, siteSaleState)}`,
+        `${i.id}:${i.quantity}:${resolveCartLineCheckoutTotal(i, siteSaleState)}`,
       )
       .slice()
       .sort()
       .join('|')}`;
-  }, [cartItems, birthdayLineActive, birthdayPercent, siteSaleState]);
+  }, [cartItems, siteSaleState]);
 
   useEffect(() => {
     if (!isAuthenticated || cartItems.length === 0) return;
@@ -832,11 +857,10 @@ export default function CartPage() {
             <div className="divide-y divide-gray-100">
               {(cart?.items ?? []).map((item) => {
                 const lineItem = mergeCartLineSiteSaleFromCalendar(item, siteSaleState);
-                const pricing = resolveCartLineDisplayPricing(
-                  lineItem,
-                  birthdayLineActive,
-                  birthdayPercent
-                );
+                const pricingCheckout = resolveCartLineDisplayPricing(lineItem, false, 0);
+                const pricing = birthdayLineActive
+                  ? resolveCartLineDisplayPricing(lineItem, true, birthdayPercent)
+                  : pricingCheckout;
                 const lineKey = `${item.product_id}-${item.selected_size ?? ''}-${item.selected_color ?? ''}-${item.id}`;
                 const lineChecked = selectionForTotals.has(item.id);
                 const showCompareUnit =
@@ -1097,7 +1121,12 @@ export default function CartPage() {
                 <span className="text-gray-500">
                   Ưu đãi chào mừng{' '}
                   <span className="font-bold text-emerald-600">{appliedPromo?.code}</span>{' '}
-                  ({appliedPromo?.discountPercent}%)
+                  (
+                  <CappedPromoPercentLabel
+                    display={welcomePercentDisplay}
+                    className="font-bold text-emerald-600"
+                  />
+                  )
                 </span>
                 <span className="font-medium text-emerald-600">
                   -
@@ -1111,7 +1140,11 @@ export default function CartPage() {
             {birthdayActive && !welcomeApplied && selectedBirthdayDiscount > 0 ? (
               <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
                 <span className="text-gray-500">
-                  Ưu đãi sinh nhật <span className="font-bold text-pink-600">{birthdayPercent}%</span>
+                  Ưu đãi sinh nhật{' '}
+                  <CappedPromoPercentLabel
+                    display={birthdayPercentDisplay}
+                    className="font-bold text-pink-600"
+                  />
                 </span>
                 <span className="font-medium text-pink-600">
                   -{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(selectedBirthdayDiscount)}
@@ -1123,7 +1156,11 @@ export default function CartPage() {
             {loyaltyPercent > 0 && selectedLoyaltyDiscount > 0 ? (
               <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
                 <span className="text-gray-500">
-                  Giảm giá hạng <span className="font-bold text-blue-600">{cart?.loyalty_tier_name}</span>
+                  Giảm giá hạng <span className="font-bold text-blue-600">{cart?.loyalty_tier_name}</span>{' '}
+                  <CappedPromoPercentLabel
+                    display={loyaltyPercentDisplay}
+                    className="font-bold text-blue-600"
+                  />
                 </span>
                 <span className="font-medium text-green-600">
                   -{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(selectedLoyaltyDiscount)}
@@ -1132,9 +1169,14 @@ export default function CartPage() {
             ) : null}
 
             {discountCapped ? (
-              <p className="mb-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
-                Tổng ưu đãi được giới hạn tối đa 15% giá trị đơn hàng.
-              </p>
+              <div className="mb-2 flex items-start justify-between gap-2 rounded-lg border border-amber-100 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-700 md:text-sm">
+                <span>
+                  Tổng ưu đãi {MAX_ORDER_DISCOUNT_PERCENT}%
+                </span>
+                <span className="shrink-0 whitespace-nowrap font-semibold text-amber-800">
+                  -{formatPrice(selectedTotalDiscount)}
+                </span>
+              </div>
             ) : null}
 
             {walletBalance > 0 ? (

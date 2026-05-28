@@ -177,6 +177,33 @@ export function resolveCartLineTotal(
   return resolveCartLineDisplayPricing(merged, birthdayActive, birthdayPercent).displayLineTotal;
 }
 
+/** Tổng tiền hàng sau site sale, trước sinh nhật / voucher — khớp backend cart subtotal. */
+export function resolveCartLineCheckoutTotal(
+  item: CartLinePricingInput,
+  calendar?: SiteSaleCalendarState | null,
+): number {
+  return resolveCartLineTotal(item, false, 0, calendar);
+}
+
+/** Nhãn badge góc ảnh: «5/5 - 6%». */
+export function siteSaleDateBadgeLabel(siteSale: SiteSaleProductPricing): string | null {
+  const pct = siteSale.percent ?? 0;
+  if (pct <= 0) return null;
+
+  if (siteSale.event_date) {
+    const parts = siteSale.event_date.slice(0, 10).split('-').map(Number);
+    const m = parts[1];
+    const d = parts[2];
+    if (m && d) return `${d}/${m} - ${pct}%`;
+  }
+
+  const raw = (siteSale.event_label ?? '').trim();
+  const fromLabel = raw.match(/(\d{1,2})\/(\d{1,2})/);
+  if (fromLabel) return `${fromLabel[1]}/${fromLabel[2]} - ${pct}%`;
+
+  return `-${pct}%`;
+}
+
 export function resolveProductDisplayPricing(
   product: Product,
   birthdayActive: boolean,
@@ -275,20 +302,30 @@ export function resolveCartLineDisplayPricing(
 
   const unitSalePrice = item.product_price ?? item.product_data?.price ?? 0;
 
-  let beforeBirthday = unitSalePrice;
-  let compareAt: number | null = null;
-
-  if (sitePhase === 'active') {
-    beforeBirthday = unitSalePrice;
-    compareAt = listPrice > beforeBirthday ? listPrice : item.original_price ?? null;
+  let siteSaleUnitPrice = unitSalePrice;
+  if (sitePhase === 'active' && sitePercent > 0) {
+    const computedSale = Math.max(0, Math.round(listPrice * (1 - sitePercent / 100)));
+    if (siteSaleUnitPrice <= 0 || siteSaleUnitPrice >= listPrice) {
+      siteSaleUnitPrice = computedSale;
+    }
   } else if (sitePhase === 'teaser') {
-    beforeBirthday = listPrice;
+    siteSaleUnitPrice = listPrice;
+  } else if (siteSaleUnitPrice <= 0) {
+    siteSaleUnitPrice = listPrice;
+  }
+
+  const beforeBirthday = siteSaleUnitPrice;
+  let compareAt: number | null = listPrice > beforeBirthday ? listPrice : item.original_price ?? null;
+
+  if (sitePhase === 'teaser') {
     compareAt = null;
-  } else if (item.original_price && item.original_price > unitSalePrice) {
-    beforeBirthday = unitSalePrice;
+  } else if (sitePhase !== 'active' && item.original_price && item.original_price > siteSaleUnitPrice) {
     compareAt = item.original_price;
-  } else if (item.product_data?.original_price && item.product_data.original_price > unitSalePrice) {
-    beforeBirthday = unitSalePrice;
+  } else if (
+    sitePhase !== 'active' &&
+    item.product_data?.original_price &&
+    item.product_data.original_price > siteSaleUnitPrice
+  ) {
     compareAt = item.product_data.original_price;
   }
 
@@ -299,17 +336,28 @@ export function resolveCartLineDisplayPricing(
   const qty = Math.max(1, item.quantity || 1);
   const displayLineTotal = displayUnitPrice * qty;
 
-  const compareUnitPrice = birthdayActive
-    ? beforeBirthday > displayUnitPrice
-      ? beforeBirthday
-      : null
-    : compareAt != null && compareAt > displayUnitPrice
-      ? compareAt
-      : null;
+  const compareUnitPrice =
+    listPrice > displayUnitPrice
+      ? listPrice
+      : compareAt != null && compareAt > displayUnitPrice
+        ? compareAt
+        : null;
 
   const compareLineTotal = compareUnitPrice != null ? compareUnitPrice * qty : null;
-  const savingsPerUnit = compareUnitPrice != null ? Math.max(0, compareUnitPrice - displayUnitPrice) : 0;
-  const lineSavings = savingsPerUnit * qty;
+  const siteUnitSavings =
+    sitePhase === 'active' && sitePercent > 0
+      ? Math.max(0, listPrice - beforeBirthday)
+      : 0;
+  const birthdayUnitSavings = birthdayActive
+    ? Math.max(0, beforeBirthday - displayUnitPrice)
+    : 0;
+  const totalUnitSavings =
+    compareUnitPrice != null
+      ? Math.max(0, compareUnitPrice - displayUnitPrice)
+      : siteUnitSavings + birthdayUnitSavings;
+  const lineSavings = totalUnitSavings * qty;
+  const siteLineSavings = siteUnitSavings * qty;
+  const birthdayLineSavings = birthdayUnitSavings * qty;
 
   const isTeaser = sitePhase === 'teaser' && sitePercent > 0 && !birthdayActive;
   const expectedSaleUnitPrice =
@@ -334,6 +382,12 @@ export function resolveCartLineDisplayPricing(
     compareUnitPrice,
     compareLineTotal,
     lineSavings,
+    siteLineSavings,
+    birthdayLineSavings,
+    siteUnitSavings,
+    birthdayUnitSavings,
+    listPrice,
+    siteSaleUnitPrice: beforeBirthday,
     sitePhase,
     sitePercent,
     siteLabel: site?.event_label ?? null,

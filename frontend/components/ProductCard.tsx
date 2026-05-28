@@ -13,7 +13,130 @@ import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
 import SiteSaleProductBadge from '@/components/SiteSaleProductBadge';
 import SiteSaleCountdownChip from '@/components/SiteSaleCountdownChip';
-import { resolveProductDisplayPricing } from '@/lib/site-sale';
+import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { useSiteSale } from '@/lib/use-site-sale';
+
+type ResolvedProductPricing = ReturnType<typeof resolveProductDisplayPricing>;
+
+function getProductCardPromoDisplay(
+  pricing: ResolvedProductPricing,
+  displayPrice: number,
+  birthdayActive: boolean,
+) {
+  if (birthdayActive) {
+    return {
+      showOriginal: false,
+      showSavingsLine: false,
+      showTeaserLine: false,
+      originalPrice: null as number | null,
+      savings: 0,
+      expectedPrice: null as number | null,
+    };
+  }
+
+  const isActive = pricing.sitePhase === 'active' && pricing.sitePercent > 0;
+  const isTeaser = pricing.sitePhase === 'teaser' && pricing.sitePercent > 0;
+  const originalPrice =
+    pricing.compareUnitPrice != null && pricing.compareUnitPrice > displayPrice
+      ? pricing.compareUnitPrice
+      : isActive && pricing.listPrice > displayPrice
+        ? pricing.listPrice
+        : null;
+  const savings = isActive
+    ? Math.max(
+        0,
+        originalPrice != null
+          ? originalPrice - displayPrice
+          : pricing.siteSavings || pricing.savingsAmount,
+      )
+    : isTeaser
+      ? Math.max(
+          0,
+          pricing.siteSavings ||
+            pricing.savingsAmount ||
+            Math.round(displayPrice * pricing.sitePercent / 100),
+        )
+      : 0;
+  const expectedPrice =
+    isTeaser && pricing.expectedSalePrice != null && pricing.expectedSalePrice > 0
+      ? pricing.expectedSalePrice
+      : isTeaser && savings > 0
+        ? Math.max(0, displayPrice - savings)
+        : null;
+
+  return {
+    showOriginal: isActive && originalPrice != null && originalPrice > displayPrice,
+    showSavingsLine: isActive && savings > 0,
+    showTeaserLine: isTeaser && savings > 0,
+    originalPrice,
+    savings,
+    expectedPrice,
+  };
+}
+
+function ProductCardPricePromo({
+  pricing,
+  displayPrice,
+  birthdayActive,
+  birthdayPercent,
+  productListPrice,
+  priceClassName,
+  strikeClassName = 'text-[10px] text-gray-500 line-through decoration-1 decoration-gray-400',
+  savingsClassName = 'text-[10px] font-medium text-emerald-600',
+  teaserClassName = 'text-[10px] font-medium text-amber-700',
+}: {
+  pricing: ResolvedProductPricing;
+  displayPrice: number;
+  birthdayActive: boolean;
+  birthdayPercent: number;
+  productListPrice?: number;
+  priceClassName: string;
+  strikeClassName?: string;
+  savingsClassName?: string;
+  teaserClassName?: string;
+}) {
+  const promo = getProductCardPromoDisplay(pricing, displayPrice, birthdayActive);
+
+  return (
+    <div className="space-y-0.5">
+      <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0">
+        <span className={priceClassName}>{formatPrice(displayPrice)}</span>
+        <BirthdayPromoPriceCakeIcon active={birthdayActive} percent={birthdayPercent} />
+        {birthdayActive && displayPrice < (productListPrice || 0) ? (
+          <span className={strikeClassName}>{formatPrice(productListPrice || 0)}</span>
+        ) : null}
+        {promo.showOriginal ? (
+          <span className={strikeClassName}>{formatPrice(promo.originalPrice!)}</span>
+        ) : null}
+        {promo.showTeaserLine && promo.expectedPrice != null ? (
+          <span className="text-[10px] font-semibold text-emerald-700">
+            → {formatPrice(promo.expectedPrice)}
+          </span>
+        ) : null}
+      </div>
+      {promo.showSavingsLine ? (
+        <p className={savingsClassName}>Tiết kiệm {formatPrice(promo.savings)}</p>
+      ) : null}
+      {promo.showTeaserLine ? (
+        <p className={teaserClassName}>
+          Sắp giảm {pricing.sitePercent}% — tiết kiệm ~{formatPrice(promo.savings)}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function useProductCardPricing(product: Product) {
+  const birthdayDiscount = useBirthdayDiscount();
+  const { state: siteSaleState } = useSiteSale();
+  const productForPricing = mergeProductSiteSaleFromCalendar(product, siteSaleState);
+  const pricing = resolveProductDisplayPricing(
+    productForPricing,
+    birthdayDiscount.active,
+    birthdayDiscount.percent,
+  );
+  return { pricing, displayPrice: pricing.displayPrice, birthdayDiscount };
+}
 
 function ProductVideoBadge({ videoLink }: { videoLink?: string | null }) {
   if (!hasVideoLink(videoLink)) return null;
@@ -104,13 +227,7 @@ export default function ProductCard({
   const [imageLoading, setImageLoading] = useState(true);
   
   const available = (product.available || 0) > 0;
-  const birthdayDiscount = useBirthdayDiscount();
-  const pricing = resolveProductDisplayPricing(
-    product,
-    birthdayDiscount.active,
-    birthdayDiscount.percent,
-  );
-  const displayPrice = pricing.displayPrice;
+  const { pricing, displayPrice, birthdayDiscount } = useProductCardPricing(product);
   const hasDiscount =
     (pricing.compareAt != null && pricing.compareAt > displayPrice) ||
     (product.original_price != null && product.original_price > product.price);
@@ -270,33 +387,40 @@ export default function ProductCard({
 
         {/* Price */}
         <div className="space-y-1">
-          <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0">
-            <span className={`font-bold text-red-600 ${sizeClasses.price}`}>
-              {formatPrice(displayPrice)}
-            </span>
-            <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
-            {birthdayDiscount.active && displayPrice < (product.price || 0) && (
-              <span className="text-xs text-gray-500 line-through decoration-1 decoration-gray-400">
-                {formatPrice(product.price)}
+          {pricing.sitePhase && pricing.sitePercent > 0 && !birthdayDiscount.active ? (
+            <ProductCardPricePromo
+              pricing={pricing}
+              displayPrice={displayPrice}
+              birthdayActive={birthdayDiscount.active}
+              birthdayPercent={birthdayDiscount.percent}
+              productListPrice={product.price}
+              priceClassName={`font-bold text-red-600 ${sizeClasses.price}`}
+              strikeClassName="text-xs text-gray-500 line-through decoration-1 decoration-gray-400"
+              savingsClassName="text-xs font-medium text-emerald-600"
+              teaserClassName="text-xs text-amber-700"
+            />
+          ) : (
+            <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0">
+              <span className={`font-bold text-red-600 ${sizeClasses.price}`}>
+                {formatPrice(displayPrice)}
               </span>
-            )}
-            {pricing.compareAt != null && pricing.compareAt > displayPrice && !birthdayDiscount.active && (
-              <span className="text-xs text-gray-500 line-through">
-                {formatPrice(pricing.compareAt)}
-              </span>
-            )}
-            {hasDiscount && pricing.compareAt == null && !birthdayDiscount.active && !product.site_sale?.phase && (
-              !birthdayDiscount.active ? (
+              <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
+              {birthdayDiscount.active && displayPrice < (product.price || 0) && (
+                <span className="text-xs text-gray-500 line-through decoration-1 decoration-gray-400">
+                  {formatPrice(product.price)}
+                </span>
+              )}
+              {pricing.compareAt != null && pricing.compareAt > displayPrice && !birthdayDiscount.active && (
+                <span className="text-xs text-gray-500 line-through">
+                  {formatPrice(pricing.compareAt)}
+                </span>
+              )}
+              {hasDiscount && pricing.compareAt == null && !birthdayDiscount.active && !product.site_sale?.phase && (
                 <span className="text-xs text-gray-500 line-through">
                   {formatPrice(product.original_price!)}
                 </span>
-              ) : null
-            )}
-          </div>
-          {pricing.sitePhase === 'teaser' && pricing.siteSavings > 0 && (
-            <p className="text-xs text-amber-700">
-              Sắp giảm {pricing.sitePercent}% — tiết kiệm ~{formatPrice(pricing.siteSavings)}
-            </p>
+              )}
+            </div>
           )}
           
           {/* Installment */}
@@ -351,13 +475,7 @@ export const SimpleProductCard = ({
   priority?: boolean;
 }) => {
   const [imageError, setImageError] = useState(false);
-  const birthdayDiscount = useBirthdayDiscount();
-  const pricing = resolveProductDisplayPricing(
-    product,
-    birthdayDiscount.active,
-    birthdayDiscount.percent,
-  );
-  const displayPrice = pricing.displayPrice;
+  const { pricing, displayPrice, birthdayDiscount } = useProductCardPricing(product);
   
   const imageUrl = getOptimizedImage(product.main_image, {
     width: 250,
@@ -444,20 +562,28 @@ export const SimpleProductCard = ({
         </h3>
 
         {/* Price */}
-        <div className="mb-1 flex flex-wrap items-baseline gap-x-1 gap-y-0">
-          <span className="text-sm font-bold text-gray-900">{formatPrice(displayPrice)}</span>
-          <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
-          {birthdayDiscount.active && displayPrice < (product.price || 0) && (
-            <span className="text-[10px] text-gray-500 line-through decoration-1 decoration-gray-400">
-              {formatPrice(product.price)}
-            </span>
-          )}
-        </div>
-        {pricing.sitePhase === 'teaser' && pricing.siteSavings > 0 ? (
-          <p className="mb-1 text-[10px] font-medium text-amber-700">
-            Sắp giảm {pricing.sitePercent}% — tiết kiệm ~{formatPrice(pricing.siteSavings)}
-          </p>
-        ) : null}
+        {pricing.sitePhase && pricing.sitePercent > 0 && !birthdayDiscount.active ? (
+          <div className="mb-1">
+            <ProductCardPricePromo
+              pricing={pricing}
+              displayPrice={displayPrice}
+              birthdayActive={birthdayDiscount.active}
+              birthdayPercent={birthdayDiscount.percent}
+              productListPrice={product.price}
+              priceClassName="text-sm font-bold text-gray-900"
+            />
+          </div>
+        ) : (
+          <div className="mb-1 flex flex-wrap items-baseline gap-x-1 gap-y-0">
+            <span className="text-sm font-bold text-gray-900">{formatPrice(displayPrice)}</span>
+            <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
+            {birthdayDiscount.active && displayPrice < (product.price || 0) && (
+              <span className="text-[10px] text-gray-500 line-through decoration-1 decoration-gray-400">
+                {formatPrice(product.price)}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Stats */}
         <div className="flex justify-between items-center text-xs text-gray-500">

@@ -22,21 +22,21 @@ def max_order_discount_amount(subtotal: Decimal) -> Decimal:
     return ((subtotal * MAX_ORDER_DISCOUNT_PERCENT) / Decimal("100")).quantize(Decimal("1"))
 
 
-def apply_total_discount_cap(
+def apply_promo_discount_cap(
     *,
-    subtotal: Decimal,
+    max_promo_amount: Decimal,
     welcome: Decimal,
     birthday: Decimal,
     loyalty: Decimal,
-) -> tuple[Decimal, Decimal, Decimal]:
-    """Nếu tổng giảm > 15% subtotal thì cắt về 15% (ưu tiên giảm loyalty trước)."""
+) -> tuple[Decimal, Decimal, Decimal, bool]:
+    """Cắt tổng voucher/sinh nhật/hạng về tối đa max_promo_amount (ưu tiên cắt loyalty trước)."""
     welcome = max(Decimal("0"), welcome)
     birthday = max(Decimal("0"), birthday)
     loyalty = max(Decimal("0"), loyalty)
-    max_total = max_order_discount_amount(subtotal)
+    max_total = max(Decimal("0"), max_promo_amount)
     total = welcome + birthday + loyalty
     if total <= max_total:
-        return welcome, birthday, loyalty
+        return welcome, birthday, loyalty, False
 
     overflow = total - max_total
 
@@ -53,7 +53,51 @@ def apply_total_discount_cap(
         cut = min(welcome, overflow)
         welcome -= cut
 
+    return welcome, birthday, loyalty, True
+
+
+def apply_total_discount_cap(
+    *,
+    subtotal: Decimal,
+    welcome: Decimal,
+    birthday: Decimal,
+    loyalty: Decimal,
+) -> tuple[Decimal, Decimal, Decimal]:
+    """Nếu tổng giảm promo > 15% subtotal thì cắt về 15% (ưu tiên giảm loyalty trước)."""
+    welcome, birthday, loyalty, _ = apply_promo_discount_cap(
+        max_promo_amount=max_order_discount_amount(subtotal),
+        welcome=welcome,
+        birthday=birthday,
+        loyalty=loyalty,
+    )
     return welcome, birthday, loyalty
+
+
+def apply_grand_discount_cap(
+    *,
+    list_subtotal: Decimal,
+    site_sale_savings: Decimal,
+    welcome: Decimal,
+    birthday: Decimal,
+    loyalty: Decimal,
+) -> tuple[Decimal, Decimal, Decimal, bool]:
+    """
+    Trần 15% trên giá gốc (list): site sale + voucher/sinh nhật/hạng không vượt 15%.
+    Ví dụ sale 6% + sinh nhật 10% = 16% → chỉ còn 15% (cắt phần promo dư).
+    """
+    list_base = max(Decimal("0"), list_subtotal)
+    site_savings = max(Decimal("0"), site_sale_savings)
+    max_total = max_order_discount_amount(list_base)
+    promo_budget = max(Decimal("0"), max_total - site_savings)
+    raw_promo = max(Decimal("0"), welcome) + max(Decimal("0"), birthday) + max(Decimal("0"), loyalty)
+    welcome, birthday, loyalty, promo_capped = apply_promo_discount_cap(
+        max_promo_amount=promo_budget,
+        welcome=welcome,
+        birthday=birthday,
+        loyalty=loyalty,
+    )
+    capped = promo_capped or (site_savings + raw_promo) > max_total
+    return welcome, birthday, loyalty, capped
 
 
 @dataclass
@@ -93,14 +137,18 @@ def calculate_order_discounts(
     user: Optional[User],
     subtotal: Decimal,
     promo_code: Optional[str] = None,
+    list_subtotal: Optional[Decimal] = None,
 ) -> OrderDiscountBreakdown:
     """
     Mã ví HOẶC sinh nhật, sau đó có thể cộng hạng thành viên trên phần còn lại.
-    Tổng giảm tối đa 15% subtotal (vd. 19% → còn 15%).
+    Tổng giảm (site sale + promo) tối đa 15% giá gốc list_subtotal.
     """
     breakdown = OrderDiscountBreakdown(subtotal=subtotal)
     if user is None or subtotal <= 0:
         return breakdown
+
+    list_base = list_subtotal if list_subtotal is not None else subtotal
+    site_sale_savings = max(Decimal("0"), list_base - subtotal)
 
     welcome_amount = Decimal("0")
     birthday_amount = Decimal("0")
@@ -148,15 +196,13 @@ def calculate_order_discounts(
         breakdown.loyalty_discount_percent = float(current_tier.discount_percent)
         breakdown.loyalty_tier_name = current_tier.name
 
-    raw_total = welcome_amount + birthday_amount + loyalty_amount
-    welcome_amount, birthday_amount, loyalty_amount = apply_total_discount_cap(
-        subtotal=subtotal,
+    welcome_amount, birthday_amount, loyalty_amount, breakdown.discount_capped = apply_grand_discount_cap(
+        list_subtotal=list_base,
+        site_sale_savings=site_sale_savings,
         welcome=welcome_amount,
         birthday=birthday_amount,
         loyalty=loyalty_amount,
     )
-    capped_total = welcome_amount + birthday_amount + loyalty_amount
-    breakdown.discount_capped = capped_total < raw_total
 
     breakdown.welcome_discount_amount = welcome_amount
     breakdown.birthday_discount_amount = birthday_amount
@@ -174,7 +220,7 @@ def calculate_order_discounts(
         )
     if breakdown.discount_capped:
         breakdown.discount_notes.append(
-            f"Tổng ưu đãi được giới hạn tối đa {MAX_ORDER_DISCOUNT_PERCENT}% đơn hàng."
+            f"Tổng ưu đãi (sale + mã/sinh nhật/hạng) được giới hạn tối đa {MAX_ORDER_DISCOUNT_PERCENT}% giá gốc đơn hàng."
         )
 
     return breakdown

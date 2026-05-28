@@ -122,12 +122,16 @@ def get_user_cart(
     cart_items_response, total_price, site_sale_state = _cart_items_with_site_sale_pricing(
         db, current_user, items
     )
+    list_total = sum(
+        _cart_line_list_price(item) * int(item.quantity or 0) for item in items
+    )
     summary = cart_crud.get_cart_summary(db, user_id=current_user.id)
     birthday_discount = get_birthday_discount_for_user(db, current_user)
     discount_fields = build_cart_discount_fields(
         db,
         user=current_user,
         total_price=total_price,
+        list_subtotal=list_total,
         promo_code=promo_code,
     )
 
@@ -235,6 +239,9 @@ def migrate_guest_cart(
         cart_items_response, total_price, site_sale_state = _cart_items_with_site_sale_pricing(
             db, current_user, items
         )
+        list_total = sum(
+            _cart_line_list_price(item) * int(item.quantity or 0) for item in items
+        )
         summary = cart_crud.get_cart_summary(db, user_id=current_user.id)
 
         birthday_discount = get_birthday_discount_for_user(db, current_user)
@@ -242,6 +249,7 @@ def migrate_guest_cart(
             db,
             user=current_user,
             total_price=total_price,
+            list_subtotal=list_total,
         )
 
         return schemas.CartMergeResponse(

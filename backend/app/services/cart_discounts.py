@@ -15,13 +15,16 @@ def build_cart_discount_fields(
     *,
     user: User,
     total_price: float,
+    list_subtotal: Optional[float] = None,
     promo_code: Optional[str] = None,
 ) -> dict:
     subtotal = Decimal(str(total_price))
+    list_base = Decimal(str(list_subtotal if list_subtotal is not None else total_price))
     breakdown = calculate_order_discounts(
         db,
         user=user,
         subtotal=subtotal,
+        list_subtotal=list_base,
         promo_code=promo_code,
     )
     from app.crud import promotion as crud_promotion
