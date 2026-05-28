@@ -655,6 +655,11 @@ export interface AdminImageLocalizationSummary {
   processing: number;
 }
 
+export interface AdminImageLocalizationJobList {
+  items: AdminImageLocalizationJob[];
+  active_count: number;
+}
+
 export interface AdminImageLocalizationReportItem {
   original_url: string;
   final_url?: string | null;
@@ -1335,6 +1340,16 @@ export const adminProductAPI = {
 
   getImageLocalizationSummary: () =>
     fetchAdmin<AdminImageLocalizationSummary>('/image-localization/summary', { timeoutMs: 60_000 }),
+
+  listImageLocalizationJobs: (params?: { limit?: number; active_only?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (params?.limit != null) qs.set('limit', String(params.limit));
+    if (params?.active_only) qs.set('active_only', 'true');
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return fetchAdmin<AdminImageLocalizationJobList>(`/image-localization/jobs${suffix}`, {
+      timeoutMs: 60_000,
+    });
+  },
 
   getImageLocalizationProductReport: (productId: string) =>
     fetchAdmin<AdminImageLocalizationProductReport>(

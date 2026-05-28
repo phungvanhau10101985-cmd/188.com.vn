@@ -48,6 +48,51 @@ def list_resumable_jobs(db: Session, limit: int = 20) -> List[ImageLocalizationJ
     )
 
 
+def list_jobs_for_admin_track(
+    db: Session,
+    *,
+    limit: int = 20,
+    active_only: bool = False,
+) -> List[ImageLocalizationJob]:
+    """Job đang chạy + gần đây — admin khôi phục Tiến trình sau reload tab."""
+    active_statuses = tuple(_RESUMABLE)
+    if active_only:
+        return (
+            db.query(ImageLocalizationJob)
+            .filter(ImageLocalizationJob.status.in_(active_statuses))
+            .order_by(ImageLocalizationJob.created_at.desc())
+            .limit(max(1, limit))
+            .all()
+        )
+
+    active = (
+        db.query(ImageLocalizationJob)
+        .filter(ImageLocalizationJob.status.in_(active_statuses))
+        .order_by(ImageLocalizationJob.created_at.desc())
+        .all()
+    )
+    remaining = max(0, limit - len(active))
+    if remaining <= 0:
+        return active[:limit]
+
+    active_ids = {row.job_id for row in active}
+    terminal = (
+        db.query(ImageLocalizationJob)
+        .filter(~ImageLocalizationJob.status.in_(active_statuses))
+        .order_by(ImageLocalizationJob.updated_at.desc())
+        .limit(remaining + len(active_ids))
+        .all()
+    )
+    out = list(active)
+    for row in terminal:
+        if row.job_id in active_ids:
+            continue
+        out.append(row)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def row_to_job_dict(row: ImageLocalizationJob) -> Dict[str, Any]:
     """Dict API giống job in-memory (admin poll)."""
     d: Dict[str, Any] = {

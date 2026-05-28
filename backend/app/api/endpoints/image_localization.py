@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -653,6 +653,52 @@ def start_job(
 def start_image_localization_job_resume_daemon_if_enabled() -> None:
     """Quét job queued/running trong DB và chạy tiếp sau restart backend."""
     start_resume_daemon(_run_job, StartImageLocalizationPayload)
+
+
+_RESUMABLE_JOB_STATUSES = frozenset({"queued", "running"})
+
+
+@router.get("/jobs")
+def list_jobs(
+    limit: int = Query(20, ge=1, le=50),
+    active_only: bool = Query(False, description="Chỉ job queued/running"),
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Danh sách job trên server — khôi phục khung Tiến trình sau khi đóng/mở trình duyệt."""
+    rows = image_loc_job_crud.list_jobs_for_admin_track(db, limit=limit, active_only=active_only)
+    seen: set[str] = set()
+    items: List[Dict[str, Any]] = []
+
+    with _jobs_lock:
+        mem_jobs = [dict(j) for j in _jobs.values()]
+    for mem in sorted(mem_jobs, key=lambda j: j.get("created_at") or "", reverse=True):
+        status = (mem.get("status") or "").strip().lower()
+        if active_only and status not in _RESUMABLE_JOB_STATUSES:
+            continue
+        jid = (mem.get("job_id") or "").strip()
+        if not jid or jid in seen:
+            continue
+        seen.add(jid)
+        items.append(_job_get(jid))
+
+    for row in rows:
+        if row.job_id in seen:
+            continue
+        seen.add(row.job_id)
+        items.append(_job_get(row.job_id))
+
+    items.sort(key=lambda j: j.get("created_at") or "", reverse=True)
+    items.sort(
+        key=lambda j: 0
+        if (j.get("status") or "").strip().lower() in _RESUMABLE_JOB_STATUSES
+        else 1
+    )
+    items = items[:limit]
+    active_count = sum(
+        1 for j in items if (j.get("status") or "").strip().lower() in _RESUMABLE_JOB_STATUSES
+    )
+    return {"items": items, "active_count": active_count}
 
 
 @router.get("/jobs/{job_id}")

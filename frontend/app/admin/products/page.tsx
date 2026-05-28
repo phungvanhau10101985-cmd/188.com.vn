@@ -98,6 +98,10 @@ const IMAGE_LOCALIZATION_JOBS_KEY = 'admin:products:image_localization_jobs';
 /** Tránh duplicate poll khi Strict Mode mount đôi (dev). */
 const resumedImageLocalizationPollSession = new Set<string>();
 
+function isActiveImageLocalizationJobStatus(status: AdminImageLocalizationJob['status'] | undefined): boolean {
+  return status === 'queued' || status === 'running';
+}
+
 function readStoredLocalizationJobIds(): string[] {
   try {
     const raw = localStorage.getItem(IMAGE_LOCALIZATION_JOBS_KEY);
@@ -759,6 +763,8 @@ export default function AdminProductsPage() {
   const [imageLocalizationSavingCookie, setImageLocalizationSavingCookie] = useState(false);
   /** Đang có ít nhất một vòng poll GET job trên tab này (có thể nhiều job song song phía server). */
   const [localizationPollActive, setLocalizationPollActive] = useState(false);
+  /** Lần đầu tải danh sách job từ server (khôi phục Tiến trình). */
+  const [localizationJobsLoading, setLocalizationJobsLoading] = useState(true);
   /** Chặn double-submit khi POST start job (ngắn). */
   const [localizationStartBusy, setLocalizationStartBusy] = useState(false);
   const localizationPollCountRef = useRef(0);
@@ -1082,9 +1088,11 @@ export default function AdminProductsPage() {
   );
 
   const finishLocalizationPoll = useCallback(
-    (jobId: string, job: AdminImageLocalizationJob) => {
+    (jobId: string, job: AdminImageLocalizationJob, options?: { notify?: boolean }) => {
       removeStoredLocalizationJobId(jobId);
       resumedImageLocalizationPollSession.delete(jobId);
+
+      if (options?.notify === false) return;
 
       const tail = (job.job_id ?? jobId).slice(0, 10);
       if (job.status === 'done') {
@@ -1098,6 +1106,79 @@ export default function AdminProductsPage() {
     },
     [scheduleLocalizationUiFlush],
   );
+
+  const beginLocalizationJobPoll = useCallback(
+    (jobId: string, options?: { notifyOnFinish?: boolean }) => {
+      if (resumedImageLocalizationPollSession.has(jobId)) return;
+      resumedImageLocalizationPollSession.add(jobId);
+      void pollImageLocalizationJob(jobId)
+        .then((job) => {
+          finishLocalizationPoll(jobId, job, { notify: options?.notifyOnFinish !== false });
+        })
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : 'Không theo dõi được job ảnh';
+          const is404 = /404|Không tìm thấy job/i.test(msg);
+          setImageLocalizationError(
+            is404
+              ? 'Job ảnh không còn trên server (có thể đã xong hoặc server đã restart trước khi lưu DB). Đã xóa khỏi danh sách theo dõi.'
+              : msg,
+          );
+          removeStoredLocalizationJobId(jobId);
+        })
+        .finally(() => {
+          resumedImageLocalizationPollSession.delete(jobId);
+        });
+    },
+    [finishLocalizationPoll, pollImageLocalizationJob],
+  );
+
+  const syncTrackedLocalizationJobs = useCallback(async () => {
+    try {
+      const [serverList, storedIds] = await Promise.all([
+        adminProductAPI.listImageLocalizationJobs({ limit: 20 }),
+        Promise.resolve(readStoredLocalizationJobIds()),
+      ]);
+      const serverJobs = serverList.items ?? [];
+      const jobsById: Record<string, AdminImageLocalizationJob> = {};
+      for (const job of serverJobs) {
+        jobsById[job.job_id] = job;
+      }
+
+      setImageLocalizationJobsById((prev) => ({ ...prev, ...jobsById }));
+
+      const orderedIds = [...new Set([...serverJobs.map((j) => j.job_id), ...storedIds])];
+      for (const jobId of orderedIds) {
+        registerLocalizationJobId(jobId);
+      }
+
+      for (const job of serverJobs) {
+        if (isActiveImageLocalizationJobStatus(job.status)) {
+          beginLocalizationJobPoll(job.job_id, { notifyOnFinish: true });
+        }
+      }
+
+      for (const jobId of storedIds) {
+        if (serverJobs.some((j) => j.job_id === jobId)) continue;
+        beginLocalizationJobPoll(jobId, { notifyOnFinish: true });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Không tải được danh sách job bản địa hóa';
+      if (/404|Not Found|chưa cập nhật API/i.test(msg)) {
+        setImageLocalizationError(
+          'Backend chưa có API danh sách job — restart FastAPI rồi tải lại trang.',
+        );
+      } else {
+        setImageLocalizationError(msg);
+      }
+      const storedIds = readStoredLocalizationJobIds();
+      for (const jobId of storedIds) {
+        registerLocalizationJobId(jobId);
+        beginLocalizationJobPoll(jobId, { notifyOnFinish: true });
+      }
+    } finally {
+      setLocalizationJobsLoading(false);
+    }
+  }, [beginLocalizationJobPoll, registerLocalizationJobId]);
 
   const handleSaveGeminiCookie = async () => {
     const cookie = imageLocalizationCookie.trim();
@@ -1168,17 +1249,7 @@ export default function AdminProductsPage() {
     }
 
     const jid = startedJobId as string;
-    void pollImageLocalizationJob(jid)
-      .then((job) => {
-        finishLocalizationPoll(jid, job);
-      })
-      .catch((err) => {
-        setImageLocalizationError(err instanceof Error ? err.message : 'Không theo dõi được job ảnh');
-        removeStoredLocalizationJobId(jid);
-      })
-      .finally(() => {
-        resumedImageLocalizationPollSession.delete(jid);
-      });
+    beginLocalizationJobPoll(jid, { notifyOnFinish: true });
   };
 
   const handleCancelImageLocalization = async (jobId: string) => {
@@ -1232,38 +1303,12 @@ export default function AdminProductsPage() {
   }, [loadImageLocalizationSummary]);
 
   useEffect(() => {
-    let cancelled = false;
-    const ids = readStoredLocalizationJobIds();
-    if (ids.length === 0) return undefined;
-    ids.forEach((jobId) => {
-      registerLocalizationJobId(jobId);
-      if (resumedImageLocalizationPollSession.has(jobId)) return;
-      resumedImageLocalizationPollSession.add(jobId);
-      void pollImageLocalizationJob(jobId)
-        .then((job) => {
-          if (cancelled) return;
-          finishLocalizationPoll(jobId, job);
-        })
-        .catch((err) => {
-          if (!cancelled) {
-            const msg = err instanceof Error ? err.message : 'Không theo dõi được job ảnh';
-            const is404 = /404|Không tìm thấy job/i.test(msg);
-            setImageLocalizationError(
-              is404
-                ? 'Job ảnh không còn trên server (có thể đã xong hoặc server đã restart trước khi lưu DB). Đã xóa khỏi danh sách theo dõi.'
-                : msg,
-            );
-            removeStoredLocalizationJobId(jobId);
-          }
-        })
-        .finally(() => {
-          resumedImageLocalizationPollSession.delete(jobId);
-        });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [finishLocalizationPoll, pollImageLocalizationJob, registerLocalizationJobId]);
+    void syncTrackedLocalizationJobs();
+    const intervalId = setInterval(() => {
+      void syncTrackedLocalizationJobs();
+    }, 45_000);
+    return () => clearInterval(intervalId);
+  }, [syncTrackedLocalizationJobs]);
 
   const handleImport1688 = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3679,18 +3724,25 @@ export default function AdminProductsPage() {
               <div className="flex items-center justify-between gap-3">
                 <span className="text-sm font-semibold text-gray-900">Tiến trình</span>
                 <span className="text-xs text-gray-500">
-                  {localizationJobsForUi.length
-                    ? localizationActiveJobCount > 0
-                      ? `${localizationActiveJobCount} đang chạy · ${localizationJobsForUi.length} card`
-                      : `${localizationJobsForUi.length} job (đã dừng)`
-                    : localizationPollActive
-                      ? 'đang tải…'
-                      : 'idle'}
+                  {localizationJobsLoading
+                    ? 'đang tải job từ server…'
+                    : localizationJobsForUi.length
+                      ? localizationActiveJobCount > 0
+                        ? `${localizationActiveJobCount} đang chạy · ${localizationJobsForUi.length} card`
+                        : `${localizationJobsForUi.length} job (đã dừng)`
+                      : localizationPollActive
+                        ? 'đang tải…'
+                        : 'idle'}
                 </span>
               </div>
 
-              {localizationJobsForUi.length === 0 ? (
-                <p className="mt-3 text-sm text-gray-600">Chưa có job đang theo dõi trên tab này.</p>
+              {localizationJobsLoading ? (
+                <p className="mt-3 text-sm text-gray-600">Đang tải job từ server…</p>
+              ) : localizationJobsForUi.length === 0 ? (
+                <p className="mt-3 text-sm text-gray-600">
+                  Không có job trên server. Bấm 「Chạy bản địa hóa ảnh」 để bắt đầu — job vẫn chạy nền khi đóng
+                  trình duyệt và sẽ hiện lại ở đây khi mở lại tab.
+                </p>
               ) : (
                 <div className="mt-3 max-h-[min(70vh,520px)] space-y-3 overflow-auto pr-0.5">
                   {localizationJobsForUi.map((job) => (
