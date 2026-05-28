@@ -358,6 +358,8 @@ def _empty_timeline_bucket() -> dict[str, Any]:
         "cod_delivered_unpaid_count": 0,
         "cod_paid_count": 0,
         "total_cod_amount": 0,
+        "cod_delivered_unpaid_total": 0,
+        "cod_paid_total": 0,
     }
 
 
@@ -376,14 +378,20 @@ def _accumulate_timeline_bucket(bucket: dict[str, Any], record: EmsShippingRecor
     if cod_bucket is None:
         return
     bucket["total_with_cod"] += 1
+    try:
+        cod_amt = int(record.cod_amount or 0)
+    except (TypeError, ValueError):
+        cod_amt = 0
+    bucket["total_cod_amount"] += cod_amt
     if cod_bucket == "paid":
         bucket["cod_paid_count"] += 1
+        try:
+            bucket["cod_paid_total"] += int(record.cod_paid_amount or cod_amt)
+        except (TypeError, ValueError):
+            bucket["cod_paid_total"] += cod_amt
     elif cod_bucket == "delivered_unpaid":
         bucket["cod_delivered_unpaid_count"] += 1
-    try:
-        bucket["total_cod_amount"] += int(record.cod_amount or 0)
-    except (TypeError, ValueError):
-        pass
+        bucket["cod_delivered_unpaid_total"] += cod_amt
 
 
 def get_shipping_timeline_stats(

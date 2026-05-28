@@ -103,6 +103,8 @@ class EmsShippingTimelineItemResponse(BaseModel):
     cod_delivered_unpaid_count: int = 0
     cod_paid_count: int = 0
     total_cod_amount: int = 0
+    cod_delivered_unpaid_total: int = 0
+    cod_paid_total: int = 0
 
 
 class EmsShippingTimelineTotalsResponse(BaseModel):
@@ -115,6 +117,8 @@ class EmsShippingTimelineTotalsResponse(BaseModel):
     cod_delivered_unpaid_count: int = 0
     cod_paid_count: int = 0
     total_cod_amount: int = 0
+    cod_delivered_unpaid_total: int = 0
+    cod_paid_total: int = 0
 
 
 class EmsShippingTimelineStatsResponse(BaseModel):

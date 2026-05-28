@@ -153,6 +153,34 @@ function TimelineCountButton({
   );
 }
 
+function TimelineCodCountCell({
+  count,
+  amount,
+  onClick,
+  className,
+  amountClassName,
+}: {
+  count: number;
+  amount: number;
+  onClick?: () => void;
+  className?: string;
+  amountClassName?: string;
+}) {
+  const showAmount = count > 0 || amount > 0;
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <TimelineCountButton count={count} onClick={onClick} className={className} />
+      {showAmount ? (
+        <span
+          className={`text-xs tabular-nums whitespace-nowrap ${amount > 0 ? amountClassName ?? 'text-gray-500' : 'text-gray-400'}`}
+        >
+          {formatVnd(amount)}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function monthInputToDateRange(value: string): { from: string; to: string } | null {
   if (!/^\d{4}-\d{2}$/.test(value)) return null;
   const [year, month] = value.split('-').map(Number);
@@ -1774,7 +1802,6 @@ export default function AdminShippingPage() {
                     <th className="px-3 py-2 text-right font-medium">Có COD</th>
                     <th className="px-3 py-2 text-right font-medium">Giao OK · chưa trả COD</th>
                     <th className="px-3 py-2 text-right font-medium">COD EMS trả shop</th>
-                    <th className="px-3 py-2 text-right font-medium">Tổng COD</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -1825,28 +1852,31 @@ export default function AdminShippingPage() {
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={item.total_with_cod}
+                          amount={item.total_cod_amount}
                           onClick={() => openTimelineBucket(item, 'has_cod')}
                           className="text-gray-800 hover:text-gray-950"
+                          amountClassName="text-gray-600"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right text-amber-800">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={item.cod_delivered_unpaid_count ?? 0}
+                          amount={item.cod_delivered_unpaid_total ?? 0}
                           onClick={() => openTimelineBucket(item, 'cod_delivered_unpaid')}
                           className="text-amber-800 hover:text-amber-950"
+                          amountClassName="text-amber-700/90"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right text-emerald-700">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={item.cod_paid_count}
+                          amount={item.cod_paid_total ?? 0}
                           onClick={() => openTimelineBucket(item, 'cod_paid')}
                           className="text-emerald-700 hover:text-emerald-900"
+                          amountClassName="text-emerald-700/90"
                         />
-                      </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
-                        {formatVnd(item.total_cod_amount)}
                       </td>
                     </tr>
                   ))}
@@ -1893,28 +1923,31 @@ export default function AdminShippingPage() {
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right font-semibold">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={timelineStats.totals.total_with_cod}
+                          amount={timelineStats.totals.total_cod_amount}
                           onClick={() => openTimelineBucketTotals('has_cod')}
                           className="text-emerald-950 hover:text-emerald-900"
+                          amountClassName="text-emerald-900"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right font-semibold text-amber-900">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={timelineStats.totals.cod_delivered_unpaid_count ?? 0}
+                          amount={timelineStats.totals.cod_delivered_unpaid_total ?? 0}
                           onClick={() => openTimelineBucketTotals('cod_delivered_unpaid')}
                           className="text-amber-900 hover:text-amber-950"
+                          amountClassName="text-amber-900"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right font-semibold">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={timelineStats.totals.cod_paid_count}
+                          amount={timelineStats.totals.cod_paid_total ?? 0}
                           onClick={() => openTimelineBucketTotals('cod_paid')}
                           className="text-emerald-800 hover:text-emerald-950"
+                          amountClassName="text-emerald-800"
                         />
-                      </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold whitespace-nowrap">
-                        {formatVnd(timelineStats.totals.total_cod_amount)}
                       </td>
                     </tr>
                   </tfoot>
@@ -1924,7 +1957,9 @@ export default function AdminShippingPage() {
             <p className="text-xs text-gray-500">
               Hiển thị tối đa {timelineStats.limit} kỳ gần nhất · múi giờ {timelineStats.timezone}
               {' · '}
-              Bấm số để xem danh sách mã · Giao OK · chưa trả COD = đã giao, EMS chưa trả tiền thu hộ về shop
+              Bấm số để xem danh sách mã · Dòng dưới số là tổng tiền COD của hạng mục đó
+              {' · '}
+              Giao OK · chưa trả COD = đã giao, EMS chưa trả tiền thu hộ về shop
               {' · '}
               COD EMS trả shop = chỉ khi import file đối soát COD
             </p>

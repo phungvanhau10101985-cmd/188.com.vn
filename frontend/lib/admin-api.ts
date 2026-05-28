@@ -3090,6 +3090,8 @@ export interface EmsShippingTimelineItem {
   cod_delivered_unpaid_count: number;
   cod_paid_count: number;
   total_cod_amount: number;
+  cod_delivered_unpaid_total: number;
+  cod_paid_total: number;
 }
 
 export interface EmsShippingTimelineStats {
@@ -3115,6 +3117,8 @@ export interface EmsShippingTimelineStats {
     | 'cod_delivered_unpaid_count'
     | 'cod_paid_count'
     | 'total_cod_amount'
+    | 'cod_delivered_unpaid_total'
+    | 'cod_paid_total'
   >;
 }
 
