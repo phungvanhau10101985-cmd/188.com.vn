@@ -505,7 +505,7 @@ export default function ProductDetailMobile({
           </div>
         )}
         <div
-          className="flex min-h-[48px] items-center gap-1.5 px-1.5 pb-[max(0px,env(safe-area-inset-bottom,0px))]"
+          className="flex min-h-[48px] items-stretch gap-1.5 px-1.5 py-0.5 pb-[max(2px,env(safe-area-inset-bottom,0px))]"
           data-188-mobile-bar="labeled"
         >
           <nav
@@ -562,12 +562,12 @@ export default function ProductDetailMobile({
               </span>
             </button>
           </nav>
-          <div className="flex min-w-0 flex-1 gap-1">
+          <div className="flex min-w-0 flex-1 items-stretch gap-1">
             <button
               type="button"
               onClick={openVariantModal}
               disabled={!available}
-              className="min-h-[32px] flex-1 rounded-md bg-gray-500 py-1 text-[11px] font-semibold text-white hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex flex-1 items-center justify-center rounded-md bg-gray-500 text-[11px] font-semibold text-white hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
               THÊM GIỎ
             </button>
@@ -575,7 +575,7 @@ export default function ProductDetailMobile({
               type="button"
               onClick={openVariantModal}
               disabled={!available}
-              className="min-h-[32px] flex-1 rounded-md bg-[#ea580c] py-1 text-[11px] font-semibold text-white hover:bg-[#c2410c] disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex flex-1 items-center justify-center rounded-md bg-[#ea580c] text-[11px] font-semibold text-white hover:bg-[#c2410c] disabled:cursor-not-allowed disabled:opacity-50"
             >
               MUA HÀNG
             </button>
