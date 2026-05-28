@@ -1,10 +1,9 @@
-// frontend/lib/image-utils.ts - OPTIMAL LONG-TERM SOLUTION
 /**
  * Image Utility for Long-term Management
  * Features:
- * - Display-size URLs (alicdn suffix / Bunny Optimizer) — giữ chất lượng cao, giảm payload
- * - Multiple fallback strategies
- * - Local placeholder generation
+ * - Alibaba CDN: URL gốc (không gắn _800x800q90…)
+ * - Bunny CDN: optional width/quality query params
+ * - Placeholder / fallback strategies
  */
 
 import { cdnUrl } from '@/lib/cdn-url';
@@ -16,7 +15,7 @@ const CDN_CONFIG = {
   fallbackService: 'https://picsum.photos',
 };
 
-/** Giới hạn pixel tải về — ~2× mật độ hiển thị, không vượt ngưỡng hợp lý cho card/listing. */
+/** Giới hạn pixel tải về — Bunny optimizer. */
 const MAX_DISPLAY_PIXELS = 960;
 
 function displayPixelSize(width: number, height: number): { w: number; h: number } {
@@ -32,12 +31,6 @@ function truncateAlicdnToFirstJpg(url: string): string {
   return url.slice(0, m.index! + 4);
 }
 
-/** Kích thước resize alicdn (img / cbu01 / imgextra) đã kiểm tra — 256, 512 thường 404. */
-const SAFE_ALICDN_RESIZE_SIDES = [80, 160, 400, 800] as const;
-
-/** imgextra: không vượt 400; ibank/cbu01 có thể dùng 800. */
-const ALICDN_IMGEXTRA_MAX_SIDE = 400;
-
 export function isAlibabaCdnImageUrl(url: string): boolean {
   const lower = (url || '').trim().toLowerCase();
   if (!lower) return false;
@@ -48,22 +41,6 @@ export function isAlibabaCdnImageUrl(url: string): boolean {
   );
 }
 
-function alicdnMaxDisplaySide(url: string): number {
-  const lower = url.toLowerCase();
-  if (lower.includes('imgextra')) return ALICDN_IMGEXTRA_MAX_SIDE;
-  return MAX_DISPLAY_PIXELS;
-}
-
-/** Chọn cạnh vuông an toàn (≤ cap), tránh hậu tố _256x256 / _512x512 bị CDN trả 404. */
-function pickSafeAlicdnResizeSide(requestedW: number, requestedH: number, maxCap: number): number {
-  const target = Math.min(maxCap, Math.max(1, Math.max(requestedW, requestedH)));
-  let pick: number = SAFE_ALICDN_RESIZE_SIDES[0];
-  for (const side of SAFE_ALICDN_RESIZE_SIDES) {
-    if (side <= target) pick = side;
-  }
-  return pick;
-}
-
 /** Bỏ hậu tố nén sau cụm .jpg đầu tiên (vd. …cib.jpg_800x800q90.jpg → …cib.jpg). */
 export function stripAlicdnToBaseJpg(url: string): string {
   const u = (url || '').trim();
@@ -71,28 +48,17 @@ export function stripAlicdnToBaseJpg(url: string): string {
   return truncateAlicdnToFirstJpg(u);
 }
 
-/** Alibaba CDN: …jpg → …jpg_WxHq90.jpg — luôn từ bản .jpg gốc, không tin hậu tố sẵn có. */
-function applyAlicdnDisplaySize(
-  url: string,
-  width: number,
-  height: number,
-  quality = 90
-): string {
+/** Alibaba CDN: dùng URL gốc — không gắn _800x800q90.jpg. */
+function applyAlicdnDisplaySize(url: string): string {
   if (!isAlibabaCdnImageUrl(url)) return url;
   const lower = url.toLowerCase();
   if (lower.includes('gw.alicdn.com/mt/')) return url;
 
-  const base = stripAlicdnToBaseJpg(url);
-  if (!/\.jpg$/i.test(base)) return base || url;
-
-  const maxSide = alicdnMaxDisplaySide(base);
-  const side = pickSafeAlicdnResizeSide(
-    Math.max(1, Math.round(width)),
-    Math.max(1, Math.round(height)),
-    maxSide,
-  );
-  const q = Math.min(100, Math.max(75, Math.round(quality)));
-  return `${base}_${side}x${side}q${q}.jpg`;
+  let base = stripAlicdnToBaseJpg(url);
+  base = base.replace(/\.webp\.jpg$/i, '.webp');
+  base = base.replace(/\.png\.jpg$/i, '.png');
+  base = base.replace(/(_\d+x\d+q?\d*|\.sum)\.(jpg|jpeg|png|webp)$/i, '');
+  return base || url;
 }
 
 function isBunnyCdnUrl(url: string): boolean {
@@ -105,7 +71,7 @@ function isBunnyCdnUrl(url: string): boolean {
   }
 }
 
-/** Bunny Optimizer: ?width=&quality=95 — resize edge, không ép WebP/AVIF nếu chất lượng giữ cao. */
+/** Bunny Optimizer: ?width=&quality=95 */
 function applyBunnyDisplaySize(url: string, width: number, quality = 95): string {
   if (!isBunnyCdnUrl(url)) return url;
   try {
@@ -147,13 +113,7 @@ const getOptimizedImageUrl = (
   const { w, h } = displayPixelSize(width, height);
 
   if (isAlibabaCdnImageUrl(processed)) {
-    const maxSide = alicdnMaxDisplaySide(processed);
-    return applyAlicdnDisplaySize(
-      processed,
-      Math.min(w, maxSide),
-      Math.min(h, maxSide),
-      quality,
-    );
+    return applyAlicdnDisplaySize(processed);
   }
   if (isBunnyCdnUrl(processed)) {
     return applyBunnyDisplaySize(processed, Math.max(w, h), quality);
