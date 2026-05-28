@@ -16,8 +16,10 @@ import {
 import ProductSizeGuideModal from '@/components/category-size-guide/ProductSizeGuideModal';
 import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
+import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
-import { resolveProductDisplayPricing } from '@/lib/site-sale';
+import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { useSiteSale } from '@/lib/use-site-sale';
 
 /** Số tồn hiển thị (ảo) random 1–3 cho mỗi phiên bản. */
 function getRandomDisplayStock(): number {
@@ -141,13 +143,19 @@ export default function ProductVariantModal({
   const remainingDisplay = Math.max(0, displayStockForVariant - (effectiveQuantity - 1));
 
   const birthdayDiscount = useBirthdayDiscount();
+  const { state: siteSaleState } = useSiteSale();
+  const productForPricing = useMemo(
+    () => mergeProductSiteSaleFromCalendar(product, siteSaleState),
+    [product, siteSaleState],
+  );
   const pricing = resolveProductDisplayPricing(
-    product,
+    productForPricing,
     birthdayDiscount.active,
     birthdayDiscount.percent,
   );
   const displayPrice = pricing.displayPrice;
-  const birthdayDiscountAmount = Math.max(0, (product.price || 0) - displayPrice) * effectiveQuantity;
+  const birthdaySavingsAmount = pricing.birthdaySavingsAmount;
+  const promoSavingsAmount = pricing.savingsAmount * effectiveQuantity;
   const loyaltyDiscountPercent = loyaltyStatus?.current_tier?.discount_percent || 0;
   const loyaltyDiscountAmount = (displayPrice * loyaltyDiscountPercent * effectiveQuantity) / 100;
   const loyaltyTierName = loyaltyStatus?.current_tier?.name || 'L0';
@@ -295,19 +303,19 @@ export default function ProductVariantModal({
             <div className="flex-1 min-w-0 flex flex-col gap-0.5">
               <p className="text-[11px] text-gray-500">Mã sp: {product.code || product.product_id || '—'}</p>
               <p className="text-sm font-medium text-gray-900 line-clamp-2 leading-tight">{product.name}</p>
-              {birthdayDiscount.active && displayPrice < (product.price || 0) && (
-                <span className="mt-1 inline-flex w-fit rounded-full bg-pink-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                  Giá sinh nhật -{birthdayDiscount.percent}%
-                </span>
-              )}
-              <div className="mt-0.5 flex flex-wrap items-baseline gap-2">
-                <p className="text-lg font-extrabold text-red-600">{formatPrice(displayPrice)}</p>
-                {birthdayDiscount.active && displayPrice < (product.price || 0) && (
-                  <p className="rounded-full border border-gray-300 bg-white px-2 py-0.5 text-xs font-semibold text-gray-800 line-through decoration-1 decoration-gray-400">
-                    Giá gốc {formatPrice(product.price)}
-                  </p>
-                )}
-              </div>
+              <ProductPromoPriceBlock
+                displayPrice={displayPrice}
+                compareUnitPrice={pricing.compareUnitPrice}
+                savingsAmount={pricing.savingsAmount}
+                expectedSalePrice={pricing.expectedSalePrice}
+                sitePhase={pricing.sitePhase}
+                sitePercent={pricing.sitePercent}
+                siteLabel={pricing.siteLabel}
+                countdownTo={pricing.countdownTo}
+                birthdayActive={birthdayDiscount.active}
+                birthdayPercent={birthdayDiscount.percent}
+                size="sm"
+              />
               
               {realStock === 0 ? (
                 <p className="text-[11px] font-medium text-red-600 flex items-center gap-1">
@@ -444,19 +452,19 @@ export default function ProductVariantModal({
                   <p className="text-sm font-medium text-gray-900 line-clamp-2 leading-tight mb-1">{product.name}</p>
                 </div>
                 <div>
-                  {birthdayDiscount.active && displayPrice < (product.price || 0) && (
-                    <span className="mb-0.5 inline-flex w-fit rounded-full bg-pink-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                      Giá sinh nhật -{birthdayDiscount.percent}%
-                    </span>
-                  )}
-                  <div className="flex flex-wrap items-baseline gap-2">
-                    <p className="text-lg font-extrabold text-red-600">{formatPrice(displayPrice)}</p>
-                    {birthdayDiscount.active && displayPrice < (product.price || 0) && (
-                      <p className="rounded-full border border-gray-300 bg-white px-2 py-0.5 text-xs font-semibold text-gray-800 line-through decoration-1 decoration-gray-400">
-                        Giá gốc {formatPrice(product.price)}
-                      </p>
-                    )}
-                  </div>
+                  <ProductPromoPriceBlock
+                    displayPrice={displayPrice}
+                    compareUnitPrice={pricing.compareUnitPrice}
+                    savingsAmount={pricing.savingsAmount}
+                    expectedSalePrice={pricing.expectedSalePrice}
+                    sitePhase={pricing.sitePhase}
+                    sitePercent={pricing.sitePercent}
+                    siteLabel={pricing.siteLabel}
+                    countdownTo={pricing.countdownTo}
+                    birthdayActive={birthdayDiscount.active}
+                    birthdayPercent={birthdayDiscount.percent}
+                    size="sm"
+                  />
                   
                   {realStock === 0 ? (
                     <p className="text-[10px] font-medium text-red-600 flex items-center gap-1">
@@ -595,8 +603,9 @@ export default function ProductVariantModal({
             className="mb-3 p-3"
           />
           <BirthdaySavingsCard
+            active={birthdayDiscount.active}
             percent={birthdayDiscount.percent}
-            savings={birthdayDiscountAmount}
+            savings={birthdaySavingsAmount * effectiveQuantity}
             nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
             compact
             className="mb-3"

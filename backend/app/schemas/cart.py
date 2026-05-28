@@ -35,6 +35,9 @@ class CartItemResponse(CartItemBase):
     product_code: Optional[str] = None
     product_name: str
     product_price: float
+    list_price: Optional[float] = None
+    original_price: Optional[float] = None
+    site_sale: Optional[Dict[str, Any]] = None
     product_image: Optional[str] = None
     product_data: Optional[Dict[str, Any]] = None
     requires_deposit: bool = False
@@ -71,6 +74,9 @@ class CartResponse(BaseModel):
     welcome_discount_percent: float = 0.0
     welcome_discount_amount: float = 0.0
     welcome_promo_code: Optional[str] = None
+
+    # Site sale ngày trùng tháng
+    site_sale: Optional[Dict[str, Any]] = None
     
     class Config:
         from_attributes = True

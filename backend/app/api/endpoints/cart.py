@@ -18,11 +18,14 @@ router = APIRouter()
 
 
 def _cart_line_list_price(item: CartItem) -> float:
-    if item.product is not None:
-        return float(item.product.price or 0)
+    """Giá gốc catalog — không dùng product_price đã lưu (có thể là giá sale cũ)."""
     pd = item.product_data if isinstance(item.product_data, dict) else {}
     if pd.get("list_price") is not None:
         return float(pd["list_price"])
+    if item.product is not None:
+        return float(item.product.price or 0)
+    if pd.get("price") is not None:
+        return float(pd["price"])
     return float(item.product_price or 0)
 
 
@@ -30,8 +33,8 @@ def _cart_items_with_site_sale_pricing(
     db: Session,
     user: User,
     items: List[CartItem],
-) -> tuple[List[CartItemResponse], float]:
-    from app.services.sale_calendar import effective_unit_price, resolve_sale_calendar_state
+) -> tuple[List[CartItemResponse], float, dict]:
+    from app.services.sale_calendar import apply_site_sale_to_price, resolve_sale_calendar_state
 
     sale_state = resolve_sale_calendar_state(db, user=user)
     total_price = 0.0
@@ -39,19 +42,29 @@ def _cart_items_with_site_sale_pricing(
     for item in items:
         resp = _cart_item_to_response(item)
         base = _cart_line_list_price(item)
-        if sale_state.is_active:
-            line_unit = effective_unit_price(db, base, user=user)
-            resp.product_price = line_unit
-        else:
-            line_unit = base
-            resp.product_price = line_unit
+        pricing = apply_site_sale_to_price(base, sale_state)
+        line_unit = float(pricing["display_price"])
+        resp.product_price = line_unit
+        resp.list_price = base if base > 0 else None
+        if sale_state.is_active and pricing.get("savings_amount", 0) > 0:
+            resp.original_price = base
+        resp.site_sale = {
+            **pricing,
+            "event_label": sale_state.event_label,
+            "event_date": sale_state.event_date.isoformat() if sale_state.event_date else None,
+            "countdown_to": sale_state.countdown_to.isoformat() if sale_state.countdown_to else None,
+        }
+        pd = dict(resp.product_data or {})
+        pd["list_price"] = base
+        pd["price"] = line_unit
+        resp.product_data = pd
         total_price += line_unit * int(item.quantity or 0)
         cart_items_response.append(resp)
-    return cart_items_response, total_price
+    return cart_items_response, total_price, sale_state.to_public_dict()
 
 
 def _single_cart_item_response(db: Session, user: User, item: CartItem) -> CartItemResponse:
-    responses, _ = _cart_items_with_site_sale_pricing(db, user, [item])
+    responses, _, _ = _cart_items_with_site_sale_pricing(db, user, [item])
     return responses[0]
 
 
@@ -106,7 +119,9 @@ def get_user_cart(
     
     items = cart_crud.get_user_cart_items(db, user_id=current_user.id)
 
-    cart_items_response, total_price = _cart_items_with_site_sale_pricing(db, current_user, items)
+    cart_items_response, total_price, site_sale_state = _cart_items_with_site_sale_pricing(
+        db, current_user, items
+    )
     summary = cart_crud.get_cart_summary(db, user_id=current_user.id)
     birthday_discount = get_birthday_discount_for_user(db, current_user)
     discount_fields = build_cart_discount_fields(
@@ -127,6 +142,7 @@ def get_user_cart(
         created_at=cart_record.created_at,
         updated_at=cart_record.updated_at,
         birthday_next_date=birthday_discount.next_birthday.isoformat() if birthday_discount.next_birthday else None,
+        site_sale=site_sale_state,
         **discount_fields,
     )
 
@@ -216,7 +232,9 @@ def migrate_guest_cart(
         # Get cart items for response
         items = cart_crud.get_user_cart_items(db, user_id=current_user.id)
 
-        cart_items_response, total_price = _cart_items_with_site_sale_pricing(db, current_user, items)
+        cart_items_response, total_price, site_sale_state = _cart_items_with_site_sale_pricing(
+            db, current_user, items
+        )
         summary = cart_crud.get_cart_summary(db, user_id=current_user.id)
 
         birthday_discount = get_birthday_discount_for_user(db, current_user)
@@ -241,6 +259,7 @@ def migrate_guest_cart(
                 created_at=cart_record.created_at,
                 updated_at=cart_record.updated_at,
                 birthday_next_date=birthday_discount.next_birthday.isoformat() if birthday_discount.next_birthday else None,
+                site_sale=site_sale_state,
                 **discount_fields,
             )
         )

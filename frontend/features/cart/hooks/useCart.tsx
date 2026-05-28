@@ -94,11 +94,13 @@ export function CartProvider({ children }: { children: ReactNode }) {
             return {
               ...item,
               product_image: lineImage || item.product_image,
+              list_price: item.list_price ?? fromApi.list_price,
               product_data: {
                 ...fromApi,
                 id: item.product_id,
                 product_id: fromApi.product_id ?? item.product_code,
                 name: fromApi.name ?? item.product_name,
+                list_price: item.list_price ?? fromApi.list_price ?? fromApi.price,
                 price: item.product_price ?? fromApi.price,
                 main_image: lineImage,
                 deposit_require: fromApi.deposit_require ?? item.requires_deposit,

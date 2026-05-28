@@ -1,4 +1,4 @@
-import type { Product, SiteSaleCalendarState } from '@/types/api';
+import type { Product, SiteSaleCalendarState, SiteSaleProductPricing } from '@/types/api';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 
 export function formatCountdownParts(targetIso: string | null | undefined): {
@@ -30,6 +30,153 @@ export function formatCountdownLabel(targetIso: string | null | undefined): stri
   return `${parts.minutes} phút ${parts.seconds} giây`;
 }
 
+/** Nhãn live trên ảnh SP — luôn có giờ:phút:giây, kèm ngày nếu còn ≥ 1 ngày. */
+export function formatCountdownCompact(targetIso: string | null | undefined): string {
+  const parts = formatCountdownParts(targetIso);
+  if (!parts || parts.expired) return '';
+  const hms = `${String(parts.hours).padStart(2, '0')}:${String(parts.minutes).padStart(2, '0')}:${String(parts.seconds).padStart(2, '0')}`;
+  if (parts.days > 0) {
+    return `${parts.days} ngày ${hms}`;
+  }
+  return hms;
+}
+
+/** Gắn / bổ sung site_sale từ calendar khi SSR chưa có (vd. test sale sau đăng nhập). */
+export function mergeProductSiteSaleFromCalendar(
+  product: Product,
+  calendar: SiteSaleCalendarState | null | undefined,
+): Product {
+  if (!calendar?.enabled || !calendar.phase) return product;
+
+  const existing = product.site_sale;
+  const pct = calendar.discount_percent ?? existing?.percent ?? 0;
+  if (pct <= 0) return product;
+
+  const base = Math.max(0, existing?.list_price ?? product.price ?? 0);
+  const savings = Math.round(base * pct / 100);
+  const salePrice = Math.max(0, base - savings);
+
+  if (existing?.phase === calendar.phase && (existing.percent ?? 0) > 0) {
+    const needsPatch =
+      (!existing.countdown_to && calendar.countdown_to) ||
+      (!existing.event_label && calendar.event_label) ||
+      (!existing.event_date && calendar.event_date);
+    if (!needsPatch) return product;
+    return {
+      ...product,
+      site_sale: {
+        ...existing,
+        countdown_to: existing.countdown_to ?? calendar.countdown_to ?? null,
+        event_label: existing.event_label ?? calendar.event_label ?? null,
+        event_date: existing.event_date ?? calendar.event_date ?? null,
+      },
+    };
+  }
+
+  const siteSale: SiteSaleProductPricing = {
+    list_price: base,
+    display_price: calendar.phase === 'active' ? salePrice : base,
+    savings_amount: savings,
+    percent: pct,
+    phase: calendar.phase,
+    expected_sale_price: calendar.phase === 'teaser' ? salePrice : undefined,
+    event_label: calendar.event_label ?? null,
+    event_date: calendar.event_date ?? null,
+    countdown_to: calendar.countdown_to ?? null,
+  };
+
+  const merged: Product = { ...product, site_sale: siteSale };
+  if (calendar.phase === 'active' && savings > 0) {
+    merged.original_price = base;
+    merged.price = salePrice;
+  }
+  return merged;
+}
+
+type CartLinePricingInput = {
+  product_price?: number;
+  list_price?: number;
+  original_price?: number;
+  site_sale?: SiteSaleProductPricing | null;
+  product_data?: { original_price?: number; price?: number; list_price?: number };
+  quantity: number;
+};
+
+/** Gắn site_sale cho dòng giỏ khi API thiếu — dùng trạng thái sale toàn giỏ. */
+export function mergeCartLineSiteSaleFromCalendar<T extends CartLinePricingInput>(
+  item: T,
+  calendar: SiteSaleCalendarState | null | undefined,
+): T {
+  if (!calendar?.enabled || !calendar.phase) return item;
+
+  const existing = item.site_sale;
+  const pct = calendar.discount_percent ?? existing?.percent ?? 0;
+  if (pct <= 0) return item;
+
+  const base = Math.max(
+    0,
+    existing?.list_price ??
+      item.list_price ??
+      item.product_data?.list_price ??
+      item.product_data?.original_price ??
+      item.product_price ??
+      item.product_data?.price ??
+      0,
+  );
+  const savings = Math.round(base * pct / 100);
+  const salePrice = Math.max(0, base - savings);
+
+  if (existing?.phase === calendar.phase && (existing.percent ?? 0) > 0) {
+    const needsPatch =
+      (!existing.countdown_to && calendar.countdown_to) ||
+      (!existing.event_label && calendar.event_label) ||
+      (!existing.event_date && calendar.event_date);
+    if (!needsPatch) {
+      return { ...item, list_price: base };
+    }
+    return {
+      ...item,
+      list_price: base,
+      site_sale: {
+        ...existing,
+        countdown_to: existing.countdown_to ?? calendar.countdown_to ?? null,
+        event_label: existing.event_label ?? calendar.event_label ?? null,
+        event_date: existing.event_date ?? calendar.event_date ?? null,
+      },
+    };
+  }
+
+  const siteSale: SiteSaleProductPricing = {
+    list_price: base,
+    display_price: calendar.phase === 'active' ? salePrice : base,
+    savings_amount: savings,
+    percent: pct,
+    phase: calendar.phase,
+    expected_sale_price: calendar.phase === 'teaser' ? salePrice : undefined,
+    event_label: calendar.event_label ?? null,
+    event_date: calendar.event_date ?? null,
+    countdown_to: calendar.countdown_to ?? null,
+  };
+
+  return {
+    ...item,
+    list_price: base,
+    site_sale: siteSale,
+    original_price: calendar.phase === 'active' && savings > 0 ? base : item.original_price,
+    product_price: calendar.phase === 'active' ? salePrice : base,
+  };
+}
+
+export function resolveCartLineTotal(
+  item: CartLinePricingInput,
+  birthdayActive: boolean,
+  birthdayPercent: number,
+  calendar?: SiteSaleCalendarState | null,
+): number {
+  const merged = mergeCartLineSiteSaleFromCalendar(item, calendar);
+  return resolveCartLineDisplayPricing(merged, birthdayActive, birthdayPercent).displayLineTotal;
+}
+
 export function resolveProductDisplayPricing(
   product: Product,
   birthdayActive: boolean,
@@ -57,18 +204,147 @@ export function resolveProductDisplayPricing(
     ? applyBirthdayDiscount(beforeBirthday, birthdayPercent)
     : beforeBirthday;
 
-  const siteSavings = site?.savings_amount ?? 0;
-  const expectedSalePrice = site?.expected_sale_price ?? null;
+  const sitePercent = site?.percent ?? 0;
+  let siteSavings = site?.savings_amount ?? 0;
+  let expectedSalePrice = site?.expected_sale_price ?? null;
+
+  if (sitePhase === 'teaser' && sitePercent > 0 && siteSavings <= 0) {
+    siteSavings = Math.round(listPrice * sitePercent / 100);
+  }
+  if (sitePhase === 'teaser' && expectedSalePrice == null && siteSavings > 0) {
+    expectedSalePrice = Math.max(0, listPrice - siteSavings);
+  }
+
+  const compareUnitPrice = birthdayActive
+    ? beforeBirthday > displayPrice
+      ? beforeBirthday
+      : null
+    : compareAt != null && compareAt > displayPrice
+      ? compareAt
+      : null;
+
+  const savingsAmount =
+    compareUnitPrice != null ? Math.max(0, compareUnitPrice - displayPrice) : siteSavings;
+
+  const birthdaySavingsAmount = birthdayActive
+    ? Math.max(0, beforeBirthday - displayPrice)
+    : 0;
 
   return {
     displayPrice,
     compareAt,
+    compareUnitPrice,
+    savingsAmount,
+    birthdaySavingsAmount,
     listPrice,
     sitePhase,
     siteSavings,
     expectedSalePrice,
-    sitePercent: site?.percent ?? 0,
+    sitePercent,
     siteLabel: site?.event_label ?? null,
+    countdownTo: site?.countdown_to ?? null,
+    beforeBirthday,
+  };
+}
+
+export function resolveCartLineDisplayPricing(
+  item: {
+    product_price?: number;
+    list_price?: number;
+    original_price?: number;
+    site_sale?: SiteSaleProductPricing | null;
+    product_data?: { original_price?: number; price?: number };
+    quantity: number;
+  },
+  birthdayActive: boolean,
+  birthdayPercent: number,
+) {
+  const site = item.site_sale;
+  const listPrice = site?.list_price ?? item.list_price ?? item.original_price ?? item.product_data?.original_price ?? item.product_price ?? 0;
+  const sitePhase = site?.phase ?? null;
+  const sitePercent = site?.percent ?? 0;
+  let siteSavings = site?.savings_amount ?? 0;
+  let expectedSalePrice = site?.expected_sale_price ?? null;
+
+  if (sitePhase === 'teaser' && sitePercent > 0 && siteSavings <= 0) {
+    siteSavings = Math.round(listPrice * sitePercent / 100);
+  }
+  if (sitePhase === 'teaser' && expectedSalePrice == null && siteSavings > 0) {
+    expectedSalePrice = Math.max(0, listPrice - siteSavings);
+  }
+
+  const unitSalePrice = item.product_price ?? item.product_data?.price ?? 0;
+
+  let beforeBirthday = unitSalePrice;
+  let compareAt: number | null = null;
+
+  if (sitePhase === 'active') {
+    beforeBirthday = unitSalePrice;
+    compareAt = listPrice > beforeBirthday ? listPrice : item.original_price ?? null;
+  } else if (sitePhase === 'teaser') {
+    beforeBirthday = listPrice;
+    compareAt = null;
+  } else if (item.original_price && item.original_price > unitSalePrice) {
+    beforeBirthday = unitSalePrice;
+    compareAt = item.original_price;
+  } else if (item.product_data?.original_price && item.product_data.original_price > unitSalePrice) {
+    beforeBirthday = unitSalePrice;
+    compareAt = item.product_data.original_price;
+  }
+
+  const displayUnitPrice = birthdayActive
+    ? applyBirthdayDiscount(beforeBirthday, birthdayPercent)
+    : beforeBirthday;
+
+  const qty = Math.max(1, item.quantity || 1);
+  const displayLineTotal = displayUnitPrice * qty;
+
+  const compareUnitPrice = birthdayActive
+    ? beforeBirthday > displayUnitPrice
+      ? beforeBirthday
+      : null
+    : compareAt != null && compareAt > displayUnitPrice
+      ? compareAt
+      : null;
+
+  const compareLineTotal = compareUnitPrice != null ? compareUnitPrice * qty : null;
+  const savingsPerUnit = compareUnitPrice != null ? Math.max(0, compareUnitPrice - displayUnitPrice) : 0;
+  const lineSavings = savingsPerUnit * qty;
+
+  const isTeaser = sitePhase === 'teaser' && sitePercent > 0 && !birthdayActive;
+  const expectedSaleUnitPrice =
+    isTeaser && expectedSalePrice != null && expectedSalePrice > 0
+      ? expectedSalePrice
+      : isTeaser && sitePercent > 0
+        ? Math.max(0, Math.round(listPrice * (1 - sitePercent / 100)))
+        : null;
+  const teaserUnitSavings =
+    isTeaser && expectedSaleUnitPrice != null
+      ? Math.max(0, displayUnitPrice - expectedSaleUnitPrice)
+      : isTeaser && siteSavings > 0
+        ? siteSavings
+        : 0;
+  const teaserLineSavings = teaserUnitSavings * qty;
+  const expectedLineTotal = expectedSaleUnitPrice != null ? expectedSaleUnitPrice * qty : null;
+
+  return {
+    displayUnitPrice,
+    displayLineTotal,
+    compareAt,
+    compareUnitPrice,
+    compareLineTotal,
+    lineSavings,
+    sitePhase,
+    sitePercent,
+    siteLabel: site?.event_label ?? null,
+    siteSavings,
+    expectedSalePrice,
+    expectedSaleUnitPrice,
+    expectedLineTotal,
+    teaserUnitSavings,
+    teaserLineSavings,
+    countdownTo: site?.countdown_to ?? null,
+    beforeBirthday,
   };
 }
 

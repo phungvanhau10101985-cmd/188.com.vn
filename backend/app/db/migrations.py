@@ -325,6 +325,41 @@ class MigrationManager:
             logger.warning("  _seed_affiliate_settings_singleton: %s", e)
             return False
 
+    def migrate_admin_feature_test_site_sale_expires_timestamptz(self) -> bool:
+        """Chuẩn hóa site_sale_test_expires_at sang timestamptz (cột cũ có thể là timestamp without time zone)."""
+        try:
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text(
+                        """
+                        SELECT data_type
+                        FROM information_schema.columns
+                        WHERE table_name = 'admin_feature_test_settings'
+                          AND column_name = 'site_sale_test_expires_at'
+                        """
+                    )
+                ).fetchone()
+                if not row:
+                    return True
+                if row[0] == "timestamp with time zone":
+                    return True
+                conn.execute(
+                    text(
+                        """
+                        ALTER TABLE admin_feature_test_settings
+                        ALTER COLUMN site_sale_test_expires_at
+                        TYPE TIMESTAMP WITH TIME ZONE
+                        USING site_sale_test_expires_at AT TIME ZONE 'UTC'
+                        """
+                    )
+                )
+                conn.commit()
+                logger.info("✅ admin_feature_test site_sale_test_expires_at -> timestamptz")
+            return True
+        except Exception as e:
+            logger.warning("  migrate_admin_feature_test_site_sale_expires_timestamptz: %s", e)
+            return False
+
     def _sync_table_columns(self, table_name: str, model_class) -> bool:
         """Thêm mọi cột thiếu của bảng theo model (dùng chung cho orders, order_items, ...)."""
         try:
@@ -611,6 +646,9 @@ class MigrationManager:
         )
         results['admin_feature_test_settings_sync'] = self._sync_table_columns(
             "admin_feature_test_settings", AdminFeatureTestSetting
+        )
+        results['admin_feature_test_site_sale_expires_tz'] = (
+            self.migrate_admin_feature_test_site_sale_expires_timestamptz()
         )
         from app.models.home_hero_category_group import HomeHeroCategoryGroup
 

@@ -13,6 +13,16 @@ def to_utc_aware(dt: Optional[datetime]) -> Optional[datetime]:
     return dt.astimezone(timezone.utc)
 
 
+def db_datetime_to_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Chuẩn hóa datetime đọc từ PostgreSQL timestamptz (psycopg2 có thể trả naive theo giờ VN)."""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc)
+    vn = timezone(timedelta(hours=7))
+    return dt.replace(tzinfo=vn).astimezone(timezone.utc)
+
+
 def imported_topic_days_ago(entity_id: int) -> int:
     """
     Thời gian chủ đề (câu hỏi / đánh giá) import: cách hôm nay 4–20 ngày, ổn định theo id.

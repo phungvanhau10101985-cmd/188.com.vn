@@ -1,4 +1,6 @@
 // features/cart/types/cart.ts
+import type { SiteSaleCalendarState, SiteSaleProductPricing } from '@/types/api';
+
 export interface CartItem {
   id: number;
   product_id: number;
@@ -9,6 +11,9 @@ export interface CartItem {
   selected_color_name?: string;
   product_name?: string;
   product_price?: number;
+  list_price?: number;
+  original_price?: number;
+  site_sale?: SiteSaleProductPricing;
   product_image?: string;
   product_data?: {
     id?: number;
@@ -52,6 +57,7 @@ export interface Cart {
   welcome_discount_percent?: number;
   welcome_discount_amount?: number;
   welcome_promo_code?: string | null;
+  site_sale?: SiteSaleCalendarState | null;
 }
 
 export interface CartState {

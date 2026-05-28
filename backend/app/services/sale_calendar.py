@@ -146,7 +146,10 @@ def _site_sale_test_row_for_user(db: Session, user) -> Optional[Any]:
             .filter(AdminUser.is_active == True)  # noqa: E712
             .filter(AdminFeatureTestSetting.site_sale_test_enabled == True)  # noqa: E712
             .filter(AdminFeatureTestSetting.site_sale_test_expires_at.isnot(None))
-            .filter(AdminFeatureTestSetting.site_sale_test_expires_at > datetime.now(timezone.utc))
+            .filter(
+                AdminFeatureTestSetting.site_sale_test_expires_at
+                > datetime.now(timezone.utc).replace(tzinfo=None)
+            )
             .first()
         )
     except Exception:

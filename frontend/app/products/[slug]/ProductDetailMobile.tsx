@@ -6,7 +6,7 @@ import Image from 'next/image';
 import type { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { formatPrice, getDiscountPercentage } from '@/lib/utils';
+import { formatPrice } from '@/lib/utils';
 import { mergeProductGalleryPhotoUrls } from '@/lib/product-gallery-merge';
 import { ProductFillImage, GalleryThumbImage } from '@/components/product-detail/HideOnImageError';
 import { reportUnreachableProductMedia } from '@/lib/report-broken-product-media';
@@ -20,7 +20,9 @@ import ProductQASection from './components/ProductQASection/ProductQASection';
 import ProductReviewSection from './components/ProductReviewSection/ProductReviewSection';
 import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
-import { applyBirthdayDiscount } from '@/lib/birthday-discount';
+import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
+import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { useSiteSale } from '@/lib/use-site-sale';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import AffiliateShareBar, { ProductShareIconButton } from '@/components/affiliate/AffiliateShareBar';
 import { useAffiliatePageShare } from '@/lib/use-affiliate-page-share';
@@ -92,10 +94,18 @@ export default function ProductDetailMobile({
   }, [isAuthenticated]);
 
   const birthdayDiscount = useBirthdayDiscount();
-  const displayPrice = birthdayDiscount.active
-    ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
-    : product.price || 0;
-  const birthdayDiscountAmount = Math.max(0, (product.price || 0) - displayPrice);
+  const { state: siteSaleState } = useSiteSale();
+  const productForPricing = useMemo(
+    () => mergeProductSiteSaleFromCalendar(product, siteSaleState),
+    [product, siteSaleState],
+  );
+  const pricing = resolveProductDisplayPricing(
+    productForPricing,
+    birthdayDiscount.active,
+    birthdayDiscount.percent,
+  );
+  const displayPrice = pricing.displayPrice;
+  const birthdaySavingsAmount = pricing.birthdaySavingsAmount;
   const loyaltyDiscountPercent = loyaltyStatus?.current_tier?.discount_percent || 0;
   const loyaltyDiscountAmount = (displayPrice * loyaltyDiscountPercent) / 100;
   const loyaltyTierName = loyaltyStatus?.current_tier?.name || 'L0';
@@ -361,48 +371,26 @@ export default function ProductDetailMobile({
         )}
 
         {/* Giá + giá gốc, giảm giá, trả góp */}
-        <div className="space-y-2 mb-3 rounded-2xl border border-orange-100 bg-orange-50/50 p-3">
-          {birthdayDiscount.active && birthdayDiscountAmount > 0 && (
-            <div className="inline-flex items-center gap-1.5 rounded-full bg-pink-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-sm">
-              <span aria-hidden>🎂</span>
-              Giá sinh nhật đã giảm {birthdayDiscount.percent}%
-            </div>
-          )}
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="text-2xl font-extrabold text-[#ea580c]">
-              {formatPrice(displayPrice)}
-            </span>
-            {birthdayDiscount.active && birthdayDiscountAmount > 0 && (
-              <>
-                <span className="inline-flex items-baseline gap-1 rounded-full border border-gray-300 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 shadow-sm">
-                  <span className="text-[10px] font-medium text-gray-500">Giá gốc</span>
-                  <span className="text-sm text-gray-800 line-through decoration-1 decoration-gray-400">
-                    {formatPrice(product.price)}
-                  </span>
-                </span>
-                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-pink-700 ring-1 ring-pink-200">
-                  Tiết kiệm {formatPrice(birthdayDiscountAmount)}
-                </span>
-              </>
-            )}
-            {product.original_price && product.original_price > (product.price ?? 0) && (
-              <>
-                {!birthdayDiscount.active && (
-                  <span className="text-sm text-gray-500 line-through">
-                    {formatPrice(product.original_price)}
-                  </span>
-                )}
-                <span className="bg-red-500 text-white px-1.5 py-0.5 rounded text-xs font-bold">
-                  -{getDiscountPercentage(product.original_price, product.price ?? 0)}%
-                </span>
-              </>
-            )}
-          </div>
+        <div className="mb-3 rounded-2xl border border-orange-100 bg-orange-50/50 p-3">
+          <ProductPromoPriceBlock
+            displayPrice={displayPrice}
+            compareUnitPrice={pricing.compareUnitPrice}
+            savingsAmount={pricing.savingsAmount}
+            expectedSalePrice={pricing.expectedSalePrice}
+            sitePhase={pricing.sitePhase}
+            sitePercent={pricing.sitePercent}
+            siteLabel={pricing.siteLabel}
+            countdownTo={pricing.countdownTo}
+            birthdayActive={birthdayDiscount.active}
+            birthdayPercent={birthdayDiscount.percent}
+            size="sm"
+          />
         </div>
 
         <BirthdaySavingsCard
+          active={birthdayDiscount.active}
           percent={birthdayDiscount.percent}
-          savings={birthdayDiscountAmount}
+          savings={birthdaySavingsAmount}
           nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
           compact
           className="mb-3"
@@ -488,11 +476,11 @@ export default function ProductDetailMobile({
       {/* Sticky bottom bar: Trang · Thử đồ · Thích | THÊM GIỎ | MUA HÀNG */}
       <div className="fixed bottom-0 left-0 right-0 z-[100] border-t border-gray-200 bg-gray-100 md:hidden pointer-events-auto" data-188-pdp-sticky-actions data-188-pdp-sticky-mobile data-188-skip-draggable>
         {/* Loyalty Discount Message */}
-        {birthdayDiscount.active && birthdayDiscountAmount > 0 && (
+        {birthdayDiscount.active && birthdaySavingsAmount > 0 && (
           <div className="border-b border-pink-700 bg-pink-600 px-2 py-0.5 text-center">
             <span className="flex items-center justify-center gap-1 text-[9px] font-semibold text-white">
               <span aria-hidden>🎁</span>
-              Giá sinh nhật: tiết kiệm <strong>{formatPrice(birthdayDiscountAmount)}</strong>
+              Giá sinh nhật: tiết kiệm <strong>{formatPrice(birthdaySavingsAmount)}</strong>
             </span>
           </div>
         )}

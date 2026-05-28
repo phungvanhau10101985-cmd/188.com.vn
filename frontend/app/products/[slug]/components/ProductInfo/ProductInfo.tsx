@@ -1,13 +1,13 @@
 // frontend/app/products/[slug]/components/ProductInfo/ProductInfo.tsx - ĐÃ SỬA LỖI PROPS
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { formatPrice, getDiscountPercentage, displayableBrandOrOrigin } from '@/lib/utils';
+import { formatPrice, displayableBrandOrOrigin } from '@/lib/utils';
 import VariantSelector from '@/components/product-detail/VariantSelector';
 import { colorLabelForCart } from '@/lib/product-color-variant';
 import ProductActions from './ProductActions';
@@ -15,8 +15,10 @@ import ProductQAReviewCards from '../ProductQAReviewCards/ProductQAReviewCards';
 import ProductVariantModal from '../ProductVariantModal/ProductVariantModal';
 import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
+import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
-import { resolveProductDisplayPricing } from '@/lib/site-sale';
+import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { useSiteSale } from '@/lib/use-site-sale';
 import {
   NANO_AI_CTX_SOURCE_PRODUCT_PDP,
 } from '@/lib/nanoai-hosted-chat';
@@ -73,16 +75,18 @@ export default function ProductInfo({
 
   const available = (product.available || 0) > 0;
   const birthdayDiscount = useBirthdayDiscount();
+  const { state: siteSaleState } = useSiteSale();
+  const productForPricing = useMemo(
+    () => mergeProductSiteSaleFromCalendar(product, siteSaleState),
+    [product, siteSaleState],
+  );
   const pricing = resolveProductDisplayPricing(
-    product,
+    productForPricing,
     birthdayDiscount.active,
     birthdayDiscount.percent,
   );
   const displayPrice = pricing.displayPrice;
-  const hasDiscount =
-    (pricing.compareAt != null && pricing.compareAt > displayPrice) ||
-    Boolean(product.original_price && product.original_price > product.price);
-  const birthdayDiscountAmount = Math.max(0, (product.price || 0) - displayPrice);
+  const birthdaySavingsAmount = pricing.birthdaySavingsAmount;
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -250,11 +254,11 @@ export default function ProductInfo({
         nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
         compact
       />
-      {pricing.sitePhase === 'teaser' && pricing.siteSavings > 0 && (
+      {pricing.sitePhase === 'teaser' && pricing.sitePercent > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <p className="font-semibold">{pricing.siteLabel ?? 'Sắp sale'} — giảm {pricing.sitePercent}%</p>
           <p className="text-xs mt-0.5">
-            Mua đúng ngày sale tiết kiệm ~{formatPrice(pricing.siteSavings)}
+            Mua đúng ngày sale tiết kiệm ~{formatPrice(pricing.siteSavings || pricing.savingsAmount)}
             {pricing.expectedSalePrice ? ` (dự kiến ${formatPrice(pricing.expectedSalePrice)})` : ''}
           </p>
         </div>
@@ -302,53 +306,20 @@ export default function ProductInfo({
       </div>
 
       {/* Price Section */}
-      <div className="space-y-2 rounded-2xl border border-orange-100 bg-orange-50/40 p-3">
-        {birthdayDiscount.active && birthdayDiscountAmount > 0 && (
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-pink-600 px-3 py-1 text-xs font-bold text-white shadow-sm">
-            <span aria-hidden>🎂</span>
-            Giá sinh nhật đã giảm {birthdayDiscount.percent}%
-          </div>
-        )}
-        <div className="flex items-baseline space-x-2 flex-wrap gap-y-0.5">
-          <span className="text-3xl font-extrabold text-[#ea580c]">
-            {formatPrice(displayPrice)}
-          </span>
-          {birthdayDiscount.active && birthdayDiscountAmount > 0 && (
-            <>
-              <span className="inline-flex items-baseline gap-1 rounded-full border border-gray-300 bg-white px-3 py-1 text-sm font-semibold text-gray-700 shadow-sm">
-                <span className="text-xs font-medium text-gray-500">Giá gốc</span>
-                <span className="text-base text-gray-800 line-through decoration-1 decoration-gray-400">
-                  {formatPrice(product.price)}
-                </span>
-              </span>
-              <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-pink-700 ring-1 ring-pink-200">
-                Tiết kiệm {formatPrice(birthdayDiscountAmount)}
-              </span>
-            </>
-          )}
-          {pricing.compareAt != null && pricing.compareAt > displayPrice && !birthdayDiscount.active && (
-            <>
-              <span className="text-lg text-gray-500 line-through">
-                {formatPrice(pricing.compareAt)}
-              </span>
-              {product.site_sale?.phase === 'active' && (
-                <span className="bg-red-500 text-white px-1.5 py-0.5 rounded text-xs font-bold">
-                  -{pricing.sitePercent}%
-                </span>
-              )}
-            </>
-          )}
-          {hasDiscount && pricing.compareAt == null && !birthdayDiscount.active && !product.site_sale?.phase && (
-            <>
-              <span className="text-lg text-gray-500 line-through">
-                {formatPrice(product.original_price!)}
-              </span>
-              <span className="bg-red-500 text-white px-1.5 py-0.5 rounded text-xs font-bold">
-                -{getDiscountPercentage(product.original_price!, product.price)}%
-              </span>
-            </>
-          )}
-        </div>
+      <div className="rounded-2xl border border-orange-100 bg-orange-50/40 p-3">
+        <ProductPromoPriceBlock
+          displayPrice={displayPrice}
+          compareUnitPrice={pricing.compareUnitPrice}
+          savingsAmount={pricing.savingsAmount}
+          expectedSalePrice={pricing.expectedSalePrice}
+          sitePhase={pricing.sitePhase}
+          sitePercent={pricing.sitePercent}
+          siteLabel={pricing.siteLabel}
+          countdownTo={pricing.countdownTo}
+          birthdayActive={birthdayDiscount.active}
+          birthdayPercent={birthdayDiscount.percent}
+          size="lg"
+        />
       </div>
 
       {/* Variant Selectors */}
@@ -390,15 +361,24 @@ export default function ProductInfo({
         </div>
       </div>
 
-      {/* Tổng số */}
       <div className="flex items-baseline justify-between text-sm">
         <span className="font-semibold text-gray-900">Tổng số:</span>
-        <span className="text-lg font-bold text-[#ea580c]">{formatPrice(displayPrice * quantity)}</span>
+        <div className="text-right">
+          <span className="text-lg font-bold text-[#ea580c]">{formatPrice(displayPrice * quantity)}</span>
+          {pricing.savingsAmount > 0 || (pricing.sitePhase === 'teaser' && pricing.sitePercent > 0) ? (
+            <p className="text-[11px] font-medium text-emerald-600">
+              {pricing.sitePhase === 'teaser'
+                ? `Tiết kiệm dự kiến ~${formatPrice(pricing.savingsAmount * quantity)}`
+                : `Tiết kiệm ${formatPrice(pricing.savingsAmount * quantity)}`}
+            </p>
+          ) : null}
+        </div>
       </div>
 
       <BirthdaySavingsCard
+        active={birthdayDiscount.active}
         percent={birthdayDiscount.percent}
-        savings={birthdayDiscountAmount * quantity}
+        savings={birthdaySavingsAmount * quantity}
         nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
       />
 

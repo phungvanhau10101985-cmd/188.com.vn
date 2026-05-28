@@ -134,21 +134,17 @@ class CartItemCRUD:
         ).first()
         
         if existing:
-            from app.models.user import User
-            from app.services.sale_calendar import effective_unit_price
-
-            user = db.query(User).filter(User.id == user_id).first()
-            unit_price = effective_unit_price(db, float(product.price or 0), user=user)
-            existing.unit_price = unit_price
-            existing.product_price = unit_price
+            list_price = float(product.price or 0)
+            existing.unit_price = list_price
+            existing.product_price = list_price
             existing.quantity += cart_item.quantity
             existing.selected_color_name = cart_item.selected_color_name
-            existing.total_price = existing.unit_price * existing.quantity
+            existing.total_price = list_price * existing.quantity
             if isinstance(existing.product_data, dict):
                 existing.product_data = {
                     **existing.product_data,
-                    "price": unit_price,
-                    "list_price": product.price,
+                    "price": list_price,
+                    "list_price": list_price,
                 }
             existing.updated_at = datetime.now()
             db.commit()
@@ -156,12 +152,8 @@ class CartItemCRUD:
             return existing
         
         # 4. Create new cart item với đầy đủ cột database yêu cầu
-        from app.models.user import User
-        from app.services.sale_calendar import effective_unit_price
-
-        user = db.query(User).filter(User.id == user_id).first()
-        unit_price = effective_unit_price(db, float(product.price or 0), user=user)
-        total_price = unit_price * cart_item.quantity
+        list_price = float(product.price or 0)
+        total_price = list_price * cart_item.quantity
 
         line_image = _resolve_cart_line_image(
             product,
@@ -175,8 +167,8 @@ class CartItemCRUD:
             "id": product.id,
             "product_id": product.product_id,
             "name": product.name,
-            "price": unit_price,
-            "list_price": product.price,
+            "price": list_price,
+            "list_price": list_price,
             "main_image": line_image,
             "slug": product.slug,
             "category_id": product.category_id,
@@ -197,10 +189,10 @@ class CartItemCRUD:
             selected_size=cart_item.selected_size,
             selected_color=cart_item.selected_color,
             selected_color_name=cart_item.selected_color_name,
-            unit_price=unit_price,  # QUAN TRỌNG: phải có unit_price (notnull)
+            unit_price=list_price,  # QUAN TRỌNG: phải có unit_price (notnull)
             total_price=total_price,  # QUAN TRỌNG: phải có total_price (notnull)
             product_name=product.name,
-            product_price=unit_price,
+            product_price=list_price,
             product_image=line_image,
             requires_deposit=product.deposit_require,
             created_at=now,  # Đảm bảo có giá trị, tránh Pydantic datetime_type lỗi
@@ -220,18 +212,14 @@ class CartItemCRUD:
 
             product = db.query(Product).filter(Product.id == db_cart_item.product_id).first()
             if product is not None:
-                from app.models.user import User
-                from app.services.sale_calendar import effective_unit_price
-
-                user = db.query(User).filter(User.id == db_cart_item.user_id).first()
-                unit_price = effective_unit_price(db, float(product.price or 0), user=user)
-                db_cart_item.unit_price = unit_price
-                db_cart_item.product_price = unit_price
+                list_price = float(product.price or 0)
+                db_cart_item.unit_price = list_price
+                db_cart_item.product_price = list_price
                 if isinstance(db_cart_item.product_data, dict):
                     db_cart_item.product_data = {
                         **db_cart_item.product_data,
-                        "price": unit_price,
-                        "list_price": product.price,
+                        "price": list_price,
+                        "list_price": list_price,
                     }
 
             if "quantity" in update_data or product is not None:

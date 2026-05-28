@@ -3,6 +3,7 @@
 import { formatPrice } from '@/lib/utils';
 
 interface BirthdaySavingsCardProps {
+  active: boolean;
   percent: number;
   savings: number;
   nextBirthdayLabel?: string | null;
@@ -11,13 +12,14 @@ interface BirthdaySavingsCardProps {
 }
 
 export default function BirthdaySavingsCard({
+  active,
   percent,
   savings,
   nextBirthdayLabel,
   compact = false,
   className = '',
 }: BirthdaySavingsCardProps) {
-  if (savings <= 0) return null;
+  if (!active || percent <= 0 || savings <= 0) return null;
 
   return (
     <div

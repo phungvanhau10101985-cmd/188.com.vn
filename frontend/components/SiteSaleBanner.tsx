@@ -2,7 +2,8 @@
 
 import { useMemo, useState, useEffect } from 'react';
 import type { SiteSaleCalendarState } from '@/types/api';
-import { formatCountdownLabel, siteSaleBannerMessage } from '@/lib/site-sale';
+import { siteSaleBannerMessage } from '@/lib/site-sale';
+import SiteSaleLiveCountdown from '@/components/SiteSaleLiveCountdown';
 
 type Props = {
   state: SiteSaleCalendarState | null;
@@ -29,7 +30,6 @@ export default function SiteSaleBanner({ state, className = '' }: Props) {
   if (!message || closed) return null;
 
   const isTeaser = state?.phase === 'teaser';
-  const countdown = formatCountdownLabel(state?.countdown_to);
 
   return (
     <div
@@ -59,11 +59,15 @@ export default function SiteSaleBanner({ state, className = '' }: Props) {
       <div className="pr-8">
         <p className="font-semibold">{state?.event_label ?? 'Chương trình sale'}</p>
         <p className="text-xs sm:text-sm opacity-90">{message}</p>
-        {countdown ? (
-          <p className="mt-1 text-xs font-medium">
-            {isTeaser ? 'Bắt đầu sau: ' : 'Còn lại: '}
-            <span className="font-bold">{countdown}</span>
-          </p>
+        {state?.countdown_to && state?.phase ? (
+          <SiteSaleLiveCountdown
+            countdownTo={state.countdown_to}
+            phase={state.phase}
+            eventLabel={state.event_label}
+            size="sm"
+            inline
+            className="mt-1 block opacity-95"
+          />
         ) : null}
       </div>
     </div>

@@ -12,6 +12,7 @@ import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
 import SiteSaleProductBadge from '@/components/SiteSaleProductBadge';
+import SiteSaleCountdownChip from '@/components/SiteSaleCountdownChip';
 import { resolveProductDisplayPricing } from '@/lib/site-sale';
 
 function ProductVideoBadge({ videoLink }: { videoLink?: string | null }) {
@@ -204,6 +205,7 @@ export default function ProductCard({
         {!imageError && (
           <>
             <SiteSaleProductBadge siteSale={product.site_sale} />
+            <SiteSaleCountdownChip siteSale={product.site_sale} />
             <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
           </>
         )}
@@ -408,6 +410,7 @@ export const SimpleProductCard = ({
           <>
             {showPersonalizedBadge ? <PersonalizedCohortImageBadge /> : null}
             <SiteSaleProductBadge siteSale={product.site_sale} className={stackedPromoBadgeClass} />
+            <SiteSaleCountdownChip siteSale={product.site_sale} />
             <BirthdayPromoImageBadge
               active={birthdayDiscount.active}
               percent={birthdayDiscount.percent}
@@ -450,6 +453,11 @@ export const SimpleProductCard = ({
             </span>
           )}
         </div>
+        {pricing.sitePhase === 'teaser' && pricing.siteSavings > 0 ? (
+          <p className="mb-1 text-[10px] font-medium text-amber-700">
+            Sắp giảm {pricing.sitePercent}% — tiết kiệm ~{formatPrice(pricing.siteSavings)}
+          </p>
+        ) : null}
 
         {/* Stats */}
         <div className="flex justify-between items-center text-xs text-gray-500">

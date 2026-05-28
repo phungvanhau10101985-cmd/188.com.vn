@@ -126,6 +126,17 @@ body {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+@keyframes countdown-tick {
+  0% {
+    transform: scale(1.08);
+    opacity: 0.72;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 /* Hero danh mục — trượt dọc + hiệu ứng hiện đại */
 @keyframes hero-category-marquee-vertical {
   0% {

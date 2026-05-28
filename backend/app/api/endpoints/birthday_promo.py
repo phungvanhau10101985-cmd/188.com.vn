@@ -24,7 +24,7 @@ from app.services.admin_feature_test_site_sale import (
     site_sale_test_settings_payload,
     upsert_site_sale_test_settings,
 )
-from app.utils.display_timeline import to_utc_aware
+from app.utils.display_timeline import db_datetime_to_utc
 
 
 router = APIRouter()
@@ -54,7 +54,7 @@ def _require_cron_secret(authorization: str | None) -> None:
 def _test_settings_payload(admin: AdminUser, row: AdminFeatureTestSetting | None) -> dict:
     test_email = ((row.test_email if row else None) or admin.email or "").strip()
     expires_at = row.birthday_promo_expires_at if row else None
-    expires_at_utc = to_utc_aware(expires_at)
+    expires_at_utc = db_datetime_to_utc(expires_at)
     is_enabled = bool(row.birthday_promo_enabled) if row else False
     if is_enabled and (
         not expires_at_utc or expires_at_utc <= datetime.now(timezone.utc)

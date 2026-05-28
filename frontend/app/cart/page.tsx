@@ -27,8 +27,12 @@ import CartLineThumbnail from '@/components/cart/CartLineThumbnail';
 import CartEmptySameShopSection from '@/components/cart/CartEmptySameShopSection';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
+import SiteSaleBanner from '@/components/SiteSaleBanner';
+import SiteSaleLiveCountdown from '@/components/SiteSaleLiveCountdown';
 import CartVoucherPicker from '@/components/cart/CartVoucherPicker';
-import { applyBirthdayDiscount } from '@/lib/birthday-discount';
+import { mergeCartLineSiteSaleFromCalendar, resolveCartLineDisplayPricing, resolveCartLineTotal } from '@/lib/site-sale';
+import { useSiteSale } from '@/lib/use-site-sale';
+import { formatPrice } from '@/lib/utils';
 import type { PromotionVoucherItem } from '@/lib/api-client';
 import {
   calculateWelcomeDiscount,
@@ -46,23 +50,10 @@ function formatAddressLine(addr: UserAddress): string {
   return parts.join(', ');
 }
 
-function cartLineTotal(item: {
-  product_price?: number;
-  unit_price?: number;
-  product_data?: { price?: number };
-  quantity: number;
-  total_price?: number;
-}): number {
-  if (typeof item.total_price === 'number' && !Number.isNaN(item.total_price)) {
-    return item.total_price;
-  }
-  const unit = item.product_price ?? item.unit_price ?? item.product_data?.price ?? 0;
-  return unit * item.quantity;
-}
-
 export default function CartPage() {
-  const { cart, updateCartItem, removeFromCart, clearCart, isLoading, error } = useCart();
+  const { cart, updateCartItem, removeFromCart, clearCart, isLoading, error, refreshCart } = useCart();
   const { isAuthenticated, user, isLoading: authLoading } = useAuth();
+  const { state: globalSiteSale } = useSiteSale();
   const router = useRouter();
   const { pushToast } = useToast();
   const [isCheckingOut, setIsCheckingOut] = useState(false);
@@ -179,15 +170,70 @@ export default function CartPage() {
   );
   const noneSelected = selectedCartItems.length === 0;
 
-  const selectedSubtotal = useMemo(
-    () => selectedCartItems.reduce((sum, item) => sum + cartLineTotal(item), 0),
-    [selectedCartItems]
-  );
-
   const loyaltyPercent = cart?.loyalty_discount_percent ?? 0;
+  const welcomeApplied = appliedPromo !== null;
   const birthdayActive = cart?.birthday_discount_active === true;
   const birthdayPercent = cart?.birthday_discount_percent ?? 0;
-  const welcomeApplied = appliedPromo !== null;
+  const birthdayLineActive = birthdayActive && !welcomeApplied && birthdayPercent > 0;
+  const siteSaleState = cart?.site_sale ?? globalSiteSale ?? null;
+  const siteSaleActive = siteSaleState?.phase === 'active';
+  const siteSaleTeaser = siteSaleState?.phase === 'teaser';
+
+  const selectedSubtotal = useMemo(
+    () =>
+      selectedCartItems.reduce(
+        (sum, item) =>
+          sum + resolveCartLineTotal(item, birthdayLineActive, birthdayPercent, siteSaleState),
+        0,
+      ),
+    [selectedCartItems, birthdayLineActive, birthdayPercent, siteSaleState]
+  );
+
+  const selectedSiteSaleSavings = useMemo(
+    () =>
+      selectedCartItems.reduce((sum, item) => {
+        const pricing = resolveCartLineDisplayPricing(
+          mergeCartLineSiteSaleFromCalendar(item, siteSaleState),
+          false,
+          0,
+        );
+        if (pricing.sitePhase === 'active' && pricing.lineSavings > 0) {
+          return sum + pricing.lineSavings;
+        }
+        return sum;
+      }, 0),
+    [selectedCartItems, siteSaleState]
+  );
+
+  const selectedTeaserSavings = useMemo(
+    () =>
+      selectedCartItems.reduce((sum, item) => {
+        const pricing = resolveCartLineDisplayPricing(
+          mergeCartLineSiteSaleFromCalendar(item, siteSaleState),
+          birthdayLineActive,
+          birthdayPercent,
+        );
+        if (pricing.sitePhase === 'teaser' && pricing.teaserLineSavings > 0) {
+          return sum + pricing.teaserLineSavings;
+        }
+        return sum;
+      }, 0),
+    [selectedCartItems, birthdayLineActive, birthdayPercent, siteSaleState]
+  );
+
+  const selectedOriginalSubtotal = useMemo(
+    () =>
+      selectedCartItems.reduce((sum, item) => {
+        const pricing = resolveCartLineDisplayPricing(
+          mergeCartLineSiteSaleFromCalendar(item, siteSaleState),
+          birthdayLineActive,
+          birthdayPercent,
+        );
+        const originalUnit = pricing.compareAt ?? pricing.beforeBirthday;
+        return sum + originalUnit * item.quantity;
+      }, 0),
+    [selectedCartItems, birthdayLineActive, birthdayPercent, siteSaleState]
+  );
   const rawWelcomeDiscount = calculateWelcomeDiscount(selectedSubtotal, appliedPromo);
   const rawBirthdayDiscount =
     !welcomeApplied && birthdayActive && birthdayPercent > 0
@@ -214,6 +260,25 @@ export default function CartPage() {
     ? Math.min(walletBalance, selectedCartItems.length > 0 ? selectedFinalPrice : 0)
     : 0;
   const payableAfterWallet = Math.max(0, selectedFinalPrice - walletUsable);
+
+  const prevSiteSalePhaseRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const phase = siteSaleState?.phase ?? null;
+    if (prevSiteSalePhaseRef.current !== undefined && prevSiteSalePhaseRef.current !== phase) {
+      void refreshCart();
+    }
+    prevSiteSalePhaseRef.current = phase;
+  }, [siteSaleState?.phase, refreshCart]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !siteSaleState?.countdown_to) return;
+    const target = new Date(siteSaleState.countdown_to).getTime();
+    if (!Number.isFinite(target)) return;
+    const timer = window.setInterval(() => {
+      if (Date.now() >= target) void refreshCart();
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [isAuthenticated, siteSaleState?.countdown_to, refreshCart]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -248,18 +313,25 @@ export default function CartPage() {
   const hasWalletPromo = promoVouchers.some((v) => v.eligible);
 
   const cartTotalAll = useMemo(
-    () => cartItems.reduce((sum, item) => sum + cartLineTotal(item), 0),
-    [cartItems]
+    () =>
+      cartItems.reduce(
+        (sum, item) =>
+          sum + resolveCartLineTotal(item, birthdayLineActive, birthdayPercent, siteSaleState),
+        0,
+      ),
+    [cartItems, birthdayLineActive, birthdayPercent, siteSaleState]
   );
 
   const cartAdsFingerprint = useMemo(() => {
     const convCfg = peekGoogleAdsConversionsFingerprint();
     return `${convCfg}|${cartItems
-      .map((i) => `${i.id}:${i.quantity}:${cartLineTotal(i)}`)
+      .map((i) =>
+        `${i.id}:${i.quantity}:${resolveCartLineTotal(i, birthdayLineActive, birthdayPercent, siteSaleState)}`,
+      )
       .slice()
       .sort()
       .join('|')}`;
-  }, [cartItems]);
+  }, [cartItems, birthdayLineActive, birthdayPercent, siteSaleState]);
 
   useEffect(() => {
     if (!isAuthenticated || cartItems.length === 0) return;
@@ -637,11 +709,22 @@ export default function CartPage() {
         </div>
 
         <BirthdayPromoBanner
-          active={birthdayActive && !welcomeApplied}
+          active={birthdayLineActive}
           percent={birthdayPercent || 10}
           nextBirthdayLabel={cart?.birthday_next_date ?? null}
           className="mb-4"
         />
+
+        <SiteSaleBanner state={siteSaleState} className="mb-4" />
+
+        {(siteSaleTeaser || siteSaleActive) && siteSaleState?.countdown_to ? (
+          <SiteSaleLiveCountdown
+            countdownTo={siteSaleState.countdown_to}
+            phase={siteSaleState.phase}
+            eventLabel={siteSaleState.event_label}
+            className="mb-4"
+          />
+        ) : null}
 
         {welcomeVoucher && !appliedPromo ? (
           <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
@@ -748,14 +831,23 @@ export default function CartPage() {
             </div>
             <div className="divide-y divide-gray-100">
               {(cart?.items ?? []).map((item) => {
-                const price = item.product_price ?? item.unit_price ?? item.product_data?.price ?? 0;
-                const displayPrice =
-                  birthdayActive && birthdayPercent > 0 ? applyBirthdayDiscount(price, birthdayPercent) : price;
-                const lineTotal = cartLineTotal(item);
-                const displayLineTotal =
-                  birthdayActive && birthdayPercent > 0 ? applyBirthdayDiscount(lineTotal, birthdayPercent) : lineTotal;
+                const lineItem = mergeCartLineSiteSaleFromCalendar(item, siteSaleState);
+                const pricing = resolveCartLineDisplayPricing(
+                  lineItem,
+                  birthdayLineActive,
+                  birthdayPercent
+                );
                 const lineKey = `${item.product_id}-${item.selected_size ?? ''}-${item.selected_color ?? ''}-${item.id}`;
                 const lineChecked = selectionForTotals.has(item.id);
+                const showCompareUnit =
+                  pricing.compareUnitPrice != null && pricing.compareUnitPrice > pricing.displayUnitPrice;
+                const showCompareLine =
+                  pricing.compareLineTotal != null && pricing.compareLineTotal > pricing.displayLineTotal;
+                const showTeaserPromo =
+                  pricing.sitePhase === 'teaser' &&
+                  pricing.sitePercent > 0 &&
+                  pricing.expectedSaleUnitPrice != null &&
+                  pricing.teaserUnitSavings > 0;
                 return (
                   <div key={lineKey} className="px-3 md:px-5 py-3 md:py-4">
                     <div className={`grid grid-cols-1 gap-3 items-center ${mdCartGridCols}`}>
@@ -807,13 +899,55 @@ export default function CartPage() {
                       </div>
 
                       <div className="text-right">
-                        <p className="text-sm md:text-base font-semibold text-gray-900 whitespace-nowrap">
-                          {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(displayPrice)}
-                        </p>
-                        {birthdayActive && displayPrice < price && (
-                          <p className="text-xs text-gray-400 line-through whitespace-nowrap">
-                            {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(price)}
-                          </p>
+                        {showTeaserPromo ? (
+                          <>
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                              Giá gốc
+                            </p>
+                            <p className="text-sm md:text-base font-semibold text-gray-900 whitespace-nowrap">
+                              {formatPrice(pricing.displayUnitPrice)}
+                            </p>
+                            <p className="text-xs font-semibold text-emerald-700 whitespace-nowrap">
+                              Sale dự kiến {formatPrice(pricing.expectedSaleUnitPrice!)}
+                            </p>
+                            <p className="text-[11px] font-medium text-amber-700 whitespace-nowrap">
+                              Tiết kiệm ~{formatPrice(pricing.teaserUnitSavings)}
+                            </p>
+                            <span className="mt-0.5 inline-block rounded bg-amber-500 px-1 py-0.5 text-[10px] font-bold text-white">
+                              -{pricing.sitePercent}%
+                            </span>
+                            {pricing.countdownTo ? (
+                              <p className="mt-1 text-[10px] font-medium text-amber-800 sm:text-[11px]">
+                                <SiteSaleLiveCountdown
+                                  countdownTo={pricing.countdownTo}
+                                  phase="teaser"
+                                  eventLabel={pricing.siteLabel}
+                                  inline
+                                />
+                              </p>
+                            ) : null}
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-sm md:text-base font-semibold text-gray-900 whitespace-nowrap">
+                              {formatPrice(pricing.displayUnitPrice)}
+                            </p>
+                            {showCompareUnit ? (
+                              <p className="text-xs text-gray-400 line-through whitespace-nowrap">
+                                {formatPrice(pricing.compareUnitPrice!)}
+                              </p>
+                            ) : null}
+                            {pricing.lineSavings > 0 ? (
+                              <p className="text-[11px] font-medium text-emerald-600 whitespace-nowrap">
+                                Tiết kiệm {formatPrice(pricing.lineSavings / item.quantity)}
+                              </p>
+                            ) : null}
+                            {pricing.sitePhase === 'active' && pricing.sitePercent > 0 ? (
+                              <span className="mt-0.5 inline-block rounded bg-red-500 px-1 py-0.5 text-[10px] font-bold text-white">
+                                -{pricing.sitePercent}%
+                              </span>
+                            ) : null}
+                          </>
                         )}
                       </div>
 
@@ -842,12 +976,30 @@ export default function CartPage() {
 
                       <div className="text-right">
                         <p className="text-sm md:text-base font-bold text-[#ea580c] whitespace-nowrap">
-                          {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(displayLineTotal)}
+                          {formatPrice(pricing.displayLineTotal)}
                         </p>
-                        {birthdayActive && displayLineTotal < lineTotal && (
-                          <p className="text-xs text-gray-400 line-through whitespace-nowrap">
-                            {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(lineTotal)}
-                          </p>
+                        {showTeaserPromo ? (
+                          <>
+                            <p className="text-xs font-semibold text-emerald-700 whitespace-nowrap">
+                              Dự kiến {formatPrice(pricing.expectedLineTotal!)}
+                            </p>
+                            <p className="text-[11px] font-medium text-amber-700 whitespace-nowrap">
+                              Tiết kiệm ~{formatPrice(pricing.teaserLineSavings)}
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            {showCompareLine ? (
+                              <p className="text-xs text-gray-400 line-through whitespace-nowrap">
+                                {formatPrice(pricing.compareLineTotal!)}
+                              </p>
+                            ) : null}
+                            {pricing.lineSavings > 0 ? (
+                              <p className="text-[11px] font-medium text-emerald-600 whitespace-nowrap">
+                                Tiết kiệm {formatPrice(pricing.lineSavings)}
+                              </p>
+                            ) : null}
+                          </>
                         )}
                       </div>
 
@@ -882,6 +1034,63 @@ export default function CartPage() {
               onClear={handleRemovePromo}
             />
             {promoError ? <p className="mb-3 text-xs text-red-600">{promoError}</p> : null}
+
+            {siteSaleTeaser && selectedTeaserSavings > 0 ? (
+              <div className="mb-2 space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] md:text-sm">
+                  <span className="text-amber-700">
+                    Tiết kiệm dự kiến khi sale{' '}
+                    <span className="font-bold">
+                      {siteSaleState?.event_label ?? ''} (-{siteSaleState?.discount_percent ?? 0}%)
+                    </span>
+                  </span>
+                  <span className="font-medium text-amber-700">~{formatPrice(selectedTeaserSavings)}</span>
+                </div>
+                {siteSaleState?.countdown_to ? (
+                  <SiteSaleLiveCountdown
+                    countdownTo={siteSaleState.countdown_to}
+                    phase="teaser"
+                    eventLabel={siteSaleState.event_label}
+                    size="sm"
+                  />
+                ) : null}
+              </div>
+            ) : null}
+
+            {siteSaleActive && siteSaleState?.countdown_to ? (
+              <SiteSaleLiveCountdown
+                countdownTo={siteSaleState.countdown_to}
+                phase="active"
+                eventLabel={siteSaleState.event_label}
+                size="sm"
+                className="mb-2"
+              />
+            ) : null}
+
+            {siteSaleActive && selectedSiteSaleSavings > 0 ? (
+              <>
+                <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
+                  <span className="text-gray-500">Giá gốc</span>
+                  <span className="text-gray-400 line-through">{formatPrice(selectedOriginalSubtotal)}</span>
+                </div>
+                <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
+                  <span className="text-gray-500">
+                    Sale ngày trùng tháng{' '}
+                    <span className="font-bold text-red-600">
+                      {siteSaleState?.event_label ?? ''} (-{siteSaleState?.discount_percent ?? 0}%)
+                    </span>
+                  </span>
+                  <span className="font-medium text-emerald-600">-{formatPrice(selectedSiteSaleSavings)}</span>
+                </div>
+              </>
+            ) : null}
+
+            {selectedOriginalSubtotal > selectedSubtotal && !siteSaleActive ? (
+              <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
+                <span className="text-gray-500">Giá gốc</span>
+                <span className="text-gray-400 line-through">{formatPrice(selectedOriginalSubtotal)}</span>
+              </div>
+            ) : null}
 
             {welcomeApplied && selectedWelcomeDiscount > 0 ? (
               <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">

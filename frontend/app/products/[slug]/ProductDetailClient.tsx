@@ -101,6 +101,20 @@ export default function ProductDetailClient({
   }, [product?.id]);
 
   useEffect(() => {
+    if (authLoading || !slug) return;
+    let cancelled = false;
+    apiClient
+      .getProductBySlug(slug)
+      .then((fresh) => {
+        if (!cancelled && fresh?.id) setProduct(fresh);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, authLoading, isAuthenticated, user?.id, user?.email]);
+
+  useEffect(() => {
     persistRelatedFiltersFromProduct(product);
   }, [product]);
 
