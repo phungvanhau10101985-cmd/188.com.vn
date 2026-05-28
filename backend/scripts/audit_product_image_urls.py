@@ -27,6 +27,7 @@ from app.services.alicdn_urls import (  # noqa: E402
     normalize_product_image_url,
     url_needs_image_normalization,
 )
+from sqlalchemy import text  # noqa: E402
 
 
 def _walk(field: str, value: Any, pid: str, hits: List[Dict[str, str]], counter: Counter) -> None:
@@ -100,6 +101,64 @@ def main() -> int:
     print("\nSamples:")
     for row in hits[:15]:
         print(json.dumps(row, ensure_ascii=False))
+
+    db2 = SessionLocal()
+    try:
+        sql_jpg_suffix = int(
+            db2.execute(
+                text(
+                    """
+                    SELECT count(*) FROM products
+                    WHERE (main_image IS NOT NULL AND main_image LIKE '%.jpg_%')
+                       OR (images::text LIKE '%.jpg_%')
+                       OR (gallery::text LIKE '%.jpg_%')
+                       OR (colors::text LIKE '%.jpg_%')
+                    """
+                )
+            ).scalar()
+            or 0
+        )
+        sql_webp_jpg = int(
+            db2.execute(
+                text(
+                    """
+                    SELECT count(*) FROM products
+                    WHERE (main_image IS NOT NULL AND main_image LIKE '%.webp.jpg%')
+                       OR (images::text LIKE '%.webp.jpg%')
+                       OR (gallery::text LIKE '%.webp.jpg%')
+                       OR (colors::text LIKE '%.webp.jpg%')
+                    """
+                )
+            ).scalar()
+            or 0
+        )
+        samples_sql = db2.execute(
+            text(
+                """
+                SELECT product_id, 'main_image' AS col, left(main_image, 200) AS url
+                FROM products
+                WHERE main_image LIKE '%.jpg_%800x800%'
+                UNION ALL
+                SELECT product_id, 'images', left(images::text, 200)
+                FROM products
+                WHERE images::text LIKE '%.jpg_%800x800%'
+                LIMIT 5
+                """
+            )
+        ).fetchall()
+    finally:
+        db2.close()
+
+    print("\n--- Kiểm tra SQL trực tiếp (pattern trong text cột) ---")
+    print(f"  Sản phẩm có '.jpg_' trong main_image/images/gallery/colors: {sql_jpg_suffix}")
+    print(f"  Sản phẩm có '.webp.jpg': {sql_webp_jpg}")
+    if samples_sql:
+        print("  Ví dụ SQL tìm thấy (.jpg_800x800):")
+        for row in samples_sql:
+            print(f"    {row[0]} | {row[1]} | {row[2]}")
+    elif sql_jpg_suffix == 0 and sum(counter.values()) == 0:
+        print("\n✅ DB products: URL ảnh đã chuẩn (không còn .jpg_ / .webp.jpg).")
+        print("   Nếu trang web vẫn thấy '_800x800q90.jpg' → frontend tự resize, không phải DB.")
 
     return 0
 
