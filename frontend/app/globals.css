@@ -194,23 +194,23 @@ body {
 }
 
 @media (min-width: 768px) {
-  html[data-nanoai188-pdp-pass="1"] #nanoai-chat-widget-v1,
-  html[data-nanoai188-pdp-pass="1"] [id^="nanoai-chat-widget"],
-  html[data-nanoai188-pdp-pass="1"] [id*="nanoai-chat-widget"] {
+  #nanoai-chat-widget-v1,
+  [id^="nanoai-chat-widget"],
+  [id*="nanoai-chat-widget"] {
     pointer-events: none !important;
   }
 
-  html[data-nanoai188-pdp-pass="1"] #nanoai-chat-widget-v1 button,
-  html[data-nanoai188-pdp-pass="1"] [id^="nanoai-chat-widget"] button,
-  html[data-nanoai188-pdp-pass="1"] [id*="nanoai-chat-widget"] button,
-  html[data-nanoai188-pdp-pass="1"] [data-nanoai-launcher],
-  html[data-nanoai188-pdp-pass="1"] [data-nanoai-chat-launcher],
-  html[data-nanoai188-pdp-pass="1"] #nanoai-chat-widget-v1 iframe,
-  html[data-nanoai188-pdp-pass="1"] [id^="nanoai-chat-widget"] iframe,
-  html[data-nanoai188-pdp-pass="1"] [id*="nanoai-chat-widget"] iframe,
-  html[data-nanoai188-pdp-pass="1"] #nanoai-chat-widget-v1 [role="dialog"],
-  html[data-nanoai188-pdp-pass="1"] [id^="nanoai-chat-widget"] [role="dialog"],
-  html[data-nanoai188-pdp-pass="1"] [id*="nanoai-chat-widget"] [role="dialog"] {
+  #nanoai-chat-widget-v1 button,
+  [id^="nanoai-chat-widget"] button,
+  [id*="nanoai-chat-widget"] button,
+  [data-nanoai-launcher],
+  [data-nanoai-chat-launcher],
+  #nanoai-chat-widget-v1 iframe,
+  [id^="nanoai-chat-widget"] iframe,
+  [id*="nanoai-chat-widget"] iframe,
+  #nanoai-chat-widget-v1 [role="dialog"],
+  [id^="nanoai-chat-widget"] [role="dialog"],
+  [id*="nanoai-chat-widget"] [role="dialog"] {
     pointer-events: auto !important;
   }
 }

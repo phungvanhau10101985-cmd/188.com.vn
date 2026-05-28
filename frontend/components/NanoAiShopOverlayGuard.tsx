@@ -11,8 +11,19 @@ import {
 } from '@/lib/nanoai-overlay-pass-through';
 import { clearNanoAiCartFlowState, isCartAddFromNanoAiFlow } from '@/lib/nanoai-hosted-chat';
 
+function isShopBrowsePath(pathname: string | null): boolean {
+  if (!pathname) return false;
+  const norm = pathname.replace(/\/$/, '') || '/';
+  if (pathname.startsWith('/admin')) return false;
+  if (pathname.startsWith('/auth')) return false;
+  if (pathname.startsWith('/cart/add/')) return false;
+  if (norm === '/luot-video-cung-shop') return false;
+  return true;
+}
+
 /**
- * Giữ khung NanoAI không chặn click/cuộn khi popup shop hoặc trang giỏ (sau luồng chat) đang active.
+ * Giữ khung NanoAI không chặn click/cuộn shop (trang chủ, danh mục, PDP, giỏ…).
+ * fullSuppress khi popup shop / auth / landing thêm giỏ từ chat.
  */
 export default function NanoAiShopOverlayGuard() {
   const pathname = usePathname();
@@ -21,7 +32,7 @@ export default function NanoAiShopOverlayGuard() {
   const isCartAddLandingPage = pathname?.startsWith('/cart/add/');
   const isCartPage = pathname === '/cart' || pathname === '/cart/';
   const isAuthPage = pathname?.startsWith('/auth/');
-  const isProductDetailPage = Boolean(pathname?.match(/^\/products\/[^/]+$/));
+  const isShopBrowse = isShopBrowsePath(pathname);
   const shouldSuppress =
     showAddToCartPopup ||
     isCartAddLandingPage ||
@@ -43,19 +54,7 @@ export default function NanoAiShopOverlayGuard() {
   }, [shouldSuppress]);
 
   useEffect(() => {
-    if (typeof document === 'undefined') return;
-    if (isProductDetailPage && !shouldSuppress) {
-      document.documentElement.setAttribute('data-nanoai188-pdp-pass', '1');
-    } else {
-      document.documentElement.removeAttribute('data-nanoai188-pdp-pass');
-    }
-    return () => {
-      document.documentElement.removeAttribute('data-nanoai188-pdp-pass');
-    };
-  }, [isProductDetailPage, shouldSuppress]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !isProductDetailPage || shouldSuppress) return;
+    if (typeof window === 'undefined' || !isShopBrowse || shouldSuppress) return;
 
     const run = () => releaseNanoAiClickBlockers({ mode: 'passThrough' });
     run();
@@ -66,12 +65,12 @@ export default function NanoAiShopOverlayGuard() {
     return () => {
       mo.disconnect();
     };
-  }, [isProductDetailPage, shouldSuppress]);
+  }, [isShopBrowse, shouldSuppress]);
 
   useEffect(() => {
-    if (shouldSuppress || isProductDetailPage) return;
+    if (isShopBrowse || shouldSuppress) return;
     clearNanoAiOverlayPassThrough();
-  }, [shouldSuppress, isProductDetailPage]);
+  }, [isShopBrowse, shouldSuppress]);
 
   useEffect(() => {
     if (isCartPage) return;
