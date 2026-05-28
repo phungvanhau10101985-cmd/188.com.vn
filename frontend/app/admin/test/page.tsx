@@ -24,6 +24,7 @@ export default function AdminFeatureTestPage() {
   const [savingBirthday, setSavingBirthday] = useState(false);
   const [savingSiteSale, setSavingSiteSale] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [siteSaleError, setSiteSaleError] = useState<string | null>(null);
   const [birthdayMessage, setBirthdayMessage] = useState<string | null>(null);
   const [siteSaleMessage, setSiteSaleMessage] = useState<string | null>(null);
   const [testEmail, setTestEmail] = useState('');
@@ -48,28 +49,42 @@ export default function AdminFeatureTestPage() {
   useEffect(() => {
     let active = true;
     const load = async () => {
+      setLoading(true);
+      setError(null);
+      setSiteSaleError(null);
+
+      let email = '';
+
       try {
-        setLoading(true);
-        setError(null);
-        const [birthdayData, siteSaleData] = await Promise.all([
-          adminFeatureTestAPI.getBirthdayPromoSettings(),
-          adminFeatureTestAPI.getSiteSaleSettings(),
-        ]);
+        const birthdayData = await adminFeatureTestAPI.getBirthdayPromoSettings();
         if (!active) return;
         setBirthdaySettings(birthdayData);
+        email = birthdayData.test_email || birthdayData.admin_email || email;
+      } catch (err) {
+        if (active) {
+          setError(err instanceof Error ? err.message : 'Không tải được cài đặt test CMSN.');
+        }
+      }
+
+      try {
+        const siteSaleData = await adminFeatureTestAPI.getSiteSaleSettings();
+        if (!active) return;
         setSiteSaleSettings(siteSaleData);
-        const email =
-          birthdayData.test_email ||
-          siteSaleData.test_email ||
-          birthdayData.admin_email ||
-          siteSaleData.admin_email ||
-          '';
-        setTestEmail(email);
+        email = siteSaleData.test_email || siteSaleData.admin_email || email;
         setSiteSalePhase(siteSaleData.site_sale_test_phase || 'active');
       } catch (err) {
-        if (active) setError(err instanceof Error ? err.message : 'Không tải được cài đặt test.');
-      } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setSiteSaleError(
+            err instanceof Error
+              ? `${err.message} Cần deploy code mới và restart backend (pm2 restart backend).`
+              : 'Không tải được cài đặt test Sale lịch.',
+          );
+        }
+      }
+
+      if (active) {
+        setTestEmail(email);
+        setLoading(false);
       }
     };
     void load();
@@ -111,7 +126,7 @@ export default function AdminFeatureTestPage() {
   const updateSiteSaleTest = async (enabled: boolean) => {
     try {
       setSavingSiteSale(true);
-      setError(null);
+      setSiteSaleError(null);
       setSiteSaleMessage(null);
       const email = testEmail.trim();
       if (enabled && !email) {
@@ -133,7 +148,7 @@ export default function AdminFeatureTestPage() {
           : 'Đã tắt test Sale lịch.'
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Không lưu được cài đặt test Sale lịch.');
+      setSiteSaleError(err instanceof Error ? err.message : 'Không lưu được cài đặt test Sale lịch.');
     } finally {
       setSavingSiteSale(false);
     }
@@ -249,6 +264,12 @@ export default function AdminFeatureTestPage() {
       {siteSaleMessage && (
         <div className="mt-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
           {siteSaleMessage}
+        </div>
+      )}
+
+      {siteSaleError && (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {siteSaleError}
         </div>
       )}
 

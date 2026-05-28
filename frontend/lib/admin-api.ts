@@ -2128,6 +2128,26 @@ export interface AdminSiteSaleTestSettings {
   can_apply_on_web: boolean;
 }
 
+async function fetchAdminFirstOk<T>(
+  endpoints: string[],
+  options: RequestInit & { timeoutMs?: number } = {},
+): Promise<T> {
+  let lastError: Error | null = null;
+  for (const endpoint of endpoints) {
+    try {
+      return await fetchAdmin<T>(endpoint, options);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('[404')) {
+        lastError = err instanceof Error ? err : new Error(message);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError ?? new Error('Không tìm thấy API admin phù hợp.');
+}
+
 export const adminFeatureTestAPI = {
   getBirthdayPromoSettings: () =>
     fetchAdmin<AdminBirthdayPromoTestSettings>('/birthday-promo/admin/test-settings'),
@@ -2137,16 +2157,25 @@ export const adminFeatureTestAPI = {
       body: JSON.stringify({ birthday_promo_enabled, test_email }),
     }),
   getSiteSaleSettings: () =>
-    fetchAdmin<AdminSiteSaleTestSettings>('/sale-calendar/admin/test-settings'),
+    fetchAdminFirstOk<AdminSiteSaleTestSettings>([
+      '/birthday-promo/admin/site-sale-test-settings',
+      '/sale-calendar/admin/test-settings',
+    ]),
   updateSiteSaleSettings: (
     site_sale_test_enabled: boolean,
     site_sale_test_phase: 'teaser' | 'active',
     test_email?: string | null,
   ) =>
-    fetchAdmin<AdminSiteSaleTestSettings>('/sale-calendar/admin/test-settings', {
-      method: 'PUT',
-      body: JSON.stringify({ site_sale_test_enabled, site_sale_test_phase, test_email }),
-    }),
+    fetchAdminFirstOk<AdminSiteSaleTestSettings>(
+      [
+        '/birthday-promo/admin/site-sale-test-settings',
+        '/sale-calendar/admin/test-settings',
+      ],
+      {
+        method: 'PUT',
+        body: JSON.stringify({ site_sale_test_enabled, site_sale_test_phase, test_email }),
+      },
+    ),
 };
 
 export interface BunnyCdnStatus {

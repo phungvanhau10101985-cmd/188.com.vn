@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,7 +10,6 @@ from app.core.security import get_current_user_optional, require_module_permissi
 from app.crud import sale_calendar as crud_sale_calendar
 from app.db.session import get_db
 from app.models.admin import AdminUser
-from app.models.admin_feature_test import AdminFeatureTestSetting
 from app.models.user import User
 from app.schemas.sale_calendar import (
     SaleCalendarMonthRuleOut,
@@ -21,38 +19,19 @@ from app.schemas.sale_calendar import (
     SaleCalendarSettingsUpdate,
 )
 from app.services import sale_calendar as sale_calendar_svc
-from app.utils.display_timeline import to_utc_aware
+from app.services.admin_feature_test_site_sale import (
+    get_site_sale_test_settings_row,
+    site_sale_test_settings_payload as _site_sale_test_settings_payload,
+    upsert_site_sale_test_settings,
+)
 
 router = APIRouter()
-TEST_DURATION_MINUTES = sale_calendar_svc.SITE_SALE_TEST_DURATION_MINUTES
 
 
 class SiteSaleTestSettingsIn(BaseModel):
     site_sale_test_enabled: bool
     site_sale_test_phase: Literal["teaser", "active"] = "active"
     test_email: str | None = None
-
-
-def _site_sale_test_settings_payload(admin: AdminUser, row: AdminFeatureTestSetting | None) -> dict:
-    test_email = ((row.test_email if row else None) or admin.email or "").strip()
-    expires_at = row.site_sale_test_expires_at if row else None
-    expires_at_utc = to_utc_aware(expires_at)
-    is_enabled = bool(row.site_sale_test_enabled) if row else False
-    if is_enabled and (not expires_at_utc or expires_at_utc <= datetime.now(timezone.utc)):
-        is_enabled = False
-    phase = (getattr(row, "site_sale_test_phase", None) or "active") if row else "active"
-    if phase not in ("teaser", "active"):
-        phase = "active"
-    return {
-        "site_sale_test_enabled": is_enabled,
-        "site_sale_test_expires_at": expires_at.isoformat() if expires_at else None,
-        "site_sale_test_phase": phase,
-        "test_duration_minutes": TEST_DURATION_MINUTES,
-        "admin_email": admin.email,
-        "test_email": test_email,
-        "linked_user_id": admin.linked_user_id,
-        "can_apply_on_web": bool(test_email),
-    }
 
 
 def _default_pct(month: int) -> float:
@@ -97,11 +76,7 @@ def get_site_sale_test_settings(
     db: Session = Depends(get_db),
     current_admin: AdminUser = Depends(require_privileged_admin),
 ):
-    row = (
-        db.query(AdminFeatureTestSetting)
-        .filter(AdminFeatureTestSetting.admin_id == current_admin.id)
-        .first()
-    )
+    row = get_site_sale_test_settings_row(db, current_admin.id)
     return _site_sale_test_settings_payload(current_admin, row)
 
 
@@ -111,28 +86,16 @@ def update_site_sale_test_settings(
     db: Session = Depends(get_db),
     current_admin: AdminUser = Depends(require_privileged_admin),
 ):
-    row = (
-        db.query(AdminFeatureTestSetting)
-        .filter(AdminFeatureTestSetting.admin_id == current_admin.id)
-        .first()
-    )
-    if not row:
-        row = AdminFeatureTestSetting(admin_id=current_admin.id)
-        db.add(row)
-    test_email = (payload.test_email or row.test_email or current_admin.email or "").strip().lower()
-    if payload.site_sale_test_enabled and not test_email:
-        raise HTTPException(status_code=400, detail="Vui lòng nhập email tài khoản test.")
-    row.test_email = test_email or None
-    row.site_sale_test_enabled = bool(payload.site_sale_test_enabled)
-    row.site_sale_test_phase = payload.site_sale_test_phase
-    row.site_sale_test_expires_at = (
-        datetime.now(timezone.utc) + timedelta(minutes=TEST_DURATION_MINUTES)
-        if payload.site_sale_test_enabled
-        else None
-    )
-    db.commit()
-    db.refresh(row)
-    return _site_sale_test_settings_payload(current_admin, row)
+    try:
+        return upsert_site_sale_test_settings(
+            db,
+            current_admin,
+            site_sale_test_enabled=payload.site_sale_test_enabled,
+            site_sale_test_phase=payload.site_sale_test_phase,
+            test_email=payload.test_email,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/admin/settings", response_model=SaleCalendarSettingsOut)

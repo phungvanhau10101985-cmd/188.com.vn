@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
@@ -18,6 +19,11 @@ from app.services.birthday_discount import (
     get_birthday_discount_for_user,
 )
 from app.services.email_service import send_birthday_promo_email
+from app.services.admin_feature_test_site_sale import (
+    get_site_sale_test_settings_row,
+    site_sale_test_settings_payload,
+    upsert_site_sale_test_settings,
+)
 from app.utils.display_timeline import to_utc_aware
 
 
@@ -27,6 +33,12 @@ TEST_DURATION_MINUTES = 10
 
 class BirthdayPromoTestSettingsIn(BaseModel):
     birthday_promo_enabled: bool
+    test_email: str | None = None
+
+
+class SiteSaleTestSettingsIn(BaseModel):
+    site_sale_test_enabled: bool
+    site_sale_test_phase: Literal["teaser", "active"] = "active"
     test_email: str | None = None
 
 
@@ -70,6 +82,33 @@ def get_birthday_promo_test_settings(
         .first()
     )
     return _test_settings_payload(current_admin, row)
+
+
+@router.get("/admin/site-sale-test-settings")
+def get_site_sale_test_settings_alias(
+    db: Session = Depends(get_db),
+    current_admin: AdminUser = Depends(require_privileged_admin),
+):
+    row = get_site_sale_test_settings_row(db, current_admin.id)
+    return site_sale_test_settings_payload(current_admin, row)
+
+
+@router.put("/admin/site-sale-test-settings")
+def update_site_sale_test_settings_alias(
+    payload: SiteSaleTestSettingsIn,
+    db: Session = Depends(get_db),
+    current_admin: AdminUser = Depends(require_privileged_admin),
+):
+    try:
+        return upsert_site_sale_test_settings(
+            db,
+            current_admin,
+            site_sale_test_enabled=payload.site_sale_test_enabled,
+            site_sale_test_phase=payload.site_sale_test_phase,
+            test_email=payload.test_email,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/me")
