@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from app.core.config import settings
-from app.services.alicdn_urls import truncate_alicdn_url_to_first_jpg
+from app.services.alicdn_urls import normalize_product_image_url
 from app.utils.product_synthetic_engagement import synthetic_engagement_counts
 
 
@@ -89,12 +89,7 @@ def _normalize_image_url(url: str) -> str:
     u = (url or "").strip().strip('"').strip("'")
     if not u:
         return ""
-    if u.startswith("//"):
-        u = f"https:{u}"
-    if u.startswith("http://"):
-        u = "https://" + u[len("http://") :]
-    u = re.sub(r"(_\d+x\d+q?\d*|\.sum)\.(jpg|jpeg|png|webp)$", r".\2", u, flags=re.I)
-    return truncate_alicdn_url_to_first_jpg(u)
+    return normalize_product_image_url(u)
 
 
 def _prefer_larger_offer_image(url: str) -> str:

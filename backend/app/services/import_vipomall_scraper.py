@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from app.core.config import settings
-from app.services.alicdn_urls import truncate_alicdn_url_to_first_jpg
+from app.services.alicdn_urls import normalize_product_image_url
 from app.services.import_hibox_scraper import (
     normalize_product_import_url,
     supply_product_link_default_for_hibox_slug,
@@ -72,7 +72,7 @@ def _norm_img_url(raw: str) -> str:
         u = "https://" + u[len("http://") :]
     if any(marker in u.lower() for marker in _VIPOMALL_IMAGE_HOST_MARKERS):
         return ""
-    return truncate_alicdn_url_to_first_jpg(u)
+    return normalize_product_image_url(u)
 
 
 def _dedupe_urls(values: List[str]) -> List[str]:

@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlparse
 
 from app.core.config import settings
-from app.services.alicdn_urls import truncate_alicdn_url_to_first_jpg
+from app.services.alicdn_urls import normalize_product_image_url
 from app.services.listing_cny_grid import (
     DEFAULT_VND_PER_CNY_FOR_LISTING_ESTIMATE,
     cny_exchange_multiplier_from_grid,
@@ -354,11 +354,7 @@ def _normalize_image_url(url: str) -> str:
     u = (url or "").strip().strip('"').strip("'")
     if not u:
         return ""
-    if u.startswith("//"):
-        u = f"https:{u}"
-    if u.startswith("http://"):
-        u = "https://" + u[len("http://") :]
-    return truncate_alicdn_url_to_first_jpg(u)
+    return normalize_product_image_url(u)
 
 
 def _load_hibox_scrape_module():  # noqa: ANN401

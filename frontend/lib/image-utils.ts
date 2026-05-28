@@ -64,10 +64,10 @@ function pickSafeAlicdnResizeSide(requestedW: number, requestedH: number, maxCap
   return pick;
 }
 
-/** Bỏ hậu tố resize cũ (có thể 404) trước khi gắn kích thước mới. */
+/** Bỏ hậu tố nén sau cụm .jpg đầu tiên (vd. …cib.jpg_800x800q90.jpg → …cib.jpg). */
 export function stripAlicdnToBaseJpg(url: string): string {
   const u = (url || '').trim();
-  if (!isAlibabaCdnImageUrl(u)) return u;
+  if (!u) return u;
   return truncateAlicdnToFirstJpg(u);
 }
 

@@ -48,6 +48,7 @@ from app.schemas.import_1688 import (
 )
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.services.import_link_deepseek_taxonomy import apply_deepseek_taxonomy_to_product_data
+from app.services.alicdn_urls import normalize_excel_product_image_urls
 from app.services.product_rating_question_groups import apply_import_rating_question_groups_to_product_data
 from app.services.product_info_web_compact import compact_product_info_for_web
 from app.services.import_hibox_scraper import (
@@ -735,6 +736,7 @@ def _publish_payload(product_data: Dict[str, Any]) -> Dict[str, Any]:
     payload["colors"] = _coerce_colors_for_create(payload.get("colors"))
     # Khớp nghiệp vụ + cột Excel mẫu (=1): lưu DB dạng bool; draft/export dùng số 1/0.
     payload["deposit_require"] = True
+    normalize_excel_product_image_urls(payload)
     return payload
 
 
@@ -1615,6 +1617,9 @@ def publish_import_1688_draft(
     merged_pd = dict(draft.product_data or {})
     merged_pd["product_id"] = canonical_pid
     merged_pd["code"] = payload.get("code") or ""
+    for _img_key in ("main_image", "images", "gallery", "colors"):
+        if _img_key in payload:
+            merged_pd[_img_key] = payload[_img_key]
     compact_product_info_for_web(merged_pd)
     merged_pd["deposit_require"] = 1
 
