@@ -34,6 +34,7 @@ if BACKEND_ROOT not in sys.path:
 
 from sqlalchemy.orm import Session  # noqa: E402
 from sqlalchemy.orm.attributes import flag_modified  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 
 from app.db.session import SessionLocal, engine  # noqa: E402
 from app.models.product import Product  # noqa: E402
@@ -42,6 +43,37 @@ from app.services.alicdn_urls import (  # noqa: E402
     iter_bad_image_urls_in_record,
     normalize_product_image_record,
 )
+
+
+def _record_json_sig(data: Dict[str, Any]) -> str:
+    return json.dumps(data, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _sql_fix_main_image_column(db: Session, *, dry_run: bool) -> Dict[str, int]:
+    """Sửa nhanh cột main_image (varchar) — pattern …cib.jpg_800x800q90.jpg."""
+    count = int(
+        db.execute(
+            text(
+                """
+                SELECT count(*) FROM products
+                WHERE main_image IS NOT NULL AND main_image ~* '\\.jpg_'
+                """
+            )
+        ).scalar()
+        or 0
+    )
+    if not dry_run and count > 0:
+        db.execute(
+            text(
+                """
+                UPDATE products
+                SET main_image = regexp_replace(main_image, '(?i)(\\.jpg)_.*$', '\\1')
+                WHERE main_image IS NOT NULL AND main_image ~* '\\.jpg_'
+                """
+            )
+        )
+        db.commit()
+    return {"main_image_sql_fixed": count}
 
 
 def _product_image_fields(product: Product) -> Dict[str, Any]:
@@ -179,7 +211,7 @@ def migrate_products(
             last_id = product.id
             before = _product_image_fields(product)
             after = normalize_product_image_record(before)
-            if before == after:
+            if _record_json_sig(before) == _record_json_sig(after):
                 continue
 
             changed += 1
@@ -243,7 +275,7 @@ def migrate_import_drafts(
 
             before = copy.deepcopy(raw)
             after = normalize_product_image_record(before)
-            if before == after:
+            if _record_json_sig(before) == _record_json_sig(after):
                 continue
 
             changed += 1
@@ -323,8 +355,23 @@ def main() -> int:
         if args.audit:
             results = [audit_products(db, limit=args.limit)]
             _print_summary(results, dry_run=True, audit=True)
+            sql_left = db.execute(
+                text(
+                    """
+                    SELECT count(*) FROM products
+                    WHERE (main_image IS NOT NULL AND main_image ~* '\\.jpg_')
+                       OR (images::text ~* '\\.jpg_')
+                       OR (gallery::text ~* '\\.jpg_')
+                       OR (colors::text ~* '\\.jpg_')
+                    """
+                )
+            ).scalar()
+            print(f"\nSQL rows still matching '.jpg_': {sql_left}")
             print("\n--audit: không ghi DB.--")
             return 0
+
+        sql_preview = _sql_fix_main_image_column(db, dry_run=True)
+        print(f"main_image SQL có thể sửa: {sql_preview['main_image_sql_fixed']}")
 
         results = [migrate_products(db, dry_run=True, batch_size=batch_size, limit=args.limit)]
         if args.include_drafts:
@@ -354,6 +401,8 @@ def main() -> int:
 
     db_run = SessionLocal()
     try:
+        sql_done = _sql_fix_main_image_column(db_run, dry_run=False)
+        print(f"main_image SQL đã sửa: {sql_done['main_image_sql_fixed']}")
         final_results = [
             migrate_products(db_run, dry_run=False, batch_size=batch_size, limit=args.limit)
         ]

@@ -80,7 +80,7 @@ def url_needs_image_normalization(url: str) -> bool:
     lower = raw.lower()
     if ".webp.jpg" in lower or ".png.jpg" in lower:
         return True
-    if re.search(r"\.jpg[._?]", raw, flags=re.I):
+    if re.search(r"\.jpg[._]", raw, flags=re.I):
         return True
     if ".webp_" in lower and _WEBP_RESIZE_SUFFIX.search(raw):
         return True
