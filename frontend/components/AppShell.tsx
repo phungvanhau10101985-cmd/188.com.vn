@@ -454,7 +454,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       )}
 
       <main
-        className={`flex-1 md:pb-0 ${showMobileBottomNav ? 'pb-16' : ''} ${isShopVideoFeedPage ? 'bg-black' : ''} ${isCartAddLandingPage ? 'min-h-0 p-0' : ''}`}
+        className={`flex-1 md:pb-0 ${showMobileBottomNav ? 'pb-14' : ''} ${isShopVideoFeedPage ? 'bg-black' : ''} ${isCartAddLandingPage ? 'min-h-0 p-0' : ''}`}
       >
         {children}
       </main>

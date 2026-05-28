@@ -208,7 +208,7 @@ export default function ProductDetailMobile({
   const productCode = product.code || product.product_id || '';
 
   return (
-    <div className="md:hidden min-h-screen bg-white pb-32">
+    <div className="md:hidden min-h-screen bg-white pb-28">
       <NanoAiLauncherGatewaySync payload={nanoPayload} />
       <div className="px-4 py-3">
         <BirthdayPromoBanner
@@ -486,85 +486,76 @@ export default function ProductDetailMobile({
       </div>
 
       {/* Sticky bottom bar: Trang · Thử đồ · Thích | THÊM GIỎ | MUA HÀNG */}
-      <div className="fixed bottom-0 left-0 right-0 z-[100] bg-gray-100 border-t border-gray-200 safe-area-pb md:hidden pointer-events-auto" data-188-pdp-sticky-actions data-188-skip-draggable>
+      <div className="fixed bottom-0 left-0 right-0 z-[100] border-t border-gray-200 bg-gray-100 md:hidden pointer-events-auto" data-188-pdp-sticky-actions data-188-skip-draggable>
         {/* Loyalty Discount Message */}
         {birthdayDiscount.active && birthdayDiscountAmount > 0 && (
-          <div className="bg-pink-600 border-b border-pink-700 px-2 py-1 text-center">
-            <span className="text-[10px] text-white font-semibold flex items-center justify-center gap-1">
+          <div className="border-b border-pink-700 bg-pink-600 px-2 py-0.5 text-center">
+            <span className="flex items-center justify-center gap-1 text-[9px] font-semibold text-white">
               <span aria-hidden>🎁</span>
               Giá sinh nhật: tiết kiệm <strong>{formatPrice(birthdayDiscountAmount)}</strong>
             </span>
           </div>
         )}
         {isAuthenticated && loyaltyDiscountAmount > 0 && (
-          <div className="bg-green-50 border-b border-green-100 px-2 py-1 text-center">
-            <span className="text-[10px] text-green-700 font-medium flex items-center justify-center gap-1">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-              Hạng <strong>{loyaltyTierName}</strong> giảm <strong>{formatPrice(loyaltyDiscountAmount)}</strong> khi mua hàng
+          <div className="border-b border-green-100 bg-green-50 px-2 py-0.5 text-center">
+            <span className="flex items-center justify-center gap-1 text-[9px] font-medium text-green-700">
+              <svg className="h-2.5 w-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+              Hạng <strong>{loyaltyTierName}</strong> giảm <strong>{formatPrice(loyaltyDiscountAmount)}</strong>
             </span>
           </div>
         )}
-        <div className="flex items-center h-14 px-2 gap-2">
+        <div className="flex h-11 items-center gap-1.5 px-1.5 pb-[max(0px,env(safe-area-inset-bottom,0px))]">
           <nav
-            className="flex shrink-0 items-center gap-px border-r border-gray-200 pr-2 mr-0.5"
+            className="mr-0.5 flex shrink-0 items-center gap-px border-r border-gray-200 pr-1.5"
             aria-label="Lối tắt"
           >
             <Link
               href="/"
-              className="flex w-12 flex-none flex-col items-center justify-center gap-px py-0 text-gray-600 active:opacity-70"
+              className="flex w-9 flex-none flex-col items-center justify-center gap-0.5 py-0 text-gray-600 active:opacity-70"
               aria-label="Trang chủ"
             >
-              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
               </svg>
-              <span className="flex flex-col items-center gap-0 leading-none">
-                <span className="text-[10px] text-gray-600">Trang</span>
-                <span className="text-[10px] text-gray-600">chủ</span>
-              </span>
+              <span className="max-w-[2.25rem] truncate text-[9px] leading-none">Trang chủ</span>
             </Link>
             <button
               type="button"
               onClick={handleNanoAiTryOn}
-              className="flex w-12 flex-none flex-col items-center justify-center gap-px py-0 text-[#ea580c] active:opacity-70"
+              className="flex w-9 flex-none flex-col items-center justify-center gap-0.5 py-0 text-[#ea580c] active:opacity-70"
               aria-label="Thử đồ với NanoAI"
             >
-              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
+              <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
                 />
               </svg>
-              <span className="flex flex-col items-center gap-0 leading-none">
-                <span className="text-[10px] font-medium text-[#ea580c]">Thử</span>
-                <span className="text-[10px] font-medium text-[#ea580c]">đồ</span>
-              </span>
+              <span className="text-[9px] font-medium leading-none">Thử đồ</span>
             </button>
             <button
               type="button"
               onClick={() => onToggleFavorite(product)}
               aria-label={`Thích, ${formatLikeCount(product.likes)} lượt`}
-              className={`flex w-12 flex-none flex-col items-center justify-center gap-px py-0 active:opacity-70 ${
+              className={`flex w-9 flex-none flex-col items-center justify-center gap-0.5 py-0 active:opacity-70 ${
                 isFavorited ? 'text-red-500' : 'text-gray-600'
               }`}
             >
-              <svg className="w-5 h-5 shrink-0" fill={isFavorited ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <svg className="h-4 w-4 shrink-0" fill={isFavorited ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
               </svg>
-              <span className="flex flex-col items-center gap-0 leading-none text-center">
-                <span className="text-[10px] leading-none">Thích</span>
-                <span className="text-[10px] font-semibold tabular-nums leading-none tracking-tight">
-                  {formatLikeCount(product.likes)}
-                </span>
+              <span className="text-center text-[9px] leading-none tabular-nums">
+                {formatLikeCount(product.likes)}
               </span>
             </button>
           </nav>
-          <div className="flex flex-1 gap-2 justify-end min-w-0">
+          <div className="flex min-w-0 flex-1 gap-1.5">
             <button
               type="button"
               onClick={openVariantModal}
               disabled={!available}
-              className="flex-1 max-w-[120px] py-2.5 rounded-lg font-semibold text-sm bg-gray-500 text-white hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="min-h-[36px] flex-1 rounded-lg bg-gray-500 py-1.5 text-xs font-semibold text-white hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
               THÊM GIỎ
             </button>
@@ -572,7 +563,7 @@ export default function ProductDetailMobile({
               type="button"
               onClick={openVariantModal}
               disabled={!available}
-              className="flex-1 max-w-[120px] py-2.5 rounded-lg font-semibold text-sm bg-[#ea580c] text-white hover:bg-[#c2410c] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="min-h-[36px] flex-1 rounded-lg bg-[#ea580c] py-1.5 text-xs font-semibold text-white hover:bg-[#c2410c] disabled:cursor-not-allowed disabled:opacity-50"
             >
               MUA HÀNG
             </button>
