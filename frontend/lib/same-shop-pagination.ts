@@ -39,3 +39,17 @@ export function normalizeSameShopTotal(
 export function sameShopTotalWhenExhausted(currentLength: number): number {
   return Math.max(0, currentLength);
 }
+
+/** Còn batch cùng shop để «Xem thêm» không (batch đầu nhỏ vẫn thử nếu API báo total lớn hơn). */
+export function inferSameShopLoadMoreAvailable(
+  loadedCount: number,
+  lastBatchSize: number,
+  pageLimit: number,
+  reportedTotal: number,
+): boolean {
+  if (loadedCount <= 0 || lastBatchSize <= 0) return false;
+  const reported = Math.max(0, reportedTotal);
+  if (reported > loadedCount) return true;
+  if (lastBatchSize >= pageLimit && reported === 0) return true;
+  return false;
+}

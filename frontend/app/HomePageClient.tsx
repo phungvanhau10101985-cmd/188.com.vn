@@ -11,6 +11,7 @@ const NanoaiSimilarProductCard = dynamic(() => import('@/components/NanoaiSimila
 const CategoryProductFilters = dynamic(() => import('@/components/CategoryProductFilters'));
 import PersonalizedHeroBanner from '@/components/home/PersonalizedHeroBanner';
 import SameShopRecommendationHeader from '@/components/home/SameShopRecommendationHeader';
+import HomeProductPagination from '@/components/home/HomeProductPagination';
 import { apiClient, NANOAI_TEXT_SEARCH_LIMIT } from '@/lib/api-client';
 import { useLazyRevealList } from '@/hooks/useLazyRevealList';
 import { trackEvent } from '@/lib/analytics';
@@ -36,8 +37,8 @@ import {
 } from '@/lib/product-related-tabs';
 import type { CategoryProductFacets } from '@/lib/category-seo';
 import {
+  inferSameShopLoadMoreAvailable,
   mergeSameShopProductBatch,
-  normalizeSameShopTotal,
   sameShopTotalWhenExhausted,
 } from '@/lib/same-shop-pagination';
 import {
@@ -46,7 +47,9 @@ import {
   mixShopAndCohortProducts,
 } from '@/lib/home-recommendation-mixed-products';
 
-const SAME_SHOP_PAGE_LIMIT = 60;
+/** Lần đầu block «CÓ THỂ BẠN THÍCH» — ít SP hơn để luôn có «Xem thêm» khi còn dữ liệu. */
+const HOME_MIX_INITIAL_LIMIT = 24;
+const HOME_MIX_LOAD_MORE_LIMIT = 24;
 
 function favoritePayloadFromProduct(p: Product): Record<string, unknown> {
   return {
@@ -905,9 +908,9 @@ export default function HomePageClient({
   const [sameShopSeed, setSameShopSeed] = useState<number | null>(null);
   const [sameShopLoading, setSameShopLoading] = useState(false);
   const [sameShopLoadMoreLoading, setSameShopLoadMoreLoading] = useState(false);
+  const [sameShopCanLoadMore, setSameShopCanLoadMore] = useState(false);
   const [mixedRecommendationProducts, setMixedRecommendationProducts] = useState<Product[]>([]);
   const recommendationMixAnchorRef = useRef('');
-  const sameShopHasMore = sameShopProducts.length < sameShopTotal && sameShopTotal > 0;
   /** Chỉ hiện khối khi đã xác định có lượt xem + có SP cùng shop (tránh skeleton khi khách mới). */
   const showSameShopSection = !sameShopLoading && sameShopTotal > 0;
   const lastSearchTrackedRef = useRef<string>('');
@@ -945,48 +948,58 @@ export default function HomePageClient({
 
   useEffect(() => {
     setSameShopLoading(true);
-    apiClient.getProductsSameShopAsRecentViews(SAME_SHOP_PAGE_LIMIT, 0)
+    setSameShopCanLoadMore(false);
+    apiClient.getProductsSameShopAsRecentViews(HOME_MIX_INITIAL_LIMIT, 0)
       .then(({ products, total, seed }) => {
         const list = products || [];
+        const reported = total ?? 0;
         setSameShopProducts(list);
-        setSameShopTotal(normalizeSameShopTotal(list.length, total ?? 0, SAME_SHOP_PAGE_LIMIT));
+        setSameShopTotal(Math.max(reported, list.length));
         setSameShopSeed(seed ?? null);
+        setSameShopCanLoadMore(
+          inferSameShopLoadMoreAvailable(list.length, list.length, HOME_MIX_INITIAL_LIMIT, reported)
+        );
       })
       .catch(() => {
         setSameShopProducts([]);
         setSameShopTotal(0);
         setSameShopSeed(null);
+        setSameShopCanLoadMore(false);
       })
       .finally(() => setSameShopLoading(false));
   }, [recommendationKey]);
 
   const loadMoreSameShop = useCallback(() => {
-    if (!sameShopHasMore || sameShopLoadMoreLoading) return;
+    if (!sameShopCanLoadMore || sameShopLoadMoreLoading) return;
     setSameShopLoadMoreLoading(true);
     const prevLen = sameShopProducts.length;
     apiClient
-      .getProductsSameShopAsRecentViews(SAME_SHOP_PAGE_LIMIT, prevLen, sameShopSeed ?? undefined)
+      .getProductsSameShopAsRecentViews(HOME_MIX_LOAD_MORE_LIMIT, prevLen, sameShopSeed ?? undefined)
       .then(({ products, total }) => {
         const batch = products || [];
         if (batch.length === 0) {
+          setSameShopCanLoadMore(false);
           setSameShopTotal(sameShopTotalWhenExhausted(prevLen));
           return;
         }
         setSameShopProducts((prev) => {
           const { merged, addedCount } = mergeSameShopProductBatch(prev, batch);
           if (addedCount === 0) {
+            setSameShopCanLoadMore(false);
             setSameShopTotal(sameShopTotalWhenExhausted(prev.length));
             return prev;
           }
           const reported = total ?? 0;
-          setSameShopTotal(
-            normalizeSameShopTotal(merged.length, Math.max(reported, merged.length), SAME_SHOP_PAGE_LIMIT)
+          const loaded = merged.length;
+          setSameShopTotal(Math.max(reported, loaded));
+          setSameShopCanLoadMore(
+            inferSameShopLoadMoreAvailable(loaded, batch.length, HOME_MIX_LOAD_MORE_LIMIT, reported)
           );
           return merged;
         });
       })
       .finally(() => setSameShopLoadMoreLoading(false));
-  }, [sameShopHasMore, sameShopLoadMoreLoading, sameShopProducts.length, sameShopSeed]);
+  }, [sameShopCanLoadMore, sameShopLoadMoreLoading, sameShopProducts.length, sameShopSeed]);
 
   const cohortProductsForMix = useMemo(() => {
     if (
@@ -1287,29 +1300,12 @@ export default function HomePageClient({
               )}
             </div>
             {showPagination && (
-              <div className="mt-6 flex flex-wrap items-center justify-between gap-3 text-sm">
-                <p className="text-gray-600">
-                  Trang {currentPage} / {totalPages} — Tổng {totalProducts} sản phẩm
-                </p>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPage(currentPage - 1)}
-                    disabled={currentPage <= 1}
-                    className="px-3 py-2 rounded-lg border border-gray-200 text-gray-700 disabled:opacity-50 hover:bg-gray-50"
-                  >
-                    Trang trước
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPage(currentPage + 1)}
-                    disabled={currentPage >= totalPages}
-                    className="px-3 py-2 rounded-lg border border-gray-200 text-gray-700 disabled:opacity-50 hover:bg-gray-50"
-                  >
-                    Trang sau
-                  </button>
-                </div>
-              </div>
+              <HomeProductPagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalProducts={totalProducts}
+                onPageChange={setPage}
+              />
             )}
           </section>
         )}
@@ -1352,13 +1348,13 @@ export default function HomePageClient({
                   ))}
                 </div>
               ) : null}
-              {sameShopHasMore && (
-                <div className="flex justify-center py-6">
+              {sameShopCanLoadMore && mixedRecommendationProducts.length > 0 && (
+                <div className="flex justify-center pt-5 pb-2">
                   <button
                     type="button"
                     onClick={loadMoreSameShop}
                     disabled={sameShopLoadMoreLoading}
-                    className="bg-[#ea580c] hover:bg-[#c2410c] disabled:opacity-60 text-white px-6 py-2.5 rounded-xl font-medium transition-colors text-sm shadow-sm"
+                    className="inline-flex min-h-[44px] items-center rounded-xl bg-[#ea580c] px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#c2410c] disabled:opacity-60"
                   >
                     {sameShopLoadMoreLoading ? 'Đang tải...' : 'Xem thêm'}
                   </button>
@@ -1411,29 +1407,12 @@ export default function HomePageClient({
                   ))}
                 </div>
                 {showPagination && (
-                  <div className="mt-6 flex flex-wrap items-center justify-between gap-3 text-sm">
-                    <p className="text-gray-600">
-                      Trang {currentPage} / {totalPages} — Tổng {totalProducts} sản phẩm
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setPage(currentPage - 1)}
-                        disabled={currentPage <= 1}
-                        className="px-3 py-2 rounded-lg border border-gray-200 text-gray-700 disabled:opacity-50 hover:bg-gray-50"
-                      >
-                        Trang trước
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPage(currentPage + 1)}
-                        disabled={currentPage >= totalPages}
-                        className="px-3 py-2 rounded-lg border border-gray-200 text-gray-700 disabled:opacity-50 hover:bg-gray-50"
-                      >
-                        Trang sau
-                      </button>
-                    </div>
-                  </div>
+                  <HomeProductPagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalProducts={totalProducts}
+                    onPageChange={setPage}
+                  />
                 )}
               </>
             ) : (
