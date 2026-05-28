@@ -202,6 +202,7 @@ def load_api_routes():
         ("analytics", "/analytics", "analytics"),
         ("birthday_promo", "/birthday-promo", "birthday-promo"),
         ("promotions", "/promotions", "promotions"),
+        ("sale_calendar", "/sale-calendar", "sale-calendar"),
         ("nanoai_search", "/nanoai", "nanoai"),
         ("sepay_webhook", "/sepay", "sepay"),
         ("debug", "/debug", "debug"),

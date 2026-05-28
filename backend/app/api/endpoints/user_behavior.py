@@ -139,8 +139,8 @@ def get_products_viewed_by_same_age_gender_endpoint(
     cohort_mode:
     - requires_login: chưa đăng nhập
     - profile_incomplete: thiếu ngày sinh hoặc giới tính → cập nhật tại /account/profile
-    - exact_cohort: random trong 30 SP xem gần nhất của khách cùng năm sinh & giới tính
-    - gender_peers: random trong 30 SP xem gần nhất của khách cùng giới tính
+    - exact_cohort: random trong 30 SP xem gần nhất của khách khác cùng năm sinh & giới tính (trừ SP bạn đã xem)
+    - gender_peers: random trong 30 SP xem gần nhất của khách khác cùng giới tính (trừ SP bạn đã xem)
     - popular_fallback: hiển thị SP phổ biến khi chưa có lượt xem để suy luận
 
     Mỗi lần tải trang: thứ tự SP tuổi/giới có thể khác (shuffle trong pool 30).
