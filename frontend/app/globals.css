@@ -443,3 +443,10 @@ html[data-nanoai188-shop-overlay="1"] [id*="nanoai-chat-widget"] * {
   color: var(--color-primary);
   border-bottom: 2px solid var(--color-primary);
 }
+
+/* PDP: thanh sticky desktop (portal trực tiếp vào body) — ẩn trên mobile. Thanh mobile nằm trong DOM trang, không bị ảnh hưởng. */
+@media (max-width: 767px) {
+  body > [data-188-pdp-sticky-actions]:not([data-188-pdp-sticky-mobile]) {
+    display: none !important;
+  }
+}

@@ -208,7 +208,7 @@ export default function ProductDetailMobile({
   const productCode = product.code || product.product_id || '';
 
   return (
-    <div className="md:hidden min-h-screen bg-white pb-28">
+    <div className="md:hidden min-h-screen bg-white pb-24">
       <NanoAiLauncherGatewaySync payload={nanoPayload} />
       <div className="px-4 py-3">
         <BirthdayPromoBanner
@@ -486,7 +486,7 @@ export default function ProductDetailMobile({
       </div>
 
       {/* Sticky bottom bar: Trang · Thử đồ · Thích | THÊM GIỎ | MUA HÀNG */}
-      <div className="fixed bottom-0 left-0 right-0 z-[100] border-t border-gray-200 bg-gray-100 md:hidden pointer-events-auto" data-188-pdp-sticky-actions data-188-skip-draggable>
+      <div className="fixed bottom-0 left-0 right-0 z-[100] border-t border-gray-200 bg-gray-100 md:hidden pointer-events-auto" data-188-pdp-sticky-actions data-188-pdp-sticky-mobile data-188-skip-draggable>
         {/* Loyalty Discount Message */}
         {birthdayDiscount.active && birthdayDiscountAmount > 0 && (
           <div className="border-b border-pink-700 bg-pink-600 px-2 py-0.5 text-center">
@@ -504,58 +504,56 @@ export default function ProductDetailMobile({
             </span>
           </div>
         )}
-        <div className="flex h-11 items-center gap-1.5 px-1.5 pb-[max(0px,env(safe-area-inset-bottom,0px))]">
+        <div className="flex h-10 items-center gap-1 px-1.5 pb-[max(0px,env(safe-area-inset-bottom,0px))]">
           <nav
-            className="mr-0.5 flex shrink-0 items-center gap-px border-r border-gray-200 pr-1.5"
+            className="mr-0.5 flex shrink-0 items-center gap-0.5 border-r border-gray-200 pr-1"
             aria-label="Lối tắt"
           >
             <Link
               href="/"
-              className="flex w-9 flex-none flex-col items-center justify-center gap-0.5 py-0 text-gray-600 active:opacity-70"
+              className="flex h-9 w-9 flex-none items-center justify-center text-gray-600 active:opacity-70"
               aria-label="Trang chủ"
             >
-              <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <svg className="h-[18px] w-[18px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
               </svg>
-              <span className="max-w-[2.25rem] truncate text-[9px] leading-none">Trang chủ</span>
             </Link>
             <button
               type="button"
               onClick={handleNanoAiTryOn}
-              className="flex w-9 flex-none flex-col items-center justify-center gap-0.5 py-0 text-[#ea580c] active:opacity-70"
+              className="flex h-9 w-9 flex-none items-center justify-center text-[#ea580c] active:opacity-70"
               aria-label="Thử đồ với NanoAI"
             >
-              <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
+              <svg className="h-[18px] w-[18px] shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
                 />
               </svg>
-              <span className="text-[9px] font-medium leading-none">Thử đồ</span>
             </button>
             <button
               type="button"
               onClick={() => onToggleFavorite(product)}
               aria-label={`Thích, ${formatLikeCount(product.likes)} lượt`}
-              className={`flex w-9 flex-none flex-col items-center justify-center gap-0.5 py-0 active:opacity-70 ${
+              className={`flex h-9 w-9 flex-none flex-col items-center justify-center gap-0 active:opacity-70 ${
                 isFavorited ? 'text-red-500' : 'text-gray-600'
               }`}
             >
-              <svg className="h-4 w-4 shrink-0" fill={isFavorited ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <svg className="h-[18px] w-[18px] shrink-0" fill={isFavorited ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
               </svg>
-              <span className="text-center text-[9px] leading-none tabular-nums">
+              <span className="text-[8px] leading-none tabular-nums">
                 {formatLikeCount(product.likes)}
               </span>
             </button>
           </nav>
-          <div className="flex min-w-0 flex-1 gap-1.5">
+          <div className="flex min-w-0 flex-1 gap-1">
             <button
               type="button"
               onClick={openVariantModal}
               disabled={!available}
-              className="min-h-[36px] flex-1 rounded-lg bg-gray-500 py-1.5 text-xs font-semibold text-white hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-[32px] flex-1 rounded-md bg-gray-500 py-1 text-[11px] font-semibold text-white hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
               THÊM GIỎ
             </button>
@@ -563,7 +561,7 @@ export default function ProductDetailMobile({
               type="button"
               onClick={openVariantModal}
               disabled={!available}
-              className="min-h-[36px] flex-1 rounded-lg bg-[#ea580c] py-1.5 text-xs font-semibold text-white hover:bg-[#c2410c] disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-[32px] flex-1 rounded-md bg-[#ea580c] py-1 text-[11px] font-semibold text-white hover:bg-[#c2410c] disabled:cursor-not-allowed disabled:opacity-50"
             >
               MUA HÀNG
             </button>
