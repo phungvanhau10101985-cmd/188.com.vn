@@ -193,6 +193,28 @@ body {
   }
 }
 
+@media (min-width: 768px) {
+  html[data-nanoai188-pdp-pass="1"] #nanoai-chat-widget-v1,
+  html[data-nanoai188-pdp-pass="1"] [id^="nanoai-chat-widget"],
+  html[data-nanoai188-pdp-pass="1"] [id*="nanoai-chat-widget"] {
+    pointer-events: none !important;
+  }
+
+  html[data-nanoai188-pdp-pass="1"] #nanoai-chat-widget-v1 button,
+  html[data-nanoai188-pdp-pass="1"] [id^="nanoai-chat-widget"] button,
+  html[data-nanoai188-pdp-pass="1"] [id*="nanoai-chat-widget"] button,
+  html[data-nanoai188-pdp-pass="1"] [data-nanoai-launcher],
+  html[data-nanoai188-pdp-pass="1"] [data-nanoai-chat-launcher],
+  html[data-nanoai188-pdp-pass="1"] #nanoai-chat-widget-v1 iframe,
+  html[data-nanoai188-pdp-pass="1"] [id^="nanoai-chat-widget"] iframe,
+  html[data-nanoai188-pdp-pass="1"] [id*="nanoai-chat-widget"] iframe,
+  html[data-nanoai188-pdp-pass="1"] #nanoai-chat-widget-v1 [role="dialog"],
+  html[data-nanoai188-pdp-pass="1"] [id^="nanoai-chat-widget"] [role="dialog"],
+  html[data-nanoai188-pdp-pass="1"] [id*="nanoai-chat-widget"] [role="dialog"] {
+    pointer-events: auto !important;
+  }
+}
+
 /* Popup/trang shop từ NanoAI: tắt hết pointer-events khung chat (desktop + mobile). */
 html[data-nanoai188-shop-overlay="1"] #nanoai-chat-widget-v1,
 html[data-nanoai188-shop-overlay="1"] [id^="nanoai-chat-widget"],

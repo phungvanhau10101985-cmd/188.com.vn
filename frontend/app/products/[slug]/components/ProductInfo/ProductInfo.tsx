@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
@@ -56,6 +57,7 @@ export default function ProductInfo({
   const [variantModalOpen, setVariantModalOpen] = useState(false);
   const [variantModalAction, setVariantModalAction] = useState<'add' | 'buy' | 'both'>('both');
   const [displayStockByVariant, setDisplayStockByVariant] = useState<Record<string, number>>({});
+  const [stickyPortalReady, setStickyPortalReady] = useState(false);
   const { isAuthenticated } = useAuth();
   const { openTryOnForProduct } = useNanoAiMessaging();
   const [loyaltyStatus, setLoyaltyStatus] = useState<any>(null);
@@ -117,6 +119,10 @@ export default function ProductInfo({
   }, [product.id, colorList.length]);
 
   useEffect(() => {
+    setStickyPortalReady(true);
+  }, []);
+
+  useEffect(() => {
     if (!actionsRef.current) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -137,6 +143,74 @@ export default function ProductInfo({
     setVariantModalAction('both');
     setVariantModalOpen(true);
   };
+
+  const stickyActionsBar =
+    showStickyActions && stickyPortalReady ? (
+      <div
+        data-188-pdp-sticky-actions
+        data-188-skip-draggable
+        className="fixed bottom-0 left-0 right-0 z-[100] bg-gray-100 border-t border-gray-200 pointer-events-auto"
+      >
+        <div className="max-w-7xl mx-auto px-4">
+          <div className="flex items-center justify-center h-14 gap-2">
+            <div className="flex items-center gap-3">
+              <Link href="/" className="flex flex-col items-center justify-center flex-shrink-0 w-14 text-gray-600">
+                <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+                <span className="text-[11px]">Trang chủ</span>
+              </Link>
+              <button
+                type="button"
+                onClick={handleNanoAiTryOn}
+                className="flex flex-col items-center justify-center flex-shrink-0 w-14 text-[#ea580c] hover:opacity-90 active:opacity-75"
+                aria-label="Thử đồ với NanoAI"
+              >
+                <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                </svg>
+                <span className="text-[11px] font-medium">Thử đồ</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleFavorite(product)}
+                disabled={isCartLoading}
+                className={`flex flex-col items-center justify-center flex-shrink-0 w-14 ${
+                  isFavorited ? 'text-red-500' : 'text-gray-600'
+                } ${isCartLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
+              >
+                <svg className="w-7 h-7" fill={isFavorited ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
+                <span className="text-[11px]">Thích {product.likes ?? 0}</span>
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={openVariantModal}
+                disabled={!available || isCartLoading}
+                className={`min-w-[160px] px-4 py-2.5 rounded-lg font-semibold text-sm transition-all whitespace-nowrap ${
+                  available && !isCartLoading
+                    ? 'bg-gray-500 text-white hover:bg-gray-600'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                } ${isCartLoading ? 'opacity-70' : ''}`}
+              >
+                {isCartLoading ? 'ĐANG THÊM...' : 'THÊM GIỎ'}
+              </button>
+              <button
+                type="button"
+                onClick={openVariantModal}
+                disabled={!available || isCartLoading}
+                className={`min-w-[160px] px-4 py-2.5 rounded-lg font-semibold text-sm transition-all whitespace-nowrap ${
+                  available && !isCartLoading
+                    ? 'bg-[#ea580c] text-white hover:bg-[#c2410c]'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                } ${isCartLoading ? 'opacity-70' : ''}`}
+              >
+                {isCartLoading ? 'ĐANG XỬ LÝ...' : 'MUA HÀNG'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    ) : null;
 
   return (
     <div className="space-y-4 md:pb-20">
@@ -385,74 +459,10 @@ export default function ProductInfo({
         layout="grid"
       />
 
-      {/* Sticky bottom actions (desktop) */}
-      {showStickyActions && (
-        <div className="hidden md:block">
-          <div className="fixed bottom-0 left-0 right-0 z-30 bg-gray-100 border-t border-gray-200">
-            <div className="max-w-7xl mx-auto px-4">
-              <div className="flex items-center justify-center h-14">
-                <div className="flex items-center gap-3">
-                  <Link href="/" className="flex flex-col items-center justify-center flex-shrink-0 w-14 text-gray-600">
-                  <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
-                  <span className="text-[11px]">Trang chủ</span>
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={handleNanoAiTryOn}
-                    className="flex flex-col items-center justify-center flex-shrink-0 w-14 text-[#ea580c] hover:opacity-90 active:opacity-75"
-                    aria-label="Thử đồ với NanoAI"
-                  >
-                    <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
-                      />
-                    </svg>
-                    <span className="text-[11px] font-medium">Thử đồ</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onToggleFavorite(product)}
-                    disabled={isCartLoading}
-                    className={`flex flex-col items-center justify-center flex-shrink-0 w-14 ${
-                      isFavorited ? 'text-red-500' : 'text-gray-600'
-                    } ${isCartLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
-                  >
-                    <svg className="w-7 h-7" fill={isFavorited ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
-                    <span className="text-[11px]">Thích {product.likes ?? 0}</span>
-                  </button>
-                </div>
-                <div className="flex items-center gap-2 ml-2">
-                  <button
-                    onClick={openVariantModal}
-                    disabled={!available || isCartLoading}
-                    className={`min-w-[160px] px-4 py-2.5 rounded-lg font-semibold text-sm transition-all whitespace-nowrap ${
-                      available && !isCartLoading
-                        ? 'bg-gray-500 text-white hover:bg-gray-600'
-                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    } ${isCartLoading ? 'opacity-70' : ''}`}
-                  >
-                    {isCartLoading ? 'ĐANG THÊM...' : 'THÊM GIỎ'}
-                  </button>
-                  <button
-                    onClick={openVariantModal}
-                    disabled={!available || isCartLoading}
-                    className={`min-w-[160px] px-4 py-2.5 rounded-lg font-semibold text-sm transition-all whitespace-nowrap ${
-                      available && !isCartLoading
-                        ? 'bg-[#ea580c] text-white hover:bg-[#c2410c]'
-                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    } ${isCartLoading ? 'opacity-70' : ''}`}
-                  >
-                    {isCartLoading ? 'ĐANG XỬ LÝ...' : 'MUA HÀNG'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Sticky bottom actions (desktop) — portal tránh bị NanoAI / ancestor che click */}
+      {typeof document !== 'undefined' && stickyActionsBar
+        ? createPortal(stickyActionsBar, document.body)
+        : null}
 
       <ProductVariantModal
         product={product}

@@ -38,6 +38,17 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 
 const GUEST_CART_LEGACY_KEY = 'guest_cart';
 
+function sortCartItemsNewestFirst<T extends { id?: number; updated_at?: string; created_at?: string; added_at?: string }>(
+  items: T[],
+): T[] {
+  return [...items].sort((a, b) => {
+    const ta = new Date(a.updated_at || a.created_at || a.added_at || 0).getTime();
+    const tb = new Date(b.updated_at || b.created_at || b.added_at || 0).getTime();
+    if (tb !== ta) return tb - ta;
+    return Number(b.id ?? 0) - Number(a.id ?? 0);
+  });
+}
+
 export function CartProvider({ children }: { children: ReactNode }) {
   const [cartState, setCartState] = useState<CartState>({
     cart: null,
@@ -60,9 +71,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   const enrichCart = (cart: Awaited<ReturnType<typeof cartAPI.getCart>>) => {
     const normalizedCart = cart ? { ...cart, items: Array.isArray(cart.items) ? cart.items : [] } : null;
-    const sortedItems = normalizedCart
-      ? [...normalizedCart.items].sort((a: any, b: any) => Number(a?.id ?? 0) - Number(b?.id ?? 0))
-      : [];
+    const sortedItems = normalizedCart ? sortCartItemsNewestFirst(normalizedCart.items) : [];
     return normalizedCart
       ? {
           ...normalizedCart,

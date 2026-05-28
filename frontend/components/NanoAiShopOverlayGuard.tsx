@@ -21,6 +21,7 @@ export default function NanoAiShopOverlayGuard() {
   const isCartAddLandingPage = pathname?.startsWith('/cart/add/');
   const isCartPage = pathname === '/cart' || pathname === '/cart/';
   const isAuthPage = pathname?.startsWith('/auth/');
+  const isProductDetailPage = Boolean(pathname?.match(/^\/products\/[^/]+$/));
   const shouldSuppress =
     showAddToCartPopup ||
     isCartAddLandingPage ||
@@ -42,9 +43,35 @@ export default function NanoAiShopOverlayGuard() {
   }, [shouldSuppress]);
 
   useEffect(() => {
-    if (shouldSuppress) return;
+    if (typeof document === 'undefined') return;
+    if (isProductDetailPage && !shouldSuppress) {
+      document.documentElement.setAttribute('data-nanoai188-pdp-pass', '1');
+    } else {
+      document.documentElement.removeAttribute('data-nanoai188-pdp-pass');
+    }
+    return () => {
+      document.documentElement.removeAttribute('data-nanoai188-pdp-pass');
+    };
+  }, [isProductDetailPage, shouldSuppress]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isProductDetailPage || shouldSuppress) return;
+
+    const run = () => releaseNanoAiClickBlockers({ mode: 'passThrough' });
+    run();
+
+    const mo = new MutationObserver(run);
+    mo.observe(document.body, { childList: true, subtree: true });
+
+    return () => {
+      mo.disconnect();
+    };
+  }, [isProductDetailPage, shouldSuppress]);
+
+  useEffect(() => {
+    if (shouldSuppress || isProductDetailPage) return;
     clearNanoAiOverlayPassThrough();
-  }, [shouldSuppress]);
+  }, [shouldSuppress, isProductDetailPage]);
 
   useEffect(() => {
     if (isCartPage) return;

@@ -1,4 +1,5 @@
 # backend/app/crud/cart.py - COMPLETE FIXED VERSION
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -108,7 +109,10 @@ class CartItemCRUD:
             db.query(CartItem)
             .options(joinedload(CartItem.product))
             .filter(CartItem.user_id == user_id)
-            .order_by(CartItem.id.asc())
+            .order_by(
+                func.coalesce(CartItem.updated_at, CartItem.created_at, CartItem.added_at).desc(),
+                CartItem.id.desc(),
+            )
             .all()
         )
     

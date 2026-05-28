@@ -486,7 +486,7 @@ export default function ProductDetailMobile({
       </div>
 
       {/* Sticky bottom bar: Trang · Thử đồ · Thích | THÊM GIỎ | MUA HÀNG */}
-      <div className="fixed bottom-0 left-0 right-0 z-30 bg-gray-100 border-t border-gray-200 safe-area-pb md:hidden">
+      <div className="fixed bottom-0 left-0 right-0 z-[100] bg-gray-100 border-t border-gray-200 safe-area-pb md:hidden pointer-events-auto" data-188-pdp-sticky-actions data-188-skip-draggable>
         {/* Loyalty Discount Message */}
         {birthdayDiscount.active && birthdayDiscountAmount > 0 && (
           <div className="bg-pink-600 border-b border-pink-700 px-2 py-1 text-center">
