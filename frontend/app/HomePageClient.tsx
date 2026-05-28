@@ -5,7 +5,6 @@ import dynamic from 'next/dynamic';
 import { useState, useEffect, useCallback, useRef, useLayoutEffect, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import Image from 'next/image';
 import { SimpleProductCard } from '@/components/ProductCard';
 
 const NanoaiSimilarProductCard = dynamic(() => import('@/components/NanoaiSimilarProductCard'));
@@ -14,9 +13,6 @@ import PersonalizedHeroBanner from '@/components/home/PersonalizedHeroBanner';
 import { apiClient, NANOAI_TEXT_SEARCH_LIMIT } from '@/lib/api-client';
 import { useLazyRevealList } from '@/hooks/useLazyRevealList';
 import { trackEvent } from '@/lib/analytics';
-import { getOptimizedImage } from '@/lib/image-utils';
-import { formatPrice } from '@/lib/utils';
-import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import type {
   Product,
   ProductListResponse,
@@ -43,6 +39,11 @@ import {
   normalizeSameShopTotal,
   sameShopTotalWhenExhausted,
 } from '@/lib/same-shop-pagination';
+import {
+  groupProductsByShop,
+  mixShopAndCohortStrips,
+  splitCohortStripGroups,
+} from '@/lib/home-recommendation-strip-groups';
 
 const SAME_SHOP_PAGE_LIMIT = 60;
 
@@ -67,26 +68,13 @@ function sameAgeGenderSectionDescription(
     case 'profile_incomplete':
       return 'Vui lòng cập nhật đủ ngày sinh và giới tính trong Hồ sơ — sau khi lưu, trang chủ sẽ hiển thị gợi ý theo nhóm tuổi và giới của bạn.';
     case 'exact_cohort':
-      return 'Dựa trên sản phẩm mà khách cùng năm sinh và cùng giới tính với bạn thường xem.';
+      return 'Gợi ý ngẫu nhiên từ sản phẩm nhóm cùng tuổi và giới tính vừa xem gần đây.';
     case 'gender_peers':
-      return 'Nhóm cùng tuổi chưa có đủ lượt xem — đang mở rộng gợi ý theo giới tính của bạn.';
+      return 'Nhóm cùng tuổi chưa đủ lượt xem — gợi ý ngẫu nhiên từ sản phẩm cùng giới tính vừa xem gần đây.';
     case 'popular_fallback':
       return 'Chưa có lượt xem nhóm để so sánh — đang hiển thị sản phẩm phổ biến; khám phá thêm để gợi ý chính xác hơn.';
     default:
       return null;
-  }
-}
-
-function sameAgeGenderPanelTitle(mode: SameAgeGenderCohortMode | null): string {
-  switch (mode) {
-    case 'exact_cohort':
-      return 'Khách cùng tuổi, cùng giới tính với bạn đang xem';
-    case 'gender_peers':
-      return 'Khách cùng giới tính đang xem nhiều';
-    case 'popular_fallback':
-      return 'Sản phẩm phổ biến gợi ý cho bạn';
-    default:
-      return 'Gợi ý cho bạn';
   }
 }
 
@@ -901,7 +889,6 @@ export default function HomePageClient({
   const [sameAgeGenderProducts, setSameAgeGenderProducts] = useState<Product[]>([]);
   const [sameAgeGenderLoading, setSameAgeGenderLoading] = useState(false);
   const [sameAgeGenderCohortMode, setSameAgeGenderCohortMode] = useState<SameAgeGenderCohortMode | null>(null);
-  const [sameAgeGenderPanelOpen, setSameAgeGenderPanelOpen] = useState(false);
   const [sameShopProducts, setSameShopProducts] = useState<Product[]>([]);
   const [sameShopTotal, setSameShopTotal] = useState(0);
   const [sameShopSeed, setSameShopSeed] = useState<number | null>(null);
@@ -1019,6 +1006,33 @@ export default function HomePageClient({
   };
 
   const sameAgeGenderExplain = sameAgeGenderSectionDescription(sameAgeGenderCohortMode, sameAgeGenderLoading);
+
+  const cohortStripGroups = useMemo(() => {
+    if (sameAgeGenderLoading) return [];
+    if (
+      sameAgeGenderCohortMode === 'requires_login' ||
+      sameAgeGenderCohortMode === 'profile_incomplete' ||
+      sameAgeGenderProducts.length === 0
+    ) {
+      return [];
+    }
+    return splitCohortStripGroups(sameAgeGenderProducts);
+  }, [sameAgeGenderLoading, sameAgeGenderCohortMode, sameAgeGenderProducts]);
+
+  const shopStripGroups = useMemo(() => groupProductsByShop(sameShopProducts), [sameShopProducts]);
+
+  const mixedHomeStrips = useMemo(
+    () => mixShopAndCohortStrips(shopStripGroups, cohortStripGroups),
+    [shopStripGroups, cohortStripGroups]
+  );
+
+  const showMixedRecommendationSection =
+    showSameShopSection ||
+    cohortStripGroups.length > 0 ||
+    sameShopLoading ||
+    sameAgeGenderLoading ||
+    sameAgeGenderCohortMode === 'requires_login' ||
+    sameAgeGenderCohortMode === 'profile_incomplete';
 
   const heroShopName = useMemo(() => {
     for (const p of sameShopProducts) {
@@ -1251,39 +1265,103 @@ export default function HomePageClient({
           </section>
         )}
 
-        {/* Cùng shop — chỉ khi khách đã xem SP và API có gợi ý (total > 0). */}
-        {!hasFilterParams && showSameShopSection && (
+        {/* Cùng shop + xen 2 dòng đề xuất tuổi/giới (tối đa 10 nhóm). */}
+        {!hasFilterParams && showMixedRecommendationSection && (
           <section className="mb-8" id="san-pham-cung-shop">
             <div className="mb-2">
               <h2 className="text-base font-bold text-gray-900 border-b-2 border-[#ea580c] pb-1 w-fit">
                 SẢN PHẨM CÙNG SHOP BẠN VỪA XEM
               </h2>
-            </div>
-          <div className="mt-4">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-              {sameShopProducts.map((product, index) => (
-                <SimpleProductCard
-                  key={product.id}
-                  product={product}
-                  onFavorite={handleFavorite}
-                  isFavorited={favoriteIds.has(product.id)}
-                  priority={index < 2}
-                />
-              ))}
-            </div>
-            {sameShopHasMore && (
-              <div className="flex justify-center py-6">
-                <button
-                  type="button"
-                  onClick={loadMoreSameShop}
-                  disabled={sameShopLoadMoreLoading}
-                  className="bg-[#ea580c] hover:bg-[#c2410c] disabled:opacity-60 text-white px-6 py-2.5 rounded-xl font-medium transition-colors text-sm shadow-sm"
+              {sameAgeGenderExplain ? (
+                <p className="text-sm text-gray-600 mt-2 max-w-2xl">{sameAgeGenderExplain}</p>
+              ) : null}
+              {!sameAgeGenderLoading && sameAgeGenderCohortMode === 'requires_login' ? (
+                <div className="mt-3 flex flex-wrap gap-3">
+                  <Link
+                    href="/auth/login"
+                    className="inline-flex items-center justify-center bg-[#ea580c] text-white text-sm font-semibold px-4 py-2.5 rounded-lg hover:bg-[#c2410c] transition-colors"
+                  >
+                    Đăng nhập
+                  </Link>
+                </div>
+              ) : null}
+              {!sameAgeGenderLoading && sameAgeGenderCohortMode === 'profile_incomplete' ? (
+                <div className="mt-3 flex flex-wrap gap-3">
+                  <Link
+                    href="/account/profile"
+                    className="inline-flex items-center justify-center bg-[#ea580c] text-white text-sm font-semibold px-4 py-2.5 rounded-lg hover:bg-[#c2410c] transition-colors"
+                  >
+                    Cập nhật ngày sinh và giới tính
+                  </Link>
+                </div>
+              ) : null}
+              {!sameAgeGenderLoading &&
+              isAuthenticated &&
+              cohortStripGroups.length > 0 &&
+              sameAgeGenderCohortMode !== 'profile_incomplete' &&
+              sameAgeGenderCohortMode !== 'requires_login' ? (
+                <Link
+                  href="/account/profile"
+                  className="inline-block mt-2 text-xs text-[#ea580c] font-medium hover:underline"
                 >
-                  {sameShopLoadMoreLoading ? 'Đang tải...' : 'Xem thêm'}
-                </button>
-              </div>
-            )}
-          </div>
+                  Chỉnh sửa ngày sinh / giới tính
+                </Link>
+              ) : null}
+            </div>
+            <div className="mt-4">
+              {sameShopLoading || sameAgeGenderLoading ? (
+                <div className="flex flex-col gap-3">
+                  {[...Array(4)].map((_, rowIndex) => (
+                    <div key={rowIndex} className="flex gap-3 overflow-x-auto scrollbar-hide -mx-4 px-4 py-1">
+                      {[...Array(6)].map((__, i) => (
+                        <div
+                          key={i}
+                          className="flex-shrink-0 w-[9.5rem] sm:w-[11rem] rounded-xl border border-gray-100 overflow-hidden animate-pulse"
+                        >
+                          <div className="aspect-square bg-gray-100" />
+                          <div className="p-2 space-y-2">
+                            <div className="h-3 bg-gray-100 rounded w-full" />
+                            <div className="h-4 bg-gray-100 rounded w-2/5" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              ) : mixedHomeStrips.length > 0 ? (
+                <div className="flex flex-col gap-4">
+                  {mixedHomeStrips.map((group) => (
+                    <div key={group.id}>
+                      <p className="text-xs font-semibold text-gray-700 mb-1.5 truncate">{group.label}</p>
+                      <div className="flex gap-3 overflow-x-auto scrollbar-hide -mx-4 px-4 py-1">
+                        {group.products.map((product, index) => (
+                          <div key={product.id} className="flex-shrink-0 w-[9.5rem] sm:w-[11rem]">
+                            <SimpleProductCard
+                              product={product}
+                              onFavorite={handleFavorite}
+                              isFavorited={favoriteIds.has(product.id)}
+                              priority={index < 2}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {sameShopHasMore && (
+                <div className="flex justify-center py-6">
+                  <button
+                    type="button"
+                    onClick={loadMoreSameShop}
+                    disabled={sameShopLoadMoreLoading}
+                    className="bg-[#ea580c] hover:bg-[#c2410c] disabled:opacity-60 text-white px-6 py-2.5 rounded-xl font-medium transition-colors text-sm shadow-sm"
+                  >
+                    {sameShopLoadMoreLoading ? 'Đang tải...' : 'Xem thêm'}
+                  </button>
+                </div>
+              )}
+            </div>
           </section>
         )}
 
@@ -1362,176 +1440,6 @@ export default function HomePageClient({
                   : 'Chưa có sản phẩm nào.'}
               </p>
             )}
-          </section>
-        )}
-
-        {/* Section Đề xuất theo tuổi và giới tính — bật đầy đủ sau khi đăng nhập và lưu ngày sinh + giới tính */}
-        {!hasFilterParams && (
-          <section className="mb-6">
-            <h2 className="text-base font-bold text-gray-900 mb-2 border-b-2 border-[#ea580c] pb-1 w-fit">
-              SẢN PHẨM ĐỀ XUẤT THEO TUỔI VÀ GIỚI TÍNH
-            </h2>
-            {sameAgeGenderExplain ? (
-              <p className="text-sm text-gray-600 mt-1 max-w-2xl">{sameAgeGenderExplain}</p>
-            ) : null}
-
-            {!sameAgeGenderLoading && sameAgeGenderCohortMode === 'requires_login' ? (
-              <div className="mt-3 flex flex-wrap gap-3">
-                <Link
-                  href="/auth/login"
-                  className="inline-flex items-center justify-center bg-[#ea580c] text-white text-sm font-semibold px-4 py-2.5 rounded-lg hover:bg-[#c2410c] transition-colors"
-                >
-                  Đăng nhập
-                </Link>
-              </div>
-            ) : null}
-
-            {!sameAgeGenderLoading && sameAgeGenderCohortMode === 'profile_incomplete' ? (
-              <div className="mt-3 flex flex-wrap gap-3">
-                <Link
-                  href="/account/profile"
-                  className="inline-flex items-center justify-center bg-[#ea580c] text-white text-sm font-semibold px-4 py-2.5 rounded-lg hover:bg-[#c2410c] transition-colors"
-                >
-                  Cập nhật ngày sinh và giới tính
-                </Link>
-              </div>
-            ) : null}
-
-            {!sameAgeGenderLoading &&
-            isAuthenticated &&
-            sameAgeGenderProducts.length > 0 &&
-            sameAgeGenderCohortMode !== 'profile_incomplete' &&
-            sameAgeGenderCohortMode !== 'requires_login' ? (
-              <Link
-                href="/account/profile"
-                className="inline-block mt-2 text-xs text-[#ea580c] font-medium hover:underline"
-              >
-                Chỉnh sửa ngày sinh / giới tính
-              </Link>
-            ) : null}
-
-            <div className="mt-4">
-              {sameAgeGenderLoading ? (
-                <div className="flex flex-col gap-2">
-                  {[0, 1].map((rowIndex) => (
-                    <div key={rowIndex} className="flex gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 py-1">
-                      {[...Array(6)].map((_, i) => (
-                        <div key={i} className="flex-shrink-0 w-24 h-24 md:w-28 md:h-28 rounded-lg bg-gray-100 animate-pulse" />
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              ) : sameAgeGenderProducts.length > 0 ? (
-              <>
-                <div className="flex flex-col gap-2">
-                  {[0, 1].map((rowIndex) => {
-                    const start = rowIndex * Math.ceil(sameAgeGenderProducts.length / 2);
-                    const rowProducts = sameAgeGenderProducts.slice(
-                      start,
-                      start + Math.ceil(sameAgeGenderProducts.length / 2)
-                    );
-                    return (
-                      <div
-                        key={rowIndex}
-                        className="flex gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 py-1"
-                      >
-                        {rowProducts.map((product) => {
-                          const imgUrl = getOptimizedImage(product.main_image, {
-                            width: 160,
-                            height: 160,
-                            quality: 80,
-                            fallbackStrategy: 'local',
-                          });
-                          return (
-                            <button
-                              key={product.id}
-                              type="button"
-                              onClick={() => setSameAgeGenderPanelOpen(true)}
-                              className="flex-shrink-0 w-24 h-24 md:w-28 md:h-28 rounded-lg overflow-hidden border border-gray-200 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all focus:outline-none focus:ring-2 focus:ring-[#ea580c] focus:ring-offset-1"
-                            >
-                              <Image
-                                src={imgUrl}
-                                alt=""
-                                width={112}
-                                height={112}
-                                className="object-cover w-full h-full"
-                              />
-                            </button>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {sameAgeGenderPanelOpen && (
-                  <>
-                    <button
-                      type="button"
-                      aria-label="Đóng"
-                      className="fixed inset-0 bg-black/50 z-40"
-                      onClick={() => setSameAgeGenderPanelOpen(false)}
-                    />
-                    <div className="fixed left-0 right-0 top-1/2 -translate-y-1/2 z-50 max-h-[85vh] overflow-hidden mx-4 rounded-xl bg-white shadow-2xl border border-gray-200 flex flex-col">
-                      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50 rounded-t-xl">
-                        <h3 className="text-base font-bold text-gray-900">
-                          {sameAgeGenderPanelTitle(sameAgeGenderCohortMode)}
-                        </h3>
-                        <button
-                          type="button"
-                          onClick={() => setSameAgeGenderPanelOpen(false)}
-                          className="p-2 rounded-full hover:bg-gray-200 text-gray-600"
-                          aria-label="Đóng"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                      <div className="overflow-y-auto flex-1 p-4">
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                          {sameAgeGenderProducts.map((product) => {
-                            const imgUrl = getOptimizedImage(product.main_image, {
-                              width: 200,
-                              height: 200,
-                              quality: 85,
-                              fallbackStrategy: 'local',
-                            });
-                            return (
-                              <Link
-                                key={product.id}
-                                href={`/products/${productPathSlugFromApi(product.slug, product.product_id) || product.id}`}
-                                onClick={() => setSameAgeGenderPanelOpen(false)}
-                                className="bg-white rounded-xl border border-gray-100 overflow-hidden hover:shadow-md transition-shadow"
-                              >
-                                <div className="aspect-square bg-gray-50 relative">
-                                  <Image
-                                    src={imgUrl}
-                                    alt={product.name}
-                                    width={200}
-                                    height={200}
-                                    className="object-cover w-full h-full"
-                                  />
-                                </div>
-                                <div className="p-2">
-                                  <p className="text-xs font-medium text-gray-900 line-clamp-2 min-h-[2rem]">
-                                    {product.name}
-                                  </p>
-                                  <p className="text-sm font-bold text-[#ea580c] mt-0.5">
-                                    {formatPrice(product.price)}
-                                  </p>
-                                </div>
-                              </Link>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </>
-            ) : null}
-            </div>
           </section>
         )}
 

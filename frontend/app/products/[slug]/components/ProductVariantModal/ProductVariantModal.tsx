@@ -282,14 +282,14 @@ export default function ProductVariantModal({
           </h2>
 
           {/* Ảnh xác nhận to + mã sp, tên, giá, kho (desktop) */}
-          <div className="hidden md:flex gap-4 mb-3">
+          <div className="hidden md:flex gap-4 mb-3 items-start">
             <div className="flex-shrink-0 w-1/2 aspect-square rounded-xl overflow-hidden bg-gray-100 border border-gray-200">
               <Image
                 src={getOptimizedImage(mainDisplayImage, { width: 512, height: 512 })}
                 alt={product.name}
                 width={512}
                 height={512}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain"
               />
             </div>
             <div className="flex-1 min-w-0 flex flex-col gap-0.5">

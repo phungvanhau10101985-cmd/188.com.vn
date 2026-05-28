@@ -255,6 +255,9 @@ def get_user_viewed_products(db: Session, user_id: int, limit: int = 20) -> List
     ).order_by(UserProductView.viewed_at.desc()).limit(limit).all()
 
 
+SAME_AGE_GENDER_RECENT_VIEW_POOL = 30
+
+
 def get_products_viewed_by_same_age_gender(
     db: Session, user_id: int, limit: int = 24
 ) -> Tuple[List[Product], str]:
@@ -263,11 +266,12 @@ def get_products_viewed_by_same_age_gender(
 
     Trả về (products, cohort_mode):
     - profile_incomplete: chưa có ngày sinh hoặc giới tính
-    - exact_cohort: từ lượt xem của user cùng năm sinh và cùng giới tính (is_active)
-    - gender_peers: chưa đủ lượt xem nhóm tuổi — mở rộng cùng giới tính
+    - exact_cohort: random trong {pool} SP xem gần nhất của khách cùng năm sinh & giới tính
+    - gender_peers: random trong {pool} SP xem gần nhất của khách cùng giới tính
     - popular_fallback: chưa có lượt xem để suy luận — SP phổ biến (purchases)
 
-    Luôn trả cohort_mode để frontend hiển thị giải thích phù hợp.
+    Mỗi lần gọi API: lấy tối đa SAME_AGE_GENDER_RECENT_VIEW_POOL SP unique (theo lượt xem mới nhất
+    trong nhóm), shuffle rồi trả tối đa `limit` SP — tương tự cùng shop (đổi mỗi lần tải trang).
     """
     user = get_user(db, user_id)
     if not user or not user.date_of_birth or not user.gender:
@@ -276,18 +280,26 @@ def get_products_viewed_by_same_age_gender(
     birth_year = user.date_of_birth.year
     gender = user.gender
 
-    def _product_ids_from_views(peer_ids: List[int]) -> List[int]:
+    def _product_ids_from_recent_cohort_views(peer_ids: List[int]) -> List[int]:
         if not peer_ids:
             return []
         rows = (
-            db.query(UserProductView.product_id, func.count(UserProductView.id).label("cnt"))
+            db.query(
+                UserProductView.product_id,
+                func.max(UserProductView.viewed_at).label("last_viewed"),
+            )
             .filter(UserProductView.user_id.in_(peer_ids))
             .group_by(UserProductView.product_id)
-            .order_by(func.count(UserProductView.id).desc())
-            .limit(limit * 2)
+            .order_by(func.max(UserProductView.viewed_at).desc())
+            .limit(SAME_AGE_GENDER_RECENT_VIEW_POOL)
             .all()
         )
-        return [r[0] for r in rows]
+        pool = [r[0] for r in rows]
+        if not pool:
+            return []
+        shuffled = pool.copy()
+        random.shuffle(shuffled)
+        return shuffled
 
     def _hydrate_ordered(product_ids: List[int]) -> List[Product]:
         if not product_ids:
@@ -309,7 +321,7 @@ def get_products_viewed_by_same_age_gender(
         .filter(extract("year", User.date_of_birth) == birth_year)
         .all()
     ]
-    product_ids = _product_ids_from_views(same_year_gender_ids)
+    product_ids = _product_ids_from_recent_cohort_views(same_year_gender_ids)
     if product_ids:
         return _hydrate_ordered(product_ids), "exact_cohort"
 
@@ -320,7 +332,7 @@ def get_products_viewed_by_same_age_gender(
         .filter(User.gender == gender)
         .all()
     ]
-    product_ids = _product_ids_from_views(gender_peer_ids)
+    product_ids = _product_ids_from_recent_cohort_views(gender_peer_ids)
     if product_ids:
         return _hydrate_ordered(product_ids), "gender_peers"
 
