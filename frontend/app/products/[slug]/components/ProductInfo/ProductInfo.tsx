@@ -182,41 +182,41 @@ export default function ProductInfo({
         className="pointer-events-auto fixed bottom-0 left-0 right-0 z-[100] hidden border-t border-gray-200 bg-gray-100 md:block"
       >
         <div className="mx-auto max-w-7xl px-4">
-          <div className="flex h-11 items-center justify-center gap-2">
-            <div className="flex items-center gap-1.5">
-              <Link href="/" className="flex w-10 flex-shrink-0 flex-col items-center justify-center text-gray-600">
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
-                <span className="text-[9px] leading-none">Trang chủ</span>
+          <div className="flex h-14 items-center justify-center gap-2">
+            <div className="flex items-center gap-3">
+              <Link href="/" className="flex w-14 flex-shrink-0 flex-col items-center justify-center text-gray-600">
+                <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+                <span className="text-[11px]">Trang chủ</span>
               </Link>
               <button
                 type="button"
                 onClick={handleNanoAiTryOn}
-                className="flex w-10 flex-shrink-0 flex-col items-center justify-center text-[#ea580c] hover:opacity-90 active:opacity-75"
+                className="flex w-14 flex-shrink-0 flex-col items-center justify-center text-[#ea580c] hover:opacity-90 active:opacity-75"
                 aria-label="Thử đồ với NanoAI"
               >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
                 </svg>
-                <span className="text-[9px] font-medium leading-none">Thử đồ</span>
+                <span className="text-[11px] font-medium">Thử đồ</span>
               </button>
               <button
                 type="button"
                 onClick={() => onToggleFavorite(product)}
                 disabled={isCartLoading}
-                className={`flex w-10 flex-shrink-0 flex-col items-center justify-center ${
+                className={`flex w-14 flex-shrink-0 flex-col items-center justify-center ${
                   isFavorited ? 'text-red-500' : 'text-gray-600'
                 } ${isCartLoading ? 'cursor-not-allowed opacity-70' : ''}`}
               >
-                <svg className="h-5 w-5" fill={isFavorited ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
-                <span className="text-[9px] leading-none tabular-nums">{product.likes ?? 0}</span>
+                <svg className="h-7 w-7" fill={isFavorited ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
+                <span className="text-[11px]">Thích {product.likes ?? 0}</span>
               </button>
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={openVariantModal}
                 disabled={!available || isCartLoading}
-                className={`min-w-[112px] rounded-lg px-3 py-1.5 text-xs font-semibold transition-all whitespace-nowrap ${
+                className={`min-w-[160px] rounded-lg px-4 py-2.5 text-sm font-semibold whitespace-nowrap transition-all ${
                   available && !isCartLoading
                     ? 'bg-gray-500 text-white hover:bg-gray-600'
                     : 'cursor-not-allowed bg-gray-300 text-gray-500'
@@ -228,7 +228,7 @@ export default function ProductInfo({
                 type="button"
                 onClick={openVariantModal}
                 disabled={!available || isCartLoading}
-                className={`min-w-[112px] rounded-lg px-3 py-1.5 text-xs font-semibold transition-all whitespace-nowrap ${
+                className={`min-w-[160px] rounded-lg px-4 py-2.5 text-sm font-semibold whitespace-nowrap transition-all ${
                   available && !isCartLoading
                     ? 'bg-[#ea580c] text-white hover:bg-[#c2410c]'
                     : 'cursor-not-allowed bg-gray-300 text-gray-500'
