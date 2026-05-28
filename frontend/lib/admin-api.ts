@@ -2117,6 +2117,17 @@ export interface AdminBirthdayPromoTestSettings {
   test_email_error?: string | null;
 }
 
+export interface AdminSiteSaleTestSettings {
+  site_sale_test_enabled: boolean;
+  site_sale_test_expires_at?: string | null;
+  site_sale_test_phase: 'teaser' | 'active';
+  test_duration_minutes?: number;
+  admin_email?: string | null;
+  test_email?: string | null;
+  linked_user_id?: number | null;
+  can_apply_on_web: boolean;
+}
+
 export const adminFeatureTestAPI = {
   getBirthdayPromoSettings: () =>
     fetchAdmin<AdminBirthdayPromoTestSettings>('/birthday-promo/admin/test-settings'),
@@ -2124,6 +2135,17 @@ export const adminFeatureTestAPI = {
     fetchAdmin<AdminBirthdayPromoTestSettings>('/birthday-promo/admin/test-settings', {
       method: 'PUT',
       body: JSON.stringify({ birthday_promo_enabled, test_email }),
+    }),
+  getSiteSaleSettings: () =>
+    fetchAdmin<AdminSiteSaleTestSettings>('/sale-calendar/admin/test-settings'),
+  updateSiteSaleSettings: (
+    site_sale_test_enabled: boolean,
+    site_sale_test_phase: 'teaser' | 'active',
+    test_email?: string | null,
+  ) =>
+    fetchAdmin<AdminSiteSaleTestSettings>('/sale-calendar/admin/test-settings', {
+      method: 'PUT',
+      body: JSON.stringify({ site_sale_test_enabled, site_sale_test_phase, test_email }),
     }),
 };
 
@@ -2625,6 +2647,45 @@ export const adminPromotionsAPI = {
     }),
   listUserGrants: (user_id: number) =>
     fetchAdmin<AdminUserGrantRow[]>(`/promotions/admin/grants?user_id=${user_id}`),
+};
+
+export type AdminSaleCalendarSettings = {
+  enabled: boolean;
+  teaser_days: number;
+  month_rules: Array<{
+    month: number;
+    enabled: boolean;
+    discount_percent_override: number | null;
+    default_discount_percent: number;
+  }>;
+  upcoming: Array<{
+    event_date: string;
+    event_label: string;
+    discount_percent: number;
+    teaser_start: string;
+    active_start: string;
+    active_end: string;
+    month_parity: string;
+  }>;
+  current: import('@/types/api').SiteSaleCalendarState;
+};
+
+export const adminSaleCalendarAPI = {
+  getSettings: () => fetchAdmin<AdminSaleCalendarSettings>('/sale-calendar/admin/settings'),
+  updateSettings: (data: { enabled?: boolean; teaser_days?: number }) =>
+    fetchAdmin<AdminSaleCalendarSettings>('/sale-calendar/admin/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  updateMonthRule: (data: {
+    month: number;
+    enabled?: boolean;
+    discount_percent_override?: number | null;
+  }) =>
+    fetchAdmin<AdminSaleCalendarSettings['month_rules'][number]>('/sale-calendar/admin/month-rules', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
 };
 
 export interface AdminUserGrantRow {

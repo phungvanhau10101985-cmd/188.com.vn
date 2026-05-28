@@ -92,7 +92,14 @@ class CartItemCRUD:
         return cart
     
     def get_cart_item(self, db: Session, cart_item_id: int) -> Optional[CartItem]:
-        return db.query(CartItem).filter(CartItem.id == cart_item_id).first()
+        from sqlalchemy.orm import joinedload
+
+        return (
+            db.query(CartItem)
+            .options(joinedload(CartItem.product))
+            .filter(CartItem.id == cart_item_id)
+            .first()
+        )
     
     def get_user_cart_items(self, db: Session, user_id: int) -> List[CartItem]:
         from sqlalchemy.orm import joinedload
@@ -123,17 +130,33 @@ class CartItemCRUD:
         ).first()
         
         if existing:
-            # Update quantity
+            from app.models.user import User
+            from app.services.sale_calendar import effective_unit_price
+
+            user = db.query(User).filter(User.id == user_id).first()
+            unit_price = effective_unit_price(db, float(product.price or 0), user=user)
+            existing.unit_price = unit_price
+            existing.product_price = unit_price
             existing.quantity += cart_item.quantity
             existing.selected_color_name = cart_item.selected_color_name
             existing.total_price = existing.unit_price * existing.quantity
+            if isinstance(existing.product_data, dict):
+                existing.product_data = {
+                    **existing.product_data,
+                    "price": unit_price,
+                    "list_price": product.price,
+                }
             existing.updated_at = datetime.now()
             db.commit()
             db.refresh(existing)
             return existing
         
         # 4. Create new cart item với đầy đủ cột database yêu cầu
-        unit_price = product.price
+        from app.models.user import User
+        from app.services.sale_calendar import effective_unit_price
+
+        user = db.query(User).filter(User.id == user_id).first()
+        unit_price = effective_unit_price(db, float(product.price or 0), user=user)
         total_price = unit_price * cart_item.quantity
 
         line_image = _resolve_cart_line_image(
@@ -148,7 +171,8 @@ class CartItemCRUD:
             "id": product.id,
             "product_id": product.product_id,
             "name": product.name,
-            "price": product.price,
+            "price": unit_price,
+            "list_price": product.price,
             "main_image": line_image,
             "slug": product.slug,
             "category_id": product.category_id,
@@ -172,7 +196,7 @@ class CartItemCRUD:
             unit_price=unit_price,  # QUAN TRỌNG: phải có unit_price (notnull)
             total_price=total_price,  # QUAN TRỌNG: phải có total_price (notnull)
             product_name=product.name,
-            product_price=product.price,
+            product_price=unit_price,
             product_image=line_image,
             requires_deposit=product.deposit_require,
             created_at=now,  # Đảm bảo có giá trị, tránh Pydantic datetime_type lỗi
@@ -189,11 +213,26 @@ class CartItemCRUD:
             update_data = cart_item_update.dict(exclude_unset=True)
             for field, value in update_data.items():
                 setattr(db_cart_item, field, value)
-            
-            # Update total_price nếu quantity thay đổi
-            if 'quantity' in update_data:
+
+            product = db.query(Product).filter(Product.id == db_cart_item.product_id).first()
+            if product is not None:
+                from app.models.user import User
+                from app.services.sale_calendar import effective_unit_price
+
+                user = db.query(User).filter(User.id == db_cart_item.user_id).first()
+                unit_price = effective_unit_price(db, float(product.price or 0), user=user)
+                db_cart_item.unit_price = unit_price
+                db_cart_item.product_price = unit_price
+                if isinstance(db_cart_item.product_data, dict):
+                    db_cart_item.product_data = {
+                        **db_cart_item.product_data,
+                        "price": unit_price,
+                        "list_price": product.price,
+                    }
+
+            if "quantity" in update_data or product is not None:
                 db_cart_item.total_price = db_cart_item.unit_price * db_cart_item.quantity
-            
+
             db_cart_item.updated_at = datetime.now()
             db.commit()
             db.refresh(db_cart_item)

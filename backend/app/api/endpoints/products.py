@@ -26,7 +26,8 @@ from app.schemas.product import (
 )
 from app.crud.product_category_size_guide import enrich_product_payloads_with_category_size_guide
 from app.models.admin import AdminUser
-from app.core.security import require_module_permission
+from app.core.security import require_module_permission, get_current_user_optional
+from app.models.user import User
 from app.core.config import settings
 from app.crud import product_media_purge
 from app.services.source_stock_checker import (
@@ -112,11 +113,15 @@ class AdminSourceStockResetPdpBody(BaseModel):
     )
 
 
-def _serialize_products_for_api(db: Session, raw_products: List) -> List:
+def _serialize_products_for_api(db: Session, raw_products: List, user: Optional[User] = None) -> List:
+    from app.services import sale_calendar as sale_calendar_svc
+
+    sale_state = sale_calendar_svc.resolve_sale_calendar_state(db, user=user)
     paired: List = []
     for product in raw_products:
         try:
             d = Product.model_validate(product).model_dump()
+            sale_calendar_svc.enrich_product_payload_with_site_sale(d, sale_state)
             paired.append((product, d))
         except Exception:
             paired.append((None, product))
@@ -126,8 +131,12 @@ def _serialize_products_for_api(db: Session, raw_products: List) -> List:
     return [entry[1] for entry in paired]
 
 
-def _product_to_response(db: Session, db_product) -> Product:
+def _product_to_response(db: Session, db_product, user: Optional[User] = None) -> Product:
+    from app.services import sale_calendar as sale_calendar_svc
+
     d = Product.model_validate(db_product).model_dump()
+    sale_state = sale_calendar_svc.resolve_sale_calendar_state(db, user=user)
+    sale_calendar_svc.enrich_product_payload_with_site_sale(d, sale_state)
     enrich_product_payloads_with_category_size_guide(db, [db_product], [d])
     return Product(**d)
 
@@ -137,6 +146,7 @@ def _product_to_response(db: Session, db_product) -> Product:
 def search_products(
     response: Response,
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     q: Optional[str] = Query(None, description="Từ khóa tìm kiếm (tên, mã, danh mục, vật liệu, kiểu dáng, màu sắc, dịp, tính năng, size)"),
     skip: int = Query(0, ge=0),
     limit: int = Query(48, ge=1, le=100),
@@ -187,7 +197,7 @@ def search_products(
         if total > 0:
             # Serialize products
             if "products" in result:
-                result["products"] = _serialize_products_for_api(db, result["products"])
+                result["products"] = _serialize_products_for_api(db, result["products"], user=current_user)
             return result
 
         # Stage 4: AI Recovery & Normalize
@@ -215,7 +225,7 @@ def search_products(
             if total2 > 0:
                 # Serialize products
                 if "products" in result2:
-                    result2["products"] = _serialize_products_for_api(db, result2["products"])
+                    result2["products"] = _serialize_products_for_api(db, result2["products"], user=current_user)
                 return result2
 
         # Stage 5: AI Category Suggestions (Safety Net)
@@ -292,7 +302,10 @@ def _read_products_list_impl(
     filter_size: Optional[str] = None,
     filter_color: Optional[str] = None,
     filter_style_tag: Optional[str] = None,
+    user: Optional[User] = None,
 ) -> dict:
+    from app.services import sale_calendar as sale_calendar_svc
+
     raw_q = (q or "").strip()
     pid = (product_id or "").strip()
     if order_random and not raw_q and not pid:
@@ -301,7 +314,8 @@ def _read_products_list_impl(
         # Admin / công cụ nội bộ cần dữ liệu mới sau PUT; public cache gây hiển thị cũ ~60s.
         response.headers["Cache-Control"] = "private, no-cache, must-revalidate"
     cache_key = None
-    if use_search_cache and raw_q and not pid:
+    skip_search_cache = user is not None and sale_calendar_svc.is_site_sale_test_enabled(db, user)
+    if use_search_cache and raw_q and not pid and not skip_search_cache:
         norm_q = crud.product._normalize_search_key(raw_q)
         cache_key = product_search_cache_crud.build_cache_key(
             norm_q=norm_q,
@@ -356,7 +370,7 @@ def _read_products_list_impl(
     )
 
     if result and "products" in result:
-        result["products"] = _serialize_products_for_api(db, result["products"])
+        result["products"] = _serialize_products_for_api(db, result["products"], user=user)
 
     if (
         use_search_cache
@@ -379,6 +393,7 @@ def _read_products_list_impl(
 def read_products(
     response: Response,
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     category: Optional[str] = None,
@@ -438,6 +453,7 @@ def read_products(
             filter_size=size,
             filter_color=color,
             filter_style_tag=style_tag,
+            user=current_user,
         )
     except Exception as e:
         return {"error": str(e), "status": "serialization_error"}
@@ -447,6 +463,7 @@ def read_products(
 def read_products_full_list(
     response: Response,
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     category: Optional[str] = None,
@@ -508,6 +525,7 @@ def read_products_full_list(
             filter_size=size,
             filter_color=color,
             filter_style_tag=style_tag,
+            user=current_user,
         )
     except Exception as e:
         return {"error": str(e), "status": "serialization_error"}
@@ -756,7 +774,8 @@ def create_product(
 @router.get("/{product_id}", response_model=Product)
 def read_product(
     product_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
     Get product by product_id, slug, or internal code (SKU).
@@ -764,7 +783,7 @@ def read_product(
     db_product = crud.product.resolve_product_by_sku(db, sku=product_id)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(db, db_product)
+    return _product_to_response(db, db_product, user=current_user)
 
 
 @router.put("/{product_id}", response_model=Product)
@@ -805,7 +824,8 @@ def delete_product(
 @router.get("/by-slug/{slug}", response_model=Product)
 def read_product_by_slug(
     slug: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
     Get product by slug (path parameter version)
@@ -814,12 +834,13 @@ def read_product_by_slug(
     db_product = crud.product.get_product_by_slug(db, slug=slug)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(db, db_product)
+    return _product_to_response(db, db_product, user=current_user)
 
 @router.get("/by-slug/", response_model=Product)
 def read_product_by_slug_query(
     slug: str = Query(..., description="Product slug"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
     Get product by slug (query parameter version)
@@ -829,12 +850,13 @@ def read_product_by_slug_query(
     db_product = crud.product.get_product_by_slug(db, slug=slug)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(db, db_product)
+    return _product_to_response(db, db_product, user=current_user)
 
 @router.get("/by-code/{product_code}", response_model=Product)
 def read_product_by_code(
     product_code: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
     Get product by product_id, slug, or internal code (SKU).
@@ -842,12 +864,13 @@ def read_product_by_code(
     db_product = crud.product.resolve_product_by_sku(db, sku=product_code)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(db, db_product)
+    return _product_to_response(db, db_product, user=current_user)
 
 @router.get("/by-id/{id}", response_model=Product)
 def read_product_by_id(
     id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
     Get product by database ID (integer primary key)
@@ -855,7 +878,7 @@ def read_product_by_id(
     db_product = crud.product.get_product(db, product_id=id)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(db, db_product)
+    return _product_to_response(db, db_product, user=current_user)
 
 
 @router.post("/by-id/{id}/source-stock-check/enqueue", response_model=dict)

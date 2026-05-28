@@ -931,6 +931,10 @@ class ApiClient {
     return this.fetch('/birthday-promo/me');
   }
 
+  async getSiteSaleCalendar(): Promise<import('@/types/api').SiteSaleCalendarState> {
+    return this.fetch('/sale-calendar/current');
+  }
+
   async getWelcomePromoEligibility(): Promise<WelcomePromoStatus> {
     return this.fetch('/promotions/welcome-eligibility');
   }

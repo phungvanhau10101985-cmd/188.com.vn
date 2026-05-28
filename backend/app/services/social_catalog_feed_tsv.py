@@ -15,7 +15,7 @@ Meta dùng `video_url` (link video).
 """
 from __future__ import annotations
 
-from typing import Iterator
+from typing import Iterator, Optional
 
 from sqlalchemy.orm import Session
 
@@ -115,15 +115,28 @@ def meta_row_values(
     *,
     fb_product_category: str,
     google_product_category_default: str,
+    sale_state=None,
+    db: Optional[Session] = None,
 ) -> list[str]:
-    title = _tsv_cell(getattr(product, "name", "") or "")
+    from app.services import sale_calendar as sale_calendar_svc
+
+    if sale_state is None and db is not None:
+        sale_state = sale_calendar_svc.resolve_sale_calendar_state(db)
+    raw_title = getattr(product, "name", "") or ""
+    title = _tsv_cell(
+        sale_calendar_svc.feed_title_with_sale_prefix(raw_title, sale_state) if sale_state else raw_title
+    )
     brand = _tsv_cell(getattr(product, "brand_name", "") or "") or "188"
     link = _product_canonical_link(product, shop_base_url)
     price = _price_gmc(getattr(product, "price", None), currency)
     gcat = resolved_google_product_category(product, google_product_category_default)
     fb = _tsv_cell(fb_product_category) or gcat
-    sale_price, sale_eff = _sale_price_and_effective(product, currency)
+    sale_price, sale_eff = _sale_price_and_effective(product, currency, sale_state=sale_state, db=db)
     c0 = _custom_label_0_value(product)
+    if sale_state is not None:
+        sale_label = sale_calendar_svc.feed_custom_label_for_teaser(sale_state)
+        if sale_label:
+            c0 = _tsv_cell(sale_label)
     c1, c2, c3, c4 = _custom_labels_1_to_4(product)
 
     return [
@@ -164,13 +177,22 @@ def tiktok_row_values(
     currency: str,
     *,
     google_product_category_default: str,
+    sale_state=None,
+    db: Optional[Session] = None,
 ) -> list[str]:
-    title = _tsv_cell(getattr(product, "name", "") or "")
+    from app.services import sale_calendar as sale_calendar_svc
+
+    if sale_state is None and db is not None:
+        sale_state = sale_calendar_svc.resolve_sale_calendar_state(db)
+    raw_title = getattr(product, "name", "") or ""
+    title = _tsv_cell(
+        sale_calendar_svc.feed_title_with_sale_prefix(raw_title, sale_state) if sale_state else raw_title
+    )
     brand = _tsv_cell(getattr(product, "brand_name", "") or "") or "188"
     link = _product_canonical_link(product, shop_base_url)
     price = _price_gmc(getattr(product, "price", None), currency)
     gcat = resolved_google_product_category(product, google_product_category_default)
-    sale_price, sale_eff = _sale_price_and_effective(product, currency)
+    sale_price, sale_eff = _sale_price_and_effective(product, currency, sale_state=sale_state, db=db)
 
     return [
         _tsv_cell(getattr(product, "product_id", "") or ""),
@@ -208,7 +230,10 @@ def iter_meta_catalog_lines(
     only_active: bool = True,
     yield_per: int = 1000,
 ) -> Iterator[str]:
+    from app.services import sale_calendar as sale_calendar_svc
+
     img_base = (image_site_base or shop_base_url).rstrip("/")
+    sale_state = sale_calendar_svc.resolve_sale_calendar_state(db)
     yield "\t".join(META_TSV_COLUMNS)
     q = db.query(Product).order_by(Product.id)
     if only_active:
@@ -221,6 +246,8 @@ def iter_meta_catalog_lines(
             currency,
             fb_product_category=fb_product_category,
             google_product_category_default=google_product_category_default,
+            sale_state=sale_state,
+            db=db,
         )
         yield "\t".join(vals)
 
@@ -235,7 +262,10 @@ def iter_tiktok_catalog_lines(
     only_active: bool = True,
     yield_per: int = 1000,
 ) -> Iterator[str]:
+    from app.services import sale_calendar as sale_calendar_svc
+
     img_base = (image_site_base or shop_base_url).rstrip("/")
+    sale_state = sale_calendar_svc.resolve_sale_calendar_state(db)
     yield "\t".join(TIKTOK_TSV_COLUMNS)
     q = db.query(Product).order_by(Product.id)
     if only_active:
@@ -247,5 +277,7 @@ def iter_tiktok_catalog_lines(
             img_base,
             currency,
             google_product_category_default=google_product_category_default,
+            sale_state=sale_state,
+            db=db,
         )
         yield "\t".join(vals)

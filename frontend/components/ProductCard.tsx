@@ -9,9 +9,10 @@ import { formatPrice, getDiscountPercentage, truncateText } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { hasVideoLink } from '@/lib/video-utils';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
-import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
+import SiteSaleProductBadge from '@/components/SiteSaleProductBadge';
+import { resolveProductDisplayPricing } from '@/lib/site-sale';
 
 function ProductVideoBadge({ videoLink }: { videoLink?: string | null }) {
   if (!hasVideoLink(videoLink)) return null;
@@ -91,11 +92,16 @@ export default function ProductCard({
   const [imageLoading, setImageLoading] = useState(true);
   
   const available = (product.available || 0) > 0;
-  const hasDiscount = product.original_price && product.original_price > product.price;
   const birthdayDiscount = useBirthdayDiscount();
-  const displayPrice = birthdayDiscount.active
-    ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
-    : product.price || 0;
+  const pricing = resolveProductDisplayPricing(
+    product,
+    birthdayDiscount.active,
+    birthdayDiscount.percent,
+  );
+  const displayPrice = pricing.displayPrice;
+  const hasDiscount =
+    (pricing.compareAt != null && pricing.compareAt > displayPrice) ||
+    (product.original_price != null && product.original_price > product.price);
   
   // Sử dụng image utils với kích thước tối ưu
   const imageUrl = getOptimizedImage(product.main_image, {
@@ -185,9 +191,12 @@ export default function ProductCard({
 
         {/* Discount Badge */}
         {!imageError && (
-          <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
+          <>
+            <SiteSaleProductBadge siteSale={product.site_sale} />
+            <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
+          </>
         )}
-        {hasDiscount && !imageError && !birthdayDiscount.active ? (
+        {hasDiscount && !imageError && !birthdayDiscount.active && !product.site_sale?.phase ? (
           <div className="absolute top-2 left-2 bg-red-500 text-white px-1.5 py-0.5 rounded-full text-xs font-bold shadow-md">
             -{getDiscountPercentage(product.original_price!, product.price)}%
           </div>
@@ -258,7 +267,12 @@ export default function ProductCard({
                 {formatPrice(product.price)}
               </span>
             )}
-            {hasDiscount && (
+            {pricing.compareAt != null && pricing.compareAt > displayPrice && !birthdayDiscount.active && (
+              <span className="text-xs text-gray-500 line-through">
+                {formatPrice(pricing.compareAt)}
+              </span>
+            )}
+            {hasDiscount && pricing.compareAt == null && !birthdayDiscount.active && !product.site_sale?.phase && (
               !birthdayDiscount.active ? (
                 <span className="text-xs text-gray-500 line-through">
                   {formatPrice(product.original_price!)}
@@ -266,6 +280,11 @@ export default function ProductCard({
               ) : null
             )}
           </div>
+          {pricing.sitePhase === 'teaser' && pricing.siteSavings > 0 && (
+            <p className="text-xs text-amber-700">
+              Sắp giảm {pricing.sitePercent}% — tiết kiệm ~{formatPrice(pricing.siteSavings)}
+            </p>
+          )}
           
           {/* Installment */}
           {displayPrice && displayPrice > 1000000 && (
@@ -317,9 +336,12 @@ export const SimpleProductCard = ({
 }) => {
   const [imageError, setImageError] = useState(false);
   const birthdayDiscount = useBirthdayDiscount();
-  const displayPrice = birthdayDiscount.active
-    ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
-    : product.price || 0;
+  const pricing = resolveProductDisplayPricing(
+    product,
+    birthdayDiscount.active,
+    birthdayDiscount.percent,
+  );
+  const displayPrice = pricing.displayPrice;
   
   const imageUrl = getOptimizedImage(product.main_image, {
     width: 250,
@@ -368,7 +390,10 @@ export const SimpleProductCard = ({
         )}
 
         {!imageError && (
-          <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
+          <>
+            <SiteSaleProductBadge siteSale={product.site_sale} />
+            <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
+          </>
         )}
 
         {/* Favorite Button */}

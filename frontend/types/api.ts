@@ -1,4 +1,28 @@
 // frontend/types/api.ts - CONSOLIDATED TYPES (ĐÃ SỬA)
+export interface SiteSaleProductPricing {
+  list_price?: number;
+  display_price?: number;
+  savings_amount?: number;
+  percent?: number;
+  phase?: 'teaser' | 'active' | null;
+  expected_sale_price?: number;
+  event_label?: string | null;
+  event_date?: string | null;
+  countdown_to?: string | null;
+}
+
+export interface SiteSaleCalendarState {
+  enabled: boolean;
+  phase?: 'teaser' | 'active' | null;
+  event_date?: string | null;
+  event_label?: string | null;
+  discount_percent?: number;
+  teaser_days?: number;
+  active_start_at?: string | null;
+  active_end_at?: string | null;
+  countdown_to?: string | null;
+}
+
 export interface ProductColor {
   name: string;
   img?: string;
@@ -35,6 +59,7 @@ export interface Product {
   created_at: string;
   updated_at?: string;
   original_price?: number;
+  site_sale?: SiteSaleProductPricing;
   shop_name?: string;
   shop_id?: string;
   pro_lower_price?: string;

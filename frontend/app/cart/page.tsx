@@ -47,6 +47,7 @@ function formatAddressLine(addr: UserAddress): string {
 }
 
 function cartLineTotal(item: {
+  product_price?: number;
   unit_price?: number;
   product_data?: { price?: number };
   quantity: number;
@@ -55,7 +56,7 @@ function cartLineTotal(item: {
   if (typeof item.total_price === 'number' && !Number.isNaN(item.total_price)) {
     return item.total_price;
   }
-  const unit = item.unit_price ?? item.product_data?.price ?? 0;
+  const unit = item.product_price ?? item.unit_price ?? item.product_data?.price ?? 0;
   return unit * item.quantity;
 }
 
@@ -747,7 +748,7 @@ export default function CartPage() {
             </div>
             <div className="divide-y divide-gray-100">
               {(cart?.items ?? []).map((item) => {
-                const price = item.unit_price ?? item.product_data?.price ?? 0;
+                const price = item.product_price ?? item.unit_price ?? item.product_data?.price ?? 0;
                 const displayPrice =
                   birthdayActive && birthdayPercent > 0 ? applyBirthdayDiscount(price, birthdayPercent) : price;
                 const lineTotal = cartLineTotal(item);

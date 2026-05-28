@@ -14,8 +14,8 @@ import ProductQAReviewCards from '../ProductQAReviewCards/ProductQAReviewCards';
 import ProductVariantModal from '../ProductVariantModal/ProductVariantModal';
 import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
-import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
+import { resolveProductDisplayPricing } from '@/lib/site-sale';
 import {
   NANO_AI_CTX_SOURCE_PRODUCT_PDP,
 } from '@/lib/nanoai-hosted-chat';
@@ -69,7 +69,17 @@ export default function ProductInfo({
   }, [openTryOnForProduct, product, viewingImageUrl]);
 
   const available = (product.available || 0) > 0;
-  const hasDiscount = product.original_price && product.original_price > product.price;
+  const birthdayDiscount = useBirthdayDiscount();
+  const pricing = resolveProductDisplayPricing(
+    product,
+    birthdayDiscount.active,
+    birthdayDiscount.percent,
+  );
+  const displayPrice = pricing.displayPrice;
+  const hasDiscount =
+    (pricing.compareAt != null && pricing.compareAt > displayPrice) ||
+    Boolean(product.original_price && product.original_price > product.price);
+  const birthdayDiscountAmount = Math.max(0, (product.price || 0) - displayPrice);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -77,11 +87,6 @@ export default function ProductInfo({
     }
   }, [isAuthenticated]);
 
-  const birthdayDiscount = useBirthdayDiscount();
-  const displayPrice = birthdayDiscount.active
-    ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
-    : product.price || 0;
-  const birthdayDiscountAmount = Math.max(0, (product.price || 0) - displayPrice);
   const loyaltyDiscountPercent = loyaltyStatus?.current_tier?.discount_percent || 0;
   const loyaltyDiscountAmount = (displayPrice * loyaltyDiscountPercent) / 100;
   const loyaltyTierName = loyaltyStatus?.current_tier?.name || 'L0';
@@ -141,6 +146,20 @@ export default function ProductInfo({
         nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
         compact
       />
+      {pricing.sitePhase === 'teaser' && pricing.siteSavings > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p className="font-semibold">{pricing.siteLabel ?? 'Sắp sale'} — giảm {pricing.sitePercent}%</p>
+          <p className="text-xs mt-0.5">
+            Mua đúng ngày sale tiết kiệm ~{formatPrice(pricing.siteSavings)}
+            {pricing.expectedSalePrice ? ` (dự kiến ${formatPrice(pricing.expectedSalePrice)})` : ''}
+          </p>
+        </div>
+      )}
+      {pricing.sitePhase === 'active' && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <p className="font-semibold">{pricing.siteLabel ?? 'Đang sale'} — giảm {pricing.sitePercent}% hôm nay</p>
+        </div>
+      )}
 
       {/* Product Name and Basic Info */}
       <div>
@@ -203,13 +222,23 @@ export default function ProductInfo({
               </span>
             </>
           )}
-          {hasDiscount && (
+          {pricing.compareAt != null && pricing.compareAt > displayPrice && !birthdayDiscount.active && (
             <>
-              {!birthdayDiscount.active && (
-                <span className="text-lg text-gray-500 line-through">
-                  {formatPrice(product.original_price!)}
+              <span className="text-lg text-gray-500 line-through">
+                {formatPrice(pricing.compareAt)}
+              </span>
+              {product.site_sale?.phase === 'active' && (
+                <span className="bg-red-500 text-white px-1.5 py-0.5 rounded text-xs font-bold">
+                  -{pricing.sitePercent}%
                 </span>
               )}
+            </>
+          )}
+          {hasDiscount && pricing.compareAt == null && !birthdayDiscount.active && !product.site_sale?.phase && (
+            <>
+              <span className="text-lg text-gray-500 line-through">
+                {formatPrice(product.original_price!)}
+              </span>
               <span className="bg-red-500 text-white px-1.5 py-0.5 rounded text-xs font-bold">
                 -{getDiscountPercentage(product.original_price!, product.price)}%
               </span>

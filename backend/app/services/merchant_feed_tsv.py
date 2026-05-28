@@ -384,11 +384,33 @@ def _catalog_sale_effective_gmc_string() -> str:
     return ""
 
 
-def _sale_price_and_effective(product: Product, currency: str) -> tuple[str, str]:
-    """sale_price = price × (1 - CATALOG_SALE_DISCOUNT_PERCENT/100) khi chương trình đang chạy."""
+def _sale_price_and_effective(
+    product: Product,
+    currency: str,
+    *,
+    sale_state=None,
+    db: Optional[Session] = None,
+) -> tuple[str, str]:
+    """sale_price từ lịch sale ngày trùng tháng (ưu tiên) hoặc CATALOG_SALE_* env."""
     base = _list_price_for_feed(product)
     if base <= 0:
         return "", ""
+
+    if sale_state is None and db is not None:
+        from app.services import sale_calendar as sale_calendar_svc
+
+        sale_state = sale_calendar_svc.resolve_sale_calendar_state(db)
+
+    if sale_state is not None and getattr(sale_state, "is_active", False):
+        from app.services import sale_calendar as sale_calendar_svc
+
+        return sale_calendar_svc.feed_sale_price_tuple(
+            base,
+            sale_state,
+            currency,
+            format_price_fn=_price_gmc,
+            effective_gmc_fn=lambda s, e: sale_calendar_svc.gmc_effective_from_bounds(s, e),
+        )
 
     if not _catalog_sale_program_enabled_now():
         return "", ""
@@ -535,8 +557,17 @@ def merchant_row_values(
     shop_base_url: str,
     image_site_base: str,
     currency: str,
+    *,
+    sale_state=None,
+    db: Optional[Session] = None,
 ) -> list[str]:
-    title = _tsv_cell(getattr(product, "name", "") or "")
+    from app.services import sale_calendar as sale_calendar_svc
+
+    if sale_state is None and db is not None:
+        sale_state = sale_calendar_svc.resolve_sale_calendar_state(db)
+
+    raw_title = getattr(product, "name", "") or ""
+    title = _tsv_cell(sale_calendar_svc.feed_title_with_sale_prefix(raw_title, sale_state) if sale_state else raw_title)
     brand = _tsv_cell(getattr(product, "brand_name", "") or "") or "188"
     link = _product_canonical_link(product, shop_base_url)
     gtin = _gtin_from_product_info(product)
@@ -544,8 +575,12 @@ def merchant_row_values(
     identifier = "yes" if (gtin or mpn) else "no"
     gdefault = getattr(settings, "CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY", "") or ""
     gcat = resolved_google_product_category(product, gdefault)
-    sale_price, sale_eff = _sale_price_and_effective(product, currency)
+    sale_price, sale_eff = _sale_price_and_effective(product, currency, sale_state=sale_state, db=db)
     c0 = _custom_label_0_value(product)
+    if sale_state is not None:
+        sale_label = sale_calendar_svc.feed_custom_label_for_teaser(sale_state)
+        if sale_label:
+            c0 = _tsv_cell(sale_label)
     c1, c2, c3, c4 = _custom_labels_1_to_4(product)
     gender = _normalized_gender(product)
     age_grp = _normalized_age_group(product)
@@ -598,8 +633,18 @@ def merchant_feed_line_for_product(
     shop_base_url: str,
     image_site_base: str,
     currency: str,
+    *,
+    sale_state=None,
+    db: Optional[Session] = None,
 ) -> str:
-    vals = merchant_row_values(product, shop_base_url, image_site_base, currency)
+    vals = merchant_row_values(
+        product,
+        shop_base_url,
+        image_site_base,
+        currency,
+        sale_state=sale_state,
+        db=db,
+    )
     return "\t".join(vals)
 
 
@@ -613,10 +658,20 @@ def iter_merchant_feed_lines(
     yield_per: int = 1000,
 ) -> Iterator[str]:
     """Stream từng dòng feed (header + rows)."""
+    from app.services import sale_calendar as sale_calendar_svc
+
     img_base = (image_site_base or shop_base_url).rstrip("/")
+    sale_state = sale_calendar_svc.resolve_sale_calendar_state(db)
     yield merchant_feed_header_row()
     q = db.query(Product).order_by(Product.id)
     if only_active:
         q = q.filter(Product.is_active.is_(True))
     for p in q.yield_per(max(50, yield_per)):
-        yield merchant_feed_line_for_product(p, shop_base_url, img_base, currency)
+        yield merchant_feed_line_for_product(
+            p,
+            shop_base_url,
+            img_base,
+            currency,
+            sale_state=sale_state,
+            db=db,
+        )

@@ -694,6 +694,15 @@ class MigrationManager:
         results['promotion_usages_sync'] = self._sync_table_columns("promotion_usages", PromotionUsage)
         results['welcome_promo_seed'] = self._seed_welcome_promotion()
         results['welcome_grants_backfill'] = self._backfill_welcome_promotion_grants()
+        from app.models.sale_calendar import SaleCalendarMonthRule, SaleCalendarSettings
+
+        results['sale_calendar_settings_create'] = self._create_table_if_not_exists(
+            "sale_calendar_settings", SaleCalendarSettings
+        )
+        results['sale_calendar_month_rules_create'] = self._create_table_if_not_exists(
+            "sale_calendar_month_rules", SaleCalendarMonthRule
+        )
+        results['sale_calendar_seed'] = self._seed_sale_calendar_defaults()
 
         return results
 
@@ -711,6 +720,22 @@ class MigrationManager:
                 db.close()
         except Exception as e:
             logger.warning("  _seed_welcome_promotion: %s", e)
+            return False
+
+    def _seed_sale_calendar_defaults(self) -> bool:
+        try:
+            from app.db.session import SessionLocal
+            from app.services import sale_calendar as sale_calendar_svc
+
+            db = SessionLocal()
+            try:
+                sale_calendar_svc.ensure_sale_calendar_defaults(db)
+                logger.info("✅ sale_calendar_seed: defaults ready")
+                return True
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning("  _seed_sale_calendar_defaults: %s", e)
             return False
 
     def _backfill_welcome_promotion_grants(self) -> bool:

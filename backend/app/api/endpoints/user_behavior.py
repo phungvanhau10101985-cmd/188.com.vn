@@ -50,14 +50,14 @@ def _json_safe_for_response(val: Any) -> Any:
     return val
 
 
-def _product_row_to_api_dict(product: Any) -> dict:
+def _product_row_to_api_dict(product: Any, *, sale_state=None) -> dict:
     """
     ORM Product → dict trả về API. Không append trực tiếp ORM hoặc __dict__
     (relationship `category_rel` join sẵn → không JSON-safe → 500).
     """
     try:
         d = ProductSchema.model_validate(product).model_dump(mode="json")
-        return _json_safe_for_response(d)
+        d = _json_safe_for_response(d)
     except Exception:
         out: dict = {}
         for col in ProductRow.__table__.columns:
@@ -66,7 +66,19 @@ def _product_row_to_api_dict(product: Any) -> dict:
                 out[col.key] = val.isoformat() if val is not None else None
             else:
                 out[col.key] = _json_safe_for_response(val)
-        return out
+        d = out
+    if sale_state is not None:
+        from app.services import sale_calendar as sale_calendar_svc
+
+        sale_calendar_svc.enrich_product_payload_with_site_sale(d, sale_state)
+    return d
+
+
+def _serialize_product_rows_for_api(db: Session, products: list, user: User | None = None) -> list[dict]:
+    from app.services import sale_calendar as sale_calendar_svc
+
+    sale_state = sale_calendar_svc.resolve_sale_calendar_state(db, user=user)
+    return [_product_row_to_api_dict(p, sale_state=sale_state) for p in products]
 
 
 # Product Views
@@ -134,7 +146,7 @@ def get_products_viewed_by_same_age_gender_endpoint(
         return {"products": [], "cohort_mode": "requires_login"}
     try:
         products, cohort_mode = get_products_viewed_by_same_age_gender(db, current_user.id, limit=limit)
-        products_list = [_product_row_to_api_dict(p) for p in products]
+        products_list = _serialize_product_rows_for_api(db, products, current_user)
         return {"products": products_list, "cohort_mode": cohort_mode}
     except Exception:
         logger.exception("Failed to build same-age/gender recommendations")
@@ -181,7 +193,7 @@ def get_products_same_shop_as_recent_views_endpoint(
             )
         else:
             return {"products": [], "total": 0, "seed": None}
-        products_list = [_product_row_to_api_dict(p) for p in products]
+        products_list = _serialize_product_rows_for_api(db, products, current_user)
         return {"products": products_list, "total": total, "seed": returned_seed}
     except Exception:
         return {"products": [], "total": 0, "seed": None}
@@ -214,7 +226,7 @@ def get_home_feed_products(
             skip=sk,
             limit=lim,
         )
-        products_list = [_product_row_to_api_dict(p) for p in products]
+        products_list = _serialize_product_rows_for_api(db, products, current_user)
     except Exception:
         logger.exception("Failed to build personalized home feed")
         db.rollback()
@@ -227,7 +239,7 @@ def get_home_feed_products(
                 .limit(lim)
                 .all()
             )
-            products_list = [_product_row_to_api_dict(p) for p in products]
+            products_list = _serialize_product_rows_for_api(db, products, current_user)
             personalized = False
         except Exception:
             logger.exception("Failed to build fallback home feed")

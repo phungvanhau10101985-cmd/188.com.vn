@@ -17,6 +17,44 @@ from app.services.cart_discounts import build_cart_discount_fields
 router = APIRouter()
 
 
+def _cart_line_list_price(item: CartItem) -> float:
+    if item.product is not None:
+        return float(item.product.price or 0)
+    pd = item.product_data if isinstance(item.product_data, dict) else {}
+    if pd.get("list_price") is not None:
+        return float(pd["list_price"])
+    return float(item.product_price or 0)
+
+
+def _cart_items_with_site_sale_pricing(
+    db: Session,
+    user: User,
+    items: List[CartItem],
+) -> tuple[List[CartItemResponse], float]:
+    from app.services.sale_calendar import effective_unit_price, resolve_sale_calendar_state
+
+    sale_state = resolve_sale_calendar_state(db, user=user)
+    total_price = 0.0
+    cart_items_response: List[CartItemResponse] = []
+    for item in items:
+        resp = _cart_item_to_response(item)
+        base = _cart_line_list_price(item)
+        if sale_state.is_active:
+            line_unit = effective_unit_price(db, base, user=user)
+            resp.product_price = line_unit
+        else:
+            line_unit = base
+            resp.product_price = line_unit
+        total_price += line_unit * int(item.quantity or 0)
+        cart_items_response.append(resp)
+    return cart_items_response, total_price
+
+
+def _single_cart_item_response(db: Session, user: User, item: CartItem) -> CartItemResponse:
+    responses, _ = _cart_items_with_site_sale_pricing(db, user, [item])
+    return responses[0]
+
+
 def _cart_item_to_response(item: CartItem) -> CartItemResponse:
     pd_raw = getattr(item, "product_data", None)
     pd = dict(pd_raw) if isinstance(pd_raw, dict) else {}
@@ -67,9 +105,9 @@ def get_user_cart(
         db.refresh(cart_record)
     
     items = cart_crud.get_user_cart_items(db, user_id=current_user.id)
+
+    cart_items_response, total_price = _cart_items_with_site_sale_pricing(db, current_user, items)
     summary = cart_crud.get_cart_summary(db, user_id=current_user.id)
-    
-    total_price = float(summary["total_price"])
     birthday_discount = get_birthday_discount_for_user(db, current_user)
     discount_fields = build_cart_discount_fields(
         db,
@@ -77,10 +115,7 @@ def get_user_cart(
         total_price=total_price,
         promo_code=promo_code,
     )
-    
-    # Convert CartItem models to CartItemResponse schema
-    cart_items_response = [_cart_item_to_response(item) for item in items]
-    
+
     return CartResponse(
         id=cart_record.id,
         user_id=current_user.id,
@@ -104,9 +139,10 @@ def add_item_to_cart(
     """Add item to cart"""
     try:
         created_item = cart_crud.create_cart_item(db, user_id=current_user.id, cart_item=cart_item)
-        
-        # Convert to response schema
-        return _cart_item_to_response(created_item)
+        created_item = cart_crud.get_cart_item(db, cart_item_id=created_item.id)
+        if not created_item:
+            raise HTTPException(status_code=500, detail="Không tải được dòng giỏ hàng vừa thêm.")
+        return _single_cart_item_response(db, current_user, created_item)
     except ValueError as e:
         msg = str(e)
         if "not found" in msg.lower():
@@ -131,8 +167,11 @@ def update_cart_item(
     updated_item = cart_crud.update_cart_item(db, cart_item_id=item_id, cart_item_update=cart_item_update)
     if not updated_item:
         raise HTTPException(status_code=404, detail="Cart item not found")
-    
-    return _cart_item_to_response(updated_item)
+
+    updated_item = cart_crud.get_cart_item(db, cart_item_id=item_id)
+    if not updated_item:
+        raise HTTPException(status_code=404, detail="Cart item not found")
+    return _single_cart_item_response(db, current_user, updated_item)
 
 @router.delete("/items/{item_id}")
 def remove_item_from_cart(
@@ -176,20 +215,17 @@ def migrate_guest_cart(
         
         # Get cart items for response
         items = cart_crud.get_user_cart_items(db, user_id=current_user.id)
-        
-        # Convert items to response format
-        cart_items_response = [_cart_item_to_response(item) for item in items]
-        
+
+        cart_items_response, total_price = _cart_items_with_site_sale_pricing(db, current_user, items)
         summary = cart_crud.get_cart_summary(db, user_id=current_user.id)
-        
+
         birthday_discount = get_birthday_discount_for_user(db, current_user)
-        total_price = float(summary["total_price"])
         discount_fields = build_cart_discount_fields(
             db,
             user=current_user,
             total_price=total_price,
         )
-        
+
         return schemas.CartMergeResponse(
             message=result.get("message", "Migration completed"),
             migrated_items=result.get("migrated_items", 0),

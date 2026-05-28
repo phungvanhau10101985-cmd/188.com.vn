@@ -16,8 +16,8 @@ import {
 import ProductSizeGuideModal from '@/components/category-size-guide/ProductSizeGuideModal';
 import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
-import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
+import { resolveProductDisplayPricing } from '@/lib/site-sale';
 
 /** Số tồn hiển thị (ảo) random 1–3 cho mỗi phiên bản. */
 function getRandomDisplayStock(): number {
@@ -141,9 +141,12 @@ export default function ProductVariantModal({
   const remainingDisplay = Math.max(0, displayStockForVariant - (effectiveQuantity - 1));
 
   const birthdayDiscount = useBirthdayDiscount();
-  const displayPrice = birthdayDiscount.active
-    ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
-    : product.price || 0;
+  const pricing = resolveProductDisplayPricing(
+    product,
+    birthdayDiscount.active,
+    birthdayDiscount.percent,
+  );
+  const displayPrice = pricing.displayPrice;
   const birthdayDiscountAmount = Math.max(0, (product.price || 0) - displayPrice) * effectiveQuantity;
   const loyaltyDiscountPercent = loyaltyStatus?.current_tier?.discount_percent || 0;
   const loyaltyDiscountAmount = (displayPrice * loyaltyDiscountPercent * effectiveQuantity) / 100;

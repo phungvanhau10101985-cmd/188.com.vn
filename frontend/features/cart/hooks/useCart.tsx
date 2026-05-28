@@ -90,7 +90,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
                 id: item.product_id,
                 product_id: fromApi.product_id ?? item.product_code,
                 name: fromApi.name ?? item.product_name,
-                price: fromApi.price ?? item.product_price,
+                price: item.product_price ?? fromApi.price,
                 main_image: lineImage,
                 deposit_require: fromApi.deposit_require ?? item.requires_deposit,
               },

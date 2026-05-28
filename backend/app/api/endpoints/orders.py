@@ -129,7 +129,9 @@ def create_order(
                 requires_deposit = True
             
             # Calculate item total (product.price is Float in DB → convert to Decimal)
-            unit_price = Decimal(str(product.price))
+            from app.services.sale_calendar import effective_unit_price
+
+            unit_price = Decimal(str(effective_unit_price(db, float(product.price or 0), user=current_user)))
             item_total = unit_price * item.quantity
             total_amount += item_total
 

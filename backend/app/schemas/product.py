@@ -300,6 +300,9 @@ class Product(ProductBase):
     #: Slug segment cấp 2 trong full_slug — cùng cơ chế enrich.
     category_level2_slug: Optional[str] = Field(None)
 
+    original_price: Optional[float] = Field(None, description="Giá gốc khi đang site sale")
+    site_sale: Optional[Dict[str, Any]] = Field(None, description="Trạng thái sale ngày trùng tháng")
+
     @model_validator(mode="after")
     def fill_product_info_from_columns(self):
         """Chuẩn hóa product_info: chuỗi JSON -> dict. Khi null/empty thì điền từ các cột khác."""

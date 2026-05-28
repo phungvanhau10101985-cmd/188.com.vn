@@ -22,6 +22,7 @@ ALLOWED_MODULE_KEYS: Set[str] = {
     "bank_accounts",
     "loyalty",
     "promotions",
+    "sale_calendar",
     "affiliate",
     "embed_codes",
     "chat_embeds",

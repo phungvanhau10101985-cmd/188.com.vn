@@ -25,6 +25,8 @@ const BirthdayPromoWelcomeModal = dynamic(
   () => import('@/components/BirthdayPromoWelcomeModal'),
   { ssr: false }
 );
+const SiteSaleBanner = dynamic(() => import('@/components/SiteSaleBanner'), { ssr: false });
+import { useSiteSale } from '@/lib/use-site-sale';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCart } from '@/features/cart/hooks/useCart';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
@@ -61,12 +63,14 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   const { isAuthenticated } = useAuth();
   const { getCartItemCount } = useCart();
   const { favoriteCount } = useFavorites();
+  const { state: siteSaleState } = useSiteSale();
   const [viewedProductsCount, setViewedProductsCount] = useState(0);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [headerVisible, setHeaderVisible] = useState(true);
 
   const qFromUrl = searchParams.get('q') ?? '';
   const isAuthPage = pathname?.startsWith('/auth/');
+  const isAdminPage = pathname?.startsWith('/admin');
   const isCartAddLandingPage = pathname?.startsWith('/cart/add/');
   const isProductDetailPage = pathname?.match(/^\/products\/[^/]+$/);
   const pathNorm = pathname != null ? pathname.replace(/\/$/, '') || '/' : '/';
@@ -443,6 +447,10 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
           onSuggestionClick={handleSuggestionClick}
           initialCategoryTree={categoryTree}
         />
+      )}
+
+      {!isAdminPage && !isAuthPage && !isCartAddLandingPage && !isShopVideoFeedPage && (
+        <SiteSaleBanner state={siteSaleState} />
       )}
 
       <main
