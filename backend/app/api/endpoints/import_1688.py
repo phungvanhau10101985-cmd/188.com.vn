@@ -48,7 +48,7 @@ from app.schemas.import_1688 import (
 )
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.services.import_link_deepseek_taxonomy import apply_deepseek_taxonomy_to_product_data
-from app.services.alicdn_urls import normalize_excel_product_image_urls
+from app.services.alicdn_urls import normalize_product_data_image_urls_for_db
 from app.services.product_rating_question_groups import apply_import_rating_question_groups_to_product_data
 from app.services.product_info_web_compact import compact_product_info_for_web
 from app.services.import_hibox_scraper import (
@@ -736,8 +736,12 @@ def _publish_payload(product_data: Dict[str, Any]) -> Dict[str, Any]:
     payload["colors"] = _coerce_colors_for_create(payload.get("colors"))
     # Khớp nghiệp vụ + cột Excel mẫu (=1): lưu DB dạng bool; draft/export dùng số 1/0.
     payload["deposit_require"] = True
-    normalize_excel_product_image_urls(payload)
     return payload
+
+
+def _finalize_product_data_for_db(product_data: Dict[str, Any]) -> None:
+    """Chuẩn hoá URL ảnh ngay trước khi ghi DB / draft."""
+    normalize_product_data_image_urls_for_db(product_data)
 
 
 def _assign_internal_sku_to_import_product_data(
@@ -854,6 +858,7 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
             _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
             _reapply_excel_locale_overlay_for_job(db, job_id, product_data)
+            _finalize_product_data_for_db(product_data)
             draft_crud.mark_done(
                 db,
                 draft,
@@ -872,6 +877,7 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
             _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
             _reapply_excel_locale_overlay_for_job(db, job_id, product_data)
+            _finalize_product_data_for_db(product_data)
             draft_crud.mark_done(
                 db,
                 draft,
@@ -1427,6 +1433,7 @@ def update_import_1688_draft(
         raise HTTPException(status_code=404, detail="Không tìm thấy draft.")
     pd = dict(payload.product_data or {})
     compact_product_info_for_web(pd)
+    _finalize_product_data_for_db(pd)
     return draft_crud.update_draft(db, draft, product_data=pd, status="done", message="Đã cập nhật draft.")
 
 
@@ -1590,6 +1597,7 @@ def publish_import_1688_draft(
         )
 
     compact_product_info_for_web(payload)
+    _finalize_product_data_for_db(payload)
 
     if existing is None:
         existing = product_crud.get_product_by_product_id(db, canonical_pid)
@@ -1617,10 +1625,11 @@ def publish_import_1688_draft(
     merged_pd = dict(draft.product_data or {})
     merged_pd["product_id"] = canonical_pid
     merged_pd["code"] = payload.get("code") or ""
-    for _img_key in ("main_image", "images", "gallery", "colors"):
+    for _img_key in ("main_image", "images", "gallery", "colors", "product_info", "description"):
         if _img_key in payload:
             merged_pd[_img_key] = payload[_img_key]
     compact_product_info_for_web(merged_pd)
+    _finalize_product_data_for_db(merged_pd)
     merged_pd["deposit_require"] = 1
 
     draft_crud.update_draft(

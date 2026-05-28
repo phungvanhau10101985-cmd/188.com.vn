@@ -5,16 +5,17 @@ Ví dụ:
   .../O1CN01...-cib.jpg_800x800q90.jpg  →  .../O1CN01...-cib.jpg
 
 Cập nhật bảng:
-  - products (main_image, images, gallery, colors)
+  - products (main_image, images, gallery, colors, product_info, description)
   - product_import_drafts (product_data) — tùy chọn --include-drafts
 
 DATABASE_URL trong backend/.env (hoặc biến môi trường).
 
-  cd backend
+  cd /var/www/188.com.vn/backend
+  source .venv/bin/activate
+  python scripts/migrate_product_image_urls_to_first_jpg.py --audit
   python scripts/migrate_product_image_urls_to_first_jpg.py --dry-run
   python scripts/migrate_product_image_urls_to_first_jpg.py --yes
   python scripts/migrate_product_image_urls_to_first_jpg.py --yes --include-drafts
-  python scripts/migrate_product_image_urls_to_first_jpg.py --yes --limit 50
 """
 
 from __future__ import annotations
@@ -32,11 +33,15 @@ if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
 from sqlalchemy.orm import Session  # noqa: E402
+from sqlalchemy.orm.attributes import flag_modified  # noqa: E402
 
 from app.db.session import SessionLocal, engine  # noqa: E402
 from app.models.product import Product  # noqa: E402
 from app.models.product_import_draft import ProductImportDraft  # noqa: E402
-from app.services.alicdn_urls import normalize_excel_product_image_urls  # noqa: E402
+from app.services.alicdn_urls import (  # noqa: E402
+    iter_bad_image_urls_in_record,
+    normalize_product_image_record,
+)
 
 
 def _product_image_fields(product: Product) -> Dict[str, Any]:
@@ -45,17 +50,9 @@ def _product_image_fields(product: Product) -> Dict[str, Any]:
         "images": product.images if isinstance(product.images, list) else [],
         "gallery": product.gallery if isinstance(product.gallery, list) else [],
         "colors": product.colors if isinstance(product.colors, list) else [],
+        "product_info": product.product_info,
+        "description": product.description,
     }
-
-
-def _normalize_image_fields(data: Dict[str, Any]) -> Dict[str, Any]:
-    out = copy.deepcopy(data)
-    normalize_excel_product_image_urls(out)
-    return out
-
-
-def _fields_changed(before: Dict[str, Any], after: Dict[str, Any]) -> bool:
-    return before != after
 
 
 def _apply_product_image_fields(product: Product, normalized: Dict[str, Any]) -> None:
@@ -63,6 +60,90 @@ def _apply_product_image_fields(product: Product, normalized: Dict[str, Any]) ->
     product.images = normalized.get("images") or []
     product.gallery = normalized.get("gallery") or []
     product.colors = normalized.get("colors") or []
+    product.product_info = normalized.get("product_info")
+    product.description = normalized.get("description")
+    flag_modified(product, "images")
+    flag_modified(product, "gallery")
+    flag_modified(product, "colors")
+    flag_modified(product, "product_info")
+
+
+def _collect_change_samples(
+    before: Dict[str, Any],
+    after: Dict[str, Any],
+    *,
+    label: str,
+    samples: List[Dict[str, str]],
+    max_samples: int = 8,
+) -> None:
+    if len(samples) >= max_samples:
+        return
+
+    def walk(path: str, b: Any, a: Any) -> None:
+        nonlocal samples
+        if len(samples) >= max_samples:
+            return
+        if isinstance(b, str) and isinstance(a, str) and b != a and _looks_changed_url(b, a):
+            samples.append(
+                {
+                    "id": label,
+                    "field": path,
+                    "before": b[:220],
+                    "after": a[:220],
+                }
+            )
+            return
+        if isinstance(b, list) and isinstance(a, list):
+            for idx, (bi, ai) in enumerate(zip(b, a)):
+                walk(f"{path}[{idx}]", bi, ai)
+            return
+        if isinstance(b, dict) and isinstance(a, dict):
+            for key in b.keys():
+                if key in a:
+                    walk(f"{path}.{key}" if path else str(key), b.get(key), a.get(key))
+
+    walk("", before, after)
+
+
+def _looks_changed_url(before: str, after: str) -> bool:
+    return bool(before.strip() and after.strip() and before.strip() != after.strip())
+
+
+def audit_products(db: Session, *, limit: Optional[int]) -> Dict[str, Any]:
+    scanned = 0
+    bad_records = 0
+    bad_urls = 0
+    samples: List[str] = []
+
+    q = db.query(Product.id, Product.product_id, Product.main_image, Product.images, Product.gallery, Product.colors, Product.product_info, Product.description).order_by(Product.id.asc())
+    if limit is not None:
+        q = q.limit(limit)
+
+    for row in q.yield_per(200):
+        scanned += 1
+        payload = {
+            "main_image": row.main_image,
+            "images": row.images if isinstance(row.images, list) else [],
+            "gallery": row.gallery if isinstance(row.gallery, list) else [],
+            "colors": row.colors if isinstance(row.colors, list) else [],
+            "product_info": row.product_info,
+            "description": row.description,
+        }
+        hits = list(iter_bad_image_urls_in_record(payload))
+        if not hits:
+            continue
+        bad_records += 1
+        bad_urls += len(hits)
+        if len(samples) < 10:
+            samples.append(f"{row.product_id}: {hits[0][:220]}")
+
+    return {
+        "table": "products",
+        "scanned": scanned,
+        "bad_records": bad_records,
+        "bad_urls": bad_urls,
+        "samples": samples,
+    }
 
 
 def migrate_products(
@@ -76,43 +157,42 @@ def migrate_products(
     changed = 0
     samples: List[Dict[str, str]] = []
 
-    q = db.query(Product).order_by(Product.id.asc())
-    if limit is not None:
-        q = q.limit(limit)
+    last_id = 0
+    while True:
+        q = db.query(Product).filter(Product.id > last_id).order_by(Product.id.asc())
+        if limit is not None:
+            remaining = limit - scanned
+            if remaining <= 0:
+                break
+            q = q.limit(min(batch_size, remaining))
+        else:
+            q = q.limit(batch_size)
 
-    pending: List[Tuple[Product, Dict[str, Any]]] = []
+        rows: List[Product] = q.all()
+        if not rows:
+            break
 
-    for product in q.yield_per(max(50, batch_size)):
-        scanned += 1
-        before = _product_image_fields(product)
-        after = _normalize_image_fields(before)
-        if not _fields_changed(before, after):
-            continue
+        pending: List[Tuple[Product, Dict[str, Any]]] = []
 
-        changed += 1
-        if len(samples) < 8:
-            samples.append(
-                {
-                    "product_id": str(product.product_id),
-                    "main_image_before": str(before.get("main_image") or "")[:180],
-                    "main_image_after": str(after.get("main_image") or "")[:180],
-                }
-            )
+        for product in rows:
+            scanned += 1
+            last_id = product.id
+            before = _product_image_fields(product)
+            after = normalize_product_image_record(before)
+            if before == after:
+                continue
 
-        if dry_run:
-            continue
+            changed += 1
+            _collect_change_samples(before, after, label=str(product.product_id), samples=samples)
 
-        pending.append((product, after))
-        if len(pending) >= batch_size:
+            if dry_run:
+                continue
+            pending.append((product, after))
+
+        if not dry_run and pending:
             for row, normalized in pending:
                 _apply_product_image_fields(row, normalized)
             db.commit()
-            pending.clear()
-
-    if not dry_run and pending:
-        for row, normalized in pending:
-            _apply_product_image_fields(row, normalized)
-        db.commit()
 
     return {
         "table": "products",
@@ -133,52 +213,56 @@ def migrate_import_drafts(
     changed = 0
     samples: List[Dict[str, str]] = []
 
-    q = (
-        db.query(ProductImportDraft)
-        .filter(ProductImportDraft.product_data.isnot(None))
-        .order_by(ProductImportDraft.id.asc())
-    )
-    if limit is not None:
-        q = q.limit(limit)
+    last_id = 0
+    while True:
+        q = (
+            db.query(ProductImportDraft)
+            .filter(ProductImportDraft.id > last_id, ProductImportDraft.product_data.isnot(None))
+            .order_by(ProductImportDraft.id.asc())
+        )
+        if limit is not None:
+            remaining = limit - scanned
+            if remaining <= 0:
+                break
+            q = q.limit(min(batch_size, remaining))
+        else:
+            q = q.limit(batch_size)
 
-    pending: List[Tuple[ProductImportDraft, Dict[str, Any]]] = []
+        rows: List[ProductImportDraft] = q.all()
+        if not rows:
+            break
 
-    for draft in q.yield_per(max(50, batch_size)):
-        scanned += 1
-        raw = draft.product_data
-        if not isinstance(raw, dict):
-            continue
+        pending: List[Tuple[ProductImportDraft, Dict[str, Any]]] = []
 
-        before = copy.deepcopy(raw)
-        after = copy.deepcopy(raw)
-        normalize_excel_product_image_urls(after)
-        if before == after:
-            continue
+        for draft in rows:
+            scanned += 1
+            last_id = draft.id
+            raw = draft.product_data
+            if not isinstance(raw, dict):
+                continue
 
-        changed += 1
-        if len(samples) < 8:
-            samples.append(
-                {
-                    "draft_id": str(draft.id),
-                    "main_image_before": str(before.get("main_image") or "")[:180],
-                    "main_image_after": str(after.get("main_image") or "")[:180],
-                }
+            before = copy.deepcopy(raw)
+            after = normalize_product_image_record(before)
+            if before == after:
+                continue
+
+            changed += 1
+            _collect_change_samples(
+                before,
+                after,
+                label=f"draft:{draft.id}",
+                samples=samples,
             )
 
-        if dry_run:
-            continue
+            if dry_run:
+                continue
+            pending.append((draft, after))
 
-        pending.append((draft, after))
-        if len(pending) >= batch_size:
+        if not dry_run and pending:
             for row, normalized in pending:
                 row.product_data = normalized
+                flag_modified(row, "product_data")
             db.commit()
-            pending.clear()
-
-    if not dry_run and pending:
-        for row, normalized in pending:
-            row.product_data = normalized
-        db.commit()
 
     return {
         "table": "product_import_drafts",
@@ -188,9 +272,18 @@ def migrate_import_drafts(
     }
 
 
-def _print_summary(results: List[Dict[str, Any]], *, dry_run: bool) -> None:
+def _print_summary(results: List[Dict[str, Any]], *, dry_run: bool, audit: bool = False) -> None:
     print("\nKết quả:")
     for row in results:
+        if audit:
+            print(
+                f"  {row['table']:<24} scanned={row['scanned']:<6} "
+                f"bad_records={row.get('bad_records', 0):<6} bad_urls={row.get('bad_urls', 0)}"
+            )
+            for sample in row.get("samples") or []:
+                print(f"    {sample}")
+            continue
+
         print(
             f"  {row['table']:<24} scanned={row['scanned']:<6} "
             f"changed={row['changed']:<6} dry_run={dry_run}"
@@ -203,6 +296,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Chuẩn hoá URL ảnh SP trong DB — cắt tại .jpg đầu tiên",
     )
+    parser.add_argument("--audit", action="store_true", help="Chỉ đếm URL còn .jpg_... chưa sửa")
     parser.add_argument("--dry-run", action="store_true", help="Chỉ đếm/thống kê, không ghi DB")
     parser.add_argument("--yes", action="store_true", help="Bỏ hỏi xác nhận trước khi ghi DB")
     parser.add_argument(
@@ -226,6 +320,12 @@ def main() -> int:
 
     db = SessionLocal()
     try:
+        if args.audit:
+            results = [audit_products(db, limit=args.limit)]
+            _print_summary(results, dry_run=True, audit=True)
+            print("\n--audit: không ghi DB.--")
+            return 0
+
         results = [migrate_products(db, dry_run=True, batch_size=batch_size, limit=args.limit)]
         if args.include_drafts:
             results.append(
@@ -266,6 +366,15 @@ def main() -> int:
         engine.dispose()
 
     _print_summary(final_results, dry_run=False)
+
+    db_audit = SessionLocal()
+    try:
+        audit_results = [audit_products(db_audit, limit=args.limit)]
+    finally:
+        db_audit.close()
+        engine.dispose()
+    _print_summary(audit_results, dry_run=False, audit=True)
+
     print("\nXong.")
     return 0
 

@@ -18,7 +18,7 @@ import copy
 import time
 from datetime import datetime
 from app.core.config import settings
-from app.services.alicdn_urls import normalize_excel_product_image_urls
+from app.services.alicdn_urls import normalize_product_data_image_urls_for_db
 from app.services.bunny_storage import (
     collect_product_image_urls_for_bunny,
     delete_bunny_assets_for_product,
@@ -1404,7 +1404,7 @@ def excel_row_to_product(row: Dict) -> Dict:
             'created_at': datetime.now()
         }
 
-        normalize_excel_product_image_urls(product_data)
+        normalize_product_data_image_urls_for_db(product_data)
         
         # Debug log để kiểm tra
         logger.debug(f"✅ Converted: {product_id}")
@@ -3901,7 +3901,7 @@ def ensure_category_seo_body(
 
 def create_product(db: Session, product: ProductCreate):
     data = product.model_dump() if hasattr(product, "model_dump") else product.dict()
-    normalize_excel_product_image_urls(data)
+    normalize_product_data_image_urls_for_db(data)
     batch_reserved: Set[str] = set()
     data["code"] = ensure_unique_internal_product_code(
         db,
@@ -3933,8 +3933,7 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
             if hasattr(product_update, "model_dump")
             else product_update.dict(exclude_unset=True)
         )
-        if any(k in update_data for k in ("main_image", "images", "gallery", "colors")):
-            normalize_excel_product_image_urls(update_data)
+        normalize_product_data_image_urls_for_db(update_data)
 
         if 'name' in update_data and 'slug' not in update_data:
             update_data['slug'] = generate_consistent_slug(update_data['name'], db_product.product_id)
@@ -4496,7 +4495,7 @@ def bulk_import_products(
                     product_data.get("product_info"),
                     product_data["code"],
                 )
-                normalize_excel_product_image_urls(product_data)
+                normalize_product_data_image_urls_for_db(product_data)
                 if existing:
                     old_product_id = existing.product_id
                     product_data["product_info"] = _merge_product_info_preserve_image_localization(
