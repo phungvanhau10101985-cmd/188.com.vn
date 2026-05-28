@@ -22,8 +22,6 @@ function sourceLabel(source?: string | null): string {
       return 'Quà chào mừng';
     case 'first_delivered':
       return 'Cảm ơn bạn đã mua';
-    case 'birthday':
-      return 'Quà sinh nhật';
     case 'comeback':
       return 'Quà quay lại';
     case 'admin':

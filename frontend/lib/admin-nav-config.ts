@@ -35,7 +35,6 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: '/admin/staff-access', label: 'Quyền nhân viên', privilegedOnly: true },
       { href: '/admin/loyalty', label: 'Thành viên (điểm)' },
       { href: '/admin/promotions', label: 'Khuyến mãi' },
-      { href: '/admin/sale-calendar', label: 'Sale lịch' },
       { href: '/admin/affiliate', label: 'Affiliate & ví' },
       { href: '/admin/bank-accounts', label: 'Nạp tiền / QR' },
     ],

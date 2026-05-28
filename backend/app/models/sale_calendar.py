@@ -1,6 +1,7 @@
-from sqlalchemy import Boolean, Column, Integer, Numeric
+from sqlalchemy import Boolean, Column, Integer, Numeric, String
 
 from app.db.base import Base
+from app.db.coerced_date import CoercedDate
 
 
 class SaleCalendarSettings(Base):
@@ -11,6 +12,12 @@ class SaleCalendarSettings(Base):
     id = Column(Integer, primary_key=True, default=1)
     enabled = Column(Boolean, nullable=False, default=True)
     teaser_days = Column(Integer, nullable=False, default=3)
+    # auto: lịch ngày trùng tháng hàng tháng | scheduled: một ngày đặt sẵn | manual: sale thủ công hôm nay
+    schedule_mode = Column(String(20), nullable=False, default="auto")
+    scheduled_sale_date = Column(CoercedDate, nullable=True)
+    scheduled_discount_percent = Column(Numeric(5, 2), nullable=True)
+    manual_sale_date = Column(CoercedDate, nullable=True)
+    manual_discount_percent = Column(Numeric(5, 2), nullable=True)
 
 
 class SaleCalendarMonthRule(Base):

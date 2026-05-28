@@ -14,7 +14,7 @@ set "PROJECT1_ROOT=G:\python-code\188-com-vn"
 set "PROJECT1_FRONTEND_DIR=%PROJECT1_ROOT%\frontend"
 set "PROJECT1_BACKEND_DIR=%PROJECT1_ROOT%\backend"
 set "PROJECT1_FRONTEND_CMD=npm run dev -- -p 3002"
-set "PROJECT1_BACKEND_CMD=python -m uvicorn main:app --reload --port 8002"
+set "PROJECT1_BACKEND_CMD=python -m uvicorn main:app --host 0.0.0.0 --port 8002"
 set "PROJECT1_NGROK_PORT=3002"
 
 REM ========================
@@ -24,7 +24,7 @@ set "PROJECT2_ROOT=G:\python-code\Thu-do-online"
 set "PROJECT2_FRONTEND_DIR=%PROJECT2_ROOT%"
 set "PROJECT2_BACKEND_DIR=%PROJECT2_ROOT%\backend"
 set "PROJECT2_FRONTEND_CMD=npm run dev -- -p 3001"
-set "PROJECT2_BACKEND_CMD=python -m uvicorn main:app --reload --port 8001"
+set "PROJECT2_BACKEND_CMD=python -m uvicorn main:app --host 0.0.0.0 --port 8001"
 set "PROJECT2_NGROK_PORT=3001"
 
 REM ========================

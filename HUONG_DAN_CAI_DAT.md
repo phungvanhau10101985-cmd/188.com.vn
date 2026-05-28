@@ -49,8 +49,11 @@ copy .env.example .env
 
 Chạy API (cổng **8001**):
 
+**Windows (khuyến nghị):** dùng `dev-clear-start.bat` ở thư mục gốc repo — **không** dùng `--reload` (dễ để process cũ giữ port 8001).
+
 ```bash
-python -m uvicorn main:app --reload --host 0.0.0.0 --port 8001
+# Linux/macOS hoặc khi chạy tay (không --reload trên Windows)
+python -m uvicorn main:app --host 0.0.0.0 --port 8001
 ```
 
 Kiểm tra: mở **http://127.0.0.1:8001/docs** hoặc `curl http://127.0.0.1:8001/health`.

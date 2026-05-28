@@ -147,6 +147,10 @@ const EMPTY_REVENUE_FILTER: RevenueFilterState = {
   preset: null,
 };
 
+function todayIsoVn(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date());
+}
+
 function monthInputToDateRange(value: string): { from: string; to: string } | null {
   if (!/^\d{4}-\d{2}$/.test(value)) return null;
   const [year, month] = value.split('-').map(Number);
@@ -183,7 +187,11 @@ export default function AdminOrdersPage() {
   const [clearCustomsBusy, setClearCustomsBusy] = useState(false);
   const [markOutForConfirmBusy, setMarkOutForConfirmBusy] = useState(false);
   const [revenueMode, setRevenueMode] = useState<RevenueReportMode>('day');
-  const [revenueFilter, setRevenueFilter] = useState<RevenueFilterState>(EMPTY_REVENUE_FILTER);
+  const [revenueFilter, setRevenueFilter] = useState<RevenueFilterState>(() => ({
+    ...EMPTY_REVENUE_FILTER,
+    date: todayIsoVn(),
+    preset: 'today',
+  }));
   const [revenueReport, setRevenueReport] = useState<AdminOrderStats | null>(null);
   const [revenueLoading, setRevenueLoading] = useState(false);
   const [revenueError, setRevenueError] = useState<string | null>(null);
@@ -589,9 +597,15 @@ export default function AdminOrdersPage() {
                 type="button"
                 onClick={() => {
                   setRevenueMode(key);
+                  setRevenueError(null);
+                  if (key === 'day') {
+                    const next = { ...EMPTY_REVENUE_FILTER, date: todayIsoVn(), preset: 'today' as const };
+                    setRevenueFilter(next);
+                    void loadRevenueReport('day', next);
+                    return;
+                  }
                   setRevenueFilter(EMPTY_REVENUE_FILTER);
                   setRevenueReport(null);
-                  setRevenueError(null);
                 }}
                 className={`rounded-lg px-3 py-2 text-sm font-medium border ${
                   revenueMode === key
@@ -612,16 +626,18 @@ export default function AdminOrdersPage() {
                   <input
                     type="date"
                     value={revenueFilter.date}
-                    onChange={(e) =>
-                      setRevenueFilter({ ...EMPTY_REVENUE_FILTER, date: e.target.value, preset: null })
-                    }
+                    onChange={(e) => {
+                      const next = { ...EMPTY_REVENUE_FILTER, date: e.target.value, preset: null };
+                      setRevenueFilter(next);
+                      if (e.target.value) void loadRevenueReport('day', next);
+                    }}
                     className="mt-1 block rounded-lg border border-gray-200 px-3 py-1.5 text-sm"
                   />
                 </label>
                 <button
                   type="button"
                   onClick={() => {
-                    const next = { ...EMPTY_REVENUE_FILTER, preset: 'today' as const };
+                    const next = { ...EMPTY_REVENUE_FILTER, date: todayIsoVn(), preset: 'today' as const };
                     setRevenueFilter(next);
                     void loadRevenueReport('day', next);
                   }}
@@ -629,14 +645,6 @@ export default function AdminOrdersPage() {
                   className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                 >
                   Hôm nay
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void loadRevenueReport('day', revenueFilter)}
-                  disabled={revenueLoading || !revenueFilter.date}
-                  className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  Xem báo cáo
                 </button>
               </>
             ) : null}
@@ -843,7 +851,7 @@ export default function AdminOrdersPage() {
                 </div>
               </div>
             ) : !revenueError ? (
-              <p className="text-sm text-gray-500">Chọn kỳ và bấm xem báo cáo.</p>
+              <p className="text-sm text-gray-500">Chọn kỳ để xem báo cáo.</p>
             ) : null}
           </div>
         </section>

@@ -27,7 +27,6 @@ class AutoGrantTrigger(enum.Enum):
     NONE = "none"
     SIGNUP = "signup"
     FIRST_DELIVERED = "first_delivered"
-    BIRTHDAY = "birthday"
     COMEBACK = "comeback"
     CART_ABANDON = "cart_abandon"
 

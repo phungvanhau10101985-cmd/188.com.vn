@@ -49,9 +49,7 @@ def _welcome_to_eligibility(status: dict) -> WelcomeEligibilityResponse:
 
 
 def _system_template_codes() -> set[str]:
-    codes = {tpl["code"] for tpl in grant_svc.PROMO_TEMPLATES}
-    codes.update(grant_svc.RETIRED_PROMO_CODES)
-    return codes
+    return {tpl["code"] for tpl in grant_svc.PROMO_TEMPLATES}
 
 
 def _promotion_to_admin_out(db: Session, promo) -> AdminPromotionOut:

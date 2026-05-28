@@ -9,8 +9,12 @@ import { getPrivilegedOnlyAdminHrefs } from '@/lib/admin-nav-config';
 export const ADMIN_ROLE_STORAGE_KEY = 'admin_role';
 export const ADMIN_MODULES_STORAGE_KEY = 'admin_modules';
 
+function adminNavPathFromHref(href: string): string {
+  return href.split('#')[0]?.split('?')[0] || href;
+}
+
 function expandAdminNavPrefixes(hrefs: string[]): string[] {
-  return [...new Set(hrefs)];
+  return [...new Set(hrefs.map(adminNavPathFromHref).filter(Boolean))];
 }
 
 export function getStoredAdminRole(): string | null {
@@ -102,7 +106,8 @@ export function defaultAdminHomeFromState(role: string | null, modules: string[]
   if (!prefixes) return '/admin/orders';
   for (const key of ADMIN_MODULE_ORDER) {
     const href = ADMIN_MODULE_NAV[key];
-    if (href && prefixes.includes(href)) return href;
+    const hrefPath = href ? adminNavPathFromHref(href) : '';
+    if (hrefPath && prefixes.includes(hrefPath)) return href || hrefPath;
   }
   return prefixes[0];
 }
@@ -120,7 +125,10 @@ export function isAdminPathAllowedForState(pathname: string, role: string | null
   }
   const prefixes = getEffectiveNavPrefixesFor(role, modules);
   if (!prefixes) return true;
-  return prefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  return prefixes.some((p) => {
+    const base = adminNavPathFromHref(p);
+    return pathname === base || pathname.startsWith(`${base}/`);
+  });
 }
 
 export function isAdminPathAllowed(pathname: string): boolean {

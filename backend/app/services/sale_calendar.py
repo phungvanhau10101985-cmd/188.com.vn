@@ -67,30 +67,106 @@ def _sale_day(year: int, month: int) -> date:
     return date(year, month, min(month, last))
 
 
+def _coerce_date(value: Any) -> Optional[date]:
+    """Chuẩn hóa date từ DB — cột sync migration đôi khi trả về str."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            return date.fromisoformat(raw[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def coerce_sale_date(value: Any) -> Optional[date]:
+    return _coerce_date(value)
+
+
 def _event_label(sale_d: date) -> str:
+    sale_d = _coerce_date(sale_d) or date.today()
     return f"Sale {sale_d.day}/{sale_d.month}"
 
 
 def _active_bounds(sale_d: date) -> tuple[datetime, datetime]:
+    sale_d = _coerce_date(sale_d) or date.today()
     start = datetime.combine(sale_d, time(0, 0, 0), tzinfo=_VN_TZ)
     end = datetime.combine(sale_d, time(23, 59, 59), tzinfo=_VN_TZ)
     return start, end
 
 
-def _load_settings(db: Session) -> tuple[bool, int]:
+@dataclass(frozen=True)
+class SaleCalendarConfig:
+    enabled: bool
+    teaser_days: int
+    schedule_mode: str
+    scheduled_sale_date: Optional[date]
+    scheduled_discount_percent: Optional[float]
+    manual_sale_date: Optional[date]
+    manual_discount_percent: Optional[float]
+
+
+def _load_settings(db: Session) -> SaleCalendarConfig:
     from app.models.sale_calendar import SaleCalendarSettings
 
     try:
         row = db.query(SaleCalendarSettings).filter(SaleCalendarSettings.id == 1).first()
         if not row:
-            return True, 3
-        return bool(row.enabled), int(row.teaser_days or 3)
+            return SaleCalendarConfig(
+                enabled=True,
+                teaser_days=3,
+                schedule_mode="auto",
+                scheduled_sale_date=None,
+                scheduled_discount_percent=None,
+                manual_sale_date=None,
+                manual_discount_percent=None,
+            )
+        scheduled_pct = (
+            float(row.scheduled_discount_percent)
+            if row.scheduled_discount_percent is not None
+            else None
+        )
+        manual_pct = (
+            float(row.manual_discount_percent) if row.manual_discount_percent is not None else None
+        )
+        mode = (getattr(row, "schedule_mode", None) or "auto").strip().lower()
+        if mode not in ("auto", "scheduled", "manual"):
+            mode = "auto"
+        return SaleCalendarConfig(
+            enabled=bool(row.enabled),
+            teaser_days=int(row.teaser_days or 3),
+            schedule_mode=mode,
+            scheduled_sale_date=_coerce_date(getattr(row, "scheduled_sale_date", None)),
+            scheduled_discount_percent=scheduled_pct,
+            manual_sale_date=_coerce_date(getattr(row, "manual_sale_date", None)),
+            manual_discount_percent=manual_pct,
+        )
     except Exception:
         try:
             db.rollback()
         except Exception:
             pass
-        return True, 3
+        return SaleCalendarConfig(
+            enabled=True,
+            teaser_days=3,
+            schedule_mode="auto",
+            scheduled_sale_date=None,
+            scheduled_discount_percent=None,
+            manual_sale_date=None,
+            manual_discount_percent=None,
+        )
+
+
+def _legacy_load_settings(db: Session) -> tuple[bool, int]:
+    cfg = _load_settings(db)
+    return cfg.enabled, cfg.teaser_days
 
 
 def _month_rule_map(db: Session) -> Dict[int, tuple[bool, Optional[float]]]:
@@ -109,6 +185,51 @@ def _month_rule_map(db: Session) -> Dict[int, tuple[bool, Optional[float]]]:
         override = float(r.discount_percent_override) if r.discount_percent_override is not None else None
         out[int(r.month)] = (bool(r.enabled), override)
     return out
+
+
+def _resolve_single_sale_event(
+    *,
+    today: date,
+    sale_d: date,
+    pct: float,
+    teaser_days: int,
+    event_label: Optional[str] = None,
+) -> Optional[SaleCalendarState]:
+    sale_d = _coerce_date(sale_d)
+    if sale_d is None:
+        return None
+    teaser_days = max(1, min(14, teaser_days))
+    teaser_start = sale_d - timedelta(days=teaser_days)
+    if today < teaser_start or today > sale_d:
+        return None
+    active_start, active_end = _active_bounds(sale_d)
+    phase = "active" if today == sale_d else "teaser"
+    countdown = active_start if phase == "teaser" else active_end
+    return SaleCalendarState(
+        phase=phase,
+        enabled=True,
+        event_date=sale_d,
+        event_label=event_label or _event_label(sale_d),
+        discount_percent=pct,
+        teaser_days=teaser_days,
+        active_start_at=active_start,
+        active_end_at=active_end,
+        countdown_to=countdown,
+    )
+
+
+def _idle_sale_state(*, enabled: bool, teaser_days: int) -> SaleCalendarState:
+    return SaleCalendarState(
+        phase=None,
+        enabled=enabled,
+        event_date=None,
+        event_label=None,
+        discount_percent=0.0,
+        teaser_days=teaser_days,
+        active_start_at=None,
+        active_end_at=None,
+        countdown_to=None,
+    )
 
 
 def _month_enabled(rules: Dict[int, tuple[bool, Optional[float]]], month: int) -> bool:
@@ -168,7 +289,7 @@ def _build_site_sale_test_state(db: Session, phase: str, now: Optional[datetime]
         current = current.astimezone(_VN_TZ)
 
     today = current.date()
-    _, teaser_days = _load_settings(db)
+    _, teaser_days = _legacy_load_settings(db)
     teaser_days = max(1, min(14, int(teaser_days or 3)))
     rules = _month_rule_map(db)
     phase = (phase or "active").strip().lower()
@@ -218,6 +339,7 @@ def resolve_sale_calendar_state(
     user=None,
 ) -> SaleCalendarState:
     """Trạng thái campaign hiện tại (teaser / active / không)."""
+    maintain_sale_calendar_settings(db)
     if user is not None:
         test_state = get_site_sale_test_state_for_user(db, user, now=now)
         if test_state is not None:
@@ -230,23 +352,41 @@ def resolve_sale_calendar_state(
         current = current.astimezone(_VN_TZ)
 
     today = current.date()
-    global_enabled, teaser_days = _load_settings(db)
+    cfg = _load_settings(db)
     rules = _month_rule_map(db)
+    teaser_days = max(1, min(14, cfg.teaser_days))
 
-    if not global_enabled:
+    if not cfg.enabled:
+        return _idle_sale_state(enabled=False, teaser_days=teaser_days)
+
+    if cfg.manual_sale_date and today == cfg.manual_sale_date:
+        pct = cfg.manual_discount_percent or _month_discount(rules, today.month)
+        active_start, active_end = _active_bounds(today)
         return SaleCalendarState(
-            phase=None,
-            enabled=False,
-            event_date=None,
-            event_label=None,
-            discount_percent=0.0,
+            phase="active",
+            enabled=True,
+            event_date=today,
+            event_label=f"{_event_label(today)} (hôm nay)",
+            discount_percent=pct,
             teaser_days=teaser_days,
-            active_start_at=None,
-            active_end_at=None,
-            countdown_to=None,
+            active_start_at=active_start,
+            active_end_at=active_end,
+            countdown_to=active_end,
         )
 
-    teaser_days = max(1, min(14, teaser_days))
+    if cfg.scheduled_sale_date:
+        sale_d = cfg.scheduled_sale_date
+        pct = cfg.scheduled_discount_percent or _month_discount(rules, sale_d.month)
+        scheduled_state = _resolve_single_sale_event(
+            today=today,
+            sale_d=sale_d,
+            pct=pct,
+            teaser_days=teaser_days,
+            event_label=f"{_event_label(sale_d)} (đặt lịch)",
+        )
+        if scheduled_state is not None:
+            return scheduled_state
+
     year = today.year
 
     candidates: List[tuple[date, str, float, datetime, datetime]] = []
@@ -264,17 +404,7 @@ def resolve_sale_calendar_state(
             candidates.append((sale_d, phase, pct, active_start, active_end))
 
     if not candidates:
-        return SaleCalendarState(
-            phase=None,
-            enabled=True,
-            event_date=None,
-            event_label=None,
-            discount_percent=0.0,
-            teaser_days=teaser_days,
-            active_start_at=None,
-            active_end_at=None,
-            countdown_to=None,
-        )
+        return _idle_sale_state(enabled=True, teaser_days=teaser_days)
 
     # Ưu tiên active hôm nay, sau đó teaser gần nhất
     candidates.sort(key=lambda x: (0 if x[1] == "active" else 1, x[0]))
@@ -409,10 +539,46 @@ def gmc_effective_from_bounds(start: Optional[datetime], end: Optional[datetime]
 
 def list_upcoming_events(db: Session, *, limit: int = 6) -> List[Dict[str, Any]]:
     """Preview lịch sale cho admin."""
+    maintain_sale_calendar_settings(db)
     today = _now_vn().date()
-    global_enabled, teaser_days = _load_settings(db)
+    cfg = _load_settings(db)
     rules = _month_rule_map(db)
+    teaser_days = max(1, min(14, cfg.teaser_days))
     out: List[Dict[str, Any]] = []
+
+    if cfg.manual_sale_date and cfg.manual_sale_date >= today:
+        sale_d = cfg.manual_sale_date
+        pct = cfg.manual_discount_percent or _month_discount(rules, sale_d.month)
+        active_start, active_end = _active_bounds(sale_d)
+        teaser_start = sale_d
+        out.append(
+            {
+                "event_date": sale_d.isoformat(),
+                "event_label": f"{_event_label(sale_d)} (hôm nay)",
+                "discount_percent": pct,
+                "teaser_start": teaser_start.isoformat(),
+                "active_start": active_start.isoformat(),
+                "active_end": active_end.isoformat(),
+                "month_parity": "manual",
+            }
+        )
+
+    if cfg.scheduled_sale_date and cfg.scheduled_sale_date >= today:
+        sale_d = cfg.scheduled_sale_date
+        pct = cfg.scheduled_discount_percent or _month_discount(rules, sale_d.month)
+        active_start, active_end = _active_bounds(sale_d)
+        teaser_start = sale_d - timedelta(days=teaser_days)
+        out.append(
+            {
+                "event_date": sale_d.isoformat(),
+                "event_label": f"{_event_label(sale_d)} (đặt lịch)",
+                "discount_percent": pct,
+                "teaser_start": teaser_start.isoformat(),
+                "active_start": active_start.isoformat(),
+                "active_end": active_end.isoformat(),
+                "month_parity": "scheduled",
+            }
+        )
 
     for y in (today.year, today.year + 1):
         for month in range(1, 13):
@@ -450,7 +616,14 @@ def ensure_sale_calendar_defaults(db: Session) -> None:
 
     try:
         if not db.query(SaleCalendarSettings).filter(SaleCalendarSettings.id == 1).first():
-            db.add(SaleCalendarSettings(id=1, enabled=True, teaser_days=3))
+            db.add(
+                SaleCalendarSettings(
+                    id=1,
+                    enabled=True,
+                    teaser_days=3,
+                    schedule_mode="auto",
+                )
+            )
         for month in range(1, 13):
             if not db.query(SaleCalendarMonthRule).filter(SaleCalendarMonthRule.month == month).first():
                 db.add(SaleCalendarMonthRule(month=month, enabled=True, discount_percent_override=None))
@@ -458,3 +631,36 @@ def ensure_sale_calendar_defaults(db: Session) -> None:
     except Exception:
         db.rollback()
         raise
+
+
+def maintain_sale_calendar_settings(db: Session) -> bool:
+    """Dọn lịch cũ: xóa ngày đặt lịch / sale hôm nay đã qua; giữ schedule_mode=auto."""
+    from app.models.sale_calendar import SaleCalendarSettings
+
+    ensure_sale_calendar_defaults(db)
+    row = db.query(SaleCalendarSettings).filter(SaleCalendarSettings.id == 1).first()
+    if not row:
+        return False
+    today = _now_vn().date()
+    changed = False
+    if (getattr(row, "schedule_mode", None) or "auto") != "auto":
+        row.schedule_mode = "auto"
+        changed = True
+    scheduled_d = _coerce_date(getattr(row, "scheduled_sale_date", None))
+    if scheduled_d is not None and scheduled_d < today:
+        row.scheduled_sale_date = None
+        row.scheduled_discount_percent = None
+        changed = True
+    manual_d = _coerce_date(getattr(row, "manual_sale_date", None))
+    if manual_d is not None and manual_d < today:
+        row.manual_sale_date = None
+        row.manual_discount_percent = None
+        changed = True
+    if changed:
+        db.commit()
+    return changed
+
+
+def normalize_to_monthly_schedule(db: Session) -> bool:
+    """Alias giữ tương thích — gọi maintain_sale_calendar_settings."""
+    return maintain_sale_calendar_settings(db)

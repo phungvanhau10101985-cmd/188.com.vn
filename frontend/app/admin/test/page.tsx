@@ -395,10 +395,10 @@ export default function AdminFeatureTestPage() {
           Mở giỏ hàng để test thanh toán
         </Link>
         <Link
-          href="/admin/sale-calendar"
+          href="/admin/promotions#site-sale"
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 sm:min-h-0 sm:w-auto"
         >
-          Cấu hình Sale lịch
+          Cấu hình sale site-wide (Khuyến mãi)
         </Link>
       </div>
     </div>

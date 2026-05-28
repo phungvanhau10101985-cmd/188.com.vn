@@ -12,7 +12,10 @@ export function useSiteSale() {
     try {
       const data = await apiClient.getSiteSaleCalendar();
       setState(data);
-    } catch {
+    } catch (e) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[useSiteSale] Không tải được sale calendar:', e);
+      }
       setState(null);
     } finally {
       setLoading(false);

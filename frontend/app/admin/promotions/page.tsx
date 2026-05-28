@@ -1,18 +1,30 @@
 'use client';
 
 import PromoCodesManager from '@/components/admin/PromoCodesManager';
+import SaleCalendarSettingsPanel from '@/components/admin/SaleCalendarSettingsPanel';
 import { useEffect, useState } from 'react';
 import { adminPromotionsAPI, AdminPromotionCode } from '@/lib/admin-api';
 
 export default function AdminPromotionsPage() {
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.location.hash === '#site-sale') {
+      window.requestAnimationFrame(() => {
+        document.getElementById('site-sale')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+  }, []);
+
   return (
     <div className="p-6 max-w-6xl">
       <h1 className="text-2xl font-bold text-gray-900 mb-2">Khuyến mãi</h1>
       <p className="text-sm text-gray-600 mb-6">
-        Quản lý toàn bộ mã khuyến mãi, tặng mã vào ví khách và chạy chiến dịch tự động.
+        Quản lý toàn bộ mã khuyến mãi, sale site-wide, tặng mã vào ví khách và chạy chiến dịch tự động.
       </p>
 
       <PromoCodesManager />
+
+      <SaleCalendarSettingsPanel embedded />
 
       <div className="mt-8 bg-white rounded-xl border border-gray-200 p-6 space-y-3">
         <h2 className="text-lg font-bold text-gray-900">Cron tự động (VPS)</h2>

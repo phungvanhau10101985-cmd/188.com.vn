@@ -170,7 +170,7 @@ class MigrationManager:
 
     def _dialect_type_for_column(self, col) -> str:
         """Map SQLAlchemy column to database-specific type for ALTER TABLE."""
-        from sqlalchemy import Integer, String, Text, Boolean, DateTime, Numeric
+        from sqlalchemy import Integer, String, Text, Boolean, DateTime, Date, Numeric
         from sqlalchemy.types import Enum as EnumType, JSON as SA_JSON_TYPE
         t = type(col.type)
         default_empty = "" if not getattr(col, "nullable", True) else " DEFAULT NULL"
@@ -187,6 +187,8 @@ class MigrationManager:
             return "TEXT" + default_empty
         if t == DateTime:
             return "DATETIME" + default_empty if not IS_POSTGRESQL else "TIMESTAMP" + default_empty
+        if t == Date:
+            return "DATE" + default_empty
         if t == Numeric:
             return "REAL DEFAULT 0" if not IS_POSTGRESQL else "DOUBLE PRECISION DEFAULT 0"
         if t == EnumType:
@@ -740,9 +742,50 @@ class MigrationManager:
         results['sale_calendar_month_rules_create'] = self._create_table_if_not_exists(
             "sale_calendar_month_rules", SaleCalendarMonthRule
         )
+        results['sale_calendar_settings_sync'] = self._sync_table_columns(
+            "sale_calendar_settings", SaleCalendarSettings
+        )
+        results['sale_calendar_settings_date_columns'] = self.migrate_sale_calendar_settings_date_columns()
         results['sale_calendar_seed'] = self._seed_sale_calendar_defaults()
 
         return results
+
+    def migrate_sale_calendar_settings_date_columns(self) -> bool:
+        """Chuẩn hóa scheduled_sale_date / manual_sale_date sang DATE (cột sync cũ có thể là TEXT)."""
+        if not IS_POSTGRESQL:
+            return True
+        try:
+            with engine.connect() as conn:
+                for col in ("scheduled_sale_date", "manual_sale_date"):
+                    row = conn.execute(
+                        text(
+                            """
+                            SELECT data_type
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'sale_calendar_settings'
+                              AND column_name = :col
+                            """
+                        ),
+                        {"col": col},
+                    ).fetchone()
+                    if not row or str(row[0]).lower() == "date":
+                        continue
+                    conn.execute(
+                        text(
+                            f"""
+                            ALTER TABLE sale_calendar_settings
+                            ALTER COLUMN {col} TYPE DATE
+                            USING NULLIF(TRIM({col}::text), '')::date
+                            """
+                        )
+                    )
+                    logger.info("✅ sale_calendar_settings.%s -> DATE", col)
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.warning("  migrate_sale_calendar_settings_date_columns: %s", e)
+            return False
 
     def _seed_welcome_promotion(self) -> bool:
         try:

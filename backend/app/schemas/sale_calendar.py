@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -42,6 +43,11 @@ class SaleCalendarMonthRuleOut(BaseModel):
 class SaleCalendarSettingsOut(BaseModel):
     enabled: bool
     teaser_days: int
+    schedule_mode: Literal["auto", "scheduled", "manual"] = "auto"
+    scheduled_sale_date: Optional[str] = None
+    scheduled_discount_percent: Optional[float] = None
+    manual_sale_date: Optional[str] = None
+    manual_discount_percent: Optional[float] = None
     month_rules: List[SaleCalendarMonthRuleOut]
     upcoming: List[dict] = Field(default_factory=list)
     current: SaleCalendarPublicResponse
@@ -50,6 +56,13 @@ class SaleCalendarSettingsOut(BaseModel):
 class SaleCalendarSettingsUpdate(BaseModel):
     enabled: Optional[bool] = None
     teaser_days: Optional[int] = Field(None, ge=1, le=14)
+    schedule_mode: Optional[Literal["auto", "scheduled", "manual"]] = None
+    scheduled_sale_date: Optional[str] = None
+    scheduled_discount_percent: Optional[float] = Field(None, ge=0, le=50)
+    manual_sale_date: Optional[str] = None
+    manual_discount_percent: Optional[float] = Field(None, ge=0, le=50)
+    clear_scheduled: bool = False
+    clear_manual: bool = False
 
 
 class SaleCalendarMonthRuleUpdate(BaseModel):

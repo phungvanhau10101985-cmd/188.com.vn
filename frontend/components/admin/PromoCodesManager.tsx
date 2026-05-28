@@ -13,7 +13,6 @@ const AUTO_GRANT_OPTIONS: { value: string; label: string }[] = [
   { value: 'first_delivered', label: 'Giao hàng lần đầu' },
   { value: 'comeback', label: 'Khách quay lại' },
   { value: 'cart_abandon', label: 'Bỏ giỏ hàng' },
-  { value: 'birthday', label: 'Sinh nhật (ví)' },
 ];
 
 const EMPTY_FORM: AdminPromotionCodeInput = {

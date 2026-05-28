@@ -2696,6 +2696,11 @@ export const adminPromotionsAPI = {
 export type AdminSaleCalendarSettings = {
   enabled: boolean;
   teaser_days: number;
+  schedule_mode: 'auto' | 'scheduled' | 'manual';
+  scheduled_sale_date?: string | null;
+  scheduled_discount_percent?: number | null;
+  manual_sale_date?: string | null;
+  manual_discount_percent?: number | null;
   month_rules: Array<{
     month: number;
     enabled: boolean;
@@ -2716,7 +2721,17 @@ export type AdminSaleCalendarSettings = {
 
 export const adminSaleCalendarAPI = {
   getSettings: () => fetchAdmin<AdminSaleCalendarSettings>('/sale-calendar/admin/settings'),
-  updateSettings: (data: { enabled?: boolean; teaser_days?: number }) =>
+  updateSettings: (data: {
+    enabled?: boolean;
+    teaser_days?: number;
+    schedule_mode?: 'auto' | 'scheduled' | 'manual';
+    scheduled_sale_date?: string | null;
+    scheduled_discount_percent?: number | null;
+    manual_sale_date?: string | null;
+    manual_discount_percent?: number | null;
+    clear_scheduled?: boolean;
+    clear_manual?: boolean;
+  }) =>
     fetchAdmin<AdminSaleCalendarSettings>('/sale-calendar/admin/settings', {
       method: 'PATCH',
       body: JSON.stringify(data),

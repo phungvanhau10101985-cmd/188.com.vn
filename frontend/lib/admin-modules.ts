@@ -17,7 +17,7 @@ export const ADMIN_MODULE_NAV: Record<string, string> = {
   bank_accounts: '/admin/bank-accounts',
   loyalty: '/admin/loyalty',
   promotions: '/admin/promotions',
-  sale_calendar: '/admin/sale-calendar',
+  sale_calendar: '/admin/promotions#site-sale',
   affiliate: '/admin/affiliate',
   embed_codes: '/admin/embed-codes',
   chat_embeds: '/admin/chat-embeds',

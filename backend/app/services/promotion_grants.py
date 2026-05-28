@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.crud import notification as crud_notification
 from app.models.cart import Cart, CartItem
 from app.models.order import Order, OrderStatus
-from app.models.promotion import AutoGrantTrigger, GrantStatus, Promotion, UserPromotionGrant
+from app.models.promotion import AutoGrantTrigger, GrantStatus, Promotion, PromotionUsage, UserPromotionGrant
 from app.models.user import User
 from app.schemas.notification import NotificationCreate
 
@@ -21,7 +21,7 @@ PROMO_THANKYOU = "THANKYOU188"
 PROMO_COMEBACK = "COMEBACK10"
 PROMO_CART_ABANDON = "CARTSAVE188"
 
-RETIRED_PROMO_CODES = ("BDAY188",)
+LEGACY_WALLET_BDAY_CODE = "BDAY188"
 
 PROMO_TEMPLATES: List[Dict[str, Any]] = [
     {
@@ -125,30 +125,27 @@ def ensure_promotion_templates(db: Session) -> None:
                 )
             )
     db.commit()
-    _retire_wallet_promotions(db)
+    purge_legacy_bday188_wallet_promo(db)
 
 
-def _retire_wallet_promotions(db: Session) -> None:
-    """Tắt mã ví đã ngừng dùng (sinh nhật dùng CMSN tự động, không qua ví)."""
+def purge_legacy_bday188_wallet_promo(db: Session) -> bool:
+    """Xóa mã ví BDAY188 — sinh nhật dùng CMSN tự động (birthday_discount), không qua ví."""
     from app.crud import promotion as crud_promotion
 
-    for code in RETIRED_PROMO_CODES:
-        promo = crud_promotion.get_promotion_by_code(db, code)
-        if not promo:
-            continue
-        if promo.is_active:
-            promo.is_active = False
-        stale = (
-            db.query(UserPromotionGrant)
-            .filter(
-                UserPromotionGrant.promotion_id == promo.id,
-                UserPromotionGrant.status == GrantStatus.ACTIVE.value,
-            )
-            .all()
-        )
-        for grant in stale:
-            grant.status = GrantStatus.EXPIRED.value
+    promo = crud_promotion.get_promotion_by_code(db, LEGACY_WALLET_BDAY_CODE)
+    if not promo:
+        return True
+    promo_id = promo.id
+    db.query(PromotionUsage).filter(PromotionUsage.promotion_id == promo_id).delete(
+        synchronize_session=False
+    )
+    db.query(UserPromotionGrant).filter(UserPromotionGrant.promotion_id == promo_id).delete(
+        synchronize_session=False
+    )
+    db.delete(promo)
     db.commit()
+    logger.info("Removed legacy wallet promo %s", LEGACY_WALLET_BDAY_CODE)
+    return True
 
 
 def expire_stale_grants(db: Session, *, user_id: Optional[int] = None) -> int:
