@@ -32,14 +32,14 @@ export default function SameShopRecommendationHeader({
     <div className="mb-1 space-y-1.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
         <h2 className="text-base font-bold text-gray-900 border-b-2 border-[#ea580c] pb-1 w-fit leading-snug">
-          SẢN PHẨM CÙNG SHOP BẠN VỪA XEM
+          CÓ THỂ BẠN THÍCH
         </h2>
 
         {showActions ? (
           <div
             className="inline-flex max-w-full shrink-0 items-center gap-0.5 rounded-full border border-orange-100 bg-orange-50/90 px-1 py-0.5"
             role="group"
-            aria-label="Gợi ý cá nhân hóa"
+            aria-label="Cá nhân hóa theo hồ sơ"
           >
             {showEditProfile ? (
               <Link
@@ -50,7 +50,7 @@ export default function SameShopRecommendationHeader({
               </Link>
             ) : (
               <span className="inline-flex min-h-[30px] items-center px-2 text-[11px] font-medium text-orange-800/90 whitespace-nowrap">
-                Gợi ý cá nhân
+                Cá nhân hóa
               </span>
             )}
             {showHelp ? (

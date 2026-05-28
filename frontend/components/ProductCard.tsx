@@ -29,6 +29,17 @@ function ProductVideoBadge({ videoLink }: { videoLink?: string | null }) {
   );
 }
 
+function PersonalizedCohortImageBadge() {
+  return (
+    <div
+      className="pointer-events-none absolute left-2 top-2 z-[2] max-w-[calc(100%-3rem)] rounded-md bg-[#ea580c] px-1.5 py-0.5 text-[9px] font-semibold leading-tight text-white shadow-md sm:text-[10px]"
+      aria-hidden
+    >
+      Đề xuất
+    </div>
+  );
+}
+
 interface ProductCardProps {
   product: Product;
   onAddToCart?: (product: Product) => void;
@@ -325,6 +336,8 @@ export const SimpleProductCard = ({
   product, 
   onFavorite,
   isFavorited = false,
+  /** Badge góc ảnh — SP gợi ý theo tuổi/giới tính trong lưới trộn. */
+  showPersonalizedBadge = false,
   /** Ưu tiên tải ảnh đầu trang — cải thiện LCP (PSI) */
   priority = false,
 }: { 
@@ -332,6 +345,7 @@ export const SimpleProductCard = ({
   onFavorite: (productId: number, e: React.MouseEvent) => void | Promise<void>;
   /** Trạng thái thích từ server (khách + đăng nhập); mặc định false */
   isFavorited?: boolean;
+  showPersonalizedBadge?: boolean;
   priority?: boolean;
 }) => {
   const [imageError, setImageError] = useState(false);
@@ -362,6 +376,7 @@ export const SimpleProductCard = ({
   };
 
   const pathSlug = productPathSlugFromApi(product.slug, product.product_id) || product.product_id;
+  const stackedPromoBadgeClass = showPersonalizedBadge ? '!top-8' : '';
 
   return (
     <Link 
@@ -391,8 +406,13 @@ export const SimpleProductCard = ({
 
         {!imageError && (
           <>
-            <SiteSaleProductBadge siteSale={product.site_sale} />
-            <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
+            {showPersonalizedBadge ? <PersonalizedCohortImageBadge /> : null}
+            <SiteSaleProductBadge siteSale={product.site_sale} className={stackedPromoBadgeClass} />
+            <BirthdayPromoImageBadge
+              active={birthdayDiscount.active}
+              percent={birthdayDiscount.percent}
+              className={stackedPromoBadgeClass}
+            />
           </>
         )}
 

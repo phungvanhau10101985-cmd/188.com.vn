@@ -71,7 +71,7 @@ function sameAgeGenderCompactHint(
             Đăng nhập
           </Link>
           {' '}
-          và điền hồ sơ để nhận ưu đãi sinh nhật & gợi ý hợp gu.
+          và điền hồ sơ để nhận ưu đãi sinh nhật & sản phẩm có thể bạn thích.
         </>
       );
     case 'profile_incomplete':
@@ -81,7 +81,7 @@ function sameAgeGenderCompactHint(
             Cập nhật ngày sinh & giới tính
           </Link>
           {' '}
-          để nhận ưu đãi sinh nhật & gợi ý hợp tuổi, hợp gu.
+          để nhận ưu đãi sinh nhật & sản phẩm hợp tuổi, hợp gu.
         </>
       );
     default:
@@ -1000,6 +1000,11 @@ export default function HomePageClient({
     return sameAgeGenderProducts;
   }, [sameAgeGenderLoading, sameAgeGenderCohortMode, sameAgeGenderProducts]);
 
+  const cohortBadgeProductIds = useMemo(() => {
+    const shopIds = new Set(sameShopProducts.map((p) => p.id));
+    return new Set(cohortProductsForMix.filter((p) => !shopIds.has(p.id)).map((p) => p.id));
+  }, [sameShopProducts, cohortProductsForMix]);
+
   useEffect(() => {
     recommendationMixAnchorRef.current = '';
     setMixedRecommendationProducts([]);
@@ -1043,6 +1048,7 @@ export default function HomePageClient({
       filteredProducts.find((p) => p.id === productId) ??
       products.find((p) => p.id === productId) ??
       sameShopProducts.find((p) => p.id === productId) ??
+      mixedRecommendationProducts.find((p) => p.id === productId) ??
       sameAgeGenderProducts.find((p) => p.id === productId);
     const had = favoriteIds.has(productId);
     try {
@@ -1340,6 +1346,7 @@ export default function HomePageClient({
                       product={product}
                       onFavorite={handleFavorite}
                       isFavorited={favoriteIds.has(product.id)}
+                      showPersonalizedBadge={cohortBadgeProductIds.has(product.id)}
                       priority={index < 2}
                     />
                   ))}
