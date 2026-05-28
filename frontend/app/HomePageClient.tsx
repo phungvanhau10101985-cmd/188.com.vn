@@ -40,10 +40,10 @@ import {
   sameShopTotalWhenExhausted,
 } from '@/lib/same-shop-pagination';
 import {
-  groupProductsByShop,
-  mixShopAndCohortStrips,
-  splitCohortStripGroups,
-} from '@/lib/home-recommendation-strip-groups';
+  appendNewShopProductsToMix,
+  HOME_COHORT_MIX_POOL_SIZE,
+  mixShopAndCohortProducts,
+} from '@/lib/home-recommendation-mixed-products';
 
 const SAME_SHOP_PAGE_LIMIT = 60;
 
@@ -68,9 +68,9 @@ function sameAgeGenderSectionDescription(
     case 'profile_incomplete':
       return 'Vui lòng cập nhật đủ ngày sinh và giới tính trong Hồ sơ — sau khi lưu, trang chủ sẽ hiển thị gợi ý theo nhóm tuổi và giới của bạn.';
     case 'exact_cohort':
-      return 'Gợi ý ngẫu nhiên từ sản phẩm nhóm cùng tuổi và giới tính vừa xem gần đây.';
+      return 'Gợi ý trộn ngẫu nhiên cùng sản phẩm cùng shop bạn xem và sản phẩm nhóm cùng tuổi, giới tính vừa xem gần đây.';
     case 'gender_peers':
-      return 'Nhóm cùng tuổi chưa đủ lượt xem — gợi ý ngẫu nhiên từ sản phẩm cùng giới tính vừa xem gần đây.';
+      return 'Gợi ý trộn ngẫu nhiên cùng sản phẩm cùng shop bạn xem và sản phẩm cùng giới tính vừa xem gần đây.';
     case 'popular_fallback':
       return 'Chưa có lượt xem nhóm để so sánh — đang hiển thị sản phẩm phổ biến; khám phá thêm để gợi ý chính xác hơn.';
     default:
@@ -894,6 +894,8 @@ export default function HomePageClient({
   const [sameShopSeed, setSameShopSeed] = useState<number | null>(null);
   const [sameShopLoading, setSameShopLoading] = useState(false);
   const [sameShopLoadMoreLoading, setSameShopLoadMoreLoading] = useState(false);
+  const [mixedRecommendationProducts, setMixedRecommendationProducts] = useState<Product[]>([]);
+  const recommendationMixAnchorRef = useRef('');
   const sameShopHasMore = sameShopProducts.length < sameShopTotal && sameShopTotal > 0;
   /** Chỉ hiện khối khi đã xác định có lượt xem + có SP cùng shop (tránh skeleton khi khách mới). */
   const showSameShopSection = !sameShopLoading && sameShopTotal > 0;
@@ -910,7 +912,7 @@ export default function HomePageClient({
     let cancelled = false;
     setSameAgeGenderLoading(true);
     apiClient
-      .getProductsViewedBySameAgeGender(24)
+      .getProductsViewedBySameAgeGender(HOME_COHORT_MIX_POOL_SIZE)
       .then(({ products, cohort_mode }) => {
         if (cancelled) return;
         setSameAgeGenderProducts(products ?? []);
@@ -975,6 +977,54 @@ export default function HomePageClient({
       .finally(() => setSameShopLoadMoreLoading(false));
   }, [sameShopHasMore, sameShopLoadMoreLoading, sameShopProducts.length, sameShopSeed]);
 
+  const cohortProductsForMix = useMemo(() => {
+    if (
+      sameAgeGenderLoading ||
+      sameAgeGenderCohortMode === 'requires_login' ||
+      sameAgeGenderCohortMode === 'profile_incomplete' ||
+      sameAgeGenderProducts.length === 0
+    ) {
+      return [];
+    }
+    return sameAgeGenderProducts;
+  }, [sameAgeGenderLoading, sameAgeGenderCohortMode, sameAgeGenderProducts]);
+
+  useEffect(() => {
+    recommendationMixAnchorRef.current = '';
+    setMixedRecommendationProducts([]);
+  }, [recommendationKey]);
+
+  useEffect(() => {
+    const cohortPending = isAuthenticated && sameAgeGenderLoading;
+    if (sameShopLoading || cohortPending) return;
+
+    const cohortAnchor =
+      cohortProductsForMix.length > 0
+        ? cohortProductsForMix
+            .map((p) => p.id)
+            .sort((a, b) => a - b)
+            .join(',')
+        : 'none';
+    const anchor = `${recommendationKey}:${sameShopSeed ?? 'none'}:${cohortAnchor}`;
+    if (recommendationMixAnchorRef.current !== anchor) {
+      recommendationMixAnchorRef.current = anchor;
+      setMixedRecommendationProducts(mixShopAndCohortProducts(sameShopProducts, cohortProductsForMix));
+      return;
+    }
+
+    setMixedRecommendationProducts((prev) =>
+      appendNewShopProductsToMix(prev, sameShopProducts)
+    );
+  }, [
+    isAuthenticated,
+    recommendationKey,
+    sameShopSeed,
+    sameShopProducts,
+    sameShopLoading,
+    sameAgeGenderLoading,
+    cohortProductsForMix,
+  ]);
+
   const handleFavorite = async (productId: number, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1007,28 +1057,10 @@ export default function HomePageClient({
 
   const sameAgeGenderExplain = sameAgeGenderSectionDescription(sameAgeGenderCohortMode, sameAgeGenderLoading);
 
-  const cohortStripGroups = useMemo(() => {
-    if (sameAgeGenderLoading) return [];
-    if (
-      sameAgeGenderCohortMode === 'requires_login' ||
-      sameAgeGenderCohortMode === 'profile_incomplete' ||
-      sameAgeGenderProducts.length === 0
-    ) {
-      return [];
-    }
-    return splitCohortStripGroups(sameAgeGenderProducts);
-  }, [sameAgeGenderLoading, sameAgeGenderCohortMode, sameAgeGenderProducts]);
-
-  const shopStripGroups = useMemo(() => groupProductsByShop(sameShopProducts), [sameShopProducts]);
-
-  const mixedHomeStrips = useMemo(
-    () => mixShopAndCohortStrips(shopStripGroups, cohortStripGroups),
-    [shopStripGroups, cohortStripGroups]
-  );
-
   const showMixedRecommendationSection =
+    mixedRecommendationProducts.length > 0 ||
     showSameShopSection ||
-    cohortStripGroups.length > 0 ||
+    cohortProductsForMix.length > 0 ||
     sameShopLoading ||
     sameAgeGenderLoading ||
     sameAgeGenderCohortMode === 'requires_login' ||
@@ -1265,7 +1297,7 @@ export default function HomePageClient({
           </section>
         )}
 
-        {/* Cùng shop + xen 2 dòng đề xuất tuổi/giới (tối đa 10 nhóm). */}
+        {/* Cùng shop + trộn ngẫu nhiên pool tuổi/giới (1 lưới). */}
         {!hasFilterParams && showMixedRecommendationSection && (
           <section className="mb-8" id="san-pham-cung-shop">
             <div className="mb-2">
@@ -1297,7 +1329,7 @@ export default function HomePageClient({
               ) : null}
               {!sameAgeGenderLoading &&
               isAuthenticated &&
-              cohortStripGroups.length > 0 &&
+              cohortProductsForMix.length > 0 &&
               sameAgeGenderCohortMode !== 'profile_incomplete' &&
               sameAgeGenderCohortMode !== 'requires_login' ? (
                 <Link
@@ -1309,43 +1341,29 @@ export default function HomePageClient({
               ) : null}
             </div>
             <div className="mt-4">
-              {sameShopLoading || sameAgeGenderLoading ? (
-                <div className="flex flex-col gap-3">
-                  {[...Array(4)].map((_, rowIndex) => (
-                    <div key={rowIndex} className="flex gap-3 overflow-x-auto scrollbar-hide -mx-4 px-4 py-1">
-                      {[...Array(6)].map((__, i) => (
-                        <div
-                          key={i}
-                          className="flex-shrink-0 w-[9.5rem] sm:w-[11rem] rounded-xl border border-gray-100 overflow-hidden animate-pulse"
-                        >
-                          <div className="aspect-square bg-gray-100" />
-                          <div className="p-2 space-y-2">
-                            <div className="h-3 bg-gray-100 rounded w-full" />
-                            <div className="h-4 bg-gray-100 rounded w-2/5" />
-                          </div>
-                        </div>
-                      ))}
+              {sameShopLoading || (isAuthenticated && sameAgeGenderLoading) ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {[...Array(12)].map((_, i) => (
+                    <div key={i} className="bg-white rounded-xl border border-gray-100 overflow-hidden animate-pulse">
+                      <div className="aspect-square bg-gray-100" />
+                      <div className="p-3 space-y-2">
+                        <div className="h-3 bg-gray-100 rounded w-3/4" />
+                        <div className="h-3 bg-gray-100 rounded w-full" />
+                        <div className="h-4 bg-gray-100 rounded w-2/5" />
+                      </div>
                     </div>
                   ))}
                 </div>
-              ) : mixedHomeStrips.length > 0 ? (
-                <div className="flex flex-col gap-4">
-                  {mixedHomeStrips.map((group) => (
-                    <div key={group.id}>
-                      <p className="text-xs font-semibold text-gray-700 mb-1.5 truncate">{group.label}</p>
-                      <div className="flex gap-3 overflow-x-auto scrollbar-hide -mx-4 px-4 py-1">
-                        {group.products.map((product, index) => (
-                          <div key={product.id} className="flex-shrink-0 w-[9.5rem] sm:w-[11rem]">
-                            <SimpleProductCard
-                              product={product}
-                              onFavorite={handleFavorite}
-                              isFavorited={favoriteIds.has(product.id)}
-                              priority={index < 2}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+              ) : mixedRecommendationProducts.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {mixedRecommendationProducts.map((product, index) => (
+                    <SimpleProductCard
+                      key={product.id}
+                      product={product}
+                      onFavorite={handleFavorite}
+                      isFavorited={favoriteIds.has(product.id)}
+                      priority={index < 2}
+                    />
                   ))}
                 </div>
               ) : null}
