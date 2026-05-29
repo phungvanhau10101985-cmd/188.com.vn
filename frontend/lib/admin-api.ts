@@ -2382,12 +2382,29 @@ export const adminMemberAPI = {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(formatFastApiDetail((err as { detail?: unknown }).detail) || 'Import thất bại');
+        const detail = formatFastApiDetail((err as { detail?: unknown }).detail);
+        if (res.status === 413) {
+          throw new Error(
+            'File quá lớn (nginx 413). Trên VPS thêm location import thành viên với client_max_body_size 200m — xem deploy/nginx-site-188.com.vn.conf.example',
+          );
+        }
+        if (res.status === 504 || res.status === 502) {
+          throw new Error(
+            detail ||
+              `Gateway timeout (${res.status}). Import nhiều dòng có thể >3 phút — tăng proxy_read_timeout nginx cho /api/v1/admin/users/import-file.`,
+          );
+        }
+        throw new Error(detail || `Import thất bại (HTTP ${res.status})`);
       }
       return res.json() as Promise<AdminMemberImportResponse>;
     } catch (e) {
       if (e instanceof Error && e.name === 'AbortError') {
         throw new Error('Import quá lâu (>15 phút). Thử chia file nhỏ hơn hoặc kiểm tra backend.');
+      }
+      if (e instanceof Error && /failed to fetch|networkerror|load failed/i.test(e.message)) {
+        throw new Error(
+          `Không kết nối được API import (${e.message}). Kiểm tra backend :8001 đang chạy và nginx cho phép upload file lớn.`,
+        );
       }
       throw e;
     } finally {

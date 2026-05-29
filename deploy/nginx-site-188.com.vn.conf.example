@@ -64,6 +64,26 @@ server {
         proxy_read_timeout 3600s;
     }
 
+    # Import khách cũ (admin/members) + newsletter — file Excel có thể vài MB / hàng chục nghìn dòng
+    location ~ ^/api/v1/(admin/users/import-file|newsletter/admin/import-file) {
+        client_max_body_size 200m;
+
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        client_body_timeout 3600s;
+        send_timeout 3600s;
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 3600s;
+        proxy_read_timeout 3600s;
+    }
+
     location /api/ {
         proxy_pass http://127.0.0.1:8001;
         proxy_http_version 1.1;
