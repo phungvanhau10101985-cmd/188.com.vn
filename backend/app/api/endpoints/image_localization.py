@@ -702,6 +702,22 @@ def list_jobs(
     return {"items": items, "active_count": active_count}
 
 
+@router.delete("/jobs/terminal")
+def delete_terminal_jobs(
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Xóa job đã dừng / lỗi / hoàn tất khỏi DB và bộ nhớ server."""
+    deleted_count, deleted_ids = image_loc_job_crud.delete_terminal_jobs(db)
+    deleted_id_set = set(deleted_ids)
+    with _jobs_lock:
+        for jid in list(_jobs.keys()):
+            status = (_jobs[jid].get("status") or "").strip().lower()
+            if jid in deleted_id_set or status in _TERMINAL_JOB_STATUSES:
+                _jobs.pop(jid, None)
+    return {"deleted_count": deleted_count, "deleted_job_ids": deleted_ids}
+
+
 @router.get("/jobs/{job_id}")
 def get_job(
     job_id: str,
@@ -749,22 +765,6 @@ def delete_job(
     with _jobs_lock:
         _jobs.pop(jid, None)
     return {"deleted": True, "job_id": jid}
-
-
-@router.delete("/jobs/terminal")
-def delete_terminal_jobs(
-    db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission("products")),
-):
-    """Xóa job đã dừng / lỗi / hoàn tất khỏi DB và bộ nhớ server."""
-    deleted_count, deleted_ids = image_loc_job_crud.delete_terminal_jobs(db)
-    deleted_id_set = set(deleted_ids)
-    with _jobs_lock:
-        for jid in list(_jobs.keys()):
-            status = (_jobs[jid].get("status") or "").strip().lower()
-            if jid in deleted_id_set or status in _TERMINAL_JOB_STATUSES:
-                _jobs.pop(jid, None)
-    return {"deleted_count": deleted_count, "deleted_job_ids": deleted_ids}
 
 
 @router.get("/products/{product_id}/report")

@@ -1335,13 +1335,14 @@ export default function AdminProductsPage() {
 
   const handleClearLocalizationTerminalJobs = async () => {
     setLocalizationClearBusy(true);
+    const terminalJobs = localizationJobsForUi.filter((j) =>
+      isTerminalImageLocalizationJobStatus(j.status),
+    );
     try {
       const res = await adminProductAPI.clearImageLocalizationTerminalJobs();
       const deletedIds = new Set(res.deleted_job_ids ?? []);
-      for (const job of localizationJobsForUi) {
-        if (isTerminalImageLocalizationJobStatus(job.status)) {
-          deletedIds.add(job.job_id);
-        }
+      for (const job of terminalJobs) {
+        deletedIds.add(job.job_id);
       }
       for (const id of deletedIds) {
         removeLocalizationJobFromUi(id);
@@ -1351,11 +1352,41 @@ export default function AdminProductsPage() {
         'ok',
         res.deleted_count > 0
           ? `Đã xóa ${res.deleted_count} job đã dừng / lỗi khỏi danh sách`
-          : 'Không còn job đã dừng để xóa trên server — đã dọn khung Tiến trình',
+          : terminalJobs.length
+            ? 'Đã dọn khung Tiến trình (server không còn bản ghi job)'
+            : 'Không còn job đã dừng để xóa',
         6000,
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Không xóa được danh sách job';
+      const looks404 = /\b404\b/i.test(msg) || /not found/i.test(msg);
+      if (looks404 && terminalJobs.length > 0) {
+        let ok = 0;
+        let fail = 0;
+        for (const job of terminalJobs) {
+          try {
+            await adminProductAPI.deleteImageLocalizationJob(job.job_id);
+            removeLocalizationJobFromUi(job.job_id);
+            ok += 1;
+          } catch {
+            removeLocalizationJobFromUi(job.job_id);
+            fail += 1;
+          }
+        }
+        setLocalizationDeleteTarget(null);
+        if (ok > 0 || fail > 0) {
+          showToast(
+            ok > 0 ? 'ok' : 'err',
+            ok > 0
+              ? `Đã xóa ${ok} job${fail ? ` · ${fail} job chỉ gỡ khỏi danh sách (server thiếu API cũ)` : ''}`
+              : 'Không gọi được API xóa — đã gỡ job khỏi khung Tiến trình trên trình duyệt',
+            8000,
+          );
+        } else {
+          showToast('err', msg, 8000);
+        }
+        return;
+      }
       showToast('err', msg, 8000);
     } finally {
       setLocalizationClearBusy(false);
@@ -1371,6 +1402,12 @@ export default function AdminProductsPage() {
       showToast('ok', 'Đã xóa job khỏi tiến trình', 5000);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Không xóa được job';
+      if (/\b404\b/i.test(msg) || /not found/i.test(msg)) {
+        removeLocalizationJobFromUi(jobId);
+        setLocalizationDeleteTarget(null);
+        showToast('ok', 'Đã gỡ job khỏi danh sách (server không còn bản ghi)', 5000);
+        return;
+      }
       showToast('err', msg, 8000);
     } finally {
       setLocalizationClearBusy(false);
