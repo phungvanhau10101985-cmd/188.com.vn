@@ -898,6 +898,7 @@ export interface AdminListingImportQueueStatus {
   pause_requested: boolean;
   stop_requested: boolean;
   worker_alive: boolean;
+  worker_error?: string | null;
   current_item_id?: string | null;
   counts: AdminListingImportQueueCounts;
   items: AdminListingImportQueueItem[];

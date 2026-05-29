@@ -399,12 +399,25 @@ function listingQueueRunStatusLabel(
 ): { title: string; hint?: string } {
   if (!s) return { title: '—' };
   const rs = s.run_status || '';
-  if (s.stop_requested || rs === 'stopped') return { title: 'Đã dừng hẳn', hint: 'Không tiếp tục được — thêm link mới để tạo đợt mới.' };
-  if (rs === 'paused') return { title: 'Tạm dừng', hint: 'Bấm «Tiếp tục» để chạy các link còn chờ.' };
+  const runningCount = s.counts?.running ?? 0;
+  const pendingCount = s.counts?.pending ?? 0;
+  if (s.stop_requested || rs === 'stopped')
+    return { title: 'Đã dừng hẳn', hint: 'Không tiếp tục được — thêm link mới để tạo đợt mới.' };
+  if (!s.worker_alive && (runningCount > 0 || (rs === 'running' && pendingCount > 0))) {
+    return {
+      title: 'Worker đã dừng',
+      hint: 'Server có thể vừa restart/deploy. Bấm «Tiếp tục» để chạy lại link đang kẹt và các link còn chờ.',
+    };
+  }
+  if (rs === 'paused')
+    return {
+      title: 'Tạm dừng',
+      hint: s.worker_error?.trim() || 'Bấm «Tiếp tục» để chạy các link còn chờ.',
+    };
   if (rs === 'completed') return { title: 'Hoàn tất', hint: 'Mọi link trong đợt đã xử lý xong.' };
   if (s.pause_requested && rs === 'running')
     return { title: 'Đang chạy', hint: 'Đã yêu cầu tạm dừng — sẽ dừng sau khi xong link hiện tại.' };
-  if (rs === 'running') return { title: 'Đang chạy' };
+  if (rs === 'running') return { title: 'Đang chạy', hint: s.worker_alive ? undefined : 'Worker đang khởi động…' };
   if (rs === 'idle') return { title: 'Chờ xử lý' };
   return { title: rs || '—' };
 }

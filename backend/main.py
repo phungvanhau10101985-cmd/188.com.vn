@@ -494,6 +494,14 @@ async def startup_event():
         print(f"   ⚠️  image localization job resume startup: {_e_ilr}")
 
     try:
+        from app.services.listing_import_queue import reconcile_all_queues_on_startup
+
+        reconcile_all_queues_on_startup()
+        print("   📋 Listing import queue: đã dọn snapshot kẹt sau restart (link running → pending).")
+    except Exception as _e_liq:
+        print(f"   ⚠️  listing import queue startup reconcile: {_e_liq}")
+
+    try:
         from app.services.source_stock_checker import start_source_stock_checker_daemon_if_enabled
 
         start_source_stock_checker_daemon_if_enabled()

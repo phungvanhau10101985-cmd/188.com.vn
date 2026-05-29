@@ -196,6 +196,77 @@ def new_queue_skeleton(admin_id: Optional[int] = None) -> Dict[str, Any]:
     }
 
 
+def _worker_is_alive(token: str) -> bool:
+    th = _worker_registry.get(token)
+    return th is not None and th.is_alive()
+
+
+def _reconcile_queue_after_worker_loss(q: Dict[str, Any], token: str) -> bool:
+    """
+    Sau restart/deploy: thread worker mất nhưng snapshot vẫn ``running`` / item ``running``.
+    Đưa link kẹt về ``pending`` và ``run_status`` → ``paused`` để admin bấm Tiếp tục.
+    """
+    if _worker_is_alive(token):
+        return False
+    if q.get("run_status") == "stopped" or q.get("stop_requested"):
+        return False
+
+    items: List[Dict[str, Any]] = list(q.get("items") or [])
+    changed = False
+    stale_note = "Link dừng giữa chừng (restart server) — chờ chạy lại."
+    for it in items:
+        if it.get("state") != "running":
+            continue
+        it["state"] = "pending"
+        prev = (it.get("message") or "").strip()
+        if prev and "restart server" not in prev.casefold():
+            it["message"] = f"{prev} · {stale_note}"
+        else:
+            it["message"] = stale_note
+        changed = True
+
+    if q.get("current_item_id"):
+        q["current_item_id"] = None
+        changed = True
+
+    has_pending = any(it.get("state") == "pending" for it in items)
+    has_running = any(it.get("state") == "running" for it in items)
+    rs = str(q.get("run_status") or "")
+    if has_pending and not has_running and rs in {"running", "pausing"}:
+        q["run_status"] = "paused"
+        if not (q.get("worker_error") or "").strip():
+            q["worker_error"] = "Worker dừng (restart server). Bấm «Tiếp tục» trên admin."
+        changed = True
+
+    return changed
+
+
+def reconcile_all_queues_on_startup() -> None:
+    """Gọi khi khởi động API — dọn snapshot listing queue bị kẹt sau deploy."""
+    try:
+        from app.db.session import SessionLocal
+        from app.models.listing_import_queue_snapshot import ListingImportQueueSnapshot
+
+        db = SessionLocal()
+        try:
+            rows = db.query(ListingImportQueueSnapshot.queue_token).all()
+            for (tok,) in rows:
+                if not tok or _is_revoked(tok):
+                    continue
+                lock = _lock_for(tok)
+                with lock:
+                    q = load_queue(tok)
+                    if not q:
+                        continue
+                    if _reconcile_queue_after_worker_loss(q, tok):
+                        save_queue(q)
+                        logger.info("listing queue %s… reconciled on startup", tok[:12])
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("listing_import_queue startup reconcile failed: %s", exc)
+
+
 def _execute_one_import(
     url: str,
     source: Optional[str],
@@ -527,9 +598,11 @@ def resume(token: str, admin_id: Optional[int]) -> Dict[str, Any]:
             raise ValueError("Không tìm thấy hàng đợi.")
         if q.get("run_status") == "stopped" or q.get("stop_requested"):
             raise ValueError("Hàng đợi đã dừng hẳn — không thể chạy lại. Hãy thêm link để tạo hàng đợi mới.")
+        _reconcile_queue_after_worker_loss(q, token)
         q["pause_requested"] = False
+        q["worker_error"] = None
         has_pending = any(it.get("state") == "pending" for it in (q.get("items") or []))
-        if has_pending and q.get("run_status") in {"paused", "idle", "completed"}:
+        if has_pending and q.get("run_status") in {"paused", "idle", "completed", "running", "pausing"}:
             q["run_status"] = "running"
         save_queue(q)
 
@@ -557,6 +630,13 @@ def stop_permanent(token: str, admin_id: Optional[int]) -> Dict[str, Any]:
 def get_status_dict(token: str) -> Dict[str, Any]:
     if not _token_ok(token):
         raise ValueError("queue_token không hợp lệ.")
+    lock = _lock_for(token)
+    with lock:
+        q = load_queue(token)
+        if not q:
+            raise ValueError("Không tìm thấy hàng đợi.")
+        if _reconcile_queue_after_worker_loss(q, token):
+            save_queue(q)
     q = load_queue(token)
     if not q:
         raise ValueError("Không tìm thấy hàng đợi.")
@@ -567,16 +647,19 @@ def get_status_dict(token: str) -> Dict[str, Any]:
     pending = sum(1 for it in items if it.get("state") == "pending")
     running = sum(1 for it in items if it.get("state") == "running")
 
-    worker_alive = token in _worker_registry and _worker_registry[token].is_alive()
+    worker_alive = _worker_is_alive(token)
+    run_status = q.get("run_status")
+    has_pending = pending > 0
 
     return {
         "queue_token": q.get("queue_token"),
         "created_at": q.get("created_at"),
         "updated_at": q.get("updated_at"),
-        "run_status": q.get("run_status"),
+        "run_status": run_status,
         "pause_requested": bool(q.get("pause_requested")),
         "stop_requested": bool(q.get("stop_requested")),
         "worker_alive": worker_alive,
+        "worker_error": q.get("worker_error"),
         "current_item_id": q.get("current_item_id"),
         "counts": {
             "total": total,
@@ -586,13 +669,20 @@ def get_status_dict(token: str) -> Dict[str, Any]:
             "running": running,
         },
         "items": items,
-        "can_resume": q.get("run_status") == "paused"
-        and not q.get("stop_requested")
-        and any(it.get("state") == "pending" for it in items),
-        "can_pause": q.get("run_status") == "running"
+        "can_resume": bool(
+            not q.get("stop_requested")
+            and has_pending
+            and run_status != "stopped"
+            and (
+                run_status == "paused"
+                or (not worker_alive and run_status in {"running", "pausing", "idle"})
+            )
+        ),
+        "can_pause": run_status == "running"
+        and worker_alive
         and not q.get("pause_requested")
         and not q.get("stop_requested"),
-        "can_stop": not q.get("stop_requested") and q.get("run_status") != "stopped",
+        "can_stop": not q.get("stop_requested") and run_status != "stopped",
     }
 
 
@@ -633,7 +723,7 @@ def list_saved_queue_summaries(*, limit: int = 50, offset: int = 0) -> Tuple[Lis
                 ua = row.updated_at.isoformat() if getattr(row, "updated_at", None) else pl.get("updated_at")
                 ca = row.created_at.isoformat() if getattr(row, "created_at", None) else pl.get("created_at")
                 tok = row.queue_token
-                alive = tok in _worker_registry and _worker_registry[tok].is_alive()
+                alive = _worker_is_alive(tok)
                 out.append(
                     {
                         "queue_token": tok,
