@@ -439,7 +439,7 @@ async def admin_import_legacy_members(
 
     msg = (
         f"Import xong: {result['created']} thành viên mới, "
-        f"{result['updated']} cập nhật hồ sơ, {result['skipped']} đã có (giữ nguyên), "
+        f"{result['updated']} cập nhật hồ sơ, {result['skipped']} không đổi / bỏ qua, "
         f"{parsed.invalid_count} không hợp lệ."
     )
     if parsed.corrected_count:

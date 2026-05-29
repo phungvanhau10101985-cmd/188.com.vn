@@ -270,9 +270,9 @@ export default function AdminMembersPage() {
           <h2 className="text-lg font-semibold text-gray-900">Import khách hàng cũ</h2>
           <p className="text-xs text-gray-500">
             File CSV/Excel với cột <strong>name</strong>, <strong>gender</strong>, <strong>email</strong>,{' '}
-            <strong>birthday</strong>, <strong>phone</strong>. Hệ thống tự sửa email gõ nhầm (vd.{' '}
-            <code className="bg-gray-100 px-1 rounded">@gmail.con</code>). Tạo tài khoản thành viên — khách
-            đăng nhập bằng OTP email khi quay lại.{' '}
+            <strong>birthday</strong>, <strong>phone</strong> (birthday dạng số Excel như{' '}
+            <code className="bg-gray-100 px-1 rounded">38073</code> cũng được). Hệ thống tự sửa email gõ nhầm.
+            Import lại cùng email sẽ <strong>cập nhật</strong> tên, giới tính, ngày sinh, SĐT theo file.{' '}
             <span className="text-gray-400">(Danh sách gửi marketing → mục Email nhận tin.)</span>
           </p>
           <input

@@ -147,24 +147,51 @@ def _fill_user_profile(
     birthday: Optional[date],
     phone: Optional[str],
     email: Optional[str],
+    overwrite: bool = False,
 ) -> bool:
     changed = False
-    if name and not (user.full_name or "").strip():
-        user.full_name = name[:255]
-        changed = True
+    if name:
+        new_name = name[:255]
+        if overwrite:
+            if (user.full_name or "") != new_name:
+                user.full_name = new_name
+                changed = True
+        elif not (user.full_name or "").strip():
+            user.full_name = new_name
+            changed = True
     g = _import_gender_value(gender)
-    if g and not (user.gender or "").strip():
-        user.gender = g
-        changed = True
-    if birthday and not user.date_of_birth:
-        user.date_of_birth = birthday
-        changed = True
-    if phone and not (user.phone or "").strip():
-        user.phone = phone
-        changed = True
-    if email and not (user.email or "").strip():
-        user.email = email
-        changed = True
+    if g:
+        if overwrite:
+            if (user.gender or "") != g:
+                user.gender = g
+                changed = True
+        elif not (user.gender or "").strip():
+            user.gender = g
+            changed = True
+    if birthday:
+        if overwrite:
+            if user.date_of_birth != birthday:
+                user.date_of_birth = birthday
+                changed = True
+        elif not user.date_of_birth:
+            user.date_of_birth = birthday
+            changed = True
+    if phone:
+        if overwrite:
+            if (user.phone or "") != phone:
+                user.phone = phone
+                changed = True
+        elif not (user.phone or "").strip():
+            user.phone = phone
+            changed = True
+    if email:
+        if overwrite:
+            if identity_email(user.email or "") != email:
+                user.email = email
+                changed = True
+        elif not (user.email or "").strip():
+            user.email = email
+            changed = True
     return changed
 
 
@@ -231,22 +258,29 @@ def import_legacy_customers_bulk(db: Session, rows: List[Any]) -> Dict[str, int]
                 if not existing:
                     skipped += 1
                     continue
-                if phone_key and existing.phone and existing.phone != phone_key:
-                    skipped += 1
-                    continue
                 if email_key and existing.email and identity_email(existing.email) != email_key:
                     skipped += 1
                     continue
+
+                phone_for_update = phone_key
+                if phone_key and phone_key != (existing.phone or "").strip():
+                    owner = phone_to_id.get(phone_key)
+                    if owner and owner != existing_id:
+                        phone_for_update = None
+
                 if _fill_user_profile(
                     existing,
                     name=item.name,
                     gender=item.gender,
                     birthday=item.birthday,
-                    phone=phone_key,
+                    phone=phone_for_update,
                     email=email_key,
+                    overwrite=True,
                 ):
                     updated += 1
                     pending += 1
+                    if phone_for_update and phone_for_update != (existing.phone or "").strip():
+                        phone_to_id[phone_for_update] = existing_id
                 else:
                     skipped += 1
             else:

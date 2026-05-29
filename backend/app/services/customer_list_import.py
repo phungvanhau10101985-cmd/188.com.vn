@@ -89,6 +89,19 @@ def _parse_gender(raw: str) -> Optional[str]:
     return text[:20]
 
 
+def _excel_serial_to_date(serial: float) -> Optional[date]:
+    """Excel lưu ngày dạng số (vd. 38073 = 27/03/2004) — origin Windows 1899-12-30."""
+    if serial < 1 or serial > 150_000:
+        return None
+    try:
+        parsed = pd.to_datetime(serial, unit="D", origin="1899-12-30", errors="coerce")
+        if pd.isna(parsed):
+            return None
+        return parsed.date()
+    except Exception:
+        return None
+
+
 def _parse_birthday(value: Any) -> Optional[date]:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return None
@@ -96,9 +109,21 @@ def _parse_birthday(value: Any) -> Optional[date]:
         return value.date()
     if isinstance(value, date):
         return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        whole = float(value)
+        if whole == int(whole):
+            as_date = _excel_serial_to_date(whole)
+            if as_date:
+                return as_date
     text = _cell_str(value)
     if not text:
         return None
+    if text.endswith(".0"):
+        text = text[:-2]
+    if text.isdigit():
+        as_date = _excel_serial_to_date(float(text))
+        if as_date:
+            return as_date
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"):
         try:
             return datetime.strptime(text.split()[0], fmt).date()
