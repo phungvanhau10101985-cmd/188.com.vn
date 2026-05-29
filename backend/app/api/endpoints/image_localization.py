@@ -727,6 +727,30 @@ def cancel_job(
     return _job_get(job_id)
 
 
+@router.delete("/jobs/{job_id}")
+def delete_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Xóa một job đã dừng / lỗi / hoàn tất khỏi DB và bộ nhớ server."""
+    jid = (job_id or "").strip()
+    if not jid:
+        raise HTTPException(status_code=400, detail="Thiếu job_id")
+    job = _job_get(jid)
+    if not job:
+        raise HTTPException(status_code=404, detail="Không tìm thấy job bản địa hóa ảnh")
+    status = (job.get("status") or "").strip().lower()
+    if status in _RESUMABLE_JOB_STATUSES:
+        raise HTTPException(status_code=409, detail="Job đang chạy — hãy hủy trước khi xóa.")
+    deleted = image_loc_job_crud.delete_job(db, jid)
+    if not deleted and status not in _TERMINAL_JOB_STATUSES:
+        raise HTTPException(status_code=409, detail="Chỉ xóa được job đã dừng, lỗi hoặc hoàn tất.")
+    with _jobs_lock:
+        _jobs.pop(jid, None)
+    return {"deleted": True, "job_id": jid}
+
+
 @router.delete("/jobs/terminal")
 def delete_terminal_jobs(
     db: Session = Depends(get_db),

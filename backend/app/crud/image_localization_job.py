@@ -157,6 +157,21 @@ def delete_terminal_jobs(db: Session) -> tuple[int, List[str]]:
     return len(ids), ids
 
 
+def delete_job(db: Session, job_id: str) -> bool:
+    """Xóa một job đã kết thúc (done / error / cancelled)."""
+    jid = (job_id or "").strip()
+    if not jid:
+        return False
+    row = get_job(db, jid)
+    if not row:
+        return False
+    if (row.status or "").strip().lower() not in _TERMINAL:
+        return False
+    db.delete(row)
+    db.commit()
+    return True
+
+
 def sync_dict_to_row(db: Session, job_id: str, job: Dict[str, Any]) -> None:
     """Ghi snapshot job từ dict in-memory."""
     if not job:

@@ -1402,6 +1402,15 @@ export const adminProductAPI = {
       timeoutMs: 60_000,
     }),
 
+  deleteImageLocalizationJob: (jobId: string) =>
+    fetchAdmin<{ deleted: boolean; job_id: string }>(
+      `/image-localization/jobs/${encodeURIComponent(jobId)}`,
+      {
+        method: 'DELETE',
+        timeoutMs: 60_000,
+      },
+    ),
+
   importExcel: async (file: File, overwrite = false) => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');

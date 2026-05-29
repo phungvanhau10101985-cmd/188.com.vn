@@ -798,7 +798,7 @@ export default function AdminProductsPage() {
   const [localizationJobsLoading, setLocalizationJobsLoading] = useState(true);
   /** Chặn double-submit khi POST start job (ngắn). */
   const [localizationStartBusy, setLocalizationStartBusy] = useState(false);
-  const [localizationClearConfirmOpen, setLocalizationClearConfirmOpen] = useState(false);
+  const [localizationDeleteTarget, setLocalizationDeleteTarget] = useState<'all' | string | null>(null);
   const [localizationClearBusy, setLocalizationClearBusy] = useState(false);
   const localizationPollCountRef = useRef(0);
   const [imageLocalizationJobsById, setImageLocalizationJobsById] = useState<
@@ -1322,6 +1322,17 @@ export default function AdminProductsPage() {
     return n;
   }, [localizationJobsForUi]);
 
+  const removeLocalizationJobFromUi = useCallback((jobId: string) => {
+    setImageLocalizationJobsById((prev) => {
+      const next = { ...prev };
+      delete next[jobId];
+      return next;
+    });
+    setLocalizationJobIdsOrdered((prev) => prev.filter((id) => id !== jobId));
+    writeStoredLocalizationJobIds(readStoredLocalizationJobIds().filter((id) => id !== jobId));
+    resumedImageLocalizationPollSession.delete(jobId);
+  }, []);
+
   const handleClearLocalizationTerminalJobs = async () => {
     setLocalizationClearBusy(true);
     try {
@@ -1332,19 +1343,15 @@ export default function AdminProductsPage() {
           deletedIds.add(job.job_id);
         }
       }
-      setImageLocalizationJobsById((prev) => {
-        const next = { ...prev };
-        for (const id of deletedIds) delete next[id];
-        return next;
-      });
-      setLocalizationJobIdsOrdered((prev) => prev.filter((id) => !deletedIds.has(id)));
-      writeStoredLocalizationJobIds(readStoredLocalizationJobIds().filter((id) => !deletedIds.has(id)));
-      setLocalizationClearConfirmOpen(false);
+      for (const id of deletedIds) {
+        removeLocalizationJobFromUi(id);
+      }
+      setLocalizationDeleteTarget(null);
       showToast(
         'ok',
         res.deleted_count > 0
           ? `Đã xóa ${res.deleted_count} job đã dừng / lỗi khỏi danh sách`
-          : 'Không còn job đã dừng để xóa',
+          : 'Không còn job đã dừng để xóa trên server — đã dọn khung Tiến trình',
         6000,
       );
     } catch (err) {
@@ -1352,6 +1359,31 @@ export default function AdminProductsPage() {
       showToast('err', msg, 8000);
     } finally {
       setLocalizationClearBusy(false);
+    }
+  };
+
+  const handleDeleteOneLocalizationJob = async (jobId: string) => {
+    setLocalizationClearBusy(true);
+    try {
+      await adminProductAPI.deleteImageLocalizationJob(jobId);
+      removeLocalizationJobFromUi(jobId);
+      setLocalizationDeleteTarget(null);
+      showToast('ok', 'Đã xóa job khỏi tiến trình', 5000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Không xóa được job';
+      showToast('err', msg, 8000);
+    } finally {
+      setLocalizationClearBusy(false);
+    }
+  };
+
+  const confirmLocalizationDelete = async () => {
+    if (localizationDeleteTarget === 'all') {
+      await handleClearLocalizationTerminalJobs();
+      return;
+    }
+    if (localizationDeleteTarget) {
+      await handleDeleteOneLocalizationJob(localizationDeleteTarget);
     }
   };
 
@@ -3765,10 +3797,11 @@ export default function AdminProductsPage() {
                       : 'Chạy bản địa hóa ảnh'}
                 </button>
               </div>
-              {localizationPollActive ? (
+              {localizationPollActive || localizationJobsForUi.length > 0 ? (
                 <p className="mt-1.5 text-xs leading-snug text-gray-600">
-                  Mỗi lần bấm chạy là một job riêng — khung Tiến trình hiển thị <strong>từng card</strong>. Hủy từng job bằng
-                  nút trong đúng card đó (không ảnh hưởng job khác).
+                  Mỗi lần bấm chạy là một job riêng — khung Tiến trình hiển thị <strong>từng card</strong>. Job đang chạy:
+                  bấm <strong>Hủy</strong> trong card. Job lỗi / đã dừng: bấm <strong>Xóa</strong> trên card hoặc{' '}
+                  <strong>Xóa tiến trình đã dừng</strong> ở góc khung Tiến trình.
                 </p>
               ) : null}
 
@@ -3799,18 +3832,18 @@ export default function AdminProductsPage() {
             </div>
 
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <span className="text-sm font-semibold text-gray-900">Tiến trình</span>
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   {localizationTerminalJobCount > 0 ? (
                     <button
                       type="button"
-                      onClick={() => setLocalizationClearConfirmOpen(true)}
+                      onClick={() => setLocalizationDeleteTarget('all')}
                       disabled={localizationClearBusy || localizationJobsLoading}
-                      className="rounded-md border border-gray-300 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1"
+                      className="inline-flex items-center rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-1"
                       aria-label={`Xóa ${localizationTerminalJobCount} job đã dừng hoặc lỗi`}
                     >
-                      Xóa job đã dừng ({localizationTerminalJobCount})
+                      Xóa tiến trình đã dừng ({localizationTerminalJobCount})
                     </button>
                   ) : null}
                   <span className="text-xs text-gray-500">
@@ -3856,6 +3889,17 @@ export default function AdminProductsPage() {
                           </p>
                           <p className="text-xs font-semibold capitalize text-gray-800">{job.status}</p>
                         </div>
+                        {isTerminalImageLocalizationJobStatus(job.status) ? (
+                          <button
+                            type="button"
+                            onClick={() => setLocalizationDeleteTarget(job.job_id)}
+                            disabled={localizationClearBusy}
+                            className="shrink-0 rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-1"
+                            aria-label={`Xóa job ${job.job_id}`}
+                          >
+                            Xóa
+                          </button>
+                        ) : null}
                       </div>
 
                       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-200">
@@ -3966,12 +4010,12 @@ export default function AdminProductsPage() {
               )}
             </div>
 
-            {localizationClearConfirmOpen ? (
+            {localizationDeleteTarget ? (
               <div
                 className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
                 role="presentation"
                 onClick={(e) => {
-                  if (e.target === e.currentTarget && !localizationClearBusy) setLocalizationClearConfirmOpen(false);
+                  if (e.target === e.currentTarget && !localizationClearBusy) setLocalizationDeleteTarget(null);
                 }}
               >
                 <div
@@ -3982,17 +4026,28 @@ export default function AdminProductsPage() {
                   onClick={(e) => e.stopPropagation()}
                 >
                   <h3 id="localization-clear-jobs-title" className="text-base font-semibold text-gray-900">
-                    Xóa job đã dừng hoặc lỗi?
+                    {localizationDeleteTarget === 'all' ? 'Xóa tiến trình đã dừng?' : 'Xóa job này?'}
                   </h3>
                   <p className="mt-2 text-sm text-gray-600 leading-relaxed">
-                    Sẽ xóa <strong className="font-medium text-gray-800">{localizationTerminalJobCount} job</strong>{' '}
-                    đã hoàn tất, lỗi hoặc đã hủy khỏi server và khung Tiến trình. Job đang chạy không bị ảnh hưởng.
-                    Không hoàn tác.
+                    {localizationDeleteTarget === 'all' ? (
+                      <>
+                        Sẽ xóa{' '}
+                        <strong className="font-medium text-gray-800">{localizationTerminalJobCount} job</strong>{' '}
+                        đã hoàn tất, lỗi hoặc đã hủy khỏi server và khung Tiến trình. Job đang chạy không bị ảnh
+                        hưởng. Không hoàn tác.
+                      </>
+                    ) : (
+                      <>
+                        Job{' '}
+                        <code className="rounded bg-gray-100 px-1 py-0.5 text-xs">{localizationDeleteTarget}</code>{' '}
+                        sẽ bị xóa khỏi server và khung Tiến trình. Không hoàn tác.
+                      </>
+                    )}
                   </p>
                   <div className="mt-5 flex flex-wrap justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => !localizationClearBusy && setLocalizationClearConfirmOpen(false)}
+                      onClick={() => !localizationClearBusy && setLocalizationDeleteTarget(null)}
                       disabled={localizationClearBusy}
                       className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
                     >
@@ -4000,11 +4055,11 @@ export default function AdminProductsPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => void handleClearLocalizationTerminalJobs()}
+                      onClick={() => void confirmLocalizationDelete()}
                       disabled={localizationClearBusy}
                       className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
                     >
-                      {localizationClearBusy ? 'Đang xóa…' : 'Xóa danh sách'}
+                      {localizationClearBusy ? 'Đang xóa…' : 'Xóa'}
                     </button>
                   </div>
                 </div>
