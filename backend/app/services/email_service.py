@@ -1,12 +1,16 @@
+import html
 import logging
 import smtplib
 import ssl
 from decimal import Decimal
 from email.message import EmailMessage
 from email.utils import formataddr
-from typing import Optional
+from typing import List, Optional, TYPE_CHECKING
 
 from app.core.config import settings
+
+if TYPE_CHECKING:
+    from app.models.cart import Cart
 
 logger = logging.getLogger(__name__)
 
@@ -498,6 +502,168 @@ def send_birthday_promo_email(
 </div>
 """
     send_email(to_email, subject, text_body, html_body)
+
+
+def _frontend_origin() -> str:
+    fe = (settings.FRONTEND_BASE_URL or settings.WEBSITE_URL or "").strip().rstrip("/")
+    return fe or "https://188.com.vn"
+
+
+def _cart_item_summary_lines(cart: "Cart", *, max_items: int = 5) -> List[str]:
+    lines: List[str] = []
+    items = list(cart.items or [])
+    for item in items[:max_items]:
+        name = (getattr(item, "product_name", None) or "").strip()
+        if not name:
+            pdata = getattr(item, "product_data", None) or {}
+            if isinstance(pdata, dict):
+                name = (
+                    str(pdata.get("name") or pdata.get("product_name") or pdata.get("title") or "")
+                ).strip()
+        if not name:
+            name = "Sản phẩm"
+        qty = int(getattr(item, "quantity", None) or 1)
+        lines.append(f"{name} × {qty}")
+    extra = len(items) - max_items
+    if extra > 0:
+        lines.append(f"... và {extra} sản phẩm khác")
+    return lines
+
+
+def send_cart_abandon_email(
+    to_email: str,
+    *,
+    customer_name: str,
+    cart: "Cart",
+    promo_code: str,
+    discount_percent: int,
+    max_discount_amount: int,
+    valid_days: int,
+) -> None:
+    """Email nhắc giỏ bỏ dở — CTA mở /cart nhanh + mã ưu đãi trong ví."""
+    if not to_email or not settings.is_smtp_configured():
+        return
+    if not getattr(settings, "CART_ABANDON_EMAIL_ENABLED", True):
+        return
+
+    origin = _frontend_origin()
+    cart_url = f"{origin}/cart"
+    wallet_url = f"{origin}/account/khuyen-mai"
+    display_name = (customer_name or "Quý khách").strip() or "Quý khách"
+    item_lines = _cart_item_summary_lines(cart)
+    max_discount_label = _format_vnd_plain(max_discount_amount) if max_discount_amount else "0"
+
+    subject = "Bạn còn sản phẩm trong giỏ — hoàn tất đơn tại 188.com.vn"
+    items_text = "\n".join(f"  • {line}" for line in item_lines) if item_lines else "  • (xem chi tiết trên giỏ hàng)"
+    text_body = (
+        f"Xin chào {display_name},\n\n"
+        "Bạn còn sản phẩm trong giỏ hàng nhưng chưa hoàn tất đặt hàng.\n\n"
+        f"{items_text}\n\n"
+        f"Shop tặng thêm mã {promo_code} — giảm {discount_percent}% "
+        f"(tối đa {max_discount_label}đ, hết hạn sau {valid_days} ngày). "
+        f"Mã đã có trong ví khuyến mãi của bạn.\n\n"
+        f"Xem giỏ hàng và đặt hàng ngay: {cart_url}\n"
+        f"Ví mã ưu đãi: {wallet_url}\n\n"
+        "Trân trọng,\n188.com.vn\n"
+        f"--\nTin nhắn tự động từ 188.com.vn · {origin}"
+    )
+
+    items_html = ""
+    if item_lines:
+        lis = "".join(f"<li style=\"margin:4px 0;\">{html.escape(line)}</li>" for line in item_lines)
+        items_html = f'<ul style="margin:12px 0;padding-left:20px;color:#374151;">{lis}</ul>'
+
+    html_body = f"""
+<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.55;color:#111827;max-width:560px;">
+  <p>Xin chào <strong>{html.escape(display_name)}</strong>,</p>
+  <p>Bạn còn sản phẩm trong giỏ hàng nhưng chưa hoàn tất đặt hàng.</p>
+  {items_html}
+  <p>Shop gửi thêm mã <strong>{html.escape(promo_code)}</strong> — giảm <strong>{discount_percent}%</strong>
+     (tối đa <strong>{html.escape(max_discount_label)}đ</strong>, hết hạn sau <strong>{valid_days}</strong> ngày).
+     Mã đã nằm trong <a href="{html.escape(wallet_url)}">ví khuyến mãi</a> của bạn.</p>
+  <p style="margin:20px 0 12px;">
+    <a href="{html.escape(cart_url)}" style="display:inline-block;padding:12px 22px;background:#ea580c;color:#ffffff !important;text-decoration:none;border-radius:10px;font-weight:600;">
+      Xem giỏ hàng &amp; đặt hàng
+    </a>
+  </p>
+  <p style="font-size:12px;color:#6b7280;word-break:break-all;">Hoặc sao chép liên kết giỏ hàng: <a href="{html.escape(cart_url)}">{html.escape(cart_url)}</a></p>
+  <p style="margin-top:24px;">Trân trọng,<br/>188.com.vn</p>
+  <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
+  <p style="font-size:12px;color:#9ca3af;">Tin nhắn tự động từ 188.com.vn</p>
+</div>
+"""
+    send_email(to_email, subject, text_body, html_body)
+    logger.info("cart_abandon_email sent to=%s promo=%s", to_email, promo_code)
+
+
+def send_newsletter_welcome_email(to_email: str) -> None:
+    """Email chào mừng sau khi đăng ký nhận tin footer."""
+    if not to_email or not settings.is_smtp_configured():
+        return
+    if not getattr(settings, "NEWSLETTER_WELCOME_EMAIL_ENABLED", True):
+        return
+
+    origin = _frontend_origin()
+    shop_url = origin
+    subject = "188.com.vn — Bạn đã đăng ký nhận tin thành công"
+    text_body = (
+        "Xin chào,\n\n"
+        "Cảm ơn bạn đã đăng ký nhận tin từ 188.com.vn. "
+        "Shop sẽ gửi ưu đãi, sale và gợi ý sản phẩm mới qua email này.\n\n"
+        f"Mua sắm ngay: {shop_url}\n\n"
+        "Trân trọng,\n188.com.vn\n"
+        f"--\nTin nhắn tự động từ 188.com.vn · {origin}"
+    )
+    html_body = f"""
+<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.55;color:#111827;max-width:560px;">
+  <p>Xin chào,</p>
+  <p>Cảm ơn bạn đã <strong>đăng ký nhận tin</strong> từ 188.com.vn. Shop sẽ gửi ưu đãi, sale và gợi ý sản phẩm mới qua email này.</p>
+  <p style="margin:20px 0 12px;">
+    <a href="{html.escape(shop_url)}" style="display:inline-block;padding:12px 22px;background:#ea580c;color:#ffffff !important;text-decoration:none;border-radius:10px;font-weight:600;">
+      Khám phá 188.com.vn
+    </a>
+  </p>
+  <p style="font-size:12px;color:#6b7280;word-break:break-all;">Hoặc mở: <a href="{html.escape(shop_url)}">{html.escape(shop_url)}</a></p>
+  <p style="margin-top:24px;">Trân trọng,<br/>188.com.vn</p>
+  <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
+  <p style="font-size:12px;color:#9ca3af;">Tin nhắn tự động từ 188.com.vn</p>
+</div>
+"""
+    send_email(to_email, subject, text_body, html_body)
+    logger.info("newsletter_welcome_email sent to=%s", to_email)
+
+
+def send_marketing_email(to_email: str, *, subject: str, message: str) -> None:
+    """Email marketing / broadcast — nội dung do admin nhập."""
+    if not to_email or not settings.is_smtp_configured():
+        return
+
+    origin = _frontend_origin()
+    shop_url = origin
+    safe_subject = (subject or "188.com.vn").strip()
+    body_text = (message or "").strip()
+    text_body = (
+        f"{body_text}\n\n"
+        f"Mua sắm tại: {shop_url}\n\n"
+        "Trân trọng,\n188.com.vn\n"
+        f"--\nTin nhắn từ 188.com.vn · {origin}"
+    )
+    html_message = html.escape(body_text).replace("\n", "<br/>")
+    html_body = f"""
+<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.55;color:#111827;max-width:560px;">
+  <p style="white-space:pre-wrap;">{html_message}</p>
+  <p style="margin:20px 0 12px;">
+    <a href="{html.escape(shop_url)}" style="display:inline-block;padding:12px 22px;background:#ea580c;color:#ffffff !important;text-decoration:none;border-radius:10px;font-weight:600;">
+      Xem 188.com.vn
+    </a>
+  </p>
+  <p style="font-size:12px;color:#6b7280;word-break:break-all;">{html.escape(shop_url)}</p>
+  <p style="margin-top:24px;">Trân trọng,<br/>188.com.vn</p>
+  <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
+  <p style="font-size:12px;color:#9ca3af;">Bạn nhận email vì đã đăng ký nhận tin từ 188.com.vn</p>
+</div>
+"""
+    send_email(to_email, safe_subject, text_body, html_body)
 
 
 def _format_vnd_plain(n) -> str:

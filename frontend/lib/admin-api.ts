@@ -2364,6 +2364,50 @@ export const adminMemberAPI = {
         modules === undefined ? { staff_role } : { staff_role, modules },
       ),
     }),
+
+  importFile: async (file: File) => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const url = `${getApiBaseUrl()}/admin/users/import-file`;
+    const fd = new FormData();
+    fd.append('file', file);
+    const ac = new AbortController();
+    const timer = window.setTimeout(() => ac.abort(), 15 * 60 * 1000);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+        body: fd,
+        signal: ac.signal,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(formatFastApiDetail((err as { detail?: unknown }).detail) || 'Import thất bại');
+      }
+      return res.json() as Promise<AdminMemberImportResponse>;
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') {
+        throw new Error('Import quá lâu (>15 phút). Thử chia file nhỏ hơn hoặc kiểm tra backend.');
+      }
+      throw e;
+    } finally {
+      window.clearTimeout(timer);
+    }
+  },
+};
+
+export type AdminMemberImportResponse = {
+  created: number;
+  updated: number;
+  skipped: number;
+  invalid: number;
+  corrected?: number;
+  duplicate_in_file?: number;
+  total_input: number;
+  parsed: number;
+  message: string;
+  corrections?: Array<{ row: number; original: string; fixed: string; fixes: string[] }>;
+  invalid_rows?: Array<{ row: number; email: string; name: string; reason: string }>;
 };
 
 export interface ProductQuestionAdmin {
@@ -2685,12 +2729,199 @@ export const adminPromotionsAPI = {
       body: JSON.stringify({ segment: 'welcome_backfill' }),
     }),
   runCartAbandon: (abandon_hours?: number) =>
-    fetchAdmin<{ granted: number; skipped: number }>('/promotions/admin/grant-segment', {
+    fetchAdmin<{ granted: number; skipped: number; emails_sent?: number }>('/promotions/admin/grant-segment', {
       method: 'POST',
       body: JSON.stringify({ segment: 'cart_abandon', abandon_hours: abandon_hours ?? 24 }),
     }),
   listUserGrants: (user_id: number) =>
     fetchAdmin<AdminUserGrantRow[]>(`/promotions/admin/grants?user_id=${user_id}`),
+};
+
+export type AdminNewsletterSubscriber = {
+  id: number;
+  email: string;
+  user_id?: number | null;
+  user_full_name?: string | null;
+  subscriber_name?: string | null;
+  gender?: string | null;
+  birthday?: string | null;
+  phone?: string | null;
+  email_original?: string | null;
+  source: string;
+  is_active: boolean;
+  subscribed_at?: string | null;
+  unsubscribed_at?: string | null;
+  created_at?: string | null;
+};
+
+export type AdminNewsletterListResponse = {
+  items: AdminNewsletterSubscriber[];
+  total: number;
+  skip: number;
+  limit: number;
+  active_total: number;
+};
+
+export const adminNewsletterAPI = {
+  list: (params?: {
+    skip?: number;
+    limit?: number;
+    q?: string;
+    active_only?: boolean | null;
+  }) => {
+    const qs = new URLSearchParams();
+    const skip = params?.skip ?? 0;
+    const limit = params?.limit ?? 50;
+    qs.set('skip', String(skip));
+    qs.set('limit', String(limit));
+    if (params?.q?.trim()) qs.set('q', params.q.trim());
+    if (params?.active_only === true) qs.set('active_only', 'true');
+    if (params?.active_only === false) qs.set('active_only', 'false');
+    return fetchAdmin<AdminNewsletterListResponse>(`/newsletter/admin/subscribers?${qs.toString()}`);
+  },
+
+  exportCsv: async (params?: { q?: string; active_only?: boolean | null }) => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const qs = new URLSearchParams();
+    if (params?.q?.trim()) qs.set('q', params.q.trim());
+    if (params?.active_only === true) qs.set('active_only', 'true');
+    if (params?.active_only === false) qs.set('active_only', 'false');
+    const query = qs.toString();
+    const url = `${getApiBaseUrl()}/newsletter/admin/subscribers/export.csv${query ? `?${query}` : ''}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail((err as { detail?: unknown }).detail) || 'Tải CSV thất bại');
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition');
+    let filename = `newsletter_subscribers_${new Date().toISOString().slice(0, 10)}.csv`;
+    const m = cd && /filename="?([^";]+)"?/i.exec(cd);
+    if (m?.[1]) filename = m[1].trim();
+    await triggerBlobDownloadPreferred(blob, filename);
+  },
+
+  importText: (emails_text: string, source = 'import') =>
+    fetchAdmin<AdminNewsletterImportResponse>('/newsletter/admin/import-text', {
+      method: 'POST',
+      body: JSON.stringify({ emails_text, source }),
+    }),
+
+  importFile: async (file: File, source = 'import') => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const qs = new URLSearchParams();
+    if (source.trim()) qs.set('source', source.trim());
+    const query = qs.toString();
+    const url = `${getApiBaseUrl()}/newsletter/admin/import-file${query ? `?${query}` : ''}`;
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+      body: fd,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail((err as { detail?: unknown }).detail) || 'Import thất bại');
+    }
+    return res.json() as Promise<AdminNewsletterImportResponse>;
+  },
+
+  sendCampaign: (payload: {
+    subject: string;
+    message: string;
+    test_email?: string;
+  }) =>
+    fetchAdmin<AdminNewsletterCampaignResponse>('/newsletter/admin/send-campaign', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getCampaignStatus: () =>
+    fetchAdmin<{ status: string; sent?: number; failed?: number; deferred_quota?: number; subject?: string }>(
+      '/newsletter/admin/campaign-status',
+    ),
+};
+
+export type AdminEmailSendManagement = {
+  warmup_enabled: boolean;
+  start_limit: number;
+  daily_increment: number;
+  max_limit: number | null;
+  birthday_cron_enabled: boolean;
+  warmup_day: number;
+  warmup_started_at: string | null;
+  daily_limit: number | null;
+  daily_sent_total: number;
+  daily_birthday_sent: number;
+  daily_marketing_sent: number;
+  remaining_today: number | null;
+  birthday_pending_today: number;
+  birthday_sent_all_time: number;
+  birthday_send_days_before: number;
+  recent_days: Array<{ date: string; birthday_sent: number }>;
+};
+
+export const adminEmailManagementAPI = {
+  getOverview: () => fetchAdmin<AdminEmailSendManagement>('/newsletter/admin/email-management'),
+
+  updateWarmupSettings: (payload: {
+    warmup_enabled: boolean;
+    start_limit: number;
+    daily_increment: number;
+    max_limit?: number | null;
+    birthday_cron_enabled: boolean;
+  }) =>
+    fetchAdmin<AdminEmailSendManagement>('/newsletter/admin/warmup-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  runBirthdayBatch: () =>
+    fetchAdmin<{
+      ok: boolean;
+      message: string;
+      sent?: number;
+      skipped?: number;
+      failed?: number;
+      deferred_quota?: number;
+    }>('/newsletter/admin/run-birthday-batch', { method: 'POST' }),
+};
+
+export type AdminNewsletterImportResponse = {
+  created: number;
+  reactivated: number;
+  skipped_active: number;
+  updated_profile?: number;
+  invalid: number;
+  corrected?: number;
+  duplicate_in_file?: number;
+  total_input: number;
+  parsed: number;
+  corrections?: Array<{
+    row: number;
+    original: string;
+    fixed: string;
+    fixes: string[];
+  }>;
+  invalid_rows?: Array<{
+    row: number;
+    email: string;
+    reason: string;
+  }>;
+};
+
+export type AdminNewsletterCampaignResponse = {
+  ok: boolean;
+  mode: string;
+  recipient_count: number;
+  sent: number;
+  failed: number;
+  message: string;
 };
 
 export type AdminSaleCalendarSettings = {

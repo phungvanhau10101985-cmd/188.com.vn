@@ -23,6 +23,7 @@ export const ADMIN_MODULE_NAV: Record<string, string> = {
   chat_embeds: '/admin/chat-embeds',
   shop_video_fab: '/admin/shop-video-fab',
   notifications: '/admin/notifications',
+  newsletter: '/admin/newsletter',
   staff_access: '/admin/staff-access',
 };
 
@@ -48,6 +49,7 @@ export const ADMIN_MODULE_ORDER: string[] = [
   'chat_embeds',
   'shop_video_fab',
   'notifications',
+  'newsletter',
   'staff_access',
 ];
 
@@ -75,6 +77,7 @@ export const ADMIN_MODULE_LABELS: Record<string, string> = {
   chat_embeds: 'Nhúng chat',
   shop_video_fab: 'Nút lướt video',
   notifications: 'Thông báo',
+  newsletter: 'Quản lý gửi email',
   staff_access: 'Quản lý quyền nhân viên',
 };
 

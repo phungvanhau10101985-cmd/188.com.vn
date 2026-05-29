@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.config import settings
 from app.crud import notification as crud_notification
 from app.models.cart import Cart, CartItem
 from app.models.order import Order, OrderStatus
@@ -395,6 +396,37 @@ def _cart_last_touch(cart: Cart) -> datetime:
     return max(touches) if touches else _utc_now()
 
 
+def _maybe_send_cart_abandon_email(
+    db: Session,
+    *,
+    user: User,
+    cart: Cart,
+    promotion: Promotion,
+    valid_days: int,
+) -> bool:
+    if not getattr(settings, "CART_ABANDON_EMAIL_ENABLED", True):
+        return False
+    to_email = (user.email or "").strip()
+    if not to_email:
+        return False
+    try:
+        from app.services.email_service import send_cart_abandon_email
+
+        send_cart_abandon_email(
+            to_email,
+            customer_name=user.full_name or "",
+            cart=cart,
+            promo_code=promotion.code,
+            discount_percent=int(promotion.discount_percent or 0),
+            max_discount_amount=int(promotion.max_discount_amount or 0),
+            valid_days=int(valid_days),
+        )
+        return True
+    except Exception as exc:
+        logger.warning("cart_abandon email failed user=%s: %s", user.id, exc)
+        return False
+
+
 def process_cart_abandon_grants_for_all(
     db: Session,
     *,
@@ -405,21 +437,23 @@ def process_cart_abandon_grants_for_all(
     ensure_promotion_templates(db)
     promo = db.query(Promotion).filter(Promotion.code == PROMO_CART_ABANDON).first()
     if not promo:
-        return {"granted": 0, "skipped": 0}
+        return {"granted": 0, "skipped": 0, "emails_sent": 0}
 
     now = _utc_now()
     cutoff = now - timedelta(hours=abandon_hours)
     cooldown_cutoff = now - timedelta(days=cooldown_days)
+    valid_days = int(promo.grant_valid_days or promo.eligible_within_days or 7)
 
     carts = (
         db.query(Cart)
-        .options(joinedload(Cart.items))
+        .options(joinedload(Cart.items), joinedload(Cart.user))
         .join(CartItem)
         .distinct()
         .all()
     )
     granted = 0
     skipped = 0
+    emails_sent = 0
     for cart in carts:
         user_id = cart.user_id
         if not cart.items:
@@ -472,9 +506,18 @@ def process_cart_abandon_grants_for_all(
         )
         if g:
             granted += 1
+            user = cart.user or db.query(User).filter(User.id == user_id).first()
+            if user and _maybe_send_cart_abandon_email(
+                db,
+                user=user,
+                cart=cart,
+                promotion=promo,
+                valid_days=valid_days,
+            ):
+                emails_sent += 1
         else:
             skipped += 1
-    return {"granted": granted, "skipped": skipped}
+    return {"granted": granted, "skipped": skipped, "emails_sent": emails_sent}
 
 
 def get_active_grant(

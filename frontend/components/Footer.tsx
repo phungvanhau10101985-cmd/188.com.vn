@@ -2,6 +2,24 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
+
+const FooterNewsletterSubscribe = dynamic(
+  () => import('@/components/FooterNewsletterSubscribe'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="space-y-2">
+        <h5 className="text-xs font-semibold uppercase tracking-wider text-gray-900">Đăng ký nhận tin</h5>
+        <p className="text-xs text-gray-600">Nhận ưu đãi và tin sale qua email — không spam.</p>
+        <div className="flex gap-2" aria-hidden="true">
+          <div className="flex-1 min-h-[44px] rounded-xl border border-gray-200 bg-gray-50" />
+          <div className="min-h-[44px] min-w-[72px] rounded-xl bg-orange-200/80" />
+        </div>
+      </div>
+    ),
+  },
+);
 
 // frontend/components/Footer.tsx - Đồng bộ thương hiệu 188, có chân trang mobile
 export default function Footer() {
@@ -121,22 +139,7 @@ export default function Footer() {
               </div>
               <div className="flex items-center gap-2 py-1"><span aria-hidden>🕒</span><span>8:00 – 16:30</span></div>
             </div>
-            <div className="space-y-2">
-              <h5 className="text-xs font-semibold uppercase tracking-wider text-gray-900">Đăng ký nhận tin</h5>
-              <div className="flex gap-2">
-                <input
-                  type="email"
-                  placeholder="Email của bạn"
-                  className="flex-1 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 placeholder-gray-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
-                />
-                <button
-                  type="submit"
-                  className="bg-[#ea580c] text-white hover:bg-orange-600 min-h-[44px] min-w-[72px] px-4 py-2.5 rounded-xl text-sm font-medium transition-colors shadow-sm"
-                >
-                  Gửi
-                </button>
-              </div>
-            </div>
+            <FooterNewsletterSubscribe />
           </div>
         </div>
       </div>

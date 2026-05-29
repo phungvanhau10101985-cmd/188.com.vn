@@ -1610,6 +1610,13 @@ class ApiClient {
     return this.fetch<any[]>(`/notifications/?skip=${skip}&limit=${limit}`);
   }
 
+  async subscribeNewsletter(email: string): Promise<{ ok: boolean; message: string }> {
+    return this.fetch<{ ok: boolean; message: string }>('/newsletter/subscribe', {
+      method: 'POST',
+      body: JSON.stringify({ email: email.trim(), source: 'footer' }),
+    });
+  }
+
   async getUnreadNotificationCount(): Promise<number> {
     const call = () => this.fetch<number>('/notifications/unread-count', { quiet: true });
     try {
@@ -1633,7 +1640,7 @@ class ApiClient {
   }
 
   async getPushVapidKey(): Promise<{ public_key: string }> {
-    return this.fetch<{ public_key: string }>('/push/vapid-public-key', { method: 'GET' });
+    return this.fetch<{ public_key: string }>('/push/vapid-public-key', { method: 'GET', quiet: true });
   }
 
   async registerPushSubscription(body: {
@@ -1644,6 +1651,7 @@ class ApiClient {
     return this.fetch('/push/subscribe', {
       method: 'POST',
       body: JSON.stringify(body),
+      quiet: true,
     });
   }
 

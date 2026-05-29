@@ -213,6 +213,7 @@ def load_api_routes():
         ("loyalty", "/loyalty", "loyalty"),
         ("affiliate", "/affiliate", "affiliate"),
         ("notifications", "/notifications", "notifications"),
+        ("newsletter", "/newsletter", "newsletter"),  # CMSN + warm-up + marketing
         ("push", "/push", "push"),
     ]
     
@@ -341,7 +342,17 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    newsletter_paths = [
+        getattr(r, "path", "")
+        for r in app.routes
+        if getattr(r, "path", "") and "/newsletter/" in getattr(r, "path", "")
+    ]
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "newsletter_routes": len(newsletter_paths),
+        "newsletter_ok": len(newsletter_paths) > 0,
+    }
 
 @app.get("/api")
 async def api_root():
@@ -393,6 +404,24 @@ async def test_import_endpoint():
 # Đăng ký router /api/v1/* ngay khi import module (không chờ startup) để luôn có
 # GET /api/v1/user-behavior/search/suggestions, /api/v1/push/vapid-public-key, v.v.
 API_LOADED_ROUTES, API_FAILED_ROUTES = load_api_routes()
+
+
+def _ensure_newsletter_router() -> None:
+    """Đảm bảo /api/v1/newsletter luôn được mount (CMSN warm-up admin)."""
+    loaded_prefixes = {path for _, path in API_LOADED_ROUTES}
+    if "/api/v1/newsletter" in loaded_prefixes:
+        return
+    try:
+        from app.api.endpoints import newsletter as newsletter_ep
+
+        app.include_router(newsletter_ep.router, prefix="/api/v1/newsletter", tags=["newsletter"])
+        API_LOADED_ROUTES.append(("newsletter", "/api/v1/newsletter"))
+        print("✅ newsletter router mounted (ensure fallback)")
+    except Exception as exc:
+        print(f"⚠️  newsletter router ensure failed: {exc}")
+
+
+_ensure_newsletter_router()
 
 
 @app.on_event("startup")

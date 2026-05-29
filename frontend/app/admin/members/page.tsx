@@ -6,6 +6,7 @@ import {
   adminMemberAPI,
   adminStaffRolePresetsAPI,
   type AdminMember,
+  type AdminMemberImportResponse,
   type LinkedStaffRoleOption,
 } from '@/lib/admin-api';
 import { getStoredAdminRole, isPrivilegedAdminRole } from '@/lib/admin-role';
@@ -51,12 +52,6 @@ function formatLinkedRoleDisplay(m: AdminMember): string {
   return base + hint;
 }
 
-function formatDate(s: string | null | undefined) {
-  if (!s) return '—';
-  const d = new Date(s);
-  return d.toLocaleDateString('vi-VN') + ' ' + d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-}
-
 function formatBirthShort(s: string | null | undefined) {
   if (!s) return '—';
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
@@ -65,6 +60,14 @@ function formatBirthShort(s: string | null | undefined) {
   }
   const dt = new Date(s);
   return Number.isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('vi-VN');
+}
+
+function formatGender(value: string | null | undefined) {
+  const g = (value || '').trim().toLowerCase();
+  if (!g) return '—';
+  if (g === 'male' || g === 'nam' || g === 'm') return 'Nam';
+  if (g === 'female' || g === 'nữ' || g === 'nu' || g === 'n') return 'Nữ';
+  return value || '—';
 }
 
 export default function AdminMembersPage() {
@@ -80,6 +83,9 @@ export default function AdminMembersPage() {
   const [staffPanelUserId, setStaffPanelUserId] = useState<number | null>(null);
   const [staffPanelDraft, setStaffPanelDraft] = useState<string[]>([]);
   const [presetModulesByRole, setPresetModulesByRole] = useState<Record<string, string[]>>({});
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<AdminMemberImportResponse | null>(null);
 
   const canManageLinkedStaff = isPrivilegedAdminRole(getStoredAdminRole());
 
@@ -211,6 +217,27 @@ export default function AdminMembersPage() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  const handleImport = async () => {
+    if (!importFile) {
+      showToast('err', 'Chọn file CSV hoặc Excel.');
+      return;
+    }
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const res = await adminMemberAPI.importFile(importFile);
+      setImportResult(res);
+      showToast('ok', res.message || 'Import thành công.');
+      setImportFile(null);
+      setPage(0);
+      fetchMembers();
+    } catch (err: unknown) {
+      showToast('err', (err as Error)?.message || 'Import thất bại');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
       <div className="p-6">
         {toast && (
@@ -237,6 +264,59 @@ export default function AdminMembersPage() {
           >
             Làm mới
           </button>
+        </div>
+
+        <div className="bg-white rounded-xl shadow border border-gray-100 p-4 mb-6 space-y-3">
+          <h2 className="text-lg font-semibold text-gray-900">Import khách hàng cũ</h2>
+          <p className="text-xs text-gray-500">
+            File CSV/Excel với cột <strong>name</strong>, <strong>gender</strong>, <strong>email</strong>,{' '}
+            <strong>birthday</strong>, <strong>phone</strong>. Hệ thống tự sửa email gõ nhầm (vd.{' '}
+            <code className="bg-gray-100 px-1 rounded">@gmail.con</code>). Tạo tài khoản thành viên — khách
+            đăng nhập bằng OTP email khi quay lại.{' '}
+            <span className="text-gray-400">(Danh sách gửi marketing → mục Email nhận tin.)</span>
+          </p>
+          <input
+            type="file"
+            accept=".csv,.xlsx,.xls"
+            onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+            className="block w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-slate-100 file:text-slate-800"
+          />
+          <button
+            type="button"
+            disabled={importing || !importFile}
+            onClick={() => void handleImport()}
+            className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-60"
+          >
+            {importing ? 'Đang import…' : 'Import vào danh sách thành viên'}
+          </button>
+          {importResult && (importResult.corrections?.length || importResult.invalid_rows?.length) ? (
+            <div className="grid gap-3 md:grid-cols-2 pt-2">
+              {importResult.corrections?.length ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+                  <p className="font-semibold text-amber-900 mb-1">Email đã sửa</p>
+                  <ul className="max-h-36 overflow-y-auto space-y-0.5 text-amber-950">
+                    {importResult.corrections.map((c) => (
+                      <li key={`${c.row}-${c.original}`}>
+                        Dòng {c.row}: {c.original} → <strong>{c.fixed}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {importResult.invalid_rows?.length ? (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
+                  <p className="font-semibold text-red-900 mb-1">Không import được</p>
+                  <ul className="max-h-36 overflow-y-auto space-y-0.5 text-red-900">
+                    {importResult.invalid_rows.map((r) => (
+                      <li key={`${r.row}-${r.email}-${r.name}`}>
+                        Dòng {r.row}: {r.name || r.email || '—'} — {r.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <div className="bg-white rounded-xl shadow border border-gray-100 overflow-hidden">
@@ -284,9 +364,8 @@ export default function AdminMembersPage() {
                       <th className="py-3 px-4">Họ tên</th>
                       <th className="py-3 px-4">Email</th>
                       <th className="py-3 px-4">Ngày sinh</th>
+                      <th className="py-3 px-4">Giới tính</th>
                       <th className="py-3 px-4">Trạng thái</th>
-                      <th className="py-3 px-4">Ngày đăng ký</th>
-                      <th className="py-3 px-4">Đăng nhập gần nhất</th>
                       <th className="py-3 px-4 min-w-[200px]">Quản trị web</th>
                       <th className="py-3 px-4 text-center">Thao tác</th>
                     </tr>
@@ -307,6 +386,7 @@ export default function AdminMembersPage() {
                             <td className="py-3 px-4">{m.full_name || '—'}</td>
                             <td className="py-3 px-4 text-gray-600">{m.email || '—'}</td>
                             <td className="py-3 px-4 text-gray-600 whitespace-nowrap">{formatBirthShort(m.date_of_birth)}</td>
+                            <td className="py-3 px-4 text-gray-600">{formatGender(m.gender)}</td>
                             <td className="py-3 px-4">
                               <span
                                 className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
@@ -316,8 +396,6 @@ export default function AdminMembersPage() {
                                 {m.is_active ? 'Đang hoạt động' : 'Đã khóa'}
                               </span>
                             </td>
-                            <td className="py-3 px-4 text-gray-600">{formatDate(m.created_at)}</td>
-                            <td className="py-3 px-4 text-gray-600">{formatDate(m.last_login)}</td>
                             <td className="py-3 px-4 align-middle">
                               {canManageLinkedStaff ? (
                                 <div className="flex flex-col gap-1.5 max-w-[260px]">
@@ -382,7 +460,7 @@ export default function AdminMembersPage() {
                           </tr>
                           {staffPanelUserId === m.id ? (
                             <tr className="border-b border-gray-100 bg-slate-50">
-                              <td colSpan={10} className="p-4">
+                              <td colSpan={9} className="p-4">
                                 <p className="text-xs text-gray-600 mb-3">
                                   Chọn mục được phép trong menu quản trị. <strong>Lưu</strong> gửi danh sách lên server;
                                   đổi vai trò ở dropdown trên (không đánh dấu mục) = preset mặc định của vai đó.

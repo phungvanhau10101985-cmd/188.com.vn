@@ -278,7 +278,9 @@ function CartAbandonForm() {
     setResult(null);
     try {
       const res = await adminPromotionsAPI.runCartAbandon(Number(hours) || 24);
-      setResult(`Đã tặng ${res.granted} khách, bỏ qua ${res.skipped}.`);
+      const emailPart =
+        typeof res.emails_sent === 'number' ? `, gửi ${res.emails_sent} email nhắc giỏ.` : '.';
+      setResult(`Đã tặng ${res.granted} khách, bỏ qua ${res.skipped}${emailPart}`);
     } catch {
       setResult('Chạy nhắc giỏ hàng thất bại.');
     } finally {
@@ -290,7 +292,9 @@ function CartAbandonForm() {
     <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 space-y-3">
       <p className="text-sm font-semibold text-gray-800">Nhắc bỏ giỏ hàng (CARTSAVE188)</p>
       <p className="text-xs text-gray-500">
-        Tặng mã cho khách có sản phẩm trong giỏ nhưng không đặt hàng sau X giờ. Đã gộp trong cron{' '}
+        Tặng mã cho khách có sản phẩm trong giỏ nhưng không đặt hàng sau X giờ. Khách có email sẽ nhận
+        thêm mail nhắc kèm link vào giỏ (<code className="text-xs bg-gray-100 px-1 rounded">/cart</code>) — cần
+        SMTP + <code className="text-xs bg-gray-100 px-1 rounded">FRONTEND_BASE_URL</code>. Đã gộp trong cron{' '}
         <code className="text-xs bg-gray-100 px-1 rounded">/promotions/cron/daily-all</code>.
       </p>
       <div className="flex flex-wrap items-center gap-3">

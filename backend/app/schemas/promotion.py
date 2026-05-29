@@ -102,6 +102,7 @@ class AdminGrantSegmentRequest(BaseModel):
 class AdminGrantSegmentResponse(BaseModel):
     granted: int
     skipped: int
+    emails_sent: int = 0
 
 
 class AdminDailyPromotionCronResponse(BaseModel):

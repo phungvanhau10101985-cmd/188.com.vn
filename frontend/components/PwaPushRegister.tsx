@@ -53,7 +53,7 @@ export default function PwaPushRegister() {
       await requestPermissionAndSyncPush();
     };
 
-    const tSync = setTimeout(runGrantedSync, 2500);
+    const tSync = setTimeout(runGrantedSync, 6000);
     const tPrompt = setTimeout(maybeAutoPromptPermission, 8000);
 
     const onStorage = (e: StorageEvent) => {

@@ -1,5 +1,24 @@
 import { apiClient } from '@/lib/api-client';
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withPushFetchRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) {
+        await sleep(1500 * (i + 1));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 export function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -28,7 +47,7 @@ export async function syncPushSubscription(): Promise<{ ok: boolean; reason?: st
   }
 
   try {
-    const vapid = await apiClient.getPushVapidKey();
+    const vapid = await withPushFetchRetry(() => apiClient.getPushVapidKey());
     if (!vapid?.public_key) return { ok: false, reason: 'no-vapid' };
 
     const reg = await navigator.serviceWorker.ready;
@@ -42,11 +61,13 @@ export async function syncPushSubscription(): Promise<{ ok: boolean; reason?: st
     const j = sub.toJSON();
     if (!j.endpoint || !j.keys?.p256dh || !j.keys?.auth) return { ok: false, reason: 'bad-sub' };
 
-    await apiClient.registerPushSubscription({
-      endpoint: j.endpoint,
-      keys: { p256dh: j.keys.p256dh, auth: j.keys.auth },
-      user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
-    });
+    await withPushFetchRetry(() =>
+      apiClient.registerPushSubscription({
+        endpoint: j.endpoint,
+        keys: { p256dh: j.keys.p256dh, auth: j.keys.auth },
+        user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+      }),
+    );
     dispatchNotificationsRefresh();
     return { ok: true };
   } catch {

@@ -1,4 +1,5 @@
 # backend/app/api/endpoints/admin.py
+import logging
 from datetime import datetime, timedelta, timezone
 import json
 import mimetypes
@@ -30,7 +31,12 @@ from app.schemas.admin import (
     StaffRolePresetPutPayload,
 )
 from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate, BankAccountResponse
-from app.schemas.user import UserResponse, UserAdminUpdate, AdminUsersListResponse
+from app.schemas.user import (
+    UserResponse,
+    UserAdminUpdate,
+    AdminUsersListResponse,
+    AdminMemberImportResponse,
+)
 from app.schemas.search_mapping import SearchMappingListResponse, SearchMappingResponse, SearchMappingCreateRequest
 from app.schemas.search_cache_admin import (
     ClearProductSearchCacheResponse,
@@ -40,6 +46,8 @@ from app.schemas.search_cache_admin import (
     SearchKeywordStatsResponse,
 )
 from app.crud import product_search_cache as product_search_cache_crud
+
+logger = logging.getLogger(__name__)
 from app.models.search_log import SearchLog
 from app.schemas.site_embed_code import (
     SiteEmbedCodeAdminItem,
@@ -362,6 +370,94 @@ def admin_list_users(
         total = crud.user.get_user_count(db)
     items = batch_admin_panel_user_responses(db, users)
     return AdminUsersListResponse(items=items, total=total)
+
+
+@router.post("/users/import-file", response_model=AdminMemberImportResponse)
+async def admin_import_legacy_members(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_module_permission("members")),
+):
+    """
+    Import khách hàng cũ từ CSV/Excel: name, gender, email, birthday, phone.
+    Tự sửa email gõ nhầm; tạo tài khoản thành viên (đăng nhập OTP email sau).
+    """
+    filename = file.filename or ""
+    if not filename.lower().endswith((".csv", ".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ .csv, .xlsx hoặc .xls")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="File trống.")
+
+    from app.services.customer_list_import import parse_customer_upload
+
+    try:
+        parsed = parse_customer_upload(filename, content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Không đọc được file: {exc}") from exc
+
+    importable = [r for r in parsed.rows if r.email or r.phone]
+    if not importable:
+        raise HTTPException(
+            status_code=400,
+            detail="Không có dòng hợp lệ — cần ít nhất email hoặc SĐT đúng định dạng.",
+        )
+
+    try:
+        result = crud.user.import_legacy_customers_bulk(db, importable)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("admin import legacy members failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Import thất bại: {exc}. Kiểm tra email/SĐT trùng trong file hoặc thử file nhỏ hơn.",
+        ) from exc
+
+    corrections = [
+        {
+            "row": r.row_number,
+            "original": r.email_original or "",
+            "fixed": r.email or "",
+            "fixes": r.email_fixes,
+        }
+        for r in parsed.rows
+        if r.email and r.email_corrected
+    ][:100]
+
+    invalid_rows = [
+        {
+            "row": r.row_number,
+            "email": r.email_original or "",
+            "name": r.name or "",
+            "reason": r.invalid_reason or "Thiếu email/SĐT hoặc trùng dữ liệu",
+        }
+        for r in parsed.rows
+        if not r.email and not r.phone
+    ][:100]
+
+    msg = (
+        f"Import xong: {result['created']} thành viên mới, "
+        f"{result['updated']} cập nhật hồ sơ, {result['skipped']} đã có (giữ nguyên), "
+        f"{parsed.invalid_count} không hợp lệ."
+    )
+    if parsed.corrected_count:
+        msg += f" Đã sửa {parsed.corrected_count} email gõ nhầm."
+
+    return AdminMemberImportResponse(
+        created=result["created"],
+        updated=result["updated"],
+        skipped=result["skipped"],
+        invalid=parsed.invalid_count + int(result.get("invalid") or 0),
+        corrected=parsed.corrected_count,
+        duplicate_in_file=parsed.duplicate_in_file,
+        total_input=parsed.total_input,
+        parsed=len(importable),
+        corrections=corrections,
+        invalid_rows=invalid_rows,
+        message=msg,
+    )
 
 
 @router.get("/users/{user_id}", response_model=UserResponse)

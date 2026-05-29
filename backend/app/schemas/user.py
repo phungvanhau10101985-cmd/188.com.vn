@@ -200,6 +200,34 @@ class AdminUsersListResponse(BaseModel):
     items: List[UserResponse]
     total: int
 
+
+class AdminMemberImportCorrectionOut(BaseModel):
+    row: int
+    original: str
+    fixed: str
+    fixes: List[str] = Field(default_factory=list)
+
+
+class AdminMemberImportInvalidOut(BaseModel):
+    row: int
+    email: str = ""
+    name: str = ""
+    reason: str
+
+
+class AdminMemberImportResponse(BaseModel):
+    created: int
+    updated: int
+    skipped: int
+    invalid: int
+    corrected: int = 0
+    duplicate_in_file: int = 0
+    total_input: int
+    parsed: int
+    corrections: List[AdminMemberImportCorrectionOut] = Field(default_factory=list)
+    invalid_rows: List[AdminMemberImportInvalidOut] = Field(default_factory=list)
+    message: str = ""
+
 class Token(BaseModel):
     access_token: str
     token_type: str

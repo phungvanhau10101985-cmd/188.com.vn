@@ -53,6 +53,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     title: 'Khác',
     items: [
       { href: '/admin/notifications', label: 'Thông báo' },
+      { href: '/admin/newsletter', label: 'Quản lý gửi email' },
     ],
   },
 ];

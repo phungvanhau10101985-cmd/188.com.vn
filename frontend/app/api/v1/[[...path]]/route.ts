@@ -129,7 +129,10 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
     const heavyUpload =
       contentLen > 2 * 1024 * 1024 ||
       (pathSuffix.includes('/import-export/import/excel') && req.method === 'POST') ||
-      (pathSuffix.includes('/orders/admin/shipping/ems-import') && req.method === 'POST');
+      (pathSuffix.includes('/orders/admin/shipping/ems-import') && req.method === 'POST') ||
+      (pathSuffix.includes('/admin/users/import-file') && req.method === 'POST') ||
+      (pathSuffix.includes('/newsletter/admin/import-file') && req.method === 'POST') ||
+      (pathSuffix.includes('/newsletter/admin/import-text') && req.method === 'POST');
       /** Admin kiểm tra nguồn: scrape Hibox có thể > 2 phút — phải > timeout fetchAdmin (240s). */
     const adminSourceHeavy =
       pathSuffix.includes('/admin/source-stock-batch/run-next-from-db') ||

@@ -13,10 +13,24 @@ from app.services.birthday_discount import (
     get_birthday_discount,
 )
 from app.services.email_service import send_birthday_promo_email
+from app.services.email_warmup import can_send_today, get_or_create_management, record_send
 
 
-def run_birthday_promo_email_batch(db: Session) -> dict:
-    """Gửi email CMSN đúng 7 ngày trước sinh nhật."""
+def run_birthday_promo_email_batch(db: Session, *, force: bool = False) -> dict:
+    """Gửi email CMSN đúng 7 ngày trước sinh nhật (tôn trọng warm-up quota)."""
+    mgmt = get_or_create_management(db)
+    if not force and not mgmt.birthday_cron_enabled:
+        return {
+            "ok": True,
+            "skipped_cron_disabled": True,
+            "checked": 0,
+            "sent": 0,
+            "skipped": 0,
+            "failed": 0,
+            "deferred_quota": 0,
+            "failures": [],
+        }
+
     today = date.today()
     users = (
         db.query(User)
@@ -27,7 +41,7 @@ def run_birthday_promo_email_batch(db: Session) -> dict:
         .all()
     )
 
-    checked = sent = skipped = failed = 0
+    checked = sent = skipped = failed = deferred_quota = 0
     failures: list[dict[str, str]] = []
 
     for user in users:
@@ -49,6 +63,10 @@ def run_birthday_promo_email_batch(db: Session) -> dict:
             skipped += 1
             continue
 
+        if not can_send_today(db):
+            deferred_quota += 1
+            continue
+
         email = (user.email or "").strip()
         try:
             send_birthday_promo_email(
@@ -67,6 +85,7 @@ def run_birthday_promo_email_batch(db: Session) -> dict:
                 )
             )
             db.commit()
+            record_send(db, channel="birthday")
             sent += 1
         except Exception as exc:
             db.rollback()
@@ -79,5 +98,6 @@ def run_birthday_promo_email_batch(db: Session) -> dict:
         "sent": sent,
         "skipped": skipped,
         "failed": failed,
+        "deferred_quota": deferred_quota,
         "failures": failures[:20],
     }

@@ -28,6 +28,7 @@ ALLOWED_MODULE_KEYS: Set[str] = {
     "chat_embeds",
     "shop_video_fab",
     "notifications",
+    "newsletter",
 }
 
 LEGACY_ROLE_MODULES = {

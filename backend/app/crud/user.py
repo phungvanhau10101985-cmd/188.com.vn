@@ -119,6 +119,179 @@ def create_user(db: Session, user: UserCreate) -> Optional[User]:
     return db_user
 
 
+def _import_gender_value(raw: Optional[str]) -> Optional[str]:
+    text = (raw or "").strip().lower()
+    if not text:
+        return None
+    if text in ("nam", "male", "m"):
+        return "male"
+    if text in ("nữ", "nu", "female", "f"):
+        return "female"
+    return None
+
+
+def _import_phone_ok(phone: Optional[str]) -> Optional[str]:
+    p = (phone or "").strip()
+    if not p:
+        return None
+    if not p.startswith("0") or not p.isdigit() or len(p) < 10 or len(p) > 11:
+        return None
+    return p
+
+
+def _fill_user_profile(
+    user: User,
+    *,
+    name: Optional[str],
+    gender: Optional[str],
+    birthday: Optional[date],
+    phone: Optional[str],
+    email: Optional[str],
+) -> bool:
+    changed = False
+    if name and not (user.full_name or "").strip():
+        user.full_name = name[:255]
+        changed = True
+    g = _import_gender_value(gender)
+    if g and not (user.gender or "").strip():
+        user.gender = g
+        changed = True
+    if birthday and not user.date_of_birth:
+        user.date_of_birth = birthday
+        changed = True
+    if phone and not (user.phone or "").strip():
+        user.phone = phone
+        changed = True
+    if email and not (user.email or "").strip():
+        user.email = email
+        changed = True
+    return changed
+
+
+def import_legacy_customers_bulk(db: Session, rows: List[Any]) -> Dict[str, int]:
+    """
+    Import khách hàng cũ vào bảng users.
+    rows: ParsedCustomerRow từ customer_list_import.
+    Không tặng promo đăng ký mới; không tự thêm newsletter.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services.customer_list_import import ParsedCustomerRow
+
+    created = 0
+    updated = 0
+    skipped = 0
+    invalid = 0
+    batch_size = 200
+
+    email_to_id: Dict[str, int] = {}
+    phone_to_id: Dict[str, int] = {}
+    for uid, em, ph in db.query(User.id, User.email, User.phone).filter(
+        or_(User.email.isnot(None), User.phone.isnot(None))
+    ):
+        if em:
+            key = identity_email(em) or str(em).strip().lower()
+            if key:
+                email_to_id[key] = int(uid)
+        if ph:
+            phone_to_id[str(ph).strip()] = int(uid)
+
+    pending = 0
+
+    def _commit_batch() -> None:
+        nonlocal pending
+        if pending <= 0:
+            return
+        db.commit()
+        pending = 0
+
+    try:
+        for item in rows:
+            if not isinstance(item, ParsedCustomerRow):
+                invalid += 1
+                continue
+
+            email_key = identity_email(item.email) if item.email else None
+            phone_key = _import_phone_ok(item.phone)
+
+            if not email_key and not phone_key:
+                invalid += 1
+                continue
+
+            by_email_id = email_to_id.get(email_key) if email_key else None
+            by_phone_id = phone_to_id.get(phone_key) if phone_key else None
+
+            if by_email_id and by_phone_id and by_email_id != by_phone_id:
+                invalid += 1
+                continue
+
+            existing_id = by_email_id or by_phone_id
+            if existing_id:
+                existing = db.get(User, existing_id)
+                if not existing:
+                    skipped += 1
+                    continue
+                if phone_key and existing.phone and existing.phone != phone_key:
+                    skipped += 1
+                    continue
+                if email_key and existing.email and identity_email(existing.email) != email_key:
+                    skipped += 1
+                    continue
+                if _fill_user_profile(
+                    existing,
+                    name=item.name,
+                    gender=item.gender,
+                    birthday=item.birthday,
+                    phone=phone_key,
+                    email=email_key,
+                ):
+                    updated += 1
+                    pending += 1
+                else:
+                    skipped += 1
+            else:
+                if phone_key and phone_key in phone_to_id:
+                    skipped += 1
+                    continue
+                if email_key and email_key in email_to_id:
+                    skipped += 1
+                    continue
+
+                row = User(
+                    email=email_key,
+                    phone=phone_key,
+                    full_name=(item.name or None),
+                    gender=_import_gender_value(item.gender),
+                    date_of_birth=item.birthday,
+                    is_verified=True,
+                    is_active=True,
+                )
+                db.add(row)
+                db.flush()
+                pending += 1
+                created += 1
+                if email_key and row.id:
+                    email_to_id[email_key] = int(row.id)
+                if phone_key and row.id:
+                    phone_to_id[phone_key] = int(row.id)
+
+            if pending >= batch_size:
+                _commit_batch()
+
+        _commit_batch()
+    except IntegrityError:
+        db.rollback()
+        raise
+
+    return {
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "invalid": invalid,
+        "total_input": len(rows),
+    }
+
+
 def update_user(db: Session, user_id: int, user_update: UserUpdate) -> Optional[User]:
     """Cập nhật thông tin user"""
     db_user = get_user_by_id(db, user_id)

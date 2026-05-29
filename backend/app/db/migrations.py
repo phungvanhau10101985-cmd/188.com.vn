@@ -48,6 +48,7 @@ from app.models.category_final_mapping import CategoryFinalMapping
 from app.models.guest_behavior import GuestProductView, GuestFavorite, GuestSearchHistory
 from app.models.admin import AdminUser
 from app.models.source_stock_worker_state import SourceStockWorkerState
+from app.models.newsletter_subscriber import NewsletterSubscriber
 from app.db.session import engine
 from app.core.config import settings
 import os
@@ -747,6 +748,13 @@ class MigrationManager:
         )
         results['sale_calendar_settings_date_columns'] = self.migrate_sale_calendar_settings_date_columns()
         results['sale_calendar_seed'] = self._seed_sale_calendar_defaults()
+
+        results['newsletter_subscribers_create'] = self._create_table_if_not_exists(
+            "newsletter_subscribers", NewsletterSubscriber
+        )
+        results['newsletter_subscribers_sync'] = self._sync_table_columns(
+            "newsletter_subscribers", NewsletterSubscriber
+        )
 
         return results
 

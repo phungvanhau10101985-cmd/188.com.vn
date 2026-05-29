@@ -586,6 +586,15 @@ class Settings:
             os.getenv("EMAIL_SUBJECT_PREFIX", "").strip() or os.getenv("EMAIL_SUBJECT", "").strip()
         )
         self.TEST_EMAIL: str = os.getenv("TEST_EMAIL", "").strip()
+        # Email nhắc giỏ bỏ dở (CARTSAVE188) — cần SMTP + FRONTEND_BASE_URL
+        self.CART_ABANDON_EMAIL_ENABLED: bool = (
+            os.getenv("CART_ABANDON_EMAIL_ENABLED", "true").strip().lower()
+            in ("1", "true", "yes", "on")
+        )
+        self.NEWSLETTER_WELCOME_EMAIL_ENABLED: bool = (
+            os.getenv("NEWSLETTER_WELCOME_EMAIL_ENABLED", "true").strip().lower()
+            in ("1", "true", "yes", "on")
+        )
         # Email shop (CSV) nhận thông báo khi khách đã đặt cọc thành công (SePay / admin)
         self.ORDER_DEPOSIT_ALERT_EMAILS: List[str] = [
             x.strip()
