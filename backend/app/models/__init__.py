@@ -126,6 +126,9 @@ except ImportError:
 from app.models.product_search_cache import ProductSearchCache
 print("[OK] ProductSearchCache model loaded")
 
+from app.models.listing_facet_cache import ListingFacetCache
+print("[OK] ListingFacetCache model loaded")
+
 # 9. Search mappings/logs
 try:
     from app.models.search_mapping import SearchMapping, SearchMappingType
@@ -228,6 +231,7 @@ __all__ = [
     "CategoryFinalMapping",
     "SearchQueryMapping",
     "ProductSearchCache",
+    "ListingFacetCache",
     "SearchMapping",
     "SearchMappingType",
     "SearchLog",

@@ -76,6 +76,11 @@ export default function CategoryPageClient({
     if (!breadcrumbNames[0]) return;
     let cancelled = false;
     setClientFacets(facets);
+    if (facets != null) {
+      return () => {
+        cancelled = true;
+      };
+    }
     apiClient
       .getProductListingFacets(facetParams)
       .then((next) => {

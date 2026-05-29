@@ -2746,6 +2746,7 @@ def get_product_listing_facets(
     filter_color: Optional[str] = None,
     filter_style_tag: Optional[str] = None,
     is_active: Optional[bool] = True,
+    skip_cache: bool = False,
 ) -> Dict[str, Any]:
     """
     Size/màu/giá cho listing `GET /products/` — khớp các chiều danh mục, shop, style, nhóm Excel…
@@ -2773,6 +2774,34 @@ def get_product_listing_facets(
         pro_high_price=pro_high_price,
     ):
         return empty
+
+    listing_kwargs = dict(
+        q=q,
+        category=category,
+        subcategory=subcategory,
+        sub_subcategory=sub_subcategory,
+        shop_name=shop_name,
+        shop_id=shop_id,
+        style=style,
+        shop_name_chinese=shop_name_chinese,
+        chinese_name=chinese_name,
+        pro_lower_price=pro_lower_price,
+        pro_high_price=pro_high_price,
+        min_price=min_price,
+        max_price=max_price,
+        filter_size=filter_size,
+        filter_color=filter_color,
+        filter_style_tag=filter_style_tag,
+    )
+    try:
+        from app.services import listing_facet_cache as lfc_service
+
+        if not skip_cache:
+            cached = lfc_service.try_read_cached_listing_facets(db, **listing_kwargs)
+            if cached is not None:
+                return cached
+    except Exception:
+        pass
 
     query = db.query(Product)
     query = apply_product_category_filters(query, db, category, subcategory, sub_subcategory)
@@ -2814,7 +2843,7 @@ def get_product_listing_facets(
     if words is not None:
         query = apply_product_search_word_filters(query, words)
 
-    return build_dependent_product_facets(
+    result = build_dependent_product_facets(
         query,
         min_price=min_price,
         max_price=max_price,
@@ -2823,6 +2852,14 @@ def get_product_listing_facets(
         filter_style_tag=filter_style_tag,
         listing_category_l1=(category or "").strip() or None,
     )
+    try:
+        from app.services import listing_facet_cache as lfc_service
+
+        if not skip_cache:
+            lfc_service.maybe_cache_listing_facets(db, facets=result, **listing_kwargs)
+    except Exception:
+        pass
+    return result
 
 
 def get_search_product_facets(
@@ -3923,11 +3960,21 @@ def create_product(db: Session, product: ProductCreate):
     db.refresh(db_product)
     _maybe_schedule_category_gemini_for_product(db, db_product)
     _schedule_google_sheets_sku_sync()
+    try:
+        from app.services.listing_facet_cache import refresh_caches_after_product_change
+
+        refresh_caches_after_product_change(db, db_product)
+    except Exception:
+        pass
     return db_product
 
 def update_product(db: Session, product_id: int, product_update: ProductUpdate):
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if db_product:
+        old_category = db_product.category
+        old_subcategory = db_product.subcategory
+        old_sub_subcategory = db_product.sub_subcategory
+        old_category_id = db_product.category_id
         update_data = (
             product_update.model_dump(exclude_unset=True)
             if hasattr(product_update, "model_dump")
@@ -3972,6 +4019,19 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
         _maybe_schedule_category_gemini_for_product(db, db_product)
         if "code" in update_data or "product_id" in update_data:
             _schedule_google_sheets_sku_sync()
+        try:
+            from app.services.listing_facet_cache import refresh_caches_after_product_change
+
+            refresh_caches_after_product_change(
+                db,
+                db_product,
+                old_category=old_category,
+                old_subcategory=old_subcategory,
+                old_sub_subcategory=old_sub_subcategory,
+                old_category_id=old_category_id,
+            )
+        except Exception:
+            pass
     return db_product
 
 def _delete_product_orm_only(db: Session, db_product: Product) -> None:
@@ -3983,9 +4043,23 @@ def _delete_product_orm_only(db: Session, db_product: Product) -> None:
 def delete_product(db: Session, product_id: int):
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if db_product:
+        from types import SimpleNamespace
+
+        snapshot = SimpleNamespace(
+            category=db_product.category,
+            subcategory=db_product.subcategory,
+            sub_subcategory=db_product.sub_subcategory,
+            category_id=db_product.category_id,
+        )
         _delete_product_orm_only(db, db_product)
         db.commit()
         _schedule_google_sheets_sku_sync()
+        try:
+            from app.services.listing_facet_cache import refresh_caches_after_product_change
+
+            refresh_caches_after_product_change(db, snapshot)
+        except Exception:
+            pass
     return db_product
 
 
@@ -4042,11 +4116,22 @@ def bulk_delete_products_by_db_ids(db: Session, db_ids: List[int]) -> Tuple[List
     by_id = {row.id: row for row in rows}
     deleted: List[int] = []
     bunny_rows: List[Product] = []
+    deleted_snapshots: List[Any] = []
 
     for pk in ordered_unique:
         row = by_id.get(pk)
         if row is None:
             continue
+        from types import SimpleNamespace
+
+        deleted_snapshots.append(
+            SimpleNamespace(
+                category=row.category,
+                subcategory=row.subcategory,
+                sub_subcategory=row.sub_subcategory,
+                category_id=row.category_id,
+            )
+        )
         bunny_rows.append(row)
         db.delete(row)
         deleted.append(pk)
@@ -4055,6 +4140,22 @@ def bulk_delete_products_by_db_ids(db: Session, db_ids: List[int]) -> Tuple[List
         db.commit()
         _schedule_google_sheets_sku_sync()
         _schedule_bunny_cleanup_for_deleted_products(bunny_rows)
+        try:
+            from app.services.listing_facet_cache import refresh_caches_after_product_change
+
+            seen_paths: set = set()
+            for snap in deleted_snapshots:
+                path_key = (
+                    (snap.category or "").strip().lower(),
+                    (snap.subcategory or "").strip().lower(),
+                    (snap.sub_subcategory or "").strip().lower(),
+                )
+                if path_key in seen_paths:
+                    continue
+                seen_paths.add(path_key)
+                refresh_caches_after_product_change(db, snap)
+        except Exception:
+            pass
 
     not_found = [pk for pk in ordered_unique if pk not in by_id]
     return deleted, not_found
@@ -4639,6 +4740,15 @@ def bulk_import_products(
     logger.info(f"   ⚠️  Warnings: {len(warnings)}")
     logger.info(f"   ❌ Errors: {len(errors)}")
     logger.info(f"   📈 Success rate: {success_rate}")
+
+    if created or updated or deleted:
+        try:
+            from app.services.listing_facet_cache import refresh_caches_after_bulk_import
+
+            refresh_caches_after_bulk_import(db)
+            warnings.append("Đã làm mới cache bộ lọc danh mục/tìm kiếm/SEO cluster sau import.")
+        except Exception as exc:
+            logger.warning("Refresh facet caches after bulk import failed: %s", exc)
     
     return result
 

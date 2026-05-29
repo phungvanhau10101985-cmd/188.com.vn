@@ -26,6 +26,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: '/admin/taxonomy', label: 'Cây danh mục' },
       { href: '/admin/search-mappings', label: 'Từ khóa mapping' },
       { href: '/admin/search-cache', label: 'Cache tìm kiếm' },
+      { href: '/admin/listing-facet-cache', label: 'Cache bộ lọc' },
     ],
   },
   {

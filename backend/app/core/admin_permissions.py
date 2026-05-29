@@ -14,6 +14,7 @@ ALLOWED_MODULE_KEYS: Set[str] = {
     "taxonomy",
     "search_mappings",
     "search_cache",
+    "listing_facet_cache",
     "category_seo",
     "bunny_cdn",
     "product_questions",
@@ -39,6 +40,7 @@ LEGACY_ROLE_MODULES = {
             "taxonomy",
             "search_mappings",
             "search_cache",
+            "listing_facet_cache",
             "category_seo",
             "bunny_cdn",
         }

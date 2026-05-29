@@ -1912,6 +1912,99 @@ export const adminSearchCacheAPI = {
     }),
 };
 
+export interface ListingFacetCacheRowItem {
+  id: number;
+  scope_type: string;
+  scope_key: string;
+  display_label: string | null;
+  product_count: number;
+  sizes_count: number;
+  colors_count: number;
+  style_tags_count: number;
+  price_min: number | null;
+  price_max: number | null;
+  is_manual: boolean;
+  is_enabled: boolean;
+  is_stale: boolean;
+  updated_at: string | null;
+  created_at: string | null;
+}
+
+export interface ListingFacetCacheListResponse {
+  total_rows: number;
+  counts_by_type: Record<string, number>;
+  items: ListingFacetCacheRowItem[];
+}
+
+export interface ListingFacetCacheDetailResponse {
+  id: number;
+  scope_type: string;
+  scope_key: string;
+  display_label: string | null;
+  product_count: number;
+  facets: {
+    sizes: string[];
+    colors: string[];
+    style_tags: string[];
+    price_min: number | null;
+    price_max: number | null;
+  };
+  is_manual: boolean;
+  is_enabled: boolean;
+  is_stale: boolean;
+  updated_at: string | null;
+  created_at: string | null;
+}
+
+export const adminListingFacetCacheAPI = {
+  list: (params?: { scope_type?: string; skip?: number; limit?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.scope_type) sp.set('scope_type', params.scope_type);
+    sp.set('skip', String(params?.skip ?? 0));
+    sp.set('limit', String(params?.limit ?? 50));
+    return fetchAdmin<ListingFacetCacheListResponse>(`/admin/listing-facet-cache?${sp.toString()}`);
+  },
+
+  getDetail: (id: number) =>
+    fetchAdmin<ListingFacetCacheDetailResponse>(`/admin/listing-facet-cache/${id}`),
+
+  rebuild: (scope: 'category' | 'search' | 'seo_cluster' | 'all') =>
+    fetchAdmin<{ rebuilt: number; scope: string; message: string }>(
+      '/admin/listing-facet-cache/rebuild',
+      {
+        method: 'POST',
+        body: JSON.stringify({ scope }),
+      },
+    ),
+
+  pinSearch: (keyword: string) =>
+    fetchAdmin<ListingFacetCacheDetailResponse>('/admin/listing-facet-cache/pin-search', {
+      method: 'POST',
+      body: JSON.stringify({ keyword }),
+    }),
+
+  toggleEnabled: (id: number, is_enabled: boolean) =>
+    fetchAdmin<ListingFacetCacheRowItem>(`/admin/listing-facet-cache/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_enabled }),
+    }),
+
+  deleteRow: (id: number) =>
+    fetchAdmin<{ deleted: number; scope_type: string | null }>(`/admin/listing-facet-cache/${id}`, {
+      method: 'DELETE',
+    }),
+
+  clearAll: (scope_type?: string) => {
+    const sp = new URLSearchParams();
+    if (scope_type) sp.set('scope_type', scope_type);
+    const qs = sp.toString();
+    return fetchAdmin<{ deleted: number; scope_type: string | null }>(
+      `/admin/listing-facet-cache${qs ? `?${qs}` : ''}`,
+      { method: 'DELETE' },
+    );
+  },
+};
+
 export const adminOrderAPI = {
   getAllOrders: (params?: { status?: string; limit?: number; skip?: number }) => {
     const sp = new URLSearchParams();

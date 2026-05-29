@@ -72,6 +72,7 @@ export function adminNavPrefixesForRole(role: string | null): string[] | null {
       '/admin/taxonomy',
       '/admin/search-mappings',
       '/admin/search-cache',
+      '/admin/listing-facet-cache',
       '/admin/danh-muc-seo',
       '/admin/bunny-cdn',
     ];

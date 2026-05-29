@@ -259,12 +259,11 @@ def get_seo_cluster_facets(
     if not cat_ids:
         return {"status": "ok", "sizes": [], "colors": [], "style_tags": [], "price_min": None, "price_max": None}
 
-    base = (
-        db.query(Product)
-        .filter(Product.category_id.in_(cat_ids), Product.is_active.is_(True))
-    )
-    facets = product_crud.build_dependent_product_facets(
-        base,
+    from app.services.listing_facet_cache import get_seo_cluster_facets_with_cache
+
+    facets = get_seo_cluster_facets_with_cache(
+        db,
+        slug,
         min_price=min_price,
         max_price=max_price,
         filter_size=size,

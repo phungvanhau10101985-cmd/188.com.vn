@@ -9,6 +9,7 @@ export const ADMIN_MODULE_NAV: Record<string, string> = {
   taxonomy: '/admin/taxonomy',
   search_mappings: '/admin/search-mappings',
   search_cache: '/admin/search-cache',
+  listing_facet_cache: '/admin/listing-facet-cache',
   category_seo: '/admin/danh-muc-seo',
   bunny_cdn: '/admin/bunny-cdn',
   product_questions: '/admin/product-questions',
@@ -35,6 +36,7 @@ export const ADMIN_MODULE_ORDER: string[] = [
   'taxonomy',
   'search_mappings',
   'search_cache',
+  'listing_facet_cache',
   'category_seo',
   'bunny_cdn',
   'product_questions',
@@ -63,6 +65,7 @@ export const ADMIN_MODULE_LABELS: Record<string, string> = {
   taxonomy: 'Cây danh mục',
   search_mappings: 'Từ khóa mapping',
   search_cache: 'Cache & thống kê tìm kiếm',
+  listing_facet_cache: 'Cache bộ lọc listing',
   category_seo: 'Tổng hợp danh mục SEO',
   bunny_cdn: 'Đăng ảnh Bunny CDN',
   product_questions: 'Câu hỏi / trả lời SP',
@@ -89,7 +92,7 @@ export function presetModuleKeysForStaffRole(
     case 'order_manager':
       return ['orders'];
     case 'product_manager':
-      return ['products', 'import_1688', 'taxonomy', 'search_mappings', 'search_cache', 'category_seo', 'bunny_cdn'];
+      return ['products', 'import_1688', 'taxonomy', 'search_mappings', 'search_cache', 'listing_facet_cache', 'category_seo', 'bunny_cdn'];
     case 'content_manager':
       return ['product_questions', 'product_reviews', 'category_seo', 'embed_codes', 'chat_embeds'];
     case 'admin':

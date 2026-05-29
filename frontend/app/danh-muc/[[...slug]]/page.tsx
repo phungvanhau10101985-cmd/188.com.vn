@@ -7,6 +7,7 @@ import {
   getProductsByCategory,
   getCategoryCatalogTilesForPage,
   getCategoryTreeForLayout,
+  getCategoryProductFacets,
   type CategoryListingFilters,
 } from '@/lib/category-seo';
 import {
@@ -183,6 +184,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
     { products, total, total_pages, page: currentPage },
     seoData,
     categoryTree,
+    facets,
   ] = await Promise.all([
     getProductsByCategory(
       level1,
@@ -193,6 +195,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
     ),
     getCategorySeoData(level1, level2, level3),
     getCategoryTreeForLayout(),
+    getCategoryProductFacets(level1, level2, level3, info, listingFilters),
   ]);
 
   const seoBody = seoData?.seo_body ?? null;
@@ -210,7 +213,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
       seoBody={seoBody}
       internalLinkMap={internalLinkMap}
       error={null}
-      facets={null}
+      facets={facets}
       listingQueryString={listingQueryString}
     />
   );

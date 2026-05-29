@@ -756,6 +756,15 @@ class MigrationManager:
             "newsletter_subscribers", NewsletterSubscriber
         )
 
+        from app.models.listing_facet_cache import ListingFacetCache
+
+        results['listing_facet_cache_create'] = self._create_table_if_not_exists(
+            "listing_facet_cache", ListingFacetCache
+        )
+        results['listing_facet_cache_sync'] = self._sync_table_columns(
+            "listing_facet_cache", ListingFacetCache
+        )
+
         return results
 
     def migrate_sale_calendar_settings_date_columns(self) -> bool:

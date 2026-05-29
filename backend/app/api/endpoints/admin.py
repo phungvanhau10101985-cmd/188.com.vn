@@ -46,6 +46,17 @@ from app.schemas.search_cache_admin import (
     SearchKeywordStatsResponse,
 )
 from app.crud import product_search_cache as product_search_cache_crud
+from app.schemas.listing_facet_cache_admin import (
+    ListingFacetCacheClearResponse,
+    ListingFacetCacheDetailResponse,
+    ListingFacetCacheListResponse,
+    ListingFacetCachePinSearchRequest,
+    ListingFacetCacheRebuildRequest,
+    ListingFacetCacheRebuildResponse,
+    ListingFacetCacheRowItem,
+    ListingFacetCacheToggleRequest,
+)
+from app.crud import listing_facet_cache as listing_facet_cache_crud
 
 logger = logging.getLogger(__name__)
 from app.models.search_log import SearchLog
@@ -821,6 +832,193 @@ def admin_clear_product_search_cache(
         raise HTTPException(status_code=400, detail='scope phải là "expired" hoặc "all"')
     deleted = product_search_cache_crud.clear_product_search_cache(db, expired_only=(s == "expired"))
     return ClearProductSearchCacheResponse(deleted=deleted, scope=s)
+
+
+# ========== CACHE BỘ LỌC LISTING (danh mục / tìm kiếm / SEO cluster) ==========
+def _facet_cache_row_item(row) -> ListingFacetCacheRowItem:
+    return ListingFacetCacheRowItem(
+        id=row.id,
+        scope_type=row.scope_type,
+        scope_key=row.scope_key,
+        display_label=row.display_label,
+        product_count=int(row.product_count or 0),
+        sizes_count=len(row.sizes_json or []),
+        colors_count=len(row.colors_json or []),
+        style_tags_count=len(row.style_tags_json or []),
+        price_min=row.price_min,
+        price_max=row.price_max,
+        is_manual=bool(row.is_manual),
+        is_enabled=bool(row.is_enabled),
+        is_stale=bool(row.is_stale),
+        updated_at=row.updated_at,
+        created_at=row.created_at,
+    )
+
+
+@router.get("/listing-facet-cache", response_model=ListingFacetCacheListResponse)
+def admin_list_listing_facet_cache(
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("listing_facet_cache")),
+    scope_type: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    total, rows = listing_facet_cache_crud.list_rows_admin(
+        db, scope_type=scope_type, skip=skip, limit=limit
+    )
+    counts = listing_facet_cache_crud.count_by_scope_type(db)
+    return ListingFacetCacheListResponse(
+        total_rows=total,
+        counts_by_type=counts,
+        items=[_facet_cache_row_item(r) for r in rows],
+    )
+
+
+@router.get("/listing-facet-cache/{row_id}", response_model=ListingFacetCacheDetailResponse)
+def admin_get_listing_facet_cache(
+    row_id: int,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("listing_facet_cache")),
+):
+    row = listing_facet_cache_crud.get_by_id(db, row_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cache bộ lọc")
+    facets = listing_facet_cache_crud.row_to_facets(row)
+    return ListingFacetCacheDetailResponse(
+        id=row.id,
+        scope_type=row.scope_type,
+        scope_key=row.scope_key,
+        display_label=row.display_label,
+        product_count=int(row.product_count or 0),
+        facets=facets,
+        is_manual=bool(row.is_manual),
+        is_enabled=bool(row.is_enabled),
+        is_stale=bool(row.is_stale),
+        updated_at=row.updated_at,
+        created_at=row.created_at,
+    )
+
+
+@router.post("/listing-facet-cache/rebuild", response_model=ListingFacetCacheRebuildResponse)
+def admin_rebuild_listing_facet_cache(
+    body: ListingFacetCacheRebuildRequest,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("listing_facet_cache")),
+):
+    from app.services import listing_facet_cache as lfc_service
+
+    scope = (body.scope or "all").strip().lower()
+    rebuilt = 0
+
+    if scope == "single":
+        st = (body.scope_type or "").strip()
+        sk = (body.scope_key or "").strip()
+        if not st or not sk:
+            raise HTTPException(status_code=400, detail="scope_type và scope_key bắt buộc khi scope=single")
+        if st == listing_facet_cache_crud.SCOPE_SEARCH_Q:
+            if lfc_service.rebuild_search_scope(db, sk, is_manual=True):
+                rebuilt = 1
+        elif st.startswith("category_"):
+            parts = sk.split("|")
+            c1 = parts[0] if parts else ""
+            c2 = parts[1] if len(parts) > 1 else None
+            c3 = parts[2] if len(parts) > 2 else None
+            if lfc_service.rebuild_category_scope(db, category=c1, subcategory=c2, sub_subcategory=c3):
+                rebuilt = 1
+        elif st == listing_facet_cache_crud.SCOPE_SEO_CLUSTER:
+            if lfc_service.rebuild_seo_cluster_scope(db, sk):
+                rebuilt = 1
+        else:
+            raise HTTPException(status_code=400, detail=f"scope_type không hỗ trợ: {st}")
+        return ListingFacetCacheRebuildResponse(
+            rebuilt=rebuilt,
+            scope=scope,
+            message=f"Đã rebuild {rebuilt} bộ lọc.",
+        )
+
+    if scope in ("category", "categories", "all"):
+        rebuilt += lfc_service.rebuild_all_category_caches(db)
+    if scope in ("search", "all"):
+        rebuilt += lfc_service.rebuild_all_search_caches(db)
+    if scope in ("seo_cluster", "seo", "all"):
+        rebuilt += lfc_service.rebuild_all_seo_cluster_caches(db)
+
+    if scope not in ("category", "categories", "search", "seo_cluster", "seo", "all"):
+        raise HTTPException(
+            status_code=400,
+            detail='scope phải là category | search | seo_cluster | all | single',
+        )
+
+    return ListingFacetCacheRebuildResponse(
+        rebuilt=rebuilt,
+        scope=scope,
+        message=f"Đã rebuild {rebuilt} bộ lọc ({scope}).",
+    )
+
+
+@router.post("/listing-facet-cache/pin-search", response_model=ListingFacetCacheDetailResponse)
+def admin_pin_search_facet_cache(
+    body: ListingFacetCachePinSearchRequest,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("listing_facet_cache")),
+):
+    from app.services import listing_facet_cache as lfc_service
+
+    row = lfc_service.rebuild_search_scope(db, body.keyword.strip(), is_manual=True)
+    if not row:
+        raise HTTPException(
+            status_code=400,
+            detail="Không tạo được cache — kiểm tra từ khóa hoặc số sản phẩm (<200 nếu chưa pin thủ công).",
+        )
+    facets = listing_facet_cache_crud.row_to_facets(row)
+    return ListingFacetCacheDetailResponse(
+        id=row.id,
+        scope_type=row.scope_type,
+        scope_key=row.scope_key,
+        display_label=row.display_label,
+        product_count=int(row.product_count or 0),
+        facets=facets,
+        is_manual=bool(row.is_manual),
+        is_enabled=bool(row.is_enabled),
+        is_stale=bool(row.is_stale),
+        updated_at=row.updated_at,
+        created_at=row.created_at,
+    )
+
+
+@router.patch("/listing-facet-cache/{row_id}", response_model=ListingFacetCacheRowItem)
+def admin_toggle_listing_facet_cache(
+    row_id: int,
+    body: ListingFacetCacheToggleRequest,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("listing_facet_cache")),
+):
+    row = listing_facet_cache_crud.set_enabled(db, row_id, body.is_enabled)
+    if not row:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cache bộ lọc")
+    return _facet_cache_row_item(row)
+
+
+@router.delete("/listing-facet-cache/{row_id}", response_model=ListingFacetCacheClearResponse)
+def admin_delete_listing_facet_cache_row(
+    row_id: int,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("listing_facet_cache")),
+):
+    ok = listing_facet_cache_crud.delete_row(db, row_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cache bộ lọc")
+    return ListingFacetCacheClearResponse(deleted=1, scope_type=None)
+
+
+@router.delete("/listing-facet-cache", response_model=ListingFacetCacheClearResponse)
+def admin_clear_listing_facet_cache(
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("listing_facet_cache")),
+    scope_type: Optional[str] = Query(None),
+):
+    deleted = listing_facet_cache_crud.clear_by_scope_type(db, scope_type=scope_type)
+    return ListingFacetCacheClearResponse(deleted=deleted, scope_type=scope_type)
 
 
 # ========== MÃ NHÚNG (Google, Facebook, Zalo, GA4, GTM, Pixel...) ==========
