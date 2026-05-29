@@ -87,6 +87,7 @@ export function adminNavPrefixesForRole(role: string | null): string[] | null {
 }
 
 export function getEffectiveNavPrefixesFor(role: string | null, modules: string[] | null): string[] | null {
+  if (isPrivilegedAdminRole(role)) return null;
   if (modules && modules.length > 0) {
     const hrefs = [...new Set(modules.map((k) => ADMIN_MODULE_NAV[k]).filter(Boolean))];
     if (hrefs.length > 0) return expandAdminNavPrefixes(hrefs);
