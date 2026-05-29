@@ -293,17 +293,29 @@ _SCRAPE_JS = r"""() => {
     const visibleSize = normText(row.querySelector(".size span span")?.innerText || "");
     if (!size && visibleSize) size = visibleSize;
     const stockText = normText(row.querySelector(".product")?.innerText || "");
+    const isOutOfStock = /hết\s*hàng/i.test(stockText);
     let stock = null;
     const sm = stockText.match(/(\d[\d.,]*)\s*SP/i);
     if (sm) stock = parseInt(sm[1].replace(/[^\d]/g, ""), 10);
+    const hasAvailableText = /có\s*sẵn/i.test(stockText);
+    const inStock = !isOutOfStock && (hasAvailableText || (stock != null && stock > 0));
     const priceText = normText(row.querySelector(".main-price")?.innerText || row.querySelector("[appformatcurrency]")?.innerText || "");
     const priceVnd = parseInt(priceText.replace(/[^\d]/g, ""), 10) || null;
+    if (!inStock) return;
     if (size) sizeSet.add(size);
     if (color || size) {
       const key = `${color}###${size}`;
       if (!pairSeen.has(key)) {
         pairSeen.add(key);
-        sizeRows.push({ color, size, stock, price_vnd: priceVnd, price_text: priceText });
+        sizeRows.push({
+          color,
+          size,
+          stock,
+          price_vnd: priceVnd,
+          price_text: priceText,
+          stock_text: stockText,
+          in_stock: true,
+        });
       }
     }
   });
@@ -545,7 +557,13 @@ def _scrape_vipomall_for_import_sync(source_url: str) -> Tuple[Dict[str, Any], D
     if not product_data.get("colors"):
         warnings.append("Vipomall: chưa thu được variant màu từ .product-type-list.")
     if not product_data.get("sizes"):
-        warnings.append("Vipomall: chưa thu được size từ .product-type-list-size.")
+        raw_variant_count = len([r for r in (raw.get("variant_rows") or []) if isinstance(r, dict)])
+        if raw_variant_count:
+            warnings.append(
+                "Vipomall: mọi size đều hết hàng — đã bỏ biến thể «Hết hàng», không còn size nào import."
+            )
+        else:
+            warnings.append("Vipomall: chưa thu được size từ .product-type-list-size.")
     if not product_data.get("gallery"):
         warnings.append("Vipomall: chưa thu được ảnh chi tiết sau Xem thêm/Xem thêm chi tiết.")
     return raw, product_data, warnings
@@ -586,6 +604,26 @@ def _pick_cny_price(row: Dict[str, Any], price_vnd: float) -> str:
             if 0 < val < 9_999_999:
                 return f"{val:.4f}".rstrip("0").rstrip(".")
     return _estimate_cny_from_vnd(price_vnd)
+
+
+def _is_vipomall_variant_in_stock(r: Dict[str, Any]) -> bool:
+    """Chỉ giữ biến thể còn hàng — bỏ dòng «(Hết hàng)» trên Vipomall."""
+    if r.get("in_stock") is False:
+        return False
+    stock_text = _clean_text(r.get("stock_text") or "", limit=160)
+    if re.search(r"hết\s*hàng", stock_text, re.I):
+        return False
+    if r.get("in_stock") is True:
+        return True
+    try:
+        stock = int(r.get("stock") or 0)
+    except (TypeError, ValueError):
+        stock = 0
+    if stock > 0:
+        return True
+    if re.search(r"có\s*sẵn", stock_text, re.I):
+        return True
+    return False
 
 
 def vipomall_row_to_product_data(
@@ -632,16 +670,21 @@ def vipomall_row_to_product_data(
         if i < len(colors_out):
             sw["label"] = _clean_text(colors_out[i].get("name"), limit=160) or sw.get("label")
 
-    variant_rows = [r for r in row.get("variant_rows") or [] if isinstance(r, dict)]
+    variant_rows = [
+        r for r in row.get("variant_rows") or [] if isinstance(r, dict) and _is_vipomall_variant_in_stock(r)
+    ]
     pair_objs: List[Dict[str, str]] = []
     sizes: List[str] = []
     seen_size: set[str] = set()
     prices: List[float] = []
     stocks: List[int] = []
+    in_stock_raw_colors: set[str] = set()
     for r in variant_rows:
         raw_color = _clean_text(r.get("color"), limit=160)
         size = _clean_text(r.get("size"), limit=80)
         color = color_map.get(raw_color, raw_color)
+        if raw_color:
+            in_stock_raw_colors.add(raw_color)
         if color and size:
             pair_objs.append({"color": color, "size": size})
         if size and size.lower() not in seen_size:
@@ -656,6 +699,17 @@ def vipomall_row_to_product_data(
             stock = 0
         if stock > 0:
             stocks.append(stock)
+    if in_stock_raw_colors:
+        colors_out = [
+            c
+            for c, raw_c in zip(colors_out, colors_raw)
+            if _clean_text(raw_c.get("label"), limit=160) in in_stock_raw_colors
+        ]
+        swatches = [
+            sw
+            for sw, raw_c in zip(swatches, colors_raw)
+            if _clean_text(raw_c.get("label"), limit=160) in in_stock_raw_colors
+        ]
     if not sizes:
         sizes = [_clean_text(s, limit=80) for s in row.get("sizes") or [] if _clean_text(s, limit=80)]
 
