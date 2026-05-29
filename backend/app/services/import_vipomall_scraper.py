@@ -14,10 +14,21 @@ from urllib.parse import parse_qs, urlparse
 from app.core.config import settings
 from app.services.alicdn_urls import normalize_product_image_url
 from app.services.import_hibox_scraper import (
+    build_canonical_hibox_product_id,
+    extract_hibox_1688_offer_digits,
+    extract_hibox_slug,
+    extract_taobao_tmall_item_id,
     normalize_product_import_url,
+    parse_t_prefixed_item_id,
     supply_product_link_default_for_hibox_slug,
 )
-from app.services.vipomall_source_stock import build_vipomall_1688_pdp_url
+from app.services.vipomall_source_stock import (
+    VIPOMALL_PLATFORM_1688,
+    VIPOMALL_PLATFORM_TAOBAO,
+    build_vipomall_1688_pdp_url,
+    build_vipomall_pdp_url,
+    build_vipomall_taobao_pdp_url,
+)
 from app.utils.product_synthetic_engagement import synthetic_engagement_counts
 
 
@@ -57,9 +68,88 @@ def extract_vipomall_offer_id(raw: str) -> Optional[str]:
     return None
 
 
+def extract_vipomall_platform_type(raw: str) -> Optional[int]:
+    norm = normalize_product_import_url((raw or "").strip())
+    if not norm:
+        return None
+    try:
+        p = urlparse(norm)
+    except ValueError:
+        return None
+    qs = parse_qs(p.query or "")
+    for key in ("platform_type", "platformType"):
+        for val in qs.get(key) or []:
+            s = (val or "").strip()
+            if s.isdigit():
+                return int(s)
+    return None
+
+
+def infer_vipomall_platform_type(source_url: str, offer_id: str) -> int:
+    explicit = extract_vipomall_platform_type(source_url)
+    if explicit in (VIPOMALL_PLATFORM_1688, VIPOMALL_PLATFORM_TAOBAO):
+        return explicit
+    norm = normalize_product_import_url((source_url or "").strip())
+    if parse_t_prefixed_item_id(norm) or extract_taobao_tmall_item_id(norm):
+        return VIPOMALL_PLATFORM_TAOBAO
+    slug = extract_hibox_slug(norm)
+    if slug and slug != "hibox_import" and not extract_hibox_1688_offer_digits(slug):
+        if re.fullmatch(r"\d+", slug or ""):
+            return VIPOMALL_PLATFORM_TAOBAO
+    return VIPOMALL_PLATFORM_1688
+
+
+def resolve_vipomall_import_url(raw: str) -> Tuple[str, int]:
+    """
+    Chuẩn hoá mọi link Taobao/Tmall/T-id/Hibox số/Vipomall → URL Vipomall + platform_type.
+    Taobao/Tmall → platform_type=21; 1688 → platform_type=10.
+    """
+    trimmed = (raw or "").strip()
+    tid = parse_t_prefixed_item_id(trimmed)
+    if tid:
+        return build_vipomall_taobao_pdp_url(tid), VIPOMALL_PLATFORM_TAOBAO
+
+    norm = normalize_product_import_url(trimmed)
+    if not norm:
+        raise ImportVipomallError("Link Vipomall/Taobao không hợp lệ.")
+
+    if is_vipomall_import_url(norm):
+        oid = extract_vipomall_offer_id(norm)
+        if not oid:
+            raise ImportVipomallError("Không đọc được id sản phẩm từ link Vipomall.")
+        pt = infer_vipomall_platform_type(norm, oid)
+        return build_vipomall_pdp_url(oid, pt), pt
+
+    tid = extract_taobao_tmall_item_id(norm)
+    if tid:
+        return build_vipomall_taobao_pdp_url(tid), VIPOMALL_PLATFORM_TAOBAO
+
+    slug = extract_hibox_slug(norm)
+    if slug and slug != "hibox_import":
+        abb = extract_hibox_1688_offer_digits(slug)
+        if abb:
+            return build_vipomall_1688_pdp_url(abb), VIPOMALL_PLATFORM_1688
+        if re.fullmatch(r"\d+", slug):
+            return build_vipomall_taobao_pdp_url(slug), VIPOMALL_PLATFORM_TAOBAO
+
+    from app.services.import_1688_scraper import extract_offer_id
+
+    oid1688 = extract_offer_id(norm)
+    if oid1688 and oid1688.isdigit():
+        return build_vipomall_1688_pdp_url(oid1688), VIPOMALL_PLATFORM_1688
+
+    raise ImportVipomallError(
+        "Không quy đổi được sang Vipomall. Cần link Taobao/Tmall, T{id}, Hibox số/abb-*, offer 1688, hoặc vipomall.vn/san-pham/{id}."
+    )
+
+
 def vipomall_canonical_import_url(raw: str) -> str:
-    oid = extract_vipomall_offer_id(raw)
-    return build_vipomall_1688_pdp_url(oid or "") or normalize_product_import_url(raw or "")
+    try:
+        url, _pt = resolve_vipomall_import_url(raw)
+        return url
+    except ImportVipomallError:
+        oid = extract_vipomall_offer_id(raw)
+        return build_vipomall_1688_pdp_url(oid or "") or normalize_product_import_url(raw or "")
 
 
 def _norm_img_url(raw: str) -> str:
@@ -288,6 +378,35 @@ _SCRAPE_JS = r"""() => {
     if (/\d/.test(t) && /đ|₫|vnd/i.test(t)) priceTexts.push(t);
   });
 
+  const shopNameCandidates = [];
+  const seenShop = new Set();
+  const pushShop = (raw) => {
+    const t = normText(raw);
+    if (!t || t.length < 2 || t.length > 120 || seenShop.has(t.toLowerCase())) return;
+    if (/vipomall|trung tâm hỗ trợ|chính sách/i.test(t)) return;
+    seenShop.add(t.toLowerCase());
+    shopNameCandidates.push(t);
+  };
+  document.querySelectorAll(".shop-name, .store-name, [class*='shop-name'], [class*='shopName'], [class*='store-name'], a[href*='shop']").forEach((el) => {
+    pushShop(el.getAttribute("title") || el.innerText || el.textContent);
+  });
+
+  const cnyPriceTexts = [];
+  const cnyRe = /(?:¥|￥|CNY|元)\s*([\d.,]+)/gi;
+  const scanCny = (raw) => {
+    const t = normText(raw);
+    if (!t) return;
+    let m;
+    while ((m = cnyRe.exec(t)) !== null) {
+      const val = normText(m[1]).replace(/,/g, "");
+      if (val) cnyPriceTexts.push(val);
+    }
+  };
+  document.querySelectorAll(".main-price, [class*='price'], [class*='Price']").forEach((el) => {
+    scanCny(el.innerText || el.textContent);
+  });
+  scanCny(text.slice(0, 8000));
+
   return {
     page_url: window.location.href,
     title: titleCandidates[0] || "",
@@ -303,6 +422,8 @@ _SCRAPE_JS = r"""() => {
     detail_images: detailImages,
     info_texts: infoPairs.slice(0, 80),
     price_texts: priceTexts.slice(0, 20),
+    shop_name_candidates: shopNameCandidates.slice(0, 12),
+    cny_price_texts: cnyPriceTexts.slice(0, 12),
     video_url: videoUrl,
   };
 }"""
@@ -338,11 +459,18 @@ def scrape_vipomall_for_import(source_url: str) -> Tuple[Dict[str, Any], Dict[st
 
 
 def _scrape_vipomall_for_import_sync(source_url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
-    norm = normalize_product_import_url((source_url or "").strip())
-    offer_id = extract_vipomall_offer_id(norm)
-    if not offer_id:
-        raise ImportVipomallError("Link Vipomall không hợp lệ. Dạng cần: https://vipomall.vn/san-pham/{offerId}?platform_type=10")
-    page_url = build_vipomall_1688_pdp_url(offer_id)
+    try:
+        page_url, platform_type = resolve_vipomall_import_url(source_url)
+    except ImportVipomallError:
+        norm = normalize_product_import_url((source_url or "").strip())
+        offer_id = extract_vipomall_offer_id(norm)
+        if not offer_id:
+            raise ImportVipomallError(
+                "Link Vipomall không hợp lệ. Dạng: https://vipomall.vn/san-pham/{id}?platform_type=10|21"
+            )
+        platform_type = infer_vipomall_platform_type(norm, offer_id)
+        page_url = build_vipomall_pdp_url(offer_id, platform_type)
+    offer_id = extract_vipomall_offer_id(page_url) or ""
 
     warnings: List[str] = []
     raw: Dict[str, Any] = {}
@@ -413,7 +541,7 @@ def _scrape_vipomall_for_import_sync(source_url: str) -> Tuple[Dict[str, Any], D
     if any(token in page_text for token in _BLOCK_MARKERS):
         raise ImportVipomallError("Vipomall đang chặn/CAPTCHA hoặc không cho tải PDP.")
 
-    product_data = vipomall_row_to_product_data(raw, page_url, offer_id)
+    product_data = vipomall_row_to_product_data(raw, page_url, offer_id, platform_type=platform_type)
     if not product_data.get("colors"):
         warnings.append("Vipomall: chưa thu được variant màu từ .product-type-list.")
     if not product_data.get("sizes"):
@@ -423,7 +551,50 @@ def _scrape_vipomall_for_import_sync(source_url: str) -> Tuple[Dict[str, Any], D
     return raw, product_data, warnings
 
 
-def vipomall_row_to_product_data(row: Dict[str, Any], source_url: str, offer_id: str) -> Dict[str, Any]:
+def _pick_shop_name_chinese(row: Dict[str, Any]) -> Optional[str]:
+    for raw in row.get("shop_name_candidates") or []:
+        s = _clean_text(raw, limit=200)
+        if s and re.search(r"[\u4e00-\u9fff]", s):
+            return s[:200]
+    body = str(row.get("body_text_sample") or "")
+    for m in re.finditer(r"([\u4e00-\u9fff]{2,40}(?:旗舰店|专卖店|店))", body):
+        cand = m.group(1).strip()
+        if len(cand) >= 4:
+            return cand[:200]
+    return None
+
+
+def _pick_cny_price(row: Dict[str, Any], price_vnd: float) -> str:
+    for raw in row.get("cny_price_texts") or []:
+        s = str(raw or "").strip().replace(",", "")
+        if not s:
+            continue
+        try:
+            val = float(s)
+        except ValueError:
+            continue
+        if 0 < val < 9_999_999:
+            return f"{val:.4f}".rstrip("0").rstrip(".")
+    for t in row.get("price_texts") or []:
+        m = re.search(r"(?:¥|￥|CNY|元)\s*([\d.,]+)", str(t))
+        if m:
+            s = m.group(1).replace(",", "")
+            try:
+                val = float(s)
+            except ValueError:
+                continue
+            if 0 < val < 9_999_999:
+                return f"{val:.4f}".rstrip("0").rstrip(".")
+    return _estimate_cny_from_vnd(price_vnd)
+
+
+def vipomall_row_to_product_data(
+    row: Dict[str, Any],
+    source_url: str,
+    offer_id: str,
+    *,
+    platform_type: int = VIPOMALL_PLATFORM_1688,
+) -> Dict[str, Any]:
     gallery = _dedupe_urls([str(u) for u in row.get("gallery_images") or []])
     meta_image = _norm_img_url(str(row.get("meta_image") or ""))
 
@@ -502,7 +673,16 @@ def vipomall_row_to_product_data(row: Dict[str, Any], source_url: str, offer_id:
     if "vipomall" in title.lower() and "-" in title:
         title = title.split("-", 1)[0].strip() or title
     if not title:
-        title = f"1688 {offer_id}"
+        title = f"{'Taobao' if platform_type == VIPOMALL_PLATFORM_TAOBAO else '1688'} {offer_id}"
+
+    shop_cn = _pick_shop_name_chinese(row)
+    is_taobao = platform_type == VIPOMALL_PLATFORM_TAOBAO
+    supply_slug = offer_id if is_taobao else f"abb-{offer_id}"
+    supply_url = supply_product_link_default_for_hibox_slug(supply_slug)
+    product_id = build_canonical_hibox_product_id(offer_id) if is_taobao else f"A{offer_id}"
+    origin = "taobao" if is_taobao else "1688"
+    supply_platform = "taobao" if is_taobao else "1688"
+    cny_for_excel = _pick_cny_price(row, price_vnd)
 
     info_texts = _clean_vipomall_info_texts(row.get("info_texts") or [])
     variant_context_parts: List[str] = []
@@ -525,9 +705,10 @@ def vipomall_row_to_product_data(row: Dict[str, Any], source_url: str, offer_id:
     variants: Dict[str, Any] = {
         "pairs": pair_objs,
         "source": "vipomall",
-        "supply_platform": "1688",
-        "supply_product_url": supply_product_link_default_for_hibox_slug(f"abb-{offer_id}"),
+        "supply_platform": supply_platform,
+        "supply_product_url": supply_url,
         "vipomall_product_url": source_url,
+        "vipomall_platform_type": platform_type,
     }
     if swatches:
         variants["color_swatches"] = swatches
@@ -539,7 +720,7 @@ def vipomall_row_to_product_data(row: Dict[str, Any], source_url: str, offer_id:
     product_info = {
         "product_info": {
             "name_original": title,
-            "listing_sku_hint": f"abb-{offer_id}",
+            "listing_sku_hint": product_id,
         },
         "market_info": {
             "currency": "VND",
@@ -554,19 +735,18 @@ def vipomall_row_to_product_data(row: Dict[str, Any], source_url: str, offer_id:
         "variants": variants,
     }
     eng = synthetic_engagement_counts()
-    cny_for_excel = _estimate_cny_from_vnd(price_vnd)
 
     return {
-        "product_id": f"A{offer_id}",
+        "product_id": product_id,
         "code": "",
-        "origin": "1688",
+        "origin": origin,
         "brand_name": None,
         "name": title[:500],
         "chinese_name": title[:500] or None,
         "description": desc[:20000],
         "price": float(price_vnd),
         "shop_name": "Vipomall",
-        "shop_name_chinese": None,
+        "shop_name_chinese": shop_cn,
         "shop_id": offer_id,
         "pro_lower_price": cny_for_excel,
         "pro_high_price": cny_for_excel,
@@ -579,7 +759,7 @@ def vipomall_row_to_product_data(row: Dict[str, Any], source_url: str, offer_id:
         "carousel_images_1688": gallery,
         "color_swatch_images_1688": [c["img"] for c in colors_out if c.get("img")],
         "detail_block_images_1688": detail_imgs,
-        "link_default": supply_product_link_default_for_hibox_slug(f"abb-{offer_id}") or source_url,
+        "link_default": supply_url or source_url,
         "video_link": _clean_text(row.get("video_url"), limit=1000),
         "main_image": main_image,
         "likes": eng["likes"],

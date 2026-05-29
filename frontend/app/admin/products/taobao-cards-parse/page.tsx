@@ -343,16 +343,33 @@ function pick1688OfferIdFromListingRow(r: ParsedTaobaoCardRow): string | null {
   return m?.[1] ?? null;
 }
 
-/** PDP gương 1688 trên Vipomall — chỉ khi có offerId số (A+digits hoặc URL 1688). */
+/** PDP Vipomall — 1688 (platform_type=10) hoặc Taobao/Tmall (platform_type=21). */
 function listingRowToVipomallImportUrl(r: ParsedTaobaoCardRow): string | null {
-  const oid = pick1688OfferIdFromListingRow(r);
-  if (!oid) return null;
+  const id = (r.item_id || '').trim();
   const u = (r.item_url || '').trim().toLowerCase();
-  if (u.includes('vipomall.vn')) {
-    const m = u.match(/\/san-pham\/(\d+)/);
-    if (m?.[1]) return `https://vipomall.vn/san-pham/${m[1]}?platform_type=10`;
+
+  const taobaoIdFromPrefix = /^[Tt](\d+)$/.exec(id)?.[1] ?? null;
+  if (taobaoIdFromPrefix) {
+    return `https://vipomall.vn/san-pham/${taobaoIdFromPrefix}?platform_type=21`;
   }
-  return `https://vipomall.vn/san-pham/${oid}?platform_type=10`;
+
+  const oid1688 = pick1688OfferIdFromListingRow(r);
+  if (oid1688) {
+    if (u.includes('vipomall.vn')) {
+      const m = u.match(/\/san-pham\/(\d+)/);
+      if (m?.[1]) {
+        const pt = u.includes('platform_type=21') ? 21 : 10;
+        return `https://vipomall.vn/san-pham/${m[1]}?platform_type=${pt}`;
+      }
+    }
+    return `https://vipomall.vn/san-pham/${oid1688}?platform_type=10`;
+  }
+
+  const onlyDigits = id.replace(/\D/g, '');
+  if (onlyDigits && (u.includes('taobao') || u.includes('tmall'))) {
+    return `https://vipomall.vn/san-pham/${onlyDigits}?platform_type=21`;
+  }
+  return null;
 }
 
 /** Ghép URL + source API theo dropdown (khớp luồng Excel batch / backend). */
@@ -979,7 +996,7 @@ export default function TaobaoCardsParsePage() {
       if (!task) {
         skipLines.push(
           importFetchTarget === 'vipomall'
-            ? `${r.item_id || '—'}: không ghép được link Vipomall (cần offer 1688 trong URL hoặc ID SP dạng A+số).`
+            ? `${r.item_id || '—'}: không ghép được link Vipomall (cần offer 1688 / Taobao·Tmall / ID A+ hoặc T+số).`
             : importFetchTarget === 'hibox'
               ? `${r.item_id || '—'}: không ghép được link Hibox (cần link 1688/Taobao/Tmall và mã sản phẩm).`
               : `${r.item_id || '—'}: không ghép được URL import — thử đổi «Trang lấy dữ liệu» (Hibox / Vipomall).`,
@@ -1075,8 +1092,8 @@ export default function TaobaoCardsParsePage() {
           importFetchTarget === 'hibox'
             ? 'qua Hibox'
             : importFetchTarget === 'vipomall'
-              ? 'qua Vipomall'
-              : 'tự chọn Hibox hoặc Vipomall';
+              ? 'qua Vipomall (1688/Taobao/Tmall)'
+              : 'tự chọn Hibox hoặc Vipomall (1688/Taobao/Tmall)';
         const scopeLabel =
           mode === 'append' && queue_token
             ? 'Đã thêm vào đợt đang mở (đợt mới nhất trong danh sách).'
@@ -2384,8 +2401,8 @@ export default function TaobaoCardsParsePage() {
                 {importFetchTarget === 'hibox'
                   ? 'Hibox'
                   : importFetchTarget === 'vipomall'
-                    ? 'Vipomall'
-                    : 'tự động Hibox/Vipomall'}
+                    ? 'Vipomall (1688 + Taobao/Tmall)'
+                    : 'tự động Hibox / Vipomall'}
                 ). Chọn đợt đích:
               </p>
               {newestTrackedQueueToken ? (
@@ -2473,8 +2490,10 @@ export default function TaobaoCardsParsePage() {
             Sau đó có thể chỉ giữ các ID chưa có trên shop và chưa có nháp crawl xong (bỏ chọn để xem cả lô).
           </span>{' '}
           <span className="text-slate-700">
-            Chọn một hoặc nhiều dòng rồi chọn <strong>Trang lấy dữ liệu</strong> (Hibox / Vipomall / tự động) và bấm «Lấy thông tin»
-            — cửa sổ sẽ hỏi <strong>thêm vào đợt đang mở</strong> hay <strong>tạo đợt / job mới</strong>. Server xử lý link{' '}
+            Chọn một hoặc nhiều dòng rồi chọn <strong>Trang lấy dữ liệu</strong> (Hibox / Vipomall 1688+Taobao·Tmall / tự động) và bấm «Lấy thông tin»
+            — cửa sổ sẽ hỏi <strong>thêm vào đợt đang mở</strong> hay <strong>tạo đợt / job mới</strong>. Vipomall: offer 1688 →{' '}
+            <code className="text-xs bg-slate-100 px-1 rounded">?platform_type=10</code>; Taobao/Tmall / ID T+số →{' '}
+            <code className="text-xs bg-slate-100 px-1 rounded">?platform_type=21</code>. Server xử lý link{' '}
             <strong>lần lượt</strong> (Playwright). Có tạm dừng / tiếp tục / dừng hẳn, tải CSV tiến trình và thanh % bên dưới.
             Hoặc «Export đã chọn» để tải CSV bảng parse.
           </span>
@@ -2534,12 +2553,12 @@ export default function TaobaoCardsParsePage() {
             onChange={(e) => persistImportFetchTarget(e.target.value as ListingImportFetchTarget)}
             disabled={enqueueSubmitting}
             className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 shadow-sm disabled:opacity-60 max-w-[min(100%,15rem)]"
-            aria-label="Chọn trang để lấy thông tin: Hibox hoặc Vipomall (offer 1688)"
-            title="Tự động: ưu tiên Hibox; không ghép được thì Vipomall (cần offerId 1688). Import trực tiếp detail.1688.com đã tắt."
+            aria-label="Chọn trang để lấy thông tin: Hibox hoặc Vipomall (1688 + Taobao/Tmall)"
+            title="Tự động: ưu tiên Hibox; không ghép được thì Vipomall (1688 platform_type=10, Taobao/Tmall platform_type=21). Import trực tiếp detail.1688.com đã tắt."
           >
-            <option value="auto">Tự động (Hibox hoặc Vipomall)</option>
+            <option value="auto">Tự động (Hibox hoặc Vipomall 1688/Taobao)</option>
             <option value="hibox">Hibox (hibox.mn)</option>
-            <option value="vipomall">Vipomall (vipomall.vn)</option>
+            <option value="vipomall">Vipomall (vipomall.vn) — 1688 + Taobao/Tmall</option>
           </select>
         </div>
         <button

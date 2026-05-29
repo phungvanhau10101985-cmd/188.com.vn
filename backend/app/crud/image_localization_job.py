@@ -140,6 +140,23 @@ def row_to_job_dict(row: ImageLocalizationJob) -> Dict[str, Any]:
     return d
 
 
+def delete_terminal_jobs(db: Session) -> tuple[int, List[str]]:
+    """Xóa job đã kết thúc (done / error / cancelled)."""
+    rows = (
+        db.query(ImageLocalizationJob)
+        .filter(ImageLocalizationJob.status.in_(tuple(_TERMINAL)))
+        .all()
+    )
+    ids = [row.job_id for row in rows]
+    if not ids:
+        return 0, []
+    db.query(ImageLocalizationJob).filter(ImageLocalizationJob.job_id.in_(ids)).delete(
+        synchronize_session=False
+    )
+    db.commit()
+    return len(ids), ids
+
+
 def sync_dict_to_row(db: Session, job_id: str, job: Dict[str, Any]) -> None:
     """Ghi snapshot job từ dict in-memory."""
     if not job:

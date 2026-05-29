@@ -314,7 +314,7 @@ export default function ProductDetailMobile({
         {mediaCount > 1 && (
           <div
             ref={thumbStripRef}
-            className="product-gallery-thumb-strip flex items-center gap-2 overflow-x-auto scrollbar-hide snap-x snap-mandatory touch-pan-x overscroll-x-contain py-2 -mx-4 px-4"
+            className="product-gallery-thumb-strip flex items-center gap-2 overflow-x-auto scrollbar-hide snap-x snap-mandatory py-2 -mx-4 px-4"
             style={{ WebkitOverflowScrolling: 'touch' }}
             aria-label="Thư viện ảnh sản phẩm"
           >

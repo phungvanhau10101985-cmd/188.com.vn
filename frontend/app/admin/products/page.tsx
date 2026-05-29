@@ -102,6 +102,10 @@ function isActiveImageLocalizationJobStatus(status: AdminImageLocalizationJob['s
   return status === 'queued' || status === 'running';
 }
 
+function isTerminalImageLocalizationJobStatus(status: AdminImageLocalizationJob['status'] | undefined): boolean {
+  return status === 'done' || status === 'error' || status === 'cancelled';
+}
+
 function readStoredLocalizationJobIds(): string[] {
   try {
     const raw = localStorage.getItem(IMAGE_LOCALIZATION_JOBS_KEY);
@@ -387,6 +391,17 @@ function resolveImportLinkUrl(raw: string): string {
     return /^https?:\/\//i.test(frag) ? frag : `https://${frag.replace(/^\/+/, '')}`;
   }
 
+  const taobaoMatch = trimmed.match(
+    /\bhttps?:\/\/(?:[\w.-]+\.)?(?:taobao|tmall)\.com\/[^\s\]\)<>'"]+/i,
+  );
+  if (taobaoMatch) {
+    return taobaoMatch[0].replace(/[,.;:"'”’)\]]+$/u, '').trim();
+  }
+
+  if (/^[Tt]\d{5,}$/.test(trimmed)) {
+    return trimmed;
+  }
+
   return trimmed;
 }
 
@@ -414,7 +429,23 @@ function isHiboxProductUrl(raw: string): boolean {
   }
 }
 
-/** PDP gương 1688 trên Vipomall — backend scrape Playwright (`source: vipomall`). */
+/** Taobao / Tmall / mã T{id}. */
+function isTaobaoTmallImportInput(raw: string): boolean {
+  const resolved = resolveImportLinkUrl(raw).trim();
+  if (/^[Tt]\d{5,}$/.test(resolved)) return true;
+  try {
+    const absolute = /^[a-z][a-z0-9+.-]*:/i.test(resolved)
+      ? resolved
+      : `https://${resolved.replace(/^\/+/, '')}`;
+    const u = new URL(absolute);
+    const host = u.hostname.replace(/^www\./i, '').toLowerCase();
+    return host.includes('taobao.com') || host.includes('tmall.com');
+  } catch {
+    return false;
+  }
+}
+
+/** PDP gương 1688 / Taobao trên Vipomall — backend scrape Playwright (`source: vipomall`). */
 function isVipomallProductUrl(raw: string): boolean {
   try {
     const resolved = resolveImportLinkUrl(raw);
@@ -767,6 +798,8 @@ export default function AdminProductsPage() {
   const [localizationJobsLoading, setLocalizationJobsLoading] = useState(true);
   /** Chặn double-submit khi POST start job (ngắn). */
   const [localizationStartBusy, setLocalizationStartBusy] = useState(false);
+  const [localizationClearConfirmOpen, setLocalizationClearConfirmOpen] = useState(false);
+  const [localizationClearBusy, setLocalizationClearBusy] = useState(false);
   const localizationPollCountRef = useRef(0);
   const [imageLocalizationJobsById, setImageLocalizationJobsById] = useState<
     Record<string, AdminImageLocalizationJob>
@@ -1281,6 +1314,47 @@ export default function AdminProductsPage() {
     return n;
   }, [localizationJobsForUi]);
 
+  const localizationTerminalJobCount = useMemo(() => {
+    let n = 0;
+    for (const j of localizationJobsForUi) {
+      if (isTerminalImageLocalizationJobStatus(j.status)) n += 1;
+    }
+    return n;
+  }, [localizationJobsForUi]);
+
+  const handleClearLocalizationTerminalJobs = async () => {
+    setLocalizationClearBusy(true);
+    try {
+      const res = await adminProductAPI.clearImageLocalizationTerminalJobs();
+      const deletedIds = new Set(res.deleted_job_ids ?? []);
+      for (const job of localizationJobsForUi) {
+        if (isTerminalImageLocalizationJobStatus(job.status)) {
+          deletedIds.add(job.job_id);
+        }
+      }
+      setImageLocalizationJobsById((prev) => {
+        const next = { ...prev };
+        for (const id of deletedIds) delete next[id];
+        return next;
+      });
+      setLocalizationJobIdsOrdered((prev) => prev.filter((id) => !deletedIds.has(id)));
+      writeStoredLocalizationJobIds(readStoredLocalizationJobIds().filter((id) => !deletedIds.has(id)));
+      setLocalizationClearConfirmOpen(false);
+      showToast(
+        'ok',
+        res.deleted_count > 0
+          ? `Đã xóa ${res.deleted_count} job đã dừng / lỗi khỏi danh sách`
+          : 'Không còn job đã dừng để xóa',
+        6000,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Không xóa được danh sách job';
+      showToast('err', msg, 8000);
+    } finally {
+      setLocalizationClearBusy(false);
+    }
+  };
+
   useEffect(() => {
     if (
       geminiAuthStatus &&
@@ -1314,19 +1388,20 @@ export default function AdminProductsPage() {
     e.preventDefault();
     const url = resolveImportLinkUrl(import1688Url);
     if (!url) {
-      showToast('err', 'Vui lòng dán link Hibox, taobao1688.kz hoặc Vipomall');
+      showToast('err', 'Vui lòng dán link Hibox, Taobao/Tmall, T{id}, taobao1688.kz hoặc Vipomall');
       return;
     }
     const fromVipomall = isVipomallProductUrl(url);
-    if (!isHiboxProductUrl(url) && !fromVipomall) {
+    const fromTaobaoTmall = isTaobaoTmallImportInput(url);
+    if (!isHiboxProductUrl(url) && !fromVipomall && !fromTaobaoTmall) {
       showToast(
         'err',
-        'Chỉ hỗ trợ link Hibox / taobao1688.kz / Vipomall. Import trực tiếp từ 1688.com đã tắt.',
+        'Chỉ hỗ trợ link Hibox / taobao1688.kz / Vipomall / Taobao / Tmall / T{id}. Import trực tiếp từ 1688.com đã tắt.',
         8000,
       );
       return;
     }
-    const importLabel = fromVipomall ? 'Vipomall' : 'Hibox';
+    const importLabel = fromVipomall || fromTaobaoTmall ? 'Vipomall' : 'Hibox';
     try {
       localStorage.removeItem(ADMIN_1688_LINK_JOB_KEY);
     } catch {
@@ -1334,7 +1409,7 @@ export default function AdminProductsPage() {
     }
     setImporting1688(true);
     setImport1688Draft(null);
-    const importSource = fromVipomall ? 'vipomall' : 'hibox';
+    const importSource = fromVipomall || fromTaobaoTmall ? 'vipomall' : 'hibox';
     setImport1688Progress({
       message: fromVipomall ? 'Đang gửi link Vipomall lên server…' : 'Đang gửi link Hibox lên server…',
       percent: null,
@@ -2331,7 +2406,7 @@ export default function AdminProductsPage() {
                       Hibox · không cần cookie 1688
                     </span>
                     <span className="inline-flex items-center rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-950">
-                      Vipomall · offer 1688 (platform_type=10)
+                      Vipomall · 1688 (platform_type=10) · Taobao/Tmall (platform_type=21)
                     </span>
                   </div>
                 </div>
@@ -2407,8 +2482,9 @@ export default function AdminProductsPage() {
                 >
                 <h3 className="text-sm font-semibold text-slate-900">Import một link</h3>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Dán link Hibox, <span className="whitespace-nowrap">taobao1688.kz</span> hoặc Vipomall{' '}
-                  <span className="whitespace-nowrap">(vipomall.vn/san-pham/…)</span>.
+                  Dán link Hibox, <span className="whitespace-nowrap">taobao1688.kz</span>, Taobao/Tmall,{' '}
+                  <span className="whitespace-nowrap">T{'{id}'}</span> hoặc Vipomall{' '}
+                  <span className="whitespace-nowrap">(vipomall.vn/san-pham/…?platform_type=10|21)</span>.
                 </p>
                 <form onSubmit={handleImport1688} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
                   <div className="min-w-0 flex-1">
@@ -2420,7 +2496,7 @@ export default function AdminProductsPage() {
                       type="url"
                       value={import1688Url}
                       onChange={(e) => setImport1688Url(e.target.value)}
-                      placeholder="https://hibox.mn/v/… · taobao1688.kz · vipomall.vn/san-pham/…"
+                      placeholder="https://hibox.mn/v/… · taobao/Tmall · T801… · vipomall.vn/san-pham/…"
                       className="w-full rounded-lg border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-orange-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-orange-300/80"
                       autoComplete="off"
                       spellCheck={false}
@@ -2471,8 +2547,10 @@ export default function AdminProductsPage() {
                   <code className="rounded bg-white/80 px-1">vnd_per_cny_used</code>), sau đó làm tròn lên bội 10.000&nbsp;₫.
                   Tuỳ chọn: Shop Trung Quốc / Tên tiếng Trung. Cột **Mã sp / SKU** mặc định để trống; backend không tự sinh SKU khi lấy dữ liệu. Chọn file → chọn{' '}
                   <strong>Lấy dữ liệu từ trang</strong> → bấm chạy.
-                  <strong>Tự động / Hibox:</strong> offer 1688 → <span className="whitespace-nowrap">hibox.mn/v/abb-…</span>.{' '}
-                  <strong>Vipomall:</strong> offer 1688 → <span className="whitespace-nowrap">vipomall.vn/san-pham/…</span> (cần SP đã có trên Vipomall).
+                  <strong>Tự động / Hibox:</strong> offer 1688 → <span className="whitespace-nowrap">hibox.mn/v/abb-…</span>; Taobao/Tmall →{' '}
+                  <span className="whitespace-nowrap">hibox.mn/v/{'{id}'}</span>.{' '}
+                  <strong>Vipomall:</strong> 1688 → <span className="whitespace-nowrap">…?platform_type=10</span>; Taobao/Tmall / T{'{id}'} →{' '}
+                  <span className="whitespace-nowrap">…?platform_type=21</span> (cần SP đã có trên Vipomall).
                   Dòng không quy đổi được sẽ bị bỏ qua kèm lý do.
                 </p>
                 <div className="mt-3 flex flex-col gap-3">
@@ -2500,7 +2578,7 @@ export default function AdminProductsPage() {
                       >
                         <option value="auto">Tự động — Taobao / 1688 → Hibox khi đổi được</option>
                         <option value="hibox">Ép về Hibox (hibox.mn)</option>
-                        <option value="vipomall">Ép về Vipomall (vipomall.vn) — offer 1688</option>
+                        <option value="vipomall">Ép về Vipomall (vipomall.vn) — 1688 + Taobao/Tmall</option>
                       </select>
                     </div>
                     <button
@@ -3723,17 +3801,30 @@ export default function AdminProductsPage() {
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-sm font-semibold text-gray-900">Tiến trình</span>
-                <span className="text-xs text-gray-500">
-                  {localizationJobsLoading
-                    ? 'đang tải job từ server…'
-                    : localizationJobsForUi.length
-                      ? localizationActiveJobCount > 0
-                        ? `${localizationActiveJobCount} đang chạy · ${localizationJobsForUi.length} card`
-                        : `${localizationJobsForUi.length} job (đã dừng)`
-                      : localizationPollActive
-                        ? 'đang tải…'
-                        : 'idle'}
-                </span>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {localizationTerminalJobCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setLocalizationClearConfirmOpen(true)}
+                      disabled={localizationClearBusy || localizationJobsLoading}
+                      className="rounded-md border border-gray-300 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1"
+                      aria-label={`Xóa ${localizationTerminalJobCount} job đã dừng hoặc lỗi`}
+                    >
+                      Xóa job đã dừng ({localizationTerminalJobCount})
+                    </button>
+                  ) : null}
+                  <span className="text-xs text-gray-500">
+                    {localizationJobsLoading
+                      ? 'đang tải job từ server…'
+                      : localizationJobsForUi.length
+                        ? localizationActiveJobCount > 0
+                          ? `${localizationActiveJobCount} đang chạy · ${localizationJobsForUi.length} card`
+                          : `${localizationJobsForUi.length} job (đã dừng)`
+                        : localizationPollActive
+                          ? 'đang tải…'
+                          : 'idle'}
+                  </span>
+                </div>
               </div>
 
               {localizationJobsLoading ? (
@@ -3874,6 +3965,51 @@ export default function AdminProductsPage() {
                 </div>
               )}
             </div>
+
+            {localizationClearConfirmOpen ? (
+              <div
+                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+                role="presentation"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget && !localizationClearBusy) setLocalizationClearConfirmOpen(false);
+                }}
+              >
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="localization-clear-jobs-title"
+                  className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-5 shadow-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 id="localization-clear-jobs-title" className="text-base font-semibold text-gray-900">
+                    Xóa job đã dừng hoặc lỗi?
+                  </h3>
+                  <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                    Sẽ xóa <strong className="font-medium text-gray-800">{localizationTerminalJobCount} job</strong>{' '}
+                    đã hoàn tất, lỗi hoặc đã hủy khỏi server và khung Tiến trình. Job đang chạy không bị ảnh hưởng.
+                    Không hoàn tác.
+                  </p>
+                  <div className="mt-5 flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => !localizationClearBusy && setLocalizationClearConfirmOpen(false)}
+                      disabled={localizationClearBusy}
+                      className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleClearLocalizationTerminalJobs()}
+                      disabled={localizationClearBusy}
+                      className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                    >
+                      {localizationClearBusy ? 'Đang xóa…' : 'Xóa danh sách'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
 

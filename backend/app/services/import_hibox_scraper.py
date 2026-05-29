@@ -46,6 +46,8 @@ _TAOBAO1688_KZ_HOST_RE = re.compile(r"^(?:www\.)?taobao1688\.kz$", re.I)
 _MIRROR_ITEM_ID_RE = re.compile(r"^[a-zA-Z0-9][\w.-]{1,220}$")
 # Ghép product_id khi publish: T{id} — id lấy sau /v/ hoặc ?id= mirror
 _CANONICAL_HIBOX_PRODUCT_ITEM_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,220}$")
+_T_PREFIX_ITEM_RE = re.compile(r"^[Tt](\d{5,})$")
+_TAOBAO_TMAIL_HOST_RE = re.compile(r"(?:^|\.)taobao\.com$|(?:^|\.)tmall\.com$", re.I)
 
 # Modal một màu kiểu «Зургийн өнгө» — đồng bộ với export_hibox_item_excel (chuẩn catalogue).
 _HIBOX_PIC_COLOR_RE = re.compile(
@@ -66,6 +68,34 @@ def _hibox_catalog_color_label(raw: str) -> str:
     if _HIBOX_PIC_COLOR_RE.search(s):
         return "Màu như ảnh"
     return s
+
+
+def parse_t_prefixed_item_id(raw: str) -> Optional[str]:
+    """Mã nội bộ T801751959231 → 801751959231."""
+    s = (raw or "").strip()
+    m = _T_PREFIX_ITEM_RE.match(s)
+    return m.group(1) if m else None
+
+
+def extract_taobao_tmall_item_id(url: str) -> Optional[str]:
+    """Trích id SP từ URL taobao.com / tmall.com (?id= / item_id)."""
+    norm = normalize_product_import_url((url or "").strip())
+    if not norm:
+        return None
+    try:
+        p = urlparse(norm)
+    except ValueError:
+        return None
+    host = (p.hostname or "").lower().replace("www.", "")
+    if not _TAOBAO_TMAIL_HOST_RE.search(host):
+        return None
+    qs = parse_qs(p.query or "")
+    for key in ("id", "item_id", "itemId"):
+        for val in qs.get(key) or []:
+            s = (val or "").strip()
+            if s.isdigit():
+                return s
+    return None
 
 
 def extract_hibox_1688_offer_digits(slug: str) -> Optional[str]:

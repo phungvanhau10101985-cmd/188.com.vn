@@ -7,6 +7,7 @@ Dùng kèm form `fetch_target` trên endpoint `batch-from-excel`.
 
 from __future__ import annotations
 
+import re
 from typing import Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
@@ -19,11 +20,14 @@ from app.services.import_cssbuy_client import (
 from app.services.import_hibox_scraper import (
     extract_hibox_1688_offer_digits,
     extract_hibox_slug,
+    extract_taobao_tmall_item_id,
     hibox_canonical_scrape_url,
     is_hibox_import_url,
     normalize_product_import_url,
+    parse_t_prefixed_item_id,
 )
-from app.services.import_vipomall_scraper import is_vipomall_import_url, vipomall_canonical_import_url
+from app.services.import_vipomall_scraper import is_vipomall_import_url, resolve_vipomall_import_url, vipomall_canonical_import_url
+from app.services.vipomall_source_stock import build_vipomall_1688_pdp_url, build_vipomall_taobao_pdp_url
 
 FETCH_TARGET_AUTO = "auto"
 FETCH_TARGET_HIBOX = "hibox"
@@ -48,23 +52,7 @@ def normalize_fetch_target_param(raw: Optional[str]) -> str:
 
 
 def _extract_taobao_tmall_item_id(url: str) -> Optional[str]:
-    norm = normalize_product_import_url((url or "").strip())
-    if not norm:
-        return None
-    try:
-        p = urlparse(norm)
-    except ValueError:
-        return None
-    host = (p.hostname or "").lower()
-    if "taobao.com" not in host and "tmall.com" not in host:
-        return None
-    qs = parse_qs(p.query)
-    for key in ("id", "item_id", "itemId"):
-        for v in qs.get(key) or []:
-            s = (v or "").strip()
-            if s.isdigit():
-                return s
-    return None
+    return extract_taobao_tmall_item_id(url) or parse_t_prefixed_item_id((url or "").strip())
 
 
 def coerce_url_for_excel_batch_import(
@@ -139,32 +127,37 @@ def coerce_url_for_excel_batch_import(
         )
 
     if ft == FETCH_TARGET_VIPOMALL:
+        try:
+            url, _pt = resolve_vipomall_import_url(norm)
+            return url, None
+        except Exception:
+            pass
         if is_vipomall_import_url(norm):
             return vipomall_canonical_import_url(norm), None
 
         oid = extract_offer_id(norm)
         if oid and oid.isdigit():
-            return f"https://vipomall.vn/san-pham/{oid}?platform_type=10", None
+            return build_vipomall_1688_pdp_url(oid), None
 
         slug = extract_hibox_slug(norm)
         if slug and slug != "hibox_import":
             abb = extract_hibox_1688_offer_digits(slug)
             if abb:
-                return f"https://vipomall.vn/san-pham/{abb}?platform_type=10", None
+                return build_vipomall_1688_pdp_url(abb), None
+            if re.fullmatch(r"\d+", slug):
+                return build_vipomall_taobao_pdp_url(slug), None
             return (
                 norm,
-                "link Hibox/Taobao không có offerId 1688 (abb-*) — không quy đổi sang Vipomall.",
+                "link Hibox không nhận dạng offer 1688 (abb-*) hoặc id Taobao số — không quy đổi sang Vipomall.",
             )
 
-        if _extract_taobao_tmall_item_id(norm):
-            return (
-                norm,
-                "link Taobao/Tmall — không quy đổi sang Vipomall 1688; cần link 1688 hoặc Hibox abb-*.",
-            )
+        tid = _extract_taobao_tmall_item_id(norm)
+        if tid:
+            return build_vipomall_taobao_pdp_url(tid), None
 
         return (
             norm,
-            "không quy đổi được sang Vipomall — cần link offer 1688, Vipomall, hoặc Hibox dạng abb-<số>.",
+            "không quy đổi được sang Vipomall — cần link Taobao/Tmall, T{id}, offer 1688, Hibox abb-* / số, hoặc vipomall.vn/san-pham/{id}.",
         )
 
     if ft == FETCH_TARGET_1688:

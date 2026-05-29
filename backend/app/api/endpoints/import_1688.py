@@ -56,18 +56,23 @@ from app.services.import_hibox_scraper import (
     build_canonical_product_id_from_hibox_slug,
     extract_hibox_1688_offer_digits,
     extract_hibox_slug,
+    extract_taobao_tmall_item_id,
     hibox_canonical_scrape_url,
     hibox_slug_is_1688_offer,
     is_hibox_import_url,
     normalize_product_import_url,
+    parse_t_prefixed_item_id,
     scrape_hibox_for_import,
 )
 from app.services.import_vipomall_scraper import (
     ImportVipomallError,
     extract_vipomall_offer_id,
+    extract_vipomall_platform_type,
     is_vipomall_import_url,
+    resolve_vipomall_import_url,
     scrape_vipomall_for_import,
 )
+from app.services.vipomall_source_stock import VIPOMALL_PLATFORM_TAOBAO
 from app.services.import_1688_scraper import (
     build_canonical_1688_product_id,
     extract_1688_numeric_offer_id,
@@ -186,13 +191,40 @@ def _batch_status_out_for_draft_ids(db: Session, batch_token: str, draft_ids: Li
 
 
 def _infer_import_source_for_url(norm_url: str, requested_source: Optional[str] = None) -> Tuple[str, str]:
-    """Trả (external_id, source). Raises ValueError nếu không phải 1688/Hibox/Vipomall."""
+    """Trả (external_id, source). Raises ValueError nếu không phải 1688/Hibox/Vipomall/Taobao."""
     req = (requested_source or "").strip().lower()
     if req in {"vipomall", "vipo", "vipomail"} or is_vipomall_import_url(norm_url):
+        try:
+            canonical, _pt = resolve_vipomall_import_url(norm_url)
+            oid = extract_vipomall_offer_id(canonical)
+            if oid:
+                return oid, "vipomall"
+        except ImportVipomallError:
+            pass
         oid = extract_vipomall_offer_id(norm_url)
         if oid:
             return oid, "vipomall"
+
     force_hibox = req in {"hibox", "hi-box", "hi_box"} or "hibox.mn" in norm_url.lower()
+    if not force_hibox and req not in {"hibox", "hi-box", "hi_box"}:
+        if (
+            parse_t_prefixed_item_id(norm_url)
+            or extract_taobao_tmall_item_id(norm_url)
+            or (
+                (slug := extract_hibox_slug(norm_url))
+                and slug != "hibox_import"
+                and not extract_hibox_1688_offer_digits(slug)
+                and re.fullmatch(r"\d+", slug or "")
+            )
+        ):
+            try:
+                canonical, _pt = resolve_vipomall_import_url(norm_url)
+                oid = extract_vipomall_offer_id(canonical)
+                if oid:
+                    return oid, "vipomall"
+            except ImportVipomallError:
+                pass
+
     if force_hibox or is_hibox_import_url(norm_url):
         return (extract_hibox_slug(norm_url) or "hibox_import"), "hibox"
     offer_id = extract_offer_id(norm_url)
@@ -950,17 +982,24 @@ def create_import_1688_job(
             detail={
                 "reason": "unsupported_import_link",
                 "message": (
-                    "Không nhận dạng được link Hibox / taobao1688.kz / Vipomall."
+                    "Không nhận dạng được link Hibox / taobao1688.kz / Vipomall / Taobao / Tmall / T{id}."
                 ),
                 "normalized_length": len(source_url),
                 "normalized_preview": source_url[:200],
                 "hints": (
                     "Hibox: https://hibox.mn/v/{mã}. Mirror: https://taobao1688.kz/item?id={mã}. "
                     "Vipomall 1688: https://vipomall.vn/san-pham/{offerId}?platform_type=10. "
+                    "Vipomall Taobao/Tmall: https://vipomall.vn/san-pham/{itemId}?platform_type=21 hoặc T{itemId}. "
                     "Import trực tiếp từ 1688.com không còn hỗ trợ."
                 ),
             },
         )
+    if src == "vipomall":
+        try:
+            source_url, _pt = resolve_vipomall_import_url(source_url)
+            ext_id = extract_vipomall_offer_id(source_url) or ext_id
+        except ImportVipomallError:
+            pass
     if src == "1688":
         raise HTTPException(
             status_code=400,
@@ -1505,22 +1544,42 @@ def publish_import_1688_draft(
                 status_code=400,
                 detail={
                     "reason": "import_publish_missing_vipomall_offer_id",
-                    "message": "Không trích được offerId 1688 từ link Vipomall.",
+                    "message": "Không trích được id sản phẩm từ link Vipomall.",
                     "normalized_url_preview": norm_url[:240],
                     "source_offer_id": draft.source_offer_id,
                 },
             )
-        if existing is None:
-            existing = product_crud.get_product_by_product_id(db, f"hibox_abb-{oid}")
-        if existing is None:
-            existing = product_crud.get_product_by_product_id(db, f"1688_{oid}")
-        try:
-            canonical_pid = build_canonical_1688_product_id(oid)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail={"reason": "invalid_internal_product_id", "message": str(exc)},
-            ) from exc
+        platform = extract_vipomall_platform_type(norm_url)
+        pd_pid = str((draft.product_data or {}).get("product_id") or "").strip()
+        if platform is None:
+            if pd_pid.upper().startswith("T"):
+                platform = VIPOMALL_PLATFORM_TAOBAO
+            else:
+                platform = 10
+        if pd_pid.startswith("T") or platform == VIPOMALL_PLATFORM_TAOBAO:
+            if existing is None:
+                existing = product_crud.get_product_by_product_id(db, f"T{oid}")
+            try:
+                from app.services.import_hibox_scraper import build_canonical_hibox_product_id
+
+                canonical_pid = build_canonical_hibox_product_id(oid)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"reason": "invalid_internal_product_id", "message": str(exc)},
+                ) from exc
+        else:
+            if existing is None:
+                existing = product_crud.get_product_by_product_id(db, f"hibox_abb-{oid}")
+            if existing is None:
+                existing = product_crud.get_product_by_product_id(db, f"1688_{oid}")
+            try:
+                canonical_pid = build_canonical_1688_product_id(oid)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"reason": "invalid_internal_product_id", "message": str(exc)},
+                ) from exc
 
     elif src == "hibox":
         hid = (extract_hibox_slug(norm_url) or "").strip()

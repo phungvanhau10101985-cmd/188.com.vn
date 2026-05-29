@@ -71,7 +71,10 @@ body {
 .product-gallery-thumb-strip {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
   scroll-behavior: smooth;
+  /* Cho phép vuốt dọc trang + vuốt ngang strip; tránh touch-pan-x chặn scroll trang trên mobile */
+  touch-action: pan-x pan-y;
 }
 
 /* Scrollbar: ẩn mặc định, hover mới hiện */

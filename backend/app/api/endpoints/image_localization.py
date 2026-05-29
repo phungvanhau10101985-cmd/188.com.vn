@@ -656,6 +656,7 @@ def start_image_localization_job_resume_daemon_if_enabled() -> None:
 
 
 _RESUMABLE_JOB_STATUSES = frozenset({"queued", "running"})
+_TERMINAL_JOB_STATUSES = frozenset({"done", "error", "cancelled"})
 
 
 @router.get("/jobs")
@@ -724,6 +725,22 @@ def cancel_job(
         return job
     _job_update(job_id, cancel_requested=True, message="Đang hủy job sau ảnh hiện tại...")
     return _job_get(job_id)
+
+
+@router.delete("/jobs/terminal")
+def delete_terminal_jobs(
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Xóa job đã dừng / lỗi / hoàn tất khỏi DB và bộ nhớ server."""
+    deleted_count, deleted_ids = image_loc_job_crud.delete_terminal_jobs(db)
+    deleted_id_set = set(deleted_ids)
+    with _jobs_lock:
+        for jid in list(_jobs.keys()):
+            status = (_jobs[jid].get("status") or "").strip().lower()
+            if jid in deleted_id_set or status in _TERMINAL_JOB_STATUSES:
+                _jobs.pop(jid, None)
+    return {"deleted_count": deleted_count, "deleted_job_ids": deleted_ids}
 
 
 @router.get("/products/{product_id}/report")

@@ -660,6 +660,11 @@ export interface AdminImageLocalizationJobList {
   active_count: number;
 }
 
+export interface AdminImageLocalizationClearTerminalJobsResult {
+  deleted_count: number;
+  deleted_job_ids: string[];
+}
+
 export interface AdminImageLocalizationReportItem {
   original_url: string;
   final_url?: string | null;
@@ -1388,6 +1393,12 @@ export const adminProductAPI = {
   cancelImageLocalizationJob: (jobId: string) =>
     fetchAdmin<AdminImageLocalizationJob>(`/image-localization/jobs/${encodeURIComponent(jobId)}/cancel`, {
       method: 'POST',
+      timeoutMs: 60_000,
+    }),
+
+  clearImageLocalizationTerminalJobs: () =>
+    fetchAdmin<AdminImageLocalizationClearTerminalJobsResult>('/image-localization/jobs/terminal', {
+      method: 'DELETE',
       timeoutMs: 60_000,
     }),
 

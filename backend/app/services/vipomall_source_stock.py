@@ -41,9 +41,24 @@ _BLOCK_MARKERS = (
 )
 
 
-def build_vipomall_1688_pdp_url(offer_id: str) -> str:
+VIPOMALL_PLATFORM_1688 = 10
+VIPOMALL_PLATFORM_TAOBAO = 21
+
+
+def build_vipomall_pdp_url(offer_id: str, platform_type: int = VIPOMALL_PLATFORM_1688) -> str:
     oid = str(offer_id or "").strip()
-    return f"https://vipomall.vn/san-pham/{oid}?platform_type=10" if oid.isdigit() else ""
+    if not oid.isdigit():
+        return ""
+    pt = VIPOMALL_PLATFORM_TAOBAO if int(platform_type) == VIPOMALL_PLATFORM_TAOBAO else VIPOMALL_PLATFORM_1688
+    return f"https://vipomall.vn/san-pham/{oid}?platform_type={pt}"
+
+
+def build_vipomall_1688_pdp_url(offer_id: str) -> str:
+    return build_vipomall_pdp_url(offer_id, VIPOMALL_PLATFORM_1688)
+
+
+def build_vipomall_taobao_pdp_url(item_id: str) -> str:
+    return build_vipomall_pdp_url(item_id, VIPOMALL_PLATFORM_TAOBAO)
 
 
 _VIPOMALL_PLACEHOLDER_TITLES = frozenset(

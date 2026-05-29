@@ -11,7 +11,13 @@ from app.api.endpoints.import_1688 import (
     _excel_row_from_product,
 )
 from app.services.import_1688_scraper import scrape_1688_product
-from app.services.import_vipomall_scraper import is_vipomall_import_url, scrape_vipomall_for_import
+from app.services.import_vipomall_scraper import (
+    ImportVipomallError,
+    is_vipomall_import_url,
+    resolve_vipomall_import_url,
+    scrape_vipomall_for_import,
+)
+from app.services.import_hibox_scraper import parse_t_prefixed_item_id, extract_taobao_tmall_item_id
 
 DEFAULT_URL = "https://detail.1688.com/offer/920080333655.html?offerId=920080333655"
 
@@ -25,9 +31,25 @@ def shorten(v: object, lim: int = 72) -> str:
     return s[:lim] + ("…" if len(s) > lim else "")
 
 
+def _should_scrape_vipomall(url: str) -> bool:
+    if is_vipomall_import_url(url):
+        return True
+    if parse_t_prefixed_item_id(url) or extract_taobao_tmall_item_id(url):
+        return True
+    try:
+        resolve_vipomall_import_url(url)
+        return True
+    except ImportVipomallError:
+        return False
+
+
 def main() -> None:
     url = (sys.argv[1] if len(sys.argv) > 1 else DEFAULT_URL).strip()
-    if is_vipomall_import_url(url):
+    if _should_scrape_vipomall(url):
+        try:
+            url, _pt = resolve_vipomall_import_url(url)
+        except ImportVipomallError:
+            pass
         _, product_data, warnings = scrape_vipomall_for_import(url)
     else:
         _, product_data, warnings = scrape_1688_product(url)
