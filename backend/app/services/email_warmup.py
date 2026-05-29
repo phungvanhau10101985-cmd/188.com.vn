@@ -142,6 +142,34 @@ def get_birthday_send_history(db: Session, *, days: int = 14) -> list[dict]:
     return [{"date": str(r.day), "birthday_sent": int(r.cnt)} for r in rows]
 
 
+def get_recent_birthday_sent_logs(db: Session, *, days: int = 14, limit: int = 100) -> list[dict]:
+    since = date.today().toordinal() - max(1, days) + 1
+    since_date = date.fromordinal(since)
+    rows = (
+        db.query(BirthdayPromoEmailLog, User.full_name)
+        .outerjoin(User, User.id == BirthdayPromoEmailLog.user_id)
+        .filter(func.date(BirthdayPromoEmailLog.sent_at) >= since_date)
+        .order_by(BirthdayPromoEmailLog.sent_at.desc())
+        .limit(max(1, min(limit, 500)))
+        .all()
+    )
+    out: list[dict] = []
+    for log, full_name in rows:
+        sent_at = log.sent_at
+        out.append(
+            {
+                "id": int(log.id),
+                "sent_at": sent_at.isoformat() if sent_at else "",
+                "recipient_email": log.recipient_email or "",
+                "user_id": int(log.user_id),
+                "user_name": (full_name or "").strip() or None,
+                "birthday_date": log.birthday_date.isoformat() if log.birthday_date else "",
+                "campaign_key": log.campaign_key or "",
+            }
+        )
+    return out
+
+
 def management_payload(db: Session) -> dict:
     row = get_or_create_management(db)
     ensure_daily_reset(db, row)
@@ -166,4 +194,5 @@ def management_payload(db: Session) -> dict:
         "birthday_sent_all_time": int(total_birthday),
         "birthday_send_days_before": BIRTHDAY_EMAIL_SEND_DAYS_BEFORE,
         "recent_days": get_birthday_send_history(db, days=14),
+        "recent_sent": get_recent_birthday_sent_logs(db, days=14, limit=100),
     }

@@ -14,6 +14,16 @@ class EmailSendDailyHistoryItem(BaseModel):
     birthday_sent: int
 
 
+class EmailBirthdaySentLogItem(BaseModel):
+    id: int
+    sent_at: str
+    recipient_email: str
+    user_id: int
+    user_name: str | None = None
+    birthday_date: str
+    campaign_key: str
+
+
 class EmailSendManagementOut(BaseModel):
     warmup_enabled: bool
     start_limit: int
@@ -31,3 +41,4 @@ class EmailSendManagementOut(BaseModel):
     birthday_sent_all_time: int
     birthday_send_days_before: int
     recent_days: list[EmailSendDailyHistoryItem]
+    recent_sent: list[EmailBirthdaySentLogItem] = []

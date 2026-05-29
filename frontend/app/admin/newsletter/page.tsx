@@ -566,30 +566,60 @@ export default function AdminNewsletterPage() {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
-                  <h2 className="text-lg font-semibold text-gray-900">Lịch sử gửi CMSN (14 ngày)</h2>
-                  {!emailMgmt.recent_days.length ? (
-                    <p className="text-sm text-gray-500">Chưa có email CMSN nào được ghi nhận.</p>
-                  ) : (
-                    <div className="overflow-x-auto">
+                <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4 lg:col-span-2">
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Lịch sử gửi CMSN (14 ngày)</h2>
+                    {emailMgmt.recent_days.length ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {emailMgmt.recent_days.map((row) => (
+                          <span
+                            key={row.date}
+                            className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs text-gray-700"
+                          >
+                            {row.date}: <strong className="ml-1">{row.birthday_sent}</strong>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500 mt-1">Chưa có email CMSN nào được ghi nhận.</p>
+                    )}
+                  </div>
+
+                  {emailMgmt.recent_sent?.length ? (
+                    <div className="overflow-x-auto max-h-96 overflow-y-auto rounded-lg border border-gray-100">
                       <table className="min-w-full text-sm">
-                        <thead className="bg-gray-50 text-left text-gray-600">
+                        <thead className="bg-gray-50 text-left text-gray-600 sticky top-0">
                           <tr>
-                            <th className="px-3 py-2 font-semibold">Ngày</th>
-                            <th className="px-3 py-2 font-semibold">Đã gửi</th>
+                            <th className="px-3 py-2 font-semibold">Gửi lúc</th>
+                            <th className="px-3 py-2 font-semibold">Email</th>
+                            <th className="px-3 py-2 font-semibold">Thành viên</th>
+                            <th className="px-3 py-2 font-semibold">Sinh nhật</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                          {emailMgmt.recent_days.map((row) => (
-                            <tr key={row.date}>
-                              <td className="px-3 py-2 text-gray-900">{row.date}</td>
-                              <td className="px-3 py-2 font-medium">{row.birthday_sent}</td>
+                          {emailMgmt.recent_sent.map((row) => (
+                            <tr key={row.id} className="hover:bg-gray-50/80">
+                              <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                                {formatDate(row.sent_at)}
+                              </td>
+                              <td className="px-3 py-2 font-medium text-gray-900">{row.recipient_email}</td>
+                              <td className="px-3 py-2 text-gray-700">
+                                {row.user_name ? (
+                                  <>
+                                    {row.user_name}{' '}
+                                    <span className="text-gray-400 text-xs">#{row.user_id}</span>
+                                  </>
+                                ) : (
+                                  <span className="text-gray-400">#{row.user_id}</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.birthday_date}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </>

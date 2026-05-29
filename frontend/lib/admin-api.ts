@@ -2881,6 +2881,15 @@ export type AdminEmailSendManagement = {
   birthday_sent_all_time: number;
   birthday_send_days_before: number;
   recent_days: Array<{ date: string; birthday_sent: number }>;
+  recent_sent: Array<{
+    id: number;
+    sent_at: string;
+    recipient_email: string;
+    user_id: number;
+    user_name: string | null;
+    birthday_date: string;
+    campaign_key: string;
+  }>;
 };
 
 export const adminEmailManagementAPI = {
