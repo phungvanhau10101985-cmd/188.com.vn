@@ -177,6 +177,20 @@ def init_database_tables():
         if strict:
             raise RuntimeError(f"DEPLOY_STRICT_DB_INIT: database init failed: {e}") from e
 
+
+def _should_run_db_init_on_startup() -> bool:
+    """
+    PM2 restart không nên chạy lại migration (deploy/update-vps.sh đã gọi init_database_tables).
+    Chặn startup → curl /health = 000 cho đến khi migrate xong (có thể vài phút trên bảng products lớn).
+    Bật lại chỉ khi cần: RUN_DB_INIT_ON_STARTUP=1 trong backend/.env
+    """
+    flag = (os.getenv("RUN_DB_INIT_ON_STARTUP") or "").strip().lower()
+    if flag in ("1", "true", "yes", "on"):
+        return True
+    if flag in ("0", "false", "no", "off"):
+        return False
+    return False
+
 # ========== LOAD API ROUTES ==========
 def load_api_routes():
     """Load API routes với error handling"""
@@ -430,7 +444,14 @@ async def startup_event():
     print("🚀 188.com.vn API Server Starting...")
     print("="*60)
 
-    init_database_tables()
+    if _should_run_db_init_on_startup():
+        init_database_tables()
+    else:
+        print(
+            "⏭️  Bỏ qua init DB lúc startup (mặc định). "
+            "Deploy script đã chạy init_database_tables. "
+            "Cần bật lại: RUN_DB_INIT_ON_STARTUP=1 trong backend/.env"
+        )
 
     print("🔍 IMPORT/EXPORT ENDPOINTS (if loaded):")
     for name, path in API_LOADED_ROUTES:

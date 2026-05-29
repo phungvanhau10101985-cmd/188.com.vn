@@ -156,9 +156,9 @@ health_check_local() {
   echo ""
   echo "==> Kiểm tra sức khỏe service (localhost, sau PM2 restart)"
   local api_code="000" web_code
-  # Uvicorn đôi khi cần >3s sau pm2 restart (import SQLAlchemy, DB…). Thử lại tối đa ~20s.
+  # Uvicorn: import app + startup có thể >20s; sau fix RUN_DB_INIT_ON_STARTUP thường <10s.
   local _i
-  for _i in $(seq 1 20); do
+  for _i in $(seq 1 45); do
     api_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 \
       "http://127.0.0.1:${API_INTERNAL_PORT}/health" 2>/dev/null || echo "000")
     if [[ "${api_code}" == "200" ]]; then
