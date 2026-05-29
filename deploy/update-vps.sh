@@ -178,6 +178,13 @@ health_check_local() {
   if [[ "${api_code}" != "200" ]]; then
     echo "    Gợi ý API: đảm bảo backend lắng nghe cổng ${API_INTERNAL_PORT} (SERVER_PORT=${API_INTERNAL_PORT} trong backend/.env hoặc"
     echo "    args uvicorn: --port ${API_INTERNAL_PORT}). Kiểm tra: pm2 show ${PM2_API} | ss -tlnp | grep -E ':${API_INTERNAL_PORT}\\b'"
+    echo ""
+    echo "    --- pm2 show ${PM2_API} (cwd + script args) ---"
+    pm2 show "${PM2_API}" 2>/dev/null | grep -E 'status|cwd|script path|script args|error|restarts' || true
+    echo "    --- cổng đang listen ---"
+    ss -tlnp 2>/dev/null | grep -E ":(${API_INTERNAL_PORT}|8000|8001)\\b" || true
+    echo "    --- ${PM2_API} error log (20 dòng cuối) ---"
+    pm2 logs "${PM2_API}" --lines 20 --nostream 2>/dev/null || true
   fi
   [[ "${DEPLOY_STRICT_HEALTH:-0}" == "1" ]] && return 1
   return 0
