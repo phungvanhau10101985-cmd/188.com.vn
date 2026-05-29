@@ -120,7 +120,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
   const renderNavLinks = () =>
     visibleGroups.map((group) => (
-      <div key={group.title} className="mb-4 last:mb-0">
+      <div key={group.title} className="mb-4 last:mb-2">
         <p className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
           {group.title}
         </p>
@@ -149,7 +149,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
   const sidebarInner = (
     <>
-      <div className="flex items-center justify-between gap-2 border-b border-slate-700 px-3 py-3 lg:px-4">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-700 px-3 py-3 lg:px-4">
         <Link href={adminHomeHref} className="min-w-0 text-lg font-bold text-white truncate">
           188 Admin
         </Link>
@@ -164,7 +164,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           </svg>
         </button>
       </div>
-      <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 py-3 lg:py-2">
+      <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-3 pb-6 lg:py-2 lg:pb-8">
         {hydrated ? renderNavLinks() : <p className="px-3 py-2 text-sm text-slate-400">Đang tải menu...</p>}
       </nav>
       <div className="border-t border-slate-700 p-2 shrink-0 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
@@ -183,7 +183,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   );
 
   return (
-    <div className="flex min-h-[100dvh] flex-col bg-slate-100 lg:flex-row">
+    <div className="flex min-h-[100svh] flex-col bg-slate-100 lg:flex-row lg:items-start">
       {sidebarOpen ? (
         <button
           type="button"
@@ -195,14 +195,14 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
       <aside
         id="admin-sidebar"
-        className={`fixed inset-y-0 left-0 z-50 flex w-[min(18.5rem,calc(100vw-2.5rem))] flex-col bg-slate-800 text-white shadow-xl transition-transform duration-200 ease-out lg:sticky lg:top-0 lg:z-auto lg:h-[100dvh] lg:w-56 lg:max-w-none lg:translate-x-0 lg:shadow-none xl:w-60 ${
+        className={`fixed inset-y-0 left-0 z-50 flex h-[100svh] max-h-[100svh] w-[min(18.5rem,calc(100vw-2.5rem))] flex-col overflow-hidden bg-slate-800 text-white shadow-xl transition-transform duration-200 ease-out lg:sticky lg:top-0 lg:z-auto lg:h-[100svh] lg:max-h-[100svh] lg:w-56 lg:max-w-none lg:translate-x-0 lg:self-start lg:shadow-none xl:w-60 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
         {sidebarInner}
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col min-h-[100dvh] lg:min-h-0">
+      <div className="flex min-h-[100svh] min-w-0 flex-1 flex-col lg:min-h-0">
         <header className="sticky top-0 z-30 flex shrink-0 flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top,0px))] sm:px-4 lg:justify-end lg:px-6 lg:py-2.5">
           <div className="flex w-full items-center gap-2 lg:hidden">
             <button
