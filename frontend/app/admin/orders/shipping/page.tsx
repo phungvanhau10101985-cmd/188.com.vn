@@ -12,6 +12,8 @@ import {
   type EmsCodSettlementRow,
   type EmsFreightSettlementImportResult,
   type EmsFreightSettlementRow,
+  type EmsShippingImportReport,
+  type EmsShippingImportReportRow,
   type EmsShippingImportResult,
   type EmsShippingImportRow,
   type EmsShippingOperationsStats,
@@ -380,6 +382,147 @@ function formatCodCollectedHint(row: EmsShippingImportRow): ReactNode {
   );
 }
 
+const IMPORT_ACTION_LABELS: Record<string, string> = {
+  created: 'Thêm mới',
+  updated: 'Cập nhật',
+};
+
+function EmsImportReportPanel({
+  report,
+  listExpanded,
+  onToggleList,
+}: {
+  report: EmsShippingImportReport;
+  listExpanded: boolean;
+  onToggleList: () => void;
+}) {
+  const listSummary = `${report.order_count.toLocaleString('vi-VN')} đơn · ${formatVnd(report.total_cod_amount)} COD · ${report.created} thêm · ${report.updated} cập nhật`;
+
+  return (
+    <div className="space-y-3 pt-1">
+      <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-4 text-sm text-emerald-950">
+        <p className="font-semibold text-emerald-900 mb-3">Báo cáo import lần này</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div>
+            <div className="text-xs text-emerald-800/80 mb-1">Số đơn import</div>
+            <TimelineCountButton
+              count={report.order_count}
+              onClick={report.order_count > 0 ? onToggleList : undefined}
+              className="text-2xl text-emerald-900"
+            />
+            {report.order_count > 0 ? (
+              <p className="text-xs text-emerald-700/80 mt-0.5">Bấm số để {listExpanded ? 'ẩn' : 'xem'} danh sách</p>
+            ) : null}
+          </div>
+          <div>
+            <div className="text-xs text-emerald-800/80 mb-1">Tổng COD</div>
+            <div className="text-2xl font-semibold tabular-nums text-emerald-900">{formatVnd(report.total_cod_amount)}</div>
+          </div>
+          <div>
+            <div className="text-xs text-emerald-800/80 mb-1">Thêm mới / Cập nhật</div>
+            <div className="text-lg font-semibold tabular-nums">
+              {report.created.toLocaleString('vi-VN')} / {report.updated.toLocaleString('vi-VN')}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-emerald-800/80 mb-1">Đồng bộ đơn shop</div>
+            <div className="text-lg font-semibold tabular-nums">{report.orders_synced.toLocaleString('vi-VN')}</div>
+          </div>
+        </div>
+        {report.skipped_no_reference > 0 ? (
+          <p className="text-xs text-amber-800 mt-3">
+            {report.skipped_no_reference.toLocaleString('vi-VN')} dòng bỏ qua (thiếu mã vận đơn cột A).
+          </p>
+        ) : null}
+      </div>
+
+      {listExpanded && report.rows.length > 0 ? (
+        <CollapsibleListPanel
+          title="Danh sách đơn đã import"
+          summary={listSummary}
+          expanded
+          onToggle={onToggleList}
+        >
+          <div className="overflow-x-auto rounded-xl border border-gray-200">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 text-gray-600">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">#</th>
+                  <th className="px-3 py-2 text-left font-medium">Mã vận đơn</th>
+                  <th className="px-3 py-2 text-left font-medium">Mã đơn shop</th>
+                  <th className="px-3 py-2 text-left font-medium">Tên khách</th>
+                  <th className="px-3 py-2 text-right font-medium">COD</th>
+                  <th className="px-3 py-2 text-left font-medium">Thao tác</th>
+                  <th className="px-3 py-2 text-left font-medium">Đối chiếu</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {report.rows.map((row: EmsShippingImportReportRow) => (
+                  <tr key={rowKey(row)} className="hover:bg-gray-50/80">
+                    <td className="px-3 py-2.5 text-gray-500 tabular-nums">{row.row_number || '—'}</td>
+                    <td className="px-3 py-2.5 font-mono text-gray-900">{row.reference_code || '—'}</td>
+                    <td className="px-3 py-2.5">
+                      {row.order_code ? (
+                        row.order_id ? (
+                          <Link
+                            href={`/admin/orders?q=${encodeURIComponent(row.order_code)}`}
+                            className="text-emerald-700 hover:underline font-medium"
+                          >
+                            {row.order_code}
+                          </Link>
+                        ) : (
+                          <span className="font-medium text-gray-800">{row.order_code}</span>
+                        )
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-gray-700 max-w-[200px] truncate" title={row.recipient_label || ''}>
+                      {row.recipient_label || '—'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatCodAmount(row.cod_amount)}</td>
+                    <td className="px-3 py-2.5">
+                      <span
+                        className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${
+                          row.import_action === 'created'
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                            : 'bg-sky-100 text-sky-800 border-sky-200'
+                        }`}
+                      >
+                        {IMPORT_ACTION_LABELS[row.import_action || ''] || row.import_action || '—'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span
+                        className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${
+                          SYNC_BADGE[row.sync_status] || SYNC_BADGE.parse_error
+                        }`}
+                      >
+                        {SYNC_LABELS[row.sync_status] || row.sync_status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="bg-gray-50 font-semibold text-gray-900">
+                <tr>
+                  <td colSpan={4} className="px-3 py-2.5 text-right">
+                    Tổng ({report.order_count} đơn)
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-emerald-800">
+                    {formatVnd(report.total_cod_amount)}
+                  </td>
+                  <td colSpan={2} />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </CollapsibleListPanel>
+      ) : null}
+    </div>
+  );
+}
+
 function CollapsibleListPanel({
   title,
   summary,
@@ -607,6 +750,7 @@ export default function AdminShippingPage() {
   const [codListExpanded, setCodListExpanded] = useState(false);
   const [freightListExpanded, setFreightListExpanded] = useState(false);
   const [emsTableExpanded, setEmsTableExpanded] = useState(true);
+  const [importReportListExpanded, setImportReportListExpanded] = useState(false);
   const [opsStats, setOpsStats] = useState<EmsShippingOperationsStats | null>(null);
   const [opsStatsLoading, setOpsStatsLoading] = useState(true);
   const [timelineGranularity, setTimelineGranularity] = useState<EmsShippingTimelineGranularity>('month');
@@ -1157,6 +1301,7 @@ export default function AdminShippingPage() {
       setAppliedSearch('');
       setSelectedKeys(new Set());
       setResult(data);
+      setImportReportListExpanded(false);
       setEmsTableExpanded(true);
       if (data.tracking_refresh_job_id) {
         startTrackingPoll(data.tracking_refresh_job_id);
@@ -2002,6 +2147,14 @@ export default function AdminShippingPage() {
           </button>
         </div>
         {file ? <p className="text-xs text-gray-500">Đã chọn: {file.name}</p> : null}
+
+        {result?.import_report && !loading ? (
+          <EmsImportReportPanel
+            report={result.import_report}
+            listExpanded={importReportListExpanded}
+            onToggleList={() => setImportReportListExpanded((v) => !v)}
+          />
+        ) : null}
       </section>
 
       <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
@@ -2402,19 +2555,6 @@ export default function AdminShippingPage() {
           <button type="button" onClick={() => void loadRecords()} className="underline font-medium">
             Thử lại
           </button>
-        </div>
-      ) : null}
-
-      {result?.import_stats ? (
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-lg px-4 py-3 text-sm">
-          Import xong: <strong>{result.import_stats.created}</strong> thêm mới ·{' '}
-          <strong>{result.import_stats.updated}</strong> cập nhật theo mã tham chiếu
-          {result.import_stats.orders_synced > 0
-            ? ` · ${result.import_stats.orders_synced} đơn shop đã đồng bộ gửi EMS`
-            : ''}
-          {result.import_stats.skipped_no_reference > 0
-            ? ` · ${result.import_stats.skipped_no_reference} dòng bỏ qua (thiếu mã tham chiếu)`
-            : ''}
         </div>
       ) : null}
 

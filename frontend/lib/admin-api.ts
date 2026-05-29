@@ -2893,6 +2893,22 @@ export interface EmsShippingListPagination {
   search?: string | null;
 }
 
+export type EmsShippingImportAction = 'created' | 'updated';
+
+export interface EmsShippingImportReportRow extends EmsShippingImportRow {
+  import_action?: EmsShippingImportAction | null;
+}
+
+export interface EmsShippingImportReport {
+  order_count: number;
+  total_cod_amount: number;
+  created: number;
+  updated: number;
+  skipped_no_reference: number;
+  orders_synced: number;
+  rows: EmsShippingImportReportRow[];
+}
+
 export interface EmsShippingImportResult {
   ok: boolean;
   warnings: string[];
@@ -2915,6 +2931,7 @@ export interface EmsShippingImportResult {
     skipped_no_reference: number;
     orders_synced: number;
   } | null;
+  import_report?: EmsShippingImportReport | null;
   tracking_refresh_job_id?: string | null;
   pagination?: EmsShippingListPagination | null;
   rows: EmsShippingImportRow[];

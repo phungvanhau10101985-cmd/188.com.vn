@@ -1121,6 +1121,7 @@ def import_ems_shipment_excel(
 
     created = updated = skipped_no_reference = orders_synced = 0
     imported_record_ids: list[int] = []
+    import_report_rows: list[dict[str, Any]] = []
     for result in results:
         ref = (result.get("reference_code") or "").strip().upper()
         if not ref:
@@ -1139,6 +1140,9 @@ def import_ems_shipment_excel(
             created += 1
         else:
             updated += 1
+        row_dict = _enrich_row_from_live_order(db, _record_to_dict(record))
+        row_dict["import_action"] = "created" if was_created else "updated"
+        import_report_rows.append(row_dict)
 
     db.commit()
 
@@ -1162,6 +1166,15 @@ def import_ems_shipment_excel(
         "updated": updated,
         "skipped_no_reference": skipped_no_reference,
         "orders_synced": orders_synced,
+    }
+    payload["import_report"] = {
+        "order_count": len(import_report_rows),
+        "total_cod_amount": sum(int(r.get("cod_amount") or 0) for r in import_report_rows),
+        "created": created,
+        "updated": updated,
+        "skipped_no_reference": skipped_no_reference,
+        "orders_synced": orders_synced,
+        "rows": import_report_rows,
     }
     payload["tracking_refresh_job_id"] = tracking_refresh_job_id
     return payload

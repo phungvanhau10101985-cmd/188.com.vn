@@ -211,6 +211,22 @@ class EmsShippingImportStatsResponse(BaseModel):
     orders_synced: int = 0
 
 
+class EmsShippingImportReportRowResponse(EmsShippingImportRowResponse):
+    """Dòng trong báo cáo lần import vừa chạy."""
+    import_action: Optional[str] = None  # created | updated
+
+
+class EmsShippingImportReportResponse(BaseModel):
+    """Báo cáo chi tiết lần import file gửi EMS vừa xong."""
+    order_count: int = 0
+    total_cod_amount: int = 0
+    created: int = 0
+    updated: int = 0
+    skipped_no_reference: int = 0
+    orders_synced: int = 0
+    rows: List[EmsShippingImportReportRowResponse] = []
+
+
 class EmsShippingListPaginationResponse(BaseModel):
     skip: int = 0
     limit: int = 50
@@ -224,6 +240,7 @@ class EmsShippingImportResponse(BaseModel):
     warnings: List[str] = []
     summary: EmsShippingImportSummaryResponse
     import_stats: Optional[EmsShippingImportStatsResponse] = None
+    import_report: Optional[EmsShippingImportReportResponse] = None
     tracking_refresh_job_id: Optional[str] = None
     pagination: Optional[EmsShippingListPaginationResponse] = None
     rows: List[EmsShippingImportRowResponse]
