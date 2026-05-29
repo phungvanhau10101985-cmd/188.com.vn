@@ -59,12 +59,15 @@ export async function syncPushSubscription(): Promise<{ ok: boolean; reason?: st
       });
     }
     const j = sub.toJSON();
-    if (!j.endpoint || !j.keys?.p256dh || !j.keys?.auth) return { ok: false, reason: 'bad-sub' };
+    const endpoint = j.endpoint;
+    const p256dh = j.keys?.p256dh;
+    const auth = j.keys?.auth;
+    if (!endpoint || !p256dh || !auth) return { ok: false, reason: 'bad-sub' };
 
     await withPushFetchRetry(() =>
       apiClient.registerPushSubscription({
-        endpoint: j.endpoint,
-        keys: { p256dh: j.keys.p256dh, auth: j.keys.auth },
+        endpoint,
+        keys: { p256dh, auth },
         user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
       }),
     );
