@@ -197,6 +197,28 @@ export function estimateListingVndRounded(
   return Math.ceil(rounded / step) * step;
 }
 
+/** Giá Tệ hiển thị kiểu bảng parse (146,00) — dùng cho overlay import listing. */
+export function formatListingCnyForImportOverlay(cny: number): string {
+  return new Intl.NumberFormat('vi-VN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(cny);
+}
+
+/**
+ * Overlay giá từ cột ~VNĐ / Giá Tệ trên bảng parse — ghi đè giá scrape Vipomall/Hibox sau import.
+ */
+export function buildListingImportPriceOverlay(
+  row: Pick<ParsedTaobaoCardRow, 'price_cny_approx' | 'cny_exchange_multiplier'>,
+  vndPerOneCny: number,
+): { price: number; pro_lower_price: string; pro_high_price: string } | null {
+  const vnd = estimateListingVndRounded(row, vndPerOneCny);
+  const cny = row.price_cny_approx;
+  if (vnd == null || cny == null) return null;
+  const cnyStr = formatListingCnyForImportOverlay(cny);
+  return { price: vnd, pro_lower_price: cnyStr, pro_high_price: cnyStr };
+}
+
 function extractTitle(titleEl: Element | null): string {
   if (!titleEl) return '';
   const clone = titleEl.cloneNode(true) as HTMLElement;

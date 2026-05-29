@@ -1742,6 +1742,9 @@ def listing_import_queue_enqueue(
             "label": it.label,
             "chinese_name": it.chinese_name,
             "shop_name_chinese": it.shop_name_chinese,
+            "price": it.price,
+            "pro_lower_price": it.pro_lower_price,
+            "pro_high_price": it.pro_high_price,
         }
         for it in payload.items
     ]

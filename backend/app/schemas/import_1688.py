@@ -127,6 +127,9 @@ class ListingImportQueueTaskIn(BaseModel):
     label: Optional[str] = None
     chinese_name: Optional[str] = None
     shop_name_chinese: Optional[str] = None
+    price: Optional[float] = Field(None, description="Giá VNĐ (~VNĐ trên bảng parse)")
+    pro_lower_price: Optional[str] = Field(None, description="Giá Tệ (CN¥) từ bảng parse")
+    pro_high_price: Optional[str] = None
 
 
 class ListingImportQueueEnqueueIn(BaseModel):

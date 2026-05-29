@@ -7,6 +7,7 @@ import {
   DEFAULT_VND_PER_CNY_FOR_LISTING_ESTIMATE,
   applyHiboxMntRateToRow,
   estimateListingVndRounded,
+  buildListingImportPriceOverlay,
   extractOfferId1688FromHref,
   parseTaobaoListingHtml,
   rowsToCsv,
@@ -527,6 +528,9 @@ export default function TaobaoCardsParsePage() {
       label?: string;
       chinese_name?: string;
       shop_name_chinese?: string;
+      price?: number;
+      pro_lower_price?: string;
+      pro_high_price?: string;
     }[];
     skipLines: string[];
   } | null>(null);
@@ -1015,18 +1019,22 @@ export default function TaobaoCardsParsePage() {
     }
 
     setPendingEnqueuePayload({
-      items: tasks.map((t) => ({
-        url: t.url,
-        source: t.source,
-        label: t.row.item_id || undefined,
-        chinese_name: (t.row.chinese_name || t.row.title || '').trim() || undefined,
-        shop_name_chinese:
-          (t.row.shop_name_chinese || t.row.shop_name || '').trim() || undefined,
-      })),
+      items: tasks.map((t) => {
+        const priceOverlay = buildListingImportPriceOverlay(t.row, effectiveRate);
+        return {
+          url: t.url,
+          source: t.source,
+          label: t.row.item_id || undefined,
+          chinese_name: (t.row.chinese_name || t.row.title || '').trim() || undefined,
+          shop_name_chinese:
+            (t.row.shop_name_chinese || t.row.shop_name || '').trim() || undefined,
+          ...(priceOverlay ?? {}),
+        };
+      }),
       skipLines,
     });
     setEnqueueChoiceOpen(true);
-  }, [displayRows, selectedRowKeys, showToast, importFetchTarget]);
+  }, [displayRows, selectedRowKeys, showToast, importFetchTarget, effectiveRate]);
 
   const cancelListingEnqueueChoice = useCallback(() => {
     if (enqueueSubmitting) return;

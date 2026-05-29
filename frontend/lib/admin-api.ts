@@ -1479,6 +1479,9 @@ export const adminProductAPI = {
       label?: string | null;
       chinese_name?: string | null;
       shop_name_chinese?: string | null;
+      price?: number | null;
+      pro_lower_price?: string | null;
+      pro_high_price?: string | null;
     }[];
   }) =>
     fetchAdmin<AdminListingImportQueueEnqueueResponse>('/import-1688/listing-queue/enqueue', {

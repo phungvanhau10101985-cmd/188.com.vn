@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import threading
 import uuid
@@ -244,14 +245,33 @@ def _execute_one_import(
         d = draft_crud.get_by_job_id(db2, job_id)
         if not d:
             return {"ok": False, "job_id": job_id, "error": "Không đọc lại draft sau import."}
-        clean_overlay = {
-            k: str(v).strip()
-            for k, v in (overlay or {}).items()
-            if k in {"chinese_name", "shop_name_chinese"} and v is not None and str(v).strip()
-        }
+        from app.services.import_link_excel_batch import merge_import_excel_overlay_into_product_data
+
+        overlay_keys = (
+            "chinese_name",
+            "shop_name_chinese",
+            "price",
+            "pro_lower_price",
+            "pro_high_price",
+        )
+        clean_overlay: Dict[str, Any] = {}
+        for k in overlay_keys:
+            v = (overlay or {}).get(k)
+            if v is None:
+                continue
+            if k == "price":
+                try:
+                    num = float(v)
+                except (TypeError, ValueError):
+                    continue
+                if not math.isfinite(num) or num <= 0:
+                    continue
+                clean_overlay[k] = num
+            elif str(v).strip():
+                clean_overlay[k] = str(v).strip()
         if clean_overlay:
             pdata = dict(d.product_data or {})
-            pdata.update(clean_overlay)
+            merge_import_excel_overlay_into_product_data(pdata, clean_overlay)
             d.product_data = pdata
             db2.add(d)
             db2.commit()
@@ -306,8 +326,15 @@ def _worker_loop(token: str) -> None:
             source = pending.get("source")
             label = pending.get("label") or ""
             overlay = {
-                "chinese_name": pending.get("chinese_name"),
-                "shop_name_chinese": pending.get("shop_name_chinese"),
+                k: pending.get(k)
+                for k in (
+                    "chinese_name",
+                    "shop_name_chinese",
+                    "price",
+                    "pro_lower_price",
+                    "pro_high_price",
+                )
+                if pending.get(k) is not None
             }
 
         try:
@@ -430,6 +457,17 @@ def enqueue(
                     continue
                 chinese_name = str(raw.get("chinese_name") or "").strip() or None
                 shop_name_chinese = str(raw.get("shop_name_chinese") or "").strip() or None
+                price_raw = raw.get("price")
+                price: Optional[float] = None
+                if price_raw is not None:
+                    try:
+                        p = float(price_raw)
+                        if math.isfinite(p) and p > 0:
+                            price = p
+                    except (TypeError, ValueError):
+                        pass
+                pro_lower_price = str(raw.get("pro_lower_price") or "").strip() or None
+                pro_high_price = str(raw.get("pro_high_price") or "").strip() or None
                 q["items"].append(
                     {
                         "id": uuid.uuid4().hex,
@@ -438,6 +476,9 @@ def enqueue(
                         "label": label,
                         "chinese_name": chinese_name,
                         "shop_name_chinese": shop_name_chinese,
+                        "price": price,
+                        "pro_lower_price": pro_lower_price,
+                        "pro_high_price": pro_high_price,
                         "state": "pending",
                         "job_id": None,
                         "draft_id": None,
