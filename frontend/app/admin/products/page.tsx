@@ -1359,7 +1359,15 @@ export default function AdminProductsPage() {
         showToast('ok', 'Đang hủy sau khi xong bước hiện tại');
       }
     } catch (err) {
-      showToast('err', err instanceof Error ? err.message : 'Không hủy được job', 8000);
+      const msg = err instanceof Error ? err.message : 'Không hủy được job';
+      const is404 = /\b404\b/i.test(msg) || /Không tìm thấy job/i.test(msg);
+      if (is404) {
+        removeLocalizationJobFromUi(jobId);
+        setLocalizationForceCancelTarget(null);
+        showToast('ok', 'Job không còn trên server — đã gỡ khỏi tiến trình', 6000);
+      } else {
+        showToast('err', msg, 8000);
+      }
     } finally {
       setLocalizationCancelBusy(false);
     }

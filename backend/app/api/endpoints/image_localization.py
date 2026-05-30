@@ -267,16 +267,17 @@ def _job_get(job_id: str) -> Dict[str, Any]:
     with _jobs_lock:
         mem = dict(_jobs.get(job_id) or {})
 
-    if not db_data and not mem:
+    if not db_data:
+        # DB không còn dòng — snapshot RAM là job ma (đã xóa/hủy trực tiếp trên DB).
+        with _jobs_lock:
+            _jobs.pop(job_id, None)
         return {}
 
-    db_st = (db_data.get("status") or "").strip().lower() if db_data else ""
-    if db_data and db_st in _TERMINAL_JOB_STATUSES:
+    db_st = (db_data.get("status") or "").strip().lower()
+    if db_st in _TERMINAL_JOB_STATUSES:
         merged = {**db_data}
-    elif db_data:
-        merged = {**mem, **db_data}
     else:
-        merged = mem
+        merged = {**mem, **db_data}
     merged["job_id"] = job_id
     with _jobs_lock:
         _jobs[job_id] = merged
@@ -1001,13 +1002,17 @@ def list_jobs(
         if not jid or jid in seen:
             continue
         seen.add(jid)
-        items.append(_job_get(jid))
+        got = _job_get(jid)
+        if got:
+            items.append(got)
 
     for row in rows:
         if row.job_id in seen:
             continue
         seen.add(row.job_id)
-        items.append(_job_get(row.job_id))
+        got = _job_get(row.job_id)
+        if got:
+            items.append(got)
 
     items.sort(key=lambda j: j.get("created_at") or "", reverse=True)
     items.sort(
