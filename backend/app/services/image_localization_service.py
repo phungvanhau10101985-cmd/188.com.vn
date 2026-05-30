@@ -40,7 +40,14 @@ def _gemini_pw_dispatch(fn: Callable[[], Any], *, timeout_sec: Optional[float] =
         if _GEMINI_PW_EXECUTOR is None:
             _GEMINI_PW_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gemini_pw")
     fut = _GEMINI_PW_EXECUTOR.submit(fn)
-    return fut.result(timeout=to)
+    try:
+        return fut.result(timeout=to)
+    except Exception:
+        try:
+            fut.cancel()
+        except Exception:
+            pass
+        raise
 
 
 def _normalize_playwright_cookie(cookie: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -1796,20 +1803,42 @@ class GeminiWebImageAdapter:
             return
 
         def _do() -> None:
-            try:
-                if self._context is not None:
-                    self._context.close()
-            finally:
-                self._context = None
-                self._page = None
-                if self._playwright is not None:
-                    self._playwright.stop()
-                    self._playwright = None
+            self._close_playwright_sync()
 
         try:
             _gemini_pw_dispatch(_do, timeout_sec=120)
         except Exception as exc:
             logger.warning("GeminiWebImageAdapter.close: %s", exc)
+
+    def force_abort(self) -> None:
+        """Đóng Playwright ngay từ thread bất kỳ (hủy ngay job)."""
+        try:
+            self._close_playwright_sync()
+        except Exception as exc:
+            logger.warning("GeminiWebImageAdapter.force_abort: %s", exc)
+
+    def _close_playwright_sync(self) -> None:
+        page = self._page
+        context = self._context
+        playwright = self._playwright
+        self._page = None
+        self._context = None
+        self._playwright = None
+        if page is not None:
+            try:
+                page.close()
+            except Exception:
+                pass
+        if context is not None:
+            try:
+                context.close()
+            except Exception:
+                pass
+        if playwright is not None:
+            try:
+                playwright.stop()
+            except Exception:
+                pass
 
 
 class _LegacySheetsAdapter:
@@ -2338,9 +2367,32 @@ class ProductImageLocalizationService:
             inference_tier=self.inference_tier,
             playwright_headless=playwright_headless,
         )
+        self._abort_requested = False
 
     def close(self) -> None:
         self.gemini.close()
+
+    def force_abort(self) -> None:
+        """Hủy ngay: đóng HTTP session + Playwright (nếu có) đang xử lý SP dở."""
+        self._abort_requested = True
+        try:
+            self.session.close()
+        except Exception:
+            pass
+        try:
+            gem = self.gemini
+            if hasattr(gem, "force_abort"):
+                gem.force_abort()
+            else:
+                gem.close()
+        except Exception:
+            pass
+
+    def _abort_if_requested(self, should_cancel=None) -> None:
+        if getattr(self, "_abort_requested", False):
+            raise ImageLocalizationError("Job đã bị hủy")
+        if should_cancel and should_cancel():
+            raise ImageLocalizationError("Job đã bị hủy")
 
     def _allows_ai_image(self, product: Product) -> bool:
         return resolve_allows_ai_image_models(product, job_override=self.allow_ai_image_models_override)
@@ -2377,8 +2429,8 @@ class ProductImageLocalizationService:
         return True
 
     def process_product(self, db: Session, product: Product, should_cancel=None) -> Dict[str, Any]:
-        if should_cancel and should_cancel():
-            raise ImageLocalizationError("Job đã bị hủy")
+        self._should_cancel = should_cancel
+        self._abort_if_requested(should_cancel)
 
         if not self._claim_product_for_processing(db, product):
             current_status = (product.image_localization_status or "").strip() or "pending"
@@ -2466,12 +2518,14 @@ class ProductImageLocalizationService:
         failed = [r for r in results.values() if r.status == "error"]
         changed = [r for r in results.values() if r.final_url and r.final_url != r.original_url]
         if failed and not changed:
+            self._abort_if_requested(should_cancel)
             product.image_localization_status = "failed"
             product.image_localization_error = failed[0].message[:2000]
             db.commit()
             return {"status": "failed", "processed_images": 0, "message": product.image_localization_error}
 
         if not self.dry_run:
+            self._abort_if_requested(should_cancel)
             self._apply_results(product, results)
             self._stash_originals(product, refs, results)
             product.image_localization_status = "localized"

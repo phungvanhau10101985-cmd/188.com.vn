@@ -16,6 +16,11 @@ from app.crud import image_localization_job as image_loc_job_crud
 from app.db.session import SessionLocal, get_db
 from app.models.admin import AdminUser
 from app.models.product import Product
+from app.services.image_localization_job_abort import (
+    force_abort_running_service,
+    register_running_service,
+    unregister_running_service,
+)
 from app.services.image_localization_job_runtime import (
     payload_from_stored,
     start_job_thread,
@@ -477,6 +482,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             allow_ai_image_models=payload.allow_ai_image_models,
             playwright_headless=payload.playwright_headless,
         )
+        register_running_service(job_id, service)
         consecutive_product_failures = 0
 
         def should_cancel() -> bool:
@@ -573,6 +579,10 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     done += 1
                     consecutive_product_failures = 0
             except Exception as exc:
+                if _job_is_cancelled(job_id):
+                    db.rollback()
+                    _reset_product_after_cancel(db, product)
+                    return
                 if should_cancel() or _is_job_cancel_exception(exc):
                     db.rollback()
                     _reset_product_after_cancel(db, product)
@@ -697,6 +707,10 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                 current_product_id=None,
             )
     finally:
+        try:
+            unregister_running_service(job_id)
+        except Exception:
+            pass
         try:
             if "service" in locals():
                 service.close()
@@ -961,7 +975,7 @@ def cancel_job(
     job_id: str,
     mode: Literal["graceful", "force"] = Query(
         "graceful",
-        description="graceful = chờ xong SP/ảnh hiện tại; force = đánh dấu hủy ngay trên server.",
+        description="graceful = chờ xong SP/ảnh hiện tại; force = dừng ngay (đóng Playwright/session, SP dở → pending).",
     ),
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("products")),
@@ -974,12 +988,17 @@ def cancel_job(
 
     if mode == "force":
         current_pid = (job.get("current_product_id") or "").strip()
+        aborted_worker = force_abort_running_service(job_id)
         if current_pid:
             _reset_product_processing_by_product_id(db, current_pid)
         _finalize_job_cancelled_from_snapshot(
             job_id,
             job,
-            message="Đã hủy ngay — không chờ bước đang chạy (SP hiện tại có thể vẫn kết thúc nền).",
+            message=(
+                "Đã hủy ngay — đã dừng sản phẩm đang xử lý."
+                if aborted_worker
+                else "Đã hủy ngay — job đã dừng (worker không còn trên server)."
+            ),
         )
         return _job_get(job_id)
 

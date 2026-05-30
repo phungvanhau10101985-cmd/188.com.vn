@@ -4111,12 +4111,12 @@ export default function AdminProductsPage() {
                   <h3 id="localization-force-cancel-title" className="text-base font-semibold text-gray-900">
                     Hủy ngay job bản địa hóa?
                   </h3>
-                  <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                    <p className="mt-2 text-sm text-gray-600 leading-relaxed">
                     Job{' '}
                     <code className="rounded bg-gray-100 px-1 py-0.5 text-xs">{localizationForceCancelTarget}</code>{' '}
-                    sẽ chuyển sang <strong className="font-medium text-gray-800">cancelled</strong> ngay trên server.
-                    Sản phẩm đang xử lý có thể vẫn chạy nền thêm vài phút (Gemini/OCR) nhưng sẽ không xử lý SP kế
-                    tiếp.
+                    sẽ chuyển sang <strong className="font-medium text-gray-800">cancelled</strong> ngay và{' '}
+                    <strong className="font-medium text-gray-800">dừng sản phẩm đang xử lý dở</strong> (đóng
+                    Playwright/Gemini nếu đang chạy). Không xử lý sản phẩm kế tiếp.
                   </p>
                   <div className="mt-5 flex flex-wrap justify-end gap-2">
                     <button
