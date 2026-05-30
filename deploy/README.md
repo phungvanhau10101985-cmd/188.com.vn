@@ -66,6 +66,34 @@ Lệnh không dùng `pm2 stop all` (tránh làm nanoai). Đặt biến `PM2_API_
 
 - Nếu vẫn lỗi: `pm2 logs 188-api --lines 80` (lỗi import DB, thiếu `.env`, v.v.).
 
+### Health check Web trả `000` (API vẫn 200)
+
+- **`000` hoặc `000000`** = không mở được TCP tới Next (process chưa listen hoặc crash loop), không phải HTTP 502.
+- **`000000`** trong log deploy cũ: script health check chỉ thử Web **một lần** ngay sau restart (3s) và có thể in đúp `000` khi curl thất bại — bản `update-vps.sh` mới đã chờ tối đa 60s và sửa lỗi in mã.
+- **Nguyên nhân hay gặp:**
+  1. **`frontend/.next` thiếu** sau build lỗi hoặc deploy bị ngắt.
+  2. **PM2 còn cấu hình cũ** (`bash -c … exec npm run start`) — `pm2 restart` **không** đổi script; cần `pm2 delete 188-web` rồi `pm2 start deploy/ecosystem.config.cjs --only 188-web`.
+  3. **Cổng 3001 bị chiếm bởi `next-server` mồ côi** (PM2 `errored` nhưng `ss -tlnp | grep 3001` vẫn thấy process) → PM2 không bind được, restart loop. Dọn: `fuser -k 3001/tcp` hoặc `bash deploy/fix-web-health.sh`.
+  4. Next chưa kịp bind sau restart (chờ thêm hoặc chạy lại health).
+- **Sửa nhanh trên VPS:**
+
+```bash
+cd /var/www/188.com.vn
+bash deploy/fix-web-health.sh
+```
+
+- Kiểm tra tay:
+
+```bash
+pm2 list
+pm2 show 188-web
+ss -tlnp | grep 3001
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3001/
+pm2 logs 188-web --lines 80
+```
+
+- Nếu thiếu `.next`: `cd frontend && npm ci && npm run build`, rồi `pm2 restart 188-web --update-env`.
+
 ### Admin / API báo **504 Gateway Timeout**
 
 - **Nguyên nhân hay gặp:** Nginx `proxy_read_timeout` mặc định (~60s) nhỏ hơn thời gian FastAPI chờ **PostgreSQL** (pool hoặc query chậm) → Nginx trả 504 trước khi API xong.

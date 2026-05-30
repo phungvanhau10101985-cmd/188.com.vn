@@ -152,22 +152,71 @@ if [[ "${DEPLOY_SKIP_TYPECHECK:-0}" == "1" ]]; then
   echo "==> Lưu ý: DEPLOY_SKIP_TYPECHECK=1 không tự tắt TS — cần ignoreBuildErrors trong next.config nếu muốn bỏ qua lỗi type."
 fi
 
+curl_http_code() {
+  local url="$1"
+  local code=""
+  code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 10 "$url" 2>/dev/null) || true
+  if [[ -z "${code}" ]]; then
+    echo "000"
+  else
+    echo "${code}"
+  fi
+}
+
+kill_listeners_on_port() {
+  local port="$1"
+  if command -v fuser >/dev/null 2>&1; then
+    fuser -k "${port}/tcp" 2>/dev/null || true
+    sleep 1
+    return 0
+  fi
+  local line pid
+  while IFS= read -r line; do
+    pid=$(echo "$line" | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1)
+    [[ -z "${pid}" ]] && continue
+    kill "${pid}" 2>/dev/null || kill -9 "${pid}" 2>/dev/null || true
+  done < <(ss -tlnp 2>/dev/null | grep ":${port}\\b" || true)
+  sleep 1
+}
+
+pm2_recreate_web_from_ecosystem() {
+  echo "==> PM2: tạo lại ${PM2_WEB} từ deploy/ecosystem.config.cjs"
+  pm2 stop "${PM2_WEB}" 2>/dev/null || true
+  pm2 delete "${PM2_WEB}" 2>/dev/null || true
+  kill_listeners_on_port "${WEB_INTERNAL_PORT}"
+  pm2 start "${PROJECT_ROOT}/deploy/ecosystem.config.cjs" --only "${PM2_WEB}"
+}
+
+pm2_web_needs_recreate() {
+  if ! pm2 describe "${PM2_WEB}" &>/dev/null; then
+    return 0
+  fi
+  if pm2 describe "${PM2_WEB}" 2>/dev/null | grep -qE 'status.*errored|exec npm run start'; then
+    return 0
+  fi
+  return 1
+}
+
 health_check_local() {
   echo ""
   echo "==> Kiểm tra sức khỏe service (localhost, sau PM2 restart)"
-  local api_code="000" web_code
-  # Uvicorn: import app + startup có thể >20s; sau fix RUN_DB_INIT_ON_STARTUP thường <10s.
+  local api_code="000" web_code="000"
   local _i
   for _i in $(seq 1 45); do
-    api_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 \
-      "http://127.0.0.1:${API_INTERNAL_PORT}/health" 2>/dev/null || echo "000")
+    api_code=$(curl_http_code "http://127.0.0.1:${API_INTERNAL_PORT}/health")
     if [[ "${api_code}" == "200" ]]; then
       break
     fi
     sleep 1
   done
-  web_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 \
-    "http://127.0.0.1:${WEB_INTERNAL_PORT}/" 2>/dev/null || echo "000")
+  # Next.js cold start sau build/restart có thể >10s — chờ tương tự API.
+  for _i in $(seq 1 60); do
+    web_code=$(curl_http_code "http://127.0.0.1:${WEB_INTERNAL_PORT}/")
+    if [[ "${web_code}" == "200" ]]; then
+      break
+    fi
+    sleep 1
+  done
   echo "    GET http://127.0.0.1:${API_INTERNAL_PORT}/health  → ${api_code}"
   echo "    GET http://127.0.0.1:${WEB_INTERNAL_PORT}/           → ${web_code}"
   if [[ "${api_code}" == "200" && "${web_code}" == "200" ]]; then
@@ -186,6 +235,20 @@ health_check_local() {
     echo "    --- ${PM2_API} error log (20 dòng cuối) ---"
     pm2 logs "${PM2_API}" --lines 20 --nostream 2>/dev/null || true
   fi
+  if [[ "${web_code}" != "200" ]]; then
+    echo "    Gợi ý Web: Next cần frontend/.next sau build; cổng ${WEB_INTERNAL_PORT} (PORT trong PM2)."
+    echo "    Sửa nhanh: bash deploy/fix-web-health.sh"
+    echo ""
+    echo "    --- pm2 show ${PM2_WEB} ---"
+    pm2 show "${PM2_WEB}" 2>/dev/null | grep -E 'status|cwd|script path|script args|error|restarts' || true
+    echo "    --- cổng đang listen ---"
+    ss -tlnp 2>/dev/null | grep -E ":(${WEB_INTERNAL_PORT}|3000|3001)\\b" || true
+    if [[ ! -d "${FRONTEND}/.next" ]]; then
+      echo "    ❌ Thiếu ${FRONTEND}/.next — chạy lại: cd frontend && npm run build"
+    fi
+    echo "    --- ${PM2_WEB} error log (40 dòng cuối) ---"
+    pm2 logs "${PM2_WEB}" --lines 40 --nostream 2>/dev/null || true
+  fi
   [[ "${DEPLOY_STRICT_HEALTH:-0}" == "1" ]] && return 1
   return 0
 }
@@ -199,13 +262,22 @@ fi
 
 echo ""
 echo "==> PM2: khởi động lại ${PM2_API} và ${PM2_WEB}"
-if pm2 describe "${PM2_API}" &>/dev/null && pm2 describe "${PM2_WEB}" &>/dev/null; then
-  pm2 restart "${PM2_API}" "${PM2_WEB}"
-  pm2 save || true
-  sleep 3
+if pm2 describe "${PM2_API}" &>/dev/null; then
+  pm2 restart "${PM2_API}" --update-env
 else
-  echo "⚠️  Chưa có process ${PM2_API} / ${PM2_WEB} — bỏ qua restart (tạo lần đầu: xem HUONG_DAN_DEPLOY.md)."
+  echo "⚠️  Chưa có ${PM2_API} — tạo từ ecosystem: pm2 start deploy/ecosystem.config.cjs --only ${PM2_API}"
 fi
+
+if pm2_web_needs_recreate; then
+  pm2_recreate_web_from_ecosystem
+elif pm2 describe "${PM2_WEB}" &>/dev/null; then
+  pm2 restart "${PM2_WEB}" --update-env
+else
+  pm2_recreate_web_from_ecosystem
+fi
+
+pm2 save || true
+sleep 5
 
 health_check_local
 
