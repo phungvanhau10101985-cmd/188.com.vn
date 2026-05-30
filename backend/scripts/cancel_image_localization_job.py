@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from sqlalchemy import text
+
 from app.db.session import SessionLocal
 from app.crud import image_localization_job as job_crud
 from app.models.product import Product
@@ -33,6 +35,29 @@ def _pkill_imgloc(job_id: str) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+
+
+def _force_cancel_sql(db, job_id: str) -> bool:
+    """UPDATE trực tiếp — không bị worker ghi đè khi API đã stop."""
+    now = datetime.now(timezone.utc)
+    res = db.execute(
+        text(
+            """
+            UPDATE image_localization_jobs
+            SET status = 'cancelled',
+                phase = 'cancelled',
+                cancel_requested = TRUE,
+                current_product_id = NULL,
+                message = 'Hủy cứng (scripts/cancel_image_localization_job.py)',
+                finished_at = :finished_at,
+                updated_at = :finished_at
+            WHERE job_id = :job_id
+            """
+        ),
+        {"job_id": job_id, "finished_at": now},
+    )
+    db.commit()
+    return (res.rowcount or 0) > 0
 
 
 def cancel_one(db, job_id: str, *, delete_row: bool = False) -> None:
@@ -67,31 +92,21 @@ def cancel_one(db, job_id: str, *, delete_row: bool = False) -> None:
     else:
         n = 0
 
-    now = datetime.now(timezone.utc)
-    job_crud.patch_job(
-        db,
-        jid,
-        {
-            "status": "cancelled",
-            "phase": "cancelled",
-            "cancel_requested": True,
-            "current_product_id": None,
-            "message": "Hủy cứng bằng scripts/cancel_image_localization_job.py",
-            "finished_at": now,
-        },
-    )
-    db.commit()
+    if not _force_cancel_sql(db, jid):
+        print(f"  ❌ UPDATE SQL không đổi dòng nào: {jid}")
+        return
+
     _pkill_imgloc(jid)
+    row2 = job_crud.get_job(db, jid)
+    print(f"  Sau SQL: status={row2.status if row2 else None!r}")
 
     if delete_row:
-        row2 = job_crud.get_job(db, jid)
         if row2:
             db.delete(row2)
             db.commit()
         print(f"  ✅ Đã xóa dòng job khỏi DB: {jid}")
     else:
-        row2 = job_crud.get_job(db, jid)
-        print(f"  Sau: status={row2.status if row2 else None!r} — chạy: pm2 restart 188-api")
+        print(f"  ✅ Xong — chạy: pm2 start 188-api")
 
 
 def cancel_all_active(db) -> None:
@@ -140,7 +155,7 @@ def main() -> None:
     finally:
         db.close()
 
-    print("\n⚠️  Bắt buộc: pm2 restart 188-api  (dừng thread/process worker cũ)")
+    print("\n⚠️  Bắt buộc: pm2 start 188-api  (chỉ start sau khi DB đã cancelled)")
     print("    Sau đó F5 trang admin → Xóa card job nếu còn hiện.")
 
 

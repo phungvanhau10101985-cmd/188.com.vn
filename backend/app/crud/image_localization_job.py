@@ -29,6 +29,10 @@ def patch_job(db: Session, job_id: str, updates: Dict[str, Any]) -> Optional[Ima
     row = get_job(db, job_id)
     if not row:
         return None
+    new_status = (str(updates.get("status") or "").strip().lower() if "status" in updates else "")
+    existing = (row.status or "").strip().lower()
+    if existing in _TERMINAL and new_status and new_status not in _TERMINAL:
+        updates = {k: v for k, v in updates.items() if k not in ("status", "phase")}
     for key, val in updates.items():
         if hasattr(row, key):
             setattr(row, key, val)
@@ -194,7 +198,10 @@ def sync_dict_to_row(db: Session, job_id: str, job: Dict[str, Any]) -> None:
     if status:
         if existing in _TERMINAL and new_st and new_st not in _TERMINAL:
             status = None
-        else:
+        elif row.cancel_requested and new_st in _RESUMABLE:
+            # Admin/worker đã yêu cầu hủy — không ghi đè lại queued/running từ snapshot cũ.
+            status = None
+        if status:
             row.status = str(status)
     for field in (
         "phase",
