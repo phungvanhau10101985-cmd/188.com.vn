@@ -633,6 +633,7 @@ export interface AdminImageLocalizationJob {
   playwright_headless_requested?: boolean | null;
   playwright_headless_effective?: boolean;
   current_product_id?: string | null;
+  cancel_requested?: boolean;
   /** Snapshot id trong lượt chạy (backend có thể cắt nếu batch rất lớn — xem job_queue_truncated). */
   job_queue_product_ids?: string[];
   job_queue_truncated?: boolean;

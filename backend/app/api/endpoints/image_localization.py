@@ -280,6 +280,53 @@ def _create_db_job_row(
         db.close()
 
 
+def _finalize_job_cancelled(
+    job_id: str,
+    *,
+    done: int,
+    failed: int,
+    skipped: int,
+    total: int,
+    processed_ids: List[str],
+    results: List[Dict[str, Any]],
+    skipped_reports: List[Dict[str, Any]],
+) -> None:
+    current, percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
+    _job_update(
+        job_id,
+        status="cancelled",
+        phase="cancelled",
+        current=current,
+        percent=percent,
+        done=done,
+        failed=failed,
+        skipped=skipped,
+        message="Đã hủy job bản địa hóa ảnh.",
+        finished_at=datetime.now(timezone.utc).isoformat(),
+        current_product_id=None,
+        cancel_requested=True,
+        skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
+        recent_results=results[-100:],
+        processed_product_ids=processed_ids,
+    )
+
+
+def _is_job_cancel_exception(exc: BaseException) -> bool:
+    if isinstance(exc, ImageLocalizationError):
+        return "hủy" in str(exc).lower()
+    return False
+
+
+def _reset_product_after_cancel(db: Session, product: Product) -> None:
+    fresh = db.query(Product).filter(Product.id == product.id).first()
+    if fresh is None:
+        return
+    if (fresh.image_localization_status or "").strip() == "processing":
+        fresh.image_localization_status = "pending"
+        fresh.image_localization_error = None
+        db.commit()
+
+
 def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: bool = False) -> None:
     db = SessionLocal()
     processed_ids: List[str] = []
@@ -400,22 +447,15 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
 
         for product in products:
             if should_cancel():
-                current, percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
-                _job_update(
+                _finalize_job_cancelled(
                     job_id,
-                    status="cancelled",
-                    phase="cancelled",
-                    current=current,
-                    percent=percent,
                     done=done,
                     failed=failed,
                     skipped=skipped,
-                    message="Đã hủy job bản địa hóa ảnh.",
-                    finished_at=datetime.now(timezone.utc).isoformat(),
-                    current_product_id=None,
-                    skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
-                    recent_results=results[-100:],
-                    processed_product_ids=processed_ids,
+                    total=total,
+                    processed_ids=processed_ids,
+                    results=results,
+                    skipped_reports=skipped_reports,
                 )
                 return
             current, percent = _job_progress(
@@ -488,6 +528,20 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     done += 1
                     consecutive_product_failures = 0
             except Exception as exc:
+                if should_cancel() or _is_job_cancel_exception(exc):
+                    db.rollback()
+                    _reset_product_after_cancel(db, product)
+                    _finalize_job_cancelled(
+                        job_id,
+                        done=done,
+                        failed=failed,
+                        skipped=skipped,
+                        total=total,
+                        processed_ids=processed_ids,
+                        results=results,
+                        skipped_reports=skipped_reports,
+                    )
+                    return
                 failed += 1
                 db.rollback()
                 fresh = db.query(Product).filter(Product.id == product.id).first()

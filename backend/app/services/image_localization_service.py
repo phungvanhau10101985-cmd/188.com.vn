@@ -1947,6 +1947,8 @@ class LegacyImageLocalizationPipeline:
 
         batches: Optional[Dict[str, Any]] = None
         try:
+            if should_cancel and should_cancel():
+                raise ImageLocalizationError("Job đã bị hủy")
             batches = merger.merge_all_images_in_batches(urls, [], [], 0, self.sheets)
             for url, info in (batches.get("column_mapping") or {}).items():
                 status = info.get("status")

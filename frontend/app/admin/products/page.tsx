@@ -4049,13 +4049,19 @@ export default function AdminProductsPage() {
 
                       {(job.status === 'running' || job.status === 'queued') && job.job_id ? (
                         <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-gray-100 pt-3">
+                          {job.cancel_requested ? (
+                            <p className="mr-auto text-xs text-amber-800">
+                              Đang hủy — chờ xong ảnh / bước hiện tại của sản phẩm đang xử lý…
+                            </p>
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => void handleCancelImageLocalization(job.job_id)}
-                            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1"
+                            disabled={Boolean(job.cancel_requested)}
+                            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
                             aria-label={`Hủy job ${job.job_id} sau ảnh đang xử lý`}
                           >
-                            Hủy job này sau ảnh hiện tại
+                            {job.cancel_requested ? 'Đang hủy…' : 'Hủy job này sau ảnh hiện tại'}
                           </button>
                         </div>
                       ) : null}
