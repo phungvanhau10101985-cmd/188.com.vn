@@ -103,7 +103,14 @@ deploy_git_sync() {
 if [[ "${DEPLOY_SKIP_GIT:-0}" == "1" ]]; then
   echo "==> Git: DEPLOY_SKIP_GIT=1 — bỏ qua (đã git pull / sync tay trước khi chạy script)."
 else
-  deploy_git_sync
+  if ! deploy_git_sync; then
+    echo ""
+    echo "❌ Git sync thất bại (vd. unmerged files / conflict)."
+    echo "   Khôi phục site không cần pull: DEPLOY_SKIP_GIT=1 bash ./deploy/update-vps.sh ${BRANCH}"
+    echo "   Ép khớp GitHub (xóa chỉnh sửa local trên VPS): DEPLOY_GIT_SYNC=reset-hard bash ./deploy/update-vps.sh ${BRANCH}"
+    echo "   Xem file conflict: git status"
+    exit 1
+  fi
 fi
 
 echo "==> Backend: venv + pip"
