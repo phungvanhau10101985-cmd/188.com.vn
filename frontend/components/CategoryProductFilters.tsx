@@ -268,19 +268,19 @@ function CategoryProductFiltersInner({
             <option value="views_desc">Xem nhiều</option>
           </select>
         </label>
-      </div>
 
-      {hasActiveFilters ? (
-        <div className={compact ? "flex justify-end leading-none" : "flex justify-end"}>
-          <button
-            type="button"
-            onClick={() => router.push(basePath, { scroll: false })}
-            className={compact ? "text-xs font-medium text-[#ea580c] hover:underline" : "rounded-full bg-orange-50 px-3 py-1.5 text-xs font-medium text-[#ea580c] hover:underline sm:bg-transparent sm:px-0 sm:py-0 sm:text-sm"}
-          >
-            Xóa bộ lọc
-          </button>
-        </div>
-      ) : null}
+        {hasActiveFilters ? (
+          <div className={compact ? "flex items-end leading-none" : "flex items-end"}>
+            <button
+              type="button"
+              onClick={() => router.push(basePath, { scroll: false })}
+              className={compact ? "h-8 shrink-0 whitespace-nowrap px-1 text-xs font-medium text-[#ea580c] hover:underline sm:px-2" : "h-10 shrink-0 whitespace-nowrap rounded-full bg-orange-50 px-3 text-xs font-medium text-[#ea580c] hover:underline sm:bg-transparent sm:px-0 sm:text-sm"}
+            >
+              Xóa bộ lọc
+            </button>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

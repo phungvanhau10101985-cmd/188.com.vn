@@ -3,7 +3,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -47,6 +47,82 @@ IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES = 3
 # Giới hạn độ dài danh sách trả về client (tránh JSON job quá lớn).
 _JOB_QUEUE_IDS_MAX = 400
 _JOB_SKIPPED_REPORT_MAX = 400
+
+
+def _unique_product_ids(ids: Optional[Iterable[str]]) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    for raw in ids or []:
+        pid = str(raw).strip()
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        out.append(pid)
+    return out
+
+
+def _completed_product_count(done: int, failed: int, skipped: int) -> int:
+    return int(done or 0) + int(failed or 0) + int(skipped or 0)
+
+
+def _job_progress(
+    *,
+    done: int,
+    failed: int,
+    skipped: int,
+    total: int,
+    in_flight: bool = False,
+) -> tuple[int, float]:
+    completed = _completed_product_count(done, failed, skipped)
+    current = completed + (1 if in_flight else 0)
+    if total and total > 0:
+        current = min(current, total)
+        percent = round(100.0 * min(completed, total) / total, 1)
+    else:
+        percent = 0.0
+    return current, percent
+
+
+def _mark_processed_product(processed_ids: List[str], processed_set: set[str], product_id: str) -> bool:
+    pid = str(product_id).strip()
+    if not pid or pid in processed_set:
+        return False
+    processed_set.add(pid)
+    processed_ids.append(pid)
+    return True
+
+
+def _account_localized_queue_skips(
+    db: Session,
+    queue_ids: List[str],
+    processed_ids: List[str],
+    processed_set: set[str],
+    skipped: int,
+    skipped_reports: List[Dict[str, Any]],
+) -> int:
+    """SP trong hàng đợi đã localized (không force) → bỏ qua và cộng tiến độ."""
+    remaining = [pid for pid in _unique_product_ids(queue_ids) if pid not in processed_set]
+    if not remaining:
+        return skipped
+    rows = (
+        db.query(Product.product_id)
+        .filter(
+            Product.product_id.in_(remaining),
+            Product.image_localization_status == "localized",
+        )
+        .all()
+    )
+    for (pid,) in rows:
+        if not _mark_processed_product(processed_ids, processed_set, pid):
+            continue
+        skipped += 1
+        skipped_reports.append(
+            {
+                "product_id": pid,
+                "message": "Bỏ qua vì sản phẩm đã bản địa hóa trước đó.",
+            }
+        )
+    return skipped
 
 
 class GeminiCookiePayload(BaseModel):
@@ -153,7 +229,7 @@ def _job_get(job_id: str) -> Dict[str, Any]:
         if not row:
             return {}
         data = image_loc_job_crud.row_to_job_dict(row)
-        data["processed_product_ids"] = list(row.processed_product_ids or [])
+        data["processed_product_ids"] = _unique_product_ids(row.processed_product_ids or [])
         with _jobs_lock:
             _jobs[job_id] = data
         return data
@@ -206,6 +282,7 @@ def _create_db_job_row(
 def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: bool = False) -> None:
     db = SessionLocal()
     processed_ids: List[str] = []
+    processed_set: set[str] = set()
     done = 0
     failed = 0
     skipped = 0
@@ -219,23 +296,29 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             stored = payload_from_stored(row.payload, StartImageLocalizationPayload)
             if stored is not None:
                 payload = stored
-            processed_ids = list(row.processed_product_ids or [])
+            processed_ids = _unique_product_ids(row.processed_product_ids or [])
+            processed_set = set(processed_ids)
             done = int(row.done or 0)
             failed = int(row.failed or 0)
             skipped = int(row.skipped or 0)
             results = list(row.recent_results or [])[-100:]
             skipped_reports = list(row.skipped_product_reports or [])[-_JOB_SKIPPED_REPORT_MAX:]
-            queue_ids = list(row.queue_product_ids or [])
+            queue_ids = _unique_product_ids(row.queue_product_ids or [])
+            total = len(queue_ids)
             reset_stale_processing_in_queue(db, queue_ids, processed_ids)
+            if not payload.force:
+                skipped = _account_localized_queue_skips(
+                    db, queue_ids, processed_ids, processed_set, skipped, skipped_reports
+                )
+            products = products_for_job_resume(db, queue_ids, processed_ids, payload.force)
+            completed = _completed_product_count(done, failed, skipped)
             _job_update(
                 job_id,
                 status="running",
                 phase="resuming",
-                message=f"Tiếp tục job — đã xử lý {len(processed_ids)}/{len(queue_ids)} sản phẩm…",
+                message=f"Tiếp tục job — đã xử lý {completed}/{total} sản phẩm…",
                 started_at=row.started_at.isoformat() if row.started_at else datetime.now(timezone.utc).isoformat(),
             )
-            products = products_for_job_resume(db, queue_ids, processed_ids, payload.force)
-            total = len(queue_ids)
         else:
             _job_update(
                 job_id,
@@ -246,16 +329,17 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             )
             limit = payload.limit or int(getattr(settings, "IMAGE_LOCALIZATION_BATCH_LIMIT", 0) or 0)
             products = products_pending_localization(db, payload.product_ids, payload.force, limit)
-            total = len(products)
-            queue_ids = [p.product_id for p in products]
+            queue_ids = _unique_product_ids([p.product_id for p in products])
+            total = len(queue_ids)
 
         queue_truncated = len(queue_ids) > _JOB_QUEUE_IDS_MAX
         queue_preview = queue_ids[:_JOB_QUEUE_IDS_MAX]
+        current, percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
         _job_update(
             job_id,
             total=total,
-            current=len(processed_ids),
-            percent=round(100.0 * len(processed_ids) / total, 1) if total else 0.0,
+            current=current,
+            percent=percent,
             job_queue_product_ids=queue_preview,
             job_queue_truncated=queue_truncated,
             queue_product_ids=queue_ids,
@@ -265,21 +349,26 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             skipped=skipped,
             skipped_product_reports=skipped_reports,
         )
+        completed = _completed_product_count(done, failed, skipped)
         if total == 0 or (resume and not products):
-            if resume and total > 0 and len(processed_ids) >= total:
-                done_msg = f"Đã hoàn tất ({len(processed_ids)}/{total} sản phẩm trong hàng đợi)."
+            if resume and total > 0 and completed >= total:
+                done_msg = f"Đã hoàn tất ({completed}/{total} sản phẩm trong hàng đợi)."
             elif resume and not products:
                 done_msg = "Không còn sản phẩm cần xử lý trong hàng đợi resume."
             else:
                 done_msg = "Không còn sản phẩm cần bản địa hóa ảnh."
+            current, percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
             _job_update(
                 job_id,
                 status="done",
                 phase="done",
                 message=done_msg,
                 finished_at=datetime.now(timezone.utc).isoformat(),
-                percent=100.0,
-                current=len(processed_ids),
+                percent=100.0 if total else percent,
+                current=current if total else 0,
+                done=done,
+                failed=failed,
+                skipped=skipped,
                 current_product_id=None,
                 job_queue_product_ids=queue_preview if total else [],
                 job_queue_truncated=queue_truncated if total else False,
@@ -307,28 +396,35 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
         def should_cancel() -> bool:
             return bool(_job_get(job_id).get("cancel_requested"))
 
-        for idx, product in enumerate(products, 1):
-            abs_idx = len(processed_ids) + idx
+        for product in products:
             if should_cancel():
+                current, percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
                 _job_update(
                     job_id,
                     status="cancelled",
                     phase="cancelled",
-                    current=abs_idx - 1,
-                    percent=round(100.0 * (abs_idx - 1) / total, 1) if total else 0.0,
+                    current=current,
+                    percent=percent,
+                    done=done,
+                    failed=failed,
+                    skipped=skipped,
                     message="Đã hủy job bản địa hóa ảnh.",
                     finished_at=datetime.now(timezone.utc).isoformat(),
                     current_product_id=None,
                     skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
                     recent_results=results[-100:],
+                    processed_product_ids=processed_ids,
                 )
                 return
+            current, percent = _job_progress(
+                done=done, failed=failed, skipped=skipped, total=total, in_flight=True
+            )
             _job_update(
                 job_id,
                 phase="processing",
-                current=abs_idx,
-                percent=round(100.0 * (abs_idx - 1) / total, 1) if total else 0.0,
-                message=f"Đang xử lý {abs_idx}/{total}: {product.product_id}",
+                current=current,
+                percent=percent,
+                message=f"Đang xử lý {current}/{total}: {product.product_id}",
                 current_product_id=product.product_id,
             )
             try:
@@ -350,20 +446,23 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                             for r in results[-IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES:]
                             if r.get("status") == "failed"
                         )
-                        processed_ids.append(product.product_id)
+                        _mark_processed_product(processed_ids, processed_set, product.product_id)
+                        current, percent = _job_progress(
+                            done=done, failed=failed, skipped=skipped, total=total
+                        )
                         _job_update(
                             job_id,
                             status="error",
                             phase="error",
-                            current=abs_idx,
+                            current=current,
                             done=done,
                             failed=failed,
                             skipped=skipped,
                             processed_product_ids=processed_ids,
-                            percent=round(100.0 * abs_idx / total, 1) if total else 0.0,
+                            percent=percent,
                             message=(
                                 f"Dừng job: {IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES} "
-                                f"sản phẩm lỗi liên tiếp (đến {product.product_id}, {abs_idx}/{total}). "
+                                f"sản phẩm lỗi liên tiếp (đến {product.product_id}, {current}/{total}). "
                                 f"{last_msgs[:750]}"
                             ),
                             finished_at=datetime.now(timezone.utc).isoformat(),
@@ -398,17 +497,20 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                 results.append({"product_id": product.product_id, "status": "failed", "message": str(exc)})
                 err_tail = str(exc)[:1000]
                 if is_image_localization_fatal_dependency_error(exc):
-                    processed_ids.append(product.product_id)
+                    _mark_processed_product(processed_ids, processed_set, product.product_id)
+                    current, percent = _job_progress(
+                        done=done, failed=failed, skipped=skipped, total=total
+                    )
                     _job_update(
                         job_id,
                         status="error",
                         phase="error",
-                        current=abs_idx,
+                        current=current,
                         done=done,
                         failed=failed,
                         skipped=skipped,
                         processed_product_ids=processed_ids,
-                        percent=round(100.0 * abs_idx / total, 1) if total else 0.0,
+                        percent=percent,
                         message=(
                             "Dừng bản địa hóa ảnh vì OCR/DeepSeek lỗi bắt buộc "
                             f"(hết quota/tiền, thiếu key hoặc billing lỗi): {err_tail}"
@@ -421,20 +523,23 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     return
                 consecutive_product_failures += 1
                 if consecutive_product_failures >= IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES:
-                    processed_ids.append(product.product_id)
+                    _mark_processed_product(processed_ids, processed_set, product.product_id)
+                    current, percent = _job_progress(
+                        done=done, failed=failed, skipped=skipped, total=total
+                    )
                     _job_update(
                         job_id,
                         status="error",
                         phase="error",
-                        current=abs_idx,
+                        current=current,
                         done=done,
                         failed=failed,
                         skipped=skipped,
                         processed_product_ids=processed_ids,
-                        percent=round(100.0 * abs_idx / total, 1) if total else 0.0,
+                        percent=percent,
                         message=(
                             f"Dừng job: {IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES} "
-                            f"sản phẩm lỗi liên tiếp (exception tại {product.product_id}, {abs_idx}/{total}). {err_tail}"
+                            f"sản phẩm lỗi liên tiếp (exception tại {product.product_id}, {current}/{total}). {err_tail}"
                         ),
                         finished_at=datetime.now(timezone.utc).isoformat(),
                         recent_results=results[-100:],
@@ -443,24 +548,26 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     )
                     return
 
-            processed_ids.append(product.product_id)
+            _mark_processed_product(processed_ids, processed_set, product.product_id)
+            current, percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
             _job_update(
                 job_id,
                 done=done,
                 failed=failed,
                 skipped=skipped,
-                current=abs_idx,
+                current=current,
                 processed_product_ids=processed_ids,
                 recent_results=results[-30:],
-                percent=round(100.0 * abs_idx / total, 1) if total else 0.0,
+                percent=percent,
                 skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
             )
 
+        current, _percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
         _job_update(
             job_id,
             status="done",
             phase="done",
-            current=total,
+            current=current,
             done=done,
             failed=failed,
             skipped=skipped,
@@ -470,6 +577,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             recent_results=results[-100:],
             current_product_id=None,
             skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
+            processed_product_ids=processed_ids,
         )
     except Exception as exc:
         _job_update(
@@ -548,12 +656,19 @@ def summary(
 ):
     pending = db.query(Product).filter(
         (Product.image_localization_status.is_(None))
-        | (Product.image_localization_status.in_(["", "pending", "failed"]))
+        | (Product.image_localization_status.in_(["", "pending"]))
     ).count()
     localized = db.query(Product).filter(Product.image_localization_status == "localized").count()
     failed = db.query(Product).filter(Product.image_localization_status == "failed").count()
     processing = db.query(Product).filter(Product.image_localization_status == "processing").count()
-    return {"pending": pending, "localized": localized, "failed": failed, "processing": processing}
+    skipped = db.query(Product).filter(Product.image_localization_status == "skipped").count()
+    return {
+        "pending": pending,
+        "localized": localized,
+        "failed": failed,
+        "processing": processing,
+        "skipped": skipped,
+    }
 
 
 @router.post("/jobs")

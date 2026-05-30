@@ -653,6 +653,7 @@ export interface AdminImageLocalizationSummary {
   localized: number;
   failed: number;
   processing: number;
+  skipped?: number;
 }
 
 export interface AdminImageLocalizationJobList {

@@ -106,6 +106,15 @@ function isTerminalImageLocalizationJobStatus(status: AdminImageLocalizationJob[
   return status === 'done' || status === 'error' || status === 'cancelled';
 }
 
+function imageLocalizationJobProgress(job: AdminImageLocalizationJob): number {
+  const completed = (job.done ?? 0) + (job.failed ?? 0) + (job.skipped ?? 0);
+  const total = job.total ?? 0;
+  if (total <= 0) {
+    return Math.max(job.current ?? 0, completed);
+  }
+  return Math.min(Math.max(job.current ?? 0, completed), total);
+}
+
 function readStoredLocalizationJobIds(): string[] {
   try {
     const raw = localStorage.getItem(IMAGE_LOCALIZATION_JOBS_KEY);
@@ -3798,7 +3807,16 @@ export default function AdminProductsPage() {
                 </label>
                 <div className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600">
                   <div>Pending: {imageLocalizationSummary?.pending ?? '—'}</div>
-                  <div>Done: {imageLocalizationSummary?.localized ?? '—'} · Error: {imageLocalizationSummary?.failed ?? '—'}</div>
+                  <div>
+                    Done: {imageLocalizationSummary?.localized ?? '—'} · Error:{' '}
+                    {imageLocalizationSummary?.failed ?? '—'}
+                    {(imageLocalizationSummary?.skipped ?? 0) > 0
+                      ? ` · Bỏ qua: ${imageLocalizationSummary?.skipped}`
+                      : ''}
+                    {(imageLocalizationSummary?.processing ?? 0) > 0
+                      ? ` · Đang chạy: ${imageLocalizationSummary?.processing}`
+                      : ''}
+                  </div>
                 </div>
               </div>
 
@@ -4012,8 +4030,8 @@ export default function AdminProductsPage() {
 
                       {job.total != null ? (
                         <p className="mt-1 text-[11px] text-gray-500">
-                          {job.current ?? 0}/{job.total} · xong {job.done ?? 0} · lỗi {job.failed ?? 0} · bỏ qua{' '}
-                          {job.skipped ?? 0}
+                          {imageLocalizationJobProgress(job)}/{job.total} · xong {job.done ?? 0} · lỗi{' '}
+                          {job.failed ?? 0} · bỏ qua {job.skipped ?? 0}
                         </p>
                       ) : null}
 
