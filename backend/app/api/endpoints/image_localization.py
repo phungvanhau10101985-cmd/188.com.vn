@@ -253,22 +253,28 @@ def _job_cancel_signal(job_id: str) -> bool:
 
 
 def _job_get(job_id: str) -> Dict[str, Any]:
-    with _jobs_lock:
-        mem = _jobs.get(job_id)
-        if mem:
-            return dict(mem)
+    """DB là nguồn đúng (worker chạy subprocess ghi DB; bộ nhớ parent dễ cũ)."""
+    db_data: Dict[str, Any] = {}
     db = SessionLocal()
     try:
         row = image_loc_job_crud.get_job(db, job_id)
-        if not row:
-            return {}
-        data = image_loc_job_crud.row_to_job_dict(row)
-        data["processed_product_ids"] = _unique_product_ids(row.processed_product_ids or [])
-        with _jobs_lock:
-            _jobs[job_id] = data
-        return data
+        if row:
+            db_data = image_loc_job_crud.row_to_job_dict(row)
+            db_data["processed_product_ids"] = _unique_product_ids(row.processed_product_ids or [])
     finally:
         db.close()
+
+    with _jobs_lock:
+        mem = dict(_jobs.get(job_id) or {})
+
+    if not db_data and not mem:
+        return {}
+
+    merged = {**mem, **db_data} if db_data else mem
+    merged["job_id"] = job_id
+    with _jobs_lock:
+        _jobs[job_id] = merged
+    return dict(merged)
 
 
 def _payload_snapshot(payload: StartImageLocalizationPayload) -> Dict[str, Any]:
@@ -372,6 +378,52 @@ def _reset_product_processing_by_product_id(db: Session, product_id: str) -> Non
         p.image_localization_status = "pending"
         p.image_localization_error = None
         db.commit()
+
+
+def _reset_job_processing_products(db: Session, job: Dict[str, Any]) -> int:
+    """Trả SP trong hàng đợi job đang `processing` về `pending` (sau hủy ngay)."""
+    ids = _unique_product_ids(
+        list(job.get("queue_product_ids") or [])
+        + list(job.get("job_queue_product_ids") or [])
+    )
+    current = (job.get("current_product_id") or "").strip()
+    if current:
+        ids = _unique_product_ids([*ids, current])
+    if not ids:
+        return 0
+    rows = (
+        db.query(Product)
+        .filter(
+            Product.product_id.in_(ids),
+            Product.image_localization_status == "processing",
+        )
+        .all()
+    )
+    for p in rows:
+        p.image_localization_status = "pending"
+        p.image_localization_error = None
+    if rows:
+        db.commit()
+    return len(rows)
+
+
+def _force_cancel_job_in_db(db: Session, job_id: str, job: Dict[str, Any]) -> None:
+    now = datetime.now(timezone.utc)
+    image_loc_job_crud.patch_job(
+        db,
+        job_id,
+        {
+            "status": "cancelled",
+            "phase": "cancelled",
+            "cancel_requested": True,
+            "current_product_id": None,
+            "message": "Đã hủy ngay — worker đã dừng.",
+            "finished_at": now,
+        },
+    )
+    _reset_job_processing_products(db, job)
+    with _jobs_lock:
+        _jobs.pop(job_id, None)
 
 
 def _job_is_cancelled(job_id: str) -> bool:
@@ -1008,28 +1060,21 @@ def cancel_job(
         return job
 
     if mode == "force":
-        current_pid = (job.get("current_product_id") or "").strip()
-        aborted_worker = force_abort_running_service(job_id)
-        if current_pid:
-            _reset_product_processing_by_product_id(db, current_pid)
-        _finalize_job_cancelled_from_snapshot(
-            job_id,
-            job,
-            message=(
-                "Đã hủy ngay — đã dừng worker (kill process nếu cần)."
-                if aborted_worker
-                else "Đã hủy ngay — job đã cancelled (worker có thể đã dừng trước đó)."
-            ),
-        )
+        _force_cancel_job_in_db(db, job_id, job)
+        force_abort_running_service(job_id)
         return _job_get(job_id)
 
     if job.get("cancel_requested"):
-        return job
-    _job_update(
+        return _job_get(job_id)
+    image_loc_job_crud.patch_job(
+        db,
         job_id,
-        cancel_requested=True,
-        message="Đang hủy job sau ảnh hiện tại...",
+        {
+            "cancel_requested": True,
+            "message": "Đang hủy job sau ảnh hiện tại...",
+        },
     )
+    _job_update(job_id, cancel_requested=True, message="Đang hủy job sau ảnh hiện tại...")
     return _job_get(job_id)
 
 

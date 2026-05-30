@@ -41,7 +41,10 @@ def patch_job(db: Session, job_id: str, updates: Dict[str, Any]) -> Optional[Ima
 def list_resumable_jobs(db: Session, limit: int = 20) -> List[ImageLocalizationJob]:
     return (
         db.query(ImageLocalizationJob)
-        .filter(ImageLocalizationJob.status.in_(tuple(_RESUMABLE)))
+        .filter(
+            ImageLocalizationJob.status.in_(tuple(_RESUMABLE)),
+            ImageLocalizationJob.cancel_requested.is_(False),
+        )
         .order_by(ImageLocalizationJob.created_at.asc())
         .limit(limit)
         .all()
@@ -59,7 +62,10 @@ def list_jobs_for_admin_track(
     if active_only:
         return (
             db.query(ImageLocalizationJob)
-            .filter(ImageLocalizationJob.status.in_(active_statuses))
+            .filter(
+                ImageLocalizationJob.status.in_(active_statuses),
+                ImageLocalizationJob.cancel_requested.is_(False),
+            )
             .order_by(ImageLocalizationJob.created_at.desc())
             .limit(max(1, limit))
             .all()
@@ -67,7 +73,10 @@ def list_jobs_for_admin_track(
 
     active = (
         db.query(ImageLocalizationJob)
-        .filter(ImageLocalizationJob.status.in_(active_statuses))
+        .filter(
+            ImageLocalizationJob.status.in_(active_statuses),
+            ImageLocalizationJob.cancel_requested.is_(False),
+        )
         .order_by(ImageLocalizationJob.created_at.desc())
         .all()
     )

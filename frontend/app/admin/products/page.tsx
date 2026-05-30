@@ -1303,7 +1303,18 @@ export default function AdminProductsPage() {
       setImageLocalizationJobsById((prev) => ({ ...prev, [jobId]: job }));
       if (mode === 'force') {
         setLocalizationForceCancelTarget(null);
-        showToast('ok', 'Đã hủy ngay job bản địa hóa ảnh');
+        const fresh = await adminProductAPI.getImageLocalizationJob(jobId);
+        setImageLocalizationJobsById((prev) => ({ ...prev, [jobId]: fresh }));
+        if (fresh.status === 'cancelled') {
+          showToast('ok', 'Đã hủy ngay job bản địa hóa ảnh');
+          finishLocalizationPoll(jobId, fresh, { notify: false });
+        } else {
+          showToast(
+            'err',
+            `Hủy ngay chưa áp dụng (status=${fresh.status}). Chạy trên VPS: pm2 restart 188-api rồi thử lại.`,
+            12000,
+          );
+        }
       } else {
         showToast('ok', 'Đang hủy sau khi xong bước hiện tại');
       }

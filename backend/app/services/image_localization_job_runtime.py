@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import multiprocessing
+import subprocess
 import threading
 import time
 from typing import Any, Dict, Optional, Set
@@ -99,26 +100,39 @@ def terminate_job_worker(job_id: str) -> bool:
     jid = (job_id or "").strip()
     if not jid:
         return False
+    killed = False
     with _proc_lock:
         proc = _job_processes.get(jid)
-    if proc is None:
-        return False
-    pid = getattr(proc, "pid", None)
+    if proc is not None:
+        pid = getattr(proc, "pid", None)
+        try:
+            if proc.is_alive():
+                logger.warning("terminate image localization job job_id=%s pid=%s", jid, pid)
+                proc.terminate()
+                proc.join(timeout=8)
+            if proc.is_alive():
+                logger.warning("kill image localization job job_id=%s pid=%s", jid, pid)
+                proc.kill()
+                proc.join(timeout=5)
+            killed = True
+        except Exception:
+            logger.exception("terminate_job_worker failed job_id=%s", jid)
+        finally:
+            _unregister_process(jid)
+            unmark_job_thread_running(jid)
     try:
-        if proc.is_alive():
-            logger.warning("terminate image localization job job_id=%s pid=%s", jid, pid)
-            proc.terminate()
-            proc.join(timeout=8)
-        if proc.is_alive():
-            logger.warning("kill image localization job job_id=%s pid=%s", jid, pid)
-            proc.kill()
-            proc.join(timeout=5)
+        subprocess.run(
+            ["pkill", "-f", f"imgloc-{jid[:8]}"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        killed = True
     except Exception:
-        logger.exception("terminate_job_worker failed job_id=%s", jid)
-    finally:
-        _unregister_process(jid)
+        pass
+    if not killed:
         unmark_job_thread_running(jid)
-    return True
+    return killed
 
 
 def get_job_worker_pid(job_id: str) -> Optional[int]:
