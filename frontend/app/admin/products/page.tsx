@@ -1090,6 +1090,17 @@ export default function AdminProductsPage() {
     setLocalizationJobIdsOrdered((prev) => (prev.includes(jobId) ? prev : [...prev, jobId]));
   }, []);
 
+  const removeLocalizationJobFromUi = useCallback((jobId: string) => {
+    setImageLocalizationJobsById((prev) => {
+      const next = { ...prev };
+      delete next[jobId];
+      return next;
+    });
+    setLocalizationJobIdsOrdered((prev) => prev.filter((id) => id !== jobId));
+    writeStoredLocalizationJobIds(readStoredLocalizationJobIds().filter((id) => id !== jobId));
+    resumedImageLocalizationPollSession.delete(jobId);
+  }, []);
+
   const scheduleLocalizationUiFlush = useCallback(() => {
     if (localizationCompletionFlushTimerRef.current != null) return;
     localizationCompletionFlushTimerRef.current = setTimeout(() => {
@@ -1168,12 +1179,15 @@ export default function AdminProductsPage() {
               : msg,
           );
           removeStoredLocalizationJobId(jobId);
+          if (is404) {
+            removeLocalizationJobFromUi(jobId);
+          }
         })
         .finally(() => {
           resumedImageLocalizationPollSession.delete(jobId);
         });
     },
-    [finishLocalizationPoll, pollImageLocalizationJob],
+    [finishLocalizationPoll, pollImageLocalizationJob, removeLocalizationJobFromUi],
   );
 
   const syncTrackedLocalizationJobs = useCallback(async () => {
@@ -1188,22 +1202,48 @@ export default function AdminProductsPage() {
         jobsById[job.job_id] = job;
       }
 
-      setImageLocalizationJobsById((prev) => ({ ...prev, ...jobsById }));
-
       const orderedIds = [...new Set([...serverJobs.map((j) => j.job_id), ...storedIds])];
-      for (const jobId of orderedIds) {
-        registerLocalizationJobId(jobId);
-      }
+      const vanishedJobIds: string[] = [];
 
-      for (const job of serverJobs) {
-        if (isActiveImageLocalizationJobStatus(job.status)) {
-          beginLocalizationJobPoll(job.job_id, { notifyOnFinish: true });
+      for (const jobId of orderedIds) {
+        try {
+          const fresh = await adminProductAPI.getImageLocalizationJob(jobId);
+          jobsById[jobId] = fresh;
+          if (isTerminalImageLocalizationJobStatus(fresh.status)) {
+            removeStoredLocalizationJobId(jobId);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '';
+          if (/404|Không tìm thấy job/i.test(msg)) {
+            vanishedJobIds.push(jobId);
+            delete jobsById[jobId];
+            removeStoredLocalizationJobId(jobId);
+          }
         }
       }
 
-      for (const jobId of storedIds) {
-        if (serverJobs.some((j) => j.job_id === jobId)) continue;
-        beginLocalizationJobPoll(jobId, { notifyOnFinish: true });
+      setImageLocalizationJobsById((prev) => {
+        const next = { ...prev, ...jobsById };
+        for (const jobId of vanishedJobIds) {
+          delete next[jobId];
+        }
+        return next;
+      });
+
+      const liveOrderedIds = orderedIds.filter((id) => !vanishedJobIds.includes(id));
+      for (const jobId of liveOrderedIds) {
+        registerLocalizationJobId(jobId);
+      }
+      setLocalizationJobIdsOrdered((prev) => {
+        const merged = [...new Set([...prev, ...liveOrderedIds])];
+        return merged.filter((id) => !vanishedJobIds.includes(id));
+      });
+
+      for (const jobId of liveOrderedIds) {
+        const job = jobsById[jobId];
+        if (job && isActiveImageLocalizationJobStatus(job.status)) {
+          beginLocalizationJobPoll(jobId, { notifyOnFinish: true });
+        }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Không tải được danh sách job bản địa hóa';
@@ -1351,17 +1391,6 @@ export default function AdminProductsPage() {
     }
     return n;
   }, [localizationJobsForUi]);
-
-  const removeLocalizationJobFromUi = useCallback((jobId: string) => {
-    setImageLocalizationJobsById((prev) => {
-      const next = { ...prev };
-      delete next[jobId];
-      return next;
-    });
-    setLocalizationJobIdsOrdered((prev) => prev.filter((id) => id !== jobId));
-    writeStoredLocalizationJobIds(readStoredLocalizationJobIds().filter((id) => id !== jobId));
-    resumedImageLocalizationPollSession.delete(jobId);
-  }, []);
 
   const handleClearLocalizationTerminalJobs = async () => {
     setLocalizationClearBusy(true);

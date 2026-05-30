@@ -270,7 +270,13 @@ def _job_get(job_id: str) -> Dict[str, Any]:
     if not db_data and not mem:
         return {}
 
-    merged = {**mem, **db_data} if db_data else mem
+    db_st = (db_data.get("status") or "").strip().lower() if db_data else ""
+    if db_data and db_st in _TERMINAL_JOB_STATUSES:
+        merged = {**db_data}
+    elif db_data:
+        merged = {**mem, **db_data}
+    else:
+        merged = mem
     merged["job_id"] = job_id
     with _jobs_lock:
         _jobs[job_id] = merged
@@ -1011,7 +1017,10 @@ def list_jobs(
     )
     items = items[:limit]
     active_count = sum(
-        1 for j in items if (j.get("status") or "").strip().lower() in _RESUMABLE_JOB_STATUSES
+        1
+        for j in items
+        if (j.get("status") or "").strip().lower() in _RESUMABLE_JOB_STATUSES
+        and not bool(j.get("cancel_requested"))
     )
     return {"items": items, "active_count": active_count}
 
