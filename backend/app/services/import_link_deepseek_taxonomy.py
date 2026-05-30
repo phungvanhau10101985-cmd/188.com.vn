@@ -1369,6 +1369,22 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
     if not settings.IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED:
         return warnings
 
+    try:
+        from app.services.variant_color_translate import (
+            apply_variant_color_translation_to_product_data,
+            _product_import_source,
+        )
+        from app.services.import_hibox_scraper import _hibox_sync_variant_display_labels
+
+        src = _product_import_source(product_data)
+        if src == "hibox":
+            apply_variant_color_translation_to_product_data(product_data, import_source="hibox")
+            _hibox_sync_variant_display_labels(product_data)
+        else:
+            apply_variant_color_translation_to_product_data(product_data)
+    except Exception:
+        pass
+
     name_vi = (product_data.get("name") or "").strip()
     title_src = resolve_taxonomy_source_title(product_data)
     desc_src = (product_data.get("description") or "").strip()

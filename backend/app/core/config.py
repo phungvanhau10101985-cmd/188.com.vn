@@ -207,6 +207,9 @@ class Settings:
         self.IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT: int = int(
             os.getenv("IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT", "80") or "80"
         )
+        self.IMAGE_LOCALIZATION_TEMP_CLEANUP_MAX_AGE_HOURS: float = float(
+            os.getenv("IMAGE_LOCALIZATION_TEMP_CLEANUP_MAX_AGE_HOURS", "1") or "1"
+        )
         # Logo dán lên ảnh đã bản địa hóa trước khi PUT lên Bunny (mặc định: logo188.png ở root repo).
         _repo_root_logo188 = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "..", "logo188.png")

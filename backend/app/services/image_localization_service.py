@@ -20,6 +20,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.product import Product
+from app.services.image_localization_temp_cleanup import (
+    cleanup_merge_batch_files,
+    cleanup_stale_image_localization_temp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1941,140 +1945,144 @@ class LegacyImageLocalizationPipeline:
         translator = self.TextTranslator()
         img_proc = self.ImageProcessor()
 
-        batches = merger.merge_all_images_in_batches(urls, [], [], 0, self.sheets)
-        for url, info in (batches.get("column_mapping") or {}).items():
-            status = info.get("status")
-            if status == "SKIPPED_188":
-                results[normalize_image_url(url)] = ImageProcessResult(normalize_image_url(url), normalize_image_url(url), "kept", "Ảnh đã ở CDN 188")
-            elif status in {"TOO_SMALL", "DOWNLOAD_FAILED"}:
-                msg = "Ảnh quá nhỏ/thumbnail" if status == "TOO_SMALL" else "Tải ảnh lỗi/404"
-                results[normalize_image_url(url)] = ImageProcessResult(normalize_image_url(url), None, "deleted", msg)
+        batches: Optional[Dict[str, Any]] = None
+        try:
+            batches = merger.merge_all_images_in_batches(urls, [], [], 0, self.sheets)
+            for url, info in (batches.get("column_mapping") or {}).items():
+                status = info.get("status")
+                if status == "SKIPPED_188":
+                    results[normalize_image_url(url)] = ImageProcessResult(normalize_image_url(url), normalize_image_url(url), "kept", "Ảnh đã ở CDN 188")
+                elif status in {"TOO_SMALL", "DOWNLOAD_FAILED"}:
+                    msg = "Ảnh quá nhỏ/thumbnail" if status == "TOO_SMALL" else "Tải ảnh lỗi/404"
+                    results[normalize_image_url(url)] = ImageProcessResult(normalize_image_url(url), None, "deleted", msg)
 
-        if should_cancel and should_cancel():
-            raise ImageLocalizationError("Job đã bị hủy")
-
-        all_ocr: Dict[int, List[Any]] = {}
-        for batch in batches.get("batches", []):
             if should_cancel and should_cancel():
                 raise ImageLocalizationError("Job đã bị hủy")
-            with open(batch["merged_path"], "rb") as f:
-                all_ocr[batch["batch_index"]] = self._normalize_ocr(ocr.process_image(f.read()))
 
-        split_results = splitter.process_all_batches(batches, all_ocr)
-        split_buffer: Dict[str, Dict[str, Any]] = {}
+            all_ocr: Dict[int, List[Any]] = {}
+            for batch in batches.get("batches", []):
+                if should_cancel and should_cancel():
+                    raise ImageLocalizationError("Job đã bị hủy")
+                with open(batch["merged_path"], "rb") as f:
+                    all_ocr[batch["batch_index"]] = self._normalize_ocr(ocr.process_image(f.read()))
 
-        for part_url, data in split_results.items():
-            if should_cancel and should_cancel():
-                raise ImageLocalizationError("Job đã bị hủy")
-            orig_url = normalize_image_url(data.get("original_url") or part_url)
-            if orig_url in results and results[orig_url].status == "deleted":
-                continue
-            is_split = bool(data.get("is_split_part"))
-            if is_split and orig_url not in split_buffer:
-                split_buffer[orig_url] = {
-                    "parts": {},
-                    "orig_shapes": {},
-                    "part_trail": [],
-                    "total_parts": int(data.get("total_parts") or 1),
-                    "modified": False,
-                    "deleted": False,
-                    "delete_message": None,
-                    "filename": (data.get("filename") or "image.jpg").split("_part")[0],
-                }
+            split_results = splitter.process_all_batches(batches, all_ocr)
+            split_buffer: Dict[str, Dict[str, Any]] = {}
 
-            if is_split:
-                buf = split_buffer[orig_url]
-                pi = int(data.get("part_index") or 0)
-                raw = data.get("image_data")
-                if raw is not None and getattr(raw, "shape", None) is not None:
-                    buf["orig_shapes"][pi] = (int(raw.shape[0]), int(raw.shape[1]))
+            for part_url, data in split_results.items():
+                if should_cancel and should_cancel():
+                    raise ImageLocalizationError("Job đã bị hủy")
+                orig_url = normalize_image_url(data.get("original_url") or part_url)
+                if orig_url in results and results[orig_url].status == "deleted":
+                    continue
+                is_split = bool(data.get("is_split_part"))
+                if is_split and orig_url not in split_buffer:
+                    split_buffer[orig_url] = {
+                        "parts": {},
+                        "orig_shapes": {},
+                        "part_trail": [],
+                        "total_parts": int(data.get("total_parts") or 1),
+                        "modified": False,
+                        "deleted": False,
+                        "delete_message": None,
+                        "filename": (data.get("filename") or "image.jpg").split("_part")[0],
+                    }
 
-            action, final_image, message = self._process_image_part(data, translator, img_proc)
-            if is_split:
-                buf = split_buffer[orig_url]
-                if action == "deleted":
-                    buf["deleted"] = True
-                    if not buf.get("delete_message") and message:
-                        buf["delete_message"] = (
-                            f"Phần {int(data.get('part_index') or 0) + 1}/{int(data.get('total_parts') or 1)}: {message}"
-                        )
-                elif not buf["deleted"]:
+                if is_split:
+                    buf = split_buffer[orig_url]
                     pi = int(data.get("part_index") or 0)
-                    tp = int(data.get("total_parts") or 1)
-                    buf["parts"][pi] = final_image
-                    if action == "processed":
-                        buf["modified"] = True
-                    trail = buf.setdefault("part_trail", [])
-                    trail.append(
-                        {
-                            "part_index": pi,
-                            "total_parts": tp,
-                            "action": action,
-                            "method": _split_part_method(action, message),
-                            "message": (message or "")[:500],
-                        }
-                    )
-            else:
-                if action == "deleted":
-                    results[orig_url] = ImageProcessResult(orig_url, None, "deleted", message)
-                elif action == "processed":
-                    final_bytes = _encode_image_bytes(
-                        apply_brand_logo_top_right_bgr(final_image),
-                        data.get("filename") or "image.jpg",
-                    )
-                    final_url = self._upload_bytes(product, final_bytes, data.get("filename") or "image.jpg")
-                    results[orig_url] = ImageProcessResult(orig_url, final_url, "processed", message)
-                else:
-                    results[orig_url] = ImageProcessResult(orig_url, orig_url, "kept", message)
+                    raw = data.get("image_data")
+                    if raw is not None and getattr(raw, "shape", None) is not None:
+                        buf["orig_shapes"][pi] = (int(raw.shape[0]), int(raw.shape[1]))
 
-        for orig_url, info in split_buffer.items():
-            if info["deleted"]:
-                detail = info.get("delete_message") or ""
-                msg = (
-                    detail
-                    if detail
-                    else "Một phần ảnh dài bị yêu cầu xóa (không có message chi tiết — xem log pipeline)."
+                action, final_image, message = self._process_image_part(data, translator, img_proc)
+                if is_split:
+                    buf = split_buffer[orig_url]
+                    if action == "deleted":
+                        buf["deleted"] = True
+                        if not buf.get("delete_message") and message:
+                            buf["delete_message"] = (
+                                f"Phần {int(data.get('part_index') or 0) + 1}/{int(data.get('total_parts') or 1)}: {message}"
+                            )
+                    elif not buf["deleted"]:
+                        pi = int(data.get("part_index") or 0)
+                        tp = int(data.get("total_parts") or 1)
+                        buf["parts"][pi] = final_image
+                        if action == "processed":
+                            buf["modified"] = True
+                        trail = buf.setdefault("part_trail", [])
+                        trail.append(
+                            {
+                                "part_index": pi,
+                                "total_parts": tp,
+                                "action": action,
+                                "method": _split_part_method(action, message),
+                                "message": (message or "")[:500],
+                            }
+                        )
+                else:
+                    if action == "deleted":
+                        results[orig_url] = ImageProcessResult(orig_url, None, "deleted", message)
+                    elif action == "processed":
+                        final_bytes = _encode_image_bytes(
+                            apply_brand_logo_top_right_bgr(final_image),
+                            data.get("filename") or "image.jpg",
+                        )
+                        final_url = self._upload_bytes(product, final_bytes, data.get("filename") or "image.jpg")
+                        results[orig_url] = ImageProcessResult(orig_url, final_url, "processed", message)
+                    else:
+                        results[orig_url] = ImageProcessResult(orig_url, orig_url, "kept", message)
+
+            for orig_url, info in split_buffer.items():
+                if info["deleted"]:
+                    detail = info.get("delete_message") or ""
+                    msg = (
+                        detail
+                        if detail
+                        else "Một phần ảnh dài bị yêu cầu xóa (không có message chi tiết — xem log pipeline)."
+                    )
+                    results[orig_url] = ImageProcessResult(orig_url, None, "deleted", msg)
+                    continue
+                if not info["modified"]:
+                    results[orig_url] = ImageProcessResult(orig_url, orig_url, "kept", "Ảnh dài không cần xử lý")
+                    continue
+                parts = info["parts"]
+                if len(parts) != info["total_parts"]:
+                    results[orig_url] = ImageProcessResult(orig_url, orig_url, "kept", "Thiếu phần ảnh sau split, giữ ảnh gốc")
+                    continue
+                try:
+                    orig_shapes = info.get("orig_shapes") or {}
+                    total_p = info["total_parts"]
+                    if len(orig_shapes) == total_p and all(i in orig_shapes for i in range(total_p)):
+                        merged = _merge_localized_split_parts_with_grid(parts, total_p, orig_shapes)
+                    else:
+                        merged = _vstack_localized_split_parts(parts, total_p)
+                except Exception as exc:
+                    logger.warning("Ghép split lỗi (%s), giữ ảnh gốc: %s", orig_url, exc)
+                    results[orig_url] = ImageProcessResult(orig_url, orig_url, "kept", f"Ghép phần ảnh lỗi: {exc}")
+                    continue
+                final_bytes = _encode_image_bytes(
+                    apply_brand_logo_top_right_bgr(merged),
+                    info["filename"] + ".jpg",
                 )
-                results[orig_url] = ImageProcessResult(orig_url, None, "deleted", msg)
-                continue
-            if not info["modified"]:
-                results[orig_url] = ImageProcessResult(orig_url, orig_url, "kept", "Ảnh dài không cần xử lý")
-                continue
-            parts = info["parts"]
-            if len(parts) != info["total_parts"]:
-                results[orig_url] = ImageProcessResult(orig_url, orig_url, "kept", "Thiếu phần ảnh sau split, giữ ảnh gốc")
-                continue
-            try:
-                orig_shapes = info.get("orig_shapes") or {}
-                total_p = info["total_parts"]
-                if len(orig_shapes) == total_p and all(i in orig_shapes for i in range(total_p)):
-                    merged = _merge_localized_split_parts_with_grid(parts, total_p, orig_shapes)
-                else:
-                    merged = _vstack_localized_split_parts(parts, total_p)
-            except Exception as exc:
-                logger.warning("Ghép split lỗi (%s), giữ ảnh gốc: %s", orig_url, exc)
-                results[orig_url] = ImageProcessResult(orig_url, orig_url, "kept", f"Ghép phần ảnh lỗi: {exc}")
-                continue
-            final_bytes = _encode_image_bytes(
-                apply_brand_logo_top_right_bgr(merged),
-                info["filename"] + ".jpg",
-            )
-            final_url = self._upload_bytes(product, final_bytes, info["filename"] + ".jpg")
-            trail = sorted(
-                info.get("part_trail") or [],
-                key=lambda x: int(x.get("part_index", 0)),
-            )
-            short_vi, long_vi = _split_merge_detail_vi(trail)
-            msg = "Đã split, xử lý và ghép lại ảnh dài. " + short_vi + " — " + long_vi
-            detail = {"split_parts": trail, "split_detail_vi": long_vi}
-            results[orig_url] = ImageProcessResult(
-                orig_url, final_url, "processed", msg, detail=detail
-            )
+                final_url = self._upload_bytes(product, final_bytes, info["filename"] + ".jpg")
+                trail = sorted(
+                    info.get("part_trail") or [],
+                    key=lambda x: int(x.get("part_index", 0)),
+                )
+                short_vi, long_vi = _split_merge_detail_vi(trail)
+                msg = "Đã split, xử lý và ghép lại ảnh dài. " + short_vi + " — " + long_vi
+                detail = {"split_parts": trail, "split_detail_vi": long_vi}
+                results[orig_url] = ImageProcessResult(
+                    orig_url, final_url, "processed", msg, detail=detail
+                )
 
-        for url in urls:
-            normalized = normalize_image_url(url)
-            results.setdefault(normalized, ImageProcessResult(normalized, normalized, "kept", "Không cần xử lý"))
-        return results
+            for url in urls:
+                normalized = normalize_image_url(url)
+                results.setdefault(normalized, ImageProcessResult(normalized, normalized, "kept", "Không cần xử lý"))
+            return results
+        finally:
+            cleanup_merge_batch_files(batches)
 
     def process_single_image(
         self,

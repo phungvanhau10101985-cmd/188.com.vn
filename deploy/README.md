@@ -81,7 +81,23 @@ Sau đó `sudo nginx -t && sudo systemctl reload nginx`.
 
 - **Đồng thời:** Giữ `DATABASE_POOL_*` trong `backend/.env` đủ lớn và `pm2 restart 188-api --update-env`; xem log `QueuePool` / `TimeoutError`.
 
-## 3. Tài liệu liên quan
+## 3. Crontab VPS
+
+File mẫu: **`deploy/crontab.188.com.vn.example`** (khuyến mãi, tra EMS, dọn temp việt hóa ảnh).
+
+**Cài lần đầu** (đọc file mẫu, thay secret + domain, ghi crontab):
+
+```bash
+cd /var/www/188.com.vn
+sed -e 's/YOUR_CRON_SECRET/'"$(grep -E '^CRON_SECRET=' backend/.env | cut -d= -f2-)"'/g' \
+    -e 's/YOUR_API_HOST/188.com.vn/g' \
+    deploy/crontab.188.com.vn.example | crontab -
+crontab -l
+```
+
+**Đã có crontab** — chỉ thêm dòng dọn temp: `crontab -e`, dán dòng cuối trong file mẫu (Chủ nhật 3:00).
+
+## 4. Tài liệu liên quan
 
 - `../HUONG_DAN_DEPLOY.md` — biến môi trường, build, domain.
 - `../DEPLOY_READINESS.md` — checklist tổng thể.

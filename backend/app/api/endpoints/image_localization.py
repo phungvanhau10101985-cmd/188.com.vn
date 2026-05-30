@@ -33,6 +33,7 @@ from app.services.image_localization_service import (
     reset_stale_processing_in_queue,
     save_gemini_cookie,
 )
+from app.services.image_localization_temp_cleanup import cleanup_stale_image_localization_temp
 
 logger = logging.getLogger(__name__)
 
@@ -289,6 +290,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
     results: List[Dict[str, Any]] = []
     skipped_reports: List[Dict[str, Any]] = []
     try:
+        cleanup_stale_image_localization_temp()
         if resume:
             row = image_loc_job_crud.get_job(db, job_id)
             if not row:
@@ -594,6 +596,10 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                 service.close()
         except Exception:
             pass
+        try:
+            cleanup_stale_image_localization_temp()
+        except Exception:
+            logger.exception("Dọn temp image localization sau job lỗi")
         db.close()
 
 

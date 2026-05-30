@@ -612,29 +612,6 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
             if not str(co.get("img") or "").strip() and pic_thumb:
                 co["img"] = pic_thumb
 
-    try:
-        from app.services.variant_color_translate import apply_deepseek_translations_to_color_entries
-
-        apply_deepseek_translations_to_color_entries(colors_out)
-    except Exception:
-        pass
-
-    # Đồng bộ tiếng Việt (hoặc nhãn sau catalog) vào pairs + swatch — tránh lệch với cột AG / variants.colors.
-    sup_to_display: Dict[str, str] = {}
-    for sup, co in zip(supplier_color_labels, colors_out):
-        vn = str(co.get("name") or "").strip()
-        if sup and vn:
-            sup_to_display[sup] = vn
-    for po in pair_objs:
-        cr = str(po.get("color") or "").strip()
-        if cr and cr in sup_to_display:
-            po["color"] = sup_to_display[cr]
-    for i, sp in enumerate(swatch_pairs):
-        if i < len(colors_out):
-            lab = str(colors_out[i].get("name") or "").strip()
-            if lab:
-                sp["label"] = lab
-
     variants: Dict[str, Any] = {"pairs": pair_objs, "source": "hibox"}
     supply_plat = "1688" if hibox_slug_is_1688_offer(slug) else "taobao"
     supply_link = supply_product_link_default_for_hibox_slug(slug)
@@ -661,11 +638,12 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
         },
         "specifications": {"supplier_specs_excerpt": specs_text[:4000] if specs_text else ""},
         "variants": variants,
+        "hibox_supplier_color_labels": supplier_color_labels,
     }
 
     _eng = synthetic_engagement_counts()
 
-    return {
+    out: Dict[str, Any] = {
         "product_id": build_canonical_product_id_from_hibox_slug(link_slug) if link_slug else "hibox_import",
         "code": "",
         "origin": supply_plat,
@@ -711,6 +689,54 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
         "is_active": True,
         "slug": "",
     }
+
+    return out
+
+
+def _hibox_sync_variant_display_labels(product_data: Dict[str, Any]) -> None:
+    """
+    Sau khi DeepSeek dịch `colors[]`: map pairs theo nhãn NCC gốc, đồng bộ swatch + cột color / variants.colors.
+    """
+    pi = product_data.get("product_info")
+    if not isinstance(pi, dict):
+        return
+    supplier_labels = pi.get("hibox_supplier_color_labels")
+    if not isinstance(supplier_labels, list):
+        supplier_labels = []
+    colors_out = product_data.get("colors") or []
+    if not isinstance(colors_out, list):
+        return
+
+    sup_to_display: Dict[str, str] = {}
+    for sup, co in zip(supplier_labels, colors_out):
+        if not isinstance(co, dict):
+            continue
+        sup_s = str(sup or "").strip()
+        vn = str(co.get("name") or "").strip()
+        if sup_s and vn:
+            sup_to_display[sup_s] = vn
+
+    variants = pi.get("variants")
+    if not isinstance(variants, dict):
+        return
+    for po in variants.get("pairs") or []:
+        if not isinstance(po, dict):
+            continue
+        cr = str(po.get("color") or "").strip()
+        if cr and cr in sup_to_display:
+            po["color"] = sup_to_display[cr]
+    sw_list = variants.get("color_swatches") or []
+    for i, sp in enumerate(sw_list):
+        if i < len(colors_out) and isinstance(sp, dict) and isinstance(colors_out[i], dict):
+            lab = str(colors_out[i].get("name") or "").strip()
+            if lab:
+                sp["label"] = lab
+    flat_color = _ag_color_column_from_colors_out(
+        [c for c in colors_out if isinstance(c, dict)]
+    )
+    if flat_color:
+        product_data["color"] = flat_color
+        variants["colors"] = flat_color
 
 
 def _slug_from_path_after_any_v(norm: str) -> Optional[str]:
@@ -767,6 +793,14 @@ def scrape_hibox_for_import(source_url: str) -> Tuple[Dict[str, Any], Dict[str, 
         )
 
     product_data = hibox_row_to_product_data(raw_row, norm_url, slug)
+    try:
+        from app.services.variant_color_translate import apply_hibox_variant_color_translation
+
+        warnings.extend(apply_hibox_variant_color_translation(product_data))
+        _hibox_sync_variant_display_labels(product_data)
+    except Exception as exc:
+        warnings.append(f"Hibox: lỗi đồng bộ dịch màu — {type(exc).__name__}: {exc}")
+
     if hibox_slug_is_1688_offer(slug):
         warnings.append(
             "Hibox: slug abb-* là nguồn cửa hàng 1688 — khi đăng dùng product_id A<số offer>."
