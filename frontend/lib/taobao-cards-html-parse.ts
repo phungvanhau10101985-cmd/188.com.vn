@@ -1440,3 +1440,23 @@ export function rowsToCsv(
   }
   return lines.join('\r\n');
 }
+
+/** Một dòng payload POST /import-1688/export-listing-link-template.xlsx */
+export type ListingLinkExportRow = {
+  product_id: string;
+  url: string;
+  shop_name_chinese: string;
+  china_price: number | null;
+  chinese_name: string;
+};
+
+/** Chuyển dòng bảng parse → mẫu Excel listing (ID, Sku trống, Link, shop TQ, Giá Tệ, tên TQ). */
+export function parsedListingRowsToLinkExportPayload(rows: ParsedTaobaoCardRow[]): ListingLinkExportRow[] {
+  return rows.map((r) => ({
+    product_id: (r.item_id || '').trim(),
+    url: (r.item_url || '').trim(),
+    shop_name_chinese: (r.shop_name_chinese || r.shop_name || '').trim(),
+    china_price: r.price_cny_approx,
+    chinese_name: (r.chinese_name || r.title || '').trim(),
+  }));
+}

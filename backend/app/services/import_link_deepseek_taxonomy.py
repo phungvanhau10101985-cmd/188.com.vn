@@ -16,6 +16,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.category import Category
+from app.services.listing_year_sanitize import (
+    LISTING_NO_YEAR_PROMPT_VI,
+    apply_listing_year_sanitize_to_product_data,
+    sanitize_listing_context_for_ai,
+    sanitize_taxonomy_vi_fields,
+    sanitize_vi_listing_field,
+)
 from app.utils.slug import create_slug
 
 logger = logging.getLogger(__name__)
@@ -154,12 +161,15 @@ def build_taxonomy_context_blob(product_data: Dict[str, Any]) -> str:
     cn = _nonempty_product_field(product_data, "chinese_name")
     vi = _nonempty_product_field(product_data, "name")
     if cn:
-        parts.append(f"Tên tiếng Trung (nguồn phân loại — cột chinese_name / import): {cn}")
+        parts.append(
+            f"Tên tiếng Trung (nguồn phân loại — cột chinese_name / import): "
+            f"{sanitize_listing_context_for_ai(cn)}"
+        )
     if vi and vi != cn:
-        parts.append(f"Tên tiếng Việt (tham khảo): {vi}")
+        parts.append(f"Tên tiếng Việt (tham khảo): {sanitize_listing_context_for_ai(vi)}")
     d = (product_data.get("description") or "").strip()
     if d:
-        parts.append(d)
+        parts.append(sanitize_listing_context_for_ai(d))
     for key in (
         "category",
         "subcategory",
@@ -180,14 +190,14 @@ def build_taxonomy_context_blob(product_data: Dict[str, Any]) -> str:
         text = json.dumps(val, ensure_ascii=False) if isinstance(val, (list, dict)) else str(val)
         text = _scrub_placeholder_str(text)
         if text:
-            parts.append(f"{key}: {text}")
+            parts.append(f"{key}: {sanitize_listing_context_for_ai(text)}")
     pi = product_data.get("product_info")
     if isinstance(pi, dict):
         spec = pi.get("specifications")
         if isinstance(spec, dict):
             ex = (spec.get("supplier_specs_excerpt") or spec.get("hibox_specs_excerpt") or "").strip()
             if ex and ex not in d:
-                parts.append(ex)
+                parts.append(sanitize_listing_context_for_ai(ex))
         for key in ("product_info", "variants", "market_info"):
             obj = pi.get(key)
             if isinstance(obj, (dict, list)) and obj:
@@ -299,6 +309,7 @@ QUY TẮC PHÂN LOẠI (bắt buộc — áp dụng khi đọc TÊN sản phẩm
   • **Giày dép / sandal / boot / cao gót**: nếu thông số có **chiều cao gót hoặc đế** (cm, hoặc inch → quy đổi gọn sang cm), ghép tự nhiên vào tên (vd. «gót 9 cm», «đế cao 3 cm», «đế bệt»); **không** bịa số.
   • **Túi xách / ví / ba lô / clutch**: nếu có **kích thước** (dài × rộng × cao, hoặc một cạnh cm), ghép gọn (vd. «25×18×10 cm», «khổ ~25 cm»); **không** bịa.
   • **Hàng khác** (vali, balô laptop…): nếu có kích thước/dung tích trong NGỮ CẢNH, có thể thêm cụm ngắn tương ứng.
+""" + LISTING_NO_YEAR_PROMPT_VI + """
 - chat_lieu_vi: **chất liệu** tiếng Việt ngắn gọn (tối đa ~100 ký tự), chỉ điền khi suy ra được từ TÊN hoặc NGỮ CẢNH (vd. cotton, polyester, da PU, lụa…); có nhãn tiếng Anh «Material» trong thông số thì dịch/ghi lại bằng tiếng Việt; **không** đoán bừa — không có thông tin thì để chuỗi rỗng "".
 - mo_ta_vi: **mô tả sản phẩm** tiếng Việt để đăng bán (plain text), khoảng 350–1200 ký tự, 2–5 đoạn (xuống dòng \\n giữa đoạn); dựa trên TÊN + NGỮ CẢNH: đặc điểm nổi bật, phom/form (nếu rõ), phù hợp ai/mùa (nếu suy ra được), chất liệu đã biết; có thể nhắc lại ngắn kích thước/gót nếu hữu ích nhưng **không** copy nguyên khối dài những gì đã gói trong ten_tieng_viet; **không** spam từ khóa, **không** liệt kê đầy đủ mọi màu/size đặt hàng (đã có biến thể); không HTML; không nhét JSON/markdown trong chuỗi.
 - thuong_hieu_vi: thương hiệu / nhà cung (tiếng Việt hoặc phiên âm ngắn) nếu NGỮ CẢNH có; không có thì "".
@@ -477,9 +488,9 @@ def translate_product_listing_deepseek_only(
     if not settings.IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED:
         return "", "", warnings
 
-    name = (product_name or "").strip()
-    desc = (supplier_description or "").strip()
-    blob = (context_text or "").strip()[:_MAX_CONTEXT_CHARS]
+    name = sanitize_listing_context_for_ai((product_name or "").strip())
+    desc = sanitize_listing_context_for_ai((supplier_description or "").strip())
+    blob = sanitize_listing_context_for_ai((context_text or "").strip()[:_MAX_CONTEXT_CHARS])
     if not name and not desc and not blob:
         warnings.append("deepseek_listing_translate: không có tên hay mô tả để dịch.")
         return "", "", warnings
@@ -489,8 +500,9 @@ def translate_product_listing_deepseek_only(
             "NHIỆM VỤ: Chỉ viết MO_TA_VI (không đổi tên).\n"
             "- Trả JSON đúng 2 key: ten_tieng_viet và mo_ta_vi.\n"
             '- ten_tieng_viet: luôn chuỗi rỗng "".\n'
-            "- mo_ta_vi: mô tả đăng bán tiếng Việt 350–1200 ký tự, 2–5 đoạn, \\n giữa đoạn; không HTML;\n"
-            "  không spam từ khóa; dựa trên TÊN + MÔ TẢ / NGỮ CẢNH bên dưới.\n\n"
+            "- mo_ta_vi: plain text tiếng Việt 350–1200 ký tự, 2–5 đoạn, \\n giữa đoạn; không HTML;\n"
+            "  không spam từ khóa; dựa trên TÊN + MÔ TẢ / NGỮ CẢNH bên dưới.\n"
+            f"{LISTING_NO_YEAR_PROMPT_VI.strip()}\n\n"
             f"TÊN SẢN PHẨM (đã có bản Việt ở hệ thống — không trả trong JSON):\n{name}\n\n"
             f"MÔ TẢ / THÔNG SỐ NGUỒN:\n{(desc + chr(10) + blob).strip()}\n\n"
             'Trả về: {"ten_tieng_viet":"","mo_ta_vi":"..."}'
@@ -500,7 +512,8 @@ def translate_product_listing_deepseek_only(
             "NHIỆM VỤ: Tên và mô tả tiếng Việt cho đăng bán.\n"
             '- ten_tieng_viet: tên SP tiếng Việt tự nhiên ≤220 ký tự (không liệt kê hết size/màu ở cuối).\n'
             "- mo_ta_vi: plain text tiếng Việt 350–1200 ký tự, 2–5 đoạn, \\n giữa đoạn; không HTML.\n"
-            "- KHÔNG để tiếng Trung/Nhật/Hàn trong JSON.\n\n"
+            "- KHÔNG để tiếng Trung/Nhật/Hàn trong JSON.\n"
+            f"{LISTING_NO_YEAR_PROMPT_VI.strip()}\n\n"
             "NGỮ CẢNH (có thể tiếng nước ngoài):\n"
             f"{blob}\n\n"
             f"TÊN NGUỒN:\n{name}\n\n"
@@ -542,11 +555,11 @@ def translate_product_listing_deepseek_only(
         warnings.append(f"deepseek_listing_translate: không đọc JSON: {exc}")
         return "", "", warnings
 
-    tv = _scrub_cjk(str(parsed.get("ten_tieng_viet") or "")).strip()
+    tv = sanitize_vi_listing_field(_scrub_cjk(str(parsed.get("ten_tieng_viet") or "")).strip())
     if len(tv) > 220:
         tv = tv[:220].strip()
     mt_raw = str(parsed.get("mo_ta_vi") or "").strip()
-    mt_vi = _scrub_cjk(mt_raw).strip()
+    mt_vi = sanitize_vi_listing_field(_scrub_cjk(mt_raw).strip())
     mt_vi = re.sub(r"[ \t]+\n", "\n", mt_vi)
     mt_vi = re.sub(r"\n{3,}", "\n\n", mt_vi).strip()
     if len(mt_vi) > 12000:
@@ -555,7 +568,7 @@ def translate_product_listing_deepseek_only(
     if description_only:
         tv = ""
     if not tv and not description_only and name:
-        tv = _scrub_cjk(name).strip()[:220] or name[:220].strip()
+        tv = sanitize_vi_listing_field(_scrub_cjk(name).strip()[:220] or name[:220].strip())
     if description_only and not mt_vi:
         warnings.append("deepseek_listing_translate: mo_ta_vi rỗng sau description_only.")
 
@@ -605,9 +618,9 @@ def translate_product_listing_gemini_only(
     Fallback Gemini 2.5 Flash để có tên/mô tả tiếng Việt khi DeepSeek rỗng hoặc giữ nguyên tên ngoại ngữ.
     """
     warnings: List[str] = []
-    name = (product_name or "").strip()
-    desc = (supplier_description or "").strip()
-    blob = (context_text or "").strip()[:_MAX_CONTEXT_CHARS]
+    name = sanitize_listing_context_for_ai((product_name or "").strip())
+    desc = sanitize_listing_context_for_ai((supplier_description or "").strip())
+    blob = sanitize_listing_context_for_ai((context_text or "").strip()[:_MAX_CONTEXT_CHARS])
     if not name and not desc and not blob:
         return "", "", warnings
 
@@ -616,7 +629,8 @@ def translate_product_listing_gemini_only(
             "Bạn viết mô tả sản phẩm TMĐT bằng tiếng Việt.\n"
             "Chỉ trả JSON thuần đúng 2 key: ten_tieng_viet và mo_ta_vi.\n"
             'ten_tieng_viet luôn là "".\n'
-            "mo_ta_vi: plain text tiếng Việt 350-1200 ký tự, 2-5 đoạn, không HTML, không markdown.\n\n"
+            "mo_ta_vi: plain text tiếng Việt 350-1200 ký tự, 2-5 đoạn, không HTML, không markdown.\n"
+            f"{LISTING_NO_YEAR_PROMPT_VI.strip()}\n\n"
             f"TÊN SẢN PHẨM:\n{name}\n\n"
             f"MÔ TẢ / NGỮ CẢNH NGUỒN:\n{(desc + chr(10) + blob).strip()}\n\n"
             'Trả về: {"ten_tieng_viet":"","mo_ta_vi":"..."}'
@@ -627,7 +641,8 @@ def translate_product_listing_gemini_only(
             "Nguồn có thể là tiếng Mông Cổ, Trung, Nga, Anh hoặc ngôn ngữ khác.\n"
             "Chỉ trả JSON thuần đúng 2 key: ten_tieng_viet và mo_ta_vi.\n"
             "ten_tieng_viet: tên sản phẩm tiếng Việt tự nhiên <=220 ký tự, không giữ nguyên chữ Cyrillic/Mông Cổ.\n"
-            "mo_ta_vi: plain text tiếng Việt 350-1200 ký tự, 2-5 đoạn, không HTML, không markdown.\n\n"
+            "mo_ta_vi: plain text tiếng Việt 350-1200 ký tự, 2-5 đoạn, không HTML, không markdown.\n"
+            f"{LISTING_NO_YEAR_PROMPT_VI.strip()}\n\n"
             f"NGỮ CẢNH:\n{blob}\n\n"
             f"TÊN NGUỒN:\n{name}\n\n"
             f"MÔ TẢ NGUỒN:\n{desc}\n\n"
@@ -638,7 +653,7 @@ def translate_product_listing_gemini_only(
     if not parsed:
         return "", "", warnings
 
-    tv = _scrub_cjk(str(parsed.get("ten_tieng_viet") or "")).strip()
+    tv = sanitize_vi_listing_field(_scrub_cjk(str(parsed.get("ten_tieng_viet") or "")).strip())
     if description_only:
         tv = ""
     if len(tv) > 220:
@@ -647,7 +662,7 @@ def translate_product_listing_gemini_only(
         warnings.append("gemini_listing_translate: ten_tieng_viet rỗng hoặc còn chữ ngoại ngữ — bỏ qua tên.")
         tv = ""
 
-    mt_vi = _scrub_cjk(str(parsed.get("mo_ta_vi") or "")).strip()
+    mt_vi = sanitize_vi_listing_field(_scrub_cjk(str(parsed.get("mo_ta_vi") or "")).strip())
     mt_vi = re.sub(r"[ \t]+\n", "\n", mt_vi)
     mt_vi = re.sub(r"\n{3,}", "\n\n", mt_vi).strip()
     if len(mt_vi) > 12000:
@@ -679,15 +694,15 @@ def classify_product_taxonomy_deepseek(
     if not settings.IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED:
         return None, warnings
 
-    name = (product_name or "").strip()
+    name = sanitize_listing_context_for_ai((product_name or "").strip())
     if not name:
         warnings.append("deepseek_taxonomy: tên sản phẩm trống.")
         return None, warnings
 
-    blob_ctx = (context_text or "").strip()[:_MAX_CONTEXT_CHARS]
+    blob_ctx = sanitize_listing_context_for_ai((context_text or "").strip()[:_MAX_CONTEXT_CHARS])
     gender_hint_eff = supplier_gender_hint
     if gender_hint_eff is None:
-        gender_hint_eff = infer_supplier_gender_hint(f"{name}\n{blob_ctx}")
+        gender_hint_eff = infer_supplier_gender_hint(f"{(product_name or '').strip()}\n{(context_text or '').strip()}")
 
     triples = load_active_category_triples(db)
     if not triples:
@@ -823,24 +838,24 @@ def classify_product_taxonomy_deepseek(
     if _CJK_RE.search(str(parsed.get("khach_hang") or "")):
         warnings.append("deepseek_taxonomy: đã loại ký tự CJK khỏi khach_hang (vi phạm quy tắc đầu ra).")
 
-    tv_raw = _scrub_cjk(str(parsed.get("ten_tieng_viet") or "")).strip()
+    tv_raw = sanitize_vi_listing_field(_scrub_cjk(str(parsed.get("ten_tieng_viet") or "")).strip())
     if not tv_raw:
         warnings.append(
             "deepseek_taxonomy: model thiếu hoặc rỗng ten_tieng_viet — dùng tên NCC đã loại CJK."
         )
-        tv_raw = _scrub_cjk(name).strip()
+        tv_raw = sanitize_vi_listing_field(_scrub_cjk(name).strip())
     if not tv_raw:
-        tv_raw = name[:200].strip()
+        tv_raw = sanitize_vi_listing_field(name[:200].strip())
     if len(tv_raw) > 220:
         tv_raw = tv_raw[:220].strip()
 
     cl_raw = str(parsed.get("chat_lieu_vi") or "").strip()
-    cl_vi = _scrub_cjk(cl_raw).strip()
+    cl_vi = sanitize_vi_listing_field(_scrub_cjk(cl_raw).strip())
     if len(cl_vi) > 100:
         cl_vi = cl_vi[:100].strip()
 
     mt_raw = str(parsed.get("mo_ta_vi") or "").strip()
-    mt_vi = _scrub_cjk(mt_raw).strip()
+    mt_vi = sanitize_vi_listing_field(_scrub_cjk(mt_raw).strip())
     mt_vi = re.sub(r"[ \t]+\n", "\n", mt_vi)
     mt_vi = re.sub(r"\n{3,}", "\n\n", mt_vi).strip()
     if len(mt_vi) > 12000:
@@ -848,24 +863,24 @@ def classify_product_taxonomy_deepseek(
 
     out: Dict[str, str] = dict(canon)
     if kh_raw:
-        out["khach_hang"] = kh_raw
+        out["khach_hang"] = sanitize_vi_listing_field(kh_raw)
     out["ten_tieng_viet"] = tv_raw
     out["chat_lieu_vi"] = cl_vi
     out["mo_ta_vi"] = mt_vi
-    out["thuong_hieu_vi"] = _clip_vi_field(str(parsed.get("thuong_hieu_vi") or ""), 120)
-    out["xuat_xu_vi"] = _clip_vi_field(str(parsed.get("xuat_xu_vi") or ""), 80)
-    out["phong_cach_vi"] = _clip_vi_field(str(parsed.get("phong_cach_vi") or ""), 120)
-    out["dip_vi"] = _clip_vi_field(str(parsed.get("dip_vi") or ""), 120)
-    out["trong_luong_vi"] = _clip_vi_field(str(parsed.get("trong_luong_vi") or ""), 80)
-    out["chieu_cao_got_vi"] = _clip_vi_field(str(parsed.get("chieu_cao_got_vi") or ""), 80)
+    out["thuong_hieu_vi"] = sanitize_vi_listing_field(_clip_vi_field(str(parsed.get("thuong_hieu_vi") or ""), 120))
+    out["xuat_xu_vi"] = sanitize_vi_listing_field(_clip_vi_field(str(parsed.get("xuat_xu_vi") or ""), 80))
+    out["phong_cach_vi"] = sanitize_vi_listing_field(_clip_vi_field(str(parsed.get("phong_cach_vi") or ""), 120))
+    out["dip_vi"] = sanitize_vi_listing_field(_clip_vi_field(str(parsed.get("dip_vi") or ""), 120))
+    out["trong_luong_vi"] = sanitize_vi_listing_field(_clip_vi_field(str(parsed.get("trong_luong_vi") or ""), 80))
+    out["chieu_cao_got_vi"] = sanitize_vi_listing_field(_clip_vi_field(str(parsed.get("chieu_cao_got_vi") or ""), 80))
     ts_raw = str(parsed.get("thong_so_kich_thuoc_vi") or "").strip()
-    ts_vi = _scrub_cjk(ts_raw).strip()
+    ts_vi = sanitize_vi_listing_field(_scrub_cjk(ts_raw).strip())
     ts_vi = re.sub(r"[ \t]+\n", "\n", ts_vi)
     ts_vi = re.sub(r"\n{4,}", "\n\n\n", ts_vi).strip()
     if len(ts_vi) > 900:
         ts_vi = ts_vi[:900].strip()
     out["thong_so_kich_thuoc_vi"] = ts_vi
-    return out, warnings
+    return sanitize_taxonomy_vi_fields(out), warnings
 
 
 def classify_product_taxonomy_gemini(
@@ -882,7 +897,7 @@ def classify_product_taxonomy_gemini(
     if not getattr(settings, "IMPORT_LINK_GEMINI_TAXONOMY_FALLBACK_ENABLED", True):
         return None, warnings
 
-    name = (product_name or "").strip()
+    name = sanitize_listing_context_for_ai((product_name or "").strip())
     if not name:
         return None, warnings
 
@@ -890,10 +905,10 @@ def classify_product_taxonomy_gemini(
     if not triples:
         return None, warnings
 
-    blob_ctx = (context_text or "").strip()[:_MAX_CONTEXT_CHARS]
+    blob_ctx = sanitize_listing_context_for_ai((context_text or "").strip()[:_MAX_CONTEXT_CHARS])
     gender_hint_eff = supplier_gender_hint
     if gender_hint_eff is None:
-        gender_hint_eff = infer_supplier_gender_hint(f"{name}\n{blob_ctx}")
+        gender_hint_eff = infer_supplier_gender_hint(f"{(product_name or '').strip()}\n{(context_text or '').strip()}")
 
     triples_use, fb = filter_triples_by_gender_hint(triples, gender_hint_eff)
     if fb:
@@ -950,37 +965,37 @@ def classify_product_taxonomy_gemini(
         warnings.append("gemini_taxonomy: kết quả mâu thuẫn giới tính đã suy ra — bỏ qua.")
         return None, warnings
 
-    tv_raw = _scrub_cjk(str(parsed.get("ten_tieng_viet") or "")).strip()
+    tv_raw = sanitize_vi_listing_field(_scrub_cjk(str(parsed.get("ten_tieng_viet") or "")).strip())
     if _looks_untranslated_non_vi(tv_raw, name):
         warnings.append("gemini_taxonomy: ten_tieng_viet rỗng hoặc còn chữ ngoại ngữ.")
         tv_raw = ""
     if len(tv_raw) > 220:
         tv_raw = tv_raw[:220].strip()
 
-    mt_vi = _scrub_cjk(str(parsed.get("mo_ta_vi") or "")).strip()
+    mt_vi = sanitize_vi_listing_field(_scrub_cjk(str(parsed.get("mo_ta_vi") or "")).strip())
     mt_vi = re.sub(r"[ \t]+\n", "\n", mt_vi)
     mt_vi = re.sub(r"\n{3,}", "\n\n", mt_vi).strip()
     if len(mt_vi) > 12000:
         mt_vi = mt_vi[:12000].strip()
 
     out: Dict[str, str] = dict(canon)
-    kh_raw = _scrub_cjk(str(parsed.get("khach_hang") or "")).strip()
+    kh_raw = sanitize_vi_listing_field(_scrub_cjk(str(parsed.get("khach_hang") or "")).strip())
     if kh_raw:
         out["khach_hang"] = kh_raw
     out["ten_tieng_viet"] = tv_raw
-    out["chat_lieu_vi"] = _clip_vi_field(str(parsed.get("chat_lieu_vi") or ""), 100)
+    out["chat_lieu_vi"] = sanitize_vi_listing_field(_clip_vi_field(str(parsed.get("chat_lieu_vi") or ""), 100))
     out["mo_ta_vi"] = mt_vi
-    out["thuong_hieu_vi"] = _clip_vi_field(str(parsed.get("thuong_hieu_vi") or ""), 120)
-    out["xuat_xu_vi"] = _clip_vi_field(str(parsed.get("xuat_xu_vi") or ""), 80)
-    out["phong_cach_vi"] = _clip_vi_field(str(parsed.get("phong_cach_vi") or ""), 120)
-    out["dip_vi"] = _clip_vi_field(str(parsed.get("dip_vi") or ""), 120)
-    out["trong_luong_vi"] = _clip_vi_field(str(parsed.get("trong_luong_vi") or ""), 80)
-    out["chieu_cao_got_vi"] = _clip_vi_field(str(parsed.get("chieu_cao_got_vi") or ""), 80)
-    ts_vi = _scrub_cjk(str(parsed.get("thong_so_kich_thuoc_vi") or "")).strip()
+    out["thuong_hieu_vi"] = sanitize_vi_listing_field(_clip_vi_field(str(parsed.get("thuong_hieu_vi") or ""), 120))
+    out["xuat_xu_vi"] = sanitize_vi_listing_field(_clip_vi_field(str(parsed.get("xuat_xu_vi") or ""), 80))
+    out["phong_cach_vi"] = sanitize_vi_listing_field(_clip_vi_field(str(parsed.get("phong_cach_vi") or ""), 120))
+    out["dip_vi"] = sanitize_vi_listing_field(_clip_vi_field(str(parsed.get("dip_vi") or ""), 120))
+    out["trong_luong_vi"] = sanitize_vi_listing_field(_clip_vi_field(str(parsed.get("trong_luong_vi") or ""), 80))
+    out["chieu_cao_got_vi"] = sanitize_vi_listing_field(_clip_vi_field(str(parsed.get("chieu_cao_got_vi") or ""), 80))
+    ts_vi = sanitize_vi_listing_field(_scrub_cjk(str(parsed.get("thong_so_kich_thuoc_vi") or "")).strip())
     ts_vi = re.sub(r"[ \t]+\n", "\n", ts_vi)
     ts_vi = re.sub(r"\n{4,}", "\n\n\n", ts_vi).strip()
     out["thong_so_kich_thuoc_vi"] = ts_vi[:900].strip() if len(ts_vi) > 900 else ts_vi
-    return out, warnings
+    return sanitize_taxonomy_vi_fields(out), warnings
 
 
 _MAX_COLORS_IN_DISPLAY_VI = 4
@@ -1294,10 +1309,12 @@ def _apply_vi_listing_from_strings(
     merge_desc: bool = True,
 ) -> None:
     """Ghi `name` + `description` (cột E/F) từ chuỗi tiếng Việt đã có; bỏ qua merge nếu chuỗi rỗng."""
-    if merge_desc and (mo_ta_vi or "").strip():
+    ten_vi = sanitize_vi_listing_field((ten_vi or "").strip())
+    mo_ta_vi = sanitize_vi_listing_field((mo_ta_vi or "").strip())
+    if merge_desc and mo_ta_vi:
         _merge_description_vi(product_data, mo_ta_vi)
-    if merge_name and (ten_vi or "").strip():
-        tn = (ten_vi or "").strip()
+    if merge_name and ten_vi:
+        tn = ten_vi
         labs = collect_variant_color_labels(product_data)
         disp_vi = append_colors_suffix_to_vi_name(tn, labs)
         _merge_vietnamese_display_into_product_info(product_data, tn, disp_vi)
@@ -1365,6 +1382,7 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
             warnings.append(
                 "deepseek_taxonomy: giữ nguyên danh mục đã có — đã cập nhật tên/mô tả tiếng Việt (nếu API trả được)."
             )
+        apply_listing_year_sanitize_to_product_data(product_data)
         return warnings
 
     if not title_src:
@@ -1381,6 +1399,7 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
         if tv_nt or mv_nt:
             _apply_vi_listing_from_strings(product_data, tv_nt, mv_nt)
             warnings.append("deepseek_listing_translate: đã dịch tên/mô tả Việt dù chưa có taxonomy.")
+        apply_listing_year_sanitize_to_product_data(product_data)
         return warnings
 
     needs_gender = taxonomy_has_ambiguous_gender_cat1(triples)
@@ -1416,6 +1435,7 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
             warnings.append(
                 "deepseek_listing_translate: taxonomy không gán được nhánh — chỉ cập nhật tên/mô tả tiếng Việt nếu có."
             )
+        apply_listing_year_sanitize_to_product_data(product_data)
         return warnings
 
     khach = (triple.get("khach_hang") or "").strip() or None
@@ -1468,4 +1488,5 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
             if md_fb:
                 _merge_description_vi(product_data, md_fb)
     _merge_excel_web_listing_blocks(product_data, triple)
+    apply_listing_year_sanitize_to_product_data(product_data)
     return warnings

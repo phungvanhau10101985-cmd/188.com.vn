@@ -1610,6 +1610,42 @@ export const adminProductAPI = {
     }
   },
 
+  /** Excel mẫu tái nhập listing (2 hàng nhãn, cột Sku trống) — từ các dòng đã chọn trên trang parse. */
+  downloadListingLinkTemplateExcel: async (
+    rows: Array<{
+      product_id: string;
+      url: string;
+      shop_name_chinese: string;
+      china_price: number | null;
+      chinese_name: string;
+    }>,
+  ) => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    if (!rows.length) throw new Error('Chưa chọn dòng nào để xuất.');
+    const url = `${getApiBaseUrl()}/import-1688/export-listing-link-template.xlsx`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...ngrokFetchHeaders(),
+      },
+      body: JSON.stringify({ rows }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Xuất Excel listing thất bại');
+    }
+    const blob = await res.blob();
+    await assertBlobLooksLikeXlsx(blob);
+    const cd = res.headers.get('Content-Disposition');
+    let filename = `listing_link_selected_${rows.length}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const m = cd && /filename="?([^";]+)"?/i.exec(cd);
+    if (m?.[1]) filename = m[1].trim();
+    await triggerBlobDownloadPreferred(blob, filename);
+  },
+
   getImport1688Job: (jobId: string) =>
     fetchAdmin<AdminImport1688Job>(`/import-1688/jobs/${encodeURIComponent(jobId)}`, {
       timeoutMs: 60_000,

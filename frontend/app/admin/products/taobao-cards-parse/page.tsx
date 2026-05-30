@@ -10,6 +10,7 @@ import {
   buildListingImportPriceOverlay,
   extractOfferId1688FromHref,
   parseTaobaoListingHtml,
+  parsedListingRowsToLinkExportPayload,
   rowsToCsv,
   type ParsedTaobaoCardRow,
 } from '@/lib/taobao-cards-html-parse';
@@ -532,6 +533,7 @@ export default function TaobaoCardsParsePage() {
   const listingDraftPublishInFlightRef = useRef(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
   const [enqueueSubmitting, setEnqueueSubmitting] = useState(false);
+  const [listingLinkExporting, setListingLinkExporting] = useState(false);
   /** Sau khi bấm «Lấy thông tin» — chờ user chọn đợt đích trước khi gọi API. */
   const [enqueueChoiceOpen, setEnqueueChoiceOpen] = useState(false);
   const [pendingEnqueuePayload, setPendingEnqueuePayload] = useState<{
@@ -1677,6 +1679,21 @@ export default function TaobaoCardsParsePage() {
     showToast('ok', `Đã tải CSV ${selectedOnPage.length} dòng đã chọn.`);
   }, [selectedOnPage, effectiveRate, showToast]);
 
+  const downloadSelectedListingLinkExcel = useCallback(async () => {
+    if (!selectedOnPage.length || listingLinkExporting) return;
+    setListingLinkExporting(true);
+    try {
+      const rows = parsedListingRowsToLinkExportPayload(selectedOnPage);
+      await adminProductAPI.downloadListingLinkTemplateExcel(rows);
+      showToast('ok', `Đã tải Excel listing ${rows.length} dòng (mẫu Link + Giá Tệ, Sku để trống).`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Không xuất được Excel listing.';
+      showToast('err', msg);
+    } finally {
+      setListingLinkExporting(false);
+    }
+  }, [selectedOnPage, listingLinkExporting, showToast]);
+
   return (
     <>
       {savedRunsOpen ? (
@@ -2516,7 +2533,7 @@ export default function TaobaoCardsParsePage() {
             <code className="text-xs bg-slate-100 px-1 rounded">?platform_type=10</code>; Taobao/Tmall / ID T+số →{' '}
             <code className="text-xs bg-slate-100 px-1 rounded">?platform_type=21</code>. Server xử lý link{' '}
             <strong>lần lượt</strong> (Playwright). Có tạm dừng / tiếp tục / dừng hẳn, tải CSV tiến trình và thanh % bên dưới.
-            Hoặc «Export đã chọn» để tải CSV bảng parse.
+            Hoặc «Export đã chọn» để tải CSV bảng parse, hoặc «Excel listing (đã chọn)» theo mẫu tái nhập (Link SP, Giá Tệ, Sku trống).
           </span>
         </p>
       </div>
@@ -2562,6 +2579,18 @@ export default function TaobaoCardsParsePage() {
         >
           Export đã chọn
           {selectedOnPage.length > 0 ? ` (${selectedOnPage.length})` : ''}
+        </button>
+        <button
+          type="button"
+          disabled={selectedOnPage.length === 0 || listingLinkExporting}
+          onClick={() => void downloadSelectedListingLinkExcel()}
+          title="File .xlsx mẫu tái nhập listing: ID SP, Sku (trống), Link SP, Shop Trung Quốc, Giá Tệ, Tên tiếng Trung — dùng cho «Import Excel batch»."
+          aria-busy={listingLinkExporting}
+          className="px-4 py-2 rounded-lg border border-blue-300 bg-blue-50 text-blue-900 text-sm font-medium hover:bg-blue-100 disabled:opacity-50"
+        >
+          {listingLinkExporting
+            ? 'Đang xuất Excel…'
+            : `Excel listing (đã chọn)${selectedOnPage.length > 0 ? ` (${selectedOnPage.length})` : ''}`}
         </button>
         <div className="flex flex-wrap items-center gap-2">
           <label htmlFor="listing-import-fetch-target" className="sr-only">

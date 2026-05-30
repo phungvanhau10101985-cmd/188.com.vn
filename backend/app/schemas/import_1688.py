@@ -179,3 +179,15 @@ class ListingImportQueueRunsOut(BaseModel):
 class ListingImportQueueDeleteOut(BaseModel):
     queue_token: str
     deleted: bool = True
+
+
+class ListingLinkExportRowIn(BaseModel):
+    product_id: str = ""
+    url: str = ""
+    shop_name_chinese: str = ""
+    china_price: Optional[float] = None
+    chinese_name: str = ""
+
+
+class ListingLinkExportIn(BaseModel):
+    rows: List[ListingLinkExportRowIn] = Field(..., min_length=1)

@@ -40,7 +40,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 
-from openpyxl import load_workbook
+from io import BytesIO
+
+from openpyxl import Workbook, load_workbook
 
 
 
@@ -924,5 +926,64 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
         skip.append("Không có dòng dữ liệu có link sau dòng tiêu đề.")
 
     return out, skip
+
+
+_LISTING_LINK_EXPORT_HEADERS_EN = (
+    "ID SP",
+    "Sku",
+    "Link SP",
+    "shop_name_chinese",
+    "China price",
+    "chinese_name",
+)
+_LISTING_LINK_EXPORT_HEADERS_VI = (
+    "id",
+    "Sku",
+    "link",
+    "Shop Trung Quốc",
+    "Giá Tệ",
+    "Tên tiếng trung",
+)
+
+
+def _listing_link_export_china_price_cell(val: Any) -> Any:
+    if val is None:
+        return ""
+    if isinstance(val, bool):
+        return ""
+    if isinstance(val, (int, float)):
+        n = float(val)
+        if not math.isfinite(n):
+            return ""
+        if abs(n - round(n)) < 1e-9:
+            return int(round(n))
+        return round(n, 4)
+    s = str(val).strip()
+    return s
+
+
+def build_listing_link_import_xlsx_bytes(rows: List[Dict[str, Any]]) -> bytes:
+    """
+    Xuất mẫu tái nhập listing (hai hàng nhãn EN/VI) — khớp batch admin / parse_link_import_excel.
+    Cột Sku luôn để trống ở các dòng dữ liệu.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    for col_idx, (en, vi) in enumerate(
+        zip(_LISTING_LINK_EXPORT_HEADERS_EN, _LISTING_LINK_EXPORT_HEADERS_VI), 1
+    ):
+        ws.cell(row=1, column=col_idx, value=en)
+        ws.cell(row=2, column=col_idx, value=vi)
+    for row_idx, item in enumerate(rows, start=3):
+        ws.cell(row=row_idx, column=1, value=_cell_str(item.get("product_id")))
+        ws.cell(row=row_idx, column=2, value="")
+        ws.cell(row=row_idx, column=3, value=_cell_str(item.get("url")))
+        ws.cell(row=row_idx, column=4, value=_cell_str(item.get("shop_name_chinese")))
+        ws.cell(row=row_idx, column=5, value=_listing_link_export_china_price_cell(item.get("china_price")))
+        ws.cell(row=row_idx, column=6, value=_cell_str(item.get("chinese_name")))
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 

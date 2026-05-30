@@ -43,6 +43,7 @@ from app.schemas.import_1688 import (
     ListingImportQueueEnqueueIn,
     ListingImportQueueEnqueueOut,
     ListingImportQueueRunsOut,
+    ListingLinkExportIn,
     ProductImportDraftOut,
     ProductImportDraftUpdate,
 )
@@ -84,7 +85,11 @@ from app.services.import_batch_url_coercion import (
     coerce_url_for_excel_batch_import,
     normalize_fetch_target_param,
 )
-from app.services.import_link_excel_batch import merge_import_excel_overlay_into_product_data, parse_link_import_excel
+from app.services.import_link_excel_batch import (
+    build_listing_link_import_xlsx_bytes,
+    merge_import_excel_overlay_into_product_data,
+    parse_link_import_excel,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -1147,6 +1152,28 @@ async def create_import_jobs_batch_from_excel(
                 tmp_path.unlink()
         except Exception:
             pass
+
+
+@router.post("/export-listing-link-template.xlsx")
+def export_listing_link_template_xlsx(
+    body: ListingLinkExportIn,
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """
+    Xuất .xlsx mẫu tái nhập listing (hai hàng nhãn EN/VI, cột Sku để trống).
+    Dùng từ trang parse HTML listing khi admin chọn một hoặc nhiều dòng.
+    """
+    if not body.rows:
+        raise HTTPException(status_code=400, detail="Không có dòng nào để xuất.")
+    payload = [r.model_dump() for r in body.rows]
+    content = build_listing_link_import_xlsx_bytes(payload)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    filename = f"listing_link_selected_{len(payload)}_{stamp}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/jobs/excel-batches", response_model=Import1688ExcelBatchListOut)
