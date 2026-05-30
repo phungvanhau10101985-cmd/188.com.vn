@@ -25,6 +25,21 @@ from app.models.product import Product
 from app.models.image_localization_job import ImageLocalizationJob
 
 
+def _pkill_workers() -> None:
+    for pattern in (
+        "imgloc-",
+        "_multiprocess_job_entry",
+        "image_localization_job",
+        "image_localization_service",
+    ):
+        subprocess.run(
+            ["pkill", "-9", "-f", pattern],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+
 def _pkill_imgloc(job_id: str) -> None:
     short = (job_id or "").strip()[:8]
     if not short:
@@ -60,7 +75,18 @@ def _force_cancel_sql(db, job_id: str) -> bool:
     return (res.rowcount or 0) > 0
 
 
-def cancel_one(db, job_id: str, *, delete_row: bool = False) -> None:
+def _reset_all_processing(db) -> int:
+    return (
+        db.query(Product)
+        .filter(Product.image_localization_status == "processing")
+        .update(
+            {Product.image_localization_status: "pending", Product.image_localization_error: None},
+            synchronize_session=False,
+        )
+    )
+
+
+def cancel_one(db, job_id: str, *, delete_row: bool = False, reset_all_processing: bool = False) -> None:
     jid = (job_id or "").strip()
     if not jid:
         return
@@ -92,6 +118,18 @@ def cancel_one(db, job_id: str, *, delete_row: bool = False) -> None:
     else:
         n = 0
 
+    if reset_all_processing:
+        all_n = _reset_all_processing(db)
+        db.commit()
+        print(f"  Reset toàn bộ SP processing → pending: {all_n}")
+
+    if delete_row:
+        db.delete(row)
+        db.commit()
+        _pkill_imgloc(jid)
+        print(f"  ✅ Đã xóa dòng job khỏi DB: {jid}")
+        return
+
     if not _force_cancel_sql(db, jid):
         print(f"  ❌ UPDATE SQL không đổi dòng nào: {jid}")
         return
@@ -99,17 +137,10 @@ def cancel_one(db, job_id: str, *, delete_row: bool = False) -> None:
     _pkill_imgloc(jid)
     row2 = job_crud.get_job(db, jid)
     print(f"  Sau SQL: status={row2.status if row2 else None!r}")
-
-    if delete_row:
-        if row2:
-            db.delete(row2)
-            db.commit()
-        print(f"  ✅ Đã xóa dòng job khỏi DB: {jid}")
-    else:
-        print(f"  ✅ Xong — chạy: pm2 start 188-api")
+    print(f"  ✅ Xong — chạy: pm2 start 188-api")
 
 
-def cancel_all_active(db) -> None:
+def cancel_all_active(db, *, delete_row: bool = False, reset_all_processing: bool = False) -> None:
     rows = (
         db.query(ImageLocalizationJob)
         .filter(ImageLocalizationJob.status.in_(("queued", "running")))
@@ -120,38 +151,56 @@ def cancel_all_active(db) -> None:
         return
     for row in rows:
         print(f"\n==> {row.job_id}")
-        cancel_one(db, row.job_id)
+        cancel_one(db, row.job_id, delete_row=delete_row, reset_all_processing=False)
+    if reset_all_processing:
+        all_n = _reset_all_processing(db)
+        db.commit()
+        print(f"Reset toàn bộ SP processing → pending: {all_n}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Hủy cứng job bản địa hóa ảnh")
     parser.add_argument("job_id", nargs="?", help="job_id (UUID). Bỏ trống = job running mới nhất")
     parser.add_argument("--all-active", action="store_true", help="Hủy mọi job queued/running")
-    parser.add_argument("--delete", action="store_true", help="Xóa luôn dòng job sau khi cancelled")
+    parser.add_argument("--delete", action="store_true", help="Xóa luôn dòng job khỏi DB")
+    parser.add_argument(
+        "--nuke",
+        action="store_true",
+        help="Dọn triệt để: --delete + reset mọi SP processing + pkill worker",
+    )
     args = parser.parse_args()
+
+    delete_row = args.delete or args.nuke
+    reset_all = args.nuke
+
+    if args.nuke:
+        _pkill_workers()
 
     db = SessionLocal()
     try:
-        if args.all_active:
-            cancel_all_active(db)
-            return
-
         jid = (args.job_id or "").strip()
-        if not jid:
+        if not jid and not args.all_active:
             row = (
                 db.query(ImageLocalizationJob)
                 .filter(ImageLocalizationJob.status.in_(("queued", "running")))
                 .order_by(ImageLocalizationJob.updated_at.desc())
                 .first()
             )
-            if not row:
-                print("Không có job queued/running — không làm gì.")
-                return
-            jid = row.job_id
-            print(f"Dùng job mới nhất: {jid}")
+            if row:
+                jid = row.job_id
+                print(f"Dùng job mới nhất: {jid}")
 
-        print(f"\n==> Hủy job {jid}")
-        cancel_one(db, jid, delete_row=args.delete)
+        if args.all_active:
+            cancel_all_active(db, delete_row=delete_row, reset_all_processing=reset_all)
+        elif jid:
+            print(f"\n==> {'Nuke' if args.nuke else 'Hủy'} job {jid}")
+            cancel_one(db, jid, delete_row=delete_row, reset_all_processing=reset_all)
+        elif args.nuke and reset_all:
+            all_n = _reset_all_processing(db)
+            db.commit()
+            print(f"Không còn job active — reset toàn bộ SP processing → pending: {all_n}")
+        else:
+            print("Không có job queued/running — không làm gì.")
     finally:
         db.close()
 

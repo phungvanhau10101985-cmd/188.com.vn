@@ -161,6 +161,18 @@ def resume_pending_jobs_after_startup(run_job, payload_cls: type) -> None:
         return
 
     for row in rows:
+        db_check = SessionLocal()
+        try:
+            fresh = job_crud.get_job(db_check, row.job_id)
+            if not fresh:
+                continue
+            st = (fresh.status or "").strip().lower()
+            if st in ("cancelled", "done", "error") or bool(fresh.cancel_requested):
+                logger.info("IMAGE_LOCALIZATION_JOB_RESUME skip job_id=%s status=%s", row.job_id, st)
+                continue
+        finally:
+            db_check.close()
+
         payload = payload_from_stored(row.payload, payload_cls)
         if payload is None:
             db_fail = SessionLocal()
