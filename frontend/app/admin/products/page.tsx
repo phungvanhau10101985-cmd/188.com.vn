@@ -808,6 +808,8 @@ export default function AdminProductsPage() {
   /** Chặn double-submit khi POST start job (ngắn). */
   const [localizationStartBusy, setLocalizationStartBusy] = useState(false);
   const [localizationDeleteTarget, setLocalizationDeleteTarget] = useState<'all' | string | null>(null);
+  const [localizationForceCancelTarget, setLocalizationForceCancelTarget] = useState<string | null>(null);
+  const [localizationCancelBusy, setLocalizationCancelBusy] = useState(false);
   const [localizationClearBusy, setLocalizationClearBusy] = useState(false);
   const localizationPollCountRef = useRef(0);
   const [imageLocalizationJobsById, setImageLocalizationJobsById] = useState<
@@ -1294,13 +1296,21 @@ export default function AdminProductsPage() {
     beginLocalizationJobPoll(jid, { notifyOnFinish: true });
   };
 
-  const handleCancelImageLocalization = async (jobId: string) => {
+  const handleCancelImageLocalization = async (jobId: string, mode: 'graceful' | 'force') => {
+    setLocalizationCancelBusy(true);
     try {
-      const job = await adminProductAPI.cancelImageLocalizationJob(jobId);
+      const job = await adminProductAPI.cancelImageLocalizationJob(jobId, mode);
       setImageLocalizationJobsById((prev) => ({ ...prev, [jobId]: job }));
-      showToast('ok', 'Đang hủy job sau ảnh hiện tại');
+      if (mode === 'force') {
+        setLocalizationForceCancelTarget(null);
+        showToast('ok', 'Đã hủy ngay job bản địa hóa ảnh');
+      } else {
+        showToast('ok', 'Đang hủy sau khi xong bước hiện tại');
+      }
     } catch (err) {
       showToast('err', err instanceof Error ? err.message : 'Không hủy được job', 8000);
+    } finally {
+      setLocalizationCancelBusy(false);
     }
   };
 
@@ -3855,7 +3865,8 @@ export default function AdminProductsPage() {
               {localizationPollActive || localizationJobsForUi.length > 0 ? (
                 <p className="mt-1.5 text-xs leading-snug text-gray-600">
                   Mỗi lần bấm chạy là một job riêng — khung Tiến trình hiển thị <strong>từng card</strong>. Job đang chạy:
-                  bấm <strong>Hủy</strong> trong card. Job lỗi / đã dừng: bấm <strong>Xóa</strong> trên card hoặc{' '}
+                  <strong>Hủy sau bước hiện tại</strong> (chờ xong SP/ảnh đang xử lý) hoặc <strong>Hủy ngay</strong>{' '}
+                  (dừng trên server ngay). Job lỗi / đã dừng: bấm <strong>Xóa</strong> trên card hoặc{' '}
                   <strong>Xóa tiến trình đã dừng</strong> ở góc khung Tiến trình.
                 </p>
               ) : null}
@@ -4049,19 +4060,28 @@ export default function AdminProductsPage() {
 
                       {(job.status === 'running' || job.status === 'queued') && job.job_id ? (
                         <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-gray-100 pt-3">
-                          {job.cancel_requested ? (
+                          {job.cancel_requested && job.status === 'running' ? (
                             <p className="mr-auto text-xs text-amber-800">
-                              Đang hủy — chờ xong ảnh / bước hiện tại của sản phẩm đang xử lý…
+                              Đang chờ xong bước hiện tại… Bấm 「Hủy ngay」 nếu không muốn đợi thêm.
                             </p>
                           ) : null}
                           <button
                             type="button"
-                            onClick={() => void handleCancelImageLocalization(job.job_id)}
-                            disabled={Boolean(job.cancel_requested)}
+                            onClick={() => void handleCancelImageLocalization(job.job_id, 'graceful')}
+                            disabled={Boolean(job.cancel_requested) || localizationCancelBusy}
                             className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
-                            aria-label={`Hủy job ${job.job_id} sau ảnh đang xử lý`}
+                            aria-label={`Hủy job ${job.job_id} sau bước hiện tại`}
                           >
-                            {job.cancel_requested ? 'Đang hủy…' : 'Hủy job này sau ảnh hiện tại'}
+                            {job.cancel_requested ? 'Đang chờ hủy…' : 'Hủy sau bước hiện tại'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setLocalizationForceCancelTarget(job.job_id)}
+                            disabled={localizationCancelBusy}
+                            className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-medium text-red-700 shadow-sm hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
+                            aria-label={`Hủy ngay job ${job.job_id}`}
+                          >
+                            Hủy ngay
                           </button>
                         </div>
                       ) : null}
@@ -4070,6 +4090,57 @@ export default function AdminProductsPage() {
                 </div>
               )}
             </div>
+
+            {localizationForceCancelTarget ? (
+              <div
+                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+                role="presentation"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget && !localizationCancelBusy) {
+                    setLocalizationForceCancelTarget(null);
+                  }
+                }}
+              >
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="localization-force-cancel-title"
+                  className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-5 shadow-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 id="localization-force-cancel-title" className="text-base font-semibold text-gray-900">
+                    Hủy ngay job bản địa hóa?
+                  </h3>
+                  <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                    Job{' '}
+                    <code className="rounded bg-gray-100 px-1 py-0.5 text-xs">{localizationForceCancelTarget}</code>{' '}
+                    sẽ chuyển sang <strong className="font-medium text-gray-800">cancelled</strong> ngay trên server.
+                    Sản phẩm đang xử lý có thể vẫn chạy nền thêm vài phút (Gemini/OCR) nhưng sẽ không xử lý SP kế
+                    tiếp.
+                  </p>
+                  <div className="mt-5 flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => !localizationCancelBusy && setLocalizationForceCancelTarget(null)}
+                      disabled={localizationCancelBusy}
+                      className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                    >
+                      Quay lại
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void handleCancelImageLocalization(localizationForceCancelTarget, 'force')
+                      }
+                      disabled={localizationCancelBusy}
+                      className="rounded-lg border border-red-600 bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                    >
+                      {localizationCancelBusy ? 'Đang hủy…' : 'Hủy ngay'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             {localizationDeleteTarget ? (
               <div

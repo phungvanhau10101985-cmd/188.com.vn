@@ -1393,11 +1393,14 @@ export const adminProductAPI = {
       timeoutMs: 60_000,
     }),
 
-  cancelImageLocalizationJob: (jobId: string) =>
-    fetchAdmin<AdminImageLocalizationJob>(`/image-localization/jobs/${encodeURIComponent(jobId)}/cancel`, {
-      method: 'POST',
-      timeoutMs: 60_000,
-    }),
+  cancelImageLocalizationJob: (jobId: string, mode: 'graceful' | 'force' = 'graceful') =>
+    fetchAdmin<AdminImageLocalizationJob>(
+      `/image-localization/jobs/${encodeURIComponent(jobId)}/cancel?mode=${encodeURIComponent(mode)}`,
+      {
+        method: 'POST',
+        timeoutMs: 60_000,
+      },
+    ),
 
   clearImageLocalizationTerminalJobs: () =>
     fetchAdmin<AdminImageLocalizationClearTerminalJobsResult>('/image-localization/jobs/terminal', {

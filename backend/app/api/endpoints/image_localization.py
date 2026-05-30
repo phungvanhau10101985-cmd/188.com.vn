@@ -3,7 +3,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -290,6 +290,7 @@ def _finalize_job_cancelled(
     processed_ids: List[str],
     results: List[Dict[str, Any]],
     skipped_reports: List[Dict[str, Any]],
+    message: str = "Đã hủy job bản địa hóa ảnh.",
 ) -> None:
     current, percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
     _job_update(
@@ -301,7 +302,7 @@ def _finalize_job_cancelled(
         done=done,
         failed=failed,
         skipped=skipped,
-        message="Đã hủy job bản địa hóa ảnh.",
+        message=message,
         finished_at=datetime.now(timezone.utc).isoformat(),
         current_product_id=None,
         cancel_requested=True,
@@ -325,6 +326,42 @@ def _reset_product_after_cancel(db: Session, product: Product) -> None:
         fresh.image_localization_status = "pending"
         fresh.image_localization_error = None
         db.commit()
+
+
+def _reset_product_processing_by_product_id(db: Session, product_id: str) -> None:
+    pid = (product_id or "").strip()
+    if not pid:
+        return
+    p = db.query(Product).filter(Product.product_id == pid).first()
+    if p is None:
+        return
+    if (p.image_localization_status or "").strip() == "processing":
+        p.image_localization_status = "pending"
+        p.image_localization_error = None
+        db.commit()
+
+
+def _job_is_cancelled(job_id: str) -> bool:
+    return (_job_get(job_id).get("status") or "").strip().lower() == "cancelled"
+
+
+def _finalize_job_cancelled_from_snapshot(
+    job_id: str,
+    job: Dict[str, Any],
+    *,
+    message: str,
+) -> None:
+    _finalize_job_cancelled(
+        job_id,
+        done=int(job.get("done") or 0),
+        failed=int(job.get("failed") or 0),
+        skipped=int(job.get("skipped") or 0),
+        total=int(job.get("total") or 0),
+        processed_ids=_unique_product_ids(job.get("processed_product_ids") or []),
+        results=list(job.get("recent_results") or []),
+        skipped_reports=list(job.get("skipped_product_reports") or []),
+        message=message,
+    )
 
 
 def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: bool = False) -> None:
@@ -443,9 +480,14 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
         consecutive_product_failures = 0
 
         def should_cancel() -> bool:
-            return bool(_job_get(job_id).get("cancel_requested"))
+            j = _job_get(job_id)
+            if (j.get("status") or "").strip().lower() == "cancelled":
+                return True
+            return bool(j.get("cancel_requested"))
 
         for product in products:
+            if _job_is_cancelled(job_id):
+                return
             if should_cancel():
                 _finalize_job_cancelled(
                     job_id,
@@ -456,6 +498,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     processed_ids=processed_ids,
                     results=results,
                     skipped_reports=skipped_reports,
+                    message="Đã hủy job sau khi xong bước hiện tại.",
                 )
                 return
             current, percent = _job_progress(
@@ -471,6 +514,8 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             )
             try:
                 result = service.process_product(db, product, should_cancel=should_cancel)
+                if _job_is_cancelled(job_id):
+                    return
                 status = result.get("status")
                 row = {
                     "product_id": product.product_id,
@@ -604,6 +649,9 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     )
                     return
 
+            if _job_is_cancelled(job_id):
+                return
+
             _mark_processed_product(processed_ids, processed_set, product.product_id)
             current, percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
             _job_update(
@@ -617,6 +665,9 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                 percent=percent,
                 skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
             )
+
+        if _job_is_cancelled(job_id):
+            return
 
         current, _percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
         _job_update(
@@ -636,14 +687,15 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             processed_product_ids=processed_ids,
         )
     except Exception as exc:
-        _job_update(
-            job_id,
-            status="error",
-            phase="error",
-            message=str(exc),
-            finished_at=datetime.now(timezone.utc).isoformat(),
-            current_product_id=None,
-        )
+        if not _job_is_cancelled(job_id):
+            _job_update(
+                job_id,
+                status="error",
+                phase="error",
+                message=str(exc),
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                current_product_id=None,
+            )
     finally:
         try:
             if "service" in locals():
@@ -907,6 +959,11 @@ def get_job(
 @router.post("/jobs/{job_id}/cancel")
 def cancel_job(
     job_id: str,
+    mode: Literal["graceful", "force"] = Query(
+        "graceful",
+        description="graceful = chờ xong SP/ảnh hiện tại; force = đánh dấu hủy ngay trên server.",
+    ),
+    db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("products")),
 ):
     job = _job_get(job_id)
@@ -914,7 +971,25 @@ def cancel_job(
         raise HTTPException(status_code=404, detail="Không tìm thấy job bản địa hóa ảnh")
     if job.get("status") in {"done", "error", "cancelled"}:
         return job
-    _job_update(job_id, cancel_requested=True, message="Đang hủy job sau ảnh hiện tại...")
+
+    if mode == "force":
+        current_pid = (job.get("current_product_id") or "").strip()
+        if current_pid:
+            _reset_product_processing_by_product_id(db, current_pid)
+        _finalize_job_cancelled_from_snapshot(
+            job_id,
+            job,
+            message="Đã hủy ngay — không chờ bước đang chạy (SP hiện tại có thể vẫn kết thúc nền).",
+        )
+        return _job_get(job_id)
+
+    if job.get("cancel_requested"):
+        return job
+    _job_update(
+        job_id,
+        cancel_requested=True,
+        message="Đang hủy job sau ảnh hiện tại...",
+    )
     return _job_get(job_id)
 
 
