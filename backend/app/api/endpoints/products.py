@@ -771,6 +771,20 @@ def create_product(
     created = crud.product.create_product(db=db, product=product)
     return _product_to_response(db, created)
 
+
+@router.get("/sitemap-slugs", response_model=dict)
+def read_product_sitemap_slugs(
+    response: Response,
+    db: Session = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(5000, ge=1, le=10000),
+    is_active: bool = Query(True),
+):
+    """slug + updated_at only — lightweight for Next.js sitemap (avoids >2MB list payloads)."""
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    return crud.product.get_product_sitemap_slugs(db, skip=skip, limit=limit, is_active=is_active)
+
+
 @router.get("/{product_id}", response_model=Product)
 def read_product(
     product_id: str,

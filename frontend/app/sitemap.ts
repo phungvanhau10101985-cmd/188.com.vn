@@ -13,18 +13,28 @@ const BASE_URL =
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001/api/v1";
 
-/** Lấy tất cả slug sản phẩm từ API (phân trang). */
+/** Lấy tất cả slug sản phẩm từ API (phân trang, payload nhẹ). */
 async function getAllProductSlugs(): Promise<{ slug: string; updated_at?: string }[]> {
   const results: { slug: string; updated_at?: string }[] = [];
   let skip = 0;
-  const limit = 500;
+  let useLegacyList = false;
+  const limit = 5000;
   try {
     while (true) {
-      const url = `${API_BASE}/products/?limit=${limit}&skip=${skip}&is_active=true`;
+      const pageLimit = useLegacyList ? 500 : limit;
+      const url = useLegacyList
+        ? `${API_BASE}/products/?limit=${pageLimit}&skip=${skip}&is_active=true`
+        : `${API_BASE}/products/sitemap-slugs?limit=${pageLimit}&skip=${skip}&is_active=true`;
       const res = await fetch(url, {
-        next: { revalidate: 3600 },
+        ...(useLegacyList ? { cache: "no-store" as const } : { next: { revalidate: 3600 } }),
         headers: { "Content-Type": "application/json" },
       });
+      if (!useLegacyList && res.status === 404) {
+        useLegacyList = true;
+        skip = 0;
+        results.length = 0;
+        continue;
+      }
       if (!res.ok) break;
       const data = (await res.json()) as { products?: { slug?: string; updated_at?: string }[] };
       const products = data.products || [];
@@ -32,8 +42,8 @@ async function getAllProductSlugs(): Promise<{ slug: string; updated_at?: string
       for (const p of products) {
         if (p.slug) results.push({ slug: p.slug, updated_at: p.updated_at });
       }
-      if (products.length < limit) break;
-      skip += limit;
+      if (products.length < pageLimit) break;
+      skip += pageLimit;
     }
   } catch {
     // Bỏ qua nếu API lỗi (vd: build không có backend)

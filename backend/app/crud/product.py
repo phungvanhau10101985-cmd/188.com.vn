@@ -1812,6 +1812,37 @@ def get_product_by_slug(db: Session, slug: str) -> Optional[Product]:
         return None
 
 
+def get_product_sitemap_slugs(
+    db: Session,
+    *,
+    skip: int = 0,
+    limit: int = 5000,
+    is_active: Optional[bool] = True,
+) -> dict:
+    """Chỉ slug + updated_at — payload nhẹ cho sitemap Next.js (tránh giới hạn cache 2MB)."""
+    filters = [Product.slug.isnot(None), Product.slug != ""]
+    if is_active is not None:
+        filters.append(Product.is_active == is_active)
+    total = db.query(Product.id).filter(*filters).count()
+    rows = (
+        db.query(Product.slug, Product.updated_at)
+        .filter(*filters)
+        .order_by(Product.id)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    products = [
+        {
+            "slug": row.slug,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+        for row in rows
+        if row.slug
+    ]
+    return {"total": total, "skip": skip, "limit": limit, "products": products}
+
+
 # Gợi ý màu từ tên SP (ưu tiên cụm dài trước) — không accent khi so khớp.
 _NAME_COLOR_HINTS_ORDERED: List[str] = [
     "xanh navy",
