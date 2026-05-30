@@ -4115,14 +4115,6 @@ export default function AdminProductsPage() {
                           ) : null}
                           <button
                             type="button"
-                            onClick={() => removeLocalizationJobFromUi(job.job_id)}
-                            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1"
-                            aria-label={`Gỡ job ${job.job_id} khỏi màn hình`}
-                          >
-                            Gỡ khỏi màn hình
-                          </button>
-                          <button
-                            type="button"
                             onClick={() => void handleCancelImageLocalization(job.job_id, 'graceful')}
                             disabled={Boolean(job.cancel_requested) || localizationCancelBusy}
                             className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
