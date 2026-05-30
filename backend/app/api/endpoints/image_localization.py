@@ -23,7 +23,7 @@ from app.services.image_localization_job_abort import (
 )
 from app.services.image_localization_job_runtime import (
     payload_from_stored,
-    start_job_thread,
+    start_job_process,
     start_resume_daemon,
 )
 from app.services.image_localization_service import (
@@ -46,6 +46,9 @@ router = APIRouter()
 
 _jobs_lock = threading.Lock()
 _jobs: Dict[str, Dict[str, Any]] = {}
+
+_TERMINAL_JOB_STATUSES = frozenset({"done", "error", "cancelled"})
+_RESUMABLE_JOB_STATUSES = frozenset({"queued", "running"})
 
 # Trong một job: SP failed / exception (không phải fatal OCR–DeepSeek) đếm liên tiếp; đủ ngưỡng thì dừng job.
 IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES = 3
@@ -218,10 +221,35 @@ def _persist_job_to_db(job_id: str) -> None:
 def _job_update(job_id: str, **kwargs: Any) -> None:
     with _jobs_lock:
         job = _jobs.get(job_id, {})
+        cur = (job.get("status") or "").strip().lower()
+        new_status = (kwargs.get("status") or "").strip().lower() if "status" in kwargs else ""
+        if cur in _TERMINAL_JOB_STATUSES and new_status and new_status not in _TERMINAL_JOB_STATUSES:
+            kwargs = dict(kwargs)
+            kwargs.pop("status", None)
+            kwargs.pop("phase", None)
         job.update(kwargs)
         job["job_id"] = job_id
         _jobs[job_id] = job
     _persist_job_to_db(job_id)
+
+
+def _job_cancel_signal(job_id: str) -> bool:
+    """Đọc DB — worker subprocess thấy hủy ngay dù bộ nhớ process con cũ."""
+    j = _job_get(job_id)
+    if (j.get("status") or "").strip().lower() == "cancelled":
+        return True
+    if bool(j.get("cancel_requested")):
+        return True
+    db = SessionLocal()
+    try:
+        row = image_loc_job_crud.get_job(db, job_id)
+        if not row:
+            return False
+        if (row.status or "").strip().lower() == "cancelled":
+            return True
+        return bool(row.cancel_requested)
+    finally:
+        db.close()
 
 
 def _job_get(job_id: str) -> Dict[str, Any]:
@@ -486,10 +514,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
         consecutive_product_failures = 0
 
         def should_cancel() -> bool:
-            j = _job_get(job_id)
-            if (j.get("status") or "").strip().lower() == "cancelled":
-                return True
-            return bool(j.get("cancel_requested"))
+            return _job_cancel_signal(job_id)
 
         for product in products:
             if _job_is_cancelled(job_id):
@@ -887,17 +912,13 @@ def start_job(
     with _jobs_lock:
         _jobs[job_id] = {**initial, "job_id": job_id}
     _create_db_job_row(job_id, payload, extra=initial)
-    start_job_thread(job_id, _run_job, (job_id, payload), {"resume": False})
+    start_job_process(job_id, payload.model_dump(), resume=False)
     return {"job_id": job_id, "status": "queued"}
 
 
 def start_image_localization_job_resume_daemon_if_enabled() -> None:
     """Quét job queued/running trong DB và chạy tiếp sau restart backend."""
     start_resume_daemon(_run_job, StartImageLocalizationPayload)
-
-
-_RESUMABLE_JOB_STATUSES = frozenset({"queued", "running"})
-_TERMINAL_JOB_STATUSES = frozenset({"done", "error", "cancelled"})
 
 
 @router.get("/jobs")
@@ -995,9 +1016,9 @@ def cancel_job(
             job_id,
             job,
             message=(
-                "Đã hủy ngay — đã dừng sản phẩm đang xử lý."
+                "Đã hủy ngay — đã dừng worker (kill process nếu cần)."
                 if aborted_worker
-                else "Đã hủy ngay — job đã dừng (worker không còn trên server)."
+                else "Đã hủy ngay — job đã cancelled (worker có thể đã dừng trước đó)."
             ),
         )
         return _job_get(job_id)

@@ -180,8 +180,13 @@ def sync_dict_to_row(db: Session, job_id: str, job: Dict[str, Any]) -> None:
     if not row:
         return
     status = job.get("status")
+    existing = (row.status or "").strip().lower()
+    new_st = (str(status).strip().lower() if status else "")
     if status:
-        row.status = str(status)
+        if existing in _TERMINAL and new_st and new_st not in _TERMINAL:
+            status = None
+        else:
+            row.status = str(status)
     for field in (
         "phase",
         "message",

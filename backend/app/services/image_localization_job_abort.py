@@ -1,10 +1,12 @@
-"""Đăng ký worker bản địa hóa ảnh đang chạy — phục vụ hủy ngay (đóng Playwright / HTTP)."""
+"""Đăng ký worker bản địa hóa ảnh đang chạy — phục vụ hủy ngay (terminate process / đóng Playwright)."""
 
 from __future__ import annotations
 
 import logging
 import threading
 from typing import Any, Dict, Optional
+
+from app.services.image_localization_job_runtime import terminate_job_worker
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +39,11 @@ def get_running_service(job_id: str) -> Optional[Any]:
 
 
 def force_abort_running_service(job_id: str) -> bool:
+    """Hủy ngay: kill subprocess trước, rồi đóng Playwright/session nếu còn trong process hiện tại."""
+    terminated = terminate_job_worker(job_id)
     service = get_running_service(job_id)
     if service is None:
-        return False
+        return terminated
     try:
         if hasattr(service, "force_abort"):
             service.force_abort()
@@ -48,4 +52,4 @@ def force_abort_running_service(job_id: str) -> bool:
         return True
     except Exception:
         logger.exception("force_abort_running_service failed job_id=%s", job_id)
-        return False
+        return terminated
