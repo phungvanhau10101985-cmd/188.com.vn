@@ -47,5 +47,5 @@ export function useLazyRevealList<T>(
     return () => obs.disconnect();
   }, [hasMore, loadMore, rootMargin, visibleCount, items.length]);
 
-  return { revealed, hasMore, sentinelRef, total: items.length };
+  return { revealed, hasMore, loadMore, sentinelRef, total: items.length };
 }
