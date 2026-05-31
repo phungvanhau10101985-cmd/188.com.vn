@@ -1014,28 +1014,9 @@ export default function HomePageClient({
   }, [sameAgeGenderLoading, sameAgeGenderCohortMode, sameAgeGenderProducts]);
 
   const cohortBadgeProductIds = useMemo(() => {
-    if (sameShopProducts.length === 0) {
-      return new Set<number>();
-    }
     const shopIds = new Set(sameShopProducts.map((p) => p.id));
     return new Set(cohortProductsForMix.filter((p) => !shopIds.has(p.id)).map((p) => p.id));
   }, [sameShopProducts, cohortProductsForMix]);
-
-  const isCohortOnlyRecommendations =
-    sameShopTotal === 0 && cohortProductsForMix.length > 0 && !sameShopLoading;
-
-  const recommendationReveal = useLazyRevealList(mixedRecommendationProducts, {
-    initial: HOME_MIX_INITIAL_LIMIT,
-    step: HOME_MIX_LOAD_MORE_LIMIT,
-  });
-
-  const displayedRecommendationProducts = isCohortOnlyRecommendations
-    ? recommendationReveal.revealed
-    : mixedRecommendationProducts;
-
-  const showRecommendationLoadMore =
-    mixedRecommendationProducts.length > 0 &&
-    (sameShopCanLoadMore || (isCohortOnlyRecommendations && recommendationReveal.hasMore));
 
   useEffect(() => {
     recommendationMixAnchorRef.current = '';
@@ -1043,8 +1024,8 @@ export default function HomePageClient({
   }, [recommendationKey]);
 
   useEffect(() => {
-    if (sameShopLoading) return;
-    if (isAuthenticated && sameAgeGenderLoading) return;
+    const cohortPending = isAuthenticated && sameAgeGenderLoading;
+    if (sameShopLoading || cohortPending) return;
 
     const cohortAnchor =
       cohortProductsForMix.length > 0
@@ -1072,16 +1053,6 @@ export default function HomePageClient({
     sameAgeGenderLoading,
     cohortProductsForMix,
   ]);
-
-  const handleRecommendationLoadMore = () => {
-    if (sameShopCanLoadMore) {
-      loadMoreSameShop();
-      return;
-    }
-    if (isCohortOnlyRecommendations && recommendationReveal.hasMore) {
-      recommendationReveal.loadMore();
-    }
-  };
 
   const handleFavorite = async (productId: number, e: React.MouseEvent) => {
     e.preventDefault();
@@ -1363,9 +1334,9 @@ export default function HomePageClient({
                     </div>
                   ))}
                 </div>
-              ) : displayedRecommendationProducts.length > 0 ? (
+              ) : mixedRecommendationProducts.length > 0 ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {displayedRecommendationProducts.map((product, index) => (
+                  {mixedRecommendationProducts.map((product, index) => (
                     <SimpleProductCard
                       key={product.id}
                       product={product}
@@ -1377,11 +1348,11 @@ export default function HomePageClient({
                   ))}
                 </div>
               ) : null}
-              {showRecommendationLoadMore && (
+              {sameShopCanLoadMore && mixedRecommendationProducts.length > 0 && (
                 <div className="flex justify-center pt-5 pb-2">
                   <button
                     type="button"
-                    onClick={handleRecommendationLoadMore}
+                    onClick={loadMoreSameShop}
                     disabled={sameShopLoadMoreLoading}
                     className="inline-flex min-h-[44px] items-center rounded-xl bg-[#ea580c] px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#c2410c] disabled:opacity-60"
                   >
