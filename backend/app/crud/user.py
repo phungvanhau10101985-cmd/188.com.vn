@@ -7,8 +7,8 @@ AttributeError: module 'app.crud.user' has no attribute 'get_user'
 
 import random
 from collections import defaultdict
-from sqlalchemy.orm import Session
-from sqlalchemy import extract, func, or_
+from sqlalchemy.orm import Session, aliased
+from sqlalchemy import extract, func, or_, exists, select
 from datetime import datetime, date
 from typing import List, Optional, Dict, Any, Tuple
 from app.models.user import (
@@ -474,6 +474,47 @@ def get_user_viewed_products(db: Session, user_id: int, limit: int = 20) -> List
 SAME_AGE_GENDER_RECENT_VIEW_POOL = 30
 
 
+def _recent_cohort_product_ids_joined(
+    db: Session,
+    *,
+    user_id: int,
+    gender: str,
+    birth_year: Optional[int] = None,
+) -> List[int]:
+    """Pool SP xem gần nhất của khách cùng giới (và cùng năm sinh nếu có) — một query JOIN, không load list user_id."""
+    peer_view = aliased(UserProductView)
+    q = (
+        db.query(peer_view.product_id)
+        .join(User, User.id == peer_view.user_id)
+        .filter(User.is_active == True)  # noqa: E712
+        .filter(User.id != user_id)
+        .filter(User.gender == gender)
+        .filter(
+            ~exists(
+                select(1).where(
+                    UserProductView.user_id == user_id,
+                    UserProductView.product_id == peer_view.product_id,
+                )
+            )
+        )
+    )
+    if birth_year is not None:
+        q = q.filter(extract("year", User.date_of_birth) == birth_year)
+
+    rows = (
+        q.group_by(peer_view.product_id)
+        .order_by(func.max(peer_view.viewed_at).desc())
+        .limit(SAME_AGE_GENDER_RECENT_VIEW_POOL)
+        .all()
+    )
+    pool = [int(r[0]) for r in rows]
+    if not pool:
+        return []
+    shuffled = pool.copy()
+    random.shuffle(shuffled)
+    return shuffled
+
+
 def get_products_viewed_by_same_age_gender(
     db: Session, user_id: int, limit: int = 24
 ) -> Tuple[List[Product], str]:
@@ -496,38 +537,6 @@ def get_products_viewed_by_same_age_gender(
     birth_year = user.date_of_birth.year
     gender = user.gender
 
-    self_viewed_product_ids = (
-        db.query(UserProductView.product_id)
-        .filter(UserProductView.user_id == user_id)
-        .distinct()
-        .subquery()
-    )
-
-    def _product_ids_from_recent_cohort_views(peer_ids: List[int]) -> List[int]:
-        if not peer_ids:
-            return []
-        peer_ids = [pid for pid in peer_ids if pid != user_id]
-        if not peer_ids:
-            return []
-        rows = (
-            db.query(
-                UserProductView.product_id,
-                func.max(UserProductView.viewed_at).label("last_viewed"),
-            )
-            .filter(UserProductView.user_id.in_(peer_ids))
-            .filter(~UserProductView.product_id.in_(db.query(self_viewed_product_ids.c.product_id)))
-            .group_by(UserProductView.product_id)
-            .order_by(func.max(UserProductView.viewed_at).desc())
-            .limit(SAME_AGE_GENDER_RECENT_VIEW_POOL)
-            .all()
-        )
-        pool = [r[0] for r in rows]
-        if not pool:
-            return []
-        shuffled = pool.copy()
-        random.shuffle(shuffled)
-        return shuffled
-
     def _hydrate_ordered(product_ids: List[int]) -> List[Product]:
         if not product_ids:
             return []
@@ -540,31 +549,22 @@ def get_products_viewed_by_same_age_gender(
         rows.sort(key=lambda p: order_map.get(p.id, 999))
         return rows[:limit]
 
-    same_year_gender_ids = [
-        r[0]
-        for r in db.query(User.id)
-        .filter(User.is_active == True)  # noqa: E712
-        .filter(User.id != user_id)
-        .filter(User.gender == gender)
-        .filter(extract("year", User.date_of_birth) == birth_year)
-        .all()
-    ]
-    product_ids = _product_ids_from_recent_cohort_views(same_year_gender_ids)
+    product_ids = _recent_cohort_product_ids_joined(
+        db, user_id=user_id, gender=gender, birth_year=birth_year
+    )
     if product_ids:
         return _hydrate_ordered(product_ids), "exact_cohort"
 
-    gender_peer_ids = [
-        r[0]
-        for r in db.query(User.id)
-        .filter(User.is_active == True)  # noqa: E712
-        .filter(User.id != user_id)
-        .filter(User.gender == gender)
-        .all()
-    ]
-    product_ids = _product_ids_from_recent_cohort_views(gender_peer_ids)
+    product_ids = _recent_cohort_product_ids_joined(db, user_id=user_id, gender=gender)
     if product_ids:
         return _hydrate_ordered(product_ids), "gender_peers"
 
+    self_viewed_product_ids = (
+        db.query(UserProductView.product_id)
+        .filter(UserProductView.user_id == user_id)
+        .distinct()
+        .subquery()
+    )
     popular = (
         db.query(Product)
         .filter(Product.is_active == True)  # noqa: E712
@@ -583,6 +583,15 @@ SAME_SHOP_HISTORY_WINDOW = 40
 SAME_SHOP_STREAK_THRESHOLD = 8
 SAME_SHOP_STREAK_DOMINANT_CYCLE_WEIGHT = 5
 SAME_SHOP_DOMINANT_MAX_PER_PAGE = 14
+SAME_SHOP_MIN_CANDIDATE_POOL = 96
+
+
+def _same_shop_candidate_pool_limit(*, limit: int, offset: int, shop_count: int) -> int:
+    """Giới hạn SP load từ DB — đủ cho trang hiện tại + «Xem thêm», tránh quét 8000 dòng mỗi lần mở trang."""
+    page_size = max(1, limit)
+    pages_needed = max(1, (offset + limit + page_size - 1) // page_size)
+    per_shop = SAME_SHOP_MAX_PER_SHOP_PER_PAGE * pages_needed + 6
+    return min(SAME_SHOP_MAX_POOL, max(SAME_SHOP_MIN_CANDIDATE_POOL, shop_count * per_shop))
 
 
 def _same_shop_key(product: Product) -> str:
@@ -859,18 +868,21 @@ def get_products_same_shop_as_recent_views(
     shop_conditions = [
         func.lower(func.trim(Product.shop_name_chinese)) == shop_lower for shop_lower in shops_lower
     ]
-    # Tránh .all() không giới hạn — vài shop lớn → OOM / timeout → 500 trên production.
     filt = (
         or_(*shop_conditions),
         Product.is_active == True,  # noqa: E712
     )
-    db_total = db.query(Product).filter(*filt).count()
-    if db_total <= 0:
-        return [], 0, None
+    pool_limit = _same_shop_candidate_pool_limit(
+        limit=limit, offset=offset, shop_count=len(shops_lower)
+    )
     q = db.query(Product).filter(*filt).order_by(Product.id)
-    candidates = q.limit(SAME_SHOP_MAX_POOL).all() if db_total > SAME_SHOP_MAX_POOL else q.all()
+    candidates = q.limit(pool_limit).all()
     if not candidates:
         return [], 0, None
+    if len(candidates) < pool_limit:
+        db_total = len(candidates)
+    else:
+        db_total = db.query(Product).filter(*filt).count()
     if require_video:
         candidates = [
             p for p in candidates if is_playable_product_video_link(getattr(p, "video_link", None))

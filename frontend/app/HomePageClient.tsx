@@ -1024,8 +1024,7 @@ export default function HomePageClient({
   }, [recommendationKey]);
 
   useEffect(() => {
-    const cohortPending = isAuthenticated && sameAgeGenderLoading;
-    if (sameShopLoading || cohortPending) return;
+    if (sameShopLoading) return;
 
     const cohortAnchor =
       cohortProductsForMix.length > 0
@@ -1045,12 +1044,10 @@ export default function HomePageClient({
       appendNewShopProductsToMix(prev, sameShopProducts)
     );
   }, [
-    isAuthenticated,
     recommendationKey,
     sameShopSeed,
     sameShopProducts,
     sameShopLoading,
-    sameAgeGenderLoading,
     cohortProductsForMix,
   ]);
 
@@ -1321,7 +1318,7 @@ export default function HomePageClient({
               hint={sameAgeGenderHint}
             />
             <div className="mt-3">
-              {sameShopLoading || (isAuthenticated && sameAgeGenderLoading) ? (
+              {sameShopLoading ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
                   {[...Array(12)].map((_, i) => (
                     <div key={i} className="bg-white rounded-xl border border-gray-100 overflow-hidden animate-pulse">
