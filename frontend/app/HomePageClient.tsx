@@ -101,7 +101,7 @@ export default function HomePageClient({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, isLoading: authLoading } = useAuth();
   const { refreshFavorites } = useFavorites();
   const qFromUrl = searchParams.get('q') ?? '';
   const shopIdFromUrl = searchParams.get('shop_id') ?? undefined;
@@ -122,9 +122,11 @@ export default function HomePageClient({
   const subSubcategoryFromUrl = searchParams.get('sub_subcategory') ?? undefined;
   const ssrProducts = initialPlainHome?.products ?? [];
   const ssrHasList = ssrProducts.length > 0;
+  /** SSR có list → client sẽ hydrate personalized; giữ skeleton đến khi xong để không đổi lưới giữa chừng. */
+  const plainHomeAwaitingPersonalized = ssrHasList && initialPlainHome != null;
   const [products, setProducts] = useState<Product[]>(ssrProducts);
   const [totalProducts, setTotalProducts] = useState(initialPlainHome?.total ?? 0);
-  const [loading, setLoading] = useState(!ssrHasList);
+  const [loading, setLoading] = useState(!ssrHasList || plainHomeAwaitingPersonalized);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState(qFromUrl);
   const [selectedFilter, setSelectedFilter] = useState<{
@@ -607,6 +609,7 @@ export default function HomePageClient({
   );
 
   useEffect(() => {
+    if (authLoading) return;
     if (qFromUrl.trim()) return;
     setSelectedFilter({
       category: categoryFromUrl,
@@ -656,8 +659,7 @@ export default function HomePageClient({
     const ssrOk = (initialPlainHome?.products?.length ?? 0) > 0 && initialPlainHome != null;
 
     if (ssrOk && currentPage === ssrPage) {
-      setLoading(false);
-      setApiStatus('online');
+      setLoading(true);
       setError(null);
       void apiClient
         .getPersonalizedHomeFeed(skip, PAGE_SIZE)
@@ -668,12 +670,19 @@ export default function HomePageClient({
           setApiStatus('online');
         })
         .catch(() => {
-          setApiStatus('offline');
+          setProducts(initialPlainHome?.products ?? []);
+          setTotalProducts(initialPlainHome?.total ?? 0);
+          setHomeFeedPersonalized(Boolean(initialPlainHome?.personalized));
+          setApiStatus('online');
+        })
+        .finally(() => {
+          setLoading(false);
         });
       return;
     }
     fetchProducts();
   }, [
+    authLoading,
     categoryFromUrl,
     subcategoryFromUrl,
     subSubcategoryFromUrl,
@@ -692,7 +701,6 @@ export default function HomePageClient({
     styleTagFromUrl,
     sortFromUrl,
     fetchProducts,
-    user?.id,
     currentPage,
     initialPlainHome,
   ]);
@@ -917,6 +925,7 @@ export default function HomePageClient({
   const lastFilterTrackedRef = useRef<string>('');
 
   useEffect(() => {
+    if (authLoading) return;
     if (!isAuthenticated) {
       setSameAgeGenderProducts([]);
       setSameAgeGenderCohortMode('requires_login');
@@ -944,9 +953,10 @@ export default function HomePageClient({
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, recommendationKey]);
+  }, [authLoading, isAuthenticated, recommendationKey]);
 
   useEffect(() => {
+    if (authLoading) return;
     setSameShopLoading(true);
     setSameShopCanLoadMore(false);
     apiClient.getProductsSameShopAsRecentViews(HOME_MIX_INITIAL_LIMIT, 0)
@@ -967,7 +977,7 @@ export default function HomePageClient({
         setSameShopCanLoadMore(false);
       })
       .finally(() => setSameShopLoading(false));
-  }, [recommendationKey]);
+  }, [authLoading, recommendationKey]);
 
   const loadMoreSameShop = useCallback(() => {
     if (!sameShopCanLoadMore || sameShopLoadMoreLoading) return;
@@ -1037,7 +1047,9 @@ export default function HomePageClient({
     const anchor = `${recommendationKey}:${sameShopSeed ?? 'none'}:${cohortAnchor}`;
     if (recommendationMixAnchorRef.current !== anchor) {
       recommendationMixAnchorRef.current = anchor;
-      setMixedRecommendationProducts(mixShopAndCohortProducts(sameShopProducts, cohortProductsForMix));
+      setMixedRecommendationProducts(
+        mixShopAndCohortProducts(sameShopProducts, cohortProductsForMix, sameShopSeed)
+      );
       return;
     }
 
@@ -1088,13 +1100,14 @@ export default function HomePageClient({
   const sameAgeGenderHint = sameAgeGenderCompactHint(sameAgeGenderCohortMode, sameAgeGenderLoading);
 
   const showMixedRecommendationSection =
-    mixedRecommendationProducts.length > 0 ||
-    showSameShopSection ||
-    cohortProductsForMix.length > 0 ||
-    sameShopLoading ||
-    sameAgeGenderLoading ||
-    sameAgeGenderCohortMode === 'requires_login' ||
-    sameAgeGenderCohortMode === 'profile_incomplete';
+    !authLoading &&
+    (mixedRecommendationProducts.length > 0 ||
+      showSameShopSection ||
+      cohortProductsForMix.length > 0 ||
+      sameShopLoading ||
+      sameAgeGenderLoading ||
+      sameAgeGenderCohortMode === 'requires_login' ||
+      sameAgeGenderCohortMode === 'profile_incomplete');
 
   const heroShopName = useMemo(() => {
     for (const p of sameShopProducts) {

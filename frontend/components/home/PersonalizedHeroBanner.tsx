@@ -83,9 +83,10 @@ export default function PersonalizedHeroBanner({
       .getHeroCategoryTiles(HERO_CATEGORY_TILE_COUNT, 8)
       .then((res) => {
         if (cancelled) return;
+        if (hasInitial) return;
         if (res.tiles?.length) {
           setHeroCategories(res);
-        } else if (!hasInitial) {
+        } else {
           return apiClient.getHeroCategoryTilesCached(defaultGender, HERO_CATEGORY_TILE_COUNT);
         }
         return null;

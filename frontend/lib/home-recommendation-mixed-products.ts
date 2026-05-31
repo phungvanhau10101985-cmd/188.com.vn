@@ -14,13 +14,20 @@ function dedupeProducts(products: Product[]): Product[] {
   return out;
 }
 
+/** Xáo có seed cố định — cùng seed + cùng input ⇒ cùng thứ tự (tránh nhảy lưới khi re-render). */
+function nextSeededUint32(state: number): number {
+  return (Math.imul(state, 1664525) + 1013904223) >>> 0;
+}
+
 /**
- * Trộn SP cùng shop (đã xáo từ API) với pool tuổi/giới — chèn cohort ngẫu nhiên vào lưới.
- * Mỗi lần gọi (tải lại trang / seed mới) thứ tự có thể khác.
+ * Trộn SP cùng shop (đã xáo từ API) với pool tuổi/giới — chèn cohort vào lưới.
+ * `mixSeed` (thường là seed same-shop từ API) giữ thứ tự ổn định trong phiên;
+ * seed mới mỗi lần tải trang ⇒ thứ tự có thể khác.
  */
 export function mixShopAndCohortProducts(
   shopProducts: Product[],
-  cohortProducts: Product[]
+  cohortProducts: Product[],
+  mixSeed?: number | null
 ): Product[] {
   const shop = dedupeProducts(shopProducts);
   const shopIds = new Set(shop.map((p) => p.id));
@@ -28,9 +35,11 @@ export function mixShopAndCohortProducts(
 
   if (cohortOnly.length === 0) return shop;
 
+  let rng = (mixSeed ?? 1) >>> 0;
   const mixed = [...shop];
   for (const product of cohortOnly) {
-    const insertAt = Math.floor(Math.random() * (mixed.length + 1));
+    rng = nextSeededUint32(rng);
+    const insertAt = rng % (mixed.length + 1);
     mixed.splice(insertAt, 0, product);
   }
   return mixed;
