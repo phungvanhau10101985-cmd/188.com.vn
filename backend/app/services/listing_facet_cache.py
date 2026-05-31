@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -23,6 +25,85 @@ from app.models.seo_cluster import SeoCluster
 logger = logging.getLogger(__name__)
 
 MIN_AUTO_CACHE_PRODUCT_COUNT = 200
+
+
+def snapshot_product_for_facet_refresh(product: Any) -> SimpleNamespace:
+    """Ảnh chụp các trường ảnh hưởng rebuild cache danh mục + từ khóa tìm kiếm."""
+    return SimpleNamespace(
+        category=getattr(product, "category", None),
+        subcategory=getattr(product, "subcategory", None),
+        sub_subcategory=getattr(product, "sub_subcategory", None),
+        category_id=getattr(product, "category_id", None),
+        name=getattr(product, "name", None),
+        code=getattr(product, "code", None),
+        material=getattr(product, "material", None),
+        style=getattr(product, "style", None),
+        color=getattr(product, "color", None),
+        occasion=getattr(product, "occasion", None),
+        features=getattr(product, "features", None),
+        sizes=getattr(product, "sizes", None),
+        product_info=getattr(product, "product_info", None),
+    )
+
+
+def _product_search_blob(product: Any) -> str:
+    def _part(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, (list, dict)):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value)
+
+    parts = (
+        _part(getattr(product, "name", None)),
+        _part(getattr(product, "code", None)),
+        _part(getattr(product, "category", None)),
+        _part(getattr(product, "subcategory", None)),
+        _part(getattr(product, "sub_subcategory", None)),
+        _part(getattr(product, "material", None)),
+        _part(getattr(product, "style", None)),
+        _part(getattr(product, "color", None)),
+        _part(getattr(product, "occasion", None)),
+        _part(getattr(product, "features", None)),
+        _part(getattr(product, "sizes", None)),
+        _part(getattr(product, "product_info", None)),
+    )
+    return " ".join(parts).lower()
+
+
+def product_matches_search_keyword(product: Any, keyword: str) -> bool:
+    """Khớp logic apply_product_search_word_filters (tất cả từ ilike trên chuỗi tổng hợp)."""
+    from app.crud.product import normalize_search_query
+
+    normalized = normalize_search_query(keyword or "")
+    words = [w.strip() for w in normalized.split() if w.strip()]
+    if not words:
+        return False
+    blob = _product_search_blob(product)
+    return all(w.lower() in blob for w in words)
+
+
+def iter_related_search_cache_rows(
+    db: Session,
+    *product_states: Any,
+) -> List[ListingFacetCache]:
+    states = [p for p in product_states if p is not None]
+    if not states:
+        return []
+    rows = (
+        db.query(ListingFacetCache)
+        .filter(
+            ListingFacetCache.scope_type == SCOPE_SEARCH_Q,
+            ListingFacetCache.is_enabled.is_(True),
+        )
+        .all()
+    )
+    related: List[ListingFacetCache] = []
+    for row in rows:
+        keyword = row.display_label or row.scope_key
+        if any(product_matches_search_keyword(state, keyword) for state in states):
+            related.append(row)
+    return related
 
 
 def _cluster_cat_ids(db: Session, cluster_id: int) -> List[int]:
@@ -537,6 +618,29 @@ def rebuild_all_seo_cluster_caches(db: Session) -> int:
     return count
 
 
+def _category_paths_for_product_change(
+    product: Product,
+    *,
+    old_category: Optional[str] = None,
+    old_subcategory: Optional[str] = None,
+    old_sub_subcategory: Optional[str] = None,
+) -> List[Tuple[str, Optional[str], Optional[str]]]:
+    paths: List[Tuple[str, Optional[str], Optional[str]]] = []
+    for c1, c2, c3 in (
+        (product.category, product.subcategory, product.sub_subcategory),
+        (old_category, old_subcategory, old_sub_subcategory),
+    ):
+        c1s = (c1 or "").strip()
+        if not c1s:
+            continue
+        paths.append((c1s, (c2 or "").strip() or None, (c3 or "").strip() or None))
+        c2s = (c2 or "").strip()
+        if c2s:
+            paths.append((c1s, c2s, None))
+        paths.append((c1s, None, None))
+    return paths
+
+
 def _cluster_slugs_for_category_id(db: Session, category_id: Optional[int]) -> List[str]:
     if not category_id:
         return []
@@ -557,51 +661,77 @@ def refresh_caches_after_product_change(
     old_subcategory: Optional[str] = None,
     old_sub_subcategory: Optional[str] = None,
     old_category_id: Optional[int] = None,
+    previous_product: Optional[Any] = None,
 ) -> None:
-    """Rebuild cache danh mục liên quan; đánh dấu stale search + SEO cluster."""
-    paths: List[Tuple[str, Optional[str], Optional[str]]] = []
-    for c1, c2, c3 in (
-        (product.category, product.subcategory, product.sub_subcategory),
-        (old_category, old_subcategory, old_sub_subcategory),
-    ):
-        c1s = (c1 or "").strip()
-        if not c1s:
-            continue
-        paths.append((c1s, (c2 or "").strip() or None, (c3 or "").strip() or None))
-        c2s = (c2 or "").strip()
-        if c2s:
-            paths.append((c1s, c2s, None))
-        paths.append((c1s, None, None))
+    """Rebuild cache danh mục / SEO cluster / từ khóa tìm kiếm liên quan SP."""
+    refresh_caches_after_products_change(
+        db,
+        [product],
+        old_category=old_category,
+        old_subcategory=old_subcategory,
+        old_sub_subcategory=old_sub_subcategory,
+        old_category_id=old_category_id,
+        previous_products=[previous_product] if previous_product is not None else None,
+    )
 
-    seen = set()
+
+def refresh_caches_after_products_change(
+    db: Session,
+    products: List[Any],
+    *,
+    old_category: Optional[str] = None,
+    old_subcategory: Optional[str] = None,
+    old_sub_subcategory: Optional[str] = None,
+    old_category_id: Optional[int] = None,
+    previous_products: Optional[List[Any]] = None,
+) -> None:
+    """Rebuild cache liên quan một hoặc nhiều SP (dedupe phạm vi rebuild)."""
+    if not products:
+        return
+
+    paths: List[Tuple[str, Optional[str], Optional[str]]] = []
+    for product in products:
+        paths.extend(
+            _category_paths_for_product_change(
+                product,
+                old_category=old_category,
+                old_subcategory=old_subcategory,
+                old_sub_subcategory=old_sub_subcategory,
+            )
+        )
+
+    seen_scopes: set = set()
     for c1, c2, c3 in paths:
         scope = resolve_facet_scope(category=c1, subcategory=c2, sub_subcategory=c3)
-        if not scope or scope[1] in seen:
+        if not scope or scope[1] in seen_scopes:
             continue
-        seen.add(scope[1])
+        seen_scopes.add(scope[1])
         try:
             rebuild_category_scope(db, category=c1, subcategory=c2, sub_subcategory=c3)
         except Exception as exc:
             logger.warning("Refresh category facet cache after product change failed: %s", exc)
 
-    slugs = set(_cluster_slugs_for_category_id(db, getattr(product, "category_id", None)))
-    slugs.update(_cluster_slugs_for_category_id(db, old_category_id))
-    if slugs:
-        for slug in slugs:
-            try:
-                rebuild_seo_cluster_scope(db, slug)
-            except Exception as exc:
-                logger.warning("Refresh SEO cluster facet cache failed (%s): %s", slug, exc)
+    slugs: set = set()
+    for product in products:
+        slugs.update(_cluster_slugs_for_category_id(db, getattr(product, "category_id", None)))
+    if old_category_id:
+        slugs.update(_cluster_slugs_for_category_id(db, old_category_id))
 
-    search_rows = (
-        db.query(ListingFacetCache)
-        .filter(
-            ListingFacetCache.scope_type == SCOPE_SEARCH_Q,
-            ListingFacetCache.is_enabled.is_(True),
-        )
-        .all()
-    )
-    for row in search_rows:
+    for slug in slugs:
+        try:
+            rebuild_seo_cluster_scope(db, slug)
+        except Exception as exc:
+            logger.warning("Refresh SEO cluster facet cache failed (%s): %s", slug, exc)
+
+    search_states: List[Any] = list(products)
+    if previous_products:
+        search_states.extend(p for p in previous_products if p is not None)
+
+    seen_search: set = set()
+    for row in iter_related_search_cache_rows(db, *search_states):
+        if row.scope_key in seen_search:
+            continue
+        seen_search.add(row.scope_key)
         try:
             rebuild_search_scope(
                 db,

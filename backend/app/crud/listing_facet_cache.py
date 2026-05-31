@@ -185,7 +185,10 @@ def list_rows_admin(
         q = q.filter(ListingFacetCache.scope_type == scope_type)
     total = int(q.count())
     rows = (
-        q.order_by(ListingFacetCache.updated_at.desc(), ListingFacetCache.id.desc())
+        q.order_by(
+            ListingFacetCache.updated_at.desc().nullslast(),
+            ListingFacetCache.id.desc(),
+        )
         .offset(skip)
         .limit(limit)
         .all()

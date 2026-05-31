@@ -66,6 +66,10 @@ export default function AdminListingFacetCachePage() {
   }, [page, scopeFilter]);
 
   useEffect(() => {
+    setPage(1);
+  }, [scopeFilter]);
+
+  useEffect(() => {
     load();
   }, [load]);
 
@@ -140,7 +144,8 @@ export default function AdminListingFacetCachePage() {
         <h1 className="text-2xl font-bold text-gray-900">Cache bộ lọc listing</h1>
         <p className="text-sm text-gray-600 mt-1">
           Bộ lọc size/màu/kiểu/giá được lưu sẵn cho danh mục (luôn), từ khóa tìm kiếm (≥200 SP hoặc
-          ghim thủ công), SEO cluster (≥200 SP). Tự làm mới khi thêm/sửa/xóa sản phẩm.
+          ghim thủ công), SEO cluster (≥200 SP). Tự làm mới khi thêm/sửa/xóa sản phẩm — chỉ danh mục
+          và từ khóa liên quan SP đó.
         </p>
       </div>
 
@@ -238,7 +243,9 @@ export default function AdminListingFacetCachePage() {
               ))}
             </select>
           </label>
-          <span className="text-sm text-gray-500">{data ? `${data.total_rows} dòng` : ''}</span>
+          <span className="text-sm text-gray-500">
+            {data ? `${data.total_rows} dòng · mới cập nhật trước` : ''}
+          </span>
         </div>
 
         {loading ? (
@@ -259,7 +266,14 @@ export default function AdminListingFacetCachePage() {
                   <th className="py-2 pr-3">Màu</th>
                   <th className="py-2 pr-3">Giá</th>
                   <th className="py-2 pr-3">Trạng thái</th>
-                  <th className="py-2 pr-3">Cập nhật</th>
+                  <th className="py-2 pr-3">
+                    <span className="inline-flex items-center gap-1 font-medium text-gray-700">
+                      Cập nhật
+                      <span className="text-indigo-600" title="Mới nhất trước" aria-hidden>
+                        ↓
+                      </span>
+                    </span>
+                  </th>
                   <th className="py-2">Thao tác</th>
                 </tr>
               </thead>

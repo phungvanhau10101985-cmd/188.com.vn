@@ -1200,4 +1200,3 @@ def purge_dead_media_url_by_db_id(
             raise HTTPException(status_code=400, detail="URL does not belong to this product")
         raise HTTPException(status_code=400, detail="URL is still reachable or could not verify (not 404)")
     return out
-

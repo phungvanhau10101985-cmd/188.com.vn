@@ -4006,6 +4006,9 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
         old_subcategory = db_product.subcategory
         old_sub_subcategory = db_product.sub_subcategory
         old_category_id = db_product.category_id
+        from app.services.listing_facet_cache import snapshot_product_for_facet_refresh
+
+        previous_product = snapshot_product_for_facet_refresh(db_product)
         update_data = (
             product_update.model_dump(exclude_unset=True)
             if hasattr(product_update, "model_dump")
@@ -4060,6 +4063,7 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
                 old_subcategory=old_subcategory,
                 old_sub_subcategory=old_sub_subcategory,
                 old_category_id=old_category_id,
+                previous_product=previous_product,
             )
         except Exception:
             pass
@@ -4074,20 +4078,16 @@ def _delete_product_orm_only(db: Session, db_product: Product) -> None:
 def delete_product(db: Session, product_id: int):
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if db_product:
-        from types import SimpleNamespace
-
-        snapshot = SimpleNamespace(
-            category=db_product.category,
-            subcategory=db_product.subcategory,
-            sub_subcategory=db_product.sub_subcategory,
-            category_id=db_product.category_id,
+        from app.services.listing_facet_cache import (
+            refresh_caches_after_product_change,
+            snapshot_product_for_facet_refresh,
         )
+
+        snapshot = snapshot_product_for_facet_refresh(db_product)
         _delete_product_orm_only(db, db_product)
         db.commit()
         _schedule_google_sheets_sku_sync()
         try:
-            from app.services.listing_facet_cache import refresh_caches_after_product_change
-
             refresh_caches_after_product_change(db, snapshot)
         except Exception:
             pass
@@ -4149,20 +4149,13 @@ def bulk_delete_products_by_db_ids(db: Session, db_ids: List[int]) -> Tuple[List
     bunny_rows: List[Product] = []
     deleted_snapshots: List[Any] = []
 
+    from app.services.listing_facet_cache import snapshot_product_for_facet_refresh
+
     for pk in ordered_unique:
         row = by_id.get(pk)
         if row is None:
             continue
-        from types import SimpleNamespace
-
-        deleted_snapshots.append(
-            SimpleNamespace(
-                category=row.category,
-                subcategory=row.subcategory,
-                sub_subcategory=row.sub_subcategory,
-                category_id=row.category_id,
-            )
-        )
+        deleted_snapshots.append(snapshot_product_for_facet_refresh(row))
         bunny_rows.append(row)
         db.delete(row)
         deleted.append(pk)
@@ -4172,19 +4165,9 @@ def bulk_delete_products_by_db_ids(db: Session, db_ids: List[int]) -> Tuple[List
         _schedule_google_sheets_sku_sync()
         _schedule_bunny_cleanup_for_deleted_products(bunny_rows)
         try:
-            from app.services.listing_facet_cache import refresh_caches_after_product_change
+            from app.services.listing_facet_cache import refresh_caches_after_products_change
 
-            seen_paths: set = set()
-            for snap in deleted_snapshots:
-                path_key = (
-                    (snap.category or "").strip().lower(),
-                    (snap.subcategory or "").strip().lower(),
-                    (snap.sub_subcategory or "").strip().lower(),
-                )
-                if path_key in seen_paths:
-                    continue
-                seen_paths.add(path_key)
-                refresh_caches_after_product_change(db, snap)
+            refresh_caches_after_products_change(db, deleted_snapshots)
         except Exception:
             pass
 
