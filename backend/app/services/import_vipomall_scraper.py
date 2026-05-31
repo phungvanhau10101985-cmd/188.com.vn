@@ -544,6 +544,12 @@ def _scrape_vipomall_for_import_sync(source_url: str) -> Tuple[Dict[str, Any], D
                         pass
     except Exception as exc:
         detail = str(exc).strip() or repr(exc) or type(exc).__name__
+        if "Executable doesn't exist" in detail or "playwright install" in detail.lower():
+            detail = (
+                f"{detail} — Trên server (Linux): "
+                "cd backend && source .venv/bin/activate && python -m playwright install chromium "
+                "(hoặc: bash deploy/install-playwright-browsers.sh từ root repo)."
+            )
         raise ImportVipomallError(f"Lỗi Playwright/Vipomall: {detail}") from exc
 
     if not isinstance(raw, dict):

@@ -23,6 +23,9 @@ source "${VENV}/bin/activate"
 pip install --upgrade pip wheel
 pip install -r "${BACKEND}/requirements.txt"
 
+echo "==> Playwright browsers (import Vipomall / Hibox / 1688)"
+bash "${PROJECT_ROOT}/deploy/install-playwright-browsers.sh"
+
 echo "==> Khởi tạo bảng DB (cần backend/.env với DATABASE_URL đúng)"
 cd "${BACKEND}"
 set +e

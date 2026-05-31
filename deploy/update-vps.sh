@@ -25,6 +25,7 @@
 #   DEPLOY_GIT_SYNC=ff-only        chỉ fast-forward — fail nếu VPS có commit lệch (không tạo merge commit)
 #   DEPLOY_GIT_SYNC=reset-hard     git fetch + reset --hard origin/<branch> — xóa chỉnh sửa local trên VPS, khớp GitHub
 #   DEPLOY_SKIP_GIT=1              không chạy git trong script (đã git pull tay trước đó)
+#   DEPLOY_SKIP_PLAYWRIGHT=1       không chạy playwright install chromium (đã cài browser)
 #
 set -euo pipefail
 
@@ -121,6 +122,12 @@ fi
 source "${VENV}/bin/activate"
 pip install --upgrade pip wheel
 pip install -r "${BACKEND}/requirements.txt"
+
+if [[ "${DEPLOY_SKIP_PLAYWRIGHT:-0}" != "1" ]]; then
+  bash "${PROJECT_ROOT}/deploy/install-playwright-browsers.sh"
+else
+  echo "==> Playwright: DEPLOY_SKIP_PLAYWRIGHT=1 — bỏ qua."
+fi
 
 cd "${BACKEND}"
 if [[ "${DEPLOY_SKIP_DB_INIT:-0}" != "1" ]]; then
