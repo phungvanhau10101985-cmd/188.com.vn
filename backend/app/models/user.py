@@ -1,5 +1,5 @@
 # backend/app/models/user.py - COMPLETE WITH RELATIONSHIPS (FIXED)
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Date, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Date, JSON, ForeignKey, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.db.base import Base
@@ -46,7 +46,8 @@ class User(Base):
 
 class UserProductView(Base):
     __tablename__ = "user_product_views"
-    
+    __table_args__ = (Index("ix_user_product_views_user_viewed", "user_id", "viewed_at"),)
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     product_id = Column(Integer, nullable=False, index=True)

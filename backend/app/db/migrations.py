@@ -543,6 +543,60 @@ class MigrationManager:
             logger.warning("migrate_admin_users_linked_user_unique_index: %s", e)
             return True
 
+    def migrate_same_shop_recommendation_indexes(self) -> bool:
+        """
+        Index phục vụ same-shop recommendations:
+        - user_product_views (user_id, viewed_at): lịch sử xem gần nhất
+        - products lower(trim(shop_name_chinese)) + id khi is_active: pool candidate theo shop TQ
+        - guest_product_views (session_id, viewed_at): đảm bảo index trên DB cũ
+        """
+        try:
+            inspector = inspect(engine)
+            tables = set(inspector.get_table_names())
+            with engine.connect() as conn:
+                if "user_product_views" in tables:
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_user_product_views_user_viewed "
+                            "ON user_product_views (user_id, viewed_at)"
+                        )
+                    )
+                    conn.commit()
+
+                if "guest_product_views" in tables:
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_guest_pv_session_viewed "
+                            "ON guest_product_views (session_id, viewed_at)"
+                        )
+                    )
+                    conn.commit()
+
+                if "products" in tables:
+                    if IS_POSTGRESQL:
+                        conn.execute(
+                            text(
+                                "CREATE INDEX IF NOT EXISTS ix_products_active_shop_cn_lower_id "
+                                "ON products (lower(trim(shop_name_chinese)), id) "
+                                "WHERE is_active IS TRUE"
+                            )
+                        )
+                    else:
+                        conn.execute(
+                            text(
+                                "CREATE INDEX IF NOT EXISTS ix_products_active_shop_cn_lower_id "
+                                "ON products (lower(trim(shop_name_chinese)), id) "
+                                "WHERE is_active = 1"
+                            )
+                        )
+                    conn.commit()
+
+            logger.info("✅ same_shop_recommendation_indexes ensured")
+            return True
+        except Exception as e:
+            logger.warning("migrate_same_shop_recommendation_indexes: %s", e)
+            return True
+
     def migrate_all_tables(self) -> Dict[str, bool]:
         """Chạy tất cả migrations cần thiết"""
         results = {}
@@ -764,6 +818,8 @@ class MigrationManager:
         results['listing_facet_cache_sync'] = self._sync_table_columns(
             "listing_facet_cache", ListingFacetCache
         )
+
+        results['same_shop_recommendation_indexes'] = self.migrate_same_shop_recommendation_indexes()
 
         return results
 

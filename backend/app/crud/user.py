@@ -8,7 +8,7 @@ AttributeError: module 'app.crud.user' has no attribute 'get_user'
 import random
 from collections import defaultdict
 from sqlalchemy.orm import Session
-from sqlalchemy import extract, func, or_
+from sqlalchemy import extract, func
 from datetime import datetime, date
 from typing import List, Optional, Dict, Any, Tuple
 from app.models.user import (
@@ -856,19 +856,18 @@ def get_products_same_shop_as_recent_views(
         if shop not in shop_queue_order:
             shop_queue_order.append(shop)
 
-    shop_conditions = [
-        func.lower(func.trim(Product.shop_name_chinese)) == shop_lower for shop_lower in shops_lower
-    ]
-    # Tránh .all() không giới hạn — vài shop lớn → OOM / timeout → 500 trên production.
-    filt = (
-        or_(*shop_conditions),
-        Product.is_active == True,  # noqa: E712
+    shop_cn_norm = func.lower(func.trim(Product.shop_name_chinese))
+    # Một query + LIMIT thay vì COUNT rồi .all() — cùng tập candidate (≤ SAME_SHOP_MAX_POOL).
+    candidates = (
+        db.query(Product)
+        .filter(
+            shop_cn_norm.in_(list(shops_lower)),
+            Product.is_active == True,  # noqa: E712
+        )
+        .order_by(Product.id)
+        .limit(SAME_SHOP_MAX_POOL)
+        .all()
     )
-    db_total = db.query(Product).filter(*filt).count()
-    if db_total <= 0:
-        return [], 0, None
-    q = db.query(Product).filter(*filt).order_by(Product.id)
-    candidates = q.limit(SAME_SHOP_MAX_POOL).all() if db_total > SAME_SHOP_MAX_POOL else q.all()
     if not candidates:
         return [], 0, None
     if require_video:
