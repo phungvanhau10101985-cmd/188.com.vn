@@ -3612,6 +3612,15 @@ export interface EmsShippingOperationsStats {
   cod_in_transit_unpaid_total: number;
   cod_delivered_unpaid_total: number;
   cod_paid_total: number;
+  cod_returned_unpaid_total?: number;
+  cod_pending_unpaid_total?: number;
+  total_cod_sum?: number;
+  total_cod_amount?: number;
+  in_transit_cod_total?: number;
+  delivered_cod_total?: number;
+  returned_cod_total?: number;
+  return_shop_received_cod_total?: number;
+  pending_cod_total?: number;
   shop_linked_count: number;
   shop_return_received_count: number;
   freight_unsettled_count: number;
@@ -3653,11 +3662,21 @@ export interface EmsShippingTimelineItem {
   returned_count: number;
   return_shop_received_count?: number;
   pending_status_count: number;
+  total_cod_sum?: number;
+  in_transit_cod_total?: number;
+  delivered_cod_total?: number;
+  returned_cod_total?: number;
+  return_shop_received_cod_total?: number;
+  pending_cod_total?: number;
   total_with_cod: number;
+  cod_in_transit_unpaid_count?: number;
+  cod_in_transit_unpaid_total?: number;
   cod_delivered_unpaid_count: number;
+  cod_delivered_unpaid_total: number;
+  cod_returned_unpaid_count?: number;
+  cod_returned_unpaid_total?: number;
   cod_paid_count: number;
   total_cod_amount: number;
-  cod_delivered_unpaid_total: number;
   cod_paid_total: number;
 }
 
@@ -3681,11 +3700,21 @@ export interface EmsShippingTimelineStats {
     | 'returned_count'
     | 'return_shop_received_count'
     | 'pending_status_count'
+    | 'total_cod_sum'
+    | 'in_transit_cod_total'
+    | 'delivered_cod_total'
+    | 'returned_cod_total'
+    | 'return_shop_received_cod_total'
+    | 'pending_cod_total'
     | 'total_with_cod'
+    | 'cod_in_transit_unpaid_count'
+    | 'cod_in_transit_unpaid_total'
     | 'cod_delivered_unpaid_count'
+    | 'cod_delivered_unpaid_total'
+    | 'cod_returned_unpaid_count'
+    | 'cod_returned_unpaid_total'
     | 'cod_paid_count'
     | 'total_cod_amount'
-    | 'cod_delivered_unpaid_total'
     | 'cod_paid_total'
   >;
 }

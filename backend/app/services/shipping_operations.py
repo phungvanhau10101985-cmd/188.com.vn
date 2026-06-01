@@ -101,6 +101,13 @@ def _has_cod(record: EmsShippingRecord) -> bool:
         return False
 
 
+def _record_cod_amount(record: EmsShippingRecord) -> int:
+    try:
+        return max(0, int(record.cod_amount or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _is_cod_paid(record: EmsShippingRecord) -> bool:
     """EMS đã trả tiền thu hộ về shop — chỉ khi import file đối soát COD khớp."""
     return (record.cod_settlement_status or "").strip().lower() == "matched"
@@ -141,6 +148,17 @@ def get_shipping_operations_stats(db: Session) -> dict[str, Any]:
     cod_delivered_unpaid_total = 0
     cod_in_transit_unpaid_total = 0
     cod_paid_total = 0
+    cod_returned_unpaid_total = 0
+    cod_pending_unpaid_total = 0
+    total_cod_sum = 0
+    total_cod_amount = 0
+    delivery_cod_totals: dict[DeliveryBucket, int] = {
+        "return_pending_shop": 0,
+        "return_shop_received": 0,
+        "delivered": 0,
+        "in_transit": 0,
+        "pending": 0,
+    }
     shop_linked_count = 0
     shop_return_received_count = 0
     freight_unsettled_count = 0
@@ -148,6 +166,11 @@ def get_shipping_operations_stats(db: Session) -> dict[str, Any]:
     for record in records:
         delivery = _delivery_bucket(record)
         delivery_counts[delivery] += 1
+        cod_amt = _record_cod_amount(record)
+        total_cod_sum += cod_amt
+        delivery_cod_totals[delivery] += cod_amt
+        if _has_cod(record):
+            total_cod_amount += cod_amt
 
         if record.order_id is not None:
             shop_linked_count += 1
@@ -165,11 +188,14 @@ def get_shipping_operations_stats(db: Session) -> dict[str, Any]:
         if cod_bucket is None:
             continue
         cod_counts[cod_bucket] += 1
-        cod_amt = int(record.cod_amount or 0)
         if cod_bucket == "delivered_unpaid":
             cod_delivered_unpaid_total += cod_amt
         elif cod_bucket == "in_transit_unpaid":
             cod_in_transit_unpaid_total += cod_amt
+        elif cod_bucket == "returned_unpaid":
+            cod_returned_unpaid_total += cod_amt
+        elif cod_bucket == "pending_unpaid":
+            cod_pending_unpaid_total += cod_amt
         elif cod_bucket == "paid":
             cod_paid_total += int(record.cod_paid_amount or cod_amt)
 
@@ -205,6 +231,15 @@ def get_shipping_operations_stats(db: Session) -> dict[str, Any]:
         "cod_in_transit_unpaid_total": cod_in_transit_unpaid_total,
         "cod_delivered_unpaid_total": cod_delivered_unpaid_total,
         "cod_paid_total": cod_paid_total,
+        "cod_returned_unpaid_total": cod_returned_unpaid_total,
+        "cod_pending_unpaid_total": cod_pending_unpaid_total,
+        "total_cod_sum": total_cod_sum,
+        "total_cod_amount": total_cod_amount,
+        "in_transit_cod_total": delivery_cod_totals["in_transit"],
+        "delivered_cod_total": delivery_cod_totals["delivered"],
+        "returned_cod_total": delivery_cod_totals["return_pending_shop"],
+        "return_shop_received_cod_total": delivery_cod_totals["return_shop_received"],
+        "pending_cod_total": delivery_cod_totals["pending"],
         "shop_linked_count": shop_linked_count,
         "shop_return_received_count": shop_return_received_count,
         "freight_unsettled_count": freight_unsettled_count,
@@ -374,11 +409,21 @@ def _empty_timeline_bucket() -> dict[str, Any]:
         "returned_count": 0,
         "return_shop_received_count": 0,
         "pending_status_count": 0,
+        "total_cod_sum": 0,
+        "in_transit_cod_total": 0,
+        "delivered_cod_total": 0,
+        "returned_cod_total": 0,
+        "return_shop_received_cod_total": 0,
+        "pending_cod_total": 0,
         "total_with_cod": 0,
+        "cod_in_transit_unpaid_count": 0,
+        "cod_in_transit_unpaid_total": 0,
         "cod_delivered_unpaid_count": 0,
+        "cod_delivered_unpaid_total": 0,
+        "cod_returned_unpaid_count": 0,
+        "cod_returned_unpaid_total": 0,
         "cod_paid_count": 0,
         "total_cod_amount": 0,
-        "cod_delivered_unpaid_total": 0,
         "cod_paid_total": 0,
     }
 
@@ -386,6 +431,17 @@ def _empty_timeline_bucket() -> dict[str, Any]:
 def _accumulate_timeline_bucket(bucket: dict[str, Any], record: EmsShippingRecord) -> None:
     delivery = _delivery_bucket(record)
     bucket["total"] += 1
+    cod_amt = _record_cod_amount(record)
+    bucket["total_cod_sum"] += cod_amt
+    delivery_cod_field = {
+        "return_pending_shop": "returned_cod_total",
+        "return_shop_received": "return_shop_received_cod_total",
+        "delivered": "delivered_cod_total",
+        "in_transit": "in_transit_cod_total",
+        "pending": "pending_cod_total",
+    }[delivery]
+    bucket[delivery_cod_field] += cod_amt
+
     delivery_field = {
         "return_pending_shop": "returned_count",
         "return_shop_received": "return_shop_received_count",
@@ -399,10 +455,6 @@ def _accumulate_timeline_bucket(bucket: dict[str, Any], record: EmsShippingRecor
     if cod_bucket is None:
         return
     bucket["total_with_cod"] += 1
-    try:
-        cod_amt = int(record.cod_amount or 0)
-    except (TypeError, ValueError):
-        cod_amt = 0
     bucket["total_cod_amount"] += cod_amt
     if cod_bucket == "paid":
         bucket["cod_paid_count"] += 1
@@ -413,6 +465,12 @@ def _accumulate_timeline_bucket(bucket: dict[str, Any], record: EmsShippingRecor
     elif cod_bucket == "delivered_unpaid":
         bucket["cod_delivered_unpaid_count"] += 1
         bucket["cod_delivered_unpaid_total"] += cod_amt
+    elif cod_bucket == "in_transit_unpaid":
+        bucket["cod_in_transit_unpaid_count"] += 1
+        bucket["cod_in_transit_unpaid_total"] += cod_amt
+    elif cod_bucket == "returned_unpaid":
+        bucket["cod_returned_unpaid_count"] += 1
+        bucket["cod_returned_unpaid_total"] += cod_amt
 
 
 def get_shipping_timeline_stats(

@@ -172,17 +172,14 @@ function TimelineCodCountCell({
   className?: string;
   amountClassName?: string;
 }) {
-  const showAmount = count > 0 || amount > 0;
   return (
     <div className="flex flex-col items-end gap-0.5">
       <TimelineCountButton count={count} onClick={onClick} className={className} />
-      {showAmount ? (
-        <span
-          className={`text-xs tabular-nums whitespace-nowrap ${amount > 0 ? amountClassName ?? 'text-gray-500' : 'text-gray-400'}`}
-        >
-          {formatVnd(amount)}
-        </span>
-      ) : null}
+      <span
+        className={`text-xs tabular-nums whitespace-nowrap ${amount > 0 ? amountClassName ?? 'text-gray-500' : 'text-gray-400'}`}
+      >
+        {formatVnd(amount)}
+      </span>
     </div>
   );
 }
@@ -333,14 +330,16 @@ function rowKey(row: EmsShippingImportRow): string {
   return `${row.row_number}:${row.reference_code}:${row.order_code || ''}`;
 }
 
+/** Tiền trên trang vận chuyển: đơn vị K (= số đồng / 1000). */
 function formatVnd(amount: number | null | undefined): string {
   if (amount == null || !Number.isFinite(amount)) return '—';
-  return `${Math.round(amount).toLocaleString('vi-VN')} ₫`;
+  const k = Math.round(amount / 1000);
+  return `${k.toLocaleString('vi-VN')} K`;
 }
 
 function formatCodAmount(amount: number | null | undefined): string {
   if (amount == null || !Number.isFinite(amount)) return '—';
-  if (amount === 0) return 'Không thu hộ (0 ₫)';
+  if (amount === 0) return 'Không thu hộ (0 K)';
   return formatVnd(amount);
 }
 
@@ -605,6 +604,7 @@ function CollapsibleListPanel({
 function OpsStatCard({
   label,
   count,
+  amount,
   color,
   active,
   onClick,
@@ -612,6 +612,7 @@ function OpsStatCard({
 }: {
   label: string;
   count: number;
+  amount?: number;
   color: string;
   active: boolean;
   onClick: () => void;
@@ -630,6 +631,9 @@ function OpsStatCard({
       <div className={`${compact ? 'text-lg' : 'text-2xl'} font-semibold tabular-nums ${color}`}>
         {Number(count).toLocaleString('vi-VN')}
       </div>
+      {amount !== undefined ? (
+        <div className="text-xs tabular-nums text-gray-500 mt-0.5">{formatVnd(amount)}</div>
+      ) : null}
     </button>
   );
 }
@@ -1706,23 +1710,25 @@ export default function AdminShippingPage() {
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                 {(
                   [
-                    ['total', 'Tổng vận đơn', opsStats.total_ems_records, 'text-gray-900'],
-                    ['in_transit', 'Đang giao', opsStats.in_transit_count, 'text-blue-800'],
-                    ['delivered', 'Giao thành công', opsStats.delivered_count, 'text-emerald-800'],
-                    ['returned', 'Đơn hoàn chưa trả shop', opsStats.returned_count, 'text-orange-800'],
+                    ['total', 'Tổng vận đơn', opsStats.total_ems_records, opsStats.total_cod_sum ?? 0, 'text-gray-900'],
+                    ['in_transit', 'Đang giao', opsStats.in_transit_count, opsStats.in_transit_cod_total ?? 0, 'text-blue-800'],
+                    ['delivered', 'Giao thành công', opsStats.delivered_count, opsStats.delivered_cod_total ?? 0, 'text-emerald-800'],
+                    ['returned', 'Đơn hoàn chưa trả shop', opsStats.returned_count, opsStats.returned_cod_total ?? 0, 'text-orange-800'],
                     [
                       'shop_return_received',
                       'Đơn hoàn đã trả shop',
                       opsStats.shop_return_received_count,
+                      opsStats.return_shop_received_cod_total ?? 0,
                       'text-orange-900',
                     ],
-                    ['pending', 'Chưa rõ EMS', opsStats.pending_status_count, 'text-slate-600'],
+                    ['pending', 'Chưa rõ EMS', opsStats.pending_status_count, opsStats.pending_cod_total ?? 0, 'text-slate-600'],
                   ] as const
-                ).map(([bucket, label, count, color]) => (
+                ).map(([bucket, label, count, amount, color]) => (
                   <OpsStatCard
                     key={bucket}
                     label={label}
                     count={count}
+                    amount={amount}
                     color={color}
                     active={activeOpsBucket === bucket}
                     onClick={() => openOpsBucket(bucket, label)}
@@ -1756,27 +1762,47 @@ export default function AdminShippingPage() {
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                 {(
                   [
-                    ['has_cod', 'Có COD', opsStats.total_with_cod, 'text-gray-900'],
-                    ['cod_in_transit_unpaid', 'Đang giao · chưa trả', opsStats.cod_in_transit_unpaid_count, 'text-indigo-800'],
-                    ['cod_delivered_unpaid', 'Giao OK · chưa trả', opsStats.cod_delivered_unpaid_count, 'text-amber-800'],
-                    ['cod_paid', 'COD EMS trả shop', opsStats.cod_paid_count, 'text-emerald-800'],
-                    ['cod_returned_unpaid', 'Hoàn · chưa trả', opsStats.cod_returned_unpaid_count, 'text-orange-800'],
+                    ['has_cod', 'Có COD', opsStats.total_with_cod, opsStats.total_cod_amount ?? 0, 'text-gray-900'],
+                    [
+                      'cod_in_transit_unpaid',
+                      'Đang giao · chưa trả',
+                      opsStats.cod_in_transit_unpaid_count,
+                      opsStats.cod_in_transit_unpaid_total,
+                      'text-indigo-800',
+                    ],
+                    [
+                      'cod_delivered_unpaid',
+                      'Giao OK · chưa trả',
+                      opsStats.cod_delivered_unpaid_count,
+                      opsStats.cod_delivered_unpaid_total,
+                      'text-amber-800',
+                    ],
+                    ['cod_paid', 'COD EMS trả shop', opsStats.cod_paid_count, opsStats.cod_paid_total, 'text-emerald-800'],
+                    [
+                      'cod_returned_unpaid',
+                      'Hoàn · chưa trả',
+                      opsStats.cod_returned_unpaid_count,
+                      opsStats.cod_returned_unpaid_total ?? 0,
+                      'text-orange-800',
+                    ],
                     ...(opsStats.cod_pending_unpaid_count > 0
                       ? ([
                           [
                             'cod_pending_unpaid',
                             'COD chưa rõ EMS',
                             opsStats.cod_pending_unpaid_count,
+                            opsStats.cod_pending_unpaid_total ?? 0,
                             'text-slate-600',
                           ],
                         ] as const)
                       : []),
                   ] as const
-                ).map(([bucket, label, count, color]) => (
+                ).map(([bucket, label, count, amount, color]) => (
                   <OpsStatCard
                     key={bucket}
                     label={label}
                     count={count}
+                    amount={amount}
                     color={color}
                     active={activeOpsBucket === bucket}
                     onClick={() => openOpsBucket(bucket, label)}
@@ -1826,20 +1852,9 @@ export default function AdminShippingPage() {
               ))}
             </div>
 
-            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-600 pt-1 border-t border-gray-100">
-              <span>
-                COD giao OK chưa trả:{' '}
-                <strong className="text-amber-800">{formatVnd(opsStats.cod_delivered_unpaid_total)}</strong>
-              </span>
-              <span>
-                COD đang giao chưa trả:{' '}
-                <strong className="text-indigo-800">{formatVnd(opsStats.cod_in_transit_unpaid_total)}</strong>
-              </span>
-              <span>
-                COD EMS trả shop:{' '}
-                <strong className="text-emerald-800">{formatVnd(opsStats.cod_paid_total)}</strong>
-              </span>
-            </div>
+            <p className="text-xs text-gray-500 pt-1 border-t border-gray-100">
+              Dòng dưới mỗi ô là tổng tiền thu hộ COD của nhóm đó (đơn vị K = ₫/1000).
+            </p>
           </div>
         ) : null}
       </section>
@@ -2093,45 +2108,57 @@ export default function AdminShippingPage() {
                         ) : null}
                       </td>
                       <td className="px-3 py-2.5 text-right font-medium">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={item.total}
+                          amount={item.total_cod_sum ?? 0}
                           onClick={() => openTimelineBucket(item, 'total')}
                           className="text-gray-900 hover:text-gray-950"
+                          amountClassName="text-gray-600"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right text-blue-800">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={item.in_transit_count}
+                          amount={item.in_transit_cod_total ?? 0}
                           onClick={() => openTimelineBucket(item, 'in_transit')}
                           className="text-blue-800 hover:text-blue-950"
+                          amountClassName="text-blue-700/90"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right text-emerald-800">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={item.delivered_count}
+                          amount={item.delivered_cod_total ?? 0}
                           onClick={() => openTimelineBucket(item, 'delivered')}
                           className="text-emerald-800 hover:text-emerald-950"
+                          amountClassName="text-emerald-700/90"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right text-orange-800">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={item.returned_count}
+                          amount={item.returned_cod_total ?? 0}
                           onClick={() => openTimelineBucket(item, 'returned')}
                           className="text-orange-800 hover:text-orange-950"
+                          amountClassName="text-orange-700/90"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right text-orange-900">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={item.return_shop_received_count ?? 0}
+                          amount={item.return_shop_received_cod_total ?? 0}
                           onClick={() => openTimelineBucket(item, 'shop_return_received')}
                           className="text-orange-900 hover:text-orange-950"
+                          amountClassName="text-orange-800/90"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right text-slate-600">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={item.pending_status_count}
+                          amount={item.pending_cod_total ?? 0}
                           onClick={() => openTimelineBucket(item, 'pending')}
                           className="text-slate-600 hover:text-slate-900"
+                          amountClassName="text-slate-500"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right">
@@ -2171,45 +2198,57 @@ export default function AdminShippingPage() {
                         Tổng ({timelineStats.items.length} kỳ hiển thị)
                       </td>
                       <td className="px-3 py-2.5 text-right font-semibold">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={timelineStats.totals.total}
+                          amount={timelineStats.totals.total_cod_sum ?? 0}
                           onClick={() => openTimelineBucketTotals('total')}
                           className="text-emerald-950 hover:text-emerald-900"
+                          amountClassName="text-emerald-900"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right font-semibold">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={timelineStats.totals.in_transit_count}
+                          amount={timelineStats.totals.in_transit_cod_total ?? 0}
                           onClick={() => openTimelineBucketTotals('in_transit')}
                           className="text-blue-900 hover:text-blue-950"
+                          amountClassName="text-blue-900"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right font-semibold">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={timelineStats.totals.delivered_count}
+                          amount={timelineStats.totals.delivered_cod_total ?? 0}
                           onClick={() => openTimelineBucketTotals('delivered')}
                           className="text-emerald-900 hover:text-emerald-950"
+                          amountClassName="text-emerald-900"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right font-semibold">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={timelineStats.totals.returned_count}
+                          amount={timelineStats.totals.returned_cod_total ?? 0}
                           onClick={() => openTimelineBucketTotals('returned')}
                           className="text-orange-900 hover:text-orange-950"
+                          amountClassName="text-orange-900"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right font-semibold">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={timelineStats.totals.return_shop_received_count ?? 0}
+                          amount={timelineStats.totals.return_shop_received_cod_total ?? 0}
                           onClick={() => openTimelineBucketTotals('shop_return_received')}
                           className="text-orange-950 hover:text-orange-900"
+                          amountClassName="text-orange-900"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right font-semibold">
-                        <TimelineCountButton
+                        <TimelineCodCountCell
                           count={timelineStats.totals.pending_status_count}
+                          amount={timelineStats.totals.pending_cod_total ?? 0}
                           onClick={() => openTimelineBucketTotals('pending')}
                           className="text-slate-700 hover:text-slate-900"
+                          amountClassName="text-slate-600"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right font-semibold">
@@ -2247,7 +2286,7 @@ export default function AdminShippingPage() {
             <p className="text-xs text-gray-500">
               Hiển thị tối đa {timelineStats.limit} kỳ gần nhất · múi giờ {timelineStats.timezone}
               {' · '}
-              Bấm số để xem danh sách mã · Dòng dưới số là tổng tiền COD của hạng mục đó
+              Bấm số để xem danh sách mã · Dòng dưới mỗi số là tổng tiền thu hộ COD của nhóm (K = ₫/1000)
               {' · '}
               Giao OK · chưa trả COD = đã giao, EMS chưa trả tiền thu hộ về shop
               {' · '}
@@ -2510,7 +2549,7 @@ export default function AdminShippingPage() {
                             {row.amount_difference != null && row.amount_difference !== 0 ? (
                               <span className="text-amber-800 font-medium">
                                 {row.amount_difference > 0 ? '+' : ''}
-                                {row.amount_difference.toLocaleString('vi-VN')} ₫
+                                {formatVnd(row.amount_difference)}
                               </span>
                             ) : (
                               '—'
@@ -2690,7 +2729,7 @@ export default function AdminShippingPage() {
         <p className="text-sm text-gray-600">
           File <strong>Doi soat cuoc.xls</strong>: cột <strong>A</strong> mã vận chuyển EMS, cột <strong>L</strong> cước phí.
           Mã phải đã có trong bảng vận chuyển và <strong>chưa từng đối soát cước</strong>.
-          Cước phí &gt; <strong>70.000 ₫</strong> sẽ được cảnh báo để xem lại.
+          Cước phí &gt; <strong>70 K</strong> (70.000 ₫) sẽ được cảnh báo để xem lại.
         </p>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           <input
@@ -2733,7 +2772,7 @@ export default function AdminShippingPage() {
               <>
                 {' '}
                 · <strong className="text-amber-800">{freightResult.import_batch.high_fee_warning_count}</strong> mã cước
-                &gt; 70.000 ₫
+                &gt; 70 K
               </>
             ) : null}
           </div>
@@ -2846,7 +2885,7 @@ export default function AdminShippingPage() {
                           <td className="px-3 py-3">
                             {row.high_fee_warning === 'yes' ? (
                               <span className="inline-flex rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
-                                Cước &gt; 70.000 ₫ — xem lại
+                                Cước &gt; 70 K — xem lại
                               </span>
                             ) : (
                               '—'

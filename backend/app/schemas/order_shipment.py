@@ -73,6 +73,15 @@ class EmsShippingOperationsStatsResponse(BaseModel):
     cod_in_transit_unpaid_total: int = 0
     cod_delivered_unpaid_total: int = 0
     cod_paid_total: int = 0
+    cod_returned_unpaid_total: int = 0
+    cod_pending_unpaid_total: int = 0
+    total_cod_sum: int = 0
+    total_cod_amount: int = 0
+    in_transit_cod_total: int = 0
+    delivered_cod_total: int = 0
+    returned_cod_total: int = 0
+    return_shop_received_cod_total: int = 0
+    pending_cod_total: int = 0
     shop_linked_count: int = 0
     shop_return_received_count: int = 0
     freight_unsettled_count: int = 0
@@ -101,11 +110,21 @@ class EmsShippingTimelineItemResponse(BaseModel):
     returned_count: int = 0
     return_shop_received_count: int = 0
     pending_status_count: int = 0
+    total_cod_sum: int = 0
+    in_transit_cod_total: int = 0
+    delivered_cod_total: int = 0
+    returned_cod_total: int = 0
+    return_shop_received_cod_total: int = 0
+    pending_cod_total: int = 0
     total_with_cod: int = 0
+    cod_in_transit_unpaid_count: int = 0
+    cod_in_transit_unpaid_total: int = 0
     cod_delivered_unpaid_count: int = 0
+    cod_delivered_unpaid_total: int = 0
+    cod_returned_unpaid_count: int = 0
+    cod_returned_unpaid_total: int = 0
     cod_paid_count: int = 0
     total_cod_amount: int = 0
-    cod_delivered_unpaid_total: int = 0
     cod_paid_total: int = 0
 
 
@@ -116,11 +135,21 @@ class EmsShippingTimelineTotalsResponse(BaseModel):
     returned_count: int = 0
     return_shop_received_count: int = 0
     pending_status_count: int = 0
+    total_cod_sum: int = 0
+    in_transit_cod_total: int = 0
+    delivered_cod_total: int = 0
+    returned_cod_total: int = 0
+    return_shop_received_cod_total: int = 0
+    pending_cod_total: int = 0
     total_with_cod: int = 0
+    cod_in_transit_unpaid_count: int = 0
+    cod_in_transit_unpaid_total: int = 0
     cod_delivered_unpaid_count: int = 0
+    cod_delivered_unpaid_total: int = 0
+    cod_returned_unpaid_count: int = 0
+    cod_returned_unpaid_total: int = 0
     cod_paid_count: int = 0
     total_cod_amount: int = 0
-    cod_delivered_unpaid_total: int = 0
     cod_paid_total: int = 0
 
 
