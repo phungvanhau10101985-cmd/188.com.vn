@@ -3,6 +3,7 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import { Product } from '@/types/api';
+import RelatedProducts from '@/components/product-detail/RelatedProducts';
 import ShopSidebarProducts from '@/components/product-detail/ShopSidebarProducts';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { displayableBrandOrOrigin } from '@/lib/utils';
@@ -373,6 +374,8 @@ export default function ProductTabs({ product }: ProductTabsProps) {
       <div className="p-4">
         {activeTab === 'description' && (
           <div className="space-y-4">
+            <RelatedProducts currentProduct={product} />
+
             {/* Product Description */}
             <div className="space-y-2">
               <h2 className="text-base font-bold text-gray-900">📋 Mô tả sản phẩm</h2>

@@ -1,7 +1,7 @@
 // frontend/components/product-detail/RelatedProducts.tsx
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { cdnUrl } from '@/lib/cdn-url';
 import Image from 'next/image';
@@ -53,7 +53,7 @@ function sectionTitle(tab: ProductRelatedTabId): string {
 function emptyHint(tab: ProductRelatedTabId): string {
   switch (tab) {
     case 'bestselling':
-      return 'Sản phẩm chưa có Style (cột Style / AF) — không lọc được nhóm bán chạy.';
+      return 'Sản phẩm chưa có Style (AF) và danh mục cấp 2 — không lọc được nhóm bán chạy.';
     case 'same_price':
       return 'Thiếu danh mục cấp 2 hoặc tên shop Trung Quốc (shop_name_chinese) — không lọc được nhóm này.';
     case 'lower_price':
@@ -138,12 +138,28 @@ function buildFetchPlan(product: Product, tab: ProductRelatedTabId): FetchPlan {
   switch (tab) {
     case 'bestselling': {
       const st = excelCell(product.style);
-      if (!st) return { ok: false };
-      return {
-        ok: true,
-        params: { ...base, style: st, sort: 'purchases_desc' },
-        sortPurchasesDesc: true,
-      };
+      if (st) {
+        return {
+          ok: true,
+          params: { ...base, style: st, sort: 'purchases_desc' },
+          sortPurchasesDesc: true,
+        };
+      }
+      const sub2 = excelCell(product.subcategory);
+      if (sub2) {
+        const cat = excelCell(product.category);
+        return {
+          ok: true,
+          params: {
+            ...base,
+            ...(cat ? { category: cat } : {}),
+            subcategory: sub2,
+            sort: 'purchases_desc',
+          },
+          sortPurchasesDesc: true,
+        };
+      }
+      return { ok: false };
     }
     case 'same_price': {
       const sibling = listingParamsSameChineseShopCat2(product);
@@ -266,8 +282,6 @@ function relatedStripStep(): number {
 }
 
 export default function RelatedProducts({ currentProduct }: RelatedProductsProps) {
-  const sectionRef = useRef<HTMLDivElement>(null);
-  const [inView, setInView] = useState(false);
   const searchParams = useSearchParams();
   const relatedTab = parseRelatedTabFromSearch(searchParams.get('rt'));
 
@@ -296,20 +310,6 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   }, [currentProduct]);
 
   useEffect(() => {
-    const el = sectionRef.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) setInView(true);
-      },
-      { rootMargin: '280px 0px', threshold: 0 },
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (!inView) return;
     const ac = new AbortController();
 
     const applySnapshot = (list: Product[], sgList: Product[]) => {
@@ -372,16 +372,12 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
     return () => {
       ac.abort();
     };
-  }, [currentProduct, relatedTab, inView]);
-
-  if (!inView) {
-    return <div ref={sectionRef} className="border-t border-gray-200 pt-5 min-h-8" aria-hidden />;
-  }
+  }, [currentProduct, relatedTab]);
 
   if (loading) {
     const showShopGroupSkeleton = relatedTab === 'bestselling' && !!chineseShopCat2GroupParams;
     return (
-      <div ref={sectionRef} className="border-t border-gray-200 pt-5">
+      <div className="border-t border-gray-200 pt-5">
         {showShopGroupSkeleton && (
           <div className="mb-8">
             <div className="h-6 bg-gray-200 rounded w-72 mb-3 animate-pulse max-w-full" />
@@ -624,7 +620,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
     ) : null;
 
   return (
-    <div ref={sectionRef} className="border-t border-gray-200 pt-5">
+    <div className="border-t border-gray-200 pt-5">
       {canShowShopGroupSection && (
         <section className="mb-8" aria-label="Sản phẩm tương tự">
           <h3 className="text-base font-bold text-gray-900 mb-3 uppercase">
@@ -673,7 +669,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
           <p className="text-sm text-gray-500">
             {!plan.ok
               ? emptyHint(relatedTab)
-              : 'Không có sản phẩm khác cùng Style trong nhóm này.'}
+              : 'Không có sản phẩm khác trong nhóm bán chạy này.'}
           </p>
         </>
       ) : null}

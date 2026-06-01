@@ -16,7 +16,6 @@ import ProductInfo from './components/ProductInfo/ProductInfo';
 import ProductTabs from '@/components/product-detail/ProductTabs';
 import ProductQASection from './components/ProductQASection/ProductQASection';
 import ProductReviewSection from './components/ProductReviewSection/ProductReviewSection';
-import RelatedProducts from '@/components/product-detail/RelatedProducts';
 import ProductDetailMobile from './ProductDetailMobile';
 import ErrorState from './components/ErrorState/ErrorState';
 import { useToast } from '@/components/ToastProvider';
@@ -40,9 +39,7 @@ import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPo
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
 import NanoAiLauncherGatewaySync from '@/components/NanoAiLauncherGatewaySync';
 import { buildNanoAiGatewayPayloadFrom188Product } from '@/lib/nanoai-hosted-chat';
-import {
-  resolveProductGroupListingPath,
-} from '@/lib/product-oos-redirect';
+import { resolveProductGroupListingPath } from '@/lib/product-oos-redirect';
 
 interface ProductDetailClientProps {
   initialProduct: Product;
@@ -134,7 +131,7 @@ export default function ProductDetailClient({
     return () => {
       cancelled = true;
     };
-  }, [product.available, slug, router]);
+  }, [product.available, product.group_listing_path, slug, router]);
 
   useEffect(() => {
     persistRelatedFiltersFromProduct(product);
@@ -702,7 +699,6 @@ export default function ProductDetailClient({
             <ProductQASection product={product} modalOnly modalOpen={qaModalOpen} onModalClose={() => setQaModalOpen(false)} onModalOpen={() => setQaModalOpen(true)} />
             <ProductReviewSection product={product} modalOnly modalOpen={reviewsModalOpen} onModalClose={() => setReviewsModalOpen(false)} onModalOpen={() => setReviewsModalOpen(true)} />
           </article>
-          <RelatedProducts currentProduct={product} />
         </main>
       </div>
     </div>
