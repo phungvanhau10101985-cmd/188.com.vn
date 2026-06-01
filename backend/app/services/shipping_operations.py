@@ -684,6 +684,22 @@ def list_operations_bucket_records(
     }
 
 
+def order_has_ems_return_marker(db: Session, order_id: int) -> bool:
+    """Đơn có ít nhất một vận đơn EMS với trạng thái hoàn (EMS hoặc shop đã xác nhận)."""
+    records = (
+        db.query(EmsShippingRecord)
+        .filter(EmsShippingRecord.order_id == order_id)
+        .all()
+    )
+    if not records:
+        return False
+    return any(
+        _is_ems_return_pending_shop(ems_status=r.ems_status)
+        or _is_shop_return_received(order_status=r.order_status)
+        for r in records
+    )
+
+
 def validate_shop_return_confirm(order: Order) -> tuple[str, str] | None:
     """Trả (mã lỗi, thông báo) hoặc None nếu được phép xác nhận."""
     status_val = getattr(order.status, "value", order.status)
@@ -743,7 +759,8 @@ def bulk_confirm_shop_returns(
 ) -> dict[str, Any]:
     """
     entries: { row_number, raw, order_code? }
-    Trạng thái dòng: confirmed | not_found | invalid_code | already_returned | invalid_status | duplicate
+    Trạng thái dòng: confirmed | not_found | invalid_code | already_returned | invalid_status |
+    ems_not_return | ems_not_linked | duplicate
     """
     rows_out: list[dict[str, Any]] = []
     seen_codes: dict[str, int] = {}
@@ -755,14 +772,17 @@ def bulk_confirm_shop_returns(
         code = (entry.get("order_code") or "").strip().upper() or None
 
         if not code:
+            resolve_err = str(entry.get("resolve_error") or "").strip()
+            status = "not_found" if resolve_err else "invalid_code"
             rows_out.append(
                 {
                     "row_number": row_number,
                     "raw": raw,
                     "order_code": None,
                     "order_id": None,
-                    "status": "invalid_code",
-                    "message": "Mã không hợp lệ — cần mã đơn shop dạng DHxxx.",
+                    "status": status,
+                    "message": resolve_err
+                    or "Mã không hợp lệ — nhập mã đơn DHxxx, mã vận chuyển EMS hoặc mã tham chiếu.",
                 }
             )
             continue
@@ -809,6 +829,39 @@ def bulk_confirm_shop_returns(
             )
             continue
 
+        if not order_has_ems_return_marker(db, order.id):
+            has_ems = (
+                db.query(EmsShippingRecord.id)
+                .filter(EmsShippingRecord.order_id == order.id)
+                .first()
+            )
+            if not has_ems:
+                rows_out.append(
+                    {
+                        "row_number": row_number,
+                        "raw": raw or code,
+                        "order_code": code,
+                        "order_id": order.id,
+                        "status": "ems_not_linked",
+                        "message": "Đơn chưa có dòng vận chuyển EMS — import file gửi EMS trước.",
+                    }
+                )
+            else:
+                rows_out.append(
+                    {
+                        "row_number": row_number,
+                        "raw": raw or code,
+                        "order_code": code,
+                        "order_id": order.id,
+                        "status": "ems_not_return",
+                        "message": (
+                            "EMS chưa báo trạng thái đơn hoàn (phát hoàn / chuyển hoàn…). "
+                            "Chỉ xác nhận khi EMS đã duyệt hoàn."
+                        ),
+                    }
+                )
+            continue
+
         to_confirm.append((entry, order))
 
     confirmed = 0
@@ -846,6 +899,8 @@ def bulk_confirm_shop_returns(
         "already_returned_count": sum(1 for r in rows_out if r["status"] == "already_returned"),
         "invalid_status_count": sum(1 for r in rows_out if r["status"] == "invalid_status"),
         "duplicate_count": sum(1 for r in rows_out if r["status"] == "duplicate"),
+        "ems_not_return_count": sum(1 for r in rows_out if r["status"] == "ems_not_return"),
+        "ems_not_linked_count": sum(1 for r in rows_out if r["status"] == "ems_not_linked"),
         "rows": rows_out,
         "warnings": [],
     }

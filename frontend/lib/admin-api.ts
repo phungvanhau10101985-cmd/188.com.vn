@@ -3566,6 +3566,8 @@ export type ShopReturnConfirmRowStatus =
   | 'invalid_code'
   | 'already_returned'
   | 'invalid_status'
+  | 'ems_not_return'
+  | 'ems_not_linked'
   | 'duplicate';
 
 export interface ShopReturnConfirmRow {
@@ -3588,6 +3590,8 @@ export interface ShopReturnConfirmResult {
   already_returned_count: number;
   invalid_status_count: number;
   duplicate_count: number;
+  ems_not_return_count?: number;
+  ems_not_linked_count?: number;
   rows: ShopReturnConfirmRow[];
   warnings: string[];
 }

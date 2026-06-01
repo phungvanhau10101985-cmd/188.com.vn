@@ -428,7 +428,7 @@ class ShopReturnConfirmRowResponse(BaseModel):
 
 
 class ShopReturnConfirmRequest(BaseModel):
-    """Nhập danh sách mã đơn shop (DHxxx), mỗi mã một dòng hoặc cách nhau bởi dấu phẩy."""
+    """Nhập mã đơn DHxxx, mã EMS (tracking) hoặc mã tham chiếu — map sang đơn shop."""
 
     order_codes: Optional[List[str]] = None
     text: Optional[str] = Field(

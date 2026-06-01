@@ -394,10 +394,12 @@ const IMPORT_ACTION_LABELS: Record<string, string> = {
 
 const SHOP_RETURN_ROW_STATUS: Record<string, { label: string; badge: string }> = {
   confirmed: { label: 'Đã xác nhận', badge: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
-  not_found: { label: 'Không tồn tại', badge: 'bg-red-100 text-red-800 border-red-200' },
+  not_found: { label: 'Không tìm thấy', badge: 'bg-red-100 text-red-800 border-red-200' },
   invalid_code: { label: 'Mã không hợp lệ', badge: 'bg-red-100 text-red-800 border-red-200' },
   already_returned: { label: 'Đã hoàn trước đó', badge: 'bg-amber-100 text-amber-900 border-amber-200' },
-  invalid_status: { label: 'Trạng thái không hợp lệ', badge: 'bg-amber-100 text-amber-900 border-amber-200' },
+  invalid_status: { label: 'Trạng thái đơn không hợp lệ', badge: 'bg-amber-100 text-amber-900 border-amber-200' },
+  ems_not_return: { label: 'EMS chưa báo hoàn', badge: 'bg-orange-100 text-orange-900 border-orange-200' },
+  ems_not_linked: { label: 'Chưa có EMS', badge: 'bg-orange-100 text-orange-900 border-orange-200' },
   duplicate: { label: 'Trùng trong file', badge: 'bg-slate-100 text-slate-700 border-slate-200' },
 };
 
@@ -2545,11 +2547,11 @@ export default function AdminShippingPage() {
         <h2 className="text-lg font-semibold text-gray-900">3. Xác nhận đơn hoàn đã trả shop</h2>
         <p className="text-sm text-gray-600">
           Shop xác nhận đã nhận hàng hoàn — ghi <strong>Đơn hoàn đã trả shop</strong> và hủy hoa hồng affiliate.
-          Nhập mã <strong>DHxxx</strong> (mỗi dòng hoặc cách nhau bằng dấu phẩy) hoặc upload Excel (mỗi dòng một mã).
-          Mã <strong>không tồn tại</strong> trên hệ thống sẽ báo lỗi, không cập nhật dòng đó.
+          Nhập <strong>mã vận chuyển EMS</strong>, <strong>mã tham chiếu</strong> (cột A file gửi EMS) hoặc <strong>mã đơn DHxxx</strong> —
+          hệ thống tự map sang đơn shop. Chỉ xác nhận khi EMS đã có trạng thái <strong>đơn hoàn</strong> (phát hoàn / chuyển hoàn…).
         </p>
         <div className="space-y-3">
-          <label className="block text-sm font-medium text-gray-700">Danh sách mã đơn</label>
+          <label className="block text-sm font-medium text-gray-700">Danh sách mã (EMS / tham chiếu / DHxxx)</label>
           <textarea
             value={shopReturnText}
             onChange={(e) => {
@@ -2557,7 +2559,7 @@ export default function AdminShippingPage() {
               setShopReturnError(null);
             }}
             rows={4}
-            placeholder={'DH131\nDH132, DH133'}
+            placeholder={'EE123456789VN\nMA_THAM_CHIEU_A\nDH131'}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono placeholder:text-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
           />
         </div>
@@ -2603,7 +2605,13 @@ export default function AdminShippingPage() {
               {shopReturnResult.not_found_count > 0 ? (
                 <>
                   {' '}
-                  (không tồn tại: <strong>{shopReturnResult.not_found_count}</strong>)
+                  (không tìm thấy: <strong>{shopReturnResult.not_found_count}</strong>)
+                </>
+              ) : null}
+              {(shopReturnResult.ems_not_return_count ?? 0) > 0 ? (
+                <>
+                  {' '}
+                  · EMS chưa hoàn: <strong>{shopReturnResult.ems_not_return_count}</strong>
                 </>
               ) : null}
             </div>
