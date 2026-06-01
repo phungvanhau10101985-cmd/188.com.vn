@@ -14,7 +14,7 @@ from app.services.shipping_operations import bulk_confirm_shop_returns
 
 _ORDER_CODE_FULL_RE = re.compile(r"^DH\d+$", re.IGNORECASE)
 _ORDER_CODE_SEARCH_RE = re.compile(r"\b(DH\d+)\b", re.IGNORECASE)
-_CODE_SPLIT_RE = re.compile(r"[\s,;|\t]++")
+_CODE_SPLIT_RE = re.compile(r"[\s,;|\t]+")
 
 
 def normalize_shop_order_code(raw: str) -> Optional[str]:
