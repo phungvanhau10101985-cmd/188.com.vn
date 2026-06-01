@@ -43,7 +43,7 @@ const ID_HINT: Record<string, Record<string, string>> = {
     merchant_center:
       'Merchant Center (xác minh website): trong Cài đặt chương trình / Xác minh URL, chọn Thẻ HTML — chỉ dán mã trong thuộc tính content (hoặc dán cả thẻ <meta> rồi bật chế độ full HTML).',
     customer_reviews:
-      'Đánh giá khách hàng qua Google: chỉ nhập Merchant ID (vd 5672138097). Bật huy hiệu điểm người bán (góc phải) + khảo sát opt-in sau đơn — tắt bằng «Tắt» hoặc xóa mã.',
+      'Đánh giá khách hàng qua Google: chỉ nhập Merchant ID (vd 5672138097). Huy hiệu góc phải; khảo sát (thanh dưới) sau khi khách đặt cọc xong hoặc đơn không cọc — tắt bằng «Tắt».',
   },
   facebook: {
     pixel:

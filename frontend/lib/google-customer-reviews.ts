@@ -31,6 +31,38 @@ export function shouldShowGoogleCustomerReviewsForOrder(
   return Date.now() - t < maxAgeHours * 60 * 60 * 1000;
 }
 
+const POST_DEPOSIT_ORDER_STATUSES = new Set([
+  'deposit_paid',
+  'confirmed',
+  'processing',
+  'shipping',
+  'delivered',
+  'completed',
+]);
+
+function depositPaidAmount(order: { deposit_paid?: number | string | null }): number {
+  const v = order.deposit_paid;
+  if (v == null) return 0;
+  if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? v : 0;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * Đơn cần cọc: chỉ hiện khảo sát sau khi đã cọc (hoặc đơn không cọc: ngay sau đặt hàng).
+ */
+export function isOrderEligibleForGoogleReviewsOptIn(order: {
+  requires_deposit?: boolean;
+  status?: string;
+  deposit_paid?: number | string | null;
+}): boolean {
+  const status = (order.status || '').trim();
+  if (status === 'cancelled') return false;
+  if (!order.requires_deposit) return true;
+  if (depositPaidAmount(order) > 0) return true;
+  return POST_DEPOSIT_ORDER_STATUSES.has(status);
+}
+
 export function clearGoogleCustomerReviewsShowFlag(orderId: number): void {
   if (typeof sessionStorage === 'undefined') return;
   try {

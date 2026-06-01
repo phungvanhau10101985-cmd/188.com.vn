@@ -650,7 +650,6 @@ export default function OrderDepositPage() {
 
   return (
     <>
-      <OrderGoogleCustomerReviews order={order} />
     <div className="bg-gray-50 min-h-0 pt-0 pb-3 md:pb-4">
       <div className="mx-auto px-0 sm:px-1 max-w-5xl">
         <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">

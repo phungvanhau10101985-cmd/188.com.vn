@@ -46,7 +46,6 @@ export default function GoogleCustomerReviewsOptIn({
     const orderId = (order.order_code || '').trim();
     if (!email || !orderId || !email.includes('@')) return;
 
-    renderedRef.current = true;
     window.___gcfg = { lang: 'vi' };
 
     const payload = {
@@ -58,29 +57,36 @@ export default function GoogleCustomerReviewsOptIn({
       opt_in_style: 'BOTTOM_TRAY',
     };
 
-    window.renderOptIn = function renderOptIn() {
+    const invokeRender = () => {
       if (!window.gapi?.load) return;
       window.gapi.load('surveyoptin', function onSurveyReady() {
         window.gapi?.surveyoptin?.render(payload);
+        renderedRef.current = true;
+        if (clearShowFlagAfterRender) {
+          clearGoogleCustomerReviewsShowFlag(order.id);
+        }
       });
     };
 
-    const existing = document.querySelector(`script[src="${PLATFORM_SCRIPT}"]`);
+    window.renderOptIn = invokeRender;
+
+    const existing = document.querySelector('script[src*="apis.google.com/js/platform.js"]');
     if (existing) {
-      if (window.gapi) {
-        window.renderOptIn();
-      }
-    } else {
-      const script = document.createElement('script');
-      script.src = PLATFORM_SCRIPT;
-      script.async = true;
-      script.defer = true;
-      document.body.appendChild(script);
+      if (window.gapi) invokeRender();
+      else existing.addEventListener('load', invokeRender);
+      return () => existing.removeEventListener('load', invokeRender);
     }
 
-    if (clearShowFlagAfterRender) {
-      clearGoogleCustomerReviewsShowFlag(order.id);
-    }
+    const script = document.createElement('script');
+    script.src = PLATFORM_SCRIPT;
+    script.async = true;
+    script.defer = true;
+    script.addEventListener('load', invokeRender);
+    document.body.appendChild(script);
+
+    return () => {
+      script.removeEventListener('load', invokeRender);
+    };
   }, [merchantId, order, clearShowFlagAfterRender]);
 
   return null;
