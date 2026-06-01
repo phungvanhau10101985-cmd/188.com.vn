@@ -1821,6 +1821,38 @@ _PRODUCT_SLUG_ID_SUFFIX_RE = re.compile(
     flags=re.IGNORECASE,
 )
 
+# URL marketing một segment: /moi-ma-...-gia-1520k-giay-da-nam-...-g03-... (mã biến thể -g0x)
+_LEGACY_MARKETING_PATH_RE = re.compile(r"(?:^|-)moi-ma-", re.IGNORECASE)
+_LEGACY_GIA_PRICE_SEG_RE = re.compile(r"^\d{2,6}k$", re.IGNORECASE)
+# Dừng trước segment mã biến thể: g03, g04, g05, g06, ... (không chỉ g06)
+_LEGACY_VARIANT_SEG_RE = re.compile(r"^g0\d{1,2}$", re.IGNORECASE)
+_LEGACY_TAIL_NOISE_SEGMENTS = frozenset(
+    {
+        "san",
+        "pham",
+        "moi",
+        "mien",
+        "phi",
+        "van",
+        "chuyen",
+        "toan",
+        "quoc",
+        "hang",
+        "sale",
+        "hot",
+        "free",
+        "ship",
+        "freeship",
+        "km",
+        "tang",
+        "qua",
+        "uu",
+        "dai",
+        "giam",
+        "gia",
+    }
+)
+
 # Ngưỡng giống slug nhóm (PDP hết hàng → chuyển sang biến thể / slug nhóm gần nhất).
 PRODUCT_OOS_GROUP_SLUG_MIN_SIMILARITY = 0.8
 # Số segment đầu của tên slug dùng làm pool ILIKE (vd ``ao-khoac-da-nam-da-bo-...`` → ``ao-khoac-da-nam%``).
@@ -1828,6 +1860,61 @@ PRODUCT_OOS_GROUP_SLUG_POOL_SEGMENTS = 4
 PRODUCT_OOS_GROUP_SLUG_POOL_CANDIDATE_LIMIT = 600
 # URL marketing một segment (không phải slug PDP): nếu không đạt 80%, chọn SP gần nhất trong pool.
 PRODUCT_OOS_LEGACY_PATH_FALLBACK_MIN_SIMILARITY = 0.42
+
+
+def is_legacy_marketing_product_path(path: str) -> bool:
+    """Path một segment kiểu /moi-ma-l1249-gia-20240k-giay-da-nam-...-1156126."""
+    s = (path or "").strip().lower()
+    if not s:
+        return False
+    if _LEGACY_MARKETING_PATH_RE.search(s):
+        return True
+    return "-gia-" in s and bool(re.search(r"gia-\d{2,6}k", s))
+
+
+def extract_legacy_marketing_name_prefix(source_slug: str) -> str:
+    """
+    Tách tên SP từ URL marketing: sau ``gia-20240k`` → trước mã biến thể ``-g0x`` (g03, g04, …).
+    Vd: ...-giay-da-nam-gutdu-giay-dep-nam-chat-lieu-da-bo-g05-san-pham-moi-... →
+    ``giay-da-nam-gutdu-giay-dep-nam-chat-lieu-da-bo``.
+    """
+    s = (source_slug or "").strip().lower().strip("-")
+    if not s or not is_legacy_marketing_product_path(s):
+        return ""
+    parts = [x for x in s.split("-") if x]
+    if not parts:
+        return ""
+
+    start = 0
+    for i, p in enumerate(parts):
+        if p == "gia" and i + 1 < len(parts) and _LEGACY_GIA_PRICE_SEG_RE.match(parts[i + 1]):
+            start = i + 2
+            break
+        if _LEGACY_GIA_PRICE_SEG_RE.match(p):
+            start = i + 1
+            break
+
+    if start == 0 and parts[0] == "moi-ma":
+        for i, p in enumerate(parts[1:], start=1):
+            if p == "gia" and i + 1 < len(parts) and _LEGACY_GIA_PRICE_SEG_RE.match(parts[i + 1]):
+                start = i + 2
+                break
+
+    collected: List[str] = []
+    for p in parts[start:]:
+        if _LEGACY_VARIANT_SEG_RE.match(p):
+            break
+        if p.isdigit() and len(p) >= 5:
+            break
+        if p in _LEGACY_TAIL_NOISE_SEGMENTS:
+            break
+        collected.append(p)
+
+    while collected and collected[-1] in _LEGACY_TAIL_NOISE_SEGMENTS:
+        collected.pop()
+
+    prefix = "-".join(collected).strip("-")
+    return prefix if len(prefix) >= 6 else ""
 
 
 def product_slug_name_prefix(slug: str, product_id: Optional[str] = None) -> str:
@@ -1902,6 +1989,10 @@ def _iter_oos_pool_prefix_candidates(name_prefix: str, source_slug: str) -> List
 
     name = (name_prefix or "").strip("-")
     source = (source_slug or name_prefix or "").strip("-")
+    legacy_name = extract_legacy_marketing_name_prefix(source)
+    if legacy_name:
+        add(legacy_name)
+
     name_parts = [x for x in name.split("-") if x]
     source_parts = [x for x in source.split("-") if x]
 
@@ -1967,6 +2058,10 @@ def product_slug_oos_pool_prefix_fast(
     """
     name = (name_prefix or "").strip()
     source = (source_slug or name).strip()
+    legacy_name = extract_legacy_marketing_name_prefix(source)
+    if legacy_name:
+        return legacy_name
+
     haystack = f"{source} {name}".lower()
     for marker in _OOS_POOL_HINT_MARKERS:
         if marker in haystack:
@@ -2210,6 +2305,13 @@ def _resolve_product_group_listing_path_uncached(
     source = (source_slug or "").strip()
     pid = product_id or (getattr(product, "product_id", None) if product else None)
 
+    legacy_pool = extract_legacy_marketing_name_prefix(source)
+    if legacy_pool:
+        path = _cluster_listing_path_from_pool_prefix(db, legacy_pool)
+        if path:
+            return path
+        return _home_search_listing_path(legacy_pool)
+
     if source:
         path = _cluster_listing_path_from_source_slug(db, source)
         if path:
@@ -2226,10 +2328,6 @@ def _resolve_product_group_listing_path_uncached(
         return _home_search_listing_path(pool)
     if name_prefix and len(name_prefix) >= 4:
         return _home_search_listing_path(name_prefix)
-    if source:
-        parts = [x for x in source.split("-") if x][:4]
-        if parts:
-            return _home_search_listing_path("-".join(parts))
     return "/"
 
 
