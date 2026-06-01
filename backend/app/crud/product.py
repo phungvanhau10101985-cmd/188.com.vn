@@ -1969,6 +1969,189 @@ def score_product_slug_oos_similarity(
     return sim
 
 
+def _seo_cluster_listing_path(cluster: Any) -> str:
+    path = (getattr(cluster, "canonical_path", None) or "").strip()
+    if path.startswith("/"):
+        return path
+    slug = (getattr(cluster, "slug", None) or "").strip()
+    return f"/c/{slug}" if slug else "/"
+
+
+def _cluster_listing_path_for_product(db: Session, product: Product) -> Optional[str]:
+    """Ưu tiên SEO cluster của cat3; không có thì /danh-muc theo taxonomy."""
+    from app.models.category import Category
+    from app.models.seo_cluster import SeoCluster
+
+    cid = getattr(product, "category_id", None)
+    if cid:
+        cat = db.query(Category).filter(Category.id == cid).first()
+        if cat:
+            if cat.seo_cluster_id:
+                cluster = (
+                    db.query(SeoCluster)
+                    .filter(SeoCluster.id == cat.seo_cluster_id)
+                    .first()
+                )
+                if cluster:
+                    return _seo_cluster_listing_path(cluster)
+            fs = (cat.full_slug or "").strip().strip("/")
+            if fs:
+                return f"/danh-muc/{fs}"
+
+    c1 = (getattr(product, "category", None) or "").strip()
+    if not c1:
+        return None
+    s1 = _normalize_category_url_slug(slugify_vietnamese(c1)) or slugify_vietnamese(c1)
+    c2 = (getattr(product, "subcategory", None) or "").strip()
+    c3 = (getattr(product, "sub_subcategory", None) or "").strip()
+    s2 = _normalize_category_url_slug(slugify_vietnamese(c2)) if c2 else None
+    s3 = _normalize_category_url_slug(slugify_vietnamese(c3)) if c3 else None
+    if s3 and s2:
+        cat3 = (
+            db.query(Category)
+            .filter(
+                Category.level == 3,
+                Category.full_slug.ilike(f"%/{s2}/{s3}"),
+            )
+            .first()
+        )
+        if cat3 and cat3.seo_cluster_id:
+            cluster = (
+                db.query(SeoCluster)
+                .filter(SeoCluster.id == cat3.seo_cluster_id)
+                .first()
+            )
+            if cluster:
+                return _seo_cluster_listing_path(cluster)
+        return f"/danh-muc/{s1}/{s2}/{s3}"
+    if s2:
+        return f"/danh-muc/{s1}/{s2}"
+    return f"/danh-muc/{s1}"
+
+
+def _cluster_listing_path_from_pool_prefix(db: Session, pool: str) -> Optional[str]:
+    """Suy ra landing nhóm từ pool slug (vd ao-khoac-da-nam) — không chọn PDP khác."""
+    from app.models.category import Category
+    from app.models.seo_cluster import SeoCluster
+
+    pool_l = (pool or "").strip().lower()
+    if len(pool_l) < 4:
+        return None
+
+    row = db.query(SeoCluster).filter(SeoCluster.slug == pool_l).first()
+    if row:
+        return _seo_cluster_listing_path(row)
+
+    row = (
+        db.query(SeoCluster)
+        .filter(SeoCluster.slug.ilike(f"{pool_l}%"))
+        .order_by(SeoCluster.slug.desc())
+        .first()
+    )
+    if row:
+        return _seo_cluster_listing_path(row)
+
+    row = (
+        db.query(SeoCluster)
+        .filter(SeoCluster.slug.ilike(f"%{pool_l}%"))
+        .order_by(sql_func.length(SeoCluster.slug).desc())
+        .first()
+    )
+    if row:
+        return _seo_cluster_listing_path(row)
+
+    dominant = (
+        db.query(SeoCluster, sql_func.count(Product.id).label("cnt"))
+        .join(Category, Category.seo_cluster_id == SeoCluster.id)
+        .join(Product, Product.category_id == Category.id)
+        .filter(
+            Product.is_active.is_(True),
+            Product.slug.isnot(None),
+            Product.slug != "",
+            Product.slug.ilike(f"{pool_l}%"),
+        )
+        .group_by(SeoCluster.id)
+        .order_by(sql_func.count(Product.id).desc())
+        .first()
+    )
+    if dominant and dominant[1] >= 1:
+        return _seo_cluster_listing_path(dominant[0])
+
+    for cand in _iter_oos_pool_prefix_candidates(pool_l, pool_l):
+        row = db.query(SeoCluster).filter(SeoCluster.slug == cand).first()
+        if row:
+            return _seo_cluster_listing_path(row)
+
+    return None
+
+
+def _cluster_listing_path_from_source_slug(db: Session, source_slug: str) -> Optional[str]:
+    """Khớp slug cluster nằm trong URL marketing / PDP (segment dài nhất)."""
+    from app.models.seo_cluster import SeoCluster
+
+    source_l = (source_slug or "").strip().lower()
+    if len(source_l) < 8:
+        return None
+    best: Optional[Any] = None
+    best_len = 0
+    for row in db.query(SeoCluster).filter(SeoCluster.slug.isnot(None)).all():
+        s = (row.slug or "").strip().lower()
+        if len(s) >= 6 and s in source_l and len(s) > best_len:
+            best_len = len(s)
+            best = row
+    if best:
+        return _seo_cluster_listing_path(best)
+    return None
+
+
+def _home_search_listing_path(pool_or_query: str) -> str:
+    from urllib.parse import quote
+
+    q = (pool_or_query or "").replace("-", " ").strip()
+    return f"/?q={quote(q)}" if q else "/"
+
+
+def resolve_product_group_listing_path(
+    db: Session,
+    *,
+    source_slug: str,
+    product: Optional[Product] = None,
+    product_id: Optional[str] = None,
+) -> str:
+    """
+    Đường dẫn listing nhóm khi SP hết hàng / không tồn tại — không mở PDP sản phẩm khác.
+    Thứ tự: cluster từ SP → pool slug → cluster trong URL → tìm kiếm trang chủ.
+    """
+    if product is not None:
+        path = _cluster_listing_path_for_product(db, product)
+        if path:
+            return path
+
+    source = (source_slug or "").strip()
+    pid = product_id or (getattr(product, "product_id", None) if product else None)
+    name_prefix = product_slug_name_prefix(source, pid)
+    pool = product_slug_oos_search_pool_prefix(db, name_prefix, source_slug=source)
+    if pool:
+        path = _cluster_listing_path_from_pool_prefix(db, pool)
+        if path:
+            return path
+
+    if source:
+        path = _cluster_listing_path_from_source_slug(db, source)
+        if path:
+            return path
+
+    if pool:
+        return _home_search_listing_path(pool)
+    if name_prefix and len(name_prefix) >= 4:
+        return _home_search_listing_path(name_prefix)
+    if source:
+        parts = [x for x in source.split("-") if x][:4]
+        if parts:
+            return _home_search_listing_path("-".join(parts))
+    return "/"
+
+
 def find_similar_product_slug_for_oos_redirect(
     db: Session,
     *,

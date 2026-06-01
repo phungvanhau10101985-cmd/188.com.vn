@@ -1,9 +1,6 @@
 import { redirect } from 'next/navigation';
 import ErrorState from '@/app/products/[slug]/components/ErrorState/ErrorState';
-import {
-  productOosGroupRedirectPath,
-  resolveProductOosGroupRedirectSlug,
-} from '@/lib/product-oos-redirect';
+import { resolveProductGroupListingPath } from '@/lib/product-oos-redirect';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import {
   canonicalProductPathFromProduct,
@@ -17,7 +14,7 @@ type Props = {
 /**
  * URL marketing một segment (Google / quảng cáo), không nằm dưới /products/.
  * - Có SP → chuyển sang PDP chuẩn /products/{slug}
- * - Hết hàng / không có SP → nhóm OOS (pool ao-khoac-nam%, …) giống PDP
+ * - Hết hàng / không có SP → listing nhóm (/c/..., /danh-muc/..., tìm kiếm)
  */
 export default async function LegacyMarketingProductPage({ params }: Props) {
   const { legacySlug: raw } = await params;
@@ -30,11 +27,11 @@ export default async function LegacyMarketingProductPage({ params }: Props) {
   const canonicalPath = product ? canonicalProductPathFromProduct(product) : null;
 
   const redirectOosGroupIfAny = async (oosSourceSlug: string, legacyMarketing = true) => {
-    const groupSlug = await resolveProductOosGroupRedirectSlug(oosSourceSlug, {
+    const listingPath = await resolveProductGroupListingPath(oosSourceSlug, {
       legacyMarketingPath: legacyMarketing,
     });
-    if (groupSlug) {
-      redirect(productOosGroupRedirectPath(groupSlug));
+    if (listingPath) {
+      redirect(listingPath);
     }
   };
 

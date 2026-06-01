@@ -4,10 +4,7 @@
 import { useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import {
-  productOosGroupRedirectPath,
-  resolveProductOosGroupRedirectSlug,
-} from '@/lib/product-oos-redirect';
+import { resolveProductGroupListingPath } from '@/lib/product-oos-redirect';
 
 interface ErrorStateProps {
   error: string | null;
@@ -39,11 +36,11 @@ export default function ErrorState({ error, slug }: ErrorStateProps) {
       };
     }
 
-    resolveProductOosGroupRedirectSlug(key)
-      .then((target) => {
+    resolveProductGroupListingPath(key)
+      .then((listingPath) => {
         if (cancelled) return;
-        if (target && target !== key) {
-          router.replace(productOosGroupRedirectPath(target));
+        if (listingPath) {
+          router.replace(listingPath);
           return;
         }
         scheduleHome();
@@ -63,7 +60,9 @@ export default function ErrorState({ error, slug }: ErrorStateProps) {
       <div className="text-6xl mb-4">😢</div>
       <h1 className="text-2xl font-bold text-gray-900 mb-2">Không tìm thấy sản phẩm</h1>
       <p className="text-gray-600 mb-2">{error}</p>
-      <p className="text-gray-500 text-sm mb-6">Đang chuyển về trang chủ sau 2 giây…</p>
+      <p className="text-gray-500 text-sm mb-6">
+        Đang tìm nhóm sản phẩm liên quan hoặc chuyển về trang chủ sau 2 giây…
+      </p>
       <Link 
         href="/"
         className="bg-[#ea580c] text-white px-6 py-3 rounded-lg hover:bg-[#c2410c] transition-colors inline-block"

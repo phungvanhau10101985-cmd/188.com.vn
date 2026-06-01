@@ -1,34 +1,28 @@
 /**
- * PDP hết hàng → redirect sang slug nhóm / biến thể giống >= 80% (backend SequenceMatcher).
+ * PDP hết hàng / không tồn tại → redirect listing nhóm (/c/..., /danh-muc/..., /?q=...).
  */
 import { getApiBaseUrl } from '@/lib/api-base';
 
-export const PRODUCT_OOS_SLUG_SIMILARITY_MIN = 0.8;
-
-export interface ProductOosGroupRedirectResult {
-  redirect_slug: string | null;
+export interface ProductGroupListingRedirectResult {
   redirect_path: string | null;
-  similarity_min?: number;
+  redirect_type?: string;
+  redirect_slug?: string | null;
 }
 
-export async function resolveProductOosGroupRedirectSlug(
+export async function resolveProductGroupListingPath(
   slug: string,
-  options?: { minSimilarity?: number; /** URL /moi-ma-... một segment */ legacyMarketingPath?: boolean },
+  options?: { /** URL /moi-ma-... một segment */ legacyMarketingPath?: boolean },
 ): Promise<string | null> {
   const key = (slug || '').trim();
   if (!key) return null;
 
-  const minSimilarity = options?.minSimilarity ?? PRODUCT_OOS_SLUG_SIMILARITY_MIN;
   const apiBase =
     typeof window === 'undefined'
       ? getApiBaseUrl()
       : process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1';
 
   try {
-    const params = new URLSearchParams({
-      slug: key,
-      min_similarity: String(minSimilarity),
-    });
+    const params = new URLSearchParams({ slug: key });
     if (options?.legacyMarketingPath) {
       params.set('legacy_path', 'true');
     }
@@ -37,16 +31,31 @@ export async function resolveProductOosGroupRedirectSlug(
       headers: { 'Content-Type': 'application/json' },
     });
     if (!res.ok) return null;
-    const data = (await res.json()) as ProductOosGroupRedirectResult;
-    const target = (data.redirect_slug || '').trim();
-    return target && target !== key ? target : null;
+    const data = (await res.json()) as ProductGroupListingRedirectResult;
+    const path = (data.redirect_path || '').trim();
+    if (!path || !path.startsWith('/')) return null;
+    if (path === `/products/${key}`) return null;
+    return path;
   } catch {
     return null;
   }
 }
 
-/** Path PDP — slug từ API đã an toàn (a-z, số, gạch ngang). */
-export function productOosGroupRedirectPath(slug: string): string {
-  const seg = (slug || '').trim().replace(/^\/+|\/+$/g, '');
-  return seg ? `/products/${seg}` : '/';
+/** @deprecated Dùng resolveProductGroupListingPath */
+export async function resolveProductOosGroupRedirectSlug(
+  slug: string,
+  options?: { minSimilarity?: number; legacyMarketingPath?: boolean },
+): Promise<string | null> {
+  void options?.minSimilarity;
+  return resolveProductGroupListingPath(slug, {
+    legacyMarketingPath: options?.legacyMarketingPath,
+  });
+}
+
+/** Chuẩn hoá path listing từ API (đã là /c/... hoặc /danh-muc/...). */
+export function productOosGroupRedirectPath(pathOrSlug: string): string {
+  const raw = (pathOrSlug || '').trim();
+  if (!raw) return '/';
+  if (raw.startsWith('/')) return raw;
+  return `/products/${raw.replace(/^\/+|\/+$/g, '')}`;
 }

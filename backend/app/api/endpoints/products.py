@@ -774,45 +774,36 @@ def create_product(
 
 @router.get("/oos-group-redirect", response_model=dict)
 def read_product_oos_group_redirect(
-    slug: str = Query(..., min_length=3, description="Slug PDP đang mở (hết hàng)"),
+    slug: str = Query(..., min_length=3, description="Slug PDP / URL marketing đang mở"),
     min_similarity: float = Query(
         0.8,
         ge=0.5,
         le=1.0,
-        description="Ngưỡng giống slug (SequenceMatcher), mặc định 0.8",
+        description="Giữ tương thích client; không dùng khi redirect listing nhóm",
     ),
     legacy_path: bool = Query(
         False,
-        description="URL marketing một segment (vd /moi-ma-...-1164016): bật fallback best-in-pool",
+        description="Giữ tương thích URL marketing một segment",
     ),
     db: Session = Depends(get_db),
 ):
     """
-    Gợi ý redirect PDP khi ``available <= 0``: slug khác trong cùng nhóm tên, giống >= min_similarity.
+    Hết hàng / không có SP: trả ``redirect_path`` tới listing nhóm (/c/..., /danh-muc/..., /?q=...),
+    không gợi ý PDP sản phẩm khác.
     """
     source = (slug or "").strip()
     current = crud.product.get_product_by_slug(db, slug=source)
     pid = getattr(current, "product_id", None) if current else None
-    fallback_min = (
-        crud.product.PRODUCT_OOS_LEGACY_PATH_FALLBACK_MIN_SIMILARITY if legacy_path else None
-    )
-    target = crud.product.find_similar_product_slug_for_oos_redirect(
+    path = crud.product.resolve_product_group_listing_path(
         db,
-        slug=source,
-        min_similarity=min_similarity,
+        source_slug=source,
+        product=current,
         product_id=pid,
-        pool_best_fallback_min=fallback_min,
     )
-    if not target or target == source:
-        return {
-            "redirect_slug": None,
-            "redirect_path": None,
-            "similarity_min": min_similarity,
-            "legacy_path": legacy_path,
-        }
     return {
-        "redirect_slug": target,
-        "redirect_path": f"/products/{target}",
+        "redirect_slug": None,
+        "redirect_path": path,
+        "redirect_type": "group_listing",
         "similarity_min": min_similarity,
         "legacy_path": legacy_path,
     }
