@@ -1,12 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useGoogleCustomerReviewsMerchantIdFromLayout } from '@/components/GoogleCustomerReviewsMerchantProvider';
+import { getApiBaseUrl } from '@/lib/api-base';
 
 export function useGoogleCustomerReviewsMerchantId(): number | null {
-  const [merchantId, setMerchantId] = useState<number | null>(null);
+  const fromLayout = useGoogleCustomerReviewsMerchantIdFromLayout();
+  const [merchantId, setMerchantId] = useState<number | null>(
+    fromLayout === undefined ? null : fromLayout,
+  );
 
   useEffect(() => {
-    const base = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:8001/api/v1';
+    if (fromLayout !== undefined) {
+      setMerchantId(fromLayout);
+      return;
+    }
+    const base = getApiBaseUrl();
     let cancelled = false;
     fetch(`${base}/embed-codes/public`, { cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : null))
@@ -20,7 +29,7 @@ export function useGoogleCustomerReviewsMerchantId(): number | null {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [fromLayout]);
 
-  return merchantId;
+  return fromLayout !== undefined ? fromLayout : merchantId;
 }

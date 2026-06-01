@@ -15,6 +15,7 @@ import {
 } from "@/components/DeferredLayoutBoot.client";
 import AnalyticsTracker from "@/components/AnalyticsTracker";
 import { fetchPublicSiteEmbeds } from "@/lib/site-embeds-public";
+import { GoogleCustomerReviewsMerchantProvider } from "@/components/GoogleCustomerReviewsMerchantProvider";
 import { partitionHeadEmbedsForSsr } from "@/lib/site-embed-head-ssr";
 import { ToastProvider } from "@/components/ToastProvider";
 import { getCategoryTreeForLayout } from "@/lib/category-seo";
@@ -183,6 +184,9 @@ export default async function RootLayout({
         <SiteEmbedsRoot embeds={siteEmbeds} headClientRemainders={headClientRemainders} />
         <DeferredLayoutFloaters />
         {/* Global Providers + Header/Footer xuyên suốt */}
+        <GoogleCustomerReviewsMerchantProvider
+          merchantId={siteEmbeds.googleCustomerReviewsMerchantId}
+        >
         <ToastProvider>
           <AuthProvider>
             <DeferredPwaPushRegister />
@@ -226,6 +230,7 @@ export default async function RootLayout({
             </CartProvider>
           </AuthProvider>
         </ToastProvider>
+        </GoogleCustomerReviewsMerchantProvider>
         
       </body>
     </html>

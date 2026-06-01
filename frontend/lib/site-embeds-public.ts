@@ -1,5 +1,7 @@
 /** Dữ liệu mã nhúng public từ API (SSR layout). */
 
+import { getApiBaseUrl } from '@/lib/api-base';
+
 /** Khớp backend `GoogleAdsWebConversions` — send_to AW-xxxx/label từ admin. */
 export type GoogleAdsWebConversionsPublic = {
   pdp?: string;
@@ -40,7 +42,7 @@ function parseWebConversionsFromJson(data: Record<string, unknown>): GoogleAdsWe
 }
 
 export async function fetchPublicSiteEmbeds(): Promise<PublicSiteEmbeds> {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:8001/api/v1';
+  const base = getApiBaseUrl();
   try {
     const res = await fetch(`${base}/embed-codes/public`, {
       next: { revalidate: 120 },
