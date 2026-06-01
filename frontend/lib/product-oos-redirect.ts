@@ -30,7 +30,7 @@ export async function resolveProductOosGroupRedirectSlug(
       min_similarity: String(minSimilarity),
     });
     const res = await fetch(`${apiBase}/products/oos-group-redirect?${params}`, {
-      next: { revalidate: 0 },
+      cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
     });
     if (!res.ok) return null;
@@ -42,6 +42,8 @@ export async function resolveProductOosGroupRedirectSlug(
   }
 }
 
+/** Path PDP — slug từ API đã an toàn (a-z, số, gạch ngang). */
 export function productOosGroupRedirectPath(slug: string): string {
-  return `/products/${encodeURIComponent(slug)}`;
+  const seg = (slug || '').trim().replace(/^\/+|\/+$/g, '');
+  return seg ? `/products/${seg}` : '/';
 }

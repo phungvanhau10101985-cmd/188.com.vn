@@ -4,22 +4,59 @@
 import { useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import {
+  productOosGroupRedirectPath,
+  resolveProductOosGroupRedirectSlug,
+} from '@/lib/product-oos-redirect';
 
 interface ErrorStateProps {
   error: string | null;
+  /** Slug PDP đang mở — thử redirect nhóm OOS trước khi về trang chủ. */
+  slug?: string;
 }
 
 const REDIRECT_DELAY_MS = 2000;
 
-export default function ErrorState({ error }: ErrorStateProps) {
+export default function ErrorState({ error, slug }: ErrorStateProps) {
   const router = useRouter();
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      router.replace('/');
-    }, REDIRECT_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [router]);
+    let cancelled = false;
+    let homeTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const scheduleHome = () => {
+      homeTimer = setTimeout(() => {
+        if (!cancelled) router.replace('/');
+      }, REDIRECT_DELAY_MS);
+    };
+
+    const key = (slug || '').trim();
+    if (!key) {
+      scheduleHome();
+      return () => {
+        cancelled = true;
+        if (homeTimer) clearTimeout(homeTimer);
+      };
+    }
+
+    resolveProductOosGroupRedirectSlug(key)
+      .then((target) => {
+        if (cancelled) return;
+        if (target && target !== key) {
+          router.replace(productOosGroupRedirectPath(target));
+          return;
+        }
+        scheduleHome();
+      })
+      .catch(() => {
+        if (!cancelled) scheduleHome();
+      });
+
+    return () => {
+      cancelled = true;
+      if (homeTimer) clearTimeout(homeTimer);
+    };
+  }, [router, slug]);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-16 text-center">
