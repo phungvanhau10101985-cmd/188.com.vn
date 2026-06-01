@@ -4,7 +4,7 @@ Loại token slug marketing không phải thuộc tính SP (mã NCC, thương hi
 from __future__ import annotations
 
 import re
-from typing import FrozenSet, Set
+from typing import FrozenSet, Optional, Set, Tuple
 
 from app.utils.vietnamese import remove_vietnamese_accents
 
@@ -211,6 +211,90 @@ _MATERIAL_ONLY_WORDS: FrozenSet[str] = frozenset(
         "liệu",
     }
 )
+
+
+_FOOTWEAR_SLUG_TYPES: dict[str, str] = {
+    "boot": "boot",
+    "giay": "giày",
+    "dep": "dép",
+    "sandal": "sandal",
+    "sneaker": "sneaker",
+    "loafer": "loafer",
+    "chelsea": "chelsea",
+}
+_HEIGHT_QUERY_MARKERS: Tuple[str, ...] = (
+    "cao got",
+    "cao gót",
+    "de cao",
+    "đế cao",
+    "co cao",
+    "cổ cao",
+    "chieu cao",
+    "chiều cao",
+)
+
+
+def supplement_footwear_search_keywords(text: str, legacy_path: str) -> str:
+    """
+    Giày dép: đảm bảo có loại (boot/giày…) và chiều cao nếu slug có chieu-cao / đế / cm.
+    """
+    q = (text or "").strip()
+    path = (legacy_path or "").lower().replace("/", "-")
+    if not path:
+        return q
+    parts = [p for p in path.split("-") if p]
+
+    footwear: Optional[str] = None
+    for p in parts:
+        if p in _FOOTWEAR_SLUG_TYPES:
+            footwear = _FOOTWEAR_SLUG_TYPES[p]
+            break
+
+    gender: Optional[str] = None
+    if "nu" in parts:
+        gender = "nữ"
+    elif "nam" in parts:
+        gender = "nam"
+
+    has_height = bool(
+        "chieu-cao" in path
+        or "cao-got" in path
+        or "de-cao" in path
+        or "co-cao" in path
+        or re.search(r"-\d{1,2}cm", path)
+    )
+
+    if not footwear and not has_height:
+        return q
+
+    q_norm = remove_vietnamese_accents(q).lower()
+    if footwear and footwear not in q_norm and "giay" not in q_norm:
+        if gender and gender in q_norm:
+            q = f"{footwear} {q}".strip()
+        elif gender:
+            q = f"{footwear} {gender} {q}".strip()
+        else:
+            q = f"{footwear} {q}".strip()
+        q_norm = remove_vietnamese_accents(q).lower()
+
+    if has_height and not any(m in q_norm for m in _HEIGHT_QUERY_MARKERS):
+        if "dang-dai" in path or "co-cao" in path:
+            q = f"{q} cổ cao".strip()
+        elif "chieu-cao" in path or "de-cao" in path or "cao-got" in path:
+            q = f"{q} cao gót".strip()
+        else:
+            q = f"{q} đế cao".strip()
+
+    return _dedupe_adjacent_words(re.sub(r"\s+", " ", q).strip())
+
+
+def _dedupe_adjacent_words(text: str) -> str:
+    out: list[str] = []
+    for w in (text or "").split():
+        if out and remove_vietnamese_accents(out[-1]).lower() == remove_vietnamese_accents(w).lower():
+            continue
+        out.append(w)
+    return " ".join(out)
 
 
 def strip_material_tokens_from_keywords(text: str) -> str:

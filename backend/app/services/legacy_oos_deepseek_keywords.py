@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.services.legacy_url_keyword_sanitize import (
     strip_material_tokens_from_keywords,
     strip_vendor_tokens_from_keywords,
+    supplement_footwear_search_keywords,
 )
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 _LEGACY_OOS_KEYWORDS_CACHE: Dict[str, Tuple[float, str]] = {}
 _LEGACY_OOS_KEYWORDS_CACHE_TTL_SEC = 3600
 _LEGACY_OOS_KEYWORDS_CACHE_MAX = 2000
-_LEGACY_OOS_KEYWORDS_CACHE_VER = "v4-cat1-attr-no-material"
+_LEGACY_OOS_KEYWORDS_CACHE_VER = "v5b-footwear-height-dedupe"
 _TIMEOUT_SEC = 30
 
 
@@ -53,6 +54,7 @@ def _finalize_search_query(query: str, legacy_path: str) -> str:
         return ""
     q = strip_vendor_tokens_from_keywords(q, legacy_path)
     q = strip_material_tokens_from_keywords(q)
+    q = supplement_footwear_search_keywords(q, legacy_path)
     return q.strip()
 
 
@@ -76,12 +78,14 @@ def deepseek_legacy_oos_search_query(legacy_path: str) -> Optional[str]:
     model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-chat"
 
     system = (
-        "URL sản phẩm thời trang VN đã hết. Trả về DUY NHẤT một dòng từ khóa tìm SP (3-6 từ, tiếng Việt). "
-        "Gồm: (1) loại SP kiểu danh mục cấp 1 + giới tính (vd quần nam, váy nữ, áo khoác nam); "
-        "(2) nếu URL có đặc tính rõ: mùa/vụ, kiểu (kẻ caro, sọc, oversize, jogger…). "
-        "Không có đặc tính rõ thì chỉ loại SP. KHÔNG ghi chất liệu (vải, bông, cotton, da bò…). "
-        "Vd URL quần nam mùa hè vải bông → quần nam mùa hè; có kẻ caro → quần nam mùa hè kẻ caro. "
-        "KHÔNG: thương hiệu, mã NCC (jitde…), marketing, moi-ma, g0x, id cuối URL."
+        "URL sản phẩm thời trang VN đã hết. Trả về DUY NHẤT một dòng từ khóa tìm SP (3-7 từ, tiếng Việt). "
+        "(1) Loại SP danh mục cấp 1 + giới tính (quần nam, váy nữ, boot nữ, giày nam…). "
+        "(2) Đặc tính rõ trong URL: mùa/vụ, kiểu (kẻ caro, oversize…). Giày dép (boot, giày, dép, sandal): "
+        "nếu URL có chiều cao/đế/cao gót/cm → thêm mô tả chiều cao (vd cao gót, đế cao, cổ cao). "
+        "Không suy mùa/kiểu không có trong URL. Không chất liệu (vải, bông…). "
+        "Vd quần nam mùa hè vải bông → quần nam mùa hè. "
+        "Vd boot nữ … chieu-cao-de-12cm → boot nữ cao gót (hoặc giày boot nữ đế cao). "
+        "KHÔNG: thương hiệu, mã NCC, marketing, màu sắc chi tiết, mã a188, id cuối URL."
     )
     user = f"https://188.com.vn/{path}"
 
