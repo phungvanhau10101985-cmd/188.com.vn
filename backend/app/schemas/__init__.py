@@ -28,8 +28,10 @@ from .category import (
 
 # --- Order Schemas ---
 from .order import (
+    AdminOrderDepositConfirmOut,
     AdminOrderResponse,
     AdminOrderStats,
+    DepositConfirmedEmailOut,
     DepositType,
     DepositType,
     OrderCreate,
@@ -134,8 +136,10 @@ __all__ = [
     "CategoryWithProducts",
 
     # Order
+    "AdminOrderDepositConfirmOut",
     "AdminOrderResponse",
     "AdminOrderStats",
+    "DepositConfirmedEmailOut",
     "DepositType",
     "DepositType",
     "OrderCreate",

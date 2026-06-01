@@ -389,14 +389,32 @@ export default function AdminOrdersPage() {
     }
   };
 
+  const depositConfirmToast = (
+    confirmed: boolean,
+    email?: { sent: boolean; to?: string | null; detail: string },
+  ) => {
+    if (!confirmed) return { type: 'ok' as const, msg: 'Đã từ chối cọc' };
+    if (email?.sent) {
+      return {
+        type: 'ok' as const,
+        msg: `Đã xác nhận cọc. Email đã gửi tới ${email.to || 'khách'}.`,
+      };
+    }
+    return {
+      type: 'err' as const,
+      msg: `Đã xác nhận cọc nhưng chưa gửi email: ${email?.detail || 'Không rõ lý do'}`,
+    };
+  };
+
   const handleConfirmDeposit = async (orderId: number, paymentId: number, isConfirmed: boolean, note?: string) => {
     try {
-      await adminOrderAPI.confirmDeposit(orderId, {
+      const res = await adminOrderAPI.confirmDeposit(orderId, {
         payment_id: paymentId,
         is_confirmed: isConfirmed,
         confirmation_note: note || undefined,
       });
-      showToast('ok', isConfirmed ? 'Đã xác nhận cọc' : 'Đã từ chối cọc');
+      const t = depositConfirmToast(isConfirmed, res.deposit_email);
+      showToast(t.type, t.msg);
       setPaymentOpen(false);
       setSelectedOrder(null);
       setOrderPayments([]);
@@ -411,11 +429,11 @@ export default function AdminOrdersPage() {
   const handleConfirmDepositManual = async () => {
     if (!selectedOrder) return;
     try {
-      await adminOrderAPI.confirmDepositManual(selectedOrder.id, { confirmation_note: paymentNote || undefined });
-      showToast(
-        'ok',
-        'Đã xác nhận cọc. Email «Đã nhận cọc» sẽ gửi tới email trên đơn (cần SMTP server bật).',
-      );
+      const res = await adminOrderAPI.confirmDepositManual(selectedOrder.id, {
+        confirmation_note: paymentNote || undefined,
+      });
+      const t = depositConfirmToast(true, res.deposit_email);
+      showToast(t.type, t.msg);
       setPaymentOpen(false);
       setSelectedOrder(null);
       setOrderPayments([]);

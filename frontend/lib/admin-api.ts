@@ -251,6 +251,18 @@ export interface AdminOrderItem {
   selected_color_name?: string | null;
 }
 
+/** Kết quả gửi email «Đã nhận cọc» khi admin xác nhận cọc. */
+export interface DepositConfirmedEmailResult {
+  sent: boolean;
+  to?: string | null;
+  detail: string;
+}
+
+export interface AdminOrderDepositConfirmResult {
+  order: AdminOrder;
+  deposit_email: DepositConfirmedEmailResult;
+}
+
 export interface AdminOrder {
   id: number;
   order_code: string;
@@ -2162,14 +2174,14 @@ export const adminOrderAPI = {
     fetchAdmin<AdminOrder>(`/orders/admin/lookup-by-code/${encodeURIComponent(orderCode.trim())}`),
 
   confirmDeposit: (orderId: number, data: { payment_id: number; is_confirmed: boolean; confirmation_note?: string }) =>
-    fetchAdmin<AdminOrder>(`/orders/admin/${orderId}/confirm-deposit`, {
+    fetchAdmin<AdminOrderDepositConfirmResult>(`/orders/admin/${orderId}/confirm-deposit`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
   /** Xác nhận cọc khi chưa có giao dịch trong hệ thống (khách đã chuyển khoản) */
   confirmDepositManual: (orderId: number, data?: { confirmation_note?: string }) =>
-    fetchAdmin<AdminOrder>(`/orders/admin/${orderId}/confirm-deposit-manual`, {
+    fetchAdmin<AdminOrderDepositConfirmResult>(`/orders/admin/${orderId}/confirm-deposit-manual`, {
       method: 'POST',
       body: JSON.stringify(data || {}),
     }),

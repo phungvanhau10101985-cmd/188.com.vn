@@ -7,7 +7,7 @@ import time
 from decimal import Decimal
 from email.message import EmailMessage
 from email.utils import formataddr
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING, TypedDict
 
 from app.core.config import settings
 
@@ -40,9 +40,9 @@ def _connect_smtp() -> smtplib.SMTP:
     port = settings.SMTP_PORT
 
     if settings.SMTP_USE_IMPLICIT_SSL:
-        return smtplib.SMTP_SSL(host, port, context=ctx, timeout=10)
+        return smtplib.SMTP_SSL(host, port, context=ctx, timeout=25)
 
-    server = smtplib.SMTP(host, port, timeout=10)
+    server = smtplib.SMTP(host, port, timeout=25)
     if settings.EMAIL_USE_TLS:
         try:
             server.ehlo()
@@ -726,10 +726,15 @@ def _google_customer_reviews_email_extras(
     return text_lines, html_block
 
 
+class DepositEmailDeliveryResult(TypedDict):
+    sent: bool
+    to: Optional[str]
+    detail: str
+
+
 def schedule_deposit_confirmed_email(order_id: int) -> None:
     """
-    Email «đã nhận cọc» trong thread nền — chờ commit DB (giống shipper notify).
-    Ổn định hơn BackgroundTasks khi admin xác nhận cọc thủ công / SePay.
+    Email «đã nhận cọc» trong thread nền — chờ commit DB (SePay webhook).
     """
 
     def _run() -> None:
@@ -743,9 +748,26 @@ def schedule_deposit_confirmed_email(order_id: int) -> None:
     ).start()
 
 
-def send_deposit_confirmed_email_task(order_id: int) -> None:
+def deliver_deposit_confirmed_email(order_id: int) -> DepositEmailDeliveryResult:
+    """
+    Gửi email «đã nhận cọc» đồng bộ — dùng khi admin xác nhận để biết ngay kết quả.
+    """
+    result: DepositEmailDeliveryResult = {"sent": False, "to": None, "detail": ""}
+    try:
+        outcome = send_deposit_confirmed_email_task(order_id)
+        if isinstance(outcome, dict):
+            return outcome
+        return result
+    except Exception as exc:
+        logger.exception("deliver_deposit_confirmed_email failed order_id=%s", order_id)
+        result["detail"] = f"Lỗi gửi mail: {exc!s}"
+        return result
+
+
+def send_deposit_confirmed_email_task(order_id: int) -> DepositEmailDeliveryResult:
     """
     Email khách (đơn + tài khoản), email cảnh báo shop, thông báo in-app.
+    Trả trạng thái gửi mail khách để admin hiển thị.
     """
     from sqlalchemy.orm import joinedload
 
@@ -754,6 +776,11 @@ def send_deposit_confirmed_email_task(order_id: int) -> None:
     from app.models.order import Order, OrderStatus
     from app.schemas.notification import NotificationCreate
 
+    customer_result: DepositEmailDeliveryResult = {
+        "sent": False,
+        "to": None,
+        "detail": "",
+    }
     db = SessionLocal()
     try:
         order = (
@@ -764,11 +791,13 @@ def send_deposit_confirmed_email_task(order_id: int) -> None:
         )
         if not order:
             logger.warning("deposit_notification skip: order not found id=%s", order_id)
-            return
+            customer_result["detail"] = "Không tìm thấy đơn hàng"
+            return customer_result
         st = getattr(order.status, "value", order.status)
         if st not in (OrderStatus.DEPOSIT_PAID.value, OrderStatus.CONFIRMED.value):
             logger.info("deposit_notification skip: wrong status order_id=%s status=%s", order_id, st)
-            return
+            customer_result["detail"] = f"Trạng thái đơn chưa phải đã cọc ({st})"
+            return customer_result
 
         paid_amt = order.deposit_paid or 0
         try:
@@ -780,7 +809,8 @@ def send_deposit_confirmed_email_task(order_id: int) -> None:
                 "deposit_confirmed_email skip: requires_deposit but deposit_paid=0 order_id=%s",
                 order_id,
             )
-            return
+            customer_result["detail"] = "Đơn chưa ghi nhận số tiền cọc"
+            return customer_result
 
         name = (order.customer_name or "Quý khách").strip()
         code = order.order_code
@@ -790,11 +820,16 @@ def send_deposit_confirmed_email_task(order_id: int) -> None:
         detail_url = f"{fe}/account/orders/{order.id}" if fe else ""
         deposit_url = f"{fe}/account/orders/{order.id}/deposit" if fe else ""
         phone = (order.customer_phone or "").strip()
-        gcr_text_lines, gcr_html_block = _google_customer_reviews_email_extras(
-            db,
-            detail_url=detail_url,
-            deposit_url=deposit_url,
-        )
+        gcr_text_lines: list[str] = []
+        gcr_html_block = ""
+        try:
+            gcr_text_lines, gcr_html_block = _google_customer_reviews_email_extras(
+                db,
+                detail_url=detail_url,
+                deposit_url=deposit_url,
+            )
+        except Exception:
+            logger.exception("deposit_confirmed_email: GCR block failed order_id=%s", order_id)
 
         if st == OrderStatus.CONFIRMED.value:
             status_msg = (
@@ -856,20 +891,32 @@ def send_deposit_confirmed_email_task(order_id: int) -> None:
             "</div>"
         )
 
+        customer_result["to"] = customer_to or None
         if customer_to:
-            try:
-                sent = send_email(customer_to, subject, text_body, html_body)
-                if sent:
-                    logger.info("deposit_confirmed_email sent order_id=%s to=%s", order_id, customer_to)
-                else:
-                    logger.warning(
-                        "deposit_confirmed_email not sent (SMTP/from) order_id=%s to=%s",
-                        order_id,
-                        customer_to,
-                    )
-            except Exception:
-                logger.exception("deposit_confirmed_email failed order_id=%s to=%s", order_id, customer_to)
+            if not settings.is_smtp_configured():
+                customer_result["detail"] = (
+                    "SMTP chưa cấu hình trên server (SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM)"
+                )
+                logger.warning("deposit_confirmed_email skip: SMTP not configured order_id=%s", order_id)
+            else:
+                try:
+                    sent = send_email(customer_to, subject, text_body, html_body)
+                    customer_result["sent"] = sent
+                    if sent:
+                        customer_result["detail"] = "Đã gửi email xác nhận cọc"
+                        logger.info("deposit_confirmed_email sent order_id=%s to=%s", order_id, customer_to)
+                    else:
+                        customer_result["detail"] = "Không gửi được (thiếu địa chỉ From hoặc cấu hình SMTP)"
+                        logger.warning(
+                            "deposit_confirmed_email not sent (SMTP/from) order_id=%s to=%s",
+                            order_id,
+                            customer_to,
+                        )
+                except Exception as exc:
+                    customer_result["detail"] = f"Lỗi SMTP: {exc!s}"
+                    logger.exception("deposit_confirmed_email failed order_id=%s to=%s", order_id, customer_to)
         else:
+            customer_result["detail"] = "Đơn không có email khách (customer_email / tài khoản)"
             logger.warning(
                 "deposit_confirmed_email skip: no customer_email or user.email order_id=%s",
                 order_id,
@@ -925,8 +972,11 @@ def send_deposit_confirmed_email_task(order_id: int) -> None:
                     order_id,
                     order.user_id,
                 )
-    except Exception:
+        return customer_result
+    except Exception as exc:
         logger.exception("send_deposit_confirmed_email_task failed order_id=%s", order_id)
+        customer_result["detail"] = f"Lỗi hệ thống: {exc!s}"
+        return customer_result
     finally:
         db.close()
 

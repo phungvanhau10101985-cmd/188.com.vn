@@ -15,6 +15,7 @@ from app.models.order import OrderStatus as OrderStatusEnum, DepositType as Depo
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission
 from app.core.config import settings
 from app.services.email_service import (
+    deliver_deposit_confirmed_email,
     send_order_email,
     schedule_deposit_confirmed_email,
     send_order_created_email_task,
@@ -1087,7 +1088,7 @@ def admin_update_order(
             )
     return order
 
-@router.post("/admin/{order_id}/confirm-deposit", response_model=schemas.AdminOrderResponse)
+@router.post("/admin/{order_id}/confirm-deposit", response_model=schemas.AdminOrderDepositConfirmOut)
 def admin_confirm_deposit(
     order_id: int,
     payment_data: schemas.PaymentConfirm,
@@ -1143,14 +1144,20 @@ def admin_confirm_deposit(
     db.commit()
     db.refresh(order)
 
+    deposit_email_out = schemas.DepositConfirmedEmailOut(
+        sent=False,
+        to=None,
+        detail="Chưa gửi email (cọc chưa được xác nhận)",
+    )
     if payment_data.is_confirmed:
-        schedule_deposit_confirmed_email(order_id)
+        raw_email = deliver_deposit_confirmed_email(order_id)
+        deposit_email_out = schemas.DepositConfirmedEmailOut(**raw_email)
         if commission:
             background_tasks.add_task(affiliate_svc.notify_referrer_deposit_commission_task, order_id)
 
-    return order
+    return schemas.AdminOrderDepositConfirmOut(order=order, deposit_email=deposit_email_out)
 
-@router.post("/admin/{order_id}/confirm-deposit-manual", response_model=schemas.AdminOrderResponse)
+@router.post("/admin/{order_id}/confirm-deposit-manual", response_model=schemas.AdminOrderDepositConfirmOut)
 def admin_confirm_deposit_manual(
     order_id: int,
     background_tasks: BackgroundTasks,
@@ -1202,10 +1209,11 @@ def admin_confirm_deposit_manual(
         order.admin_notes = (order.admin_notes or "") + "\n[Xác nhận cọc thủ công] " + str(body.get("confirmation_note"))
     db.commit()
     db.refresh(order)
-    schedule_deposit_confirmed_email(order_id)
+    raw_email = deliver_deposit_confirmed_email(order_id)
+    deposit_email_out = schemas.DepositConfirmedEmailOut(**raw_email)
     if commission:
         background_tasks.add_task(affiliate_svc.notify_referrer_deposit_commission_task, order_id)
-    return order
+    return schemas.AdminOrderDepositConfirmOut(order=order, deposit_email=deposit_email_out)
 
 
 @router.post("/admin/{order_id}/refund-deposit", response_model=schemas.AdminOrderResponse)

@@ -173,6 +173,18 @@ class AdminOrderResponse(OrderResponse):
     class Config:
         from_attributes = True
 
+
+class DepositConfirmedEmailOut(BaseModel):
+    """Kết quả gửi email «Đã nhận cọc» cho khách (admin xác nhận cọc)."""
+    sent: bool = False
+    to: Optional[str] = None
+    detail: str = ""
+
+
+class AdminOrderDepositConfirmOut(BaseModel):
+    order: AdminOrderResponse
+    deposit_email: DepositConfirmedEmailOut
+
 class AdminOrderStats(BaseModel):
     """Order statistics for admin dashboard"""
     total_orders: int
