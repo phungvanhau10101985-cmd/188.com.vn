@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 _LEGACY_OOS_KEYWORDS_CACHE: Dict[str, Tuple[float, str]] = {}
 _LEGACY_OOS_KEYWORDS_CACHE_TTL_SEC = 3600
 _LEGACY_OOS_KEYWORDS_CACHE_MAX = 2000
-_LEGACY_OOS_KEYWORDS_CACHE_VER = "v7-raw-ai-only"
+_LEGACY_OOS_KEYWORDS_CACHE_VER = "v8-vietnamese-only"
 _TIMEOUT_SEC = 30
 
 
@@ -63,15 +63,16 @@ def deepseek_legacy_oos_search_query(legacy_path: str) -> Optional[str]:
     model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-chat"
 
     system = (
-        "URL sản phẩm thời trang VN đã hết. Trả về DUY NHẤT một dòng từ khóa tìm SP (3-7 từ, tiếng Việt). "
-        "(1) Loại SP danh mục cấp 1 + giới tính (quần nam, váy nữ, boot nữ, giày nam…). "
-        "(2) Đặc tính rõ trong URL: mùa/vụ, kiểu (kẻ caro, oversize…). Giày dép (boot, giày, dép, sandal): "
-        "nếu URL có chiều cao/đế/cao gót/cm → thêm mô tả chiều cao (vd cao gót, đế cao, cổ cao). "
-        "Không suy mùa/kiểu không có trong URL. Không chất liệu (vải, bông…). "
+        "URL sản phẩm thời trang VN đã hết. Trả về DUY NHẤT một dòng từ khóa tìm SP (3-7 từ). "
+        "BẮT BUỘC: chỉ tiếng Việt có dấu, KHÔNG dùng từ tiếng Anh (boot→giày cao cổ, parka→áo khoác dài, "
+        "jean→quần bò, oversize→rộng, sandal→dép quai, sneaker→giày thể thao…). "
+        "(1) Loại SP danh mục cấp 1 + giới tính (quần nam, váy nữ, giày nữ…). "
+        "(2) Đặc tính rõ trong URL: mùa/vụ, kiểu (kẻ caro, sọc…). Giày dép: có chiều cao/đế/cm → cao gót, đế cao, cổ cao. "
+        "Không suy mùa/kiểu không có trong URL. Không chất liệu. "
         "Vd quần nam mùa hè vải bông → quần nam mùa hè. "
-        "Vd boot nữ … chieu-cao-de-12cm → boot nữ cao gót. "
-        "Vd ao-khoac-phao-nu parka cong-so → áo khoác phao nữ parka công sở. "
-        "KHÔNG: thương hiệu, mã NCC, marketing, màu sắc chi tiết, mã a188, id cuối URL."
+        "Vd boot-nu chieu-cao-de → giày cao cổ nữ cao gót. "
+        "Vd ao-khoac-phao-nu parka cong-so → áo khoác phao nữ công sở. "
+        "KHÔNG: thương hiệu, mã NCC, marketing, màu sắc, mã a188, id cuối URL."
     )
     user = f"https://188.com.vn/{path}"
 
