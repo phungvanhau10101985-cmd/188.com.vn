@@ -24,7 +24,13 @@ pip install --upgrade pip wheel
 pip install -r "${BACKEND}/requirements.txt"
 
 echo "==> Playwright browsers (import Vipomall / Hibox / 1688)"
-bash "${PROJECT_ROOT}/deploy/install-playwright-browsers.sh"
+PW_SCRIPT="${PROJECT_ROOT}/deploy/install-playwright-browsers.sh"
+if [[ -f "${PW_SCRIPT}" ]]; then
+  bash "${PW_SCRIPT}"
+else
+  echo "⚠️  Thiếu ${PW_SCRIPT} — cài Chromium inline."
+  python -m playwright install chromium
+fi
 
 echo "==> Khởi tạo bảng DB (cần backend/.env với DATABASE_URL đúng)"
 cd "${BACKEND}"

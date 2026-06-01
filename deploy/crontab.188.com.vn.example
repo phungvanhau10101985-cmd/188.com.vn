@@ -1,0 +1,30 @@
+# Crontab VPS — 188.com.vn
+#
+# Cài lần đầu (thay YOUR_CRON_SECRET và YOUR_API_HOST trước khi chạy):
+#   cd /var/www/188.com.vn
+#   sed -e 's/YOUR_CRON_SECRET/<giá trị CRON_SECRET trong backend/.env>/g' \
+#       -e 's/YOUR_API_HOST/188.com.vn/g' \
+#       deploy/crontab.188.com.vn.example | crontab -
+#
+# Chỉnh / gộp với crontab hiện có (không ghi đè):
+#   crontab -e
+#   (copy các dòng lịch bên dưới, bỏ dòng comment #)
+#
+# Xem crontab đang chạy:
+#   crontab -l
+#
+# Chạy thử dọn temp image localization (không chờ Chủ nhật):
+#   cd /var/www/188.com.vn/backend && PYTHONPATH=. .venv/bin/python -c \
+#     "from app.services.image_localization_temp_cleanup import cleanup_stale_image_localization_temp; print(cleanup_stale_image_localization_temp(max_age_hours=24))"
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Khuyến mãi + voucher + email CMSN (hàng ngày 9:00)
+0 9 * * * curl -sS -H "Authorization: Bearer YOUR_CRON_SECRET" "https://YOUR_API_HOST/api/v1/promotions/cron/daily-all"
+
+# Tra EMS vận chuyển (6:00 và 15:00)
+0 6,15 * * * curl -sS -H "Authorization: Bearer YOUR_CRON_SECRET" "https://YOUR_API_HOST/api/v1/orders/cron/refresh-ems-tracking"
+
+# Dọn file tạm việt hóa ảnh (temp_images) — Chủ nhật 3:00, file cũ hơn 24 giờ
+0 3 * * 0 cd /var/www/188.com.vn/backend && PYTHONPATH=. .venv/bin/python -c "from app.services.image_localization_temp_cleanup import cleanup_stale_image_localization_temp; cleanup_stale_image_localization_temp(max_age_hours=24)"

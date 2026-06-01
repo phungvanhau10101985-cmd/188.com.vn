@@ -124,7 +124,17 @@ pip install --upgrade pip wheel
 pip install -r "${BACKEND}/requirements.txt"
 
 if [[ "${DEPLOY_SKIP_PLAYWRIGHT:-0}" != "1" ]]; then
-  bash "${PROJECT_ROOT}/deploy/install-playwright-browsers.sh"
+  PW_SCRIPT="${PROJECT_ROOT}/deploy/install-playwright-browsers.sh"
+  if [[ -f "${PW_SCRIPT}" ]]; then
+    bash "${PW_SCRIPT}"
+  else
+    echo "⚠️  Thiếu ${PW_SCRIPT} (chưa git pull / chưa push deploy/) — cài Chromium inline."
+    if python -c "import playwright" 2>/dev/null; then
+      python -m playwright install chromium || echo "⚠️  playwright install chromium thất bại — thử lại sau hoặc DEPLOY_SKIP_PLAYWRIGHT=1"
+    else
+      echo "⚠️  Package playwright chưa có trong venv — bỏ qua browser."
+    fi
+  fi
 else
   echo "==> Playwright: DEPLOY_SKIP_PLAYWRIGHT=1 — bỏ qua."
 fi
