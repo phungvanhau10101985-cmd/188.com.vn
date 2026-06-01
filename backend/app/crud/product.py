@@ -1819,6 +1819,9 @@ _PRODUCT_SLUG_ID_SUFFIX_RE = re.compile(
 
 # Ngưỡng giống slug nhóm (PDP hết hàng → chuyển sang biến thể / slug nhóm gần nhất).
 PRODUCT_OOS_GROUP_SLUG_MIN_SIMILARITY = 0.8
+# Số segment đầu của tên slug dùng làm pool ILIKE (vd ``ao-khoac-da-nam-da-bo-...`` → ``ao-khoac-da-nam%``).
+PRODUCT_OOS_GROUP_SLUG_POOL_SEGMENTS = 4
+PRODUCT_OOS_GROUP_SLUG_POOL_CANDIDATE_LIMIT = 600
 
 
 def product_slug_name_prefix(slug: str, product_id: Optional[str] = None) -> str:
@@ -1837,6 +1840,41 @@ def product_slug_name_prefix(slug: str, product_id: Optional[str] = None) -> str
     return s.rstrip("-")
 
 
+def product_slug_oos_search_pool_prefix(
+    name_prefix: str,
+    segments: int = PRODUCT_OOS_GROUP_SLUG_POOL_SEGMENTS,
+) -> str:
+    """
+    Pool ILIKE cho redirect OOS — vd ``ao-khoac-da-nam-da-bo-co-be-...`` → ``ao-khoac-da-nam``.
+    """
+    parts = [p for p in (name_prefix or "").strip("-").split("-") if p]
+    if not parts:
+        return ""
+    n = max(1, min(int(segments), len(parts)))
+    return "-".join(parts[:n])
+
+
+def score_product_slug_oos_similarity(
+    source_slug: str,
+    candidate_slug: str,
+    name_prefix: str,
+) -> float:
+    """Độ giống slug PDP nguồn ↔ ứng viên (SequenceMatcher + boost prefix / slug nhóm)."""
+    source = (source_slug or "").strip()
+    cand = (candidate_slug or "").strip()
+    prefix = (name_prefix or "").strip()
+    if not source or not cand:
+        return 0.0
+    sim = _similarity_score(source, cand)
+    if prefix:
+        canonical = f"{prefix}-"
+        if cand == canonical:
+            sim = max(sim, 0.95)
+        elif cand.startswith(prefix):
+            sim = max(sim, _similarity_score(prefix, cand))
+    return sim
+
+
 def find_similar_product_slug_for_oos_redirect(
     db: Session,
     *,
@@ -1845,18 +1883,19 @@ def find_similar_product_slug_for_oos_redirect(
     product_id: Optional[str] = None,
 ) -> Optional[str]:
     """
-    Tìm slug PDP thay thế khi SP hết hàng: cùng nhóm tên (prefix slug), độ giống >= min_similarity.
-    Ưu tiên: còn hàng → slug nhóm dạng ``{prefix}-`` → độ giống cao → lượt mua.
+    Tìm slug PDP thay thế khi SP hết hàng: pool ``{4 segment đầu}%`` (vd ao-khoac-da-nam%),
+    độ giống >= min_similarity (mặc định 0.8).
+    Ưu tiên: còn hàng → slug nhóm ``{prefix}-`` → độ giống cao → lượt mua.
     """
     source = (slug or "").strip()
     if not source:
         return None
-    prefix = product_slug_name_prefix(source, product_id)
-    if len(prefix) < 6:
+    name_prefix = product_slug_name_prefix(source, product_id)
+    pool_prefix = product_slug_oos_search_pool_prefix(name_prefix)
+    if len(pool_prefix) < 6:
         return None
 
-    canonical_group_slug = f"{prefix}-"
-    like_prefix = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    canonical_group_slug = f"{name_prefix}-" if name_prefix else ""
 
     q = (
         db.query(Product)
@@ -1864,10 +1903,7 @@ def find_similar_product_slug_for_oos_redirect(
             Product.slug.isnot(None),
             Product.slug != "",
             Product.slug != source,
-            or_(
-                Product.slug.ilike(f"{like_prefix}%", escape="\\"),
-                Product.slug.ilike(f"{like_prefix}-%", escape="\\"),
-            ),
+            Product.slug.ilike(f"{pool_prefix}%"),
         )
     )
     if hasattr(Product, "is_active"):
@@ -1879,7 +1915,7 @@ def find_similar_product_slug_for_oos_redirect(
             Product.purchases.desc(),
             Product.id.asc(),
         )
-        .limit(120)
+        .limit(PRODUCT_OOS_GROUP_SLUG_POOL_CANDIDATE_LIMIT)
         .all()
     )
     if not candidates:
@@ -1893,11 +1929,7 @@ def find_similar_product_slug_for_oos_redirect(
         cand = (p.slug or "").strip()
         if not cand or cand == source:
             continue
-        sim = _similarity_score(source, cand)
-        if cand == canonical_group_slug:
-            sim = max(sim, 0.95)
-        elif cand.startswith(prefix):
-            sim = max(sim, _similarity_score(prefix, cand))
+        sim = score_product_slug_oos_similarity(source, cand, name_prefix)
         if sim < min_sim:
             continue
         in_stock = 1 if int(p.available or 0) > 0 else 0
