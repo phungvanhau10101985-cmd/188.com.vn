@@ -70,7 +70,9 @@ try {
     $paths = @(
         "backend",
         "frontend",
+        "deploy",
         "dev-clear-start.ps1",
+        "deploy-vps.cmd",
         "fix-git-ownership.cmd",
         "push-git.cmd",
         "push-git.ps1"
@@ -98,6 +100,12 @@ try {
     Write-Step "Xong"
     Invoke-Git log -1 --oneline
     Invoke-Git status -sb
+
+    Write-Host ""
+    Write-Host "Deploy VPS (SSH tren nanoai):" -ForegroundColor Green
+    Write-Host "  cd /var/www/188.com.vn && git pull origin main"
+    Write-Host "  DEPLOY_SKIP_GIT=1 DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main"
+    Write-Host "  bash deploy/verify-shipping-ops-api.sh"
 }
 catch {
     Write-Host ""
