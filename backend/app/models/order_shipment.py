@@ -57,6 +57,54 @@ class EmsShippingRecord(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class EmsShippingImportBatch(Base):
+    """Lần import file gửi EMS (file gui ems.xlsx) — báo cáo có thể mở lại."""
+
+    __tablename__ = "ems_shipping_import_batches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_filename = Column(String(255), nullable=True)
+    imported_by_admin_id = Column(Integer, ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True)
+    file_rows_processed = Column(Integer, nullable=False, default=0)
+    order_count = Column(Integer, nullable=False, default=0)
+    created_count = Column(Integer, nullable=False, default=0)
+    updated_count = Column(Integer, nullable=False, default=0)
+    skipped_no_reference_count = Column(Integer, nullable=False, default=0)
+    orders_synced_count = Column(Integer, nullable=False, default=0)
+    total_cod_amount = Column(Numeric(15, 0), nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EmsShippingImportBatchRow(Base):
+    """Từng dòng trong báo cáo một lần import EMS."""
+
+    __tablename__ = "ems_shipping_import_batch_rows"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(
+        Integer,
+        ForeignKey("ems_shipping_import_batches.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    ems_shipping_record_id = Column(
+        Integer,
+        ForeignKey("ems_shipping_records.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    excel_row_number = Column(Integer, nullable=True)
+    reference_code = Column(String(50), nullable=True, index=True)
+    recipient_label = Column(Text, nullable=True)
+    order_code = Column(String(50), nullable=True)
+    order_id = Column(Integer, nullable=True)
+    cod_amount = Column(Numeric(15, 0), nullable=True)
+    import_action = Column(String(20), nullable=True)
+    sync_status = Column(String(40), nullable=True)
+    sync_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class EmsCodSettlementBatch(Base):
     """Lần import file đối soát COD đã thanh toán (Doi soat cod)."""
 

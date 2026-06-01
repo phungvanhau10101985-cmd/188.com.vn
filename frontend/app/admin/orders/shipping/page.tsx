@@ -12,9 +12,11 @@ import {
   type EmsCodSettlementRow,
   type EmsFreightSettlementImportResult,
   type EmsFreightSettlementRow,
+  type EmsShippingImportBatch,
   type EmsShippingImportReport,
   type EmsShippingImportReportRow,
   type EmsShippingImportResult,
+  type EmsShippingImportBatchesResult,
   type EmsShippingImportRow,
   type EmsShippingOperationsStats,
   type EmsShippingTimelineGranularity,
@@ -25,6 +27,8 @@ import {
   type EmsShippingTimelineStats,
   type EmsTrackingRefreshJob,
   type OpsBucketKey,
+  type ShopReturnConfirmResult,
+  type ShopReturnConfirmRow,
 } from '@/lib/admin-api';
 
 const EMS_LIST_PAGE_SIZES = [25, 50, 100] as const;
@@ -43,7 +47,7 @@ const TIMELINE_BUCKET_LABELS: Record<OpsBucketKey, string> = {
   total: 'Tổng vận đơn',
   in_transit: 'Đang giao',
   delivered: 'Giao OK',
-  returned: 'Hoàn hàng',
+  returned: 'Đơn hoàn chưa trả shop',
   pending: 'Chưa rõ EMS',
   has_cod: 'Có COD',
   cod_in_transit_unpaid: 'COD đang giao · chưa trả',
@@ -53,7 +57,7 @@ const TIMELINE_BUCKET_LABELS: Record<OpsBucketKey, string> = {
   cod_pending_unpaid: 'COD chưa rõ trạng thái',
   freight_unsettled: 'Chưa đối soát cước',
   shop_linked: 'Ghép đơn shop',
-  shop_return_received: 'Hoàn · shop đã nhận',
+  shop_return_received: 'Đơn hoàn đã trả shop',
   shop_shipping: 'Đơn shop đang giao',
 };
 
@@ -222,7 +226,7 @@ const ORDER_STATUS_TEXTS: Record<string, string> = {
   shipping: 'Chờ nhận hàng',
   delivered: 'Đã nhận hàng',
   completed: 'Đã đánh giá',
-  returned: 'Đã hoàn hàng',
+  returned: 'Đơn hoàn đã trả shop',
   cancelled: 'Đã hủy',
 };
 
@@ -254,6 +258,7 @@ function orderStatusLabel(status: string | null | undefined): string {
 }
 
 function emsShopOrderStatusLabel(row: EmsShippingImportRow): string {
+  if (row.return_to_shop_label) return row.return_to_shop_label;
   if (!row.order_status) return '—';
   if (row.order_id && (row.reference_code || row.ems_reference_code)) {
     const st = row.order_status;
@@ -387,21 +392,47 @@ const IMPORT_ACTION_LABELS: Record<string, string> = {
   updated: 'Cập nhật',
 };
 
+const SHOP_RETURN_ROW_STATUS: Record<string, { label: string; badge: string }> = {
+  confirmed: { label: 'Đã xác nhận', badge: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  not_found: { label: 'Không tồn tại', badge: 'bg-red-100 text-red-800 border-red-200' },
+  invalid_code: { label: 'Mã không hợp lệ', badge: 'bg-red-100 text-red-800 border-red-200' },
+  already_returned: { label: 'Đã hoàn trước đó', badge: 'bg-amber-100 text-amber-900 border-amber-200' },
+  invalid_status: { label: 'Trạng thái không hợp lệ', badge: 'bg-amber-100 text-amber-900 border-amber-200' },
+  duplicate: { label: 'Trùng trong file', badge: 'bg-slate-100 text-slate-700 border-slate-200' },
+};
+
+function formatEmsImportBatchLabel(batch: EmsShippingImportBatch): string {
+  const when = batch.created_at
+    ? new Date(batch.created_at).toLocaleString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : `#${batch.id}`;
+  const file = batch.source_filename?.trim();
+  const stats = `${batch.order_count.toLocaleString('vi-VN')} đơn · +${batch.created_count}/~${batch.updated_count}`;
+  return file ? `${when} · ${file} · ${stats}` : `${when} · ${stats}`;
+}
+
 function EmsImportReportPanel({
   report,
   listExpanded,
   onToggleList,
+  title = 'Báo cáo import',
 }: {
   report: EmsShippingImportReport;
   listExpanded: boolean;
   onToggleList: () => void;
+  title?: string;
 }) {
   const listSummary = `${report.order_count.toLocaleString('vi-VN')} đơn · ${formatVnd(report.total_cod_amount)} COD · ${report.created} thêm · ${report.updated} cập nhật`;
 
   return (
     <div className="space-y-3 pt-1">
       <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-4 text-sm text-emerald-950">
-        <p className="font-semibold text-emerald-900 mb-3">Báo cáo import lần này</p>
+        <p className="font-semibold text-emerald-900 mb-3">{title}</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div>
             <div className="text-xs text-emerald-800/80 mb-1">Số đơn import</div>
@@ -722,6 +753,7 @@ export default function AdminShippingPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const codFileRef = useRef<HTMLInputElement>(null);
   const freightFileRef = useRef<HTMLInputElement>(null);
+  const shopReturnFileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [codFile, setCodFile] = useState<File | null>(null);
   const [freightFile, setFreightFile] = useState<File | null>(null);
@@ -749,8 +781,17 @@ export default function AdminShippingPage() {
   const [selectedFreightBatchId, setSelectedFreightBatchId] = useState<number | null>(null);
   const [codListExpanded, setCodListExpanded] = useState(false);
   const [freightListExpanded, setFreightListExpanded] = useState(false);
+  const [shopReturnText, setShopReturnText] = useState('');
+  const [shopReturnFile, setShopReturnFile] = useState<File | null>(null);
+  const [shopReturnLoading, setShopReturnLoading] = useState(false);
+  const [shopReturnError, setShopReturnError] = useState<string | null>(null);
+  const [shopReturnResult, setShopReturnResult] = useState<ShopReturnConfirmResult | null>(null);
+  const [shopReturnListExpanded, setShopReturnListExpanded] = useState(true);
   const [emsTableExpanded, setEmsTableExpanded] = useState(true);
   const [importReportListExpanded, setImportReportListExpanded] = useState(false);
+  const [emsImportBatches, setEmsImportBatches] = useState<EmsShippingImportBatchesResult | null>(null);
+  const [emsImportBatchesLoading, setEmsImportBatchesLoading] = useState(true);
+  const [selectedEmsImportBatchId, setSelectedEmsImportBatchId] = useState<number | null>(null);
   const [opsStats, setOpsStats] = useState<EmsShippingOperationsStats | null>(null);
   const [opsStatsLoading, setOpsStatsLoading] = useState(true);
   const [timelineGranularity, setTimelineGranularity] = useState<EmsShippingTimelineGranularity>('month');
@@ -807,6 +848,22 @@ export default function AdminShippingPage() {
       }
     }
   }, [appliedSearch, filter, listPage, listPageSize]);
+
+  const loadEmsImportBatches = useCallback(async () => {
+    setEmsImportBatchesLoading(true);
+    try {
+      const data = await adminShippingAPI.listEmsImportBatches(30);
+      setEmsImportBatches(data);
+      setSelectedEmsImportBatchId((prev) => {
+        if (prev != null && data.batches.some((b) => b.id === prev)) return prev;
+        return data.batches[0]?.id ?? null;
+      });
+    } catch {
+      /* im lặng — báo cáo cũ không chặn trang */
+    } finally {
+      setEmsImportBatchesLoading(false);
+    }
+  }, []);
 
   const loadCodSettlements = useCallback(async () => {
     setCodListLoading(true);
@@ -1094,10 +1151,11 @@ export default function AdminShippingPage() {
 
   useEffect(() => {
     void loadRecords();
+    void loadEmsImportBatches();
     void loadCodSettlements();
     void loadFreightSettlements();
     void loadOpsStats();
-  }, [loadRecords, loadCodSettlements, loadFreightSettlements, loadOpsStats]);
+  }, [loadRecords, loadEmsImportBatches, loadCodSettlements, loadFreightSettlements, loadOpsStats]);
 
   const selectTimelineGranularity = useCallback(
     (granularity: EmsShippingTimelineGranularity) => {
@@ -1216,6 +1274,19 @@ export default function AdminShippingPage() {
     setError('Chọn dòng, nhập mã tra cứu, hoặc chọn bộ lọc trạng thái trước khi tra EMS.');
   }, [appliedSearch, filter, runEmsTrackingRefresh, selectedRecordIds]);
 
+  const activeEmsImportBatch = useMemo(() => {
+    if (!emsImportBatches?.batches.length) return null;
+    if (selectedEmsImportBatchId != null) {
+      return (
+        emsImportBatches.batches.find((b) => b.id === selectedEmsImportBatchId) ??
+        emsImportBatches.batches[0]
+      );
+    }
+    return emsImportBatches.batches[0];
+  }, [emsImportBatches, selectedEmsImportBatchId]);
+
+  const activeEmsImportReport = activeEmsImportBatch?.import_report ?? null;
+
   const activeCodBatch = useMemo(() => {
     if (!codResult?.batches.length) return null;
     if (selectedBatchId != null) {
@@ -1301,7 +1372,13 @@ export default function AdminShippingPage() {
       setAppliedSearch('');
       setSelectedKeys(new Set());
       setResult(data);
-      setImportReportListExpanded(false);
+      if (data.batches?.length) {
+        setEmsImportBatches({ ok: true, batches: data.batches, import_batch: data.import_batch ?? data.batches[0] });
+        setSelectedEmsImportBatchId(data.import_batch?.id ?? data.batches[0]?.id ?? null);
+      } else {
+        await loadEmsImportBatches();
+      }
+      setImportReportListExpanded(true);
       setEmsTableExpanded(true);
       if (data.tracking_refresh_job_id) {
         startTrackingPoll(data.tracking_refresh_job_id);
@@ -1311,7 +1388,7 @@ export default function AdminShippingPage() {
     } finally {
       setLoading(false);
     }
-  }, [file, startTrackingPoll]);
+  }, [file, loadEmsImportBatches, startTrackingPoll]);
 
   const runCodImport = useCallback(async () => {
     if (!codFile) {
@@ -1334,6 +1411,34 @@ export default function AdminShippingPage() {
       setCodLoading(false);
     }
   }, [codFile, loadRecords, loadOpsStats]);
+
+  const runShopReturnConfirm = useCallback(async () => {
+    const text = shopReturnText.trim();
+    if (!text && !shopReturnFile) {
+      setShopReturnError('Nhập mã đơn (DHxxx) hoặc chọn file Excel.');
+      return;
+    }
+    setShopReturnLoading(true);
+    setShopReturnError(null);
+    try {
+      let data: ShopReturnConfirmResult;
+      if (shopReturnFile) {
+        data = await adminShippingAPI.confirmShopReturnsExcel(shopReturnFile);
+      } else {
+        data = await adminShippingAPI.confirmShopReturns({ text });
+      }
+      setShopReturnResult(data);
+      setShopReturnListExpanded(true);
+      if (data.confirmed_count > 0) {
+        await loadRecords({ silent: true });
+        await loadOpsStats();
+      }
+    } catch (err) {
+      setShopReturnError(err instanceof Error ? err.message : 'Xác nhận hoàn thất bại');
+    } finally {
+      setShopReturnLoading(false);
+    }
+  }, [shopReturnFile, shopReturnText, loadRecords, loadOpsStats]);
 
   const runFreightImport = useCallback(async () => {
     if (!freightFile) {
@@ -1589,7 +1694,13 @@ export default function AdminShippingPage() {
                     ['total', 'Tổng vận đơn', opsStats.total_ems_records, 'text-gray-900'],
                     ['in_transit', 'Đang giao', opsStats.in_transit_count, 'text-blue-800'],
                     ['delivered', 'Giao thành công', opsStats.delivered_count, 'text-emerald-800'],
-                    ['returned', 'Hoàn hàng', opsStats.returned_count, 'text-orange-800'],
+                    ['returned', 'Đơn hoàn chưa trả shop', opsStats.returned_count, 'text-orange-800'],
+                    [
+                      'shop_return_received',
+                      'Đơn hoàn đã trả shop',
+                      opsStats.shop_return_received_count,
+                      'text-orange-900',
+                    ],
                     ['pending', 'Chưa rõ EMS', opsStats.pending_status_count, 'text-slate-600'],
                   ] as const
                 ).map(([bucket, label, count, color]) => (
@@ -1604,13 +1715,18 @@ export default function AdminShippingPage() {
                 ))}
               </div>
               <p className="mt-1.5 text-xs text-gray-500 tabular-nums">
-                {opsStats.in_transit_count + opsStats.delivered_count + opsStats.returned_count + opsStats.pending_status_count}
-                {' = '}
-                {opsStats.in_transit_count} + {opsStats.delivered_count} + {opsStats.returned_count} +{' '}
+                {opsStats.in_transit_count +
+                  opsStats.delivered_count +
+                  opsStats.returned_count +
+                  (opsStats.return_shop_received_count ?? opsStats.shop_return_received_count) +
+                  opsStats.pending_status_count}{' '}
+                = {opsStats.in_transit_count} + {opsStats.delivered_count} + {opsStats.returned_count} +{' '}
+                {opsStats.return_shop_received_count ?? opsStats.shop_return_received_count} +{' '}
                 {opsStats.pending_status_count}
                 {opsStats.in_transit_count +
                   opsStats.delivered_count +
                   opsStats.returned_count +
+                  (opsStats.return_shop_received_count ?? opsStats.shop_return_received_count) +
                   opsStats.pending_status_count ===
                 opsStats.total_ems_records
                   ? ' ✓'
@@ -1678,7 +1794,6 @@ export default function AdminShippingPage() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1 border-t border-gray-100">
               {(
                 [
-                  ['shop_return_received', 'Hoàn · shop đã nhận', opsStats.shop_return_received_count, 'text-orange-900'],
                   ['shop_linked', 'Ghép đơn shop', opsStats.shop_linked_count, 'text-emerald-800'],
                   ['freight_unsettled', 'Chưa đối soát cước', opsStats.freight_unsettled_count, 'text-violet-800'],
                   ['shop_shipping', 'Đơn shop đang giao', opsStats.shop_shipping_orders, 'text-blue-700'],
@@ -1942,7 +2057,8 @@ export default function AdminShippingPage() {
                     <th className="px-3 py-2 text-right font-medium">Tổng</th>
                     <th className="px-3 py-2 text-right font-medium">Đang giao</th>
                     <th className="px-3 py-2 text-right font-medium">Giao OK</th>
-                    <th className="px-3 py-2 text-right font-medium">Hoàn</th>
+                    <th className="px-3 py-2 text-right font-medium">Hoàn chưa trả shop</th>
+                    <th className="px-3 py-2 text-right font-medium">Đã trả shop</th>
                     <th className="px-3 py-2 text-right font-medium">Chưa rõ</th>
                     <th className="px-3 py-2 text-right font-medium">Có COD</th>
                     <th className="px-3 py-2 text-right font-medium">Giao OK · chưa trả COD</th>
@@ -1987,6 +2103,13 @@ export default function AdminShippingPage() {
                           count={item.returned_count}
                           onClick={() => openTimelineBucket(item, 'returned')}
                           className="text-orange-800 hover:text-orange-950"
+                        />
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-orange-900">
+                        <TimelineCountButton
+                          count={item.return_shop_received_count ?? 0}
+                          onClick={() => openTimelineBucket(item, 'shop_return_received')}
+                          className="text-orange-900 hover:text-orange-950"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right text-slate-600">
@@ -2058,6 +2181,13 @@ export default function AdminShippingPage() {
                           count={timelineStats.totals.returned_count}
                           onClick={() => openTimelineBucketTotals('returned')}
                           className="text-orange-900 hover:text-orange-950"
+                        />
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-semibold">
+                        <TimelineCountButton
+                          count={timelineStats.totals.return_shop_received_count ?? 0}
+                          onClick={() => openTimelineBucketTotals('shop_return_received')}
+                          className="text-orange-950 hover:text-orange-900"
                         />
                       </td>
                       <td className="px-3 py-2.5 text-right font-semibold">
@@ -2148,12 +2278,55 @@ export default function AdminShippingPage() {
         </div>
         {file ? <p className="text-xs text-gray-500">Đã chọn: {file.name}</p> : null}
 
-        {result?.import_report && !loading ? (
-          <EmsImportReportPanel
-            report={result.import_report}
-            listExpanded={importReportListExpanded}
-            onToggleList={() => setImportReportListExpanded((v) => !v)}
-          />
+        {emsImportBatchesLoading ? (
+          <p className="text-sm text-gray-500">Đang tải lịch sử báo cáo import…</p>
+        ) : emsImportBatches?.batches.length ? (
+          <div className="space-y-3 border-t border-gray-100 pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-gray-900">
+                Lịch sử báo cáo import ({emsImportBatches.batches.length})
+              </h3>
+              {emsImportBatches.batches.length > 1 ? (
+                <label className="text-sm text-gray-600 flex items-center gap-2 min-w-0">
+                  <span className="shrink-0">Mở báo cáo</span>
+                  <select
+                    value={selectedEmsImportBatchId ?? ''}
+                    onChange={(e) => {
+                      setSelectedEmsImportBatchId(Number(e.target.value));
+                      setImportReportListExpanded(false);
+                    }}
+                    className="min-w-0 max-w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                  >
+                    {emsImportBatches.batches.map((batch) => (
+                      <option key={batch.id} value={batch.id}>
+                        {formatEmsImportBatchLabel(batch)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : activeEmsImportBatch ? (
+                <span className="text-xs text-gray-500 truncate max-w-md" title={formatEmsImportBatchLabel(activeEmsImportBatch)}>
+                  {formatEmsImportBatchLabel(activeEmsImportBatch)}
+                </span>
+              ) : null}
+            </div>
+            {activeEmsImportReport && !loading ? (
+              <EmsImportReportPanel
+                report={activeEmsImportReport}
+                listExpanded={importReportListExpanded}
+                onToggleList={() => setImportReportListExpanded((v) => !v)}
+                title={
+                  selectedEmsImportBatchId === emsImportBatches.batches[0]?.id
+                    ? 'Báo cáo import mới nhất'
+                    : 'Báo cáo import đã lưu'
+                }
+              />
+            ) : null}
+          </div>
+        ) : !loading ? (
+          <p className="text-xs text-gray-500">
+            Chưa có báo cáo import nào được lưu. Sau khi «Import & đối chiếu», báo cáo sẽ xuất hiện ở đây để mở lại.
+          </p>
         ) : null}
       </section>
 
@@ -2356,7 +2529,143 @@ export default function AdminShippingPage() {
       </section>
 
       <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900">3. Import đối soát cước</h2>
+        <h2 className="text-lg font-semibold text-gray-900">3. Xác nhận đơn hoàn đã trả shop</h2>
+        <p className="text-sm text-gray-600">
+          Shop xác nhận đã nhận hàng hoàn — ghi <strong>Đơn hoàn đã trả shop</strong> và hủy hoa hồng affiliate.
+          Nhập mã <strong>DHxxx</strong> (mỗi dòng hoặc cách nhau bằng dấu phẩy) hoặc upload Excel (mỗi dòng một mã).
+          Mã <strong>không tồn tại</strong> trên hệ thống sẽ báo lỗi, không cập nhật dòng đó.
+        </p>
+        <div className="space-y-3">
+          <label className="block text-sm font-medium text-gray-700">Danh sách mã đơn</label>
+          <textarea
+            value={shopReturnText}
+            onChange={(e) => {
+              setShopReturnText(e.target.value);
+              setShopReturnError(null);
+            }}
+            rows={4}
+            placeholder={'DH131\nDH132, DH133'}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono placeholder:text-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+          />
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          <input
+            ref={shopReturnFileRef}
+            type="file"
+            accept=".xls,.xlsx,.xlsm"
+            className="block w-full text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100"
+            onChange={(e) => {
+              setShopReturnFile(e.target.files?.[0] ?? null);
+              setShopReturnError(null);
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => void runShopReturnConfirm()}
+            disabled={shopReturnLoading || (!shopReturnText.trim() && !shopReturnFile)}
+            className="inline-flex items-center justify-center rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:opacity-50"
+          >
+            {shopReturnLoading ? 'Đang xử lý…' : 'Xác nhận đơn hoàn'}
+          </button>
+        </div>
+        {shopReturnFile ? <p className="text-xs text-gray-500">File Excel: {shopReturnFile.name}</p> : null}
+
+        {shopReturnError ? (
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+            {shopReturnError}
+          </div>
+        ) : null}
+
+        {shopReturnResult && !shopReturnLoading ? (
+          <div className="space-y-3">
+            <div
+              className={`rounded-lg border px-4 py-3 text-sm ${
+                shopReturnResult.error_count > 0
+                  ? 'bg-amber-50 border-amber-200 text-amber-950'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-950'
+              }`}
+            >
+              <strong>{shopReturnResult.confirmed_count.toLocaleString('vi-VN')}</strong> đơn đã xác nhận ·{' '}
+              <strong>{shopReturnResult.error_count.toLocaleString('vi-VN')}</strong> lỗi
+              {shopReturnResult.not_found_count > 0 ? (
+                <>
+                  {' '}
+                  (không tồn tại: <strong>{shopReturnResult.not_found_count}</strong>)
+                </>
+              ) : null}
+            </div>
+            {shopReturnResult.warnings?.length ? (
+              <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-4 py-3 text-sm space-y-1">
+                {shopReturnResult.warnings.map((w) => (
+                  <p key={w}>{w}</p>
+                ))}
+              </div>
+            ) : null}
+            {shopReturnResult.rows.length > 0 ? (
+              <CollapsibleListPanel
+                title="Chi tiết từng mã"
+                summary={`${shopReturnResult.rows.length} dòng`}
+                expanded={shopReturnListExpanded}
+                onToggle={() => setShopReturnListExpanded((v) => !v)}
+              >
+                <div className="overflow-x-auto rounded-xl border border-gray-200">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">#</th>
+                        <th className="px-3 py-2 text-left font-medium">Mã nhập</th>
+                        <th className="px-3 py-2 text-left font-medium">Mã đơn</th>
+                        <th className="px-3 py-2 text-left font-medium">Kết quả</th>
+                        <th className="px-3 py-2 text-left font-medium">Ghi chú</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {shopReturnResult.rows.map((row: ShopReturnConfirmRow) => {
+                        const st = SHOP_RETURN_ROW_STATUS[row.status] || SHOP_RETURN_ROW_STATUS.invalid_code;
+                        return (
+                          <tr key={`${row.row_number}:${row.order_code}:${row.status}`} className="hover:bg-gray-50/80">
+                            <td className="px-3 py-2 text-gray-500 tabular-nums">{row.row_number || '—'}</td>
+                            <td className="px-3 py-2 text-gray-700 max-w-[140px] truncate" title={row.raw}>
+                              {row.raw || '—'}
+                            </td>
+                            <td className="px-3 py-2 font-mono font-medium">
+                              {row.order_code ? (
+                                row.order_id ? (
+                                  <Link
+                                    href={`/admin/orders?q=${encodeURIComponent(row.order_code)}`}
+                                    className="text-orange-700 hover:underline"
+                                  >
+                                    {row.order_code}
+                                  </Link>
+                                ) : (
+                                  <span className="text-red-700">{row.order_code}</span>
+                                )
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2">
+                              <span
+                                className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${st.badge}`}
+                              >
+                                {st.label}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-gray-600 max-w-xs">{row.message || '—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </CollapsibleListPanel>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900">4. Import đối soát cước</h2>
         <p className="text-sm text-gray-600">
           File <strong>Doi soat cuoc.xls</strong>: cột <strong>A</strong> mã vận chuyển EMS, cột <strong>L</strong> cước phí.
           Mã phải đã có trong bảng vận chuyển và <strong>chưa từng đối soát cước</strong>.

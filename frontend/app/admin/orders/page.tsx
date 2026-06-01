@@ -16,7 +16,7 @@ const STATUS_TEXTS: Record<string, string> = {
   shipping: 'Chờ nhận hàng',
   delivered: 'Đã nhận hàng',
   completed: 'Đã đánh giá',
-  returned: 'Đã hoàn hàng',
+  returned: 'Đơn hoàn đã trả shop',
   cancelled: 'Đã hủy',
 };
 
@@ -514,7 +514,7 @@ export default function AdminOrdersPage() {
       const updated = await adminOrderAPI.approveReturnReceived(order.id, {
         note: 'Shop đã nhận hàng hoàn',
       });
-      showToast('ok', 'Đã ghi nhận nhận hàng hoàn — hoa hồng affiliate đã hủy');
+      showToast('ok', 'Đã ghi nhận đơn hoàn đã trả shop — hoa hồng affiliate đã hủy');
       setSelectedOrder(updated);
       fetchOrders();
       fetchStats();
@@ -545,7 +545,7 @@ export default function AdminOrdersPage() {
     { key: 'shipping', label: 'Chờ nhận hàng', countKey: 'shipping_orders' as const },
     { key: 'delivered', label: 'Đã nhận hàng', countKey: 'delivered_orders' as const },
     { key: 'completed', label: 'Đã đánh giá', countKey: 'completed_orders' as const },
-    { key: 'returned', label: 'Đã hoàn hàng', countKey: 'returned_orders' as const },
+    { key: 'returned', label: 'Đơn hoàn đã trả shop', countKey: 'returned_orders' as const },
     { key: 'cancelled', label: 'Đã hủy', countKey: 'cancelled_orders' as const },
   ];
 
@@ -553,9 +553,11 @@ export default function AdminOrdersPage() {
       <div className="p-6">
         {toast && (
           <div
-            className={`fixed top-4 right-4 z-50 px-4 py-2 rounded-lg shadow-lg ${
+            className={`fixed top-24 right-4 z-[100] max-w-[min(20rem,calc(100vw-2rem))] px-4 py-2 rounded-lg shadow-lg sm:right-6 ${
               toast.type === 'ok' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
             }`}
+            role="status"
+            aria-live="polite"
           >
             {toast.msg}
           </div>
@@ -1350,7 +1352,7 @@ export default function AdminOrdersPage() {
                     onClick={() => handleApproveReturn(selectedOrder)}
                     className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700"
                   >
-                    Duyệt đã nhận hàng hoàn
+                    Xác nhận đơn hoàn đã trả shop
                   </button>
                 )}
                 <button onClick={() => setDetailOpen(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">

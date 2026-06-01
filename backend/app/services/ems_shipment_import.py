@@ -12,7 +12,12 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.models.order import Order, OrderStatus
-from app.models.order_shipment import EmsShippingRecord, OrderShipmentEvent
+from app.models.order_shipment import (
+    EmsShippingImportBatch,
+    EmsShippingImportBatchRow,
+    EmsShippingRecord,
+    OrderShipmentEvent,
+)
 from app.services import ems_tracking as ems_tracking_svc
 from app.services import order_shipment_timeline as shipment_svc
 
@@ -781,36 +786,39 @@ def _record_to_dict(record: EmsShippingRecord) -> dict[str, Any]:
     if settlement != "matched":
         cod_paid_amount = None
         cod_paid_date = None
-    return {
-        "id": record.id,
-        "row_number": record.excel_row_number or 0,
-        "reference_code": record.reference_code or "",
-        "recipient_label": record.recipient_label or "",
-        "order_code": record.order_code,
-        "order_id": record.order_id,
-        "order_status": record.order_status,
-        "current_step_key": record.current_step_key,
-        "tracking_number_saved": record.tracking_number_saved,
-        "ems_tracking_code": record.ems_tracking_code,
-        "ems_reference_code": record.ems_reference_code,
-        "ems_status": record.ems_status,
-        "ems_phase": record.ems_phase,
-        "sync_status": record.sync_status,
-        "sync_message": record.sync_message or "",
-        "ems_error": record.ems_error,
-        "cod_amount": int(record.cod_amount) if record.cod_amount is not None else None,
-        "cod_paid_amount": cod_paid_amount,
-        "cod_paid_date": cod_paid_date,
-        "cod_settlement_status": record.cod_settlement_status,
-        "cod_settlement_message": record.cod_settlement_message,
-        "freight_amount": int(record.freight_amount) if record.freight_amount is not None else None,
-        "freight_settled_at": _isoformat_value(record.freight_settled_at),
-        "freight_settlement_status": record.freight_settlement_status,
-        "freight_settlement_message": record.freight_settlement_message,
-        "freight_high_fee_warning": record.freight_high_fee_warning,
-        "order_synced": False,
-        "order_sync_message": "",
-    }
+    return _apply_return_to_shop_fields(
+        {
+            "id": record.id,
+            "row_number": record.excel_row_number or 0,
+            "reference_code": record.reference_code or "",
+            "recipient_label": record.recipient_label or "",
+            "order_code": record.order_code,
+            "order_id": record.order_id,
+            "order_status": record.order_status,
+            "current_step_key": record.current_step_key,
+            "tracking_number_saved": record.tracking_number_saved,
+            "ems_tracking_code": record.ems_tracking_code,
+            "ems_reference_code": record.ems_reference_code,
+            "ems_status": record.ems_status,
+            "ems_phase": record.ems_phase,
+            "sync_status": record.sync_status,
+            "sync_message": record.sync_message or "",
+            "ems_error": record.ems_error,
+            "cod_amount": int(record.cod_amount) if record.cod_amount is not None else None,
+            "cod_paid_amount": cod_paid_amount,
+            "cod_paid_date": cod_paid_date,
+            "cod_settlement_status": record.cod_settlement_status,
+            "cod_settlement_message": record.cod_settlement_message,
+            "freight_amount": int(record.freight_amount) if record.freight_amount is not None else None,
+            "freight_settled_at": _isoformat_value(record.freight_settled_at),
+            "freight_settlement_status": record.freight_settlement_status,
+            "freight_settlement_message": record.freight_settlement_message,
+            "freight_high_fee_warning": record.freight_high_fee_warning,
+            "return_to_shop_label": None,
+            "order_synced": False,
+            "order_sync_message": "",
+        }
+    )
 
 
 def _result_has_ems_tracking_payload(result: dict[str, Any]) -> bool:
@@ -886,18 +894,55 @@ def _upsert_record(
         record.import_source_filename = source_filename
     if admin_id:
         record.imported_by_admin_id = admin_id
+    _apply_return_to_shop_on_record(record)
     db.flush()
     return record, created
+
+
+def _apply_return_to_shop_fields(row: dict[str, Any]) -> dict[str, Any]:
+    from app.services.shipping_operations import (
+        RETURN_PENDING_SHOP_LABEL,
+        RETURN_SHOP_RECEIVED_LABEL,
+        return_to_shop_label,
+    )
+
+    label = return_to_shop_label(
+        order_status=row.get("order_status"),
+        ems_status=row.get("ems_status"),
+    )
+    row["return_to_shop_label"] = label
+    if label == RETURN_PENDING_SHOP_LABEL:
+        row["sync_message"] = RETURN_PENDING_SHOP_LABEL
+    elif label == RETURN_SHOP_RECEIVED_LABEL:
+        row["sync_message"] = RETURN_SHOP_RECEIVED_LABEL
+    return row
+
+
+def _apply_return_to_shop_on_record(record: EmsShippingRecord) -> None:
+    from app.services.shipping_operations import (
+        RETURN_PENDING_SHOP_LABEL,
+        RETURN_SHOP_RECEIVED_LABEL,
+        return_to_shop_label,
+    )
+
+    label = return_to_shop_label(
+        order_status=record.order_status,
+        ems_status=record.ems_status,
+    )
+    if label == RETURN_PENDING_SHOP_LABEL:
+        record.sync_message = RETURN_PENDING_SHOP_LABEL
+    elif label == RETURN_SHOP_RECEIVED_LABEL:
+        record.sync_message = RETURN_SHOP_RECEIVED_LABEL
 
 
 def _enrich_row_from_live_order(db: Session, row: dict[str, Any]) -> dict[str, Any]:
     """Cập nhật trạng thái đơn shop mới nhất khi hiển thị bảng (không cần import lại)."""
     order_code = (row.get("order_code") or "").strip().upper()
     if not _is_shop_order_code(order_code):
-        return row
+        return _apply_return_to_shop_fields(row)
     order = crud.order.get_order_by_code(db, order_code)
     if not order:
-        return row
+        return _apply_return_to_shop_fields(row)
     row["order_id"] = order.id
     row["order_status"] = getattr(order.status, "value", order.status)
     row["tracking_number_saved"] = order.tracking_number
@@ -915,7 +960,7 @@ def _enrich_row_from_live_order(db: Session, row: dict[str, Any]) -> dict[str, A
     elif row.get("order_id") and (row.get("reference_code") or row.get("ems_reference_code")):
         row["sync_status"] = "in_progress"
         row["sync_message"] = _shop_ems_handoff_message(order_code)
-    return row
+    return _apply_return_to_shop_fields(row)
 
 
 def _build_summary_from_db(db: Session) -> dict[str, Any]:
@@ -1085,6 +1130,123 @@ def list_ems_shipping_records(
     }
 
 
+def _import_batch_row_to_report_row(row: EmsShippingImportBatchRow) -> dict[str, Any]:
+    return {
+        "id": row.ems_shipping_record_id,
+        "row_number": row.excel_row_number or 0,
+        "reference_code": row.reference_code or "",
+        "recipient_label": row.recipient_label or "",
+        "order_code": row.order_code,
+        "order_id": row.order_id,
+        "order_status": None,
+        "current_step_key": None,
+        "tracking_number_saved": None,
+        "ems_tracking_code": None,
+        "ems_reference_code": None,
+        "ems_status": None,
+        "ems_phase": None,
+        "sync_status": row.sync_status or "pending",
+        "sync_message": row.sync_message or "",
+        "ems_error": None,
+        "cod_amount": int(row.cod_amount) if row.cod_amount is not None else None,
+        "import_action": row.import_action,
+    }
+
+
+def _batch_to_dict(batch: EmsShippingImportBatch, report_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "id": batch.id,
+        "source_filename": batch.source_filename,
+        "created_at": _isoformat_value(batch.created_at),
+        "file_rows_processed": int(batch.file_rows_processed or 0),
+        "order_count": int(batch.order_count or 0),
+        "created_count": int(batch.created_count or 0),
+        "updated_count": int(batch.updated_count or 0),
+        "skipped_no_reference_count": int(batch.skipped_no_reference_count or 0),
+        "orders_synced_count": int(batch.orders_synced_count or 0),
+        "total_cod_amount": int(batch.total_cod_amount or 0),
+        "import_report": {
+            "order_count": int(batch.order_count or 0),
+            "total_cod_amount": int(batch.total_cod_amount or 0),
+            "created": int(batch.created_count or 0),
+            "updated": int(batch.updated_count or 0),
+            "skipped_no_reference": int(batch.skipped_no_reference_count or 0),
+            "orders_synced": int(batch.orders_synced_count or 0),
+            "rows": report_rows,
+        },
+    }
+
+
+def _persist_import_batch(
+    db: Session,
+    *,
+    import_report_rows: list[dict[str, Any]],
+    file_rows_processed: int,
+    created: int,
+    updated: int,
+    skipped_no_reference: int,
+    orders_synced: int,
+    admin_id: Optional[int] = None,
+    source_filename: Optional[str] = None,
+) -> EmsShippingImportBatch:
+    total_cod = sum(int(r.get("cod_amount") or 0) for r in import_report_rows)
+    batch = EmsShippingImportBatch(
+        source_filename=source_filename,
+        imported_by_admin_id=admin_id,
+        file_rows_processed=file_rows_processed,
+        order_count=len(import_report_rows),
+        created_count=created,
+        updated_count=updated,
+        skipped_no_reference_count=skipped_no_reference,
+        orders_synced_count=orders_synced,
+        total_cod_amount=total_cod,
+    )
+    db.add(batch)
+    db.flush()
+    for row_dict in import_report_rows:
+        db.add(
+            EmsShippingImportBatchRow(
+                batch_id=batch.id,
+                ems_shipping_record_id=row_dict.get("id"),
+                excel_row_number=row_dict.get("row_number"),
+                reference_code=(row_dict.get("reference_code") or "").strip() or None,
+                recipient_label=row_dict.get("recipient_label"),
+                order_code=row_dict.get("order_code"),
+                order_id=row_dict.get("order_id"),
+                cod_amount=row_dict.get("cod_amount"),
+                import_action=row_dict.get("import_action"),
+                sync_status=row_dict.get("sync_status"),
+                sync_message=row_dict.get("sync_message"),
+            )
+        )
+    return batch
+
+
+def list_ems_import_batches(db: Session, *, limit: int = 30) -> dict[str, Any]:
+    limit = max(1, min(int(limit or 30), 100))
+    batches = (
+        db.query(EmsShippingImportBatch)
+        .order_by(EmsShippingImportBatch.created_at.desc(), EmsShippingImportBatch.id.desc())
+        .limit(limit)
+        .all()
+    )
+    items: list[dict[str, Any]] = []
+    for batch in batches:
+        rows = (
+            db.query(EmsShippingImportBatchRow)
+            .filter(EmsShippingImportBatchRow.batch_id == batch.id)
+            .order_by(EmsShippingImportBatchRow.excel_row_number.asc(), EmsShippingImportBatchRow.id.asc())
+            .all()
+        )
+        report_rows = [_import_batch_row_to_report_row(r) for r in rows]
+        items.append(_batch_to_dict(batch, report_rows))
+    return {
+        "ok": True,
+        "batches": items,
+        "import_batch": items[0] if items else None,
+    }
+
+
 def delete_ems_shipping_records(db: Session, record_ids: list[int]) -> int:
     ids = [int(x) for x in record_ids if int(x) > 0]
     if not ids:
@@ -1144,6 +1306,18 @@ def import_ems_shipment_excel(
         row_dict["import_action"] = "created" if was_created else "updated"
         import_report_rows.append(row_dict)
 
+    import_batch = _persist_import_batch(
+        db,
+        import_report_rows=import_report_rows,
+        file_rows_processed=len(results),
+        created=created,
+        updated=updated,
+        skipped_no_reference=skipped_no_reference,
+        orders_synced=orders_synced,
+        admin_id=admin_id,
+        source_filename=source_filename,
+    )
+
     db.commit()
 
     tracking_refresh_job_id = None
@@ -1167,14 +1341,10 @@ def import_ems_shipment_excel(
         "skipped_no_reference": skipped_no_reference,
         "orders_synced": orders_synced,
     }
-    payload["import_report"] = {
-        "order_count": len(import_report_rows),
-        "total_cod_amount": sum(int(r.get("cod_amount") or 0) for r in import_report_rows),
-        "created": created,
-        "updated": updated,
-        "skipped_no_reference": skipped_no_reference,
-        "orders_synced": orders_synced,
-        "rows": import_report_rows,
-    }
+    batch_saved = _batch_to_dict(import_batch, import_report_rows)
+    batches_payload = list_ems_import_batches(db)
+    payload["batches"] = batches_payload["batches"]
+    payload["import_batch"] = batch_saved
+    payload["import_report"] = batch_saved["import_report"]
     payload["tracking_refresh_job_id"] = tracking_refresh_job_id
     return payload

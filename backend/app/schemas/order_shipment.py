@@ -63,6 +63,7 @@ class EmsShippingOperationsStatsResponse(BaseModel):
     in_transit_count: int = 0
     delivered_count: int = 0
     returned_count: int = 0
+    return_shop_received_count: int = 0
     pending_status_count: int = 0
     cod_in_transit_unpaid_count: int = 0
     cod_delivered_unpaid_count: int = 0
@@ -98,6 +99,7 @@ class EmsShippingTimelineItemResponse(BaseModel):
     in_transit_count: int = 0
     delivered_count: int = 0
     returned_count: int = 0
+    return_shop_received_count: int = 0
     pending_status_count: int = 0
     total_with_cod: int = 0
     cod_delivered_unpaid_count: int = 0
@@ -112,6 +114,7 @@ class EmsShippingTimelineTotalsResponse(BaseModel):
     in_transit_count: int = 0
     delivered_count: int = 0
     returned_count: int = 0
+    return_shop_received_count: int = 0
     pending_status_count: int = 0
     total_with_cod: int = 0
     cod_delivered_unpaid_count: int = 0
@@ -181,6 +184,7 @@ class EmsShippingImportRowResponse(BaseModel):
     freight_settlement_status: Optional[str] = None
     freight_settlement_message: Optional[str] = None
     freight_high_fee_warning: Optional[str] = None
+    return_to_shop_label: Optional[str] = None
 
 
 class EmsShippingBreakdownItem(BaseModel):
@@ -235,15 +239,39 @@ class EmsShippingListPaginationResponse(BaseModel):
     search: Optional[str] = None
 
 
+class EmsShippingImportBatchResponse(BaseModel):
+    """Một lần import file gửi EMS — lưu DB để mở lại báo cáo."""
+
+    id: int
+    source_filename: Optional[str] = None
+    created_at: Optional[str] = None
+    file_rows_processed: int = 0
+    order_count: int = 0
+    created_count: int = 0
+    updated_count: int = 0
+    skipped_no_reference_count: int = 0
+    orders_synced_count: int = 0
+    total_cod_amount: int = 0
+    import_report: EmsShippingImportReportResponse
+
+
+class EmsShippingImportBatchesListResponse(BaseModel):
+    ok: bool = True
+    batches: List[EmsShippingImportBatchResponse] = []
+    import_batch: Optional[EmsShippingImportBatchResponse] = None
+
+
 class EmsShippingImportResponse(BaseModel):
     ok: bool = True
     warnings: List[str] = []
     summary: EmsShippingImportSummaryResponse
     import_stats: Optional[EmsShippingImportStatsResponse] = None
     import_report: Optional[EmsShippingImportReportResponse] = None
+    import_batch: Optional[EmsShippingImportBatchResponse] = None
+    batches: List[EmsShippingImportBatchResponse] = []
     tracking_refresh_job_id: Optional[str] = None
     pagination: Optional[EmsShippingListPaginationResponse] = None
-    rows: List[EmsShippingImportRowResponse]
+    rows: List[EmsShippingImportRowResponse] = []
 
 
 class EmsShippingOperationsRecordsResponse(BaseModel):
@@ -388,3 +416,38 @@ class EmsFreightSettlementImportResponse(BaseModel):
     summary: EmsFreightSettlementSummaryResponse
     import_batch: Optional[EmsFreightSettlementBatchResponse] = None
     batches: List[EmsFreightSettlementBatchResponse] = []
+
+
+class ShopReturnConfirmRowResponse(BaseModel):
+    row_number: int = 0
+    raw: str = ""
+    order_code: Optional[str] = None
+    order_id: Optional[int] = None
+    status: str
+    message: str = ""
+
+
+class ShopReturnConfirmRequest(BaseModel):
+    """Nhập danh sách mã đơn shop (DHxxx), mỗi mã một dòng hoặc cách nhau bởi dấu phẩy."""
+
+    order_codes: Optional[List[str]] = None
+    text: Optional[str] = Field(
+        default=None,
+        description="Hoặc dán nhiều mã — xuống dòng / dấu phẩy.",
+    )
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class ShopReturnConfirmResponse(BaseModel):
+    ok: bool = True
+    source: str = "manual"
+    total_rows: int = 0
+    confirmed_count: int = 0
+    error_count: int = 0
+    not_found_count: int = 0
+    invalid_code_count: int = 0
+    already_returned_count: int = 0
+    invalid_status_count: int = 0
+    duplicate_count: int = 0
+    rows: List[ShopReturnConfirmRowResponse] = []
+    warnings: List[str] = []

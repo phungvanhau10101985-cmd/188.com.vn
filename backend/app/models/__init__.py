@@ -167,6 +167,8 @@ try:
         EmsCodSettlementRow,
         EmsFreightSettlementBatch,
         EmsFreightSettlementRow,
+        EmsShippingImportBatch,
+        EmsShippingImportBatchRow,
         EmsShippingRecord,
         OrderShipmentEvent,
     )

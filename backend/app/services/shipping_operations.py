@@ -23,13 +23,19 @@ _TIMELINE_DEFAULT_LIMITS: dict[str, int] = {
 _EMS_DELIVERED_PHASES = frozenset({"delivered", "cod_collected", "cod_settled"})
 _EMS_IN_TRANSIT_PHASES = frozenset({"posted", "in_transit", "out_for_delivery"})
 
-DeliveryBucket = Literal["returned", "delivered", "in_transit", "pending"]
+DeliveryBucket = Literal["return_pending_shop", "return_shop_received", "delivered", "in_transit", "pending"]
 CodBucket = Literal["paid", "returned_unpaid", "delivered_unpaid", "in_transit_unpaid", "pending_unpaid"]
 
+RETURN_PENDING_SHOP_LABEL = "Đơn hoàn chưa trả shop"
+RETURN_SHOP_RECEIVED_LABEL = "Đơn hoàn đã trả shop"
 
-def _is_returned(*, order_status: str | None, ems_status: str | None) -> bool:
-    if (order_status or "").strip().lower() == OrderStatus.RETURNED.value:
-        return True
+
+def _is_shop_return_received(*, order_status: str | None) -> bool:
+    return (order_status or "").strip().lower() == OrderStatus.RETURNED.value
+
+
+def _is_ems_return_pending_shop(*, ems_status: str | None) -> bool:
+    """EMS đã duyệt / báo hoàn — hàng chưa về shop (đơn shop chưa RETURNED)."""
     text = (ems_status or "").lower()
     if not text:
         return False
@@ -42,6 +48,14 @@ def _is_returned(*, order_status: str | None, ems_status: str | None) -> bool:
         "returned",
     )
     return any(m in text for m in markers)
+
+
+def return_to_shop_label(*, order_status: str | None, ems_status: str | None) -> str | None:
+    if _is_shop_return_received(order_status=order_status):
+        return RETURN_SHOP_RECEIVED_LABEL
+    if _is_ems_return_pending_shop(ems_status=ems_status):
+        return RETURN_PENDING_SHOP_LABEL
+    return None
 
 
 def _is_delivered(*, ems_phase: str | None, ems_status: str | None) -> bool:
@@ -67,8 +81,10 @@ def _is_in_transit(*, ems_phase: str | None, ems_status: str | None) -> bool:
 
 
 def _delivery_bucket(record: EmsShippingRecord) -> DeliveryBucket:
-    if _is_returned(order_status=record.order_status, ems_status=record.ems_status):
-        return "returned"
+    if _is_shop_return_received(order_status=record.order_status):
+        return "return_shop_received"
+    if _is_ems_return_pending_shop(ems_status=record.ems_status):
+        return "return_pending_shop"
     if _is_delivered(ems_phase=record.ems_phase, ems_status=record.ems_status):
         return "delivered"
     if (record.cod_settlement_status or "").strip().lower() == "matched":
@@ -95,7 +111,7 @@ def _cod_bucket(record: EmsShippingRecord, delivery: DeliveryBucket) -> CodBucke
         return None
     if _is_cod_paid(record):
         return "paid"
-    if delivery == "returned":
+    if delivery in ("return_pending_shop", "return_shop_received"):
         return "returned_unpaid"
     if delivery == "delivered":
         return "delivered_unpaid"
@@ -109,7 +125,8 @@ def get_shipping_operations_stats(db: Session) -> dict[str, Any]:
     records = db.query(EmsShippingRecord).all()
 
     delivery_counts: dict[DeliveryBucket, int] = {
-        "returned": 0,
+        "return_pending_shop": 0,
+        "return_shop_received": 0,
         "delivered": 0,
         "in_transit": 0,
         "pending": 0,
@@ -140,7 +157,7 @@ def get_shipping_operations_stats(db: Session) -> dict[str, Any]:
         if (
             record.freight_settled_at is None
             and (record.ems_tracking_code or "").strip()
-            and delivery != "returned"
+            and delivery not in ("return_pending_shop", "return_shop_received")
         ):
             freight_unsettled_count += 1
 
@@ -177,7 +194,8 @@ def get_shipping_operations_stats(db: Session) -> dict[str, Any]:
         "total_with_cod": total_with_cod,
         "in_transit_count": delivery_counts["in_transit"],
         "delivered_count": delivery_counts["delivered"],
-        "returned_count": delivery_counts["returned"],
+        "returned_count": delivery_counts["return_pending_shop"],
+        "return_shop_received_count": delivery_counts["return_shop_received"],
         "pending_status_count": delivery_counts["pending"],
         "cod_in_transit_unpaid_count": cod_counts["in_transit_unpaid"],
         "cod_delivered_unpaid_count": cod_counts["delivered_unpaid"],
@@ -197,6 +215,7 @@ def get_shipping_operations_stats(db: Session) -> dict[str, Any]:
         "shipping_orders": delivery_counts["in_transit"],
         "delivered_success_orders": delivery_counts["delivered"],
         "returned_orders": shop_return_received_count,
+        # returned_count = EMS hoàn, chưa shop xác nhận; shop_return_received_count = shop đã nhận hoàn
         "cod_success_unpaid_count": cod_counts["delivered_unpaid"],
         "cod_success_unpaid_total": cod_delivered_unpaid_total,
         "cod_success_paid_count": cod_counts["paid"],
@@ -353,6 +372,7 @@ def _empty_timeline_bucket() -> dict[str, Any]:
         "in_transit_count": 0,
         "delivered_count": 0,
         "returned_count": 0,
+        "return_shop_received_count": 0,
         "pending_status_count": 0,
         "total_with_cod": 0,
         "cod_delivered_unpaid_count": 0,
@@ -367,7 +387,8 @@ def _accumulate_timeline_bucket(bucket: dict[str, Any], record: EmsShippingRecor
     delivery = _delivery_bucket(record)
     bucket["total"] += 1
     delivery_field = {
-        "returned": "returned_count",
+        "return_pending_shop": "returned_count",
+        "return_shop_received": "return_shop_received_count",
         "delivered": "delivered_count",
         "in_transit": "in_transit_count",
         "pending": "pending_status_count",
@@ -479,7 +500,9 @@ _OPS_BUCKET_LABELS: dict[str, str] = {
     "total": "Tổng vận đơn",
     "in_transit": "Đang giao",
     "delivered": "Giao thành công",
-    "returned": "Hoàn hàng",
+    "returned": "Đơn hoàn chưa trả shop",
+    "return_pending_shop": "Đơn hoàn chưa trả shop",
+    "return_shop_received": "Đơn hoàn đã trả shop",
     "pending": "Chưa rõ EMS",
     "has_cod": "Có COD",
     "cod_in_transit_unpaid": "COD đang giao · chưa trả",
@@ -489,7 +512,7 @@ _OPS_BUCKET_LABELS: dict[str, str] = {
     "cod_pending_unpaid": "COD chưa rõ trạng thái",
     "freight_unsettled": "Chưa đối soát cước",
     "shop_linked": "Ghép đơn shop",
-    "shop_return_received": "Hoàn · shop đã nhận",
+    "shop_return_received": "Đơn hoàn đã trả shop",
     "shop_shipping": "Đơn shop đang giao",
 }
 
@@ -506,8 +529,10 @@ def _matches_ops_bucket(record: EmsShippingRecord, bucket: str) -> bool:
         return delivery == "in_transit"
     if bucket == "delivered":
         return delivery == "delivered"
-    if bucket == "returned":
-        return delivery == "returned"
+    if bucket == "returned" or bucket == "return_pending_shop":
+        return delivery == "return_pending_shop"
+    if bucket == "return_shop_received":
+        return delivery == "return_shop_received"
     if bucket == "pending":
         return delivery == "pending"
     if bucket == "has_cod":
@@ -526,7 +551,7 @@ def _matches_ops_bucket(record: EmsShippingRecord, bucket: str) -> bool:
         return (
             record.freight_settled_at is None
             and bool((record.ems_tracking_code or "").strip())
-            and delivery != "returned"
+            and delivery not in ("return_pending_shop", "return_shop_received")
         )
     if bucket == "shop_linked":
         return record.order_id is not None
@@ -659,30 +684,34 @@ def list_operations_bucket_records(
     }
 
 
-def admin_approve_return_received(
-    db: Session,
-    order_id: int,
-    *,
-    admin_id: int,
-    note: str | None = None,
-) -> Order:
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if not order:
-        raise ValueError("Order not found")
-
+def validate_shop_return_confirm(order: Order) -> tuple[str, str] | None:
+    """Trả (mã lỗi, thông báo) hoặc None nếu được phép xác nhận."""
     status_val = getattr(order.status, "value", order.status)
     if status_val == OrderStatus.RETURNED.value:
-        raise ValueError("Đơn đã được ghi nhận hoàn hàng.")
+        return "already_returned", "Đơn đã được ghi nhận đơn hoàn đã trả shop."
     if status_val == OrderStatus.CANCELLED.value:
-        raise ValueError("Đơn đã hủy — không thể duyệt hoàn hàng.")
+        return "invalid_status", "Đơn đã hủy — không thể xác nhận hoàn."
     if status_val not in (
         OrderStatus.SHIPPING.value,
         OrderStatus.DELIVERED.value,
         OrderStatus.COMPLETED.value,
     ):
-        raise ValueError("Chỉ duyệt hoàn hàng khi đơn đang giao hoặc đã giao thành công.")
+        return (
+            "invalid_status",
+            f"Trạng thái «{status_val}» — chỉ xác nhận khi đơn đang giao hoặc đã giao.",
+        )
+    return None
 
-    old_status = status_val
+
+def apply_shop_return_received_on_order(
+    db: Session,
+    order: Order,
+    *,
+    admin_id: int,
+    note: str | None = None,
+) -> None:
+    """Cập nhật đơn + EMS — không commit (dùng trong bulk)."""
+    old_status = getattr(order.status, "value", order.status)
     now = datetime.now()
     order.status = OrderStatus.RETURNED.value
     order.returned_at = now
@@ -701,10 +730,143 @@ def admin_approve_return_received(
     )
     for record in ems_records:
         record.order_status = OrderStatus.RETURNED.value
-        msg = record.sync_message or ""
-        if "Đơn hoàn hàng" not in msg:
-            record.sync_message = (msg + " · Đơn hoàn hàng — shop đã nhận lại.").strip(" ·")
+        record.sync_message = RETURN_SHOP_RECEIVED_LABEL
 
+
+def bulk_confirm_shop_returns(
+    db: Session,
+    entries: list[dict[str, Any]],
+    *,
+    admin_id: int,
+    note: str | None = None,
+    source: str = "manual",
+) -> dict[str, Any]:
+    """
+    entries: { row_number, raw, order_code? }
+    Trạng thái dòng: confirmed | not_found | invalid_code | already_returned | invalid_status | duplicate
+    """
+    rows_out: list[dict[str, Any]] = []
+    seen_codes: dict[str, int] = {}
+    to_confirm: list[tuple[dict[str, Any], Any]] = []
+
+    for entry in entries:
+        row_number = int(entry.get("row_number") or 0)
+        raw = str(entry.get("raw") or "").strip()
+        code = (entry.get("order_code") or "").strip().upper() or None
+
+        if not code:
+            rows_out.append(
+                {
+                    "row_number": row_number,
+                    "raw": raw,
+                    "order_code": None,
+                    "order_id": None,
+                    "status": "invalid_code",
+                    "message": "Mã không hợp lệ — cần mã đơn shop dạng DHxxx.",
+                }
+            )
+            continue
+
+        if code in seen_codes:
+            rows_out.append(
+                {
+                    "row_number": row_number,
+                    "raw": raw or code,
+                    "order_code": code,
+                    "order_id": None,
+                    "status": "duplicate",
+                    "message": f"Mã trùng trong danh sách (đã có ở dòng {seen_codes[code]}).",
+                }
+            )
+            continue
+        seen_codes[code] = row_number
+
+        order = crud.order.get_order_by_code(db, code)
+        if not order:
+            rows_out.append(
+                {
+                    "row_number": row_number,
+                    "raw": raw or code,
+                    "order_code": code,
+                    "order_id": None,
+                    "status": "not_found",
+                    "message": f"Không tìm thấy đơn #{code} trên 188.com.vn.",
+                }
+            )
+            continue
+
+        err = validate_shop_return_confirm(order)
+        if err:
+            rows_out.append(
+                {
+                    "row_number": row_number,
+                    "raw": raw or code,
+                    "order_code": code,
+                    "order_id": order.id,
+                    "status": err[0],
+                    "message": err[1],
+                }
+            )
+            continue
+
+        to_confirm.append((entry, order))
+
+    confirmed = 0
+    for entry, order in to_confirm:
+        apply_shop_return_received_on_order(db, order, admin_id=admin_id, note=note)
+        confirmed += 1
+        code = (order.order_code or "").strip().upper()
+        rows_out.append(
+            {
+                "row_number": int(entry.get("row_number") or 0),
+                "raw": str(entry.get("raw") or code).strip(),
+                "order_code": code,
+                "order_id": order.id,
+                "status": "confirmed",
+                "message": RETURN_SHOP_RECEIVED_LABEL,
+            }
+        )
+
+    if confirmed:
+        db.commit()
+    else:
+        db.rollback()
+
+    rows_out.sort(key=lambda r: (int(r.get("row_number") or 0), str(r.get("order_code") or "")))
+
+    error_count = sum(1 for r in rows_out if r["status"] != "confirmed")
+    return {
+        "ok": True,
+        "source": source,
+        "total_rows": len(entries),
+        "confirmed_count": confirmed,
+        "error_count": error_count,
+        "not_found_count": sum(1 for r in rows_out if r["status"] == "not_found"),
+        "invalid_code_count": sum(1 for r in rows_out if r["status"] == "invalid_code"),
+        "already_returned_count": sum(1 for r in rows_out if r["status"] == "already_returned"),
+        "invalid_status_count": sum(1 for r in rows_out if r["status"] == "invalid_status"),
+        "duplicate_count": sum(1 for r in rows_out if r["status"] == "duplicate"),
+        "rows": rows_out,
+        "warnings": [],
+    }
+
+
+def admin_approve_return_received(
+    db: Session,
+    order_id: int,
+    *,
+    admin_id: int,
+    note: str | None = None,
+) -> Order:
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise ValueError("Không tìm thấy đơn hàng.")
+
+    err = validate_shop_return_confirm(order)
+    if err:
+        raise ValueError(err[1])
+
+    apply_shop_return_received_on_order(db, order, admin_id=admin_id, note=note)
     db.commit()
     db.refresh(order)
     return order

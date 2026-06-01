@@ -49,7 +49,7 @@ const CUSTOMER_TABS = [
   { key: 'delivered', label: 'Đã nhận hàng', statuses: ['delivered'] },
   { key: 'completed', label: 'Đã đánh giá', statuses: ['completed'] },
   { key: 'cancelled', label: 'Đã hủy', statuses: ['cancelled'] },
-  { key: 'returned', label: 'Đã hoàn hàng', statuses: ['returned'] },
+  { key: 'returned', label: 'Đơn hoàn đã trả shop', statuses: ['returned'] },
 ];
 
 const STATUS_LABELS: Record<string, string> = {
@@ -61,7 +61,7 @@ const STATUS_LABELS: Record<string, string> = {
   shipping: 'Đang giao hàng',
   delivered: 'Đã nhận hàng',
   completed: 'Đã đánh giá',
-  returned: 'Đã hoàn hàng',
+  returned: 'Đơn hoàn đã trả shop',
   cancelled: 'Đã hủy',
 };
 

@@ -14,7 +14,7 @@ class OrderStatus(enum.Enum):
     SHIPPING = "shipping"            # Đang giao hàng
     DELIVERED = "delivered"          # Đã giao hàng
     COMPLETED = "completed"          # Đã hoàn thành (đã đánh giá)
-    RETURNED = "returned"            # Đã hoàn hàng (shop nhận lại)
+    RETURNED = "returned"            # Đơn hoàn đã trả shop (shop xác nhận đã nhận lại)
     CANCELLED = "cancelled"          # Đã hủy
 
 class PaymentMethod(enum.Enum):

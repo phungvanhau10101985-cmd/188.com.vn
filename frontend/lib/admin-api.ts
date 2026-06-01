@@ -3310,6 +3310,8 @@ export interface EmsShippingImportRow {
   freight_settlement_status?: string | null;
   freight_settlement_message?: string | null;
   freight_high_fee_warning?: string | null;
+  /** Đơn hoàn chưa trả shop | Đơn hoàn đã trả shop */
+  return_to_shop_label?: string | null;
 }
 
 export interface EmsShippingListPagination {
@@ -3336,6 +3338,26 @@ export interface EmsShippingImportReport {
   rows: EmsShippingImportReportRow[];
 }
 
+export interface EmsShippingImportBatch {
+  id: number;
+  source_filename?: string | null;
+  created_at?: string | null;
+  file_rows_processed: number;
+  order_count: number;
+  created_count: number;
+  updated_count: number;
+  skipped_no_reference_count: number;
+  orders_synced_count: number;
+  total_cod_amount: number;
+  import_report: EmsShippingImportReport;
+}
+
+export interface EmsShippingImportBatchesResult {
+  ok: boolean;
+  batches: EmsShippingImportBatch[];
+  import_batch?: EmsShippingImportBatch | null;
+}
+
 export interface EmsShippingImportResult {
   ok: boolean;
   warnings: string[];
@@ -3359,6 +3381,8 @@ export interface EmsShippingImportResult {
     orders_synced: number;
   } | null;
   import_report?: EmsShippingImportReport | null;
+  import_batch?: EmsShippingImportBatch | null;
+  batches?: EmsShippingImportBatch[];
   tracking_refresh_job_id?: string | null;
   pagination?: EmsShippingListPagination | null;
   rows: EmsShippingImportRow[];
@@ -3452,6 +3476,11 @@ export const adminShippingAPI = {
     );
   },
 
+  listEmsImportBatches: (limit = 30) =>
+    fetchAdmin<EmsShippingImportBatchesResult>(
+      `/orders/admin/shipping/ems-import-batches?limit=${encodeURIComponent(String(limit))}`,
+    ),
+
   importEmsExcel: async (file: File): Promise<EmsShippingImportResult> => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
@@ -3503,7 +3532,64 @@ export const adminShippingAPI = {
       '/orders/admin/shipping/ems-tracking-refresh',
       { method: 'POST', body: JSON.stringify(payload) },
     ),
+
+  confirmShopReturns: (payload: { text?: string; order_codes?: string[]; note?: string }) =>
+    fetchAdmin<ShopReturnConfirmResult>('/orders/admin/shipping/shop-return-confirm', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  confirmShopReturnsExcel: async (file: File, note?: string): Promise<ShopReturnConfirmResult> => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const form = new FormData();
+    form.append('file', file);
+    if (note?.trim()) form.append('note', note.trim());
+    const url = `${getApiBaseUrl()}/orders/admin/shipping/shop-return-confirm-import`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+      body: form,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Import xác nhận hoàn thất bại');
+    }
+    return res.json();
+  },
 };
+
+export type ShopReturnConfirmRowStatus =
+  | 'confirmed'
+  | 'not_found'
+  | 'invalid_code'
+  | 'already_returned'
+  | 'invalid_status'
+  | 'duplicate';
+
+export interface ShopReturnConfirmRow {
+  row_number: number;
+  raw: string;
+  order_code?: string | null;
+  order_id?: number | null;
+  status: ShopReturnConfirmRowStatus;
+  message: string;
+}
+
+export interface ShopReturnConfirmResult {
+  ok: boolean;
+  source: string;
+  total_rows: number;
+  confirmed_count: number;
+  error_count: number;
+  not_found_count: number;
+  invalid_code_count: number;
+  already_returned_count: number;
+  invalid_status_count: number;
+  duplicate_count: number;
+  rows: ShopReturnConfirmRow[];
+  warnings: string[];
+}
 
 export interface EmsShippingOperationsStats {
   total_ems_records: number;
@@ -3511,6 +3597,7 @@ export interface EmsShippingOperationsStats {
   in_transit_count: number;
   delivered_count: number;
   returned_count: number;
+  return_shop_received_count?: number;
   pending_status_count: number;
   cod_in_transit_unpaid_count: number;
   cod_delivered_unpaid_count: number;
@@ -3559,6 +3646,7 @@ export interface EmsShippingTimelineItem {
   in_transit_count: number;
   delivered_count: number;
   returned_count: number;
+  return_shop_received_count?: number;
   pending_status_count: number;
   total_with_cod: number;
   cod_delivered_unpaid_count: number;

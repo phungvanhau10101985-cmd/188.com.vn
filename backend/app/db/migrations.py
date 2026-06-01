@@ -27,6 +27,8 @@ from app.models.order_shipment import (
     EmsCodSettlementRow,
     EmsFreightSettlementBatch,
     EmsFreightSettlementRow,
+    EmsShippingImportBatch,
+    EmsShippingImportBatchRow,
     EmsShippingRecord,
     OrderShipmentEvent,
 )
@@ -763,6 +765,12 @@ class MigrationManager:
         )
         results['ems_shipping_records_sync'] = self._sync_table_columns(
             "ems_shipping_records", EmsShippingRecord
+        )
+        results['ems_shipping_import_batches_create'] = self._create_table_if_not_exists(
+            "ems_shipping_import_batches", EmsShippingImportBatch
+        )
+        results['ems_shipping_import_batch_rows_create'] = self._create_table_if_not_exists(
+            "ems_shipping_import_batch_rows", EmsShippingImportBatchRow
         )
         results['ems_cod_settlement_batches_create'] = self._create_table_if_not_exists(
             "ems_cod_settlement_batches", EmsCodSettlementBatch

@@ -1,6 +1,6 @@
 # backend/app/api/endpoints/orders.py - COMPLETE ORDER API WITH DEPOSIT
 import re
-from fastapi import APIRouter, Depends, HTTPException, Query, Body, status, BackgroundTasks, Header, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, status, BackgroundTasks, Header, UploadFile, File, Form
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -32,6 +32,7 @@ from app.services import ems_tracking_refresh as ems_refresh_svc
 from app.services import ems_cod_settlement_import as cod_settlement_svc
 from app.services import ems_freight_settlement_import as freight_settlement_svc
 from app.services import shipping_operations as shipping_ops_svc
+from app.services import shop_return_confirm as shop_return_confirm_svc
 from app.schemas import order_shipment as shipment_schemas
 
 
@@ -668,6 +669,19 @@ def admin_list_ems_shipping_records(
     )
 
 
+@router.get(
+    "/admin/shipping/ems-import-batches",
+    response_model=shipment_schemas.EmsShippingImportBatchesListResponse,
+)
+def admin_list_ems_import_batches(
+    limit: int = 30,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Danh sách các lần import file gửi EMS — mở lại báo cáo từng lần."""
+    return ems_import_svc.list_ems_import_batches(db, limit=limit)
+
+
 @router.post("/admin/shipping/ems-import", response_model=shipment_schemas.EmsShippingImportResponse)
 async def admin_import_ems_shipment_excel(
     file: UploadFile = File(...),
@@ -992,6 +1006,73 @@ def admin_approve_return_received(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return order
+
+
+@router.post(
+    "/admin/shipping/shop-return-confirm",
+    response_model=shipment_schemas.ShopReturnConfirmResponse,
+)
+def admin_confirm_shop_returns_bulk(
+    body: shipment_schemas.ShopReturnConfirmRequest,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Xác nhận đơn hoàn đã trả shop — nhập / dán danh sách mã DHxxx."""
+    text = (body.text or "").strip()
+    codes = [str(c).strip() for c in (body.order_codes or []) if str(c).strip()]
+    if not text and not codes:
+        raise HTTPException(status_code=400, detail="Nhập ít nhất một mã đơn (DHxxx).")
+    try:
+        if text:
+            return shop_return_confirm_svc.confirm_shop_returns_from_text(
+                db,
+                text,
+                admin_id=current_admin.id,
+                note=body.note,
+            )
+        return shop_return_confirm_svc.confirm_shop_returns_from_text(
+            db,
+            "\n".join(codes),
+            admin_id=current_admin.id,
+            note=body.note,
+        )
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/admin/shipping/shop-return-confirm-import",
+    response_model=shipment_schemas.ShopReturnConfirmResponse,
+)
+async def admin_confirm_shop_returns_excel(
+    file: UploadFile = File(...),
+    note: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Import Excel xác nhận đơn hoàn đã trả shop — cột có mã DHxxx; mã không tồn tại báo lỗi."""
+    filename = (file.filename or "").lower()
+    if not filename.endswith((".xlsx", ".xlsm", ".xls")):
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file Excel .xls / .xlsx")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="File trống.")
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File quá lớn (tối đa 5MB).")
+
+    try:
+        return shop_return_confirm_svc.confirm_shop_returns_from_excel(
+            db,
+            raw,
+            admin_id=current_admin.id,
+            note=(note or "").strip() or None,
+            source_filename=file.filename,
+        )
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Không xử lý được file: {exc}") from exc
 
 
 @router.get(
