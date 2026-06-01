@@ -244,7 +244,16 @@ export default function AccountOrderDetailPage() {
 
   return (
     <div className="space-y-6">
-      <OrderGoogleCustomerReviews order={order} />
+      <OrderGoogleCustomerReviews
+        order={order}
+        showAfterDepositSuccess={
+          Boolean(order.requires_deposit) &&
+          (Number(order.deposit_paid || 0) > 0 ||
+            ['deposit_paid', 'confirmed', 'processing', 'shipping', 'delivered', 'completed'].includes(
+              order.status,
+            ))
+        }
+      />
       <div className="flex flex-wrap items-center gap-4">
         <h2 className="text-xl font-bold text-gray-900">Đơn #{order.order_code}</h2>
         <span className="px-2 py-1 rounded text-sm font-medium bg-gray-100 text-gray-700">

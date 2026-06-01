@@ -57,24 +57,41 @@ export default function GoogleCustomerReviewsOptIn({
       opt_in_style: 'BOTTOM_TRAY',
     };
 
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
     const invokeRender = () => {
-      if (!window.gapi?.load) return;
-      window.gapi.load('surveyoptin', function onSurveyReady() {
-        window.gapi?.surveyoptin?.render(payload);
-        renderedRef.current = true;
-        if (clearShowFlagAfterRender) {
-          clearGoogleCustomerReviewsShowFlag(order.id);
+      const attempt = (n = 0) => {
+        if (cancelled || renderedRef.current) return;
+        if (window.gapi?.load) {
+          window.gapi.load('surveyoptin', function onSurveyReady() {
+            if (cancelled || renderedRef.current) return;
+            window.gapi?.surveyoptin?.render(payload);
+            renderedRef.current = true;
+            if (clearShowFlagAfterRender) {
+              clearGoogleCustomerReviewsShowFlag(order.id);
+            }
+          });
+          return;
         }
-      });
+        if (n < 24) {
+          retryTimer = setTimeout(() => attempt(n + 1), 250);
+        }
+      };
+      attempt();
     };
 
     window.renderOptIn = invokeRender;
 
     const existing = document.querySelector('script[src*="apis.google.com/js/platform.js"]');
     if (existing) {
-      if (window.gapi) invokeRender();
-      else existing.addEventListener('load', invokeRender);
-      return () => existing.removeEventListener('load', invokeRender);
+      invokeRender();
+      if (!window.gapi) existing.addEventListener('load', invokeRender);
+      return () => {
+        cancelled = true;
+        if (retryTimer) clearTimeout(retryTimer);
+        existing.removeEventListener('load', invokeRender);
+      };
     }
 
     const script = document.createElement('script');
@@ -83,8 +100,11 @@ export default function GoogleCustomerReviewsOptIn({
     script.defer = true;
     script.addEventListener('load', invokeRender);
     document.body.appendChild(script);
+    invokeRender();
 
     return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
       script.removeEventListener('load', invokeRender);
     };
   }, [merchantId, order, clearShowFlagAfterRender]);

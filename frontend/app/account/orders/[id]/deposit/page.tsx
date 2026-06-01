@@ -29,6 +29,7 @@ import {
 } from '@/lib/google-ads-gtag';
 import OrderGoogleCustomerReviews from '@/components/OrderGoogleCustomerReviews';
 import { markGoogleCustomerReviewsForOrder } from '@/lib/google-customer-reviews';
+import { useGoogleCustomerReviewsMerchantId } from '@/lib/use-google-customer-reviews-merchant-id';
 
 const META_OD_AWAITING_LS = (orderId: number) => `meta_order_awaiting_deposit_${orderId}`;
 
@@ -150,6 +151,7 @@ export default function OrderDepositPage() {
     account_number?: string | null;
   } | null>(null);
   const { pushToast } = useToast();
+  const gcrMerchantId = useGoogleCustomerReviewsMerchantId();
   const prevStatusRef = useRef<string | null>(null);
   /** Tách ref: lần render `order` null vẫn bắn PageView; không được chặn ViewDepositPayment khi đơn load xong. */
   const depositPageViewTrackedForIdRef = useRef<number | null>(null);
@@ -578,7 +580,7 @@ export default function OrderDepositPage() {
     const statusLabel = depositSuccessStatusLabel(order);
     return (
       <div className="bg-gray-50 min-h-0 pt-0 pb-6 md:pb-8">
-        <OrderGoogleCustomerReviews order={order} />
+        <OrderGoogleCustomerReviews order={order} showAfterDepositSuccess />
         <div className="mx-auto px-3 sm:px-4 max-w-2xl">
           <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
             <div className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-4 py-5 md:px-6">
@@ -619,6 +621,15 @@ export default function OrderDepositPage() {
               <p className="text-sm text-gray-600 leading-relaxed">
                 Đội ngũ 188.com.vn sẽ xử lý đơn và liên hệ khi cần. Quý khách có thể theo dõi tiến độ trong mục chi tiết đơn hàng.
               </p>
+              {gcrMerchantId ? (
+                <div className="rounded-lg border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-950">
+                  <p className="font-medium text-sky-900">Đánh giá khách hàng qua Google (tùy chọn)</p>
+                  <p className="mt-1 text-sky-900/90 leading-relaxed">
+                    Lời mời từ Google có thể hiện ở <strong>cạnh đáy màn hình</strong> — chọn tham gia để sau khi nhận hàng
+                    Google gửi email khảo sát. Nếu không thấy, thử tắt chặn quảng cáo hoặc mở trang bằng Chrome/Safari.
+                  </p>
+                </div>
+              ) : null}
               <div className="flex flex-col sm:flex-row gap-2 pt-2">
                 <Link
                   href={`/account/orders/${order.id}`}
