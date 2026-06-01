@@ -2365,10 +2365,6 @@ def _resolve_missing_product_listing_path(
     SP không còn trong DB: DeepSeek → ``/?q=``; fallback parse URL (không quét pool 600 slug).
     """
     from app.services.legacy_oos_deepseek_keywords import deepseek_legacy_oos_search_query
-    from app.services.legacy_url_keyword_sanitize import (
-        strip_vendor_segments_from_slug,
-        strip_vendor_tokens_from_keywords,
-    )
 
     source = normalize_legacy_source_slug(source_slug or "")
     if not source:
@@ -2378,19 +2374,13 @@ def _resolve_missing_product_listing_path(
     if ai_q:
         return _home_search_listing_path(ai_q)
 
-    legacy_pool = strip_vendor_segments_from_slug(
-        extract_legacy_url_name_prefix(source) or "",
-        source,
-    )
+    legacy_pool = extract_legacy_url_name_prefix(source)
     if legacy_pool:
         short_pool = product_slug_oos_pool_prefix_fast(legacy_pool, source_slug=source)
         search_path = _oos_home_search_fallback(short_pool or legacy_pool)
         if search_path:
             return search_path
-        q = strip_vendor_tokens_from_keywords(
-            legacy_pool.replace("-", " ").strip(),
-            source,
-        )
+        q = legacy_pool.replace("-", " ").strip()
         if q:
             return _home_search_listing_path(q)
 

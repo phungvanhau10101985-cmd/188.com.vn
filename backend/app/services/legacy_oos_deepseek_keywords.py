@@ -11,21 +11,13 @@ from typing import Dict, Optional, Tuple
 import requests
 
 from app.core.config import settings
-from app.utils.vietnamese import remove_vietnamese_accents
-from app.services.legacy_url_keyword_sanitize import (
-    build_category_keywords_from_slug,
-    _looks_broken_search_query,
-    strip_material_tokens_from_keywords,
-    strip_vendor_tokens_from_keywords,
-    supplement_footwear_search_keywords,
-)
 
 logger = logging.getLogger(__name__)
 
 _LEGACY_OOS_KEYWORDS_CACHE: Dict[str, Tuple[float, str]] = {}
 _LEGACY_OOS_KEYWORDS_CACHE_TTL_SEC = 3600
 _LEGACY_OOS_KEYWORDS_CACHE_MAX = 2000
-_LEGACY_OOS_KEYWORDS_CACHE_VER = "v6-apparel-slug-parse"
+_LEGACY_OOS_KEYWORDS_CACHE_VER = "v7-raw-ai-only"
 _TIMEOUT_SEC = 30
 
 
@@ -49,25 +41,6 @@ def _sanitize_search_query(text: str) -> str:
     if len(q) > 120:
         q = q[:120].strip()
     return q
-
-
-def _finalize_search_query(query: str, legacy_path: str) -> str:
-    q = _sanitize_search_query(query)
-    if not q:
-        return ""
-    q = strip_vendor_tokens_from_keywords(q, legacy_path)
-    q = strip_material_tokens_from_keywords(q)
-    q = supplement_footwear_search_keywords(q, legacy_path)
-    slug_q = build_category_keywords_from_slug(legacy_path)
-    if slug_q and (not q or _looks_broken_search_query(q)):
-        q = slug_q
-    elif slug_q and q:
-        # Ưu tiên cụm loại SP từ slug nếu AI thiếu (vd thiếu phao/parka)
-        sq = remove_vietnamese_accents(slug_q).lower()
-        qq = remove_vietnamese_accents(q).lower()
-        if "khoac" in sq and "khoac" not in qq and "phao" not in qq:
-            q = slug_q
-    return q.strip()
 
 
 def deepseek_legacy_oos_search_query(legacy_path: str) -> Optional[str]:
@@ -120,7 +93,7 @@ def deepseek_legacy_oos_search_query(legacy_path: str) -> Optional[str]:
         )
         if resp.ok:
             content = (resp.json().get("choices") or [{}])[0].get("message", {}).get("content") or ""
-            query = _finalize_search_query(content.split("\n", 1)[0], path)
+            query = _sanitize_search_query(content.split("\n", 1)[0])
         else:
             logger.warning(
                 "legacy_oos_deepseek: HTTP %s %s",
