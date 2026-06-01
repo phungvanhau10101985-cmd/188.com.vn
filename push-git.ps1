@@ -102,10 +102,10 @@ try {
     Invoke-Git status -sb
 
     Write-Host ""
-    Write-Host "Deploy VPS (SSH tren nanoai):" -ForegroundColor Green
+    Write-Host "Deploy VPS (SSH):" -ForegroundColor Green
     Write-Host "  cd /var/www/188.com.vn && git pull origin main"
     Write-Host "  DEPLOY_SKIP_GIT=1 DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main"
-    Write-Host "  bash deploy/verify-shipping-ops-api.sh"
+    Write-Host "  (verify-shipping-ops-api.sh — chi khi debug API shipping, khong bat buoc)"
 }
 catch {
     Write-Host ""
