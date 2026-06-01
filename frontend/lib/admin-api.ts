@@ -3674,6 +3674,7 @@ export interface EmsShippingTimelineStats {
     | 'in_transit_count'
     | 'delivered_count'
     | 'returned_count'
+    | 'return_shop_received_count'
     | 'pending_status_count'
     | 'total_with_cod'
     | 'cod_delivered_unpaid_count'
