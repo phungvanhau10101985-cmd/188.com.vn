@@ -2,6 +2,7 @@
  * PDP hết hàng / không tồn tại → redirect listing nhóm (/c/..., /danh-muc/..., /?q=...).
  */
 import { getApiBaseUrl } from '@/lib/api-base';
+import { normalizeLegacyProductPath } from '@/lib/legacy-product-path';
 
 export interface ProductGroupListingRedirectResult {
   redirect_path: string | null;
@@ -18,7 +19,7 @@ export async function resolveProductGroupListingPath(
     allowCache?: boolean;
   },
 ): Promise<string | null> {
-  const key = (slug || '').trim();
+  const key = normalizeLegacyProductPath(slug);
   if (!key) return null;
 
   const apiBase =

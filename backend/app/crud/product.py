@@ -1862,14 +1862,60 @@ PRODUCT_OOS_GROUP_SLUG_POOL_CANDIDATE_LIMIT = 600
 PRODUCT_OOS_LEGACY_PATH_FALLBACK_MIN_SIMILARITY = 0.42
 
 
+def normalize_legacy_source_slug(source_slug: str) -> str:
+    """Bỏ prefix index.php (URL cũ WordPress / marketing)."""
+    s = (source_slug or "").strip().lower()
+    if not s:
+        return ""
+    if "index.php/" in s:
+        s = s.split("index.php/", 1)[-1]
+    elif s.startswith("index.php"):
+        s = re.sub(r"^index\.php/?", "", s, count=1)
+    return s.strip("/ ").strip("-")
+
+
 def is_legacy_marketing_product_path(path: str) -> bool:
     """Path một segment kiểu /moi-ma-l1249-gia-20240k-giay-da-nam-...-1156126."""
-    s = (path or "").strip().lower()
+    s = normalize_legacy_source_slug(path)
     if not s:
         return False
     if _LEGACY_MARKETING_PATH_RE.search(s):
         return True
     return "-gia-" in s and bool(re.search(r"gia-\d{2,6}k", s))
+
+
+def is_legacy_index_php_product_path(path: str) -> bool:
+    """URL cũ /index.php/vay-dam-lien-than-du-tiec-nu-1172882."""
+    s = normalize_legacy_source_slug(path)
+    if not s or is_legacy_marketing_product_path(s):
+        return False
+    return bool(re.match(r"^.+-\d{5,}$", s))
+
+
+def extract_legacy_index_php_name_prefix(source_slug: str) -> str:
+    """
+    Tách tên SP từ URL index.php: ``vay-dam-lien-than-du-tiec-nu-1172882`` →
+    ``vay-dam-lien-than-du-tiec-nu``.
+    """
+    s = normalize_legacy_source_slug(source_slug)
+    if not s or not is_legacy_index_php_product_path(s):
+        return ""
+    m = re.match(r"^(.+)-(\d{5,})$", s)
+    if not m:
+        return ""
+    prefix = (m.group(1) or "").strip("-")
+    return prefix if len(prefix) >= 6 else ""
+
+
+def extract_legacy_url_name_prefix(source_slug: str) -> str:
+    """Pool tên SP từ URL marketing (moi-ma-…) hoặc index.php (slug-id)."""
+    s = normalize_legacy_source_slug(source_slug)
+    if not s:
+        return ""
+    marketing = extract_legacy_marketing_name_prefix(s)
+    if marketing:
+        return marketing
+    return extract_legacy_index_php_name_prefix(s)
 
 
 def extract_legacy_marketing_name_prefix(source_slug: str) -> str:
@@ -1878,7 +1924,7 @@ def extract_legacy_marketing_name_prefix(source_slug: str) -> str:
     Vd: ...-giay-da-nam-gutdu-giay-dep-nam-chat-lieu-da-bo-g05-san-pham-moi-... →
     ``giay-da-nam-gutdu-giay-dep-nam-chat-lieu-da-bo``.
     """
-    s = (source_slug or "").strip().lower().strip("-")
+    s = normalize_legacy_source_slug(source_slug)
     if not s or not is_legacy_marketing_product_path(s):
         return ""
     parts = [x for x in s.split("-") if x]
@@ -1989,7 +2035,7 @@ def _iter_oos_pool_prefix_candidates(name_prefix: str, source_slug: str) -> List
 
     name = (name_prefix or "").strip("-")
     source = (source_slug or name_prefix or "").strip("-")
-    legacy_name = extract_legacy_marketing_name_prefix(source)
+    legacy_name = extract_legacy_url_name_prefix(source)
     if legacy_name:
         add(legacy_name)
 
@@ -2058,7 +2104,7 @@ def product_slug_oos_pool_prefix_fast(
     """
     name = (name_prefix or "").strip()
     source = (source_slug or name).strip()
-    legacy_name = extract_legacy_marketing_name_prefix(source)
+    legacy_name = extract_legacy_url_name_prefix(source)
     if legacy_name:
         return legacy_name
 
@@ -2434,10 +2480,10 @@ def _resolve_product_group_listing_path_uncached(
         if path:
             return path
 
-    source = (source_slug or "").strip()
+    source = normalize_legacy_source_slug(source_slug or "")
     pid = product_id or (getattr(product, "product_id", None) if product else None)
 
-    legacy_pool = extract_legacy_marketing_name_prefix(source)
+    legacy_pool = extract_legacy_url_name_prefix(source)
     if legacy_pool:
         path = _resolve_listing_via_slug_pools(
             db,
