@@ -16,7 +16,7 @@ from app.core.security import get_current_user, get_current_user_optional, requi
 from app.core.config import settings
 from app.services.email_service import (
     send_order_email,
-    send_deposit_confirmed_email_task,
+    schedule_deposit_confirmed_email,
     send_order_created_email_task,
     send_order_received_confirmed_email_task,
 )
@@ -1068,6 +1068,15 @@ def admin_update_order(
 
     new_status_val = getattr(order.status, "value", order.status)
     if update_payload.get("status") is not None and str(new_status_val) != str(old_status_val):
+        deposit_confirmed_statuses = {
+            OrderStatusEnum.DEPOSIT_PAID.value,
+            OrderStatusEnum.CONFIRMED.value,
+        }
+        if (
+            str(old_status_val) == OrderStatusEnum.WAITING_DEPOSIT.value
+            and str(new_status_val) in deposit_confirmed_statuses
+        ):
+            schedule_deposit_confirmed_email(order_id)
         recipient = order.customer_email or (order.user.email if order.user else None)
         if recipient:
             background_tasks.add_task(
@@ -1112,7 +1121,8 @@ def admin_confirm_deposit(
         order.deposit_paid_at = datetime.now()
         
         # If deposit is 100%, mark as fully paid (assign enum, not .value)
-        if order.deposit_type == DepositTypeEnum.PERCENT_100:
+        dt_val = getattr(order.deposit_type, "value", order.deposit_type)
+        if dt_val == DepositTypeEnum.PERCENT_100.value:
             order.payment_status = PaymentStatusEnum.PAID
             order.status = OrderStatusEnum.CONFIRMED
             order.confirmed_at = datetime.now()
@@ -1134,7 +1144,7 @@ def admin_confirm_deposit(
     db.refresh(order)
 
     if payment_data.is_confirmed:
-        background_tasks.add_task(send_deposit_confirmed_email_task, order_id)
+        schedule_deposit_confirmed_email(order_id)
         if commission:
             background_tasks.add_task(affiliate_svc.notify_referrer_deposit_commission_task, order_id)
 
@@ -1178,7 +1188,8 @@ def admin_confirm_deposit_manual(
     order.deposit_paid = amount_due
     order.deposit_paid_at = datetime.now()
     order.remaining_amount = (_dec(order.total_amount) - amount_due).quantize(Decimal("0.01"))
-    if order.deposit_type == DepositTypeEnum.PERCENT_100:
+    dt_val_after = getattr(order.deposit_type, "value", order.deposit_type)
+    if dt_val_after == DepositTypeEnum.PERCENT_100.value:
         order.payment_status = PaymentStatusEnum.PAID
         order.status = OrderStatusEnum.CONFIRMED
         order.confirmed_at = datetime.now()
@@ -1191,7 +1202,7 @@ def admin_confirm_deposit_manual(
         order.admin_notes = (order.admin_notes or "") + "\n[Xác nhận cọc thủ công] " + str(body.get("confirmation_note"))
     db.commit()
     db.refresh(order)
-    background_tasks.add_task(send_deposit_confirmed_email_task, order_id)
+    schedule_deposit_confirmed_email(order_id)
     if commission:
         background_tasks.add_task(affiliate_svc.notify_referrer_deposit_commission_task, order_id)
     return order

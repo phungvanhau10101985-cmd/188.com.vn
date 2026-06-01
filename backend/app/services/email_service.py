@@ -2,6 +2,8 @@ import html
 import logging
 import smtplib
 import ssl
+import threading
+import time
 from decimal import Decimal
 from email.message import EmailMessage
 from email.utils import formataddr
@@ -54,22 +56,29 @@ def _connect_smtp() -> smtplib.SMTP:
     return server
 
 
-def send_email(to_email: str, subject: str, text_body: str, html_body: Optional[str] = None) -> None:
-    if not to_email:
-        return
+def send_email(to_email: str, subject: str, text_body: str, html_body: Optional[str] = None) -> bool:
+    """Trả True nếu đã gửi SMTP; False nếu bỏ qua (cấu hình thiếu / không có người nhận)."""
+    recipient = (to_email or "").strip()
+    if not recipient:
+        logger.warning("send_email skip: empty recipient")
+        return False
     if not settings.is_smtp_configured():
-        return
+        logger.warning(
+            "send_email skip: SMTP not configured (need SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM or SENDER_EMAIL)"
+        )
+        return False
 
     from_header = _build_from_header()
     if not from_header:
-        return
+        logger.warning("send_email skip: no From address configured")
+        return False
 
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = from_header
     if settings.REPLY_TO:
         msg["Reply-To"] = settings.REPLY_TO
-    msg["To"] = to_email
+    msg["To"] = recipient
     msg.set_content(text_body)
     if html_body:
         msg.add_alternative(html_body, subtype="html")
@@ -77,6 +86,7 @@ def send_email(to_email: str, subject: str, text_body: str, html_body: Optional[
     with _connect_smtp() as server:
         server.login(settings.SMTP_USER, settings.SMTP_PASS)
         server.send_message(msg)
+    return True
 
 
 def send_account_email(to_email: str, subject: str, message: str) -> None:
@@ -716,9 +726,26 @@ def _google_customer_reviews_email_extras(
     return text_lines, html_block
 
 
+def schedule_deposit_confirmed_email(order_id: int) -> None:
+    """
+    Email «đã nhận cọc» trong thread nền — chờ commit DB (giống shipper notify).
+    Ổn định hơn BackgroundTasks khi admin xác nhận cọc thủ công / SePay.
+    """
+
+    def _run() -> None:
+        time.sleep(1.5)
+        send_deposit_confirmed_email_task(order_id)
+
+    threading.Thread(
+        target=_run,
+        name=f"deposit-confirmed-email-{order_id}",
+        daemon=True,
+    ).start()
+
+
 def send_deposit_confirmed_email_task(order_id: int) -> None:
     """
-    BackgroundTasks: email khách (đơn + tài khoản), email cảnh báo shop, thông báo in-app.
+    Email khách (đơn + tài khoản), email cảnh báo shop, thông báo in-app.
     """
     from sqlalchemy.orm import joinedload
 
@@ -741,6 +768,18 @@ def send_deposit_confirmed_email_task(order_id: int) -> None:
         st = getattr(order.status, "value", order.status)
         if st not in (OrderStatus.DEPOSIT_PAID.value, OrderStatus.CONFIRMED.value):
             logger.info("deposit_notification skip: wrong status order_id=%s status=%s", order_id, st)
+            return
+
+        paid_amt = order.deposit_paid or 0
+        try:
+            paid_ok = Decimal(str(paid_amt)) > 0
+        except Exception:
+            paid_ok = False
+        if order.requires_deposit and not paid_ok:
+            logger.info(
+                "deposit_confirmed_email skip: requires_deposit but deposit_paid=0 order_id=%s",
+                order_id,
+            )
             return
 
         name = (order.customer_name or "Quý khách").strip()
@@ -819,12 +858,19 @@ def send_deposit_confirmed_email_task(order_id: int) -> None:
 
         if customer_to:
             try:
-                send_email(customer_to, subject, text_body, html_body)
-                logger.info("deposit_confirmed_email sent order_id=%s to=%s", order_id, customer_to)
+                sent = send_email(customer_to, subject, text_body, html_body)
+                if sent:
+                    logger.info("deposit_confirmed_email sent order_id=%s to=%s", order_id, customer_to)
+                else:
+                    logger.warning(
+                        "deposit_confirmed_email not sent (SMTP/from) order_id=%s to=%s",
+                        order_id,
+                        customer_to,
+                    )
             except Exception:
                 logger.exception("deposit_confirmed_email failed order_id=%s to=%s", order_id, customer_to)
         else:
-            logger.info(
+            logger.warning(
                 "deposit_confirmed_email skip: no customer_email or user.email order_id=%s",
                 order_id,
             )

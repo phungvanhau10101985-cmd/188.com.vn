@@ -412,7 +412,10 @@ export default function AdminOrdersPage() {
     if (!selectedOrder) return;
     try {
       await adminOrderAPI.confirmDepositManual(selectedOrder.id, { confirmation_note: paymentNote || undefined });
-      showToast('ok', 'Đã xác nhận cọc');
+      showToast(
+        'ok',
+        'Đã xác nhận cọc. Email «Đã nhận cọc» sẽ gửi tới email trên đơn (cần SMTP server bật).',
+      );
       setPaymentOpen(false);
       setSelectedOrder(null);
       setOrderPayments([]);
