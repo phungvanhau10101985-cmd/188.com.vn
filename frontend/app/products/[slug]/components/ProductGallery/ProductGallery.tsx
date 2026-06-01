@@ -10,8 +10,8 @@ import { reportUnreachableProductMedia } from '@/lib/report-broken-product-media
 import { ProductFillImage, GalleryThumbImage } from '@/components/product-detail/HideOnImageError';
 import { hasVideoLink, parseVideoLink, buildYoutubeEmbedSrc } from '@/lib/video-utils';
 
-/** Số thumbnail hiển thị khi thu gọn — phần còn lại gộp nút «+N». */
-const COLLAPSED_THUMB_COUNT = 5;
+/** Số ô thumbnail khi thu gọn (tối đa 7); ô thứ 8 là «+N» nếu còn ảnh/video. */
+const COLLAPSED_THUMB_COUNT = 7;
 
 interface ProductGalleryProps {
   product: Product;

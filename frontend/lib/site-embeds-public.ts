@@ -19,6 +19,8 @@ export type PublicSiteEmbeds = {
   googleAdsWebConversions?: GoogleAdsWebConversionsPublic;
   /** true khi chỉ có trường cũ `google_ads_pdp_conversion_send_to` — chỉ ép PDP từ admin, các bước khác vẫn dùng NEXT_PUBLIC_* */
   googleAdsWebConversionsLegacyPdpOnly?: boolean;
+  /** Merchant Center ID — Google Customer Reviews opt-in; null/undefined = tắt. */
+  googleCustomerReviewsMerchantId?: number | null;
 };
 
 const empty: PublicSiteEmbeds = { head: [], body_open: [], body_close: [] };
@@ -63,6 +65,14 @@ export async function fetchPublicSiteEmbeds(): Promise<PublicSiteEmbeds> {
       googleAdsWebConversionsLegacyPdpOnly = true;
     }
 
+    const gcrRaw = data.google_customer_reviews_merchant_id;
+    const gcrParsed =
+      typeof gcrRaw === 'number'
+        ? gcrRaw
+        : Number.parseInt(String(gcrRaw ?? ''), 10);
+    const googleCustomerReviewsMerchantId =
+      Number.isFinite(gcrParsed) && gcrParsed > 0 ? gcrParsed : null;
+
     return {
       head: Array.isArray(data.head) ? data.head.filter(Boolean) : [],
       body_open: Array.isArray(data.body_open) ? data.body_open.filter(Boolean) : [],
@@ -70,6 +80,7 @@ export async function fetchPublicSiteEmbeds(): Promise<PublicSiteEmbeds> {
       ...(googleAdsAwIds !== undefined ? { googleAdsAwIds } : {}),
       ...(googleAdsWebConversions !== undefined ? { googleAdsWebConversions } : {}),
       ...(googleAdsWebConversionsLegacyPdpOnly ? { googleAdsWebConversionsLegacyPdpOnly: true } : {}),
+      ...(googleCustomerReviewsMerchantId != null ? { googleCustomerReviewsMerchantId } : {}),
     };
   } catch {
     return empty;

@@ -117,6 +117,14 @@ _DEFAULT_ROWS: tuple = (
         "Merchant Center → Xác minh URL website: chọn Thẻ HTML — chỉ dán chuỗi trong thuộc tính content (hoặc dán full meta).",
         42,
     ),
+    (
+        "google",
+        "customer_reviews",
+        "Google — Đánh giá khách hàng (huy hiệu + opt-in sau đơn)",
+        "body_close",
+        "Chỉ nhập Merchant ID (số, vd 5672138097). Huy hiệu điểm người bán + khảo sát sau đơn — tắt bằng is_active.",
+        43,
+    ),
     ("google", "other", "Google — mã khác (AdSense,...)", "head", "Chỉ dán full HTML/script nếu không thuộc các mục trên.", 50),
     ("facebook", "pixel", "Meta Pixel — Remarketing động / Advantage+ catalogue", "head", "Chỉ nhập Pixel ID (số): dùng chung cho chuyển đổi, tiếp thị động, đối tượng tùy chỉnh.", 60),
     ("facebook", "capi_token", "Meta — Conversion API — Access Token (server)", "head", "Chỉ dán token từ Events Manager → Cài đặt → Conversion API. Không hiện trên web; dùng cho API máy chủ.", 59),
@@ -383,3 +391,27 @@ def get_google_ads_web_conversions(db: Session) -> GoogleAdsWebConversions:
         deposit_page=_get_active_conversion_send_to_for_category(db, "ads_conversion_deposit_page"),
         purchase=_get_active_conversion_send_to_for_category(db, "ads_conversion_purchase"),
     )
+
+
+def get_google_customer_reviews_merchant_id(db: Session) -> Optional[int]:
+    """Merchant Center ID — huy hiệu đánh giá + opt-in sau đơn (google/customer_reviews)."""
+    row = (
+        db.query(SiteEmbedCode)
+        .filter(
+            SiteEmbedCode.is_active.is_(True),
+            SiteEmbedCode.platform == "google",
+            SiteEmbedCode.category == "customer_reviews",
+        )
+        .order_by(SiteEmbedCode.sort_order.asc(), SiteEmbedCode.id.asc())
+        .first()
+    )
+    if not row:
+        return None
+    raw = (row.content or "").strip()
+    digits = re.sub(r"\D", "", raw)
+    if not digits:
+        return None
+    try:
+        return int(digits)
+    except ValueError:
+        return None

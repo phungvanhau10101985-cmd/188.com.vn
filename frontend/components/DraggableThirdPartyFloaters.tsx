@@ -17,6 +17,7 @@ type DragState = { x: number; y: number; storageKey: string };
 const dragStates = new WeakMap<HTMLElement, DragState>();
 
 function skipElement(el: HTMLElement): boolean {
+  if (el.closest('#google-merchantwidget-iframe-wrapper, #merchantwidgetiframe')) return true;
   if (el.closest('[data-188-video-fab]')) return true;
   if (el.closest('[data-188-skip-draggable]')) return true;
   if (el.dataset.draggable188Attached === '1') return true;

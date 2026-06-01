@@ -12,6 +12,7 @@ import { pushOrderReceivedConfirmedToast } from '@/app/account/orders/components
 import { getOptimizedImage } from '@/lib/image-utils';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
+import OrderGoogleCustomerReviews from '@/components/OrderGoogleCustomerReviews';
 
 interface OrderItem {
   id: number;
@@ -29,8 +30,10 @@ interface Order {
   order_code: string;
   customer_name: string;
   customer_phone?: string;
+  customer_email?: string;
   total_amount: number;
   status: string;
+  estimated_delivery?: string | null;
   payment_status?: string;
   requires_deposit?: boolean;
   deposit_type?: string;
@@ -239,6 +242,7 @@ export default function AccountOrderDetailPage() {
 
   return (
     <div className="space-y-6">
+      <OrderGoogleCustomerReviews order={order} />
       <div className="flex flex-wrap items-center gap-4">
         <h2 className="text-xl font-bold text-gray-900">Đơn #{order.order_code}</h2>
         <span className="px-2 py-1 rounded text-sm font-medium bg-gray-100 text-gray-700">

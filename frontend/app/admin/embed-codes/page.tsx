@@ -42,6 +42,8 @@ const ID_HINT: Record<string, Record<string, string>> = {
       'Chỉ nhập chuỗi xác minh của Google Search Console — hoặc bật "Dán full HTML/meta" nếu dán cả thẻ.',
     merchant_center:
       'Merchant Center (xác minh website): trong Cài đặt chương trình / Xác minh URL, chọn Thẻ HTML — chỉ dán mã trong thuộc tính content (hoặc dán cả thẻ <meta> rồi bật chế độ full HTML).',
+    customer_reviews:
+      'Đánh giá khách hàng qua Google: chỉ nhập Merchant ID (vd 5672138097). Bật huy hiệu điểm người bán (góc phải) + khảo sát opt-in sau đơn — tắt bằng «Tắt» hoặc xóa mã.',
   },
   facebook: {
     pixel:
@@ -123,6 +125,7 @@ function classifyField(platform: string, category: string, contentSnap: string, 
       'ads_conversion_purchase',
       'search_console',
       'merchant_center',
+      'customer_reviews',
     ],
     facebook: ['pixel', 'domain', 'chat'],
     tiktok: ['pixel'],

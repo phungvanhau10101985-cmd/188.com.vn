@@ -52,6 +52,8 @@ class PublicSiteEmbedsResponse(BaseModel):
     #: Chỉ từ mã nhúng admin (google/ads đang bật) — frontend dùng làm đích duy nhất cho gtag send_to.
     google_ads_aw_ids: List[str] = Field(default_factory=list)
     google_ads_web_conversions: GoogleAdsWebConversions = Field(default_factory=GoogleAdsWebConversions)
+    #: Merchant Center ID — Đánh giá khách hàng qua Google (opt-in trang xác nhận đơn). None = tắt.
+    google_customer_reviews_merchant_id: Optional[int] = None
 
 
 class SiteEmbedCodeAdminItem(BaseModel):

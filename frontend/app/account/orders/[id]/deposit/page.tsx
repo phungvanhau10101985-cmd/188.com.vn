@@ -27,13 +27,18 @@ import {
   trackGoogleAdsPurchase,
   peekGoogleAdsConversionSendTo,
 } from '@/lib/google-ads-gtag';
+import OrderGoogleCustomerReviews from '@/components/OrderGoogleCustomerReviews';
+import { markGoogleCustomerReviewsForOrder } from '@/lib/google-customer-reviews';
 
 const META_OD_AWAITING_LS = (orderId: number) => `meta_order_awaiting_deposit_${orderId}`;
 
 interface Order {
   id: number;
   order_code: string;
+  customer_email?: string;
   customer_phone?: string;
+  created_at?: string;
+  estimated_delivery?: string | null;
   deposit_amount?: number | string;
   deposit_paid?: number | string;
   remaining_amount?: number | string;
@@ -423,6 +428,7 @@ export default function OrderDepositPage() {
     const landedAlreadyPaid = nowDone && (prev === null || prev === '');
 
     if (wasWaiting && nowDone) {
+      markGoogleCustomerReviewsForOrder(order.id);
       pushToast({
         title: 'Đã xác nhận thanh toán cọc',
         description: 'Cảm ơn quý khách. Email xác nhận đã được gửi tới hộp thư của bạn (nếu có).',
@@ -569,6 +575,7 @@ export default function OrderDepositPage() {
     const statusLabel = depositSuccessStatusLabel(order);
     return (
       <div className="bg-gray-50 min-h-0 pt-0 pb-6 md:pb-8">
+        <OrderGoogleCustomerReviews order={order} />
         <div className="mx-auto px-3 sm:px-4 max-w-2xl">
           <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
             <div className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-4 py-5 md:px-6">
@@ -643,6 +650,7 @@ export default function OrderDepositPage() {
 
   return (
     <>
+      <OrderGoogleCustomerReviews order={order} />
     <div className="bg-gray-50 min-h-0 pt-0 pb-3 md:pb-4">
       <div className="mx-auto px-0 sm:px-1 max-w-5xl">
         <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">

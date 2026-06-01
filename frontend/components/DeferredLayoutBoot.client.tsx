@@ -10,6 +10,10 @@ const NanoAiMobileLauncherAdjust = dynamic(
   () => import('@/components/NanoAiMobileLauncherAdjust'),
   { ssr: false }
 );
+const GoogleCustomerReviewsBadge = dynamic(
+  () => import('@/components/GoogleCustomerReviewsBadge'),
+  { ssr: false }
+);
 
 /** Widget nền — tải sau hydrate, không chặn LCP. */
 export function DeferredLayoutFloaters() {
@@ -17,6 +21,7 @@ export function DeferredLayoutFloaters() {
     <>
       <DraggableThirdPartyFloaters />
       <NanoAiMobileLauncherAdjust />
+      <GoogleCustomerReviewsBadge />
     </>
   );
 }

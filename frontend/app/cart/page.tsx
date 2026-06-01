@@ -20,6 +20,7 @@ import {
   peekGoogleAdsConversionsFingerprint,
 } from '@/lib/google-ads-gtag';
 import { shouldRedirectToDepositAfterCreate } from '@/lib/order-deposit';
+import { markGoogleCustomerReviewsForOrder } from '@/lib/google-customer-reviews';
 import { buildAuthLoginHrefFromFullPath } from '@/lib/auth-redirect';
 import { isClientAuthLikelyLoggedIn, probeCookieAuthSession } from '@/lib/client-auth-session';
 import type { CartLineRef } from '@/features/cart/types/cart';
@@ -628,6 +629,7 @@ export default function CartPage() {
           product_ids: linesToOrder.map((i) => i.product_id),
         });
       }
+      markGoogleCustomerReviewsForOrder(order.id);
       router.push(redirectDeposit ? `/account/orders/${order.id}/deposit` : `/account/orders/${order.id}`);
     } catch (err: unknown) {
       const message = (err as Error)?.message || 'Đặt hàng thất bại';

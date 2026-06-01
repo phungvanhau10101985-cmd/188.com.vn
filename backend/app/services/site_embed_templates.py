@@ -330,6 +330,9 @@ def expand_row(row: SiteEmbedCode) -> List[PlacementHtml]:
             return expand_google_site_verification(raw)
         if cat == "merchant_center":
             return expand_google_merchant_center_verification(raw)
+        if cat == "customer_reviews":
+            # Huy hiệu + opt-in động — `GoogleCustomerReviewsBadge` / `GoogleCustomerReviewsOptIn`.
+            return []
         # other: chỉ nhận literal HTML (đã xử lý ở trên); không thì bỏ qua token thuần
         return []
 
