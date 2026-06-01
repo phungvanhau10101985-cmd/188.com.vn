@@ -242,6 +242,9 @@ health_check_local() {
     sleep 1
   done
   echo "    GET http://127.0.0.1:${API_INTERNAL_PORT}/health  → ${api_code}"
+  local ship_stats_code
+  ship_stats_code=$(curl_http_code "http://127.0.0.1:${API_INTERNAL_PORT}/api/v1/orders/admin/shipping/operations-stats")
+  echo "    GET .../orders/admin/shipping/operations-stats → ${ship_stats_code} (401/403=OK, 404=cần pull+restart API)"
   echo "    GET http://127.0.0.1:${WEB_INTERNAL_PORT}/           → ${web_code}"
   if [[ "${api_code}" == "200" && "${web_code}" == "200" ]]; then
     echo "✅ Sức khỏe: OK."

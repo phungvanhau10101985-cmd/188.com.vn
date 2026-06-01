@@ -215,7 +215,9 @@ async function fetchAdmin<T>(
                 ADMIN_SOURCE_STOCK_SCAN_TIMEOUT_MS / 60000,
               )} phút cho route API /products/ hoặc thử lại. `
           : res.status === 404
-            ? `[404 ${url}] `
+            ? endpoint.includes('/orders/admin/shipping/operations-stats')
+              ? `[404 ${url}] API chưa có endpoint thống kê vận hành — trên VPS chạy: git pull origin main && pm2 restart 188-api (chỉ build web không đủ). `
+              : `[404 ${url}] `
             : '';
       throw new Error(statusHint + msg);
     }
@@ -3432,7 +3434,6 @@ export const adminShippingAPI = {
 
   getTimelineStats: async (params: EmsShippingTimelineParams = {}) => {
     const qs = new URLSearchParams();
-    qs.set('view', 'timeline');
     if (params.granularity) qs.set('granularity', params.granularity);
     if (params.limit != null) qs.set('limit', String(params.limit));
     if (params.date_from) qs.set('date_from', params.date_from);
@@ -3440,7 +3441,7 @@ export const adminShippingAPI = {
     if (params.preset) qs.set('preset', params.preset);
     if (params.year != null) qs.set('year', String(params.year));
     const data = await fetchAdmin<EmsShippingTimelineStats>(
-      `/orders/admin/shipping/operations-stats?${qs.toString()}`,
+      `/orders/admin/shipping/operations-stats/timeline?${qs.toString()}`,
     );
     if (!Array.isArray(data.items) || typeof data.granularity !== 'string') {
       throw new Error(

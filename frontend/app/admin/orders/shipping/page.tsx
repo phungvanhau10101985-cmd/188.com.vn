@@ -794,6 +794,7 @@ export default function AdminShippingPage() {
   const [selectedEmsImportBatchId, setSelectedEmsImportBatchId] = useState<number | null>(null);
   const [opsStats, setOpsStats] = useState<EmsShippingOperationsStats | null>(null);
   const [opsStatsLoading, setOpsStatsLoading] = useState(true);
+  const [opsStatsError, setOpsStatsError] = useState<string | null>(null);
   const [timelineGranularity, setTimelineGranularity] = useState<EmsShippingTimelineGranularity>('month');
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilterState>(EMPTY_TIMELINE_FILTER);
   const [timelineMonthPick, setTimelineMonthPick] = useState('');
@@ -923,25 +924,37 @@ export default function AdminShippingPage() {
     if (!silent) {
       setOpsStatsLoading(true);
       setTimelineLoading(true);
+      setOpsStatsError(null);
       setTimelineError(null);
     }
-    try {
-      const [ops, timeline] = await Promise.all([
-        adminShippingAPI.getOperationsStats(),
-        adminShippingAPI.getTimelineStats(buildTimelineApiParams(timelineGranularity, timelineFilter)),
-      ]);
-      setOpsStats(ops);
-      setTimelineStats(timeline);
-    } catch (err) {
-      if (!silent) {
-        setOpsStats(null);
-        setTimelineError(err instanceof Error ? err.message : 'Không tải được thống kê theo thời gian');
-      }
-    } finally {
-      if (!silent) {
-        setOpsStatsLoading(false);
-        setTimelineLoading(false);
-      }
+    const timelineParams = buildTimelineApiParams(timelineGranularity, timelineFilter);
+    const [opsResult, timelineResult] = await Promise.allSettled([
+      adminShippingAPI.getOperationsStats(),
+      adminShippingAPI.getTimelineStats(timelineParams),
+    ]);
+    if (opsResult.status === 'fulfilled') {
+      setOpsStats(opsResult.value);
+      if (!silent) setOpsStatsError(null);
+    } else if (!silent) {
+      setOpsStats(null);
+      setOpsStatsError(
+        opsResult.reason instanceof Error ? opsResult.reason.message : 'Không tải được tổng quan vận hành',
+      );
+    }
+    if (timelineResult.status === 'fulfilled') {
+      setTimelineStats(timelineResult.value);
+      if (!silent) setTimelineError(null);
+    } else if (!silent) {
+      setTimelineStats(null);
+      setTimelineError(
+        timelineResult.reason instanceof Error
+          ? timelineResult.reason.message
+          : 'Không tải được thống kê theo thời gian',
+      );
+    }
+    if (!silent) {
+      setOpsStatsLoading(false);
+      setTimelineLoading(false);
     }
   }, [timelineFilter, timelineGranularity]);
 
@@ -2239,7 +2252,7 @@ export default function AdminShippingPage() {
               COD EMS trả shop = chỉ khi import file đối soát COD
             </p>
           </div>
-        ) : (
+        ) : timelineError ? null : (
           <p className="text-sm text-gray-500 py-4 text-center">
             {timelineStats?.filter_label
               ? 'Không có vận đơn nào trong khoảng thời gian đã chọn.'
