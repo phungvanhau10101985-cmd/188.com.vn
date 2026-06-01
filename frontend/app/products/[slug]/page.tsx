@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation';
-import { getProductBySlugForSSR } from '@/lib/product-seo';
-import { resolveProductGroupListingPath } from '@/lib/product-oos-redirect';
+import {
+  loadProductForOosPage,
+  resolveOosListingPathForSlug,
+} from '@/lib/product-oos-page';
 import ProductDetailClient from './ProductDetailClient';
 import ErrorState from './components/ErrorState/ErrorState';
 
@@ -8,10 +10,10 @@ type Props = { params: Promise<{ slug: string }> };
 
 export default async function ProductDetailPage({ params }: Props) {
   const { slug } = await params;
-  const product = await getProductBySlugForSSR(slug);
+  const product = await loadProductForOosPage(slug);
 
   const redirectOosGroupIfAny = async () => {
-    const listingPath = await resolveProductGroupListingPath(slug);
+    const listingPath = await resolveOosListingPathForSlug(slug, product);
     if (listingPath) {
       redirect(listingPath);
     }

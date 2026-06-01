@@ -1,10 +1,10 @@
 import { redirect } from 'next/navigation';
 import ErrorState from '@/app/products/[slug]/components/ErrorState/ErrorState';
-import { resolveProductGroupListingPath } from '@/lib/product-oos-redirect';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import { resolveOosListingPathForSlug } from '@/lib/product-oos-page';
 import {
   canonicalProductPathFromProduct,
-  resolveProductFromLegacyPath,
+  resolveLegacyProductAndListingPath,
 } from '@/lib/legacy-product-path';
 
 type Props = {
@@ -23,13 +23,21 @@ export default async function LegacyMarketingProductPage({ params }: Props) {
     redirect('/');
   }
 
-  const product = await resolveProductFromLegacyPath(legacySlug);
+  const { product, listingPath: prefetchedListingPath } =
+    await resolveLegacyProductAndListingPath(legacySlug);
   const canonicalPath = product ? canonicalProductPathFromProduct(product) : null;
 
-  const redirectOosGroupIfAny = async (oosSourceSlug: string, legacyMarketing = true) => {
-    const listingPath = await resolveProductGroupListingPath(oosSourceSlug, {
-      legacyMarketingPath: legacyMarketing,
-    });
+  const redirectOosGroupIfAny = async (
+    oosSourceSlug: string,
+    productForEmbed?: typeof product,
+    legacyMarketing = true,
+    prefetched?: string | null,
+  ) => {
+    const listingPath =
+      prefetched ||
+      (await resolveOosListingPathForSlug(oosSourceSlug, productForEmbed, {
+        legacyMarketingPath: legacyMarketing,
+      }));
     if (listingPath) {
       redirect(listingPath);
     }
@@ -39,11 +47,11 @@ export default async function LegacyMarketingProductPage({ params }: Props) {
     const oosSource =
       productPathSlugFromApi(product.slug, product.product_id) || legacySlug;
     if ((product.available ?? 0) <= 0) {
-      await redirectOosGroupIfAny(oosSource, false);
+      await redirectOosGroupIfAny(oosSource, product, false, prefetchedListingPath);
     }
     redirect(canonicalPath);
   }
 
-  await redirectOosGroupIfAny(legacySlug, true);
+  await redirectOosGroupIfAny(legacySlug, null, true, prefetchedListingPath);
   return <ErrorState error="Không tìm thấy sản phẩm" slug={legacySlug} />;
 }

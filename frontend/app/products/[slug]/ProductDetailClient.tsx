@@ -120,8 +120,13 @@ export default function ProductDetailClient({
   /** PDP hết hàng → listing nhóm (khớp SSR page.tsx). */
   useEffect(() => {
     if ((product.available ?? 0) > 0 || !slug) return;
+    const embedded = (product.group_listing_path || '').trim();
+    if (embedded) {
+      router.replace(embedded);
+      return;
+    }
     let cancelled = false;
-    resolveProductGroupListingPath(slug).then((listingPath) => {
+    resolveProductGroupListingPath(slug, { allowCache: true }).then((listingPath) => {
       if (cancelled || !listingPath) return;
       router.replace(listingPath);
     });

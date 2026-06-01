@@ -131,13 +131,30 @@ def _serialize_products_for_api(db: Session, raw_products: List, user: Optional[
     return [entry[1] for entry in paired]
 
 
-def _product_to_response(db: Session, db_product, user: Optional[User] = None) -> Product:
+def _product_to_response(
+    db: Session,
+    db_product,
+    user: Optional[User] = None,
+    *,
+    attach_group_listing: bool = False,
+) -> Product:
     from app.services import sale_calendar as sale_calendar_svc
+    from app.utils.public_product_url import slug_path_segment_from_input
 
     d = Product.model_validate(db_product).model_dump()
     sale_state = sale_calendar_svc.resolve_sale_calendar_state(db, user=user)
     sale_calendar_svc.enrich_product_payload_with_site_sale(d, sale_state)
     enrich_product_payloads_with_category_size_guide(db, [db_product], [d])
+    if attach_group_listing and int(d.get("available") or 0) <= 0:
+        src = slug_path_segment_from_input(getattr(db_product, "slug", None)) or (
+            (getattr(db_product, "slug", None) or "").strip()
+        )
+        d["group_listing_path"] = crud.product.resolve_product_group_listing_path(
+            db,
+            source_slug=src,
+            product=db_product,
+            product_id=getattr(db_product, "product_id", None),
+        )
     return Product(**d)
 
 
@@ -772,8 +789,29 @@ def create_product(
     return _product_to_response(db, created)
 
 
+@router.get("/group-listing-path", response_model=dict)
+def read_product_group_listing_path(
+    response: Response,
+    slug: str = Query(..., min_length=3, description="Slug PDP / URL marketing"),
+    db: Session = Depends(get_db),
+):
+    """API nhẹ: chỉ trả đường dẫn listing nhóm (cache HTTP 10 phút)."""
+    response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=120"
+    source = (slug or "").strip()
+    current = crud.product.get_product_by_slug(db, slug=source)
+    pid = getattr(current, "product_id", None) if current else None
+    path = crud.product.resolve_product_group_listing_path(
+        db,
+        source_slug=source,
+        product=current,
+        product_id=pid,
+    )
+    return {"redirect_path": path, "redirect_type": "group_listing"}
+
+
 @router.get("/oos-group-redirect", response_model=dict)
 def read_product_oos_group_redirect(
+    response: Response,
     slug: str = Query(..., min_length=3, description="Slug PDP / URL marketing đang mở"),
     min_similarity: float = Query(
         0.8,
@@ -791,6 +829,7 @@ def read_product_oos_group_redirect(
     Hết hàng / không có SP: trả ``redirect_path`` tới listing nhóm (/c/..., /danh-muc/..., /?q=...),
     không gợi ý PDP sản phẩm khác.
     """
+    response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=120"
     source = (slug or "").strip()
     current = crud.product.get_product_by_slug(db, slug=source)
     pid = getattr(current, "product_id", None) if current else None
@@ -890,6 +929,10 @@ def read_product_by_slug(
 @router.get("/by-slug/", response_model=Product)
 def read_product_by_slug_query(
     slug: str = Query(..., description="Product slug"),
+    attach_group_listing: bool = Query(
+        False,
+        description="Khi SP hết hàng, kèm group_listing_path để redirect 1 round-trip",
+    ),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
@@ -901,7 +944,12 @@ def read_product_by_slug_query(
     db_product = crud.product.get_product_by_slug(db, slug=slug)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(db, db_product, user=current_user)
+    return _product_to_response(
+        db,
+        db_product,
+        user=current_user,
+        attach_group_listing=attach_group_listing,
+    )
 
 @router.get("/by-code/{product_code}", response_model=Product)
 def read_product_by_code(
@@ -920,6 +968,7 @@ def read_product_by_code(
 @router.get("/by-id/{id}", response_model=Product)
 def read_product_by_id(
     id: int,
+    attach_group_listing: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
@@ -929,7 +978,12 @@ def read_product_by_id(
     db_product = crud.product.get_product(db, product_id=id)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(db, db_product, user=current_user)
+    return _product_to_response(
+        db,
+        db_product,
+        user=current_user,
+        attach_group_listing=attach_group_listing,
+    )
 
 
 @router.post("/by-id/{id}/source-stock-check/enqueue", response_model=dict)

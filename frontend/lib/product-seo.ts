@@ -63,12 +63,26 @@ export async function getProductBySlugForSeo(
   }
 }
 
+export type ProductSSRLoadOptions = {
+  /** PDP OOS: không cache để redirect kịp thời */
+  noStore?: boolean;
+  /** Một request: kèm group_listing_path khi hết hàng */
+  attachGroupListing?: boolean;
+};
+
 /** Server-side: lấy full product theo slug (cho SSR trang chi tiết). */
-export async function getProductBySlugForSSR(slug: string): Promise<Product | null> {
+export async function getProductBySlugForSSR(
+  slug: string,
+  options?: ProductSSRLoadOptions,
+): Promise<Product | null> {
   try {
-    const url = `${API_BASE}/products/by-slug/?slug=${encodeURIComponent(slug)}`;
+    const params = new URLSearchParams({ slug });
+    if (options?.attachGroupListing) {
+      params.set("attach_group_listing", "true");
+    }
+    const url = `${API_BASE}/products/by-slug/?${params}`;
     const res = await fetch(url, {
-      next: { revalidate: 60 },
+      ...(options?.noStore ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
       headers: { "Content-Type": "application/json" },
     });
     if (!res.ok) {

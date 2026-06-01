@@ -49,6 +49,8 @@ export interface Product {
   
   main_image?: string;
   available?: number;
+  /** Listing nhóm khi hết hàng (API attach_group_listing) */
+  group_listing_path?: string;
   product_description?: string; // Giữ lại cho tương thích ngược
   origin?: string;
   brand_name?: string;

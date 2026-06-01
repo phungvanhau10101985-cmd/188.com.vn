@@ -12,7 +12,7 @@ interface ErrorStateProps {
   slug?: string;
 }
 
-const REDIRECT_DELAY_MS = 2000;
+const HOME_FALLBACK_DELAY_MS = 1200;
 
 export default function ErrorState({ error, slug }: ErrorStateProps) {
   const router = useRouter();
@@ -24,7 +24,7 @@ export default function ErrorState({ error, slug }: ErrorStateProps) {
     const scheduleHome = () => {
       homeTimer = setTimeout(() => {
         if (!cancelled) router.replace('/');
-      }, REDIRECT_DELAY_MS);
+      }, HOME_FALLBACK_DELAY_MS);
     };
 
     const key = (slug || '').trim();
@@ -36,7 +36,7 @@ export default function ErrorState({ error, slug }: ErrorStateProps) {
       };
     }
 
-    resolveProductGroupListingPath(key)
+    resolveProductGroupListingPath(key, { allowCache: true })
       .then((listingPath) => {
         if (cancelled) return;
         if (listingPath) {

@@ -5,6 +5,7 @@
 import type { Product } from '@/types/api';
 import { getApiBaseUrl } from '@/lib/api-base';
 import { getProductBySlugForSSR, getProductBySkuForSSR } from '@/lib/product-seo';
+import { resolveProductGroupListingPath } from '@/lib/product-oos-redirect';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 
 /** Số cuối path (vd …-1164016) — thường là products.id hoặc mã nội bộ. */
@@ -15,14 +16,18 @@ export function extractTrailingNumericId(path: string): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-export async function getProductByDbIdForSSR(dbId: number): Promise<Product | null> {
+export async function getProductByDbIdForSSR(
+  dbId: number,
+  options?: { attachGroupListing?: boolean },
+): Promise<Product | null> {
   if (!Number.isFinite(dbId) || dbId <= 0) return null;
   const apiBase =
     typeof window === 'undefined'
       ? getApiBaseUrl()
       : process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1';
   try {
-    const res = await fetch(`${apiBase}/products/by-id/${dbId}`, {
+    const q = options?.attachGroupListing ? '?attach_group_listing=true' : '';
+    const res = await fetch(`${apiBase}/products/by-id/${dbId}${q}`, {
       cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -53,6 +58,19 @@ export async function resolveProductFromLegacyPath(path: string): Promise<Produc
   }
 
   return null;
+}
+
+/** Tra SP + đường dẫn listing song song (SSR legacy URL). */
+export async function resolveLegacyProductAndListingPath(path: string): Promise<{
+  product: Product | null;
+  listingPath: string | null;
+}> {
+  const key = (path || '').trim();
+  const [product, listingPath] = await Promise.all([
+    resolveProductFromLegacyPath(key),
+    resolveProductGroupListingPath(key, { legacyMarketingPath: true }),
+  ]);
+  return { product, listingPath };
 }
 
 /** Segment /products/ chuẩn để redirect. */

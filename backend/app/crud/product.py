@@ -1864,6 +1864,11 @@ _OOS_POOL_HINT_MARKERS: Tuple[str, ...] = (
 )
 MIN_OOS_POOL_PRODUCT_COUNT = 3
 
+# Cache đường dẫn listing nhóm (slug/SP) — giảm latency redirect OOS.
+_OOS_GROUP_LISTING_PATH_CACHE: Dict[str, Tuple[float, str]] = {}
+_OOS_GROUP_LISTING_CACHE_TTL_SEC = 600
+_OOS_GROUP_LISTING_CACHE_MAX = 2500
+
 
 def _count_active_products_with_slug_prefix(db: Session, prefix: str) -> int:
     p = (prefix or "").strip().lower()
@@ -1948,6 +1953,44 @@ def product_slug_oos_search_pool_prefix(
     return best_prefix
 
 
+def product_slug_oos_pool_prefix_fast(
+    name_prefix: str,
+    *,
+    source_slug: Optional[str] = None,
+) -> str:
+    """
+    Pool prefix cho redirect listing — không COUNT DB từng ứng viên (nhanh hơn ``product_slug_oos_search_pool_prefix``).
+    """
+    name = (name_prefix or "").strip()
+    source = (source_slug or name).strip()
+    haystack = f"{source} {name}".lower()
+    for marker in _OOS_POOL_HINT_MARKERS:
+        if marker in haystack:
+            return marker
+
+    marketing_noise = ("moi-ma", "gia-", "sale-", "hot-", "new-")
+    for cand in sorted(
+        _iter_oos_pool_prefix_candidates(name, source),
+        key=len,
+        reverse=True,
+    ):
+        if len(cand) < 6:
+            continue
+        if any(cand.startswith(p) for p in marketing_noise):
+            continue
+        return cand
+
+    for cand in _iter_oos_pool_prefix_candidates(name, source):
+        if len(cand) >= 6:
+            return cand
+    name_parts = [x for x in name.split("-") if x]
+    if len(name_parts) >= PRODUCT_OOS_GROUP_SLUG_POOL_SEGMENTS:
+        return "-".join(name_parts[:PRODUCT_OOS_GROUP_SLUG_POOL_SEGMENTS])
+    if name_parts:
+        return "-".join(name_parts)
+    return name
+
+
 def score_product_slug_oos_similarity(
     source_slug: str,
     candidate_slug: str,
@@ -1984,16 +2027,16 @@ def _cluster_listing_path_for_product(db: Session, product: Product) -> Optional
 
     cid = getattr(product, "category_id", None)
     if cid:
-        cat = db.query(Category).filter(Category.id == cid).first()
-        if cat:
-            if cat.seo_cluster_id:
-                cluster = (
-                    db.query(SeoCluster)
-                    .filter(SeoCluster.id == cat.seo_cluster_id)
-                    .first()
-                )
-                if cluster:
-                    return _seo_cluster_listing_path(cluster)
+        row = (
+            db.query(Category, SeoCluster)
+            .outerjoin(SeoCluster, Category.seo_cluster_id == SeoCluster.id)
+            .filter(Category.id == cid)
+            .first()
+        )
+        if row:
+            cat, cluster = row
+            if cluster:
+                return _seo_cluster_listing_path(cluster)
             fs = (cat.full_slug or "").strip().strip("/")
             if fs:
                 return f"/danh-muc/{fs}"
@@ -2051,54 +2094,87 @@ def _cluster_listing_path_from_pool_prefix(db: Session, pool: str) -> Optional[s
     if row:
         return _seo_cluster_listing_path(row)
 
-    row = (
-        db.query(SeoCluster)
-        .filter(SeoCluster.slug.ilike(f"%{pool_l}%"))
-        .order_by(sql_func.length(SeoCluster.slug).desc())
-        .first()
-    )
-    if row:
-        return _seo_cluster_listing_path(row)
-
-    dominant = (
-        db.query(SeoCluster, sql_func.count(Product.id).label("cnt"))
-        .join(Category, Category.seo_cluster_id == SeoCluster.id)
-        .join(Product, Product.category_id == Category.id)
-        .filter(
-            Product.is_active.is_(True),
-            Product.slug.isnot(None),
-            Product.slug != "",
-            Product.slug.ilike(f"{pool_l}%"),
+    cands = [c for c in _iter_oos_pool_prefix_candidates(pool_l, pool_l) if len(c) >= 6]
+    if cands:
+        rows = (
+            db.query(SeoCluster)
+            .filter(SeoCluster.slug.in_(cands[:30]))
+            .all()
         )
-        .group_by(SeoCluster.id)
-        .order_by(sql_func.count(Product.id).desc())
-        .first()
-    )
-    if dominant and dominant[1] >= 1:
-        return _seo_cluster_listing_path(dominant[0])
+        by_slug = {(r.slug or "").lower(): r for r in rows}
+        for cand in sorted(cands, key=len, reverse=True):
+            hit = by_slug.get(cand)
+            if hit:
+                return _seo_cluster_listing_path(hit)
 
-    for cand in _iter_oos_pool_prefix_candidates(pool_l, pool_l):
-        row = db.query(SeoCluster).filter(SeoCluster.slug == cand).first()
-        if row:
-            return _seo_cluster_listing_path(row)
+    if len(pool_l) >= 10:
+        dominant = (
+            db.query(SeoCluster, sql_func.count(Product.id).label("cnt"))
+            .join(Category, Category.seo_cluster_id == SeoCluster.id)
+            .join(Product, Product.category_id == Category.id)
+            .filter(
+                Product.is_active.is_(True),
+                Product.slug.isnot(None),
+                Product.slug != "",
+                Product.slug.ilike(f"{pool_l}%"),
+            )
+            .group_by(SeoCluster.id)
+            .order_by(sql_func.count(Product.id).desc())
+            .first()
+        )
+        if dominant and dominant[1] >= 1:
+            return _seo_cluster_listing_path(dominant[0])
 
     return None
 
 
 def _cluster_listing_path_from_source_slug(db: Session, source_slug: str) -> Optional[str]:
-    """Khớp slug cluster nằm trong URL marketing / PDP (segment dài nhất)."""
+    """Khớp slug cluster trong URL — chỉ query ứng viên / SQL strpos, không load toàn bảng."""
     from app.models.seo_cluster import SeoCluster
 
     source_l = (source_slug or "").strip().lower()
     if len(source_l) < 8:
         return None
+
+    cands: List[str] = []
+    seen: Set[str] = set()
+    for c in _iter_oos_pool_prefix_candidates("", source_l):
+        if len(c) >= 6 and c not in seen:
+            seen.add(c)
+            cands.append(c)
+    if cands:
+        rows = (
+            db.query(SeoCluster)
+            .filter(SeoCluster.slug.in_(cands[:30]))
+            .all()
+        )
+        by_slug = {(r.slug or "").lower(): r for r in rows}
+        for cand in sorted(cands, key=len, reverse=True):
+            hit = by_slug.get(cand)
+            if hit:
+                return _seo_cluster_listing_path(hit)
+
+    if not is_sqlite:
+        row = (
+            db.query(SeoCluster)
+            .filter(
+                sql_func.length(SeoCluster.slug) >= 6,
+                sql_func.strpos(source_l, SeoCluster.slug) > 0,
+            )
+            .order_by(sql_func.length(SeoCluster.slug).desc())
+            .first()
+        )
+        if row:
+            return _seo_cluster_listing_path(row)
+
     best: Optional[Any] = None
     best_len = 0
-    for row in db.query(SeoCluster).filter(SeoCluster.slug.isnot(None)).all():
-        s = (row.slug or "").strip().lower()
-        if len(s) >= 6 and s in source_l and len(s) > best_len:
-            best_len = len(s)
-            best = row
+    for cand in sorted(cands, key=len, reverse=True)[:12]:
+        if cand in source_l and len(cand) > best_len:
+            row = db.query(SeoCluster).filter(SeoCluster.slug == cand).first()
+            if row:
+                best_len = len(cand)
+                best = row
     if best:
         return _seo_cluster_listing_path(best)
     return None
@@ -2111,7 +2187,7 @@ def _home_search_listing_path(pool_or_query: str) -> str:
     return f"/?q={quote(q)}" if q else "/"
 
 
-def resolve_product_group_listing_path(
+def _resolve_product_group_listing_path_uncached(
     db: Session,
     *,
     source_slug: str,
@@ -2129,15 +2205,16 @@ def resolve_product_group_listing_path(
 
     source = (source_slug or "").strip()
     pid = product_id or (getattr(product, "product_id", None) if product else None)
-    name_prefix = product_slug_name_prefix(source, pid)
-    pool = product_slug_oos_search_pool_prefix(db, name_prefix, source_slug=source)
-    if pool:
-        path = _cluster_listing_path_from_pool_prefix(db, pool)
-        if path:
-            return path
 
     if source:
         path = _cluster_listing_path_from_source_slug(db, source)
+        if path:
+            return path
+
+    name_prefix = product_slug_name_prefix(source, pid)
+    pool = product_slug_oos_pool_prefix_fast(name_prefix, source_slug=source)
+    if pool:
+        path = _cluster_listing_path_from_pool_prefix(db, pool)
         if path:
             return path
 
@@ -2150,6 +2227,35 @@ def resolve_product_group_listing_path(
         if parts:
             return _home_search_listing_path("-".join(parts))
     return "/"
+
+
+def resolve_product_group_listing_path(
+    db: Session,
+    *,
+    source_slug: str,
+    product: Optional[Product] = None,
+    product_id: Optional[str] = None,
+) -> str:
+    """Có cache TTL — dùng cho redirect OOS / API nhẹ."""
+    source = (source_slug or "").strip()
+    pid = product_id or (getattr(product, "product_id", None) if product else None)
+    cid = getattr(product, "category_id", None) if product is not None else None
+    cache_key = f"{cid or 0}:{pid or ''}:{source}"
+    now = time.time()
+    hit = _OOS_GROUP_LISTING_PATH_CACHE.get(cache_key)
+    if hit and (now - hit[0]) < _OOS_GROUP_LISTING_CACHE_TTL_SEC:
+        return hit[1]
+
+    path = _resolve_product_group_listing_path_uncached(
+        db,
+        source_slug=source,
+        product=product,
+        product_id=pid,
+    )
+    if len(_OOS_GROUP_LISTING_PATH_CACHE) >= _OOS_GROUP_LISTING_CACHE_MAX:
+        _OOS_GROUP_LISTING_PATH_CACHE.clear()
+    _OOS_GROUP_LISTING_PATH_CACHE[cache_key] = (now, path)
+    return path
 
 
 def find_similar_product_slug_for_oos_redirect(

@@ -302,6 +302,10 @@ class Product(ProductBase):
 
     original_price: Optional[float] = Field(None, description="Giá gốc khi đang site sale")
     site_sale: Optional[Dict[str, Any]] = Field(None, description="Trạng thái sale ngày trùng tháng")
+    group_listing_path: Optional[str] = Field(
+        None,
+        description="Đường dẫn listing nhóm khi SP hết hàng (chỉ khi client yêu cầu attach_group_listing)",
+    )
 
     @model_validator(mode="after")
     def fill_product_info_from_columns(self):

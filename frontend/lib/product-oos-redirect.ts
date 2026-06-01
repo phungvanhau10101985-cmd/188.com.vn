@@ -11,7 +11,12 @@ export interface ProductGroupListingRedirectResult {
 
 export async function resolveProductGroupListingPath(
   slug: string,
-  options?: { /** URL /moi-ma-... một segment */ legacyMarketingPath?: boolean },
+  options?: {
+    /** URL /moi-ma-... một segment — giữ query legacy_path cho tương thích */
+    legacyMarketingPath?: boolean;
+    /** Cho phép cache ngắn (client fallback); SSR nên để false */
+    allowCache?: boolean;
+  },
 ): Promise<string | null> {
   const key = (slug || '').trim();
   if (!key) return null;
@@ -26,8 +31,10 @@ export async function resolveProductGroupListingPath(
     if (options?.legacyMarketingPath) {
       params.set('legacy_path', 'true');
     }
-    const res = await fetch(`${apiBase}/products/oos-group-redirect?${params}`, {
-      cache: 'no-store',
+    const res = await fetch(`${apiBase}/products/group-listing-path?${params}`, {
+      ...(options?.allowCache
+        ? { next: { revalidate: 300 } }
+        : { cache: 'no-store' as const }),
       headers: { 'Content-Type': 'application/json' },
     });
     if (!res.ok) return null;
