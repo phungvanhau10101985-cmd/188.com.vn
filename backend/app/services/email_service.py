@@ -674,6 +674,48 @@ def _format_vnd_plain(n) -> str:
         return str(n)
 
 
+def _google_customer_reviews_email_extras(
+    db,
+    *,
+    detail_url: str,
+    deposit_url: str,
+) -> tuple[list[str], str]:
+    """
+    Đoạn email khách sau cọc — nhắc tham gia Đánh giá khách hàng qua Google (khi admin bật).
+    Trả (dòng text thêm, HTML thêm); rỗng nếu tắt.
+    """
+    from app.crud import site_embed_code as embed_crud
+
+    merchant_id = embed_crud.get_google_customer_reviews_merchant_id(db)
+    if not merchant_id:
+        return [], ""
+
+    participate_url = deposit_url or detail_url
+    if not participate_url:
+        return [], ""
+
+    text_lines = [
+        "",
+        "Đánh giá khách hàng qua Google (tùy chọn):",
+        "188.com.vn tham gia chương trình Đánh giá khách hàng qua Google. "
+        "Mở liên kết đơn hàng bên dưới — tại cuối trang chọn tham gia trên thanh của Google. "
+        "Sau khi nhận hàng, Google có thể gửi email khảo sát trải nghiệm mua sắm.",
+        f"Mở đơn và tham gia: {participate_url}",
+    ]
+    html_block = f"""
+<div style="margin:20px 0;padding:14px 16px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;font-size:14px;line-height:1.5;color:#0c4a6e;">
+  <p style="margin:0 0 8px;font-weight:600;color:#0369a1;">Đánh giá khách hàng qua Google (tùy chọn)</p>
+  <p style="margin:0 0 12px;">188.com.vn tham gia chương trình của Google. Mở đơn hàng — chọn <strong>tham gia</strong> trên thanh hiện ở cuối trang. Sau khi nhận hàng, Google có thể gửi email khảo sát.</p>
+  <p style="margin:0;text-align:center;">
+    <a href="{html.escape(participate_url)}" style="display:inline-block;padding:10px 18px;background:#0369a1;color:#ffffff !important;text-decoration:none;border-radius:8px;font-weight:600;">
+      Mở đơn · tham gia đánh giá
+    </a>
+  </p>
+</div>
+"""
+    return text_lines, html_block
+
+
 def send_deposit_confirmed_email_task(order_id: int) -> None:
     """
     BackgroundTasks: email khách (đơn + tài khoản), email cảnh báo shop, thông báo in-app.
@@ -707,7 +749,13 @@ def send_deposit_confirmed_email_task(order_id: int) -> None:
         vnd = _format_vnd_plain(amt)
         fe = (settings.FRONTEND_BASE_URL or "").strip().rstrip("/")
         detail_url = f"{fe}/account/orders/{order.id}" if fe else ""
+        deposit_url = f"{fe}/account/orders/{order.id}/deposit" if fe else ""
         phone = (order.customer_phone or "").strip()
+        gcr_text_lines, gcr_html_block = _google_customer_reviews_email_extras(
+            db,
+            detail_url=detail_url,
+            deposit_url=deposit_url,
+        )
 
         if st == OrderStatus.CONFIRMED.value:
             status_msg = (
@@ -741,22 +789,32 @@ def send_deposit_confirmed_email_task(order_id: int) -> None:
                 "",
                 status_msg,
                 *(["", f"Xem chi tiết đơn hàng: {detail_url}"] if detail_url else []),
+                *gcr_text_lines,
                 "",
                 "Trân trọng,",
                 "188.com.vn",
             ]
         )
-        link_html = (
-            f'<p><a href="{detail_url}">Xem chi tiết đơn hàng</a></p>' if detail_url else ""
-        )
+        link_html = ""
+        if detail_url:
+            link_html = (
+                f'<p style="margin:16px 0 8px;text-align:center;">'
+                f'<a href="{html.escape(detail_url)}" style="display:inline-block;padding:10px 18px;'
+                f'background:#ea580c;color:#ffffff !important;text-decoration:none;border-radius:8px;font-weight:600;">'
+                f"Xem chi tiết đơn hàng</a></p>"
+            )
         html_body = (
-            f"<p>Kính gửi <strong>{name}</strong>,</p>"
+            f"<div style=\"font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;"
+            f"line-height:1.55;color:#111827;max-width:560px;\">"
+            f"<p>Kính gửi <strong>{html.escape(name)}</strong>,</p>"
             "<p>Cảm ơn quý khách đã <strong>thanh toán đặt cọc</strong>.</p>"
-            f"<p>Mã đơn: <strong>{code}</strong><br>"
+            f"<p>Mã đơn: <strong>{html.escape(str(code))}</strong><br>"
             f"Số tiền cọc: <strong>{vnd} VND</strong></p>"
-            f"<p>{status_msg}</p>"
+            f"<p>{html.escape(status_msg)}</p>"
             f"{link_html}"
-            "<p>Trân trọng,<br>188.com.vn</p>"
+            f"{gcr_html_block}"
+            "<p style=\"margin-top:24px;\">Trân trọng,<br>188.com.vn</p>"
+            "</div>"
         )
 
         if customer_to:

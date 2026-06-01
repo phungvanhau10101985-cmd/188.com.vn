@@ -427,8 +427,11 @@ export default function OrderDepositPage() {
     /** Vào trang khi đơn đã cọc (refresh / link): prev chưa từng là waiting trong phiên — vẫn cần bắn purchase. */
     const landedAlreadyPaid = nowDone && (prev === null || prev === '');
 
-    if (wasWaiting && nowDone) {
+    if (nowDone && (wasWaiting || landedAlreadyPaid)) {
       markGoogleCustomerReviewsForOrder(order.id);
+    }
+
+    if (wasWaiting && nowDone) {
       pushToast({
         title: 'Đã xác nhận thanh toán cọc',
         description: 'Cảm ơn quý khách. Email xác nhận đã được gửi tới hộp thư của bạn (nếu có).',

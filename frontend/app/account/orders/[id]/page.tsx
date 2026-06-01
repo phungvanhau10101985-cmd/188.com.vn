@@ -13,6 +13,7 @@ import { getOptimizedImage } from '@/lib/image-utils';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import OrderGoogleCustomerReviews from '@/components/OrderGoogleCustomerReviews';
+import { markGoogleCustomerReviewsForOrder } from '@/lib/google-customer-reviews';
 
 interface OrderItem {
   id: number;
@@ -134,6 +135,7 @@ export default function AccountOrderDetailPage() {
           const prev = orderStatusPollRef.current;
           if (prev === 'waiting_deposit' && o.status !== 'waiting_deposit') {
             if (o.status === 'deposit_paid' || o.status === 'confirmed') {
+              markGoogleCustomerReviewsForOrder(o.id);
               pushToast({
                 title: 'Đã ghi nhận đặt cọc',
                 description: 'Trạng thái đơn đã cập nhật. Email xác nhận đã được gửi (nếu có email đơn hàng).',

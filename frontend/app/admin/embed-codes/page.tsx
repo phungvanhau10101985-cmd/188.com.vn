@@ -311,6 +311,9 @@ export default function AdminEmbedCodesPage() {
             <li><span className="font-medium">Trong head</span> — GA4, GTM (phần script), Ads, Pixel, meta xác minh.</li>
             <li><span className="font-medium">Đầu body</span> — GTM auto thêm iframe noscript vào đây (một khối ô nhớ duy nhất).</li>
             <li><span className="font-medium">Cuối body</span> — Zalo/Facebook Chat plugin.</li>
+            <li>
+              <span className="font-medium">Google customer_reviews</span> — chỉ lưu Merchant ID; huy hiệu + khảo sát do code React (vị trí «cuối body» không chèn HTML).
+            </li>
           </ul>
         </div>
 
@@ -384,7 +387,11 @@ export default function AdminEmbedCodesPage() {
                                   ? 'Chưa nhập — nhấn «Sửa» để nhập mã một dòng (G-/AW-/GTM-…).'
                                   : 'Chưa nhập — không hiển thị / không gửi CAPI'}
                           </p>
-                          {row.hint && <p className="text-xs text-slate-500 mt-1">{row.hint}</p>}
+                          {(hintLine(row.platform, row.category) || row.hint) && (
+                            <p className="text-xs text-slate-500 mt-1">
+                              {hintLine(row.platform, row.category) || row.hint}
+                            </p>
+                          )}
                           {headInjectPreview && (
                             <div className="mt-2">
                               <button

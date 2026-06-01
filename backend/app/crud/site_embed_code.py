@@ -122,7 +122,7 @@ _DEFAULT_ROWS: tuple = (
         "customer_reviews",
         "Google — Đánh giá khách hàng (huy hiệu + opt-in sau đơn)",
         "body_close",
-        "Chỉ nhập Merchant ID (số, vd 5672138097). Huy hiệu điểm người bán + khảo sát sau đơn — tắt bằng is_active.",
+        "Chỉ nhập Merchant ID (số, vd 5672138097). Huy hiệu góc phải toàn site; khảo sát (thanh dưới) sau cọc hoặc đơn không cọc — tắt bằng is_active.",
         43,
     ),
     ("google", "other", "Google — mã khác (AdSense,...)", "head", "Chỉ dán full HTML/script nếu không thuộc các mục trên.", 50),
