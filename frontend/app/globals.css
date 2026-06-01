@@ -27,6 +27,14 @@ body {
   color: #1f2937;
 }
 
+/* Ẩn ảnh PNG nội dung (logo / VietQR: data-allow-png hoặc .allow-png) */
+img[src$=".png" i]:not([data-allow-png]):not(.allow-png),
+img[src*=".png?" i]:not([data-allow-png]):not(.allow-png) {
+  visibility: hidden;
+  max-height: 0;
+  overflow: hidden;
+}
+
 /* Utility classes bổ sung - ĐẢM BẢO KHÔNG DÙNG TAILWIND CLASSES TRONG ĐÂY */
 .line-clamp-1 {
   overflow: hidden;

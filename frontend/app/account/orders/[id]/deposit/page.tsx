@@ -808,6 +808,7 @@ export default function OrderDepositPage() {
                   <div className="rounded-xl bg-white p-2 md:p-3 shadow border border-gray-200">
                     <img
                       src={qrValue}
+                      data-allow-png
                       alt="Mã QR chuyển khoản"
                       className="w-[min(100%,240px)] h-[min(100%,240px)] sm:w-64 sm:h-64 md:w-72 md:h-72 object-contain"
                       width={288}

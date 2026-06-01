@@ -359,6 +359,7 @@ export default function MobileHeader({
             >
               <Image
                 src="https://188comvn.b-cdn.net/logo%20head%20188.png"
+                data-allow-png
                 alt="188.com.vn"
                 width={200}
                 height={40}

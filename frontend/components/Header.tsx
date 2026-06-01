@@ -162,6 +162,7 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
           <Link href="/" className="flex items-center h-full group">
             <Image
               src={LOGO_URL}
+              data-allow-png
               alt="188.com.vn - Xem là thích click là mê"
               width={320}
               height={80}

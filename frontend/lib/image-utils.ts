@@ -15,6 +15,55 @@ const CDN_CONFIG = {
   fallbackService: 'https://picsum.photos',
 };
 
+/** PNG branding / QR — không ẩn trên web. */
+const WEB_PNG_ALLOWLIST = [
+  /logo.*188/i,
+  /logo188/i,
+  /favicon\.png/i,
+  /logo_1x1_/i,
+  /vietqr\.io/i,
+  /\/icon\.png$/i,
+  /\/app\/icon/i,
+];
+
+/** URL ảnh có đuôi .png (kể cả alicdn …-80-80.png, %2F…png). */
+export function isPngImageUrl(url: string | undefined | null): boolean {
+  const raw = (url || '').trim();
+  if (!raw) return false;
+  const lower = raw.toLowerCase();
+  const pathOnly = lower.split('?')[0]?.split('#')[0] ?? lower;
+  if (pathOnly.endsWith('.png')) return true;
+  if (/\.png(?:[?&#]|_|%|$)/i.test(lower)) return true;
+  try {
+    const pathname = new URL(raw.startsWith('//') ? `https:${raw}` : raw).pathname.toLowerCase();
+    return pathname.endsWith('.png') || /\.png_/i.test(pathname);
+  } catch {
+    return /\.png/i.test(pathOnly);
+  }
+}
+
+/** PNG nội dung SP / CDN — ẩn trên storefront (logo, favicon, VietQR giữ). */
+export function isHiddenWebPngImageUrl(url: string | undefined | null): boolean {
+  const raw = (url || '').trim();
+  if (!raw || !isPngImageUrl(raw)) return false;
+  const lower = raw.toLowerCase();
+  return !WEB_PNG_ALLOWLIST.some((re) => re.test(lower));
+}
+
+/** Lọc danh sách URL gallery — bỏ PNG ẩn. */
+export function filterVisibleWebImageUrls(urls: Iterable<string | null | undefined>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of urls) {
+    const u = (raw || '').trim();
+    if (!u || isHiddenWebPngImageUrl(u)) continue;
+    if (seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
+}
+
 /** Giới hạn pixel tải về — Bunny optimizer. */
 const MAX_DISPLAY_PIXELS = 960;
 
@@ -154,6 +203,10 @@ export const getOptimizedImage = (
     return getFallbackImage(fallbackStrategy, width, height);
   }
 
+  if (isHiddenWebPngImageUrl(processedUrl)) {
+    return getFallbackImage(fallbackStrategy, width, height);
+  }
+
   try {
     return getOptimizedImageUrl(processedUrl, width, height, quality);
   } catch (error) {
@@ -193,7 +246,7 @@ export const getProductImages = (product: any) => {
     fallbackStrategy: 'local',
   });
 
-  const galleryImages = (product.images || product.gallery || [])
+  const galleryImages = filterVisibleWebImageUrls(product.images || product.gallery || [])
     .slice(0, 5)
     .map((img: string, index: number) =>
       getOptimizedImage(img, {

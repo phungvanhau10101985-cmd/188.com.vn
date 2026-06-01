@@ -1,4 +1,5 @@
 import type { Product } from '@/types/api';
+import { isHiddenWebPngImageUrl } from '@/lib/image-utils';
 
 /** Same storefront origin semantics as PDP layout `absoluteImage`. */
 function storefrontOrigin(): string {
@@ -35,6 +36,7 @@ export function mergeProductGalleryPhotoUrls(product: Product): string[] {
   const add = (raw?: string | null) => {
     const u = typeof raw === 'string' ? toAbsoluteGalleryUrl(raw) : null;
     if (!u || !/^https?:\/\//i.test(u)) return;
+    if (isHiddenWebPngImageUrl(u)) return;
     if (seen.has(u)) return;
     seen.add(u);
     out.push(u);
@@ -52,6 +54,7 @@ export function mergeProductPhotoUrlsIncludingDetail(product: Product): string[]
   const add = (raw?: string | null) => {
     const u = typeof raw === 'string' ? toAbsoluteGalleryUrl(raw) : null;
     if (!u || !/^https?:\/\//i.test(u)) return;
+    if (isHiddenWebPngImageUrl(u)) return;
     if (seen.has(u)) return;
     seen.add(u);
     out.push(u);

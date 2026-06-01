@@ -1,7 +1,7 @@
 // frontend/components/product-detail/RelatedProducts.tsx
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { cdnUrl } from '@/lib/cdn-url';
 import Image from 'next/image';
@@ -22,6 +22,14 @@ import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
+
+/** Lấy đủ cho lưới 5 + «Xem thêm»; tránh limit=120 + COUNT(*) trên PDP. */
+const RELATED_PDP_FETCH_LIMIT = 36;
+
+const RELATED_LIST_BASE: Pick<ProductSearchParams, 'skip_total' | 'is_active'> = {
+  skip_total: true,
+  is_active: true,
+};
 
 interface RelatedProductsProps {
   currentProduct: Product;
@@ -125,7 +133,7 @@ function productSearchParamsFromChineseShopCat2(product: Product): ProductSearch
 }
 
 function buildFetchPlan(product: Product, tab: ProductRelatedTabId): FetchPlan {
-  const base: ProductSearchParams = { limit: 120, is_active: true };
+  const base: ProductSearchParams = { ...RELATED_LIST_BASE, limit: RELATED_PDP_FETCH_LIMIT };
 
   switch (tab) {
     case 'bestselling': {
@@ -133,7 +141,7 @@ function buildFetchPlan(product: Product, tab: ProductRelatedTabId): FetchPlan {
       if (!st) return { ok: false };
       return {
         ok: true,
-        params: { ...base, style: st },
+        params: { ...base, style: st, sort: 'purchases_desc' },
         sortPurchasesDesc: true,
       };
     }
@@ -201,13 +209,12 @@ async function loadChineseShopGroupSnapshot(currentProduct: Product): Promise<Pr
   const parallelParams = productSearchParamsFromChineseShopCat2(currentProduct);
   if (!parallelParams) return [];
   const shopGroupResponse = await apiClient.getProducts({
-    limit: 120,
-    is_active: true,
+    ...RELATED_LIST_BASE,
+    limit: RELATED_PDP_FETCH_LIMIT,
+    sort: 'purchases_desc',
     ...parallelParams,
   });
-  let sgList = (shopGroupResponse.products || []).filter((p) => p.id !== currentProduct.id);
-  sgList = [...sgList].sort((a, b) => (b.purchases ?? 0) - (a.purchases ?? 0));
-  return sgList;
+  return (shopGroupResponse.products || []).filter((p) => p.id !== currentProduct.id);
 }
 
 async function loadRelatedProductsSnapshot(
@@ -231,10 +238,7 @@ async function loadRelatedProductsSnapshot(
         shopPromise,
       ]);
 
-      let list = (response.products || []).filter((p) => p.id !== currentProduct.id);
-      if (plan.sortPurchasesDesc) {
-        list = [...list].sort((a, b) => (b.purchases ?? 0) - (a.purchases ?? 0));
-      }
+      const list = (response.products || []).filter((p) => p.id !== currentProduct.id);
 
       return { relatedProducts: list, shopGroupProducts: sgList };
     })().finally(() => {
@@ -262,6 +266,8 @@ function relatedStripStep(): number {
 }
 
 export default function RelatedProducts({ currentProduct }: RelatedProductsProps) {
+  const sectionRef = useRef<HTMLDivElement>(null);
+  const [inView, setInView] = useState(false);
   const searchParams = useSearchParams();
   const relatedTab = parseRelatedTabFromSearch(searchParams.get('rt'));
 
@@ -290,6 +296,20 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   }, [currentProduct]);
 
   useEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) setInView(true);
+      },
+      { rootMargin: '280px 0px', threshold: 0 },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!inView) return;
     const ac = new AbortController();
 
     const applySnapshot = (list: Product[], sgList: Product[]) => {
@@ -347,31 +367,21 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
       }
     };
 
-    const kickoff = () => {
-      void runFetch();
-    };
-
-    let idleHandle: number | undefined;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-      idleHandle = window.requestIdleCallback(kickoff, { timeout: 2200 });
-    } else {
-      timeoutId = setTimeout(kickoff, 0);
-    }
+    void runFetch();
 
     return () => {
       ac.abort();
-      if (idleHandle !== undefined && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-        window.cancelIdleCallback(idleHandle);
-      }
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
     };
-  }, [currentProduct, relatedTab]);
+  }, [currentProduct, relatedTab, inView]);
+
+  if (!inView) {
+    return <div ref={sectionRef} className="border-t border-gray-200 pt-5 min-h-8" aria-hidden />;
+  }
 
   if (loading) {
     const showShopGroupSkeleton = relatedTab === 'bestselling' && !!chineseShopCat2GroupParams;
     return (
-      <div className="border-t border-gray-200 pt-5">
+      <div ref={sectionRef} className="border-t border-gray-200 pt-5">
         {showShopGroupSkeleton && (
           <div className="mb-8">
             <div className="h-6 bg-gray-200 rounded w-72 mb-3 animate-pulse max-w-full" />
@@ -461,12 +471,11 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
       if (!p.ok) return;
       const response = await apiClient.getProducts({
         ...p.params,
-        limit: Math.min(500, 1000),
+        skip_total: false,
+        limit: Math.min(120, 500),
+        sort: p.sortPurchasesDesc ? 'purchases_desc' : p.params.sort,
       });
-      let list = (response.products || []).filter((x) => x.id !== currentProduct.id);
-      if (p.sortPurchasesDesc) {
-        list = [...list].sort((a, b) => (b.purchases ?? 0) - (a.purchases ?? 0));
-      }
+      const list = (response.products || []).filter((x) => x.id !== currentProduct.id);
       setRelatedProducts(list);
       setVisibleCount(list.length);
     } catch (error) {
@@ -503,12 +512,13 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
     try {
       setShopGroupShowAllLoading(true);
       const response = await apiClient.getProducts({
-        limit: Math.min(500, 1000),
-        is_active: true,
+        ...RELATED_LIST_BASE,
+        skip_total: false,
+        limit: Math.min(120, 500),
+        sort: 'purchases_desc',
         ...extra,
       });
-      let list = (response.products || []).filter((x) => x.id !== currentProduct.id);
-      list = [...list].sort((a, b) => (b.purchases ?? 0) - (a.purchases ?? 0));
+      const list = (response.products || []).filter((x) => x.id !== currentProduct.id);
       setShopGroupProducts(list);
       setShopGroupVisibleCount(list.length);
     } catch (error) {
@@ -614,7 +624,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
     ) : null;
 
   return (
-    <div className="border-t border-gray-200 pt-5">
+    <div ref={sectionRef} className="border-t border-gray-200 pt-5">
       {canShowShopGroupSection && (
         <section className="mb-8" aria-label="Sản phẩm tương tự">
           <h3 className="text-base font-bold text-gray-900 mb-3 uppercase">

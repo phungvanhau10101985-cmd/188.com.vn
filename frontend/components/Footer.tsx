@@ -47,6 +47,7 @@ export default function Footer() {
             >
               <Image
                 src="https://188comvn.b-cdn.net/logo188.png"
+                data-allow-png
                 alt="188.com.vn - Xem là thích click là mê"
                 width={160}
                 height={48}

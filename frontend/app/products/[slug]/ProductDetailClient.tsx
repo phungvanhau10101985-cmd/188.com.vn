@@ -30,6 +30,7 @@ import {
   searchParamsToEncodedQueryString,
 } from '@/lib/product-related-tabs';
 import { cartLineMainImage } from '@/lib/product-color-variant';
+import { filterVisibleWebImageUrls } from '@/lib/image-utils';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
 import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
@@ -370,7 +371,7 @@ export default function ProductDetailClient({
 
   const nanoImageList = useMemo(() => {
     const ordered = [product.main_image, ...(product.images || [])].filter(Boolean) as string[];
-    return [...new Set(ordered)];
+    return filterVisibleWebImageUrls([...new Set(ordered)]);
   }, [product.main_image, product.images]);
 
   const nanoPrimaryImage =
@@ -428,6 +429,7 @@ export default function ProductDetailClient({
                   >
                     <Image
                       src="https://188comvn.b-cdn.net/logo%20head%20188.png"
+                      data-allow-png
                       alt="188.com.vn"
                       width={140}
                       height={35}

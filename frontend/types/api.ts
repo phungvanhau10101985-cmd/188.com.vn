@@ -349,8 +349,10 @@ export interface ProductSearchParams {
   color?: string;
   /** Lọc kiểu phổ thông tự rút từ tên/thông tin sản phẩm */
   style_tag?: string;
-  /** Sắp xếp: default | views_desc | newest | oldest */
+  /** Sắp xếp: default | views_desc | newest | oldest | purchases_desc */
   sort?: string;
+  /** Bỏ COUNT(*) — PDP / khối liên quan */
+  skip_total?: boolean;
   min_rating?: number;
   is_active?: boolean;
   has_deposit?: boolean;

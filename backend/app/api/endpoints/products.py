@@ -319,6 +319,7 @@ def _read_products_list_impl(
     filter_size: Optional[str] = None,
     filter_color: Optional[str] = None,
     filter_style_tag: Optional[str] = None,
+    skip_total: bool = False,
     user: Optional[User] = None,
 ) -> dict:
     from app.services import sale_calendar as sale_calendar_svc
@@ -384,6 +385,7 @@ def _read_products_list_impl(
         filter_size=filter_size,
         filter_color=filter_color,
         filter_style_tag=filter_style_tag,
+        skip_total=skip_total,
     )
 
     if result and "products" in result:
@@ -439,6 +441,10 @@ def read_products(
         description="Lọc màu (khớp tên SP, cột color, hoặc JSON colors — nên dùng giá trị từ category facets)",
     ),
     style_tag: Optional[str] = Query(None, description="Lọc kiểu phổ thông tự rút từ tên/thông tin sản phẩm"),
+    skip_total: bool = Query(
+        False,
+        description="Bỏ COUNT(*) — dùng cho khối SP liên quan PDP (chỉ cần danh sách)",
+    ),
 ):
     """
     Get products with filtering and search (by name; the product_id filter matches Excel id or SKU code).
@@ -470,6 +476,7 @@ def read_products(
             filter_size=size,
             filter_color=color,
             filter_style_tag=style_tag,
+            skip_total=skip_total,
             user=current_user,
         )
     except Exception as e:

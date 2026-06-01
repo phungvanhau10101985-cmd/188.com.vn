@@ -261,12 +261,14 @@ def _schedule_google_sheets_sku_sync(*, immediate: bool = False) -> None:
 
 
 def normalize_product_list_sort(sort: Optional[str]) -> str:
-    """Giá trị nội bộ: default | views_desc | newest | oldest."""
+    """Giá trị nội bộ: default | views_desc | newest | oldest | purchases_desc."""
     s = (sort or "").strip().lower().replace("-", "_")
     if s in ("", "default", "id", "id_asc"):
         return "default"
     if s in ("views_desc", "views", "popular", "most_viewed"):
         return "views_desc"
+    if s in ("purchases_desc", "purchases", "bestselling", "best_selling", "sold"):
+        return "purchases_desc"
     if s in ("newest", "new", "created_desc"):
         return "newest"
     if s in ("oldest", "created_asc"):
@@ -307,6 +309,8 @@ def _order_exprs_for_product_list(sort: str, view_totals_subq):
         return [Product.created_at.desc().nullslast(), Product.id.desc()]
     if sort == "oldest":
         return [Product.created_at.asc().nullslast(), Product.id.asc()]
+    if sort == "purchases_desc":
+        return [Product.purchases.desc().nullslast(), Product.id.desc()]
     return [Product.id.asc()]
 
 
@@ -3494,6 +3498,7 @@ def get_products(
     filter_size: Optional[str] = None,
     filter_color: Optional[str] = None,
     filter_style_tag: Optional[str] = None,
+    skip_total: bool = False,
 ):
     query = db.query(Product)
     has_q = bool(q and str(q).strip())
@@ -3668,7 +3673,10 @@ def get_products(
                 logger.debug("AI correct search skipped: %s", e)
             _log_search(db, raw_query, total, ai_processed=ai_processed)
     if not (q and q.strip()):
-        total = query.count()
+        if skip_total:
+            total = -1
+        else:
+            total = query.count()
         if use_random_order:
             products = query.order_by(sql_func.random()).offset(skip).limit(limit).all()
         elif sort_norm == "views_desc":

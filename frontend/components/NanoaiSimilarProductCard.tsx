@@ -1,6 +1,7 @@
 'use client';
 
 import type { NanoaiSearchProduct } from '@/types/api';
+import { getOptimizedImage } from '@/lib/image-utils';
 import { truncateText } from '@/lib/utils';
 
 /** Hiển thị giá VND theo thói quen VN: nhóm nghìn + hậu tố đ (không dùng ký hiệu ₫ của Intl). */
@@ -74,7 +75,11 @@ interface NanoaiSimilarProductCardProps {
 /** Thẻ cùng phong cách SimpleProductCard, dùng cho kết quả NanoAI (có/không giá). */
 export default function NanoaiSimilarProductCard({ item }: NanoaiSimilarProductCardProps) {
   const name = item.name || 'Sản phẩm';
-  const img = item.image_url || '';
+  const imgRaw = item.image_url
+    ? getOptimizedImage(item.image_url, { width: 400, height: 400, fallbackStrategy: 'local' })
+    : '';
+  const img =
+    imgRaw && !imgRaw.startsWith('data:image/svg') ? imgRaw : '';
   const priceLine = resolvePriceLine(item);
   const colorUrlsRaw = extractColorImageUrls(item);
   const seenUrl = new Set<string>();
@@ -95,14 +100,17 @@ export default function NanoaiSimilarProductCard({ item }: NanoaiSimilarProductC
         role="list"
         aria-label="Ảnh màu sản phẩm"
       >
-        {colorThumbUrls.slice(0, MAX_COLOR_THUMBS).map((url, i) => (
+        {colorThumbUrls.slice(0, MAX_COLOR_THUMBS).map((url, i) => {
+          const thumbSrc = getOptimizedImage(url, { width: 64, height: 64, fallbackStrategy: 'local' });
+          if (!thumbSrc || thumbSrc.startsWith('data:image/svg')) return null;
+          return (
           <div
             role="listitem"
             key={`${url}-${i}`}
             className="h-7 w-7 sm:h-8 sm:w-8 shrink-0 overflow-hidden rounded-md border border-gray-200 bg-gray-50 ring-1 ring-black/5"
           >
             <img
-              src={url}
+              src={thumbSrc}
               alt=""
               width={32}
               height={32}
@@ -111,7 +119,8 @@ export default function NanoaiSimilarProductCard({ item }: NanoaiSimilarProductC
               decoding="async"
             />
           </div>
-        ))}
+          );
+        })}
       </div>
     ) : null;
 

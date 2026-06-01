@@ -10,6 +10,7 @@ import {
   type SeoClusterListingFilters,
 } from "@/lib/seo-cluster";
 import { formatPrice } from "@/lib/utils";
+import { getOptimizedImage } from "@/lib/image-utils";
 import { productPathSlugFromApi } from "@/lib/product-path-slug";
 import SeoClusterFiltersClient from "./SeoClusterFiltersClient";
 
@@ -184,7 +185,12 @@ export default async function SeoClusterLandingPage({ params, searchParams }: Pr
 function ClusterProductCard({ product }: { product: SeoClusterProductCard }) {
   const seg = productPathSlugFromApi(product.slug, product.product_id) || product.product_id;
   const href = `/products/${seg}`;
-  const img = product.main_image || product.images?.[0] || "/images/og-default.jpg";
+  const img =
+    getOptimizedImage(product.main_image || product.images?.[0], {
+      width: 400,
+      height: 400,
+      fallbackStrategy: 'local',
+    }) || '/images/og-default.jpg';
   return (
     <Link
       href={href}
