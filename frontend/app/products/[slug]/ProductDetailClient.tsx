@@ -39,6 +39,10 @@ import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPo
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
 import NanoAiLauncherGatewaySync from '@/components/NanoAiLauncherGatewaySync';
 import { buildNanoAiGatewayPayloadFrom188Product } from '@/lib/nanoai-hosted-chat';
+import {
+  productOosGroupRedirectPath,
+  resolveProductOosGroupRedirectSlug,
+} from '@/lib/product-oos-redirect';
 
 interface ProductDetailClientProps {
   initialProduct: Product;
@@ -113,6 +117,19 @@ export default function ProductDetailClient({
       cancelled = true;
     };
   }, [slug, authLoading, isAuthenticated, user?.id, user?.email]);
+
+  /** PDP hết hàng → chuyển sang slug nhóm / biến thể giống >= 80% (khớp SSR page.tsx). */
+  useEffect(() => {
+    if ((product.available ?? 0) > 0 || !slug) return;
+    let cancelled = false;
+    resolveProductOosGroupRedirectSlug(slug).then((target) => {
+      if (cancelled || !target || target === slug) return;
+      router.replace(productOosGroupRedirectPath(target));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [product.available, slug, router]);
 
   useEffect(() => {
     persistRelatedFiltersFromProduct(product);

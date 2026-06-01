@@ -1812,6 +1812,104 @@ def get_product_by_slug(db: Session, slug: str) -> Optional[Product]:
         return None
 
 
+_PRODUCT_SLUG_ID_SUFFIX_RE = re.compile(
+    r"-(?:a|b)(\d{6,}a188[a-z0-9]+)$",
+    flags=re.IGNORECASE,
+)
+
+# Ngưỡng giống slug nhóm (PDP hết hàng → chuyển sang biến thể / slug nhóm gần nhất).
+PRODUCT_OOS_GROUP_SLUG_MIN_SIMILARITY = 0.8
+
+
+def product_slug_name_prefix(slug: str, product_id: Optional[str] = None) -> str:
+    """Phần tên trong slug (bỏ mã product_id ở cuối), dùng gom nhóm biến thể."""
+    s = (slug or "").strip()
+    if not s:
+        return ""
+    pid = (product_id or "").strip().lower()
+    if pid:
+        suffix = f"-{pid}"
+        if s.lower().endswith(suffix):
+            return s[: -len(suffix)].rstrip("-")
+    m = _PRODUCT_SLUG_ID_SUFFIX_RE.search(s)
+    if m:
+        return s[: m.start()].rstrip("-")
+    return s.rstrip("-")
+
+
+def find_similar_product_slug_for_oos_redirect(
+    db: Session,
+    *,
+    slug: str,
+    min_similarity: float = PRODUCT_OOS_GROUP_SLUG_MIN_SIMILARITY,
+    product_id: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Tìm slug PDP thay thế khi SP hết hàng: cùng nhóm tên (prefix slug), độ giống >= min_similarity.
+    Ưu tiên: còn hàng → slug nhóm dạng ``{prefix}-`` → độ giống cao → lượt mua.
+    """
+    source = (slug or "").strip()
+    if not source:
+        return None
+    prefix = product_slug_name_prefix(source, product_id)
+    if len(prefix) < 6:
+        return None
+
+    canonical_group_slug = f"{prefix}-"
+    like_prefix = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    q = (
+        db.query(Product)
+        .filter(
+            Product.slug.isnot(None),
+            Product.slug != "",
+            Product.slug != source,
+            or_(
+                Product.slug.ilike(f"{like_prefix}%", escape="\\"),
+                Product.slug.ilike(f"{like_prefix}-%", escape="\\"),
+            ),
+        )
+    )
+    if hasattr(Product, "is_active"):
+        q = q.filter(Product.is_active.is_(True))
+
+    candidates = (
+        q.order_by(
+            Product.available.desc(),
+            Product.purchases.desc(),
+            Product.id.asc(),
+        )
+        .limit(120)
+        .all()
+    )
+    if not candidates:
+        return None
+
+    min_sim = max(0.0, min(1.0, float(min_similarity)))
+    best_slug: Optional[str] = None
+    best_key: Tuple[int, float, int, int] = (-1, -1.0, -1, -1)
+
+    for p in candidates:
+        cand = (p.slug or "").strip()
+        if not cand or cand == source:
+            continue
+        sim = _similarity_score(source, cand)
+        if cand == canonical_group_slug:
+            sim = max(sim, 0.95)
+        elif cand.startswith(prefix):
+            sim = max(sim, _similarity_score(prefix, cand))
+        if sim < min_sim:
+            continue
+        in_stock = 1 if int(p.available or 0) > 0 else 0
+        is_canonical = 1 if cand == canonical_group_slug else 0
+        key = (in_stock, sim, is_canonical, int(p.purchases or 0))
+        if key > best_key:
+            best_key = key
+            best_slug = cand
+
+    return best_slug
+
+
 def get_product_sitemap_slugs(
     db: Session,
     *,

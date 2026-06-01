@@ -772,6 +772,38 @@ def create_product(
     return _product_to_response(db, created)
 
 
+@router.get("/oos-group-redirect", response_model=dict)
+def read_product_oos_group_redirect(
+    slug: str = Query(..., min_length=3, description="Slug PDP đang mở (hết hàng)"),
+    min_similarity: float = Query(
+        0.8,
+        ge=0.5,
+        le=1.0,
+        description="Ngưỡng giống slug (SequenceMatcher), mặc định 0.8",
+    ),
+    db: Session = Depends(get_db),
+):
+    """
+    Gợi ý redirect PDP khi ``available <= 0``: slug khác trong cùng nhóm tên, giống >= min_similarity.
+    """
+    source = (slug or "").strip()
+    current = crud.product.get_product_by_slug(db, slug=source)
+    pid = getattr(current, "product_id", None) if current else None
+    target = crud.product.find_similar_product_slug_for_oos_redirect(
+        db,
+        slug=source,
+        min_similarity=min_similarity,
+        product_id=pid,
+    )
+    if not target or target == source:
+        return {"redirect_slug": None, "redirect_path": None, "similarity_min": min_similarity}
+    return {
+        "redirect_slug": target,
+        "redirect_path": f"/products/{target}",
+        "similarity_min": min_similarity,
+    }
+
+
 @router.get("/sitemap-slugs", response_model=dict)
 def read_product_sitemap_slugs(
     response: Response,
