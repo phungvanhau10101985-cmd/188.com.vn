@@ -2286,6 +2286,138 @@ def _home_search_listing_path(pool_or_query: str) -> str:
     return f"/?q={quote(q)}" if q else "/"
 
 
+def _oos_home_search_fallback(pool: str) -> Optional[str]:
+    """Chỉ fallback ``/?q=`` với pool ngắn (≤ N segment) — không search cả slug marketing."""
+    p = (pool or "").strip().lower()
+    if len(p) < 4:
+        return None
+    parts = [x for x in p.split("-") if x]
+    if len(parts) > PRODUCT_OOS_GROUP_SLUG_POOL_SEGMENTS:
+        return None
+    return _home_search_listing_path(p)
+
+
+def _cluster_listing_path_from_slug_group_pool(
+    db: Session,
+    *,
+    source_slug: str,
+    name_prefix: str,
+    product_id: Optional[str] = None,
+    pool_prefix: Optional[str] = None,
+    legacy_marketing: bool = False,
+) -> Optional[str]:
+    """
+    Suy listing nhóm từ pool slug ILIKE + độ giống (không full-text ``/?q=``).
+    URL marketing: trong pool vẫn chọn SP đại diện để lấy /c/ hoặc /danh-muc/.
+    """
+    source = (source_slug or "").strip()
+    name = (name_prefix or product_slug_name_prefix(source, product_id) or "").strip()
+    compare_slug = source or name
+    if not compare_slug:
+        return None
+
+    pool = (pool_prefix or "").strip().lower()
+    if len(pool) < 6:
+        pool = product_slug_oos_search_pool_prefix(db, name, source_slug=source or name)
+    if len(pool) < 6 or _count_active_products_with_slug_prefix(db, pool) < 1:
+        return None
+
+    q = db.query(Product).filter(
+        Product.slug.isnot(None),
+        Product.slug != "",
+        Product.slug.ilike(f"{pool}%"),
+    )
+    if hasattr(Product, "is_active"):
+        q = q.filter(Product.is_active.is_(True))
+
+    candidates = (
+        q.order_by(
+            Product.available.desc(),
+            Product.purchases.desc(),
+            Product.id.asc(),
+        )
+        .limit(PRODUCT_OOS_GROUP_SLUG_POOL_CANDIDATE_LIMIT)
+        .all()
+    )
+    if not candidates:
+        return None
+
+    min_sim = (
+        PRODUCT_OOS_LEGACY_PATH_FALLBACK_MIN_SIMILARITY
+        if legacy_marketing
+        else PRODUCT_OOS_GROUP_SLUG_MIN_SIMILARITY
+    )
+    best_product: Optional[Product] = None
+    best_key: Tuple[int, float, int] = (-1, -1.0, -1)
+    loose_product: Optional[Product] = None
+    loose_key: Tuple[int, float, int] = (-1, -1.0, -1)
+
+    for p in candidates:
+        cand_slug = (p.slug or "").strip()
+        if not cand_slug:
+            continue
+        sim = score_product_slug_oos_similarity(compare_slug, cand_slug, name)
+        in_stock = 1 if int(p.available or 0) > 0 else 0
+        key = (in_stock, sim, int(p.purchases or 0))
+        if sim >= min_sim and key > best_key:
+            best_key = key
+            best_product = p
+        if legacy_marketing and key > loose_key:
+            loose_key = key
+            loose_product = p
+
+    pick = best_product or (loose_product if legacy_marketing else None)
+    if pick is not None:
+        return _cluster_listing_path_for_product(db, pick)
+    return None
+
+
+def _resolve_listing_via_slug_pools(
+    db: Session,
+    *,
+    source_slug: str,
+    name_prefix: str,
+    product_id: Optional[str] = None,
+    legacy_marketing: bool = False,
+) -> Optional[str]:
+    """Thử pool slug (DB + ứng viên) → cluster SEO / danh mục từ SP trong pool."""
+    source = (source_slug or "").strip()
+    name = (name_prefix or "").strip()
+    if not name and not source:
+        return None
+
+    pools: List[str] = []
+    seen: Set[str] = set()
+
+    def add_pool(raw: str) -> None:
+        pl = (raw or "").strip().lower()
+        if len(pl) >= 6 and pl not in seen:
+            seen.add(pl)
+            pools.append(pl)
+
+    add_pool(product_slug_oos_search_pool_prefix(db, name, source_slug=source or name))
+    for cand in _iter_oos_pool_prefix_candidates(name, source or name):
+        add_pool(cand)
+
+    for pool in pools:
+        path = _cluster_listing_path_from_pool_prefix(db, pool)
+        if path:
+            return path
+
+    for pool in pools:
+        path = _cluster_listing_path_from_slug_group_pool(
+            db,
+            source_slug=source,
+            name_prefix=name,
+            product_id=product_id,
+            pool_prefix=pool,
+            legacy_marketing=legacy_marketing,
+        )
+        if path:
+            return path
+    return None
+
+
 def _resolve_product_group_listing_path_uncached(
     db: Session,
     *,
@@ -2295,7 +2427,7 @@ def _resolve_product_group_listing_path_uncached(
 ) -> str:
     """
     Đường dẫn listing nhóm khi SP hết hàng / không tồn tại — không mở PDP sản phẩm khác.
-    Thứ tự: cluster từ SP → pool slug → cluster trong URL → tìm kiếm trang chủ.
+    Thứ tự: cluster từ SP → pool slug ILIKE + nhóm SP → cluster trong URL → ``/?q=`` pool ngắn.
     """
     if product is not None:
         path = _cluster_listing_path_for_product(db, product)
@@ -2307,10 +2439,23 @@ def _resolve_product_group_listing_path_uncached(
 
     legacy_pool = extract_legacy_marketing_name_prefix(source)
     if legacy_pool:
-        path = _cluster_listing_path_from_pool_prefix(db, legacy_pool)
+        path = _resolve_listing_via_slug_pools(
+            db,
+            source_slug=source,
+            name_prefix=legacy_pool,
+            product_id=pid,
+            legacy_marketing=True,
+        )
         if path:
             return path
-        return _home_search_listing_path(legacy_pool)
+        short_pool = product_slug_oos_search_pool_prefix(
+            db, legacy_pool, source_slug=source
+        )
+        if short_pool:
+            search_path = _oos_home_search_fallback(short_pool)
+            if search_path:
+                return search_path
+        return "/"
 
     if source:
         path = _cluster_listing_path_from_source_slug(db, source)
@@ -2318,16 +2463,23 @@ def _resolve_product_group_listing_path_uncached(
             return path
 
     name_prefix = product_slug_name_prefix(source, pid)
-    pool = product_slug_oos_pool_prefix_fast(name_prefix, source_slug=source)
-    if pool:
-        path = _cluster_listing_path_from_pool_prefix(db, pool)
-        if path:
-            return path
+    path = _resolve_listing_via_slug_pools(
+        db,
+        source_slug=source,
+        name_prefix=name_prefix or source,
+        product_id=pid,
+        legacy_marketing=False,
+    )
+    if path:
+        return path
 
+    pool = product_slug_oos_search_pool_prefix(
+        db, name_prefix or source, source_slug=source
+    ) or product_slug_oos_pool_prefix_fast(name_prefix, source_slug=source)
     if pool:
-        return _home_search_listing_path(pool)
-    if name_prefix and len(name_prefix) >= 4:
-        return _home_search_listing_path(name_prefix)
+        search_path = _oos_home_search_fallback(pool)
+        if search_path:
+            return search_path
     return "/"
 
 
