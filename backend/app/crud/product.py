@@ -2355,6 +2355,59 @@ def _home_search_listing_path(pool_or_query: str) -> str:
     return f"/?q={quote(q)}" if q else "/"
 
 
+def _resolve_missing_product_listing_path(
+    db: Session,
+    *,
+    source_slug: str,
+    product_id: Optional[str] = None,
+) -> str:
+    """
+    SP không còn trong DB: DeepSeek → ``/?q=``; fallback parse URL (không quét pool 600 slug).
+    """
+    from app.services.legacy_oos_deepseek_keywords import deepseek_legacy_oos_search_query
+    from app.services.legacy_url_keyword_sanitize import (
+        strip_vendor_segments_from_slug,
+        strip_vendor_tokens_from_keywords,
+    )
+
+    source = normalize_legacy_source_slug(source_slug or "")
+    if not source:
+        return "/"
+
+    ai_q = deepseek_legacy_oos_search_query(source)
+    if ai_q:
+        return _home_search_listing_path(ai_q)
+
+    legacy_pool = strip_vendor_segments_from_slug(
+        extract_legacy_url_name_prefix(source) or "",
+        source,
+    )
+    if legacy_pool:
+        short_pool = product_slug_oos_pool_prefix_fast(legacy_pool, source_slug=source)
+        search_path = _oos_home_search_fallback(short_pool or legacy_pool)
+        if search_path:
+            return search_path
+        q = strip_vendor_tokens_from_keywords(
+            legacy_pool.replace("-", " ").strip(),
+            source,
+        )
+        if q:
+            return _home_search_listing_path(q)
+
+    path = _cluster_listing_path_from_source_slug(db, source)
+    if path:
+        return path
+
+    name_prefix = product_slug_name_prefix(source, product_id)
+    pool = product_slug_oos_pool_prefix_fast(name_prefix, source_slug=source) or (
+        name_prefix or ""
+    ).strip().lower()
+    search_path = _oos_home_search_fallback(pool)
+    if search_path:
+        return search_path
+    return "/"
+
+
 def _oos_home_search_fallback(pool: str) -> Optional[str]:
     """Chỉ fallback ``/?q=`` với pool ngắn (≤ N segment) — không search cả slug marketing."""
     p = (pool or "").strip().lower()
@@ -2505,6 +2558,11 @@ def _resolve_product_group_listing_path_uncached(
 
     source = normalize_legacy_source_slug(source_slug or "")
     pid = product_id or (getattr(product, "product_id", None) if product else None)
+
+    if product is None:
+        return _resolve_missing_product_listing_path(
+            db, source_slug=source, product_id=pid
+        )
 
     legacy_pool = extract_legacy_url_name_prefix(source)
     if legacy_pool:

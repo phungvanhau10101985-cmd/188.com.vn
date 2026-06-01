@@ -488,6 +488,10 @@ class Settings:
         self.DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
         self.DEEPSEEK_API_URL: str = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
         self.DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        # URL legacy / SP đã xóa: DeepSeek tạo từ khóa → /?q= (một dòng, không JSON)
+        self.LEGACY_OOS_DEEPSEEK_ENABLED: bool = os.getenv(
+            "LEGACY_OOS_DEEPSEEK_ENABLED", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
         # Import từ link 1688/Hibox: gán danh mục 3 cấp bằng DeepSeek theo tên SP + taxonomy trong DB
         self.IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED: bool = os.getenv(
             "IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED", "true"
