@@ -6,10 +6,12 @@ import { getOptimizedImage, isAlibabaCdnImageUrl, stripAlicdnToBaseJpg } from '@
 function buildRemoteImgSrc(raw: string, size: number, rawOverride?: string): string {
   const s = (rawOverride || raw).trim();
   if (!s) return '';
-  if (isAlibabaCdnImageUrl(s)) {
-    return getOptimizedImage(s, { width: size, height: size, fallbackStrategy: 'local' });
-  }
-  return s;
+  return getOptimizedImage(s, {
+    width: size,
+    height: size,
+    fallbackStrategy: 'local',
+    hideProductPng: true,
+  });
 }
 
 type RemoteProductImgProps = {

@@ -31,7 +31,7 @@ function wireImage(img: HTMLImageElement) {
     normalized.startsWith('http') || normalized.startsWith('//') || normalized.startsWith('/')
       ? getOptimizedImage(
           normalized.startsWith('//') ? `https:${normalized}` : normalized,
-          { width: 600, height: 600, fallbackStrategy: 'local' },
+          { width: 600, height: 600, fallbackStrategy: 'local', hideProductPng: true },
         )
       : raw;
   if (displaySrc !== raw) {

@@ -293,7 +293,7 @@ export default function ProductVariantModal({
           <div className="hidden md:flex gap-4 mb-3 items-start">
             <div className="flex-shrink-0 w-1/2 aspect-square rounded-xl overflow-hidden bg-gray-100 border border-gray-200">
               <Image
-                src={getOptimizedImage(mainDisplayImage, { width: 512, height: 512 })}
+                src={getOptimizedImage(mainDisplayImage, { width: 512, height: 512, hideProductPng: true })}
                 alt={product.name}
                 width={512}
                 height={512}
@@ -355,7 +355,7 @@ export default function ProductVariantModal({
                         {swatch ? (
                           <div className="pointer-events-none w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200 relative">
                             <Image
-                              src={getOptimizedImage(swatch, { width: 64, height: 64 })}
+                              src={getOptimizedImage(swatch, { width: 64, height: 64, hideProductPng: true })}
                               alt=""
                               width={32}
                               height={32}
@@ -439,7 +439,7 @@ export default function ProductVariantModal({
             <div className="flex gap-3 mb-3">
               <div className="w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
                 <Image
-                  src={getOptimizedImage(mainDisplayImage, { width: 256, height: 256 })}
+                  src={getOptimizedImage(mainDisplayImage, { width: 256, height: 256, hideProductPng: true })}
                   alt={product.name}
                   width={128}
                   height={128}
@@ -508,7 +508,7 @@ export default function ProductVariantModal({
                         {swatch ? (
                           <div className="pointer-events-none w-9 h-9 rounded overflow-hidden flex-shrink-0 border border-gray-200 relative">
                             <Image
-                              src={getOptimizedImage(swatch, { width: 72, height: 72 })}
+                              src={getOptimizedImage(swatch, { width: 72, height: 72, hideProductPng: true })}
                               alt=""
                               width={36}
                               height={36}

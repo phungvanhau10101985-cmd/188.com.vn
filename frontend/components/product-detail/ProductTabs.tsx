@@ -408,7 +408,7 @@ export default function ProductTabs({ product }: ProductTabsProps) {
                     {visibleDetailImages.map((image, index) => (
                       <HideOnImageError
                         key={image}
-                        src={getOptimizedImage(image, { width: 800, height: 600 })}
+                        src={getOptimizedImage(image, { width: 800, height: 600, hideProductPng: true })}
                         alt={`${product.name} chi tiết ${index + 1}`}
                         onBroken={() => markDetailImageBroken(image)}
                       />

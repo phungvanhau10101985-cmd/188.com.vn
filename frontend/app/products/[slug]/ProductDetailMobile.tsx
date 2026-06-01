@@ -294,7 +294,7 @@ export default function ProductDetailMobile({
           onTouchEnd={handleMainTouchEnd}
         >
           <ProductFillImage
-            src={getOptimizedImage(mainImageRaw, { width: 600, height: 750 })}
+            src={getOptimizedImage(mainImageRaw, { width: 600, height: 750, hideProductPng: true })}
             alt={product.name}
             onBroken={() => markBrokenPhoto(mainImageRaw)}
           >
@@ -345,7 +345,7 @@ export default function ProductDetailMobile({
               return (
                 <GalleryThumbImage
                   key={img}
-                  src={getOptimizedImage(img, { width: 64, height: 64 })}
+                  src={getOptimizedImage(img, { width: 64, height: 64, hideProductPng: true })}
                   selected={selectedImage === mediaIndex}
                   onClick={() => setSelectedImage(mediaIndex)}
                   onBroken={() => markBrokenPhoto(img)}

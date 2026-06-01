@@ -42,7 +42,7 @@ export function isPngImageUrl(url: string | undefined | null): boolean {
   }
 }
 
-/** PNG nội dung SP / CDN — ẩn trên storefront (logo, favicon, VietQR giữ). */
+/** PNG ảnh SP (gallery / mô tả PDP) — không dùng cho logo, cài đặt web, VietQR. */
 export function isHiddenWebPngImageUrl(url: string | undefined | null): boolean {
   const raw = (url || '').trim();
   if (!raw || !isPngImageUrl(raw)) return false;
@@ -50,7 +50,7 @@ export function isHiddenWebPngImageUrl(url: string | undefined | null): boolean 
   return !WEB_PNG_ALLOWLIST.some((re) => re.test(lower));
 }
 
-/** Lọc danh sách URL gallery — bỏ PNG ẩn. */
+/** Lọc URL gallery PDP — bỏ PNG ảnh sản phẩm. */
 export function filterVisibleWebImageUrls(urls: Iterable<string | null | undefined>): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -178,9 +178,17 @@ export const getOptimizedImage = (
     height?: number;
     quality?: number;
     fallbackStrategy?: 'local' | 'cdn' | 'external';
+    /** Chỉ bật trên PDP / ảnh thông tin SP — không ảnh hưởng logo, cài đặt web, listing. */
+    hideProductPng?: boolean;
   } = {}
 ): string => {
-  const { width = 400, height = 400, quality = 90, fallbackStrategy = 'local' } = options;
+  const {
+    width = 400,
+    height = 400,
+    quality = 90,
+    fallbackStrategy = 'local',
+    hideProductPng = false,
+  } = options;
 
   if (!url) {
     return getFallbackImage(fallbackStrategy, width, height);
@@ -203,7 +211,7 @@ export const getOptimizedImage = (
     return getFallbackImage(fallbackStrategy, width, height);
   }
 
-  if (isHiddenWebPngImageUrl(processedUrl)) {
+  if (hideProductPng && isHiddenWebPngImageUrl(processedUrl)) {
     return getFallbackImage(fallbackStrategy, width, height);
   }
 
@@ -238,15 +246,21 @@ const isValidUrl = (url: string): boolean => {
   }
 };
 
-export const getProductImages = (product: any) => {
+export const getProductImages = (product: any, opts?: { hideProductPng?: boolean }) => {
+  const hideProductPng = Boolean(opts?.hideProductPng);
+  const rawGallery = hideProductPng
+    ? filterVisibleWebImageUrls(product.images || product.gallery || [])
+    : (product.images || product.gallery || []).filter(Boolean);
+
   const mainImage = getOptimizedImage(product.main_image, {
     width: 600,
     height: 600,
     quality: 92,
     fallbackStrategy: 'local',
+    hideProductPng,
   });
 
-  const galleryImages = filterVisibleWebImageUrls(product.images || product.gallery || [])
+  const galleryImages = rawGallery
     .slice(0, 5)
     .map((img: string, index: number) =>
       getOptimizedImage(img, {
@@ -254,6 +268,7 @@ export const getProductImages = (product: any) => {
         height: 300,
         quality: 90,
         fallbackStrategy: index === 0 ? 'local' : 'external',
+        hideProductPng,
       })
     );
 
@@ -261,7 +276,7 @@ export const getProductImages = (product: any) => {
     main: mainImage,
     gallery: galleryImages.length > 0 ? galleryImages : [mainImage],
     thumbnails: galleryImages.map((img: string) =>
-      getOptimizedImage(img, { width: 100, height: 100, quality: 88 })
+      getOptimizedImage(img, { width: 100, height: 100, quality: 88, hideProductPng })
     ),
   };
 };

@@ -124,7 +124,7 @@ export default function VariantSelector({
                   <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200 bg-gray-100 relative">
                     {swatch ? (
                       <Image
-                        src={getOptimizedImage(swatch, { width: 80, height: 80 })}
+                        src={getOptimizedImage(swatch, { width: 80, height: 80, hideProductPng: true })}
                         alt={label}
                         width={40}
                         height={40}

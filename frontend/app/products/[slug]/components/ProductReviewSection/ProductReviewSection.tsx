@@ -131,7 +131,10 @@ export default function ProductReviewSection({
     <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg mb-4">
       <div className="shrink-0 w-14 h-14 rounded-lg overflow-hidden bg-white border border-gray-200 relative">
         <Image
-          src={getOptimizedImage(product.main_image || product.images?.[0], { fallbackStrategy: 'local' })}
+          src={getOptimizedImage(product.main_image || product.images?.[0], {
+            fallbackStrategy: 'local',
+            hideProductPng: true,
+          })}
           alt={product.name}
           fill
           sizes="56px"

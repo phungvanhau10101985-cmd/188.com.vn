@@ -132,7 +132,7 @@ export default function ProductGallery({ product, selectedImageUrl, onSelectImag
             </div>
           ) : mainRaw ? (
             <ProductFillImage
-              src={getOptimizedImage(mainRaw, { width: 900, height: 900 })}
+              src={getOptimizedImage(mainRaw, { width: 900, height: 900, hideProductPng: true })}
               alt={product.name}
               frameClassName="aspect-square relative w-full overflow-hidden rounded-lg bg-gray-100"
               onBroken={() => markBroken(mainRaw)}
@@ -184,7 +184,7 @@ export default function ProductGallery({ product, selectedImageUrl, onSelectImag
                 ) : (
                   <GalleryThumbImage
                     key={item.url}
-                    src={getOptimizedImage(item.url, { width: 64, height: 64 })}
+                    src={getOptimizedImage(item.url, { width: 64, height: 64, hideProductPng: true })}
                     sizeClass="w-[3.25rem] h-[3.25rem]"
                     selectedClassName="border-[#ea580c] scale-[1.02] shadow-md"
                     unselectedClassName="border-gray-300 hover:border-gray-400"
