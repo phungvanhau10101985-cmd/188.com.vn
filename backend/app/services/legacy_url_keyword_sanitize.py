@@ -99,6 +99,52 @@ _FASHION_SLUG_SEGMENTS: FrozenSet[str] = frozenset(
         "basic",
         "thoi",
         "trang",
+        "phao",
+        "parka",
+        "dang",
+        "cong",
+        "mu",
+        "vit",
+        "lot",
+        "som",
+        "gile",
+        "bomber",
+        "windbreaker",
+        "puffer",
+        "duffle",
+        "trench",
+        "blouse",
+        "crop",
+        "legging",
+        "short",
+        "skirt",
+        "jumpsuit",
+    }
+)
+
+# Màu / biến thể — không coi là mã NCC, không đưa vào từ khóa.
+_COLOR_NOISE_SEGMENTS: FrozenSet[str] = frozenset(
+    {
+        "mau",
+        "do",
+        "den",
+        "kem",
+        "ruou",
+        "trang",
+        "xanh",
+        "vang",
+        "hong",
+        "tim",
+        "nau",
+        "ghi",
+        "be",
+        "cam",
+        "bac",
+        "dong",
+        "nhat",
+        "dam",
+        "nhat",
+        "rep",
     }
 )
 
@@ -162,7 +208,11 @@ def vendor_slug_tokens_from_path(path: str) -> Set[str]:
             continue
         if not _VENDOR_SLUG_RE.match(low):
             continue
-        if low in _FASHION_SLUG_SEGMENTS or low in _MARKETING_NOISE_SEGMENTS:
+        if (
+            low in _FASHION_SLUG_SEGMENTS
+            or low in _MARKETING_NOISE_SEGMENTS
+            or low in _COLOR_NOISE_SEGMENTS
+        ):
             continue
         if re.match(r"^g0\d", low) or re.match(r"^\d", low):
             continue
@@ -286,6 +336,76 @@ def supplement_footwear_search_keywords(text: str, legacy_path: str) -> str:
             q = f"{q} đế cao".strip()
 
     return _dedupe_adjacent_words(re.sub(r"\s+", " ", q).strip())
+
+
+_PRODUCT_ID_SUFFIX_RE = re.compile(
+    r"-a\d{6,}a188[a-z0-9]+$",
+    re.IGNORECASE,
+)
+
+
+def build_category_keywords_from_slug(path: str) -> str:
+    """
+    Ghép từ khóa từ slug PDP chuẩn (áo khoác, phao, parka…) — ổn định hơn khi AI/lọc vendor sai.
+    """
+    raw = (path or "").strip().lower().replace("/", "-")
+    if _PRODUCT_ID_SUFFIX_RE.search(raw):
+        raw = raw[: _PRODUCT_ID_SUFFIX_RE.search(raw).start()]
+    joined = raw
+    parts = [p for p in raw.split("-") if p]
+    phrases: list[str] = []
+
+    if "ao-khoac-phao" in joined or ("ao-khoac" in joined and "phao" in parts):
+        phrases.append("áo khoác phao")
+    elif "ao-khoac" in joined:
+        phrases.append("áo khoác")
+    elif "ao-phao" in joined:
+        phrases.append("áo phao")
+    elif "ao-thun" in joined:
+        phrases.append("áo thun")
+    elif "ao-so-mi" in joined or ("ao" in parts and "so" in parts and "mi" in parts):
+        phrases.append("áo sơ mi")
+    elif "quan-jean" in joined:
+        phrases.append("quần jean")
+    elif "quan" in parts:
+        phrases.append("quần")
+    elif "vay-dam" in joined or "vay" in parts:
+        phrases.append("váy")
+    elif "boot" in parts:
+        phrases.append("boot")
+
+    if "nu" in parts:
+        phrases.append("nữ")
+    elif "nam" in parts:
+        phrases.append("nam")
+
+    if "parka" in parts and "parka" not in " ".join(phrases):
+        phrases.append("parka")
+    if "cong-so" in joined:
+        phrases.append("công sở")
+    if "co-mu" in joined:
+        phrases.append("có mũ")
+    if "lot-long" in joined or ("lot" in parts and "long" in parts):
+        phrases.append("lót lông")
+
+    return _dedupe_adjacent_words(" ".join(phrases).strip())
+
+
+def _looks_broken_search_query(text: str) -> bool:
+    """Từ khóa cụt / mất nghĩa sau lọc vendor (vd «áo khoác nữ sở»)."""
+    q = (text or "").strip()
+    if len(q) < 4:
+        return True
+    words = q.split()
+    if len(words) <= 2:
+        return False
+    norm_words = [remove_vietnamese_accents(w).lower() for w in words]
+    orphans = {"so", "sở", "cong", "dang", "lot", "mu", "vit"}
+    if norm_words[-1] in orphans and len(words) <= 4:
+        return True
+    if "sở" in q and "công" not in q and "cong" not in remove_vietnamese_accents(q):
+        return True
+    return False
 
 
 def _dedupe_adjacent_words(text: str) -> str:

@@ -11,7 +11,10 @@ from typing import Dict, Optional, Tuple
 import requests
 
 from app.core.config import settings
+from app.utils.vietnamese import remove_vietnamese_accents
 from app.services.legacy_url_keyword_sanitize import (
+    build_category_keywords_from_slug,
+    _looks_broken_search_query,
     strip_material_tokens_from_keywords,
     strip_vendor_tokens_from_keywords,
     supplement_footwear_search_keywords,
@@ -22,7 +25,7 @@ logger = logging.getLogger(__name__)
 _LEGACY_OOS_KEYWORDS_CACHE: Dict[str, Tuple[float, str]] = {}
 _LEGACY_OOS_KEYWORDS_CACHE_TTL_SEC = 3600
 _LEGACY_OOS_KEYWORDS_CACHE_MAX = 2000
-_LEGACY_OOS_KEYWORDS_CACHE_VER = "v5b-footwear-height-dedupe"
+_LEGACY_OOS_KEYWORDS_CACHE_VER = "v6-apparel-slug-parse"
 _TIMEOUT_SEC = 30
 
 
@@ -55,6 +58,15 @@ def _finalize_search_query(query: str, legacy_path: str) -> str:
     q = strip_vendor_tokens_from_keywords(q, legacy_path)
     q = strip_material_tokens_from_keywords(q)
     q = supplement_footwear_search_keywords(q, legacy_path)
+    slug_q = build_category_keywords_from_slug(legacy_path)
+    if slug_q and (not q or _looks_broken_search_query(q)):
+        q = slug_q
+    elif slug_q and q:
+        # Ưu tiên cụm loại SP từ slug nếu AI thiếu (vd thiếu phao/parka)
+        sq = remove_vietnamese_accents(slug_q).lower()
+        qq = remove_vietnamese_accents(q).lower()
+        if "khoac" in sq and "khoac" not in qq and "phao" not in qq:
+            q = slug_q
     return q.strip()
 
 
@@ -84,7 +96,8 @@ def deepseek_legacy_oos_search_query(legacy_path: str) -> Optional[str]:
         "nếu URL có chiều cao/đế/cao gót/cm → thêm mô tả chiều cao (vd cao gót, đế cao, cổ cao). "
         "Không suy mùa/kiểu không có trong URL. Không chất liệu (vải, bông…). "
         "Vd quần nam mùa hè vải bông → quần nam mùa hè. "
-        "Vd boot nữ … chieu-cao-de-12cm → boot nữ cao gót (hoặc giày boot nữ đế cao). "
+        "Vd boot nữ … chieu-cao-de-12cm → boot nữ cao gót. "
+        "Vd ao-khoac-phao-nu parka cong-so → áo khoác phao nữ parka công sở. "
         "KHÔNG: thương hiệu, mã NCC, marketing, màu sắc chi tiết, mã a188, id cuối URL."
     )
     user = f"https://188.com.vn/{path}"
