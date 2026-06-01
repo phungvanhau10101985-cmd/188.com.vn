@@ -330,16 +330,14 @@ function rowKey(row: EmsShippingImportRow): string {
   return `${row.row_number}:${row.reference_code}:${row.order_code || ''}`;
 }
 
-/** Tiền trên trang vận chuyển: đơn vị K (= số đồng / 1000). */
 function formatVnd(amount: number | null | undefined): string {
   if (amount == null || !Number.isFinite(amount)) return '—';
-  const k = Math.round(amount / 1000);
-  return `${k.toLocaleString('vi-VN')} K`;
+  return `${Math.round(amount).toLocaleString('vi-VN')} đ`;
 }
 
 function formatCodAmount(amount: number | null | undefined): string {
   if (amount == null || !Number.isFinite(amount)) return '—';
-  if (amount === 0) return 'Không thu hộ (0 K)';
+  if (amount === 0) return 'Không thu hộ (0 đ)';
   return formatVnd(amount);
 }
 
@@ -1853,7 +1851,7 @@ export default function AdminShippingPage() {
             </div>
 
             <p className="text-xs text-gray-500 pt-1 border-t border-gray-100">
-              Dòng dưới mỗi ô là tổng tiền thu hộ COD của nhóm đó (đơn vị K = ₫/1000).
+              Dòng dưới mỗi ô là tổng tiền thu hộ COD của nhóm đó (đồng).
             </p>
           </div>
         ) : null}
@@ -2286,7 +2284,7 @@ export default function AdminShippingPage() {
             <p className="text-xs text-gray-500">
               Hiển thị tối đa {timelineStats.limit} kỳ gần nhất · múi giờ {timelineStats.timezone}
               {' · '}
-              Bấm số để xem danh sách mã · Dòng dưới mỗi số là tổng tiền thu hộ COD của nhóm (K = ₫/1000)
+              Bấm số để xem danh sách mã · Dòng dưới mỗi số là tổng tiền thu hộ COD của nhóm (đ)
               {' · '}
               Giao OK · chưa trả COD = đã giao, EMS chưa trả tiền thu hộ về shop
               {' · '}
@@ -2729,7 +2727,7 @@ export default function AdminShippingPage() {
         <p className="text-sm text-gray-600">
           File <strong>Doi soat cuoc.xls</strong>: cột <strong>A</strong> mã vận chuyển EMS, cột <strong>L</strong> cước phí.
           Mã phải đã có trong bảng vận chuyển và <strong>chưa từng đối soát cước</strong>.
-          Cước phí &gt; <strong>70 K</strong> (70.000 ₫) sẽ được cảnh báo để xem lại.
+          Cước phí &gt; <strong>70.000 đ</strong> sẽ được cảnh báo để xem lại.
         </p>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           <input
@@ -2772,7 +2770,7 @@ export default function AdminShippingPage() {
               <>
                 {' '}
                 · <strong className="text-amber-800">{freightResult.import_batch.high_fee_warning_count}</strong> mã cước
-                &gt; 70 K
+                &gt; 70.000 đ
               </>
             ) : null}
           </div>
@@ -2885,7 +2883,7 @@ export default function AdminShippingPage() {
                           <td className="px-3 py-3">
                             {row.high_fee_warning === 'yes' ? (
                               <span className="inline-flex rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
-                                Cước &gt; 70 K — xem lại
+                                Cước &gt; 70.000 đ — xem lại
                               </span>
                             ) : (
                               '—'
