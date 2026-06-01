@@ -180,6 +180,52 @@ def strip_vendor_segments_from_slug(slug: str, source_path: str = "") -> str:
     return "-".join(parts)
 
 
+# Chất liệu — không đưa vào từ khóa redirect (tránh AND search quá hẹp).
+_MATERIAL_ONLY_WORDS: FrozenSet[str] = frozenset(
+    {
+        "vai",
+        "vải",
+        "bong",
+        "bông",
+        "cotton",
+        "linen",
+        "polyester",
+        "nylon",
+        "spandex",
+        "voan",
+        "lua",
+        "lụa",
+        "ni",
+        "len",
+        "lông",
+        "poly",
+        "mesh",
+        "satin",
+        "flannel",
+        "fleece",
+        "det",
+        "dệt",
+        "chat",
+        "lieu",
+        "chất",
+        "liệu",
+    }
+)
+
+
+def strip_material_tokens_from_keywords(text: str) -> str:
+    """Bỏ từ chỉ mang nghĩa chất liệu (vd vải, bông) — giữ loại SP + đặc tính."""
+    if not (text or "").strip():
+        return ""
+    kept: list[str] = []
+    for word in (text or "").split():
+        norm = remove_vietnamese_accents(word).lower().strip()
+        if norm in _MATERIAL_ONLY_WORDS:
+            continue
+        kept.append(word)
+    return " ".join(kept).strip()
+
+
 def strip_vendor_tokens_from_keywords(text: str, legacy_path: str = "") -> str:
     """Bỏ từ trong chuỗi tìm kiếm trùng mã NCC / segment lạ từ URL."""
     vendors = vendor_slug_tokens_from_path(legacy_path)
