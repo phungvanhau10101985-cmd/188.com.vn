@@ -781,6 +781,10 @@ def read_product_oos_group_redirect(
         le=1.0,
         description="Ngưỡng giống slug (SequenceMatcher), mặc định 0.8",
     ),
+    legacy_path: bool = Query(
+        False,
+        description="URL marketing một segment (vd /moi-ma-...-1164016): bật fallback best-in-pool",
+    ),
     db: Session = Depends(get_db),
 ):
     """
@@ -789,18 +793,28 @@ def read_product_oos_group_redirect(
     source = (slug or "").strip()
     current = crud.product.get_product_by_slug(db, slug=source)
     pid = getattr(current, "product_id", None) if current else None
+    fallback_min = (
+        crud.product.PRODUCT_OOS_LEGACY_PATH_FALLBACK_MIN_SIMILARITY if legacy_path else None
+    )
     target = crud.product.find_similar_product_slug_for_oos_redirect(
         db,
         slug=source,
         min_similarity=min_similarity,
         product_id=pid,
+        pool_best_fallback_min=fallback_min,
     )
     if not target or target == source:
-        return {"redirect_slug": None, "redirect_path": None, "similarity_min": min_similarity}
+        return {
+            "redirect_slug": None,
+            "redirect_path": None,
+            "similarity_min": min_similarity,
+            "legacy_path": legacy_path,
+        }
     return {
         "redirect_slug": target,
         "redirect_path": f"/products/{target}",
         "similarity_min": min_similarity,
+        "legacy_path": legacy_path,
     }
 
 

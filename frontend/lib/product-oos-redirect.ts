@@ -13,7 +13,7 @@ export interface ProductOosGroupRedirectResult {
 
 export async function resolveProductOosGroupRedirectSlug(
   slug: string,
-  options?: { minSimilarity?: number },
+  options?: { minSimilarity?: number; /** URL /moi-ma-... một segment */ legacyMarketingPath?: boolean },
 ): Promise<string | null> {
   const key = (slug || '').trim();
   if (!key) return null;
@@ -29,6 +29,9 @@ export async function resolveProductOosGroupRedirectSlug(
       slug: key,
       min_similarity: String(minSimilarity),
     });
+    if (options?.legacyMarketingPath) {
+      params.set('legacy_path', 'true');
+    }
     const res = await fetch(`${apiBase}/products/oos-group-redirect?${params}`, {
       cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },

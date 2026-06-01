@@ -1822,6 +1822,8 @@ PRODUCT_OOS_GROUP_SLUG_MIN_SIMILARITY = 0.8
 # Số segment đầu của tên slug dùng làm pool ILIKE (vd ``ao-khoac-da-nam-da-bo-...`` → ``ao-khoac-da-nam%``).
 PRODUCT_OOS_GROUP_SLUG_POOL_SEGMENTS = 4
 PRODUCT_OOS_GROUP_SLUG_POOL_CANDIDATE_LIMIT = 600
+# URL marketing một segment (không phải slug PDP): nếu không đạt 80%, chọn SP gần nhất trong pool.
+PRODUCT_OOS_LEGACY_PATH_FALLBACK_MIN_SIMILARITY = 0.42
 
 
 def product_slug_name_prefix(slug: str, product_id: Optional[str] = None) -> str:
@@ -1840,18 +1842,110 @@ def product_slug_name_prefix(slug: str, product_id: Optional[str] = None) -> str
     return s.rstrip("-")
 
 
+# Gợi ý nhóm phổ biến (thêm vào ứng viên pool, không thay thế quét DB).
+_OOS_POOL_HINT_MARKERS: Tuple[str, ...] = (
+    "ao-khoac-da-nam",
+    "ao-khoac-nam",
+    "ao-khoac-nu",
+    "ao-thun-nam",
+    "ao-thun-nu",
+    "ao-so-mi-nam",
+    "ao-so-mi-nu",
+    "quan-jean-nam",
+    "quan-jean-nu",
+    "quan-nam",
+    "quan-nu",
+    "vay-dam-nu",
+    "vay-nu",
+    "giay-nam",
+    "giay-nu",
+    "tui-xach-nu",
+    "tui-nam",
+)
+MIN_OOS_POOL_PRODUCT_COUNT = 3
+
+
+def _count_active_products_with_slug_prefix(db: Session, prefix: str) -> int:
+    p = (prefix or "").strip().lower()
+    if len(p) < 6:
+        return 0
+    q = db.query(Product.id).filter(
+        Product.slug.isnot(None),
+        Product.slug != "",
+        Product.slug.ilike(f"{p}%"),
+    )
+    if hasattr(Product, "is_active"):
+        q = q.filter(Product.is_active.is_(True))
+    return int(q.count())
+
+
+def _iter_oos_pool_prefix_candidates(name_prefix: str, source_slug: str) -> List[str]:
+    """Sinh ứng viên pool từ PDP (N segment đầu) + cửa sổ trượt trên URL marketing."""
+    seen: Set[str] = set()
+    out: List[str] = []
+
+    def add(raw: str) -> None:
+        p = (raw or "").strip("-").lower()
+        if len(p) < 6 or p in seen:
+            return
+        seen.add(p)
+        out.append(p)
+
+    name = (name_prefix or "").strip("-")
+    source = (source_slug or name_prefix or "").strip("-")
+    name_parts = [x for x in name.split("-") if x]
+    source_parts = [x for x in source.split("-") if x]
+
+    for n in (
+        PRODUCT_OOS_GROUP_SLUG_POOL_SEGMENTS,
+        max(3, PRODUCT_OOS_GROUP_SLUG_POOL_SEGMENTS - 1),
+    ):
+        if len(name_parts) >= n:
+            add("-".join(name_parts[:n]))
+
+    for window in (5, 4, 3):
+        if len(source_parts) < window:
+            continue
+        for i in range(0, len(source_parts) - window + 1):
+            add("-".join(source_parts[i : i + window]))
+
+    haystack = f"{source} {name}".lower()
+    for marker in _OOS_POOL_HINT_MARKERS:
+        if marker in haystack:
+            add(marker)
+
+    return out
+
+
 def product_slug_oos_search_pool_prefix(
+    db: Session,
     name_prefix: str,
     segments: int = PRODUCT_OOS_GROUP_SLUG_POOL_SEGMENTS,
+    *,
+    source_slug: Optional[str] = None,
 ) -> str:
     """
-    Pool ILIKE cho redirect OOS — vd ``ao-khoac-da-nam-da-bo-co-be-...`` → ``ao-khoac-da-nam``.
+    Chọn pool ILIKE theo DB: cụm segment nào khớp nhiều slug SP nhất (>= MIN_OOS_POOL_PRODUCT_COUNT).
+    Áp dụng mọi nhóm (quần, váy, giày, áo, …), không chỉ áo khoác nam.
     """
-    parts = [p for p in (name_prefix or "").strip("-").split("-") if p]
-    if not parts:
-        return ""
-    n = max(1, min(int(segments), len(parts)))
-    return "-".join(parts[:n])
+    _ = segments  # giữ tham số tương thích; cỡ cửa sổ cố định trong _iter_oos_pool_prefix_candidates
+    name = (name_prefix or "").strip()
+    source = (source_slug or name).strip()
+    best_prefix = ""
+    best_count = -1
+    for cand in _iter_oos_pool_prefix_candidates(name, source):
+        cnt = _count_active_products_with_slug_prefix(db, cand)
+        if cnt > best_count:
+            best_count = cnt
+            best_prefix = cand
+    if best_prefix and best_count >= MIN_OOS_POOL_PRODUCT_COUNT:
+        return best_prefix
+    name_parts = [x for x in name.split("-") if x]
+    if name_parts:
+        fallback = "-".join(name_parts[: min(PRODUCT_OOS_GROUP_SLUG_POOL_SEGMENTS, len(name_parts))])
+        if len(fallback) >= 6:
+            return fallback
+    return best_prefix
 
 
 def score_product_slug_oos_similarity(
@@ -1881,6 +1975,7 @@ def find_similar_product_slug_for_oos_redirect(
     slug: str,
     min_similarity: float = PRODUCT_OOS_GROUP_SLUG_MIN_SIMILARITY,
     product_id: Optional[str] = None,
+    pool_best_fallback_min: Optional[float] = None,
 ) -> Optional[str]:
     """
     Tìm slug PDP thay thế khi SP hết hàng: pool ``{4 segment đầu}%`` (vd ao-khoac-da-nam%),
@@ -1891,8 +1986,10 @@ def find_similar_product_slug_for_oos_redirect(
     if not source:
         return None
     name_prefix = product_slug_name_prefix(source, product_id)
-    pool_prefix = product_slug_oos_search_pool_prefix(name_prefix)
+    pool_prefix = product_slug_oos_search_pool_prefix(db, name_prefix, source_slug=source)
     if len(pool_prefix) < 6:
+        return None
+    if _count_active_products_with_slug_prefix(db, pool_prefix) < 1:
         return None
 
     canonical_group_slug = f"{name_prefix}-" if name_prefix else ""
@@ -1922,24 +2019,34 @@ def find_similar_product_slug_for_oos_redirect(
         return None
 
     min_sim = max(0.0, min(1.0, float(min_similarity)))
+    fallback_min = (
+        max(0.0, min(1.0, float(pool_best_fallback_min)))
+        if pool_best_fallback_min is not None
+        else None
+    )
     best_slug: Optional[str] = None
     best_key: Tuple[int, float, int, int] = (-1, -1.0, -1, -1)
+    fallback_slug: Optional[str] = None
+    fallback_key: Tuple[int, float, int, int] = (-1, -1.0, -1, -1)
 
     for p in candidates:
         cand = (p.slug or "").strip()
         if not cand or cand == source:
             continue
         sim = score_product_slug_oos_similarity(source, cand, name_prefix)
-        if sim < min_sim:
-            continue
         in_stock = 1 if int(p.available or 0) > 0 else 0
         is_canonical = 1 if cand == canonical_group_slug else 0
         key = (in_stock, sim, is_canonical, int(p.purchases or 0))
-        if key > best_key:
+        if sim >= min_sim and key > best_key:
             best_key = key
             best_slug = cand
+        elif fallback_min is not None and sim >= fallback_min and key > fallback_key:
+            fallback_key = key
+            fallback_slug = cand
 
-    return best_slug
+    if best_slug:
+        return best_slug
+    return fallback_slug
 
 
 def get_product_sitemap_slugs(

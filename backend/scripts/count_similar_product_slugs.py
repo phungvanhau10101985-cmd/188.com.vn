@@ -41,7 +41,7 @@ def main() -> None:
         current = get_product_by_slug(db, source)
         pid = getattr(current, "product_id", None) if current else None
         name_prefix = product_slug_name_prefix(source, pid)
-        pool_prefix = product_slug_oos_search_pool_prefix(name_prefix)
+        pool_prefix = product_slug_oos_search_pool_prefix(db, name_prefix, source_slug=source)
         canonical = f"{name_prefix}-"
         redirect = find_similar_product_slug_for_oos_redirect(
             db, slug=source, min_similarity=min_sim, product_id=pid
