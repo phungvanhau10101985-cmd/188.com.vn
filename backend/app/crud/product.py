@@ -93,8 +93,10 @@ def split_product_id_web_prefix_and_internal_sku(product_id: Optional[str]) -> O
 
 def _listing_source_prefix_from_product_id(product_id: Optional[str]) -> Optional[Dict[str, str]]:
     """
-    Lấy mã nguồn A/T từ cột id Excel.
-    Hỗ trợ cả dạng mới `A673071730303` và legacy `A673071730303a188B7402`.
+    Mã cột A (id Excel) — một offer = một ``prefix_key``:
+    - Chỉ prefix: ``a990013135592`` / ``A990013135592``
+    - Đủ legacy: ``a990013135592a188f6946`` / ``A990013135592a188K8790``
+    Cả hai cùng ``prefix_key`` ``a990013135592`` → một sản phẩm (import chỉ cập nhật).
     """
     raw = str(product_id or "").strip()
     if not raw:
@@ -118,13 +120,13 @@ def find_conflicting_product_id_for_same_listing_source(
     exclude_product_pk_ids: Optional[Set[int]] = None,
 ) -> Optional[str]:
     """
-    Trùng mã nguồn 1688/Taobao: cùng phần trước «a188» trong `product_id` (vd `A852085738630a188…`).
+    Trùng mã nguồn 1688/Taobao (cột A): cùng prefix A/T trước «a188» hoặc id chỉ có A/T+số.
     Trả `product_id` của bản ghi khác đã chiếm — dùng chặn đăng/import trùng offer/item.
     """
-    seg = split_product_id_web_prefix_and_internal_sku(candidate_product_id)
-    if not seg:
+    cand_src = _listing_source_prefix_from_product_id(candidate_product_id)
+    if not cand_src:
         return None
-    pk = seg["prefix_key"]
+    pk = cand_src["prefix_key"]
     ex = exclude_product_pk_ids or set()
     cand_norm = str(candidate_product_id).strip()
     for row_id, pid_str in db.query(Product.id, Product.product_id).filter(Product.product_id.isnot(None)).all():
@@ -132,9 +134,29 @@ def find_conflicting_product_id_for_same_listing_source(
             continue
         if str(pid_str).strip() == cand_norm:
             continue
-        other = split_product_id_web_prefix_and_internal_sku(pid_str)
-        if other and other["prefix_key"] == pk:
+        other_src = _listing_source_prefix_from_product_id(pid_str)
+        if other_src and other_src["prefix_key"] == pk:
             return str(pid_str).strip()
+    return None
+
+
+def find_product_by_listing_source_prefix(
+    db: Session,
+    source_prefix: Dict[str, str],
+    *,
+    exclude_product_pk_ids: Optional[Set[int]] = None,
+) -> Optional[Product]:
+    """Tìm một SP đã có cùng mã cột A (prefix_key), kể cả id Excel khác hậu tố a188SKU."""
+    pk = (source_prefix or {}).get("prefix_key")
+    if not pk:
+        return None
+    ex = exclude_product_pk_ids or set()
+    for row_id, pid_str in db.query(Product.id, Product.product_id).filter(Product.product_id.isnot(None)).all():
+        if row_id in ex:
+            continue
+        other_src = _listing_source_prefix_from_product_id(pid_str)
+        if other_src and other_src["prefix_key"] == pk:
+            return db.query(Product).filter(Product.id == row_id).first()
     return None
 
 
@@ -1290,6 +1312,7 @@ def excel_row_to_product(row: Dict) -> Dict:
         product_id = _clean_excel_text(row.get('id'), max_len=255)
         product_name = _clean_excel_text(row.get('name'), max_len=500)
         
+        # Cột A (id): a990013135592 hoặc a990013135592a188F6946 — cùng prefix = một SP (import chỉ cập nhật).
         # VALIDATION: Product ID là bắt buộc
         if not product_id or product_id.lower() == 'nan':
             logger.warning(f"Missing product_id in row: {row.get('name', 'No name')}")
@@ -4799,6 +4822,14 @@ def ensure_category_seo_body(
 
 def create_product(db: Session, product: ProductCreate):
     data = product.model_dump() if hasattr(product, "model_dump") else product.dict()
+    pid_raw = (data.get("product_id") or "").strip()
+    if pid_raw:
+        hit = find_conflicting_product_id_for_same_listing_source(db, pid_raw)
+        if hit:
+            raise ValueError(
+                f"Mã cột A (prefix trước a188) đã tồn tại — sản phẩm {hit}. "
+                "Chỉ cập nhật, không tạo mới."
+            )
     normalize_product_data_image_urls_for_db(data)
     batch_reserved: Set[str] = set()
     data["code"] = ensure_unique_internal_product_code(
@@ -5359,6 +5390,23 @@ def bulk_import_products(
     batch_prefix_owner: Dict[str, str] = {}
     batch_code_owner: Dict[str, str] = {}
 
+    prefix_counts: Dict[str, int] = {}
+    prefix_sample: Dict[str, str] = {}
+    for pid_row in db.query(Product.product_id).filter(Product.product_id.isnot(None)).all():
+        pid_s = (pid_row[0] or "").strip()
+        src0 = _listing_source_prefix_from_product_id(pid_s)
+        if not src0:
+            continue
+        pk0 = src0["prefix_key"]
+        prefix_counts[pk0] = prefix_counts.get(pk0, 0) + 1
+        prefix_sample.setdefault(pk0, src0["prefix"])
+    for pk0, cnt in prefix_counts.items():
+        if cnt > 1:
+            warnings.append(
+                f"Mã cột A «{prefix_sample.get(pk0, pk0)}» đang có {cnt} sản phẩm trên web — "
+                "import chỉ cập nhật một bản, không tạo thêm trùng offer."
+            )
+
     def _missing_required_category_labels(data: Dict) -> List[str]:
         labels = (
             ("category", "danh mục cấp 1"),
@@ -5439,10 +5487,19 @@ def bulk_import_products(
             continue
 
         pk = source_prefix["prefix_key"]
-        existing_by_prefix = batch_prefix_owner.get(pk) or db_prefix_owner.get(pk)
-        existing = db.query(Product).filter(Product.product_id == existing_by_prefix).first() if existing_by_prefix else None
+        prefix_label = source_prefix.get("prefix") or product_id
+        existing: Optional[Product] = None
+        owner_pid = batch_prefix_owner.get(pk) or db_prefix_owner.get(pk)
+        if owner_pid:
+            existing = db.query(Product).filter(Product.product_id == owner_pid).first()
         if existing is None:
             existing = db.query(Product).filter(Product.product_id == product_id).first()
+        if existing is None:
+            conflict_pid = find_conflicting_product_id_for_same_listing_source(db, product_id)
+            if conflict_pid:
+                existing = db.query(Product).filter(Product.product_id == conflict_pid).first()
+        if existing is None:
+            existing = find_product_by_listing_source_prefix(db, source_prefix)
         ex_pid_early = existing.id if existing else None
         proposed_raw = product_data.get("code")
         proposed_u = str(proposed_raw or "").strip().upper()
@@ -5509,6 +5566,25 @@ def bulk_import_products(
                     product_data["code"],
                 )
                 normalize_product_data_image_urls_for_db(product_data)
+                if not existing:
+                    late = find_product_by_listing_source_prefix(db, source_prefix)
+                    if late is None:
+                        late_pid = find_conflicting_product_id_for_same_listing_source(
+                            db, product_id
+                        )
+                        if late_pid:
+                            late = (
+                                db.query(Product)
+                                .filter(Product.product_id == late_pid)
+                                .first()
+                            )
+                    if late is not None:
+                        existing = late
+                        warnings.append(
+                            f"Dòng {idx + 1}: Mã cột A «{prefix_label}» đã có "
+                            f"(«{existing.product_id}») — cập nhật, không thêm mới."
+                        )
+
                 if existing:
                     old_product_id = existing.product_id
                     product_data["product_info"] = _merge_product_info_preserve_image_localization(
@@ -5523,8 +5599,6 @@ def bulk_import_products(
                             batch_code_owner,
                             db_code_owner,
                         )
-
-                if existing:
                     for key, value in product_data.items():
                         if hasattr(existing, key) and key not in ["id", "created_at"]:
                             setattr(existing, key, value)

@@ -1687,6 +1687,10 @@ def publish_import_1688_draft(
 
     if existing is None:
         existing = product_crud.get_product_by_product_id(db, canonical_pid)
+    if existing is None:
+        src = product_crud._listing_source_prefix_from_product_id(canonical_pid)
+        if src:
+            existing = product_crud.find_product_by_listing_source_prefix(db, src)
 
     if existing:
         product = product_crud.update_product(db, existing.id, ProductUpdate(**payload))
