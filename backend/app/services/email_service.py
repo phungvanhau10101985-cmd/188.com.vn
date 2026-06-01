@@ -684,6 +684,28 @@ def _format_vnd_plain(n) -> str:
         return str(n)
 
 
+def _order_deposit_paid_positive(order) -> bool:
+    try:
+        return Decimal(str(order.deposit_paid or 0)) > 0
+    except Exception:
+        return False
+
+
+def _order_eligible_for_deposit_confirmed_email(order, status_value: str) -> bool:
+    """
+    Sau xác nhận cọc, timeline vận chuyển có thể đẩy đơn sang processing ngay —
+    vẫn gửi email nếu đã ghi nhận deposit_paid.
+    """
+    st = (status_value or "").strip()
+    if st == "cancelled":
+        return False
+    if not getattr(order, "requires_deposit", False):
+        return st in ("deposit_paid", "confirmed")
+    if not _order_deposit_paid_positive(order):
+        return False
+    return st not in ("waiting_deposit", "pending")
+
+
 def _google_customer_reviews_email_extras(
     db,
     *,
@@ -794,22 +816,17 @@ def send_deposit_confirmed_email_task(order_id: int) -> DepositEmailDeliveryResu
             customer_result["detail"] = "Không tìm thấy đơn hàng"
             return customer_result
         st = getattr(order.status, "value", order.status)
-        if st not in (OrderStatus.DEPOSIT_PAID.value, OrderStatus.CONFIRMED.value):
-            logger.info("deposit_notification skip: wrong status order_id=%s status=%s", order_id, st)
-            customer_result["detail"] = f"Trạng thái đơn chưa phải đã cọc ({st})"
-            return customer_result
-
-        paid_amt = order.deposit_paid or 0
-        try:
-            paid_ok = Decimal(str(paid_amt)) > 0
-        except Exception:
-            paid_ok = False
-        if order.requires_deposit and not paid_ok:
+        if not _order_eligible_for_deposit_confirmed_email(order, str(st)):
             logger.info(
-                "deposit_confirmed_email skip: requires_deposit but deposit_paid=0 order_id=%s",
+                "deposit_notification skip: not eligible order_id=%s status=%s deposit_paid=%s",
                 order_id,
+                st,
+                order.deposit_paid,
             )
-            customer_result["detail"] = "Đơn chưa ghi nhận số tiền cọc"
+            customer_result["detail"] = (
+                f"Chưa đủ điều kiện gửi mail cọc (trạng thái: {st}, "
+                f"cọc đã nhận: {order.deposit_paid or 0})"
+            )
             return customer_result
 
         name = (order.customer_name or "Quý khách").strip()
