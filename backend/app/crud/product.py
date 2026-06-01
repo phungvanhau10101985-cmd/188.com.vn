@@ -5014,6 +5014,63 @@ def _collect_unique_category_paths_for_import(products_data: List[Dict]) -> List
     return list(unique_paths)
 
 
+def _category_path_string_from_slugs(
+    level1: str,
+    level2: Optional[str] = None,
+    level3: Optional[str] = None,
+) -> str:
+    parts = [str(level1 or "").strip().lower()]
+    if level2:
+        parts.append(str(level2).strip().lower())
+    if level3:
+        parts.append(str(level3).strip().lower())
+    return "/".join(p for p in parts if p)
+
+
+def _filter_paths_needing_gemini_seo(db: Session, paths_list: List[tuple]) -> List[tuple]:
+    """Chỉ giữ path thiếu seo_description hoặc seo_body trong category_seo_meta."""
+    if not paths_list:
+        return []
+    path_strs: List[str] = []
+    tup_by_path: Dict[str, tuple] = {}
+    for tup in paths_list:
+        if not tup or not tup[0]:
+            continue
+        level1, level2, level3 = tup[0], tup[1] if len(tup) > 1 else None, tup[2] if len(tup) > 2 else None
+        ps = _category_path_string_from_slugs(level1, level2, level3)
+        if len(ps) < 3:
+            continue
+        if ps not in tup_by_path:
+            path_strs.append(ps)
+            tup_by_path[ps] = tup
+    if not path_strs:
+        return []
+
+    rows = (
+        db.query(
+            CategorySeoMeta.category_path,
+            CategorySeoMeta.seo_description,
+            CategorySeoMeta.seo_body,
+        )
+        .filter(CategorySeoMeta.category_path.in_(path_strs))
+        .all()
+    )
+    meta_by_path = {
+        (r[0] or "").strip().lower(): (
+            (r[1] or "").strip(),
+            (r[2] or "").strip(),
+        )
+        for r in rows
+    }
+    out: List[tuple] = []
+    for ps, tup in tup_by_path.items():
+        desc, body = meta_by_path.get(ps, ("", ""))
+        if desc and body:
+            continue
+        out.append(tup)
+    return out
+
+
 def _filter_category_paths_by_gemini_whitelist(db: Session, paths_list: List[tuple]) -> List[tuple]:
     """Khi CATEGORY_GEMINI_SEO_WHITELIST_ONLY: chỉ giữ path có trong category_seo_gemini_targets."""
     if not getattr(settings, "CATEGORY_GEMINI_SEO_WHITELIST_ONLY", False):
@@ -5098,8 +5155,19 @@ def _spawn_category_gemini_background(paths_snapshot: List[tuple]) -> None:
                     len(snap),
                 )
                 return
-            logger.info("CATEGORY_GEMINI [nền] Bắt đầu — %s path", len(snap_f))
-            nd, nb = _run_category_gemini_seo_loop_for_paths(db2, snap_f, None)
+            snap_need = _filter_paths_needing_gemini_seo(db2, snap_f)
+            if not snap_need:
+                logger.info(
+                    "CATEGORY_GEMINI [nền] Bỏ qua — %s path đã có đủ seo_description + seo_body",
+                    len(snap_f),
+                )
+                return
+            logger.info(
+                "CATEGORY_GEMINI [nền] Bắt đầu — %s path thiếu SEO (đã kiểm tra %s path)",
+                len(snap_need),
+                len(snap_f),
+            )
+            nd, nb = _run_category_gemini_seo_loop_for_paths(db2, snap_need, None)
             logger.info(
                 "CATEGORY_GEMINI [nền] Xong — meta description mới: %s, body mới: %s",
                 nd,
@@ -5503,17 +5571,27 @@ def bulk_import_products(
         ((created + updated + deleted) / total_processed * 100) if total_processed > 0 else 0
     )
 
-    if _should_run_auto_category_gemini_after_import(db, total_processed):
-        paths = _collect_unique_category_paths_for_import(products_data)
-        if paths:
+    run_cat_gemini = _should_run_auto_category_gemini_after_import(db, total_processed)
+    paths_need_n = 0
+    if run_cat_gemini:
+        paths = _filter_category_paths_by_gemini_whitelist(
+            db, _collect_unique_category_paths_for_import(products_data)
+        )
+        paths_need = _filter_paths_needing_gemini_seo(db, paths)
+        paths_need_n = len(paths_need)
+        if paths_need:
             warnings.append(
-                "Đã bật Gemini SEO danh mục — đang chạy nền cho các path trong file import "
-                "(xem pm2 logs CATEGORY_GEMINI)."
+                f"Gemini SEO danh mục (nền): {paths_need_n} path thiếu mô tả/body "
+                f"(đã kiểm tra {len(paths)} path trong file; xem pm2 logs CATEGORY_GEMINI)."
             )
-            _spawn_category_gemini_background(paths)
+            _spawn_category_gemini_background(paths_need)
+        elif paths:
+            warnings.append(
+                "Gemini SEO danh mục: các path trong file import đã có đủ mô tả + body — không gọi lại Gemini."
+            )
 
     if progress_callback:
-        progress_callback("seo_categories", n_products or 1, n_products or 1)
+        progress_callback("seo_categories", 0, paths_need_n if run_cat_gemini else 0)
 
     # Calculate success rate
     success_rate = f"{success_rate_pct:.1f}%"

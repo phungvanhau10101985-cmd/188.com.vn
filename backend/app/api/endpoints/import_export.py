@@ -123,10 +123,17 @@ def _import_progress_message(phase: str, current: int, total: Optional[int]) -> 
         return "Đang xử lý các dòng trong file..."
     if phase == "database" and total is not None:
         return f"Đang ghi CSDL: {current:,} / {total:,} sản phẩm..."
+    if phase == "seo_categories" and total is not None and total == 0:
+        return "SEO danh mục: đã đủ nội dung — không gọi Gemini."
+    if phase == "seo_categories" and total and current == 0:
+        return (
+            f"Đã xếp hàng chờ Gemini SEO: {total} danh mục thiếu mô tả/body "
+            f"(chạy nền sau khi import xong)..."
+        )
     if phase == "seo_categories" and total:
         return f"Sinh nội dung SEO danh mục: {current} / {total}..."
     if phase == "seo_categories":
-        return "Đang sinh nội dung SEO cho danh mục..."
+        return "Đang sinh nội dung SEO cho danh mục (nền)..."
     if phase == "done":
         return "Hoàn tất import."
     return "Đang xử lý..."
