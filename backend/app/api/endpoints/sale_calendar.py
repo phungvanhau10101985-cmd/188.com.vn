@@ -98,6 +98,12 @@ def _build_admin_settings_out(db: Session) -> SaleCalendarSettingsOut:
             if getattr(settings, "manual_discount_percent", None) is not None
             else None
         ),
+        warehouse_clearance_enabled=bool(getattr(settings, "warehouse_clearance_enabled", True)),
+        warehouse_clearance_discount_percent=(
+            float(settings.warehouse_clearance_discount_percent)
+            if getattr(settings, "warehouse_clearance_discount_percent", None) is not None
+            else 20.0
+        ),
         month_rules=month_out,
         upcoming=sale_calendar_svc.list_upcoming_events(db, limit=8),
         current=SaleCalendarPublicResponse(**state.to_public_dict()),
@@ -176,6 +182,14 @@ def admin_update_sale_calendar_settings(
         manual_discount_percent=payload.manual_discount_percent if "manual_discount_percent" in fields_set else None,
         clear_scheduled=payload.clear_scheduled,
         clear_manual=payload.clear_manual,
+        warehouse_clearance_enabled=(
+            payload.warehouse_clearance_enabled if "warehouse_clearance_enabled" in fields_set else None
+        ),
+        warehouse_clearance_discount_percent=(
+            payload.warehouse_clearance_discount_percent
+            if "warehouse_clearance_discount_percent" in fields_set
+            else None
+        ),
     )
     return _build_admin_settings_out(db)
 

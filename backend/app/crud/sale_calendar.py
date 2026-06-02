@@ -42,6 +42,8 @@ def update_settings(
     manual_discount_percent: Optional[float] = None,
     clear_scheduled: bool = False,
     clear_manual: bool = False,
+    warehouse_clearance_enabled: Optional[bool] = None,
+    warehouse_clearance_discount_percent: Optional[float] = None,
 ) -> SaleCalendarSettings:
     row = get_settings(db)
     if enabled is not None:
@@ -66,6 +68,10 @@ def update_settings(
         row.manual_sale_date = _parse_optional_date(manual_sale_date)
     if manual_discount_percent is not None:
         row.manual_discount_percent = Decimal(str(manual_discount_percent))
+    if warehouse_clearance_enabled is not None:
+        row.warehouse_clearance_enabled = bool(warehouse_clearance_enabled)
+    if warehouse_clearance_discount_percent is not None:
+        row.warehouse_clearance_discount_percent = Decimal(str(warehouse_clearance_discount_percent))
     db.commit()
     db.refresh(row)
     return row

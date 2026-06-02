@@ -66,6 +66,8 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
   const [scheduledDate, setScheduledDate] = useState('');
   const [scheduledDiscount, setScheduledDiscount] = useState('6');
   const [manualDiscount, setManualDiscount] = useState('6');
+  const [warehouseEnabled, setWarehouseEnabled] = useState(true);
+  const [warehouseDiscount, setWarehouseDiscount] = useState('20');
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
@@ -80,6 +82,8 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
       setManualDiscount(
         String(res.manual_discount_percent ?? defaultDiscountForDate(res.manual_sale_date ?? todayIsoVn())),
       );
+      setWarehouseEnabled(res.warehouse_clearance_enabled !== false);
+      setWarehouseDiscount(String(res.warehouse_clearance_discount_percent ?? 20));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không tải được cấu hình sale');
     } finally {
@@ -104,6 +108,30 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
       showToast('Đã cập nhật số ngày teaser');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Lỗi lưu');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveWarehouseClearance = async () => {
+    const pct = Number(warehouseDiscount);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 80) {
+      setError('Giảm giá kho thanh lý phải từ 0–80%.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await adminSaleCalendarAPI.updateSettings({
+        warehouse_clearance_enabled: warehouseEnabled,
+        warehouse_clearance_discount_percent: pct,
+      });
+      setData(res);
+      setWarehouseEnabled(res.warehouse_clearance_enabled !== false);
+      setWarehouseDiscount(String(res.warehouse_clearance_discount_percent ?? pct));
+      showToast('Đã lưu cài đặt hàng kho thanh lý');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Không lưu được cài đặt kho thanh lý');
     } finally {
       setSaving(false);
     }
@@ -508,6 +536,49 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
         ) : (
           <p className="text-xs text-gray-500">Chưa có — chọn ngày và bấm Lưu (tùy chọn, bên cạnh lịch tháng).</p>
         )}
+      </div>
+
+      <div className="rounded-xl border border-violet-100 bg-violet-50/40 p-5 space-y-3">
+        <div>
+          <p className="font-semibold text-gray-900">Thanh lý trong kho (duyệt hoàn)</p>
+          <p className="text-xs text-gray-500 mt-1">
+            Áp dụng cho sản phẩm import id có dấu «/» (vd. HN256/XL). Một mức % chung — hiển thị trên block
+            «Thanh lý trong kho» ở trang sản phẩm (hoặc giá trực tiếp nếu chưa có SP gốc). Không cộng sale ngày trùng tháng.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={warehouseEnabled}
+              disabled={saving}
+              onChange={(e) => setWarehouseEnabled(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            Bật giảm giá kho
+          </label>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Giảm giá kho (%)</label>
+            <input
+              type="number"
+              min={0}
+              max={80}
+              step={0.5}
+              className="w-24 border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+              value={warehouseDiscount}
+              disabled={saving}
+              onChange={(e) => setWarehouseDiscount(e.target.value)}
+            />
+          </div>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void saveWarehouseClearance()}
+            className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-60"
+          >
+            Lưu cài đặt kho
+          </button>
+        </div>
       </div>
 
       <div className={`overflow-hidden rounded-xl border border-gray-200 ${embedded ? 'bg-white' : 'bg-white'}`}>

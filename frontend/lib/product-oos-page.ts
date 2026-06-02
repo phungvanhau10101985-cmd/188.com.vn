@@ -17,6 +17,10 @@ export async function resolveOosListingPathForSlug(
   product?: Product | null,
   options?: { legacyMarketingPath?: boolean },
 ): Promise<string | null> {
+  const whStock = (product?.warehouse_variants ?? []).some((v) => (v.available ?? 0) > 0);
+  if (product?.source_oos && whStock) {
+    return null;
+  }
   const embedded = (product?.group_listing_path || '').trim();
   if (embedded) return embedded;
   return resolveProductGroupListingPath(slug, options);

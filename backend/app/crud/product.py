@@ -1432,6 +1432,15 @@ def excel_row_to_product(row: Dict) -> Dict:
         }
 
         normalize_product_data_image_urls_for_db(product_data)
+
+        from app.services.warehouse_clearance import parse_warehouse_product_id
+
+        wh_parsed = parse_warehouse_product_id(product_id)
+        if wh_parsed:
+            product_data['is_warehouse_clearance'] = True
+            product_data['base_sku'] = wh_parsed['base_sku']
+            if not str(product_data.get('code') or '').strip():
+                product_data['code'] = wh_parsed['base_sku']
         
         # Debug log để kiểm tra
         logger.debug(f"✅ Converted: {product_id}")
@@ -3867,7 +3876,9 @@ def get_products(
     filter_style_tag: Optional[str] = None,
     skip_total: bool = False,
 ):
-    query = db.query(Product)
+    query = db.query(Product).filter(
+        or_(Product.is_warehouse_clearance == False, Product.is_warehouse_clearance.is_(None))  # noqa: E712
+    )
     has_q = bool(q and str(q).strip())
     sort_norm = normalize_product_list_sort(sort)
     use_random_order = bool(order_random and not has_q)
@@ -4991,7 +5002,9 @@ def delete_product(db: Session, product_id: int):
             refresh_caches_after_product_change,
             snapshot_product_for_facet_refresh,
         )
+        from app.services import warehouse_clearance as wh_clearance_svc
 
+        wh_clearance_svc.assert_product_deletion_allowed(db, db_product)
         snapshot = snapshot_product_for_facet_refresh(db_product)
         _delete_product_orm_only(db, db_product)
         db.commit()
@@ -5059,10 +5072,17 @@ def bulk_delete_products_by_db_ids(db: Session, db_ids: List[int]) -> Tuple[List
     deleted_snapshots: List[Any] = []
 
     from app.services.listing_facet_cache import snapshot_product_for_facet_refresh
+    from app.services import warehouse_clearance as wh_clearance_svc
 
+    blocked: List[int] = []
     for pk in ordered_unique:
         row = by_id.get(pk)
         if row is None:
+            continue
+        try:
+            wh_clearance_svc.assert_product_deletion_allowed(db, row)
+        except ValueError:
+            blocked.append(pk)
             continue
         deleted_snapshots.append(snapshot_product_for_facet_refresh(row))
         bunny_rows.append(row)
@@ -5468,7 +5488,87 @@ def bulk_import_products(
                 missing.append(label)
         return missing
 
+    def _bulk_import_one_warehouse_row(idx: int, product_data: Dict) -> Optional[str]:
+        """Import dòng kho thanh lý (id có /). Trả 'deleted'|'created'|'updated'|'skip'|'error' nếu đã xử lý."""
+        from app.services import warehouse_clearance as wh_svc
+
+        product_id = str(product_data.get("product_id") or "").strip()
+        parsed = wh_svc.parse_warehouse_product_id(product_id)
+        if not parsed:
+            return None
+
+        excel_listed = listed_from_excel_cell(product_data.pop("excel_import_listed", 1), default=1)
+        if excel_listed == 0:
+            existing_del = db.query(Product).filter(Product.product_id == product_id).first()
+            if existing_del:
+                try:
+                    wh_svc.assert_product_deletion_allowed(db, existing_del)
+                    with db.begin_nested():
+                        _delete_product_orm_only(db, existing_del)
+                    return "deleted"
+                except ValueError as exc:
+                    errors.append(f"Dòng {idx + 1} ({product_id}): {exc}")
+                    return "error"
+                except Exception as e:
+                    errors.append(f"Dòng {idx + 1} ({product_id}): Không thể xóa khỏi DB — {e}")
+                    return "error"
+            skipped.append(
+                f"Dòng {idx + 1} ({product_id}): listed=0 nhưng chưa có sản phẩm kho trong DB — bỏ qua."
+            )
+            return "skip"
+
+        parent = wh_svc.find_parent_product_by_base_sku(db, parsed["base_sku"])
+        if parent is not None:
+            wh_svc.merge_clone_from_parent(parent, product_data, parsed)
+            product_data["category_id"] = product_data.get("category_id") or parent.category_id
+        else:
+            missing = _missing_required_category_labels(product_data)
+            if missing:
+                errors.append(
+                    f"Dòng {idx + 1} ({product_id}): Thiếu {', '.join(missing)} — "
+                    f"chưa có SP gốc «{parsed['base_sku']}», cần đủ danh mục trong file."
+                )
+                return "error"
+            wh_svc.apply_warehouse_import_from_row(product_data, parsed)
+            product_data["category_id"] = _resolve_category_id_from_row(product_data, cat3_idx)
+            warnings.append(
+                f"Dòng {idx + 1} ({product_id}): Chưa có SP gốc «{parsed['base_sku']}» — "
+                "tạo sản phẩm kho từ dữ liệu file import."
+            )
+
+        product_data["slug"] = generate_consistent_slug(product_data.get("name", ""), product_id)
+        normalize_product_data_image_urls_for_db(product_data)
+
+        existing_wh = db.query(Product).filter(Product.product_id == product_id).first()
+        try:
+            with db.begin_nested():
+                if existing_wh:
+                    for key, value in product_data.items():
+                        if hasattr(existing_wh, key) and key not in ["id", "created_at"]:
+                            setattr(existing_wh, key, value)
+                    existing_wh.updated_at = datetime.now()
+                    return "updated"
+                db.add(Product(**product_data))
+                return "created"
+        except Exception as e:
+            errors.append(f"Dòng {idx + 1} ({product_id}): Lỗi import kho — {e}")
+            return "error"
+
     for idx, product_data in enumerate(products_data):
+        wh_action = _bulk_import_one_warehouse_row(idx, product_data)
+        if wh_action is not None:
+            if wh_action == "deleted":
+                deleted += 1
+            elif wh_action == "created":
+                created += 1
+            elif wh_action == "updated":
+                updated += 1
+            if (idx + 1) % batch_size == 0:
+                db.commit()
+            if progress_callback and ((idx + 1) % db_tick == 0 or (idx + 1) == n_products):
+                progress_callback("database", idx + 1, n_products)
+            continue
+
         product_id = product_data.get("product_id")
         if not product_id:
             errors.append(f"Dòng {idx + 1}: Thiếu product_id")
@@ -5497,6 +5597,9 @@ def bulk_import_products(
             )
             if existing_del:
                 try:
+                    from app.services import warehouse_clearance as wh_clearance_svc
+
+                    wh_clearance_svc.assert_product_deletion_allowed(db, existing_del)
                     product_id = existing_del.product_id
                     code_upper = str(existing_del.code or "").strip().upper()
                     with db.begin_nested():
@@ -5511,6 +5614,8 @@ def bulk_import_products(
                     if code_upper and internal_sku_is_valid_format(code_upper):
                         sku_batch_reserved.discard(code_upper)
                     deleted += 1
+                except ValueError as exc:
+                    errors.append(f"Dòng {idx + 1} ({product_id}): {exc}")
                 except Exception as e:
                     errors.append(f"Dòng {idx + 1} ({product_id}): Không thể xóa khỏi DB — {e}")
                     logger.error("❌ Delete-from-excel row %s: %s", idx + 1, e)

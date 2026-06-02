@@ -18,6 +18,8 @@ class SaleCalendarSettings(Base):
     scheduled_discount_percent = Column(Numeric(5, 2), nullable=True)
     manual_sale_date = Column(CoercedDate, nullable=True)
     manual_discount_percent = Column(Numeric(5, 2), nullable=True)
+    warehouse_clearance_enabled = Column(Boolean, nullable=False, default=True)
+    warehouse_clearance_discount_percent = Column(Numeric(5, 2), nullable=True, default=20)
 
 
 class SaleCalendarMonthRule(Base):

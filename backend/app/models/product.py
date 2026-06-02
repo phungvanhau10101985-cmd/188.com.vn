@@ -75,6 +75,9 @@ class Product(Base):
     source_stock_check_platform = Column(String(80), nullable=True)
     # Trang admin Kiểm tra nguồn (DB): thời điểm đã xếp hàng chạy lần gần nhất; qua N ngày mới vào lại vòng.
     admin_source_batch_scanned_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    # Hàng kho thanh lý duyệt hoàn — product_id dạng HN256/XL; base_sku = HN256
+    is_warehouse_clearance = Column(Boolean, default=False, nullable=False, index=True)
+    base_sku = Column(String(100), nullable=True, index=True)
 
     # ========== ADDITIONAL FIELDS ==========
     slug = Column(String(500), unique=True, index=True)

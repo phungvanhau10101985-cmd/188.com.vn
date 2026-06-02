@@ -109,6 +109,28 @@ export interface Product {
   source_stock_checked_at?: string | null;
   source_stock_next_check_at?: string | null;
   source_stock_error?: string | null;
+  /** Nguồn 1688/Taobao báo hết hàng — chỉ còn đặt hàng kho thanh lý (nếu có). */
+  source_oos?: boolean;
+  /** Biến thể kho thanh lý duyệt hoàn (block B trên PDP). */
+  warehouse_variants?: WarehouseClearanceVariant[];
+  warehouse_clearance?: {
+    enabled?: boolean;
+    discount_percent?: number;
+  };
+}
+
+export interface WarehouseClearanceVariant {
+  id: number;
+  product_id: string;
+  color?: string | null;
+  size?: string | null;
+  available: number;
+  list_price: number;
+  display_price: number;
+  original_price: number;
+  savings_amount: number;
+  clearance_percent: number;
+  main_image?: string | null;
 }
 
 /** Biến thể màu từ NanoAI (schema partner): tên + ảnh nguyên bản. */

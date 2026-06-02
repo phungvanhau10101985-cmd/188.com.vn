@@ -302,6 +302,15 @@ class Product(ProductBase):
 
     original_price: Optional[float] = Field(None, description="Giá gốc khi đang site sale")
     site_sale: Optional[Dict[str, Any]] = Field(None, description="Trạng thái sale ngày trùng tháng")
+    source_oos: Optional[bool] = Field(None, description="Nguồn 1688/Taobao báo hết hàng")
+    warehouse_variants: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Biến thể kho thanh lý (block B trên PDP)",
+    )
+    warehouse_clearance: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Cài đặt % giảm hàng kho thanh lý",
+    )
     group_listing_path: Optional[str] = Field(
         None,
         description="Đường dẫn listing nhóm khi SP hết hàng (chỉ khi client yêu cầu attach_group_listing)",

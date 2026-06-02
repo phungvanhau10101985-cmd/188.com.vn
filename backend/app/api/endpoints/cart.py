@@ -35,25 +35,39 @@ def _cart_items_with_site_sale_pricing(
     items: List[CartItem],
 ) -> tuple[List[CartItemResponse], float, dict]:
     from app.services.sale_calendar import apply_site_sale_to_price, resolve_sale_calendar_state
+    from app.services import warehouse_clearance as wh_clearance_svc
 
     sale_state = resolve_sale_calendar_state(db, user=user)
+    wh_enabled, wh_pct = wh_clearance_svc.get_warehouse_clearance_settings(db)
     total_price = 0.0
     cart_items_response: List[CartItemResponse] = []
     for item in items:
         resp = _cart_item_to_response(item)
         base = _cart_line_list_price(item)
-        pricing = apply_site_sale_to_price(base, sale_state)
-        line_unit = float(pricing["display_price"])
-        resp.product_price = line_unit
-        resp.list_price = base if base > 0 else None
-        if sale_state.is_active and pricing.get("savings_amount", 0) > 0:
-            resp.original_price = base
-        resp.site_sale = {
-            **pricing,
-            "event_label": sale_state.event_label,
-            "event_date": sale_state.event_date.isoformat() if sale_state.event_date else None,
-            "countdown_to": sale_state.countdown_to.isoformat() if sale_state.countdown_to else None,
-        }
+        is_wh = bool(
+            item.product is not None and getattr(item.product, "is_warehouse_clearance", False)
+        )
+        if is_wh:
+            pricing = wh_clearance_svc.apply_clearance_pricing(base, enabled=wh_enabled, percent=wh_pct)
+            line_unit = float(pricing["display_price"])
+            resp.product_price = line_unit
+            resp.list_price = base if base > 0 else None
+            if pricing.get("savings_amount", 0) > 0:
+                resp.original_price = base
+            resp.site_sale = None
+        else:
+            pricing = apply_site_sale_to_price(base, sale_state)
+            line_unit = float(pricing["display_price"])
+            resp.product_price = line_unit
+            resp.list_price = base if base > 0 else None
+            if sale_state.is_active and pricing.get("savings_amount", 0) > 0:
+                resp.original_price = base
+            resp.site_sale = {
+                **pricing,
+                "event_label": sale_state.event_label,
+                "event_date": sale_state.event_date.isoformat() if sale_state.event_date else None,
+                "countdown_to": sale_state.countdown_to.isoformat() if sale_state.countdown_to else None,
+            }
         pd = dict(resp.product_data or {})
         pd["list_price"] = base
         pd["price"] = line_unit

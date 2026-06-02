@@ -139,22 +139,44 @@ def _product_to_response(
     attach_group_listing: bool = False,
 ) -> Product:
     from app.services import sale_calendar as sale_calendar_svc
+    from app.services import warehouse_clearance as wh_clearance_svc
     from app.utils.public_product_url import slug_path_segment_from_input
 
-    d = Product.model_validate(db_product).model_dump()
-    sale_state = sale_calendar_svc.resolve_sale_calendar_state(db, user=user)
-    sale_calendar_svc.enrich_product_payload_with_site_sale(d, sale_state)
-    enrich_product_payloads_with_category_size_guide(db, [db_product], [d])
+    row = db_product
+    standalone_wh = False
+    if getattr(db_product, "is_warehouse_clearance", False):
+        parent = wh_clearance_svc.find_parent_product_by_base_sku(
+            db, getattr(db_product, "base_sku", None) or db_product.code or ""
+        )
+        if parent is not None:
+            row = parent
+        else:
+            standalone_wh = True
+
+    d = Product.model_validate(row).model_dump()
+    if standalone_wh:
+        wh_clearance_svc.enrich_standalone_warehouse_product(db, d, db_product)
+    else:
+        sale_state = sale_calendar_svc.resolve_sale_calendar_state(db, user=user)
+        sale_calendar_svc.enrich_product_payload_with_site_sale(d, sale_state)
+        wh_clearance_svc.enrich_parent_with_warehouse_clearance(db, d, row)
+    enrich_product_payloads_with_category_size_guide(db, [row], [d])
+
+    wh_variants = d.get("warehouse_variants") or []
+    source_oos = bool(d.get("source_oos"))
+    has_wh_stock = len(wh_variants) > 0
     if attach_group_listing and int(d.get("available") or 0) <= 0:
-        src = slug_path_segment_from_input(getattr(db_product, "slug", None)) or (
-            (getattr(db_product, "slug", None) or "").strip()
-        )
-        d["group_listing_path"] = crud.product.resolve_product_group_listing_path(
-            db,
-            source_slug=src,
-            product=db_product,
-            product_id=getattr(db_product, "product_id", None),
-        )
+        if not (source_oos and has_wh_stock):
+            if not has_wh_stock:
+                src = slug_path_segment_from_input(getattr(row, "slug", None)) or (
+                    (getattr(row, "slug", None) or "").strip()
+                )
+                d["group_listing_path"] = crud.product.resolve_product_group_listing_path(
+                    db,
+                    source_slug=src,
+                    product=row,
+                    product_id=getattr(row, "product_id", None),
+                )
     return Product(**d)
 
 
@@ -913,6 +935,11 @@ def delete_product(
     existing = crud.product.get_product_by_product_id(db, product_id=product_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Product not found")
+    from app.services import warehouse_clearance as wh_clearance_svc
+
+    block = wh_clearance_svc.parent_has_deletion_block(db, existing)
+    if block:
+        raise HTTPException(status_code=400, detail=block)
     db_product = crud.product.delete_product(db, product_id=existing.id)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")

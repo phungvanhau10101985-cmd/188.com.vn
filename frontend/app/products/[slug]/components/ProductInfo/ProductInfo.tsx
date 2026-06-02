@@ -24,6 +24,12 @@ import {
 } from '@/lib/nanoai-hosted-chat';
 import { useNanoAiMessaging } from '@/lib/use-nanoai-messaging';
 import AffiliateShareBar from '@/components/affiliate/AffiliateShareBar';
+import WarehouseClearanceBlock from '@/components/product-detail/WarehouseClearanceBlock';
+import {
+  canOrderAnyVariant,
+  canOrderSourceProduct,
+  warehouseVariantsInStock,
+} from '@/lib/warehouse-clearance';
 
 interface ProductInfoProps {
   product: Product;
@@ -73,7 +79,11 @@ export default function ProductInfo({
     });
   }, [openTryOnForProduct, product, viewingImageUrl]);
 
-  const available = (product.available || 0) > 0;
+  const sourceAvailable = canOrderSourceProduct(product);
+  const warehouseInStock = warehouseVariantsInStock(product);
+  const sourceOos = product.source_oos === true;
+  const available = sourceAvailable;
+  const canShowStickyBuy = canOrderAnyVariant(product);
   const birthdayDiscount = useBirthdayDiscount();
   const { state: siteSaleState } = useSiteSale();
   const productForPricing = useMemo(
@@ -219,9 +229,9 @@ export default function ProductInfo({
               <button
                 type="button"
                 onClick={openVariantModal}
-                disabled={!available || isCartLoading}
+                disabled={!canShowStickyBuy || isCartLoading}
                 className={`min-w-[160px] rounded-lg px-4 py-2.5 text-sm font-semibold whitespace-nowrap transition-all ${
-                  available && !isCartLoading
+                  canShowStickyBuy && !isCartLoading
                     ? 'bg-gray-500 text-white hover:bg-gray-600'
                     : 'cursor-not-allowed bg-gray-300 text-gray-500'
                 } ${isCartLoading ? 'opacity-70' : ''}`}
@@ -231,9 +241,9 @@ export default function ProductInfo({
               <button
                 type="button"
                 onClick={openVariantModal}
-                disabled={!available || isCartLoading}
+                disabled={!canShowStickyBuy || isCartLoading}
                 className={`min-w-[160px] rounded-lg px-4 py-2.5 text-sm font-semibold whitespace-nowrap transition-all ${
-                  available && !isCartLoading
+                  canShowStickyBuy && !isCartLoading
                     ? 'bg-[#ea580c] text-white hover:bg-[#c2410c]'
                     : 'cursor-not-allowed bg-gray-300 text-gray-500'
                 } ${isCartLoading ? 'opacity-70' : ''}`}
@@ -322,7 +332,14 @@ export default function ProductInfo({
         />
       </div>
 
-      {/* Variant Selectors */}
+      {/* Variant Selectors — order nguồn */}
+      {sourceOos && warehouseInStock.length > 0 ? (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+          Hàng order nguồn tạm hết — chọn <strong>Thanh lý trong kho</strong> bên dưới hoặc quay lại khi nguồn có lại.
+        </div>
+      ) : null}
+
+      <div className={sourceAvailable ? '' : 'opacity-60 pointer-events-none select-none'} aria-disabled={!sourceAvailable}>
       <VariantSelector
         sizes={product.sizes || []}
         colors={colorList}
@@ -408,6 +425,14 @@ export default function ProductInfo({
           isFavorited={isFavorited}
         />
       </div>
+      </div>
+
+      <WarehouseClearanceBlock
+        product={product}
+        onAddToCart={onAddToCart}
+        onBuyNow={onBuyNow}
+        isCartLoading={isCartLoading}
+      />
 
       {/* Giao hàng & Đổi trả */}
       <div className="border-t border-gray-100 pt-3">

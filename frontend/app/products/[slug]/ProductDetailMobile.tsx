@@ -33,6 +33,12 @@ import {
   NANO_AI_CTX_SOURCE_PRODUCT_PDP,
 } from '@/lib/nanoai-hosted-chat';
 import { useNanoAiMessaging } from '@/lib/use-nanoai-messaging';
+import WarehouseClearanceBlock from '@/components/product-detail/WarehouseClearanceBlock';
+import {
+  canOrderAnyVariant,
+  canOrderSourceProduct,
+  warehouseVariantsInStock,
+} from '@/lib/warehouse-clearance';
 
 function formatLikeCount(n: unknown): string {
   const v = Math.max(0, Math.floor(Number(n)) || 0);
@@ -71,7 +77,10 @@ export default function ProductDetailMobile({
   const [loyaltyStatus, setLoyaltyStatus] = useState<any>(null);
 
   const quantity = 1;
-  const available = (product.available || 0) > 0;
+  const sourceAvailable = canOrderSourceProduct(product);
+  const warehouseInStock = warehouseVariantsInStock(product);
+  const available = sourceAvailable;
+  const canShowStickyBuy = canOrderAnyVariant(product);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -425,6 +434,19 @@ export default function ProductDetailMobile({
           </p>
         </div>
 
+        {product.source_oos && warehouseInStock.length > 0 ? (
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 mb-3">
+            Hàng order nguồn tạm hết — chọn <strong>Thanh lý trong kho</strong> bên dưới.
+          </div>
+        ) : null}
+
+        <WarehouseClearanceBlock
+          product={product}
+          onAddToCart={onAddToCart}
+          onBuyNow={onBuyNow}
+          isCartLoading={isCartLoading}
+        />
+
         {/* Dịch vụ */}
         <div className="mb-3">
           <p className="text-xs text-gray-700 leading-snug">
@@ -554,7 +576,7 @@ export default function ProductDetailMobile({
             <button
               type="button"
               onClick={openVariantModal}
-              disabled={!available}
+              disabled={!canShowStickyBuy}
               className="flex flex-1 items-center justify-center rounded-md bg-gray-500 text-[11px] font-semibold text-white hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
               THÊM GIỎ
@@ -562,7 +584,7 @@ export default function ProductDetailMobile({
             <button
               type="button"
               onClick={openVariantModal}
-              disabled={!available}
+              disabled={!canShowStickyBuy}
               className="flex flex-1 items-center justify-center rounded-md bg-[#ea580c] text-[11px] font-semibold text-white hover:bg-[#c2410c] disabled:cursor-not-allowed disabled:opacity-50"
             >
               MUA HÀNG
