@@ -838,6 +838,15 @@ class MigrationManager:
             "user_home_recommendation_snapshots", UserHomeRecommendationSnapshot
         )
 
+        from app.models.user_cohort_view_pool_cache import UserCohortViewPoolCache
+
+        results['user_cohort_view_pool_cache_create'] = self._create_table_if_not_exists(
+            "user_cohort_view_pool_cache", UserCohortViewPoolCache
+        )
+        results['user_cohort_view_pool_cache_sync'] = self._sync_table_columns(
+            "user_cohort_view_pool_cache", UserCohortViewPoolCache
+        )
+
         return results
 
     def migrate_sale_calendar_settings_date_columns(self) -> bool:

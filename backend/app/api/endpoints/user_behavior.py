@@ -21,7 +21,6 @@ from app.models.product import Product as ProductRow
 from app.schemas.product import Product as ProductSchema
 from app.crud.category_hero_suggestions import get_hero_category_tiles, infer_category_gender_priority
 from app.crud.home_hero_category_cache import get_home_hero_tiles_fast
-from app.crud import home_recommendation_snapshot as home_snapshot_crud
 from app.crud.user import (
     add_product_view_with_data, get_user_viewed_products,
     get_products_viewed_by_same_age_gender, get_products_same_shop_as_recent_views,
@@ -140,11 +139,11 @@ def get_products_viewed_by_same_age_gender_endpoint(
     cohort_mode:
     - requires_login: chưa đăng nhập
     - profile_incomplete: thiếu ngày sinh hoặc giới tính → cập nhật tại /account/profile
-    - exact_cohort: random trong 30 SP xem gần nhất của khách khác cùng năm sinh & giới tính (trừ SP bạn đã xem)
-    - gender_peers: random trong 30 SP xem gần nhất của khách khác cùng giới tính (trừ SP bạn đã xem)
+    - exact_cohort: random trong pool 100 SP xem gần nhất của khách khác cùng năm sinh & giới tính
+    - gender_peers: random trong pool 100 SP xem gần nhất của khách khác cùng giới tính
     - popular_fallback: hiển thị SP phổ biến khi chưa có lượt xem để suy luận
 
-    Mỗi lần tải trang: thứ tự SP tuổi/giới có thể khác (shuffle trong pool 30).
+    Pool 100 SP peer (cache DB ~6h); mỗi lần gọi shuffle trong pool (trộn trang chủ vẫn random).
     """
     if not current_user:
         return {"products": [], "cohort_mode": "requires_login"}
@@ -263,57 +262,6 @@ def get_home_feed_products(
         "total_pages": total_pages,
         "personalized": personalized,
     }
-
-
-@router.get("/products/home-recommendation-snapshot", response_model=dict)
-def get_home_recommendation_snapshot(
-    response: Response,
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    db: Session = Depends(get_db),
-):
-    """
-    Snapshot phiên trước (chỉ tài khoản đăng nhập).
-    Frontend hiển thị ngay, sau đó gọi POST rebuild để tính phiên mới (lưu DB, không đổi UI nếu đã show cache).
-    """
-    response.headers["Cache-Control"] = "private, no-store"
-    if not current_user:
-        return {"snapshot": None, "version_key": None, "computed_at": None}
-    try:
-        row = home_snapshot_crud.get_user_home_snapshot(db, current_user.id)
-        if not row:
-            return {"snapshot": None, "version_key": None, "computed_at": None}
-        expected = home_snapshot_crud.home_snapshot_version_key(current_user)
-        if row.get("version_key") != expected:
-            return {"snapshot": None, "version_key": expected, "computed_at": None}
-        return {
-            "snapshot": row.get("snapshot"),
-            "version_key": row.get("version_key"),
-            "computed_at": row.get("computed_at"),
-        }
-    except Exception:
-        logger.exception("Failed to read home recommendation snapshot")
-        db.rollback()
-        return {"snapshot": None, "version_key": None, "computed_at": None}
-
-
-@router.post("/products/home-recommendation-snapshot/rebuild", response_model=dict)
-def rebuild_home_recommendation_snapshot(
-    response: Response,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Tính phiên gợi ý trang chủ mới và lưu DB (same-shop + cohort + mix + home-feed trang 1)."""
-    response.headers["Cache-Control"] = "private, no-store"
-    try:
-        return home_snapshot_crud.build_and_save_user_home_snapshot(
-            db,
-            current_user,
-            serialize_products=_serialize_product_rows_for_api,
-        )
-    except Exception:
-        logger.exception("Failed to rebuild home recommendation snapshot")
-        db.rollback()
-        raise HTTPException(status_code=500, detail="Không thể tạo gợi ý trang chủ")
 
 
 # Favorites

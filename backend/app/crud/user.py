@@ -471,109 +471,20 @@ def get_user_viewed_products(db: Session, user_id: int, limit: int = 20) -> List
     ).order_by(UserProductView.viewed_at.desc()).limit(limit).all()
 
 
-SAME_AGE_GENDER_RECENT_VIEW_POOL = 30
+# Pool peer lưu cache — xem cohort_view_pool_cache.COHORT_VIEW_POOL_CACHE_SIZE (= 100).
+SAME_AGE_GENDER_RECENT_VIEW_POOL = 100
 
 
 def get_products_viewed_by_same_age_gender(
     db: Session, user_id: int, limit: int = 24
 ) -> Tuple[List[Product], str]:
     """
-    Gợi ý theo hành vi nhóm cùng tuổi + giới (ưu tiên), có fallback.
-
-    Trả về (products, cohort_mode):
-    - profile_incomplete: chưa có ngày sinh hoặc giới tính
-    - exact_cohort: random trong {pool} SP xem gần nhất của khách khác cùng năm sinh & giới tính
-    - gender_peers: random trong {pool} SP xem gần nhất của khách khác cùng giới tính
-    - popular_fallback: chưa có lượt xem để suy luận — SP phổ biến (purchases)
-
-    Mỗi lần gọi API: lấy tối đa SAME_AGE_GENDER_RECENT_VIEW_POOL SP unique (theo lượt xem mới nhất
-    trong nhóm đồng trang lứa), loại SP khách hiện tại đã từng xem, shuffle rồi trả tối đa `limit` SP.
+    Gợi ý nhóm tuổi/giới: pool tối đa 100 SP peer (cache DB, rebuild ~6h),
+    mỗi lần gọi shuffle + loại SP user đã xem rồi trả tối đa `limit` SP.
     """
-    user = get_user(db, user_id)
-    if not user or not user.date_of_birth or not user.gender:
-        return [], "profile_incomplete"
+    from app.crud.cohort_view_pool_cache import sample_cohort_products_from_pool
 
-    birth_year = user.date_of_birth.year
-    gender = user.gender
-
-    self_viewed_product_ids = (
-        db.query(UserProductView.product_id)
-        .filter(UserProductView.user_id == user_id)
-        .distinct()
-        .subquery()
-    )
-
-    def _product_ids_from_recent_cohort_views(peer_ids: List[int]) -> List[int]:
-        if not peer_ids:
-            return []
-        peer_ids = [pid for pid in peer_ids if pid != user_id]
-        if not peer_ids:
-            return []
-        rows = (
-            db.query(
-                UserProductView.product_id,
-                func.max(UserProductView.viewed_at).label("last_viewed"),
-            )
-            .filter(UserProductView.user_id.in_(peer_ids))
-            .filter(~UserProductView.product_id.in_(db.query(self_viewed_product_ids.c.product_id)))
-            .group_by(UserProductView.product_id)
-            .order_by(func.max(UserProductView.viewed_at).desc())
-            .limit(SAME_AGE_GENDER_RECENT_VIEW_POOL)
-            .all()
-        )
-        pool = [r[0] for r in rows]
-        if not pool:
-            return []
-        shuffled = pool.copy()
-        random.shuffle(shuffled)
-        return shuffled
-
-    def _hydrate_ordered(product_ids: List[int]) -> List[Product]:
-        if not product_ids:
-            return []
-        rows = (
-            db.query(Product)
-            .filter(Product.id.in_(product_ids), Product.is_active == True)  # noqa: E712
-            .all()
-        )
-        order_map = {pid: i for i, pid in enumerate(product_ids)}
-        rows.sort(key=lambda p: order_map.get(p.id, 999))
-        return rows[:limit]
-
-    same_year_gender_ids = [
-        r[0]
-        for r in db.query(User.id)
-        .filter(User.is_active == True)  # noqa: E712
-        .filter(User.id != user_id)
-        .filter(User.gender == gender)
-        .filter(extract("year", User.date_of_birth) == birth_year)
-        .all()
-    ]
-    product_ids = _product_ids_from_recent_cohort_views(same_year_gender_ids)
-    if product_ids:
-        return _hydrate_ordered(product_ids), "exact_cohort"
-
-    gender_peer_ids = [
-        r[0]
-        for r in db.query(User.id)
-        .filter(User.is_active == True)  # noqa: E712
-        .filter(User.id != user_id)
-        .filter(User.gender == gender)
-        .all()
-    ]
-    product_ids = _product_ids_from_recent_cohort_views(gender_peer_ids)
-    if product_ids:
-        return _hydrate_ordered(product_ids), "gender_peers"
-
-    popular = (
-        db.query(Product)
-        .filter(Product.is_active == True)  # noqa: E712
-        .filter(~Product.id.in_(db.query(self_viewed_product_ids.c.product_id)))
-        .order_by(Product.purchases.desc().nullslast(), Product.id)
-        .limit(limit)
-        .all()
-    )
-    return popular, "popular_fallback"
+    return sample_cohort_products_from_pool(db, user_id, limit=limit)
 
 
 SAME_SHOP_MAX_POOL = 8000
