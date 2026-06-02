@@ -582,6 +582,74 @@ class ApiClient {
     return this.fetch<ProductListResponse>(`/user-behavior/products/home-feed?${params}`);
   }
 
+  /** Snapshot gợi ý trang chủ đã lưu (đăng nhập). */
+  async getHomeRecommendationSnapshot(): Promise<{
+    snapshot: {
+      main_feed?: {
+        products?: Product[];
+        total?: number;
+        personalized?: boolean;
+        page?: number;
+        size?: number;
+      } | null;
+      recommendation?: Record<string, unknown> | null;
+    } | null;
+    version_key: string | null;
+    computed_at: string | null;
+  }> {
+    return this.fetch<{
+      snapshot: {
+        main_feed?: {
+          products?: Product[];
+          total?: number;
+          personalized?: boolean;
+          page?: number;
+          size?: number;
+        } | null;
+        recommendation?: Record<string, unknown> | null;
+      } | null;
+      version_key: string | null;
+      computed_at: string | null;
+    }>(`/user-behavior/products/home-recommendation-snapshot`).catch(() => ({
+      snapshot: null,
+      version_key: null,
+      computed_at: null,
+    }));
+  }
+
+  /** Tính phiên gợi ý mới và lưu DB (đăng nhập). */
+  async rebuildHomeRecommendationSnapshot(): Promise<{
+    snapshot: {
+      main_feed?: {
+        products?: Product[];
+        total?: number;
+        personalized?: boolean;
+        page?: number;
+        size?: number;
+      } | null;
+      recommendation?: Record<string, unknown> | null;
+    };
+    version_key: string;
+    computed_at: string;
+  }> {
+    return this.fetch<{
+      snapshot: {
+        main_feed?: {
+          products?: Product[];
+          total?: number;
+          personalized?: boolean;
+          page?: number;
+          size?: number;
+        } | null;
+        recommendation?: Record<string, unknown> | null;
+      };
+      version_key: string;
+      computed_at: string;
+    }>(`/user-behavior/products/home-recommendation-snapshot/rebuild`, {
+      method: 'POST',
+    });
+  }
+
   /** Sản phẩm cùng shop TQ (AM): round-robin theo shop, tối đa 8 SP/shop/trang, ưu tiên subcategory (AC). */
   async getProductsSameShopAsRecentViews(
     limit = 60,

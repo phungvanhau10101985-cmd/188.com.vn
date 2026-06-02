@@ -829,6 +829,15 @@ class MigrationManager:
 
         results['same_shop_recommendation_indexes'] = self.migrate_same_shop_recommendation_indexes()
 
+        from app.models.home_recommendation_snapshot import UserHomeRecommendationSnapshot
+
+        results['user_home_recommendation_snapshots_create'] = self._create_table_if_not_exists(
+            "user_home_recommendation_snapshots", UserHomeRecommendationSnapshot
+        )
+        results['user_home_recommendation_snapshots_sync'] = self._sync_table_columns(
+            "user_home_recommendation_snapshots", UserHomeRecommendationSnapshot
+        )
+
         return results
 
     def migrate_sale_calendar_settings_date_columns(self) -> bool:

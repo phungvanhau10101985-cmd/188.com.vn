@@ -46,9 +46,18 @@ import {
   HOME_COHORT_MIX_POOL_SIZE,
   mixShopAndCohortProducts,
 } from '@/lib/home-recommendation-mixed-products';
+import {
+  buildGuestHomeSnapshot,
+  buildHomeSnapshotVersionKey,
+  canPersistGuestRecommendation,
+  HOME_MIX_INITIAL_LIMIT,
+  parseHomeSnapshotApiResponse,
+  readGuestHomeSnapshot,
+  writeGuestHomeSnapshot,
+  type HomeRecommendationSnapshotBlock,
+  type HomeRecommendationSnapshotMainFeed,
+} from '@/lib/home-recommendation-snapshot';
 
-/** Lần đầu block «CÓ THỂ BẠN THÍCH» — ít SP hơn để luôn có «Xem thêm» khi còn dữ liệu. */
-const HOME_MIX_INITIAL_LIMIT = 24;
 const HOME_MIX_LOAD_MORE_LIMIT = 24;
 
 function favoritePayloadFromProduct(p: Product): Record<string, unknown> {
@@ -608,6 +617,334 @@ export default function HomePageClient({
       sortFromUrl
   );
 
+  const recommendationKey = `${isAuthenticated}-${user?.id ?? 'guest'}-${user?.gender ?? ''}-${
+    user?.date_of_birth ?? ''
+  }`;
+
+  const homeSnapshotVersionKey = useMemo(
+    () =>
+      buildHomeSnapshotVersionKey({
+        isAuthenticated,
+        userId: user?.id,
+        gender: user?.gender,
+        dateOfBirth: user?.date_of_birth,
+      }),
+    [isAuthenticated, user?.id, user?.gender, user?.date_of_birth]
+  );
+
+  const homeSnapshotDisplayedRef = useRef(false);
+  const homeMainSnapshotDisplayedRef = useRef(false);
+  const recommendationMixAnchorRef = useRef('');
+  const [authSnapshotFallback, setAuthSnapshotFallback] = useState(false);
+
+  const [sameAgeGenderProducts, setSameAgeGenderProducts] = useState<Product[]>([]);
+  const [sameAgeGenderLoading, setSameAgeGenderLoading] = useState(false);
+  const [sameAgeGenderCohortMode, setSameAgeGenderCohortMode] = useState<SameAgeGenderCohortMode | null>(null);
+  const [sameShopProducts, setSameShopProducts] = useState<Product[]>([]);
+  const [sameShopTotal, setSameShopTotal] = useState(0);
+  const [sameShopSeed, setSameShopSeed] = useState<number | null>(null);
+  const [sameShopLoading, setSameShopLoading] = useState(false);
+  const [sameShopLoadMoreLoading, setSameShopLoadMoreLoading] = useState(false);
+  const [sameShopCanLoadMore, setSameShopCanLoadMore] = useState(false);
+  const [mixedRecommendationProducts, setMixedRecommendationProducts] = useState<Product[]>([]);
+
+  const applyRecommendationSnapshot = useCallback((rec: HomeRecommendationSnapshotBlock) => {
+    setSameShopProducts(rec.sameShopProducts);
+    setSameShopTotal(rec.sameShopTotal);
+    setSameShopSeed(rec.sameShopSeed);
+    setSameShopCanLoadMore(rec.sameShopCanLoadMore);
+    setSameAgeGenderProducts(rec.sameAgeGenderProducts);
+    setSameAgeGenderCohortMode(rec.sameAgeGenderCohortMode);
+    setMixedRecommendationProducts(rec.mixedRecommendationProducts);
+    const cohortAnchor =
+      rec.sameAgeGenderProducts.length > 0
+        ? rec.sameAgeGenderProducts
+            .map((p) => p.id)
+            .sort((a, b) => a - b)
+            .join(',')
+        : 'none';
+    recommendationMixAnchorRef.current = `${recommendationKey}:${rec.sameShopSeed ?? 'none'}:${cohortAnchor}`;
+    setSameShopLoading(false);
+    setSameAgeGenderLoading(false);
+  }, [recommendationKey]);
+
+  const applyMainFeedSnapshot = useCallback((main: HomeRecommendationSnapshotMainFeed) => {
+    setProducts(main.products);
+    setTotalProducts(main.total);
+    setHomeFeedPersonalized(main.personalized);
+    setLoading(false);
+    setApiStatus('online');
+  }, []);
+
+  const showSameShopSection = !sameShopLoading && sameShopTotal > 0;
+  const lastSearchTrackedRef = useRef<string>('');
+  const lastFilterTrackedRef = useRef<string>('');
+
+  /** Khách: đọc snapshot localStorage trước khi gọi API. */
+  useEffect(() => {
+    if (authLoading || isAuthenticated) return;
+    const cached = readGuestHomeSnapshot(homeSnapshotVersionKey);
+    if (!cached) return;
+    if (cached.recommendation) {
+      applyRecommendationSnapshot(cached.recommendation);
+      homeSnapshotDisplayedRef.current = true;
+    }
+    if (cached.mainFeed && plainHomeAwaitingPersonalized) {
+      applyMainFeedSnapshot(cached.mainFeed);
+      homeMainSnapshotDisplayedRef.current = true;
+    }
+  }, [
+    authLoading,
+    isAuthenticated,
+    homeSnapshotVersionKey,
+    plainHomeAwaitingPersonalized,
+    applyRecommendationSnapshot,
+    applyMainFeedSnapshot,
+  ]);
+
+  /** Đăng nhập: đọc snapshot DB → hiển thị ngay; rebuild nền (lưu phiên mới). */
+  useEffect(() => {
+    if (authLoading || !isAuthenticated) {
+      setAuthSnapshotFallback(false);
+      return;
+    }
+    let cancelled = false;
+    homeSnapshotDisplayedRef.current = false;
+    homeMainSnapshotDisplayedRef.current = false;
+    setAuthSnapshotFallback(false);
+    setSameShopLoading(true);
+    setSameAgeGenderLoading(true);
+
+    void (async () => {
+      let hadCache = false;
+      try {
+        const cachedRes = await apiClient.getHomeRecommendationSnapshot();
+        if (cancelled) return;
+        const cached = parseHomeSnapshotApiResponse(cachedRes);
+        if (cached && cached.versionKey === homeSnapshotVersionKey) {
+          hadCache = true;
+          if (cached.recommendation) {
+            applyRecommendationSnapshot(cached.recommendation);
+            homeSnapshotDisplayedRef.current = true;
+          }
+          if (cached.mainFeed && plainHomeAwaitingPersonalized) {
+            applyMainFeedSnapshot(cached.mainFeed);
+            homeMainSnapshotDisplayedRef.current = true;
+          }
+        }
+      } catch {
+        /* đọc cache thất bại — tiếp tục rebuild */
+      }
+
+      if (!hadCache && !cancelled) {
+        setSameShopLoading(true);
+        setSameAgeGenderLoading(true);
+      }
+
+      try {
+        const rebuiltRes = await apiClient.rebuildHomeRecommendationSnapshot();
+        if (cancelled) return;
+        const rebuilt = parseHomeSnapshotApiResponse(rebuiltRes);
+        if (!rebuilt || rebuilt.versionKey !== homeSnapshotVersionKey) {
+          if (!hadCache) setAuthSnapshotFallback(true);
+          return;
+        }
+        if (!homeSnapshotDisplayedRef.current && rebuilt.recommendation) {
+          applyRecommendationSnapshot(rebuilt.recommendation);
+        } else if (!homeSnapshotDisplayedRef.current) {
+          setSameShopLoading(false);
+          setSameAgeGenderLoading(false);
+        }
+        if (
+          !homeMainSnapshotDisplayedRef.current &&
+          rebuilt.mainFeed &&
+          plainHomeAwaitingPersonalized
+        ) {
+          applyMainFeedSnapshot(rebuilt.mainFeed);
+        }
+      } catch {
+        if (!cancelled && !hadCache) setAuthSnapshotFallback(true);
+        if (!cancelled && !homeSnapshotDisplayedRef.current) {
+          setSameShopLoading(false);
+          setSameAgeGenderLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    authLoading,
+    isAuthenticated,
+    homeSnapshotVersionKey,
+    plainHomeAwaitingPersonalized,
+    applyRecommendationSnapshot,
+    applyMainFeedSnapshot,
+  ]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated) {
+      setSameAgeGenderProducts([]);
+      setSameAgeGenderCohortMode('requires_login');
+      setSameAgeGenderLoading(false);
+      return;
+    }
+    if (!authSnapshotFallback) return;
+    let cancelled = false;
+    setSameAgeGenderLoading(true);
+    apiClient
+      .getProductsViewedBySameAgeGender(HOME_COHORT_MIX_POOL_SIZE)
+      .then(({ products, cohort_mode }) => {
+        if (cancelled) return;
+        setSameAgeGenderProducts(products ?? []);
+        setSameAgeGenderCohortMode(cohort_mode);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSameAgeGenderProducts([]);
+          setSameAgeGenderCohortMode('requires_login');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSameAgeGenderLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, isAuthenticated, recommendationKey, authSnapshotFallback]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (isAuthenticated && !authSnapshotFallback) return;
+    if (!homeSnapshotDisplayedRef.current) {
+      setSameShopLoading(true);
+      setSameShopCanLoadMore(false);
+    }
+    apiClient
+      .getProductsSameShopAsRecentViews(HOME_MIX_INITIAL_LIMIT, 0)
+      .then(({ products, total, seed }) => {
+        if (homeSnapshotDisplayedRef.current) return;
+        const list = products || [];
+        const reported = total ?? 0;
+        setSameShopProducts(list);
+        setSameShopTotal(Math.max(reported, list.length));
+        setSameShopSeed(seed ?? null);
+        setSameShopCanLoadMore(
+          inferSameShopLoadMoreAvailable(list.length, list.length, HOME_MIX_INITIAL_LIMIT, reported)
+        );
+      })
+      .catch(() => {
+        if (homeSnapshotDisplayedRef.current) return;
+        setSameShopProducts([]);
+        setSameShopTotal(0);
+        setSameShopSeed(null);
+        setSameShopCanLoadMore(false);
+      })
+      .finally(() => {
+        if (!homeSnapshotDisplayedRef.current) setSameShopLoading(false);
+      });
+  }, [authLoading, recommendationKey, isAuthenticated, authSnapshotFallback]);
+
+  const cohortProductsForMix = useMemo(() => {
+    if (
+      sameAgeGenderLoading ||
+      sameAgeGenderCohortMode === 'requires_login' ||
+      sameAgeGenderCohortMode === 'profile_incomplete' ||
+      sameAgeGenderProducts.length === 0
+    ) {
+      return [];
+    }
+    return sameAgeGenderProducts;
+  }, [sameAgeGenderLoading, sameAgeGenderCohortMode, sameAgeGenderProducts]);
+
+  useEffect(() => {
+    recommendationMixAnchorRef.current = '';
+    setMixedRecommendationProducts([]);
+  }, [recommendationKey]);
+
+  useEffect(() => {
+    const cohortPending = isAuthenticated && sameAgeGenderLoading;
+    if (sameShopLoading || cohortPending) return;
+    if (homeSnapshotDisplayedRef.current && mixedRecommendationProducts.length > 0) return;
+
+    const cohortAnchor =
+      cohortProductsForMix.length > 0
+        ? cohortProductsForMix
+            .map((p) => p.id)
+            .sort((a, b) => a - b)
+            .join(',')
+        : 'none';
+    const anchor = `${recommendationKey}:${sameShopSeed ?? 'none'}:${cohortAnchor}`;
+    if (recommendationMixAnchorRef.current !== anchor) {
+      recommendationMixAnchorRef.current = anchor;
+      setMixedRecommendationProducts(
+        mixShopAndCohortProducts(sameShopProducts, cohortProductsForMix, sameShopSeed)
+      );
+      return;
+    }
+
+    setMixedRecommendationProducts((prev) =>
+      appendNewShopProductsToMix(prev, sameShopProducts)
+    );
+  }, [
+    isAuthenticated,
+    recommendationKey,
+    sameShopSeed,
+    sameShopProducts,
+    sameShopLoading,
+    sameAgeGenderLoading,
+    cohortProductsForMix,
+    mixedRecommendationProducts.length,
+  ]);
+
+  /** Khách: lưu snapshot localStorage sau khi API xong (phiên sau mở nhanh). */
+  useEffect(() => {
+    if (authLoading || isAuthenticated) return;
+    if (sameShopLoading || sameAgeGenderLoading || loading) return;
+    if (!canPersistGuestRecommendation(sameShopTotal, mixedRecommendationProducts.length)) {
+      return;
+    }
+    const snap = buildGuestHomeSnapshot({
+      versionKey: homeSnapshotVersionKey,
+      mainFeed: plainHomeAwaitingPersonalized
+        ? {
+            products,
+            total: totalProducts,
+            personalized: homeFeedPersonalized,
+            page: 1,
+            size: PAGE_SIZE,
+          }
+        : null,
+      sameShopProducts,
+      sameShopTotal,
+      sameShopSeed,
+      sameShopCanLoadMore,
+      sameAgeGenderProducts,
+      sameAgeGenderCohortMode: sameAgeGenderCohortMode ?? 'requires_login',
+    });
+    writeGuestHomeSnapshot(snap);
+  }, [
+    authLoading,
+    isAuthenticated,
+    sameShopLoading,
+    sameAgeGenderLoading,
+    loading,
+    sameShopTotal,
+    mixedRecommendationProducts.length,
+    homeSnapshotVersionKey,
+    products,
+    totalProducts,
+    homeFeedPersonalized,
+    plainHomeAwaitingPersonalized,
+    sameShopProducts,
+    sameShopSeed,
+    sameShopCanLoadMore,
+    sameAgeGenderProducts,
+    sameAgeGenderCohortMode,
+  ]);
+
   useEffect(() => {
     if (authLoading) return;
     if (qFromUrl.trim()) return;
@@ -659,24 +996,31 @@ export default function HomePageClient({
     const ssrOk = (initialPlainHome?.products?.length ?? 0) > 0 && initialPlainHome != null;
 
     if (ssrOk && currentPage === ssrPage) {
-      setLoading(true);
+      if (isAuthenticated && !authSnapshotFallback) {
+        return;
+      }
+      if (!homeMainSnapshotDisplayedRef.current) {
+        setLoading(true);
+      }
       setError(null);
       void apiClient
         .getPersonalizedHomeFeed(skip, PAGE_SIZE)
         .then((response) => {
+          if (homeMainSnapshotDisplayedRef.current) return;
           setProducts(response.products || []);
           setTotalProducts(response.total ?? (response.products?.length ?? 0));
           setHomeFeedPersonalized(Boolean(response.personalized));
           setApiStatus('online');
         })
         .catch(() => {
+          if (homeMainSnapshotDisplayedRef.current) return;
           setProducts(initialPlainHome?.products ?? []);
           setTotalProducts(initialPlainHome?.total ?? 0);
           setHomeFeedPersonalized(Boolean(initialPlainHome?.personalized));
           setApiStatus('online');
         })
         .finally(() => {
-          setLoading(false);
+          if (!homeMainSnapshotDisplayedRef.current) setLoading(false);
         });
       return;
     }
@@ -703,6 +1047,8 @@ export default function HomePageClient({
     fetchProducts,
     currentPage,
     initialPlainHome,
+    isAuthenticated,
+    authSnapshotFallback,
   ]);
 
   const retryHomeDataLoad = useCallback(() => {
@@ -904,81 +1250,6 @@ export default function HomePageClient({
     };
   }, [isAuthenticated, user?.id]);
 
-  const recommendationKey = `${isAuthenticated}-${user?.id ?? 'guest'}-${user?.gender ?? ''}-${
-    user?.date_of_birth ?? ''
-  }`;
-
-  const [sameAgeGenderProducts, setSameAgeGenderProducts] = useState<Product[]>([]);
-  const [sameAgeGenderLoading, setSameAgeGenderLoading] = useState(false);
-  const [sameAgeGenderCohortMode, setSameAgeGenderCohortMode] = useState<SameAgeGenderCohortMode | null>(null);
-  const [sameShopProducts, setSameShopProducts] = useState<Product[]>([]);
-  const [sameShopTotal, setSameShopTotal] = useState(0);
-  const [sameShopSeed, setSameShopSeed] = useState<number | null>(null);
-  const [sameShopLoading, setSameShopLoading] = useState(false);
-  const [sameShopLoadMoreLoading, setSameShopLoadMoreLoading] = useState(false);
-  const [sameShopCanLoadMore, setSameShopCanLoadMore] = useState(false);
-  const [mixedRecommendationProducts, setMixedRecommendationProducts] = useState<Product[]>([]);
-  const recommendationMixAnchorRef = useRef('');
-  /** Chỉ hiện khối khi đã xác định có lượt xem + có SP cùng shop (tránh skeleton khi khách mới). */
-  const showSameShopSection = !sameShopLoading && sameShopTotal > 0;
-  const lastSearchTrackedRef = useRef<string>('');
-  const lastFilterTrackedRef = useRef<string>('');
-
-  useEffect(() => {
-    if (authLoading) return;
-    if (!isAuthenticated) {
-      setSameAgeGenderProducts([]);
-      setSameAgeGenderCohortMode('requires_login');
-      setSameAgeGenderLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setSameAgeGenderLoading(true);
-    apiClient
-      .getProductsViewedBySameAgeGender(HOME_COHORT_MIX_POOL_SIZE)
-      .then(({ products, cohort_mode }) => {
-        if (cancelled) return;
-        setSameAgeGenderProducts(products ?? []);
-        setSameAgeGenderCohortMode(cohort_mode);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSameAgeGenderProducts([]);
-          setSameAgeGenderCohortMode('requires_login');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setSameAgeGenderLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [authLoading, isAuthenticated, recommendationKey]);
-
-  useEffect(() => {
-    if (authLoading) return;
-    setSameShopLoading(true);
-    setSameShopCanLoadMore(false);
-    apiClient.getProductsSameShopAsRecentViews(HOME_MIX_INITIAL_LIMIT, 0)
-      .then(({ products, total, seed }) => {
-        const list = products || [];
-        const reported = total ?? 0;
-        setSameShopProducts(list);
-        setSameShopTotal(Math.max(reported, list.length));
-        setSameShopSeed(seed ?? null);
-        setSameShopCanLoadMore(
-          inferSameShopLoadMoreAvailable(list.length, list.length, HOME_MIX_INITIAL_LIMIT, reported)
-        );
-      })
-      .catch(() => {
-        setSameShopProducts([]);
-        setSameShopTotal(0);
-        setSameShopSeed(null);
-        setSameShopCanLoadMore(false);
-      })
-      .finally(() => setSameShopLoading(false));
-  }, [authLoading, recommendationKey]);
-
   const loadMoreSameShop = useCallback(() => {
     if (!sameShopCanLoadMore || sameShopLoadMoreLoading) return;
     setSameShopLoadMoreLoading(true);
@@ -1011,60 +1282,10 @@ export default function HomePageClient({
       .finally(() => setSameShopLoadMoreLoading(false));
   }, [sameShopCanLoadMore, sameShopLoadMoreLoading, sameShopProducts.length, sameShopSeed]);
 
-  const cohortProductsForMix = useMemo(() => {
-    if (
-      sameAgeGenderLoading ||
-      sameAgeGenderCohortMode === 'requires_login' ||
-      sameAgeGenderCohortMode === 'profile_incomplete' ||
-      sameAgeGenderProducts.length === 0
-    ) {
-      return [];
-    }
-    return sameAgeGenderProducts;
-  }, [sameAgeGenderLoading, sameAgeGenderCohortMode, sameAgeGenderProducts]);
-
   const cohortBadgeProductIds = useMemo(() => {
     const shopIds = new Set(sameShopProducts.map((p) => p.id));
     return new Set(cohortProductsForMix.filter((p) => !shopIds.has(p.id)).map((p) => p.id));
   }, [sameShopProducts, cohortProductsForMix]);
-
-  useEffect(() => {
-    recommendationMixAnchorRef.current = '';
-    setMixedRecommendationProducts([]);
-  }, [recommendationKey]);
-
-  useEffect(() => {
-    const cohortPending = isAuthenticated && sameAgeGenderLoading;
-    if (sameShopLoading || cohortPending) return;
-
-    const cohortAnchor =
-      cohortProductsForMix.length > 0
-        ? cohortProductsForMix
-            .map((p) => p.id)
-            .sort((a, b) => a - b)
-            .join(',')
-        : 'none';
-    const anchor = `${recommendationKey}:${sameShopSeed ?? 'none'}:${cohortAnchor}`;
-    if (recommendationMixAnchorRef.current !== anchor) {
-      recommendationMixAnchorRef.current = anchor;
-      setMixedRecommendationProducts(
-        mixShopAndCohortProducts(sameShopProducts, cohortProductsForMix, sameShopSeed)
-      );
-      return;
-    }
-
-    setMixedRecommendationProducts((prev) =>
-      appendNewShopProductsToMix(prev, sameShopProducts)
-    );
-  }, [
-    isAuthenticated,
-    recommendationKey,
-    sameShopSeed,
-    sameShopProducts,
-    sameShopLoading,
-    sameAgeGenderLoading,
-    cohortProductsForMix,
-  ]);
 
   const handleFavorite = async (productId: number, e: React.MouseEvent) => {
     e.preventDefault();
