@@ -734,6 +734,13 @@ export default function AdminSourceStockCheckPage() {
     null,
   );
   const [reportOosDeleting, setReportOosDeleting] = useState(false);
+  const [reportOosDeleteProgress, setReportOosDeleteProgress] = useState<{
+    processed: number;
+    total: number;
+    deleted: number;
+    chunkIndex: number;
+    chunkTotal: number;
+  } | null>(null);
   const [reportOosSampleSelectedIds, setReportOosSampleSelectedIds] = useState<number[]>([]);
   const [reportOosBulkBusy, setReportOosBulkBusy] = useState(false);
   const [resetPdpConfirmOpen, setResetPdpConfirmOpen] = useState(false);
@@ -1144,8 +1151,17 @@ export default function AdminSourceStockCheckPage() {
     const ids = reportOosDeleteConfirmIds;
     if (!ids?.length) return;
     setReportOosDeleting(true);
+    setReportOosDeleteProgress({
+      processed: 0,
+      total: ids.length,
+      deleted: 0,
+      chunkIndex: 0,
+      chunkTotal: Math.max(1, Math.ceil(ids.length / 20)),
+    });
     try {
-      const res = await adminProductAPI.deleteSourceStockBatchProductsByDbIds(ids);
+      const res = await adminProductAPI.deleteSourceStockBatchProductsByDbIds(ids, {
+        onProgress: (p) => setReportOosDeleteProgress(p),
+      });
       let msg = `Đã xóa ${res.deleted_count ?? 0} sản (${(res.deleted_db_ids ?? []).length} khớp).`;
       if ((res.not_found_db_ids ?? []).length) {
         msg += ` Không thấy id: ${res.not_found_db_ids!.join(', ')}.`;
@@ -1160,6 +1176,7 @@ export default function AdminSourceStockCheckPage() {
       showToast('err', e instanceof Error ? e.message : String(e));
     } finally {
       setReportOosDeleting(false);
+      setReportOosDeleteProgress(null);
     }
   }, [refreshActivityReport, refreshQueueStats, reportOosDeleteConfirmIds, showToast]);
 
@@ -2100,6 +2117,42 @@ export default function AdminSourceStockCheckPage() {
                   và {reportOosDeleteConfirmIds.length - 18} mã khác trong cùng lần xóa.
                 </p>
               ) : null}
+              {reportOosDeleting && reportOosDeleteProgress ? (
+                <div
+                  className="mt-3 rounded-lg border border-red-100 bg-red-50/80 px-3 py-3 space-y-2"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-red-950">
+                    <span className="font-medium">Đang xóa khỏi DB…</span>
+                    <span className="tabular-nums">
+                      {reportOosDeleteProgress.processed.toLocaleString('vi-VN')} /{' '}
+                      {reportOosDeleteProgress.total.toLocaleString('vi-VN')} mã
+                    </span>
+                  </div>
+                  <div
+                    className="h-2.5 w-full rounded-full bg-red-100 overflow-hidden"
+                    aria-hidden
+                  >
+                    <div
+                      className="h-full rounded-full bg-red-600 transition-[width] duration-300 ease-out"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          reportOosDeleteProgress.total > 0
+                            ? (reportOosDeleteProgress.processed / reportOosDeleteProgress.total) * 100
+                            : 0,
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <p className="text-xs text-red-900/90 tabular-nums">
+                    Đã xóa {reportOosDeleteProgress.deleted.toLocaleString('vi-VN')} sản · lô{' '}
+                    {reportOosDeleteProgress.chunkIndex}/{reportOosDeleteProgress.chunkTotal} (tối đa 20
+                    mã/lô, kèm dọn Bunny)
+                  </p>
+                </div>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-3 justify-end mt-6">
               <button
@@ -2116,7 +2169,13 @@ export default function AdminSourceStockCheckPage() {
                 disabled={reportOosDeleting}
                 onClick={() => void executeReportOosDeleteFromDb()}
               >
-                {reportOosDeleting ? 'Đang xóa…' : 'Đồng ý — xóa'}
+                {reportOosDeleting && reportOosDeleteProgress
+                  ? `${Math.round(
+                      (reportOosDeleteProgress.processed / Math.max(1, reportOosDeleteProgress.total)) * 100,
+                    )}%…`
+                  : reportOosDeleting
+                    ? 'Đang xóa…'
+                    : 'Đồng ý — xóa'}
               </button>
             </div>
           </div>

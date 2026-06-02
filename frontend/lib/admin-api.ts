@@ -1318,16 +1318,36 @@ export const adminProductAPI = {
     }),
 
   /** Xóa vĩnh viễn các sản theo khóa chính `products.id` (sau phiên kiểm tra nguồn). */
-  deleteSourceStockBatchProductsByDbIds: async (dbIds: number[]) => {
+  deleteSourceStockBatchProductsByDbIds: async (
+    dbIds: number[],
+    options?: {
+      onProgress?: (progress: {
+        processed: number;
+        total: number;
+        deleted: number;
+        chunkIndex: number;
+        chunkTotal: number;
+      }) => void;
+    },
+  ) => {
     const unique = [...new Set(dbIds.filter((id) => Number.isFinite(id) && id > 0))];
     if (!unique.length) {
       return { ok: true, deleted_count: 0, deleted_db_ids: [], not_found_db_ids: [] };
     }
     const chunkSize = 20;
+    const chunkTotal = Math.ceil(unique.length / chunkSize);
     const deleted_db_ids: number[] = [];
     const not_found_db_ids: number[] = [];
     for (let i = 0; i < unique.length; i += chunkSize) {
       const chunk = unique.slice(i, i + chunkSize);
+      const chunkIndex = Math.floor(i / chunkSize) + 1;
+      options?.onProgress?.({
+        processed: i,
+        total: unique.length,
+        deleted: deleted_db_ids.length,
+        chunkIndex,
+        chunkTotal,
+      });
       const res = await fetchAdmin<AdminSourceStockBatchDeleteByDbIdsResult>(
         '/products/admin/source-stock-batch/delete-by-db-ids',
         {
@@ -1338,6 +1358,13 @@ export const adminProductAPI = {
       );
       deleted_db_ids.push(...(res.deleted_db_ids ?? []));
       not_found_db_ids.push(...(res.not_found_db_ids ?? []));
+      options?.onProgress?.({
+        processed: Math.min(i + chunk.length, unique.length),
+        total: unique.length,
+        deleted: deleted_db_ids.length,
+        chunkIndex,
+        chunkTotal,
+      });
     }
     return {
       ok: true,
