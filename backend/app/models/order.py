@@ -132,6 +132,10 @@ class OrderItem(Base):
     # Đặt cọc cho sản phẩm
     requires_deposit = Column(Boolean, default=False)
     deposit_amount = Column(Numeric(12, 2), default=0)
+
+    # Tồn kho thanh lý: giữ khi đã cọc, trừ khi giao thành công
+    warehouse_stock_reserved_at = Column(DateTime(timezone=True), nullable=True)
+    warehouse_stock_deducted_at = Column(DateTime(timezone=True), nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     

@@ -52,7 +52,7 @@ function sortCartItemsNewestFirst<T extends { id?: number; updated_at?: string; 
 export function CartProvider({ children }: { children: ReactNode }) {
   const [cartState, setCartState] = useState<CartState>({
     cart: null,
-    isLoading: false,
+    isLoading: true,
     error: null,
   });
 
@@ -94,13 +94,15 @@ export function CartProvider({ children }: { children: ReactNode }) {
             return {
               ...item,
               product_image: lineImage || item.product_image,
-              list_price: item.list_price ?? fromApi.list_price,
+              list_price: item.list_price ?? fromApi.list_price ?? fromApi.original_price,
+              original_price: item.original_price ?? fromApi.original_price,
               product_data: {
                 ...fromApi,
                 id: item.product_id,
                 product_id: fromApi.product_id ?? item.product_code,
                 name: fromApi.name ?? item.product_name,
-                list_price: item.list_price ?? fromApi.list_price ?? fromApi.price,
+                list_price: item.list_price ?? fromApi.list_price ?? fromApi.original_price,
+                original_price: item.original_price ?? fromApi.original_price,
                 price: item.product_price ?? fromApi.price,
                 main_image: lineImage,
                 deposit_require: fromApi.deposit_require ?? item.requires_deposit,

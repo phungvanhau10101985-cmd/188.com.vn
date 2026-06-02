@@ -111,6 +111,8 @@ export interface Product {
   source_stock_error?: string | null;
   /** Nguồn 1688/Taobao báo hết hàng — chỉ còn đặt hàng kho thanh lý (nếu có). */
   source_oos?: boolean;
+  /** Dòng kho thanh lý (product_id có /). */
+  is_warehouse_clearance?: boolean;
   /** Biến thể kho thanh lý duyệt hoàn (block B trên PDP). */
   warehouse_variants?: WarehouseClearanceVariant[];
   warehouse_clearance?: {
@@ -131,7 +133,18 @@ export interface WarehouseClearanceVariant {
   savings_amount: number;
   clearance_percent: number;
   main_image?: string | null;
+  /** Ảnh từ cột Variant (img) khi import kho thanh lý. */
+  color_image?: string | null;
 }
+
+export type WarehouseVariantPricing = {
+  displayPrice: number;
+  originalPrice: number;
+  listPrice: number;
+  percent: number;
+  hasDiscount: boolean;
+  savingsAmount: number;
+};
 
 /** Biến thể màu từ NanoAI (schema partner): tên + ảnh nguyên bản. */
 export interface NanoaiColorVariant {
@@ -375,6 +388,8 @@ export interface ProductSearchParams {
   sort?: string;
   /** Bỏ COUNT(*) — PDP / khối liên quan */
   skip_total?: boolean;
+  /** Gắn biến thể kho thanh lý (storefront; admin không dùng) */
+  include_warehouse_clearance?: boolean;
   min_rating?: number;
   is_active?: boolean;
   has_deposit?: boolean;

@@ -123,6 +123,8 @@ def _import_progress_message(phase: str, current: int, total: Optional[int]) -> 
         return "Đang xử lý các dòng trong file..."
     if phase == "database" and total is not None:
         return f"Đang ghi CSDL: {current:,} / {total:,} sản phẩm..."
+    if phase == "cache_refresh":
+        return "Đang xếp hàng làm mới cache bộ lọc/tìm kiếm (chạy nền)…"
     if phase == "seo_categories" and total is not None and total == 0:
         return "SEO danh mục: đã đủ nội dung — không gọi Gemini."
     if phase == "seo_categories" and total and current == 0:
@@ -301,15 +303,20 @@ def _run_import_excel_job(
                 "skipped": skipped_out if skipped_out else None,
             },
         )
-        threading.Thread(target=auto_scan_category_seo_safe, daemon=True).start()
+        if not result.get("only_warehouse_import"):
+            threading.Thread(target=auto_scan_category_seo_safe, daemon=True).start()
+            seo_spawned = "yes"
+        else:
+            seo_spawned = "skipped_warehouse_only"
         logger.info(
-            "%s done job=%s created=%s updated=%s processed=%s file=%s (auto_scan_seo_spawned=yes)",
+            "%s done job=%s created=%s updated=%s processed=%s file=%s (auto_scan_seo_spawned=%s)",
             IMPORT_EXCEL_LOG_PREFIX,
             job_id,
             result.get("created"),
             result.get("updated"),
             result.get("total_processed"),
             original_filename,
+            seo_spawned,
         )
 
     except Exception as e:
@@ -556,16 +563,23 @@ async def import_excel(
             len(result.get("errors", []) or []),
         )
         
-        # Tự động scan SEO danh mục trong background (session mới, không dùng db request)
-        background_tasks.add_task(auto_scan_category_seo_safe)
-        print("🚀 Đã thêm task: Auto scan SEO danh mục (chạy background)")
-        
+        auto_seo_scan = "skipped_warehouse_only"
+        if not result.get("only_warehouse_import"):
+            background_tasks.add_task(auto_scan_category_seo_safe)
+            auto_seo_scan = "running_in_background"
+            print("🚀 Đã thêm task: Auto scan SEO danh mục (chạy background)")
+
+        seo_note = (
+            " Import kho thanh lý — không chạy SEO danh mục."
+            if result.get("only_warehouse_import")
+            else " Đang tự động scan SEO danh mục..."
+        )
         return {
             "success": True,
             "message": (
                 f"Đã xử lý {result.get('total_processed', 0)} dòng: "
                 f"{result.get('created', 0)} mới, {result.get('updated', 0)} cập nhật, "
-                f"{int(result.get('skipped_count') or 0)} bỏ qua. Đang tự động scan SEO danh mục..."
+                f"{int(result.get('skipped_count') or 0)} bỏ qua.{seo_note}"
             ),
             "data": {
                 "created": result.get("created", 0),
@@ -575,7 +589,8 @@ async def import_excel(
                 "success_rate": result.get("success_rate", "0%"),
                 "file_name": file.filename,
                 "import_time": datetime.now().isoformat(),
-                "auto_seo_scan": "running_in_background"
+                "auto_seo_scan": auto_seo_scan,
+                "only_warehouse_import": bool(result.get("only_warehouse_import")),
             },
             "warnings": result.get("warnings", [])[:10],
             "errors": result.get("errors", [])[:20],

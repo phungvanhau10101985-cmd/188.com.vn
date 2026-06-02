@@ -59,6 +59,7 @@ export default function ProductInfo({
 }: ProductInfoProps) {
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedColorIndex, setSelectedColorIndex] = useState(-1);
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState<number | null>(null);
   const [quantity, setQuantity] = useState(1);
   const actionsRef = useRef<HTMLDivElement | null>(null);
   const [showStickyActions, setShowStickyActions] = useState(false);
@@ -129,6 +130,8 @@ export default function ProductInfo({
     : undefined;
 
   useEffect(() => {
+    setSelectedWarehouseId(null);
+    setSelectedSize('');
     const n = colorList.length;
     setSelectedColorIndex(n > 0 ? 0 : -1);
   }, [product.id, colorList.length]);
@@ -177,9 +180,26 @@ export default function ProductInfo({
     };
   }, []);
 
+  const handleSizeChange = (size: string) => {
+    setSelectedSize(size);
+    setSelectedWarehouseId(null);
+  };
+
   const handleColorChange = (colorIndex: number, _colorName: string, colorImage?: string) => {
     setSelectedColorIndex(colorIndex);
+    setSelectedWarehouseId(null);
     onColorImageChange?.(colorImage || null);
+  };
+
+  const handleWarehouseSelect = (id: number | null) => {
+    setSelectedWarehouseId(id);
+    if (id != null) {
+      setSelectedSize('');
+      setSelectedColorIndex(-1);
+      const wh = warehouseInStock.find((v) => v.id === id);
+      const img = (wh?.color_image || wh?.main_image || '').trim();
+      if (img) onColorImageChange?.(img);
+    }
   };
 
   const openVariantModal = () => {
@@ -343,9 +363,9 @@ export default function ProductInfo({
       <VariantSelector
         sizes={product.sizes || []}
         colors={colorList}
-        selectedSize={selectedSize}
-        selectedColorIndex={selectedColorIndex}
-        onSizeChange={setSelectedSize}
+        selectedSize={selectedWarehouseId != null ? '' : selectedSize}
+        selectedColorIndex={selectedWarehouseId != null ? -1 : selectedColorIndex}
+        onSizeChange={handleSizeChange}
         onColorChange={handleColorChange}
         categoryLevel1Slug={product.category_level1_slug ?? null}
         categoryLevel2Slug={product.category_level2_slug ?? null}
@@ -429,6 +449,8 @@ export default function ProductInfo({
 
       <WarehouseClearanceBlock
         product={product}
+        selectedVariantId={selectedWarehouseId}
+        onSelectVariant={handleWarehouseSelect}
         onAddToCart={onAddToCart}
         onBuyNow={onBuyNow}
         isCartLoading={isCartLoading}

@@ -332,6 +332,13 @@ class EmsTrackingRefreshJobResponse(BaseModel):
     resume_message: Optional[str] = None
 
 
+class EmsTrackingRefreshActiveResponse(BaseModel):
+    """GET .../ems-tracking-refresh/active — không dùng 404 khi không có job."""
+
+    active: bool = False
+    job: Optional[EmsTrackingRefreshJobResponse] = None
+
+
 class EmsTrackingRefreshEnqueueResponse(BaseModel):
     ok: bool = True
     job_id: Optional[str] = None
@@ -454,6 +461,13 @@ class ShopReturnConfirmRowResponse(BaseModel):
     order_id: Optional[int] = None
     status: str
     message: str = ""
+    ems_status: Optional[str] = None
+    ems_phase: Optional[str] = None
+    ems_tracking_code: Optional[str] = None
+    order_status: Optional[str] = None
+    can_confirm: bool = False
+    can_show_warehouse: bool = False
+    warehouse_sku: Optional[str] = None
 
 
 class ShopReturnConfirmRequest(BaseModel):
@@ -469,14 +483,99 @@ class ShopReturnConfirmRequest(BaseModel):
 
 class ShopReturnConfirmResponse(BaseModel):
     ok: bool = True
+    preview: bool = False
     source: str = "manual"
     total_rows: int = 0
     confirmed_count: int = 0
+    confirmable_count: int = 0
+    warehouse_eligible_count: int = 0
     error_count: int = 0
     not_found_count: int = 0
     invalid_code_count: int = 0
     already_returned_count: int = 0
     invalid_status_count: int = 0
     duplicate_count: int = 0
+    ems_not_return_count: int = 0
+    ems_not_linked_count: int = 0
     rows: List[ShopReturnConfirmRowResponse] = []
     warnings: List[str] = []
+
+
+class ReturnWarehouseColorOption(BaseModel):
+    key: str
+    name: str
+    image: Optional[str] = None
+    color_index: Optional[int] = None
+
+
+class ReturnWarehouseVariantRow(BaseModel):
+    product_id: str
+    color: Optional[str] = None
+    size: Optional[str] = None
+    available: int = 0
+    is_active: bool = True
+    price: float = 0
+
+
+class ReturnWarehouseParentSummary(BaseModel):
+    id: int
+    product_id: str
+    name: str
+    price: float = 0
+    slug: Optional[str] = None
+
+
+class ResolveReturnWarehouseSkuResponse(BaseModel):
+    """Mã SKU kho (cột H EMS) trích từ mã EMS / tham chiếu / DHxxx."""
+
+    ok: bool = True
+    sku: Optional[str] = None
+    order_code: Optional[str] = None
+    source: Optional[str] = None
+    message: Optional[str] = None
+
+
+class ReturnWarehouseLookupResponse(BaseModel):
+    ok: bool = True
+    base_sku: str
+    input: str = ""
+    has_parent: bool = False
+    parent: Optional[ReturnWarehouseParentSummary] = None
+    colors: List[ReturnWarehouseColorOption] = []
+    sizes: List[str] = []
+    variants: List[ReturnWarehouseVariantRow] = []
+    warehouse_row_count: int = 0
+    default_unit: Optional[str] = Field(
+        None,
+        description="Hậu tố mã kho dạng base/size/unit (vd. khH0723/40/3 → unit 3)",
+    )
+    warehouse_product_id: Optional[str] = Field(
+        None,
+        description="Mã kho đầy đủ nhân viên gõ (vd. H9441/1/xl) — nhập kho lưu đúng chuỗi này",
+    )
+    parsed_size: Optional[str] = None
+    parsed_color_key: Optional[str] = None
+
+
+class ReturnWarehouseIntakeRequest(BaseModel):
+    sku: str = Field(..., description="Mã SKU gốc hoặc mã kho dạng H0723/40/3")
+    warehouse_product_id: Optional[str] = Field(
+        None,
+        description="Mã kho đầy đủ (cột A import) — ưu tiên hơn ghép từ màu/size UI",
+    )
+    color: Optional[str] = Field(None, description="Màu đã chọn (key hoặc tên)")
+    color_index: Optional[int] = Field(None, ge=0, description="Chỉ số ô màu trên SP gốc (0-based)")
+    color_image: Optional[str] = Field(None, description="URL ảnh màu đã chọn (từ tra cứu)")
+    size: str = Field("", description="Size UI (chỉ bắt buộc khi không gửi warehouse_product_id)")
+    quantity: int = Field(1, ge=1, le=500)
+    note: Optional[str] = Field(None, max_length=500)
+
+
+class ReturnWarehouseIntakeResponse(BaseModel):
+    ok: bool = True
+    action: str
+    product_id: str
+    available_before: int = 0
+    available_after: int = 0
+    quantity_added: int = 0
+    message: str = ""

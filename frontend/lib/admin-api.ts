@@ -217,7 +217,9 @@ async function fetchAdmin<T>(
           : res.status === 404
             ? endpoint.includes('/orders/admin/shipping/operations-stats')
               ? `[404 ${url}] API chưa có endpoint thống kê vận hành — trên VPS chạy: git pull origin main && pm2 restart 188-api (chỉ build web không đủ). `
-              : `[404 ${url}] `
+              : endpoint.includes('/orders/admin/shipping/return-warehouse')
+                ? `[404] API nhập hàng hoàn chưa được nạp — khởi động lại backend FastAPI (port 8001): dừng process cũ rồi chạy lại uvicorn/pm2 restart 188-api. `
+                : `[404 ${url}] `
             : '';
       throw new Error(statusHint + msg);
     }
@@ -364,6 +366,8 @@ export interface AdminProduct {
   image_localization_language?: string | null;
   image_localized_at?: string | null;
   image_localization_error?: string | null;
+  is_warehouse_clearance?: boolean;
+  base_sku?: string | null;
   [key: string]: unknown;
 }
 
@@ -1092,7 +1096,8 @@ function postImportExcelAsyncMultipart(
 /** Timeout danh sách SP admin — tránh treo "Đang tải..." khi API/pool DB chờ quá lâu */
 const ADMIN_PRODUCTS_LIST_TIMEOUT_MS = 120_000;
 
-export type AdminProductListSort = 'default' | 'views_desc' | 'newest' | 'oldest';
+/** Admin /admin/products — 4 kiểu sắp xếp danh sách. */
+export type AdminProductListSort = 'id_desc' | 'newest' | 'oldest' | 'views_desc';
 
 /** Một mục tiêu trong POST /import-export/sync/google-sheet-skus */
 export type AdminGoogleSheetSkuSyncTargetResult = {
@@ -1141,17 +1146,24 @@ export const adminProductAPI = {
       q?: string;
       product_id?: string;
       sort?: AdminProductListSort;
+      /** Bỏ COUNT(*) — lưới admin mặc định bật khi không lọc. */
+      skipTotal?: boolean;
     },
+    fetchOpts?: RequestInit & { timeoutMs?: number },
   ) => {
     const sp = new URLSearchParams();
     sp.set('skip', String(params?.skip ?? 0));
     sp.set('limit', String(params?.limit ?? 100));
     if (params?.q) sp.set('q', params.q);
     if (params?.product_id) sp.set('product_id', params.product_id);
-    if (params?.sort && params.sort !== 'default') sp.set('sort', params.sort);
+    if (params?.sort && params.sort !== 'id_desc') sp.set('sort', params.sort);
+    if (params?.skipTotal) sp.set('skip_total', 'true');
+    sp.set('admin_list', 'true');
+    sp.set('include_warehouse_clearance', 'false');
     return fetchAdmin<AdminProductsResponse>(`/products/?${sp.toString()}`, {
       timeoutMs: ADMIN_PRODUCTS_LIST_TIMEOUT_MS,
       cache: 'no-store',
+      ...fetchOpts,
     });
   },
 
@@ -1174,13 +1186,29 @@ export const adminProductAPI = {
     }),
 
   updateProduct: (productId: string, data: Partial<AdminProduct>) =>
-    fetchAdmin<AdminProduct>(`/products/${encodeURIComponent(productId)}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    }),
+    fetchAdmin<AdminProduct>(
+      `/products/by-product-id?product_id=${encodeURIComponent(productId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    ),
 
   deleteProduct: (productId: string) =>
-    fetchAdmin<AdminProduct>(`/products/${encodeURIComponent(productId)}`, { method: 'DELETE' }),
+    fetchAdmin<AdminProduct>('/products/by-product-id/delete', {
+      method: 'POST',
+      body: JSON.stringify({ product_id: productId }),
+    }),
+
+  bulkDeleteProducts: (productIds: string[]) =>
+    fetchAdmin<{
+      deleted: string[];
+      deleted_count: number;
+      errors: { product_id: string; status: number; detail: string }[];
+    }>('/products/by-product-id/bulk-delete', {
+      method: 'POST',
+      body: JSON.stringify({ product_ids: productIds }),
+    }),
 
   /** Xếp hàng kiểm tra tình trạng nguồn qua worker scrape Hibox (`SOURCE_STOCK_CHECK_*`). Không chờ worker xong. */
   enqueueSourceStockCheckByDbId: (dbPkId: number) =>
@@ -3548,7 +3576,13 @@ export const adminShippingAPI = {
 
   getActiveEmsTrackingRefreshJob: async (): Promise<EmsTrackingRefreshJob | null> => {
     try {
-      return await fetchAdmin<EmsTrackingRefreshJob>('/orders/admin/shipping/ems-tracking-refresh/active');
+      const res = await fetchAdmin<{ active: boolean; job: EmsTrackingRefreshJob | null }>(
+        '/orders/admin/shipping/ems-tracking-refresh/active',
+      );
+      if (res && typeof res === 'object' && 'active' in res) {
+        return res.active && res.job?.job_id ? res.job : null;
+      }
+      return (res as EmsTrackingRefreshJob)?.job_id ? (res as EmsTrackingRefreshJob) : null;
     } catch {
       return null;
     }
@@ -3565,8 +3599,39 @@ export const adminShippingAPI = {
       { method: 'POST', body: JSON.stringify(payload) },
     ),
 
+  previewShopReturns: (payload: { text?: string; order_codes?: string[] }) =>
+    fetchAdmin<ShopReturnConfirmResult>('/orders/admin/shipping/shop-return-preview', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
   confirmShopReturns: (payload: { text?: string; order_codes?: string[]; note?: string }) =>
     fetchAdmin<ShopReturnConfirmResult>('/orders/admin/shipping/shop-return-confirm', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  resolveReturnWarehouseSku: (code: string) =>
+    fetchAdmin<ResolveReturnWarehouseSkuResult>(
+      `/orders/admin/shipping/resolve-return-warehouse-sku?code=${encodeURIComponent(code.trim())}`,
+    ),
+
+  returnWarehouseLookup: (sku: string) =>
+    fetchAdmin<ReturnWarehouseLookupResult>(
+      `/orders/admin/shipping/return-warehouse-lookup?sku=${encodeURIComponent(sku.trim())}`,
+    ),
+
+  returnWarehouseIntake: (payload: {
+    sku: string;
+    warehouse_product_id?: string | null;
+    color?: string | null;
+    color_index?: number | null;
+    color_image?: string | null;
+    size?: string;
+    quantity: number;
+    note?: string;
+  }) =>
+    fetchAdmin<ReturnWarehouseIntakeResult>('/orders/admin/shipping/return-warehouse-intake', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
@@ -3591,15 +3656,72 @@ export const adminShippingAPI = {
   },
 };
 
+export type ReturnWarehouseColorOption = {
+  key: string;
+  name: string;
+  image?: string | null;
+  color_index?: number | null;
+};
+
+export type ReturnWarehouseVariantRow = {
+  product_id: string;
+  color?: string | null;
+  size?: string | null;
+  available: number;
+  is_active: boolean;
+  price: number;
+};
+
+export type ResolveReturnWarehouseSkuResult = {
+  ok: boolean;
+  sku?: string | null;
+  order_code?: string | null;
+  source?: string | null;
+  message?: string | null;
+};
+
+export type ReturnWarehouseLookupResult = {
+  ok: boolean;
+  base_sku: string;
+  input: string;
+  has_parent: boolean;
+  parent?: {
+    id: number;
+    product_id: string;
+    name: string;
+    price: number;
+    slug?: string | null;
+  } | null;
+  colors: ReturnWarehouseColorOption[];
+  sizes: string[];
+  variants: ReturnWarehouseVariantRow[];
+  warehouse_row_count: number;
+  warehouse_product_id?: string | null;
+  parsed_size?: string | null;
+  parsed_color_key?: string | null;
+};
+
+export type ReturnWarehouseIntakeResult = {
+  ok: boolean;
+  action: 'created' | 'updated' | string;
+  product_id: string;
+  available_before: number;
+  available_after: number;
+  quantity_added: number;
+  message: string;
+};
+
 export type ShopReturnConfirmRowStatus =
   | 'confirmed'
+  | 'ready_to_confirm'
   | 'not_found'
   | 'invalid_code'
   | 'already_returned'
   | 'invalid_status'
   | 'ems_not_return'
   | 'ems_not_linked'
-  | 'duplicate';
+  | 'duplicate'
+  | 'order_not_found';
 
 export interface ShopReturnConfirmRow {
   row_number: number;
@@ -3608,13 +3730,23 @@ export interface ShopReturnConfirmRow {
   order_id?: number | null;
   status: ShopReturnConfirmRowStatus;
   message: string;
+  ems_status?: string | null;
+  ems_phase?: string | null;
+  ems_tracking_code?: string | null;
+  order_status?: string | null;
+  can_confirm?: boolean;
+  can_show_warehouse?: boolean;
+  warehouse_sku?: string | null;
 }
 
 export interface ShopReturnConfirmResult {
   ok: boolean;
+  preview?: boolean;
   source: string;
   total_rows: number;
   confirmed_count: number;
+  confirmable_count?: number;
+  warehouse_eligible_count?: number;
   error_count: number;
   not_found_count: number;
   invalid_code_count: number;

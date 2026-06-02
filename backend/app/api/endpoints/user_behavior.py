@@ -50,7 +50,7 @@ def _json_safe_for_response(val: Any) -> Any:
     return val
 
 
-def _product_row_to_api_dict(product: Any, *, sale_state=None) -> dict:
+def _product_row_to_api_dict(product: Any, *, sale_state=None, db: Session | None = None) -> dict:
     """
     ORM Product → dict trả về API. Không append trực tiếp ORM hoặc __dict__
     (relationship `category_rel` join sẵn → không JSON-safe → 500).
@@ -71,6 +71,10 @@ def _product_row_to_api_dict(product: Any, *, sale_state=None) -> dict:
         from app.services import sale_calendar as sale_calendar_svc
 
         sale_calendar_svc.enrich_product_payload_with_site_sale(d, sale_state)
+    if db is not None and not getattr(product, "is_warehouse_clearance", False):
+        from app.services.warehouse_clearance import enrich_parent_with_warehouse_clearance
+
+        enrich_parent_with_warehouse_clearance(db, d, product)
     return d
 
 
@@ -78,7 +82,7 @@ def _serialize_product_rows_for_api(db: Session, products: list, user: User | No
     from app.services import sale_calendar as sale_calendar_svc
 
     sale_state = sale_calendar_svc.resolve_sale_calendar_state(db, user=user)
-    return [_product_row_to_api_dict(p, sale_state=sale_state) for p in products]
+    return [_product_row_to_api_dict(p, sale_state=sale_state, db=db) for p in products]
 
 
 # Product Views
@@ -99,6 +103,12 @@ def track_product_view(
     guest_behavior_crud.add_guest_product_view(db, sid, view_data)
     return {"message": "Đã lưu lịch sử xem sản phẩm (phiên khách)"}
 
+def _enrich_behavior_product_data(db: Session, product_id: int, product_data: Any) -> Any:
+    from app.services.warehouse_clearance import enrich_snapshot_product_data_for_card
+
+    return enrich_snapshot_product_data_for_card(db, product_id, product_data)
+
+
 @router.get("/products/viewed", response_model=list[ProductViewResponse])
 def get_viewed_products(
     limit: int = 20,
@@ -108,7 +118,18 @@ def get_viewed_products(
 ):
     """Lấy danh sách sản phẩm đã xem"""
     if current_user:
-        return get_user_viewed_products(db, current_user.id, limit)
+        rows = get_user_viewed_products(db, current_user.id, limit)
+        return [
+            ProductViewResponse(
+                id=r.id,
+                user_id=r.user_id,
+                product_id=r.product_id,
+                product_data=_enrich_behavior_product_data(db, r.product_id, r.product_data),
+                time_spent_seconds=r.time_spent_seconds or 0,
+                viewed_at=r.viewed_at,
+            )
+            for r in rows
+        ]
     sid = (x_guest_session_id or "").strip()
     if not sid:
         return []
@@ -118,7 +139,7 @@ def get_viewed_products(
             id=r.id,
             user_id=None,
             product_id=r.product_id,
-            product_data=r.product_data,
+            product_data=_enrich_behavior_product_data(db, r.product_id, r.product_data),
             time_spent_seconds=r.time_spent_seconds or 0,
             viewed_at=r.viewed_at,
         )
@@ -316,7 +337,17 @@ def get_favorite_products(
 ):
     """Lấy danh sách sản phẩm yêu thích"""
     if current_user:
-        return get_user_favorites(db, current_user.id, limit)
+        rows = get_user_favorites(db, current_user.id, limit)
+        return [
+            FavoriteResponse(
+                id=r.id,
+                user_id=r.user_id,
+                product_id=r.product_id,
+                product_data=_enrich_behavior_product_data(db, r.product_id, r.product_data),
+                created_at=r.created_at,
+            )
+            for r in rows
+        ]
     sid = (x_guest_session_id or "").strip()
     if not sid:
         return []
@@ -326,7 +357,7 @@ def get_favorite_products(
             id=r.id,
             user_id=None,
             product_id=r.product_id,
-            product_data=r.product_data,
+            product_data=_enrich_behavior_product_data(db, r.product_id, r.product_data),
             created_at=r.created_at,
         )
         for r in rows

@@ -6,10 +6,10 @@ const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
   // Trình duyệt mặc định GET /favicon.ico — không có file .ico thì trả về favicon.png (200).
   async rewrites() {
-    const apiOrigin = (process.env.API_INTERNAL_ORIGIN || "http://127.0.0.1:8001").replace(/\/$/, "");
     return [
       { source: "/favicon.ico", destination: "/favicon.png" },
-      { source: "/api/:path*", destination: `${apiOrigin}/api/:path*` },
+      // /api/v1/* do app/api/v1/[[...path]]/route.ts proxy (retry ECONNRESET, timeout 120s+).
+      // Không rewrite thẳng → tránh lỗi "Failed to proxy … socket hang up" khi uvicorn bận sau import.
     ];
   },
   /** Cho phép iframe YouTube (fullscreen, autoplay trong iframe). Không đặt CSP cứng ở đây để tránh vỡ GA/GTM/FB từ admin embed-codes. */

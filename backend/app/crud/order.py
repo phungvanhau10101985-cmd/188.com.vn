@@ -170,8 +170,11 @@ def update_order_deposit_type(
     return order
 
 def get_order_by_code(db: Session, order_code: str) -> Optional[Order]:
-    """Get order by order code"""
-    return db.query(Order).filter(Order.order_code == order_code).first()
+    """Get order by order code (DHxxx — không phân biệt hoa thường)."""
+    code = (order_code or "").strip()
+    if not code:
+        return None
+    return db.query(Order).filter(Order.order_code.ilike(code)).first()
 
 def get_user_orders(
     db: Session, 
@@ -266,8 +269,12 @@ def admin_update_order(
 
     commission_confirmed = False
     if 'status' in update_data:
-        commission_confirmed = affiliate_svc.handle_order_status_change(db, order, old_status, update_data['status'])
-        if update_data['status'] == OrderStatus.DELIVERED.value:
+        new_status_val = update_data['status']
+        from app.services.warehouse_stock import sync_warehouse_stock_on_status_change
+
+        sync_warehouse_stock_on_status_change(db, order, old_status, new_status_val)
+        commission_confirmed = affiliate_svc.handle_order_status_change(db, order, old_status, new_status_val)
+        if new_status_val == OrderStatus.DELIVERED.value:
             shipment_svc.mark_delivered_on_timeline(db, order, admin_id=admin_id)
             if order.user_id:
                 try:
@@ -315,6 +322,9 @@ def cancel_order(
     order.updated_at = datetime.now()
 
     old_status = status_val
+    from app.services.warehouse_stock import sync_warehouse_stock_on_status_change
+
+    sync_warehouse_stock_on_status_change(db, order, old_status, OrderStatus.CANCELLED.value)
     affiliate_svc.handle_order_status_change(db, order, old_status, OrderStatus.CANCELLED.value)
     
     db.commit()
@@ -342,6 +352,9 @@ def confirm_received(
     order.status = OrderStatus.DELIVERED.value
     order.delivered_at = datetime.now()
     order.updated_at = datetime.now()
+    from app.services.warehouse_stock import sync_warehouse_stock_on_status_change
+
+    sync_warehouse_stock_on_status_change(db, order, old_status, OrderStatus.DELIVERED.value)
     commission_confirmed = affiliate_svc.handle_order_status_change(db, order, old_status, OrderStatus.DELIVERED.value)
     shipment_svc.mark_delivered_on_timeline(db, order)
     db.commit()

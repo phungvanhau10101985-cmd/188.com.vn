@@ -10,6 +10,7 @@ import type { Product, SimpleProductResponse } from '@/types/api';
 import { useCart } from '@/features/cart/hooks/useCart';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { cartLineMainImage } from '@/lib/product-color-variant';
+import { warehouseCartProductDataExtras } from '@/lib/warehouse-clearance';
 import { useToast } from '@/components/ToastProvider';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
 import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
@@ -120,11 +121,14 @@ export default function ProductDetailPage() {
           product_id: p.product_id,
           name: p.name,
           price: p.price,
+          list_price:
+            p.original_price != null && p.original_price > (p.price ?? 0) ? p.original_price : p.price,
           main_image: lineImg,
           brand_name: p.brand_name,
           available: p.available,
           original_price: p.original_price,
           slug: p.slug,
+          ...warehouseCartProductDataExtras(p),
         },
       };
       if (!isAuthenticated) {
@@ -179,11 +183,14 @@ export default function ProductDetailPage() {
           product_id: p.product_id,
           name: p.name,
           price: p.price,
+          list_price:
+            p.original_price != null && p.original_price > (p.price ?? 0) ? p.original_price : p.price,
           main_image: lineImg,
           brand_name: p.brand_name,
           available: p.available,
           original_price: p.original_price,
           slug: p.slug,
+          ...warehouseCartProductDataExtras(p),
         },
       };
       if (!isAuthenticated) {

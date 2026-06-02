@@ -6,9 +6,11 @@ import type { Product } from "@/types/api";
 import { displayableBrandWithDefault } from "@/lib/utils";
 import { productPublicPdpUrl } from "@/lib/product-path-slug";
 import { getApiBaseUrl } from "@/lib/api-base";
+import { normalizeProductRouteSlug } from "@/lib/product-route-slug";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001/api/v1";
+function apiBaseForProductFetch(): string {
+  return getApiBaseUrl();
+}
 
 export interface ProductForSeo {
   id: number;
@@ -41,13 +43,20 @@ export async function getProductBySlugForSeo(
   slug: string
 ): Promise<ProductForSeo | null> {
   try {
-    const url = `${API_BASE}/products/by-slug/?slug=${encodeURIComponent(slug)}`;
-    const res = await fetch(url, {
+    const apiBase = apiBaseForProductFetch();
+    const encoded = encodeURIComponent(slug);
+    let res = await fetch(`${apiBase}/products/by-slug/${encoded}`, {
       next: { revalidate: 60 },
       headers: { "Content-Type": "application/json" },
     });
     if (!res.ok) {
-      const fallbackUrl = `${API_BASE}/products/${encodeURIComponent(slug)}`;
+      res = await fetch(`${apiBase}/products/by-slug/?slug=${encoded}`, {
+        next: { revalidate: 60 },
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (!res.ok) {
+      const fallbackUrl = `${apiBase}/products/${encoded}`;
       const fallbackRes = await fetch(fallbackUrl, {
         next: { revalidate: 60 },
         headers: { "Content-Type": "application/json" },
@@ -76,17 +85,26 @@ export async function getProductBySlugForSSR(
   options?: ProductSSRLoadOptions,
 ): Promise<Product | null> {
   try {
-    const params = new URLSearchParams({ slug });
+    const normalized = normalizeProductRouteSlug(slug);
+    const apiBase = apiBaseForProductFetch();
+    const encoded = encodeURIComponent(normalized);
+    const params = new URLSearchParams({ slug: normalized });
     if (options?.attachGroupListing) {
       params.set("attach_group_listing", "true");
     }
-    const url = `${API_BASE}/products/by-slug/?${params}`;
-    const res = await fetch(url, {
+    const attachQs = options?.attachGroupListing ? "?attach_group_listing=true" : "";
+    let res = await fetch(`${apiBase}/products/by-slug/${encoded}${attachQs}`, {
       ...(options?.noStore ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
       headers: { "Content-Type": "application/json" },
     });
     if (!res.ok) {
-      const fallbackUrl = `${API_BASE}/products/${encodeURIComponent(slug)}`;
+      res = await fetch(`${apiBase}/products/by-slug/?${params}`, {
+        ...(options?.noStore ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (!res.ok) {
+      const fallbackUrl = `${apiBase}/products/${encoded}`;
       const fallbackRes = await fetch(fallbackUrl, {
         next: { revalidate: 60 },
         headers: { "Content-Type": "application/json" },
@@ -106,7 +124,7 @@ export async function getProductBySlugForSSR(
 export async function getProductBySkuForSSR(sku: string): Promise<Product | null> {
   const key = (sku || "").trim();
   if (!key) return null;
-  const apiBase = typeof window === "undefined" ? getApiBaseUrl() : API_BASE;
+  const apiBase = apiBaseForProductFetch();
   const headers = { "Content-Type": "application/json" };
 
   try {

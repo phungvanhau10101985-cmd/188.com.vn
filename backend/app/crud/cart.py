@@ -1,12 +1,41 @@
 # backend/app/crud/cart.py - COMPLETE FIXED VERSION
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 import re
 from app.models.cart import CartItem, Cart
 from app.models.product import Product
 from app.schemas.cart import CartItemCreate, CartItemUpdate
+
+
+def _warehouse_stock_cap(product: Product) -> Optional[int]:
+    from app.services.warehouse_clearance import is_warehouse_cart_product
+    from app.services.warehouse_stock import warehouse_sellable_qty
+
+    if not is_warehouse_cart_product(product):
+        return None
+    return warehouse_sellable_qty(product)
+
+
+def _cart_line_unit_prices(db: Session, product: Product) -> Tuple[float, float, bool, Optional[int], float]:
+    """
+    Trả (giá bán đơn vị, giá gốc/list, is_warehouse, cap tồn, % giảm kho).
+    Dòng kho: giá bán = giá sau % admin; cap = available trên Product kho.
+    """
+    from app.services.warehouse_clearance import (
+        get_warehouse_clearance_settings,
+        is_warehouse_cart_product,
+        resolve_checkout_line_prices,
+    )
+
+    is_wh = is_warehouse_cart_product(product)
+    cap = _warehouse_stock_cap(product) if is_wh else None
+    display, original = resolve_checkout_line_prices(db, product)
+    if not is_wh:
+        return display, original, False, None, 0.0
+    _enabled, pct = get_warehouse_clearance_settings(db)
+    return display, original, True, cap, float(pct)
 
 
 def _variant_dict_img(c: Any) -> str:
@@ -133,27 +162,56 @@ class CartItemCRUD:
             CartItem.selected_color == cart_item.selected_color
         ).first()
         
+        unit_sale, list_original, is_wh, stock_cap, wh_pct = _cart_line_unit_prices(db, product)
+
         if existing:
-            list_price = float(product.price or 0)
-            existing.unit_price = list_price
-            existing.product_price = list_price
-            existing.quantity += cart_item.quantity
+            new_qty = int(existing.quantity or 0) + int(cart_item.quantity or 0)
+            if is_wh:
+                if stock_cap is not None and stock_cap <= 0:
+                    raise ValueError(
+                        f"Sản phẩm kho «{product.product_id}» đã hết hàng — không thể thêm vào giỏ."
+                    )
+                if stock_cap is not None and new_qty > stock_cap:
+                    raise ValueError(
+                        f"Sản phẩm kho «{product.product_id}» chỉ còn {stock_cap} — "
+                        f"đã có {existing.quantity} trong giỏ, không thể thêm quá {stock_cap}."
+                    )
+            existing.unit_price = unit_sale
+            existing.product_price = unit_sale
+            existing.quantity = new_qty
             existing.selected_color_name = cart_item.selected_color_name
-            existing.total_price = list_price * existing.quantity
+            existing.total_price = unit_sale * new_qty
             if isinstance(existing.product_data, dict):
-                existing.product_data = {
-                    **existing.product_data,
-                    "price": list_price,
-                    "list_price": list_price,
-                }
+                pd = {**existing.product_data}
+                pd["price"] = unit_sale
+                pd["list_price"] = list_original
+                pd["original_price"] = list_original
+                if is_wh:
+                    pd["is_warehouse_clearance"] = True
+                    pd["warehouse_clearance_percent"] = wh_pct
+                    if stock_cap is not None:
+                        pd["available"] = stock_cap
+                    from app.services import warehouse_clearance as wh_clearance_svc
+
+                    wh_clearance_svc.apply_warehouse_cart_product_data_slug(db, product, pd)
+                existing.product_data = pd
             existing.updated_at = datetime.now()
             db.commit()
             db.refresh(existing)
             return existing
-        
-        # 4. Create new cart item với đầy đủ cột database yêu cầu
-        list_price = float(product.price or 0)
-        total_price = list_price * cart_item.quantity
+
+        qty = int(cart_item.quantity or 1)
+        if is_wh:
+            if stock_cap is not None and stock_cap <= 0:
+                raise ValueError(
+                    f"Sản phẩm kho «{product.product_id}» đã hết hàng — không thể thêm vào giỏ."
+                )
+            if stock_cap is not None and qty > stock_cap:
+                raise ValueError(
+                    f"Sản phẩm kho «{product.product_id}» chỉ còn {stock_cap} — không thể thêm {qty} vào giỏ."
+                )
+
+        total_price = unit_sale * qty
 
         line_image = _resolve_cart_line_image(
             product,
@@ -167,13 +225,22 @@ class CartItemCRUD:
             "id": product.id,
             "product_id": product.product_id,
             "name": product.name,
-            "price": list_price,
-            "list_price": list_price,
+            "price": unit_sale,
+            "list_price": list_original,
+            "original_price": list_original if is_wh and list_original > unit_sale else None,
             "main_image": line_image,
             "slug": product.slug,
             "category_id": product.category_id,
             "deposit_require": product.deposit_require,
         }
+        if is_wh:
+            product_data["is_warehouse_clearance"] = True
+            product_data["warehouse_clearance_percent"] = wh_pct
+            if stock_cap is not None:
+                product_data["available"] = stock_cap
+            from app.services import warehouse_clearance as wh_clearance_svc
+
+            wh_clearance_svc.apply_warehouse_cart_product_data_slug(db, product, product_data)
         for k, v in client_pd.items():
             if v is None or k in product_data:
                 continue
@@ -185,14 +252,14 @@ class CartItemCRUD:
             user_id=user_id,
             product_id=cart_item.product_id,
             product_data=product_data,  # QUAN TRỌNG: phải có product_data (notnull)
-            quantity=cart_item.quantity,
+            quantity=qty,
             selected_size=cart_item.selected_size,
             selected_color=cart_item.selected_color,
             selected_color_name=cart_item.selected_color_name,
-            unit_price=list_price,  # QUAN TRỌNG: phải có unit_price (notnull)
+            unit_price=unit_sale,  # QUAN TRỌNG: phải có unit_price (notnull)
             total_price=total_price,  # QUAN TRỌNG: phải có total_price (notnull)
             product_name=product.name,
-            product_price=list_price,
+            product_price=unit_sale,
             product_image=line_image,
             requires_deposit=product.deposit_require,
             created_at=now,  # Đảm bảo có giá trị, tránh Pydantic datetime_type lỗi
@@ -212,18 +279,33 @@ class CartItemCRUD:
 
             product = db.query(Product).filter(Product.id == db_cart_item.product_id).first()
             if product is not None:
-                list_price = float(product.price or 0)
-                db_cart_item.unit_price = list_price
-                db_cart_item.product_price = list_price
+                unit_sale, list_original, is_wh, stock_cap, wh_pct = _cart_line_unit_prices(db, product)
+                qty = int(db_cart_item.quantity or 1)
+                if is_wh and stock_cap is not None:
+                    if stock_cap <= 0:
+                        raise ValueError(
+                            f"Sản phẩm kho «{product.product_id}» đã hết hàng."
+                        )
+                    qty = min(qty, stock_cap)
+                    db_cart_item.quantity = qty
+                db_cart_item.unit_price = unit_sale
+                db_cart_item.product_price = unit_sale
                 if isinstance(db_cart_item.product_data, dict):
-                    db_cart_item.product_data = {
-                        **db_cart_item.product_data,
-                        "price": list_price,
-                        "list_price": list_price,
-                    }
+                    pd = {**db_cart_item.product_data}
+                    pd["price"] = unit_sale
+                    pd["list_price"] = list_original
+                    pd["original_price"] = list_original
+                    if is_wh:
+                        pd["is_warehouse_clearance"] = True
+                        pd["warehouse_clearance_percent"] = wh_pct
+                        if stock_cap is not None:
+                            pd["available"] = stock_cap
+                    db_cart_item.product_data = pd
 
             if "quantity" in update_data or product is not None:
-                db_cart_item.total_price = db_cart_item.unit_price * db_cart_item.quantity
+                db_cart_item.total_price = float(db_cart_item.unit_price or 0) * int(
+                    db_cart_item.quantity or 0
+                )
 
             db_cart_item.updated_at = datetime.now()
             db.commit()

@@ -1,6 +1,7 @@
 # backend/app/api/endpoints/products.py - COMPLETE FIXED VERSION WITH BOTH ENDPOINTS
 from datetime import datetime
 import io
+from urllib.parse import unquote
 
 import pandas as pd
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
@@ -113,11 +114,41 @@ class AdminSourceStockResetPdpBody(BaseModel):
     )
 
 
-def _serialize_products_for_api(db: Session, raw_products: List, user: Optional[User] = None) -> List:
+# Trường nặng không cần trên lưới admin (mô tả/SEO) — giảm payload & thời gian serialize.
+_ADMIN_LIST_DUMP_EXCLUDE = frozenset(
+    {
+        "description",
+        "product_info",
+        "meta_title",
+        "meta_description",
+        "meta_keywords",
+    }
+)
+
+
+def _serialize_products_for_api(
+    db: Session,
+    raw_products: List,
+    user: Optional[User] = None,
+    *,
+    include_warehouse_clearance: bool = False,
+    admin_list: bool = False,
+) -> List:
+    paired: List = []
+    if admin_list:
+        for product in raw_products:
+            try:
+                d = Product.model_validate(product).model_dump(
+                    exclude=_ADMIN_LIST_DUMP_EXCLUDE,
+                )
+                paired.append((product, d))
+            except Exception:
+                paired.append((None, product))
+        return [entry[1] for entry in paired]
+
     from app.services import sale_calendar as sale_calendar_svc
 
     sale_state = sale_calendar_svc.resolve_sale_calendar_state(db, user=user)
-    paired: List = []
     for product in raw_products:
         try:
             d = Product.model_validate(product).model_dump()
@@ -128,6 +159,10 @@ def _serialize_products_for_api(db: Session, raw_products: List, user: Optional[
     dict_rows = [(o, d) for o, d in paired if o is not None and isinstance(d, dict)]
     if dict_rows:
         enrich_product_payloads_with_category_size_guide(db, [t[0] for t in dict_rows], [t[1] for t in dict_rows])
+        if include_warehouse_clearance:
+            from app.services.warehouse_clearance import enrich_listing_product_payloads
+
+            enrich_listing_product_payloads(db, dict_rows)
     return [entry[1] for entry in paired]
 
 
@@ -156,6 +191,10 @@ def _product_to_response(
     d = Product.model_validate(row).model_dump()
     if standalone_wh:
         wh_clearance_svc.enrich_standalone_warehouse_product(db, d, db_product)
+        d["slug"] = crud.product.generate_consistent_slug(
+            d.get("name") or getattr(db_product, "name", "") or "",
+            getattr(db_product, "product_id", None) or "",
+        )
     else:
         sale_state = sale_calendar_svc.resolve_sale_calendar_state(db, user=user)
         sale_calendar_svc.enrich_product_payload_with_site_sale(d, sale_state)
@@ -236,7 +275,12 @@ def search_products(
         if total > 0:
             # Serialize products
             if "products" in result:
-                result["products"] = _serialize_products_for_api(db, result["products"], user=current_user)
+                result["products"] = _serialize_products_for_api(
+                    db,
+                    result["products"],
+                    user=current_user,
+                    include_warehouse_clearance=True,
+                )
             return result
 
         # Stage 4: AI Recovery & Normalize
@@ -264,7 +308,12 @@ def search_products(
             if total2 > 0:
                 # Serialize products
                 if "products" in result2:
-                    result2["products"] = _serialize_products_for_api(db, result2["products"], user=current_user)
+                    result2["products"] = _serialize_products_for_api(
+                        db,
+                        result2["products"],
+                        user=current_user,
+                        include_warehouse_clearance=True,
+                    )
                 return result2
 
         # Stage 5: AI Category Suggestions (Safety Net)
@@ -343,18 +392,27 @@ def _read_products_list_impl(
     filter_style_tag: Optional[str] = None,
     skip_total: bool = False,
     user: Optional[User] = None,
+    include_warehouse_clearance: bool = False,
+    admin_list: bool = False,
 ) -> dict:
     from app.services import sale_calendar as sale_calendar_svc
 
+    if not admin_list and is_active is None:
+        is_active = True
+
     raw_q = (q or "").strip()
     pid = (product_id or "").strip()
+    if admin_list and not skip_total and not raw_q and not pid:
+        skip_total = True
     if order_random and not raw_q and not pid:
         response.headers["Cache-Control"] = "private, no-store"
     else:
         # Admin / công cụ nội bộ cần dữ liệu mới sau PUT; public cache gây hiển thị cũ ~60s.
         response.headers["Cache-Control"] = "private, no-cache, must-revalidate"
     cache_key = None
-    skip_search_cache = user is not None and sale_calendar_svc.is_site_sale_test_enabled(db, user)
+    skip_search_cache = admin_list or (
+        user is not None and sale_calendar_svc.is_site_sale_test_enabled(db, user)
+    )
     if use_search_cache and raw_q and not pid and not skip_search_cache:
         norm_q = crud.product._normalize_search_key(raw_q)
         cache_key = product_search_cache_crud.build_cache_key(
@@ -408,10 +466,18 @@ def _read_products_list_impl(
         filter_color=filter_color,
         filter_style_tag=filter_style_tag,
         skip_total=skip_total,
+        include_warehouse_products=admin_list,
+        admin_list_query=admin_list,
     )
 
     if result and "products" in result:
-        result["products"] = _serialize_products_for_api(db, result["products"], user=user)
+        result["products"] = _serialize_products_for_api(
+            db,
+            result["products"],
+            user=user,
+            include_warehouse_clearance=include_warehouse_clearance,
+            admin_list=admin_list,
+        )
 
     if (
         use_search_cache
@@ -449,13 +515,16 @@ def read_products(
     pro_high_price: Optional[str] = Query(None, description="Lọc theo nhóm giá cao hơn (chuỗi)"),
     min_price: Optional[float] = Query(None, ge=0),
     max_price: Optional[float] = Query(None, ge=0),
-    is_active: Optional[bool] = True,
+    is_active: Optional[bool] = Query(
+        None,
+        description="Lọc hiển thị shop. Mặc định storefront=true; admin_list=true thì mặc định null (mọi trạng thái).",
+    ),
     q: Optional[str] = Query(None, description="Tìm theo tên, mã, danh mục, vật liệu, kiểu dáng, màu sắc, dịp, tính năng, size (từ khóa rời rạc)"),
     product_id: Optional[str] = Query(None, description="Tìm theo ID sản phẩm (Excel) hoặc mã SKU (cột code)"),
     order_random: bool = Query(False, description="Trộn ngẫu nhiên (chỉ áp dụng khi không có q); phân trang theo random không ổn định giữa các lần tải"),
     sort: Optional[str] = Query(
         None,
-        description="Sắp xếp: default | views_desc | newest | oldest (bị bỏ qua khi order_random=true)",
+        description="Sắp xếp: id_desc | newest | oldest | views_desc | id_asc (bị bỏ qua khi order_random=true)",
     ),
     size: Optional[str] = Query(None, description="Lọc size (khớp mảng JSON `sizes` của SP)"),
     color: Optional[str] = Query(
@@ -466,6 +535,14 @@ def read_products(
     skip_total: bool = Query(
         False,
         description="Bỏ COUNT(*) — dùng cho khối SP liên quan PDP (chỉ cần danh sách)",
+    ),
+    include_warehouse_clearance: bool = Query(
+        False,
+        description="Gắn warehouse_variants cho thẻ SP (chỉ bật storefront; admin để false tránh chậm)",
+    ),
+    admin_list: bool = Query(
+        False,
+        description="Lưới admin: bỏ enrich sale/size-guide, không cache tìm kiếm, mặc định hiện cả SP ẩn.",
     ),
 ):
     """
@@ -500,6 +577,8 @@ def read_products(
             filter_style_tag=style_tag,
             skip_total=skip_total,
             user=current_user,
+            include_warehouse_clearance=include_warehouse_clearance,
+            admin_list=admin_list,
         )
     except Exception as e:
         return {"error": str(e), "status": "serialization_error"}
@@ -524,13 +603,16 @@ def read_products_full_list(
     pro_high_price: Optional[str] = Query(None, description="Lọc theo nhóm giá cao hơn (chuỗi)"),
     min_price: Optional[float] = Query(None, ge=0),
     max_price: Optional[float] = Query(None, ge=0),
-    is_active: Optional[bool] = True,
+    is_active: Optional[bool] = Query(
+        None,
+        description="Lọc hiển thị shop. Mặc định true (chỉ SP đang bán).",
+    ),
     q: Optional[str] = Query(None, description="Tìm theo tên, mã, danh mục, vật liệu, kiểu dáng, màu sắc, dịp, tính năng, size (từ khóa rời rạc)"),
     product_id: Optional[str] = Query(None, description="Tìm theo ID sản phẩm (Excel) hoặc mã SKU (cột code)"),
     order_random: bool = Query(False, description="Trộn ngẫu nhiên (chỉ áp dụng khi không có q); phân trang theo random không ổn định giữa các lần tải"),
     sort: Optional[str] = Query(
         None,
-        description="Sắp xếp: default | views_desc | newest | oldest (bị bỏ qua khi order_random=true)",
+        description="Sắp xếp: id_desc | newest | oldest | views_desc | id_asc (bị bỏ qua khi order_random=true)",
     ),
     size: Optional[str] = Query(None, description="Lọc size (khớp mảng JSON `sizes` của SP)"),
     color: Optional[str] = Query(
@@ -890,62 +972,8 @@ def read_product_sitemap_slugs(
     return crud.product.get_product_sitemap_slugs(db, skip=skip, limit=limit, is_active=is_active)
 
 
-@router.get("/{product_id}", response_model=Product)
-def read_product(
-    product_id: str,
-    db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
-):
-    """
-    Get product by product_id, slug, or internal code (SKU).
-    """
-    db_product = crud.product.resolve_product_by_sku(db, sku=product_id)
-    if db_product is None:
-        raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(db, db_product, user=current_user)
-
-
-@router.put("/{product_id}", response_model=Product)
-def update_product(
-    product_id: str,
-    product_update: ProductUpdate,
-    db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission("products")),
-):
-    """
-    Update product (product_id = Excel column A / product_id string)
-    """
-    existing = crud.product.get_product_by_product_id(db, product_id=product_id)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="Product not found")
-    db_product = crud.product.update_product(db, product_id=existing.id, product_update=product_update)
-    if db_product is None:
-        raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(db, db_product)
-
-@router.delete("/{product_id}", response_model=Product)
-def delete_product(
-    product_id: str,
-    db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission("products")),
-):
-    """
-    Delete product (product_id = Excel column A / product_id string)
-    """
-    existing = crud.product.get_product_by_product_id(db, product_id=product_id)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="Product not found")
-    from app.services import warehouse_clearance as wh_clearance_svc
-
-    block = wh_clearance_svc.parent_has_deletion_block(db, existing)
-    if block:
-        raise HTTPException(status_code=400, detail=block)
-    db_product = crud.product.delete_product(db, product_id=existing.id)
-    if db_product is None:
-        raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(db, db_product)
-
-@router.get("/by-slug/{slug}", response_model=Product)
+# Phải đăng ký TRƯỚC /{product_id} — nếu không "by-slug" bị nuốt như product_id.
+@router.get("/by-slug/{slug:path}", response_model=Product)
 def read_product_by_slug(
     slug: str,
     db: Session = Depends(get_db),
@@ -960,6 +988,8 @@ def read_product_by_slug(
         raise HTTPException(status_code=404, detail="Product not found")
     return _product_to_response(db, db_product, user=current_user)
 
+
+@router.get("/by-slug", response_model=Product)
 @router.get("/by-slug/", response_model=Product)
 def read_product_by_slug_query(
     slug: str = Query(..., description="Product slug"),
@@ -985,6 +1015,7 @@ def read_product_by_slug_query(
         attach_group_listing=attach_group_listing,
     )
 
+
 @router.get("/by-code/{product_code}", response_model=Product)
 def read_product_by_code(
     product_code: str,
@@ -998,6 +1029,7 @@ def read_product_by_code(
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return _product_to_response(db, db_product, user=current_user)
+
 
 @router.get("/by-id/{id}", response_model=Product)
 def read_product_by_id(
@@ -1018,6 +1050,92 @@ def read_product_by_id(
         user=current_user,
         attach_group_listing=attach_group_listing,
     )
+
+
+def _normalize_excel_product_id(product_id: str) -> str:
+    return unquote(product_id or "").strip()
+
+
+def _resolve_admin_product_by_excel_id(db: Session, product_id: str):
+    """Tra SP theo cột product_id Excel — dùng cho route query (ID có dấu /)."""
+    pid = _normalize_excel_product_id(product_id)
+    existing = crud.product.get_product_by_product_id(db, product_id=pid)
+    if existing is None:
+        existing = crud.product.resolve_product_by_sku(db, sku=pid)
+    return existing
+
+
+def _delete_product_by_excel_id(db: Session, product_id: str, *, admin_force: bool = True) -> Product:
+    existing = _resolve_admin_product_by_excel_id(db, product_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    from app.services import warehouse_clearance as wh_clearance_svc
+
+    block = wh_clearance_svc.parent_has_deletion_block(db, existing, admin_force=admin_force)
+    if block:
+        raise HTTPException(status_code=400, detail=block)
+    db_product = crud.product.delete_product(db, product_id=existing.id, admin_force=admin_force)
+    if db_product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return _product_to_response(db, db_product)
+
+
+class ProductExcelIdBody(BaseModel):
+    product_id: str = Field(..., min_length=1, max_length=512)
+
+
+class BulkDeleteByProductIdBody(BaseModel):
+    product_ids: List[str] = Field(..., min_length=1, max_length=200)
+
+
+@router.post("/by-product-id/delete", response_model=Product)
+def delete_product_by_product_id_body(
+    body: ProductExcelIdBody,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Xóa SP theo product_id trong JSON body — an toàn khi ID có / hoặc khoảng trắng."""
+    return _delete_product_by_excel_id(db, body.product_id)
+
+
+@router.post("/by-product-id/bulk-delete", response_model=dict)
+def bulk_delete_products_by_product_id_body(
+    body: BulkDeleteByProductIdBody,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Xóa nhiều SP admin — một transaction, không qua path URL."""
+    deleted, errors = crud.product.bulk_delete_products_by_excel_product_ids(
+        db, body.product_ids, admin_force=True
+    )
+    return {"deleted": deleted, "deleted_count": len(deleted), "errors": errors}
+
+
+@router.put("/by-product-id", response_model=Product)
+def update_product_by_product_id_query(
+    product_update: ProductUpdate,
+    product_id: str = Query(..., description="product_id Excel / mã kho (có thể chứa /)"),
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Cập nhật SP khi product_id có dấu / — tránh 404 do path segment."""
+    existing = _resolve_admin_product_by_excel_id(db, product_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    db_product = crud.product.update_product(db, product_id=existing.id, product_update=product_update)
+    if db_product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return _product_to_response(db, db_product)
+
+
+@router.delete("/by-product-id", response_model=Product)
+def delete_product_by_product_id_query(
+    product_id: str = Query(..., description="product_id Excel / mã kho (có thể chứa /)"),
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Xóa SP khi product_id có dấu / — tránh 404 do path segment."""
+    return _delete_product_by_excel_id(db, product_id)
 
 
 @router.post("/by-id/{id}/source-stock-check/enqueue", response_model=dict)
@@ -1325,3 +1443,45 @@ def purge_dead_media_url_by_db_id(
             raise HTTPException(status_code=400, detail="URL does not belong to this product")
         raise HTTPException(status_code=400, detail="URL is still reachable or could not verify (not 404)")
     return out
+
+
+# Catch-all product_id (có dấu /) — đăng ký CUỐI để không nuốt /admin/*, /by-id/*, …
+@router.get("/{product_id:path}", response_model=Product)
+def read_product(
+    product_id: str,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Get product by product_id, slug, or internal code (SKU)."""
+    pid = _normalize_excel_product_id(product_id)
+    db_product = crud.product.resolve_product_by_sku(db, sku=pid)
+    if db_product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return _product_to_response(db, db_product, user=current_user)
+
+
+@router.put("/{product_id:path}", response_model=Product)
+def update_product(
+    product_id: str,
+    product_update: ProductUpdate,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Update product (product_id = Excel column A / product_id string)."""
+    existing = _resolve_admin_product_by_excel_id(db, product_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    db_product = crud.product.update_product(db, product_id=existing.id, product_update=product_update)
+    if db_product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return _product_to_response(db, db_product)
+
+
+@router.delete("/{product_id:path}", response_model=Product)
+def delete_product(
+    product_id: str,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Delete product (product_id = Excel column A / product_id string)."""
+    return _delete_product_by_excel_id(db, product_id)

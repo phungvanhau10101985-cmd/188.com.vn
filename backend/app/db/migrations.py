@@ -786,6 +786,7 @@ class MigrationManager:
         )
         results['order_shipment_backfill'] = self._backfill_order_shipment_timelines()
         results['ems_cod_paid_sanitize'] = self._sanitize_ems_cod_paid_without_settlement()
+        results['ems_product_code_sanitize'] = self._sanitize_invalid_ems_product_codes()
         results['promotions_create'] = self._create_table_if_not_exists("promotions", Promotion)
         results['promotion_usages_create'] = self._create_table_if_not_exists(
             "promotion_usages", PromotionUsage
@@ -975,6 +976,24 @@ class MigrationManager:
                 db.close()
         except Exception as e:
             logger.warning("  _sanitize_ems_cod_paid_without_settlement: %s", e)
+            return False
+
+    def _sanitize_invalid_ems_product_codes(self) -> bool:
+        """Xóa product_code ghi nhầm từ tên/địa chỉ — chỉ giữ MA_SP cột H."""
+        try:
+            from app.db.session import SessionLocal
+            from app.services import ems_shipment_import as ems_import_svc
+
+            db = SessionLocal()
+            try:
+                fixed = ems_import_svc.sanitize_invalid_ems_product_codes(db)
+                if fixed:
+                    logger.info("✅ ems_product_code_sanitize: fixed %s records", fixed)
+                return True
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning("  _sanitize_invalid_ems_product_codes: %s", e)
             return False
 
     def _repair_premature_commission_confirmations(self) -> bool:

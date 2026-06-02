@@ -33,7 +33,8 @@ _VI_LATIN_RE = re.compile(
 )
 # Tránh dịch nhầm size thuần (S/M/L, 170 / L, …)
 _SIZE_LIKE_RE = re.compile(
-    r"(?i)^(xxl|xxxl|xxxxl|xs|xl|[sm])\s*$|^\d{2,3}\s*[-–/]\s*[a-z0-9]+\s*$",
+    r"^(xxl|xxxl|xxxxl|xs|xl|[sm])\s*$|^\d{2,3}\s*[-–/]\s*[a-z0-9]+\s*$",
+    re.IGNORECASE,
 )
 # Nhãn màu/chất liệu tiếng Anh trên Hibox/1688 (vd. Black Suede, Champagne Gold).
 _EN_FASHION_COLOR_RE = re.compile(

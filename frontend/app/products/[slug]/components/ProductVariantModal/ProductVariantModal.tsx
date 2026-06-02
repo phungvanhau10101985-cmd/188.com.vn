@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import type { Product, ProductColor } from '@/types/api';
@@ -20,6 +20,8 @@ import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPric
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
+import WarehouseClearanceBlock from '@/components/product-detail/WarehouseClearanceBlock';
+import { warehouseVariantsInStock } from '@/lib/warehouse-clearance';
 
 /** Số tồn hiển thị (ảo) random 1–3 cho mỗi phiên bản. */
 function getRandomDisplayStock(): number {
@@ -81,7 +83,12 @@ export default function ProductVariantModal({
   const [selectedSize, setSelectedSize] = useState('');
   /** Chỉ số vào `product.colors`; luôn phân biệt từng ô dù trùng `name`. */
   const [selectedColorIndex, setSelectedColorIndex] = useState(-1);
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState<number | null>(null);
   const [quantity, setQuantity] = useState(1);
+  const [uiCartLoading, setUiCartLoading] = useState(false);
+  useLayoutEffect(() => {
+    setUiCartLoading(isCartLoading);
+  }, [isCartLoading]);
   const [confirmImageIndex, setConfirmImageIndex] = useState(0);
   const [displayStockByVariantLocal, setDisplayStockByVariantLocal] = useState<Record<string, number>>({});
   const displayStockByVariant = displayStockByVariantProp ?? displayStockByVariantLocal;
@@ -91,8 +98,10 @@ export default function ProductVariantModal({
 
   const sizes = useMemo(() => product.sizes || [], [product.sizes]);
   const colors = useMemo(() => product.colors || ([] as ProductColor[]), [product.colors]);
+  const warehouseInStock = useMemo(() => warehouseVariantsInStock(product), [product]);
   const realStock = product.available ?? 0;
   const available = realStock > 0;
+  const orderingWarehouse = selectedWarehouseId != null;
   const [sizeGuideOpen, setSizeGuideOpen] = useState(false);
   const [portalReady, setPortalReady] = useState(false);
   const wasOpenRef = useRef(false);
@@ -186,9 +195,56 @@ export default function ProductVariantModal({
     if (!justOpened) return;
     setSelectedSize(sizes[0] || '');
     setSelectedColorIndex(colors.length > 0 ? 0 : -1);
+    setSelectedWarehouseId(null);
     setQuantity(1);
     setConfirmImageIndex(0);
   }, [isOpen, sizes, colors, product.id]);
+
+  const handleWarehouseSelect = useCallback((id: number | null) => {
+    setSelectedWarehouseId(id);
+    if (id != null) {
+      setSelectedSize('');
+      setSelectedColorIndex(-1);
+      setQuantity(1);
+    }
+  }, []);
+
+  const handleClearanceAddToCart = useCallback(
+    (p: Product, qty: number, size?: string, color?: string) => {
+      onAddToCart(p, qty, size, color);
+      if (closeAfterConfirm === true || closeAfterConfirm === 'add-only') onClose();
+    },
+    [onAddToCart, onClose, closeAfterConfirm],
+  );
+
+  const handleClearanceBuyNow = useCallback(
+    (p: Product, qty: number, size?: string, color?: string) => {
+      onBuyNow(p, qty, size, color);
+      if (closeAfterConfirm === true) onClose();
+    },
+    [onBuyNow, onClose, closeAfterConfirm],
+  );
+
+  const warehouseClearanceSection =
+    warehouseInStock.length > 0 ? (
+      <div className="mt-3 border-t border-amber-100 pt-3">
+        {product.source_oos ? (
+          <p className="mb-2 text-[10px] text-amber-800 leading-snug">
+            Hàng order nguồn tạm hết — chọn <strong>Thanh lý trong kho</strong> bên dưới.
+          </p>
+        ) : (
+          <p className="mb-2 text-[10px] font-semibold text-amber-900">Thanh lý trong kho</p>
+        )}
+        <WarehouseClearanceBlock
+          product={product}
+          onAddToCart={handleClearanceAddToCart}
+          onBuyNow={handleClearanceBuyNow}
+          isCartLoading={uiCartLoading}
+          selectedVariantId={selectedWarehouseId}
+          onSelectVariant={handleWarehouseSelect}
+        />
+      </div>
+    ) : null;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -345,9 +401,12 @@ export default function ProductVariantModal({
                       <button
                         key={`color-${colorIndex}-${swatch || 'n'}`}
                         type="button"
-                        onClick={() => setSelectedColorIndex(colorIndex)}
+                        onClick={() => {
+                          setSelectedWarehouseId(null);
+                          setSelectedColorIndex(colorIndex);
+                        }}
                         className={`flex min-h-[44px] items-center gap-1.5 rounded-xl border-2 p-1.5 transition-all touch-manipulation ${
-                          selectedColorIndex === colorIndex
+                          selectedColorIndex === colorIndex && !orderingWarehouse
                             ? 'border-[#ea580c] bg-orange-50'
                             : 'border-gray-200 hover:border-gray-300'
                         }`}
@@ -394,9 +453,12 @@ export default function ProductVariantModal({
                       <button
                         key={size}
                         type="button"
-                        onClick={() => setSelectedSize(size)}
+                        onClick={() => {
+                          setSelectedWarehouseId(null);
+                          setSelectedSize(size);
+                        }}
                         className={`min-w-10 px-2.5 py-1.5 border-2 rounded-lg text-xs font-medium transition-all ${
-                          selectedSize === size
+                          selectedSize === size && !orderingWarehouse
                             ? 'border-[#ea580c] bg-orange-50 text-orange-700'
                             : 'border-gray-300 text-gray-700 hover:border-gray-400'
                         }`}
@@ -408,9 +470,11 @@ export default function ProductVariantModal({
                 </div>
               )}
 
+              {warehouseClearanceSection}
+
               {/* Số lượng: - disabled khi =1; + disabled khi đã = maxQty (tồn ảo còn 1 thì maxQty=1, không cộng thêm được nhưng vẫn mua được 1; chỉ tồn ảo=0 mới không mua được). */}
               <div className="mt-2">
-                <p className="text-xs font-semibold text-gray-900 mb-1.5">Số lượng</p>
+                <p className="text-xs font-semibold text-gray-900 mb-1.5">Số lượng (hàng order)</p>
                 <div className="flex items-center gap-2.5">
                   <button
                     type="button"
@@ -498,9 +562,12 @@ export default function ProductVariantModal({
                       <button
                         key={`color-m-${colorIndex}-${swatch || 'n'}`}
                         type="button"
-                        onClick={() => setSelectedColorIndex(colorIndex)}
+                        onClick={() => {
+                          setSelectedWarehouseId(null);
+                          setSelectedColorIndex(colorIndex);
+                        }}
                         className={`flex min-h-[44px] min-w-[44px] items-center gap-1.5 rounded-lg border p-1 pr-2 transition-all touch-manipulation active:scale-[0.98] ${
-                          selectedColorIndex === colorIndex
+                          selectedColorIndex === colorIndex && !orderingWarehouse
                             ? 'border-[#ea580c] bg-orange-50 ring-1 ring-[#ea580c]'
                             : 'border-gray-200 hover:border-gray-300'
                         }`}
@@ -547,9 +614,12 @@ export default function ProductVariantModal({
                       <button
                         key={size}
                         type="button"
-                        onClick={() => setSelectedSize(size)}
+                        onClick={() => {
+                          setSelectedWarehouseId(null);
+                          setSelectedSize(size);
+                        }}
                         className={`min-w-8 px-2 py-1 border rounded-md text-[11px] font-medium transition-all ${
-                          selectedSize === size
+                          selectedSize === size && !orderingWarehouse
                             ? 'border-[#ea580c] bg-orange-50 text-orange-700 ring-1 ring-[#ea580c]'
                             : 'border-gray-300 text-gray-700 hover:border-gray-400'
                         }`}
@@ -561,9 +631,11 @@ export default function ProductVariantModal({
                 </div>
               )}
 
+              {warehouseClearanceSection}
+
               {/* Số lượng */}
-              <div>
-                <p className="text-[11px] font-semibold text-gray-900 mb-1.5">Số lượng</p>
+              <div className={orderingWarehouse ? 'opacity-50 pointer-events-none' : ''}>
+                <p className="text-[11px] font-semibold text-gray-900 mb-1.5">Số lượng (hàng order)</p>
                 <div className="flex items-center gap-3">
                   <div className="flex items-center border border-gray-300 rounded-lg">
                     <button
@@ -620,25 +692,47 @@ export default function ProductVariantModal({
             </div>
           )}
 
+          {orderingWarehouse ? (
+            <p className="mb-2 text-center text-[11px] text-amber-800">
+              Bạn đang chọn hàng thanh lý — dùng nút <strong>Thêm giỏ (thanh lý)</strong> /{' '}
+              <strong>Mua ngay (thanh lý)</strong> phía trên.
+            </p>
+          ) : null}
           <div className="flex flex-row gap-2">
             {(action === 'add' || action === 'both') && (
               <button
                 type="button"
                 onClick={handleConfirmAddToCart}
-                disabled={!available || maxQty === 0 || effectiveQuantity < 1 || isCartLoading}
+                disabled={
+                  orderingWarehouse || !available || maxQty === 0 || effectiveQuantity < 1 || uiCartLoading
+                }
                 className="flex-1 py-3.5 rounded-xl font-semibold text-sm bg-gray-500 text-white hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {!available ? 'Hết hàng' : maxQty === 0 ? 'Hết hàng' : isCartLoading ? 'Đang thêm...' : 'Thêm vào Giỏ hàng'}
+                {!available && warehouseInStock.length === 0
+                  ? 'Hết hàng'
+                  : maxQty === 0 && !orderingWarehouse
+                    ? 'Hết hàng'
+                    : uiCartLoading
+                      ? 'Đang thêm...'
+                      : 'Thêm vào Giỏ hàng'}
               </button>
             )}
             {(action === 'buy' || action === 'both') && (
               <button
                 type="button"
                 onClick={handleConfirmBuyNow}
-                disabled={!available || maxQty === 0 || effectiveQuantity < 1 || isCartLoading}
+                disabled={
+                  orderingWarehouse || !available || maxQty === 0 || effectiveQuantity < 1 || uiCartLoading
+                }
                 className="flex-1 py-3.5 rounded-xl font-semibold text-sm bg-[#ea580c] text-white hover:bg-[#c2410c] disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {!available ? 'Hết hàng' : maxQty === 0 ? 'Hết hàng' : isCartLoading ? 'Đang xử lý...' : 'Mua hàng'}
+                {!available && warehouseInStock.length === 0
+                  ? 'Hết hàng'
+                  : maxQty === 0 && !orderingWarehouse
+                    ? 'Hết hàng'
+                    : uiCartLoading
+                      ? 'Đang xử lý...'
+                      : 'Mua hàng'}
               </button>
             )}
           </div>

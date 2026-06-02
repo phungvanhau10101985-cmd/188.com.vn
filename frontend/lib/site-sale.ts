@@ -1,5 +1,26 @@
 import type { Product, SiteSaleCalendarState, SiteSaleProductPricing } from '@/types/api';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
+import {
+  isWarehouseCartLine,
+  resolveWarehouseCartLineUnitPricing,
+} from '@/lib/warehouse-clearance';
+
+type CartLinePricingInput = {
+  product_price?: number;
+  list_price?: number;
+  original_price?: number;
+  site_sale?: SiteSaleProductPricing | null;
+  product_code?: string | null;
+  product_data?: {
+    original_price?: number;
+    price?: number;
+    list_price?: number;
+    product_id?: string;
+    is_warehouse_clearance?: boolean;
+    warehouse_clearance_percent?: number;
+  };
+  quantity: number;
+};
 
 export function formatCountdownParts(targetIso: string | null | undefined): {
   days: number;
@@ -93,20 +114,12 @@ export function mergeProductSiteSaleFromCalendar(
   return merged;
 }
 
-type CartLinePricingInput = {
-  product_price?: number;
-  list_price?: number;
-  original_price?: number;
-  site_sale?: SiteSaleProductPricing | null;
-  product_data?: { original_price?: number; price?: number; list_price?: number };
-  quantity: number;
-};
-
 /** Gắn site_sale cho dòng giỏ khi API thiếu — dùng trạng thái sale toàn giỏ. */
 export function mergeCartLineSiteSaleFromCalendar<T extends CartLinePricingInput>(
   item: T,
   calendar: SiteSaleCalendarState | null | undefined,
 ): T {
+  if (isWarehouseCartLine(item)) return item;
   if (!calendar?.enabled || !calendar.phase) return item;
 
   const existing = item.site_sale;
@@ -185,6 +198,52 @@ export function resolveCartLineCheckoutTotal(
   return resolveCartLineTotal(item, false, 0, calendar);
 }
 
+export function sumCartLineCheckoutTotals(
+  items: CartLinePricingInput[],
+  calendar?: SiteSaleCalendarState | null,
+): number {
+  return items.reduce((sum, item) => sum + resolveCartLineCheckoutTotal(item, calendar), 0);
+}
+
+export function sumCartLineListSubtotal(
+  items: CartLinePricingInput[],
+  calendar?: SiteSaleCalendarState | null,
+): number {
+  return items.reduce((sum, item) => {
+    const pricing = resolveCartLineDisplayPricing(
+      mergeCartLineSiteSaleFromCalendar(item, calendar),
+      false,
+      0,
+    );
+    return sum + pricing.listPrice * Math.max(1, item.quantity || 1);
+  }, 0);
+}
+
+/** Chỉ sale ngày trùng tháng — không gồm thanh lý kho. */
+export function sumCartLineSiteSaleSavings(
+  items: CartLinePricingInput[],
+  calendar?: SiteSaleCalendarState | null,
+): number {
+  return items.reduce((sum, item) => {
+    if (isWarehouseCartLine(item)) return sum;
+    const pricing = resolveCartLineDisplayPricing(
+      mergeCartLineSiteSaleFromCalendar(item, calendar),
+      false,
+      0,
+    );
+    return sum + pricing.siteLineSavings;
+  }, 0);
+}
+
+/** Tiết kiệm từ giá thanh lý kho (độc lập sale site). */
+export function sumCartLineClearanceSavings(items: CartLinePricingInput[]): number {
+  return items.reduce((sum, item) => {
+    if (!isWarehouseCartLine(item)) return sum;
+    const pricing = resolveCartLineDisplayPricing(item, false, 0);
+    return sum + pricing.lineSavings;
+  }, 0);
+}
+
 /** Nhãn badge góc ảnh: «5/5 - 6%». */
 export function siteSaleDateBadgeLabel(siteSale: SiteSaleProductPricing): string | null {
   const pct = siteSale.percent ?? 0;
@@ -209,6 +268,45 @@ export function resolveProductDisplayPricing(
   birthdayActive: boolean,
   birthdayPercent: number,
 ) {
+  const whPct = Math.max(0, Math.min(100, product.warehouse_clearance?.discount_percent ?? 0));
+  const isWhLine =
+    product.is_warehouse_clearance === true ||
+    String(product.product_id || '').includes('/');
+  if (isWhLine && whPct > 0) {
+    const listPrice = Math.max(
+      0,
+      Number(product.original_price ?? product.price ?? 0),
+    );
+    let beforeBirthday = Math.max(0, Number(product.price ?? listPrice));
+    if (beforeBirthday >= listPrice || product.original_price == null) {
+      beforeBirthday = Math.max(0, Math.round(listPrice * (1 - whPct / 100)));
+    }
+    const displayPrice = birthdayActive
+      ? applyBirthdayDiscount(beforeBirthday, birthdayPercent)
+      : beforeBirthday;
+    const compareUnitPrice =
+      listPrice > displayPrice ? listPrice : null;
+    const savingsAmount = compareUnitPrice != null ? listPrice - displayPrice : 0;
+    const birthdaySavingsAmount = birthdayActive
+      ? Math.max(0, beforeBirthday - displayPrice)
+      : 0;
+    return {
+      displayPrice,
+      compareAt: compareUnitPrice,
+      compareUnitPrice,
+      savingsAmount,
+      birthdaySavingsAmount,
+      listPrice,
+      sitePhase: null,
+      siteSavings: 0,
+      expectedSalePrice: null,
+      sitePercent: 0,
+      siteLabel: null,
+      countdownTo: null,
+      beforeBirthday,
+    };
+  }
+
   const site = product.site_sale;
   const listPrice = site?.list_price ?? product.original_price ?? product.price ?? 0;
   const sitePhase = site?.phase ?? null;
@@ -280,12 +378,51 @@ export function resolveCartLineDisplayPricing(
     list_price?: number;
     original_price?: number;
     site_sale?: SiteSaleProductPricing | null;
-    product_data?: { original_price?: number; price?: number };
+    product_data?: {
+      original_price?: number;
+      price?: number;
+      list_price?: number;
+      is_warehouse_clearance?: boolean;
+      warehouse_clearance_percent?: number;
+      product_id?: string;
+    };
+    product_code?: string | null;
     quantity: number;
   },
   birthdayActive: boolean,
   birthdayPercent: number,
 ) {
+  if (isWarehouseCartLine(item)) {
+    const wh = resolveWarehouseCartLineUnitPricing(item);
+    const qty = Math.max(1, item.quantity || 1);
+    const displayUnitPrice = birthdayActive
+      ? applyBirthdayDiscount(wh.displayPrice, birthdayPercent)
+      : wh.displayPrice;
+    const compareUnitPrice = wh.hasDiscount ? wh.originalPrice : null;
+    const displayLineTotal = displayUnitPrice * qty;
+    const compareLineTotal = compareUnitPrice != null ? compareUnitPrice * qty : null;
+    const lineSavings = compareLineTotal != null ? compareLineTotal - displayLineTotal : 0;
+    return {
+      displayUnitPrice,
+      compareUnitPrice,
+      displayLineTotal,
+      compareLineTotal,
+      lineSavings: Math.max(0, lineSavings),
+      listPrice: wh.listPrice,
+      sitePhase: null as string | null,
+      sitePercent: wh.percent,
+      siteLabel: 'Thanh lý kho',
+      siteLineSavings: 0,
+      siteUnitSavings: 0,
+      teaserUnitSavings: 0,
+      teaserLineSavings: 0,
+      expectedSaleUnitPrice: null,
+      expectedLineTotal: null,
+      countdownTo: null,
+      beforeBirthday: wh.displayPrice,
+    };
+  }
+
   const site = item.site_sale;
   const listPrice = site?.list_price ?? item.list_price ?? item.original_price ?? item.product_data?.original_price ?? item.product_price ?? 0;
   const sitePhase = site?.phase ?? null;

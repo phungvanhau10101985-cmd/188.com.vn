@@ -20,10 +20,13 @@ export interface CartItem {
     product_id?: string;
     name?: string;
     price?: number;
+    list_price?: number;
     main_image?: string;
     brand_name?: string;
     available?: number;
     original_price?: number;
+    is_warehouse_clearance?: boolean;
+    warehouse_clearance_percent?: number;
     deposit_require?: boolean;
   };
   unit_price?: number;

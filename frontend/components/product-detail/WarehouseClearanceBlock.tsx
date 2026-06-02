@@ -1,20 +1,51 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useState } from 'react';
+import Image from 'next/image';
 import type { Product, WarehouseClearanceVariant } from '@/types/api';
 import { formatPrice } from '@/lib/utils';
-import { warehouseVariantAsProduct, warehouseVariantsInStock } from '@/lib/warehouse-clearance';
+import { getOptimizedImage } from '@/lib/image-utils';
+import {
+  resolveWarehouseVariantPricing,
+  warehouseVariantAriaLabel,
+  warehouseVariantAsProduct,
+  warehouseVariantColorLabel,
+  warehouseVariantSizeLabel,
+  warehouseVariantsInStock,
+} from '@/lib/warehouse-clearance';
 
 type WarehouseClearanceBlockProps = {
   product: Product;
   onAddToCart: (product: Product, quantity: number, selectedSize?: string, selectedColor?: string) => void;
   onBuyNow: (product: Product, quantity: number, selectedSize?: string, selectedColor?: string) => void;
   isCartLoading?: boolean;
+  /** Chọn loại trừ với biến thể order phía trên — null = chưa chọn dòng kho. */
+  selectedVariantId?: number | null;
+  onSelectVariant?: (id: number | null) => void;
 };
 
-function variantLabel(v: WarehouseClearanceVariant): string {
-  const parts = [v.color, v.size].filter(Boolean);
-  return parts.length > 0 ? parts.join(' · ') : v.product_id;
+function WarehouseVariantMeta({ variant }: { variant: WarehouseClearanceVariant }) {
+  const color = warehouseVariantColorLabel(variant);
+  const size = warehouseVariantSizeLabel(variant);
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <p className="text-sm leading-snug text-gray-900">
+        <span className="font-medium text-gray-500">Màu: </span>
+        <span className="font-semibold">{color}</span>
+      </p>
+      {size ? (
+        <p className="text-sm leading-snug text-gray-900">
+          <span className="font-medium text-gray-500">Size: </span>
+          <span className="font-semibold">{size}</span>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function variantThumbUrl(v: WarehouseClearanceVariant): string | null {
+  const raw = (v.color_image || v.main_image || '').trim();
+  return raw || null;
 }
 
 export default function WarehouseClearanceBlock({
@@ -22,13 +53,28 @@ export default function WarehouseClearanceBlock({
   onAddToCart,
   onBuyNow,
   isCartLoading = false,
+  selectedVariantId: selectedVariantIdProp,
+  onSelectVariant,
 }: WarehouseClearanceBlockProps) {
   const variants = useMemo(() => warehouseVariantsInStock(product), [product]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [quantity, setQuantity] = useState(1);
+  const isControlled = onSelectVariant != null;
+  const [internalId, setInternalId] = useState<number | null>(null);
+  const selectedId = isControlled ? (selectedVariantIdProp ?? null) : internalId;
+  const setSelectedId = (id: number | null) => {
+    if (isControlled) onSelectVariant?.(id);
+    else setInternalId(id);
+  };
 
-  const selected = variants.find((v) => v.id === selectedId) ?? variants[0] ?? null;
-  const clearancePct = product.warehouse_clearance?.discount_percent ?? selected?.clearance_percent ?? 0;
+  const [quantity, setQuantity] = useState(1);
+  /** Tránh hydration mismatch: SSR isLoading=true, client soft-nav có thể false. */
+  const [uiCartLoading, setUiCartLoading] = useState(false);
+  useLayoutEffect(() => {
+    setUiCartLoading(isCartLoading);
+  }, [isCartLoading]);
+
+  const selected =
+    selectedId != null ? variants.find((v) => v.id === selectedId) ?? null : null;
+  const fallbackClearancePct = product.warehouse_clearance?.discount_percent ?? 0;
   const maxQty = Math.max(1, selected?.available ?? 1);
 
   if (variants.length === 0) return null;
@@ -54,7 +100,7 @@ export default function WarehouseClearanceBlock({
         <p className="text-sm font-semibold text-amber-950">Thanh lý trong kho</p>
         <p className="text-xs text-amber-900/80 mt-0.5">
           Hàng duyệt hoàn — giá riêng
-          {clearancePct > 0 ? ` (giảm ${clearancePct}%)` : ''}. Không cộng sale ngày trùng tháng.
+          {fallbackClearancePct > 0 ? ` (giảm ${fallbackClearancePct}%)` : ''}. Không cộng sale ngày trùng tháng.
         </p>
         {product.source_oos ? (
           <p className="text-xs font-medium text-amber-800 mt-1">
@@ -66,7 +112,8 @@ export default function WarehouseClearanceBlock({
       <div className="space-y-2" role="listbox" aria-label="Chọn màu size kho thanh lý">
         {variants.map((v) => {
           const active = selected?.id === v.id;
-          const pct = v.clearance_percent > 0 ? v.clearance_percent : clearancePct;
+          const pricing = resolveWarehouseVariantPricing(v, fallbackClearancePct);
+          const thumb = variantThumbUrl(v);
           return (
             <button
               key={v.id}
@@ -83,20 +130,44 @@ export default function WarehouseClearanceBlock({
                   : 'border-amber-100 bg-white/80 hover:border-amber-300'
               }`}
             >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-sm font-medium text-gray-900">{variantLabel(v)}</span>
-                {pct > 0 ? (
-                  <span className="text-[11px] font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">
-                    -{pct}%
-                  </span>
+              <div className="flex items-start gap-3">
+                {thumb ? (
+                  <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-md border border-amber-100 bg-white">
+                    <Image
+                      src={getOptimizedImage(thumb, { width: 112, height: 112, hideProductPng: true })}
+                      alt={warehouseVariantAriaLabel(v)}
+                      width={56}
+                      height={56}
+                      className="h-full w-full object-cover"
+                    />
+                  </div>
                 ) : null}
-              </div>
-              <div className="mt-1 flex flex-wrap items-baseline gap-2">
-                <span className="text-base font-bold text-[#ea580c]">{formatPrice(v.display_price)}</span>
-                {v.savings_amount > 0 ? (
-                  <span className="text-xs text-gray-500 line-through">{formatPrice(v.original_price)}</span>
-                ) : null}
-                <span className="text-[11px] text-gray-600">Còn {v.available}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <WarehouseVariantMeta variant={v} />
+                    {pricing.hasDiscount ? (
+                      <span className="text-[11px] font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">
+                        -{pricing.percent}%
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className="text-base font-bold text-[#ea580c]">
+                      {formatPrice(pricing.displayPrice)}
+                    </span>
+                    {pricing.hasDiscount ? (
+                      <span className="text-xs text-gray-500 line-through">
+                        {formatPrice(pricing.originalPrice)}
+                      </span>
+                    ) : null}
+                    {pricing.savingsAmount > 0 ? (
+                      <span className="text-[11px] font-semibold text-emerald-700">
+                        Tiết kiệm {formatPrice(pricing.savingsAmount)}
+                      </span>
+                    ) : null}
+                    <span className="text-[11px] text-gray-600">Còn {v.available}</span>
+                  </div>
+                </div>
               </div>
             </button>
           );
@@ -108,7 +179,7 @@ export default function WarehouseClearanceBlock({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            disabled={quantity <= 1 || isCartLoading}
+            disabled={!selected || quantity <= 1 || uiCartLoading}
             onClick={() => setQuantity((q) => Math.max(1, q - 1))}
             className="w-8 h-8 border border-gray-300 rounded bg-white text-sm disabled:opacity-50"
           >
@@ -117,7 +188,7 @@ export default function WarehouseClearanceBlock({
           <span className="w-8 text-center text-sm font-semibold">{quantity}</span>
           <button
             type="button"
-            disabled={quantity >= maxQty || isCartLoading}
+            disabled={!selected || quantity >= maxQty || uiCartLoading}
             onClick={() => setQuantity((q) => Math.min(maxQty, q + 1))}
             className="w-8 h-8 border border-gray-300 rounded bg-white text-sm disabled:opacity-50"
           >
@@ -129,19 +200,19 @@ export default function WarehouseClearanceBlock({
       <div className="flex flex-col sm:flex-row gap-2">
         <button
           type="button"
-          disabled={!selected || isCartLoading}
+          disabled={!selected || uiCartLoading}
           onClick={handleAdd}
           className="flex-1 rounded-lg bg-gray-600 text-white py-2.5 text-sm font-semibold hover:bg-gray-700 disabled:opacity-50"
         >
-          {isCartLoading ? 'Đang thêm…' : 'Thêm giỏ (thanh lý)'}
+          {uiCartLoading ? 'Đang thêm…' : 'Thêm giỏ (thanh lý)'}
         </button>
         <button
           type="button"
-          disabled={!selected || isCartLoading}
+          disabled={!selected || uiCartLoading}
           onClick={handleBuy}
           className="flex-1 rounded-lg bg-[#ea580c] text-white py-2.5 text-sm font-semibold hover:bg-[#c2410c] disabled:opacity-50"
         >
-          {isCartLoading ? 'Đang xử lý…' : 'Mua ngay (thanh lý)'}
+          {uiCartLoading ? 'Đang xử lý…' : 'Mua ngay (thanh lý)'}
         </button>
       </div>
     </section>

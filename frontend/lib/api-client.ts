@@ -245,6 +245,7 @@ class ApiClient {
   // PRODUCT
   async getProducts(params?: ProductSearchParams): Promise<ProductListResponse> {
     const query = new URLSearchParams();
+    query.append('include_warehouse_clearance', 'true');
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') query.append(key, String(value));
@@ -306,7 +307,12 @@ class ApiClient {
   }
 
   async getProductBySlug(slug: string): Promise<Product> {
-    return this.fetch<Product>(`/products/by-slug/?slug=${encodeURIComponent(slug)}`);
+    const encoded = encodeURIComponent(slug);
+    try {
+      return await this.fetch<Product>(`/products/by-slug/${encoded}`, { quiet: true });
+    } catch {
+      return this.fetch<Product>(`/products/by-slug/?slug=${encoded}`);
+    }
   }
   
   async searchProducts(keyword: string): Promise<ProductListResponse> {

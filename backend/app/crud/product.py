@@ -16,6 +16,7 @@ import logging
 import json
 import copy
 import time
+import threading
 from datetime import datetime
 from app.core.config import settings
 from app.services.alicdn_urls import normalize_product_data_image_urls_for_db
@@ -283,10 +284,12 @@ def _schedule_google_sheets_sku_sync(*, immediate: bool = False) -> None:
 
 
 def normalize_product_list_sort(sort: Optional[str]) -> str:
-    """Giá trị nội bộ: default | views_desc | newest | oldest | purchases_desc."""
+    """Giá trị nội bộ: id_desc | newest | oldest | views_desc | purchases_desc | id_asc."""
     s = (sort or "").strip().lower().replace("-", "_")
-    if s in ("", "default", "id", "id_asc"):
-        return "default"
+    if s in ("", "default", "id_desc", "id_newest"):
+        return "id_desc"
+    if s in ("id", "id_asc"):
+        return "id_asc"
     if s in ("views_desc", "views", "popular", "most_viewed"):
         return "views_desc"
     if s in ("purchases_desc", "purchases", "bestselling", "best_selling", "sold"):
@@ -295,7 +298,7 @@ def normalize_product_list_sort(sort: Optional[str]) -> str:
         return "newest"
     if s in ("oldest", "created_asc"):
         return "oldest"
-    return "default"
+    return "id_desc"
 
 
 def _product_view_totals_subquery():
@@ -333,7 +336,10 @@ def _order_exprs_for_product_list(sort: str, view_totals_subq):
         return [Product.created_at.asc().nullslast(), Product.id.asc()]
     if sort == "purchases_desc":
         return [Product.purchases.desc().nullslast(), Product.id.desc()]
-    return [Product.id.asc()]
+    if sort == "id_asc":
+        return [Product.id.asc()]
+    # id_desc: ID hệ thống giảm dần — nhập/import mới lên đầu
+    return [Product.id.desc()]
 
 
 # ========== HELPER FUNCTIONS ==========
@@ -767,12 +773,13 @@ def generate_consistent_slug(name: str, product_id: str = "") -> str:
         if not product_id:
             product_id = f"pid{datetime.now().strftime('%Y%m%d%H%M%S')}"
         
-        # FIX: PRODUCT_ID giữ NGUYÊN TẤT CẢ ký tự
-        # Chỉ chuyển CHỮ HOA thành CHỮ THƯỜNG
-        # Ví dụ: "A863862166833a188b0196" → "a863862166833a188b0196"
-        # Không bỏ 'A' đầu, không cắt xén, giữ NGUYÊN
-        
-        product_code = product_id.lower()  # CHỈ chuyển hoa → thường
+        # Mã kho thanh lý (H0723/40/3): không để '/' trong slug — URL Next/FastAPI vỡ.
+        if "/" in product_id or "\\" in product_id:
+            from app.services.warehouse_clearance import warehouse_safe_slug_token
+
+            product_code = warehouse_safe_slug_token(product_id)
+        else:
+            product_code = product_id.lower()  # CHỈ chuyển hoa → thường
         logger.debug(f"✅ Product ID: {product_id} → {product_code} (lowercase only)")
         
         # Tạo slug từ tên sử dụng hàm từ slug.py
@@ -1791,7 +1798,7 @@ def _search_products_by_words(
     limit: int,
     skip: int,
     *,
-    sort: str = "default",
+    sort: str = "id_desc",
 ):
     """
     Tìm sản phẩm khi chuỗi tổng hợp chứa TẤT CẢ các từ (ilike).
@@ -1840,18 +1847,113 @@ def apply_product_search_word_filters(query, words: List[str]):
     return query
 
 
-def get_product_by_slug(db: Session, slug: str) -> Optional[Product]:
-    try:
-        return db.query(Product).filter(Product.slug == slug).first()
-    except Exception as e:
-        logger.error(f"Database error: {str(e)}")
-        return None
-
-
 _PRODUCT_SLUG_ID_SUFFIX_RE = re.compile(
     r"-(?:a|b)(\d{6,}a188[a-z0-9]+)$",
     flags=re.IGNORECASE,
 )
+
+
+def _maybe_repair_warehouse_slug(db: Session, row: Product) -> Product:
+    """Slug cũ có '/' → cập nhật dạng ...-h0723-40-3 để URL PDP mở được."""
+    if not row or "/" not in (row.slug or ""):
+        return row
+    new_slug = generate_consistent_slug(row.name or "", row.product_id or "")
+    if not new_slug or new_slug == row.slug:
+        return row
+    try:
+        row.slug = new_slug
+        db.commit()
+        db.refresh(row)
+    except Exception as exc:
+        logger.warning("repair warehouse slug failed for %s: %s", row.product_id, exc)
+        db.rollback()
+    return row
+
+
+def _product_slug_lookup_variants(slug: str) -> List[str]:
+    """Các biến thể slug từ URL (encode %2F, gạch ngang thay /)."""
+    from urllib.parse import unquote
+
+    from app.services.warehouse_clearance import warehouse_safe_slug_token
+
+    out: List[str] = []
+
+    def _add(v: str) -> None:
+        v = (v or "").strip()
+        if v and v not in out:
+            out.append(v)
+
+    _add(slug)
+    try:
+        _add(unquote(slug))
+    except Exception:
+        pass
+    for base in list(out):
+        _add(base.replace("%2F", "/").replace("%2f", "/"))
+        _add(re.sub(r"[/\\]+", "-", base))
+    # Slug marketing ...-khh0723-40-3 ↔ product_id khH0723/40/3
+    for base in list(out):
+        tail = base.split("-")[-3:]
+        if len(tail) >= 2 and tail[-1].isdigit():
+            guess = "/".join(tail)
+            _add(guess)
+            _add(guess.upper())
+        safe = warehouse_safe_slug_token(base.split("-")[-1] if "/" in base else "")
+        if safe:
+            _add(safe)
+    return out
+
+
+def get_product_by_slug(db: Session, slug: str) -> Optional[Product]:
+    """Tra SP theo slug; dòng kho thanh lý trả SP gốc (PDP nhóm) hoặc chính nó nếu không có gốc."""
+    s = (slug or "").strip()
+    if not s:
+        return None
+    try:
+        from app.services.warehouse_clearance import (
+            find_parent_product_by_base_sku,
+            is_warehouse_clearance_product_id,
+            parse_warehouse_product_id,
+        )
+
+        def _parent_for_warehouse_row(row: Product) -> Optional[Product]:
+            if not (
+                getattr(row, "is_warehouse_clearance", False)
+                or is_warehouse_clearance_product_id(getattr(row, "product_id", None))
+            ):
+                return row
+            parsed = parse_warehouse_product_id(getattr(row, "product_id", None))
+            base = (parsed or {}).get("base_sku") or (getattr(row, "base_sku", None) or row.code or "")
+            parent = find_parent_product_by_base_sku(db, str(base).strip())
+            return parent if parent is not None else row
+
+        row = None
+        for cand in _product_slug_lookup_variants(s):
+            row = db.query(Product).filter(Product.slug == cand).first()
+            if row is not None:
+                break
+        if row is None and is_warehouse_clearance_product_id(s):
+            row = get_product_by_product_id(db, product_id=s)
+        if row is not None:
+            row = _maybe_repair_warehouse_slug(db, row)
+            return _parent_for_warehouse_row(row)
+
+        # Slug marketing có suffix mã (vd. ...-a606864241417a188m7147) — thử tra product_id nhúng cuối slug
+        m = _PRODUCT_SLUG_ID_SUFFIX_RE.search(s)
+        if m:
+            embedded = (m.group(0) or "").lstrip("-")
+            if embedded:
+                by_pid = get_product_by_product_id(db, product_id=embedded)
+                if by_pid is not None:
+                    return _parent_for_warehouse_row(by_pid)
+                by_pid2 = get_product_by_product_id(db, product_id=embedded.upper())
+                if by_pid2 is not None:
+                    return _parent_for_warehouse_row(by_pid2)
+        return None
+    except Exception as e:
+        logger.error(f"Database error: {str(e)}")
+        return None
+
 
 # URL marketing một segment: /moi-ma-...-gia-1520k-giay-da-nam-...-g03-... (mã biến thể -g0x)
 _LEGACY_MARKETING_PATH_RE = re.compile(r"(?:^|-)moi-ma-", re.IGNORECASE)
@@ -3875,15 +3977,65 @@ def get_products(
     filter_color: Optional[str] = None,
     filter_style_tag: Optional[str] = None,
     skip_total: bool = False,
+    include_warehouse_products: bool = False,
+    admin_list_query: bool = False,
 ):
-    query = db.query(Product).filter(
-        or_(Product.is_warehouse_clearance == False, Product.is_warehouse_clearance.is_(None))  # noqa: E712
-    )
+    query = db.query(Product)
+    if admin_list_query:
+        from sqlalchemy.orm import load_only, noload
+
+        _admin_cols = (
+            Product.id,
+            Product.product_id,
+            Product.code,
+            Product.name,
+            Product.price,
+            Product.slug,
+            Product.brand_name,
+            Product.category,
+            Product.subcategory,
+            Product.sub_subcategory,
+            Product.main_image,
+            Product.images,
+            Product.gallery,
+            Product.available,
+            Product.is_active,
+            Product.link_default,
+            Product.source_stock_status,
+            Product.source_stock_checked_at,
+            Product.source_stock_next_check_at,
+            Product.source_stock_error,
+            Product.admin_source_batch_scanned_at,
+            Product.image_localization_status,
+            Product.image_localization_language,
+            Product.image_localized_at,
+            Product.image_localization_error,
+            Product.is_warehouse_clearance,
+            Product.base_sku,
+            Product.colors,
+            Product.sizes,
+            Product.shop_name,
+            Product.shop_id,
+            Product.created_at,
+            Product.updated_at,
+            Product.deposit_require,
+            Product.material,
+            Product.style,
+            Product.color,
+            Product.origin,
+            Product.chinese_name,
+            Product.shop_name_chinese,
+        )
+        query = query.options(load_only(*_admin_cols), noload(Product.category_rel))
+    if not include_warehouse_products:
+        query = query.filter(
+            or_(Product.is_warehouse_clearance == False, Product.is_warehouse_clearance.is_(None))  # noqa: E712
+        )
     has_q = bool(q and str(q).strip())
     sort_norm = normalize_product_list_sort(sort)
     use_random_order = bool(order_random and not has_q)
     if use_random_order:
-        sort_norm = "default"
+        sort_norm = "id_desc"
 
     query = apply_product_category_filters(query, db, category, subcategory, sub_subcategory)
     query = apply_product_size_filter(query, filter_size)
@@ -4064,12 +4216,17 @@ def get_products(
         else:
             products = query.order_by(*_order_exprs_for_product_list(sort_norm, None)).offset(skip).limit(limit).all()
     
+    page_num = skip // limit + 1 if limit > 0 else 1
+    if total < 0:
+        total_pages = page_num + (1 if len(products) >= limit and limit > 0 else 0)
+    else:
+        total_pages = math.ceil(total / limit) if limit > 0 else 1
     return {
         "total": total,
         "products": products,
-        "page": skip // limit + 1 if limit > 0 else 1,
+        "page": page_num,
         "size": limit,
-        "total_pages": math.ceil(total / limit) if limit > 0 else 1,
+        "total_pages": total_pages,
         "applied_query": applied_query,
         "normalized_query": normalized_query,
         "suggested_queries": suggested_queries,
@@ -4995,7 +5152,7 @@ def _delete_product_orm_only(db: Session, db_product: Product) -> None:
     db.delete(db_product)
 
 
-def delete_product(db: Session, product_id: int):
+def delete_product(db: Session, product_id: int, *, admin_force: bool = False):
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if db_product:
         from app.services.listing_facet_cache import (
@@ -5004,7 +5161,7 @@ def delete_product(db: Session, product_id: int):
         )
         from app.services import warehouse_clearance as wh_clearance_svc
 
-        wh_clearance_svc.assert_product_deletion_allowed(db, db_product)
+        wh_clearance_svc.assert_product_deletion_allowed(db, db_product, admin_force=admin_force)
         snapshot = snapshot_product_for_facet_refresh(db_product)
         _delete_product_orm_only(db, db_product)
         db.commit()
@@ -5103,6 +5260,65 @@ def bulk_delete_products_by_db_ids(db: Session, db_ids: List[int]) -> Tuple[List
     not_found = [pk for pk in ordered_unique if pk not in by_id]
     return deleted, not_found
 
+
+def bulk_delete_products_by_excel_product_ids(
+    db: Session,
+    product_ids: List[str],
+    *,
+    admin_force: bool = True,
+) -> Tuple[List[str], List[dict]]:
+    """
+    Xóa nhiều SP theo product_id Excel trong một transaction.
+    Bunny + facet cache chạy một lần — nhanh hơn gọi delete_product lặp.
+    """
+    from urllib.parse import unquote
+    from app.services import warehouse_clearance as wh_clearance_svc
+    from app.services.listing_facet_cache import (
+        refresh_caches_after_products_change,
+        snapshot_product_for_facet_refresh,
+    )
+
+    deleted_pids: List[str] = []
+    errors: List[dict] = []
+    bunny_rows: List[Product] = []
+    snapshots: List[Any] = []
+    seen: Set[str] = set()
+
+    for raw in product_ids:
+        pid = unquote((raw or "").strip())
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+
+        row = get_product_by_product_id(db, product_id=pid)
+        if row is None:
+            row = resolve_product_by_sku(db, sku=pid)
+        if row is None:
+            errors.append({"product_id": pid, "status": 404, "detail": "Product not found"})
+            continue
+        try:
+            wh_clearance_svc.assert_product_deletion_allowed(db, row, admin_force=admin_force)
+        except ValueError as exc:
+            errors.append({"product_id": pid, "status": 400, "detail": str(exc)})
+            continue
+
+        snapshots.append(snapshot_product_for_facet_refresh(row))
+        bunny_rows.append(row)
+        db.delete(row)
+        deleted_pids.append(pid)
+
+    if deleted_pids:
+        db.commit()
+        _schedule_google_sheets_sku_sync()
+        _schedule_bunny_cleanup_for_deleted_products(bunny_rows)
+        try:
+            refresh_caches_after_products_change(db, snapshots)
+        except Exception:
+            pass
+
+    return deleted_pids, errors
+
+
 def get_category_gemini_auto_settings_snapshot(db: Session) -> Dict[str, Any]:
     """Trả trạng thái chế độ auto Gemini SEO danh mục cho trang admin."""
     env_ok = bool(getattr(settings, "CATEGORY_GEMINI_SEO_AUTO_ENABLED", False))
@@ -5142,10 +5358,19 @@ def _should_run_auto_category_gemini_after_import(db: Session, rows_in_batch: in
     return True
 
 
+def _is_warehouse_row_in_import_batch(product_data: Dict) -> bool:
+    from app.services.warehouse_clearance import parse_warehouse_product_id
+
+    pid = str(product_data.get("product_id") or "").strip()
+    return parse_warehouse_product_id(pid) is not None
+
+
 def _collect_unique_category_paths_for_import(products_data: List[Dict]) -> List[tuple]:
     """Từ dữ liệu SP import, gom path slug danh mục (cấp 1 / 1+2 / đủ 3) cho SEO body."""
     unique_paths = set()
     for product_data in products_data:
+        if _is_warehouse_row_in_import_batch(product_data):
+            continue
         c1 = (product_data.get("category") or "").strip()
         c2 = (product_data.get("subcategory") or "").strip()
         c3 = (product_data.get("sub_subcategory") or "").strip()
@@ -5433,6 +5658,8 @@ def bulk_import_products(
     errors = []
     warnings = []
     skipped: List[str] = []
+    warehouse_import_rows = 0
+    regular_import_rows = 0
 
     batch_size = max(
         1,
@@ -5475,12 +5702,16 @@ def bulk_import_products(
                 "import chỉ cập nhật một bản, không tạo thêm trùng offer."
             )
 
-    def _missing_required_category_labels(data: Dict) -> List[str]:
-        labels = (
-            ("category", "danh mục cấp 1"),
-            ("subcategory", "danh mục cấp 2"),
-            ("sub_subcategory", "danh mục cấp 3"),
-        )
+    def _missing_required_category_labels(data: Dict, *, warehouse_row: bool = False) -> List[str]:
+        if warehouse_row:
+            # Kho thanh lý độc lập: chỉ bắt buộc danh mục cấp 1 (còn thiếu field khác vẫn import).
+            labels = (("category", "danh mục cấp 1"),)
+        else:
+            labels = (
+                ("category", "danh mục cấp 1"),
+                ("subcategory", "danh mục cấp 2"),
+                ("sub_subcategory", "danh mục cấp 3"),
+            )
         missing: List[str] = []
         for key, label in labels:
             value = str(data.get(key) or "").strip()
@@ -5522,18 +5753,19 @@ def bulk_import_products(
             wh_svc.merge_clone_from_parent(parent, product_data, parsed)
             product_data["category_id"] = product_data.get("category_id") or parent.category_id
         else:
-            missing = _missing_required_category_labels(product_data)
+            missing = _missing_required_category_labels(product_data, warehouse_row=True)
             if missing:
                 errors.append(
                     f"Dòng {idx + 1} ({product_id}): Thiếu {', '.join(missing)} — "
-                    f"chưa có SP gốc «{parsed['base_sku']}», cần đủ danh mục trong file."
+                    f"chưa có SP gốc «{parsed['base_sku']}», cần ít nhất danh mục cấp 1 trong file."
                 )
                 return "error"
             wh_svc.apply_warehouse_import_from_row(product_data, parsed)
             product_data["category_id"] = _resolve_category_id_from_row(product_data, cat3_idx)
             warnings.append(
                 f"Dòng {idx + 1} ({product_id}): Chưa có SP gốc «{parsed['base_sku']}» — "
-                "tạo sản phẩm kho từ dữ liệu file import."
+                "đã tạo/cập nhật dòng kho thanh lý từ file (không sinh SEO). "
+                f"Tìm trong admin theo ID «{product_id}»."
             )
 
         product_data["slug"] = generate_consistent_slug(product_data.get("name", ""), product_id)
@@ -5557,6 +5789,8 @@ def bulk_import_products(
     for idx, product_data in enumerate(products_data):
         wh_action = _bulk_import_one_warehouse_row(idx, product_data)
         if wh_action is not None:
+            if wh_action in ("created", "updated", "deleted"):
+                warehouse_import_rows += 1
             if wh_action == "deleted":
                 deleted += 1
             elif wh_action == "created":
@@ -5769,6 +6003,7 @@ def bulk_import_products(
                 updated += 1
             else:
                 created += 1
+            regular_import_rows += 1
 
             if row_slug_warning:
                 warnings.append(row_slug_warning)
@@ -5844,7 +6079,12 @@ def bulk_import_products(
         ((created + updated + deleted) / total_processed * 100) if total_processed > 0 else 0
     )
 
-    run_cat_gemini = _should_run_auto_category_gemini_after_import(db, total_processed)
+    only_warehouse_import = warehouse_import_rows > 0 and regular_import_rows == 0
+
+    run_cat_gemini = (
+        not only_warehouse_import
+        and _should_run_auto_category_gemini_after_import(db, regular_import_rows or total_processed)
+    )
     paths_need_n = 0
     if run_cat_gemini:
         paths = _filter_category_paths_by_gemini_whitelist(
@@ -5879,6 +6119,9 @@ def bulk_import_products(
         "skipped_count": len(skipped),
         "total_processed": total_processed,
         "success_rate": success_rate,
+        "only_warehouse_import": only_warehouse_import,
+        "warehouse_import_rows": warehouse_import_rows,
+        "regular_import_rows": regular_import_rows,
     }
 
     logger.info(f"📦 BULK IMPORT COMPLETE:")
@@ -5891,14 +6134,34 @@ def bulk_import_products(
     logger.info(f"   📈 Success rate: {success_rate}")
 
     if created or updated or deleted:
-        try:
-            from app.services.listing_facet_cache import refresh_caches_after_bulk_import
+        if only_warehouse_import:
+            warnings.append(
+                "Import kho thanh lý: không sinh SEO danh mục / không làm mới cache facet toàn catalog "
+                "(chỉ áp dụng khi import sản phẩm thường)."
+            )
+        else:
+            if progress_callback:
+                progress_callback("cache_refresh", 0, None)
 
-            refresh_caches_after_bulk_import(db)
-            warnings.append("Đã làm mới cache bộ lọc danh mục/tìm kiếm/SEO cluster sau import.")
-        except Exception as exc:
-            logger.warning("Refresh facet caches after bulk import failed: %s", exc)
-    
+            def _refresh_caches_background() -> None:
+                from app.db.session import SessionLocal
+                from app.services.listing_facet_cache import refresh_caches_after_bulk_import
+
+                db_bg = SessionLocal()
+                try:
+                    refresh_caches_after_bulk_import(db_bg)
+                    logger.info("Background cache refresh after bulk import completed")
+                except Exception as exc:
+                    logger.warning("Background cache refresh after bulk import failed: %s", exc)
+                finally:
+                    db_bg.close()
+
+            threading.Thread(target=_refresh_caches_background, daemon=True).start()
+            warnings.append(
+                "Đang làm mới cache bộ lọc danh mục/tìm kiếm/SEO cluster trên nền "
+                "(catalog lớn có thể vài phút — không chặn kết thúc import)."
+            )
+
     return result
 
 # ========== EXPORT FUNCTIONS ==========

@@ -37,9 +37,11 @@ _SHOP_EXPORT_HEADERS: dict[str, tuple[str, ...]] = {
     "address": ("DIA_CHI_KH",),
     "phone": ("SDT_KH", "SDT"),
     "cod_amount": ("COD",),
-    "product_code": ("MA_SP",),
-    "order_code": ("DON_HANG",),
+    "product_code": ("MA_SP", "MA_SAN_PHAM", "MA_SP_KHO", "SKU", "MA_HANG"),
+    "order_code": ("DON_HANG", "MA_DON_HANG", "MADONHANG", "ORDER_CODE"),
 }
+# Cột H (0-based index 7) trên file gửi EMS chuẩn
+_COL_H_INDEX = 7
 _SHOP_EXPORT_DEFAULTS: dict[str, int] = {
     "reference_code": 0,
     "product_name": 1,
@@ -64,6 +66,7 @@ _COL_COD_NAMES = (
 )
 _EMS_EXPORT_DEFAULTS: dict[str, int] = {
     "reference_code": 3,
+    "product_code": 7,
     "recipient_label": 9,
     "cod_amount": 15,
 }
@@ -112,6 +115,154 @@ def _normalize_external_order_code(code: str) -> Optional[str]:
     if dc:
         return dc.group(1).upper()
     return None
+
+
+def looks_like_recipient_not_sku(text: Optional[str]) -> bool:
+    """Phát hiện chuỗi tên/SĐT/địa chỉ khách — không phải MA_SP cột H."""
+    raw = _cell_str(text)
+    if not raw:
+        return False
+    if "—" in raw or " · " in raw:
+        return True
+    lower = raw.lower()
+    if any(
+        m in lower
+        for m in (
+            "đường",
+            "phường",
+            "quận",
+            "huyện",
+            "thành phố",
+            "tỉnh",
+            "tp ",
+            "ngõ",
+            "thôn",
+            "xã ",
+        )
+    ):
+        return True
+    if len(raw) > 48 and "/" not in raw:
+        return True
+    return False
+
+
+def extract_warehouse_sku_from_ems_label(text: Optional[str]) -> Optional[str]:
+    """
+    Mã kho từ cột H (MA_SP) / nhãn EMS: lấy chuỗi trước dấu «-» đầu tiên.
+    Vd. B7796/41/2-XANH LAM-*https://... → B7796/41/2
+    """
+    raw = _cell_str(text)
+    if not raw or looks_like_recipient_not_sku(raw):
+        return None
+    head = raw
+    for sep in ("-", "–", "—", "−"):
+        if sep in head:
+            head = head.split(sep, 1)[0]
+            break
+    head = head.strip()
+    if not head or len(head) < 2:
+        return None
+    if _is_placeholder_order_code(head):
+        return None
+    if looks_like_recipient_not_sku(head):
+        return None
+    return head
+
+
+def warehouse_sku_from_col_h_cell(text: Optional[str]) -> Optional[str]:
+    """Chuẩn hóa ô cột H (MA_SP) → mã kho trước dấu «-»."""
+    return extract_warehouse_sku_from_ems_label(text)
+
+
+_SKU_FRAGMENT_RE = re.compile(
+    r"([A-Za-z]\d{2,}(?:/[A-Za-z0-9]{1,14})+)\s*[-–—]",
+    re.IGNORECASE,
+)
+
+
+def extract_ma_sp_from_text_blob(text: str) -> tuple[str, str]:
+    """Trích MA_SP từ một ô (cột H, TEN_SP, hoặc chuỗi lẫn tên SP)."""
+    raw = _cell_str(text)
+    if not raw or looks_like_recipient_not_sku(raw):
+        return "", ""
+    match = _SKU_FRAGMENT_RE.search(raw)
+    if match:
+        frag = match.group(1).strip()
+        sku = warehouse_sku_from_col_h_cell(frag + "-x") or frag
+        if sku and not looks_like_recipient_not_sku(sku):
+            return match.group(0).strip(), sku
+    # Cả ô là MA_SP (vd. B7796/41/2-XANH LAM-*url) — không cắt ở dấu - đầu trong tên dài
+    if len(raw) <= 96 and "/" in raw:
+        sku = warehouse_sku_from_col_h_cell(raw) or ""
+        if sku and not looks_like_recipient_not_sku(sku) and len(sku) <= 48:
+            return raw, sku
+    return "", ""
+
+
+def _append_cell_candidates(
+    raws: list[str],
+    *,
+    row: tuple[Any, ...],
+    row_alt: tuple[Any, ...] | None,
+    indices: list[int],
+) -> None:
+    seen: set[str] = set()
+    for idx in indices:
+        if idx < 0:
+            continue
+        for source in (row, row_alt or ()):
+            if idx >= len(source):
+                continue
+            val = source[idx]
+            if val is None:
+                continue
+            text = _cell_str(val)
+            if not text:
+                s = str(val).strip()
+                if s.startswith("="):
+                    continue
+                text = _cell_str(s)
+            if text and text not in seen:
+                seen.add(text)
+                raws.append(text)
+
+
+def read_ma_sp_from_excel_row(
+    row: tuple[Any, ...],
+    col_map: dict[str, int],
+    *,
+    row_alt: tuple[Any, ...] | None = None,
+) -> tuple[str, str]:
+    """
+    Đọc MA_SP từ dòng Excel — cột header MA_SP, cột H (7), TEN_SP (1), quét cả dòng.
+    row_alt: cùng dòng đọc data_only=False (ô công thức Excel chưa cache).
+    """
+    indices: list[int] = []
+    for key in ("product_code", "product_name"):
+        mapped = col_map.get(key)
+        if mapped is not None:
+            indices.append(int(mapped))
+    for idx in (_COL_H_INDEX, 8, 1, 6, 2):
+        if idx not in indices:
+            indices.append(idx)
+
+    raws: list[str] = []
+    _append_cell_candidates(raws, row=row, row_alt=row_alt, indices=indices)
+
+    for raw in raws:
+        found_raw, sku = extract_ma_sp_from_text_blob(raw)
+        if sku:
+            return found_raw or raw, sku
+
+    for cell in row:
+        text = _cell_str(cell)
+        if not text or len(text) > 220:
+            continue
+        found_raw, sku = extract_ma_sp_from_text_blob(text)
+        if sku:
+            return found_raw or text, sku
+
+    return "", ""
 
 
 def extract_order_code_from_recipient(text: Optional[str]) -> Optional[str]:
@@ -209,12 +360,16 @@ def _find_header_map(rows: list[tuple[Any, ...]]) -> tuple[int, str, dict[str, i
                     shop_map[field] = col_idx
             if _match_header_field(key, _COL_REF_NAMES):
                 ems_map["reference_code"] = col_idx
+            if _match_header_field(key, _SHOP_EXPORT_HEADERS["product_code"]):
+                ems_map["product_code"] = col_idx
             if _match_header_field(key, _COL_RECIPIENT_NAMES):
                 ems_map["recipient_label"] = col_idx
             if _match_header_field(key, _COL_COD_NAMES):
                 ems_map["cod_amount"] = col_idx
 
-        if shop_map.get("reference_code") is not None and shop_map.get("order_code") is not None:
+        if shop_map.get("reference_code") is not None and (
+            shop_map.get("order_code") is not None or shop_map.get("product_code") is not None
+        ):
             merged = {**_SHOP_EXPORT_DEFAULTS, **shop_map}
             return idx, "shop_export", merged
         if ems_map.get("reference_code") is not None and ems_map.get("recipient_label") is not None:
@@ -226,12 +381,24 @@ def _find_header_map(rows: list[tuple[Any, ...]]) -> tuple[int, str, dict[str, i
 
 def parse_ems_export_rows(file_bytes: bytes) -> tuple[list[dict[str, Any]], list[str]]:
     warnings: list[str] = []
-    wb = load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+    bio = io.BytesIO(file_bytes)
+    wb = load_workbook(bio, read_only=True, data_only=True)
     try:
         ws = wb.active
         raw_rows = [tuple(row) for row in ws.iter_rows(values_only=True)]
     finally:
         wb.close()
+
+    raw_rows_alt: list[tuple[Any, ...]] = []
+    try:
+        bio.seek(0)
+        wb_alt = load_workbook(bio, read_only=True, data_only=False)
+        try:
+            raw_rows_alt = [tuple(row) for row in wb_alt.active.iter_rows(values_only=True)]
+        finally:
+            wb_alt.close()
+    except Exception:
+        raw_rows_alt = []
 
     if not raw_rows:
         return [], ["File Excel trống."]
@@ -248,7 +415,12 @@ def parse_ems_export_rows(file_bytes: bytes) -> tuple[list[dict[str, Any]], list
     cod_col = col_map.get("cod_amount", 6 if file_format == "shop_export" else 15)
     parsed: list[dict[str, Any]] = []
 
-    for row_idx, row in enumerate(raw_rows[header_idx + 1 :], start=header_idx + 2):
+    data_rows = raw_rows[header_idx + 1 :]
+    data_rows_alt = raw_rows_alt[header_idx + 1 :] if len(raw_rows_alt) > header_idx else []
+
+    for offset, row in enumerate(data_rows):
+        row_idx = header_idx + 2 + offset
+        row_alt = data_rows_alt[offset] if offset < len(data_rows_alt) else None
         ref_code = _cell_str(row[ref_col] if ref_col < len(row) else "").upper()
         cod_raw = row[cod_col] if cod_col < len(row) else None
         cod_amount = _parse_cod_amount(cod_raw)
@@ -257,7 +429,7 @@ def parse_ems_export_rows(file_bytes: bytes) -> tuple[list[dict[str, Any]], list
             customer_name = _cell_str(row[col_map.get("customer_name", 3)] if col_map.get("customer_name", 3) < len(row) else "")
             phone = _cell_str(row[col_map.get("phone", 5)] if col_map.get("phone", 5) < len(row) else "")
             address = _cell_str(row[col_map.get("address", 4)] if col_map.get("address", 4) < len(row) else "")
-            product_code = _cell_str(row[col_map.get("product_code", 7)] if col_map.get("product_code", 7) < len(row) else "")
+            ma_sp_raw, product_code = read_ma_sp_from_excel_row(row, col_map, row_alt=row_alt)
             order_direct = row[col_map.get("order_code", 8)] if col_map.get("order_code", 8) < len(row) else None
             recipient_label = _build_recipient_label(
                 customer_name=customer_name,
@@ -266,13 +438,17 @@ def parse_ems_export_rows(file_bytes: bytes) -> tuple[list[dict[str, Any]], list
             )
             order_code = _resolve_order_code(
                 direct=order_direct,
-                product_code=product_code,
+                product_code=ma_sp_raw or product_code,
                 recipient_label=recipient_label,
             )
         else:
+            ma_sp_raw, product_code = read_ma_sp_from_excel_row(row, col_map, row_alt=row_alt)
             recipient_col = col_map.get("recipient_label", 9)
             recipient_label = _cell_str(row[recipient_col] if recipient_col < len(row) else "")
-            order_code = _resolve_order_code(recipient_label=recipient_label)
+            order_code = _resolve_order_code(
+                product_code=ma_sp_raw or product_code,
+                recipient_label=recipient_label,
+            )
 
         if not ref_code and not recipient_label and not order_code:
             continue
@@ -281,6 +457,8 @@ def parse_ems_export_rows(file_bytes: bytes) -> tuple[list[dict[str, Any]], list
                 "row_number": row_idx,
                 "reference_code": ref_code,
                 "recipient_label": recipient_label,
+                "product_code": product_code or "",
+                "product_code_raw": ma_sp_raw,
                 "order_code": order_code,
                 "cod_amount": cod_amount,
             }
@@ -779,6 +957,23 @@ def sanitize_cod_paid_without_settlement(db: Session) -> int:
     return fixed
 
 
+def sanitize_invalid_ems_product_codes(db: Session) -> int:
+    """Xóa product_code ghi nhầm từ nhãn người nhận — chỉ giữ MA_SP cột H hợp lệ."""
+    rows = db.query(EmsShippingRecord).filter(EmsShippingRecord.product_code.isnot(None)).all()
+    fixed = 0
+    for record in rows:
+        raw = (record.product_code or "").strip()
+        if not raw:
+            continue
+        normalized = warehouse_sku_from_col_h_cell(raw)
+        if normalized != raw or looks_like_recipient_not_sku(raw):
+            record.product_code = normalized or None
+            fixed += 1
+    if fixed:
+        db.commit()
+    return fixed
+
+
 def _record_to_dict(record: EmsShippingRecord) -> dict[str, Any]:
     settlement = (record.cod_settlement_status or "").strip().lower()
     cod_paid_amount = int(record.cod_paid_amount) if record.cod_paid_amount is not None else None
@@ -848,6 +1043,14 @@ def _upsert_record(
         db.add(record)
 
     record.recipient_label = result.get("recipient_label") or ""
+    pc = warehouse_sku_from_col_h_cell(result.get("product_code")) or ""
+    if not pc:
+        pc = warehouse_sku_from_col_h_cell(result.get("product_code_raw")) or ""
+    if pc:
+        record.product_code = pc
+    elif created:
+        record.product_code = None
+    # Cập nhật import: không xóa SKU cũ nếu dòng mới không đọc được cột H
     record.order_code = result.get("order_code")
     record.order_id = result.get("order_id")
     record.excel_row_number = result.get("row_number")
@@ -1270,6 +1473,13 @@ def import_ems_shipment_excel(
     rows, warnings = parse_ems_export_rows(file_bytes)
     rows, dedupe_warnings = _dedupe_rows_by_reference(rows)
     warnings.extend(dedupe_warnings)
+
+    missing_ma_sp = sum(1 for r in rows if not (r.get("product_code") or "").strip())
+    if missing_ma_sp:
+        warnings.append(
+            f"{missing_ma_sp} dòng không đọc được MA_SP (cột H) — "
+            "kiểm tra ô H / TEN_SP có dạng B7796/41/2-...; nếu ô H là công thức, mở file trong Excel rồi Save trước khi import."
+        )
 
     # Luôn import nhanh — tra EMS chạy nền qua ems_tracking_refresh worker.
     warnings.append(

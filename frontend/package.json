@@ -7,7 +7,7 @@
     "build": "next build --webpack",
     "start": "node scripts/next-start.cjs",
     "lint": "next lint",
-    "clear-cache": "node -e \"const fs=require('fs');['.next','node_modules/.cache'].forEach(p=>{try{fs.rmSync(p,{recursive:true,force:true})}catch(e){}})\"",
+    "clear-cache": "node -e \"const fs=require('fs');['.next','.next-run','node_modules/.cache'].forEach(p=>{try{fs.rmSync(p,{recursive:true,force:true})}catch(e){}})\"",
     "type-check": "tsc --noEmit",
     "analyze": "cross-env ANALYZE=true next build --webpack",
     "test": "jest",

@@ -17,15 +17,32 @@ from app.services.cart_discounts import build_cart_discount_fields
 router = APIRouter()
 
 
-def _cart_line_list_price(item: CartItem) -> float:
-    """Giá gốc catalog — không dùng product_price đã lưu (có thể là giá sale cũ)."""
+def _is_warehouse_cart_line(item: CartItem) -> bool:
+    from app.services.warehouse_clearance import is_warehouse_cart_product
+
     pd = item.product_data if isinstance(item.product_data, dict) else {}
+    return is_warehouse_cart_product(item.product, pd)
+
+
+def _cart_line_list_price(item: CartItem, *, is_wh: bool = False) -> float:
+    """Giá gốc catalog (list) — dòng kho luôn lấy từ Product.price trong DB."""
+    pd = item.product_data if isinstance(item.product_data, dict) else {}
+    if is_wh and item.product is not None:
+        return float(item.product.price or 0)
     if pd.get("list_price") is not None:
-        return float(pd["list_price"])
+        try:
+            lp = float(pd["list_price"])
+            if lp > 0:
+                return lp
+        except (TypeError, ValueError):
+            pass
     if item.product is not None:
         return float(item.product.price or 0)
-    if pd.get("price") is not None:
-        return float(pd["price"])
+    if pd.get("original_price") is not None:
+        try:
+            return float(pd["original_price"])
+        except (TypeError, ValueError):
+            pass
     return float(item.product_price or 0)
 
 
@@ -43,18 +60,20 @@ def _cart_items_with_site_sale_pricing(
     cart_items_response: List[CartItemResponse] = []
     for item in items:
         resp = _cart_item_to_response(item)
-        base = _cart_line_list_price(item)
-        is_wh = bool(
-            item.product is not None and getattr(item.product, "is_warehouse_clearance", False)
-        )
+        is_wh = _is_warehouse_cart_line(item)
+        base = _cart_line_list_price(item, is_wh=is_wh)
+        sellable: Optional[int] = None
         if is_wh:
-            pricing = wh_clearance_svc.apply_clearance_pricing(base, enabled=wh_enabled, percent=wh_pct)
+            from app.services.warehouse_stock import warehouse_sellable_qty
+
+            pricing = wh_clearance_svc.apply_clearance_pricing(base, percent=wh_pct)
             line_unit = float(pricing["display_price"])
             resp.product_price = line_unit
             resp.list_price = base if base > 0 else None
-            if pricing.get("savings_amount", 0) > 0:
-                resp.original_price = base
+            resp.original_price = base if base > line_unit else None
             resp.site_sale = None
+            if item.product is not None:
+                sellable = warehouse_sellable_qty(item.product)
         else:
             pricing = apply_site_sale_to_price(base, sale_state)
             line_unit = float(pricing["display_price"])
@@ -71,6 +90,16 @@ def _cart_items_with_site_sale_pricing(
         pd = dict(resp.product_data or {})
         pd["list_price"] = base
         pd["price"] = line_unit
+        if is_wh:
+            pd["is_warehouse_clearance"] = True
+            pd["warehouse_clearance_percent"] = wh_pct
+            pd["original_price"] = base
+            if item.product is not None:
+                pd["available"] = int(sellable if sellable is not None else item.product.available or 0)
+                pd["warehouse_available"] = int(item.product.available or 0)
+                if not str(pd.get("product_id") or "").strip():
+                    pd["product_id"] = item.product.product_id
+                wh_clearance_svc.apply_warehouse_cart_product_data_slug(db, item.product, pd)
         resp.product_data = pd
         total_price += line_unit * int(item.quantity or 0)
         cart_items_response.append(resp)
@@ -181,6 +210,8 @@ def add_item_to_cart(
         msg = str(e)
         if "not found" in msg.lower():
             raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại. Kiểm tra lại product_id (dùng id số của sản phẩm).")
+        if "kho" in msg.lower() or "hết hàng" in msg.lower() or "tối đa" in msg.lower():
+            raise HTTPException(status_code=400, detail=msg)
         raise HTTPException(status_code=404, detail=msg)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
@@ -198,7 +229,10 @@ def update_cart_item(
     if not cart_item or cart_item.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Cart item not found")
     
-    updated_item = cart_crud.update_cart_item(db, cart_item_id=item_id, cart_item_update=cart_item_update)
+    try:
+        updated_item = cart_crud.update_cart_item(db, cart_item_id=item_id, cart_item_update=cart_item_update)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not updated_item:
         raise HTTPException(status_code=404, detail="Cart item not found")
 

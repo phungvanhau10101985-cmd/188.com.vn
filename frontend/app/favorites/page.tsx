@@ -10,6 +10,8 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
+import { snapshotProductDataAsProduct } from '@/lib/viewed-product-card';
 import { buildHomeListingHrefByChineseShop } from '@/lib/product-related-tabs';
 import { displayableBrandOrOrigin } from '@/lib/utils';
 
@@ -122,6 +124,12 @@ function FavoriteProductCard({ item, removing, priorityImage, onRemove }: Favori
         ) : null}
 
         <p className="text-sm font-bold tabular-nums text-[#ea580c] sm:text-base">{formatVnd(price)}</p>
+
+        <ProductCardClearanceMeta
+          product={snapshotProductDataAsProduct(item.product_id, data as Record<string, unknown>)}
+          compact
+          className="mt-1"
+        />
 
         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
           <Link

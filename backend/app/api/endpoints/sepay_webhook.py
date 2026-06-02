@@ -25,6 +25,7 @@ _SEPAY_WEBHOOK_ERROR_EN: dict[str, str] = {
     "no_deposit_required": "Order does not require deposit",
     "content_mismatch": "Transfer content does not match expected order reference",
     "amount_mismatch": "Transfer amount does not match required deposit",
+    "warehouse_out_of_stock": "Warehouse clearance item is out of stock",
 }
 
 

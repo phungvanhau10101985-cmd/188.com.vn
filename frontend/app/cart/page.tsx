@@ -31,7 +31,20 @@ import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import SiteSaleBanner from '@/components/SiteSaleBanner';
 import SiteSaleLiveCountdown from '@/components/SiteSaleLiveCountdown';
 import CartVoucherPicker from '@/components/cart/CartVoucherPicker';
-import { mergeCartLineSiteSaleFromCalendar, resolveCartLineCheckoutTotal, resolveCartLineDisplayPricing } from '@/lib/site-sale';
+import {
+  mergeCartLineSiteSaleFromCalendar,
+  resolveCartLineCheckoutTotal,
+  resolveCartLineDisplayPricing,
+  sumCartLineCheckoutTotals,
+  sumCartLineClearanceSavings,
+  sumCartLineListSubtotal,
+  sumCartLineSiteSaleSavings,
+} from '@/lib/site-sale';
+import {
+  cartLineMaxQuantity,
+  isWarehouseCartLine,
+  resolveWarehouseCartPdpSlug,
+} from '@/lib/warehouse-clearance';
 import { useSiteSale } from '@/lib/use-site-sale';
 import { formatPrice } from '@/lib/utils';
 import type { PromotionVoucherItem } from '@/lib/api-client';
@@ -52,12 +65,40 @@ function formatAddressLine(addr: UserAddress): string {
   return parts.join(', ');
 }
 
+/** Skeleton thống nhất SSR + client — tránh mismatch khi CartProvider còn state sau soft-nav. */
+function CartPageSkeleton() {
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="mx-auto max-w-7xl px-3 pb-5 pt-2 sm:px-3 md:px-4 md:py-8 md:pb-6 md:pt-3">
+        <div className="animate-pulse">
+          <div className="mb-3 h-5 max-w-[8rem] rounded-md bg-gray-200 sm:h-6 md:mb-8 md:h-8 md:max-w-[12rem]" />
+          {[...Array(3)].map((_, i) => (
+            <div
+              key={i}
+              className="mb-3 rounded-xl border border-gray-100 bg-white p-4 shadow-sm md:mb-4 md:rounded-lg md:p-6"
+            >
+              <div className="flex gap-4">
+                <div className="h-20 w-20 shrink-0 rounded-lg bg-gray-200 md:h-24 md:w-24" />
+                <div className="min-w-0 flex-1 space-y-2 md:space-y-3">
+                  <div className="h-4 rounded bg-gray-200 md:w-3/4" />
+                  <div className="h-4 rounded bg-gray-200 md:w-1/2" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CartPage() {
   const { cart, updateCartItem, removeFromCart, clearCart, isLoading, error, refreshCart } = useCart();
   const { isAuthenticated, user, isLoading: authLoading } = useAuth();
   const { state: globalSiteSale } = useSiteSale();
   const router = useRouter();
   const { pushToast } = useToast();
+  const [pageReady, setPageReady] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [addresses, setAddresses] = useState<UserAddress[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<number | null>(null);
@@ -83,6 +124,10 @@ export default function CartPage() {
   const [promoError, setPromoError] = useState<string | null>(null);
   const [promoVouchers, setPromoVouchers] = useState<PromotionVoucherItem[]>([]);
   const [promoVouchersLoading, setPromoVouchersLoading] = useState(false);
+
+  useEffect(() => {
+    setPageReady(true);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -170,7 +215,17 @@ export default function CartPage() {
     () => cartItems.filter((i) => selectionForTotals.has(i.id)),
     [cartItems, selectionForTotals]
   );
+  const selectedRegularItems = useMemo(
+    () => selectedCartItems.filter((i) => !isWarehouseCartLine(i)),
+    [selectedCartItems],
+  );
+  const selectedWarehouseItems = useMemo(
+    () => selectedCartItems.filter((i) => isWarehouseCartLine(i)),
+    [selectedCartItems],
+  );
   const noneSelected = selectedCartItems.length === 0;
+  const hasRegularSelection = selectedRegularItems.length > 0;
+  const hasWarehouseSelection = selectedWarehouseItems.length > 0;
 
   const loyaltyPercent = cart?.loyalty_discount_percent ?? 0;
   const welcomeApplied = appliedPromo !== null;
@@ -181,31 +236,38 @@ export default function CartPage() {
   const siteSaleActive = siteSaleState?.phase === 'active';
   const siteSaleTeaser = siteSaleState?.phase === 'teaser';
 
-  const selectedSubtotal = useMemo(
-    () =>
-      selectedCartItems.reduce(
-        (sum, item) => sum + resolveCartLineCheckoutTotal(item, siteSaleState),
-        0,
-      ),
-    [selectedCartItems, siteSaleState]
+  const regularSubtotal = useMemo(
+    () => sumCartLineCheckoutTotals(selectedRegularItems, siteSaleState),
+    [selectedRegularItems, siteSaleState],
   );
+  const warehouseSubtotal = useMemo(
+    () => sumCartLineCheckoutTotals(selectedWarehouseItems, siteSaleState),
+    [selectedWarehouseItems, siteSaleState],
+  );
+  const selectedSubtotal = regularSubtotal + warehouseSubtotal;
 
-  const selectedSiteSaleSavings = useMemo(
-    () =>
-      selectedCartItems.reduce((sum, item) => {
-        const pricing = resolveCartLineDisplayPricing(
-          mergeCartLineSiteSaleFromCalendar(item, siteSaleState),
-          false,
-          0,
-        );
-        return sum + pricing.siteLineSavings;
-      }, 0),
-    [selectedCartItems, siteSaleState]
+  const regularListSubtotal = useMemo(
+    () => sumCartLineListSubtotal(selectedRegularItems, siteSaleState),
+    [selectedRegularItems, siteSaleState],
+  );
+  const warehouseListSubtotal = useMemo(
+    () => sumCartLineListSubtotal(selectedWarehouseItems, siteSaleState),
+    [selectedWarehouseItems, siteSaleState],
+  );
+  const selectedOriginalSubtotal = regularListSubtotal + warehouseListSubtotal;
+
+  const regularSiteSaleSavings = useMemo(
+    () => sumCartLineSiteSaleSavings(selectedRegularItems, siteSaleState),
+    [selectedRegularItems, siteSaleState],
+  );
+  const warehouseClearanceSavings = useMemo(
+    () => sumCartLineClearanceSavings(selectedWarehouseItems),
+    [selectedWarehouseItems],
   );
 
   const selectedTeaserSavings = useMemo(
     () =>
-      selectedCartItems.reduce((sum, item) => {
+      selectedRegularItems.reduce((sum, item) => {
         const pricing = resolveCartLineDisplayPricing(
           mergeCartLineSiteSaleFromCalendar(item, siteSaleState),
           birthdayLineActive,
@@ -216,32 +278,20 @@ export default function CartPage() {
         }
         return sum;
       }, 0),
-    [selectedCartItems, birthdayLineActive, birthdayPercent, siteSaleState]
+    [selectedRegularItems, birthdayLineActive, birthdayPercent, siteSaleState],
   );
 
-  const selectedOriginalSubtotal = useMemo(
-    () =>
-      selectedCartItems.reduce((sum, item) => {
-        const pricing = resolveCartLineDisplayPricing(
-          mergeCartLineSiteSaleFromCalendar(item, siteSaleState),
-          false,
-          0,
-        );
-        return sum + pricing.listPrice * item.quantity;
-      }, 0),
-    [selectedCartItems, siteSaleState]
-  );
-  const rawWelcomeDiscount = calculateWelcomeDiscount(selectedSubtotal, appliedPromo);
+  const rawWelcomeDiscount = calculateWelcomeDiscount(regularSubtotal, appliedPromo);
   const rawBirthdayDiscount =
     !welcomeApplied && birthdayActive && birthdayPercent > 0
-      ? (selectedSubtotal * birthdayPercent) / 100
+      ? (regularSubtotal * birthdayPercent) / 100
       : 0;
-  const subtotalAfterPrimary = Math.max(0, selectedSubtotal - rawWelcomeDiscount - rawBirthdayDiscount);
+  const subtotalAfterPrimary = Math.max(0, regularSubtotal - rawWelcomeDiscount - rawBirthdayDiscount);
   const rawLoyaltyDiscount =
     loyaltyPercent > 0 ? (subtotalAfterPrimary * loyaltyPercent) / 100 : 0;
   const cappedDiscounts = applyGrandOrderDiscountCap(
-    selectedOriginalSubtotal,
-    selectedSiteSaleSavings,
+    regularListSubtotal,
+    regularSiteSaleSavings,
     rawWelcomeDiscount,
     rawBirthdayDiscount,
     rawLoyaltyDiscount,
@@ -250,18 +300,17 @@ export default function CartPage() {
   const selectedBirthdayDiscount = cappedDiscounts.birthday;
   const selectedLoyaltyDiscount = cappedDiscounts.loyalty;
   const discountCapped = cappedDiscounts.capped;
-  const selectedFinalPrice = Math.max(
+  const regularFinalPrice = Math.max(
     0,
-    selectedSubtotal - selectedWelcomeDiscount - selectedBirthdayDiscount - selectedLoyaltyDiscount
+    regularSubtotal - selectedWelcomeDiscount - selectedBirthdayDiscount - selectedLoyaltyDiscount,
   );
-  const selectedTotalDiscount =
-    selectedSiteSaleSavings +
-    selectedWelcomeDiscount +
-    selectedBirthdayDiscount +
-    selectedLoyaltyDiscount;
+  const selectedFinalPrice = regularFinalPrice + warehouseSubtotal;
+  const regularPromoDiscount =
+    selectedWelcomeDiscount + selectedBirthdayDiscount + selectedLoyaltyDiscount;
+  const regularTotalDiscount = regularSiteSaleSavings + regularPromoDiscount;
   const cappedLabelBase = {
-    listSubtotal: selectedOriginalSubtotal,
-    siteSaleSavings: selectedSiteSaleSavings,
+    listSubtotal: regularListSubtotal,
+    siteSaleSavings: regularSiteSaleSavings,
     siteSaleActive,
     discountCapped,
   };
@@ -315,7 +364,7 @@ export default function CartPage() {
     let cancelled = false;
     setPromoVouchersLoading(true);
     apiClient
-      .getMyPromoVouchers(selectedSubtotal > 0 ? selectedSubtotal : undefined)
+      .getMyPromoVouchers(regularSubtotal > 0 ? regularSubtotal : undefined)
       .then((res) => {
         if (!cancelled) setPromoVouchers(res.items ?? []);
       })
@@ -328,7 +377,7 @@ export default function CartPage() {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, selectedSubtotal]);
+  }, [isAuthenticated, regularSubtotal]);
 
   const allLineIds = useMemo(() => cartItems.map((i) => i.id), [cartItems]);
   const allSelected =
@@ -363,6 +412,10 @@ export default function CartPage() {
     if (!isAuthenticated || cartItems.length === 0) return;
     trackGoogleAdsCartPageView(cartItems, cartTotalAll);
   }, [isAuthenticated, cartAdsFingerprint, cartTotalAll]);
+
+  if (!pageReady || isLoading) {
+    return <CartPageSkeleton />;
+  }
 
   if (!isClientAuthLikelyLoggedIn(isAuthenticated, authLoading)) {
     return (
@@ -415,11 +468,35 @@ export default function CartPage() {
   });
 
   const handleQuantityChange = async (
-    item: { id: number; product_id: number; selected_size?: string; selected_color?: string },
-    newQuantity: number
+    item: {
+      id: number;
+      product_id: number;
+      selected_size?: string;
+      selected_color?: string;
+      product_data?: Record<string, unknown> | null;
+    },
+    newQuantity: number,
   ) => {
     if (newQuantity < 1) return;
-    await updateCartItem(cartLineRef(item), { quantity: newQuantity });
+    const maxQ = cartLineMaxQuantity(item);
+    if (newQuantity > maxQ) {
+      pushToast({
+        title: 'Số lượng tối đa',
+        description: isWarehouseCartLine(item)
+          ? `Hàng kho thanh lý chỉ còn ${maxQ} — không thể chọn quá ${maxQ}.`
+          : `Tối đa ${maxQ} sản phẩm mỗi dòng.`,
+        variant: 'info',
+        durationMs: 3500,
+      });
+      await updateCartItem(cartLineRef(item), { quantity: maxQ });
+      return;
+    }
+    try {
+      await updateCartItem(cartLineRef(item), { quantity: newQuantity });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      pushToast({ title: 'Không cập nhật được số lượng', description: msg, variant: 'error', durationMs: 4000 });
+    }
   };
 
   const handleRemoveItem = async (item: {
@@ -488,8 +565,8 @@ export default function CartPage() {
 
   const handleSelectPromoVoucher = async (voucher: PromotionVoucherItem) => {
     if (!voucher.eligible) return;
-    if (selectedSubtotal <= 0) {
-      setPromoError('Vui lòng chọn sản phẩm để áp dụng mã.');
+    if (regularSubtotal <= 0) {
+      setPromoError('Mã khuyến mãi chỉ áp dụng cho hàng thường (không gồm thanh lý kho).');
       return;
     }
     setPromoApplying(true);
@@ -497,7 +574,7 @@ export default function CartPage() {
     try {
       const res = await apiClient.validatePromoCode({
         code: voucher.code,
-        subtotal: selectedSubtotal,
+        subtotal: regularSubtotal,
       });
       setAppliedPromo({
         code: res.code,
@@ -640,7 +717,32 @@ export default function CartPage() {
     }
   };
 
-  const handleOpenProduct = async (item: { product_id: number; product_data?: any }) => {
+  const handleOpenProduct = async (item: {
+    product_id: number;
+    product_code?: string | null;
+    product_data?: Record<string, unknown> | null;
+  }) => {
+    if (isWarehouseCartLine(item)) {
+      const parentSeg = resolveWarehouseCartPdpSlug(item);
+      if (parentSeg) {
+        router.push(`/products/${parentSeg}`);
+        return;
+      }
+      const code = String(item.product_data?.product_id ?? item.product_code ?? '');
+      const baseSku = code.split('/')[0];
+      if (baseSku) {
+        try {
+          const p = await apiClient.getProductBySku(baseSku);
+          const seg = productPathSlugFromApi(p?.slug, p?.product_id);
+          if (seg) {
+            router.push(`/products/${seg}`);
+            return;
+          }
+        } catch {
+          // fall through
+        }
+      }
+    }
     const rawSlug = item.product_data?.slug;
     const seg = productPathSlugFromApi(rawSlug, String(item.product_id));
     if (seg) {
@@ -659,29 +761,6 @@ export default function CartPage() {
   };
 
   const mdCartGridCols = 'md:grid-cols-[44px_minmax(0,1fr)_120px_120px_120px_40px]';
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="mx-auto max-w-7xl px-3 pb-5 pt-2 sm:px-3 md:px-4 md:py-8 md:pb-6 md:pt-3">
-          <div className="animate-pulse">
-            <div className="mb-3 h-5 max-w-[8rem] rounded-md bg-gray-200 sm:h-6 md:mb-8 md:h-8 md:max-w-[12rem]" />
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="mb-3 rounded-xl border border-gray-100 bg-white p-4 shadow-sm md:mb-4 md:rounded-lg md:p-6">
-                <div className="flex gap-4">
-                  <div className="h-20 w-20 shrink-0 rounded-lg bg-gray-200 md:h-24 md:w-24" />
-                  <div className="min-w-0 flex-1 space-y-2 md:space-y-3">
-                    <div className="h-4 rounded bg-gray-200 md:w-3/4" />
-                    <div className="h-4 rounded bg-gray-200 md:w-1/2" />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) {
     return (
@@ -874,6 +953,8 @@ export default function CartPage() {
                   pricing.sitePercent > 0 &&
                   pricing.expectedSaleUnitPrice != null &&
                   pricing.teaserUnitSavings > 0;
+                const maxLineQty = cartLineMaxQuantity(item);
+                const isWhLine = isWarehouseCartLine(item);
                 return (
                   <div key={lineKey} className="px-3 md:px-5 py-3 md:py-4">
                     <div className={`grid grid-cols-1 gap-3 items-center ${mdCartGridCols}`}>
@@ -918,6 +999,7 @@ export default function CartPage() {
                                 {item.selected_color && `Màu: ${item.selected_color}`}
                                 {item.selected_color && item.product_data?.product_id && ' • '}
                                 {item.product_data?.product_id && `ID: ${item.product_data?.product_id}`}
+                                {isWhLine ? ' • Thanh lý kho' : ''}
                               </p>
                             )}
                           </div>
@@ -968,7 +1050,7 @@ export default function CartPage() {
                                 Tiết kiệm {formatPrice(pricing.lineSavings / item.quantity)}
                               </p>
                             ) : null}
-                            {pricing.sitePhase === 'active' && pricing.sitePercent > 0 ? (
+                            {(pricing.sitePhase === 'active' || isWhLine) && pricing.sitePercent > 0 ? (
                               <span className="mt-0.5 inline-block rounded bg-red-500 px-1 py-0.5 text-[10px] font-bold text-white">
                                 -{pricing.sitePercent}%
                               </span>
@@ -993,7 +1075,9 @@ export default function CartPage() {
                           <button
                             type="button"
                             onClick={() => handleQuantityChange(item, item.quantity + 1)}
-                            className="w-9 h-9 flex items-center justify-center text-gray-600 hover:bg-gray-50"
+                            disabled={item.quantity >= maxLineQty}
+                            className="w-9 h-9 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                            aria-label="Tăng số lượng"
                           >
                             +
                           </button>
@@ -1093,11 +1177,17 @@ export default function CartPage() {
               />
             ) : null}
 
-            {siteSaleActive && selectedSiteSaleSavings > 0 ? (
+            {hasRegularSelection ? (
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 md:text-xs">
+                Hàng thường
+              </p>
+            ) : null}
+
+            {siteSaleActive && hasRegularSelection && regularSiteSaleSavings > 0 ? (
               <>
                 <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
-                  <span className="text-gray-500">Giá gốc</span>
-                  <span className="text-gray-400 line-through">{formatPrice(selectedOriginalSubtotal)}</span>
+                  <span className="text-gray-500">Giá gốc (hàng thường)</span>
+                  <span className="text-gray-400 line-through">{formatPrice(regularListSubtotal)}</span>
                 </div>
                 <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
                   <span className="text-gray-500">
@@ -1106,15 +1196,15 @@ export default function CartPage() {
                       {siteSaleState?.event_label ?? ''} (-{siteSaleState?.discount_percent ?? 0}%)
                     </span>
                   </span>
-                  <span className="font-medium text-emerald-600">-{formatPrice(selectedSiteSaleSavings)}</span>
+                  <span className="font-medium text-emerald-600">-{formatPrice(regularSiteSaleSavings)}</span>
                 </div>
               </>
             ) : null}
 
-            {selectedOriginalSubtotal > selectedSubtotal && !siteSaleActive ? (
+            {hasRegularSelection && regularListSubtotal > regularSubtotal && !siteSaleActive ? (
               <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
-                <span className="text-gray-500">Giá gốc</span>
-                <span className="text-gray-400 line-through">{formatPrice(selectedOriginalSubtotal)}</span>
+                <span className="text-gray-500">Giá gốc (hàng thường)</span>
+                <span className="text-gray-400 line-through">{formatPrice(regularListSubtotal)}</span>
               </div>
             ) : null}
 
@@ -1170,13 +1260,42 @@ export default function CartPage() {
               </div>
             ) : null}
 
-            {discountCapped ? (
+            {hasRegularSelection ? (
+              <div className="mb-2 flex items-center justify-between text-[11px] md:text-sm">
+                <span className="font-medium text-gray-700">Tạm tính hàng thường</span>
+                <span className="font-semibold text-gray-900">{formatPrice(regularFinalPrice)}</span>
+              </div>
+            ) : null}
+
+            {hasWarehouseSelection ? (
+              <div className="mb-2 rounded-lg border border-amber-100 bg-amber-50/50 px-2 py-2">
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-900 md:text-xs">
+                  Thanh lý kho
+                </p>
+                {warehouseListSubtotal > warehouseSubtotal ? (
+                  <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
+                    <span className="text-gray-600">Giá gốc (thanh lý)</span>
+                    <span className="text-gray-400 line-through">{formatPrice(warehouseListSubtotal)}</span>
+                  </div>
+                ) : null}
+                {warehouseClearanceSavings > 0 ? (
+                  <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
+                    <span className="text-gray-600">Giảm giá thanh lý kho</span>
+                    <span className="font-medium text-emerald-700">-{formatPrice(warehouseClearanceSavings)}</span>
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-between text-[11px] md:text-sm">
+                  <span className="font-medium text-amber-950">Tạm tính thanh lý kho</span>
+                  <span className="font-semibold text-amber-950">{formatPrice(warehouseSubtotal)}</span>
+                </div>
+              </div>
+            ) : null}
+
+            {discountCapped && hasRegularSelection ? (
               <div className="mb-2 flex items-start justify-between gap-2 rounded-lg border border-amber-100 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-700 md:text-sm">
-                <span>
-                  Tổng ưu đãi {MAX_ORDER_DISCOUNT_PERCENT}%
-                </span>
+                <span>Trần ưu đãi hàng thường {MAX_ORDER_DISCOUNT_PERCENT}% (không gồm thanh lý kho)</span>
                 <span className="shrink-0 whitespace-nowrap font-semibold text-amber-800">
-                  -{formatPrice(selectedTotalDiscount)}
+                  -{formatPrice(regularTotalDiscount)}
                 </span>
               </div>
             ) : null}

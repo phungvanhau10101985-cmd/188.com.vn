@@ -27,6 +27,8 @@ class EmsShippingRecord(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     reference_code = Column(String(50), nullable=False, unique=True, index=True)
+    """Cột H file gui ems (MA_SP) — phần trước dấu «-» đầu, vd. B7796/41/2."""
+    product_code = Column(String(255), nullable=True, index=True)
     recipient_label = Column(Text, nullable=True)
     order_code = Column(String(50), nullable=True, index=True)
     order_id = Column(Integer, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True)

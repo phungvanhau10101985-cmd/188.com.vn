@@ -24,6 +24,7 @@ import {
   type AdminProductsResponse,
   type AdminProductListSort,
 } from '@/lib/admin-api';
+import { bulkDeleteAdminProducts } from '@/lib/admin-product-delete';
 import { getCatalogFeedApiBaseUrl, isNonPublicCatalogFeedBase } from '@/lib/api-base';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { ImportDraftExcelCompare } from '@/components/admin/ImportDraftExcelCompare';
@@ -256,16 +257,17 @@ function resolveOpenaiOutputPresetId(quality: string, size: string): string {
 /** Giữ lựa chọn «Sắp xếp» sau khi reload trang. */
 const ADMIN_PRODUCTS_LIST_SORT_KEY = 'admin:products:list_sort';
 const ADMIN_PRODUCTS_LIST_SORT_VALUES: readonly AdminProductListSort[] = [
-  'default',
-  'views_desc',
+  'id_desc',
   'newest',
   'oldest',
+  'views_desc',
 ];
 
 function parseStoredProductListSort(raw: string | null): AdminProductListSort | null {
   if (!raw) return null;
-  return ADMIN_PRODUCTS_LIST_SORT_VALUES.includes(raw as AdminProductListSort)
-    ? (raw as AdminProductListSort)
+  const legacy = raw === 'default' ? 'id_desc' : raw;
+  return ADMIN_PRODUCTS_LIST_SORT_VALUES.includes(legacy as AdminProductListSort)
+    ? (legacy as AdminProductListSort)
     : null;
 }
 
@@ -725,7 +727,7 @@ export default function AdminProductsPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [searchName, setSearchName] = useState('');
   const [searchId, setSearchId] = useState('');
-  const [listSort, setListSort] = useState<AdminProductListSort>('default');
+  const [listSort, setListSort] = useState<AdminProductListSort>('id_desc');
   /** Chỉ fetch sau khi đọc localStorage để không bị sort mặc định một nhịp rồi đổi. */
   const [listSortReady, setListSortReady] = useState(false);
   const [page, setPage] = useState(1);
@@ -938,26 +940,38 @@ export default function AdminProductsPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [imageLocReportOpen]);
 
+  const productsFetchAbortRef = useRef<AbortController | null>(null);
+
   const fetchProducts = useCallback(async () => {
+    productsFetchAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    productsFetchAbortRef.current = ctrl;
     setLoading(true);
     setFetchError(null);
     try {
-      const res = await adminProductAPI.getProducts({
-        skip: (page - 1) * PAGE_SIZE,
-        limit: PAGE_SIZE,
-        q: searchName.trim() || undefined,
-        product_id: searchId.trim() || undefined,
-        sort: listSort,
-      });
+      const hasFilter = Boolean(searchName.trim() || searchId.trim());
+      const res = await adminProductAPI.getProducts(
+        {
+          skip: (page - 1) * PAGE_SIZE,
+          limit: PAGE_SIZE,
+          q: searchName.trim() || undefined,
+          product_id: searchId.trim() || undefined,
+          sort: listSort,
+          skipTotal: !hasFilter,
+        },
+        { signal: ctrl.signal },
+      );
+      if (ctrl.signal.aborted) return;
       setData(res);
     } catch (e) {
+      if (ctrl.signal.aborted) return;
       const msg =
         e instanceof Error ? e.message : 'Lỗi tải danh sách sản phẩm';
       setFetchError(msg.length > 400 ? `${msg.slice(0, 400)}…` : msg);
       showToast('err', msg.length > 220 ? `${msg.slice(0, 220)}…` : msg, 8000);
       setData(null);
     } finally {
-      setLoading(false);
+      if (!ctrl.signal.aborted) setLoading(false);
     }
   }, [page, searchName, searchId, listSort]);
 
@@ -2060,7 +2074,10 @@ export default function AdminProductsPage() {
       if (panel) setImportDetailPanel(panel);
       showToast(tmsg.type, tmsg.msg, tmsg.type === 'err' || panel?.variant === 'warn' ? 8000 : 4500);
 
-      if (job.status !== 'error') fetchProducts();
+      if (job.status !== 'error') {
+        setPage(1);
+        if (page === 1) void fetchProducts();
+      }
     } catch (err: unknown) {
       const raw = (err as Error)?.message || 'Import thất bại';
       setImportDetailPanel({
@@ -2117,7 +2134,10 @@ export default function AdminProductsPage() {
         const { panel, toast: tmsg } = formatImportExcelJobOutcome(job);
         if (panel) setImportDetailPanel(panel);
         showToast(tmsg.type, tmsg.msg, 6000);
-        if (job.status !== 'error') fetchProducts();
+        if (job.status !== 'error') {
+          setPage(1);
+          if (page === 1) void fetchProducts();
+        }
       } catch (err) {
         if (cancelled) return;
         const msg = (err as Error)?.message || 'Lỗi khôi phục job';
@@ -2506,9 +2526,40 @@ export default function AdminProductsPage() {
     if (!confirm(`Xóa ${selectedProductIds.size} sản phẩm đang chọn?`)) return;
     setDeleting(true);
     try {
-      await Promise.all(Array.from(selectedProductIds).map((id) => adminProductAPI.deleteProduct(id)));
-      showToast('ok', `Đã xóa ${selectedProductIds.size} sản phẩm`);
-      await fetchProducts();
+      const ids = Array.from(selectedProductIds);
+      const res = await bulkDeleteAdminProducts(ids);
+      if (res.deleted_count > 0) {
+        showToast('ok', `Đã xóa ${res.deleted_count} sản phẩm`);
+      }
+      if (res.errors.length > 0) {
+        const first = res.errors[0];
+        const more = res.errors.length > 1 ? ` (+${res.errors.length - 1} lỗi khác)` : '';
+        showToast(
+          'err',
+          `${first.product_id}: ${typeof first.detail === 'string' ? first.detail : 'Không xóa được'}${more}`,
+          9000,
+        );
+      }
+      if (res.deleted_count === 0 && res.errors.length === 0) {
+        showToast('err', 'Không xóa được sản phẩm nào');
+      }
+      if (res.deleted_count > 0) {
+        const removed = new Set(res.deleted);
+        setData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            products: prev.products.filter((p) => !removed.has(p.product_id)),
+            total:
+              typeof prev.total === 'number'
+                ? Math.max(0, prev.total - res.deleted_count)
+                : prev.total,
+          };
+        });
+      }
+      setSelectedProductIds(new Set());
+      setPage(1);
+      void fetchProducts();
     } catch (err: unknown) {
       showToast('err', (err as Error)?.message || 'Xóa thất bại');
     } finally {
@@ -4301,10 +4352,10 @@ export default function AdminProductsPage() {
                   className="w-full h-9 rounded-lg border border-gray-300 px-3 text-sm bg-white"
                   aria-label="Sắp xếp danh sách sản phẩm"
                 >
-                  <option value="default">ID sản phẩm (mặc định)</option>
-                  <option value="views_desc">Nhiều lượt xem nhất</option>
-                  <option value="newest">Từ mới đến cũ</option>
-                  <option value="oldest">Từ cũ đến mới</option>
+                  <option value="id_desc">Theo ID</option>
+                  <option value="newest">Mới nhất trước</option>
+                  <option value="oldest">Cũ nhất trước</option>
+                  <option value="views_desc">Nhiều lượt xem nhất trước</option>
                 </select>
               </div>
               <div className="flex flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-1 xl:justify-end">
@@ -4479,7 +4530,12 @@ export default function AdminProductsPage() {
         {/* Table */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           {loading ? (
-            <div className="p-12 text-center text-gray-500">Đang tải...</div>
+            <div className="p-12 text-center text-gray-500 space-y-2">
+              <p>Đang tải danh sách sản phẩm…</p>
+              <p className="text-xs text-gray-400 max-w-md mx-auto">
+                Catalog lớn có thể mất 10–30 giây. Nếu quá lâu, kiểm tra FastAPI (cổng 8001) đang chạy và bấm Thử lại.
+              </p>
+            </div>
           ) : fetchError ? (
             <div className="p-12 text-center space-y-4">
               <p className="text-red-600 whitespace-pre-wrap max-w-2xl mx-auto">{fetchError}</p>
@@ -4495,16 +4551,25 @@ export default function AdminProductsPage() {
             <>
               <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50/90 text-sm text-gray-700">
                 <span className="font-semibold tabular-nums text-gray-900">
-                  {data.total.toLocaleString('vi-VN')}
+                  {data.total >= 0 ? data.total.toLocaleString('vi-VN') : '—'}
                 </span>{' '}
                 sản phẩm trong danh sách
+                {data.total < 0 ? (
+                  <span className="text-gray-500 text-xs ml-1">(đang bỏ đếm tổng để tải nhanh)</span>
+                ) : null}
                 {totalPages > 1 ? (
                   <span className="text-gray-500">
                     {' '}
                     · Trang này:{' '}
                     <span className="tabular-nums text-gray-700">{data.products.length.toLocaleString('vi-VN')}</span>
-                    {' / '}
-                    <span className="tabular-nums text-gray-700">{data.total.toLocaleString('vi-VN')}</span>
+                    {data.total >= 0 ? (
+                      <>
+                        {' / '}
+                        <span className="tabular-nums text-gray-700">
+                          {data.total.toLocaleString('vi-VN')}
+                        </span>
+                      </>
+                    ) : null}
                   </span>
                 ) : null}
               </div>
@@ -4630,6 +4695,15 @@ export default function AdminProductsPage() {
                                     title="Bấm để sửa ID"
                                   >
                                     {p.product_id || String(p.id)}
+                                  </span>
+                                )}
+                                {(p.is_warehouse_clearance === true ||
+                                  String(p.product_id || '').includes('/')) && (
+                                  <span
+                                    className="mt-0.5 block w-fit rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-900"
+                                    title="Sản phẩm kho thanh lý (id có dấu /)"
+                                  >
+                                    Kho thanh lý
                                   </span>
                                 )}
                               </td>
@@ -4855,7 +4929,8 @@ export default function AdminProductsPage() {
               {/* Pagination: 100 sản phẩm 1 trang */}
               <div className="flex items-center justify-between border-t border-gray-200 px-4 py-3 bg-gray-50">
                 <span className="text-sm text-gray-600">
-                  Trang {page} / {totalPages} — Tổng {data.total} sản phẩm (100/trang)
+                  Trang {page} / {totalPages}
+                  {data.total >= 0 ? ` — Tổng ${data.total.toLocaleString('vi-VN')} sản phẩm` : ''} (100/trang)
                 </span>
                 <div className="flex gap-2">
                   <button

@@ -596,6 +596,32 @@ def _find_matching_pending_sepay_deposit(
     return None
 
 
+def _apply_sepay_deposit_finalize(
+    db: Session,
+    order: Order,
+    amount: Decimal,
+    sepay_id_str: str,
+    reference: str,
+    data: Dict[str, Any],
+    pending_payment: Optional[Payment],
+) -> Tuple[bool, str]:
+    """Ghi nhận cọc + giữ tồn kho. Trả (ok, message_code)."""
+    from app.services.warehouse_stock import WarehouseStockError
+
+    try:
+        _finalize_sepay_deposit_success(
+            db, order, amount, sepay_id_str, reference, data, pending_payment
+        )
+        return True, "ok"
+    except WarehouseStockError as exc:
+        logger.warning(
+            "SePay deposit blocked warehouse stock order_id=%s: %s",
+            order.id,
+            exc.message,
+        )
+        return False, "warehouse_out_of_stock"
+
+
 def _finalize_sepay_deposit_success(
     db: Session,
     order: Order,
@@ -647,8 +673,16 @@ def _finalize_sepay_deposit_success(
 
     commission = affiliate_svc.grant_deposit_commission_for_order(db, order)
     from app.services import order_shipment_timeline as shipment_svc
+    from app.services.warehouse_stock import (
+        WarehouseStockError,
+        reload_order_with_items,
+        reserve_warehouse_stock_for_order,
+    )
 
     shipment_svc.ensure_shipment_timeline(db, order)
+    order_loaded = reload_order_with_items(db, order.id)
+    if order_loaded:
+        reserve_warehouse_stock_for_order(db, order_loaded)
     db.commit()
     if commission and order.id:
         affiliate_svc.notify_referrer_deposit_commission_task(order.id)
@@ -721,7 +755,7 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
                     amount,
                     getattr(direct_pending, "id", None),
                 )
-                _finalize_sepay_deposit_success(
+                ok_fin, fin_msg = _apply_sepay_deposit_finalize(
                     db,
                     direct_order,
                     amount,
@@ -730,6 +764,8 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
                     data,
                     direct_pending,
                 )
+                if not ok_fin:
+                    return False, fin_msg, None
                 return True, "ok", direct_order.id
 
     # --- Luồng B: khớp bản ghi Payment PENDING đã tạo khi GET sepay-deposit-info (ổn định hơn parse SMS) ---
@@ -754,7 +790,11 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
                 dep,
                 order.id,
             )
-        _finalize_sepay_deposit_success(db, order, amount, sepay_id_str, reference, data, pending)
+        ok_fin, fin_msg = _apply_sepay_deposit_finalize(
+            db, order, amount, sepay_id_str, reference, data, pending
+        )
+        if not ok_fin:
+            return False, fin_msg, None
         return True, "ok", order.id
 
     # --- Legacy: không có pending (khách chưa mở API cọc sau khi deploy / QR cũ) ---
@@ -800,7 +840,11 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
 
     dep = Decimal(str(order.deposit_amount))
     if _amount_equal(amount, dep):
-        _finalize_sepay_deposit_success(db, order, amount, sepay_id_str, reference, data, None)
+        ok_fin, fin_msg = _apply_sepay_deposit_finalize(
+            db, order, amount, sepay_id_str, reference, data, None
+        )
+        if not ok_fin:
+            return False, fin_msg, None
         return True, "ok", order.id
 
     # Legacy: đơn + nội dung OK nhưng orders.deposit_amount lệch số tiền thực chuyển — thường do sửa đơn sau khi
@@ -814,7 +858,11 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
                 dep,
                 order.id,
             )
-        _finalize_sepay_deposit_success(db, order, amount, sepay_id_str, reference, data, loose_pending)
+        ok_fin, fin_msg = _apply_sepay_deposit_finalize(
+            db, order, amount, sepay_id_str, reference, data, loose_pending
+        )
+        if not ok_fin:
+            return False, fin_msg, None
         return True, "ok", order.id
 
     return False, "amount_mismatch", None

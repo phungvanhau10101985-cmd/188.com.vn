@@ -7,19 +7,18 @@ import { apiClient } from '@/lib/api-client';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
+import {
+  mergeProductSnapshotFromApi,
+  snapshotNeedsClearanceEnrich,
+  snapshotNeedsProductRefresh,
+  snapshotProductDataAsProduct,
+} from '@/lib/viewed-product-card';
 
 interface ViewedItem {
   id: number;
   product_id: number;
-  product_data?: {
-    id?: number;
-    product_id?: string;
-    name?: string;
-    price?: number;
-    main_image?: string;
-    brand_name?: string;
-    slug?: string;
-  };
+  product_data?: Record<string, unknown>;
   viewed_at?: string;
 }
 
@@ -41,25 +40,15 @@ export default function DaXemPage() {
         const raw = Array.isArray(list) ? list : [];
         const enriched = await Promise.all(
           raw.map(async (item: ViewedItem) => {
-            const data = item.product_data || {};
-            const needsEnrich =
-              !data.name || data.price == null || data.price === undefined || !data.main_image;
-            if (!needsEnrich) return item;
+            const data = (item.product_data || {}) as Record<string, unknown>;
+            const needsRefresh =
+              snapshotNeedsProductRefresh(data) || snapshotNeedsClearanceEnrich(data);
+            if (!needsRefresh) return item;
             try {
               const product = await apiClient.getProductById(item.product_id);
               return {
                 ...item,
-                product_data: {
-                  ...data,
-                  id: product.id,
-                  code: product.code,
-                  product_id: product.product_id,
-                  name: product.name,
-                  price: product.price,
-                  main_image: product.main_image,
-                  brand_name: product.brand_name ?? data.brand_name,
-                  slug: product.slug ?? data.slug,
-                },
+                product_data: mergeProductSnapshotFromApi(data, product),
               };
             } catch {
               return item;
@@ -107,7 +96,7 @@ export default function DaXemPage() {
         </div>
 
         {loading ? (
-          <div className="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-2 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-2 sm:gap-3 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">
             {[...Array(6)].map((_, i) => (
               <div
                 key={i}
@@ -137,11 +126,12 @@ export default function DaXemPage() {
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-2 sm:gap-3 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">
             {items.map((item, index) => {
               const data = item.product_data || {};
-              const name = data.name || `Sản phẩm #${item.product_id}`;
-              const price = data.price ?? 0;
-              const pathSeg = productPathSlugFromApi(data.slug, String(item.product_id));
+              const cardProduct = snapshotProductDataAsProduct(item.product_id, data);
+              const name = cardProduct.name;
+              const price = cardProduct.price ?? 0;
+              const pathSeg = productPathSlugFromApi(cardProduct.slug, String(item.product_id));
               const href = `/products/${pathSeg}`;
-              const imageUrl = getOptimizedImage(data.main_image, { fallbackStrategy: 'local' });
+              const imageUrl = getOptimizedImage(cardProduct.main_image, { fallbackStrategy: 'local' });
 
               return (
                 <article
@@ -164,14 +154,15 @@ export default function DaXemPage() {
                         {name}
                       </h2>
                     </Link>
-                    {data.brand_name && (
+                    {cardProduct.brand_name && (
                       <p className="mt-0.5 line-clamp-1 text-[11px] text-gray-500 sm:text-xs md:text-sm">
-                        {data.brand_name}
+                        {cardProduct.brand_name}
                       </p>
                     )}
                     <p className="mt-1.5 break-words text-sm font-bold tabular-nums text-[#ea580c] sm:mt-2 md:text-lg">
                       {formatVnd(price)}
                     </p>
+                    <ProductCardClearanceMeta product={cardProduct} compact className="mt-1.5" />
                     <Link
                       href={href}
                       className="mt-2 inline-flex min-h-[44px] items-center justify-center rounded-md text-xs font-semibold text-[#ea580c] underline decoration-[#ea580c]/50 underline-offset-2 hover:decoration-[#ea580c] md:mt-3 md:min-h-0 md:w-full md:rounded-lg md:bg-[#ea580c] md:px-3 md:py-2 md:text-center md:text-sm md:font-medium md:text-white md:no-underline md:hover:bg-orange-600"

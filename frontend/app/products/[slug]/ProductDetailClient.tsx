@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useLayoutEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -29,6 +29,7 @@ import {
   searchParamsToEncodedQueryString,
 } from '@/lib/product-related-tabs';
 import { cartLineMainImage } from '@/lib/product-color-variant';
+import { warehouseCartProductDataExtras } from '@/lib/warehouse-clearance';
 import { filterVisibleWebImageUrls } from '@/lib/image-utils';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
 import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
@@ -65,6 +66,10 @@ export default function ProductDetailClient({
   const stickyBarRef = useRef<HTMLDivElement>(null);
   const menuCloseTimerRef = useRef<number | null>(null);
   const { addToCart, isLoading: cartLoading, getCartItemCount } = useCart();
+  const [uiCartLoading, setUiCartLoading] = useState(false);
+  useLayoutEffect(() => {
+    setUiCartLoading(cartLoading);
+  }, [cartLoading]);
   const { isAuthenticated, user, isLoading: authLoading } = useAuth();
   const [accountNavReady, setAccountNavReady] = useState(false);
   const { refreshFavorites, favoriteCount } = useFavorites();
@@ -200,11 +205,14 @@ export default function ProductDetailClient({
         product_id: p.product_id,
         name: p.name,
         price: p.price,
+        list_price:
+          p.original_price != null && p.original_price > (p.price ?? 0) ? p.original_price : p.price,
         main_image: lineImg,
         brand_name: p.brand_name,
         available: p.available,
         original_price: p.original_price,
         slug: p.slug,
+        ...warehouseCartProductDataExtras(p),
       },
     };
     if (!isAuthenticated) {
@@ -228,6 +236,8 @@ export default function ProductDetailClient({
       if (message.includes('Authentication required') || message.includes('401')) {
         pushToast({ title: 'Vui lòng đăng nhập lại', description: 'Phiên đăng nhập đã hết hạn.', variant: 'info', durationMs: 2500 });
         router.push(buildAuthLoginHrefFromFullPath(getBrowserReturnLocation()));
+      } else if (/đã có.*trong giỏ|chỉ còn \d+/i.test(message)) {
+        pushToast({ title: 'Không thể tăng số lượng', description: message, variant: 'info', durationMs: 3500 });
       } else {
         pushToast({ title: 'Không thể thêm vào giỏ hàng', description: message, variant: 'error', durationMs: 3000 });
       }
@@ -309,11 +319,14 @@ export default function ProductDetailClient({
         product_id: p.product_id,
         name: p.name,
         price: p.price,
+        list_price:
+          p.original_price != null && p.original_price > (p.price ?? 0) ? p.original_price : p.price,
         main_image: lineImg,
         brand_name: p.brand_name,
         available: p.available,
         original_price: p.original_price,
         slug: p.slug,
+        ...warehouseCartProductDataExtras(p),
       },
     };
     if (!isAuthenticated) {
@@ -401,7 +414,7 @@ export default function ProductDetailClient({
         <ProductDetailMobile
           product={product}
           isFavorited={isFavorited}
-          isCartLoading={cartLoading}
+          isCartLoading={uiCartLoading}
           onAddToCart={handleAddToCart}
           onBuyNow={handleBuyNow}
           onToggleFavorite={handleToggleFavorite}
@@ -687,7 +700,7 @@ export default function ProductDetailClient({
                 onBuyNow={handleBuyNow}
                 onOpenQA={() => setQaModalOpen(true)}
                 onOpenReviews={() => setReviewsModalOpen(true)}
-                isCartLoading={cartLoading}
+                isCartLoading={uiCartLoading}
                 isFavorited={isFavorited}
                 onColorImageChange={setSelectedColorImage}
               />

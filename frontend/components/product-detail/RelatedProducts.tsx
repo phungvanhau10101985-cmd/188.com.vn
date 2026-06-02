@@ -22,6 +22,7 @@ import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
+import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
 
 /** Lấy đủ cho lưới 5 + «Xem thêm»; tránh limit=120 + COUNT(*) trên PDP. */
 const RELATED_PDP_FETCH_LIMIT = 36;
@@ -104,6 +105,8 @@ function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSi
             <span className="text-xs text-gray-500 line-through decoration-1 decoration-gray-400">{formatPrice(product.original_price)}</span>
           ) : null}
         </div>
+
+        <ProductCardClearanceMeta product={product} compact className="mt-1" />
 
         {typeof product.purchases === 'number' && product.purchases > 0 && (
           <div className="mt-1 text-[10px] text-gray-500">Đã bán {product.purchases}</div>

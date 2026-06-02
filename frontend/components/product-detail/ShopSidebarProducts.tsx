@@ -13,6 +13,7 @@ import { excelCell } from '@/lib/product-related-tabs';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
+import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
 
 interface ShopSidebarProductsProps {
   currentProduct: Product;
@@ -106,6 +107,7 @@ export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProdu
                     {formatPrice(product.price)}
                   </div>
                 )}
+                <ProductCardClearanceMeta product={product} compact className="mt-1 w-full max-w-[8.5rem]" />
               </Link>
             );
           })}

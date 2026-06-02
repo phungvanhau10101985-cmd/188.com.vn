@@ -13,8 +13,10 @@ import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
 import SiteSaleProductBadge from '@/components/SiteSaleProductBadge';
 import SiteSaleCountdownChip from '@/components/SiteSaleCountdownChip';
+import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
 import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
+import { productShowsClearanceOnCard } from '@/lib/warehouse-clearance';
 
 type ResolvedProductPricing = ReturnType<typeof resolveProductDisplayPricing>;
 
@@ -431,11 +433,21 @@ export default function ProductCard({
           )}
         </div>
 
+        <ProductCardClearanceMeta
+          product={product}
+          compact={size === 'small'}
+          className={size === 'small' ? 'mt-1' : 'mt-1.5'}
+        />
+
         {/* Stats */}
         <div className="flex justify-between items-center text-xs text-gray-500">
           <span>Đã bán: {product.purchases || 0}</span>
-          <span className={`font-medium ${available ? 'text-green-600' : 'text-red-600'}`}>
-            {available ? 'Còn hàng' : 'Hết hàng'}
+          <span
+            className={`font-medium ${
+              available || productShowsClearanceOnCard(product) ? 'text-green-600' : 'text-red-600'
+            }`}
+          >
+            {available || productShowsClearanceOnCard(product) ? 'Còn hàng' : 'Hết hàng'}
           </span>
         </div>
 
@@ -584,6 +596,8 @@ export const SimpleProductCard = ({
             )}
           </div>
         )}
+
+        <ProductCardClearanceMeta product={product} compact className="mb-1.5" />
 
         {/* Stats */}
         <div className="flex justify-between items-center text-xs text-gray-500">

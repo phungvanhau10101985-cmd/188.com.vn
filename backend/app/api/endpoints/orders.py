@@ -117,28 +117,42 @@ def create_order(
     """
     try:
         # 1. Validate items and calculate deposit
+        from app.services.warehouse_clearance import (
+            is_warehouse_cart_product,
+            resolve_checkout_line_prices,
+        )
+
         items = []
         total_amount = Decimal('0')
         list_amount = Decimal('0')
+        regular_subtotal = Decimal('0')
+        regular_list_subtotal = Decimal('0')
+        warehouse_subtotal = Decimal('0')
         requires_deposit = False
+        warehouse_checkout_lines: list = []
         
         for item in order_data.items:
             product = crud.product.get_product(db, item.product_id)
             if not product:
                 raise HTTPException(status_code=404, detail=f"Product {item.product_id} not found")
+            if is_warehouse_cart_product(product):
+                warehouse_checkout_lines.append((product, int(item.quantity or 0)))
             
             # Check if product requires deposit
             if product.deposit_require:
                 requires_deposit = True
             
-            # Calculate item total (product.price is Float in DB → convert to Decimal)
-            from app.services.sale_calendar import effective_unit_price
-
-            list_unit = Decimal(str(product.price or 0))
-            unit_price = Decimal(str(effective_unit_price(db, float(product.price or 0), user=current_user)))
+            unit_f, list_f = resolve_checkout_line_prices(db, product, user=current_user)
+            unit_price = Decimal(str(unit_f))
+            list_unit = Decimal(str(list_f))
             item_total = unit_price * item.quantity
             total_amount += item_total
             list_amount += list_unit * item.quantity
+            if is_warehouse_cart_product(product):
+                warehouse_subtotal += item_total
+            else:
+                regular_subtotal += item_total
+                regular_list_subtotal += list_unit * item.quantity
 
             items.append({
                 "product_id": product.id,
@@ -153,6 +167,17 @@ def create_order(
                 "requires_deposit": product.deposit_require,
                 "deposit_amount": unit_price * Decimal('0.3') if product.deposit_require else Decimal('0')
             })
+
+        if warehouse_checkout_lines:
+            from app.services.warehouse_stock import (
+                WarehouseStockError,
+                validate_warehouse_checkout_lines,
+            )
+
+            try:
+                validate_warehouse_checkout_lines(db, warehouse_checkout_lines)
+            except WarehouseStockError as exc:
+                raise HTTPException(status_code=400, detail=exc.message) from exc
         
         # --- PROMO + BIRTHDAY + LOYALTY DISCOUNT (chỉ khi đã đăng nhập) ---
         birthday_discount_amount = Decimal('0')
@@ -162,13 +187,13 @@ def create_order(
         applied_promotion = None
         applied_grant_id = None
 
-        if current_user is not None:
+        if current_user is not None and regular_subtotal > 0:
             try:
                 breakdown = calculate_order_discounts(
                     db,
                     user=current_user,
-                    subtotal=total_amount,
-                    list_subtotal=list_amount,
+                    subtotal=regular_subtotal,
+                    list_subtotal=regular_list_subtotal,
                     promo_code=order_data.promo_code,
                 )
             except PromoValidationError as exc:
@@ -181,9 +206,10 @@ def create_order(
             applied_promotion = breakdown.applied_promotion
             applied_grant_id = breakdown.applied_grant_id
             
-        # Apply discount
+        # Apply discount (chỉ hàng thường — đồng bộ giỏ hàng)
         total_discount_amount = birthday_discount_amount + loyalty_discount_amount + welcome_discount_amount
-        total_amount_after_discount = max(Decimal('0'), total_amount - total_discount_amount)
+        regular_after_discount = max(Decimal('0'), regular_subtotal - total_discount_amount)
+        total_amount_after_discount = regular_after_discount + warehouse_subtotal
 
         # 2. Calculate deposit
         deposit_type = order_data.deposit_type
@@ -275,6 +301,21 @@ def create_order(
 
         if shipment_svc.should_have_timeline(order):
             shipment_svc.ensure_shipment_timeline(db, order)
+
+        if not requires_deposit:
+            from app.services.warehouse_stock import (
+                WarehouseStockError,
+                reload_order_with_items,
+                reserve_warehouse_stock_for_order,
+            )
+
+            order_loaded = reload_order_with_items(db, order.id)
+            if order_loaded:
+                try:
+                    reserve_warehouse_stock_for_order(db, order_loaded)
+                except WarehouseStockError as exc:
+                    db.rollback()
+                    raise HTTPException(status_code=400, detail=exc.message) from exc
 
         db.commit()
         db.refresh(order)
@@ -730,7 +771,7 @@ def admin_resume_ems_tracking_refresh_job(
 
 @router.get(
     "/admin/shipping/ems-tracking-refresh/active",
-    response_model=shipment_schemas.EmsTrackingRefreshJobResponse,
+    response_model=shipment_schemas.EmsTrackingRefreshActiveResponse,
 )
 def admin_get_active_ems_tracking_refresh_job(
     current_admin: models.AdminUser = Depends(require_module_permission("orders")),
@@ -738,8 +779,8 @@ def admin_get_active_ems_tracking_refresh_job(
     """Job tra EMS đang chạy gần nhất (queued/running) — dùng khi F5 trang admin."""
     job = ems_refresh_svc.get_active_tracking_refresh_job()
     if not job:
-        raise HTTPException(status_code=404, detail="Không có job tra EMS đang chạy.")
-    return job
+        return shipment_schemas.EmsTrackingRefreshActiveResponse(active=False, job=None)
+    return shipment_schemas.EmsTrackingRefreshActiveResponse(active=True, job=job)
 
 
 @router.get(
@@ -1009,6 +1050,30 @@ def admin_approve_return_received(
 
 
 @router.post(
+    "/admin/shipping/shop-return-preview",
+    response_model=shipment_schemas.ShopReturnConfirmResponse,
+)
+def admin_preview_shop_returns_bulk(
+    body: shipment_schemas.ShopReturnConfirmRequest,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Tra cứu trạng thái EMS/đơn — không xác nhận."""
+    del current_admin
+    text = (body.text or "").strip()
+    codes = [str(c).strip() for c in (body.order_codes or []) if str(c).strip()]
+    if not text and not codes:
+        raise HTTPException(status_code=400, detail="Nhập ít nhất một mã.")
+    try:
+        if text:
+            return shop_return_confirm_svc.preview_shop_returns_from_text(db, text)
+        return shop_return_confirm_svc.preview_shop_returns_from_text(db, "\n".join(codes))
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
     "/admin/shipping/shop-return-confirm",
     response_model=shipment_schemas.ShopReturnConfirmResponse,
 )
@@ -1036,6 +1101,86 @@ def admin_confirm_shop_returns_bulk(
             admin_id=current_admin.id,
             note=body.note,
         )
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/admin/shipping/resolve-return-warehouse-sku",
+    response_model=shipment_schemas.ResolveReturnWarehouseSkuResponse,
+)
+def admin_resolve_return_warehouse_sku(
+    code: str = Query(..., min_length=1, description="Mã EMS / tham chiếu / DHxxx"),
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Trích mã SKU cột H file EMS → điền ô nhập kho thanh lý."""
+    data = shop_return_confirm_svc.resolve_warehouse_sku_for_return_intake(db, code)
+    return shipment_schemas.ResolveReturnWarehouseSkuResponse(**data)
+
+
+@router.get(
+    "/admin/shipping/return-warehouse-lookup",
+    response_model=shipment_schemas.ReturnWarehouseLookupResponse,
+)
+def admin_return_warehouse_lookup(
+    sku: str = Query(..., min_length=1, description="Mã SKU gốc hoặc mã kho H0723/40/3"),
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Tra cứu màu/size của SKU để nhập hàng hoàn vào kho thanh lý."""
+    from app.services import return_warehouse_intake as rw_intake_svc
+
+    try:
+        data = rw_intake_svc.lookup_return_intake_catalog(db, sku)
+        return shipment_schemas.ReturnWarehouseLookupResponse(**data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/admin/shipping/return-warehouse-intake",
+    response_model=shipment_schemas.ReturnWarehouseIntakeResponse,
+)
+def admin_return_warehouse_intake(
+    body: shipment_schemas.ReturnWarehouseIntakeRequest,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Nhập hàng hoàn vào kho thanh lý — tạo/cộng tồn dòng is_warehouse_clearance."""
+    from app.services import return_warehouse_intake as rw_intake_svc
+
+    try:
+        result = rw_intake_svc.intake_return_to_warehouse(
+            db,
+            base_sku=body.sku,
+            color=body.color,
+            size=body.size or "",
+            quantity=body.quantity,
+            color_index=body.color_index,
+            color_image=body.color_image,
+            warehouse_product_id=body.warehouse_product_id,
+            admin_id=current_admin.id,
+        )
+        pid = result["product_id"]
+        msg = (
+            f"Đã cộng {result['quantity_added']} vào tồn «{pid}» "
+            f"(tồn {result['available_before']} → {result['available_after']})."
+            if result["action"] == "updated"
+            else f"Đã tạo dòng kho thanh lý «{pid}» với tồn {result['available_after']}."
+        )
+        return shipment_schemas.ReturnWarehouseIntakeResponse(
+            ok=True,
+            action=result["action"],
+            product_id=pid,
+            available_before=result["available_before"],
+            available_after=result["available_after"],
+            quantity_added=result["quantity_added"],
+            message=msg,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1217,6 +1362,19 @@ def admin_confirm_deposit(
         order.remaining_amount = order.total_amount - order.deposit_paid
         commission = affiliate_svc.grant_deposit_commission_for_order(db, order)
         shipment_svc.ensure_shipment_timeline(db, order)
+        from app.services.warehouse_stock import (
+            WarehouseStockError,
+            reload_order_with_items,
+            reserve_warehouse_stock_for_order,
+        )
+
+        order_loaded = reload_order_with_items(db, order.id)
+        if order_loaded:
+            try:
+                reserve_warehouse_stock_for_order(db, order_loaded)
+            except WarehouseStockError as exc:
+                db.rollback()
+                raise HTTPException(status_code=400, detail=exc.message) from exc
     else:
         # Payment rejected
         order.status = OrderStatusEnum.WAITING_DEPOSIT
@@ -1288,6 +1446,19 @@ def admin_confirm_deposit_manual(
     shipment_svc.ensure_shipment_timeline(db, order)
     if body.get("confirmation_note"):
         order.admin_notes = (order.admin_notes or "") + "\n[Xác nhận cọc thủ công] " + str(body.get("confirmation_note"))
+    from app.services.warehouse_stock import (
+        WarehouseStockError,
+        reload_order_with_items,
+        reserve_warehouse_stock_for_order,
+    )
+
+    order_loaded = reload_order_with_items(db, order.id)
+    if order_loaded:
+        try:
+            reserve_warehouse_stock_for_order(db, order_loaded)
+        except WarehouseStockError as exc:
+            db.rollback()
+            raise HTTPException(status_code=400, detail=exc.message) from exc
     db.commit()
     db.refresh(order)
     raw_email = deliver_deposit_confirmed_email(order_id)

@@ -43,7 +43,7 @@ class ExcelImporter:
         Template thường gặp: hàng 1 = tên cột (id, sku, ...), hàng 2 = nhãn tiếng Việt, dữ liệu từ hàng 3.
 
         progress_callback(phase, current, total):
-          phase ∈ reading | parsing | database | seo_categories
+          phase ∈ reading | parsing | database | seo_categories | cache_refresh
         """
         try:
             logger.info(f"📥 BẮT ĐẦU IMPORT: {file_path}")

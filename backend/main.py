@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from datetime import datetime
 from pathlib import Path
 import logging
@@ -303,7 +304,8 @@ def load_api_routes():
             print(f"  ⚠️  products: No router attribute")
             failed.append(("products", "No router attribute"))
     except Exception as e:
-        print(f"  ⚠️  products: Skipping - {str(e)[:80]}")
+        print(f"  ❌ products: FAILED TO LOAD - {e}")
+        traceback.print_exc()
         failed.append(("products", str(e)))
     
     # Alias SePay: nhiều deploy gửi toàn bộ /api/* vào FastAPI — SePay đăng ký .../api/sepay-webhook (Next)
@@ -578,11 +580,27 @@ async def global_unhandled_exception(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": msg})
 
 
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Giữ detail từ HTTPException (vd. Product not found) — không ghi đè Endpoint not found."""
+    if exc.status_code == 404:
+        detail = exc.detail
+        if isinstance(detail, dict):
+            content = detail
+        else:
+            content = {"detail": detail if detail else "Not found"}
+        return JSONResponse(status_code=404, content=content)
+    if exc.status_code == 400 and isinstance(exc.detail, (str, dict)):
+        content = exc.detail if isinstance(exc.detail, dict) else {"detail": exc.detail}
+        return JSONResponse(status_code=400, content=content)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 @app.exception_handler(404)
-async def not_found_exception_handler(request, exc):
-    """Custom 404 handler hiển thị available endpoints"""
+async def not_found_exception_handler(request: Request, exc):
+    """404 thật (không khớp route) — gợi ý path; HTTPException 404 xử lý ở handler trên."""
     from fastapi.responses import JSONResponse
-    
+
     paths = sorted(
         {route.path for route in app.routes if hasattr(route, "path") and route.path},
     )

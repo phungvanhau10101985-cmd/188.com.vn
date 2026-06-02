@@ -24,7 +24,11 @@ function targetUrl(req: NextRequest, segments: string[]): string {
   // Bỏ phần rỗng (URL dạng /api/v1/products/ → 308 ở FastAPI khi lặp proxy)
   const segs = segments.filter((s) => s && s.length > 0);
   const path = segs.length ? segs.join('/') : '';
-  const suffix = path ? `/api/v1/${path}` : '/api/v1';
+  let suffix = path ? `/api/v1/${path}` : '/api/v1';
+  // Giữ trailing slash (vd. /products/by-slug/) — FastAPI route `/by-slug/` không khớp `/by-slug?slug=`
+  if (req.nextUrl.pathname.endsWith('/') && !suffix.endsWith('/')) {
+    suffix += '/';
+  }
   const u = new URL(suffix + req.nextUrl.search, backendBase());
   return u.toString();
 }

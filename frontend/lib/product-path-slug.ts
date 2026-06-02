@@ -38,7 +38,8 @@ export function productPathSlugFromApi(slug: string | null | undefined, fallback
       return raw;
     }
   }
-  return raw;
+  // Slug kho thanh lý (…-h0723/40/3) — URL chỉ dùng một segment, không có '/'.
+  return raw.replace(/\//g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
 /** URL PDP công khai — nếu slug đã là URL thì dùng luôn, không ghép SITE_URL thêm lần. */

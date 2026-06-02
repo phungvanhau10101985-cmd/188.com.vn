@@ -1,5 +1,6 @@
 import { cdnUrl } from '@/lib/cdn-url';
 import type { Product } from '@/types/api';
+import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
 
 interface ProductCardProps {
   product: Product;
@@ -95,6 +96,8 @@ export default function ProductCard({ product, onAddToCart, onProductClick }: Pr
             </span>
           )}
         </div>
+
+        <ProductCardClearanceMeta product={product} className="mb-3" />
 
         {/* Rating & Stats */}
         <div className="flex items-center justify-between mb-3 text-sm text-gray-500">
