@@ -21,6 +21,12 @@ from app.models.product import Product as ProductRow
 from app.schemas.product import Product as ProductSchema
 from app.crud.category_hero_suggestions import get_hero_category_tiles, infer_category_gender_priority
 from app.crud.home_hero_category_cache import get_home_hero_tiles_fast
+from app.crud.home_recommendation_block import (
+    HOME_RECOMMENDATION_COHORT_LIMIT_DEFAULT,
+    HOME_RECOMMENDATION_SHOP_LIMIT_DEFAULT,
+    build_home_recommendation_block_rows,
+    serialize_home_recommendation_block,
+)
 from app.crud.user import (
     add_product_view_with_data, get_user_viewed_products,
     get_products_viewed_by_same_age_gender, get_products_same_shop_as_recent_views,
@@ -177,6 +183,51 @@ def get_products_viewed_by_same_age_gender_endpoint(
         logger.exception("Failed to build same-age/gender recommendations")
         db.rollback()
         return {"products": [], "cohort_mode": "popular_fallback"}
+
+
+@router.get("/products/home-recommendation-block", response_model=dict)
+def get_home_recommendation_block_endpoint(
+    response: Response,
+    shop_limit: int = HOME_RECOMMENDATION_SHOP_LIMIT_DEFAULT,
+    cohort_limit: int = HOME_RECOMMENDATION_COHORT_LIMIT_DEFAULT,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
+):
+    """
+    Khối «CÓ THỂ BẠN THÍCH»: same-shop + cohort + lưới đã trộn — một request, dữ liệu tươi.
+    Same-shop và cohort query song song; serialize sale calendar một lần.
+    «Xem thêm» vẫn dùng GET /products/same-shop-as-recent-views với seed/offset.
+    """
+    response.headers["Cache-Control"] = "private, no-store"
+    sid = (x_guest_session_id or "").strip() or None
+    uid = current_user.id if current_user else None
+    try:
+        block = build_home_recommendation_block_rows(
+            user_id=uid,
+            guest_session_id=sid,
+            shop_limit=shop_limit,
+            cohort_limit=cohort_limit,
+        )
+        return serialize_home_recommendation_block(
+            db,
+            block,
+            serialize_products=_serialize_product_rows_for_api,
+            user=current_user,
+        )
+    except Exception:
+        logger.exception("Failed to build home recommendation block")
+        db.rollback()
+        return {
+            "same_shop_products": [],
+            "same_shop_total": 0,
+            "same_shop_seed": None,
+            "same_shop_can_load_more": False,
+            "same_age_gender_products": [],
+            "same_age_gender_cohort_mode": "requires_login" if not uid else "popular_fallback",
+            "mixed_recommendation_products": [],
+            "cohort_badge_product_ids": [],
+        }
 
 
 @router.get("/products/same-shop-as-recent-views", response_model=dict)

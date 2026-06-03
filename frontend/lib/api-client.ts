@@ -18,6 +18,7 @@ import {
   AddressUpdateInput,
   NanoaiSearchResponse,
   SameAgeGenderCohortMode,
+  HomeRecommendationBlockResponse,
   PopularCategoryForProfile,
   PopularCategoryHeroSource,
   HeroCategoryTilesResponse,
@@ -586,6 +587,40 @@ class ApiClient {
   async getPersonalizedHomeFeed(skip = 0, limit = 48): Promise<ProductListResponse> {
     const params = new URLSearchParams({ skip: String(skip), limit: String(limit) });
     return this.fetch<ProductListResponse>(`/user-behavior/products/home-feed?${params}`);
+  }
+
+  /** Khối «CÓ THỂ BẠN THÍCH»: same-shop + cohort + lưới trộn — một request, dữ liệu tươi. */
+  async getHomeRecommendationBlock(
+    shopLimit = 24,
+    cohortLimit = 30
+  ): Promise<HomeRecommendationBlockResponse> {
+    const params = new URLSearchParams({
+      shop_limit: String(shopLimit),
+      cohort_limit: String(cohortLimit),
+    });
+    const empty: HomeRecommendationBlockResponse = {
+      same_shop_products: [],
+      same_shop_total: 0,
+      same_shop_seed: null,
+      same_shop_can_load_more: false,
+      same_age_gender_products: [],
+      same_age_gender_cohort_mode: 'requires_login',
+      mixed_recommendation_products: [],
+      cohort_badge_product_ids: [],
+    };
+    const res = await this.fetch<Partial<HomeRecommendationBlockResponse>>(
+      `/user-behavior/products/home-recommendation-block?${params}`
+    ).catch(() => empty);
+    return {
+      same_shop_products: res?.same_shop_products ?? [],
+      same_shop_total: res?.same_shop_total ?? 0,
+      same_shop_seed: res?.same_shop_seed ?? null,
+      same_shop_can_load_more: Boolean(res?.same_shop_can_load_more),
+      same_age_gender_products: res?.same_age_gender_products ?? [],
+      same_age_gender_cohort_mode: res?.same_age_gender_cohort_mode ?? 'requires_login',
+      mixed_recommendation_products: res?.mixed_recommendation_products ?? [],
+      cohort_badge_product_ids: res?.cohort_badge_product_ids ?? [],
+    };
   }
 
   /** Sản phẩm cùng shop TQ (AM): round-robin theo shop, tối đa 8 SP/shop/trang, ưu tiên subcategory (AC). */

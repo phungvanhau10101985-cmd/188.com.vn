@@ -326,6 +326,18 @@ export type SameAgeGenderCohortMode =
   | 'gender_peers'
   | 'popular_fallback';
 
+/** API /user-behavior/products/home-recommendation-block */
+export interface HomeRecommendationBlockResponse {
+  same_shop_products: Product[];
+  same_shop_total: number;
+  same_shop_seed: number | null;
+  same_shop_can_load_more: boolean;
+  same_age_gender_products: Product[];
+  same_age_gender_cohort_mode: SameAgeGenderCohortMode;
+  mixed_recommendation_products: Product[];
+  cohort_badge_product_ids: number[];
+}
+
 /** Danh mục cấp 3 (cột AD) */
 export interface CategoryLevel3 {
   name: string;
