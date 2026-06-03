@@ -136,6 +136,25 @@ async function assertBlobLooksLikeXlsx(blob: Blob): Promise<void> {
   );
 }
 
+async function downloadAdminGetXlsx(endpoint: string, fallbackFilename: string): Promise<void> {
+  const token = getAdminToken();
+  if (!token) throw new Error('Chưa đăng nhập admin');
+  const url = endpoint.startsWith('http') ? endpoint : `${getApiBaseUrl()}${endpoint}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Tải file mẫu thất bại');
+  }
+  const blob = await res.blob();
+  await assertBlobLooksLikeXlsx(blob);
+  const cd = res.headers.get('Content-Disposition');
+  const m = cd && /filename="?([^";]+)"?/i.exec(cd);
+  const filename = m?.[1]?.trim() || fallbackFilename;
+  await triggerBlobDownloadPreferred(blob, filename);
+}
+
 /** Chuỗi thân thiện từ FastAPI detail (chuỗi | mảng validation | object { message }) */
 function formatFastApiDetail(detail: unknown): string {
   if (detail == null || detail === '') return '';
@@ -3542,6 +3561,9 @@ export const adminShippingAPI = {
       `/orders/admin/shipping/ems-import-batches?limit=${encodeURIComponent(String(limit))}`,
     ),
 
+  downloadEmsImportSample: () =>
+    downloadAdminGetXlsx('/orders/admin/shipping/ems-import/sample', 'file_gui_ems_mau.xlsx'),
+
   importEmsExcel: async (file: File): Promise<EmsShippingImportResult> => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
@@ -3636,6 +3658,12 @@ export const adminShippingAPI = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  downloadShopReturnConfirmSample: () =>
+    downloadAdminGetXlsx(
+      '/orders/admin/shipping/shop-return-confirm-import/sample',
+      'xac_nhan_don_hoan_mau.xlsx',
+    ),
 
   confirmShopReturnsExcel: async (file: File, note?: string): Promise<ShopReturnConfirmResult> => {
     const token = getAdminToken();
@@ -3987,6 +4015,12 @@ export const adminCodSettlementAPI = {
   listBatches: () =>
     fetchAdmin<EmsCodSettlementImportResult>('/orders/admin/shipping/cod-settlement-batches'),
 
+  downloadImportSample: () =>
+    downloadAdminGetXlsx(
+      '/orders/admin/shipping/cod-settlement-import/sample',
+      'doi_soat_cod_mau.xlsx',
+    ),
+
   importExcel: async (file: File): Promise<EmsCodSettlementImportResult> => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
@@ -4063,6 +4097,12 @@ export interface EmsFreightSettlementImportResult {
 export const adminFreightSettlementAPI = {
   listBatches: () =>
     fetchAdmin<EmsFreightSettlementImportResult>('/orders/admin/shipping/freight-settlement-batches'),
+
+  downloadImportSample: () =>
+    downloadAdminGetXlsx(
+      '/orders/admin/shipping/freight-settlement-import/sample',
+      'doi_soat_cuoc_mau.xlsx',
+    ),
 
   importExcel: async (file: File): Promise<EmsFreightSettlementImportResult> => {
     const token = getAdminToken();

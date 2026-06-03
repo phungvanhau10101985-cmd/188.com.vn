@@ -661,6 +661,39 @@ function OpsStatCard({
   );
 }
 
+function ImportSampleDownloadButton({
+  onDownload,
+  onError,
+  className,
+}: {
+  onDownload: () => Promise<void>;
+  onError?: (message: string) => void;
+  className?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => {
+        setBusy(true);
+        void onDownload()
+          .catch((err: unknown) => {
+            onError?.(err instanceof Error ? err.message : 'Tải file mẫu thất bại');
+          })
+          .finally(() => setBusy(false));
+      }}
+      className={
+        className ??
+        'inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50 shrink-0'
+      }
+      aria-label="Tải file Excel mẫu để điền dữ liệu import"
+    >
+      {busy ? 'Đang tải…' : 'Tải file mẫu'}
+    </button>
+  );
+}
+
 function DetailField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="min-w-0">
@@ -2547,22 +2580,27 @@ export default function AdminShippingPage() {
           <strong>cập nhật</strong> COD/đơn/tên; mã mới thì <strong>thêm dòng</strong>. Tra EMS chạy{' '}
           <strong>nền trên server</strong> theo thứ tự (progress bar bên dưới). Cron hàng ngày cập nhật đơn đang giao.
         </p>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
           <input
             ref={fileRef}
             type="file"
             accept=".xlsx,.xlsm"
-            className="block w-full text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
+            className="block w-full sm:flex-1 min-w-[200px] text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
             onChange={(e) => {
               setFile(e.target.files?.[0] ?? null);
               setError(null);
             }}
           />
+          <ImportSampleDownloadButton
+            onDownload={() => adminShippingAPI.downloadEmsImportSample()}
+            onError={setError}
+            className="inline-flex items-center justify-center rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 shrink-0"
+          />
           <button
             type="button"
             onClick={runImport}
             disabled={loading || !file || listLoading}
-            className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 shrink-0"
           >
             {loading ? 'Đang tra EMS…' : 'Import & đối chiếu'}
           </button>
@@ -2629,22 +2667,27 @@ export default function AdminShippingPage() {
           Chỉ sau bước này hệ thống mới ghi <strong>COD EMS trả shop</strong> — hành trình «[COD]Đã thu tiền» là
           bưu tá thu khách, chưa phải trả shop.
         </p>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
           <input
             ref={codFileRef}
             type="file"
             accept=".xls,.xlsx,.xlsm"
-            className="block w-full text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+            className="block w-full sm:flex-1 min-w-[200px] text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
             onChange={(e) => {
               setCodFile(e.target.files?.[0] ?? null);
               setCodError(null);
             }}
           />
+          <ImportSampleDownloadButton
+            onDownload={() => adminCodSettlementAPI.downloadImportSample()}
+            onError={setCodError}
+            className="inline-flex items-center justify-center rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50 shrink-0"
+          />
           <button
             type="button"
             onClick={() => void runCodImport()}
             disabled={codLoading || !codFile || codListLoading}
-            className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 shrink-0"
           >
             {codLoading ? 'Đang đối chiếu COD…' : 'Import đối soát COD'}
           </button>
@@ -2843,16 +2886,21 @@ export default function AdminShippingPage() {
             xác nhận và hiện ô <strong>Nhập kho thanh lý</strong> bên dưới.
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
           <input
             ref={shopReturnFileRef}
             type="file"
             accept=".xls,.xlsx,.xlsm"
-            className="block w-full text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100"
+            className="block w-full sm:flex-1 min-w-[200px] text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100"
             onChange={(e) => {
               setShopReturnFile(e.target.files?.[0] ?? null);
               setShopReturnError(null);
             }}
+          />
+          <ImportSampleDownloadButton
+            onDownload={() => adminShippingAPI.downloadShopReturnConfirmSample()}
+            onError={setShopReturnError}
+            className="inline-flex items-center justify-center rounded-lg border border-orange-300 bg-orange-50 px-4 py-2 text-sm font-medium text-orange-800 hover:bg-orange-100 disabled:opacity-50 shrink-0"
           />
           <button
             type="button"
@@ -2863,7 +2911,7 @@ export default function AdminShippingPage() {
               (!shopReturnText.trim() && !shopReturnFile) ||
               (!shopReturnFile && (shopReturnPreview?.confirmable_count ?? 0) < 1)
             }
-            className="inline-flex items-center justify-center rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:opacity-50"
+            className="inline-flex items-center justify-center rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:opacity-50 shrink-0"
           >
             {shopReturnLoading ? 'Đang xử lý…' : 'Xác nhận đơn hoàn'}
           </button>
@@ -3206,22 +3254,27 @@ export default function AdminShippingPage() {
           Mã phải đã có trong bảng vận chuyển và <strong>chưa từng đối soát cước</strong>.
           Cước phí &gt; <strong>70.000 đ</strong> sẽ được cảnh báo để xem lại.
         </p>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
           <input
             ref={freightFileRef}
             type="file"
             accept=".xls,.xlsx,.xlsm"
-            className="block w-full text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100"
+            className="block w-full sm:flex-1 min-w-[200px] text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100"
             onChange={(e) => {
               setFreightFile(e.target.files?.[0] ?? null);
               setFreightError(null);
             }}
           />
+          <ImportSampleDownloadButton
+            onDownload={() => adminFreightSettlementAPI.downloadImportSample()}
+            onError={setFreightError}
+            className="inline-flex items-center justify-center rounded-lg border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-800 hover:bg-violet-100 disabled:opacity-50 shrink-0"
+          />
           <button
             type="button"
             onClick={() => void runFreightImport()}
             disabled={freightLoading || !freightFile || freightListLoading}
-            className="inline-flex items-center justify-center rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+            className="inline-flex items-center justify-center rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 shrink-0"
           >
             {freightLoading ? 'Đang đối soát cước…' : 'Import đối soát cước'}
           </button>

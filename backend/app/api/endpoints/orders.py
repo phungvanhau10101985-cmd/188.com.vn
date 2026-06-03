@@ -1,7 +1,8 @@
 # backend/app/api/endpoints/orders.py - COMPLETE ORDER API WITH DEPOSIT
+import io
 import re
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, status, BackgroundTasks, Header, UploadFile, File, Form
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
@@ -33,6 +34,7 @@ from app.services import ems_cod_settlement_import as cod_settlement_svc
 from app.services import ems_freight_settlement_import as freight_settlement_svc
 from app.services import shipping_operations as shipping_ops_svc
 from app.services import shop_return_confirm as shop_return_confirm_svc
+from app.services import ems_import_sample_templates as ems_sample_tpl_svc
 from app.schemas import order_shipment as shipment_schemas
 
 
@@ -723,6 +725,19 @@ def admin_list_ems_import_batches(
     return ems_import_svc.list_ems_import_batches(db, limit=limit)
 
 
+@router.get("/admin/shipping/ems-import/sample")
+def admin_download_ems_shipment_import_sample(
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Tải file Excel mẫu import gửi EMS (file gui ems.xlsx)."""
+    content, filename = ems_sample_tpl_svc.build_ems_shipment_sample_xlsx()
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/admin/shipping/ems-import", response_model=shipment_schemas.EmsShippingImportResponse)
 async def admin_import_ems_shipment_excel(
     file: UploadFile = File(...),
@@ -877,6 +892,19 @@ def admin_list_cod_settlement_batches(
 ):
     """Danh sách các lần import đối soát COD đã thanh toán."""
     return cod_settlement_svc.list_cod_settlement_batches(db)
+
+
+@router.get("/admin/shipping/cod-settlement-import/sample")
+def admin_download_cod_settlement_import_sample(
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Tải file Excel mẫu đối soát COD EMS trả shop."""
+    content, filename = ems_sample_tpl_svc.build_cod_settlement_sample_xlsx()
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post(
@@ -1186,6 +1214,19 @@ def admin_return_warehouse_intake(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/admin/shipping/shop-return-confirm-import/sample")
+def admin_download_shop_return_confirm_import_sample(
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Tải file Excel mẫu xác nhận đơn hoàn đã trả shop."""
+    content, filename = ems_sample_tpl_svc.build_shop_return_confirm_sample_xlsx()
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post(
     "/admin/shipping/shop-return-confirm-import",
     response_model=shipment_schemas.ShopReturnConfirmResponse,
@@ -1230,6 +1271,19 @@ def admin_list_freight_settlement_batches(
 ):
     """Danh sách các lần import đối soát cước EMS."""
     return freight_settlement_svc.list_freight_settlement_batches(db)
+
+
+@router.get("/admin/shipping/freight-settlement-import/sample")
+def admin_download_freight_settlement_import_sample(
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Tải file Excel mẫu đối soát cước EMS."""
+    content, filename = ems_sample_tpl_svc.build_freight_settlement_sample_xlsx()
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post(

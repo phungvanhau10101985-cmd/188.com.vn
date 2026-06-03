@@ -49,6 +49,54 @@ function getAllVariantKeys(colors: ProductColor[], sizes: string[]): string[] {
   return ['default'];
 }
 
+/** Tổng tiền theo số lượng — hiển thị ngay dưới bộ chọn số lượng (mobile + desktop). */
+function VariantModalLineTotal({
+  quantity,
+  unitPrice,
+  savingsPerUnit,
+  sitePhase,
+  sitePercent,
+  compact,
+}: {
+  quantity: number;
+  unitPrice: number;
+  savingsPerUnit: number;
+  sitePhase?: string;
+  sitePercent?: number;
+  compact?: boolean;
+}) {
+  const subtotal = unitPrice * quantity;
+  const savingsTotal = savingsPerUnit * quantity;
+  const showSavings =
+    savingsTotal > 0 || (sitePhase === 'teaser' && (sitePercent ?? 0) > 0);
+
+  return (
+    <div
+      className={`flex items-baseline justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 ${
+        compact ? 'mt-2' : 'mt-2.5'
+      }`}
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <span className={`font-semibold text-gray-900 ${compact ? 'text-[11px]' : 'text-xs'}`}>
+        Tổng tiền ({quantity} sp):
+      </span>
+      <div className="text-right">
+        <span className={`font-bold text-[#ea580c] ${compact ? 'text-base' : 'text-lg'}`}>
+          {formatPrice(subtotal)}
+        </span>
+        {showSavings ? (
+          <p className={`font-medium text-emerald-600 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
+            {sitePhase === 'teaser'
+              ? `Tiết kiệm dự kiến ~${formatPrice(savingsTotal)}`
+              : `Tiết kiệm ${formatPrice(savingsTotal)}`}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 interface ProductVariantModalProps {
   product: Product;
   isOpen: boolean;
@@ -494,6 +542,15 @@ export default function ProductVariantModal({
                     +
                   </button>
                 </div>
+                {!orderingWarehouse ? (
+                  <VariantModalLineTotal
+                    quantity={effectiveQuantity}
+                    unitPrice={displayPrice}
+                    savingsPerUnit={pricing.savingsAmount}
+                    sitePhase={pricing.sitePhase}
+                    sitePercent={pricing.sitePercent}
+                  />
+                ) : null}
               </div>
             </div>
           </div>
@@ -660,6 +717,16 @@ export default function ProductVariantModal({
                     (Còn {remainingDisplay} sản phẩm)
                   </span>
                 </div>
+                {!orderingWarehouse ? (
+                  <VariantModalLineTotal
+                    quantity={effectiveQuantity}
+                    unitPrice={displayPrice}
+                    savingsPerUnit={pricing.savingsAmount}
+                    sitePhase={pricing.sitePhase}
+                    sitePercent={pricing.sitePercent}
+                    compact
+                  />
+                ) : null}
               </div>
             </div>
           </div>
