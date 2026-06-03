@@ -627,18 +627,22 @@ export default function HomePageClient({
   const [sameShopProducts, setSameShopProducts] = useState<Product[]>([]);
   const [sameShopTotal, setSameShopTotal] = useState(0);
   const [sameShopSeed, setSameShopSeed] = useState<number | null>(null);
-  const [sameShopLoading, setSameShopLoading] = useState(false);
+  const [sameShopLoading, setSameShopLoading] = useState(true);
   const [sameShopLoadMoreLoading, setSameShopLoadMoreLoading] = useState(false);
   const [sameShopCanLoadMore, setSameShopCanLoadMore] = useState(false);
   const [mixedRecommendationProducts, setMixedRecommendationProducts] = useState<Product[]>([]);
   const recommendationMixAnchorRef = useRef('');
   /** Số SP same-shop đã gộp vào lưới — chỉ append khi tăng (tránh «Xem thêm» nhảy lưới). */
   const sameShopMergedCountRef = useRef(0);
+  const mixedGridHasContentRef = useRef(false);
   const showSameShopSection = !sameShopLoading && sameShopTotal > 0;
+  const showRecommendationSkeleton =
+    sameShopLoading && mixedRecommendationProducts.length === 0;
   const lastSearchTrackedRef = useRef<string>('');
   const lastFilterTrackedRef = useRef<string>('');
 
   useEffect(() => {
+    if (authLoading) return;
     if (!isAuthenticated || user?.id == null) {
       setSameAgeGenderProducts([]);
       setSameAgeGenderCohortMode('requires_login');
@@ -666,11 +670,16 @@ export default function HomePageClient({
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, user?.id, user?.gender, user?.date_of_birth]);
+  }, [authLoading, isAuthenticated, user?.id, user?.gender, user?.date_of_birth]);
 
   useEffect(() => {
+    mixedGridHasContentRef.current = mixedRecommendationProducts.length > 0;
+  }, [mixedRecommendationProducts]);
+
+  useEffect(() => {
+    if (authLoading) return;
     let cancelled = false;
-    setSameShopLoading(true);
+    if (!mixedGridHasContentRef.current) setSameShopLoading(true);
     setSameShopCanLoadMore(false);
     apiClient
       .getProductsSameShopAsRecentViews(HOME_MIX_INITIAL_LIMIT, 0)
@@ -705,7 +714,7 @@ export default function HomePageClient({
     return () => {
       cancelled = true;
     };
-  }, [shopBehaviorKey]);
+  }, [shopBehaviorKey, authLoading]);
 
   const cohortProductsForMix = useMemo(() => {
     if (sameAgeGenderLoading) return [];
@@ -722,7 +731,6 @@ export default function HomePageClient({
   useEffect(() => {
     recommendationMixAnchorRef.current = '';
     sameShopMergedCountRef.current = 0;
-    setMixedRecommendationProducts([]);
   }, [shopBehaviorKey]);
 
   useEffect(() => {
@@ -737,8 +745,23 @@ export default function HomePageClient({
             .join(',')
         : 'none';
     const anchor = `${recommendationKey}:${sameShopSeed ?? 'none'}:${cohortAnchor}`;
-    if (recommendationMixAnchorRef.current !== anchor) {
+    const prevAnchor = recommendationMixAnchorRef.current;
+    if (prevAnchor !== anchor) {
+      const hadVisibleGrid = mixedGridHasContentRef.current && prevAnchor !== '';
+      const cohortJustArrived =
+        cohortAnchor !== 'pending' && prevAnchor.endsWith(':pending');
+
       recommendationMixAnchorRef.current = anchor;
+
+      if (hadVisibleGrid && cohortJustArrived) {
+        setMixedRecommendationProducts((prev) => {
+          const ids = new Set(prev.map((p) => p.id));
+          const toAdd = cohortProductsForMix.filter((p) => !ids.has(p.id));
+          return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
+        });
+        return;
+      }
+
       sameShopMergedCountRef.current = sameShopProducts.length;
       setMixedRecommendationProducts(
         mixShopAndCohortProducts(sameShopProducts, cohortProductsForMix, sameShopSeed)
@@ -778,7 +801,18 @@ export default function HomePageClient({
       void apiClient
         .getPersonalizedHomeFeed(skip, PAGE_SIZE)
         .then((response) => {
-          setProducts(response.products || []);
+          const next = response.products || [];
+          setProducts((prev) => {
+            if (
+              prev.length > 0 &&
+              next.length > 0 &&
+              prev.length === next.length &&
+              prev.every((p, i) => p.id === next[i]?.id)
+            ) {
+              return prev;
+            }
+            return next;
+          });
           setTotalProducts(response.total ?? (response.products?.length ?? 0));
           setHomeFeedPersonalized(Boolean(response.personalized));
           setApiStatus('online');
@@ -1392,7 +1426,7 @@ export default function HomePageClient({
               hint={sameAgeGenderHint}
             />
             <div className="mt-3">
-              {sameShopLoading ? (
+              {showRecommendationSkeleton ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
                   {[...Array(12)].map((_, i) => (
                     <div key={i} className="bg-white rounded-xl border border-gray-100 overflow-hidden animate-pulse">

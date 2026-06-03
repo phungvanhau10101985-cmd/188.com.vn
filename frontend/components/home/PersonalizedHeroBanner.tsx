@@ -46,7 +46,6 @@ export default function PersonalizedHeroBanner({
 
   useEffect(() => {
     let cancelled = false;
-    setSearchResolved(false);
 
     void apiClient
       .getSearchHistory(1)
