@@ -33,7 +33,6 @@ CodBucket = Literal["paid", "returned_unpaid", "delivered_unpaid", "in_transit_u
 
 RETURN_PENDING_SHOP_LABEL = "Đơn hoàn chưa trả shop"
 RETURN_SHOP_RECEIVED_LABEL = "Đơn hoàn đã trả shop"
-_RETURN_PENDING_BUCKETS = frozenset({"returned", "return_pending_shop"})
 
 
 def _is_shop_return_received(*, order_status: str | None) -> bool:
@@ -84,22 +83,6 @@ def _is_in_transit(*, ems_phase: str | None, ems_status: str | None) -> bool:
     text = (ems_status or "").lower()
     markers = ("vận chuyển", "giao bưu tá", "đến bưu cục", "chấp nhận gửi", "out for delivery")
     return any(m in text for m in markers)
-
-
-def _is_return_pending_bucket(bucket: str) -> bool:
-    return (bucket or "").strip().lower() in _RETURN_PENDING_BUCKETS
-
-
-def _count_return_pending_shop(db: Session) -> tuple[int, int]:
-    """Đếm mọi đơn EMS đã báo hoàn, shop chưa xác nhận — không lọc theo ngày import."""
-    count = 0
-    cod_total = 0
-    for record in db.query(EmsShippingRecord).all():
-        if _delivery_bucket(record) != "return_pending_shop":
-            continue
-        count += 1
-        cod_total += _record_cod_amount(record)
-    return count, cod_total
 
 
 def _delivery_bucket(record: EmsShippingRecord) -> DeliveryBucket:
@@ -558,13 +541,7 @@ def get_shipping_timeline_stats(
         }
         items.append(item)
         for field in totals:
-            if field in ("returned_count", "returned_cod_total"):
-                continue
             totals[field] += int(bucket.get(field) or 0)
-
-    pending_count, pending_cod = _count_return_pending_shop(db)
-    totals["returned_count"] = pending_count
-    totals["returned_cod_total"] = pending_cod
 
     return {
         "granularity": key,
@@ -688,14 +665,8 @@ def list_timeline_bucket_records(
         .all()
     )
     matched: list[EmsShippingRecord] = []
-    skip_date_filter = _is_return_pending_bucket(key)
 
     for record in records:
-        if skip_date_filter:
-            if _matches_ops_bucket(record, key):
-                matched.append(record)
-            continue
-
         rec_date = _record_import_date(record)
         if rec_date is None:
             continue
@@ -715,12 +686,7 @@ def list_timeline_bucket_records(
     rows = [_enrich_row_from_live_order(db, _record_to_dict(record)) for record in page_records]
 
     bucket_label = _OPS_BUCKET_LABELS[key]
-    if skip_date_filter:
-        bucket_label = (
-            f"{RETURN_PENDING_SHOP_LABEL} — tất cả đơn cần xác nhận "
-            f"({total:,} vận đơn, không lọc theo ngày import)"
-        ).replace(",", ".")
-    elif period:
+    if period:
         _, _, period_label = _timeline_period_bounds(period, gran)  # type: ignore[arg-type]
         bucket_label = f"{bucket_label} — {period_label}"
     elif filter_label:
@@ -838,6 +804,52 @@ def _order_status_value(order: Order | None, *, record: EmsShippingRecord | None
     return None
 
 
+def _resolve_shop_return_context(
+    db: Session,
+    *,
+    raw: str,
+    code: Optional[str],
+) -> tuple[Optional[EmsShippingRecord], Optional[Order], str]:
+    """Ghép vận đơn EMS + đơn shop từ mã nhập (EMS / tham chiếu / mã đơn)."""
+    token = (raw or code or "").strip()
+    display_code = (code or "").strip().upper() or None
+    record = find_ems_record_by_token(db, token) if token else None
+    order: Order | None = None
+
+    if record:
+        if not display_code:
+            display_code = (record.order_code or "").strip().upper() or None
+        if record.order_id:
+            order = db.query(Order).filter(Order.id == record.order_id).first()
+        if not order and display_code:
+            order = crud.order.get_order_by_code(db, display_code)
+
+    if not record and display_code:
+        order = crud.order.get_order_by_code(db, display_code)
+        if order:
+            record = _primary_ems_record_for_order(db, order.id)
+
+    if not display_code and record:
+        display_code = (
+            (record.order_code or record.reference_code or record.ems_tracking_code or token or "")
+            .strip()
+            .upper()
+            or None
+        )
+
+    return record, order, display_code or ""
+
+
+def _shop_already_received_return(*, order: Order | None, record: EmsShippingRecord | None) -> bool:
+    if order is not None:
+        status_val = getattr(order.status, "value", order.status)
+        if _is_shop_return_received(order_status=status_val):
+            return True
+    if record is not None and _is_shop_return_received(order_status=record.order_status):
+        return True
+    return False
+
+
 def evaluate_shop_return_entry(
     db: Session,
     entry: dict[str, Any],
@@ -845,7 +857,7 @@ def evaluate_shop_return_entry(
 ) -> dict[str, Any]:
     """
     Đánh giá một dòng nhập — không ghi DB.
-    can_confirm=True chỉ khi EMS đã báo hoàn và đơn shop được phép xác nhận.
+    Hai trạng thái chính: ready_to_confirm (EMS hoàn, shop chưa xác nhận) và already_returned.
     """
     row_number = int(entry.get("row_number") or 0)
     raw = str(entry.get("raw") or "").strip()
@@ -864,117 +876,86 @@ def evaluate_shop_return_entry(
             "can_confirm": False,
             "can_show_warehouse": False,
             "warehouse_sku": None,
+            "ems_record_id": None,
         }
         base.update(kwargs)
         return base
 
-    if not code:
-        resolve_err = str(entry.get("resolve_error") or "").strip()
-        record = find_ems_record_by_token(db, raw) if raw else None
-        snap = _ems_snapshot(record)
-        if record is not None:
-            return _row(
-                order_code=(record.order_code or "").strip().upper() or None,
-                order_id=record.order_id,
-                order_status=_order_status_value(None, record=record),
-                status="ems_not_linked",
-                message=resolve_err
-                or "Vận đơn EMS chưa gắn mã đơn shop (DHxxx) — kiểm tra import file gửi EMS.",
-                **snap,
-            )
-        status = "not_found" if resolve_err else "invalid_code"
+    if not code and not raw:
         return _row(
-            status=status,
-            message=resolve_err
-            or "Mã không hợp lệ — nhập mã đơn DHxxx, mã vận chuyển EMS hoặc mã tham chiếu.",
+            status="not_ready",
+            message="Mã trống — nhập mã EMS, mã tham chiếu hoặc mã đơn.",
         )
 
-    if code in seen_codes:
+    record, order, display_code = _resolve_shop_return_context(db, raw=raw, code=code)
+    code = display_code or code
+    dedupe_key = (code or raw).strip().upper()
+    if dedupe_key in seen_codes:
         return _row(
-            order_code=code,
+            order_code=code or None,
             status="duplicate",
-            message=f"Mã trùng trong danh sách (đã có ở dòng {seen_codes[code]}).",
+            message=f"Mã trùng trong danh sách (đã có ở dòng {seen_codes[dedupe_key]}).",
         )
-    seen_codes[code] = row_number
-
-    order = crud.order.get_order_by_code(db, code)
-    record = _primary_ems_record_for_order(db, order.id) if order else find_ems_record_by_token(db, raw)
+    if dedupe_key:
+        seen_codes[dedupe_key] = row_number
     snap = _ems_snapshot(record)
     order_status = _order_status_value(order, record=record)
 
-    if not order:
-        ems_return = bool(
-            record and _is_ems_return_pending_shop(ems_status=record.ems_status)
-        )
-        wh_sku = _warehouse_sku_from_ems_record(record) if record else None
-        if ems_return:
-            return _row(
-                order_code=code,
-                status="order_not_found",
-                message=(
-                    f"EMS đã báo đơn hoàn nhưng đơn #{code} không có trên 188.com.vn — "
-                    "không thể xác nhận hoàn shop; vẫn có thể nhập kho thanh lý"
-                    + (f" (SKU: {wh_sku})." if wh_sku else " (gõ SKU thủ công hoặc import lại file EMS cột H).")
-                ),
-                order_status=order_status,
-                can_show_warehouse=True,
-                warehouse_sku=wh_sku,
-                **snap,
-            )
+    if _shop_already_received_return(order=order, record=record):
         return _row(
-            order_code=code,
-            status="not_found",
-            message=f"Không tìm thấy đơn #{code} trên 188.com.vn.",
+            order_code=code or None,
+            order_id=order.id if order else None,
             order_status=order_status,
+            status="already_returned",
+            message="Shop đã xác nhận đã nhận hàng hoàn.",
             **snap,
         )
 
-    err = validate_shop_return_confirm(order)
-    if err:
+    if not record:
         return _row(
-            order_code=code,
-            order_id=order.id,
-            order_status=order_status,
-            status=err[0],
-            message=err[1],
-            **snap,
+            order_code=code or None,
+            status="not_ready",
+            message="Không tìm thấy vận đơn EMS — nhập mã EMS, mã tham chiếu hoặc mã đơn.",
         )
 
-    if not order_has_ems_return_marker(db, order.id):
-        has_ems = (
-            db.query(EmsShippingRecord.id)
-            .filter(EmsShippingRecord.order_id == order.id)
-            .first()
-        )
-        if not has_ems:
-            return _row(
-                order_code=code,
-                order_id=order.id,
-                order_status=order_status,
-                status="ems_not_linked",
-                message="Đơn chưa có dòng vận chuyển EMS — import file gửi EMS trước.",
-                **snap,
-            )
-        ems_label = (snap.get("ems_status") or "").strip() or "—"
+    if not _is_ems_return_pending_shop(ems_status=record.ems_status):
+        ems_label = (record.ems_status or "").strip() or "—"
         return _row(
-            order_code=code,
-            order_id=order.id,
+            order_code=code or None,
+            order_id=order.id if order else record.order_id,
             order_status=order_status,
-            status="ems_not_return",
+            status="not_ready",
             message=(
-                f"Trạng thái EMS hiện tại: «{ems_label}». "
-                "Chỉ xác nhận khi EMS đã báo đơn hoàn (phát hoàn / chuyển hoàn…)."
+                f"EMS chưa báo đơn hoàn (hiện tại: «{ems_label}»). "
+                "Chỉ xác nhận khi EMS đã phát hoàn / chuyển hoàn."
             ),
             **snap,
         )
 
+    if order:
+        err = validate_shop_return_confirm(order)
+        if err:
+            return _row(
+                order_code=code,
+                order_id=order.id,
+                order_status=order_status,
+                ems_record_id=record.id,
+                status=err[0],
+                message=err[1],
+                **snap,
+            )
+
     wh_sku = _warehouse_sku_from_ems_record(record)
+    msg = "EMS đã báo đơn hoàn — shop chưa xác nhận, có thể xác nhận đã nhận hàng."
+    if not order:
+        msg += " (Chưa có đơn shop trên web — chỉ ghi nhận trên vận đơn EMS.)"
     return _row(
-        order_code=code,
-        order_id=order.id,
+        order_code=code or None,
+        order_id=order.id if order else record.order_id,
         order_status=order_status,
+        ems_record_id=record.id,
         status="ready_to_confirm",
-        message="EMS đã báo đơn hoàn — có thể xác nhận shop đã nhận hàng.",
+        message=msg,
         can_confirm=True,
         can_show_warehouse=True,
         warehouse_sku=wh_sku,
@@ -994,7 +975,8 @@ def preview_shop_returns(
     rows_out.sort(key=lambda r: (int(r.get("row_number") or 0), str(r.get("order_code") or "")))
     confirmable = sum(1 for r in rows_out if r.get("can_confirm"))
     warehouse_eligible = sum(1 for r in rows_out if r.get("can_show_warehouse"))
-    error_count = len(rows_out) - confirmable
+    already_returned_count = sum(1 for r in rows_out if r["status"] == "already_returned")
+    error_count = len(rows_out) - confirmable - already_returned_count
     return {
         "ok": True,
         "preview": True,
@@ -1036,19 +1018,27 @@ def validate_shop_return_confirm(order: Order) -> tuple[str, str] | None:
     """Trả (mã lỗi, thông báo) hoặc None nếu được phép xác nhận."""
     status_val = getattr(order.status, "value", order.status)
     if status_val == OrderStatus.RETURNED.value:
-        return "already_returned", "Đơn đã được ghi nhận đơn hoàn đã trả shop."
+        return "already_returned", "Shop đã xác nhận đã nhận hàng hoàn."
     if status_val == OrderStatus.CANCELLED.value:
-        return "invalid_status", "Đơn đã hủy — không thể xác nhận hoàn."
-    if status_val not in (
-        OrderStatus.SHIPPING.value,
-        OrderStatus.DELIVERED.value,
-        OrderStatus.COMPLETED.value,
-    ):
-        return (
-            "invalid_status",
-            f"Trạng thái «{status_val}» — chỉ xác nhận khi đơn đang giao hoặc đã giao.",
-        )
+        return "not_ready", "Đơn đã hủy — không thể xác nhận hoàn."
     return None
+
+
+def apply_shop_return_received_on_ems_record(
+    db: Session,
+    record: EmsShippingRecord,
+    *,
+    admin_id: int,
+    note: str | None = None,
+) -> None:
+    """Ghi nhận shop đã nhận hoàn trên vận đơn EMS; cập nhật đơn shop nếu có và hợp lệ."""
+    if record.order_id:
+        order = db.query(Order).filter(Order.id == record.order_id).first()
+        if order and validate_shop_return_confirm(order) is None:
+            apply_shop_return_received_on_order(db, order, admin_id=admin_id, note=note)
+            return
+    record.order_status = OrderStatus.RETURNED.value
+    record.sync_message = RETURN_SHOP_RECEIVED_LABEL
 
 
 def apply_shop_return_received_on_order(
@@ -1098,32 +1088,36 @@ def bulk_confirm_shop_returns(
     """
     rows_out: list[dict[str, Any]] = []
     seen_codes: dict[str, int] = {}
-    to_confirm: list[tuple[dict[str, Any], Order]] = []
+    to_confirm: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
     for entry in entries:
         row = evaluate_shop_return_entry(db, entry, seen_codes)
-        if row.get("can_confirm") and row.get("order_id"):
-            order = db.query(Order).filter(Order.id == row["order_id"]).first()
-            if order:
-                to_confirm.append((entry, order))
-                continue
-        if row.get("status") == "ready_to_confirm":
-            row = {**row, "status": "ems_not_return", "can_confirm": False}
+        if row.get("can_confirm") and row.get("ems_record_id"):
+            to_confirm.append((entry, row))
+            continue
         rows_out.append(row)
 
     confirmed = 0
-    for entry, order in to_confirm:
-        apply_shop_return_received_on_order(db, order, admin_id=admin_id, note=note)
+    for entry, row in to_confirm:
+        record = (
+            db.query(EmsShippingRecord)
+            .filter(EmsShippingRecord.id == int(row["ems_record_id"]))
+            .first()
+        )
+        if not record:
+            rows_out.append({**row, "status": "not_ready", "can_confirm": False, "message": "Không tìm thấy vận đơn EMS."})
+            continue
+        apply_shop_return_received_on_ems_record(db, record, admin_id=admin_id, note=note)
         confirmed += 1
-        code = (order.order_code or "").strip().upper()
-        record = _primary_ems_record_for_order(db, order.id)
+        code = (row.get("order_code") or record.order_code or "").strip().upper() or None
         snap = _ems_snapshot(record)
         rows_out.append(
             {
                 "row_number": int(entry.get("row_number") or 0),
-                "raw": str(entry.get("raw") or code).strip(),
+                "raw": str(entry.get("raw") or code or "").strip(),
                 "order_code": code,
-                "order_id": order.id,
+                "order_id": record.order_id,
+                "ems_record_id": record.id,
                 "order_status": OrderStatus.RETURNED.value,
                 "status": "confirmed",
                 "message": RETURN_SHOP_RECEIVED_LABEL,

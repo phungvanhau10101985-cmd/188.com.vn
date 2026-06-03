@@ -3766,6 +3766,7 @@ export interface ShopReturnConfirmRow {
   can_confirm?: boolean;
   can_show_warehouse?: boolean;
   warehouse_sku?: string | null;
+  ems_record_id?: number | null;
 }
 
 export interface ShopReturnConfirmResult {

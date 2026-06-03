@@ -96,24 +96,23 @@ function buildTimelineApiParams(
   return params;
 }
 
-type TimelineBucketContext = {
-  periodKey?: string;
-  periodLabel?: string;
-  recordsParams?: Omit<EmsShippingTimelineRecordsParams, 'bucket' | 'skip' | 'limit'>;
-};
+type TimelineBucketContext =
+  | {
+      mode: 'period';
+      periodKey: string;
+      periodLabel: string;
+    }
+  | {
+      mode: 'range';
+      periodLabel: string;
+      recordsParams: Omit<EmsShippingTimelineRecordsParams, 'bucket' | 'skip' | 'limit'>;
+    };
 
-function buildTimelineRecordsQuery(
+function buildTimelineRangeRecordsQuery(
   granularity: EmsShippingTimelineGranularity,
   filter: TimelineFilterState,
-  context: TimelineBucketContext | null,
   items: EmsShippingTimelineItem[] | undefined,
 ): Omit<EmsShippingTimelineRecordsParams, 'bucket' | 'skip' | 'limit'> {
-  if (context?.recordsParams) {
-    return { granularity, ...context.recordsParams };
-  }
-  if (context?.periodKey) {
-    return { granularity, period_key: context.periodKey };
-  }
   const filterParams = buildTimelineApiParams(granularity, filter);
   if (filterParams.preset || filterParams.year || filterParams.date_from || filterParams.date_to) {
     return {
@@ -134,6 +133,18 @@ function buildTimelineRecordsQuery(
     };
   }
   return { granularity };
+}
+
+function buildTimelineRecordsQuery(
+  granularity: EmsShippingTimelineGranularity,
+  filter: TimelineFilterState,
+  context: TimelineBucketContext,
+  items: EmsShippingTimelineItem[] | undefined,
+): Omit<EmsShippingTimelineRecordsParams, 'bucket' | 'skip' | 'limit'> {
+  if (context.mode === 'period') {
+    return { granularity, period_key: context.periodKey };
+  }
+  return { granularity, ...context.recordsParams };
 }
 
 function TimelineCountButton({
@@ -392,21 +403,18 @@ const IMPORT_ACTION_LABELS: Record<string, string> = {
   updated: 'Cập nhật',
 };
 
-const SHOP_RETURN_ROW_STATUS: Record<string, { label: string; badge: string }> = {
-  confirmed: { label: 'Đã xác nhận', badge: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
-  ready_to_confirm: { label: 'Sẵn sàng xác nhận', badge: 'bg-emerald-50 text-emerald-800 border-emerald-200' },
-  not_found: { label: 'Không tìm thấy', badge: 'bg-red-100 text-red-800 border-red-200' },
-  invalid_code: { label: 'Mã không hợp lệ', badge: 'bg-red-100 text-red-800 border-red-200' },
-  already_returned: { label: 'Đã hoàn trước đó', badge: 'bg-amber-100 text-amber-900 border-amber-200' },
-  invalid_status: { label: 'Trạng thái đơn không hợp lệ', badge: 'bg-amber-100 text-amber-900 border-amber-200' },
-  ems_not_return: { label: 'EMS chưa báo hoàn', badge: 'bg-orange-100 text-orange-900 border-orange-200' },
-  ems_not_linked: { label: 'Chưa gắn đơn / EMS', badge: 'bg-orange-100 text-orange-900 border-orange-200' },
-  duplicate: { label: 'Trùng trong file', badge: 'bg-slate-100 text-slate-700 border-slate-200' },
-  order_not_found: {
-    label: 'Đơn không có trên web',
-    badge: 'bg-violet-100 text-violet-900 border-violet-200',
-  },
-};
+function shopReturnResultBadge(status: string): { label: string; badge: string } {
+  if (status === 'ready_to_confirm') {
+    return { label: 'Có thể xác nhận', badge: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+  }
+  if (status === 'confirmed' || status === 'already_returned') {
+    return { label: 'Đã xác nhận nhận hàng', badge: 'bg-amber-100 text-amber-900 border-amber-200' };
+  }
+  if (status === 'duplicate') {
+    return { label: 'Trùng trong danh sách', badge: 'bg-slate-100 text-slate-700 border-slate-200' };
+  }
+  return { label: 'Chưa đủ điều kiện', badge: 'bg-slate-100 text-slate-800 border-slate-200' };
+}
 
 const SHOP_ORDER_STATUS_LABELS: Record<string, string> = {
   pending: 'Chờ xử lý',
@@ -989,6 +997,7 @@ export default function AdminShippingPage() {
   const [opsBucketLoading, setOpsBucketLoading] = useState(false);
   const [opsBucketError, setOpsBucketError] = useState<string | null>(null);
   const [timelineBucketContext, setTimelineBucketContext] = useState<TimelineBucketContext | null>(null);
+  const [opsBucketFromTimeline, setOpsBucketFromTimeline] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [deleteConfirmKeys, setDeleteConfirmKeys] = useState<string[] | null>(null);
   const [orderStatusModal, setOrderStatusModal] = useState<OrderStatusModalState | null>(null);
@@ -1145,7 +1154,8 @@ export default function AdminShippingPage() {
       try {
         const skip = (page - 1) * OPS_LIST_PAGE_SIZE;
         const timelineContext = context === undefined ? timelineBucketContext : context;
-        const data = timelineContext
+        const useTimelineApi = Boolean(timelineContext);
+        const data = useTimelineApi
           ? await adminShippingAPI.listTimelineRecords({
               bucket,
               skip,
@@ -1153,7 +1163,7 @@ export default function AdminShippingPage() {
               ...buildTimelineRecordsQuery(
                 timelineGranularity,
                 timelineFilter,
-                timelineContext,
+                timelineContext!,
                 timelineStats?.items,
               ),
             })
@@ -1162,6 +1172,7 @@ export default function AdminShippingPage() {
               skip,
               limit: OPS_LIST_PAGE_SIZE,
             });
+        setOpsBucketFromTimeline(useTimelineApi);
         setActiveOpsBucket(bucket);
         setOpsBucketLabel(data.bucket_label);
         setOpsBucketRows(data.rows);
@@ -1180,6 +1191,7 @@ export default function AdminShippingPage() {
   const closeOpsBucketModal = useCallback(() => {
     setActiveOpsBucket(null);
     setTimelineBucketContext(null);
+    setOpsBucketFromTimeline(false);
     setOpsBucketRows([]);
     setOpsBucketError(null);
     setOpsBucketPage(1);
@@ -1188,6 +1200,7 @@ export default function AdminShippingPage() {
   const openOpsBucket = useCallback(
     (bucket: OpsBucketKey, label: string) => {
       setTimelineBucketContext(null);
+      setOpsBucketFromTimeline(false);
       setOpsBucketLabel(label);
       setActiveOpsBucket(bucket);
       void loadOpsBucketRecords(bucket, 1, null);
@@ -1198,10 +1211,12 @@ export default function AdminShippingPage() {
   const openTimelineBucket = useCallback(
     (item: EmsShippingTimelineItem, bucket: OpsBucketKey) => {
       const context: TimelineBucketContext = {
+        mode: 'period',
         periodKey: item.period_key,
         periodLabel: item.period_label,
       };
       setTimelineBucketContext(context);
+      setOpsBucketFromTimeline(true);
       setOpsBucketLabel(`${TIMELINE_BUCKET_LABELS[bucket]} — ${item.period_label}`);
       setActiveOpsBucket(bucket);
       void loadOpsBucketRecords(bucket, 1, context);
@@ -1211,17 +1226,19 @@ export default function AdminShippingPage() {
 
   const openTimelineBucketTotals = useCallback(
     (bucket: OpsBucketKey) => {
+      const periodLabel = timelineStats?.filter_label || 'Tổng các kỳ hiển thị';
       const context: TimelineBucketContext = {
-        periodLabel: timelineStats?.filter_label || 'Tổng các kỳ hiển thị',
-        recordsParams: buildTimelineRecordsQuery(
+        mode: 'range',
+        periodLabel,
+        recordsParams: buildTimelineRangeRecordsQuery(
           timelineGranularity,
           timelineFilter,
-          null,
           timelineStats?.items,
         ),
       };
       setTimelineBucketContext(context);
-      setOpsBucketLabel(`${TIMELINE_BUCKET_LABELS[bucket]} — ${context.periodLabel}`);
+      setOpsBucketFromTimeline(true);
+      setOpsBucketLabel(`${TIMELINE_BUCKET_LABELS[bucket]} — ${periodLabel}`);
       setActiveOpsBucket(bucket);
       void loadOpsBucketRecords(bucket, 1, context);
     },
@@ -1633,7 +1650,7 @@ export default function AdminShippingPage() {
     }
     if (!shopReturnFile && (shopReturnPreview?.confirmable_count ?? 0) < 1) {
       setShopReturnError(
-        'Không có đơn nào EMS đã báo hoàn (phát hoàn / chuyển hoàn…). Chỉ xác nhận khi cột trạng thái hiển thị «Sẵn sàng xác nhận».',
+        'Không có đơn nào «Có thể xác nhận». Cần EMS đã báo đơn hoàn và shop chưa xác nhận đã nhận hàng.',
       );
       return;
     }
@@ -2122,8 +2139,8 @@ export default function AdminShippingPage() {
                 ))}
               </div>
               <p className="mt-1 text-xs text-orange-800">
-                «Đơn hoàn chưa trả shop»: đếm và danh sách <strong>tất cả</strong> đơn EMS đã báo hoàn mà shop chưa
-                xác nhận — <strong>không</strong> lọc theo khoảng ngày thống kê bên dưới.
+                Ô «Đơn hoàn chưa trả shop» ở đây = <strong>tất cả</strong> đơn cần xác nhận (toàn hệ thống). Bấm số
+                trong bảng <strong>Theo dõi theo thời gian</strong> bên dưới để xem đúng từng tháng/tuần.
               </p>
               <p className="mt-1.5 text-xs text-gray-500 tabular-nums">
                 {opsStats.in_transit_count +
@@ -2984,8 +3001,8 @@ export default function AdminShippingPage() {
         <h2 className="text-lg font-semibold text-gray-900">3. Xác nhận đơn hoàn đã trả shop</h2>
         <p className="text-sm text-gray-600">
           Shop xác nhận đã nhận hàng hoàn — ghi <strong>Đơn hoàn đã trả shop</strong> và hủy hoa hồng affiliate.
-          Nhập <strong>mã vận chuyển EMS</strong>, <strong>mã tham chiếu</strong> (cột A file gửi EMS) hoặc <strong>mã đơn DHxxx</strong> —
-          hệ thống tự map sang đơn shop. Chỉ xác nhận khi EMS đã có trạng thái <strong>đơn hoàn</strong> (phát hoàn / chuyển hoàn…).
+          Nhập <strong>mã vận chuyển EMS</strong>, <strong>mã tham chiếu</strong> (cột A) hoặc <strong>mã đơn</strong>.
+          Chỉ cần EMS đã báo <strong>đơn hoàn</strong> (phát hoàn / chuyển hoàn…) — không bắt buộc có đơn shop trên web; nếu có đơn sẽ cập nhật thêm trạng thái đơn và hủy affiliate.
         </p>
         <div className="space-y-3">
           <label className="block text-sm font-medium text-gray-700">
@@ -3003,8 +3020,8 @@ export default function AdminShippingPage() {
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono placeholder:text-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
           />
           <p className="text-xs text-gray-500">
-            Hệ thống tự tra cứu trạng thái EMS khi bạn nhập mã. Chỉ khi EMS đã báo <strong>đơn hoàn</strong> mới cho
-            xác nhận và hiện ô <strong>Nhập kho thanh lý</strong> bên dưới.
+            Hai trạng thái: <strong>Có thể xác nhận</strong> = EMS đã báo đơn hoàn, shop chưa xác nhận đã nhận ·{' '}
+            <strong>Đã xác nhận nhận hàng</strong> = shop đã ghi nhận trước đó.
           </p>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
@@ -3058,37 +3075,15 @@ export default function AdminShippingPage() {
                     : 'bg-emerald-50 border-emerald-200 text-emerald-950'
                 }`}
               >
-                <strong>{shopReturnResult.confirmed_count.toLocaleString('vi-VN')}</strong> đơn đã xác nhận ·{' '}
-                <strong>{shopReturnResult.error_count.toLocaleString('vi-VN')}</strong> lỗi
-                {shopReturnResult.not_found_count > 0 ? (
-                  <>
-                    {' '}
-                    (không tìm thấy: <strong>{shopReturnResult.not_found_count}</strong>)
-                  </>
-                ) : null}
-                {(shopReturnResult.ems_not_return_count ?? 0) > 0 ? (
-                  <>
-                    {' '}
-                    · EMS chưa hoàn: <strong>{shopReturnResult.ems_not_return_count}</strong>
-                  </>
-                ) : null}
+                <strong>{shopReturnResult.confirmed_count.toLocaleString('vi-VN')}</strong> đã xác nhận nhận hàng ·{' '}
+                <strong>{shopReturnResult.error_count.toLocaleString('vi-VN')}</strong> chưa xác nhận / chưa đủ điều kiện
               </div>
             ) : shopReturnPreview ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800">
-                Tra cứu: <strong>{shopReturnPreview.confirmable_count ?? 0}</strong> đơn sẵn sàng xác nhận
-                {(shopReturnPreview.warehouse_eligible_count ?? 0) > 0 ? (
-                  <>
-                    {' '}
-                    · <strong>{shopReturnPreview.warehouse_eligible_count}</strong> có thể nhập kho thanh lý
-                  </>
-                ) : null}{' '}
-                · <strong>{shopReturnPreview.error_count}</strong> chưa đủ điều kiện xác nhận
-                {(shopReturnPreview.ems_not_return_count ?? 0) > 0 ? (
-                  <>
-                    {' '}
-                    (EMS chưa hoàn: <strong>{shopReturnPreview.ems_not_return_count}</strong>)
-                  </>
-                ) : null}
+                <strong className="text-emerald-800">{shopReturnPreview.confirmable_count ?? 0}</strong> có thể
+                xác nhận ·{' '}
+                <strong className="text-amber-800">{shopReturnPreview.already_returned_count ?? 0}</strong> đã xác
+                nhận trước · <strong>{shopReturnPreview.error_count ?? 0}</strong> chưa đủ điều kiện
               </div>
             ) : null}
             {(shopReturnResult?.warnings?.length ?? shopReturnPreview?.warnings?.length) ? (
@@ -3120,7 +3115,7 @@ export default function AdminShippingPage() {
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {shopReturnDisplayRows.map((row: ShopReturnConfirmRow) => {
-                        const st = SHOP_RETURN_ROW_STATUS[row.status] || SHOP_RETURN_ROW_STATUS.invalid_code;
+                        const st = shopReturnResultBadge(row.status);
                         return (
                           <tr key={`${row.row_number}:${row.raw}:${row.status}`} className="hover:bg-gray-50/80">
                             <td className="px-3 py-2 text-gray-500 tabular-nums">{row.row_number || '—'}</td>
@@ -4094,7 +4089,13 @@ export default function AdminShippingPage() {
                   {opsBucketTotal > 0
                     ? ` · trang ${opsBucketPage}/${opsBucketTotalPages}`
                     : ''}
+                  {opsBucketFromTimeline ? ' · lọc theo kỳ bảng thời gian' : null}
                 </p>
+                {opsBucketLabel.includes('không lọc theo ngày') ? (
+                  <p className="text-xs text-amber-800 mt-1">
+                    Backend chưa cập nhật — restart FastAPI (port 8001) rồi bấm lại số trên bảng thời gian.
+                  </p>
+                ) : null}
               </div>
               <button
                 type="button"

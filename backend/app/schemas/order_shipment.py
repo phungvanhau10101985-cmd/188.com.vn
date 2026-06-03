@@ -469,6 +469,7 @@ class ShopReturnConfirmRowResponse(BaseModel):
     can_confirm: bool = False
     can_show_warehouse: bool = False
     warehouse_sku: Optional[str] = None
+    ems_record_id: Optional[int] = None
 
 
 class ShopReturnConfirmRequest(BaseModel):
