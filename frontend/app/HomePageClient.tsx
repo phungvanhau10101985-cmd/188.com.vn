@@ -21,7 +21,6 @@ import type {
   NanoaiSearchProduct,
   SameAgeGenderCohortMode,
   HeroCategoryTilesResponse,
-  HomeRecommendationBlockResponse,
 } from '@/types/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
@@ -46,6 +45,7 @@ import {
 import {
   appendNewShopProductsToMix,
   HOME_COHORT_MIX_POOL_SIZE,
+  mixShopAndCohortProducts,
 } from '@/lib/home-recommendation-mixed-products';
 
 /** Lần đầu block «CÓ THỂ BẠN THÍCH» — ít SP hơn để luôn có «Xem thêm» khi còn dữ liệu. */
@@ -614,48 +614,77 @@ export default function HomePageClient({
   }`;
 
   const [sameAgeGenderProducts, setSameAgeGenderProducts] = useState<Product[]>([]);
+  const [sameAgeGenderLoading, setSameAgeGenderLoading] = useState(false);
   const [sameAgeGenderCohortMode, setSameAgeGenderCohortMode] = useState<SameAgeGenderCohortMode | null>(null);
   const [sameShopProducts, setSameShopProducts] = useState<Product[]>([]);
   const [sameShopTotal, setSameShopTotal] = useState(0);
   const [sameShopSeed, setSameShopSeed] = useState<number | null>(null);
-  const [recommendationBlockLoading, setRecommendationBlockLoading] = useState(false);
+  const [sameShopLoading, setSameShopLoading] = useState(false);
   const [sameShopLoadMoreLoading, setSameShopLoadMoreLoading] = useState(false);
   const [sameShopCanLoadMore, setSameShopCanLoadMore] = useState(false);
   const [mixedRecommendationProducts, setMixedRecommendationProducts] = useState<Product[]>([]);
-  const [cohortBadgeIds, setCohortBadgeIds] = useState<Set<number>>(() => new Set());
+  const recommendationMixAnchorRef = useRef('');
   /** Số SP same-shop đã gộp vào lưới — chỉ append khi tăng (tránh «Xem thêm» nhảy lưới). */
   const sameShopMergedCountRef = useRef(0);
-  const showSameShopSection = !recommendationBlockLoading && sameShopTotal > 0;
+  const showSameShopSection = !sameShopLoading && sameShopTotal > 0;
   const lastSearchTrackedRef = useRef<string>('');
   const lastFilterTrackedRef = useRef<string>('');
 
-  const applyHomeRecommendationBlock = useCallback((block: HomeRecommendationBlockResponse) => {
-    const shopList = block.same_shop_products ?? [];
-    setSameShopProducts(shopList);
-    setSameShopTotal(block.same_shop_total ?? 0);
-    setSameShopSeed(block.same_shop_seed ?? null);
-    setSameShopCanLoadMore(Boolean(block.same_shop_can_load_more));
-    setSameAgeGenderProducts(block.same_age_gender_products ?? []);
-    setSameAgeGenderCohortMode(block.same_age_gender_cohort_mode ?? 'requires_login');
-    setMixedRecommendationProducts(block.mixed_recommendation_products ?? []);
-    setCohortBadgeIds(new Set(block.cohort_badge_product_ids ?? []));
-    sameShopMergedCountRef.current = shopList.length;
-  }, []);
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated) {
+      setSameAgeGenderProducts([]);
+      setSameAgeGenderCohortMode('requires_login');
+      setSameAgeGenderLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSameAgeGenderLoading(true);
+    apiClient
+      .getProductsViewedBySameAgeGender(HOME_COHORT_MIX_POOL_SIZE)
+      .then(({ products, cohort_mode }) => {
+        if (cancelled) return;
+        setSameAgeGenderProducts(products ?? []);
+        setSameAgeGenderCohortMode(cohort_mode);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSameAgeGenderProducts([]);
+          setSameAgeGenderCohortMode('requires_login');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSameAgeGenderLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, isAuthenticated, recommendationKey]);
 
   useEffect(() => {
     if (authLoading) return;
     let cancelled = false;
-    setRecommendationBlockLoading(true);
+    setSameShopLoading(true);
     setSameShopCanLoadMore(false);
-    setMixedRecommendationProducts([]);
-    setCohortBadgeIds(new Set());
-    sameShopMergedCountRef.current = 0;
-
     apiClient
-      .getHomeRecommendationBlock(HOME_MIX_INITIAL_LIMIT, HOME_COHORT_MIX_POOL_SIZE)
-      .then((block) => {
+      .getProductsSameShopAsRecentViews(HOME_MIX_INITIAL_LIMIT, 0)
+      .then(({ products, total, seed }) => {
         if (cancelled) return;
-        applyHomeRecommendationBlock(block);
+        const list = products || [];
+        const reported = total ?? 0;
+        setSameShopProducts(list);
+        setSameShopTotal(
+          normalizeSameShopTotal(list.length, reported, HOME_MIX_INITIAL_LIMIT)
+        );
+        setSameShopSeed(seed ?? null);
+        setSameShopCanLoadMore(
+          inferSameShopLoadMoreAvailable(
+            list.length,
+            list.length,
+            HOME_MIX_INITIAL_LIMIT,
+            normalizeSameShopTotal(list.length, reported, HOME_MIX_INITIAL_LIMIT)
+          )
+        );
       })
       .catch(() => {
         if (cancelled) return;
@@ -663,28 +692,68 @@ export default function HomePageClient({
         setSameShopTotal(0);
         setSameShopSeed(null);
         setSameShopCanLoadMore(false);
-        setSameAgeGenderProducts([]);
-        setSameAgeGenderCohortMode(isAuthenticated ? 'popular_fallback' : 'requires_login');
-        setMixedRecommendationProducts([]);
-        setCohortBadgeIds(new Set());
-        sameShopMergedCountRef.current = 0;
       })
       .finally(() => {
-        if (!cancelled) setRecommendationBlockLoading(false);
+        if (!cancelled) setSameShopLoading(false);
       });
-
     return () => {
       cancelled = true;
     };
-  }, [authLoading, isAuthenticated, recommendationKey, applyHomeRecommendationBlock]);
+  }, [authLoading, recommendationKey]);
+
+  const cohortProductsForMix = useMemo(() => {
+    if (sameAgeGenderLoading) return [];
+    if (
+      sameAgeGenderCohortMode === 'requires_login' ||
+      sameAgeGenderCohortMode === 'profile_incomplete' ||
+      sameAgeGenderProducts.length === 0
+    ) {
+      return [];
+    }
+    return sameAgeGenderProducts;
+  }, [sameAgeGenderLoading, sameAgeGenderCohortMode, sameAgeGenderProducts]);
 
   useEffect(() => {
-    if (recommendationBlockLoading) return;
+    recommendationMixAnchorRef.current = '';
+    sameShopMergedCountRef.current = 0;
+    setMixedRecommendationProducts([]);
+  }, [recommendationKey]);
+
+  useEffect(() => {
+    if (sameShopLoading) return;
+
+    const cohortAnchor = sameAgeGenderLoading
+      ? 'pending'
+      : cohortProductsForMix.length > 0
+        ? cohortProductsForMix
+            .map((p) => p.id)
+            .sort((a, b) => a - b)
+            .join(',')
+        : 'none';
+    const anchor = `${recommendationKey}:${sameShopSeed ?? 'none'}:${cohortAnchor}`;
+    if (recommendationMixAnchorRef.current !== anchor) {
+      recommendationMixAnchorRef.current = anchor;
+      sameShopMergedCountRef.current = sameShopProducts.length;
+      setMixedRecommendationProducts(
+        mixShopAndCohortProducts(sameShopProducts, cohortProductsForMix, sameShopSeed)
+      );
+      return;
+    }
+
     const shopCount = sameShopProducts.length;
     if (shopCount <= sameShopMergedCountRef.current) return;
     sameShopMergedCountRef.current = shopCount;
-    setMixedRecommendationProducts((prev) => appendNewShopProductsToMix(prev, sameShopProducts));
-  }, [sameShopProducts, recommendationBlockLoading]);
+    setMixedRecommendationProducts((prev) =>
+      appendNewShopProductsToMix(prev, sameShopProducts)
+    );
+  }, [
+    recommendationKey,
+    sameShopSeed,
+    sameShopProducts,
+    sameShopLoading,
+    sameAgeGenderLoading,
+    cohortProductsForMix,
+  ]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -1034,6 +1103,11 @@ export default function HomePageClient({
     sameShopProducts,
   ]);
 
+  const cohortBadgeProductIds = useMemo(() => {
+    const shopIds = new Set(sameShopProducts.map((p) => p.id));
+    return new Set(cohortProductsForMix.filter((p) => !shopIds.has(p.id)).map((p) => p.id));
+  }, [sameShopProducts, cohortProductsForMix]);
+
   const hasCohortProductsForHeader =
     sameAgeGenderCohortMode != null &&
     sameAgeGenderCohortMode !== 'requires_login' &&
@@ -1042,15 +1116,15 @@ export default function HomePageClient({
 
   const sameAgeGenderHint = sameAgeGenderCompactHint(
     sameAgeGenderCohortMode,
-    recommendationBlockLoading && isAuthenticated
+    sameAgeGenderLoading && isAuthenticated
   );
 
   const showMixedRecommendationSection =
     !authLoading &&
     (mixedRecommendationProducts.length > 0 ||
       showSameShopSection ||
-      hasCohortProductsForHeader ||
-      recommendationBlockLoading ||
+      cohortProductsForMix.length > 0 ||
+      sameShopLoading ||
       sameAgeGenderCohortMode === 'requires_login' ||
       sameAgeGenderCohortMode === 'profile_incomplete');
 
@@ -1124,7 +1198,7 @@ export default function HomePageClient({
           <PersonalizedHeroBanner
             apiStatus={apiStatus}
             sameShopTotal={sameShopTotal}
-            sameShopLoading={recommendationBlockLoading}
+            sameShopLoading={sameShopLoading}
             shopName={heroShopName}
             previewProducts={heroPreviewProducts}
             behaviorKey={recommendationKey}
@@ -1304,13 +1378,13 @@ export default function HomePageClient({
           <section className="mb-8" id="san-pham-cung-shop">
             <SameShopRecommendationHeader
               cohortMode={sameAgeGenderCohortMode}
-              cohortLoading={recommendationBlockLoading && isAuthenticated}
+              cohortLoading={sameAgeGenderLoading}
               isAuthenticated={isAuthenticated}
               hasCohortProducts={hasCohortProductsForHeader}
               hint={sameAgeGenderHint}
             />
             <div className="mt-3">
-              {recommendationBlockLoading ? (
+              {sameShopLoading ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
                   {[...Array(12)].map((_, i) => (
                     <div key={i} className="bg-white rounded-xl border border-gray-100 overflow-hidden animate-pulse">
@@ -1331,7 +1405,7 @@ export default function HomePageClient({
                       product={product}
                       onFavorite={handleFavorite}
                       isFavorited={favoriteIds.has(product.id)}
-                      showPersonalizedBadge={cohortBadgeIds.has(product.id)}
+                      showPersonalizedBadge={cohortBadgeProductIds.has(product.id)}
                       priority={index < 2}
                     />
                   ))}
