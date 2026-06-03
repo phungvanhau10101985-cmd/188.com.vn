@@ -619,10 +619,10 @@ function settlementBatchTitle(
   return batch.source_filename ? `${dateLine} · ${batch.source_filename}` : dateLine;
 }
 
-/** Đợt mới nhất nằm cuối danh sách (thứ tự từ trên xuống = cũ → mới). */
+/** Đợt mới nhất nằm đầu danh sách (ngày gần nhất ở trên). */
 function latestSettlementBatchId<T extends { id: number }>(batches: T[]): number | null {
   if (!batches.length) return null;
-  return batches[batches.length - 1]?.id ?? null;
+  return batches[0]?.id ?? null;
 }
 
 function SettlementBatchHistoryList<
@@ -1492,7 +1492,7 @@ export default function AdminShippingPage() {
 
   const activeCodBatch = useMemo(() => {
     if (!codResult?.batches.length) return null;
-    const fallback = codResult.batches[codResult.batches.length - 1];
+    const fallback = codResult.batches[0];
     if (selectedBatchId != null) {
       return codResult.batches.find((b) => b.id === selectedBatchId) ?? fallback;
     }
@@ -1523,7 +1523,7 @@ export default function AdminShippingPage() {
 
   const activeFreightBatch = useMemo(() => {
     if (!freightResult?.batches.length) return null;
-    const fallback = freightResult.batches[freightResult.batches.length - 1];
+    const fallback = freightResult.batches[0];
     if (selectedFreightBatchId != null) {
       return freightResult.batches.find((b) => b.id === selectedFreightBatchId) ?? fallback;
     }

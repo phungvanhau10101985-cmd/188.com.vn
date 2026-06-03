@@ -321,7 +321,7 @@ def _apply_settlement_to_shipping_record(
 def list_cod_settlement_batches(db: Session, *, limit: int = 100) -> dict[str, Any]:
     batches = (
         db.query(EmsCodSettlementBatch)
-        .order_by(EmsCodSettlementBatch.created_at.asc(), EmsCodSettlementBatch.id.asc())
+        .order_by(EmsCodSettlementBatch.payment_date.desc(), EmsCodSettlementBatch.id.desc())
         .limit(limit)
         .all()
     )
@@ -336,7 +336,7 @@ def list_cod_settlement_batches(db: Session, *, limit: int = 100) -> dict[str, A
         row_dicts = [_row_to_dict(r) for r in rows]
         items.append(_batch_to_dict(batch, row_dicts))
 
-    latest_rows = items[-1]["rows"] if items else []
+    latest_rows = items[0]["rows"] if items else []
     return {
         "ok": True,
         "warnings": [],

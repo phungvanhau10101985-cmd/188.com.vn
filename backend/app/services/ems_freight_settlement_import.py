@@ -328,7 +328,11 @@ def _apply_settlement_to_shipping_record(
 def list_freight_settlement_batches(db: Session, *, limit: int = 100) -> dict[str, Any]:
     batches = (
         db.query(EmsFreightSettlementBatch)
-        .order_by(EmsFreightSettlementBatch.created_at.asc(), EmsFreightSettlementBatch.id.asc())
+        .order_by(
+            EmsFreightSettlementBatch.settlement_date.desc().nullslast(),
+            EmsFreightSettlementBatch.created_at.desc(),
+            EmsFreightSettlementBatch.id.desc(),
+        )
         .limit(limit)
         .all()
     )
@@ -343,7 +347,7 @@ def list_freight_settlement_batches(db: Session, *, limit: int = 100) -> dict[st
         row_dicts = [_row_to_dict(r) for r in rows]
         items.append(_batch_to_dict(batch, row_dicts))
 
-    latest_rows = items[-1]["rows"] if items else []
+    latest_rows = items[0]["rows"] if items else []
     return {
         "ok": True,
         "warnings": [],
