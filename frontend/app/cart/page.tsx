@@ -744,7 +744,10 @@ export default function CartPage() {
       }
     }
     const rawSlug = item.product_data?.slug;
-    const seg = productPathSlugFromApi(rawSlug, String(item.product_id));
+    const seg = productPathSlugFromApi(
+      typeof rawSlug === 'string' ? rawSlug : undefined,
+      String(item.product_id),
+    );
     if (seg) {
       router.push(`/products/${seg}`);
       return;
