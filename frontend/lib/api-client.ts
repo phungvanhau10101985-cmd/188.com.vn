@@ -598,12 +598,32 @@ class ApiClient {
     ).catch(() => empty);
   }
 
-  /** Rebuild snapshot nền khi tab ẩn / rời web. */
+  /** Rebuild snapshot nền khi idle ≥2 phút. */
   async rebuildHomeRecommendationSnapshot(): Promise<{ queued: boolean; reason?: string }> {
     return this.fetch<{ queued: boolean; reason?: string }>(
       '/user-behavior/home/recommendation-snapshot/rebuild',
-      { method: 'POST' }
+      { method: 'POST', quiet: true }
     ).catch(() => ({ queued: false }));
+  }
+
+  /** Rebuild khi đóng tab / thoát PWA — fetch keepalive để request không bị hủy. */
+  rebuildHomeRecommendationSnapshotOnUnload(): void {
+    if (typeof window === 'undefined') return;
+    const url = `${getApiBaseUrl()}/user-behavior/home/recommendation-snapshot/rebuild`;
+    const token = localStorage.getItem('access_token');
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...ngrokFetchHeaders(),
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const guestSid = getGuestSessionId();
+    if (guestSid) headers['X-Guest-Session-Id'] = guestSid;
+    void fetch(url, {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      keepalive: true,
+    }).catch(() => {});
   }
 
   /** Khối «CÓ THỂ BẠN THÍCH»: same-shop + cohort + lưới trộn — một request, dữ liệu tươi. */

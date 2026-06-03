@@ -1,58 +1,82 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { usePathname } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 
-/** Tab ẩn / rời web ≥ 2 phút → rebuild snapshot nền cho lần mở trang chủ sau. */
-const AWAY_MS = 2 * 60 * 1000;
+/** Không tương tác / không chuyển trang ≥ 2 phút → rebuild snapshot nền. */
+const IDLE_MS = 2 * 60 * 1000;
+/** Tránh gọi rebuild liên tiếp (idle + đóng tab cùng lúc). */
+const REBUILD_DEBOUNCE_MS = 30 * 1000;
+
+const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'touchstart', 'scroll', 'click'] as const;
 
 export default function HomeRecommendationSnapshotManager() {
-  const hiddenAtRef = useRef<number | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pathname = usePathname();
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRebuildAtRef = useRef(0);
+  const bumpActivityRef = useRef<() => void>(() => {});
+  const prevPathnameRef = useRef(pathname);
 
   useEffect(() => {
-    function clearTimer() {
-      if (timerRef.current != null) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
+    function clearIdleTimer() {
+      if (idleTimerRef.current != null) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
       }
     }
 
-    function queueRebuild() {
+    function queueRebuild(options?: { keepalive?: boolean }) {
+      const now = Date.now();
+      if (now - lastRebuildAtRef.current < REBUILD_DEBOUNCE_MS) return;
+      lastRebuildAtRef.current = now;
+
+      if (options?.keepalive) {
+        apiClient.rebuildHomeRecommendationSnapshotOnUnload();
+        return;
+      }
       void apiClient.rebuildHomeRecommendationSnapshot().catch(() => {});
     }
 
-    function onHidden() {
-      hiddenAtRef.current = Date.now();
-      clearTimer();
-      timerRef.current = setTimeout(queueRebuild, AWAY_MS);
+    function scheduleIdleRebuild() {
+      clearIdleTimer();
+      idleTimerRef.current = setTimeout(() => {
+        queueRebuild();
+        scheduleIdleRebuild();
+      }, IDLE_MS);
     }
 
-    function onVisible() {
-      hiddenAtRef.current = null;
-      clearTimer();
-    }
-
-    function onVisibilityChange() {
-      if (document.hidden) onHidden();
-      else onVisible();
+    function bumpActivity() {
+      scheduleIdleRebuild();
     }
 
     function onPageHide() {
-      const hiddenAt = hiddenAtRef.current;
-      if (hiddenAt != null && Date.now() - hiddenAt >= AWAY_MS) {
-        queueRebuild();
-      }
+      queueRebuild({ keepalive: true });
     }
 
-    document.addEventListener('visibilitychange', onVisibilityChange);
+    bumpActivityRef.current = bumpActivity;
+    bumpActivity();
+
+    for (const event of ACTIVITY_EVENTS) {
+      window.addEventListener(event, bumpActivity, { passive: true });
+    }
     window.addEventListener('pagehide', onPageHide);
+
     return () => {
-      clearTimer();
-      document.removeEventListener('visibilitychange', onVisibilityChange);
+      clearIdleTimer();
+      bumpActivityRef.current = () => {};
+      for (const event of ACTIVITY_EVENTS) {
+        window.removeEventListener(event, bumpActivity);
+      }
       window.removeEventListener('pagehide', onPageHide);
     };
   }, []);
+
+  useEffect(() => {
+    if (prevPathnameRef.current === pathname) return;
+    prevPathnameRef.current = pathname;
+    bumpActivityRef.current();
+  }, [pathname]);
 
   return null;
 }
