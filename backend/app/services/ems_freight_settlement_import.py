@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -11,14 +11,21 @@ from app.models.order_shipment import (
     EmsFreightSettlementRow,
     EmsShippingRecord,
 )
-from app.services.ems_excel_utils import read_spreadsheet_rows
+from app.services.ems_excel_utils import parse_excel_date_cell, read_spreadsheet_rows
 from app.services.ems_shipment_import import _parse_cod_amount, _cell_str
 
 _TRACKING_RE = re.compile(r"^[A-Z]{2}\d+[A-Z]{2}$", re.IGNORECASE)
 _COL_TRACKING = 0  # cột A
+_COL_ISSUE_DATE = 2  # cột C — Ngay_Phat_Hanh
 _COL_FREIGHT = 11  # cột L
 _HIGH_FEE_THRESHOLD = 70_000
 _HEADER_TRACKING_NAMES = ("MA_E1", "MA E1", "MA_VAN_CHUYEN", "MA VAN CHUYEN")
+_HEADER_ISSUE_DATE_NAMES = (
+    "NGAY_PHAT_HANH",
+    "NGAY PHAT HANH",
+    "NGAY_PH",
+    "NGAY PHAT",
+)
 
 
 def _isoformat_value(value: Any) -> Optional[str]:
@@ -54,19 +61,56 @@ def _find_header_row(raw_rows: list[tuple[Any, ...]]) -> int:
     return 0
 
 
+def _find_issue_date_column(raw_rows: list[tuple[Any, ...]], header_idx: int) -> int:
+    if header_idx >= len(raw_rows):
+        return _COL_ISSUE_DATE
+    header_row = raw_rows[header_idx]
+    for col_idx in range(min(len(header_row), 8)):
+        header = _cell_str(header_row[col_idx] if col_idx < len(header_row) else "").upper().replace(" ", "_")
+        if header in _HEADER_ISSUE_DATE_NAMES or "PHAT_HANH" in header:
+            return col_idx
+    return _COL_ISSUE_DATE
+
+
+def _extract_latest_issue_date(
+    raw_rows: list[tuple[Any, ...]],
+    *,
+    header_idx: int,
+    issue_col: int,
+) -> Optional[date]:
+    """Ngày đối soát cước = ngày phát hành gần nhất (lớn nhất) trong cột C."""
+    dates: list[date] = []
+    for row in raw_rows[header_idx + 1 :]:
+        if issue_col >= len(row):
+            continue
+        parsed = parse_excel_date_cell(row[issue_col])
+        if parsed:
+            dates.append(parsed)
+    if not dates:
+        return None
+    return max(dates)
+
+
 def parse_freight_settlement_rows(
     file_bytes: bytes,
     *,
     source_filename: Optional[str] = None,
-) -> tuple[list[dict[str, Any]], list[str]]:
+) -> tuple[Optional[date], list[dict[str, Any]], list[str]]:
     warnings: list[str] = []
     raw_rows = read_spreadsheet_rows(file_bytes, source_filename or "")
     if not raw_rows:
-        return [], ["File Excel trống."]
+        return None, [], ["File Excel trống."]
 
     header_idx = _find_header_row(raw_rows)
     if header_idx > 0:
         warnings.append(f"Phát hiện dòng tiêu đề ở hàng {header_idx + 1}.")
+
+    issue_col = _find_issue_date_column(raw_rows, header_idx)
+    settlement_date = _extract_latest_issue_date(raw_rows, header_idx=header_idx, issue_col=issue_col)
+    if not settlement_date:
+        warnings.append(
+            "Không đọc được ngày từ cột C (Ngay_Phat_Hanh) — vẫn import nhưng thiếu ngày đối soát."
+        )
 
     parsed: list[dict[str, Any]] = []
     for row_idx, row in enumerate(raw_rows[header_idx + 1 :], start=header_idx + 2):
@@ -91,7 +135,7 @@ def parse_freight_settlement_rows(
 
     if not parsed:
         warnings.append("Không có dòng dữ liệu hợp lệ (cột A mã vận chuyển / cột L cước phí).")
-    return parsed, warnings
+    return settlement_date, parsed, warnings
 
 
 def _dedupe_by_tracking(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
@@ -207,6 +251,7 @@ def _row_to_dict(row: EmsFreightSettlementRow) -> dict[str, Any]:
 def _batch_to_dict(batch: EmsFreightSettlementBatch, rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "id": batch.id,
+        "settlement_date": _isoformat_value(batch.settlement_date),
         "source_filename": batch.source_filename,
         "total_rows": batch.total_rows,
         "settled_count": batch.settled_count,
@@ -280,10 +325,10 @@ def _apply_settlement_to_shipping_record(
     shipping.freight_high_fee_warning = "yes" if high_fee else None
 
 
-def list_freight_settlement_batches(db: Session, *, limit: int = 20) -> dict[str, Any]:
+def list_freight_settlement_batches(db: Session, *, limit: int = 100) -> dict[str, Any]:
     batches = (
         db.query(EmsFreightSettlementBatch)
-        .order_by(EmsFreightSettlementBatch.created_at.desc(), EmsFreightSettlementBatch.id.desc())
+        .order_by(EmsFreightSettlementBatch.created_at.asc(), EmsFreightSettlementBatch.id.asc())
         .limit(limit)
         .all()
     )
@@ -298,7 +343,7 @@ def list_freight_settlement_batches(db: Session, *, limit: int = 20) -> dict[str
         row_dicts = [_row_to_dict(r) for r in rows]
         items.append(_batch_to_dict(batch, row_dicts))
 
-    latest_rows = items[0]["rows"] if items else []
+    latest_rows = items[-1]["rows"] if items else []
     return {
         "ok": True,
         "warnings": [],
@@ -314,7 +359,9 @@ def import_freight_settlement_excel(
     admin_id: Optional[int] = None,
     source_filename: Optional[str] = None,
 ) -> dict[str, Any]:
-    rows, warnings = parse_freight_settlement_rows(file_bytes, source_filename=source_filename)
+    settlement_date, rows, warnings = parse_freight_settlement_rows(
+        file_bytes, source_filename=source_filename
+    )
     rows, dedupe_warnings = _dedupe_by_tracking(rows)
     warnings.extend(dedupe_warnings)
 
@@ -331,6 +378,7 @@ def import_freight_settlement_excel(
         )
 
     batch = EmsFreightSettlementBatch(
+        settlement_date=settlement_date,
         source_filename=source_filename,
         imported_by_admin_id=admin_id,
         total_rows=summary["total_rows"],
@@ -371,7 +419,7 @@ def import_freight_settlement_excel(
 
     db.commit()
 
-    payload = list_freight_settlement_batches(db, limit=20)
+    payload = list_freight_settlement_batches(db, limit=100)
     payload["warnings"] = warnings
     payload["import_batch"] = _batch_to_dict(batch, saved_rows)
     payload["summary"] = _build_summary(saved_rows)

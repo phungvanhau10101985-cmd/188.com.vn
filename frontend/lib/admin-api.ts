@@ -4069,6 +4069,7 @@ export interface EmsFreightSettlementImportResult {
   };
   import_batch?: {
     id: number;
+    settlement_date?: string | null;
     source_filename?: string | null;
     total_rows: number;
     settled_count: number;
@@ -4081,6 +4082,7 @@ export interface EmsFreightSettlementImportResult {
   } | null;
   batches: Array<{
     id: number;
+    settlement_date?: string | null;
     source_filename?: string | null;
     total_rows: number;
     settled_count: number;

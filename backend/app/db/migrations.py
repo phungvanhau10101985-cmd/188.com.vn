@@ -781,6 +781,9 @@ class MigrationManager:
         results['ems_freight_settlement_batches_create'] = self._create_table_if_not_exists(
             "ems_freight_settlement_batches", EmsFreightSettlementBatch
         )
+        results['ems_freight_settlement_batches_sync'] = self._sync_table_columns(
+            "ems_freight_settlement_batches", EmsFreightSettlementBatch
+        )
         results['ems_freight_settlement_rows_create'] = self._create_table_if_not_exists(
             "ems_freight_settlement_rows", EmsFreightSettlementRow
         )

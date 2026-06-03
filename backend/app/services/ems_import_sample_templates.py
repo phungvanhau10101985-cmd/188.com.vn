@@ -92,14 +92,15 @@ def build_cod_settlement_sample_xlsx() -> tuple[bytes, str]:
 
 
 def build_freight_settlement_sample_xlsx() -> tuple[bytes, str]:
-    """Doi soat cuoc — A mã EMS, L cước phí."""
+    """Doi soat cuoc — A mã EMS, C Ngay_Phat_Hanh, L cước phí."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Doi soat cuoc"
     _bold_header_row(ws, 1, ["MA_E1"])
+    ws.cell(row=1, column=3, value="Ngay_Phat_Hanh")
     ws.cell(row=1, column=12, value="CUOC_PHI")
-    ws.append(["EE123456789VN", None, None, None, None, None, None, None, None, None, None, 45000])
-    ws.append(["EE987654321VN", None, None, None, None, None, None, None, None, None, None, 62000])
+    ws.append(["EE123456789VN", None, "01/06/2026", None, None, None, None, None, None, None, None, 45000])
+    ws.append(["EE987654321VN", None, "02/06/2026", None, None, None, None, None, None, None, None, 62000])
     ws.column_dimensions["A"].width = 20
     ws.column_dimensions["L"].width = 14
     return _workbook_to_bytes(wb), "doi_soat_cuoc_mau.xlsx"

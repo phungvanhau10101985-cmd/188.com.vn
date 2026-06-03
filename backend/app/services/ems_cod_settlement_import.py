@@ -7,13 +7,8 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.models.order_shipment import EmsCodSettlementBatch, EmsCodSettlementRow, EmsShippingRecord
-from app.services.ems_excel_utils import read_spreadsheet_rows
+from app.services.ems_excel_utils import parse_excel_date_cell, read_spreadsheet_rows
 from app.services.ems_shipment_import import _parse_cod_amount, _cell_str
-
-_PAYMENT_DATE_RE = re.compile(
-    r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})",
-    re.IGNORECASE,
-)
 _TRACKING_RE = re.compile(r"^[A-Z]{2}\d+[A-Z]{2}$", re.IGNORECASE)
 _COL_TRACKING = 2  # cột C
 _COL_PAID = 3  # cột D
@@ -33,23 +28,6 @@ def _isoformat_value(value: Any) -> Optional[str]:
     return str(value)
 
 
-def _parse_payment_date(value: Any) -> Optional[date]:
-    text = _cell_str(value)
-    if not text:
-        return None
-    match = _PAYMENT_DATE_RE.search(text)
-    if not match:
-        return None
-    day, month, year = match.groups()
-    y = int(year)
-    if y < 100:
-        y += 2000
-    try:
-        return date(y, int(month), int(day))
-    except ValueError:
-        return None
-
-
 def _read_excel_rows(file_bytes: bytes, filename: str) -> list[tuple[Any, ...]]:
     return read_spreadsheet_rows(file_bytes, filename)
 
@@ -65,11 +43,12 @@ def parse_cod_settlement_rows(
         return None, [], ["File Excel trống."]
 
     pay_row, pay_col = _PAYMENT_DATE_CELL
-    payment_date = _parse_payment_date(
-        raw_rows[pay_row][pay_col] if pay_row < len(raw_rows) and pay_col < len(raw_rows[pay_row]) else None
-    )
+    e1_raw = raw_rows[pay_row][pay_col] if pay_row < len(raw_rows) and pay_col < len(raw_rows[pay_row]) else None
+    payment_date = parse_excel_date_cell(e1_raw)
     if not payment_date:
-        warnings.append("Không đọc được ngày trả tiền từ ô E1 — vẫn import nhưng thiếu ngày.")
+        warnings.append(
+            "Không đọc được ngày trả tiền từ ô E1 (vd. «Ngày trả tiền: 02/06/2026») — vẫn import nhưng thiếu ngày."
+        )
 
     parsed: list[dict[str, Any]] = []
     for row_idx, row in enumerate(raw_rows[_DATA_START_ROW:], start=_DATA_START_ROW + 1):
@@ -339,76 +318,10 @@ def _apply_settlement_to_shipping_record(
     shipping.cod_settlement_message = message
 
 
-def _cleanup_duplicate_batches_keep_latest(db: Session) -> int:
-    """Xóa batch trùng ngày — giữ lại lần import sau (id lớn nhất)."""
-    all_batches = (
-        db.query(EmsCodSettlementBatch)
-        .order_by(EmsCodSettlementBatch.payment_date.asc(), EmsCodSettlementBatch.id.asc())
-        .all()
-    )
-    keep_ids: set[int] = set()
-    latest_by_date: dict[date, EmsCodSettlementBatch] = {}
-    for batch in all_batches:
-        prev = latest_by_date.get(batch.payment_date)
-        if prev is None or batch.id > prev.id:
-            latest_by_date[batch.payment_date] = batch
-    keep_ids = {int(b.id) for b in latest_by_date.values()}
-
-    removed = 0
-    for batch in all_batches:
-        if int(batch.id) in keep_ids:
-            continue
-        db.delete(batch)
-        removed += 1
-    if removed:
-        db.flush()
-    return removed
-
-
-def _remove_existing_batches_for_payment_date(db: Session, payment_date: date) -> int:
-    """Một ngày trả COD chỉ giữ một lần import — xóa batch cũ cùng ngày trước khi ghi mới."""
-    old_batches = (
-        db.query(EmsCodSettlementBatch)
-        .filter(EmsCodSettlementBatch.payment_date == payment_date)
-        .all()
-    )
-    if not old_batches:
-        return 0
-
-    affected_record_ids: set[int] = set()
-    for batch in old_batches:
-        rows = (
-            db.query(EmsCodSettlementRow)
-            .filter(EmsCodSettlementRow.batch_id == batch.id)
-            .all()
-        )
-        for row in rows:
-            if row.ems_shipping_record_id:
-                affected_record_ids.add(int(row.ems_shipping_record_id))
-        db.delete(batch)
-
-    db.flush()
-
-    for record_id in affected_record_ids:
-        shipping = db.query(EmsShippingRecord).filter(EmsShippingRecord.id == record_id).first()
-        if not shipping or shipping.cod_paid_date != payment_date:
-            continue
-        shipping.cod_paid_amount = None
-        shipping.cod_paid_date = None
-        shipping.cod_settlement_status = None
-        shipping.cod_settlement_message = None
-
-    return len(old_batches)
-
-
-def list_cod_settlement_batches(db: Session, *, limit: int = 20) -> dict[str, Any]:
-    removed = _cleanup_duplicate_batches_keep_latest(db)
-    if removed:
-        db.commit()
-
+def list_cod_settlement_batches(db: Session, *, limit: int = 100) -> dict[str, Any]:
     batches = (
         db.query(EmsCodSettlementBatch)
-        .order_by(EmsCodSettlementBatch.payment_date.desc(), EmsCodSettlementBatch.id.desc())
+        .order_by(EmsCodSettlementBatch.created_at.asc(), EmsCodSettlementBatch.id.asc())
         .limit(limit)
         .all()
     )
@@ -423,7 +336,7 @@ def list_cod_settlement_batches(db: Session, *, limit: int = 20) -> dict[str, An
         row_dicts = [_row_to_dict(r) for r in rows]
         items.append(_batch_to_dict(batch, row_dicts))
 
-    latest_rows = items[0]["rows"] if items else []
+    latest_rows = items[-1]["rows"] if items else []
     return {
         "ok": True,
         "warnings": [],
@@ -447,12 +360,6 @@ def import_cod_settlement_excel(
     summary = _build_summary(reconciled)
 
     effective_payment_date = payment_date or date.today()
-    removed_batches = _remove_existing_batches_for_payment_date(db, effective_payment_date)
-    if removed_batches:
-        warnings.append(
-            f"Đã thay thế {removed_batches} lần import COD cũ cho ngày "
-            f"{effective_payment_date.strftime('%d/%m/%Y')} — giữ lần import mới nhất."
-        )
 
     batch = EmsCodSettlementBatch(
         payment_date=effective_payment_date,
@@ -498,7 +405,7 @@ def import_cod_settlement_excel(
 
     db.commit()
 
-    payload = list_cod_settlement_batches(db, limit=20)
+    payload = list_cod_settlement_batches(db, limit=100)
     payload["warnings"] = warnings
     payload["import_batch"] = _batch_to_dict(batch, saved_rows)
     payload["summary"] = _build_summary(saved_rows)

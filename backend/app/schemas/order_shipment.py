@@ -434,6 +434,7 @@ class EmsFreightSettlementSummaryResponse(BaseModel):
 
 class EmsFreightSettlementBatchResponse(BaseModel):
     id: int
+    settlement_date: Optional[str] = None
     source_filename: Optional[str] = None
     total_rows: int
     settled_count: int

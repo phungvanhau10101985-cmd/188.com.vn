@@ -578,6 +578,111 @@ function EmsImportReportPanel({
   );
 }
 
+function formatCodBatchSummaryLine(batch: EmsCodSettlementImportResult['batches'][number]): string {
+  return `${batch.total_rows.toLocaleString('vi-VN')} mã · ${batch.matched_count.toLocaleString('vi-VN')} khớp · ${batch.amount_mismatch_count.toLocaleString('vi-VN')} lệch · ${formatVnd(batch.total_paid_amount)} đã trả`;
+}
+
+function formatFreightBatchSummaryLine(batch: EmsFreightSettlementImportResult['batches'][number]): string {
+  return `${batch.total_rows.toLocaleString('vi-VN')} mã · ${batch.settled_count.toLocaleString('vi-VN')} đối soát · ${formatVnd(batch.total_freight_amount)} tổng cước`;
+}
+
+function formatIsoDateVi(iso?: string | null): string | null {
+  if (!iso) return null;
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (isoMatch) return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
+  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(iso.trim());
+  if (slashMatch) return iso.trim();
+  return iso.slice(0, 10);
+}
+
+function codBatchDateLabel(batch: { payment_date?: string | null }): string {
+  const d = formatIsoDateVi(batch.payment_date);
+  return d ? `Ngày trả tiền: ${d}` : 'Ngày trả tiền: —';
+}
+
+function freightBatchDateLabel(batch: { settlement_date?: string | null }): string {
+  const d = formatIsoDateVi(batch.settlement_date);
+  return d ? `Ngày đối soát: ${d}` : 'Ngày đối soát: —';
+}
+
+function settlementBatchTitle(
+  batch: {
+    id: number;
+    payment_date?: string | null;
+    settlement_date?: string | null;
+    created_at?: string | null;
+    source_filename?: string | null;
+  },
+  kind: 'cod' | 'freight',
+): string {
+  const dateLine = kind === 'cod' ? codBatchDateLabel(batch) : freightBatchDateLabel(batch);
+  return batch.source_filename ? `${dateLine} · ${batch.source_filename}` : dateLine;
+}
+
+/** Đợt mới nhất nằm cuối danh sách (thứ tự từ trên xuống = cũ → mới). */
+function latestSettlementBatchId<T extends { id: number }>(batches: T[]): number | null {
+  if (!batches.length) return null;
+  return batches[batches.length - 1]?.id ?? null;
+}
+
+function SettlementBatchHistoryList<
+  T extends {
+    id: number;
+    payment_date?: string | null;
+    settlement_date?: string | null;
+    created_at?: string | null;
+    source_filename?: string | null;
+  },
+>({
+  countLabel,
+  batches,
+  selectedBatchId,
+  onSelect,
+  formatLine,
+  accent,
+  kind,
+}: {
+  countLabel: string;
+  batches: T[];
+  selectedBatchId: number | null;
+  onSelect: (id: number) => void;
+  formatLine: (batch: T) => string;
+  accent: 'blue' | 'violet';
+  kind: 'cod' | 'freight';
+}) {
+  if (!batches.length) return null;
+  const selectedClass =
+    accent === 'blue'
+      ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-200 text-blue-950'
+      : 'bg-violet-50 border-violet-300 ring-1 ring-violet-200 text-violet-950';
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-gray-50/90 px-3 py-3 space-y-2">
+      <p className="text-xs font-medium text-gray-600">
+        {batches.length.toLocaleString('vi-VN')} {countLabel}
+      </p>
+      <ul className="space-y-1.5 max-h-52 overflow-y-auto" role="list">
+        {batches.map((batch, index) => (
+          <li key={batch.id}>
+            <button
+              type="button"
+              onClick={() => onSelect(batch.id)}
+              className={`w-full text-left rounded-lg border px-3 py-2 text-sm transition ${
+                selectedBatchId === batch.id ? selectedClass : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-800'
+              }`}
+            >
+              <div className="font-medium">
+                Đợt {index + 1} · {settlementBatchTitle(batch, kind)}
+              </div>
+              <div className="text-xs text-gray-500 mt-0.5 tabular-nums">{formatLine(batch)}</div>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function CollapsibleListPanel({
   title,
   summary,
@@ -949,7 +1054,7 @@ export default function AdminShippingPage() {
       setCodResult(data);
       setSelectedBatchId((prev) => {
         if (prev != null && data.batches.some((b) => b.id === prev)) return prev;
-        return data.batches[0]?.id ?? null;
+        return latestSettlementBatchId(data.batches);
       });
     } catch (err) {
       setCodError(err instanceof Error ? err.message : 'Không tải được đối soát COD');
@@ -966,7 +1071,7 @@ export default function AdminShippingPage() {
       setFreightResult(data);
       setSelectedFreightBatchId((prev) => {
         if (prev != null && data.batches.some((b) => b.id === prev)) return prev;
-        return data.batches[0]?.id ?? null;
+        return latestSettlementBatchId(data.batches);
       });
     } catch (err) {
       setFreightError(err instanceof Error ? err.message : 'Không tải được đối soát cước');
@@ -1387,10 +1492,11 @@ export default function AdminShippingPage() {
 
   const activeCodBatch = useMemo(() => {
     if (!codResult?.batches.length) return null;
+    const fallback = codResult.batches[codResult.batches.length - 1];
     if (selectedBatchId != null) {
-      return codResult.batches.find((b) => b.id === selectedBatchId) ?? codResult.batches[0];
+      return codResult.batches.find((b) => b.id === selectedBatchId) ?? fallback;
     }
-    return codResult.batches[0];
+    return fallback;
   }, [codResult, selectedBatchId]);
 
   const filteredCodRows = useMemo(() => {
@@ -1417,10 +1523,11 @@ export default function AdminShippingPage() {
 
   const activeFreightBatch = useMemo(() => {
     if (!freightResult?.batches.length) return null;
+    const fallback = freightResult.batches[freightResult.batches.length - 1];
     if (selectedFreightBatchId != null) {
-      return freightResult.batches.find((b) => b.id === selectedFreightBatchId) ?? freightResult.batches[0];
+      return freightResult.batches.find((b) => b.id === selectedFreightBatchId) ?? fallback;
     }
-    return freightResult.batches[0];
+    return fallback;
   }, [freightResult, selectedFreightBatchId]);
 
   const filteredFreightRows = useMemo(() => {
@@ -1445,14 +1552,22 @@ export default function AdminShippingPage() {
   }, [activeFreightBatch, freightResult]);
 
   const codListCollapseSummary = useMemo(() => {
-    if (!codSummary) return '';
-    return `${codSummary.total_rows.toLocaleString('vi-VN')} mã · ${codSummary.matched.toLocaleString('vi-VN')} khớp · ${codSummary.amount_mismatch.toLocaleString('vi-VN')} lệch · ${formatVnd(codSummary.total_paid_amount)} đã trả`;
-  }, [codSummary]);
+    const n = codResult?.batches.length ?? 0;
+    if (!n) return '';
+    if (activeCodBatch) {
+      return `${n} đợt đã lưu · đang xem: ${formatCodBatchSummaryLine(activeCodBatch)}`;
+    }
+    return `${n} đợt đối soát COD đã lưu`;
+  }, [codResult?.batches.length, activeCodBatch]);
 
   const freightListCollapseSummary = useMemo(() => {
-    if (!freightSummary) return '';
-    return `${freightSummary.total_rows.toLocaleString('vi-VN')} mã · ${freightSummary.settled.toLocaleString('vi-VN')} đối soát · ${formatVnd(freightSummary.total_freight_amount)} tổng cước`;
-  }, [freightSummary]);
+    const n = freightResult?.batches.length ?? 0;
+    if (!n) return '';
+    if (activeFreightBatch) {
+      return `${n} đợt đã lưu · đang xem: ${formatFreightBatchSummaryLine(activeFreightBatch)}`;
+    }
+    return `${n} đợt đối soát cước đã lưu`;
+  }, [freightResult?.batches.length, activeFreightBatch]);
 
   const runImport = useCallback(async () => {
     if (!file) {
@@ -1498,7 +1613,7 @@ export default function AdminShippingPage() {
     try {
       const data = await adminCodSettlementAPI.importExcel(codFile);
       setCodResult(data);
-      setSelectedBatchId(data.import_batch?.id ?? data.batches[0]?.id ?? null);
+      setSelectedBatchId(data.import_batch?.id ?? latestSettlementBatchId(data.batches));
       setCodFilter('all');
       setCodListExpanded(true);
       await loadRecords();
@@ -1717,7 +1832,7 @@ export default function AdminShippingPage() {
     try {
       const data = await adminFreightSettlementAPI.importExcel(freightFile);
       setFreightResult(data);
-      setSelectedFreightBatchId(data.import_batch?.id ?? data.batches[0]?.id ?? null);
+      setSelectedFreightBatchId(data.import_batch?.id ?? latestSettlementBatchId(data.batches));
       setFreightFilter('all');
       setFreightListExpanded(true);
       await loadRecords();
@@ -2663,7 +2778,8 @@ export default function AdminShippingPage() {
         <h2 className="text-lg font-semibold text-gray-900">2. Import đối soát COD EMS trả shop</h2>
         <p className="text-sm text-gray-600">
           File <strong>Doi soat cod (Shop 188).xls</strong>: cột <strong>C</strong> mã vận chuyển EMS, cột{' '}
-          <strong>D</strong> số tiền EMS đã trả shop (vd. 5,200,000), ô <strong>E1</strong> ngày trả tiền.
+          <strong>D</strong> số tiền EMS đã trả shop (vd. 5,200,000), ô <strong>E1</strong> ngày trả tiền (vd.{' '}
+          <strong>Ngày trả tiền: 02/06/2026</strong>).
           Chỉ sau bước này hệ thống mới ghi <strong>COD EMS trả shop</strong> — hành trình «[COD]Đã thu tiền» là
           bưu tá thu khách, chưa phải trả shop.
         </p>
@@ -2705,8 +2821,7 @@ export default function AdminShippingPage() {
 
         {codResult?.import_batch && !codLoading ? (
           <div className="bg-blue-50 border border-blue-200 text-blue-900 rounded-lg px-4 py-3 text-sm">
-            Đối soát ngày{' '}
-            <strong>{codResult.import_batch.payment_date || '—'}</strong>:{' '}
+            <strong>{codBatchDateLabel(codResult.import_batch)}</strong>:{' '}
             <strong>{codResult.import_batch.matched_count}</strong> khớp ·{' '}
             <strong>{codResult.import_batch.amount_mismatch_count}</strong> lệch tiền ·{' '}
             <strong>{codResult.import_batch.record_not_found_count}</strong> không có trong DB · tổng trả{' '}
@@ -2734,6 +2849,19 @@ export default function AdminShippingPage() {
             Đang tải lịch sử đối soát COD…
           </div>
         ) : codResult?.batches.length ? (
+          <>
+          <SettlementBatchHistoryList
+            countLabel="đợt đối soát COD đã lưu"
+            batches={codResult.batches}
+            selectedBatchId={selectedBatchId}
+            onSelect={(id) => {
+              setSelectedBatchId(id);
+              setCodListExpanded(true);
+            }}
+            formatLine={formatCodBatchSummaryLine}
+            accent="blue"
+            kind="cod"
+          />
           <CollapsibleListPanel
             title="Danh sách đối soát COD"
             summary={codListCollapseSummary}
@@ -2775,25 +2903,9 @@ export default function AdminShippingPage() {
                   <h3 className="text-base font-semibold text-gray-900">Bảng đối soát COD</h3>
                   <span className="text-sm text-gray-500">{filteredCodRows.length} dòng</span>
                 </div>
-                {codResult.batches.length > 1 ? (
-                  <label className="text-sm text-gray-600 flex items-center gap-2">
-                    Ngày trả tiền
-                    <select
-                      value={selectedBatchId ?? ''}
-                      onChange={(e) => setSelectedBatchId(Number(e.target.value))}
-                      className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                    >
-                      {codResult.batches.map((batch) => (
-                        <option key={batch.id} value={batch.id}>
-                          {batch.payment_date || batch.created_at?.slice(0, 10) || `#${batch.id}`}
-                          {batch.source_filename ? ` · ${batch.source_filename}` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : activeCodBatch?.payment_date ? (
+                {activeCodBatch ? (
                   <span className="text-sm text-gray-600">
-                    Ngày trả: <strong>{activeCodBatch.payment_date}</strong>
+                    Đợt: <strong>{settlementBatchTitle(activeCodBatch, 'cod')}</strong>
                   </span>
                 ) : null}
               </div>
@@ -2855,6 +2967,7 @@ export default function AdminShippingPage() {
               </div>
             </div>
           </CollapsibleListPanel>
+          </>
         ) : (
           <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-8 text-center text-sm text-gray-500">
             Chưa có lần đối soát COD nào. Upload file <strong>Doi soat cod</strong> để bắt đầu.
@@ -3250,7 +3363,9 @@ export default function AdminShippingPage() {
       <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
         <h2 className="text-lg font-semibold text-gray-900">4. Import đối soát cước</h2>
         <p className="text-sm text-gray-600">
-          File <strong>Doi soat cuoc.xls</strong>: cột <strong>A</strong> mã vận chuyển EMS, cột <strong>L</strong> cước phí.
+          File <strong>Doi soat cuoc.xls</strong>: cột <strong>A</strong> mã vận chuyển EMS, cột <strong>C</strong>{' '}
+          <strong>Ngay_Phat_Hanh</strong> (ngày đối soát = ngày phát hành gần nhất trong file), cột <strong>L</strong>{' '}
+          cước phí.
           Mã phải đã có trong bảng vận chuyển và <strong>chưa từng đối soát cước</strong>.
           Cước phí &gt; <strong>70.000 đ</strong> sẽ được cảnh báo để xem lại.
         </p>
@@ -3292,7 +3407,8 @@ export default function AdminShippingPage() {
 
         {freightResult?.import_batch && !freightLoading ? (
           <div className="bg-violet-50 border border-violet-200 text-violet-900 rounded-lg px-4 py-3 text-sm">
-            Đối soát cước: <strong>{freightResult.import_batch.settled_count}</strong> thành công ·{' '}
+            <strong>{freightBatchDateLabel(freightResult.import_batch)}</strong> ·{' '}
+            <strong>{freightResult.import_batch.settled_count}</strong> thành công ·{' '}
             <strong>{freightResult.import_batch.already_settled_count}</strong> đã đối soát trước ·{' '}
             <strong>{freightResult.import_batch.record_not_found_count}</strong> không có trong DB · tổng cước{' '}
             <strong>{formatVnd(freightResult.import_batch.total_freight_amount)}</strong>
@@ -3319,6 +3435,19 @@ export default function AdminShippingPage() {
             Đang tải lịch sử đối soát cước…
           </div>
         ) : freightResult?.batches.length ? (
+          <>
+          <SettlementBatchHistoryList
+            countLabel="đợt đối soát cước đã lưu"
+            batches={freightResult.batches}
+            selectedBatchId={selectedFreightBatchId}
+            onSelect={(id) => {
+              setSelectedFreightBatchId(id);
+              setFreightListExpanded(true);
+            }}
+            formatLine={formatFreightBatchSummaryLine}
+            accent="violet"
+            kind="freight"
+          />
           <CollapsibleListPanel
             title="Danh sách đối soát cước"
             summary={freightListCollapseSummary}
@@ -3365,22 +3494,10 @@ export default function AdminShippingPage() {
                   <h3 className="text-base font-semibold text-gray-900">Bảng đối soát cước</h3>
                   <span className="text-sm text-gray-500">{filteredFreightRows.length} dòng</span>
                 </div>
-                {freightResult.batches.length > 1 ? (
-                  <label className="text-sm text-gray-600 flex items-center gap-2">
-                    Lần import
-                    <select
-                      value={selectedFreightBatchId ?? ''}
-                      onChange={(e) => setSelectedFreightBatchId(Number(e.target.value))}
-                      className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                    >
-                      {freightResult.batches.map((batch) => (
-                        <option key={batch.id} value={batch.id}>
-                          {batch.created_at?.slice(0, 16).replace('T', ' ') || `#${batch.id}`}
-                          {batch.source_filename ? ` · ${batch.source_filename}` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                {activeFreightBatch ? (
+                  <span className="text-sm text-gray-600">
+                    Đợt: <strong>{settlementBatchTitle(activeFreightBatch, 'freight')}</strong>
+                  </span>
                 ) : null}
               </div>
               <div className="overflow-x-auto">
@@ -3439,6 +3556,7 @@ export default function AdminShippingPage() {
               </div>
             </div>
           </CollapsibleListPanel>
+          </>
         ) : (
           <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-8 text-center text-sm text-gray-500">
             Chưa có lần đối soát cước nào. Upload file <strong>Doi soat cuoc</strong> để bắt đầu.

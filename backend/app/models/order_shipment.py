@@ -108,7 +108,7 @@ class EmsShippingImportBatchRow(Base):
 
 
 class EmsCodSettlementBatch(Base):
-    """Lần import file đối soát COD đã thanh toán (Doi soat cod)."""
+    """Một đợt import file đối soát COD (Doi soat cod) — lưu lịch sử các đợt."""
 
     __tablename__ = "ems_cod_settlement_batches"
 
@@ -157,11 +157,12 @@ class EmsCodSettlementRow(Base):
 
 
 class EmsFreightSettlementBatch(Base):
-    """Lần import file đối soát cước EMS (Doi soat cuoc)."""
+    """Một đợt import file đối soát cước EMS (Doi soat cuoc) — lưu lịch sử các đợt."""
 
     __tablename__ = "ems_freight_settlement_batches"
 
     id = Column(Integer, primary_key=True, index=True)
+    settlement_date = Column(Date, nullable=True, index=True)
     source_filename = Column(String(255), nullable=True)
     imported_by_admin_id = Column(Integer, ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True)
     total_rows = Column(Integer, nullable=False, default=0)

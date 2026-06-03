@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import io
+import re
 import xml.etree.ElementTree as ET
-from typing import Any
+from datetime import date, datetime
+from typing import Any, Optional
 
 import pandas as pd
+
+_EXCEL_DATE_RE = re.compile(
+    r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})",
+    re.IGNORECASE,
+)
 
 _SS_NS = "{urn:schemas-microsoft-com:office:spreadsheet}"
 
@@ -47,6 +54,40 @@ def _read_xml_spreadsheet_rows(file_bytes: bytes) -> list[tuple[Any, ...]]:
         row_tuple = tuple(cells.get(i) for i in range(1, max_col + 1))
         rows.append(row_tuple)
     return rows
+
+
+def parse_excel_date_cell(value: Any) -> Optional[date]:
+    """Đọc ngày từ ô Excel: datetime, chuỗi «Ngày trả tiền: 02/06/2026», v.v."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(text[:10] if fmt == "%Y-%m-%d" else text, fmt).date()
+        except ValueError:
+            continue
+    if len(text) >= 10 and text[4:5] == "-":
+        try:
+            return date.fromisoformat(text[:10])
+        except ValueError:
+            pass
+    match = _EXCEL_DATE_RE.search(text)
+    if not match:
+        return None
+    day, month, year = match.groups()
+    y = int(year)
+    if y < 100:
+        y += 2000
+    try:
+        return date(y, int(month), int(day))
+    except ValueError:
+        return None
 
 
 def read_spreadsheet_rows(file_bytes: bytes, filename: str = "") -> list[tuple[Any, ...]]:
