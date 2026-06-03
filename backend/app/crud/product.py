@@ -1791,6 +1791,78 @@ def _apply_word_mapping(words: List[str]) -> List[str]:
     return result
 
 
+def _search_products_sale_keyword(
+    db: Session,
+    query,
+    limit: int,
+    skip: int,
+    *,
+    sort: str = "id_desc",
+):
+    """
+    Từ khóa «sale» / kho thanh lý: tên hoặc slug chứa sale, hoặc SP gốc còn biến thể kho thanh lý.
+    """
+    sale_pat = "%sale%"
+    search_concat = sql_func.concat(
+        sql_func.coalesce(Product.name, ""), " ",
+        sql_func.coalesce(Product.slug, ""), " ",
+        sql_func.coalesce(Product.code, ""), " ",
+        sql_func.coalesce(Product.category, ""), " ",
+        sql_func.coalesce(Product.subcategory, ""), " ",
+        sql_func.coalesce(Product.sub_subcategory, ""), " ",
+        sql_func.coalesce(Product.material, ""), " ",
+        sql_func.coalesce(Product.style, ""), " ",
+        sql_func.coalesce(Product.color, ""), " ",
+        sql_func.coalesce(Product.occasion, ""), " ",
+        sql_func.coalesce(cast(Product.features, String), ""), " ",
+        sql_func.coalesce(cast(Product.sizes, String), ""), " ",
+        sql_func.coalesce(cast(Product.product_info, String), ""),
+    )
+    search_concat_norm = sql_func.lower(search_concat)
+
+    wh_rows = (
+        db.query(Product.base_sku, Product.product_id)
+        .filter(
+            Product.is_warehouse_clearance == True,  # noqa: E712
+            Product.is_active == True,  # noqa: E712
+            Product.available > 0,
+        )
+        .all()
+    )
+    parent_keys: set[str] = set()
+    for base_sku, product_id in wh_rows:
+        sku = str(base_sku or "").strip()
+        if sku:
+            parent_keys.add(sku)
+        pid = str(product_id or "").strip()
+        if "/" in pid:
+            parent_keys.add(pid.split("/")[0].strip())
+
+    parent_match = []
+    if parent_keys:
+        parent_match.append(Product.code.in_(list(parent_keys)))
+        parent_match.append(Product.product_id.in_(list(parent_keys)))
+
+    sale_match = [search_concat_norm.ilike(sale_pat)]
+    if parent_match:
+        sale_match.append(
+            and_(
+                or_(Product.is_warehouse_clearance == False, Product.is_warehouse_clearance.is_(None)),  # noqa: E712
+                or_(*parent_match),
+            )
+        )
+
+    q2 = query.filter(or_(*sale_match))
+    vt_sub = None
+    if sort == "views_desc":
+        vt_sub = _product_view_totals_subquery()
+        q2 = q2.outerjoin(vt_sub, Product.id == vt_sub.c.product_id)
+    total = q2.count()
+    order_exprs = _order_exprs_for_product_list(sort, vt_sub)
+    products = q2.order_by(*order_exprs).offset(skip).limit(limit).all()
+    return total, products
+
+
 def _search_products_by_words(
     db: Session,
     query,
@@ -1826,6 +1898,7 @@ def apply_product_search_word_filters(query, words: List[str]):
 
     search_concat = func.concat(
         func.coalesce(Product.name, ""), " ",
+        func.coalesce(Product.slug, ""), " ",
         func.coalesce(Product.code, ""), " ",
         func.coalesce(Product.category, ""), " ",
         func.coalesce(Product.subcategory, ""), " ",
@@ -4111,18 +4184,33 @@ def get_products(
     normalized_query = normalize_search_query(q) if q and q.strip() else None
     if q and q.strip():
         raw_query = q.strip()
+        from app.services.warehouse_clearance import (
+            WAREHOUSE_CLEARANCE_GROUP_LISTING_PATH,
+            is_sale_listing_search_query,
+        )
+
+        sale_keyword_search = is_sale_listing_search_query(raw_query)
+
+        if sale_keyword_search:
+            total, products = _search_products_sale_keyword(
+                db, query, limit, skip, sort=sort_norm,
+            )
+            if total > 0:
+                applied_query = normalize_search_query(raw_query)
+                _log_search(db, raw_query, total, ai_processed=False)
+
         normalized_key = _normalize_search_key(raw_query)
         has_accents = _has_vietnamese_accents(raw_query)
 
         mapped_query = None
-        mapping = _get_search_mapping(db, normalized_key)
+        mapping = None if sale_keyword_search else _get_search_mapping(db, normalized_key)
 
         try:
             category_tree = get_category_tree_from_products(db, is_active=is_active if is_active is not None else True)
         except Exception:
             category_tree = []
 
-        if has_accents and mapping and mapping.keyword_target:
+        if total == 0 and has_accents and mapping and mapping.keyword_target:
             mapping_key = _normalize_search_key(mapping.keyword_target)
             matched_from_mapping = _match_category_path(mapping_key, category_tree) if mapping_key else None
             if not matched_from_mapping and mapping.type == SearchMappingType.category_redirect:
@@ -4167,7 +4255,7 @@ def get_products(
                     applied_query = normalized
         if total > 0:
             _log_search(db, raw_query, total, ai_processed=False)
-        if total == 0:
+        if total == 0 and not sale_keyword_search:
             try:
                 from app.services.search_query_corrector import correct_search_query_via_ai, suggest_category_matches_via_ai
                 gender_context = _infer_gender_context(category, subcategory, sub_subcategory, raw_query)
@@ -4219,6 +4307,8 @@ def get_products(
                             suggested_categories.append({"name": c.get("name"), "path": c.get("path")})
             except Exception as e:
                 logger.debug("AI correct search skipped: %s", e)
+            if total == 0 and sale_keyword_search:
+                redirect_path = WAREHOUSE_CLEARANCE_GROUP_LISTING_PATH
             _log_search(db, raw_query, total, ai_processed=ai_processed)
     if not (q and q.strip()):
         if skip_total:

@@ -1,6 +1,24 @@
 import type { CategoryLevel1 } from '@/types/api';
 import { generateSlug } from '@/lib/utils';
 
+/** Từ khóa → trang kho sale / thanh lý (khớp VPS: không dùng ?q=sale trên trang chủ). */
+const SALE_LISTING_SLUGS = new Set([
+  'sale',
+  'kho-sale',
+  'thanh-ly',
+  'thanh-ly-kho',
+  'sale-soc',
+  'sale-so',
+  'hang-sale',
+  'hang-thanh-ly',
+]);
+
+export function isSaleListingSearchTerm(raw: string): boolean {
+  const term = raw.trim();
+  if (!term) return false;
+  return SALE_LISTING_SLUGS.has(generateSlug(term));
+}
+
 /**
  * Điều hướng tìm sản phẩm theo chữ — dùng chung header, nav sticky, mobile header, trang chi tiết SP.
  * - Khớp slug với tên/slug danh mục → mở /danh-muc/...
@@ -16,12 +34,11 @@ export function navigateProductTextSearch(
     router.push('/');
     return;
   }
-  const target = generateSlug(term);
-  const saleListingSlugs = new Set(['sale', 'kho-sale', 'thanh-ly', 'thanh-ly-kho', 'sale-soc']);
-  if (saleListingSlugs.has(target)) {
+  if (isSaleListingSearchTerm(term)) {
     router.push('/kho-sale');
     return;
   }
+  const target = generateSlug(term);
   const tree = categoryTree || [];
   for (const c1 of tree) {
     const slug1 = generateSlug(c1.slug || c1.name);

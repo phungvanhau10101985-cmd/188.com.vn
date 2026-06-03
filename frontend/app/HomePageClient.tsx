@@ -49,6 +49,7 @@ import {
   mixShopAndCohortProducts,
 } from '@/lib/home-recommendation-mixed-products';
 import { consumeHomeRecommendationFresh } from '@/lib/home-navigation-mode';
+import { isSaleListingSearchTerm } from '@/lib/navigate-product-text-search';
 import type { HomeRecommendationSnapshotResponse } from '@/types/api';
 
 /** Lần đầu block «CÓ THỂ BẠN THÍCH» — ít SP hơn để luôn có «Xem thêm» khi còn dữ liệu. */
@@ -210,6 +211,12 @@ export default function HomePageClient({
   const pageFromUrl = Number(searchParams.get('page') || 1);
   const currentPage = Number.isFinite(pageFromUrl) && pageFromUrl > 0 ? pageFromUrl : 1;
   const PAGE_SIZE = 48;
+
+  /** ?q=sale: ưu tiên kết quả kho; chỉ sang /kho-sale khi API báo redirect hoặc 0 SP catalog. */
+  const saleSearchIntent = useMemo(
+    () => isSaleListingSearchTerm(qFromUrl.trim()),
+    [qFromUrl],
+  );
   /** Tìm kiếm trang 1: hiện trước N SP, sau đó gọi tiếp để đủ một “trang” (PAGE_SIZE). */
   const SEARCH_INITIAL_LIMIT = 12;
   const [searchCatalogAppending, setSearchCatalogAppending] = useState(false);
@@ -352,7 +359,6 @@ export default function HomePageClient({
       setNanoaiTextError(null);
       return;
     }
-
     let cancelled = false;
 
     const searchApiParams = {
@@ -469,9 +475,14 @@ export default function HomePageClient({
         }
 
         if (catalogTotal === 0) {
+          if (saleSearchIntent && currentPage === 1) {
+            const dest = first.redirect_path?.trim() || '/kho-sale';
+            router.replace(dest);
+            return;
+          }
           setNanoaiTextProducts([]);
           setNanoaiTextError(null);
-          if (qFromUrl.trim().length >= 2 && currentPage === 1) {
+          if (qFromUrl.trim().length >= 2 && currentPage === 1 && !saleSearchIntent) {
             setNanoaiTextLoading(true);
             try {
               const nano = await apiClient.nanoaiTextSearch(qFromUrl.trim(), NANOAI_TEXT_SEARCH_LIMIT);

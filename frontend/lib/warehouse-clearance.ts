@@ -81,6 +81,108 @@ export function warehouseVariantThumbUrl(variant: WarehouseClearanceVariant): st
   return raw || null;
 }
 
+/** Ảnh màu dòng kho đơn (listing /kho-sale) — không dùng ảnh SP gốc nếu có ảnh variant. */
+export function warehouseStandaloneSaleImage(product: Product): string | null {
+  const rawColor = product.colors?.[0];
+  if (typeof rawColor === 'object' && rawColor != null) {
+    const img = String(
+      (rawColor as { img?: string; image?: string }).img ||
+        (rawColor as { image?: string }).image ||
+        '',
+    ).trim();
+    if (img) return img;
+  }
+  const urls = product.color_image_urls;
+  if (Array.isArray(urls)) {
+    for (const u of urls) {
+      const s = String(u || '').trim();
+      if (s) return s;
+    }
+  }
+  return String(product.main_image || '').trim() || null;
+}
+
+/** Size từ cột sizes hoặc mã dòng kho (HN256/XL/2 → XL). */
+export function warehouseStandaloneSize(product: Product): string | null {
+  const fromSizes = product.sizes?.[0];
+  if (fromSizes != null && String(fromSizes).trim()) {
+    return String(fromSizes).trim();
+  }
+  const pid = String(product.product_id || '').trim();
+  if (!pid.includes('/')) return null;
+  const parts = pid.split('/').map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+  const seg = parts[1];
+  return seg || null;
+}
+
+function clearanceLineFromStandaloneProduct(product: Product): ClearanceCardLine {
+  const fallbackPct = product.warehouse_clearance?.discount_percent ?? 0;
+  const thumbUrl = warehouseStandaloneSaleImage(product);
+  const size = warehouseStandaloneSize(product);
+  const displayPrice = Math.max(0, Number(product.price ?? 0));
+  const apiOriginal = product.original_price;
+  const originalPrice =
+    apiOriginal != null && apiOriginal > displayPrice
+      ? apiOriginal
+      : null;
+  const hasDiscount = originalPrice != null && originalPrice > displayPrice;
+  let discountPercent = clearanceLineDiscountPercent(
+    displayPrice,
+    originalPrice,
+    fallbackPct,
+  );
+  if (discountPercent <= 0 && hasDiscount && originalPrice != null) {
+    discountPercent = Math.max(
+      0,
+      Math.min(100, Math.round(((originalPrice - displayPrice) / originalPrice) * 100)),
+    );
+  }
+  if (discountPercent <= 0 && fallbackPct > 0) {
+    discountPercent = Math.round(fallbackPct);
+  }
+  const rawColor = product.colors?.[0];
+  const color =
+    typeof rawColor === 'object' && rawColor != null
+      ? String(rawColor.name || rawColor.value || '').trim()
+      : String(rawColor || '').trim();
+  return {
+    color: color || (thumbUrl ? 'Như ảnh' : '—'),
+    size,
+    displayPrice,
+    originalPrice,
+    hasDiscount,
+    thumbUrl,
+    discountPercent,
+  };
+}
+
+/** % hiển thị badge góc ảnh — luôn có khi có giá gạch hoặc % cấu hình kho. */
+export function resolveClearanceCardHeroPercent(
+  product: Product,
+  firstLine?: ClearanceCardLine | null,
+): number {
+  const line = firstLine ?? getClearanceCardDisplayLines(product, 1)[0];
+  let pct = getClearanceCardBestDiscountPercent(product);
+  if (pct <= 0 && line) pct = line.discountPercent;
+  if (
+    pct <= 0 &&
+    line?.hasDiscount &&
+    line.originalPrice != null &&
+    line.originalPrice > line.displayPrice
+  ) {
+    pct = Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(((line.originalPrice - line.displayPrice) / line.originalPrice) * 100),
+      ),
+    );
+  }
+  const cfg = Math.round(Number(product.warehouse_clearance?.discount_percent ?? 0));
+  return Math.max(pct, cfg);
+}
+
 export type ClearanceCardLine = {
   color: string;
   size: string | null;
@@ -88,52 +190,113 @@ export type ClearanceCardLine = {
   originalPrice: number | null;
   hasDiscount: boolean;
   thumbUrl: string | null;
+  discountPercent: number;
 };
+
+export type ClearanceCardHero = {
+  /** Ảnh màu thanh lý — ưu tiên `color_image` biến thể đầu còn tồn. */
+  imageUrl: string | null;
+  /** % giảm cao nhất trong các dòng kho còn hàng. */
+  discountPercent: number;
+  /** Nhãn size trên badge ảnh (một size, hoặc «XL · L», hoặc «XL +2»). */
+  sizeBadge: string | null;
+};
+
+/** % giảm thực tế của một dòng kho (ưu tiên chênh lệch giá, sau đó % cấu hình). */
+export function clearanceLineDiscountPercent(
+  displayPrice: number,
+  originalPrice: number | null,
+  configuredPercent = 0,
+): number {
+  const orig = originalPrice != null && originalPrice > displayPrice ? originalPrice : 0;
+  if (orig > 0 && displayPrice > 0) {
+    return Math.max(0, Math.min(100, Math.round(((orig - displayPrice) / orig) * 100)));
+  }
+  return Math.max(0, Math.min(100, Math.round(configuredPercent)));
+}
+
+function clearanceLineFromVariant(
+  product: Product,
+  variant: WarehouseClearanceVariant,
+  fallbackPct: number,
+): ClearanceCardLine {
+  const pricing = resolveWarehouseVariantPricing(variant, fallbackPct);
+  const originalPrice = pricing.hasDiscount ? pricing.originalPrice : null;
+  return {
+    color: warehouseVariantColorLabel(variant),
+    size: warehouseVariantSizeLabel(variant),
+    displayPrice: pricing.displayPrice,
+    originalPrice,
+    hasDiscount: pricing.hasDiscount,
+    thumbUrl:
+      warehouseVariantThumbUrl(variant) || String(product.main_image || '').trim() || null,
+    discountPercent: clearanceLineDiscountPercent(
+      pricing.displayPrice,
+      originalPrice,
+      pricing.percent,
+    ),
+  };
+}
 
 /** Dòng Màu/Size + giá sale kho trên thẻ SP (tối đa `limit`). */
 export function getClearanceCardDisplayLines(product: Product, limit = 2): ClearanceCardLine[] {
   const fallbackPct = product.warehouse_clearance?.discount_percent ?? 0;
   const variants = warehouseVariantsInStock(product);
   if (variants.length > 0) {
-    return variants.slice(0, limit).map((v) => {
-      const pricing = resolveWarehouseVariantPricing(v, fallbackPct);
-      return {
-        color: warehouseVariantColorLabel(v),
-        size: warehouseVariantSizeLabel(v),
-        displayPrice: pricing.displayPrice,
-        originalPrice: pricing.hasDiscount ? pricing.originalPrice : null,
-        hasDiscount: pricing.hasDiscount,
-        thumbUrl:
-          warehouseVariantThumbUrl(v) || String(product.main_image || '').trim() || null,
-      };
-    });
+    return variants.slice(0, limit).map((v) => clearanceLineFromVariant(product, v, fallbackPct));
   }
   if (!isWarehouseClearanceProduct(product)) return [];
-  const rawColor = product.colors?.[0];
-  const color =
-    typeof rawColor === 'object' && rawColor != null
-      ? String(rawColor.name || rawColor.value || '').trim()
-      : String(rawColor || '').trim();
-  const sizeRaw = product.sizes?.[0];
-  const size = sizeRaw != null && String(sizeRaw).trim() ? String(sizeRaw).trim() : null;
-  const colorImg =
-    typeof rawColor === 'object' && rawColor != null
-      ? String(rawColor.img || '').trim()
-      : '';
-  const thumbUrl = colorImg || String(product.main_image || '').trim() || null;
-  const listPrice = Math.max(0, Number(product.original_price ?? product.price ?? 0));
-  const displayPrice = Math.max(0, Number(product.price ?? listPrice));
-  const hasDiscount = listPrice > displayPrice && displayPrice > 0;
-  return [
-    {
-      color: color || '—',
-      size,
-      displayPrice,
-      originalPrice: hasDiscount ? listPrice : null,
-      hasDiscount,
-      thumbUrl,
-    },
+  return [clearanceLineFromStandaloneProduct(product)];
+}
+
+/** Nhãn size gọn cho badge trên ảnh thẻ SP. */
+export function getClearanceCardSizeBadge(product: Product): string | null {
+  const variants = warehouseVariantsInStock(product);
+  const sizes = [
+    ...new Set(
+      variants
+        .map((v) => warehouseVariantSizeLabel(v))
+        .filter((s): s is string => Boolean(s)),
+    ),
   ];
+  if (sizes.length === 1) return sizes[0];
+  if (sizes.length === 2) return `${sizes[0]} · ${sizes[1]}`;
+  if (sizes.length > 2) return `${sizes[0]} +${sizes.length - 1}`;
+  const line = getClearanceCardDisplayLines(product, 1)[0];
+  return line?.size ?? null;
+}
+
+/** % giảm cao nhất trong các dòng thanh lý còn tồn. */
+export function getClearanceCardBestDiscountPercent(product: Product): number {
+  const fallbackPct = product.warehouse_clearance?.discount_percent ?? 0;
+  const variants = warehouseVariantsInStock(product);
+  if (variants.length > 0) {
+    const percents = variants.map(
+      (v) => clearanceLineFromVariant(product, v, fallbackPct).discountPercent,
+    );
+    return Math.max(0, ...percents);
+  }
+  const line = getClearanceCardDisplayLines(product, 1)[0];
+  return line?.discountPercent ?? 0;
+}
+
+/** Ảnh + % + size cho vùng ảnh đại diện thẻ SP khi có thanh lý. */
+export function getClearanceCardHero(product: Product): ClearanceCardHero | null {
+  if (!productShowsClearanceOnCard(product)) return null;
+  const lines = getClearanceCardDisplayLines(product, 1);
+  const first = lines[0];
+  if (!first) return null;
+  const discountPercent = resolveClearanceCardHeroPercent(product, first);
+  const imageUrl =
+    first.thumbUrl ||
+    warehouseStandaloneSaleImage(product) ||
+    String(product.main_image || '').trim() ||
+    null;
+  return {
+    imageUrl,
+    discountPercent,
+    sizeBadge: getClearanceCardSizeBadge(product) ?? first.size,
+  };
 }
 
 /** Có dòng kho thanh lý còn tồn — không phụ thuộc `warehouse_clearance.enabled` (cờ admin chỉ ảnh hưởng % giảm). */

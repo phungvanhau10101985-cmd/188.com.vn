@@ -13,6 +13,45 @@ from app.models.product import Product
 # Listing nhóm / redirect OOS cho dòng kho thanh lý (Sale Sốc, …).
 WAREHOUSE_CLEARANCE_GROUP_LISTING_PATH = "/kho-sale"
 
+# Từ khóa tìm «sale» / thanh lý → listing kho (không ?q=sale trên trang chủ).
+_SALE_LISTING_SEARCH_SLUGS = frozenset(
+    {
+        "sale",
+        "kho-sale",
+        "thanh-ly",
+        "thanh-ly-kho",
+        "sale-soc",
+        "sale-so",
+        "hang-sale",
+        "hang-thanh-ly",
+    }
+)
+
+
+def _sale_search_term_slug(raw: str) -> str:
+    """Slug khớp frontend `generateSlug` — dùng nhận diện từ khóa kho sale."""
+    import unicodedata
+
+    s = unicodedata.normalize("NFD", str(raw or "").strip().lower())
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    s = re.sub(r"[^a-z0-9 -]", "", s)
+    s = re.sub(r"\s+", "-", s).strip("-")
+    return re.sub(r"-+", "-", s)
+
+
+def is_sale_listing_search_query(raw_query: Optional[str]) -> bool:
+    """True khi người dùng tìm kho sale / thanh lý (một cụm, không phải «áo sale»)."""
+    raw = str(raw_query or "").strip()
+    if not raw:
+        return False
+    slug = _sale_search_term_slug(raw)
+    if not slug:
+        return False
+    if slug in _SALE_LISTING_SEARCH_SLUGS:
+        return True
+    compact = re.sub(r"[^a-z0-9]+", "", slug)
+    return compact in {"sale", "khosale", "thanhkho", "salesoc"}
+
 # Cột clone từ SP gốc khi import kho (ảnh/size/màu/tồn/giá lấy từ Excel hoặc rule riêng).
 _WAREHOUSE_CLONE_FIELDS = (
     "origin",
@@ -945,6 +984,18 @@ def enrich_standalone_warehouse_product(db: Session, payload: Dict[str, Any], pr
         "enabled": enabled,
         "discount_percent": pct,
     }
+    variant_img = (warehouse_variant_payload(db, product).get("color_image") or "").strip()
+    if variant_img:
+        payload["main_image"] = variant_img
+        colors = payload.get("colors")
+        if isinstance(colors, list) and colors:
+            first = colors[0]
+            if isinstance(first, dict):
+                first["img"] = variant_img
+            elif isinstance(first, str):
+                payload["colors"] = [{"name": first, "value": first, "img": variant_img}]
+        else:
+            payload["colors"] = [{"name": "Như ảnh", "value": "Như ảnh", "img": variant_img}]
 
 
 def assert_product_deletion_allowed(db: Session, product: Product, *, admin_force: bool = False) -> None:

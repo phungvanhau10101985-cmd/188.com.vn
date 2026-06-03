@@ -64,7 +64,7 @@ def build_cache_key(
         "cl": (filter_color or "").strip(),
         "stylet": (filter_style_tag or "").strip(),
         # Bump khi thay đổi cấu trúc payload hoặc ngữ nghĩa filter (tránh cache cũ trả 0 sai).
-        "pv": 10,
+        "pv": 11,
     }
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]

@@ -9,6 +9,7 @@ import {
   clearanceVariantCountOnCard,
   getClearanceCardDisplayLines,
   productShowsClearanceOnCard,
+  resolveClearanceCardHeroPercent,
 } from '@/lib/warehouse-clearance';
 
 type ProductCardClearanceMetaProps = {
@@ -26,11 +27,13 @@ export default function ProductCardClearanceMeta({
 }: ProductCardClearanceMetaProps) {
   const lines = useMemo(() => getClearanceCardDisplayLines(product, 2), [product]);
   const totalVariants = useMemo(() => clearanceVariantCountOnCard(product), [product]);
+  const bestDiscountPct = useMemo(() => resolveClearanceCardHeroPercent(product), [product]);
   const extraCount = Math.max(0, totalVariants - lines.length);
 
   if (!productShowsClearanceOnCard(product)) return null;
 
   const headerClass = compact ? 'text-[11px]' : 'text-xs';
+  const pctBadgeClass = compact ? 'text-sm px-1.5 py-0.5' : 'text-base px-2 py-0.5';
   const metaClass = compact ? 'text-[11px]' : 'text-xs';
   const priceClass = compact ? 'text-sm' : 'text-base';
   const strikeClass = compact ? 'text-[10px]' : 'text-xs';
@@ -38,12 +41,21 @@ export default function ProductCardClearanceMeta({
 
   return (
     <div
-      className={`rounded-md border border-amber-200/90 bg-amber-50/80 px-2.5 py-2 space-y-1.5 ${className}`}
+      className={`rounded-md border-2 border-amber-300/90 bg-gradient-to-b from-amber-50 to-orange-50/90 px-2.5 py-2 space-y-1.5 shadow-sm ${className}`}
       aria-label="Hàng thanh lý xả kho"
     >
-      <p className={`${headerClass} font-semibold uppercase tracking-wide text-amber-900`}>
-        Sale thanh lý xả kho
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-1.5">
+        <p className={`${headerClass} font-bold uppercase tracking-wide text-amber-950`}>
+          Sale thanh lý xả kho
+        </p>
+        {bestDiscountPct > 0 ? (
+          <span
+            className={`${pctBadgeClass} shrink-0 rounded-md bg-red-600 font-black tabular-nums text-white shadow-sm`}
+          >
+            -{bestDiscountPct}%
+          </span>
+        ) : null}
+      </div>
       {lines.map((line, idx) => {
         const thumbSrc = line.thumbUrl
           ? getOptimizedImage(line.thumbUrl, { width: 96, height: 96, quality: 80, fallbackStrategy: 'local' })
@@ -75,8 +87,9 @@ export default function ProductCardClearanceMeta({
                     <span className="mx-1 text-amber-700/60" aria-hidden>
                       ·
                     </span>
-                    <span className="font-medium text-gray-500">Size: </span>
-                    <span className="font-semibold text-gray-900">{line.size}</span>
+                    <span className="inline-flex items-center rounded bg-amber-900/90 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white sm:text-[11px]">
+                      {line.size}
+                    </span>
                   </>
                 ) : null}
               </p>

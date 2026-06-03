@@ -3,7 +3,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Product } from '@/types/api';
 import { formatPrice, getDiscountPercentage, truncateText } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
@@ -14,9 +14,14 @@ import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/component
 import SiteSaleProductBadge from '@/components/SiteSaleProductBadge';
 import SiteSaleCountdownChip from '@/components/SiteSaleCountdownChip';
 import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
+import ProductCardClearanceImageBadges from '@/components/ProductCardClearanceImageBadges';
 import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
-import { productShowsClearanceOnCard } from '@/lib/warehouse-clearance';
+import {
+  getClearanceCardHero,
+  productShowsClearanceOnCard,
+  warehouseStandaloneSaleImage,
+} from '@/lib/warehouse-clearance';
 
 type ResolvedProductPricing = ReturnType<typeof resolveProductDisplayPricing>;
 
@@ -230,12 +235,17 @@ export default function ProductCard({
   
   const available = (product.available || 0) > 0;
   const { pricing, displayPrice, birthdayDiscount } = useProductCardPricing(product);
+  const clearanceHero = useMemo(() => getClearanceCardHero(product), [product]);
+  const showsClearance = productShowsClearanceOnCard(product);
   const hasDiscount =
-    (pricing.compareAt != null && pricing.compareAt > displayPrice) ||
-    (product.original_price != null && product.original_price > product.price);
+    !showsClearance &&
+    ((pricing.compareAt != null && pricing.compareAt > displayPrice) ||
+      (product.original_price != null && product.original_price > product.price));
   
-  // Sử dụng image utils với kích thước tối ưu
-  const imageUrl = getOptimizedImage(product.main_image, {
+  // Sử dụng image utils với kích thước tối ưu — ảnh màu thanh lý thay ảnh đại diện khi có kho sale
+  const cardImageSource =
+    clearanceHero?.imageUrl || warehouseStandaloneSaleImage(product) || product.main_image;
+  const imageUrl = getOptimizedImage(cardImageSource, {
     width: getImageSize(size).width,
     height: getImageSize(size).height,
     quality: 85,
@@ -286,7 +296,11 @@ export default function ProductCard({
   return (
     <div className={`product-card group bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-lg hover:border-orange-200 overflow-hidden ${sizeClasses.container}`}>
       {/* Image Section */}
-      <div className={`relative overflow-hidden bg-gray-50 rounded-t-xl ${sizeClasses.image}`}>
+      <div
+        className={`relative overflow-hidden bg-gray-50 rounded-t-xl ${sizeClasses.image} ${
+          showsClearance ? 'ring-2 ring-inset ring-amber-400/70' : ''
+        }`}
+      >
         <Link href={productHref}>
           {!imageError ? (
             <>
@@ -323,6 +337,10 @@ export default function ProductCard({
         {/* Discount Badge */}
         {!imageError && (
           <>
+            <ProductCardClearanceImageBadges
+              product={product}
+              compact={size === 'small'}
+            />
             <SiteSaleProductBadge siteSale={product.site_sale} />
             <SiteSaleCountdownChip siteSale={product.site_sale} />
             <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
@@ -488,8 +506,12 @@ export const SimpleProductCard = ({
 }) => {
   const [imageError, setImageError] = useState(false);
   const { pricing, displayPrice, birthdayDiscount } = useProductCardPricing(product);
-  
-  const imageUrl = getOptimizedImage(product.main_image, {
+  const clearanceHero = useMemo(() => getClearanceCardHero(product), [product]);
+  const showsClearance = productShowsClearanceOnCard(product);
+  const cardImageSource =
+    clearanceHero?.imageUrl || warehouseStandaloneSaleImage(product) || product.main_image;
+
+  const imageUrl = getOptimizedImage(cardImageSource, {
     width: 250,
     height: 250,
     quality: 80,
@@ -516,7 +538,11 @@ export const SimpleProductCard = ({
       className="product-card group bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-lg hover:border-orange-200 overflow-hidden transition-all block"
     >
       {/* Image Container */}
-      <div className="relative aspect-square bg-gray-50 overflow-hidden rounded-t-xl">
+      <div
+        className={`relative aspect-square bg-gray-50 overflow-hidden rounded-t-xl ${
+          showsClearance ? 'ring-2 ring-inset ring-amber-400/70' : ''
+        }`}
+      >
         {!imageError ? (
           <Image
             src={imageUrl}
@@ -538,6 +564,7 @@ export const SimpleProductCard = ({
 
         {!imageError && (
           <>
+            <ProductCardClearanceImageBadges product={product} compact />
             {showPersonalizedBadge ? <PersonalizedCohortImageBadge /> : null}
             <SiteSaleProductBadge siteSale={product.site_sale} className={stackedPromoBadgeClass} />
             <SiteSaleCountdownChip siteSale={product.site_sale} />
