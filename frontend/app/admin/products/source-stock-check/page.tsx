@@ -1156,7 +1156,7 @@ export default function AdminSourceStockCheckPage() {
       total: ids.length,
       deleted: 0,
       chunkIndex: 0,
-      chunkTotal: Math.max(1, Math.ceil(ids.length / 20)),
+      chunkTotal: Math.max(1, Math.ceil(ids.length / 8)),
     });
     try {
       const res = await adminProductAPI.deleteSourceStockBatchProductsByDbIds(ids, {

@@ -1362,7 +1362,8 @@ export const adminProductAPI = {
     if (!unique.length) {
       return { ok: true, deleted_count: 0, deleted_db_ids: [], not_found_db_ids: [] };
     }
-    const chunkSize = 20;
+    /** Nhỏ hơn để mỗi request < timeout nginx (~180s) kể cả commit + cascade DB. */
+    const chunkSize = 8;
     const chunkTotal = Math.ceil(unique.length / chunkSize);
     const deleted_db_ids: number[] = [];
     const not_found_db_ids: number[] = [];

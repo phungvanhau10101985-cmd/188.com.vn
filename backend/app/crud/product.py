@@ -5217,6 +5217,31 @@ def _schedule_bunny_cleanup_for_deleted_products(products: List[Product]) -> Non
     threading.Thread(target=_run, name="bulk-bunny-delete", daemon=True).start()
 
 
+def _schedule_facet_cache_refresh_after_bulk_delete(snapshots: List[Any]) -> None:
+    """Làm mới cache facet sau bulk xóa — nền để tránh 504 gateway trên lô lớn."""
+    if not snapshots:
+        return
+    snap_copy = list(snapshots)
+
+    def _run() -> None:
+        from app.db.session import SessionLocal
+        from app.services.listing_facet_cache import refresh_caches_after_products_change
+
+        db_bg = SessionLocal()
+        try:
+            refresh_caches_after_products_change(db_bg, snap_copy)
+            logger.info(
+                "Bulk xóa SP: đã làm mới cache facet (nền), %s snapshot",
+                len(snap_copy),
+            )
+        except Exception as exc:
+            logger.warning("Bulk xóa SP — làm mới cache facet nền lỗi: %s", exc)
+        finally:
+            db_bg.close()
+
+    threading.Thread(target=_run, name="bulk-facet-cache-refresh", daemon=True).start()
+
+
 def bulk_delete_products_by_db_ids(db: Session, db_ids: List[int]) -> Tuple[List[int], List[int]]:
     """
     Xóa nhiều SP theo ``products.id`` trong một transaction; Bunny CDN dọn nền.
@@ -5268,12 +5293,7 @@ def bulk_delete_products_by_db_ids(db: Session, db_ids: List[int]) -> Tuple[List
         db.commit()
         _schedule_google_sheets_sku_sync()
         _schedule_bunny_cleanup_for_deleted_products(bunny_rows)
-        try:
-            from app.services.listing_facet_cache import refresh_caches_after_products_change
-
-            refresh_caches_after_products_change(db, deleted_snapshots)
-        except Exception:
-            pass
+        _schedule_facet_cache_refresh_after_bulk_delete(deleted_snapshots)
 
     not_found = [pk for pk in ordered_unique if pk not in by_id]
     return deleted, not_found
@@ -5291,10 +5311,7 @@ def bulk_delete_products_by_excel_product_ids(
     """
     from urllib.parse import unquote
     from app.services import warehouse_clearance as wh_clearance_svc
-    from app.services.listing_facet_cache import (
-        refresh_caches_after_products_change,
-        snapshot_product_for_facet_refresh,
-    )
+    from app.services.listing_facet_cache import snapshot_product_for_facet_refresh
 
     deleted_pids: List[str] = []
     errors: List[dict] = []
@@ -5329,10 +5346,7 @@ def bulk_delete_products_by_excel_product_ids(
         db.commit()
         _schedule_google_sheets_sku_sync()
         _schedule_bunny_cleanup_for_deleted_products(bunny_rows)
-        try:
-            refresh_caches_after_products_change(db, snapshots)
-        except Exception:
-            pass
+        _schedule_facet_cache_refresh_after_bulk_delete(snapshots)
 
     return deleted_pids, errors
 

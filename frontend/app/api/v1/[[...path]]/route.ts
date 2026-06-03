@@ -140,7 +140,8 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
       /** Admin kiểm tra nguồn: scrape Hibox có thể > 2 phút — phải > timeout fetchAdmin (240s). */
     const adminSourceHeavy =
       pathSuffix.includes('/admin/source-stock-batch/run-next-from-db') ||
-      pathSuffix.includes('/admin/source-stock-batch/run');
+      pathSuffix.includes('/admin/source-stock-batch/run') ||
+      pathSuffix.includes('/admin/source-stock-batch/delete-by-db-ids');
     /** Đồng bộ Google Sheet có thể > 2 phút (đọc sheet + so khớp DB + batchUpdate/append) — phải ≥ fetchAdmin 300s. */
     const googleSheetSkuSync =
       pathSuffix.includes('/import-export/sync/google-sheet-skus') && req.method === 'POST';
