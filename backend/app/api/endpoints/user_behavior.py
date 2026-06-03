@@ -86,9 +86,14 @@ def _product_row_to_api_dict(product: Any, *, sale_state=None, db: Session | Non
 
 def _serialize_product_rows_for_api(db: Session, products: list, user: User | None = None) -> list[dict]:
     from app.services import sale_calendar as sale_calendar_svc
+    from app.services.warehouse_clearance import enrich_listing_product_payloads_batched
 
     sale_state = sale_calendar_svc.resolve_sale_calendar_state(db, user=user)
-    return [_product_row_to_api_dict(p, sale_state=sale_state, db=db) for p in products]
+    pairs: list[tuple[Any, dict]] = []
+    for product in products:
+        pairs.append((product, _product_row_to_api_dict(product, sale_state=sale_state, db=None)))
+    enrich_listing_product_payloads_batched(db, pairs)
+    return [payload for _row, payload in pairs]
 
 
 # Product Views

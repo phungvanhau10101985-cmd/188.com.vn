@@ -367,12 +367,75 @@ def enrich_listing_product_payloads(
     pairs: List[Tuple[Any, Dict[str, Any]]],
 ) -> None:
     """Gắn warehouse_variants / warehouse_clearance cho thẻ SP danh sách & trang chủ."""
+    enrich_listing_product_payloads_batched(db, pairs)
+
+
+def enrich_listing_product_payloads_batched(
+    db: Session,
+    pairs: List[Tuple[Any, Dict[str, Any]]],
+) -> None:
+    """Một lần đọc settings + query kho theo batch base_sku (tránh N+1 trên lưới gợi ý)."""
+    if not pairs:
+        return
+    enabled, pct = get_warehouse_clearance_settings(db)
+    base_skus: List[str] = []
+    seen_bases: Set[str] = set()
+    for row, _payload in pairs:
+        if row is None or getattr(row, "is_warehouse_clearance", False):
+            continue
+        base = _resolve_base_sku_for_parent(row)
+        if base and base not in seen_bases:
+            seen_bases.add(base)
+            base_skus.append(base)
+    wh_by_base = _list_warehouse_variants_for_base_skus(db, base_skus) if base_skus else {}
+
     for row, payload in pairs:
         if row is None or not isinstance(payload, dict):
             continue
         if getattr(row, "is_warehouse_clearance", False):
             continue
-        enrich_parent_with_warehouse_clearance(db, payload, row)
+        source_oos = is_source_product_oos(row)
+        payload["source_oos"] = source_oos
+        base = _resolve_base_sku_for_parent(row)
+        variants: List[Dict[str, Any]] = []
+        if base:
+            for wh in wh_by_base.get(base, []):
+                if int(wh.available or 0) <= 0:
+                    continue
+                variants.append(warehouse_variant_payload(db, wh))
+        payload["warehouse_variants"] = variants
+        payload["warehouse_clearance"] = {
+            "enabled": enabled or len(variants) > 0,
+            "discount_percent": pct,
+        }
+
+
+def _list_warehouse_variants_for_base_skus(
+    db: Session,
+    base_skus: List[str],
+    *,
+    active_only: bool = True,
+) -> Dict[str, List[Product]]:
+    cleaned = [str(s or "").strip() for s in base_skus if str(s or "").strip()]
+    if not cleaned:
+        return {}
+    conditions = []
+    for sku in cleaned:
+        conditions.append(Product.base_sku == sku)
+        conditions.append(Product.product_id.like(f"{sku}/%"))
+    q = db.query(Product).filter(Product.is_warehouse_clearance == True)  # noqa: E712
+    if active_only:
+        q = q.filter(Product.is_active == True)  # noqa: E712
+    rows = q.filter(or_(*conditions)).order_by(Product.product_id.asc()).all()
+    grouped: Dict[str, List[Product]] = {sku: [] for sku in cleaned}
+    for row in rows:
+        base = _resolve_base_sku_for_parent(row) or (row.base_sku or "").strip()
+        if not base:
+            pid = (row.product_id or "").split("/")[0].strip()
+            base = pid
+        if base in grouped:
+            grouped[base].append(row)
+    return grouped
 
 
 def enrich_parent_with_warehouse_clearance(db: Session, payload: Dict[str, Any], product: Product) -> None:
