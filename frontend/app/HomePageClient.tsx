@@ -630,14 +630,15 @@ export default function HomePageClient({
   const [sameShopLoading, setSameShopLoading] = useState(true);
   const [sameShopLoadMoreLoading, setSameShopLoadMoreLoading] = useState(false);
   const [sameShopCanLoadMore, setSameShopCanLoadMore] = useState(false);
-  const [mixedRecommendationProducts, setMixedRecommendationProducts] = useState<Product[]>([]);
-  const recommendationMixAnchorRef = useRef('');
+  const [displayedRecommendationProducts, setDisplayedRecommendationProducts] = useState<Product[]>([]);
+  const cohortAppendedIdsRef = useRef<Set<number>>(new Set());
+  const pendingCohortProductsRef = useRef<Product[]>([]);
+  const hasDisplayedRecommendationRef = useRef(false);
   /** Số SP same-shop đã gộp vào lưới — chỉ append khi tăng (tránh «Xem thêm» nhảy lưới). */
   const sameShopMergedCountRef = useRef(0);
-  const mixedGridHasContentRef = useRef(false);
   const showSameShopSection = !sameShopLoading && sameShopTotal > 0;
   const showRecommendationSkeleton =
-    sameShopLoading && mixedRecommendationProducts.length === 0;
+    sameShopLoading && displayedRecommendationProducts.length === 0;
   const lastSearchTrackedRef = useRef<string>('');
   const lastFilterTrackedRef = useRef<string>('');
 
@@ -673,33 +674,48 @@ export default function HomePageClient({
   }, [authLoading, isAuthenticated, user?.id, user?.gender, user?.date_of_birth]);
 
   useEffect(() => {
-    mixedGridHasContentRef.current = mixedRecommendationProducts.length > 0;
-  }, [mixedRecommendationProducts]);
+    hasDisplayedRecommendationRef.current = displayedRecommendationProducts.length > 0;
+  }, [displayedRecommendationProducts]);
 
   useEffect(() => {
     if (authLoading) return;
     let cancelled = false;
-    if (!mixedGridHasContentRef.current) setSameShopLoading(true);
+    if (!hasDisplayedRecommendationRef.current) setSameShopLoading(true);
     setSameShopCanLoadMore(false);
+    cohortAppendedIdsRef.current = new Set();
+    pendingCohortProductsRef.current = [];
     apiClient
       .getProductsSameShopAsRecentViews(HOME_MIX_INITIAL_LIMIT, 0)
       .then(({ products, total, seed }) => {
         if (cancelled) return;
         const list = products || [];
         const reported = total ?? 0;
-        setSameShopProducts(list);
-        setSameShopTotal(
-          normalizeSameShopTotal(list.length, reported, HOME_MIX_INITIAL_LIMIT)
+        const normalizedTotal = normalizeSameShopTotal(
+          list.length,
+          reported,
+          HOME_MIX_INITIAL_LIMIT
         );
-        setSameShopSeed(seed ?? null);
+        const nextSeed = seed ?? null;
+        const initialMix = mixShopAndCohortProducts(list, [], nextSeed);
+        sameShopMergedCountRef.current = list.length;
+        const pendingCohort = pendingCohortProductsRef.current;
+        pendingCohortProductsRef.current = [];
+        const mixIds = new Set(initialMix.map((p) => p.id));
+        const cohortTail = pendingCohort.filter((p) => !mixIds.has(p.id));
+        const nextDisplay = cohortTail.length > 0 ? [...initialMix, ...cohortTail] : initialMix;
+        setSameShopProducts(list);
+        setSameShopTotal(normalizedTotal);
+        setSameShopSeed(nextSeed);
+        setDisplayedRecommendationProducts(nextDisplay);
         setSameShopCanLoadMore(
           inferSameShopLoadMoreAvailable(
             list.length,
             list.length,
             HOME_MIX_INITIAL_LIMIT,
-            normalizeSameShopTotal(list.length, reported, HOME_MIX_INITIAL_LIMIT)
+            normalizedTotal
           )
         );
+        setSameShopLoading(false);
       })
       .catch(() => {
         if (cancelled) return;
@@ -707,9 +723,9 @@ export default function HomePageClient({
         setSameShopTotal(0);
         setSameShopSeed(null);
         setSameShopCanLoadMore(false);
-      })
-      .finally(() => {
-        if (!cancelled) setSameShopLoading(false);
+        setDisplayedRecommendationProducts([]);
+        sameShopMergedCountRef.current = 0;
+        setSameShopLoading(false);
       });
     return () => {
       cancelled = true;
@@ -728,61 +744,32 @@ export default function HomePageClient({
     return sameAgeGenderProducts;
   }, [sameAgeGenderLoading, sameAgeGenderCohortMode, sameAgeGenderProducts]);
 
-  useEffect(() => {
-    recommendationMixAnchorRef.current = '';
-    sameShopMergedCountRef.current = 0;
-  }, [shopBehaviorKey]);
+  useLayoutEffect(() => {
+    if (sameAgeGenderLoading || cohortProductsForMix.length === 0) return;
+    const toAdd = cohortProductsForMix.filter((p) => !cohortAppendedIdsRef.current.has(p.id));
+    if (toAdd.length === 0) return;
+    for (const p of toAdd) cohortAppendedIdsRef.current.add(p.id);
+    setDisplayedRecommendationProducts((prev) => {
+      const ids = new Set(prev.map((p) => p.id));
+      const novel = toAdd.filter((p) => !ids.has(p.id));
+      if (novel.length === 0) return prev;
+      if (prev.length === 0) {
+        pendingCohortProductsRef.current = novel;
+        return prev;
+      }
+      return [...prev, ...novel];
+    });
+  }, [sameAgeGenderLoading, cohortProductsForMix]);
 
   useEffect(() => {
     if (sameShopLoading) return;
-
-    const cohortAnchor = sameAgeGenderLoading
-      ? 'pending'
-      : cohortProductsForMix.length > 0
-        ? cohortProductsForMix
-            .map((p) => p.id)
-            .sort((a, b) => a - b)
-            .join(',')
-        : 'none';
-    const anchor = `${recommendationKey}:${sameShopSeed ?? 'none'}:${cohortAnchor}`;
-    const prevAnchor = recommendationMixAnchorRef.current;
-    if (prevAnchor !== anchor) {
-      const hadVisibleGrid = mixedGridHasContentRef.current && prevAnchor !== '';
-      const cohortJustArrived =
-        cohortAnchor !== 'pending' && prevAnchor.endsWith(':pending');
-
-      recommendationMixAnchorRef.current = anchor;
-
-      if (hadVisibleGrid && cohortJustArrived) {
-        setMixedRecommendationProducts((prev) => {
-          const ids = new Set(prev.map((p) => p.id));
-          const toAdd = cohortProductsForMix.filter((p) => !ids.has(p.id));
-          return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
-        });
-        return;
-      }
-
-      sameShopMergedCountRef.current = sameShopProducts.length;
-      setMixedRecommendationProducts(
-        mixShopAndCohortProducts(sameShopProducts, cohortProductsForMix, sameShopSeed)
-      );
-      return;
-    }
-
     const shopCount = sameShopProducts.length;
     if (shopCount <= sameShopMergedCountRef.current) return;
     sameShopMergedCountRef.current = shopCount;
-    setMixedRecommendationProducts((prev) =>
+    setDisplayedRecommendationProducts((prev) =>
       appendNewShopProductsToMix(prev, sameShopProducts)
     );
-  }, [
-    recommendationKey,
-    sameShopSeed,
-    sameShopProducts,
-    sameShopLoading,
-    sameAgeGenderLoading,
-    cohortProductsForMix,
-  ]);
+  }, [sameShopProducts, sameShopLoading]);
 
   useEffect(() => {
     if (qFromUrl.trim()) return;
@@ -1162,7 +1149,7 @@ export default function HomePageClient({
   );
 
   const showMixedRecommendationSection =
-    mixedRecommendationProducts.length > 0 ||
+    displayedRecommendationProducts.length > 0 ||
     showSameShopSection ||
     cohortProductsForMix.length > 0 ||
     sameShopLoading ||
@@ -1177,7 +1164,7 @@ export default function HomePageClient({
       filteredProducts.find((p) => p.id === productId) ??
       products.find((p) => p.id === productId) ??
       sameShopProducts.find((p) => p.id === productId) ??
-      mixedRecommendationProducts.find((p) => p.id === productId) ??
+      displayedRecommendationProducts.find((p) => p.id === productId) ??
       sameAgeGenderProducts.find((p) => p.id === productId);
     const had = favoriteIds.has(productId);
     try {
@@ -1439,9 +1426,9 @@ export default function HomePageClient({
                     </div>
                   ))}
                 </div>
-              ) : mixedRecommendationProducts.length > 0 ? (
+              ) : displayedRecommendationProducts.length > 0 ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {mixedRecommendationProducts.map((product, index) => (
+                  {displayedRecommendationProducts.map((product, index) => (
                     <SimpleProductCard
                       key={product.id}
                       product={product}
@@ -1453,7 +1440,7 @@ export default function HomePageClient({
                   ))}
                 </div>
               ) : null}
-              {sameShopCanLoadMore && mixedRecommendationProducts.length > 0 && (
+              {sameShopCanLoadMore && displayedRecommendationProducts.length > 0 && (
                 <div className="flex justify-center pt-5 pb-2">
                   <button
                     type="button"
