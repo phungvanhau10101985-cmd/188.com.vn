@@ -3,7 +3,7 @@ import math
 import logging
 from datetime import date, datetime
 from typing import Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, Header, Response
+from fastapi import APIRouter, Depends, HTTPException, Header, Response, BackgroundTasks
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.user import User
@@ -26,6 +26,13 @@ from app.crud.home_recommendation_block import (
     HOME_RECOMMENDATION_SHOP_LIMIT_DEFAULT,
     build_home_recommendation_block_rows,
     serialize_home_recommendation_block,
+)
+from app.crud.home_recommendation_snapshot import (
+    build_and_save_home_snapshot,
+    get_guest_home_snapshot,
+    get_user_home_snapshot,
+    guest_home_snapshot_version_key,
+    home_snapshot_version_key,
 )
 from app.crud.user import (
     add_product_view_with_data, get_user_viewed_products,
@@ -188,6 +195,86 @@ def get_products_viewed_by_same_age_gender_endpoint(
         logger.exception("Failed to build same-age/gender recommendations")
         db.rollback()
         return {"products": [], "cohort_mode": "popular_fallback"}
+
+
+def _background_rebuild_home_recommendation_snapshot(
+    user_id: Optional[int],
+    guest_session_id: Optional[str],
+) -> None:
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        user = None
+        if user_id is not None:
+            user = db.query(User).filter(User.id == user_id).first()
+            if not user:
+                return
+        elif not (guest_session_id or "").strip():
+            return
+        build_and_save_home_snapshot(
+            db,
+            user=user,
+            guest_session_id=guest_session_id,
+            serialize_products=_serialize_product_rows_for_api,
+        )
+    except Exception:
+        logger.exception("Failed to rebuild home recommendation snapshot")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@router.get("/home/recommendation-snapshot", response_model=dict)
+def get_home_recommendation_snapshot_endpoint(
+    response: Response,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
+):
+    """
+    Snapshot trang chủ đã tính sẵn (away ≥2 phút rebuild).
+    Trả về ngay nếu version_key còn khớp (user: id+gender+dob; guest: session id).
+    """
+    response.headers["Cache-Control"] = "private, no-store"
+    sid = (x_guest_session_id or "").strip() or None
+    snap: Optional[dict] = None
+
+    if current_user:
+        expected_key = home_snapshot_version_key(current_user)
+        snap = get_user_home_snapshot(db, current_user.id)
+        if not snap or snap.get("version_key") != expected_key:
+            return {"found": False}
+    elif sid:
+        expected_key = guest_home_snapshot_version_key(sid)
+        snap = get_guest_home_snapshot(db, sid)
+        if not snap or snap.get("version_key") != expected_key:
+            return {"found": False}
+    else:
+        return {"found": False}
+
+    payload = snap.get("snapshot") or {}
+    return {
+        "found": True,
+        "computed_at": snap.get("computed_at"),
+        "recommendation": payload.get("recommendation") or {},
+        "main_feed": payload.get("main_feed"),
+    }
+
+
+@router.post("/home/recommendation-snapshot/rebuild", response_model=dict)
+def rebuild_home_recommendation_snapshot_endpoint(
+    background_tasks: BackgroundTasks,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
+):
+    """Tính lại snapshot nền — gọi khi tab ẩn ≥2 phút hoặc rời trang."""
+    sid = (x_guest_session_id or "").strip() or None
+    uid = current_user.id if current_user else None
+    if uid is None and not sid:
+        return {"queued": False, "reason": "no_identity"}
+    background_tasks.add_task(_background_rebuild_home_recommendation_snapshot, uid, sid)
+    return {"queued": True}
 
 
 @router.get("/products/home-recommendation-block", response_model=dict)

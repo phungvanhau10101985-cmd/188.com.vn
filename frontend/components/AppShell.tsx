@@ -21,6 +21,10 @@ const BirthGenderSalePromptModal = dynamic(
   () => import('@/components/BirthGenderSalePromptModal'),
   { ssr: false }
 );
+const HomeRecommendationSnapshotManager = dynamic(
+  () => import('@/components/home/HomeRecommendationSnapshotManager'),
+  { ssr: false }
+);
 const BirthdayPromoWelcomeModal = dynamic(
   () => import('@/components/BirthdayPromoWelcomeModal'),
   { ssr: false }
@@ -43,6 +47,7 @@ import {
   shouldTryAttributeReferral,
 } from '@/lib/affiliate-ref';
 import { consumeAndOpenNanoAiChatLauncher } from '@/lib/nanoai-hosted-chat';
+import { trackPathForHomeRecommendationFresh } from '@/lib/home-navigation-mode';
 import NanoAiShopOverlayGuard from '@/components/NanoAiShopOverlayGuard';
 import NanoAiEmbedContextRouteSync from '@/components/NanoAiEmbedContextRouteSync';
 
@@ -85,6 +90,8 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   useLayoutEffect(() => {
     const prev = prevPathnameForHomeScrollRef.current;
     prevPathnameForHomeScrollRef.current = pathname ?? '';
+
+    trackPathForHomeRecommendationFresh(pathname ?? '', prev);
 
     const nowHome = pathSegIsHome(pathname ?? null);
     const wasHome = pathSegIsHome(prev);
@@ -470,6 +477,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       {!isCartAddLandingPage && <PwaInstallPrompt />}
       <NanoAiShopOverlayGuard />
       <NanoAiEmbedContextRouteSync />
+      <HomeRecommendationSnapshotManager />
       <CartAddedPopup />
       {!isAuthPage && !isCartAddLandingPage && <BirthGenderSalePromptModal />}
       {!isAuthPage && !isCartAddLandingPage && !pathname?.startsWith('/admin') && <BirthdayPromoWelcomeModal />}

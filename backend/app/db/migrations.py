@@ -839,6 +839,15 @@ class MigrationManager:
             "user_home_recommendation_snapshots", UserHomeRecommendationSnapshot
         )
 
+        from app.models.guest_home_recommendation_snapshot import GuestHomeRecommendationSnapshot
+
+        results['guest_home_recommendation_snapshots_create'] = self._create_table_if_not_exists(
+            "guest_home_recommendation_snapshots", GuestHomeRecommendationSnapshot
+        )
+        results['guest_home_recommendation_snapshots_sync'] = self._sync_table_columns(
+            "guest_home_recommendation_snapshots", GuestHomeRecommendationSnapshot
+        )
+
         from app.models.user_cohort_view_pool_cache import UserCohortViewPoolCache
 
         results['user_cohort_view_pool_cache_create'] = self._create_table_if_not_exists(

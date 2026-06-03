@@ -19,6 +19,7 @@ import {
   NanoaiSearchResponse,
   SameAgeGenderCohortMode,
   HomeRecommendationBlockResponse,
+  HomeRecommendationSnapshotResponse,
   PopularCategoryForProfile,
   PopularCategoryHeroSource,
   HeroCategoryTilesResponse,
@@ -587,6 +588,22 @@ class ApiClient {
   async getPersonalizedHomeFeed(skip = 0, limit = 48): Promise<ProductListResponse> {
     const params = new URLSearchParams({ skip: String(skip), limit: String(limit) });
     return this.fetch<ProductListResponse>(`/user-behavior/products/home-feed?${params}`);
+  }
+
+  /** Snapshot trang chủ đã tính sẵn (away ≥2 phút). */
+  async getHomeRecommendationSnapshot(): Promise<HomeRecommendationSnapshotResponse> {
+    const empty: HomeRecommendationSnapshotResponse = { found: false };
+    return this.fetch<HomeRecommendationSnapshotResponse>(
+      '/user-behavior/home/recommendation-snapshot'
+    ).catch(() => empty);
+  }
+
+  /** Rebuild snapshot nền khi tab ẩn / rời web. */
+  async rebuildHomeRecommendationSnapshot(): Promise<{ queued: boolean; reason?: string }> {
+    return this.fetch<{ queued: boolean; reason?: string }>(
+      '/user-behavior/home/recommendation-snapshot/rebuild',
+      { method: 'POST' }
+    ).catch(() => ({ queued: false }));
   }
 
   /** Khối «CÓ THỂ BẠN THÍCH»: same-shop + cohort + lưới trộn — một request, dữ liệu tươi. */

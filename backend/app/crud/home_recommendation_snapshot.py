@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-import random
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
 from app.crud.personalized_feed import get_personalized_home_products
 from app.crud.user import (
-    SAME_AGE_GENDER_RECENT_VIEW_POOL,
     get_products_same_shop_as_recent_views,
     get_products_viewed_by_same_age_gender,
 )
+from app.models.guest_home_recommendation_snapshot import GuestHomeRecommendationSnapshot
 from app.models.home_recommendation_snapshot import UserHomeRecommendationSnapshot
 from app.models.user import User
 
 HOME_MIX_INITIAL_LIMIT = 24
 HOME_MAIN_FEED_LIMIT = 48
+HOME_COHORT_SNAPSHOT_LIMIT = 30
 
 
 def home_snapshot_version_key(user: User) -> str:
@@ -26,6 +26,10 @@ def home_snapshot_version_key(user: User) -> str:
     if user.date_of_birth:
         dob = user.date_of_birth.isoformat() if isinstance(user.date_of_birth, date) else str(user.date_of_birth)
     return f"{user.id}:{user.gender or ''}:{dob}"
+
+
+def guest_home_snapshot_version_key(guest_session_id: str) -> str:
+    return f"guest:{guest_session_id.strip()}"
 
 
 def _dedupe_products_by_id(products: List[Any]) -> List[Any]:
@@ -97,20 +101,33 @@ def get_user_home_snapshot(db: Session, user_id: int) -> Optional[Dict[str, Any]
     }
 
 
-def build_home_recommendation_snapshot(
+def get_guest_home_snapshot(db: Session, guest_session_id: str) -> Optional[Dict[str, Any]]:
+    sid = guest_session_id.strip()
+    if not sid:
+        return None
+    row = db.query(GuestHomeRecommendationSnapshot).filter(
+        GuestHomeRecommendationSnapshot.guest_session_id == sid
+    ).first()
+    if not row or not row.payload:
+        return None
+    return {
+        "version_key": row.version_key,
+        "computed_at": row.computed_at.isoformat() if row.computed_at else None,
+        "snapshot": row.payload,
+    }
+
+
+def _build_recommendation_payload(
     db: Session,
-    user: User,
     *,
-    serialize_products,
+    shop_products: List[Any],
+    shop_total: int,
+    shop_seed: Optional[int],
+    cohort_products: List[Any],
+    cohort_mode: str,
+    user: Optional[User],
+    serialize_products: Callable[..., List[dict]],
 ) -> Dict[str, Any]:
-    """
-    Tính phiên mới: same-shop (24) + cohort (30) + mix + home-feed (48).
-    `serialize_products(db, products, user)` → list[dict] API-safe.
-    """
-    uid = user.id
-    shop_products, shop_total, shop_seed = get_products_same_shop_as_recent_views(
-        db, user_id=uid, limit=HOME_MIX_INITIAL_LIMIT, offset=0, seed=None
-    )
     shop_list = list(shop_products or [])
     shop_serialized = serialize_products(db, shop_list, user)
     loaded = len(shop_list)
@@ -119,26 +136,10 @@ def build_home_recommendation_snapshot(
         loaded, loaded, HOME_MIX_INITIAL_LIMIT, reported
     )
 
-    cohort_products: List[Any] = []
-    cohort_mode = "requires_login"
-    if user.date_of_birth and user.gender:
-        cohort_products, cohort_mode = get_products_viewed_by_same_age_gender(
-            db, uid, limit=SAME_AGE_GENDER_RECENT_VIEW_POOL
-        )
     cohort_serialized = serialize_products(db, list(cohort_products or []), user)
-
     mixed_rows = mix_shop_and_cohort_products(shop_list, list(cohort_products or []), shop_seed)
     mixed_serialized = serialize_products(db, mixed_rows, user)
     badge_ids = cohort_badge_product_ids(shop_serialized, cohort_serialized)
-
-    main_products, main_total, main_personalized = get_personalized_home_products(
-        db,
-        user_id=uid,
-        guest_session_id=None,
-        skip=0,
-        limit=HOME_MAIN_FEED_LIMIT,
-    )
-    main_serialized = serialize_products(db, list(main_products or []), user)
 
     recommendation = {
         "same_shop_products": shop_serialized,
@@ -150,6 +151,82 @@ def build_home_recommendation_snapshot(
         "mixed_recommendation_products": mixed_serialized,
         "cohort_badge_product_ids": badge_ids,
     }
+    return recommendation
+
+
+def build_home_recommendation_snapshot(
+    db: Session,
+    *,
+    user: Optional[User] = None,
+    guest_session_id: Optional[str] = None,
+    serialize_products: Callable[..., List[dict]],
+) -> Dict[str, Any]:
+    """
+    Tính phiên mới: same-shop (24) + cohort (30) + mix + home-feed (48).
+    `serialize_products(db, products, user)` → list[dict] API-safe.
+    """
+    if user is not None:
+        uid = user.id
+        shop_products, shop_total, shop_seed = get_products_same_shop_as_recent_views(
+            db, user_id=uid, limit=HOME_MIX_INITIAL_LIMIT, offset=0, seed=None
+        )
+        cohort_products: List[Any] = []
+        cohort_mode = "requires_login"
+        if user.date_of_birth and user.gender:
+            cohort_products, cohort_mode = get_products_viewed_by_same_age_gender(
+                db, uid, limit=HOME_COHORT_SNAPSHOT_LIMIT
+            )
+        recommendation = _build_recommendation_payload(
+            db,
+            shop_products=shop_products,
+            shop_total=shop_total,
+            shop_seed=shop_seed,
+            cohort_products=cohort_products,
+            cohort_mode=cohort_mode,
+            user=user,
+            serialize_products=serialize_products,
+        )
+        main_products, main_total, main_personalized = get_personalized_home_products(
+            db,
+            user_id=uid,
+            guest_session_id=None,
+            skip=0,
+            limit=HOME_MAIN_FEED_LIMIT,
+        )
+        main_serialized = serialize_products(db, list(main_products or []), user)
+        version_key = home_snapshot_version_key(user)
+    elif guest_session_id:
+        sid = guest_session_id.strip()
+        shop_products, shop_total, shop_seed = get_products_same_shop_as_recent_views(
+            db,
+            user_id=None,
+            guest_session_id=sid,
+            limit=HOME_MIX_INITIAL_LIMIT,
+            offset=0,
+            seed=None,
+        )
+        recommendation = _build_recommendation_payload(
+            db,
+            shop_products=shop_products,
+            shop_total=shop_total,
+            shop_seed=shop_seed,
+            cohort_products=[],
+            cohort_mode="requires_login",
+            user=None,
+            serialize_products=serialize_products,
+        )
+        main_products, main_total, main_personalized = get_personalized_home_products(
+            db,
+            user_id=None,
+            guest_session_id=sid,
+            skip=0,
+            limit=HOME_MAIN_FEED_LIMIT,
+        )
+        main_serialized = serialize_products(db, list(main_products or []), None)
+        version_key = guest_home_snapshot_version_key(sid)
+    else:
+        raise ValueError("user hoặc guest_session_id là bắt buộc")
+
     main_feed = {
         "products": main_serialized,
         "total": int(main_total or 0),
@@ -157,7 +234,6 @@ def build_home_recommendation_snapshot(
         "page": 1,
         "size": HOME_MAIN_FEED_LIMIT,
     }
-    version_key = home_snapshot_version_key(user)
     payload = {
         "main_feed": main_feed,
         "recommendation": recommendation,
@@ -186,17 +262,50 @@ def save_user_home_snapshot(db: Session, user_id: int, version_key: str, payload
     db.commit()
 
 
+def save_guest_home_snapshot(
+    db: Session, guest_session_id: str, version_key: str, payload: Dict[str, Any]
+) -> None:
+    sid = guest_session_id.strip()
+    row = db.query(GuestHomeRecommendationSnapshot).filter(
+        GuestHomeRecommendationSnapshot.guest_session_id == sid
+    ).first()
+    if row:
+        row.version_key = version_key
+        row.payload = payload
+    else:
+        row = GuestHomeRecommendationSnapshot(
+            guest_session_id=sid,
+            version_key=version_key,
+            payload=payload,
+        )
+        db.add(row)
+    db.commit()
+
+
+def build_and_save_home_snapshot(
+    db: Session,
+    *,
+    user: Optional[User] = None,
+    guest_session_id: Optional[str] = None,
+    serialize_products: Callable[..., List[dict]],
+) -> Dict[str, Any]:
+    built = build_home_recommendation_snapshot(
+        db,
+        user=user,
+        guest_session_id=guest_session_id,
+        serialize_products=serialize_products,
+    )
+    if user is not None:
+        save_user_home_snapshot(db, user.id, built["version_key"], built["snapshot"])
+    elif guest_session_id:
+        save_guest_home_snapshot(db, guest_session_id, built["version_key"], built["snapshot"])
+    return built
+
+
 def build_and_save_user_home_snapshot(
     db: Session,
     user: User,
     *,
-    serialize_products,
+    serialize_products: Callable[..., List[dict]],
 ) -> Dict[str, Any]:
-    built = build_home_recommendation_snapshot(db, user, serialize_products=serialize_products)
-    save_user_home_snapshot(
-        db,
-        user.id,
-        built["version_key"],
-        built["snapshot"],
-    )
-    return built
+    return build_and_save_home_snapshot(db, user=user, serialize_products=serialize_products)

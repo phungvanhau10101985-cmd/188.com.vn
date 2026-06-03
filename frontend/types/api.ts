@@ -338,6 +338,20 @@ export interface HomeRecommendationBlockResponse {
   cohort_badge_product_ids: number[];
 }
 
+/** API GET /user-behavior/home/recommendation-snapshot */
+export interface HomeRecommendationSnapshotResponse {
+  found: boolean;
+  computed_at?: string | null;
+  recommendation?: HomeRecommendationBlockResponse;
+  main_feed?: {
+    products: Product[];
+    total: number;
+    personalized: boolean;
+    page?: number;
+    size?: number;
+  };
+}
+
 /** Danh mục cấp 3 (cột AD) */
 export interface CategoryLevel3 {
   name: string;
