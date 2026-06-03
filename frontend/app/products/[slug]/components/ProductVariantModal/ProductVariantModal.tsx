@@ -61,8 +61,8 @@ function VariantModalLineTotal({
   quantity: number;
   unitPrice: number;
   savingsPerUnit: number;
-  sitePhase?: string;
-  sitePercent?: number;
+  sitePhase?: 'teaser' | 'active' | string | null;
+  sitePercent?: number | null;
   compact?: boolean;
 }) {
   const subtotal = unitPrice * quantity;
