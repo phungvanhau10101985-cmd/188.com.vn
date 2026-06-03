@@ -416,6 +416,8 @@ export interface ProductSearchParams {
   skip_total?: boolean;
   /** Gắn biến thể kho thanh lý (storefront; admin không dùng) */
   include_warehouse_clearance?: boolean;
+  /** Chỉ SP hàng thanh lý kho — trang /kho-sale */
+  warehouse_clearance_only?: boolean;
   min_rating?: number;
   is_active?: boolean;
   has_deposit?: boolean;

@@ -393,6 +393,7 @@ def _read_products_list_impl(
     skip_total: bool = False,
     user: Optional[User] = None,
     include_warehouse_clearance: bool = False,
+    warehouse_clearance_only: bool = False,
     admin_list: bool = False,
 ) -> dict:
     from app.services import sale_calendar as sale_calendar_svc
@@ -467,6 +468,7 @@ def _read_products_list_impl(
         filter_style_tag=filter_style_tag,
         skip_total=skip_total,
         include_warehouse_products=admin_list,
+        warehouse_clearance_only=warehouse_clearance_only,
         admin_list_query=admin_list,
     )
 
@@ -540,6 +542,10 @@ def read_products(
         False,
         description="Gắn warehouse_variants cho thẻ SP (chỉ bật storefront; admin để false tránh chậm)",
     ),
+    warehouse_clearance_only: bool = Query(
+        False,
+        description="Chỉ SP hàng thanh lý kho (trang /kho-sale). Tìm q= vẫn gồm kho thanh lý khi không bật cờ này.",
+    ),
     admin_list: bool = Query(
         False,
         description="Lưới admin: bỏ enrich sale/size-guide, không cache tìm kiếm, mặc định hiện cả SP ẩn.",
@@ -578,6 +584,7 @@ def read_products(
             skip_total=skip_total,
             user=current_user,
             include_warehouse_clearance=include_warehouse_clearance,
+            warehouse_clearance_only=warehouse_clearance_only,
             admin_list=admin_list,
         )
     except Exception as e:
@@ -768,6 +775,7 @@ def read_product_listing_facets(
     color: Optional[str] = Query(None),
     style_tag: Optional[str] = Query(None),
     is_active: Optional[bool] = True,
+    warehouse_clearance_only: bool = Query(False, description="Facets trên tập /kho-sale"),
 ):
     """
     Facets cho listing `/` không bắt buộc `q` — style, danh mục, shop… (không áp size/màu/min/max trong SQL).
@@ -793,6 +801,7 @@ def read_product_listing_facets(
             filter_color=color,
             filter_style_tag=style_tag,
             is_active=is_active,
+            warehouse_clearance_only=warehouse_clearance_only,
         )
         return {"status": "ok", **facets}
     except Exception as e:

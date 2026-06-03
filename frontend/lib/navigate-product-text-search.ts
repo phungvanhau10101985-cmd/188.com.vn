@@ -17,6 +17,11 @@ export function navigateProductTextSearch(
     return;
   }
   const target = generateSlug(term);
+  const saleListingSlugs = new Set(['sale', 'kho-sale', 'thanh-ly', 'thanh-ly-kho', 'sale-soc']);
+  if (saleListingSlugs.has(target)) {
+    router.push('/kho-sale');
+    return;
+  }
   const tree = categoryTree || [];
   for (const c1 of tree) {
     const slug1 = generateSlug(c1.slug || c1.name);

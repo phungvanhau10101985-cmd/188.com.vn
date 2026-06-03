@@ -246,7 +246,11 @@ def _product_type_breadcrumb(product: Product) -> str:
         v = getattr(product, attr, None)
         if not _is_blankish(v):
             parts.append(str(v).strip())
-    return " > ".join(parts)
+    breadcrumb = " > ".join(parts)
+    if getattr(product, "is_warehouse_clearance", False):
+        label = "Hàng thanh lý kho"
+        return f"{label} > {breadcrumb}" if breadcrumb else label
+    return breadcrumb
 
 
 def _sizes_string(product: Product) -> str:

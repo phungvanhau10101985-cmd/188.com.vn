@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.models.product import Product
 
+# Listing nhóm / redirect OOS cho dòng kho thanh lý (Sale Sốc, …).
+WAREHOUSE_CLEARANCE_GROUP_LISTING_PATH = "/kho-sale"
+
 # Cột clone từ SP gốc khi import kho (ảnh/size/màu/tồn/giá lấy từ Excel hoặc rule riêng).
 _WAREHOUSE_CLONE_FIELDS = (
     "origin",
@@ -101,6 +104,30 @@ def parse_warehouse_product_id(product_id: Optional[str]) -> Optional[Dict[str, 
     out["warehouse_color"] = mid
     out["warehouse_size"] = tail
     return out
+
+
+def apply_catalog_visibility_filter(
+    query,
+    *,
+    include_warehouse_products: bool = False,
+    warehouse_clearance_only: bool = False,
+    has_text_search: bool = False,
+):
+    """
+    Storefront: mặc định ẩn dòng kho thanh lý khỏi danh mục/listing không tìm.
+    - warehouse_clearance_only: chỉ SP is_warehouse_clearance (trang /kho-sale).
+    - has_text_search: tìm theo q — gồm cả SP thường và kho thanh lý.
+    - include_warehouse_products: admin — không lọc.
+    """
+    if include_warehouse_products:
+        return query
+    if warehouse_clearance_only:
+        return query.filter(Product.is_warehouse_clearance == True)  # noqa: E712
+    if has_text_search:
+        return query
+    return query.filter(
+        or_(Product.is_warehouse_clearance == False, Product.is_warehouse_clearance.is_(None))  # noqa: E712
+    )
 
 
 def is_warehouse_clearance_product_id(product_id: Optional[str]) -> bool:
@@ -393,6 +420,8 @@ def enrich_listing_product_payloads_batched(
         if row is None or not isinstance(payload, dict):
             continue
         if getattr(row, "is_warehouse_clearance", False):
+            enrich_standalone_warehouse_product(db, payload, row)
+            payload["group_listing_path"] = WAREHOUSE_CLEARANCE_GROUP_LISTING_PATH
             continue
         source_oos = is_source_product_oos(row)
         payload["source_oos"] = source_oos

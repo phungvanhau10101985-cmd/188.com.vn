@@ -2652,6 +2652,11 @@ def _resolve_product_group_listing_path_uncached(
     Đường dẫn listing nhóm khi SP hết hàng / không tồn tại — không mở PDP sản phẩm khác.
     Thứ tự: cluster từ SP → pool slug ILIKE + nhóm SP → cluster trong URL → ``/?q=`` pool ngắn.
     """
+    from app.services.warehouse_clearance import WAREHOUSE_CLEARANCE_GROUP_LISTING_PATH
+
+    if product is not None and getattr(product, "is_warehouse_clearance", False):
+        return WAREHOUSE_CLEARANCE_GROUP_LISTING_PATH
+
     if product is not None:
         path = _cluster_listing_path_for_product(db, product)
         if path:
@@ -3785,6 +3790,7 @@ def get_product_listing_facets(
     filter_color: Optional[str] = None,
     filter_style_tag: Optional[str] = None,
     is_active: Optional[bool] = True,
+    warehouse_clearance_only: bool = False,
     skip_cache: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -3800,7 +3806,7 @@ def get_product_listing_facets(
         words = [w.strip() for w in normalized.split() if w.strip()]
         if not words:
             return empty
-    elif not _facet_listing_dimensions_present(
+    elif not warehouse_clearance_only and not _facet_listing_dimensions_present(
         category=category,
         subcategory=subcategory,
         sub_subcategory=sub_subcategory,
@@ -3843,6 +3849,13 @@ def get_product_listing_facets(
         pass
 
     query = db.query(Product)
+    from app.services.warehouse_clearance import apply_catalog_visibility_filter
+
+    query = apply_catalog_visibility_filter(
+        query,
+        warehouse_clearance_only=warehouse_clearance_only,
+        has_text_search=bool(words),
+    )
     query = apply_product_category_filters(query, db, category, subcategory, sub_subcategory)
     if shop_name:
         query = query.filter(Product.shop_name.ilike(f"%{shop_name.strip()}%"))
@@ -3978,6 +3991,7 @@ def get_products(
     filter_style_tag: Optional[str] = None,
     skip_total: bool = False,
     include_warehouse_products: bool = False,
+    warehouse_clearance_only: bool = False,
     admin_list_query: bool = False,
 ):
     query = db.query(Product)
@@ -4027,11 +4041,15 @@ def get_products(
             Product.shop_name_chinese,
         )
         query = query.options(load_only(*_admin_cols), noload(Product.category_rel))
-    if not include_warehouse_products:
-        query = query.filter(
-            or_(Product.is_warehouse_clearance == False, Product.is_warehouse_clearance.is_(None))  # noqa: E712
-        )
     has_q = bool(q and str(q).strip())
+    from app.services.warehouse_clearance import apply_catalog_visibility_filter
+
+    query = apply_catalog_visibility_filter(
+        query,
+        include_warehouse_products=include_warehouse_products,
+        warehouse_clearance_only=warehouse_clearance_only,
+        has_text_search=has_q,
+    )
     sort_norm = normalize_product_list_sort(sort)
     use_random_order = bool(order_random and not has_q)
     if use_random_order:
