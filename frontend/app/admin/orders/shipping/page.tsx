@@ -1710,11 +1710,6 @@ export default function AdminShippingPage() {
   const shopReturnDisplayRows = shopReturnPreview?.rows?.length
     ? shopReturnPreview.rows
     : shopReturnResult?.rows ?? [];
-  const shopReturnShowWarehouse =
-    (shopReturnPreview?.warehouse_eligible_count ?? 0) > 0 ||
-    (shopReturnPreview?.confirmable_count ?? 0) > 0 ||
-    (shopReturnPreview?.rows?.some((r) => r.can_show_warehouse) ?? false) ||
-    (shopReturnResult?.rows?.some((r) => r.status === 'confirmed' || r.can_show_warehouse) ?? false);
 
   const runReturnWarehouseLookup = useCallback(async () => {
     const sku = normalizeWarehouseSkuFromEmsLabel(returnWhSkuInput);
@@ -1751,13 +1746,6 @@ export default function AdminShippingPage() {
   const shopReturnSkuSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!shopReturnShowWarehouse) {
-      setReturnWhSkuInput('');
-      setReturnWhLookup(null);
-      setReturnWhLookupError(null);
-      return;
-    }
-
     const text = shopReturnText.trim();
     if (!text) return;
 
@@ -1800,7 +1788,7 @@ export default function AdminShippingPage() {
     return () => {
       if (shopReturnSkuSyncTimerRef.current) clearTimeout(shopReturnSkuSyncTimerRef.current);
     };
-  }, [shopReturnText, shopReturnPreview, shopReturnShowWarehouse]);
+  }, [shopReturnText, shopReturnPreview]);
 
   const runReturnWarehouseIntake = useCallback(async () => {
     if (!returnWhLookup) {
@@ -3166,11 +3154,8 @@ export default function AdminShippingPage() {
             ) : null}
           </div>
         ) : null}
-      </section>
-
-      {shopReturnShowWarehouse ? (
-      <section className="bg-white border border-amber-200 rounded-xl p-5 shadow-sm space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900">Nhập hàng hoàn vào kho thanh lý</h2>
+        <div className="border-t border-gray-200 pt-5 mt-5 space-y-4">
+        <h3 className="text-base font-semibold text-gray-900">Nhập hàng hoàn vào kho thanh lý</h3>
         <p className="text-sm text-gray-600">
           Nhập mã kho đầy đủ như import (vd. <strong>H9441/1/xl</strong>) hoặc mã gốc <strong>H9441</strong>.
           Dán cả chuỗi cột H EMS cũng được — hệ thống chỉ giữ phần <strong>trước dấu «-»</strong> (vd.{' '}
@@ -3360,8 +3345,8 @@ export default function AdminShippingPage() {
             ) : null}
           </div>
         ) : null}
+        </div>
       </section>
-      ) : null}
 
       <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
         <h2 className="text-lg font-semibold text-gray-900">4. Import đối soát cước</h2>
