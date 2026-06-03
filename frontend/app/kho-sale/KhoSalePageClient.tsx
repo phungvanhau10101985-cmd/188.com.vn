@@ -171,12 +171,15 @@ export default function KhoSalePageClient({
         </div>
       )}
 
-      {loading ? (
-        <p className="py-12 text-center text-gray-500">Đang tải…</p>
-      ) : products.length === 0 ? (
+      {products.length === 0 && !loading ? (
         <p className="py-12 text-center text-gray-500">Chưa có sản phẩm kho sale đang hiển thị.</p>
       ) : (
-        <ProductGrid products={products} />
+        <ProductGrid
+          products={products}
+          loading={loading}
+          selectedCategory="Kho sale — thanh lý"
+          showFilters={false}
+        />
       )}
 
       {totalPages > 1 && (
