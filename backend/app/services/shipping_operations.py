@@ -33,6 +33,7 @@ CodBucket = Literal["paid", "returned_unpaid", "delivered_unpaid", "in_transit_u
 
 RETURN_PENDING_SHOP_LABEL = "Đơn hoàn chưa trả shop"
 RETURN_SHOP_RECEIVED_LABEL = "Đơn hoàn đã trả shop"
+_RETURN_PENDING_BUCKETS = frozenset({"returned", "return_pending_shop"})
 
 
 def _is_shop_return_received(*, order_status: str | None) -> bool:
@@ -83,6 +84,22 @@ def _is_in_transit(*, ems_phase: str | None, ems_status: str | None) -> bool:
     text = (ems_status or "").lower()
     markers = ("vận chuyển", "giao bưu tá", "đến bưu cục", "chấp nhận gửi", "out for delivery")
     return any(m in text for m in markers)
+
+
+def _is_return_pending_bucket(bucket: str) -> bool:
+    return (bucket or "").strip().lower() in _RETURN_PENDING_BUCKETS
+
+
+def _count_return_pending_shop(db: Session) -> tuple[int, int]:
+    """Đếm mọi đơn EMS đã báo hoàn, shop chưa xác nhận — không lọc theo ngày import."""
+    count = 0
+    cod_total = 0
+    for record in db.query(EmsShippingRecord).all():
+        if _delivery_bucket(record) != "return_pending_shop":
+            continue
+        count += 1
+        cod_total += _record_cod_amount(record)
+    return count, cod_total
 
 
 def _delivery_bucket(record: EmsShippingRecord) -> DeliveryBucket:
@@ -541,7 +558,13 @@ def get_shipping_timeline_stats(
         }
         items.append(item)
         for field in totals:
+            if field in ("returned_count", "returned_cod_total"):
+                continue
             totals[field] += int(bucket.get(field) or 0)
+
+    pending_count, pending_cod = _count_return_pending_shop(db)
+    totals["returned_count"] = pending_count
+    totals["returned_cod_total"] = pending_cod
 
     return {
         "granularity": key,
@@ -665,7 +688,14 @@ def list_timeline_bucket_records(
         .all()
     )
     matched: list[EmsShippingRecord] = []
+    skip_date_filter = _is_return_pending_bucket(key)
+
     for record in records:
+        if skip_date_filter:
+            if _matches_ops_bucket(record, key):
+                matched.append(record)
+            continue
+
         rec_date = _record_import_date(record)
         if rec_date is None:
             continue
@@ -685,7 +715,12 @@ def list_timeline_bucket_records(
     rows = [_enrich_row_from_live_order(db, _record_to_dict(record)) for record in page_records]
 
     bucket_label = _OPS_BUCKET_LABELS[key]
-    if period:
+    if skip_date_filter:
+        bucket_label = (
+            f"{RETURN_PENDING_SHOP_LABEL} — tất cả đơn cần xác nhận "
+            f"({total:,} vận đơn, không lọc theo ngày import)"
+        ).replace(",", ".")
+    elif period:
         _, _, period_label = _timeline_period_bounds(period, gran)  # type: ignore[arg-type]
         bucket_label = f"{bucket_label} — {period_label}"
     elif filter_label:
@@ -748,7 +783,7 @@ def list_operations_bucket_records(
 
 
 def find_ems_record_by_token(db: Session, token: str) -> EmsShippingRecord | None:
-    """Tra mã vận chuyển EMS, mã tham chiếu (cột A) hoặc ems_reference_code."""
+    """Tra mã EMS, mã tham chiếu (cột A), ems_reference_code hoặc mã đơn shop trên dòng EMS."""
     t = (token or "").strip().upper()
     if not t or len(t) < 3:
         return None
@@ -756,6 +791,7 @@ def find_ems_record_by_token(db: Session, token: str) -> EmsShippingRecord | Non
         EmsShippingRecord.ems_tracking_code,
         EmsShippingRecord.reference_code,
         EmsShippingRecord.ems_reference_code,
+        EmsShippingRecord.order_code,
     ):
         record = db.query(EmsShippingRecord).filter(column.ilike(t)).first()
         if record:

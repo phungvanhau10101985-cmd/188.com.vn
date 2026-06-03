@@ -16,6 +16,7 @@ from app.services.ems_shipment_import import (
     looks_like_recipient_not_sku,
     warehouse_sku_from_col_h_cell,
 )
+from app import crud
 from app.services.shipping_operations import (
     _is_ems_return_pending_shop,
     bulk_confirm_shop_returns,
@@ -44,8 +45,8 @@ def resolve_shop_return_input(
     raw: str,
 ) -> tuple[Optional[str], Optional[str]]:
     """
-    Trả (order_code DHxxx, lỗi).
-    Nhận: DHxxx | mã EMS (tracking) | mã tham chiếu (reference_code).
+    Trả (order_code shop, lỗi).
+    Nhận: DHxxx/DCxxx/H… | mã EMS | mã tham chiếu cột A | mã đơn trên dòng EMS.
     """
     text = (raw or "").strip()
     if not text:
@@ -56,23 +57,27 @@ def resolve_shop_return_input(
         return dh, None
 
     record = find_ems_record_by_token(db, text)
-    if not record:
-        return (
-            None,
-            f"Không tìm thấy «{text[:40]}» trong bảng vận chuyển EMS (mã EMS / mã tham chiếu).",
-        )
+    if record:
+        order_code = (record.order_code or "").strip().upper()
+        if order_code:
+            return order_code, None
 
-    order_code = (record.order_code or "").strip().upper()
-    if order_code:
-        return order_code, None
+        if record.order_id:
+            order = db.query(Order).filter(Order.id == record.order_id).first()
+            if order and order.order_code:
+                return order.order_code.strip().upper(), None
 
-    if record.order_id:
-        order = db.query(Order).filter(Order.id == record.order_id).first()
-        if order and order.order_code:
-            return order.order_code.strip().upper(), None
+        ref = (record.reference_code or text).strip().upper()
+        return None, f"Vận đơn EMS {ref} chưa gắn mã đơn shop — kiểm tra import file gửi EMS."
 
-    ref = (record.reference_code or text).strip().upper()
-    return None, f"Vận đơn EMS {ref} chưa gắn mã đơn shop (DHxxx) — kiểm tra import file gửi EMS."
+    order = crud.order.get_order_by_code(db, text)
+    if order and order.order_code:
+        return order.order_code.strip().upper(), None
+
+    return (
+        None,
+        f"Không tìm thấy «{text[:40]}» trong bảng vận chuyển EMS (mã EMS / tham chiếu / mã đơn H·DC·DH…).",
+    )
 
 
 def _entry_from_raw(db: Session, *, row_number: int, raw: str) -> dict[str, Any]:

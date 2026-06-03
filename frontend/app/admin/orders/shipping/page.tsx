@@ -1690,8 +1690,9 @@ export default function AdminShippingPage() {
     };
   }, [shopReturnText, shopReturnFile]);
 
-  const shopReturnDisplayRows =
-    shopReturnResult?.rows?.length ? shopReturnResult.rows : shopReturnPreview?.rows ?? [];
+  const shopReturnDisplayRows = shopReturnPreview?.rows?.length
+    ? shopReturnPreview.rows
+    : shopReturnResult?.rows ?? [];
   const shopReturnShowWarehouse =
     (shopReturnPreview?.warehouse_eligible_count ?? 0) > 0 ||
     (shopReturnPreview?.confirmable_count ?? 0) > 0 ||
@@ -2120,6 +2121,10 @@ export default function AdminShippingPage() {
                   />
                 ))}
               </div>
+              <p className="mt-1 text-xs text-orange-800">
+                «Đơn hoàn chưa trả shop»: đếm và danh sách <strong>tất cả</strong> đơn EMS đã báo hoàn mà shop chưa
+                xác nhận — <strong>không</strong> lọc theo khoảng ngày thống kê bên dưới.
+              </p>
               <p className="mt-1.5 text-xs text-gray-500 tabular-nums">
                 {opsStats.in_transit_count +
                   opsStats.delivered_count +
@@ -2983,15 +2988,18 @@ export default function AdminShippingPage() {
           hệ thống tự map sang đơn shop. Chỉ xác nhận khi EMS đã có trạng thái <strong>đơn hoàn</strong> (phát hoàn / chuyển hoàn…).
         </p>
         <div className="space-y-3">
-          <label className="block text-sm font-medium text-gray-700">Danh sách mã (EMS / tham chiếu / DHxxx)</label>
+          <label className="block text-sm font-medium text-gray-700">
+            Danh sách mã (EMS / tham chiếu / mã đơn H·DC·DH…)
+          </label>
           <textarea
             value={shopReturnText}
             onChange={(e) => {
               setShopReturnText(e.target.value);
               setShopReturnError(null);
+              setShopReturnResult(null);
             }}
             rows={4}
-            placeholder={'EE123456789VN\nMA_THAM_CHIEU_A\nDH131'}
+            placeholder={'EE123456789VN\nH11022607\nDC38833\nDH131'}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono placeholder:text-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
           />
           <p className="text-xs text-gray-500">
