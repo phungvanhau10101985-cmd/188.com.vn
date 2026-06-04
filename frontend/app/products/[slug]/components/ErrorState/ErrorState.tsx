@@ -12,7 +12,7 @@ interface ErrorStateProps {
   slug?: string;
 }
 
-const HOME_FALLBACK_DELAY_MS = 1200;
+const HOME_FALLBACK_DELAY_MS = 4000;
 
 export default function ErrorState({ error, slug }: ErrorStateProps) {
   const router = useRouter();
@@ -61,7 +61,7 @@ export default function ErrorState({ error, slug }: ErrorStateProps) {
       <h1 className="text-2xl font-bold text-gray-900 mb-2">Không tìm thấy sản phẩm</h1>
       <p className="text-gray-600 mb-2">{error}</p>
       <p className="text-gray-500 text-sm mb-6">
-        Đang tìm nhóm sản phẩm liên quan hoặc chuyển về trang chủ sau 2 giây…
+        Đang tìm nhóm sản phẩm liên quan hoặc chuyển về trang chủ sau vài giây…
       </p>
       <Link 
         href="/"

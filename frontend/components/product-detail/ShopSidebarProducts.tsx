@@ -75,10 +75,13 @@ export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProdu
             const displayPrice = birthdayDiscount.active
               ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
               : product.price || 0;
+            const pathSeg =
+              productPathSlugFromApi(product.slug, product.product_id) || product.product_id;
+            if (!pathSeg) return null;
             return (
               <Link
                 key={product.id}
-                href={`/products/${productPathSlugFromApi(product.slug, product.product_id) || product.id}`}
+                href={`/products/${encodeURIComponent(String(pathSeg))}`}
                 className="flex flex-col items-center gap-2 p-3 -mt-6 first:mt-0 hover:bg-gray-50"
               >
                 <div className="relative h-32 w-32 flex-shrink-0 overflow-hidden rounded bg-gray-100">

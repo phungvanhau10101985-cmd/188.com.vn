@@ -41,10 +41,7 @@ export async function getProductByDbIdForSSR(
   options?: { attachGroupListing?: boolean },
 ): Promise<Product | null> {
   if (!Number.isFinite(dbId) || dbId <= 0) return null;
-  const apiBase =
-    typeof window === 'undefined'
-      ? getApiBaseUrl()
-      : process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1';
+  const apiBase = getApiBaseUrl();
   try {
     const q = options?.attachGroupListing ? '?attach_group_listing=true' : '';
     const res = await fetch(`${apiBase}/products/by-id/${dbId}${q}`, {

@@ -534,7 +534,13 @@ export const SimpleProductCard = ({
 
   return (
     <Link 
-      href={pathSlug ? `/products/${pathSlug}` : `/products/${product.id}`}
+      href={
+        pathSlug
+          ? `/products/${encodeURIComponent(pathSlug)}`
+          : product.product_id
+            ? `/products/${encodeURIComponent(String(product.product_id))}`
+            : '#'
+      }
       className="product-card group bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-lg hover:border-orange-200 overflow-hidden transition-all block"
     >
       {/* Image Container */}

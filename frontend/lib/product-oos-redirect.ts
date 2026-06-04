@@ -22,10 +22,7 @@ export async function resolveProductGroupListingPath(
   const key = normalizeLegacyProductPath(slug);
   if (!key) return null;
 
-  const apiBase =
-    typeof window === 'undefined'
-      ? getApiBaseUrl()
-      : process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001/api/v1';
+  const apiBase = getApiBaseUrl();
 
   try {
     const params = new URLSearchParams({ slug: key });

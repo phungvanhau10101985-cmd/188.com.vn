@@ -3,7 +3,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.exceptions import RequestValidationError
@@ -98,31 +97,16 @@ if getattr(_settings, "BACKEND_CORS_ORIGIN_REGEX", None):
 app.add_middleware(CORSMiddleware, **_cors_kwargs)
 
 
-class LastResortJsonMiddleware(BaseHTTPMiddleware):
-    """Nếu exception lọt ra ngoài ExceptionMiddleware → vẫn trả JSON (admin XHR parse được)."""
+from app.middleware.http_safe import (
+    AuthLoginBodyMiddleware,
+    ClientDisconnectSafeMiddleware,
+    LastResortJsonMiddleware,
+)
 
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
-        try:
-            return await call_next(request)
-        except Exception as exc:
-            log = logging.getLogger("last_resort_json")
-            log.exception("%s %s", request.method, request.url.path)
-            msg = str(exc).strip() or exc.__class__.__name__
-            return JSONResponse(status_code=500, content={"detail": msg})
-
-
-class AuthLoginContextMiddleware(BaseHTTPMiddleware):
-    """Giữ email khách từ body POST /auth/* để cảnh báo lỗi đăng nhập."""
-
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
-        from app.services.auth_failure_alert import capture_auth_request_context
-
-        request = await capture_auth_request_context(request)
-        return await call_next(request)
-
-
-app.add_middleware(AuthLoginContextMiddleware)
+# Thứ tự: thêm sau = chạy trước (ngoài cùng). ClientDisconnectSafe bọc send cuối cùng.
 app.add_middleware(LastResortJsonMiddleware)
+app.add_middleware(AuthLoginBodyMiddleware)
+app.add_middleware(ClientDisconnectSafeMiddleware)
 
 # ========== DATABASE INITIALIZATION ==========
 def init_database_tables():
