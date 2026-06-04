@@ -6,6 +6,7 @@ import Link from 'next/link';
 import GoogleLoginButton from './GoogleLoginButton';
 import EmailOtpPanel from './EmailOtpPanel';
 import { useAuth } from '../hooks/useAuth';
+import { APIError, reportLoginFailureToAdmins } from '../api/auth-api';
 import { getOrCreateDeviceId } from '@/lib/auth-device-id';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 
@@ -20,8 +21,12 @@ export default function RegisterForm() {
     setError('');
     try {
       await loginWithGoogle(idToken, getOrCreateDeviceId());
-    } catch (err: any) {
-      setError(err.message || 'Đăng ký Gmail thất bại');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Đăng ký Gmail thất bại';
+      if (!(err instanceof APIError)) {
+        void reportLoginFailureToAdmins({ source: 'google_register', message: msg });
+      }
+      setError(msg || 'Đăng ký Gmail thất bại');
     } finally {
       setLoading(false);
     }

@@ -160,6 +160,21 @@ class GoogleLoginRequest(BaseModel):
         return s or None
 
 
+class ReportLoginFailureRequest(BaseModel):
+    """Báo lỗi đăng nhập từ trình duyệt (Google script, mạng, …) — gửi email cho admin."""
+    source: str = Field(..., max_length=64, description="google_client | email_form | …")
+    message: str = Field(..., min_length=1, max_length=500)
+    email: Optional[str] = Field(None, max_length=255)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def strip_report_email(cls, v):
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
+
+
 class SendEmailOtpRequest(BaseModel):
     """Gửi mã OTP đăng nhập tới email"""
     email: EmailStr

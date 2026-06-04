@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { reportLoginFailureToAdmins } from '../api/auth-api';
 
 interface GoogleLoginButtonProps {
   onCredential: (idToken: string) => void;
@@ -19,7 +20,9 @@ export default function GoogleLoginButton({ onCredential, onError }: GoogleLogin
   useEffect(() => {
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID?.trim();
     if (!clientId) {
-      onError?.('Đăng nhập Google tạm thời không khả dụng. Vui lòng dùng email bên dưới.');
+      const msg = 'Đăng nhập Google tạm thời không khả dụng. Vui lòng dùng email bên dưới.';
+      void reportLoginFailureToAdmins({ source: 'google_client', message: msg });
+      onError?.(msg);
       return;
     }
 
@@ -49,10 +52,12 @@ export default function GoogleLoginButton({ onCredential, onError }: GoogleLogin
       return;
     }
 
-    const failFinal = () =>
-      onError?.(
-        'Không tải được đăng nhập Google. Kiểm tra mạng hoặc tắt chặn quảng cáo, rồi thử lại hoặc dùng email.'
-      );
+    const failFinal = () => {
+      const msg =
+        'Không tải được đăng nhập Google. Kiểm tra mạng hoặc tắt chặn quảng cáo, rồi thử lại hoặc dùng email.';
+      void reportLoginFailureToAdmins({ source: 'google_client', message: msg });
+      onError?.(msg);
+    };
 
     const loadScript = (isRetry: boolean) => {
       const script = document.createElement('script');

@@ -583,6 +583,13 @@ class Settings:
         self.SENDER_NAME: str = os.getenv("SENDER_NAME", "").strip()
         self.REPLY_TO: str = os.getenv("REPLY_TO", "").strip()
         self.EMAIL_USE_TLS: bool = os.getenv("EMAIL_USE_TLS", "True").lower() == "true"
+        # Windows dev / mail host thiếu intermediate CA: SMTP_SSL_VERIFY=false (chỉ dev; production nên true)
+        self.SMTP_SSL_VERIFY: bool = os.getenv("SMTP_SSL_VERIFY", "true").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
 
         # Tuỳ chọn (template nội dung / test — code có thể đọc sau)
         self.COMPANY_NAME: str = os.getenv("COMPANY_NAME", "").strip()
@@ -608,6 +615,15 @@ class Settings:
             for x in os.getenv("ORDER_DEPOSIT_ALERT_EMAILS", "").split(",")
             if x.strip()
         ]
+        # Email cảnh báo khi khách không đăng nhập được → mọi admin_users.is_active (bật mặc định)
+        self.AUTH_LOGIN_FAILURE_ALERT_ENABLED: bool = (
+            os.getenv("AUTH_LOGIN_FAILURE_ALERT_ENABLED", "true").strip().lower()
+            in ("1", "true", "yes", "on")
+        )
+        self.AUTH_LOGIN_FAILURE_ALERT_COOLDOWN_SECONDS: int = max(
+            60,
+            int(os.getenv("AUTH_LOGIN_FAILURE_ALERT_COOLDOWN_SECONDS", "180") or "180"),
+        )
 
         # ========================
         # GOOGLE OAUTH CONFIGURATION

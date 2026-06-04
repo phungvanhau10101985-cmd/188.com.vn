@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import GoogleLoginButton from './GoogleLoginButton';
 import EmailOtpPanel from './EmailOtpPanel';
+import { APIError, reportLoginFailureToAdmins } from '../api/auth-api';
 import { getOrCreateDeviceId } from '@/lib/auth-device-id';
 import {
   clearNanoAiOverlayPassThrough,
@@ -33,8 +34,12 @@ export default function LoginForm() {
     try {
       const deviceId = getOrCreateDeviceId();
       await loginWithGoogle(idToken, deviceId);
-    } catch (err: any) {
-      setError(err.message || 'Đăng nhập Gmail thất bại');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Đăng nhập Gmail thất bại';
+      if (!(err instanceof APIError)) {
+        void reportLoginFailureToAdmins({ source: 'google_login', message: msg });
+      }
+      setError(msg || 'Đăng nhập Gmail thất bại');
     } finally {
       setLoading(false);
     }

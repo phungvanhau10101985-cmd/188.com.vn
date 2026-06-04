@@ -30,12 +30,23 @@ def _build_from_header() -> Optional[str]:
     return from_addr
 
 
+def _smtp_ssl_context() -> ssl.SSLContext:
+    ctx = ssl.create_default_context()
+    if not getattr(settings, "SMTP_SSL_VERIFY", True):
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        logger.warning(
+            "SMTP_SSL_VERIFY=false — bỏ qua xác minh chứng chỉ SSL (chỉ nên dùng dev/local)"
+        )
+    return ctx
+
+
 def _connect_smtp() -> smtplib.SMTP:
     """
     Tương tự nodemailer: secure true hoặc port 465 => SMTP_SSL;
     ngược lại: SMTP rồi (tuỳ chọn) STARTTLS nếu EMAIL_USE_TLS.
     """
-    ctx = ssl.create_default_context()
+    ctx = _smtp_ssl_context()
     host = settings.SMTP_HOST
     port = settings.SMTP_PORT
 

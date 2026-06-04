@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Alert, Button, Checkbox, Form, Input, Typography } from 'antd';
-import { authAPI } from '../api/auth-api';
+import { APIError, authAPI, reportLoginFailureToAdmins } from '../api/auth-api';
 import { useAuth } from '../hooks/useAuth';
 import { canPersistTrustedDevice, getOrCreateDeviceId } from '@/lib/auth-device-id';
 import { getLoginRedirectFromUrl } from '@/lib/auth-redirect';
@@ -31,7 +31,13 @@ export default function EmailOtpPanel() {
     setLoading(true);
     const browserId = getOrCreateDeviceId();
     if (!browserId || browserId.length < 8) {
-      setError('Không tạo được mã thiết bị. Bật cookie/lưu trữ trình duyệt.');
+      const msg = 'Không tạo được mã thiết bị. Bật cookie/lưu trữ trình duyệt.';
+      void reportLoginFailureToAdmins({
+        source: 'email_otp_send',
+        message: msg,
+        email: values.email?.trim(),
+      });
+      setError(msg);
       setLoading(false);
       return;
     }
@@ -59,11 +65,22 @@ export default function EmailOtpPanel() {
         }
         return;
       }
-      setInfo(r.message || 'Đã gửi mã.');
+      setInfo(
+        r.message ||
+          'Đã gửi mã OTP tới email. Làm mới hộp thư nếu chưa thấy; kiểm tra cả thư rác.'
+      );
       setStep('code');
       otpForm.resetFields();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Không thực hiện được. Thử lại.');
+      const msg = err instanceof Error ? err.message : 'Không thực hiện được. Thử lại.';
+      if (!(err instanceof APIError)) {
+        void reportLoginFailureToAdmins({
+          source: 'email_otp_send',
+          message: msg,
+          email: emailVal || values.email,
+        });
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -95,7 +112,15 @@ export default function EmailOtpPanel() {
         }
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Đăng nhập thất bại');
+      const msg = err instanceof Error ? err.message : 'Đăng nhập thất bại';
+      if (!(err instanceof APIError)) {
+        void reportLoginFailureToAdmins({
+          source: 'email_otp_verify',
+          message: msg,
+          email: emailVal,
+        });
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -118,7 +143,13 @@ export default function EmailOtpPanel() {
         <Alert type="error" message={error} showIcon className="text-sm" />
       ) : null}
       {info && step === 'code' ? (
-        <Alert type="success" message={info} showIcon className="text-sm" />
+        <Alert
+          type="success"
+          showIcon
+          className="text-sm"
+          message="Đã gửi mã OTP tới email"
+          description="Làm mới hộp thư nếu chưa thấy. Kiểm tra cả mục thư rác."
+        />
       ) : null}
 
       {step === 'email' ? (

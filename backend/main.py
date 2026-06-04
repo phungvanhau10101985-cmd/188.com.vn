@@ -6,6 +6,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
 from datetime import datetime
 from pathlib import Path
 import logging
@@ -109,6 +111,17 @@ class LastResortJsonMiddleware(BaseHTTPMiddleware):
             return JSONResponse(status_code=500, content={"detail": msg})
 
 
+class AuthLoginContextMiddleware(BaseHTTPMiddleware):
+    """Giữ email khách từ body POST /auth/* để cảnh báo lỗi đăng nhập."""
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
+        from app.services.auth_failure_alert import capture_auth_request_context
+
+        request = await capture_auth_request_context(request)
+        return await call_next(request)
+
+
+app.add_middleware(AuthLoginContextMiddleware)
 app.add_middleware(LastResortJsonMiddleware)
 
 # ========== DATABASE INITIALIZATION ==========
@@ -575,14 +588,29 @@ async def global_unhandled_exception(request: Request, exc: Exception):
     Mặc định uvicorn/Starlette có thể trả HTML/text cho 500 — admin XHR (import Excel) chỉ parse JSON
     → báo 'Phản hồi không hợp lệ'. Handler này bắt phần còn lại sau HTTPException / RequestValidationError, v.v.
     """
+    from app.services.auth_failure_alert import maybe_notify_auth_login_failure
+
     logger.exception("Unhandled exception %s %s", request.method, request.url.path)
     msg = str(exc).strip() or exc.__class__.__name__
+    maybe_notify_auth_login_failure(request, status_code=500, detail=msg)
     return JSONResponse(status_code=500, content={"detail": msg})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    from app.services.auth_failure_alert import maybe_notify_auth_login_failure
+
+    maybe_notify_auth_login_failure(request, status_code=422, detail=exc.errors())
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Giữ detail từ HTTPException (vd. Product not found) — không ghi đè Endpoint not found."""
+    from app.services.auth_failure_alert import maybe_notify_auth_login_failure
+
+    if exc.status_code >= 400:
+        maybe_notify_auth_login_failure(request, status_code=exc.status_code, detail=exc.detail)
     if exc.status_code == 404:
         detail = exc.detail
         if isinstance(detail, dict):

@@ -20,10 +20,31 @@ const jsonHeaders = (extra: Record<string, string> = {}): Record<string, string>
   ...extra,
 });
 
-class APIError extends Error {
+export class APIError extends Error {
   constructor(public status: number, message: string) {
     super(message);
     this.name = 'APIError';
+  }
+}
+
+/** Báo lỗi đăng nhập cho admin (không chặn UI nếu thất bại). */
+export async function reportLoginFailureToAdmins(payload: {
+  source: string;
+  message: string;
+  email?: string;
+}): Promise<void> {
+  try {
+    await fetch(`${getApiBaseUrl()}/auth/report-login-failure`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        source: payload.source.slice(0, 64),
+        message: payload.message.slice(0, 500),
+        email: payload.email?.trim() || undefined,
+      }),
+    });
+  } catch {
+    /* im lặng */
   }
 }
 

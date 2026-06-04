@@ -400,7 +400,7 @@ def email_auth_request(
     return EmailAuthRequestResponse(
         auto_signed_in=False,
         next=next_path,
-        message="Đã gửi mã OTP tới email. Kiểm tra cả mục thư rác.",
+        message="Đã gửi mã OTP tới email. Làm mới hộp thư nếu chưa thấy; kiểm tra cả thư rác.",
     )
 
 

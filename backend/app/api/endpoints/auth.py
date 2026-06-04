@@ -1,6 +1,6 @@
 # backend/app/api/endpoints/auth.py - FINAL FIXED VERSION + OTP
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request, Response
 from sqlalchemy.orm import Session
 from datetime import date, timedelta, datetime, timezone
 import random
@@ -16,7 +16,7 @@ from app.core.security import create_access_token, get_current_user, create_admi
 from app.schemas.user import (
     UserCreate, UserResponse, UserLogin, Token,
     UserUpdate, DateOfBirthResponse, SendRegisterOtpRequest, ForgotDateOfBirthRequest,
-    GoogleLoginRequest, SendEmailOtpRequest, VerifyEmailOtpRequest,
+    GoogleLoginRequest, SendEmailOtpRequest, VerifyEmailOtpRequest, ReportLoginFailureRequest,
     TryTrustedDeviceRequest, TryTrustedDeviceResponse,
 )
 from app.schemas.admin import AdminTokenResponse
@@ -302,7 +302,7 @@ def send_email_login_otp(body: SendEmailOtpRequest):
     _email_last_send[email_key] = now
     _email_send_count[day_key] = cnt + 1
     return {
-        "message": "Đã gửi mã tới email. Kiểm tra cả mục thư rác.",
+        "message": "Đã gửi mã tới email. Làm mới hộp thư nếu chưa thấy; kiểm tra cả thư rác.",
         "email": email_key,
     }
 
@@ -363,6 +363,23 @@ def verify_email_login_otp(
         "token_type": "bearer",
         "user": user_response_with_linked_admin(db, user),
     }
+
+
+@router.post("/report-login-failure", status_code=status.HTTP_204_NO_CONTENT)
+def report_client_login_failure(body: ReportLoginFailureRequest, request: Request):
+    """Trình duyệt báo lỗi đăng nhập (Google script, mạng) — email tới mọi admin đang bật."""
+    from app.services.auth_failure_alert import maybe_notify_auth_login_failure
+
+    if body.email:
+        request.scope["auth_alert_email"] = body.email.strip().lower()
+    src = (body.source or "client").strip()[:64]
+    msg = (body.message or "").strip()[:500]
+    maybe_notify_auth_login_failure(
+        request,
+        status_code=400,
+        detail=f"[{src}] {msg}",
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/google", response_model=Token)
