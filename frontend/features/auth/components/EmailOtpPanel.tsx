@@ -104,21 +104,15 @@ export default function EmailOtpPanel() {
   return (
     <div className="mt-4 pt-4 border-t border-gray-200 space-y-3">
       <p className="text-sm text-center text-gray-600 mb-0">Hoặc nhập email để nhận mã</p>
-      {canTrustDevice ? (
-        <Typography.Paragraph type="secondary" className="!mb-0 text-xs text-center leading-relaxed">
-          Email đã từng xác thực OTP trên hệ thống có thể <strong>vào luôn</strong> khi bấm Gửi mã (kể cả ẩn danh).
-          Tuỳ chọn tin cậy thiết bị chỉ bổ sung cho <strong>trình duyệt này</strong>; ẩn danh là phiên riêng với
-          cửa sổ thường.
-        </Typography.Paragraph>
-      ) : (
+      {!canTrustDevice ? (
         <Alert
           type="info"
           showIcon
           className="text-sm"
-          message="Chế độ ẩn danh hoặc chặn lưu trữ"
-          description="Không ghi nhớ thiết bị giữa các phiên. Mỗi lần mở phiên ẩn danh mới hoặc khi trình duyệt xóa dữ liệu, bạn sẽ cần mã OTP lại — đây là hành vi bình thường để bảo mật."
+          message="Cần mã OTP mỗi lần đăng nhập"
+          description="Trình duyệt ẩn danh hoặc chặn cookie không lưu thiết bị — bạn sẽ nhận mã qua email mỗi phiên."
         />
-      )}
+      ) : null}
 
       {error ? (
         <Alert type="error" message={error} showIcon className="text-sm" />

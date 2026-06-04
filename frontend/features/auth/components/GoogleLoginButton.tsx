@@ -19,9 +19,7 @@ export default function GoogleLoginButton({ onCredential, onError }: GoogleLogin
   useEffect(() => {
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID?.trim();
     if (!clientId) {
-      onError?.(
-        'Thiếu NEXT_PUBLIC_GOOGLE_CLIENT_ID ở frontend (.env.local). Phải cùng giá trị với GOOGLE_CLIENT_ID trên backend — sau đó khởi động lại Next.',
-      );
+      onError?.('Đăng nhập Google tạm thời không khả dụng. Vui lòng dùng email bên dưới.');
       return;
     }
 
@@ -53,7 +51,7 @@ export default function GoogleLoginButton({ onCredential, onError }: GoogleLogin
 
     const failFinal = () =>
       onError?.(
-        'Không tải được script Google. Thử mạng khác / tắt VPN–AdBlock; với ngrok thêm URL site vào Authorized JavaScript origins (OAuth Web client).'
+        'Không tải được đăng nhập Google. Kiểm tra mạng hoặc tắt chặn quảng cáo, rồi thử lại hoặc dùng email.'
       );
 
     const loadScript = (isRetry: boolean) => {
