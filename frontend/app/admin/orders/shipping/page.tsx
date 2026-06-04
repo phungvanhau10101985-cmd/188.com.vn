@@ -32,7 +32,25 @@ import {
   type ReturnWarehouseLookupResult,
   type ReturnWarehouseIntakeResult,
 } from '@/lib/admin-api';
-import { normalizeWarehouseSkuFromEmsLabel } from '@/lib/warehouse-sku';
+import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import {
+  normalizeWarehouseSkuFromEmsLabel,
+  parseListingSourceSkuSegments,
+} from '@/lib/warehouse-sku';
+
+/** Mã cuối trong ô xác nhận hoàn (dòng / dấu phẩy / khoảng trắng). */
+function lastShopReturnToken(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+  const tokens: string[] = [];
+  for (const line of trimmed.split(/\r?\n/)) {
+    for (const part of line.split(/[\s,;|\t]+/)) {
+      const t = part.trim();
+      if (t) tokens.push(t);
+    }
+  }
+  return tokens[tokens.length - 1] ?? '';
+}
 
 const EMS_LIST_PAGE_SIZES = [25, 50, 100] as const;
 const EMS_LIST_DEFAULT_PAGE_SIZE = 50;
@@ -963,6 +981,7 @@ export default function AdminShippingPage() {
   const [shopReturnResult, setShopReturnResult] = useState<ShopReturnConfirmResult | null>(null);
   const [shopReturnPreview, setShopReturnPreview] = useState<ShopReturnConfirmResult | null>(null);
   const [shopReturnPreviewLoading, setShopReturnPreviewLoading] = useState(false);
+  const [shopReturnPreviewError, setShopReturnPreviewError] = useState<string | null>(null);
   const [shopReturnListExpanded, setShopReturnListExpanded] = useState(true);
 
   const [returnWhSkuInput, setReturnWhSkuInput] = useState('');
@@ -970,11 +989,16 @@ export default function AdminShippingPage() {
   const [returnWhLookupLoading, setReturnWhLookupLoading] = useState(false);
   const [returnWhLookupError, setReturnWhLookupError] = useState<string | null>(null);
   const [returnWhColor, setReturnWhColor] = useState('');
+  const [returnWhColorName, setReturnWhColorName] = useState('');
   const [returnWhSize, setReturnWhSize] = useState('');
   const [returnWhQty, setReturnWhQty] = useState(1);
   const [returnWhIntakeLoading, setReturnWhIntakeLoading] = useState(false);
   const [returnWhIntakeError, setReturnWhIntakeError] = useState<string | null>(null);
   const [returnWhIntakeResult, setReturnWhIntakeResult] = useState<ReturnWarehouseIntakeResult | null>(null);
+  const [returnWhChineseName, setReturnWhChineseName] = useState('');
+  const [returnWhPrice, setReturnWhPrice] = useState('');
+  const [returnWhColorImage, setReturnWhColorImage] = useState('');
+  const [returnWhNoSize, setReturnWhNoSize] = useState(false);
   const [emsTableExpanded, setEmsTableExpanded] = useState(true);
   const [importReportListExpanded, setImportReportListExpanded] = useState(false);
   const [emsImportBatches, setEmsImportBatches] = useState<EmsShippingImportBatchesResult | null>(null);
@@ -1679,41 +1703,14 @@ export default function AdminShippingPage() {
 
   const shopReturnPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    const text = shopReturnText.trim();
-    if (!text || shopReturnFile) {
-      setShopReturnPreview(null);
-      return;
-    }
-
-    if (shopReturnPreviewTimerRef.current) clearTimeout(shopReturnPreviewTimerRef.current);
-    shopReturnPreviewTimerRef.current = setTimeout(() => {
-      void (async () => {
-        setShopReturnPreviewLoading(true);
-        try {
-          const data = await adminShippingAPI.previewShopReturns({ text });
-          setShopReturnPreview(data);
-          setShopReturnListExpanded(true);
-        } catch {
-          setShopReturnPreview(null);
-        } finally {
-          setShopReturnPreviewLoading(false);
-        }
-      })();
-    }, 500);
-
-    return () => {
-      if (shopReturnPreviewTimerRef.current) clearTimeout(shopReturnPreviewTimerRef.current);
-    };
-  }, [shopReturnText, shopReturnFile]);
-
   const shopReturnDisplayRows = shopReturnPreview?.rows?.length
     ? shopReturnPreview.rows
     : shopReturnResult?.rows ?? [];
 
-  const runReturnWarehouseLookup = useCallback(async () => {
-    const sku = normalizeWarehouseSkuFromEmsLabel(returnWhSkuInput);
-    if (sku !== returnWhSkuInput.trim()) setReturnWhSkuInput(sku);
+  const runReturnWarehouseLookup = useCallback(async (skuOverride?: string) => {
+    const rawInput = (skuOverride ?? returnWhSkuInput).trim();
+    const sku = normalizeWarehouseSkuFromEmsLabel(rawInput);
+    if (sku && sku !== returnWhSkuInput.trim()) setReturnWhSkuInput(sku);
     if (!sku) {
       setReturnWhLookupError('Nhập mã SKU (vd. H0723 hoặc H0723/40/3).');
       return;
@@ -1722,19 +1719,76 @@ export default function AdminShippingPage() {
     setReturnWhLookupError(null);
     setReturnWhIntakeResult(null);
     setReturnWhIntakeError(null);
+    setReturnWhSize('');
+    setReturnWhColor('');
+    setReturnWhColorName('');
     try {
       const data = await adminShippingAPI.returnWarehouseLookup(sku);
-      setReturnWhLookup(data);
-      const parsedSize = data.parsed_size?.trim();
+      const localSeg = parseListingSourceSkuSegments(sku);
+      const colorImageIndex =
+        data.parsed_color_image_index ?? localSeg?.colorImageIndex ?? null;
+      const onlyColorIndex =
+        colorImageIndex != null && localSeg?.colorImageIndex != null && !localSeg?.size;
+      const parsedSize = onlyColorIndex
+        ? null
+        : (data.parsed_size?.trim() || localSeg?.size || '').trim() || null;
+
+      const colors = [...(data.colors || [])];
+      if (colorImageIndex != null && !colors.some((c) => c.key === `idx:${colorImageIndex}`)) {
+        colors.unshift({
+          key: `idx:${colorImageIndex}`,
+          name: `Ảnh màu #${colorImageIndex} (1688)`,
+          image: null,
+          color_index: colorImageIndex,
+        });
+      }
+      const sizes = (data.sizes || []).filter((s) => {
+        if (onlyColorIndex && String(colorImageIndex) === s.trim()) return false;
+        return true;
+      });
+
+      setReturnWhLookup({
+        ...data,
+        colors,
+        sizes,
+        parsed_size: parsedSize,
+        parsed_color_image_index: colorImageIndex,
+        parsed_color_key:
+          colorImageIndex != null
+            ? `idx:${colorImageIndex}`
+            : data.parsed_color_key,
+      });
+
       const sizeMatch =
-        parsedSize && data.sizes.find((s) => s.toUpperCase() === parsedSize.toUpperCase());
-      const firstColor =
-        data.colors.find((c) => c.key === data.parsed_color_key)?.key ??
-        data.colors[0]?.key ??
-        '';
-      setReturnWhColor(firstColor);
-      setReturnWhSize(sizeMatch || (data.sizes[0] ?? ''));
+        parsedSize && sizes.find((s) => s.toUpperCase() === parsedSize.toUpperCase());
+      const colorKey =
+        colorImageIndex != null
+          ? `idx:${colorImageIndex}`
+          : data.colors.find((c) => c.key === data.parsed_color_key)?.key ??
+            data.colors[0]?.key ??
+            '';
+      const firstColorRow = colors.find((c) => c.key === colorKey) ?? colors[0];
+      setReturnWhColor(colorKey);
+      setReturnWhColorName(firstColorRow?.name?.trim() || 'Như ảnh');
+      if (firstColorRow?.image) setReturnWhColorImage(firstColorRow.image);
+      else if (colorImageIndex != null) setReturnWhColorImage('');
+
+      const noSizeDefault =
+        colorImageIndex != null && !parsedSize && !localSeg?.size;
+      setReturnWhNoSize(noSizeDefault);
+      if (noSizeDefault) {
+        setReturnWhSize('');
+      } else if (parsedSize) {
+        setReturnWhSize(sizeMatch || parsedSize);
+      } else {
+        setReturnWhSize(sizes[0] ?? '');
+      }
       setReturnWhQty(1);
+      if (data.needs_parent_publish && !data.parent) {
+        setReturnWhChineseName('');
+        setReturnWhPrice('');
+        if (!firstColorRow?.image) setReturnWhColorImage('');
+      }
     } catch (err) {
       setReturnWhLookup(null);
       setReturnWhLookupError(err instanceof Error ? err.message : 'Không tra cứu được SKU');
@@ -1743,90 +1797,223 @@ export default function AdminShippingPage() {
     }
   }, [returnWhSkuInput]);
 
-  const shopReturnSkuSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncWarehouseFromShopReturn = useCallback(
+    async (token: string, preview: ShopReturnConfirmResult | null) => {
+      const code = token.trim();
+      if (code.length < 3) return;
+
+      const whRows = (preview?.rows ?? []).filter((r) => r.can_show_warehouse || r.can_confirm);
+      let sku: string | null = null;
+
+      if (whRows.length) {
+        const target = whRows[whRows.length - 1];
+        const preset = target.warehouse_sku?.trim();
+        if (preset) sku = normalizeWarehouseSkuFromEmsLabel(preset);
+      }
+
+      if (!sku) {
+        try {
+          const res = await adminShippingAPI.resolveReturnWarehouseSku(code);
+          if (res.sku?.trim()) {
+            sku = normalizeWarehouseSkuFromEmsLabel(res.sku);
+          } else if (res.message?.trim()) {
+            setReturnWhLookupError(res.message.trim());
+          }
+        } catch {
+          /* thử mã kho trực tiếp */
+        }
+      }
+
+      if (!sku) {
+        const direct = normalizeWarehouseSkuFromEmsLabel(code);
+        if (direct && (direct.includes('/') || /^[A-Za-z]?\d{4,}/.test(direct))) {
+          sku = direct;
+        }
+      }
+
+      if (!sku) return;
+
+      setReturnWhSkuInput(sku);
+      setReturnWhLookupError(null);
+      await runReturnWarehouseLookup(sku);
+    },
+    [runReturnWarehouseLookup],
+  );
+
+  const syncWarehouseFromShopReturnRef = useRef(syncWarehouseFromShopReturn);
+  syncWarehouseFromShopReturnRef.current = syncWarehouseFromShopReturn;
 
   useEffect(() => {
     const text = shopReturnText.trim();
-    if (!text) return;
-
-    const tokens: string[] = [];
-    for (const line of text.split(/\r?\n/)) {
-      for (const part of line.split(/[\s,;|\t]+/)) {
-        const t = part.trim();
-        if (t) tokens.push(t);
-      }
-    }
-    const lastToken = tokens[tokens.length - 1];
-    if (!lastToken || lastToken.length < 3) return;
-
-    const whRows = (shopReturnPreview?.rows ?? []).filter((r) => r.can_show_warehouse || r.can_confirm);
-    if (!whRows.length) return;
-    const target = whRows[whRows.length - 1];
-    const presetSku = target.warehouse_sku?.trim();
-    if (presetSku) {
-      setReturnWhSkuInput(normalizeWarehouseSkuFromEmsLabel(presetSku));
-      setReturnWhLookupError(null);
+    if (!text || shopReturnFile) {
+      setShopReturnPreview(null);
+      setShopReturnPreviewError(null);
       return;
     }
-    const skuToken = (target.raw || lastToken).trim();
 
-    if (shopReturnSkuSyncTimerRef.current) clearTimeout(shopReturnSkuSyncTimerRef.current);
-    shopReturnSkuSyncTimerRef.current = setTimeout(() => {
+    const token = lastShopReturnToken(text);
+    if (token.length < 3) {
+      setShopReturnPreview(null);
+      setShopReturnPreviewError(null);
+      return;
+    }
+
+    if (shopReturnPreviewTimerRef.current) clearTimeout(shopReturnPreviewTimerRef.current);
+    shopReturnPreviewTimerRef.current = setTimeout(() => {
       void (async () => {
+        setShopReturnPreviewLoading(true);
+        setShopReturnPreviewError(null);
         try {
-          const res = await adminShippingAPI.resolveReturnWarehouseSku(skuToken);
-          if (res.sku) {
-            setReturnWhSkuInput(normalizeWarehouseSkuFromEmsLabel(res.sku));
-            setReturnWhLookupError(null);
-          }
-        } catch {
-          /* cột H trống — nhân viên gõ SKU tay */
+          const data = await adminShippingAPI.previewShopReturns({ text });
+          setShopReturnPreview(data);
+          setShopReturnListExpanded(true);
+          await syncWarehouseFromShopReturnRef.current(token, data);
+        } catch (err) {
+          setShopReturnPreview(null);
+          setShopReturnPreviewError(
+            err instanceof Error ? err.message : 'Không tra cứu được mã — thử lại',
+          );
+        } finally {
+          setShopReturnPreviewLoading(false);
         }
       })();
     }, 400);
 
     return () => {
-      if (shopReturnSkuSyncTimerRef.current) clearTimeout(shopReturnSkuSyncTimerRef.current);
+      if (shopReturnPreviewTimerRef.current) clearTimeout(shopReturnPreviewTimerRef.current);
     };
-  }, [shopReturnText, shopReturnPreview]);
+  }, [shopReturnText, shopReturnFile]);
+
+  const returnWhIntakeGate = useMemo(() => {
+    if (!returnWhLookup) {
+      return { can: false, reason: 'Tra cứu SKU trước.' };
+    }
+    const needsPublish = Boolean(returnWhLookup.needs_parent_publish && !returnWhLookup.parent);
+    const selectedColor = returnWhLookup.colors.find((c) => c.key === returnWhColor);
+    const colorIdxFromUi =
+      returnWhLookup.parsed_color_image_index ??
+      selectedColor?.color_index ??
+      (returnWhColor.startsWith('idx:')
+        ? parseInt(returnWhColor.split(':')[1] || '', 10)
+        : null);
+    const hasColorIdx = colorIdxFromUi != null && Number.isFinite(colorIdxFromUi);
+    const skuNorm = normalizeWarehouseSkuFromEmsLabel(returnWhSkuInput);
+    const hasWhPath = Boolean(
+      skuNorm.includes('/') || returnWhLookup.warehouse_product_id?.trim(),
+    );
+    const sizeOk = returnWhNoSize || Boolean(returnWhSize.trim()) || hasColorIdx || hasWhPath;
+    if (!sizeOk) {
+      return {
+        can: false,
+        reason:
+          'Chọn size, bật «Không có size», hoặc tra mã có ô ảnh màu (vd. A757876600366/4).',
+      };
+    }
+    if (needsPublish && (!returnWhChineseName.trim() || !returnWhPrice.trim())) {
+      const missing: string[] = [];
+      if (!returnWhChineseName.trim()) missing.push('tên tiếng Trung');
+      if (!returnWhPrice.trim()) missing.push('giá list');
+      return { can: false, reason: `Nhập ${missing.join(' và ')}.` };
+    }
+    return { can: true, reason: null as string | null };
+  }, [
+    returnWhLookup,
+    returnWhSkuInput,
+    returnWhSize,
+    returnWhNoSize,
+    returnWhChineseName,
+    returnWhPrice,
+    returnWhColor,
+  ]);
 
   const runReturnWarehouseIntake = useCallback(async () => {
     if (!returnWhLookup) {
       setReturnWhIntakeError('Tra cứu SKU trước khi nhập kho.');
       return;
     }
+    const needsPublish = Boolean(returnWhLookup.needs_parent_publish && !returnWhLookup.parent);
+    const chinese = returnWhChineseName.trim();
+    const priceRaw = returnWhPrice.trim().replace(/[^\d.]/g, '');
+    const price = parseFloat(priceRaw);
+    if (needsPublish) {
+      if (!chinese) {
+        setReturnWhIntakeError('Nhập tên tiếng Trung.');
+        return;
+      }
+      if (!Number.isFinite(price) || price <= 0) {
+        setReturnWhIntakeError('Nhập giá list hợp lệ (VNĐ).');
+        return;
+      }
+    }
     const skuNorm = normalizeWarehouseSkuFromEmsLabel(returnWhSkuInput);
-    const whProductId =
+    const selectedColor = returnWhLookup.colors.find((c) => c.key === returnWhColor);
+    const colorIdxFromUi =
+      returnWhLookup.parsed_color_image_index ??
+      selectedColor?.color_index ??
+      (returnWhColor.startsWith('idx:')
+        ? parseInt(returnWhColor.split(':')[1] || '', 10)
+        : null);
+    const colorIdxOk = colorIdxFromUi != null && Number.isFinite(colorIdxFromUi);
+    let whProductId =
+      (skuNorm.includes('/') ? skuNorm : '') ||
       returnWhLookup.warehouse_product_id?.trim() ||
-      (skuNorm.includes('/') ? skuNorm : '');
-    if (!whProductId && !returnWhSize.trim()) {
-      setReturnWhIntakeError('Chọn size hoặc nhập mã kho đầy đủ (vd. H9441/1/xl).');
+      '';
+    const noSizeOk =
+      returnWhNoSize ||
+      colorIdxOk ||
+      Boolean(returnWhLookup.parsed_color_image_index != null);
+    if (
+      returnWhNoSize &&
+      colorIdxOk &&
+      !whProductId &&
+      returnWhLookup.listing_source
+    ) {
+      whProductId = `${returnWhLookup.base_sku}/${colorIdxFromUi}`;
+    }
+    if (!whProductId && !returnWhSize.trim() && !noSizeOk) {
+      setReturnWhIntakeError(
+        'Chọn size, bật «Không có size», hoặc nhập mã kho đầy đủ (vd. A757876600366/4).',
+      );
       return;
     }
     setReturnWhIntakeLoading(true);
     setReturnWhIntakeError(null);
-    const selectedColor = returnWhLookup.colors.find((c) => c.key === returnWhColor);
+    const colorImage =
+      returnWhColorImage.trim() || selectedColor?.image?.trim() || null;
+    const colorLabel = returnWhColorName.trim() || selectedColor?.name?.trim() || 'Như ảnh';
     try {
       const result = await adminShippingAPI.returnWarehouseIntake({
         sku: returnWhLookup.base_sku,
         warehouse_product_id: whProductId || null,
         color: returnWhColor || null,
-        color_index: selectedColor?.color_index ?? null,
-        color_image: selectedColor?.image ?? null,
-        size: returnWhSize.trim(),
+        color_label: colorLabel,
+        color_index: colorIdxOk ? Number(colorIdxFromUi) : null,
+        color_image: colorImage,
+        size: returnWhNoSize ? '' : returnWhSize.trim(),
         quantity: returnWhQty,
+        chinese_name: needsPublish ? chinese : null,
+        price: needsPublish ? price : null,
       });
       setReturnWhIntakeResult(result);
-      const refreshed = await adminShippingAPI.returnWarehouseLookup(
-        whProductId || returnWhLookup.base_sku,
-      );
+      const refreshed = await adminShippingAPI.returnWarehouseLookup(returnWhSkuInput.trim());
       setReturnWhLookup(refreshed);
     } catch (err) {
       setReturnWhIntakeError(err instanceof Error ? err.message : 'Nhập kho thất bại');
     } finally {
       setReturnWhIntakeLoading(false);
     }
-  }, [returnWhLookup, returnWhSkuInput, returnWhColor, returnWhSize, returnWhQty]);
+  }, [
+    returnWhLookup,
+    returnWhSkuInput,
+    returnWhColor,
+    returnWhColorName,
+    returnWhColorImage,
+    returnWhChineseName,
+    returnWhPrice,
+    returnWhSize,
+    returnWhQty,
+    returnWhNoSize,
+  ]);
 
   const runFreightImport = useCallback(async () => {
     if (!freightFile) {
@@ -2791,7 +2978,8 @@ export default function AdminShippingPage() {
           <strong>D</strong> số tiền EMS đã trả shop (vd. 5,200,000), ô <strong>E1</strong> ngày trả tiền (vd.{' '}
           <strong>Ngày trả tiền: 02/06/2026</strong>).
           Chỉ sau bước này hệ thống mới ghi <strong>COD EMS trả shop</strong> — hành trình «[COD]Đã thu tiền» là
-          bưu tá thu khách, chưa phải trả shop.
+          bưu tá thu khách, chưa phải trả shop. Import lần 2 cùng tên file thì <strong>cập nhật</strong> đợt
+          đối soát đã lưu, không tạo đợt mới.
         </p>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
           <input
@@ -3001,6 +3189,7 @@ export default function AdminShippingPage() {
             onChange={(e) => {
               setShopReturnText(e.target.value);
               setShopReturnError(null);
+              setShopReturnPreviewError(null);
               setShopReturnResult(null);
             }}
             rows={4}
@@ -3008,8 +3197,9 @@ export default function AdminShippingPage() {
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono placeholder:text-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
           />
           <p className="text-xs text-gray-500">
-            Hai trạng thái: <strong>Có thể xác nhận</strong> = EMS đã báo đơn hoàn, shop chưa xác nhận đã nhận ·{' '}
-            <strong>Đã xác nhận nhận hàng</strong> = shop đã ghi nhận trước đó.
+            Tự tra cứu EMS sau ~0,4s khi ngừng gõ; đồng thời điền và tra SKU kho bên dưới. Hai trạng thái:{' '}
+            <strong>Có thể xác nhận</strong> = EMS đã báo đơn hoàn · <strong>Đã xác nhận nhận hàng</strong> = shop đã
+            ghi nhận trước.
           </p>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
@@ -3044,6 +3234,36 @@ export default function AdminShippingPage() {
         </div>
         {shopReturnPreviewLoading ? (
           <p className="text-xs text-gray-500">Đang tra cứu trạng thái EMS…</p>
+        ) : null}
+        {shopReturnPreviewError ? (
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+            {shopReturnPreviewError}{' '}
+            <button
+              type="button"
+              className="underline font-medium"
+              onClick={() => {
+                const text = shopReturnText.trim();
+                if (!text) return;
+                void (async () => {
+                  setShopReturnPreviewLoading(true);
+                  setShopReturnPreviewError(null);
+                  try {
+                    const data = await adminShippingAPI.previewShopReturns({ text });
+                    setShopReturnPreview(data);
+                    await syncWarehouseFromShopReturnRef.current(lastShopReturnToken(text), data);
+                  } catch (err) {
+                    setShopReturnPreviewError(
+                      err instanceof Error ? err.message : 'Không tra cứu được mã — thử lại',
+                    );
+                  } finally {
+                    setShopReturnPreviewLoading(false);
+                  }
+                })();
+              }}
+            >
+              Thử lại
+            </button>
+          </div>
         ) : null}
         {shopReturnFile ? <p className="text-xs text-gray-500">File Excel: {shopReturnFile.name}</p> : null}
 
@@ -3154,16 +3374,24 @@ export default function AdminShippingPage() {
             ) : null}
           </div>
         ) : null}
-        <div className="border-t border-gray-200 pt-5 mt-5 space-y-4">
-        <h3 className="text-base font-semibold text-gray-900">Nhập hàng hoàn vào kho thanh lý</h3>
+      </section>
+
+      <section className="bg-white border border-amber-200 rounded-xl p-5 shadow-sm space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900">Nhập hàng hoàn vào kho thanh lý</h2>
         <p className="text-sm text-gray-600">
           Nhập mã kho đầy đủ như import (vd. <strong>H9441/1/xl</strong>) hoặc mã gốc <strong>H9441</strong>.
+          Mã nguồn <strong>A932203996836/40/1</strong> (1688) hoặc <strong>T932203996836/40/1</strong> (Tmall)
+          — nếu chưa có SP gốc, đăng lên web rồi nhập kho thanh lý.
           Dán cả chuỗi cột H EMS cũng được — hệ thống chỉ giữ phần <strong>trước dấu «-»</strong> (vd.{' '}
           <span className="font-mono">L3712/M/1</span>).
         </p>
         <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
           <div className="flex-1">
             <label className="block text-sm font-medium text-gray-700 mb-1">Mã SKU</label>
+            <p className="text-xs text-gray-500 mb-1.5">
+              Mã 1688/Tmall: <span className="font-mono">A…/4</span> = ô ảnh màu #4 (không phải size) ·{' '}
+              <span className="font-mono">A…/45/4</span> = size 45, ô ảnh #4
+            </p>
             <input
               type="text"
               value={returnWhSkuInput}
@@ -3209,27 +3437,163 @@ export default function AdminShippingPage() {
             <div className="text-sm text-gray-800">
               <span className="font-medium">SKU gốc:</span>{' '}
               <code className="font-mono text-amber-900">{returnWhLookup.base_sku}</code>
-              {returnWhLookup.parent ? (
+              {returnWhLookup.parent && !returnWhLookup.parent.listing_prefix_matched ? (
                 <>
                   {' '}
                   · <span className="font-medium">SP gốc:</span> {returnWhLookup.parent.name} (
                   <code className="font-mono">{returnWhLookup.parent.product_id}</code>)
                 </>
-              ) : (
+              ) : null}
+              {!returnWhLookup.parent && returnWhLookup.needs_parent_publish && returnWhLookup.listing_source ? (
+                <span className="text-blue-800">
+                  {' '}
+                  · Chưa có dòng sale kho — «Nhập kho» sẽ tạo SP sale độc lập (vd. A…/size/…)
+                </span>
+              ) : null}
+              {!returnWhLookup.parent && !returnWhLookup.needs_parent_publish ? (
                 <span className="text-amber-800"> · Chưa có SP gốc — sẽ dùng dòng kho mẫu nếu có</span>
-              )}
+              ) : null}
             </div>
+
+            {returnWhLookup.parent?.listing_prefix_matched ? (
+              <div className="rounded-lg border border-emerald-300 bg-emerald-50/80 p-4 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex rounded-full bg-emerald-200 px-2.5 py-0.5 text-xs font-semibold text-emerald-950">
+                    Đã có SP trên shop — trùng mã nguồn {returnWhLookup.listing_source?.listing_prefix}
+                  </span>
+                  {returnWhLookup.listing_source?.link_default ? (
+                    <a
+                      href={returnWhLookup.listing_source.link_default}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center rounded-lg border border-blue-300 bg-white px-2.5 py-1 text-xs font-medium text-blue-900 hover:bg-blue-50"
+                    >
+                      Mở {returnWhLookup.listing_source.platform === '1688' ? '1688' : 'Tmall'}
+                    </a>
+                  ) : null}
+                  {returnWhLookup.parent.slug ? (
+                    <Link
+                      href={`/products/${returnWhLookup.parent.slug}`}
+                      target="_blank"
+                      className="inline-flex items-center rounded-lg border border-emerald-400 bg-white px-2.5 py-1 text-xs font-medium text-emerald-900 hover:bg-emerald-100/60"
+                    >
+                      Xem trên web
+                    </Link>
+                  ) : null}
+                </div>
+                <div className="flex flex-col sm:flex-row gap-4">
+                  {returnWhLookup.parent.main_image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={returnWhLookup.parent.main_image}
+                      alt=""
+                      className="h-28 w-28 rounded-lg border border-emerald-200 object-cover shrink-0"
+                    />
+                  ) : null}
+                  <div className="min-w-0 space-y-1 text-sm">
+                    <p className="font-semibold text-gray-900">{returnWhLookup.parent.name}</p>
+                    <p className="text-gray-700">
+                      Mã SP: <code className="font-mono text-xs">{returnWhLookup.parent.product_id}</code>
+                    </p>
+                    <p className="text-gray-700 tabular-nums">
+                      Giá list: <strong>{formatVnd(returnWhLookup.parent.price)}</strong>
+                    </p>
+                    {returnWhLookup.parent.chinese_name ? (
+                      <p className="text-gray-600">
+                        Tên Trung: <span className="font-medium">{returnWhLookup.parent.chinese_name}</span>
+                      </p>
+                    ) : null}
+                    {returnWhLookup.parent.category ? (
+                      <p className="text-gray-600">
+                        Danh mục: {returnWhLookup.parent.category}
+                        {returnWhLookup.parent.subcategory ? ` › ${returnWhLookup.parent.subcategory}` : ''}
+                        {returnWhLookup.parent.sub_subcategory
+                          ? ` › ${returnWhLookup.parent.sub_subcategory}`
+                          : ''}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+                <p className="text-xs text-emerald-900">
+                  Dùng màu/size bên dưới từ SP gốc — bấm «Nhập kho» để cộng tồn thanh lý.
+                </p>
+              </div>
+            ) : returnWhLookup.listing_source?.link_default ? (
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <a
+                  href={returnWhLookup.listing_source.link_default}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 font-medium text-blue-900 hover:bg-blue-100"
+                >
+                  Mở{' '}
+                  {returnWhLookup.listing_source.platform === '1688'
+                    ? '1688'
+                    : 'Tmall'}{' '}
+                  (id {returnWhLookup.listing_source.offer_id})
+                </a>
+                <span className="text-gray-600 font-mono text-xs break-all">
+                  {returnWhLookup.listing_source.link_default}
+                </span>
+              </div>
+            ) : null}
+
+            {returnWhLookup.needs_parent_publish && !returnWhLookup.parent ? (
+              <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/60 p-4">
+                <p className="text-sm font-medium text-blue-950">
+                  Chưa có dòng sale kho — bấm «Nhập kho» sẽ tạo SP sale độc lập (DeepSeek dịch tên, tiền tố Sale
+                  Sốc), không tạo SP gốc trên shop. Ảnh màu = ảnh đại diện + gallery; trường khác có thể để trống.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tên tiếng Trung</label>
+                    <input
+                      type="text"
+                      value={returnWhChineseName}
+                      onChange={(e) => setReturnWhChineseName(e.target.value)}
+                      placeholder="商品中文标题…"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Giá list (VNĐ)</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={returnWhPrice}
+                      onChange={(e) => setReturnWhPrice(e.target.value)}
+                      placeholder="1350000"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm tabular-nums"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Link ảnh màu</label>
+                    <input
+                      type="url"
+                      value={returnWhColorImage}
+                      onChange={(e) => setReturnWhColorImage(e.target.value)}
+                      placeholder="https://…"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             <div>
               <p className="text-sm font-medium text-gray-700 mb-2">Màu sắc</p>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 mb-2">
                 {returnWhLookup.colors.map((c) => {
                   const active = returnWhColor === c.key;
                   return (
                     <button
                       key={c.key}
                       type="button"
-                      onClick={() => setReturnWhColor(c.key)}
+                      onClick={() => {
+                        setReturnWhColor(c.key);
+                        setReturnWhColorName(c.name?.trim() || 'Như ảnh');
+                        if (c.image) setReturnWhColorImage(c.image);
+                      }}
                       className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${
                         active
                           ? 'border-amber-600 bg-amber-100 text-amber-950 ring-1 ring-amber-500'
@@ -3245,42 +3609,73 @@ export default function AdminShippingPage() {
                   );
                 })}
               </div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tên màu (có thể sửa)</label>
+              <input
+                type="text"
+                value={returnWhColorName}
+                onChange={(e) => setReturnWhColorName(e.target.value)}
+                placeholder="Như ảnh"
+                className="w-full max-w-md rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              />
             </div>
 
             <div>
               <p className="text-sm font-medium text-gray-700 mb-2">Size</p>
-              <div className="flex flex-wrap gap-2">
-                {returnWhLookup.sizes.length ? (
-                  returnWhLookup.sizes.map((s) => {
-                    const active = returnWhSize === s;
-                    return (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={() => setReturnWhSize(s)}
-                        className={`min-w-[3rem] rounded-lg border px-3 py-1.5 text-sm font-medium ${
-                          active
-                            ? 'border-amber-600 bg-amber-100 text-amber-950'
-                            : 'border-gray-200 bg-white text-gray-800 hover:border-amber-300'
-                        }`}
-                      >
-                        {s}
-                      </button>
-                    );
-                  })
-                ) : (
-                  <p className="text-sm text-gray-500">Chưa có size trên SP gốc — nhập size thủ công:</p>
-                )}
-              </div>
-              {!returnWhLookup.sizes.length ? (
+              <label className="mb-2 flex items-center gap-2 text-sm text-gray-700">
                 <input
-                  type="text"
-                  value={returnWhSize}
-                  onChange={(e) => setReturnWhSize(e.target.value)}
-                  placeholder="40"
-                  className="mt-2 w-32 rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
+                  type="checkbox"
+                  checked={returnWhNoSize}
+                  onChange={(e) => {
+                    setReturnWhNoSize(e.target.checked);
+                    if (e.target.checked) setReturnWhSize('');
+                  }}
+                  className="rounded border-gray-300 text-amber-600 focus:ring-amber-500"
                 />
-              ) : null}
+                Không có size (túi xách, đồng hồ, phụ kiện…)
+              </label>
+              {!returnWhNoSize ? (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    {returnWhLookup.sizes.length ? (
+                      returnWhLookup.sizes.map((s) => {
+                        const active = returnWhSize === s;
+                        return (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setReturnWhSize(s)}
+                            className={`min-w-[3rem] rounded-lg border px-3 py-1.5 text-sm font-medium ${
+                              active
+                                ? 'border-amber-600 bg-amber-100 text-amber-950'
+                                : 'border-gray-200 bg-white text-gray-800 hover:border-amber-300'
+                            }`}
+                          >
+                            {s}
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <p className="text-sm text-gray-500">
+                        Chưa có size trên SP gốc — nhập size thủ công (nếu có):
+                      </p>
+                    )}
+                  </div>
+                  {!returnWhLookup.sizes.length || returnWhLookup.needs_parent_publish ? (
+                    <input
+                      type="text"
+                      value={returnWhSize}
+                      onChange={(e) => setReturnWhSize(e.target.value)}
+                      placeholder="40 (bỏ trống nếu không có)"
+                      className="mt-2 w-40 rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
+                    />
+                  ) : null}
+                </>
+              ) : (
+                <p className="text-sm text-amber-900">
+                  Mã kho sẽ giữ dạng ô ảnh màu (vd.{' '}
+                  <span className="font-mono">{returnWhLookup.base_sku}/4</span> — không thêm size vào mã.
+                </p>
+              )}
             </div>
 
             <div className="flex flex-wrap items-end gap-4">
@@ -3292,17 +3687,64 @@ export default function AdminShippingPage() {
                   max={500}
                   value={returnWhQty}
                   onChange={(e) => setReturnWhQty(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                  className="w-28 rounded-lg border border-gray-300 px-3 py-2 text-sm tabular-nums"
+                  disabled={Boolean(returnWhIntakeResult?.ok)}
+                  className="w-28 rounded-lg border border-gray-300 px-3 py-2 text-sm tabular-nums disabled:bg-gray-100"
                 />
               </div>
-              <button
-                type="button"
-                onClick={() => void runReturnWarehouseIntake()}
-                disabled={returnWhIntakeLoading || !returnWhSize.trim()}
-                className="inline-flex items-center justify-center rounded-lg bg-amber-600 px-5 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
-              >
-                {returnWhIntakeLoading ? 'Đang nhập kho…' : 'Nhập kho'}
-              </button>
+              {returnWhIntakeResult?.ok && returnWhIntakeResult.product_id ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {(() => {
+                    const viewSlug = productPathSlugFromApi(
+                      returnWhIntakeResult.slug,
+                      returnWhIntakeResult.product_id,
+                    );
+                    return viewSlug ? (
+                      <Link
+                        href={`/products/${encodeURIComponent(viewSlug)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+                      >
+                        Xem sản phẩm kho
+                      </Link>
+                    ) : (
+                      <span className="text-sm text-gray-600">
+                        Đã lưu <code className="font-mono">{returnWhIntakeResult.product_id}</code> — chưa có slug
+                      </span>
+                    );
+                  })()}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReturnWhIntakeResult(null);
+                      setReturnWhIntakeError(null);
+                    }}
+                    className="inline-flex items-center justify-center rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-medium text-amber-900 hover:bg-amber-50"
+                  >
+                    Nhập tiếp
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <button
+                    type="button"
+                    onClick={() => void runReturnWarehouseIntake()}
+                    disabled={returnWhIntakeLoading || !returnWhIntakeGate.can}
+                    className="inline-flex items-center justify-center rounded-lg bg-amber-600 px-5 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {returnWhIntakeLoading
+                      ? returnWhLookup.needs_parent_publish && !returnWhLookup.parent
+                        ? 'Đang tạo SP sale + nhập kho…'
+                        : 'Đang nhập kho…'
+                      : returnWhLookup.needs_parent_publish && !returnWhLookup.parent
+                        ? 'Nhập kho (tạo SP sale kho)'
+                        : 'Nhập kho'}
+                  </button>
+                  {!returnWhIntakeLoading && !returnWhIntakeGate.can && returnWhIntakeGate.reason ? (
+                    <p className="text-xs text-amber-900">{returnWhIntakeGate.reason}</p>
+                  ) : null}
+                </div>
+              )}
             </div>
 
             {returnWhIntakeResult ? (
@@ -3345,7 +3787,6 @@ export default function AdminShippingPage() {
             ) : null}
           </div>
         ) : null}
-        </div>
       </section>
 
       <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">

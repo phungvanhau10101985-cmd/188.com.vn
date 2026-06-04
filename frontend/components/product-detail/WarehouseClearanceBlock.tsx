@@ -6,6 +6,8 @@ import type { Product, WarehouseClearanceVariant } from '@/types/api';
 import { formatPrice } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
 import {
+  clearanceLineDiscountPercent,
+  getClearanceCardBestDiscountPercent,
   resolveWarehouseVariantPricing,
   warehouseVariantAriaLabel,
   warehouseVariantAsProduct,
@@ -24,17 +26,31 @@ type WarehouseClearanceBlockProps = {
   onSelectVariant?: (id: number | null) => void;
 };
 
+function variantDisplayPercent(
+  pricing: ReturnType<typeof resolveWarehouseVariantPricing>,
+  fallbackPct: number,
+): number {
+  if (pricing.hasDiscount && pricing.originalPrice > pricing.displayPrice) {
+    return clearanceLineDiscountPercent(
+      pricing.displayPrice,
+      pricing.originalPrice,
+      pricing.percent,
+    );
+  }
+  return Math.max(0, pricing.percent || fallbackPct);
+}
+
 function WarehouseVariantMeta({ variant }: { variant: WarehouseClearanceVariant }) {
   const color = warehouseVariantColorLabel(variant);
   const size = warehouseVariantSizeLabel(variant);
   return (
-    <div className="flex min-w-0 flex-col gap-0.5">
-      <p className="text-sm leading-snug text-gray-900">
+    <div className="flex min-w-0 flex-col gap-1">
+      <p className="text-sm leading-snug text-gray-900 sm:text-base">
         <span className="font-medium text-gray-500">Màu: </span>
         <span className="font-semibold">{color}</span>
       </p>
       {size ? (
-        <p className="text-sm leading-snug text-gray-900">
+        <p className="text-sm leading-snug text-gray-900 sm:text-base">
           <span className="font-medium text-gray-500">Size: </span>
           <span className="font-semibold">{size}</span>
         </p>
@@ -66,15 +82,27 @@ export default function WarehouseClearanceBlock({
   };
 
   const [quantity, setQuantity] = useState(1);
-  /** Tránh hydration mismatch: SSR isLoading=true, client soft-nav có thể false. */
   const [uiCartLoading, setUiCartLoading] = useState(false);
   useLayoutEffect(() => {
     setUiCartLoading(isCartLoading);
   }, [isCartLoading]);
 
+  const fallbackClearancePct = product.warehouse_clearance?.discount_percent ?? 0;
+  const bestDiscountPct = useMemo(
+    () => getClearanceCardBestDiscountPercent(product),
+    [product],
+  );
+  const headerPct = bestDiscountPct > 0 ? bestDiscountPct : fallbackClearancePct;
+
   const selected =
     selectedId != null ? variants.find((v) => v.id === selectedId) ?? null : null;
-  const fallbackClearancePct = product.warehouse_clearance?.discount_percent ?? 0;
+  const selectedPricing = selected
+    ? resolveWarehouseVariantPricing(selected, fallbackClearancePct)
+    : null;
+  const selectedPct =
+    selectedPricing != null
+      ? variantDisplayPercent(selectedPricing, fallbackClearancePct)
+      : 0;
   const maxQty = Math.max(1, selected?.available ?? 1);
 
   if (variants.length === 0) return null;
@@ -93,27 +121,44 @@ export default function WarehouseClearanceBlock({
 
   return (
     <section
-      className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 space-y-3"
+      className="rounded-2xl border-2 border-orange-300 bg-gradient-to-br from-orange-50 via-amber-50 to-orange-100/90 p-4 shadow-md ring-1 ring-orange-200/70 sm:p-5"
       aria-label="Hàng thanh lý trong kho"
     >
-      <div>
-        <p className="text-sm font-semibold text-amber-950">Thanh lý trong kho</p>
-        <p className="text-xs text-amber-900/80 mt-0.5">
-          Hàng duyệt hoàn — giá riêng
-          {fallbackClearancePct > 0 ? ` (giảm ${fallbackClearancePct}%)` : ''}. Không cộng sale ngày trùng tháng.
-        </p>
-        {product.source_oos ? (
-          <p className="text-xs font-medium text-amber-800 mt-1">
-            Nguồn order tạm hết — bạn vẫn có thể mua các dòng kho bên dưới.
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-orange-200/80 pb-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-base font-extrabold tracking-tight text-orange-950 sm:text-lg">
+              Thanh lý trong kho
+            </p>
+            {headerPct > 0 ? (
+              <span className="inline-flex min-w-[3.25rem] items-center justify-center rounded-lg bg-red-600 px-2.5 py-1 text-sm font-extrabold text-white shadow-sm ring-2 ring-red-400/30">
+                -{headerPct}%
+              </span>
+            ) : null}
+          </div>
+          <p className="text-xs font-medium text-orange-900/90 sm:text-sm">
+            Hàng duyệt hoàn — giá riêng, không cộng sale ngày trùng tháng.
+            {variants.length > 1 ? (
+              <span className="ml-1 font-semibold text-orange-950">
+                ({variants.length} dòng còn hàng)
+              </span>
+            ) : null}
           </p>
-        ) : null}
+          {product.source_oos ? (
+            <p className="text-xs font-semibold text-amber-900 sm:text-sm">
+              Nguồn order tạm hết — vẫn mua được hàng thanh lý bên dưới.
+            </p>
+          ) : null}
+        </div>
       </div>
 
-      <div className="space-y-2" role="listbox" aria-label="Chọn màu size kho thanh lý">
+      <div className="space-y-3 pt-3" role="listbox" aria-label="Chọn màu size kho thanh lý">
         {variants.map((v) => {
           const active = selected?.id === v.id;
           const pricing = resolveWarehouseVariantPricing(v, fallbackClearancePct);
+          const pct = variantDisplayPercent(pricing, fallbackClearancePct);
           const thumb = variantThumbUrl(v);
+          const lowStock = v.available <= 3;
           return (
             <button
               key={v.id}
@@ -124,48 +169,63 @@ export default function WarehouseClearanceBlock({
                 setSelectedId(v.id);
                 setQuantity(1);
               }}
-              className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors ${
+              className={`w-full text-left rounded-xl border-2 px-3 py-3 transition-all sm:px-4 sm:py-3.5 ${
                 active
-                  ? 'border-[#ea580c] bg-white ring-1 ring-[#ea580c]/30'
-                  : 'border-amber-100 bg-white/80 hover:border-amber-300'
+                  ? 'border-[#ea580c] bg-white shadow-md ring-2 ring-[#ea580c]/25'
+                  : 'border-orange-200/90 bg-white/90 hover:border-orange-400 hover:shadow-sm'
               }`}
             >
-              <div className="flex items-start gap-3">
+              <div className="flex items-start gap-3 sm:gap-4">
                 {thumb ? (
-                  <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-md border border-amber-100 bg-white">
+                  <div className="relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-lg border-2 border-orange-100 bg-white shadow-sm sm:h-24 sm:w-24">
                     <Image
-                      src={getOptimizedImage(thumb, { width: 112, height: 112, hideProductPng: true })}
+                      src={getOptimizedImage(thumb, { width: 160, height: 160, hideProductPng: true })}
                       alt={warehouseVariantAriaLabel(v)}
-                      width={56}
-                      height={56}
+                      width={96}
+                      height={96}
                       className="h-full w-full object-cover"
                     />
-                  </div>
-                ) : null}
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <WarehouseVariantMeta variant={v} />
-                    {pricing.hasDiscount ? (
-                      <span className="text-[11px] font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">
-                        -{pricing.percent}%
+                    {pct > 0 ? (
+                      <span className="absolute left-1 top-1 rounded-md bg-red-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white shadow sm:text-xs">
+                        -{pct}%
                       </span>
                     ) : null}
                   </div>
-                  <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    <span className="text-base font-bold text-[#ea580c]">
+                ) : pct > 0 ? (
+                  <span className="flex-shrink-0 rounded-lg bg-red-600 px-2.5 py-2 text-sm font-extrabold text-white shadow-sm">
+                    -{pct}%
+                  </span>
+                ) : null}
+                <div className="min-w-0 flex-1">
+                  <WarehouseVariantMeta variant={v} />
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {pricing.hasDiscount && pct > 0 && !thumb ? (
+                      <span className="rounded-lg bg-red-600 px-2.5 py-1.5 text-base font-extrabold text-white shadow-sm">
+                        -{pct}%
+                      </span>
+                    ) : null}
+                    <span className="text-xl font-extrabold text-[#ea580c] sm:text-2xl">
                       {formatPrice(pricing.displayPrice)}
                     </span>
                     {pricing.hasDiscount ? (
-                      <span className="text-xs text-gray-500 line-through">
+                      <span className="text-sm text-gray-500 line-through decoration-2 sm:text-base">
                         {formatPrice(pricing.originalPrice)}
                       </span>
                     ) : null}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                     {pricing.savingsAmount > 0 ? (
-                      <span className="text-[11px] font-semibold text-emerald-700">
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-800 ring-1 ring-emerald-200 sm:text-sm">
                         Tiết kiệm {formatPrice(pricing.savingsAmount)}
                       </span>
                     ) : null}
-                    <span className="text-[11px] text-gray-600">Còn {v.available}</span>
+                    <span
+                      className={`text-xs font-semibold sm:text-sm ${
+                        lowStock ? 'text-red-700' : 'text-gray-600'
+                      }`}
+                    >
+                      {lowStock ? `Chỉ còn ${v.available}` : `Còn ${v.available}`}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -174,35 +234,62 @@ export default function WarehouseClearanceBlock({
         })}
       </div>
 
+      {selected && selectedPricing ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-orange-200 bg-white/95 px-3 py-2.5 sm:px-4">
+          <p className="text-xs font-medium text-gray-600 sm:text-sm">Tổng thanh lý đã chọn</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedPct > 0 ? (
+              <span className="rounded-lg bg-red-600 px-2 py-1 text-sm font-extrabold text-white">
+                -{selectedPct}%
+              </span>
+            ) : null}
+            <span className="text-lg font-extrabold text-[#ea580c] sm:text-xl">
+              {formatPrice(selectedPricing.displayPrice * quantity)}
+            </span>
+            {selectedPricing.savingsAmount > 0 ? (
+              <span className="text-xs font-semibold text-emerald-700 sm:text-sm">
+                Tiết kiệm {formatPrice(selectedPricing.savingsAmount * quantity)}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <p className="text-center text-xs font-medium text-orange-900/80 sm:text-sm">
+          Chọn một dòng thanh lý ở trên để mua
+        </p>
+      )}
+
       <div className="flex items-center gap-3">
-        <span className="text-sm text-gray-700">Số lượng</span>
-        <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold text-gray-800">Số lượng</span>
+        <div className="flex items-center gap-2 rounded-lg border border-orange-200 bg-white p-0.5">
           <button
             type="button"
             disabled={!selected || quantity <= 1 || uiCartLoading}
             onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-            className="w-8 h-8 border border-gray-300 rounded bg-white text-sm disabled:opacity-50"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-base font-semibold hover:bg-orange-50 disabled:opacity-50"
+            aria-label="Giảm số lượng"
           >
             −
           </button>
-          <span className="w-8 text-center text-sm font-semibold">{quantity}</span>
+          <span className="min-w-[2rem] text-center text-base font-bold tabular-nums">{quantity}</span>
           <button
             type="button"
             disabled={!selected || quantity >= maxQty || uiCartLoading}
             onClick={() => setQuantity((q) => Math.min(maxQty, q + 1))}
-            className="w-8 h-8 border border-gray-300 rounded bg-white text-sm disabled:opacity-50"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-base font-semibold hover:bg-orange-50 disabled:opacity-50"
+            aria-label="Tăng số lượng"
           >
             +
           </button>
         </div>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <button
           type="button"
           disabled={!selected || uiCartLoading}
           onClick={handleAdd}
-          className="flex-1 rounded-lg bg-gray-600 text-white py-2.5 text-sm font-semibold hover:bg-gray-700 disabled:opacity-50"
+          className="flex-1 rounded-xl border-2 border-gray-600 bg-gray-700 py-3 text-sm font-bold text-white shadow-sm hover:bg-gray-800 disabled:opacity-50 sm:text-base"
         >
           {uiCartLoading ? 'Đang thêm…' : 'Thêm giỏ (thanh lý)'}
         </button>
@@ -210,7 +297,7 @@ export default function WarehouseClearanceBlock({
           type="button"
           disabled={!selected || uiCartLoading}
           onClick={handleBuy}
-          className="flex-1 rounded-lg bg-[#ea580c] text-white py-2.5 text-sm font-semibold hover:bg-[#c2410c] disabled:opacity-50"
+          className="flex-1 rounded-xl bg-gradient-to-r from-[#ea580c] to-orange-600 py-3 text-sm font-bold text-white shadow-md hover:from-[#c2410c] hover:to-orange-700 disabled:opacity-50 sm:text-base"
         >
           {uiCartLoading ? 'Đang xử lý…' : 'Mua ngay (thanh lý)'}
         </button>

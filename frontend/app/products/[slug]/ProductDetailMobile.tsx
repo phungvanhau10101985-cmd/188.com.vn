@@ -113,6 +113,7 @@ export default function ProductDetailMobile({
     birthdayDiscount.active,
     birthdayDiscount.percent,
   );
+  const isClearancePdp = product.is_warehouse_clearance === true;
   const displayPrice = pricing.displayPrice;
   const birthdaySavingsAmount = pricing.birthdaySavingsAmount;
   const loyaltyDiscountPercent = loyaltyStatus?.current_tier?.discount_percent || 0;
@@ -392,6 +393,8 @@ export default function ProductDetailMobile({
             countdownTo={pricing.countdownTo}
             birthdayActive={birthdayDiscount.active}
             birthdayPercent={birthdayDiscount.percent}
+            clearanceHighlight={isClearancePdp}
+            promoLabel={isClearancePdp ? 'Thanh lý kho' : null}
             size="sm"
           />
         </div>

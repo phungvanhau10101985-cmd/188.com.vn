@@ -18,6 +18,10 @@ export interface ProductPromoPriceBlockProps {
   quantity?: number;
   size?: 'sm' | 'md' | 'lg';
   showQuantityTotal?: boolean;
+  /** Nhãn badge % giảm (vd. «Thanh lý kho») — mặc định «Giảm giá». */
+  promoLabel?: string | null;
+  /** SP kho thanh lý — badge % nổi bật hơn. */
+  clearanceHighlight?: boolean;
   className?: string;
 }
 
@@ -35,6 +39,8 @@ export default function ProductPromoPriceBlock({
   quantity = 1,
   size = 'md',
   showQuantityTotal = false,
+  promoLabel = null,
+  clearanceHighlight = false,
   className = '',
 }: ProductPromoPriceBlockProps) {
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -79,6 +85,37 @@ export default function ProductPromoPriceBlock({
     unitSavings > 0;
   const showTeaserPromo = isTeaser && teaserSavings > 0;
 
+  const activeDiscountPercent = useMemo(() => {
+    if (showTeaserPromo && sitePercent > 0) return sitePercent;
+    if (
+      showActivePromo &&
+      compareUnitPrice != null &&
+      compareUnitPrice > displayPrice
+    ) {
+      return Math.max(
+        1,
+        Math.min(
+          100,
+          Math.round(((compareUnitPrice - displayPrice) / compareUnitPrice) * 100),
+        ),
+      );
+    }
+    return 0;
+  }, [
+    showTeaserPromo,
+    showActivePromo,
+    sitePercent,
+    compareUnitPrice,
+    displayPrice,
+  ]);
+
+  const showPercentBadge = activeDiscountPercent > 0 && (showActivePromo || showTeaserPromo);
+  const percentBadgeClass = clearanceHighlight
+    ? size === 'lg'
+      ? 'min-w-[4.5rem] rounded-xl bg-red-600 px-3.5 py-2 text-lg font-extrabold text-white shadow-md ring-2 ring-red-400/40'
+      : 'min-w-[3.5rem] rounded-lg bg-red-600 px-2.5 py-1.5 text-sm font-extrabold text-white shadow-md'
+    : 'rounded bg-red-500 px-1.5 py-0.5 text-xs font-bold text-white';
+
   const priceClass =
     size === 'lg' ? 'text-3xl' : size === 'sm' ? 'text-2xl' : 'text-2xl md:text-3xl';
   const compareClass =
@@ -117,6 +154,25 @@ export default function ProductPromoPriceBlock({
         </div>
       ) : null}
 
+      {showActivePromo &&
+      activeDiscountPercent > 0 &&
+      sitePhase !== 'active' &&
+      !birthdayActive ? (
+        <div
+          className={`inline-flex items-center gap-2 rounded-full font-bold text-white shadow-sm ${
+            clearanceHighlight
+              ? 'bg-gradient-to-r from-red-600 to-orange-600 px-4 py-1.5 text-sm'
+              : 'bg-red-600 px-3 py-1 text-xs'
+          }`}
+        >
+          <span aria-hidden>{clearanceHighlight ? '🏷️' : '🔥'}</span>
+          <span>
+            {promoLabel?.trim() || (clearanceHighlight ? 'Thanh lý kho' : 'Giảm giá')} —{' '}
+            <span className="tabular-nums">-{activeDiscountPercent}%</span>
+          </span>
+        </div>
+      ) : null}
+
       {countdownPrefix && countdownLive ? (
         <div
           className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold sm:text-sm ${
@@ -136,53 +192,71 @@ export default function ProductPromoPriceBlock({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        {showTeaserPromo ? (
-          <span className="w-full text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-            Giá gốc
+      <div
+        className={`flex flex-wrap items-center gap-x-3 gap-y-2 ${
+          clearanceHighlight && showActivePromo ? 'sm:items-center' : 'items-baseline'
+        }`}
+      >
+        {showPercentBadge && clearanceHighlight && showActivePromo ? (
+          <span
+            className={percentBadgeClass}
+            aria-label={`Giảm ${activeDiscountPercent} phần trăm`}
+          >
+            -{activeDiscountPercent}%
           </span>
         ) : null}
-        <span className={`${priceClass} font-extrabold text-[#ea580c]`}>
-          {formatPrice(displayPrice)}
-        </span>
 
-        {showTeaserPromo ? (
-          <>
-            <span
-              className={`inline-flex items-baseline gap-1 rounded-full border border-emerald-200 bg-emerald-50 font-semibold text-emerald-800 shadow-sm ${compareClass}`}
-            >
-              <span className="text-[10px] font-medium text-emerald-700">Giá sale dự kiến</span>
-              <span>{formatPrice(teaserExpected!)}</span>
+        <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1">
+          {showTeaserPromo ? (
+            <span className="w-full text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+              Giá gốc
             </span>
-            <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200 sm:text-xs">
-              Tiết kiệm dự kiến ~{formatPrice(teaserSavings)}
+          ) : null}
+          {showActivePromo && !showTeaserPromo ? (
+            <span className="w-full text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+              Giá thanh lý
             </span>
-            <span className="rounded bg-amber-500 px-1.5 py-0.5 text-xs font-bold text-white">
-              -{sitePercent}%
-            </span>
-          </>
-        ) : null}
+          ) : null}
+          <span className={`${priceClass} font-extrabold text-[#ea580c]`}>
+            {formatPrice(displayPrice)}
+          </span>
 
-        {showActivePromo ? (
-          <>
-            <span
-              className={`inline-flex items-baseline gap-1 rounded-full border border-gray-300 bg-white font-semibold text-gray-700 shadow-sm ${compareClass}`}
-            >
-              <span className="text-[10px] font-medium text-gray-500">Giá gốc</span>
-              <span className="text-gray-800 line-through decoration-1 decoration-gray-400">
-                {formatPrice(compareUnitPrice!)}
+          {showTeaserPromo ? (
+            <>
+              <span
+                className={`inline-flex items-baseline gap-1 rounded-full border border-emerald-200 bg-emerald-50 font-semibold text-emerald-800 shadow-sm ${compareClass}`}
+              >
+                <span className="text-[10px] font-medium text-emerald-700">Giá sale dự kiến</span>
+                <span>{formatPrice(teaserExpected!)}</span>
               </span>
-            </span>
-            <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200 sm:text-xs">
-              Tiết kiệm {formatPrice(unitSavings)}
-            </span>
-            {showActivePromo && sitePhase === 'active' && sitePercent > 0 ? (
-              <span className="rounded bg-red-500 px-1.5 py-0.5 text-xs font-bold text-white">
-                -{sitePercent}%
+              <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200 sm:text-xs">
+                Tiết kiệm dự kiến ~{formatPrice(teaserSavings)}
               </span>
-            ) : null}
-          </>
-        ) : null}
+              {!clearanceHighlight ? (
+                <span className={percentBadgeClass}>-{activeDiscountPercent}%</span>
+              ) : null}
+            </>
+          ) : null}
+
+          {showActivePromo ? (
+            <>
+              <span
+                className={`inline-flex items-baseline gap-1 rounded-full border border-gray-300 bg-white font-semibold text-gray-700 shadow-sm ${compareClass}`}
+              >
+                <span className="text-[10px] font-medium text-gray-500">Giá gốc</span>
+                <span className="text-gray-800 line-through decoration-1 decoration-gray-400">
+                  {formatPrice(compareUnitPrice!)}
+                </span>
+              </span>
+              <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200 sm:text-xs">
+                Tiết kiệm {formatPrice(unitSavings)}
+              </span>
+              {showPercentBadge && !(clearanceHighlight && showActivePromo) ? (
+                <span className={percentBadgeClass}>-{activeDiscountPercent}%</span>
+              ) : null}
+            </>
+          ) : null}
+        </div>
       </div>
 
       {showQuantityTotal ? (

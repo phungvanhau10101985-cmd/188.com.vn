@@ -98,6 +98,7 @@ export default function ProductInfo({
   );
   const displayPrice = pricing.displayPrice;
   const birthdaySavingsAmount = pricing.birthdaySavingsAmount;
+  const isClearancePdp = product.is_warehouse_clearance === true;
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -348,6 +349,8 @@ export default function ProductInfo({
           countdownTo={pricing.countdownTo}
           birthdayActive={birthdayDiscount.active}
           birthdayPercent={birthdayDiscount.percent}
+          clearanceHighlight={isClearancePdp}
+          promoLabel={isClearancePdp ? 'Thanh lý kho' : null}
           size="lg"
         />
       </div>

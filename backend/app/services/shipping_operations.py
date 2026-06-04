@@ -39,6 +39,13 @@ def _is_shop_return_received(*, order_status: str | None) -> bool:
     return (order_status or "").strip().lower() == OrderStatus.RETURNED.value
 
 
+def is_ems_record_shop_return_received(record: EmsShippingRecord) -> bool:
+    """Xác nhận hoàn shop — cờ thời gian ưu tiên hơn order_status (tránh mất sau import EMS)."""
+    if getattr(record, "shop_return_received_at", None) is not None:
+        return True
+    return _is_shop_return_received(order_status=record.order_status)
+
+
 def _is_ems_return_pending_shop(*, ems_status: str | None) -> bool:
     """EMS đã duyệt / báo hoàn — hàng chưa về shop (đơn shop chưa RETURNED)."""
     text = (ems_status or "").lower()
@@ -55,8 +62,13 @@ def _is_ems_return_pending_shop(*, ems_status: str | None) -> bool:
     return any(m in text for m in markers)
 
 
-def return_to_shop_label(*, order_status: str | None, ems_status: str | None) -> str | None:
-    if _is_shop_return_received(order_status=order_status):
+def return_to_shop_label(
+    *,
+    order_status: str | None,
+    ems_status: str | None,
+    shop_return_received_at: Any = None,
+) -> str | None:
+    if shop_return_received_at is not None or _is_shop_return_received(order_status=order_status):
         return RETURN_SHOP_RECEIVED_LABEL
     if _is_ems_return_pending_shop(ems_status=ems_status):
         return RETURN_PENDING_SHOP_LABEL
@@ -86,7 +98,7 @@ def _is_in_transit(*, ems_phase: str | None, ems_status: str | None) -> bool:
 
 
 def _delivery_bucket(record: EmsShippingRecord) -> DeliveryBucket:
-    if _is_shop_return_received(order_status=record.order_status):
+    if is_ems_record_shop_return_received(record):
         return "return_shop_received"
     if _is_ems_return_pending_shop(ems_status=record.ems_status):
         return "return_pending_shop"
@@ -796,8 +808,14 @@ def _ems_snapshot(record: EmsShippingRecord | None) -> dict[str, Any]:
 
 
 def _order_status_value(order: Order | None, *, record: EmsShippingRecord | None = None) -> str | None:
+    if record is not None and is_ems_record_shop_return_received(record):
+        return OrderStatus.RETURNED.value
     if order is not None:
         val = getattr(order.status, "value", order.status)
+        if _is_shop_return_received(order_status=val):
+            return OrderStatus.RETURNED.value
+        if record is not None and record.order_status:
+            return str(record.order_status).strip() or None
         return str(val).strip() if val else None
     if record is not None and record.order_status:
         return str(record.order_status).strip() or None
@@ -845,7 +863,7 @@ def _shop_already_received_return(*, order: Order | None, record: EmsShippingRec
         status_val = getattr(order.status, "value", order.status)
         if _is_shop_return_received(order_status=status_val):
             return True
-    if record is not None and _is_shop_return_received(order_status=record.order_status):
+    if record is not None and is_ems_record_shop_return_received(record):
         return True
     return False
 
@@ -862,6 +880,7 @@ def evaluate_shop_return_entry(
     row_number = int(entry.get("row_number") or 0)
     raw = str(entry.get("raw") or "").strip()
     code = (entry.get("order_code") or "").strip().upper() or None
+    resolve_error = str(entry.get("resolve_error") or "").strip() or None
 
     def _row(**kwargs: Any) -> dict[str, Any]:
         base: dict[str, Any] = {
@@ -885,6 +904,12 @@ def evaluate_shop_return_entry(
         return _row(
             status="not_ready",
             message="Mã trống — nhập mã EMS, mã tham chiếu hoặc mã đơn.",
+        )
+
+    if resolve_error and not code:
+        return _row(
+            status="not_found",
+            message=resolve_error,
         )
 
     record, order, display_code = _resolve_shop_return_context(db, raw=raw, code=code)
@@ -1009,7 +1034,7 @@ def order_has_ems_return_marker(db: Session, order_id: int) -> bool:
         return False
     return any(
         _is_ems_return_pending_shop(ems_status=r.ems_status)
-        or _is_shop_return_received(order_status=r.order_status)
+        or is_ems_record_shop_return_received(r)
         for r in records
     )
 
@@ -1032,11 +1057,13 @@ def apply_shop_return_received_on_ems_record(
     note: str | None = None,
 ) -> None:
     """Ghi nhận shop đã nhận hoàn trên vận đơn EMS; cập nhật đơn shop nếu có và hợp lệ."""
+    now = datetime.now()
     if record.order_id:
         order = db.query(Order).filter(Order.id == record.order_id).first()
         if order and validate_shop_return_confirm(order) is None:
             apply_shop_return_received_on_order(db, order, admin_id=admin_id, note=note)
             return
+    record.shop_return_received_at = now
     record.order_status = OrderStatus.RETURNED.value
     record.sync_message = RETURN_SHOP_RECEIVED_LABEL
 
@@ -1070,6 +1097,7 @@ def apply_shop_return_received_on_order(
         .all()
     )
     for record in ems_records:
+        record.shop_return_received_at = now
         record.order_status = OrderStatus.RETURNED.value
         record.sync_message = RETURN_SHOP_RECEIVED_LABEL
 

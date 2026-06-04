@@ -18,6 +18,7 @@ import ProductCardClearanceImageBadges from '@/components/ProductCardClearanceIm
 import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
 import {
+  canOrderAnyVariant,
   getClearanceCardHero,
   productShowsClearanceOnCard,
   warehouseStandaloneSaleImage,
@@ -171,6 +172,24 @@ function PersonalizedCohortImageBadge() {
   );
 }
 
+/** Hết cả tồn thường và kho thanh lý — overlay «Hết hàng» giữa ảnh thẻ. */
+function isFullyOutOfStock(product: Product): boolean {
+  return !canOrderAnyVariant(product);
+}
+
+function ProductImageOutOfStockOverlay() {
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 z-[4] flex items-center justify-center bg-black/40"
+      aria-hidden
+    >
+      <span className="rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-gray-900 shadow sm:text-sm">
+        Hết hàng
+      </span>
+    </div>
+  );
+}
+
 interface ProductCardProps {
   product: Product;
   onAddToCart?: (product: Product) => void;
@@ -233,7 +252,7 @@ export default function ProductCard({
   const [imageError, setImageError] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
   
-  const available = (product.available || 0) > 0;
+  const canOrder = canOrderAnyVariant(product);
   const { pricing, displayPrice, birthdayDiscount } = useProductCardPricing(product);
   const clearanceHero = useMemo(() => getClearanceCardHero(product), [product]);
   const showsClearance = productShowsClearanceOnCard(product);
@@ -372,14 +391,7 @@ export default function ProductCard({
           </button>
         </div>
 
-        {/* Out of Stock Overlay */}
-        {!available && (
-          <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
-            <span className="bg-white px-2 py-1 rounded text-xs font-medium text-gray-900">
-              Hết hàng
-            </span>
-          </div>
-        )}
+        {isFullyOutOfStock(product) ? <ProductImageOutOfStockOverlay /> : null}
       </div>
 
       {/* Product Info */}
@@ -460,27 +472,23 @@ export default function ProductCard({
         {/* Stats */}
         <div className="flex justify-between items-center text-xs text-gray-500">
           <span>Đã bán: {product.purchases || 0}</span>
-          <span
-            className={`font-medium ${
-              available || productShowsClearanceOnCard(product) ? 'text-green-600' : 'text-red-600'
-            }`}
-          >
-            {available || productShowsClearanceOnCard(product) ? 'Còn hàng' : 'Hết hàng'}
+          <span className={`font-medium ${canOrder ? 'text-green-600' : 'text-red-600'}`}>
+            {canOrder ? 'Còn hàng' : 'Hết hàng'}
           </span>
         </div>
 
         {/* Add to Cart Button - nút phụ màu xám (theme 188) */}
         <button 
           onClick={handleAddToCart}
-          disabled={!available}
+          disabled={!canOrder}
           className={`w-full rounded font-medium transition-all flex items-center justify-center space-x-1 ${
-            available 
+            canOrder
               ? 'bg-gray-500 hover:bg-gray-600 text-white shadow-sm hover:shadow-md' 
               : 'bg-gray-300 text-gray-500 cursor-not-allowed'
           } ${sizeClasses.button}`}
         >
           <span>🛒</span>
-          <span>{available ? 'Thêm vào giỏ' : 'Hết hàng'}</span>
+          <span>{canOrder ? 'Thêm vào giỏ' : 'Hết hàng'}</span>
         </button>
       </div>
     </div>
@@ -508,6 +516,7 @@ export const SimpleProductCard = ({
   const { pricing, displayPrice, birthdayDiscount } = useProductCardPricing(product);
   const clearanceHero = useMemo(() => getClearanceCardHero(product), [product]);
   const showsClearance = productShowsClearanceOnCard(product);
+  const fullyOutOfStock = isFullyOutOfStock(product);
   const cardImageSource =
     clearanceHero?.imageUrl || warehouseStandaloneSaleImage(product) || product.main_image;
 
@@ -597,6 +606,8 @@ export const SimpleProductCard = ({
         </button>
 
         {!imageError && <ProductVideoBadge videoLink={product.video_link} />}
+
+        {fullyOutOfStock ? <ProductImageOutOfStockOverlay /> : null}
       </div>
 
       {/* Product Info */}

@@ -34,6 +34,8 @@ class EmsShippingRecord(Base):
     order_id = Column(Integer, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True)
     excel_row_number = Column(Integer, nullable=True)
     order_status = Column(String(40), nullable=True)
+    """Shop xác nhận đã nhận hàng hoàn — không bị EMS import/tra cứu ghi đè."""
+    shop_return_received_at = Column(DateTime(timezone=True), nullable=True, index=True)
     current_step_key = Column(String(40), nullable=True)
     tracking_number_saved = Column(String(100), nullable=True)
     ems_tracking_code = Column(String(50), nullable=True, index=True)

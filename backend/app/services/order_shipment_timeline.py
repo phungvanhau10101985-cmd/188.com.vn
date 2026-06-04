@@ -633,6 +633,8 @@ def apply_ems_import_shipping_sync(
     st = _order_status_value(order)
     if st in (OrderStatus.CANCELLED.value, OrderStatus.PENDING.value, OrderStatus.WAITING_DEPOSIT.value):
         return False, "Đơn chưa sẵn sàng đồng bộ EMS."
+    if st == OrderStatus.RETURNED.value:
+        return False, "Shop đã xác nhận nhận hàng hoàn — bỏ qua đồng bộ EMS."
     if ems_phase not in EMS_IMPORT_SYNC_PHASES:
         return False, "EMS chưa có trạng thái vận chuyển để đồng bộ."
     if st in (OrderStatus.DELIVERED.value, OrderStatus.COMPLETED.value):

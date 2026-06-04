@@ -1188,8 +1188,11 @@ def admin_return_warehouse_intake(
             quantity=body.quantity,
             color_index=body.color_index,
             color_image=body.color_image,
+            color_label=body.color_label,
             warehouse_product_id=body.warehouse_product_id,
             admin_id=current_admin.id,
+            chinese_name=body.chinese_name,
+            price=body.price,
         )
         pid = result["product_id"]
         msg = (
@@ -1202,11 +1205,43 @@ def admin_return_warehouse_intake(
             ok=True,
             action=result["action"],
             product_id=pid,
+            slug=result.get("slug"),
             available_before=result["available_before"],
             available_after=result["available_after"],
             quantity_added=result["quantity_added"],
             message=msg,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/admin/shipping/return-warehouse-publish-parent",
+    response_model=shipment_schemas.ReturnWarehousePublishParentResponse,
+)
+def admin_return_warehouse_publish_parent(
+    body: shipment_schemas.ReturnWarehousePublishParentRequest,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    """Đăng SP gốc từ mã nguồn A/T (legacy — luồng nhập kho mặc định tạo SP sale độc lập)."""
+    from app.services import return_warehouse_intake as rw_intake_svc
+
+    try:
+        result = rw_intake_svc.publish_listing_parent_for_return_intake(
+            db,
+            base_sku=body.base_sku,
+            chinese_name=body.chinese_name,
+            price=body.price,
+            size=body.size,
+            color_image=body.color_image,
+            color_name=body.color_name,
+            admin_id=current_admin.id,
+        )
+        return shipment_schemas.ReturnWarehousePublishParentResponse(**result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

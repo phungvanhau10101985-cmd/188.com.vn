@@ -3648,16 +3648,35 @@ export const adminShippingAPI = {
     sku: string;
     warehouse_product_id?: string | null;
     color?: string | null;
+    color_label?: string | null;
     color_index?: number | null;
     color_image?: string | null;
     size?: string;
     quantity: number;
     note?: string;
+    chinese_name?: string | null;
+    price?: number | null;
   }) =>
     fetchAdmin<ReturnWarehouseIntakeResult>('/orders/admin/shipping/return-warehouse-intake', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  publishReturnWarehouseParent: (payload: {
+    base_sku: string;
+    chinese_name: string;
+    price: number;
+    size: string;
+    color_image?: string | null;
+    color_name?: string;
+  }) =>
+    fetchAdmin<ReturnWarehousePublishParentResult>(
+      '/orders/admin/shipping/return-warehouse-publish-parent',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    ),
 
   downloadShopReturnConfirmSample: () =>
     downloadAdminGetXlsx(
@@ -3714,12 +3733,27 @@ export type ReturnWarehouseLookupResult = {
   base_sku: string;
   input: string;
   has_parent: boolean;
+  needs_parent_publish?: boolean;
+  listing_source?: {
+    platform: string;
+    listing_prefix: string;
+    offer_id: string;
+    link_default: string;
+    origin: string;
+  } | null;
   parent?: {
     id: number;
     product_id: string;
     name: string;
     price: number;
     slug?: string | null;
+    chinese_name?: string | null;
+    category?: string | null;
+    subcategory?: string | null;
+    sub_subcategory?: string | null;
+    link_default?: string | null;
+    main_image?: string | null;
+    listing_prefix_matched?: boolean;
   } | null;
   colors: ReturnWarehouseColorOption[];
   sizes: string[];
@@ -3728,12 +3762,27 @@ export type ReturnWarehouseLookupResult = {
   warehouse_product_id?: string | null;
   parsed_size?: string | null;
   parsed_color_key?: string | null;
+  parsed_color_image_index?: number | null;
+};
+
+export type ReturnWarehousePublishParentResult = {
+  ok: boolean;
+  product_id: string;
+  name: string;
+  slug?: string | null;
+  category?: string | null;
+  subcategory?: string | null;
+  sub_subcategory?: string | null;
+  link_default?: string | null;
+  warnings?: string[];
+  message: string;
 };
 
 export type ReturnWarehouseIntakeResult = {
   ok: boolean;
   action: 'created' | 'updated' | string;
   product_id: string;
+  slug?: string | null;
   available_before: number;
   available_after: number;
   quantity_added: number;

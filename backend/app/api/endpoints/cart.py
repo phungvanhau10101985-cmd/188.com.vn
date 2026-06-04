@@ -24,9 +24,13 @@ def _is_warehouse_cart_line(item: CartItem) -> bool:
     return is_warehouse_cart_product(item.product, pd)
 
 
-def _cart_line_list_price(item: CartItem, *, is_wh: bool = False) -> float:
-    """Giá gốc catalog (list) — dòng kho luôn lấy từ Product.price trong DB."""
+def _cart_line_list_price(item: CartItem, *, is_wh: bool = False, db: Optional[Session] = None) -> float:
+    """Giá gốc catalog (list) — dòng kho: ưu tiên giá SP gốc trên shop."""
     pd = item.product_data if isinstance(item.product_data, dict) else {}
+    if is_wh and item.product is not None and db is not None:
+        from app.services.warehouse_clearance import resolve_warehouse_list_price
+
+        return resolve_warehouse_list_price(db, item.product)
     if is_wh and item.product is not None:
         return float(item.product.price or 0)
     if pd.get("list_price") is not None:
@@ -61,7 +65,7 @@ def _cart_items_with_site_sale_pricing(
     for item in items:
         resp = _cart_item_to_response(item)
         is_wh = _is_warehouse_cart_line(item)
-        base = _cart_line_list_price(item, is_wh=is_wh)
+        base = _cart_line_list_price(item, is_wh=is_wh, db=db)
         sellable: Optional[int] = None
         if is_wh:
             from app.services.warehouse_stock import warehouse_sellable_qty
@@ -166,7 +170,7 @@ def get_user_cart(
         db, current_user, items
     )
     list_total = sum(
-        _cart_line_list_price(item) * int(item.quantity or 0) for item in items
+        _cart_line_list_price(item, db=db) * int(item.quantity or 0) for item in items
     )
     summary = cart_crud.get_cart_summary(db, user_id=current_user.id)
     birthday_discount = get_birthday_discount_for_user(db, current_user)
@@ -288,7 +292,7 @@ def migrate_guest_cart(
             db, current_user, items
         )
         list_total = sum(
-            _cart_line_list_price(item) * int(item.quantity or 0) for item in items
+            _cart_line_list_price(item, db=db) * int(item.quantity or 0) for item in items
         )
         summary = cart_crud.get_cart_summary(db, user_id=current_user.id)
 

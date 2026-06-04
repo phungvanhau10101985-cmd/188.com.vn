@@ -96,6 +96,12 @@ _SIZE_LIKE_RE = re.compile(
     r"^(xxs|xs|s|m|l|xl|xxl|xxxl|2xl|3xl|4xl|5xl|\d{1,2}(?:\.\d)?|\d{2,3})$",
     re.IGNORECASE,
 )
+_LISTING_SOURCE_BASE_RE = re.compile(r"^([AT])(\d{6,})$", re.IGNORECASE)
+
+
+def is_listing_source_base_sku(base_sku: Optional[str]) -> bool:
+    """Mã gốc nguồn 1688/Tmall: A932203996836 / T932203996836."""
+    return bool(_LISTING_SOURCE_BASE_RE.match(str(base_sku or "").strip()))
 
 
 def warehouse_safe_slug_token(product_id: Optional[str]) -> str:
@@ -106,23 +112,67 @@ def warehouse_safe_slug_token(product_id: Optional[str]) -> str:
     return re.sub(r"-+", "-", re.sub(r"[/\\]+", "-", raw)).strip("-")
 
 
-def parse_warehouse_product_id(product_id: Optional[str]) -> Optional[Dict[str, Any]]:
+def _parse_listing_source_product_segments(parts: List[str]) -> Dict[str, Any]:
     """
-    HN256/XL → base HN256, size XL
-    HN256/XL/2 → base HN256, size XL, unit 2
-    HN256/Đen/XL → base HN256, color Đen, size XL
+    Mã nguồn 1688/Tmall (A/T + id):
+    - A757876600366/4 → ô ảnh màu #4 (không phải size)
+    - A757876600366/45/4 → size 45, ô ảnh màu #4
+    - A652267320844/XL/3 → size XL, unit 3 (kho thanh lý)
+    - A941905898454/40/1 → size 40, unit 1
     """
-    raw = str(product_id or "").strip()
-    if "/" not in raw:
-        return None
-    parts = [p.strip() for p in raw.split("/") if p.strip()]
-    if len(parts) < 2:
-        return None
     base_sku = parts[0]
-    if not base_sku:
-        return None
+    out: Dict[str, Any] = {
+        "base_sku": base_sku,
+        "warehouse_color": None,
+        "warehouse_size": None,
+        "warehouse_unit": None,
+        "listing_color_image_index": None,
+    }
+    if len(parts) == 2:
+        seg = parts[1]
+        if seg.isdigit():
+            out["listing_color_image_index"] = int(seg)
+        else:
+            out["warehouse_color"] = seg
+        return out
 
-    out: Dict[str, Any] = {"base_sku": base_sku, "warehouse_color": None, "warehouse_size": None}
+    if len(parts) == 3:
+        mid, tail = parts[1], parts[2]
+        if _SIZE_LIKE_RE.match(mid) and mid.isalpha():
+            out["warehouse_size"] = mid.upper()
+            if tail.isdigit():
+                out["warehouse_unit"] = tail
+            return out
+        if _SIZE_LIKE_RE.match(mid) and tail.isdigit():
+            out["warehouse_size"] = mid.upper() if mid.isalpha() else mid
+            if int(tail) == 1:
+                out["warehouse_unit"] = tail
+            else:
+                out["listing_color_image_index"] = int(tail)
+            return out
+        if _SIZE_LIKE_RE.match(tail):
+            out["warehouse_color"] = mid
+            out["warehouse_size"] = tail.upper() if tail.isalpha() else tail
+            return out
+        out["warehouse_color"] = mid
+        out["warehouse_size"] = tail
+        return out
+
+    out["warehouse_color"] = parts[1]
+    out["warehouse_size"] = parts[-1]
+    return out
+
+
+def _parse_legacy_warehouse_product_segments(parts: List[str]) -> Dict[str, Any]:
+    """HN256/XL, HN256/XL/2, HN256/Đen/XL — không áp dụng quy tắc ô ảnh màu 1688."""
+    base_sku = parts[0]
+    out: Dict[str, Any] = {
+        "base_sku": base_sku,
+        "warehouse_color": None,
+        "warehouse_size": None,
+        "warehouse_unit": None,
+        "listing_color_image_index": None,
+    }
     if len(parts) == 2:
         seg = parts[1]
         if _SIZE_LIKE_RE.match(seg):
@@ -143,6 +193,28 @@ def parse_warehouse_product_id(product_id: Optional[str]) -> Optional[Dict[str, 
     out["warehouse_color"] = mid
     out["warehouse_size"] = tail
     return out
+
+
+def parse_warehouse_product_id(product_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """
+    HN256/XL → base HN256, size XL
+    HN256/XL/2 → base HN256, size XL, unit 2
+    HN256/Đen/XL → base HN256, color Đen, size XL
+    A757876600366/4 → ô ảnh màu 1688 #4 (không phải size 4)
+    """
+    raw = str(product_id or "").strip()
+    if "/" not in raw:
+        return None
+    parts = [p.strip() for p in raw.split("/") if p.strip()]
+    if len(parts) < 2:
+        return None
+    base_sku = parts[0]
+    if not base_sku:
+        return None
+
+    if is_listing_source_base_sku(base_sku):
+        return _parse_listing_source_product_segments(parts)
+    return _parse_legacy_warehouse_product_segments(parts)
 
 
 def apply_catalog_visibility_filter(
@@ -281,8 +353,69 @@ def _resolve_base_sku_for_parent(product: Product) -> Optional[str]:
         return code
     pid = (product.product_id or "").strip()
     if pid and "/" not in pid:
+        try:
+            from app.crud.product import _listing_source_prefix_from_product_id
+
+            src = _listing_source_prefix_from_product_id(pid)
+            if src and src.get("prefix"):
+                return str(src["prefix"]).strip()
+        except Exception:
+            pass
         return pid
     return None
+
+
+def _warehouse_row_base_sku(wh: Product) -> str:
+    base = (getattr(wh, "base_sku", None) or "").strip()
+    if base:
+        return base
+    parsed = parse_warehouse_product_id(getattr(wh, "product_id", None))
+    if parsed:
+        return str(parsed.get("base_sku") or "").strip()
+    return (getattr(wh, "code", None) or "").strip()
+
+
+def find_parent_for_warehouse_row(db: Session, wh: Product) -> Optional[Product]:
+    """SP gốc (không phải dòng kho) — dùng đồng bộ giá list thanh lý."""
+    base = _warehouse_row_base_sku(wh)
+    if base:
+        parent = find_parent_product_by_base_sku(db, base)
+        if parent is not None:
+            return parent
+        try:
+            from app.services.return_warehouse_intake import find_listing_parent_product
+
+            listing_parent = find_listing_parent_product(db, base)
+            if listing_parent is not None:
+                return listing_parent
+        except Exception:
+            pass
+    pi = getattr(wh, "product_info", None)
+    if isinstance(pi, dict):
+        pid = str(pi.get("parent_product_id") or "").strip()
+        if pid:
+            row = db.query(Product).filter(Product.product_id == pid).first()
+            if row is not None and not getattr(row, "is_warehouse_clearance", False):
+                return row
+    return None
+
+
+def resolve_warehouse_list_price(db: Session, wh: Product) -> float:
+    """
+    Giá gốc (list) để tính % thanh lý kho — ưu tiên SP gốc trên shop, không dùng giá cũ trên dòng kho.
+    """
+    parent = find_parent_for_warehouse_row(db, wh)
+    if parent is not None and parent.price is not None:
+        try:
+            p = float(parent.price)
+            if p > 0:
+                return p
+        except (TypeError, ValueError):
+            pass
+    try:
+        return max(0.0, float(wh.price or 0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def get_warehouse_clearance_settings(db: Session) -> Tuple[bool, float]:
@@ -310,16 +443,17 @@ def resolve_checkout_line_prices(
 ) -> Tuple[float, float]:
     """
     (unit_price, list_price) cho checkout/đặt hàng — đồng bộ với giỏ hàng.
-    Dòng kho thanh lý: áp % giảm admin trên Product.price (giá gốc).
+    Dòng kho thanh lý: áp % giảm admin trên giá list SP gốc (resolve_warehouse_list_price).
     Hàng thường: site sale active (effective_unit_price).
     """
     from app.services.sale_calendar import effective_unit_price
 
-    list_price = float(product.price or 0)
     if is_warehouse_cart_product(product):
+        list_price = resolve_warehouse_list_price(db, product)
         _enabled, pct = get_warehouse_clearance_settings(db)
         pricing = apply_clearance_pricing(list_price, percent=pct)
         return float(pricing["display_price"]), float(pricing["list_price"])
+    list_price = float(product.price or 0)
     unit = float(effective_unit_price(db, list_price, user=user))
     return unit, list_price
 
@@ -354,7 +488,7 @@ def warehouse_variant_payload(db: Session, wh: Product) -> Dict[str, Any]:
     from app.services.warehouse_stock import warehouse_sellable_qty
 
     enabled, pct = get_warehouse_clearance_settings(db)
-    base_price = float(wh.price or 0)
+    base_price = resolve_warehouse_list_price(db, wh)
     pricing = apply_clearance_pricing(base_price, percent=pct)
     sellable = warehouse_sellable_qty(wh)
     wh_color = (wh.color or "").strip()
@@ -878,6 +1012,14 @@ def backfill_warehouse_row_from_parent(
         if row.product_id and (row.code or "") != row.product_id:
             row.code = row.product_id
             changed = True
+        if parent.price is not None:
+            try:
+                parent_price = float(parent.price)
+                if parent_price > 0 and float(row.price or 0) != parent_price:
+                    row.price = parent_price
+                    changed = True
+            except (TypeError, ValueError):
+                pass
     return changed
 
 
@@ -972,7 +1114,9 @@ def merge_clone_from_parent(parent: Product, product_data: Dict[str, Any], parse
 def enrich_standalone_warehouse_product(db: Session, payload: Dict[str, Any], product: Product) -> None:
     """PDP trực tiếp dòng kho khi chưa có SP gốc cùng base_sku."""
     enabled, pct = get_warehouse_clearance_settings(db)
-    base = float(getattr(product, "price", None) or payload.get("price") or 0)
+    base = resolve_warehouse_list_price(db, product)
+    if base <= 0:
+        base = float(getattr(product, "price", None) or payload.get("price") or 0)
     pricing = apply_clearance_pricing(base, percent=pct)
     payload["price"] = pricing["display_price"]
     payload["original_price"] = pricing["original_price"] if pricing["savings_amount"] > 0 else None

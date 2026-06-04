@@ -525,6 +525,21 @@ class ReturnWarehouseParentSummary(BaseModel):
     name: str
     price: float = 0
     slug: Optional[str] = None
+    chinese_name: Optional[str] = None
+    category: Optional[str] = None
+    subcategory: Optional[str] = None
+    sub_subcategory: Optional[str] = None
+    link_default: Optional[str] = None
+    main_image: Optional[str] = None
+    listing_prefix_matched: bool = False
+
+
+class ReturnWarehouseListingSource(BaseModel):
+    platform: str
+    listing_prefix: str
+    offer_id: str
+    link_default: str
+    origin: str
 
 
 class ResolveReturnWarehouseSkuResponse(BaseModel):
@@ -542,6 +557,11 @@ class ReturnWarehouseLookupResponse(BaseModel):
     base_sku: str
     input: str = ""
     has_parent: bool = False
+    needs_parent_publish: bool = Field(
+        False,
+        description="Chưa có dòng kho A/T — cần tên Trung + giá để tạo SP sale kho độc lập (không đăng SP gốc)",
+    )
+    listing_source: Optional[ReturnWarehouseListingSource] = None
     parent: Optional[ReturnWarehouseParentSummary] = None
     colors: List[ReturnWarehouseColorOption] = []
     sizes: List[str] = []
@@ -557,6 +577,10 @@ class ReturnWarehouseLookupResponse(BaseModel):
     )
     parsed_size: Optional[str] = None
     parsed_color_key: Optional[str] = None
+    parsed_color_image_index: Optional[int] = Field(
+        None,
+        description="Ô ảnh màu trên 1688 (vd. A757876600366/4 → 4; A757876600366/45/4 → 4)",
+    )
 
 
 class ReturnWarehouseIntakeRequest(BaseModel):
@@ -566,18 +590,54 @@ class ReturnWarehouseIntakeRequest(BaseModel):
         description="Mã kho đầy đủ (cột A import) — ưu tiên hơn ghép từ màu/size UI",
     )
     color: Optional[str] = Field(None, description="Màu đã chọn (key hoặc tên)")
+    color_label: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Tên màu hiển thị (có thể sửa — dùng khi đăng SP / nhập kho)",
+    )
     color_index: Optional[int] = Field(None, ge=0, description="Chỉ số ô màu trên SP gốc (0-based)")
     color_image: Optional[str] = Field(None, description="URL ảnh màu đã chọn (từ tra cứu)")
     size: str = Field("", description="Size UI (chỉ bắt buộc khi không gửi warehouse_product_id)")
     quantity: int = Field(1, ge=1, le=500)
     note: Optional[str] = Field(None, max_length=500)
+    chinese_name: Optional[str] = Field(
+        None,
+        max_length=500,
+        description="Tên tiếng Trung — bắt buộc khi tạo SP sale kho độc lập từ mã A/T",
+    )
+    price: Optional[float] = Field(
+        None, gt=0, description="Giá list VNĐ — khi tạo SP sale kho độc lập từ mã A/T"
+    )
 
 
 class ReturnWarehouseIntakeResponse(BaseModel):
     ok: bool = True
     action: str
     product_id: str
+    slug: Optional[str] = Field(None, description="Slug PDP — mở trang sản phẩm kho")
     available_before: int = 0
     available_after: int = 0
     quantity_added: int = 0
+    message: str = ""
+
+
+class ReturnWarehousePublishParentRequest(BaseModel):
+    base_sku: str = Field(..., description="Mã gốc A<id> hoặc T<id>, vd. A932203996836")
+    chinese_name: str = Field(..., min_length=1, max_length=500, description="Tên tiếng Trung")
+    price: float = Field(..., gt=0, description="Giá list (VNĐ)")
+    size: str = Field(..., min_length=1, max_length=40, description="Size variant")
+    color_image: Optional[str] = Field(None, max_length=2000, description="URL ảnh màu")
+    color_name: str = Field("Như ảnh", max_length=100, description="Tên màu hiển thị")
+
+
+class ReturnWarehousePublishParentResponse(BaseModel):
+    ok: bool = True
+    product_id: str
+    name: str
+    slug: Optional[str] = None
+    category: Optional[str] = None
+    subcategory: Optional[str] = None
+    sub_subcategory: Optional[str] = None
+    link_default: Optional[str] = None
+    warnings: List[str] = []
     message: str = ""

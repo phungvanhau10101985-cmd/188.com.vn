@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import re
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 from openpyxl import load_workbook
@@ -1010,6 +1010,7 @@ def _record_to_dict(record: EmsShippingRecord) -> dict[str, Any]:
             "freight_settlement_message": record.freight_settlement_message,
             "freight_high_fee_warning": record.freight_high_fee_warning,
             "return_to_shop_label": None,
+            "shop_return_received_at": _isoformat_value(record.shop_return_received_at),
             "order_synced": False,
             "order_sync_message": "",
         }
@@ -1054,7 +1055,16 @@ def _upsert_record(
     record.order_code = result.get("order_code")
     record.order_id = result.get("order_id")
     record.excel_row_number = result.get("row_number")
-    record.order_status = result.get("order_status")
+    # Giữ xác nhận hoàn shop — cron/import EMS không được ghi đè về None/shipping.
+    shop_confirmed = getattr(record, "shop_return_received_at", None) is not None or (
+        (record.order_status or "").strip().lower() == OrderStatus.RETURNED.value
+    )
+    if shop_confirmed:
+        record.order_status = OrderStatus.RETURNED.value
+        if getattr(record, "shop_return_received_at", None) is None:
+            record.shop_return_received_at = record.updated_at or datetime.now(timezone.utc)
+    elif result.get("order_status") is not None:
+        record.order_status = result.get("order_status")
     record.current_step_key = result.get("current_step_key")
     record.tracking_number_saved = result.get("tracking_number_saved")
 
@@ -1077,7 +1087,7 @@ def _upsert_record(
         record.ems_error = result.get("ems_error")
         if result.get("sync_status"):
             record.sync_status = result.get("sync_status") or "pending"
-        if result.get("sync_message") is not None:
+        if not shop_confirmed and result.get("sync_message") is not None:
             record.sync_message = result.get("sync_message")
     elif not (record.sync_status or "").strip():
         record.sync_status = result.get("sync_status") or "pending"
@@ -1112,6 +1122,7 @@ def _apply_return_to_shop_fields(row: dict[str, Any]) -> dict[str, Any]:
     label = return_to_shop_label(
         order_status=row.get("order_status"),
         ems_status=row.get("ems_status"),
+        shop_return_received_at=row.get("shop_return_received_at"),
     )
     row["return_to_shop_label"] = label
     if label == RETURN_PENDING_SHOP_LABEL:
@@ -1131,6 +1142,7 @@ def _apply_return_to_shop_on_record(record: EmsShippingRecord) -> None:
     label = return_to_shop_label(
         order_status=record.order_status,
         ems_status=record.ems_status,
+        shop_return_received_at=getattr(record, "shop_return_received_at", None),
     )
     if label == RETURN_PENDING_SHOP_LABEL:
         record.sync_message = RETURN_PENDING_SHOP_LABEL
@@ -1140,6 +1152,12 @@ def _apply_return_to_shop_on_record(record: EmsShippingRecord) -> None:
 
 def _enrich_row_from_live_order(db: Session, row: dict[str, Any]) -> dict[str, Any]:
     """Cập nhật trạng thái đơn shop mới nhất khi hiển thị bảng (không cần import lại)."""
+    if row.get("shop_return_received_at") or (
+        (row.get("order_status") or "").strip().lower() == OrderStatus.RETURNED.value
+    ):
+        row["order_status"] = OrderStatus.RETURNED.value
+        return _apply_return_to_shop_fields(row)
+
     order_code = (row.get("order_code") or "").strip().upper()
     if not _is_shop_order_code(order_code):
         return _apply_return_to_shop_fields(row)
@@ -1147,7 +1165,11 @@ def _enrich_row_from_live_order(db: Session, row: dict[str, Any]) -> dict[str, A
     if not order:
         return _apply_return_to_shop_fields(row)
     row["order_id"] = order.id
-    row["order_status"] = getattr(order.status, "value", order.status)
+    st = getattr(order.status, "value", order.status)
+    if (st or "").strip().lower() == OrderStatus.RETURNED.value:
+        row["order_status"] = OrderStatus.RETURNED.value
+        return _apply_return_to_shop_fields(row)
+    row["order_status"] = st
     row["tracking_number_saved"] = order.tracking_number
     step_key, _ = _order_timeline_summary(db, order)
     row["current_step_key"] = step_key

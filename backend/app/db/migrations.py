@@ -4,6 +4,7 @@ Professional migration system for database schema updates - PostgreSQL / SQLite
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import List, Dict, Any
 from sqlalchemy import inspect, text
 from app.db.base import Base
@@ -398,6 +399,38 @@ class MigrationManager:
         """Thêm mọi cột thiếu của bảng order_items theo model OrderItem."""
         return self._sync_table_columns("order_items", OrderItem)
 
+    def migrate_ems_shop_return_received_backfill(self) -> bool:
+        """Gắn cờ xác nhận hoàn shop cho bản ghi EMS đã có order_status=returned."""
+        try:
+            from app.db.session import SessionLocal
+
+            db = SessionLocal()
+            try:
+                rows = (
+                    db.query(EmsShippingRecord)
+                    .filter(
+                        EmsShippingRecord.shop_return_received_at.is_(None),
+                        EmsShippingRecord.order_status == OrderStatus.RETURNED.value,
+                    )
+                    .all()
+                )
+                if not rows:
+                    return True
+                now = datetime.now(timezone.utc)
+                for row in rows:
+                    row.shop_return_received_at = row.updated_at or row.created_at or now
+                db.commit()
+                logger.info(
+                    "✅ ems_shipping_records shop_return_received_at backfill (%s rows)",
+                    len(rows),
+                )
+            finally:
+                db.close()
+            return True
+        except Exception as e:
+            logger.warning("migrate_ems_shop_return_received_backfill: %s", e)
+            return False
+
     def migrate_orders_enum_values(self) -> bool:
         """Chuẩn hóa enum trong DB: tên enum (PERCENT_30) -> value (percent_30), legacy (unpaid) -> valid value."""
         name_to_value = {
@@ -766,6 +799,7 @@ class MigrationManager:
         results['ems_shipping_records_sync'] = self._sync_table_columns(
             "ems_shipping_records", EmsShippingRecord
         )
+        results['ems_shop_return_received_backfill'] = self.migrate_ems_shop_return_received_backfill()
         results['ems_shipping_import_batches_create'] = self._create_table_if_not_exists(
             "ems_shipping_import_batches", EmsShippingImportBatch
         )

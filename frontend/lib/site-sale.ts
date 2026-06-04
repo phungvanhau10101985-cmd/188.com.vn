@@ -272,6 +272,45 @@ export function resolveProductDisplayPricing(
   const isWhLine =
     product.is_warehouse_clearance === true ||
     String(product.product_id || '').includes('/');
+  const whListFromDb =
+    product.original_price != null && product.original_price > (product.price ?? 0)
+      ? product.original_price
+      : null;
+  if (isWhLine && whListFromDb != null) {
+    const beforeBirthday = Math.max(0, Number(product.price ?? 0));
+    const displayPrice = birthdayActive
+      ? applyBirthdayDiscount(beforeBirthday, birthdayPercent)
+      : beforeBirthday;
+    const compareUnitPrice = whListFromDb;
+    const savingsAmount = Math.max(0, compareUnitPrice - displayPrice);
+    const discountPercent =
+      compareUnitPrice > 0
+        ? Math.max(
+            0,
+            Math.min(100, Math.round((savingsAmount / compareUnitPrice) * 100)),
+          )
+        : 0;
+    const birthdaySavingsAmount = birthdayActive
+      ? Math.max(0, beforeBirthday - displayPrice)
+      : 0;
+    return {
+      displayPrice,
+      compareAt: compareUnitPrice,
+      compareUnitPrice,
+      savingsAmount,
+      birthdaySavingsAmount,
+      listPrice: compareUnitPrice,
+      sitePhase: null,
+      siteSavings: 0,
+      expectedSalePrice: null,
+      sitePercent: discountPercent,
+      siteLabel: null,
+      countdownTo: null,
+      beforeBirthday,
+      discountPercent,
+      isWarehouseClearance: true,
+    };
+  }
   if (isWhLine && whPct > 0) {
     const listPrice = Math.max(
       0,
