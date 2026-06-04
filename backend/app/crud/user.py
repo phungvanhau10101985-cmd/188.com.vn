@@ -8,7 +8,7 @@ AttributeError: module 'app.crud.user' has no attribute 'get_user'
 import random
 from collections import defaultdict
 from sqlalchemy.orm import Session
-from sqlalchemy import extract, func
+from sqlalchemy import extract, func, or_
 from datetime import datetime, date
 from typing import List, Optional, Dict, Any, Tuple
 from app.models.user import (

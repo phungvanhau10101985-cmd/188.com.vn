@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import GoogleLoginButton from './GoogleLoginButton';
+import GoogleOAuthOriginHint from './GoogleOAuthOriginHint';
 import EmailOtpPanel from './EmailOtpPanel';
 import { getOrCreateDeviceId } from '@/lib/auth-device-id';
 import {
@@ -69,6 +70,7 @@ export default function LoginForm() {
             onCredential={handleGoogleCredential}
             onError={(msg) => setError(msg)}
           />
+          <GoogleOAuthOriginHint />
           {loading && (
             <div className="text-center text-sm text-gray-500">Đang đăng nhập...</div>
           )}
