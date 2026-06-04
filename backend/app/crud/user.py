@@ -379,8 +379,14 @@ def update_last_login(db: Session, user_id: int) -> Optional[User]:
 
 
 def get_users(db: Session, skip: int = 0, limit: int = 100) -> List[User]:
-    """Lấy danh sách user"""
-    return db.query(User).offset(skip).limit(limit).all()
+    """Lấy danh sách user — đăng ký mới nhất trước."""
+    return (
+        db.query(User)
+        .order_by(User.created_at.desc().nullslast(), User.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 def delete_user(db: Session, user_id: int) -> Optional[User]:
@@ -398,12 +404,19 @@ def get_user_count(db: Session) -> int:
 
 
 def search_users(db: Session, keyword: str, skip: int = 0, limit: int = 100) -> List[User]:
-    """Tìm kiếm user"""
-    return db.query(User).filter(
-        (User.phone.contains(keyword)) |
-        (User.email.contains(keyword)) |
-        (User.full_name.contains(keyword))
-    ).offset(skip).limit(limit).all()
+    """Tìm kiếm user — đăng ký mới nhất trước."""
+    return (
+        db.query(User)
+        .filter(
+            (User.phone.contains(keyword))
+            | (User.email.contains(keyword))
+            | (User.full_name.contains(keyword))
+        )
+        .order_by(User.created_at.desc().nullslast(), User.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 def get_search_users_count(db: Session, keyword: str) -> int:

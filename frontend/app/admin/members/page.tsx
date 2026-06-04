@@ -70,6 +70,19 @@ function formatGender(value: string | null | undefined) {
   return value || '—';
 }
 
+function formatCreatedAt(s: string | null | undefined) {
+  if (!s) return '—';
+  const dt = new Date(s);
+  if (Number.isNaN(dt.getTime())) return '—';
+  return dt.toLocaleString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export default function AdminMembersPage() {
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<AdminMember[]>([]);
@@ -254,7 +267,7 @@ export default function AdminMembersPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Quản lý thành viên</h1>
             <p className="text-gray-600 text-sm mt-1">
-              Danh sách khách hàng — bấm <strong>Chi tiết</strong> để xem email, ngày sinh, thời gian tạo.
+              Sắp xếp theo ngày đăng ký mới nhất. Bấm <strong>Chi tiết</strong> để xem đầy đủ thông tin.
             </p>
           </div>
           <button
@@ -365,6 +378,7 @@ export default function AdminMembersPage() {
                       <th className="py-3 px-4">Email</th>
                       <th className="py-3 px-4">Ngày sinh</th>
                       <th className="py-3 px-4">Giới tính</th>
+                      <th className="py-3 px-4 whitespace-nowrap">Ngày tạo TK</th>
                       <th className="py-3 px-4">Trạng thái</th>
                       <th className="py-3 px-4 min-w-[200px]">Quản trị web</th>
                       <th className="py-3 px-4 text-center">Thao tác</th>
@@ -387,6 +401,9 @@ export default function AdminMembersPage() {
                             <td className="py-3 px-4 text-gray-600">{m.email || '—'}</td>
                             <td className="py-3 px-4 text-gray-600 whitespace-nowrap">{formatBirthShort(m.date_of_birth)}</td>
                             <td className="py-3 px-4 text-gray-600">{formatGender(m.gender)}</td>
+                            <td className="py-3 px-4 text-gray-600 whitespace-nowrap text-xs">
+                              {formatCreatedAt(m.created_at)}
+                            </td>
                             <td className="py-3 px-4">
                               <span
                                 className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
@@ -460,7 +477,7 @@ export default function AdminMembersPage() {
                           </tr>
                           {staffPanelUserId === m.id ? (
                             <tr className="border-b border-gray-100 bg-slate-50">
-                              <td colSpan={9} className="p-4">
+                              <td colSpan={10} className="p-4">
                                 <p className="text-xs text-gray-600 mb-3">
                                   Chọn mục được phép trong menu quản trị. <strong>Lưu</strong> gửi danh sách lên server;
                                   đổi vai trò ở dropdown trên (không đánh dấu mục) = preset mặc định của vai đó.
