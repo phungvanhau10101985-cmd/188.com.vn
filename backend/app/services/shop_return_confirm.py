@@ -47,6 +47,7 @@ def resolve_shop_return_input(
     """
     Trả (order_code shop, lỗi).
     Nhận: DHxxx/DCxxx/H… | mã EMS | mã tham chiếu cột A | mã đơn trên dòng EMS.
+    Vận đơn EMS không gắn DHxxx → (None, None); bước preview/confirm dựa trên trạng thái EMS.
     """
     text = (raw or "").strip()
     if not text:
@@ -67,8 +68,8 @@ def resolve_shop_return_input(
             if order and order.order_code:
                 return order.order_code.strip().upper(), None
 
-        ref = (record.reference_code or text).strip().upper()
-        return None, f"Vận đơn EMS {ref} chưa gắn mã đơn shop — kiểm tra import file gửi EMS."
+        # Không gắn đơn shop — vẫn cho phép tra/xác nhận theo mã EMS nếu EMS đã báo hoàn.
+        return None, None
 
     order = crud.order.get_order_by_code(db, text)
     if order and order.order_code:
