@@ -1,10 +1,11 @@
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import {
   loadProductForOosPage,
   resolveOosListingPathForSlug,
 } from '@/lib/product-oos-page';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { normalizeProductRouteSlug } from '@/lib/product-route-slug';
+import { isReservedNonProductSlug } from '@/lib/reserved-non-product-slugs';
 import ProductDetailClient from './ProductDetailClient';
 import ErrorState from './components/ErrorState/ErrorState';
 
@@ -13,6 +14,9 @@ type Props = { params: Promise<{ slug: string }> };
 export default async function ProductDetailPage({ params }: Props) {
   const { slug: rawSlug } = await params;
   const slug = normalizeProductRouteSlug(rawSlug);
+  if (isReservedNonProductSlug(slug)) {
+    notFound();
+  }
   const product = await loadProductForOosPage(slug);
 
   const redirectOosGroupIfAny = async () => {

@@ -1,4 +1,4 @@
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import ErrorState from '@/app/products/[slug]/components/ErrorState/ErrorState';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { resolveOosListingPathForSlug } from '@/lib/product-oos-page';
@@ -7,6 +7,7 @@ import {
   normalizeLegacyProductPath,
   resolveLegacyProductAndListingPath,
 } from '@/lib/legacy-product-path';
+import { isReservedNonProductSlug } from '@/lib/reserved-non-product-slugs';
 
 type Props = {
   params: Promise<{ legacySlug: string }>;
@@ -22,6 +23,9 @@ export default async function LegacyMarketingProductPage({ params }: Props) {
   const legacySlug = normalizeLegacyProductPath(decodeURIComponent((raw || '').trim()));
   if (!legacySlug) {
     redirect('/');
+  }
+  if (isReservedNonProductSlug(legacySlug)) {
+    notFound();
   }
 
   const { product, listingPath: prefetchedListingPath } =
