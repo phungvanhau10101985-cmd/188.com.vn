@@ -948,13 +948,18 @@ export default function AdminProductsPage() {
   }, [imageLocReportOpen]);
 
   const productsFetchAbortRef = useRef<AbortController | null>(null);
+  const productsSilentFetchAbortRef = useRef<AbortController | null>(null);
 
-  const fetchProducts = useCallback(async () => {
-    productsFetchAbortRef.current?.abort();
+  const fetchProducts = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    const abortRef = silent ? productsSilentFetchAbortRef : productsFetchAbortRef;
+    abortRef.current?.abort();
     const ctrl = new AbortController();
-    productsFetchAbortRef.current = ctrl;
-    setLoading(true);
-    setFetchError(null);
+    abortRef.current = ctrl;
+    if (!silent) {
+      setLoading(true);
+      setFetchError(null);
+    }
     try {
       const hasFilter = Boolean(searchName.trim() || searchId.trim());
       const res = await adminProductAPI.getProducts(
@@ -972,13 +977,14 @@ export default function AdminProductsPage() {
       setData(res);
     } catch (e) {
       if (ctrl.signal.aborted) return;
+      if (silent) return;
       const msg =
         e instanceof Error ? e.message : 'Lỗi tải danh sách sản phẩm';
       setFetchError(msg.length > 400 ? `${msg.slice(0, 400)}…` : msg);
       showToast('err', msg.length > 220 ? `${msg.slice(0, 220)}…` : msg, 8000);
       setData(null);
     } finally {
-      if (!ctrl.signal.aborted) setLoading(false);
+      if (!silent && !ctrl.signal.aborted) setLoading(false);
     }
   }, [page, searchName, searchId, listSort]);
 
@@ -2598,6 +2604,12 @@ export default function AdminProductsPage() {
       }
       if (res.deleted_count > 0) {
         const removed = new Set(res.deleted);
+        const prevProducts = data?.products ?? [];
+        const nextProducts = prevProducts.filter((p) => !removed.has(p.product_id));
+        const nextTotal =
+          typeof data?.total === 'number'
+            ? Math.max(0, data.total - res.deleted_count)
+            : data?.total;
         setData((prev) => {
           if (!prev) return prev;
           return {
@@ -2609,10 +2621,15 @@ export default function AdminProductsPage() {
                 : prev.total,
           };
         });
+        setSelectedProductIds(new Set());
+        const pageNowEmpty = nextProducts.length === 0;
+        const mayHaveMore = typeof nextTotal === 'number' ? nextTotal > 0 : prevProducts.length > 0;
+        if (pageNowEmpty && mayHaveMore) {
+          void fetchProducts({ silent: true });
+        }
+      } else {
+        setSelectedProductIds(new Set());
       }
-      setSelectedProductIds(new Set());
-      setPage(1);
-      void fetchProducts();
     } catch (err: unknown) {
       showToast('err', (err as Error)?.message || 'Xóa thất bại');
     } finally {
