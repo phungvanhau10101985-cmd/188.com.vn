@@ -2628,6 +2628,8 @@ export const adminMemberAPI = {
   getMember: (id: number) => fetchAdmin<AdminMember>(`/admin/users/${id}`),
   updateMember: (id: number, data: { is_active?: boolean; full_name?: string; email?: string; address?: string }) =>
     fetchAdmin<AdminMember>(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteMember: (id: number) =>
+    fetchAdmin<void>(`/admin/users/${id}`, { method: 'DELETE' }),
   setLinkedStaff: (
     id: number,
     staff_role: LinkedStaffRoleOption,

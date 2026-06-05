@@ -390,11 +390,23 @@ def get_users(db: Session, skip: int = 0, limit: int = 100) -> List[User]:
 
 
 def delete_user(db: Session, user_id: int) -> Optional[User]:
-    """Xóa user"""
+    """Xóa user — gỡ liên kết quản trị web trước khi xóa."""
+    from app.models.admin import AdminUser, AdminRole
+
     db_user = get_user_by_id(db, user_id)
-    if db_user:
-        db.delete(db_user)
-        db.commit()
+    if not db_user:
+        return None
+
+    linked = db.query(AdminUser).filter(AdminUser.linked_user_id == user_id).first()
+    if linked:
+        if linked.role == AdminRole.SUPER_ADMIN:
+            raise ValueError("Không thể xóa thành viên liên kết với super_admin.")
+        linked.linked_user_id = None
+        linked.is_active = False
+        linked.granular_permissions = None
+
+    db.delete(db_user)
+    db.commit()
     return db_user
 
 

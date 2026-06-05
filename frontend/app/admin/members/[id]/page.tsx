@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { adminMemberAPI, type AdminMember } from '@/lib/admin-api';
 
 function formatDateTime(s: string | null | undefined) {
@@ -35,12 +35,15 @@ function genderLabel(g: string | null | undefined) {
 
 export default function AdminMemberDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const id = Number(params?.id);
   const [member, setMember] = useState<AdminMember | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const showToast = (type: 'ok' | 'err', msg: string) => {
     setToast({ type, msg });
@@ -81,6 +84,19 @@ export default function AdminMemberDetailPage() {
       showToast('err', (err as Error)?.message || 'Lỗi cập nhật');
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!member) return;
+    setDeleting(true);
+    try {
+      await adminMemberAPI.deleteMember(member.id);
+      router.push('/admin/members');
+    } catch (err: unknown) {
+      showToast('err', (err as Error)?.message || 'Không thể xóa tài khoản');
+      setDeleting(false);
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -138,7 +154,7 @@ export default function AdminMemberDetailPage() {
                 <button
                   type="button"
                   onClick={handleToggleActive}
-                  disabled={updating}
+                  disabled={updating || deleting}
                   className={`px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 ${
                     member.is_active
                       ? 'bg-amber-100 text-amber-900 hover:bg-amber-200'
@@ -146,6 +162,14 @@ export default function AdminMemberDetailPage() {
                   }`}
                 >
                   {updating ? '...' : member.is_active ? 'Khóa tài khoản' : 'Mở khóa'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  disabled={deleting}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-red-100 text-red-900 hover:bg-red-200 disabled:opacity-50"
+                >
+                  Xóa tài khoản
                 </button>
               </div>
             </div>
@@ -184,6 +208,52 @@ export default function AdminMemberDetailPage() {
             </div>
           </div>
         )}
+
+        {showDeleteConfirm && member ? (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-member-detail-title"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && !deleting) setShowDeleteConfirm(false);
+            }}
+          >
+            <div className="w-full max-w-md rounded-xl bg-white shadow-xl border border-gray-200 p-5 space-y-4">
+              <h3 id="delete-member-detail-title" className="text-lg font-semibold text-gray-900">
+                Xóa tài khoản thành viên?
+              </h3>
+              <p className="text-sm text-gray-600">
+                Bạn sắp xóa vĩnh viễn tài khoản{' '}
+                <strong>{member.full_name?.trim() || `#${member.id}`}</strong>. Thao tác này{' '}
+                <strong>không thể hoàn tác</strong>.
+              </p>
+              {member.has_linked_admin ? (
+                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Thành viên này có quyền quản trị web — liên kết sẽ được gỡ khi xóa.
+                </p>
+              ) : null}
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={deleting}
+                  className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDelete()}
+                  disabled={deleting}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {deleting ? 'Đang xóa…' : 'Xóa vĩnh viễn'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
   );
 }

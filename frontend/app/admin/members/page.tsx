@@ -99,6 +99,8 @@ export default function AdminMembersPage() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<AdminMemberImportResponse | null>(null);
+  const [deleteConfirmMember, setDeleteConfirmMember] = useState<AdminMember | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const canManageLinkedStaff = isPrivilegedAdminRole(getStoredAdminRole());
 
@@ -229,6 +231,23 @@ export default function AdminMembersPage() {
   };
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const confirmDeleteMember = async () => {
+    if (!deleteConfirmMember) return;
+    const target = deleteConfirmMember;
+    setDeletingId(target.id);
+    try {
+      await adminMemberAPI.deleteMember(target.id);
+      showToast('ok', 'Đã xóa tài khoản thành viên');
+      setDeleteConfirmMember(null);
+      if (staffPanelUserId === target.id) setStaffPanelUserId(null);
+      fetchMembers();
+    } catch (err: unknown) {
+      showToast('err', (err as Error)?.message || 'Không thể xóa tài khoản');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const handleImport = async () => {
     if (!importFile) {
@@ -472,6 +491,14 @@ export default function AdminMembersPage() {
                                 >
                                   {updatingId === m.id ? '...' : m.is_active ? 'Khóa' : 'Mở khóa'}
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteConfirmMember(m)}
+                                  disabled={deletingId === m.id}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 disabled:opacity-50"
+                                >
+                                  Xóa
+                                </button>
                               </div>
                             </td>
                           </tr>
@@ -556,6 +583,58 @@ export default function AdminMembersPage() {
             </>
           )}
         </div>
+
+        {deleteConfirmMember ? (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-member-title"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && deletingId == null) setDeleteConfirmMember(null);
+            }}
+          >
+            <div className="w-full max-w-md rounded-xl bg-white shadow-xl border border-gray-200 p-5 space-y-4">
+              <h3 id="delete-member-title" className="text-lg font-semibold text-gray-900">
+                Xóa tài khoản thành viên?
+              </h3>
+              <p className="text-sm text-gray-600">
+                Bạn sắp xóa vĩnh viễn tài khoản{' '}
+                <strong>{deleteConfirmMember.full_name?.trim() || `#${deleteConfirmMember.id}`}</strong>
+                {deleteConfirmMember.email ? (
+                  <>
+                    {' '}
+                    (<span className="font-mono">{deleteConfirmMember.email}</span>)
+                  </>
+                ) : null}
+                . Thao tác này <strong>không thể hoàn tác</strong>.
+              </p>
+              {deleteConfirmMember.has_linked_admin ? (
+                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Thành viên này có quyền quản trị web — liên kết sẽ được gỡ khi xóa.
+                </p>
+              ) : null}
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirmMember(null)}
+                  disabled={deletingId != null}
+                  className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmDeleteMember()}
+                  disabled={deletingId != null}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {deletingId != null ? 'Đang xóa…' : 'Xóa vĩnh viễn'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
   );
 }

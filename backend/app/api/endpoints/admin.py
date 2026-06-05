@@ -498,6 +498,29 @@ def admin_update_user(
     return admin_panel_user_response(db, user)
 
 
+@router.delete("/users/{user_id}", status_code=204)
+def admin_delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: models.AdminUser = Depends(require_module_permission("members")),
+):
+    """Xóa vĩnh viễn tài khoản thành viên."""
+    user = crud.user.get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy thành viên")
+    try:
+        crud.user.delete_user(db, user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("admin delete user %s failed", user_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Không thể xóa thành viên: {exc}",
+        ) from exc
+
+
 _LINK_STAFF_PAYLOAD_TO_ROLE = {
     "none": None,
     "order_manager": AdminRole.ORDER_MANAGER,
