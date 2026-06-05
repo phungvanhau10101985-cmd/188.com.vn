@@ -38,6 +38,31 @@ class User(Base):
     product_views = relationship("UserProductView", back_populates="user", cascade="all, delete-orphan")
     cart_items = relationship("CartItem", back_populates="user", cascade="all, delete-orphan")
     notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
+    push_subscriptions = relationship(
+        "UserPushSubscription",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    category_views = relationship(
+        "UserCategoryView",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    brand_views = relationship(
+        "UserBrandView",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    search_history = relationship(
+        "UserSearchHistory",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    shop_interactions = relationship(
+        "UserShopInteraction",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     # ===================================
     
     def __repr__(self):
@@ -84,7 +109,7 @@ class UserCategoryView(Base):
     view_count = Column(Integer, default=1)
     
     # Relationship
-    user = relationship("User", backref="category_views")
+    user = relationship("User", back_populates="category_views")
 
 
 class UserBrandView(Base):
@@ -97,7 +122,7 @@ class UserBrandView(Base):
     view_count = Column(Integer, default=1)
     
     # Relationship
-    user = relationship("User", backref="brand_views")
+    user = relationship("User", back_populates="brand_views")
 
 
 class UserSearchHistory(Base):
@@ -111,7 +136,7 @@ class UserSearchHistory(Base):
     searched_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relationship
-    user = relationship("User", backref="search_history")
+    user = relationship("User", back_populates="search_history")
 
 
 class UserShopInteraction(Base):
@@ -130,4 +155,4 @@ class UserShopInteraction(Base):
     interaction_count = Column(Integer, default=1)
     
     # Relationship
-    user = relationship("User", backref="shop_interactions")
+    user = relationship("User", back_populates="shop_interactions")

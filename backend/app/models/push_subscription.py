@@ -17,4 +17,4 @@ class UserPushSubscription(Base):
     user_agent = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    user = relationship("User", backref="push_subscriptions", lazy="joined")
+    user = relationship("User", back_populates="push_subscriptions", lazy="joined")

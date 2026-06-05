@@ -221,6 +221,20 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
       return res;
     }
 
+    // 204/205/304 không được có body — NextResponse ném "Invalid response status code 204"
+    if (upstream.status === 204 || upstream.status === 205 || upstream.status === 304) {
+      const res = new NextResponse(null, {
+        status: upstream.status,
+        statusText: upstream.statusText,
+      });
+      applyResponseHeaders(
+        upstream,
+        res,
+        new Set(['content-type', 'content-length', 'transfer-encoding']),
+      );
+      return res;
+    }
+
     const res = new NextResponse(bodyBuf, {
       status: upstream.status,
       statusText: upstream.statusText,

@@ -390,8 +390,12 @@ def get_users(db: Session, skip: int = 0, limit: int = 100) -> List[User]:
 
 
 def delete_user(db: Session, user_id: int) -> Optional[User]:
-    """Xóa user — gỡ liên kết quản trị web trước khi xóa."""
+    """Xóa user — gỡ liên kết quản trị web và dọn FK chưa CASCADE trước khi xóa."""
     from app.models.admin import AdminUser, AdminRole
+    from app.models.analytics_event import AnalyticsEvent
+    from app.models.notification import Notification
+    from app.models.cart import Cart
+    from app.models.push_subscription import UserPushSubscription
 
     db_user = get_user_by_id(db, user_id)
     if not db_user:
@@ -404,6 +408,26 @@ def delete_user(db: Session, user_id: int) -> Optional[User]:
         linked.linked_user_id = None
         linked.is_active = False
         linked.granular_permissions = None
+
+    # analytics_events.user_id: giữ sự kiện, bỏ liên kết user
+    db.query(AnalyticsEvent).filter(AnalyticsEvent.user_id == user_id).update(
+        {AnalyticsEvent.user_id: None},
+        synchronize_session=False,
+    )
+    # Bảng con user_id NOT NULL — xóa tường minh (tránh ORM SET user_id=NULL)
+    for model in (
+        UserPushSubscription,
+        Notification,
+        UserCategoryView,
+        UserBrandView,
+        UserSearchHistory,
+        UserShopInteraction,
+        UserProductView,
+        UserFavorite,
+    ):
+        db.query(model).filter(model.user_id == user_id).delete(synchronize_session=False)
+    for cart in db.query(Cart).filter(Cart.user_id == user_id).all():
+        db.delete(cart)
 
     db.delete(db_user)
     db.commit()
