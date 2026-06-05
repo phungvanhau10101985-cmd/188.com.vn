@@ -1137,6 +1137,21 @@ export type AdminGoogleSheetSkuSyncTargetResult = {
   db_key_count?: number;
 };
 
+/** Kết quả POST /import-export/sync/google-sheet-product-catalog */
+export type AdminGoogleSheetProductCatalogSyncResult = {
+  ok: boolean;
+  skipped?: boolean;
+  reason?: string;
+  error?: string;
+  spreadsheet_id?: string;
+  sheet_gid?: number;
+  sheet_title?: string;
+  column_count?: number;
+  product_rows?: number;
+  cleared_trailing_rows?: number;
+  synced_at?: string;
+};
+
 /** Kết quả POST /import-export/sync/google-sheet-skus */
 export type AdminGoogleSheetSkuSyncResult = {
   ok: boolean;
@@ -1917,6 +1932,17 @@ export const adminProductAPI = {
       body: JSON.stringify({}),
       timeoutMs: 300_000,
     }),
+
+  /** Đồng bộ toàn bộ catalog (41 cột Excel) lên Google Sheet catalog. */
+  syncGoogleSheetProductCatalog: () =>
+    fetchAdmin<AdminGoogleSheetProductCatalogSyncResult>(
+      '/import-export/sync/google-sheet-product-catalog',
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+        timeoutMs: 600_000,
+      },
+    ),
 
   exportExcel: async () => {
     const token = getAdminToken();

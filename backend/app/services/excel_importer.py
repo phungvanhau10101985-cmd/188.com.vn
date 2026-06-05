@@ -24,6 +24,67 @@ logger = logging.getLogger(__name__)
 # Báo tiến trình parse file (tránh gọi quá dày với file lớn)
 PARSE_PROGRESS_EVERY = 200
 
+# Thứ tự cột export Excel / đồng bộ Google Sheet catalog (41 cột)
+PRODUCT_EXCEL_EXPORT_COLUMNS = [
+    'id', 'sku', 'origin', 'brand', 'name', 'pro_content',
+    'price', 'shop_name', 'shop_id', 'pro_lower_price', 'pro_high_price',
+    'rating_group_id', 'question_group_id', 'sizes', 'Variant',
+    'gallery_images', 'detail_images', 'product_url', 'video_url',
+    'main_image', 'likes_count', 'purchases_count', 'reviews_count',
+    'questions_count', 'rating_score', 'stock_quantity', 'deposit_required',
+    'Main Category', 'Subcategory', 'Sub-subcategory', 'Material',
+    'Style', 'Color', 'Occasion', 'Features', 'Weight',
+    'product_info',
+    'chinese_name',
+    'shop_name_chinese',
+    'Slug',
+    'listed',
+]
+
+PRODUCT_EXCEL_VIETNAMESE_HEADERS = {
+    'id': 'Id sản phẩm',
+    'sku': 'Mã sản phẩm',
+    'origin': 'Xuất xứ',
+    'brand': 'Thương hiệu',
+    'name': 'Tên',
+    'pro_content': 'Mô tả sản phẩm',
+    'price': 'Giá',
+    'shop_name': 'Tên shop',
+    'shop_id': 'Shop id',
+    'pro_lower_price': 'Sp giá thấp hơn',
+    'pro_high_price': 'Sp giá cao hơn',
+    'rating_group_id': 'Nhóm đánh giá',
+    'question_group_id': 'Nhóm câu hỏi',
+    'sizes': 'Size',
+    'Variant': 'Biến thể',
+    'gallery_images': 'Thư viện ảnh',
+    'detail_images': 'Nội dung',
+    'product_url': 'Link mặc định',
+    'video_url': 'Link Video',
+    'main_image': 'Link img',
+    'likes_count': 'Thích',
+    'purchases_count': 'Mua',
+    'reviews_count': 'Lượt đánh giá',
+    'questions_count': 'Lượt hỏi',
+    'rating_score': 'Điểm đánh giá',
+    'stock_quantity': 'Số lượng có thể mua',
+    'deposit_required': 'Cần đặt cọc',
+    'Main Category': 'Danh mục cấp 1',
+    'Subcategory': 'Danh mục cấp 2',
+    'Sub-subcategory': 'Danh mục cấp 3',
+    'Material': 'Chất liệu',
+    'Style': 'Kiểu dáng',
+    'Color': 'màu sắc',
+    'Occasion': 'Dịp',
+    'Features': 'Tính năng',
+    'Weight': 'Trọng lượng',
+    'product_info': 'Thông tin sản phẩm',
+    'chinese_name': 'Tên tiếng trung',
+    'shop_name_chinese': 'Shop Trung Quốc',
+    'Slug': 'Slug',
+    'listed': 'Trong danh sách (1=import, 0=xóa DB)',
+}
+
 
 class ExcelImporter:
     def __init__(self, db: Session):
@@ -277,22 +338,7 @@ class ExcelImporter:
             
             df = pd.DataFrame(products)
             
-            # EXPORT ORDER: ... Slug (AN) + listed (AO): 1=trên web, 0=đã ẩn
-            excel_columns_order = [
-                'id', 'sku', 'origin', 'brand', 'name', 'pro_content',
-                'price', 'shop_name', 'shop_id', 'pro_lower_price', 'pro_high_price',
-                'rating_group_id', 'question_group_id', 'sizes', 'Variant',
-                'gallery_images', 'detail_images', 'product_url', 'video_url',
-                'main_image', 'likes_count', 'purchases_count', 'reviews_count',
-                'questions_count', 'rating_score', 'stock_quantity', 'deposit_required',
-                'Main Category', 'Subcategory', 'Sub-subcategory', 'Material',
-                'Style', 'Color', 'Occasion', 'Features', 'Weight',
-                'product_info',  # AK: Thông tin sản phẩm (JSON)
-                'chinese_name',
-                'shop_name_chinese',
-                'Slug',          # sau hai cột tiếng Trung
-                'listed',
-            ]
+            excel_columns_order = PRODUCT_EXCEL_EXPORT_COLUMNS
             
             if 'product_info' not in df.columns and 'product_info' in excel_columns_order:
                 df['product_info'] = ''
@@ -319,49 +365,7 @@ class ExcelImporter:
             os.makedirs(export_dir, exist_ok=True)
             filepath = os.path.join(export_dir, filename)
             
-            vietnamese_headers = {
-                'id': 'Id sản phẩm',
-                'sku': 'Mã sản phẩm',
-                'origin': 'Xuất xứ',
-                'brand': 'Thương hiệu',
-                'name': 'Tên',
-                'pro_content': 'Mô tả sản phẩm',
-                'price': 'Giá',
-                'shop_name': 'Tên shop',
-                'shop_id': 'Shop id',
-                'pro_lower_price': 'Sp giá thấp hơn',
-                'pro_high_price': 'Sp giá cao hơn',
-                'rating_group_id': 'Nhóm đánh giá',
-                'question_group_id': 'Nhóm câu hỏi',
-                'sizes': 'Size',
-                'Variant': 'Biến thể',
-                'gallery_images': 'Thư viện ảnh',
-                'detail_images': 'Nội dung',
-                'product_url': 'Link mặc định',
-                'video_url': 'Link Video',
-                'main_image': 'Link img',
-                'likes_count': 'Thích',
-                'purchases_count': 'Mua',
-                'reviews_count': 'Lượt đánh giá',
-                'questions_count': 'Lượt hỏi',
-                'rating_score': 'Điểm đánh giá',
-                'stock_quantity': 'Số lượng có thể mua',
-                'deposit_required': 'Cần đặt cọc',
-                'Main Category': 'Danh mục cấp 1',
-                'Subcategory': 'Danh mục cấp 2',
-                'Sub-subcategory': 'Danh mục cấp 3',
-                'Material': 'Chất liệu',
-                'Style': 'Kiểu dáng',
-                'Color': 'màu sắc',
-                'Occasion': 'Dịp',
-                'Features': 'Tính năng',
-                'Weight': 'Trọng lượng',
-                'product_info': 'Thông tin sản phẩm',
-                'chinese_name': 'Tên tiếng trung',
-                'shop_name_chinese': 'Shop Trung Quốc',
-                'Slug': 'Slug',
-                'listed': 'Trong danh sách (1=import, 0=xóa DB)',
-            }
+            vietnamese_headers = PRODUCT_EXCEL_VIETNAMESE_HEADERS
             
             with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
                 df.to_excel(writer, sheet_name='Products', index=False, startrow=0)

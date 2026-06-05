@@ -1,6 +1,9 @@
 /**
  * Xóa SP admin theo product_id Excel (có dấu /) — POST body, không đưa ID vào path URL.
+ * Dùng proxy /api/v1 (ổn định trên VPS); tránh route riêng /api/admin/... có thể chưa deploy.
  */
+import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
+
 export type AdminBulkDeleteProductsResult = {
   deleted: string[];
   deleted_count: number;
@@ -18,11 +21,12 @@ export async function bulkDeleteAdminProducts(
   const token = adminToken();
   if (!token) throw new Error('Chưa đăng nhập admin');
 
-  const res = await fetch('/api/admin/products/bulk-delete', {
+  const res = await fetch(`${getApiBaseUrl()}/products/by-product-id/bulk-delete`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
+      ...ngrokFetchHeaders(),
     },
     body: JSON.stringify({ product_ids: productIds }),
     cache: 'no-store',
@@ -50,7 +54,11 @@ export async function bulkDeleteAdminProducts(
         : Array.isArray(data.detail)
           ? data.detail.map((x) => (typeof x === 'object' && x && 'msg' in x ? String((x as { msg?: unknown }).msg) : String(x))).join('; ')
           : res.statusText;
-    throw new Error(`[${res.status}] ${detail || 'Xóa thất bại'}`);
+    const hint =
+      res.status === 404 && !detail
+        ? 'API xóa chưa có trên server — deploy lại frontend + backend (endpoint POST /products/by-product-id/bulk-delete).'
+        : '';
+    throw new Error(`[${res.status}] ${detail || hint || 'Xóa thất bại'}`);
   }
 
   return {

@@ -28,3 +28,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Dọn file tạm việt hóa ảnh (temp_images) — Chủ nhật 3:00, file cũ hơn 24 giờ
 0 3 * * 0 cd /var/www/188.com.vn/backend && PYTHONPATH=. .venv/bin/python -c "from app.services.image_localization_temp_cleanup import cleanup_stale_image_localization_temp; cleanup_stale_image_localization_temp(max_age_hours=24)"
+
+# Đồng bộ toàn bộ catalog sản phẩm lên Google Sheet — hàng ngày 3:30 sáng giờ Việt Nam
+# (server TZ phải là Asia/Ho_Chi_Minh; nếu UTC thì dùng: 30 20 * * *)
+30 3 * * * curl -sS -m 3600 -H "Authorization: Bearer YOUR_CRON_SECRET" "https://YOUR_API_HOST/api/v1/import-export/cron/sync-google-sheet-product-catalog"

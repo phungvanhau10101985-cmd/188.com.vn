@@ -832,6 +832,7 @@ export default function AdminProductsPage() {
   const cancelTrackRef = useRef(false);
   const [exporting, setExporting] = useState(false);
   const [googleSheetSyncing, setGoogleSheetSyncing] = useState(false);
+  const [googleSheetCatalogSyncing, setGoogleSheetCatalogSyncing] = useState(false);
   /** Còn lại giây trước khi cho phép thử đồng bộ lại (quota 429). null = không giới hạn. */
   const [googleSheetRateLimitSec, setGoogleSheetRateLimitSec] = useState<number | null>(null);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
@@ -851,8 +852,14 @@ export default function AdminProductsPage() {
   const showAdminGoogleSheetSync =
     process.env.NEXT_PUBLIC_ADMIN_GOOGLE_SHEET_SYNC !== '0' &&
     process.env.NEXT_PUBLIC_ADMIN_GOOGLE_SHEET_SYNC !== 'false';
+  const showAdminGoogleSheetCatalogSync =
+    process.env.NEXT_PUBLIC_ADMIN_GOOGLE_SHEET_CATALOG_SYNC !== '0' &&
+    process.env.NEXT_PUBLIC_ADMIN_GOOGLE_SHEET_CATALOG_SYNC !== 'false';
   const googleSheetsEditorUrl = (process.env.NEXT_PUBLIC_GOOGLE_SHEETS_EDITOR_URL || '').trim();
   const googleSheetsEditorUrl2 = (process.env.NEXT_PUBLIC_GOOGLE_SHEETS_EDITOR_URL_2 || '').trim();
+  const googleSheetsCatalogEditorUrl = (
+    process.env.NEXT_PUBLIC_GOOGLE_SHEETS_CATALOG_EDITOR_URL || ''
+  ).trim();
 
   const imageLocalizationHeadlessNeedsSavedCookie =
     imageLocalizationGeminiMode === 'web' &&
@@ -2316,14 +2323,14 @@ export default function AdminProductsPage() {
         showToast(
           'err',
           r.reason === 'disabled'
-            ? 'Đồng bộ Google Sheet đang tắt trên server (kiểm tra GOOGLE_SHEETS_SKU_SYNC_ENABLED).'
-            : 'Không đồng bộ.',
+            ? 'Đồng bộ mã đang tắt trên server (kiểm tra GOOGLE_SHEETS_SKU_SYNC_ENABLED).'
+            : 'Không đồng bộ mã.',
           6000,
         );
         return;
       }
       if (!r.ok) {
-        const errRaw = r.error ?? 'Đồng bộ Google Sheet thất bại';
+        const errRaw = r.error ?? 'Đồng bộ mã thất bại';
         if (isGoogleSheetsRateLimitMessage(errRaw)) {
           setGoogleSheetRateLimitSec(GOOGLE_SHEET_RATE_LIMIT_COOLDOWN_SEC);
           return;
@@ -2342,7 +2349,7 @@ export default function AdminProductsPage() {
       if (r.targets && r.targets.length > 1) {
         showToast(
           'ok',
-          `Google Sheet: ${formatGoogleSheetSyncTargetsSummary(r.targets)}`,
+          `Đồng bộ mã: ${formatGoogleSheetSyncTargetsSummary(r.targets)}`,
           9000,
         );
         return;
@@ -2355,9 +2362,9 @@ export default function AdminProductsPage() {
         parts.push(`gỡ ${r.removed_orphan_rows} mã thừa (A/B)`);
       if (r.removed_duplicate_rows != null && r.removed_duplicate_rows > 0)
         parts.push(`gỡ ${r.removed_duplicate_rows} trùng (A/B)`);
-      showToast('ok', parts.length ? `Google Sheet: ${parts.join(' · ')}` : 'Đã đồng bộ Google Sheet', 7000);
+      showToast('ok', parts.length ? `Đồng bộ mã: ${parts.join(' · ')}` : 'Đã đồng bộ mã', 7000);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Đồng bộ Google Sheet lỗi';
+      const msg = e instanceof Error ? e.message : 'Đồng bộ mã lỗi';
       if (isGoogleSheetsRateLimitMessage(msg)) {
         setGoogleSheetRateLimitSec(GOOGLE_SHEET_RATE_LIMIT_COOLDOWN_SEC);
       } else {
@@ -2365,6 +2372,52 @@ export default function AdminProductsPage() {
       }
     } finally {
       setGoogleSheetSyncing(false);
+    }
+  };
+
+  const handleSyncGoogleSheetCatalog = async () => {
+    if (googleSheetRateLimitSec !== null) return;
+    setGoogleSheetCatalogSyncing(true);
+    try {
+      const r = await adminProductAPI.syncGoogleSheetProductCatalog();
+      if (r.skipped) {
+        showToast(
+          'err',
+          r.reason === 'disabled'
+            ? 'Đồng bộ sản phẩm đang tắt trên server (kiểm tra GOOGLE_SHEETS_PRODUCT_CATALOG_SYNC_ENABLED).'
+            : 'Không đồng bộ sản phẩm.',
+          6000,
+        );
+        return;
+      }
+      if (!r.ok) {
+        const errRaw = r.error ?? 'Đồng bộ sản phẩm thất bại';
+        if (isGoogleSheetsRateLimitMessage(errRaw)) {
+          setGoogleSheetRateLimitSec(GOOGLE_SHEET_RATE_LIMIT_COOLDOWN_SEC);
+          return;
+        }
+        showToast('err', errRaw.length > 500 ? `${errRaw.slice(0, 500)}…` : errRaw, 8000);
+        return;
+      }
+      const parts: string[] = [];
+      if (r.product_rows != null) parts.push(`${r.product_rows} sản phẩm`);
+      if (r.cleared_trailing_rows != null && r.cleared_trailing_rows > 0)
+        parts.push(`xóa ${r.cleared_trailing_rows} hàng thừa`);
+      if (r.synced_at) parts.push(r.synced_at);
+      showToast(
+        'ok',
+        parts.length ? `Đồng bộ sản phẩm: ${parts.join(' · ')}` : 'Đã đồng bộ sản phẩm',
+        8000,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Đồng bộ sản phẩm lỗi';
+      if (isGoogleSheetsRateLimitMessage(msg)) {
+        setGoogleSheetRateLimitSec(GOOGLE_SHEET_RATE_LIMIT_COOLDOWN_SEC);
+      } else {
+        showToast('err', msg, 8000);
+      }
+    } finally {
+      setGoogleSheetCatalogSyncing(false);
     }
   };
 
@@ -4420,18 +4473,18 @@ export default function AdminProductsPage() {
                     title={
                       googleSheetRateLimitSec !== null
                         ? 'Quota Google Sheet (429): chờ hết đếm ngược rồi thử lại.'
-                        : 'Cập nhật Google Sheet theo dữ liệu cửa hàng'
+                        : 'Ghi mã prefix + SKU lên 2 Sheet vận hành. Có thể mất 3–5 phút.'
                     }
                     aria-busy={googleSheetSyncing}
-                    aria-label="Đồng bộ danh sách sản phẩm lên Google Sheet"
+                    aria-label="Đồng bộ mã lên Google Sheet"
                   >
                     {googleSheetSyncing
-                      ? 'Đang đồng bộ…'
+                      ? 'Đang đồng bộ mã…'
                       : googleSheetRateLimitSec !== null && googleSheetRateLimitSec > 0
                         ? `Chờ ${googleSheetRateLimitSec}s…`
                         : googleSheetRateLimitSec === 0
                           ? 'Đang mở khóa…'
-                          : 'Đồng bộ Google Sheet'}
+                          : 'Đồng bộ mã'}
                   </button>
                   {(googleSheetsEditorUrl || googleSheetsEditorUrl2) ? (
                     <span className="hidden sm:inline text-gray-300" aria-hidden>
@@ -4462,7 +4515,69 @@ export default function AdminProductsPage() {
                   ) : null}
                 </>
               ) : null}
+              {showAdminGoogleSheetCatalogSync ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void handleSyncGoogleSheetCatalog()}
+                    disabled={
+                      googleSheetCatalogSyncing ||
+                      googleSheetSyncing ||
+                      googleSheetRateLimitSec !== null
+                    }
+                    className="inline-flex h-9 items-center px-3 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm font-medium disabled:opacity-70 disabled:cursor-not-allowed"
+                    title={
+                      googleSheetRateLimitSec !== null
+                        ? 'Quota Google Sheet (429): chờ hết đếm ngược rồi thử lại.'
+                        : 'Ghi toàn bộ sản phẩm (41 cột Excel) lên Google Sheet — thường mất 3–5 phút, đừng đóng trang.'
+                    }
+                    aria-busy={googleSheetCatalogSyncing}
+                    aria-label="Đồng bộ sản phẩm lên Google Sheet"
+                  >
+                    {googleSheetCatalogSyncing
+                      ? 'Đang đồng bộ sản phẩm…'
+                      : googleSheetRateLimitSec !== null && googleSheetRateLimitSec > 0
+                        ? `Chờ ${googleSheetRateLimitSec}s…`
+                        : googleSheetRateLimitSec === 0
+                          ? 'Đang mở khóa…'
+                          : 'Đồng bộ sản phẩm'}
+                  </button>
+                  {googleSheetsCatalogEditorUrl ? (
+                    <a
+                      href={googleSheetsCatalogEditorUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-9 items-center text-xs text-violet-800 hover:underline px-1"
+                      title="Bảng sản phẩm đầy đủ (41 cột)"
+                    >
+                      Sheet sản phẩm
+                    </a>
+                  ) : null}
+                </>
+              ) : null}
             </div>
+            {(showAdminGoogleSheetSync || showAdminGoogleSheetCatalogSync) ? (
+              <p className="text-xs text-gray-500 pt-1">
+                <span className="font-medium text-sky-800">Đồng bộ mã</span> → prefix + SKU (2 link bên cạnh).{' '}
+                <span className="font-medium text-violet-800">Đồng bộ sản phẩm</span> → bảng đầy đủ 41 cột
+                {googleSheetsCatalogEditorUrl ? (
+                  <>
+                    {' '}
+                    (
+                    <a
+                      href={googleSheetsCatalogEditorUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-violet-700 hover:underline"
+                    >
+                      mở sheet sản phẩm
+                    </a>
+                    )
+                  </>
+                ) : null}
+                . Mỗi lần chạy có thể mất vài phút — chờ toast kết quả.
+              </p>
+            ) : null}
 
             {importing && importProgress ? (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2.5 space-y-1.5">

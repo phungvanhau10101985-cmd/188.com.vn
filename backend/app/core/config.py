@@ -689,6 +689,20 @@ class Settings:
         self.GOOGLE_SHEETS_SKU_SYNC_ROW_MODE_2: str = (
             _rm2 if _rm2 in ("full", "key_time") else "full"
         )
+
+        # Đồng bộ toàn bộ catalog sản phẩm (41 cột Excel) lên Google Sheet — cron 3:30 sáng VN
+        _gpc_en = (os.getenv("GOOGLE_SHEETS_PRODUCT_CATALOG_SYNC_ENABLED") or "true").strip().lower()
+        self.GOOGLE_SHEETS_PRODUCT_CATALOG_SYNC_ENABLED: bool = _gpc_en not in (
+            "0", "false", "no", "off", "disabled"
+        )
+        self.GOOGLE_SHEETS_PRODUCT_CATALOG_SPREADSHEET_ID: str = os.getenv(
+            "GOOGLE_SHEETS_PRODUCT_CATALOG_SPREADSHEET_ID", ""
+        ).strip()
+        _gpc_gid = os.getenv("GOOGLE_SHEETS_PRODUCT_CATALOG_SHEET_GID", "").strip()
+        try:
+            self.GOOGLE_SHEETS_PRODUCT_CATALOG_SHEET_GID: int = int(_gpc_gid) if _gpc_gid else 0
+        except ValueError:
+            self.GOOGLE_SHEETS_PRODUCT_CATALOG_SHEET_GID = 0
         
         # ========================
         # FILE UPLOAD CONFIGURATION

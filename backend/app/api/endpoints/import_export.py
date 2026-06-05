@@ -1,6 +1,6 @@
 # backend/app/api/endpoints/import_export.py - COMPLETE FINAL VERSION
 import pandas as pd
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, BackgroundTasks, Query, Header
 from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -1047,6 +1047,15 @@ async def get_import_status():
         },
     }
 
+def _require_cron_secret(authorization: str | None) -> None:
+    expected = (settings.CRON_SECRET or "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="CRON_SECRET is not configured")
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or token.strip() != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
 @router.post("/sync/google-sheet-skus")
 def sync_google_sheet_skus(
     db: Session = Depends(get_db),
@@ -1059,6 +1068,38 @@ def sync_google_sheet_skus(
     from app.services.google_sheets_sku_sync import sync_product_skus_to_google_sheet
 
     return sync_product_skus_to_google_sheet(db)
+
+
+@router.post("/sync/google-sheet-product-catalog")
+def sync_google_sheet_product_catalog(
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_privileged_admin),
+):
+    """
+    Đồng bộ tay toàn bộ catalog sản phẩm (41 cột Excel) lên Google Sheet catalog.
+    """
+    from app.services.google_sheets_product_catalog_sync import sync_product_catalog_to_google_sheet
+
+    return sync_product_catalog_to_google_sheet(db)
+
+
+@router.get("/cron/sync-google-sheet-product-catalog")
+def cron_sync_google_sheet_product_catalog(
+    db: Session = Depends(get_db),
+    authorization: str | None = Header(None),
+):
+    """
+    Cron: ghi đè toàn bộ dữ liệu sản phẩm lên Google Sheet catalog.
+    Authorization: Bearer CRON_SECRET
+
+    Crontab (server TZ = Asia/Ho_Chi_Minh):
+      30 3 * * * curl -sS -m 3600 -H "Authorization: Bearer $CRON_SECRET" \\
+        "https://YOUR_API_HOST/api/v1/import-export/cron/sync-google-sheet-product-catalog"
+    """
+    _require_cron_secret(authorization)
+    from app.services.google_sheets_product_catalog_sync import sync_product_catalog_to_google_sheet
+
+    return sync_product_catalog_to_google_sheet(db)
 
 
 @router.post("/fix/slugs")

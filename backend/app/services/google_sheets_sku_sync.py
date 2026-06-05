@@ -155,8 +155,18 @@ def _column_letters_one_based(index: int) -> str:
     return "".join(reversed(parts))
 
 
+def _google_sheets_ssl_verify() -> bool:
+    raw = (os.getenv("GOOGLE_SHEETS_SSL_VERIFY") or "true").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
 def _get_sheets_service():
+    import certifi
+    import httplib2
+    import requests
+    from google.auth.transport.requests import Request as GoogleAuthRequest
     from google.oauth2 import service_account
+    from google_auth_httplib2 import AuthorizedHttp
     from googleapiclient.discovery import build
 
     path = _credentials_path()
@@ -165,8 +175,40 @@ def _get_sheets_service():
             "Thiếu file JSON service account (GOOGLE_SHEETS_SKU_CREDENTIALS_PATH, "
             "GOOGLE_APPLICATION_CREDENTIALS hoặc IMAGE_LOCALIZATION_GCP_KEY_FILE)."
         )
+    ssl_verify = _google_sheets_ssl_verify()
+    if not ssl_verify:
+        logger.warning(
+            "GOOGLE_SHEETS_SSL_VERIFY=false — bỏ qua xác minh SSL Google API (chỉ dev/local)."
+        )
+
     creds = service_account.Credentials.from_service_account_file(path, scopes=SCOPES)
-    return build("sheets", "v4", credentials=creds, cache_discovery=False)
+    session = requests.Session()
+    if ssl_verify:
+        session.verify = certifi.where()
+    else:
+        import ssl
+        import urllib3
+        from requests.adapters import HTTPAdapter
+
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        class _NoVerifyHTTPAdapter(HTTPAdapter):
+            def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                pool_kwargs["ssl_context"] = ctx
+                return super().init_poolmanager(connections, maxsize, block=block, **pool_kwargs)
+
+        session.mount("https://", _NoVerifyHTTPAdapter())
+        session.verify = False
+    creds.refresh(GoogleAuthRequest(session=session))
+    if ssl_verify:
+        http = httplib2.Http(ca_certs=certifi.where(), timeout=300)
+    else:
+        http = httplib2.Http(disable_ssl_certificate_validation=True, timeout=300)
+    authed_http = AuthorizedHttp(creds, http=http)
+    return build("sheets", "v4", http=authed_http, cache_discovery=False)
 
 
 def _sheet_title_for_gid(service: Any, spreadsheet_id: str, sheet_gid: int) -> str:
