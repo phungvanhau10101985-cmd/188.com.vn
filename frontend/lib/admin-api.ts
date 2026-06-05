@@ -230,9 +230,11 @@ async function fetchAdmin<T>(
         res.status === 422
           ? '[422] Body JSON cần dạng: {"url":"https://..." , "download_images":true}. '
           : res.status === 504 || res.status === 502
-            ? `[${res.status}] Hết giờ chờ proxy (gateway timeout) — request lâu hơn giới hạn nginx/Cloudflare. Cấu hình proxy_read_timeout / timeout ít nhất ${Math.round(
-                ADMIN_SOURCE_STOCK_SCAN_TIMEOUT_MS / 60000,
-              )} phút cho route API /products/ hoặc thử lại. `
+            ? `[${res.status}] Hết giờ chờ proxy (gateway timeout) — request lâu hơn giới hạn nginx/Cloudflare. Cấu hình proxy_read_timeout ≥ 10 phút cho route API ${
+                /import-export\/(sync\/google-sheet|cron\/sync-google-sheet)/.test(endpoint)
+                  ? '/import-export/sync/google-sheet-*'
+                  : '/products/'
+              } hoặc thử lại. `
           : res.status === 404
             ? endpoint.includes('/orders/admin/shipping/operations-stats')
               ? `[404 ${url}] API chưa có endpoint thống kê vận hành — trên VPS chạy: git pull origin main && pm2 restart 188-api (chỉ build web không đủ). `
