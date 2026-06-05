@@ -20,8 +20,8 @@ module.exports = {
       max_restarts: 10,
       min_uptime: '10s',
       restart_delay: 3000,
-      /** Tránh API treo sau nhiều giờ (RAM phình >3GB → pool DB kẹt). */
-      max_memory_restart: '1500M',
+      /** Tránh API treo sau nhiều giờ (RAM phình → pool DB kẹt). 2.5G: ít restart hơn 1.5G, vẫn dưới mức treo ~3.8G. */
+      max_memory_restart: '2500M',
     },
     {
       name: '188-web',
