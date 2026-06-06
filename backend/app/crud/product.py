@@ -2030,6 +2030,26 @@ def get_product_by_slug(db: Session, slug: str) -> Optional[Product]:
                 by_pid2 = get_product_by_product_id(db, product_id=embedded.upper())
                 if by_pid2 is not None:
                     return _parent_for_warehouse_row(by_pid2)
+
+        # URL marketing / index.php: ...-1141545 (số cuối = PK hoặc product_id Excel)
+        m_tail = re.search(r"-(\d{5,})$", s)
+        if m_tail:
+            tail = (m_tail.group(1) or "").strip()
+            if tail:
+                try:
+                    pk = int(tail)
+                    if pk > 0:
+                        row = get_product(db, product_id=pk)
+                        if row is not None:
+                            return _parent_for_warehouse_row(row)
+                except (TypeError, ValueError):
+                    pass
+                by_pid = get_product_by_product_id(db, product_id=tail)
+                if by_pid is not None:
+                    return _parent_for_warehouse_row(by_pid)
+                by_code = get_product_by_code(db, code=tail)
+                if by_code is not None:
+                    return _parent_for_warehouse_row(by_code)
         return None
     except Exception as e:
         logger.error(f"Database error: {str(e)}")

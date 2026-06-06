@@ -55,24 +55,24 @@ export async function getProductByDbIdForSSR(
   }
 }
 
-/** Tra SP từ path marketing / index.php: slug đầy đủ → SKU/product_id → id cuối URL. */
+/** Tra SP từ path marketing / index.php: id cuối URL → slug đầy đủ → SKU. */
 export async function resolveProductFromLegacyPath(path: string): Promise<Product | null> {
   const key = normalizeLegacyProductPath(path);
   if (!key) return null;
+
+  const tailId = extractTrailingNumericId(key);
+  if (tailId) {
+    let product = await getProductByDbIdForSSR(tailId);
+    if (product?.id) return product;
+    product = await getProductBySkuForSSR(String(tailId));
+    if (product?.id) return product;
+  }
 
   let product = await getProductBySlugForSSR(key);
   if (product?.id) return product;
 
   product = await getProductBySkuForSSR(key);
   if (product?.id) return product;
-
-  const tailId = extractTrailingNumericId(key);
-  if (tailId) {
-    product = await getProductByDbIdForSSR(tailId);
-    if (product?.id) return product;
-    product = await getProductBySkuForSSR(String(tailId));
-    if (product?.id) return product;
-  }
 
   return null;
 }

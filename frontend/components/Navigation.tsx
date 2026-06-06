@@ -20,6 +20,7 @@ import {
   level1CategoryHref,
 } from '@/lib/kho-sale-menu-category';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
+import { useClientMounted } from '@/lib/use-client-mounted';
 
 export interface CategoryFilter {
   category?: string;
@@ -78,11 +79,11 @@ export default function Navigation({
   const [stickySearchTerm, setStickySearchTerm] = useState('');
   const [stickyMenuOpen, setStickyMenuOpen] = useState(false);
   const [catalogMenuOpen, setCatalogMenuOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const clientMounted = useClientMounted();
   const stickyMenuCloseTimerRef = useRef<number | null>(null);
   const catalogMenuCloseTimerRef = useRef<number | null>(null);
   const { isAuthenticated, isLoading, user } = useAuth();
-  const authReady = mounted && !isLoading;
+  const authReady = clientMounted && !isLoading;
   const showAuthenticatedActions = authReady && isAuthenticated;
   const loginHref = useLoginRedirectHref();
   const { favoriteCount } = useFavorites();
@@ -95,10 +96,6 @@ export default function Navigation({
   const pillsScrollRef = useRef<HTMLDivElement>(null);
   const level1WrapRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const [megaPlacement, setMegaPlacement] = useState<{ left: number; width: number } | null>(null);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   // Khi đang ở /danh-muc/... thì highlight theo slug (resolve từ tree)
   const effectiveFilter = useMemo(() => {
@@ -259,7 +256,7 @@ export default function Navigation({
         : 'sticky top-0';
   const stickyBarTopClass = 'top-0';
 
-  const hideListingCategoryPills = mounted && embedInStickyChrome && collapseListingCategoryBar;
+  const hideListingCategoryPills = clientMounted && embedInStickyChrome && collapseListingCategoryBar;
 
   useLayoutEffect(() => {
     if (!embedInStickyChrome || !onDesktopThinChromeHeight || !showStickyBar) return;

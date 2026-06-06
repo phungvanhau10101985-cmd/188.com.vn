@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState, useEffect } from 'react';
+import { useClientMounted } from '@/lib/use-client-mounted';
 import type { SiteSaleCalendarState } from '@/types/api';
 import { siteSaleBannerMessage } from '@/lib/site-sale';
 import SiteSaleLiveCountdown from '@/components/SiteSaleLiveCountdown';
@@ -15,25 +16,21 @@ export default function SiteSaleBanner({ state, className = '' }: Props) {
     () => `188_site_sale_banner_${state?.event_date ?? 'none'}_${state?.phase ?? 'off'}`,
     [state?.event_date, state?.phase],
   );
-  const [clientReady, setClientReady] = useState(false);
+  const clientMounted = useClientMounted();
   const [closed, setClosed] = useState(false);
 
   useEffect(() => {
-    setClientReady(true);
-  }, []);
-
-  useEffect(() => {
-    if (!clientReady) return;
+    if (!clientMounted) return;
     try {
       if (sessionStorage.getItem(storageKey) === '1') setClosed(true);
     } catch {
       /* noop */
     }
-  }, [clientReady, storageKey]);
+  }, [clientMounted, storageKey]);
 
-  const message = clientReady ? siteSaleBannerMessage(state) : null;
+  const message = clientMounted ? siteSaleBannerMessage(state) : null;
 
-  if (!clientReady || !message || closed) return null;
+  if (!clientMounted || !message || closed) return null;
 
   const isTeaser = state?.phase === 'teaser';
 

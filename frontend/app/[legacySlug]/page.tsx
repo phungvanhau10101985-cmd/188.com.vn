@@ -24,6 +24,13 @@ export default async function LegacyMarketingProductPage({ params }: Props) {
   if (!legacySlug) {
     redirect('/');
   }
+  const legacyKey = legacySlug.toLowerCase();
+  if (legacyKey === 'dang-ky' || legacyKey === 'dangky') {
+    redirect('/auth/register');
+  }
+  if (legacyKey === 'dang-nhap' || legacyKey === 'dangnhap') {
+    redirect('/auth/login');
+  }
   if (isReservedNonProductSlug(legacySlug)) {
     notFound();
   }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useClientMounted } from '@/lib/use-client-mounted';
 
 type Props = {
   countdownTo?: string | null;
@@ -31,20 +32,16 @@ export default function SiteSaleLiveCountdown({
   inline = false,
   className = '',
 }: Props) {
-  const [clientReady, setClientReady] = useState(false);
+  const clientMounted = useClientMounted();
   const [nowMs, setNowMs] = useState<number | null>(null);
 
   useEffect(() => {
-    setClientReady(true);
-  }, []);
-
-  useEffect(() => {
-    if (!clientReady || !countdownTo || !phase) return;
+    if (!clientMounted || !countdownTo || !phase) return;
     const tick = () => setNowMs(Date.now());
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [clientReady, countdownTo, phase]);
+  }, [clientMounted, countdownTo, phase]);
 
   const countdownLive = useMemo(() => {
     if (nowMs == null || !countdownTo) return '';
@@ -62,7 +59,7 @@ export default function SiteSaleLiveCountdown({
     return formatLiveHms(parts);
   }, [countdownTo, nowMs]);
 
-  if (!clientReady || !phase || !countdownLive) return null;
+  if (!clientMounted || !phase || !countdownLive) return null;
 
   const label = eventLabel?.trim() || 'Sale';
   const prefix = phase === 'teaser' ? `${label} bắt đầu sau` : `${label} — còn`;

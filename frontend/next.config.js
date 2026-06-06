@@ -16,6 +16,7 @@ const nextConfig = {
   },
   /** Cho phép iframe YouTube (fullscreen, autoplay trong iframe). Không đặt CSP cứng ở đây để tránh vỡ GA/GTM/FB từ admin embed-codes. */
   async headers() {
+    const isDev = process.env.NODE_ENV === "development";
     const videoFeedRobots = [
       {
         key: "X-Robots-Tag",
@@ -28,15 +29,20 @@ const nextConfig = {
         value: "public, max-age=31536000, immutable",
       },
     ];
+    const staticCacheHeaders = isDev ? [] : longCache;
     return [
-      {
-        source: "/_next/static/:path*",
-        headers: longCache,
-      },
-      {
-        source: "/favicon.png",
-        headers: longCache,
-      },
+      ...(staticCacheHeaders.length
+        ? [
+            {
+              source: "/_next/static/:path*",
+              headers: staticCacheHeaders,
+            },
+            {
+              source: "/favicon.png",
+              headers: staticCacheHeaders,
+            },
+          ]
+        : []),
       {
         source: "/luot-video-cung-shop",
         headers: videoFeedRobots,

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useClientMounted } from '@/lib/use-client-mounted';
 import { formatCountdownParts } from '@/lib/site-sale';
 import { formatPrice } from '@/lib/utils';
 
@@ -43,23 +44,19 @@ export default function ProductPromoPriceBlock({
   clearanceHighlight = false,
   className = '',
 }: ProductPromoPriceBlockProps) {
-  const [clientReady, setClientReady] = useState(false);
+  const clientMounted = useClientMounted();
   const [nowMs, setNowMs] = useState<number | null>(null);
 
   useEffect(() => {
-    setClientReady(true);
-  }, []);
-
-  useEffect(() => {
-    if (!clientReady || !countdownTo || !sitePhase) return;
+    if (!clientMounted || !countdownTo || !sitePhase) return;
     const tick = () => setNowMs(Date.now());
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [clientReady, countdownTo, sitePhase]);
+  }, [clientMounted, countdownTo, sitePhase]);
 
   const countdownLive = useMemo(() => {
-    if (!clientReady || nowMs == null || !countdownTo) return '';
+    if (!clientMounted || nowMs == null || !countdownTo) return '';
     const parts = formatCountdownParts(countdownTo, nowMs);
     if (!parts || parts.expired) return '';
     const hms = `${String(parts.hours).padStart(2, '0')}:${String(parts.minutes).padStart(2, '0')}:${String(parts.seconds).padStart(2, '0')}`;
