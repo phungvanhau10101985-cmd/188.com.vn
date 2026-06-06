@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { SiteSaleProductPricing } from '@/types/api';
+import { useClientMounted } from '@/lib/use-client-mounted';
 
 type Props = {
   siteSale?: SiteSaleProductPricing | null;
@@ -31,21 +32,16 @@ function saleEventLabel(siteSale: SiteSaleProductPricing): string {
 
 /** Thanh đếm ngược — đặt dưới ảnh SP (teaser: bắt đầu sau; active: còn). */
 export default function SiteSaleCountdownChip({ siteSale, className = '' }: Props) {
-  /** Chỉ mount trên client — SSR + lần hydrate đầu luôn null (tránh lệch cây DOM). */
-  const [clientReady, setClientReady] = useState(false);
+  const clientMounted = useClientMounted();
   const [nowMs, setNowMs] = useState<number | null>(null);
 
   useEffect(() => {
-    setClientReady(true);
-  }, []);
-
-  useEffect(() => {
-    if (!clientReady || !siteSale?.countdown_to || !siteSale?.phase) return;
+    if (!clientMounted || !siteSale?.countdown_to || !siteSale?.phase) return;
     const tick = () => setNowMs(Date.now());
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [clientReady, siteSale?.countdown_to, siteSale?.phase]);
+  }, [clientMounted, siteSale?.countdown_to, siteSale?.phase]);
 
   const phase = siteSale?.phase;
   const targetIso = siteSale?.countdown_to;
@@ -65,7 +61,7 @@ export default function SiteSaleCountdownChip({ siteSale, className = '' }: Prop
     };
   }, [targetIso, nowMs]);
 
-  if (!clientReady || !siteSale || !phase || nowMs == null || !parts) return null;
+  if (!clientMounted || !siteSale || !phase || nowMs == null || !parts) return null;
 
   const countdownLive = formatLiveCountdown(parts);
   const isTeaser = phase === 'teaser';

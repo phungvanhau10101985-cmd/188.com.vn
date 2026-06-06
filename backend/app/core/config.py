@@ -202,7 +202,7 @@ class Settings:
         # Nhiều job song song vẫn không trùng product_id nhờ claim processing trong DB.
         self.IMAGE_LOCALIZATION_BATCH_LIMIT: int = int(os.getenv("IMAGE_LOCALIZATION_BATCH_LIMIT", "0") or "0")
         self.IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: bool = os.getenv(
-            "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", "true"
+            "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", "false"
         ).strip().lower() in ("1", "true", "yes", "on")
         self.IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT: int = int(
             os.getenv("IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT", "80") or "80"
