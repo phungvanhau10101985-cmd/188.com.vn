@@ -210,6 +210,20 @@ class Settings:
         self.IMAGE_LOCALIZATION_TEMP_CLEANUP_MAX_AGE_HOURS: float = float(
             os.getenv("IMAGE_LOCALIZATION_TEMP_CLEANUP_MAX_AGE_HOURS", "1") or "1"
         )
+        self.IMAGE_LOCALIZATION_TEMP_CLEANUP_SCHEDULER_ENABLED: bool = os.getenv(
+            "IMAGE_LOCALIZATION_TEMP_CLEANUP_SCHEDULER_ENABLED", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.IMAGE_LOCALIZATION_TEMP_CLEANUP_INTERVAL_MINUTES: float = float(
+            os.getenv("IMAGE_LOCALIZATION_TEMP_CLEANUP_INTERVAL_MINUTES", "10") or "10"
+        )
+        # Van an toàn dung lượng đĩa runtime ảnh (MB).
+        # warn: chỉ cảnh báo log; stop: dọn khẩn + dừng job nếu vẫn thiếu.
+        self.IMAGE_LOCALIZATION_DISK_WARN_BELOW_MB: int = int(
+            os.getenv("IMAGE_LOCALIZATION_DISK_WARN_BELOW_MB", "4096") or "4096"
+        )
+        self.IMAGE_LOCALIZATION_DISK_STOP_BELOW_MB: int = int(
+            os.getenv("IMAGE_LOCALIZATION_DISK_STOP_BELOW_MB", "2048") or "2048"
+        )
         # Logo dán lên ảnh đã bản địa hóa trước khi PUT lên Bunny (mặc định: logo188.png ở root repo).
         _repo_root_logo188 = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "..", "logo188.png")

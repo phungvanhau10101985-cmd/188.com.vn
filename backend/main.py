@@ -480,14 +480,23 @@ async def startup_event():
         from app.api.endpoints.image_localization import (
             start_image_localization_job_resume_daemon_if_enabled,
         )
+        from app.services.image_localization_temp_cleanup import (
+            start_periodic_image_localization_temp_cleanup_daemon_if_enabled,
+        )
 
         start_image_localization_job_resume_daemon_if_enabled()
+        start_periodic_image_localization_temp_cleanup_daemon_if_enabled()
         from app.core.config import settings as _ilr
 
         if getattr(_ilr, "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", True):
             print(
                 "   🖼️  IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: "
                 "sẽ tiếp tục job queued/running trong DB sau ~2.5s."
+            )
+        if getattr(_ilr, "IMAGE_LOCALIZATION_TEMP_CLEANUP_SCHEDULER_ENABLED", True):
+            print(
+                "   🧹 IMAGE_LOCALIZATION_TEMP_CLEANUP_SCHEDULER_ENABLED: "
+                f"dọn temp định kỳ mỗi ~{getattr(_ilr, 'IMAGE_LOCALIZATION_TEMP_CLEANUP_INTERVAL_MINUTES', 10)} phút."
             )
     except Exception as _e_ilr:
         print(f"   ⚠️  image localization job resume startup: {_e_ilr}")

@@ -38,7 +38,9 @@ from app.services.image_localization_service import (
     reset_stale_processing_in_queue,
     save_gemini_cookie,
 )
+from app.services.image_localization_temp_cleanup import cleanup_runtime_temp_now
 from app.services.image_localization_temp_cleanup import cleanup_stale_image_localization_temp
+from app.services.image_localization_temp_cleanup import guard_runtime_disk_space
 
 logger = logging.getLogger(__name__)
 
@@ -474,6 +476,8 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
     results: List[Dict[str, Any]] = []
     skipped_reports: List[Dict[str, Any]] = []
     try:
+        # Kiểm tra dung lượng ngay đầu job để tránh đơ server khi ổ gần đầy.
+        guard_runtime_disk_space()
         cleanup_stale_image_localization_temp()
         if resume:
             row = image_loc_job_crud.get_job(db, job_id)
@@ -585,6 +589,8 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
 
         product_ids_to_run = [str(p.product_id).strip() for p in products if str(getattr(p, "product_id", "")).strip()]
         for product_id in product_ids_to_run:
+            # Mỗi sản phẩm kiểm tra lại dung lượng, dừng sớm nếu ổ đĩa xuống ngưỡng nguy hiểm.
+            guard_runtime_disk_space()
             if _job_is_cancelled(job_id):
                 return
             if should_cancel():
@@ -785,6 +791,12 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                         skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
                     )
                     return
+            finally:
+                # Dọn ngay temp sau mỗi sản phẩm để tránh tích tụ đầy ổ trong job dài.
+                try:
+                    cleanup_runtime_temp_now()
+                except Exception:
+                    logger.exception("cleanup_runtime_temp_now failed product_id=%s", product_id)
 
             if _job_is_cancelled(job_id):
                 return
