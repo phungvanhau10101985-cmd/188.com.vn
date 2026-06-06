@@ -28,6 +28,9 @@ const isDev = process.env.NODE_ENV === "development";
 const disableCache = process.env.NEXT_PUBLIC_DISABLE_CACHE === "1" || process.env.DISABLE_CACHE === "1";
 const REVALIDATE_CATEGORY = isDev || disableCache ? 0 : 120;
 const REVALIDATE_SEO_DATA = isDev || disableCache ? 0 : 300;
+const CATEGORY_TREE_MEM_TTL_MS = Math.max(15_000, REVALIDATE_CATEGORY * 1000 || 60_000);
+let categoryTreeMemCache: { expiresAt: number; value: CategoryLevel1[] } | null = null;
+let categoryTreeInflight: Promise<CategoryLevel1[]> | null = null;
 
 /** Tag dùng cho revalidateTag() khi admin bấm "Xóa sạch cache". */
 export const CACHE_TAG_CATEGORY_SEO = "category-seo";
@@ -115,20 +118,38 @@ export async function getCategoryTreeForLayout(): Promise<CategoryLevel1[]> {
   if (isNextProductionBuild()) {
     return [];
   }
-  try {
-    const url = `${API_BASE}/categories/from-products`;
-    const res = await fetch(url, {
-      next: { revalidate: REVALIDATE_CATEGORY, tags: [CACHE_TAG_CATEGORY_SEO] },
-      headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(LAYOUT_CATEGORY_TREE_TIMEOUT_MS),
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    const tree = Array.isArray(data) ? (data as CategoryLevel1[]) : [];
-    return withKhoSaleMenuCategory(tree);
-  } catch {
-    return [];
+  const now = Date.now();
+  const hit = categoryTreeMemCache;
+  if (hit && hit.expiresAt > now) {
+    return hit.value;
   }
+  if (categoryTreeInflight) {
+    return categoryTreeInflight;
+  }
+  categoryTreeInflight = (async () => {
+    try {
+      const url = `${API_BASE}/categories/from-products`;
+      const res = await fetch(url, {
+        next: { revalidate: REVALIDATE_CATEGORY, tags: [CACHE_TAG_CATEGORY_SEO] },
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(LAYOUT_CATEGORY_TREE_TIMEOUT_MS),
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      const tree = Array.isArray(data) ? (data as CategoryLevel1[]) : [];
+      const value = withKhoSaleMenuCategory(tree);
+      categoryTreeMemCache = {
+        expiresAt: Date.now() + CATEGORY_TREE_MEM_TTL_MS,
+        value,
+      };
+      return value;
+    } catch {
+      return [];
+    } finally {
+      categoryTreeInflight = null;
+    }
+  })();
+  return categoryTreeInflight;
 }
 
 export interface CategoryByPathInfo {

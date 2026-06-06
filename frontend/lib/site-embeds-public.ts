@@ -26,6 +26,9 @@ export type PublicSiteEmbeds = {
 };
 
 const empty: PublicSiteEmbeds = { head: [], body_open: [], body_close: [] };
+const PUBLIC_EMBEDS_MEM_TTL_MS = 60_000;
+let publicEmbedsMemCache: { expiresAt: number; value: PublicSiteEmbeds } | null = null;
+let publicEmbedsInflight: Promise<PublicSiteEmbeds> | null = null;
 
 function parseWebConversionsFromJson(data: Record<string, unknown>): GoogleAdsWebConversionsPublic | undefined {
   const raw = data.google_ads_web_conversions;
@@ -45,50 +48,68 @@ export async function fetchPublicSiteEmbeds(): Promise<PublicSiteEmbeds> {
   if (process.env.NEXT_PHASE === "phase-production-build") {
     return empty;
   }
-  const base = getApiBaseUrl();
-  try {
-    const res = await fetch(`${base}/embed-codes/public`, {
-      next: { revalidate: 120 },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) return empty;
-    const data = (await res.json()) as Record<string, unknown>;
-    const hasAwKey = 'google_ads_aw_ids' in data;
-    const rawAw = data.google_ads_aw_ids;
-    const googleAdsAwIds = hasAwKey
-      ? Array.isArray(rawAw)
-        ? rawAw
-            .map((x) => String(x ?? '').trim().toUpperCase())
-            .filter((s) => /^AW-\d+$/.test(s))
-        : []
-      : undefined;
-
-    let googleAdsWebConversions = parseWebConversionsFromJson(data);
-    let googleAdsWebConversionsLegacyPdpOnly = false;
-    if (!googleAdsWebConversions && 'google_ads_pdp_conversion_send_to' in data) {
-      const legacy = String(data.google_ads_pdp_conversion_send_to ?? '').trim();
-      googleAdsWebConversions = { pdp: legacy };
-      googleAdsWebConversionsLegacyPdpOnly = true;
-    }
-
-    const gcrRaw = data.google_customer_reviews_merchant_id;
-    const gcrParsed =
-      typeof gcrRaw === 'number'
-        ? gcrRaw
-        : Number.parseInt(String(gcrRaw ?? ''), 10);
-    const googleCustomerReviewsMerchantId =
-      Number.isFinite(gcrParsed) && gcrParsed > 0 ? gcrParsed : null;
-
-    return {
-      head: Array.isArray(data.head) ? data.head.filter(Boolean) : [],
-      body_open: Array.isArray(data.body_open) ? data.body_open.filter(Boolean) : [],
-      body_close: Array.isArray(data.body_close) ? data.body_close.filter(Boolean) : [],
-      ...(googleAdsAwIds !== undefined ? { googleAdsAwIds } : {}),
-      ...(googleAdsWebConversions !== undefined ? { googleAdsWebConversions } : {}),
-      ...(googleAdsWebConversionsLegacyPdpOnly ? { googleAdsWebConversionsLegacyPdpOnly: true } : {}),
-      ...(googleCustomerReviewsMerchantId != null ? { googleCustomerReviewsMerchantId } : {}),
-    };
-  } catch {
-    return empty;
+  const now = Date.now();
+  const hit = publicEmbedsMemCache;
+  if (hit && hit.expiresAt > now) {
+    return hit.value;
   }
+  if (publicEmbedsInflight) {
+    return publicEmbedsInflight;
+  }
+  const base = getApiBaseUrl();
+  publicEmbedsInflight = (async () => {
+    try {
+      const res = await fetch(`${base}/embed-codes/public`, {
+        next: { revalidate: 120 },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) return empty;
+      const data = (await res.json()) as Record<string, unknown>;
+      const hasAwKey = 'google_ads_aw_ids' in data;
+      const rawAw = data.google_ads_aw_ids;
+      const googleAdsAwIds = hasAwKey
+        ? Array.isArray(rawAw)
+          ? rawAw
+              .map((x) => String(x ?? '').trim().toUpperCase())
+              .filter((s) => /^AW-\d+$/.test(s))
+          : []
+        : undefined;
+
+      let googleAdsWebConversions = parseWebConversionsFromJson(data);
+      let googleAdsWebConversionsLegacyPdpOnly = false;
+      if (!googleAdsWebConversions && 'google_ads_pdp_conversion_send_to' in data) {
+        const legacy = String(data.google_ads_pdp_conversion_send_to ?? '').trim();
+        googleAdsWebConversions = { pdp: legacy };
+        googleAdsWebConversionsLegacyPdpOnly = true;
+      }
+
+      const gcrRaw = data.google_customer_reviews_merchant_id;
+      const gcrParsed =
+        typeof gcrRaw === 'number'
+          ? gcrRaw
+          : Number.parseInt(String(gcrRaw ?? ''), 10);
+      const googleCustomerReviewsMerchantId =
+        Number.isFinite(gcrParsed) && gcrParsed > 0 ? gcrParsed : null;
+
+      const value: PublicSiteEmbeds = {
+        head: Array.isArray(data.head) ? data.head.filter(Boolean) : [],
+        body_open: Array.isArray(data.body_open) ? data.body_open.filter(Boolean) : [],
+        body_close: Array.isArray(data.body_close) ? data.body_close.filter(Boolean) : [],
+        ...(googleAdsAwIds !== undefined ? { googleAdsAwIds } : {}),
+        ...(googleAdsWebConversions !== undefined ? { googleAdsWebConversions } : {}),
+        ...(googleAdsWebConversionsLegacyPdpOnly ? { googleAdsWebConversionsLegacyPdpOnly: true } : {}),
+        ...(googleCustomerReviewsMerchantId != null ? { googleCustomerReviewsMerchantId } : {}),
+      };
+      publicEmbedsMemCache = {
+        expiresAt: Date.now() + PUBLIC_EMBEDS_MEM_TTL_MS,
+        value,
+      };
+      return value;
+    } catch {
+      return empty;
+    } finally {
+      publicEmbedsInflight = null;
+    }
+  })();
+  return publicEmbedsInflight;
 }
