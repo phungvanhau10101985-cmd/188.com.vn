@@ -1935,17 +1935,17 @@ def _count_products_query(query) -> int:
     - tắt eager load/options không cần thiết cho truy vấn đếm.
     - dùng COUNT(products.id) thay vì query.count() dạng subquery full-column.
     """
+    base = query.enable_eagerloads(False).order_by(None)
     try:
-        return int(
-            query.enable_eagerloads(False)
-            .order_by(None)
-            .with_entities(sql_func.count(Product.id))
-            .scalar()
-            or 0
-        )
+        return int(base.with_entities(sql_func.count(Product.id)).scalar() or 0)
     except Exception:
-        # Fallback an toàn nếu query có cấu trúc đặc biệt.
-        return int(query.order_by(None).count() or 0)
+        try:
+            # Fallback nhẹ: chỉ subquery Product.id thay vì full cột Product.
+            id_subq = base.with_entities(Product.id).subquery()
+            return int(query.session.query(sql_func.count()).select_from(id_subq).scalar() or 0)
+        except Exception:
+            # Last resort cho trường hợp query cực đặc biệt.
+            return int(base.count() or 0)
 
 
 _PRODUCT_SLUG_ID_SUFFIX_RE = re.compile(
@@ -2961,7 +2961,13 @@ def get_product_sitemap_slugs(
     if is_active is not None:
         query = query.filter(Product.is_active == is_active)
     query = apply_catalog_visibility_filter(query)
-    total = query.count()
+    total = int(
+        query.enable_eagerloads(False)
+        .order_by(None)
+        .with_entities(sql_func.count(Product.id))
+        .scalar()
+        or 0
+    )
     rows = (
         query.order_by(Product.id)
         .offset(skip)
