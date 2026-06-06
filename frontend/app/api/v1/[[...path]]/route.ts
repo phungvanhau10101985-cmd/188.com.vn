@@ -235,11 +235,14 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
       return res;
     }
 
-    const res = new NextResponse(bodyBuf, {
+    // Dùng Uint8Array + bỏ content-length/content-encoding từ upstream:
+    // tránh mismatch giữa body đã được Node fetch giải mã và header nén gốc,
+    // đồng thời né lỗi stream transform nội bộ của Next ở một số phiên bản Node/Next.
+    const res = new NextResponse(new Uint8Array(bodyBuf), {
       status: upstream.status,
       statusText: upstream.statusText,
     });
-    applyResponseHeaders(upstream, res);
+    applyResponseHeaders(upstream, res, new Set(['content-length', 'content-encoding']));
 
     if (upstream.status >= 300 && upstream.status < 400) {
       const loc = upstream.headers.get('location');

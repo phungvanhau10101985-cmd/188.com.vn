@@ -14,6 +14,16 @@ type Props = {
 };
 
 /**
+ * Slug một-segment không phải PDP thật, thường xuất hiện từ hash/id section hoặc URL cũ.
+ * Chặn sớm để tránh SSR gọi nhiều API fallback sản phẩm.
+ */
+const LEGACY_NON_PRODUCT_REDIRECTS: Record<string, string> = {
+  'tim-kiem-sp': '/',
+  'san-pham-cung-shop': '/#san-pham-cung-shop',
+  'san-pham-cung-shop-id': '/#san-pham-cung-shop',
+};
+
+/**
  * URL legacy một segment (marketing / index.php), không nằm dưới /products/.
  * - Có SP → chuyển sang PDP chuẩn /products/{slug}
  * - Hết hàng / không có SP → listing nhóm (/c/..., /danh-muc/..., tìm kiếm)
@@ -25,6 +35,10 @@ export default async function LegacyMarketingProductPage({ params }: Props) {
     redirect('/');
   }
   const legacyKey = legacySlug.toLowerCase();
+  const nonProductRedirect = LEGACY_NON_PRODUCT_REDIRECTS[legacyKey];
+  if (nonProductRedirect) {
+    redirect(nonProductRedirect);
+  }
   if (legacyKey === 'dang-ky' || legacyKey === 'dangky') {
     redirect('/auth/register');
   }

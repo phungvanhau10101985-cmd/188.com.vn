@@ -9,6 +9,7 @@ type SiteSaleSnapshot = {
   loading: boolean;
 };
 
+const SERVER_SNAPSHOT: SiteSaleSnapshot = { state: null, loading: true };
 let store: SiteSaleSnapshot = { state: null, loading: true };
 let inflight: Promise<void> | null = null;
 let saleCalendarRequested = false;
@@ -31,7 +32,7 @@ function getClientSnapshot(): SiteSaleSnapshot {
 }
 
 function getServerSnapshot(): SiteSaleSnapshot {
-  return { state: null, loading: true };
+  return SERVER_SNAPSHOT;
 }
 
 async function loadSiteSaleOnce(force = false): Promise<void> {

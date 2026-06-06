@@ -3,6 +3,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { useMemo, useState } from 'react';
 import { Product } from '@/types/api';
 import { formatPrice, getDiscountPercentage, truncateText } from '@/lib/utils';
@@ -12,7 +13,6 @@ import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
 import SiteSaleProductBadge from '@/components/SiteSaleProductBadge';
-import SiteSaleCountdownChip from '@/components/SiteSaleCountdownChip';
 import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
 import ProductCardClearanceImageBadges from '@/components/ProductCardClearanceImageBadges';
 import { productForCatalogCardPricing, resolveProductDisplayPricing } from '@/lib/site-sale';
@@ -23,6 +23,11 @@ import {
   productShowsClearanceOnCard,
   warehouseStandaloneSaleImage,
 } from '@/lib/warehouse-clearance';
+
+const SiteSaleCountdownChip = dynamic(
+  () => import('@/components/SiteSaleCountdownChip'),
+  { ssr: false },
+);
 
 type ResolvedProductPricing = ReturnType<typeof resolveProductDisplayPricing>;
 
