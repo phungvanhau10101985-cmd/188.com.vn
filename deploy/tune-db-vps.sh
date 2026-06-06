@@ -55,9 +55,13 @@ else
   SWAP_SCRIPT="${ROOT}/deploy/setup-swap.sh"
   if [[ -f "${SWAP_SCRIPT}" ]]; then
     if [[ "$(id -u)" -eq 0 ]]; then
-      bash "${SWAP_SCRIPT}" 8G || echo "    ⚠️  setup-swap thất bại — tiếp tục deploy"
+      bash "${SWAP_SCRIPT}" 8G || {
+        echo "    ⚠️  setup-swap that bai — xem loi o tren. Chay tay: sudo bash deploy/setup-swap.sh 8G"
+      }
     elif command -v sudo >/dev/null 2>&1; then
-      sudo bash "${SWAP_SCRIPT}" 8G || echo "    ⚠️  setup-swap thất bại — tiếp tục deploy"
+      sudo bash "${SWAP_SCRIPT}" 8G || {
+        echo "    ⚠️  setup-swap that bai — xem loi o tren. Chay tay: sudo bash deploy/setup-swap.sh 8G"
+      }
     else
       echo "    (bỏ qua swap — cần root hoặc sudo)"
     fi

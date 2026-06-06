@@ -73,8 +73,16 @@ if ! fallocate -l "${SWAP_SIZE}" "${SWAP_FILE}" 2>/dev/null; then
   dd if=/dev/zero of="${SWAP_FILE}" bs=1M count="${TARGET_MB}" status=none
 fi
 chmod 600 "${SWAP_FILE}"
-mkswap "${SWAP_FILE}"
-swapon "${SWAP_FILE}"
+if ! mkswap "${SWAP_FILE}"; then
+  echo "❌ mkswap that bai — kiem tra df -h / va quyen ghi ${SWAP_FILE}"
+  exit 1
+fi
+if ! swapon "${SWAP_FILE}"; then
+  echo "❌ swapon that bai — mot so VPS/LXC chan swap file."
+  echo "   Thu: dmesg | tail -5 ; df -h / ; ls -lh ${SWAP_FILE}"
+  echo "   Hoac bat swap trong panel nha cung cap."
+  exit 1
+fi
 _finish_fstab_swappiness
 
 echo

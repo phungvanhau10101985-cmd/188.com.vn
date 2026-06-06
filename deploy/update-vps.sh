@@ -473,6 +473,19 @@ if [[ -f "${PROJECT_ROOT}/deploy/relieve-db-after-restart.sh" ]]; then
 fi
 
 health_check_local || true
+
+if [[ "${DEPLOY_SKIP_SWAP:-0}" != "1" ]] && [[ "${DEPLOY_SKIP_DB_TUNING:-0}" != "1" ]]; then
+  if ! swapon --show 2>/dev/null | grep -q .; then
+    echo ""
+    echo "⚠️  Swap van = 0 sau deploy. Chay tay (root):"
+    echo "    sudo bash ${PROJECT_ROOT}/deploy/setup-swap.sh 8G"
+  else
+    echo ""
+    echo "==> Swap:"
+    swapon --show 2>/dev/null || true
+  fi
+fi
+
 print_safe_deploy_checklist
 
 echo ""
