@@ -17,6 +17,8 @@
 #   API_INTERNAL_PORT             (mặc định 8001 — Uvicorn FastAPI)
 #   WEB_INTERNAL_PORT             (mặc định 3001 — Next start)
 #   DEPLOY_RESTART_PM2=0          bỏ qua pm2 restart sau build
+#   DEPLOY_RESTART_ALL_PM2=1      (mặc định) sau deploy 188: restart mọi process PM2 khác trên VPS
+#   DEPLOY_RESTART_ALL_PM2=0      chỉ restart ${PM2_API} / ${PM2_WEB}
 #   DEPLOY_STRICT_HEALTH=1        exit 1 nếu curl health không 200
 #   DEPLOY_SKIP_DB_INIT=1         không tạo DB / không chạy init_database_tables + migrations
 #   DEPLOY_CREATE_DATABASE=0      không gọi postgres-create-db.sh (DB đã có sẵn)
@@ -86,7 +88,9 @@ port_is_listening() {
 
 if [[ "${DEPLOY_STOP_PM2_BEFORE_BUILD:-0}" == "1" ]]; then
   # next build SSR layout gọi API :8001 — KHÔNG stop 188-api (chỉ dừng web giải phóng RAM).
+  # Lưu dump trước stop để pm2 resurrect khôi phục các dự án khác sau build.
   echo "==> PM2 stop: chỉ ${PM2_WEB} (giữ ${PM2_API} cho next build)"
+  pm2 save 2>/dev/null || true
   pm2 stop "${PM2_WEB}" 2>/dev/null || true
 fi
 
@@ -288,6 +292,35 @@ pm2_web_needs_recreate() {
   return 1
 }
 
+pm2_list_process_names() {
+  pm2 jlist 2>/dev/null | python3 -c "
+import json, sys
+try:
+    for p in json.load(sys.stdin):
+        n = p.get('name')
+        if n:
+            print(n)
+except Exception:
+    pass
+" 2>/dev/null || true
+}
+
+pm2_restart_other_vps_apps() {
+  local name restarted=0
+  echo ""
+  echo "==> PM2: khởi động lại các dự án khác trên VPS (ngoài ${PM2_API}, ${PM2_WEB})"
+  while IFS= read -r name; do
+    [[ -z "${name}" ]] && continue
+    [[ "${name}" == "${PM2_API}" || "${name}" == "${PM2_WEB}" ]] && continue
+    echo "    → restart ${name}"
+    pm2 restart "${name}" --update-env 2>/dev/null || true
+    restarted=$((restarted + 1))
+  done < <(pm2_list_process_names)
+  if [[ "${restarted}" -eq 0 ]]; then
+    echo "    (Không có process PM2 nào khác trên VPS.)"
+  fi
+}
+
 health_check_local() {
   echo ""
   echo "==> Kiểm tra sức khỏe service (localhost, sau PM2 restart)"
@@ -405,7 +438,7 @@ print_safe_deploy_checklist() {
   echo ""
   echo "==> Checklist deploy an toàn (chống treo) — lần sau chạy nhanh:"
   echo "   1) Trước deploy: tạm dừng app không liên quan (vd: pm2 stop thu-do-online worksheet-worker)."
-  echo "   2) Deploy chuẩn: git pull -> backend pip/init -> frontend build -> pm2 restart ${PM2_API} ${PM2_WEB}."
+  echo "   2) Deploy chuẩn: git pull -> backend pip/init -> frontend build -> pm2 restart ${PM2_API} ${PM2_WEB} + các dự án PM2 khác."
   echo "   3) Luôn pm2 save sau restart để reboot không chạy cấu hình cũ."
   echo "   4) Flush log rồi theo dõi lỗi mới: pm2 flush ${PM2_API}; pm2 flush ${PM2_WEB}; pm2 logs ..."
   echo "   5) Nếu web lag: kiểm tra DB active query (pg_stat_activity), hủy query nặng/idle transaction kéo dài."
@@ -421,11 +454,14 @@ if [[ "${DEPLOY_RESTART_PM2:-1}" != "1" ]]; then
 fi
 
 echo ""
-echo "==> PM2: khởi động lại ${PM2_API} và ${PM2_WEB}"
+echo "==> PM2: khôi phục dump + khởi động lại ${PM2_API}, ${PM2_WEB} và các dự án khác trên VPS"
+pm2 resurrect 2>/dev/null || true
+
 if pm2 describe "${PM2_API}" &>/dev/null; then
   pm2 restart "${PM2_API}" --update-env
 else
-  echo "⚠️  Chưa có ${PM2_API} — tạo từ ecosystem: pm2 start deploy/ecosystem.config.cjs --only ${PM2_API}"
+  echo "⚠️  Chưa có ${PM2_API} — tạo từ ecosystem"
+  pm2 start "${PROJECT_ROOT}/deploy/ecosystem.config.cjs" --only "${PM2_API}" 2>/dev/null || true
 fi
 
 if pm2_web_needs_recreate; then
@@ -434,6 +470,13 @@ elif pm2 describe "${PM2_WEB}" &>/dev/null; then
   pm2 restart "${PM2_WEB}" --update-env
 else
   pm2_recreate_web_from_ecosystem
+fi
+
+if [[ "${DEPLOY_RESTART_ALL_PM2:-1}" == "1" ]]; then
+  pm2_restart_other_vps_apps
+else
+  echo ""
+  echo "==> DEPLOY_RESTART_ALL_PM2=0 — chỉ restart ${PM2_API} / ${PM2_WEB}."
 fi
 
 pm2 save || true
