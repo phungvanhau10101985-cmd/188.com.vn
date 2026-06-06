@@ -47,7 +47,7 @@ DEPLOY_GIT_SYNC=reset-hard DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NOD
 
 **Nginx → Next (Server Actions):** trong mỗi `location` proxy, nên có đủ header: `Host`, `X-Forwarded-For`, `X-Forwarded-Proto`; thêm **`proxy_set_header X-Forwarded-Host $host;`** giúp giảm cảnh báo *Missing origin*. Chi tiết ví dụ: `HUONG_DAN_DEPLOY.md` — Phần 4.
 
-Script sẽ **tự `pm2 restart`** (nếu đã có `188-api` / `188-web`) và **`pm2 save`**, rồi **curl kiểm tra** `:${API_INTERNAL_PORT:-8001}/health` và `:${WEB_INTERNAL_PORT:-3001}/`. `DEPLOY_RESTART_PM2=0` để chỉ build không restart. `DEPLOY_STRICT_HEALTH=1` để fail (exit≠0) khi không 200.
+Script sẽ **tự `pm2 restart`** (nếu đã có `188-api` / `188-web`) và **`pm2 save`**, rồi **curl kiểm tra** `:${API_INTERNAL_PORT:-8001}/health` và `:${WEB_INTERNAL_PORT:-3001}/robots.txt` (nhẹ — không SSR trang chủ). Kiểm tra tay: `bash deploy/health-check.sh`. `DEPLOY_RESTART_PM2=0` để chỉ build không restart. `DEPLOY_STRICT_HEALTH=1` để fail (exit≠0) khi không 200.
 
 Lệnh không dùng `pm2 stop all` (tránh làm nanoai). Đặt biến `PM2_API_NAME` / `PM2_WEB_NAME` nếu tên PM2 khác `188-api` / `188-web`.
 

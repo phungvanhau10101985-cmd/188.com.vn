@@ -107,19 +107,19 @@ pm2 start deploy/ecosystem.config.cjs --only "${PM2_WEB}"
 pm2 save || true
 
 echo ""
-echo "==> Chờ Web (tối đa 60s)..."
+echo "==> Chờ Web (tối đa 60s, GET /robots.txt — không SSR trang chủ)..."
 code="000"
 for _i in $(seq 1 60); do
-  code=$(curl_http_code "http://127.0.0.1:${PORT}/")
-  if [[ "${code}" == "200" ]]; then
+  code=$(curl_http_code "http://127.0.0.1:${PORT}/robots.txt")
+  if [[ "${code}" == "200" || "${code}" == "204" ]]; then
     break
   fi
   sleep 1
 done
 
-echo "    GET http://127.0.0.1:${PORT}/ → ${code}"
+echo "    GET http://127.0.0.1:${PORT}/robots.txt → ${code}"
 
-if [[ "${code}" != "200" ]]; then
+if [[ "${code}" != "200" && "${code}" != "204" ]]; then
   echo ""
   echo "❌ Vẫn không healthy. Log lỗi:"
   pm2 logs "${PM2_WEB}" --lines 80 --nostream 2>/dev/null || true

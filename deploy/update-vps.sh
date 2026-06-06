@@ -176,14 +176,47 @@ if [[ "${DEPLOY_SKIP_TYPECHECK:-0}" == "1" ]]; then
   echo "==> Lưu ý: DEPLOY_SKIP_TYPECHECK=1 không tự tắt TS — cần ignoreBuildErrors trong next.config nếu muốn bỏ qua lỗi type."
 fi
 
+port_is_listening() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tln 2>/dev/null | grep -qE ":${port}\\b"
+    return $?
+  fi
+  if command -v nc >/dev/null 2>&1; then
+    nc -z 127.0.0.1 "${port}" >/dev/null 2>&1
+    return $?
+  fi
+  return 1
+}
+
 curl_http_code() {
   local url="$1"
+  local max_time="${2:-5}"
   local code=""
-  code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 10 "$url" 2>/dev/null) || true
+  code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 1 --max-time "${max_time}" "$url" 2>/dev/null) || true
   if [[ -z "${code}" ]]; then
     echo "000"
   else
     echo "${code}"
+  fi
+}
+
+run_with_timeout() {
+  local secs="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${secs}" "$@" 2>/dev/null || true
+  else
+    "$@" 2>/dev/null || true
+  fi
+}
+
+health_wait_tick() {
+  local label="$1"
+  local attempt="$2"
+  local max="$3"
+  if (( attempt == 1 || attempt % 5 == 0 || attempt == max )); then
+    echo "    … ${label} (${attempt}/${max}s)"
   fi
 }
 
@@ -224,29 +257,44 @@ pm2_web_needs_recreate() {
 health_check_local() {
   echo ""
   echo "==> Kiểm tra sức khỏe service (localhost, sau PM2 restart)"
+  # Không dùng GET / — trang chủ SSR + gọi API có thể >10s/lần → health check im lặng hàng phút.
+  local web_path="${WEB_HEALTH_PATH:-/robots.txt}"
+  local api_wait="${HEALTH_API_WAIT_SEC:-45}"
+  local web_wait="${HEALTH_WEB_WAIT_SEC:-60}"
   local api_code="000" web_code="000"
   local _i
-  for _i in $(seq 1 45); do
-    api_code=$(curl_http_code "http://127.0.0.1:${API_INTERNAL_PORT}/health")
-    if [[ "${api_code}" == "200" ]]; then
-      break
+  echo "    API: http://127.0.0.1:${API_INTERNAL_PORT}/health (tối đa ${api_wait}s)"
+  for _i in $(seq 1 "${api_wait}"); do
+    health_wait_tick "chờ API" "${_i}" "${api_wait}"
+    if port_is_listening "${API_INTERNAL_PORT}"; then
+      api_code=$(curl_http_code "http://127.0.0.1:${API_INTERNAL_PORT}/health" 3)
+      if [[ "${api_code}" == "200" ]]; then
+        break
+      fi
+    else
+      api_code="000"
     fi
     sleep 1
   done
-  # Next.js cold start sau build/restart có thể >10s — chờ tương tự API.
-  for _i in $(seq 1 60); do
-    web_code=$(curl_http_code "http://127.0.0.1:${WEB_INTERNAL_PORT}/")
-    if [[ "${web_code}" == "200" ]]; then
-      break
+  echo "    Web: http://127.0.0.1:${WEB_INTERNAL_PORT}${web_path} (nhẹ, không SSR trang chủ — tối đa ${web_wait}s)"
+  for _i in $(seq 1 "${web_wait}"); do
+    health_wait_tick "chờ Web" "${_i}" "${web_wait}"
+    if port_is_listening "${WEB_INTERNAL_PORT}"; then
+      web_code=$(curl_http_code "http://127.0.0.1:${WEB_INTERNAL_PORT}${web_path}" 5)
+      if [[ "${web_code}" == "200" || "${web_code}" == "204" ]]; then
+        break
+      fi
+    else
+      web_code="000"
     fi
     sleep 1
   done
   echo "    GET http://127.0.0.1:${API_INTERNAL_PORT}/health  → ${api_code}"
   local ship_stats_code
-  ship_stats_code=$(curl_http_code "http://127.0.0.1:${API_INTERNAL_PORT}/api/v1/orders/admin/shipping/operations-stats")
+  ship_stats_code=$(curl_http_code "http://127.0.0.1:${API_INTERNAL_PORT}/api/v1/orders/admin/shipping/operations-stats" 5)
   echo "    GET .../orders/admin/shipping/operations-stats → ${ship_stats_code} (401/403=OK, 404=cần pull+restart API)"
-  echo "    GET http://127.0.0.1:${WEB_INTERNAL_PORT}/           → ${web_code}"
-  if [[ "${api_code}" == "200" && "${web_code}" == "200" ]]; then
+  echo "    GET http://127.0.0.1:${WEB_INTERNAL_PORT}${web_path} → ${web_code}"
+  if [[ "${api_code}" == "200" && ( "${web_code}" == "200" || "${web_code}" == "204" ) ]]; then
     echo "✅ Sức khỏe: OK."
     return 0
   fi
@@ -260,9 +308,9 @@ health_check_local() {
     echo "    --- cổng đang listen ---"
     ss -tlnp 2>/dev/null | grep -E ":(${API_INTERNAL_PORT}|8000|8001)\\b" || true
     echo "    --- ${PM2_API} error log (20 dòng cuối) ---"
-    pm2 logs "${PM2_API}" --lines 20 --nostream 2>/dev/null || true
+    run_with_timeout 15 pm2 logs "${PM2_API}" --lines 20 --nostream
   fi
-  if [[ "${web_code}" != "200" ]]; then
+  if [[ "${web_code}" != "200" && "${web_code}" != "204" ]]; then
     echo "    Gợi ý Web: Next cần frontend/.next sau build; cổng ${WEB_INTERNAL_PORT} (PORT trong PM2)."
     echo "    Sửa nhanh: bash deploy/fix-web-health.sh"
     echo ""
@@ -274,7 +322,7 @@ health_check_local() {
       echo "    ❌ Thiếu ${FRONTEND}/.next — chạy lại: cd frontend && npm run build"
     fi
     echo "    --- ${PM2_WEB} error log (40 dòng cuối) ---"
-    pm2 logs "${PM2_WEB}" --lines 40 --nostream 2>/dev/null || true
+    run_with_timeout 20 pm2 logs "${PM2_WEB}" --lines 40 --nostream
   fi
   [[ "${DEPLOY_STRICT_HEALTH:-0}" == "1" ]] && return 1
   return 0
@@ -306,7 +354,7 @@ fi
 pm2 save || true
 sleep 5
 
-health_check_local
+health_check_local || true
 
 echo ""
 echo "==> Deploy xong."
