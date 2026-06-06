@@ -36,6 +36,7 @@ from app.services.image_localization_service import (
     is_image_localization_fatal_dependency_error,
     products_for_job_resume,
     products_pending_localization,
+    reset_stale_processing_before_fresh_job,
     reset_stale_processing_in_queue,
     save_gemini_cookie,
 )
@@ -385,6 +386,21 @@ def _reset_product_after_cancel(db: Session, product: Product) -> None:
         db.commit()
 
 
+def _reset_product_after_cancel_by_pk(product_db_id: int) -> None:
+    def write(sess: Session) -> None:
+        fresh = sess.query(Product).filter(Product.id == product_db_id).first()
+        if fresh is None:
+            return
+        if (fresh.image_localization_status or "").strip() == "processing":
+            fresh.image_localization_status = "pending"
+            fresh.image_localization_error = None
+
+    try:
+        run_db_write(SessionLocal, write)
+    except Exception:
+        logger.exception("Không reset pending sau hủy product_db_id=%s", product_db_id)
+
+
 def _reset_product_processing_by_product_id(db: Session, product_id: str) -> None:
     pid = (product_id or "").strip()
     if not pid:
@@ -511,11 +527,15 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                 started_at=row.started_at.isoformat() if row.started_at else datetime.now(timezone.utc).isoformat(),
             )
         else:
+            stale_n = reset_stale_processing_before_fresh_job(db)
             _job_update(
                 job_id,
                 status="running",
                 phase="selecting",
-                message="Đang chọn sản phẩm chưa bản địa hóa...",
+                message=(
+                    "Đang chọn sản phẩm chưa bản địa hóa..."
+                    + (f" (đã mở khóa {stale_n} SP kẹt processing)" if stale_n else "")
+                ),
                 started_at=datetime.now(timezone.utc).isoformat(),
             )
             limit = payload.limit or int(getattr(settings, "IMAGE_LOCALIZATION_BATCH_LIMIT", 0) or 0)
@@ -614,6 +634,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             db.close()
             db = SessionLocal()
             product = db.query(Product).filter(Product.product_id == product_id).first()
+            product_db_id: Optional[int] = product.id if product is not None else None
             if product is None:
                 skipped += 1
                 _mark_processed_product(processed_ids, processed_set, product_id)
@@ -709,12 +730,14 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     consecutive_product_failures = 0
             except Exception as exc:
                 if _job_is_cancelled(job_id):
-                    db.rollback()
-                    _reset_product_after_cancel(db, product)
+                    release_db_session(db)
+                    if product_db_id is not None:
+                        _reset_product_after_cancel_by_pk(product_db_id)
                     return
                 if should_cancel() or _is_job_cancel_exception(exc):
-                    db.rollback()
-                    _reset_product_after_cancel(db, product)
+                    release_db_session(db)
+                    if product_db_id is not None:
+                        _reset_product_after_cancel_by_pk(product_db_id)
                     _finalize_job_cancelled(
                         job_id,
                         done=done,
@@ -734,7 +757,9 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     transient_db_retries[product_id] = retry_n
                     if retry_n < 3:
                         def _reset_pending(sess: Session) -> None:
-                            fresh = sess.query(Product).filter(Product.id == product.id).first()
+                            if product_db_id is None:
+                                return
+                            fresh = sess.query(Product).filter(Product.id == product_db_id).first()
                             if fresh is None:
                                 return
                             if (fresh.image_localization_status or "").strip() == "processing":
@@ -781,7 +806,9 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                 failed += 1
 
                 def _mark_failed(sess: Session) -> None:
-                    fresh = sess.query(Product).filter(Product.id == product.id).first()
+                    if product_db_id is None:
+                        return
+                    fresh = sess.query(Product).filter(Product.id == product_db_id).first()
                     if fresh is None:
                         return
                     fresh.image_localization_status = "failed"

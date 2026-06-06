@@ -699,7 +699,8 @@ async def export_excel(
         result = importer.export_to_excel(products_data, filename)
         
         if not result.get("success", False):
-            raise HTTPException(status_code=500, detail=result.get("error", "Export failed"))
+            err = result.get("error") or "Export failed"
+            raise HTTPException(status_code=500, detail=f"Export thất bại: {err}")
         
         print(f"\n{'='*60}")
         print(f"✅ EXPORT HOÀN TẤT")
@@ -718,7 +719,11 @@ async def export_excel(
                     media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
             else:
-                raise HTTPException(status_code=500, detail="Export file not created")
+                missing = result.get("filepath") or "(không có đường dẫn file)"
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Export thất bại: không tạo được file Excel tại {missing}",
+                )
         
         # IF download=false, return JSON info (default)
         return {

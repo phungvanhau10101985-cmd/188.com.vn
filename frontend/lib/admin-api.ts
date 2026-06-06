@@ -1958,8 +1958,20 @@ export const adminProductAPI = {
     const url = `${getApiBaseUrl()}/import-export/export/excel?download=true`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+      signal: AbortSignal.timeout(900_000),
     });
-    if (!res.ok) throw new Error('Export thất bại');
+    if (!res.ok) {
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (ct.includes('application/json')) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(
+          formatFastApiDetail((err as { detail?: unknown }).detail ?? err) ||
+            `Export thất bại (HTTP ${res.status})`,
+        );
+      }
+      const text = (await res.text().catch(() => '')).trim();
+      throw new Error(text.slice(0, 600) || `Export thất bại (HTTP ${res.status})`);
+    }
     const blob = await res.blob();
     const disposition = res.headers.get('Content-Disposition');
     const match = disposition?.match(/filename="?([^";]+)"?/);

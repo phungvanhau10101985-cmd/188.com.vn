@@ -597,7 +597,10 @@ def read_products(
         description="Lọc hiển thị shop. Mặc định storefront=true; admin_list=true thì mặc định null (mọi trạng thái).",
     ),
     q: Optional[str] = Query(None, description="Tìm theo tên, mã, danh mục, vật liệu, kiểu dáng, màu sắc, dịp, tính năng, size (từ khóa rời rạc)"),
-    product_id: Optional[str] = Query(None, description="Tìm theo ID sản phẩm (Excel) hoặc mã SKU (cột code)"),
+    product_id: Optional[str] = Query(
+        None,
+        description="Tìm theo ID SP (cột A / prefix A|T+số, có hoặc không hậu tố a188SKU), mã SKU (code) hoặc khớp một phần",
+    ),
     order_random: bool = Query(False, description="Trộn ngẫu nhiên (chỉ áp dụng khi không có q); phân trang theo random không ổn định giữa các lần tải"),
     sort: Optional[str] = Query(
         None,
@@ -690,7 +693,10 @@ def read_products_full_list(
         description="Lọc hiển thị shop. Mặc định true (chỉ SP đang bán).",
     ),
     q: Optional[str] = Query(None, description="Tìm theo tên, mã, danh mục, vật liệu, kiểu dáng, màu sắc, dịp, tính năng, size (từ khóa rời rạc)"),
-    product_id: Optional[str] = Query(None, description="Tìm theo ID sản phẩm (Excel) hoặc mã SKU (cột code)"),
+    product_id: Optional[str] = Query(
+        None,
+        description="Tìm theo ID SP (cột A / prefix A|T+số, có hoặc không hậu tố a188SKU), mã SKU (code) hoặc khớp một phần",
+    ),
     order_random: bool = Query(False, description="Trộn ngẫu nhiên (chỉ áp dụng khi không có q); phân trang theo random không ổn định giữa các lần tải"),
     sort: Optional[str] = Query(
         None,

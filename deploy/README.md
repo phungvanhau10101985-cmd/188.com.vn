@@ -97,15 +97,26 @@ pm2 logs 188-web --lines 80
 ### Admin / API báo **504 Gateway Timeout**
 
 - **Nguyên nhân hay gặp:** Nginx `proxy_read_timeout` mặc định (~60s) nhỏ hơn thời gian FastAPI chờ **PostgreSQL** (pool hoặc query chậm) → Nginx trả 504 trước khi API xong.
-- **Sửa:** Trong `location /api/` trên VPS thêm (hoặc đồng bộ với `deploy/nginx-site-188.com.vn.conf.example` đã cập nhật):
+- **Kiểm tra timeout hiện tại trên VPS:**
 
-```nginx
-proxy_connect_timeout 75s;
-proxy_send_timeout 180s;
-proxy_read_timeout 180s;
+```bash
+sudo nginx -T 2>/dev/null | grep -E 'server_name|location |proxy_read_timeout|proxy_send_timeout'
 ```
 
-Sau đó `sudo nginx -t && sudo systemctl reload nginx`.
+- **Giá trị khuyến nghị** (file mẫu `deploy/nginx-site-188.com.vn.conf.example`):
+
+| Location | `proxy_read_timeout` | `proxy_send_timeout` | Ghi chú |
+|----------|----------------------|----------------------|---------|
+| `/api/v1/import-export/import/` | **3600s** | **3600s** | Upload + import Excel lớn |
+| `/api/v1/import-export/export/` | **900s** | **900s** | Export ~30k SP |
+| `location /api/` (còn lại) | **900s** | **900s** | Trước đây thường chỉ **180s** → export dễ 504 |
+| `location /` → Next :3001 | **900s** | **900s** | Mặc định nginx ~60s nếu không khai báo |
+
+- **Sửa:** Đồng bộ VPS với mẫu trên (hoặc copy cả file), rồi:
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
 
 - **Đồng thời:** Giữ `DATABASE_POOL_*` trong `backend/.env` đủ lớn và `pm2 restart 188-api --update-env`; xem log `QueuePool` / `TimeoutError`.
 

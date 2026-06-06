@@ -19,7 +19,7 @@ import requests
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.retry import release_db_session, run_db_write
+from app.db.retry import preload_product_for_offline_use, release_db_session, run_db_write
 from app.db.session import SessionLocal
 from app.models.product import Product
 from app.services.image_localization_temp_cleanup import (
@@ -2454,7 +2454,8 @@ class ProductImageLocalizationService:
 
         product_pk = product.id
         # Trả connection về pool trước bước xử lý ảnh lâu — tránh SSL idle timeout khi commit.
-        release_db_session(db)
+        preload_product_for_offline_use(product)
+        release_db_session(db, detach_objects=(product,))
 
         refs = self._collect_refs(product)
         unique_urls = []
@@ -2701,6 +2702,21 @@ class ProductImageLocalizationService:
         )
         info["image_localization"] = loc
         product.product_info = info
+
+
+def reset_stale_processing_before_fresh_job(db: Session) -> int:
+    """SP kẹt `processing` sau job crash — trả về `pending` khi admin chạy job mới."""
+    rows = (
+        db.query(Product)
+        .filter(Product.image_localization_status == "processing")
+        .all()
+    )
+    for p in rows:
+        p.image_localization_status = "pending"
+        p.image_localization_error = None
+    if rows:
+        db.commit()
+    return len(rows)
 
 
 def reset_stale_processing_in_queue(

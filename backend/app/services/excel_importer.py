@@ -8,6 +8,7 @@ import os
 import re
 from datetime import datetime
 import traceback
+from pathlib import Path
 
 from app.crud.product import (
     excel_row_to_product,
@@ -23,6 +24,18 @@ logger = logging.getLogger(__name__)
 
 # Báo tiến trình parse file (tránh gọi quá dày với file lớn)
 PARSE_PROGRESS_EVERY = 200
+
+# Tự chỉnh độ rộng cột trên file nhỏ; catalog lớn bỏ qua (tránh timeout trên VPS).
+_EXPORT_AUTO_COLUMN_WIDTH_MAX_ROWS = 2500
+
+
+def _resolve_export_dir() -> Path:
+    """Đường dẫn tuyệt đối tới thư mục export — không phụ thuộc cwd khi chạy uvicorn trên VPS."""
+    configured = Path(settings.UPLOAD_DIR)
+    if configured.is_absolute():
+        return configured
+    backend_root = Path(__file__).resolve().parents[2]
+    return (backend_root / settings.UPLOAD_DIR).resolve()
 
 # Thứ tự cột export Excel / đồng bộ Google Sheet catalog (41 cột)
 PRODUCT_EXCEL_EXPORT_COLUMNS = [
@@ -361,9 +374,9 @@ class ExcelImporter:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"export_products_{timestamp}.xlsx"
             
-            export_dir = os.path.join("app", "static", "uploads")
-            os.makedirs(export_dir, exist_ok=True)
-            filepath = os.path.join(export_dir, filename)
+            export_dir = _resolve_export_dir()
+            export_dir.mkdir(parents=True, exist_ok=True)
+            filepath = str(export_dir / filename)
             
             vietnamese_headers = PRODUCT_EXCEL_VIETNAMESE_HEADERS
             
@@ -378,18 +391,24 @@ class ExcelImporter:
                     viet_name = vietnamese_headers.get(col_name, col_name)
                     worksheet.cell(row=2, column=col_idx, value=viet_name)
                 
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
-                        try:
-                            if cell.value:
-                                cell_length = len(str(cell.value))
-                                max_length = max(max_length, cell_length)
-                        except:
-                            pass
-                    adjusted_width = min(max_length + 2, 50)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
+                if len(df) <= _EXPORT_AUTO_COLUMN_WIDTH_MAX_ROWS:
+                    for column in worksheet.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if cell.value:
+                                    cell_length = len(str(cell.value))
+                                    max_length = max(max_length, cell_length)
+                            except Exception:
+                                pass
+                        adjusted_width = min(max_length + 2, 50)
+                        worksheet.column_dimensions[column_letter].width = adjusted_width
+                else:
+                    from openpyxl.utils import get_column_letter
+
+                    for col_idx in range(1, len(available_columns) + 1):
+                        worksheet.column_dimensions[get_column_letter(col_idx)].width = 18
             
             file_size = os.path.getsize(filepath)
             logger.info(f"✅ EXPORT THÀNH CÔNG: {filename}")

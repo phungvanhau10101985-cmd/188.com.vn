@@ -58,8 +58,34 @@ def _safe_close(db: Session) -> None:
         pass
 
 
-def release_db_session(db: Session) -> None:
+def preload_product_for_offline_use(product: Any) -> None:
+    """Force-load ORM fields before session close so detached Product stays readable."""
+    _ = (
+        product.id,
+        product.product_id,
+        product.code,
+        product.colors,
+        product.images,
+        product.gallery,
+        product.main_image,
+        product.product_info,
+        product.image_localization_status,
+    )
+
+
+def detach_session_objects(db: Session, *objects: Any) -> None:
+    for obj in objects:
+        if obj is None:
+            continue
+        try:
+            db.expunge(obj)
+        except Exception:
+            pass
+
+
+def release_db_session(db: Session, *, detach_objects: tuple[Any, ...] = ()) -> None:
     """Return connection to pool after short DB work (before long CPU/IO)."""
+    detach_session_objects(db, *detach_objects)
     _safe_rollback(db)
     _safe_close(db)
 

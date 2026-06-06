@@ -1665,6 +1665,82 @@ def listing_parser_ids_existing_in_products(
     return out
 
 
+def _build_product_id_or_code_filter(term: str):
+    """
+    Lọc admin/storefront theo ID Excel, prefix nguồn (A/T + số), SKU nội bộ hoặc khớp một phần.
+    Vd. «A1045143359347» hoặc chỉ «1045143359347» → «A1045143359347a188K0842»; «K0842» → code / a188SKU.
+    """
+    t = (term or "").strip()
+    if not t:
+        return None
+
+    clauses = []
+    tu = t.upper()
+    digits_only = t.isdigit()
+
+    clauses.extend(
+        [
+            Product.product_id == t,
+            Product.code == t,
+            sql_func.upper(sql_func.trim(Product.code)) == tu,
+            Product.base_sku == t,
+            sql_func.upper(sql_func.trim(Product.base_sku)) == tu,
+        ]
+    )
+
+    norm_listing = normalize_listing_parser_external_id(t)
+    if norm_listing:
+        clauses.append(Product.product_id == norm_listing)
+        if _LISTING_PARSER_AT_NUMERIC_ONLY.fullmatch(norm_listing):
+            clauses.append(Product.product_id.ilike(f"{norm_listing}a188%"))
+            clauses.append(Product.product_id.ilike(f"{norm_listing}%"))
+
+    # Chỉ dãy số (không có A/T): coi là mã nguồn 1688/Taobao — thử A… và T…
+    if digits_only and len(t) >= 4:
+        for pfx in ("A", "T"):
+            prefixed = f"{pfx}{t}"
+            clauses.append(Product.product_id == prefixed)
+            clauses.append(Product.product_id.ilike(f"{prefixed}a188%"))
+            clauses.append(Product.product_id.ilike(f"{prefixed}%"))
+        clauses.append(Product.product_id.ilike(f"%{t}%"))
+
+    try:
+        from app.services.product_internal_sku import internal_sku_is_valid_format
+
+        if internal_sku_is_valid_format(t):
+            clauses.append(sql_func.upper(sql_func.trim(Product.code)) == tu)
+            clauses.append(Product.product_id.ilike(f"%a188{tu}%"))
+    except Exception:
+        pass
+
+    seg = split_product_id_web_prefix_and_internal_sku(t)
+    if seg and seg.get("sku"):
+        clauses.append(sql_func.upper(sql_func.trim(Product.code)) == seg["sku"])
+        clauses.append(Product.product_id.ilike(f"%a188{seg['sku']}%"))
+
+    if _PRODUCT_ID_A188_RE.search(t):
+        clauses.append(Product.product_id.ilike(f"%{t}%"))
+
+    if digits_only:
+        try:
+            pk = int(t)
+            if 0 < pk <= 2_147_483_647:
+                clauses.append(Product.id == pk)
+        except ValueError:
+            pass
+    elif len(t) >= 3:
+        like = f"%{t}%"
+        clauses.extend(
+            [
+                Product.product_id.ilike(like),
+                Product.code.ilike(like),
+                Product.base_sku.ilike(like),
+            ]
+        )
+
+    return or_(*clauses)
+
+
 def listing_parser_ids_with_done_drafts(db: Session, candidate_external_ids: List[str]) -> Set[str]:
     """
     Id listing (A|T + chữ số sau chuẩn hóa) đã có bản nháp import crawl xong:
@@ -4228,8 +4304,9 @@ def get_products(
     if is_active is not None:
         query = query.filter(Product.is_active == is_active)
     if product_id:
-        pid_term = product_id.strip()
-        query = query.filter(or_(Product.product_id == pid_term, Product.code == pid_term))
+        pid_filter = _build_product_id_or_code_filter(product_id)
+        if pid_filter is not None:
+            query = query.filter(pid_filter)
     total = 0
     products = []
     applied_query = None
@@ -6383,22 +6460,19 @@ def bulk_import_products(
 # ========== EXPORT FUNCTIONS ==========
 
 def get_all_products_for_export(db: Session) -> List[Dict]:
-    """Get all products in Excel format (37 columns)"""
+    """Get all products in Excel format (37 columns) — đọc theo lô để giảm RAM và timeout DB."""
+    excel_rows: List[Dict] = []
     try:
-        products = db.query(Product).all()
-        excel_rows = []
-        
-        for product in products:
+        query = db.query(Product).order_by(Product.id.asc()).yield_per(300)
+        for product in query:
             excel_row = product_to_excel_row(product)
             if excel_row:
                 excel_rows.append(excel_row)
-        
         logger.info(f"📤 Prepared {len(excel_rows)} products for export")
         return excel_rows
-        
     except Exception as e:
         logger.error(f"❌ Error getting products for export: {str(e)}")
-        return []
+        raise
 
 # ========== UTILITY FUNCTIONS ==========
 

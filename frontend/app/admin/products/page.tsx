@@ -2315,8 +2315,12 @@ export default function AdminProductsPage() {
     try {
       await adminProductAPI.exportExcel();
       showToast('ok', 'Đã tải file Excel xuống');
-    } catch {
-      showToast('err', 'Export thất bại');
+    } catch (e) {
+      const msg =
+        e instanceof Error && e.message.trim()
+          ? e.message.trim()
+          : 'Export thất bại — không nhận được phản hồi từ server';
+      showToast('err', msg, 10_000);
     } finally {
       setExporting(false);
     }
@@ -4401,7 +4405,7 @@ export default function AdminProductsPage() {
                   type="text"
                   value={searchId}
                   onChange={(e) => setSearchId(e.target.value)}
-                  placeholder="ID sản phẩm hoặc mã SKU..."
+                  placeholder="1045143359347, A104…, K0842, SKU…"
                   className="w-full h-9 rounded-lg border border-gray-300 px-3 text-sm"
                 />
               </div>

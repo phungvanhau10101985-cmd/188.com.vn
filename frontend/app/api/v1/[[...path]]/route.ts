@@ -147,7 +147,10 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
       pathSuffix.includes('/import-export/sync/google-sheet-skus') && req.method === 'POST';
     const googleSheetCatalogSync =
       pathSuffix.includes('/import-export/sync/google-sheet-product-catalog') && req.method === 'POST';
-    const timeoutMs = heavyUpload
+    /** Export toàn bộ catalog (~30k SP) có thể > 2 phút trên VPS. */
+    const heavyProductExport =
+      pathSuffix.includes('/import-export/export/excel') && req.method === 'GET';
+    const timeoutMs = heavyUpload || heavyProductExport
       ? 900_000
       : googleSheetCatalogSync
         ? 660_000
