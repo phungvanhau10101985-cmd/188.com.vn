@@ -4505,6 +4505,20 @@ def get_product_category_branch_keys(db: Session, is_active: bool = True) -> Dic
     return {"level2_keys": sorted(level2), "level3_keys": sorted(level3)}
 
 
+def _build_storefront_active_category_id_counts(db: Session) -> Dict[int, int]:
+    """Một query GROUP BY — dùng cho prune menu thay vì COUNT từng nhánh L3."""
+    from app.services.warehouse_clearance import apply_catalog_visibility_filter
+
+    q = db.query(Product.category_id, sql_func.count(Product.id))
+    q = q.filter(Product.is_active.is_(True), Product.category_id.isnot(None))
+    q = apply_catalog_visibility_filter(q)
+    return {
+        int(cid): int(cnt)
+        for cid, cnt in q.group_by(Product.category_id).all()
+        if cid is not None
+    }
+
+
 def count_products_for_category_path(
     db: Session,
     name1: str,
@@ -4513,6 +4527,7 @@ def count_products_for_category_path(
     is_active: bool = True,
     *,
     cat3_by_triple: Optional[Dict[str, int]] = None,
+    cat_counts_by_id: Optional[Dict[int, int]] = None,
     storefront_visible: bool = False,
 ) -> int:
     """
@@ -4571,6 +4586,19 @@ def count_products_for_category_path(
 
     # Có taxonomy cat3: FK là nguồn sự thật (giống `/c/`). Text chỉ áp khi category_id NULL.
     # → Nhánh nguồn sau map (SP đã đổi FK) không còn bị đếm nhờ text cũ; nhánh đích vẫn nhận SP lệch chữ.
+    if cid is not None and cat_counts_by_id is not None:
+        base_count = int(cat_counts_by_id.get(int(cid), 0))
+        if not text_parts:
+            return base_count
+        text_match = and_(*text_parts)
+        extra = _count_products_query(_apply_storefront_filters(
+            db.query(Product).filter(
+                Product.is_active == is_active,
+                Product.category_id.is_(None),
+                text_match,
+            )
+        ))
+        return base_count + extra
     if cid is not None and text_parts:
         text_match = and_(*text_parts)
         return _count_products_query(_apply_storefront_filters(
@@ -4645,6 +4673,7 @@ def prune_category_tree_empty_branches(
 
     out: List[Dict[str, Any]] = []
     triple_idx = _build_cat3_triple_name_lookup(db)
+    cat_counts_by_id = _build_storefront_active_category_id_counts(db)
     for c1 in tree:
         name1 = (c1.get("name") or "").strip()
         if not name1 or _is_junk_level1_menu_category(name1):
@@ -4669,6 +4698,7 @@ def prune_category_tree_empty_branches(
                     n3s,
                     is_active,
                     cat3_by_triple=triple_idx,
+                    cat_counts_by_id=cat_counts_by_id,
                     storefront_visible=True,
                 )
                 if _l3_meets_menu_min(cnt):
@@ -4908,7 +4938,13 @@ def get_category_tree_from_products(
 
 # Cùng key/TTL với GET /categories/from-products — by-path phải dùng đúng cây menu đã cache,
 # tránh lệch (menu còn mà trang /danh-muc/... báo không tồn tại).
-_CATEGORY_MENU_TREE_TTL_SEC = 60.0
+def _category_menu_tree_ttl_sec() -> float:
+    try:
+        return max(30.0, float(getattr(settings, "CATEGORY_MENU_TREE_TTL_SECONDS", 300)))
+    except (TypeError, ValueError):
+        return 300.0
+
+
 _CATEGORY_MENU_TREE_KEY_ACTIVE = "category_tree_v1:from_products:active=true"
 _CATEGORY_MENU_TREE_KEY_ALL = "category_tree_v1:from_products:active=false"
 
@@ -4929,10 +4965,10 @@ def _build_menu_tree_session(is_active: bool) -> List[Dict[str, Any]]:
 
 
 def get_cached_menu_category_tree(is_active: bool = True) -> List[Dict[str, Any]]:
-    """Cây danh mục trên menu (đã lọc theo CATEGORY_MENU_MIN_PRODUCT_COUNT). Cache process 60s, đồng bộ với from-products."""
+    """Cây danh mục trên menu (đã lọc theo CATEGORY_MENU_MIN_PRODUCT_COUNT). Cache in-process (mặc định 300s)."""
     from app.utils.ttl_cache import cache as ttl_cache
     key = _CATEGORY_MENU_TREE_KEY_ACTIVE if is_active else _CATEGORY_MENU_TREE_KEY_ALL
-    return ttl_cache.get_or_fetch(key, _CATEGORY_MENU_TREE_TTL_SEC, lambda: _build_menu_tree_session(is_active))
+    return ttl_cache.get_or_fetch(key, _category_menu_tree_ttl_sec(), lambda: _build_menu_tree_session(is_active))
 
 
 def get_category_by_path(

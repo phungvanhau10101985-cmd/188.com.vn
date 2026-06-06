@@ -23,7 +23,7 @@ git pull origin main
 DEPLOY_SKIP_GIT=1 DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
 ```
 
-(`DEPLOY_SKIP_GIT=1` = không chạy `git` thêm lần nữa trong script, vì đã `git pull` tay; bỏ biến này nếu muốn script tự `git pull`.)
+(`DEPLOY_SKIP_GIT=1` = không chạy `git` thêm lần nữa trong script, vì đã `git pull` tay; bỏ biến này nếu muốn script tự `git pull`. Script cũng tự: **`.env` pool/TTL**, **index DB**, **swap 4G** — xem mục 2b.)
 
 1. Cài **PostgreSQL**, tạo DB/user (xem `postgres-init.sql.example`). Script **`deploy/update-vps.sh`** (mặc định) sẽ **tự tạo database PostgreSQL** nếu đọc `DATABASE_URL` trỏ tới Postgres (tên DB lấy sau path, vd. `188comvn`), rồi chạy **`init_database_tables()`** (tạo bảng + **`run_migrations()`**). Tuỳ chọn: `DEPLOY_SKIP_DB_INIT=1` (bỏ qua toàn bộ bước DB), `DEPLOY_CREATE_DATABASE=0` (chỉ không gọi `postgres-create-db.sh`, vẫn chạy migrations), `DEPLOY_STRICT_DB_INIT=0` (lỗi DB không dừng script deploy). Nếu log API báo **`FATAL: database "…" does not exist`** mà chưa chạy script: tạo tay hoặc **`sudo bash deploy/postgres-create-db.sh`** (cần `sudo -u postgres`).
 2. (Tùy chọn) **Redis** — `redis-notes.txt`.
@@ -118,7 +118,32 @@ sudo nginx -T 2>/dev/null | grep -E 'server_name|location |proxy_read_timeout|pr
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-- **Đồng thời:** Giữ `DATABASE_POOL_*` trong `backend/.env` đủ lớn và `pm2 restart 188-api --update-env`; xem log `QueuePool` / `TimeoutError`.
+- **Đồng thời:** Trên VPS chia sẻ, **không** tăng pool quá cao — dùng `bash deploy/tune-db-vps.sh` (mặc định `8` + `12` overflow). Pool lớn → nhiều query COUNT song song → Postgres treo. Xem log `QueuePool` / `TimeoutError`.
+
+## 2b. Tuning DB — VPS chia sẻ (nanoai + 188 + Postgres local)
+
+Không đổi tính năng/UI; chỉ giảm tải DB:
+
+| Việc | Mặc định mới | Ghi chú |
+|------|--------------|---------|
+| Connection pool | `8` + overflow `12` | Tối đa ~20 conn / `188-api` |
+| Cache menu `/categories/from-products` | 300s | Trước 60s |
+| Cache `/danh-muc` catalog-tiles | 300s | Trước 120s |
+| Index | `ix_products_active_category_id` | Tự tạo khi API migrate |
+
+**Tự động:** `deploy/update-vps.sh` đã gọi `tune-db-vps.sh` sau bước init DB (pool `.env`, index, swap 4G). Tắt: `DEPLOY_SKIP_DB_TUNING=1` hoặc chỉ tắt swap: `DEPLOY_SKIP_SWAP=1`.
+
+**Chỉ tuning (không build):**
+
+```bash
+cd /var/www/188.com.vn
+bash deploy/tune-db-vps.sh
+pm2 restart 188-api --update-env && pm2 save
+```
+
+Tùy chọn trong `backend/.env`: `CATEGORY_MENU_TREE_TTL_SECONDS`, `CATEGORY_CATALOG_TILES_TTL_SECONDS` (giây).
+
+**Theo dõi:** `sudo -u postgres psql -c "SELECT datname, count(*) FROM pg_stat_activity GROUP BY datname;"` — `188comvn` nên **< 15** khi bình thường.
 
 ## 3. Crontab VPS
 

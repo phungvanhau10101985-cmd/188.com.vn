@@ -11,6 +11,7 @@ from app.crud import home_hero_category_cache
 from app.models.category import Category as CategoryModel
 from app.models.seo_cluster import SeoCluster
 from app.utils.ttl_cache import cache as ttl_cache
+from app.core.config import settings
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ def read_category_tree_from_products(is_active: bool = True):
     - Cấp 3 (cột AD): sub_subcategory
     Trả về [{ name, slug, children: [{ name, slug, children: [{ name, slug }] }] }]
 
-    Cache 60s — dùng chung implementation với resolve GET /from-products/by-path (xem crud.get_cached_menu_category_tree).
+    Cache in-process (mặc định 300s) — dùng chung implementation với resolve GET /from-products/by-path.
     """
     try:
         return crud_product.get_cached_menu_category_tree(is_active)
@@ -36,7 +37,13 @@ def read_category_tree_from_products(is_active: bool = True):
         return []
 
 
-_CATALOG_TILES_TTL = 120.0
+def _catalog_tiles_ttl() -> float:
+    try:
+        return max(60.0, float(getattr(settings, "CATEGORY_CATALOG_TILES_TTL_SECONDS", 300)))
+    except (TypeError, ValueError):
+        return 300.0
+
+
 _HOME_HERO_CACHED_TTL = 300.0
 
 
@@ -85,7 +92,7 @@ def read_category_catalog_tiles(
 ):
     """
     Lưới danh mục L2/L3 kèm product_count và ảnh đại diện — trang /danh-muc.
-    Cache 120s (public, không phụ thuộc phiên).
+    Cache mặc định 300s (public, không phụ thuộc phiên).
     """
     cache_key = f"category_catalog_tiles:limit={limit}"
 
@@ -97,7 +104,7 @@ def read_category_catalog_tiles(
             db.close()
 
     try:
-        return ttl_cache.get_or_fetch(cache_key, _CATALOG_TILES_TTL, _fetch)
+        return ttl_cache.get_or_fetch(cache_key, _catalog_tiles_ttl(), _fetch)
     except Exception:
         _log.exception("GET /categories/from-products/catalog-tiles failed (limit=%s)", limit)
         return {"tiles": []}

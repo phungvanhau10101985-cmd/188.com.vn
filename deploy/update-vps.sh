@@ -31,6 +31,8 @@
 #   DEPLOY_GIT_SYNC=reset-hard     git fetch + reset --hard origin/<branch> — xóa chỉnh sửa local trên VPS, khớp GitHub
 #   DEPLOY_SKIP_GIT=1              không chạy git trong script (đã git pull tay trước đó)
 #   DEPLOY_SKIP_PLAYWRIGHT=1       không chạy playwright install chromium (đã cài browser)
+#   DEPLOY_SKIP_DB_TUNING=1        không chạy tune-db-vps (.env pool/TTL + index + swap)
+#   DEPLOY_SKIP_SWAP=1             không tạo/bật swap (vẫn chạy pool .env + index nếu tuning bật)
 #
 set -euo pipefail
 
@@ -174,6 +176,16 @@ if [[ "${DEPLOY_SKIP_DB_INIT:-0}" != "1" ]]; then
 else
   echo "==> Database: DEPLOY_SKIP_DB_INIT=1 — bỏ qua."
 fi
+
+if [[ "${DEPLOY_SKIP_DB_TUNING:-0}" != "1" ]]; then
+  echo ""
+  echo "==> VPS runtime tuning (.env pool/TTL + Postgres index + swap)"
+  DEPLOY_TUNING_QUIET=1 bash "${PROJECT_ROOT}/deploy/tune-db-vps.sh" || \
+    echo "⚠️  tune-db-vps có bước lỗi — tiếp tục deploy"
+else
+  echo "==> VPS tuning: DEPLOY_SKIP_DB_TUNING=1 — bỏ qua."
+fi
+
 deactivate
 
 if [[ "${DEPLOY_BUILD_VPS:-1}" != "1" ]]; then
@@ -414,7 +426,7 @@ print_safe_deploy_checklist() {
   echo ""
   echo "==> Checklist deploy an toàn (chống treo) — lần sau chạy nhanh:"
   echo "   1) Mặc định script tự pm2 stop all trước build; tắt: DEPLOY_STOP_PM2_BEFORE_BUILD=0."
-  echo "   2) Deploy chuẩn: git pull -> backend pip/init -> frontend build -> pm2 resurrect + restart all."
+  echo "   2) Deploy chuẩn: git pull -> pip/init -> tune-db-vps (.env pool + index + swap) -> build -> pm2 restart."
   echo "   3) Luôn pm2 save sau restart để reboot không chạy cấu hình cũ."
   echo "   4) Flush log rồi theo dõi lỗi mới: pm2 flush ${PM2_API}; pm2 flush ${PM2_WEB}; pm2 logs ..."
   echo "   5) Nếu web lag: kiểm tra DB active query (pg_stat_activity), hủy query nặng/idle transaction kéo dài."

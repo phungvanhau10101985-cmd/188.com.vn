@@ -632,6 +632,37 @@ class MigrationManager:
             logger.warning("migrate_same_shop_recommendation_indexes: %s", e)
             return True
 
+    def migrate_product_category_active_index(self) -> bool:
+        """Index COUNT menu/catalog: is_active + category_id."""
+        try:
+            inspector = inspect(engine)
+            tables = inspector.get_table_names()
+            if "products" not in tables:
+                return True
+            with engine.connect() as conn:
+                if IS_POSTGRESQL:
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_products_active_category_id "
+                            "ON products (is_active, category_id) "
+                            "WHERE is_active IS TRUE"
+                        )
+                    )
+                else:
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_products_active_category_id "
+                            "ON products (is_active, category_id) "
+                            "WHERE is_active = 1"
+                        )
+                    )
+                conn.commit()
+            logger.info("✅ ix_products_active_category_id ensured")
+            return True
+        except Exception as e:
+            logger.warning("migrate_product_category_active_index: %s", e)
+            return True
+
     def migrate_all_tables(self) -> Dict[str, bool]:
         """Chạy tất cả migrations cần thiết"""
         results = {}
@@ -866,6 +897,7 @@ class MigrationManager:
         )
 
         results['same_shop_recommendation_indexes'] = self.migrate_same_shop_recommendation_indexes()
+        results['product_category_active_index'] = self.migrate_product_category_active_index()
 
         from app.models.home_recommendation_snapshot import UserHomeRecommendationSnapshot
 

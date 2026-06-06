@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cập nhật DATABASE_POOL_* trong backend/.env trên VPS, không đụng key khác.
+# Cập nhật DATABASE_POOL_* + cache menu/catalog trong backend/.env, không đụng key khác.
 # Idempotent: chạy nhiều lần kết quả như nhau. Tạo backup .env.bak-YYYYMMDD-HHMMSS.
 #
 # Dùng:
@@ -32,10 +32,12 @@ upsert() {
   fi
 }
 
-upsert DATABASE_POOL_SIZE     30   "$ENV_FILE"
-upsert DATABASE_MAX_OVERFLOW  60   "$ENV_FILE"
-upsert DATABASE_POOL_TIMEOUT  30   "$ENV_FILE"
-upsert DATABASE_POOL_RECYCLE  1800 "$ENV_FILE"
+upsert DATABASE_POOL_SIZE                  8    "$ENV_FILE"
+upsert DATABASE_MAX_OVERFLOW               12   "$ENV_FILE"
+upsert DATABASE_POOL_TIMEOUT               20   "$ENV_FILE"
+upsert DATABASE_POOL_RECYCLE               1800 "$ENV_FILE"
+upsert CATEGORY_MENU_TREE_TTL_SECONDS      300  "$ENV_FILE"
+upsert CATEGORY_CATALOG_TILES_TTL_SECONDS  300  "$ENV_FILE"
 
 bash "${ROOT}/deploy/ensure-api-safe-env.sh" 2>/dev/null || true
 

@@ -83,11 +83,19 @@ class Settings:
             self.ACTUAL_DATABASE_PATH = actual_db_path
             self.IS_POSTGRESQL = False
         
-        # PostgreSQL: QueuePool — pool nhỏ + nhiều request đồng thời → TimeoutError (sqlalchemy.me/e/20/3o7r)
-        self.DATABASE_POOL_SIZE: int = int(os.getenv("DATABASE_POOL_SIZE", "30"))
-        self.DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "60"))
+        # PostgreSQL QueuePool — VPS chia sẻ (nanoai + Postgres local): 8+12 đủ; VPS riêng 188: 10+15.
+        # Tổng connection mọi app < Postgres max_connections (mặc định 100).
+        self.DATABASE_POOL_SIZE: int = int(os.getenv("DATABASE_POOL_SIZE", "10"))
+        self.DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "15"))
         self.DATABASE_POOL_RECYCLE: int = int(os.getenv("DATABASE_POOL_RECYCLE", "1800"))
-        self.DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "30"))
+        self.DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "20"))
+        # Cache menu / catalog — giảm bão COUNT khi SSR; dữ liệu giống, chỉ refresh chậm hơn vài phút.
+        self.CATEGORY_MENU_TREE_TTL_SECONDS: float = float(
+            os.getenv("CATEGORY_MENU_TREE_TTL_SECONDS", "300")
+        )
+        self.CATEGORY_CATALOG_TILES_TTL_SECONDS: float = float(
+            os.getenv("CATEGORY_CATALOG_TILES_TTL_SECONDS", "300")
+        )
         
         # Cây danh mục /menu (GET /categories/from-products): chỉ giữ nhánh có số SP active **lớn hơn** ngưỡng này.
         # 0 = hành vi cũ (ẩn nhánh 0 SP). Mặc định 10 → hiển thị khi có ≥11 SP; ≤10 SP thì ẩn khỏi menu/sitemap dùng cây này.
