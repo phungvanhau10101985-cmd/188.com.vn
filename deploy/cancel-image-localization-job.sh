@@ -42,12 +42,38 @@ if [[ $NUKE -eq 0 ]]; then
   NUKE=1
 fi
 
-if [[ -n "${JOB_ID}" ]]; then
-  python scripts/cancel_image_localization_job.py "${JOB_ID}" "${ARGS[@]}"
-elif [[ $ALL -eq 1 ]]; then
-  python scripts/cancel_image_localization_job.py --all-active "${ARGS[@]}"
+DB_NAME="${POSTGRES_DB_NAME:-188comvn}"
+if command -v sudo >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
+  echo "==> SQL hủy nhanh (trước Python)…"
+  sudo -u postgres psql -P pager=off -d "${DB_NAME}" -v ON_ERROR_STOP=1 <<'SQL' || true
+UPDATE image_localization_jobs
+SET status = 'cancelled', phase = 'cancelled', cancel_requested = TRUE,
+    current_product_id = NULL, finished_at = NOW(), updated_at = NOW()
+WHERE status IN ('queued', 'running');
+UPDATE products SET image_localization_status = 'pending', image_localization_error = NULL
+WHERE image_localization_status = 'processing';
+SQL
+fi
+
+if command -v timeout >/dev/null 2>&1; then
+  if [[ -n "${JOB_ID}" ]]; then
+    timeout 90 python scripts/cancel_image_localization_job.py "${JOB_ID}" "${ARGS[@]}" \
+      || echo "    (Python cancel timeout — đã SQL hủy ở trên)"
+  elif [[ $ALL -eq 1 ]]; then
+    timeout 90 python scripts/cancel_image_localization_job.py --all-active "${ARGS[@]}" \
+      || echo "    (Python cancel timeout — đã SQL hủy ở trên)"
+  else
+    timeout 90 python scripts/cancel_image_localization_job.py "${ARGS[@]}" \
+      || echo "    (Python cancel timeout — đã SQL hủy ở trên)"
+  fi
 else
-  python scripts/cancel_image_localization_job.py "${ARGS[@]}"
+  if [[ -n "${JOB_ID}" ]]; then
+    python scripts/cancel_image_localization_job.py "${JOB_ID}" "${ARGS[@]}" || true
+  elif [[ $ALL -eq 1 ]]; then
+    python scripts/cancel_image_localization_job.py --all-active "${ARGS[@]}" || true
+  else
+    python scripts/cancel_image_localization_job.py "${ARGS[@]}" || true
+  fi
 fi
 deactivate
 

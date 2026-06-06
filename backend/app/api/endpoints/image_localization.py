@@ -977,6 +977,10 @@ def start_job(
 
 def start_image_localization_job_resume_daemon_if_enabled() -> None:
     """Quét job queued/running trong DB và chạy tiếp sau restart backend."""
+    from app.core.config import settings
+
+    if not getattr(settings, "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", True):
+        return
     start_resume_daemon(_run_job, StartImageLocalizationPayload)
 
 

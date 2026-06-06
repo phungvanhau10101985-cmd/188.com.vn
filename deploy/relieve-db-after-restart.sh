@@ -45,8 +45,8 @@ if pgrep -f 'image_localization_job|imgloc-|_multiprocess_job_entry' >/dev/null 
 fi
 
 if [[ "${imgloc_running}" == "1" && "${RELIEVE_CANCEL_IMGLOC_JOBS:-1}" == "1" ]]; then
-  echo "==> Hủy job ảnh đang chạy (cancel-image-localization-job)…"
-  bash "${PROJECT_ROOT}/deploy/cancel-image-localization-job.sh" --all-active --nuke || true
+  echo "==> Hủy job ảnh đang chạy (free-api-now)…"
+  bash "${PROJECT_ROOT}/deploy/free-api-now.sh" || true
 else
   echo "==> PM2 restart ${PM2_API} (áp dụng pool + tắt resume job ảnh)…"
   pm2 restart "${PM2_API}" --update-env 2>/dev/null || \
@@ -73,11 +73,8 @@ if command -v curl >/dev/null 2>&1; then
   fi
   echo "    GET /api/v1/products/ (storefront probe) → ${code}"
   if [[ "${code}" != "200" ]]; then
-    echo "⚠️  Products API chưa 200."
-    if [[ "${imgloc_running}" == "0" ]]; then
-      echo "    Thử: bash deploy/cancel-image-localization-job.sh --all-active --nuke"
-    fi
-    echo "    Rồi: pm2 restart ${PM2_API} --update-env && bash deploy/health-check.sh"
+    echo "⚠️  Products API chưa 200 — chạy free-api-now…"
+    bash "${PROJECT_ROOT}/deploy/free-api-now.sh" || true
     exit 1
   fi
 fi
