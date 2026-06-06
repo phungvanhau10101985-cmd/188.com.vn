@@ -18,7 +18,10 @@ def _is_client_disconnect_exc(exc: BaseException) -> bool:
     if name in ("LocalProtocolError", "ClientDisconnect", "EndOfStream"):
         return True
     msg = str(exc)
-    return "Can't send data when our state is ERROR" in msg
+    return (
+        "Can't send data when our state is ERROR" in msg
+        or "after response already completed" in msg
+    )
 
 
 class ClientDisconnectSafeMiddleware:
@@ -105,17 +108,31 @@ class LastResortJsonMiddleware:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return
+        response_started = False
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal response_started
+            if message.get("type") == "http.response.start":
+                response_started = True
+            await send(message)
+
         try:
-            await self.app(scope, receive, send)
+            await self.app(scope, receive, send_wrapper)
         except Exception as exc:
             if _is_client_disconnect_exc(exc):
                 return
             log = logging.getLogger("last_resort_json")
-            log.exception("%s %s", scope.get("method"), scope.get("path"))
+            method = scope.get("method")
+            path = scope.get("path")
+            if response_started:
+                # Response đã bắt đầu stream/flush; không thể gửi JSON lỗi lần 2.
+                log.exception("late exception after response started %s %s", method, path)
+                return
+            log.exception("%s %s", method, path)
             from starlette.responses import JSONResponse
 
             response = JSONResponse(
                 status_code=500,
                 content={"detail": str(exc).strip() or exc.__class__.__name__},
             )
-            await response(scope, receive, send)
+            await response(scope, receive, send_wrapper)
