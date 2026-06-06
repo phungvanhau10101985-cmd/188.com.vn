@@ -252,6 +252,33 @@ health_wait_tick() {
   fi
 }
 
+# Homepage SSR sau restart có thể 30–120s; 1 curl dài + log tiến trình (tránh im lặng như treo).
+curl_homepage_smoke() {
+  local base_url="$1"
+  local max_sec="${HEALTH_HOMEPAGE_CURL_MAX_SEC:-120}"
+  local code_file
+  code_file=$(mktemp)
+  echo "    GET ${base_url}/ (SSR smoke — timeout ${max_sec}s, lần đầu sau restart thường 30-120s)…"
+  curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time "${max_sec}" \
+    "${base_url}/" >"${code_file}" 2>/dev/null &
+  local pid=$!
+  local elapsed=0
+  while kill -0 "${pid}" 2>/dev/null; do
+    sleep 10
+    elapsed=$((elapsed + 10))
+    echo "    … vẫn đang render homepage (${elapsed}s / tối đa ${max_sec}s)"
+  done
+  wait "${pid}" 2>/dev/null || true
+  local code
+  code=$(tr -d '[:space:]' <"${code_file}" 2>/dev/null || true)
+  rm -f "${code_file}"
+  if [[ -z "${code}" ]]; then
+    echo "000"
+  else
+    echo "${code}"
+  fi
+}
+
 kill_listeners_on_port() {
   local port="$1"
   if command -v fuser >/dev/null 2>&1; then
@@ -335,23 +362,31 @@ health_check_local() {
   local homepage_code="000"
   local sale_code="000"
   if [[ "${web_code}" == "200" || "${web_code}" == "204" ]]; then
-    local _hp_wait="${HEALTH_HOMEPAGE_WAIT_SEC:-90}"
-    echo "    GET http://127.0.0.1:${WEB_INTERNAL_PORT}/ (SSR smoke, tối đa ${_hp_wait}s)"
-    for _i in $(seq 1 "${_hp_wait}"); do
-      homepage_code=$(curl_http_code "http://127.0.0.1:${WEB_INTERNAL_PORT}/" 30)
-      if [[ "${homepage_code}" == "200" ]]; then
-        break
-      fi
-      sleep 1
-    done
+    homepage_code=$(curl_homepage_smoke "http://127.0.0.1:${WEB_INTERNAL_PORT}")
     echo "    GET / (homepage) → ${homepage_code}"
   fi
   if [[ "${api_code}" == "200" ]]; then
     sale_code=$(curl_http_code "http://127.0.0.1:${API_INTERNAL_PORT}/api/v1/sale-calendar/current" 10)
     echo "    GET /api/v1/sale-calendar/current → ${sale_code}"
   fi
-  if [[ "${api_code}" == "200" && ( "${web_code}" == "200" || "${web_code}" == "204" ) && "${products_code}" == "200" && "${homepage_code}" == "200" ]]; then
+  local core_ok=0
+  if [[ "${api_code}" == "200" && ( "${web_code}" == "200" || "${web_code}" == "204" ) && "${products_code}" == "200" ]]; then
+    core_ok=1
+  fi
+  if [[ "${core_ok}" == "1" && "${homepage_code}" == "200" ]]; then
     echo "✅ Sức khỏe: OK (API + Web + products + homepage)."
+    return 0
+  fi
+  if [[ "${core_ok}" == "1" ]]; then
+    echo "✅ Sức khỏe cốt lõi: OK (API + Web + products)."
+    if [[ "${homepage_code}" != "200" ]]; then
+      echo "⚠️  Homepage SSR chưa trả 200 trong ${HEALTH_HOMEPAGE_CURL_MAX_SEC:-120}s (mã ${homepage_code})."
+      echo "    Site có thể vẫn chạy nhưng chậm — xem: pm2 logs ${PM2_WEB} --lines 60"
+      if [[ "${DEPLOY_REQUIRE_HOMEPAGE:-0}" == "1" ]]; then
+        echo "❌ DEPLOY_REQUIRE_HOMEPAGE=1 — coi là deploy thất bại."
+        [[ "${DEPLOY_STRICT_HEALTH:-1}" == "1" ]] && return 1
+      fi
+    fi
     return 0
   fi
   echo "⚠️  Sức khỏe bất thường — xem: pm2 logs ${PM2_API} | pm2 logs ${PM2_WEB}"

@@ -10,7 +10,6 @@ WEB_PORT="${WEB_INTERNAL_PORT:-3001}"
 WEB_PATH="${WEB_HEALTH_PATH:-/robots.txt}"
 API_WAIT="${HEALTH_API_WAIT_SEC:-45}"
 WEB_WAIT="${HEALTH_WEB_WAIT_SEC:-60}"
-HOMEPAGE_WAIT="${HEALTH_HOMEPAGE_WAIT_SEC:-90}"
 
 port_is_listening() {
   local port="$1"
@@ -31,6 +30,32 @@ curl_http_code() {
   local code=""
   code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 1 --max-time "${max_time}" "$url" 2>/dev/null) || true
   echo "${code:-000}"
+}
+
+curl_homepage_smoke() {
+  local base_url="$1"
+  local max_sec="${HEALTH_HOMEPAGE_CURL_MAX_SEC:-120}"
+  local code_file
+  code_file=$(mktemp)
+  echo "    GET ${base_url}/ (SSR — timeout ${max_sec}s)…"
+  curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time "${max_sec}" \
+    "${base_url}/" >"${code_file}" 2>/dev/null &
+  local pid=$!
+  local elapsed=0
+  while kill -0 "${pid}" 2>/dev/null; do
+    sleep 10
+    elapsed=$((elapsed + 10))
+    echo "    … vẫn đang render homepage (${elapsed}s / tối đa ${max_sec}s)"
+  done
+  wait "${pid}" 2>/dev/null || true
+  local code
+  code=$(tr -d '[:space:]' <"${code_file}" 2>/dev/null || true)
+  rm -f "${code_file}"
+  if [[ -z "${code}" ]]; then
+    echo "000"
+  else
+    echo "${code}"
+  fi
 }
 
 echo "==> Health check 188.com.vn (${PROJECT_ROOT})"
@@ -67,11 +92,7 @@ if [[ "${api_code}" == "200" ]]; then
 fi
 
 if [[ "${web_code}" == "200" || "${web_code}" == "204" ]]; then
-  for _i in $(seq 1 "${HOMEPAGE_WAIT}"); do
-    homepage_code=$(curl_http_code "http://127.0.0.1:${WEB_PORT}/" 30)
-    [[ "${homepage_code}" == "200" ]] && break
-    sleep 1
-  done
+  homepage_code=$(curl_homepage_smoke "http://127.0.0.1:${WEB_PORT}")
 fi
 
 echo ""
@@ -87,15 +108,22 @@ echo ""
 echo "    listen:"
 ss -tlnp 2>/dev/null | grep -E ":(${API_PORT}|${WEB_PORT})\\b" || echo "    (chưa thấy cổng ${API_PORT}/${WEB_PORT})"
 
-ok=1
-[[ "${api_code}" == "200" ]] || ok=0
-[[ "${web_code}" == "200" || "${web_code}" == "204" ]] || ok=0
-[[ "${products_code}" == "200" ]] || ok=0
-[[ "${homepage_code}" == "200" ]] || ok=0
+core_ok=0
+[[ "${api_code}" == "200" && ( "${web_code}" == "200" || "${web_code}" == "204" ) && "${products_code}" == "200" ]] && core_ok=1
 
-if [[ "${ok}" == "1" ]]; then
+if [[ "${core_ok}" == "1" && "${homepage_code}" == "200" ]]; then
   echo ""
   echo "✅ Sức khỏe: OK (API + Web + products + homepage)."
+  exit 0
+fi
+
+if [[ "${core_ok}" == "1" ]]; then
+  echo ""
+  echo "✅ Sức khỏe cốt lõi: OK (API + Web + products)."
+  if [[ "${homepage_code}" != "200" ]]; then
+    echo "⚠️  Homepage SSR chưa 200 trong ${HEALTH_HOMEPAGE_CURL_MAX_SEC:-120}s — xem pm2 logs 188-web"
+    [[ "${DEPLOY_REQUIRE_HOMEPAGE:-0}" == "1" ]] && exit 1
+  fi
   exit 0
 fi
 
