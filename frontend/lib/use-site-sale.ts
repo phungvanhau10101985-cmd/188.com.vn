@@ -1,38 +1,84 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { SiteSaleCalendarState } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
 
-export function useSiteSale() {
-  const [state, setState] = useState<SiteSaleCalendarState | null>(null);
-  const [loading, setLoading] = useState(true);
+type SiteSaleSnapshot = {
+  state: SiteSaleCalendarState | null;
+  loading: boolean;
+};
 
-  const reload = useCallback(async () => {
+let store: SiteSaleSnapshot = { state: null, loading: true };
+let inflight: Promise<void> | null = null;
+const listeners = new Set<() => void>();
+
+function emit() {
+  listeners.forEach((fn) => fn());
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function getClientSnapshot(): SiteSaleSnapshot {
+  return store;
+}
+
+function getServerSnapshot(): SiteSaleSnapshot {
+  return { state: null, loading: true };
+}
+
+async function loadSiteSaleOnce(force = false): Promise<void> {
+  if (!force && store.state !== null && !store.loading) return;
+  if (inflight && !force) return inflight;
+
+  if (force) {
+    inflight = null;
+    store = { state: store.state, loading: true };
+    emit();
+  }
+
+  inflight = (async () => {
     try {
       const data = await apiClient.getSiteSaleCalendar();
-      setState(data);
+      store = { state: data, loading: false };
     } catch (e) {
       if (process.env.NODE_ENV === 'development') {
         console.warn('[useSiteSale] Không tải được sale calendar:', e);
       }
-      setState(null);
+      store = { state: null, loading: false };
     } finally {
-      setLoading(false);
+      inflight = null;
+      emit();
     }
+  })();
+
+  return inflight;
+}
+
+/** Một request /sale-calendar/current cho cả app (tránh N× ProductCard gọi trùng). */
+export function useSiteSale() {
+  const snapshot = useSyncExternalStore(
+    subscribe,
+    getClientSnapshot,
+    getServerSnapshot,
+  );
+
+  useEffect(() => {
+    void loadSiteSaleOnce();
   }, []);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  useEffect(() => {
-    if (!state?.countdown_to) return;
-    const id = window.setInterval(() => {
-      setState((prev) => (prev ? { ...prev } : prev));
-    }, 1000);
+    if (!snapshot.state?.countdown_to) return;
+    const id = window.setInterval(() => emit(), 1000);
     return () => window.clearInterval(id);
-  }, [state?.countdown_to, state?.phase]);
+  }, [snapshot.state?.countdown_to, snapshot.state?.phase]);
 
-  return { state, loading, reload };
+  const reload = useCallback(async () => {
+    await loadSiteSaleOnce(true);
+  }, []);
+
+  return { state: snapshot.state, loading: snapshot.loading, reload };
 }

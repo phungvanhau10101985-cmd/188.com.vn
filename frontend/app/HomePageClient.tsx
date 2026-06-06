@@ -7,8 +7,15 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { SimpleProductCard } from '@/components/ProductCard';
 
-const NanoaiSimilarProductCard = dynamic(() => import('@/components/NanoaiSimilarProductCard'));
-const CategoryProductFilters = dynamic(() => import('@/components/CategoryProductFilters'));
+const NanoaiSimilarProductCard = dynamic(() => import('@/components/NanoaiSimilarProductCard'), {
+  ssr: false,
+});
+const CategoryProductFilters = dynamic(() => import('@/components/CategoryProductFilters'), {
+  ssr: false,
+  loading: () => (
+    <div className="h-10 w-full animate-pulse rounded-lg bg-gray-100" aria-hidden />
+  ),
+});
 import PersonalizedHeroBanner from '@/components/home/PersonalizedHeroBanner';
 import SameShopRecommendationHeader from '@/components/home/SameShopRecommendationHeader';
 import HomeProductPagination from '@/components/home/HomeProductPagination';
