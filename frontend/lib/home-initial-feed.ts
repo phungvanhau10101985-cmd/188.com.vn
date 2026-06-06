@@ -24,6 +24,7 @@ export async function getInitialHomeProductList(
       skip: String(skip),
       limit: String(limit),
       is_active: "true",
+      skip_total: "true",
     });
     const res = await fetch(`${API_BASE}/products/?${params}`, {
       next: { revalidate: REVALIDATE_HOME },

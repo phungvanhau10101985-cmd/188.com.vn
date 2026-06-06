@@ -294,7 +294,13 @@ health_check_local() {
   ship_stats_code=$(curl_http_code "http://127.0.0.1:${API_INTERNAL_PORT}/api/v1/orders/admin/shipping/operations-stats" 5)
   echo "    GET .../orders/admin/shipping/operations-stats → ${ship_stats_code} (401/403=OK, 404=cần pull+restart API)"
   echo "    GET http://127.0.0.1:${WEB_INTERNAL_PORT}${web_path} → ${web_code}"
-  if [[ "${api_code}" == "200" && ( "${web_code}" == "200" || "${web_code}" == "204" ) ]]; then
+  local products_code="000"
+  if [[ "${api_code}" == "200" ]]; then
+    products_code=$(curl_http_code \
+      "http://127.0.0.1:${API_INTERNAL_PORT}/api/v1/products/?limit=48&skip=0&is_active=true" 25)
+    echo "    GET /api/v1/products/?limit=48 (storefront) → ${products_code} (200 cần có — 000=pool DB kẹt)"
+  fi
+  if [[ "${api_code}" == "200" && ( "${web_code}" == "200" || "${web_code}" == "204" ) && "${products_code}" == "200" ]]; then
     echo "✅ Sức khỏe: OK."
     return 0
   fi
@@ -353,6 +359,12 @@ fi
 
 pm2 save || true
 sleep 5
+
+if [[ -f "${PROJECT_ROOT}/deploy/relieve-db-after-restart.sh" ]]; then
+  echo ""
+  echo "==> Dọn pool PostgreSQL sau restart (apply-db-pool + terminate idle in transaction)"
+  bash "${PROJECT_ROOT}/deploy/relieve-db-after-restart.sh" || true
+fi
 
 health_check_local || true
 

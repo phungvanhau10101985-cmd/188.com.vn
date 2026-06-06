@@ -84,10 +84,10 @@ class Settings:
             self.IS_POSTGRESQL = False
         
         # PostgreSQL: QueuePool — pool nhỏ + nhiều request đồng thời → TimeoutError (sqlalchemy.me/e/20/3o7r)
-        self.DATABASE_POOL_SIZE: int = int(os.getenv("DATABASE_POOL_SIZE", "15"))
-        self.DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "25"))
-        self.DATABASE_POOL_RECYCLE: int = int(os.getenv("DATABASE_POOL_RECYCLE", "3600"))
-        self.DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "60"))
+        self.DATABASE_POOL_SIZE: int = int(os.getenv("DATABASE_POOL_SIZE", "30"))
+        self.DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "60"))
+        self.DATABASE_POOL_RECYCLE: int = int(os.getenv("DATABASE_POOL_RECYCLE", "1800"))
+        self.DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "30"))
         
         # Cây danh mục /menu (GET /categories/from-products): chỉ giữ nhánh có số SP active **lớn hơn** ngưỡng này.
         # 0 = hành vi cũ (ẩn nhánh 0 SP). Mặc định 10 → hiển thị khi có ≥11 SP; ≤10 SP thì ẩn khỏi menu/sitemap dùng cây này.

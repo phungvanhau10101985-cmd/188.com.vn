@@ -126,6 +126,55 @@ _ADMIN_LIST_DUMP_EXCLUDE = frozenset(
 )
 
 
+def _should_skip_total_storefront_list(
+    *,
+    admin_list: bool,
+    skip_total: bool,
+    raw_q: str,
+    pid: str,
+    category: Optional[str],
+    subcategory: Optional[str],
+    sub_subcategory: Optional[str],
+    shop_name: Optional[str],
+    shop_id: Optional[str],
+    style: Optional[str],
+    shop_name_chinese: Optional[str],
+    chinese_name: Optional[str],
+    pro_lower_price: Optional[str],
+    pro_high_price: Optional[str],
+    min_price: Optional[float],
+    max_price: Optional[float],
+    filter_size: Optional[str],
+    filter_color: Optional[str],
+    filter_style_tag: Optional[str],
+    order_random: bool,
+    warehouse_clearance_only: bool,
+) -> bool:
+    """Storefront danh sách thuần (không lọc/tìm): bỏ COUNT(*) ~30k SP — giảm giữ connection DB."""
+    if admin_list or skip_total or raw_q or pid or order_random or warehouse_clearance_only:
+        return False
+    text_filters = (
+        category,
+        subcategory,
+        sub_subcategory,
+        shop_name,
+        shop_id,
+        style,
+        shop_name_chinese,
+        chinese_name,
+        pro_lower_price,
+        pro_high_price,
+        filter_size,
+        filter_color,
+        filter_style_tag,
+    )
+    if any(x is not None and str(x).strip() for x in text_filters):
+        return False
+    if min_price is not None or max_price is not None:
+        return False
+    return True
+
+
 def _serialize_products_for_api(
     db: Session,
     raw_products: List,
@@ -406,6 +455,30 @@ def _read_products_list_impl(
     raw_q = (q or "").strip()
     pid = (product_id or "").strip()
     if admin_list and not skip_total and not raw_q and not pid:
+        skip_total = True
+    if _should_skip_total_storefront_list(
+        admin_list=admin_list,
+        skip_total=skip_total,
+        raw_q=raw_q,
+        pid=pid,
+        category=category,
+        subcategory=subcategory,
+        sub_subcategory=sub_subcategory,
+        shop_name=shop_name,
+        shop_id=shop_id,
+        style=style,
+        shop_name_chinese=shop_name_chinese,
+        chinese_name=chinese_name,
+        pro_lower_price=pro_lower_price,
+        pro_high_price=pro_high_price,
+        min_price=min_price,
+        max_price=max_price,
+        filter_size=filter_size,
+        filter_color=filter_color,
+        filter_style_tag=filter_style_tag,
+        order_random=order_random,
+        warehouse_clearance_only=warehouse_clearance_only,
+    ):
         skip_total = True
     if order_random and not raw_q and not pid:
         response.headers["Cache-Control"] = "private, no-store"

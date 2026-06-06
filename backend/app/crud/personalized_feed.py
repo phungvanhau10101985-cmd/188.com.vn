@@ -60,13 +60,14 @@ def _signal_ids_for_guest(db: Session, guest_session_id: str) -> List[int]:
 
 def _fallback_popularity(db: Session, skip: int, limit: int) -> Tuple[List[Product], int, bool]:
     base = db.query(Product).filter(Product.is_active == True)  # noqa: E712
-    total = base.count()
     products = (
         base.order_by(Product.purchases.desc().nullslast(), Product.id)
         .offset(skip)
         .limit(limit)
         .all()
     )
+    # Không COUNT(*) toàn catalog — tránh giữ transaction lâu khi pool DB đầy (trang chủ / home-feed).
+    total = -1
     return products, total, False
 
 

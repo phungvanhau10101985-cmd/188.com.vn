@@ -22,6 +22,8 @@ else:
     engine_kwargs["max_overflow"] = settings.DATABASE_MAX_OVERFLOW
     engine_kwargs["pool_recycle"] = settings.DATABASE_POOL_RECYCLE
     engine_kwargs["pool_timeout"] = settings.DATABASE_POOL_TIMEOUT
+    # Trả connection về pool sạch sau mỗi request — giảm «idle in transaction» tích tụ.
+    engine_kwargs["pool_reset_on_return"] = "rollback"
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL, **engine_kwargs)
 
@@ -40,5 +42,9 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
+        db.rollback()
         db.close()

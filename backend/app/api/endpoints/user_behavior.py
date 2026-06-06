@@ -400,13 +400,13 @@ def get_home_feed_products(
         db.rollback()
         try:
             base = db.query(ProductRow).filter(ProductRow.is_active == True)  # noqa: E712
-            total = base.count()
             products = (
                 base.order_by(ProductRow.purchases.desc().nullslast(), ProductRow.id)
                 .offset(sk)
                 .limit(lim)
                 .all()
             )
+            total = -1
             products_list = _serialize_product_rows_for_api(db, products, current_user)
             personalized = False
         except Exception:
@@ -416,8 +416,11 @@ def get_home_feed_products(
             products_list = []
             personalized = False
 
-    total_pages = math.ceil(total / lim) if lim > 0 else 1
     page = sk // lim + 1 if lim > 0 else 1
+    if total < 0:
+        total_pages = page + (1 if len(products_list) >= lim and lim > 0 else 0)
+    else:
+        total_pages = math.ceil(total / lim) if lim > 0 else 1
     return {
         "products": products_list,
         "total": total,

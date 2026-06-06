@@ -16,6 +16,12 @@ module.exports = {
       env: {
         SERVER_PORT: '8001',
         RUN_DB_INIT_ON_STARTUP: '0',
+        IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: 'false',
+        DATABASE_POOL_SIZE: '30',
+        DATABASE_MAX_OVERFLOW: '60',
+        DATABASE_POOL_TIMEOUT: '30',
+        DATABASE_POOL_RECYCLE: '1800',
+        EMS_TRACKING_INTERNAL_SCHEDULER_ENABLED: 'false',
       },
       max_restarts: 10,
       min_uptime: '10s',
