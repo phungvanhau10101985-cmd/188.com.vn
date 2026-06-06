@@ -31,8 +31,10 @@ function getServerSnapshot(): SiteSaleSnapshot {
 }
 
 async function loadSiteSaleOnce(force = false): Promise<void> {
-  if (!force && store.state !== null && !store.loading) return;
-  if (inflight && !force) return inflight;
+  if (!force) {
+    if (inflight) return inflight;
+    if (store.state !== null && !store.loading) return;
+  }
 
   if (force) {
     inflight = null;
@@ -58,6 +60,8 @@ async function loadSiteSaleOnce(force = false): Promise<void> {
   return inflight;
 }
 
+let bootstrapped = false;
+
 /** Một request /sale-calendar/current cho cả app (tránh N× ProductCard gọi trùng). */
 export function useSiteSale() {
   const snapshot = useSyncExternalStore(
@@ -67,6 +71,8 @@ export function useSiteSale() {
   );
 
   useEffect(() => {
+    if (bootstrapped) return;
+    bootstrapped = true;
     void loadSiteSaleOnce();
   }, []);
 
