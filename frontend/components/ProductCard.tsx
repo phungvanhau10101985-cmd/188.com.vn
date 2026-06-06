@@ -372,8 +372,8 @@ export default function ProductCard({
               product={product}
               compact={size === 'small'}
             />
-            <SiteSaleProductBadge siteSale={catalogSiteSale ?? product.site_sale} />
-            <SiteSaleCountdownChip siteSale={catalogSiteSale ?? product.site_sale} />
+            <SiteSaleProductBadge siteSale={product.site_sale} />
+            <SiteSaleCountdownChip siteSale={product.site_sale} />
             <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
           </>
         )}
@@ -599,10 +599,10 @@ export const SimpleProductCard = ({
             <ProductCardClearanceImageBadges product={product} compact />
             {showPersonalizedBadge ? <PersonalizedCohortImageBadge /> : null}
             <SiteSaleProductBadge
-              siteSale={catalogSiteSale ?? product.site_sale}
+              siteSale={product.site_sale}
               className={stackedPromoBadgeClass}
             />
-            <SiteSaleCountdownChip siteSale={catalogSiteSale ?? product.site_sale} />
+            <SiteSaleCountdownChip siteSale={product.site_sale} />
             <BirthdayPromoImageBadge
               active={birthdayDiscount.active}
               percent={birthdayDiscount.percent}

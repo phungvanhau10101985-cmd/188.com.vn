@@ -31,16 +31,21 @@ function saleEventLabel(siteSale: SiteSaleProductPricing): string {
 
 /** Thanh đếm ngược — đặt dưới ảnh SP (teaser: bắt đầu sau; active: còn). */
 export default function SiteSaleCountdownChip({ siteSale, className = '' }: Props) {
-  /** null trên SSR + lần hydrate đầu — tránh lệch Date.now() server/client. */
+  /** Chỉ mount trên client — SSR + lần hydrate đầu luôn null (tránh lệch cây DOM). */
+  const [clientReady, setClientReady] = useState(false);
   const [nowMs, setNowMs] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!siteSale?.countdown_to || !siteSale?.phase) return;
+    setClientReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!clientReady || !siteSale?.countdown_to || !siteSale?.phase) return;
     const tick = () => setNowMs(Date.now());
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [siteSale?.countdown_to, siteSale?.phase]);
+  }, [clientReady, siteSale?.countdown_to, siteSale?.phase]);
 
   const phase = siteSale?.phase;
   const targetIso = siteSale?.countdown_to;
@@ -60,7 +65,7 @@ export default function SiteSaleCountdownChip({ siteSale, className = '' }: Prop
     };
   }, [targetIso, nowMs]);
 
-  if (!siteSale || !phase || nowMs == null || !parts) return null;
+  if (!clientReady || !siteSale || !phase || nowMs == null || !parts) return null;
 
   const countdownLive = formatLiveCountdown(parts);
   const isTeaser = phase === 'teaser';

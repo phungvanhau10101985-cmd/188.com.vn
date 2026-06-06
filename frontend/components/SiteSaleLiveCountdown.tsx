@@ -32,23 +32,38 @@ export default function SiteSaleLiveCountdown({
   inline = false,
   className = '',
 }: Props) {
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [clientReady, setClientReady] = useState(false);
+  const [nowMs, setNowMs] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!countdownTo || !phase) return;
-    setNowMs(Date.now());
-    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    setClientReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!clientReady || !countdownTo || !phase) return;
+    const tick = () => setNowMs(Date.now());
+    tick();
+    const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [countdownTo, phase]);
+  }, [clientReady, countdownTo, phase]);
 
   const countdownLive = useMemo(() => {
-    if (!countdownTo) return '';
-    const parts = formatCountdownParts(countdownTo);
-    if (!parts || parts.expired) return '';
+    if (nowMs == null || !countdownTo) return '';
+    const target = new Date(countdownTo).getTime();
+    if (!Number.isFinite(target)) return '';
+    const diff = target - nowMs;
+    if (diff <= 0) return '';
+    const totalSec = Math.floor(diff / 1000);
+    const parts = {
+      days: Math.floor(totalSec / 86400),
+      hours: Math.floor((totalSec % 86400) / 3600),
+      minutes: Math.floor((totalSec % 3600) / 60),
+      seconds: totalSec % 60,
+    };
     return formatLiveHms(parts);
   }, [countdownTo, nowMs]);
 
-  if (!phase || !countdownLive) return null;
+  if (!clientReady || !phase || !countdownLive) return null;
 
   const label = eventLabel?.trim() || 'Sale';
   const prefix = phase === 'teaser' ? `${label} bắt đầu sau` : `${label} — còn`;

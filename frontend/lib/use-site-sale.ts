@@ -73,7 +73,9 @@ export function useSiteSale() {
   useEffect(() => {
     if (bootstrapped) return;
     bootstrapped = true;
-    void loadSiteSaleOnce();
+    // Trì hoãn sau hydrate — tránh store đổi khi ProductCard còn đang hydrate.
+    const id = window.setTimeout(() => void loadSiteSaleOnce(), 0);
+    return () => window.clearTimeout(id);
   }, []);
 
   useEffect(() => {
