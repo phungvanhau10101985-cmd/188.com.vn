@@ -4458,7 +4458,7 @@ def count_products_for_category_path(
     if _e is not None:
         filt_l1.append(_e)
     if not name2 or not str(name2).strip():
-        return _apply_storefront_filters(db.query(Product).filter(*filt_l1)).count()
+        return _count_products_query(_apply_storefront_filters(db.query(Product).filter(*filt_l1)))
     name2 = str(name2).strip()
     subcat_group = get_subcategory_group_for_query(name1, name2)
     q = db.query(Product).filter(Product.is_active == is_active)
@@ -4474,7 +4474,7 @@ def count_products_for_category_path(
             _e2 = category_field_equals_ci(Product.subcategory, name2)
             if _e2 is not None:
                 q = q.filter(_e2)
-        return _apply_storefront_filters(q).count()
+        return _count_products_query(_apply_storefront_filters(q))
     name3 = str(name3).strip()
     _ca = category_field_equals_ci(Product.category, name1)
     _ss = category_field_equals_ci(Product.sub_subcategory, name3)
@@ -4496,22 +4496,22 @@ def count_products_for_category_path(
     # → Nhánh nguồn sau map (SP đã đổi FK) không còn bị đếm nhờ text cũ; nhánh đích vẫn nhận SP lệch chữ.
     if cid is not None and text_parts:
         text_match = and_(*text_parts)
-        return _apply_storefront_filters(
+        return _count_products_query(_apply_storefront_filters(
             db.query(Product)
             .filter(
                 Product.is_active == is_active,
                 or_(Product.category_id == cid, and_(Product.category_id.is_(None), text_match)),
             )
-        ).count()
+        ))
     if cid is not None:
-        return _apply_storefront_filters(
+        return _count_products_query(_apply_storefront_filters(
             db.query(Product)
             .filter(Product.is_active == is_active, Product.category_id == cid)
-        ).count()
+        ))
     q = db.query(Product).filter(Product.is_active == is_active)
     for p in text_parts:
         q = q.filter(p)
-    return _apply_storefront_filters(q).count()
+    return _count_products_query(_apply_storefront_filters(q))
 
 
 _SIZE_ONLY_LEVEL1_RE = re.compile(
