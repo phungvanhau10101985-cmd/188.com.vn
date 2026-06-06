@@ -4,6 +4,8 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=health-lib.sh
+source "${PROJECT_ROOT}/deploy/health-lib.sh"
 ENV_FILE="${PROJECT_ROOT}/backend/.env"
 DB_NAME="${POSTGRES_DB_NAME:-188comvn}"
 
@@ -34,14 +36,8 @@ fi
 
 API_PORT="${API_INTERNAL_PORT:-8001}"
 if command -v curl >/dev/null 2>&1; then
-  code="000"
-  for _i in $(seq 1 30); do
-    code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 20 \
-      "http://127.0.0.1:${API_PORT}/api/v1/products/?limit=48&skip=0&is_active=true" 2>/dev/null) || true
-    [[ "${code}" == "200" ]] && break
-    sleep 1
-  done
-  echo "    GET /api/v1/products/ (storefront) → ${code}"
+  code=$(health_curl_products_probe "${API_PORT}" 6 25)
+  echo "    GET /api/v1/products/ (storefront probe) → ${code}"
   if [[ "${code}" != "200" ]]; then
     echo "⚠️  Products API chưa 200 — thử: pm2 restart 188-api --update-env"
     exit 1

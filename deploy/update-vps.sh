@@ -32,6 +32,8 @@ set -euo pipefail
 
 BRANCH="${1:-main}"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=health-lib.sh
+source "${PROJECT_ROOT}/deploy/health-lib.sh"
 BACKEND="${PROJECT_ROOT}/backend"
 FRONTEND="${PROJECT_ROOT}/frontend"
 VENV="${BACKEND}/.venv"
@@ -252,33 +254,6 @@ health_wait_tick() {
   fi
 }
 
-# Homepage SSR sau restart có thể 30–120s; 1 curl dài + log tiến trình (tránh im lặng như treo).
-curl_homepage_smoke() {
-  local base_url="$1"
-  local max_sec="${HEALTH_HOMEPAGE_CURL_MAX_SEC:-120}"
-  local code_file
-  code_file=$(mktemp)
-  echo "    GET ${base_url}/ (SSR smoke — timeout ${max_sec}s, lần đầu sau restart thường 30-120s)…" >&2
-  curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time "${max_sec}" \
-    "${base_url}/" >"${code_file}" 2>/dev/null &
-  local pid=$!
-  local elapsed=0
-  while kill -0 "${pid}" 2>/dev/null; do
-    sleep 10
-    elapsed=$((elapsed + 10))
-    echo "    … vẫn đang render homepage (${elapsed}s / tối đa ${max_sec}s)" >&2
-  done
-  wait "${pid}" 2>/dev/null || true
-  local code
-  code=$(tr -d '[:space:]' <"${code_file}" 2>/dev/null || true)
-  rm -f "${code_file}"
-  if [[ -z "${code}" ]]; then
-    echo "000"
-  else
-    echo "${code}"
-  fi
-}
-
 kill_listeners_on_port() {
   local port="$1"
   if command -v fuser >/dev/null 2>&1; then
@@ -354,20 +329,23 @@ health_check_local() {
   echo "    GET .../orders/admin/shipping/operations-stats → ${ship_stats_code} (401/403=OK, 404=cần pull+restart API)"
   echo "    GET http://127.0.0.1:${WEB_INTERNAL_PORT}${web_path} → ${web_code}"
   local products_code="000"
-  if [[ "${api_code}" == "200" ]]; then
-    products_code=$(curl_http_code \
-      "http://127.0.0.1:${API_INTERNAL_PORT}/api/v1/products/?limit=48&skip=0&is_active=true" 25)
-    echo "    GET /api/v1/products/?limit=48 (storefront) → ${products_code} (200 cần có — 000=pool DB kẹt)"
-  fi
   local homepage_code="000"
   local sale_code="000"
-  if [[ "${web_code}" == "200" || "${web_code}" == "204" ]]; then
-    homepage_code=$(curl_homepage_smoke "http://127.0.0.1:${WEB_INTERNAL_PORT}")
-    echo "    GET / (homepage) → ${homepage_code}"
-  fi
   if [[ "${api_code}" == "200" ]]; then
-    sale_code=$(curl_http_code "http://127.0.0.1:${API_INTERNAL_PORT}/api/v1/sale-calendar/current" 10)
+    products_code=$(health_curl_products_probe "${API_INTERNAL_PORT}")
+    if [[ "${products_code}" != "200" ]]; then
+      echo "    → products timeout — dọn pool DB (idle in transaction)…"
+      health_terminate_idle_db_transactions
+      sleep 2
+      products_code=$(health_curl_products_probe "${API_INTERNAL_PORT}" 2 30)
+    fi
+    echo "    GET /api/v1/products/?limit=${HEALTH_PRODUCTS_LIMIT:-8}&skip_total=true → ${products_code} (200 cần có — 000=pool DB kẹt)"
+    sale_code=$(health_curl_http_code "http://127.0.0.1:${API_INTERNAL_PORT}/api/v1/sale-calendar/current" 15)
     echo "    GET /api/v1/sale-calendar/current → ${sale_code}"
+  fi
+  if [[ "${web_code}" == "200" || "${web_code}" == "204" ]]; then
+    homepage_code=$(health_curl_homepage_smoke "http://127.0.0.1:${WEB_INTERNAL_PORT}")
+    echo "    GET / (homepage) → ${homepage_code}"
   fi
   local core_ok=0
   if [[ "${api_code}" == "200" && ( "${web_code}" == "200" || "${web_code}" == "204" ) && "${products_code}" == "200" ]]; then
@@ -390,6 +368,10 @@ health_check_local() {
     return 0
   fi
   echo "⚠️  Sức khỏe bất thường — xem: pm2 logs ${PM2_API} | pm2 logs ${PM2_WEB}"
+  if [[ "${api_code}" == "200" && "${products_code}" != "200" ]]; then
+    echo "    /health OK nhưng products timeout → pool PostgreSQL kẹt."
+    echo "    Thử: bash deploy/relieve-db-after-restart.sh && pm2 restart ${PM2_API} --update-env"
+  fi
   if [[ "${api_code}" != "200" ]]; then
     echo "    Gợi ý API: đảm bảo backend lắng nghe cổng ${API_INTERNAL_PORT} (SERVER_PORT=${API_INTERNAL_PORT} trong backend/.env hoặc"
     echo "    args uvicorn: --port ${API_INTERNAL_PORT}). Kiểm tra: pm2 show ${PM2_API} | ss -tlnp | grep -E ':${API_INTERNAL_PORT}\\b'"
