@@ -37,6 +37,9 @@ upsert DATABASE_MAX_OVERFLOW  60   "$ENV_FILE"
 upsert DATABASE_POOL_TIMEOUT  30   "$ENV_FILE"
 upsert DATABASE_POOL_RECYCLE  1800 "$ENV_FILE"
 
+bash "${ROOT}/deploy/ensure-api-safe-env.sh" 2>/dev/null || true
+
 echo
 echo "✓ Đã cập nhật ${ENV_FILE}. Backup: ${ENV_FILE}.bak-*"
-echo "Bước tiếp:  pm2 restart 188-api --update-env && pm2 save && pm2 logs 188-api --lines 80"
+echo "Bước tiếp:  bash deploy/relieve-db-after-restart.sh"
+echo "    hoặc:    pm2 restart 188-api --update-env && pm2 save"

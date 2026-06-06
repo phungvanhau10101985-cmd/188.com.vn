@@ -31,6 +31,11 @@ echo "==> Health check 188.com.vn (${PROJECT_ROOT})"
 echo "    API : http://127.0.0.1:${API_PORT}/health"
 echo "    Web : http://127.0.0.1:${WEB_PORT}${WEB_PATH}"
 
+if pgrep -f 'image_localization_job|imgloc-|_multiprocess_job_entry' >/dev/null 2>&1; then
+  echo "⚠️  Job bản địa hóa ảnh/OCR đang chạy — API có thể timeout."
+  echo "    Chạy: bash deploy/cancel-image-localization-job.sh --all-active --nuke"
+fi
+
 api_code="000"
 for _i in $(seq 1 "${API_WAIT}"); do
   if port_is_listening "${API_PORT}"; then
@@ -104,8 +109,9 @@ fi
 echo ""
 echo "⚠️  Sức khỏe bất thường."
 if [[ "${api_code}" == "200" && "${products_code}" != "200" ]]; then
-  echo "    /health OK nhưng products timeout → thường do pool PostgreSQL kẹt."
-  echo "    Thử: bash deploy/relieve-db-after-restart.sh && pm2 restart 188-api --update-env"
+  echo "    /health OK nhưng products timeout → pool DB kẹt hoặc job OCR ảnh chiếm API."
+  echo "    Thử: bash deploy/relieve-db-after-restart.sh"
+  echo "    Hoặc: bash deploy/cancel-image-localization-job.sh --all-active --nuke"
 fi
 echo "    API:  bash deploy/fix-api-health.sh"
 echo "    Web:  bash deploy/fix-web-health.sh"
