@@ -641,11 +641,16 @@ export default function HomePageClient({
     user?.date_of_birth ?? ''
   }`;
 
+  const [guestBehaviorKey, setGuestBehaviorKey] = useState('guest:none');
+  useEffect(() => {
+    if (user?.id != null) return;
+    setGuestBehaviorKey(`guest:${getGuestSessionId()}`);
+  }, [user?.id]);
+
   const shopBehaviorKey = useMemo(() => {
     if (user?.id != null) return `user:${user.id}`;
-    const guestId = typeof window !== 'undefined' ? getGuestSessionId() : null;
-    return `guest:${guestId ?? 'none'}`;
-  }, [user?.id]);
+    return guestBehaviorKey;
+  }, [user?.id, guestBehaviorKey]);
 
   const [sameAgeGenderProducts, setSameAgeGenderProducts] = useState<Product[]>([]);
   const [sameAgeGenderLoading, setSameAgeGenderLoading] = useState(false);

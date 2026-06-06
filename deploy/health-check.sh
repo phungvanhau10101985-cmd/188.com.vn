@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Kiểm tra nhanh 188-api + 188-web trên localhost (sau deploy hoặc debug).
+# Kiểm tra sức khỏe 188-api + 188-web (sau deploy hoặc debug).
 # Usage trên VPS:
 #   cd /var/www/188.com.vn && bash deploy/health-check.sh
 set -euo pipefail
@@ -10,6 +10,7 @@ WEB_PORT="${WEB_INTERNAL_PORT:-3001}"
 WEB_PATH="${WEB_HEALTH_PATH:-/robots.txt}"
 API_WAIT="${HEALTH_API_WAIT_SEC:-45}"
 WEB_WAIT="${HEALTH_WEB_WAIT_SEC:-60}"
+HOMEPAGE_WAIT="${HEALTH_HOMEPAGE_WAIT_SEC:-90}"
 
 port_is_listening() {
   local port="$1"
@@ -56,9 +57,29 @@ for _i in $(seq 1 "${WEB_WAIT}"); do
   sleep 1
 done
 
+products_code="000"
+sale_code="000"
+homepage_code="000"
+if [[ "${api_code}" == "200" ]]; then
+  products_code=$(curl_http_code \
+    "http://127.0.0.1:${API_PORT}/api/v1/products/?limit=48&skip=0&is_active=true" 25)
+  sale_code=$(curl_http_code "http://127.0.0.1:${API_PORT}/api/v1/sale-calendar/current" 10)
+fi
+
+if [[ "${web_code}" == "200" || "${web_code}" == "204" ]]; then
+  for _i in $(seq 1 "${HOMEPAGE_WAIT}"); do
+    homepage_code=$(curl_http_code "http://127.0.0.1:${WEB_PORT}/" 30)
+    [[ "${homepage_code}" == "200" ]] && break
+    sleep 1
+  done
+fi
+
 echo ""
-echo "    GET /health     → ${api_code}"
-echo "    GET ${WEB_PATH} → ${web_code}"
+echo "    GET /health                          → ${api_code}"
+echo "    GET ${WEB_PATH}                      → ${web_code}"
+echo "    GET /api/v1/products/?limit=48       → ${products_code}"
+echo "    GET /api/v1/sale-calendar/current    → ${sale_code}"
+echo "    GET / (homepage SSR smoke)           → ${homepage_code}"
 echo ""
 echo "    pm2:"
 pm2 list 2>/dev/null | grep -E '188-api|188-web|name' || pm2 list 2>/dev/null || true
@@ -66,14 +87,21 @@ echo ""
 echo "    listen:"
 ss -tlnp 2>/dev/null | grep -E ":(${API_PORT}|${WEB_PORT})\\b" || echo "    (chưa thấy cổng ${API_PORT}/${WEB_PORT})"
 
-if [[ "${api_code}" == "200" && ( "${web_code}" == "200" || "${web_code}" == "204" ) ]]; then
+ok=1
+[[ "${api_code}" == "200" ]] || ok=0
+[[ "${web_code}" == "200" || "${web_code}" == "204" ]] || ok=0
+[[ "${products_code}" == "200" ]] || ok=0
+[[ "${homepage_code}" == "200" ]] || ok=0
+
+if [[ "${ok}" == "1" ]]; then
   echo ""
-  echo "✅ Sức khỏe: OK."
+  echo "✅ Sức khỏe: OK (API + Web + products + homepage)."
   exit 0
 fi
 
 echo ""
 echo "⚠️  Sức khỏe bất thường."
-echo "    API: bash deploy/fix-api-health.sh"
-echo "    Web: bash deploy/fix-web-health.sh"
+echo "    API:  bash deploy/fix-api-health.sh"
+echo "    Web:  bash deploy/fix-web-health.sh"
+echo "    DB:   bash deploy/relieve-db-after-restart.sh"
 exit 1

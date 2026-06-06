@@ -11,6 +11,7 @@ type SiteSaleSnapshot = {
 
 let store: SiteSaleSnapshot = { state: null, loading: true };
 let inflight: Promise<void> | null = null;
+let saleCalendarRequested = false;
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -19,6 +20,9 @@ function emit() {
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
+  if (typeof window !== 'undefined') {
+    void loadSiteSaleOnce();
+  }
   return () => listeners.delete(listener);
 }
 
@@ -33,14 +37,14 @@ function getServerSnapshot(): SiteSaleSnapshot {
 async function loadSiteSaleOnce(force = false): Promise<void> {
   if (!force) {
     if (inflight) return inflight;
-    if (store.state !== null && !store.loading) return;
-  }
-
-  if (force) {
+    if (saleCalendarRequested) return;
+  } else {
     inflight = null;
     store = { state: store.state, loading: true };
     emit();
   }
+
+  saleCalendarRequested = true;
 
   inflight = (async () => {
     try {
@@ -60,8 +64,6 @@ async function loadSiteSaleOnce(force = false): Promise<void> {
   return inflight;
 }
 
-let bootstrapped = false;
-
 /** Một request /sale-calendar/current cho cả app (tránh N× ProductCard gọi trùng). */
 export function useSiteSale() {
   const snapshot = useSyncExternalStore(
@@ -69,14 +71,6 @@ export function useSiteSale() {
     getClientSnapshot,
     getServerSnapshot,
   );
-
-  useEffect(() => {
-    if (bootstrapped) return;
-    bootstrapped = true;
-    // Trì hoãn sau hydrate — tránh store đổi khi ProductCard còn đang hydrate.
-    const id = window.setTimeout(() => void loadSiteSaleOnce(), 0);
-    return () => window.clearTimeout(id);
-  }, []);
 
   useEffect(() => {
     if (!snapshot.state?.countdown_to) return;

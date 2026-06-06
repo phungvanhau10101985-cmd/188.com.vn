@@ -151,7 +151,12 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   const useListingThinOnScroll =
     keepDesktopHeaderPinned && pathname != null && !pathname.startsWith('/info');
 
+  const [clientLayoutReady, setClientLayoutReady] = useState(false);
   const [pinnedListingCompact, setPinnedListingCompact] = useState(false);
+
+  useEffect(() => {
+    setClientLayoutReady(true);
+  }, []);
 
   /** Ngưỡng co kéo có độ trễ: spacer đổi cao có thể kéo `scrollY` lùi về dưới ngưỡng → bật/tắt nhanh (nhấp nháy). */
   const LISTING_COMPACT_ENTER_Y = 100;
@@ -164,7 +169,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   );
 
   useEffect(() => {
-    if (!useListingThinOnScroll || typeof window === 'undefined') return;
+    if (!clientLayoutReady || !useListingThinOnScroll || typeof window === 'undefined') return;
     const onScroll = () => {
       setPinnedListingCompact((prev) =>
         applyPinnedListingCompact(window.scrollY, prev),
@@ -173,9 +178,10 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
-  }, [useListingThinOnScroll, applyPinnedListingCompact]);
+  }, [clientLayoutReady, useListingThinOnScroll, applyPinnedListingCompact]);
 
   useLayoutEffect(() => {
+    if (!clientLayoutReady) return;
     if (!useListingThinOnScroll) {
       setPinnedListingCompact(false);
       return;
@@ -184,7 +190,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     setPinnedListingCompact((prev) =>
       applyPinnedListingCompact(window.scrollY, prev),
     );
-  }, [pathname, searchParams, useListingThinOnScroll, applyPinnedListingCompact]);
+  }, [clientLayoutReady, pathname, searchParams, useListingThinOnScroll, applyPinnedListingCompact]);
 
   /** Chiều cao khối chrome cố định — spacer đẩy main, tránh nội dung chui dưới fixed bar */
   const listingChromeRef = useRef<HTMLDivElement>(null);

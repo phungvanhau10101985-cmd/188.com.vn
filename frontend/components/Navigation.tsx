@@ -80,6 +80,7 @@ export default function Navigation({
   const [catalogMenuOpen, setCatalogMenuOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const stickyMenuCloseTimerRef = useRef<number | null>(null);
+  const catalogMenuCloseTimerRef = useRef<number | null>(null);
   const { isAuthenticated, isLoading, user } = useAuth();
   const authReady = mounted && !isLoading;
   const showAuthenticatedActions = authReady && isAuthenticated;
@@ -258,7 +259,7 @@ export default function Navigation({
         : 'sticky top-0';
   const stickyBarTopClass = 'top-0';
 
-  const hideListingCategoryPills = embedInStickyChrome && collapseListingCategoryBar;
+  const hideListingCategoryPills = mounted && embedInStickyChrome && collapseListingCategoryBar;
 
   useLayoutEffect(() => {
     if (!embedInStickyChrome || !onDesktopThinChromeHeight || !showStickyBar) return;
@@ -293,7 +294,6 @@ export default function Navigation({
 
   const isKhoSaleActive = pathname === KHO_SALE_HREF || pathname?.startsWith(`${KHO_SALE_HREF}/`);
   const openCategory = tree.find((c) => c.name === openLevel1);
-  const catalogMenuCloseTimerRef = useRef<number | null>(null);
 
   const handleCatalogMenuEnter = () => {
     if (catalogMenuCloseTimerRef.current) {

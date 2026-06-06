@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { formatCountdownParts } from '@/lib/site-sale';
 
 type Props = {
   countdownTo?: string | null;

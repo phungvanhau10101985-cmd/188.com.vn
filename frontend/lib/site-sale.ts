@@ -24,7 +24,10 @@ type CartLinePricingInput = {
   quantity: number;
 };
 
-export function formatCountdownParts(targetIso: string | null | undefined): {
+export function formatCountdownParts(
+  targetIso: string | null | undefined,
+  nowMs?: number | null,
+): {
   days: number;
   hours: number;
   minutes: number;
@@ -34,7 +37,8 @@ export function formatCountdownParts(targetIso: string | null | undefined): {
   if (!targetIso) return null;
   const target = new Date(targetIso).getTime();
   if (!Number.isFinite(target)) return null;
-  const diff = target - Date.now();
+  const now = nowMs ?? Date.now();
+  const diff = target - now;
   if (diff <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0, expired: true };
   const totalSec = Math.floor(diff / 1000);
   const days = Math.floor(totalSec / 86400);

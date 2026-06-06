@@ -27,31 +27,12 @@ interface AuthContextType extends AuthState {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [authState, setAuthState] = useState<AuthState>(() => {
-    if (typeof window === 'undefined') {
-      return {
-        user: null,
-        token: null,
-        isAuthenticated: false,
-        isLoading: true,
-      };
-    }
-    const cachedUser = readClientAuthUser<UserResponse>();
-    const token = localStorage.getItem('access_token');
-    if (cachedUser) {
-      return {
-        user: cachedUser,
-        token,
-        isAuthenticated: true,
-        isLoading: false,
-      };
-    }
-    return {
-      user: null,
-      token: null,
-      isAuthenticated: false,
-      isLoading: true,
-    };
+  /** SSR + lần hydrate đầu luôn guest — đọc localStorage/cookie trong useEffect để tránh lệch DOM. */
+  const [authState, setAuthState] = useState<AuthState>({
+    user: null,
+    token: null,
+    isAuthenticated: false,
+    isLoading: true,
   });
 
   const router = useRouter();

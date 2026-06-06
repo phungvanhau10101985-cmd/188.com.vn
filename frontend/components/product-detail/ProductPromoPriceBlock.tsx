@@ -43,18 +43,24 @@ export default function ProductPromoPriceBlock({
   clearanceHighlight = false,
   className = '',
 }: ProductPromoPriceBlockProps) {
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [clientReady, setClientReady] = useState(false);
+  const [nowMs, setNowMs] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!countdownTo || !sitePhase) return;
-    setNowMs(Date.now());
-    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    setClientReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!clientReady || !countdownTo || !sitePhase) return;
+    const tick = () => setNowMs(Date.now());
+    tick();
+    const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [countdownTo, sitePhase]);
+  }, [clientReady, countdownTo, sitePhase]);
 
   const countdownLive = useMemo(() => {
-    if (!countdownTo) return '';
-    const parts = formatCountdownParts(countdownTo);
+    if (!clientReady || nowMs == null || !countdownTo) return '';
+    const parts = formatCountdownParts(countdownTo, nowMs);
     if (!parts || parts.expired) return '';
     const hms = `${String(parts.hours).padStart(2, '0')}:${String(parts.minutes).padStart(2, '0')}:${String(parts.seconds).padStart(2, '0')}`;
     if (parts.days > 0) return `${parts.days} ngày ${hms}`;

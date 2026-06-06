@@ -15,19 +15,25 @@ export default function SiteSaleBanner({ state, className = '' }: Props) {
     () => `188_site_sale_banner_${state?.event_date ?? 'none'}_${state?.phase ?? 'off'}`,
     [state?.event_date, state?.phase],
   );
+  const [clientReady, setClientReady] = useState(false);
   const [closed, setClosed] = useState(false);
 
   useEffect(() => {
+    setClientReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!clientReady) return;
     try {
       if (sessionStorage.getItem(storageKey) === '1') setClosed(true);
     } catch {
       /* noop */
     }
-  }, [storageKey]);
+  }, [clientReady, storageKey]);
 
-  const message = siteSaleBannerMessage(state);
+  const message = clientReady ? siteSaleBannerMessage(state) : null;
 
-  if (!message || closed) return null;
+  if (!clientReady || !message || closed) return null;
 
   const isTeaser = state?.phase === 'teaser';
 

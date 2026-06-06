@@ -184,8 +184,19 @@ if port_is_listening "${API_INTERNAL_PORT}"; then
   _hc=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 \
     "http://127.0.0.1:${API_INTERNAL_PORT}/health" 2>/dev/null || echo "000")
   echo "    API health → ${_hc}"
+  if [[ "${_hc}" != "200" ]]; then
+    echo "⚠️  API health ≠ 200 — next build có thể timeout (layout gọi API)."
+    if [[ "${DEPLOY_REQUIRE_API_BEFORE_BUILD:-1}" == "1" ]]; then
+      echo "❌ DEPLOY_REQUIRE_API_BEFORE_BUILD=1 — dừng deploy. Sửa API trước: pm2 restart ${PM2_API}"
+      exit 1
+    fi
+  fi
 else
   echo "⚠️  API chưa listen :${API_INTERNAL_PORT} — next build có thể timeout (layout gọi API)."
+  if [[ "${DEPLOY_REQUIRE_API_BEFORE_BUILD:-1}" == "1" ]]; then
+    echo "❌ DEPLOY_REQUIRE_API_BEFORE_BUILD=1 — dừng deploy."
+    exit 1
+  fi
 fi
 
 echo "==> Frontend: xóa .next (nếu có)"
@@ -321,8 +332,26 @@ health_check_local() {
       "http://127.0.0.1:${API_INTERNAL_PORT}/api/v1/products/?limit=48&skip=0&is_active=true" 25)
     echo "    GET /api/v1/products/?limit=48 (storefront) → ${products_code} (200 cần có — 000=pool DB kẹt)"
   fi
-  if [[ "${api_code}" == "200" && ( "${web_code}" == "200" || "${web_code}" == "204" ) && "${products_code}" == "200" ]]; then
-    echo "✅ Sức khỏe: OK."
+  local homepage_code="000"
+  local sale_code="000"
+  if [[ "${web_code}" == "200" || "${web_code}" == "204" ]]; then
+    local _hp_wait="${HEALTH_HOMEPAGE_WAIT_SEC:-90}"
+    echo "    GET http://127.0.0.1:${WEB_INTERNAL_PORT}/ (SSR smoke, tối đa ${_hp_wait}s)"
+    for _i in $(seq 1 "${_hp_wait}"); do
+      homepage_code=$(curl_http_code "http://127.0.0.1:${WEB_INTERNAL_PORT}/" 30)
+      if [[ "${homepage_code}" == "200" ]]; then
+        break
+      fi
+      sleep 1
+    done
+    echo "    GET / (homepage) → ${homepage_code}"
+  fi
+  if [[ "${api_code}" == "200" ]]; then
+    sale_code=$(curl_http_code "http://127.0.0.1:${API_INTERNAL_PORT}/api/v1/sale-calendar/current" 10)
+    echo "    GET /api/v1/sale-calendar/current → ${sale_code}"
+  fi
+  if [[ "${api_code}" == "200" && ( "${web_code}" == "200" || "${web_code}" == "204" ) && "${products_code}" == "200" && "${homepage_code}" == "200" ]]; then
+    echo "✅ Sức khỏe: OK (API + Web + products + homepage)."
     return 0
   fi
   echo "⚠️  Sức khỏe bất thường — xem: pm2 logs ${PM2_API} | pm2 logs ${PM2_WEB}"
@@ -351,7 +380,7 @@ health_check_local() {
     echo "    --- ${PM2_WEB} error log (40 dòng cuối) ---"
     run_with_timeout 20 pm2 logs "${PM2_WEB}" --lines 40 --nostream
   fi
-  [[ "${DEPLOY_STRICT_HEALTH:-0}" == "1" ]] && return 1
+  [[ "${DEPLOY_STRICT_HEALTH:-1}" == "1" ]] && return 1
   return 0
 }
 
