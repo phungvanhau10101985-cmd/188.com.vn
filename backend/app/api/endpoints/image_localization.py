@@ -55,7 +55,15 @@ IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES = 3
 
 # Giới hạn độ dài danh sách trả về client (tránh JSON job quá lớn).
 _JOB_QUEUE_IDS_MAX = 400
-_JOB_SKIPPED_REPORT_MAX = 400
+_JOB_SKIPPED_REPORT_MAX = 120
+_JOB_RECENT_RESULTS_MAX = 40
+
+
+def _clip_job_message(v: Any, max_len: int = 600) -> str:
+    s = str(v or "").strip()
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 1].rstrip() + "…"
 
 
 def _unique_product_ids(ids: Optional[Iterable[str]]) -> List[str]:
@@ -353,7 +361,7 @@ def _finalize_job_cancelled(
         current_product_id=None,
         cancel_requested=True,
         skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
-        recent_results=results[-100:],
+        recent_results=results[-_JOB_RECENT_RESULTS_MAX:],
         processed_product_ids=processed_ids,
     )
 
@@ -639,7 +647,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                 row = {
                     "product_id": product_id,
                     "status": status,
-                    "message": result.get("message"),
+                    "message": _clip_job_message(result.get("message"), 320),
                     "processed_images": result.get("processed_images", 0),
                 }
                 results.append(row)
@@ -672,7 +680,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                                 f"{last_msgs[:750]}"
                             ),
                             finished_at=datetime.now(timezone.utc).isoformat(),
-                            recent_results=results[-100:],
+                            recent_results=results[-_JOB_RECENT_RESULTS_MAX:],
                             current_product_id=None,
                             skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
                         )
@@ -718,7 +726,13 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     fresh.image_localization_language = payload.language
                     fresh.image_localization_error = str(exc)[:2000]
                     db.commit()
-                results.append({"product_id": product_id, "status": "failed", "message": str(exc)})
+                results.append(
+                    {
+                        "product_id": product_id,
+                        "status": "failed",
+                        "message": _clip_job_message(exc, 600),
+                    }
+                )
                 err_tail = str(exc)[:1000]
                 if is_image_localization_fatal_dependency_error(exc):
                     _mark_processed_product(processed_ids, processed_set, product_id)
@@ -740,7 +754,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                             f"(hết quota/tiền, thiếu key hoặc billing lỗi): {err_tail}"
                         ),
                         finished_at=datetime.now(timezone.utc).isoformat(),
-                        recent_results=results[-100:],
+                        recent_results=results[-_JOB_RECENT_RESULTS_MAX:],
                         current_product_id=None,
                         skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
                     )
@@ -766,7 +780,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                             f"sản phẩm lỗi liên tiếp (exception tại {product_id}, {current}/{total}). {err_tail}"
                         ),
                         finished_at=datetime.now(timezone.utc).isoformat(),
-                        recent_results=results[-100:],
+                        recent_results=results[-_JOB_RECENT_RESULTS_MAX:],
                         current_product_id=None,
                         skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
                     )
@@ -784,7 +798,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                 skipped=skipped,
                 current=current,
                 processed_product_ids=processed_ids,
-                recent_results=results[-30:],
+                recent_results=results[-_JOB_RECENT_RESULTS_MAX:],
                 percent=percent,
                 skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
             )
@@ -804,7 +818,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             percent=100.0,
             message=f"Hoàn tất: {done} xong, {failed} lỗi, {skipped} bỏ qua.",
             finished_at=datetime.now(timezone.utc).isoformat(),
-            recent_results=results[-100:],
+            recent_results=results[-_JOB_RECENT_RESULTS_MAX:],
             current_product_id=None,
             skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
             processed_product_ids=processed_ids,
@@ -815,7 +829,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                 job_id,
                 status="error",
                 phase="error",
-                message=str(exc),
+                message=_clip_job_message(exc, 700),
                 finished_at=datetime.now(timezone.utc).isoformat(),
                 current_product_id=None,
             )

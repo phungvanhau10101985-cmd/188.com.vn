@@ -4177,10 +4177,11 @@ export default function AdminProductsPage() {
                       {job.skipped_product_reports?.length ? (
                         <div className="mt-2 rounded border border-amber-100 bg-amber-50/90 px-2 py-1.5">
                           <p className="text-[11px] font-semibold text-amber-950">
-                            Đã bỏ qua ({job.skipped_product_reports.length})
+                            Đã bỏ qua ({job.skipped_product_reports.length}
+                            {job.skipped_product_reports.length > 40 ? ' — chỉ hiển thị 40 dòng cuối' : ''})
                           </p>
                           <ul className="mt-1 max-h-28 space-y-1 overflow-auto text-[11px] text-amber-950">
-                            {job.skipped_product_reports.map((s, i) => (
+                            {job.skipped_product_reports.slice(-40).map((s, i) => (
                               <li key={`${s.product_id}-${i}`} className="border-b border-amber-100/80 pb-1 last:border-0">
                                 <span className="font-mono font-medium">{s.product_id}</span>
                                 {s.message ? (

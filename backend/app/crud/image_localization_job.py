@@ -11,6 +11,46 @@ from app.models.image_localization_job import ImageLocalizationJob
 
 _TERMINAL = frozenset({"done", "error", "cancelled"})
 _RESUMABLE = frozenset({"queued", "running"})
+_API_RECENT_RESULTS_MAX = 20
+_API_SKIPPED_REPORTS_MAX = 60
+_API_MESSAGE_MAX = 280
+
+
+def _clip_text(v: Any, max_len: int = _API_MESSAGE_MAX) -> str:
+    s = str(v or "").strip()
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 1].rstrip() + "…"
+
+
+def _compact_recent_results(items: Any) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for item in list(items or [])[-_API_RECENT_RESULTS_MAX:]:
+        if not isinstance(item, dict):
+            continue
+        out.append(
+            {
+                "product_id": str(item.get("product_id") or "").strip(),
+                "status": str(item.get("status") or "").strip(),
+                "processed_images": int(item.get("processed_images") or 0),
+                "message": _clip_text(item.get("message")),
+            }
+        )
+    return out
+
+
+def _compact_skipped_reports(items: Any) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for item in list(items or [])[-_API_SKIPPED_REPORTS_MAX:]:
+        if not isinstance(item, dict):
+            continue
+        out.append(
+            {
+                "product_id": str(item.get("product_id") or "").strip(),
+                "message": _clip_text(item.get("message")),
+            }
+        )
+    return out
 
 
 def get_job(db: Session, job_id: str) -> Optional[ImageLocalizationJob]:
@@ -112,7 +152,7 @@ def row_to_job_dict(row: ImageLocalizationJob) -> Dict[str, Any]:
         "job_id": row.job_id,
         "status": row.status,
         "phase": row.phase,
-        "message": row.message,
+        "message": _clip_text(row.message, max_len=500),
         "current": row.current,
         "total": row.total,
         "done": row.done,
@@ -128,8 +168,8 @@ def row_to_job_dict(row: ImageLocalizationJob) -> Dict[str, Any]:
         "local_image_only": row.local_image_only,
         "job_queue_product_ids": list(row.queue_product_ids or [])[:400],
         "job_queue_truncated": bool(row.job_queue_truncated),
-        "skipped_product_reports": list(row.skipped_product_reports or []),
-        "recent_results": list(row.recent_results or []),
+        "skipped_product_reports": _compact_skipped_reports(row.skipped_product_reports),
+        "recent_results": _compact_recent_results(row.recent_results),
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "started_at": row.started_at.isoformat() if row.started_at else None,
         "finished_at": row.finished_at.isoformat() if row.finished_at else None,
