@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useClientMounted } from '@/lib/use-client-mounted';
+import { useCountdownNowMs } from '@/lib/use-countdown-now-ms';
 
 type Props = {
   countdownTo?: string | null;
@@ -33,21 +34,15 @@ export default function SiteSaleLiveCountdown({
   className = '',
 }: Props) {
   const clientMounted = useClientMounted();
-  const [nowMs, setNowMs] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!clientMounted || !countdownTo || !phase) return;
-    const tick = () => setNowMs(Date.now());
-    tick();
-    const id = window.setInterval(tick, 1000);
-    return () => window.clearInterval(id);
-  }, [clientMounted, countdownTo, phase]);
+  const hasCountdown = Boolean(countdownTo && phase);
+  const nowMs = useCountdownNowMs(hasCountdown);
+  const tickMs = clientMounted && hasCountdown ? nowMs : null;
 
   const countdownLive = useMemo(() => {
-    if (nowMs == null || !countdownTo) return '';
+    if (tickMs == null || !countdownTo) return '';
     const target = new Date(countdownTo).getTime();
     if (!Number.isFinite(target)) return '';
-    const diff = target - nowMs;
+    const diff = target - tickMs;
     if (diff <= 0) return '';
     const totalSec = Math.floor(diff / 1000);
     const parts = {
@@ -57,7 +52,7 @@ export default function SiteSaleLiveCountdown({
       seconds: totalSec % 60,
     };
     return formatLiveHms(parts);
-  }, [countdownTo, nowMs]);
+  }, [countdownTo, tickMs]);
 
   if (!clientMounted || !phase || !countdownLive) return null;
 

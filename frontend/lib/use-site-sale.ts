@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import type { SiteSaleCalendarState } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
 
@@ -71,12 +71,6 @@ export function useSiteSale() {
     getClientSnapshot,
     getServerSnapshot,
   );
-
-  useEffect(() => {
-    if (!snapshot.state?.countdown_to) return;
-    const id = window.setInterval(() => emit(), 1000);
-    return () => window.clearInterval(id);
-  }, [snapshot.state?.countdown_to, snapshot.state?.phase]);
 
   const reload = useCallback(async () => {
     await loadSiteSaleOnce(true);

@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { SiteSaleProductPricing } from '@/types/api';
 import { useClientMounted } from '@/lib/use-client-mounted';
+import { useCountdownNowMs } from '@/lib/use-countdown-now-ms';
 
 type Props = {
   siteSale?: SiteSaleProductPricing | null;
@@ -33,24 +34,18 @@ function saleEventLabel(siteSale: SiteSaleProductPricing): string {
 /** Thanh đếm ngược — đặt dưới ảnh SP (teaser: bắt đầu sau; active: còn). */
 export default function SiteSaleCountdownChip({ siteSale, className = '' }: Props) {
   const clientMounted = useClientMounted();
-  const [nowMs, setNowMs] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!clientMounted || !siteSale?.countdown_to || !siteSale?.phase) return;
-    const tick = () => setNowMs(Date.now());
-    tick();
-    const id = window.setInterval(tick, 1000);
-    return () => window.clearInterval(id);
-  }, [clientMounted, siteSale?.countdown_to, siteSale?.phase]);
+  const hasCountdown = Boolean(siteSale?.countdown_to && siteSale?.phase);
+  const nowMs = useCountdownNowMs(hasCountdown);
+  const tickMs = clientMounted && hasCountdown ? nowMs : null;
 
   const phase = siteSale?.phase;
   const targetIso = siteSale?.countdown_to;
 
   const parts = useMemo(() => {
-    if (nowMs == null || !targetIso) return null;
+    if (tickMs == null || !targetIso) return null;
     const target = new Date(targetIso).getTime();
     if (!Number.isFinite(target)) return null;
-    const diff = target - nowMs;
+    const diff = target - tickMs;
     if (diff <= 0) return null;
     const totalSec = Math.floor(diff / 1000);
     return {
@@ -59,9 +54,9 @@ export default function SiteSaleCountdownChip({ siteSale, className = '' }: Prop
       minutes: Math.floor((totalSec % 3600) / 60),
       seconds: totalSec % 60,
     };
-  }, [targetIso, nowMs]);
+  }, [targetIso, tickMs]);
 
-  if (!clientMounted || !siteSale || !phase || nowMs == null || !parts) return null;
+  if (!clientMounted || !siteSale || !phase || tickMs == null || !parts) return null;
 
   const countdownLive = formatLiveCountdown(parts);
   const isTeaser = phase === 'teaser';
