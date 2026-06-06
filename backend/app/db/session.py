@@ -24,6 +24,14 @@ else:
     engine_kwargs["pool_timeout"] = settings.DATABASE_POOL_TIMEOUT
     # Trả connection về pool sạch sau mỗi request — giảm «idle in transaction» tích tụ.
     engine_kwargs["pool_reset_on_return"] = "rollback"
+    # Giữ TCP sống để giảm lỗi "SSL connection has been closed unexpectedly"
+    # khi kết nối idle lâu qua proxy/LB.
+    engine_kwargs["connect_args"] = {
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+    }
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL, **engine_kwargs)
 

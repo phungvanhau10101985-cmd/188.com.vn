@@ -575,7 +575,8 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
         def should_cancel() -> bool:
             return _job_cancel_signal(job_id)
 
-        for product in products:
+        product_ids_to_run = [str(p.product_id).strip() for p in products if str(getattr(p, "product_id", "")).strip()]
+        for product_id in product_ids_to_run:
             if _job_is_cancelled(job_id):
                 return
             if should_cancel():
@@ -591,6 +592,34 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     message="Đã hủy job sau khi xong bước hiện tại.",
                 )
                 return
+            # Dùng session ngắn cho từng sản phẩm:
+            # - tránh giữ 1 PostgreSQL connection quá lâu trong job lớn
+            # - giúp pool_pre_ping hoạt động hiệu quả hơn (checkout lại mỗi vòng)
+            db.close()
+            db = SessionLocal()
+            product = db.query(Product).filter(Product.product_id == product_id).first()
+            if product is None:
+                skipped += 1
+                _mark_processed_product(processed_ids, processed_set, product_id)
+                skipped_reports.append(
+                    {
+                        "product_id": product_id,
+                        "message": "Bỏ qua vì không còn sản phẩm trong DB.",
+                    }
+                )
+                current, percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
+                _job_update(
+                    job_id,
+                    done=done,
+                    failed=failed,
+                    skipped=skipped,
+                    current=current,
+                    processed_product_ids=processed_ids,
+                    percent=percent,
+                    skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
+                )
+                continue
+
             current, percent = _job_progress(
                 done=done, failed=failed, skipped=skipped, total=total, in_flight=True
             )
@@ -599,8 +628,8 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                 phase="processing",
                 current=current,
                 percent=percent,
-                message=f"Đang xử lý {current}/{total}: {product.product_id}",
-                current_product_id=product.product_id,
+                message=f"Đang xử lý {current}/{total}: {product_id}",
+                current_product_id=product_id,
             )
             try:
                 result = service.process_product(db, product, should_cancel=should_cancel)
@@ -608,7 +637,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     return
                 status = result.get("status")
                 row = {
-                    "product_id": product.product_id,
+                    "product_id": product_id,
                     "status": status,
                     "message": result.get("message"),
                     "processed_images": result.get("processed_images", 0),
@@ -639,7 +668,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                             percent=percent,
                             message=(
                                 f"Dừng job: {IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES} "
-                                f"sản phẩm lỗi liên tiếp (đến {product.product_id}, {current}/{total}). "
+                                f"sản phẩm lỗi liên tiếp (đến {product_id}, {current}/{total}). "
                                 f"{last_msgs[:750]}"
                             ),
                             finished_at=datetime.now(timezone.utc).isoformat(),
@@ -653,7 +682,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     consecutive_product_failures = 0
                     skipped_reports.append(
                         {
-                            "product_id": product.product_id,
+                            "product_id": product_id,
                             "message": (
                                 ((result.get("message") or "").strip()[:480] or None)
                             ),
@@ -689,10 +718,10 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     fresh.image_localization_language = payload.language
                     fresh.image_localization_error = str(exc)[:2000]
                     db.commit()
-                results.append({"product_id": product.product_id, "status": "failed", "message": str(exc)})
+                results.append({"product_id": product_id, "status": "failed", "message": str(exc)})
                 err_tail = str(exc)[:1000]
                 if is_image_localization_fatal_dependency_error(exc):
-                    _mark_processed_product(processed_ids, processed_set, product.product_id)
+                    _mark_processed_product(processed_ids, processed_set, product_id)
                     current, percent = _job_progress(
                         done=done, failed=failed, skipped=skipped, total=total
                     )
@@ -718,7 +747,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     return
                 consecutive_product_failures += 1
                 if consecutive_product_failures >= IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES:
-                    _mark_processed_product(processed_ids, processed_set, product.product_id)
+                    _mark_processed_product(processed_ids, processed_set, product_id)
                     current, percent = _job_progress(
                         done=done, failed=failed, skipped=skipped, total=total
                     )
@@ -734,7 +763,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                         percent=percent,
                         message=(
                             f"Dừng job: {IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES} "
-                            f"sản phẩm lỗi liên tiếp (exception tại {product.product_id}, {current}/{total}). {err_tail}"
+                            f"sản phẩm lỗi liên tiếp (exception tại {product_id}, {current}/{total}). {err_tail}"
                         ),
                         finished_at=datetime.now(timezone.utc).isoformat(),
                         recent_results=results[-100:],
@@ -746,7 +775,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             if _job_is_cancelled(job_id):
                 return
 
-            _mark_processed_product(processed_ids, processed_set, product.product_id)
+            _mark_processed_product(processed_ids, processed_set, product_id)
             current, percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
             _job_update(
                 job_id,
