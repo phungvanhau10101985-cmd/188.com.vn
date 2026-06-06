@@ -1865,7 +1865,7 @@ def _search_products_sale_keyword(
     if sort == "views_desc":
         vt_sub = _product_view_totals_subquery()
         q2 = q2.outerjoin(vt_sub, Product.id == vt_sub.c.product_id)
-    total = q2.count()
+    total = _count_products_query(q2)
     order_exprs = _order_exprs_for_product_list(sort, vt_sub)
     products = q2.order_by(*order_exprs).offset(skip).limit(limit).all()
     return total, products
@@ -1891,7 +1891,7 @@ def _search_products_by_words(
     if sort == "views_desc":
         vt_sub = _product_view_totals_subquery()
         query = query.outerjoin(vt_sub, Product.id == vt_sub.c.product_id)
-    total = query.count()
+    total = _count_products_query(query)
     order_exprs = _order_exprs_for_product_list(sort, vt_sub)
     products = query.order_by(*order_exprs).offset(skip).limit(limit).all()
     return total, products
@@ -1926,6 +1926,26 @@ def apply_product_search_word_filters(query, words: List[str]):
             continue
         query = query.filter(search_concat_norm.ilike(f"%{w_norm}%"))
     return query
+
+
+def _count_products_query(query) -> int:
+    """
+    Đếm nhanh trên tập Product:
+    - bỏ ORDER BY để planner không phải sort vô ích khi count.
+    - tắt eager load/options không cần thiết cho truy vấn đếm.
+    - dùng COUNT(products.id) thay vì query.count() dạng subquery full-column.
+    """
+    try:
+        return int(
+            query.enable_eagerloads(False)
+            .order_by(None)
+            .with_entities(sql_func.count(Product.id))
+            .scalar()
+            or 0
+        )
+    except Exception:
+        # Fallback an toàn nếu query có cấu trúc đặc biệt.
+        return int(query.order_by(None).count() or 0)
 
 
 _PRODUCT_SLUG_ID_SUFFIX_RE = re.compile(
@@ -4344,7 +4364,7 @@ def get_products(
         if skip_total:
             total = -1
         else:
-            total = query.count()
+            total = _count_products_query(query)
         if use_random_order:
             products = query.order_by(sql_func.random()).offset(skip).limit(limit).all()
         elif sort_norm == "views_desc":
