@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tuning VPS chia sẻ: .env pool + cache TTL + index Postgres + swap 4G.
+# Tuning VPS chia sẻ: .env pool + cache TTL + index Postgres + swap 8G.
 # Gọi tự động từ deploy/update-vps.sh hoặc tay:
 #   bash deploy/tune-db-vps.sh
 #
@@ -48,18 +48,16 @@ else
 fi
 
 echo
-echo "==> [tuning] 4/4 Swap 4G (nếu chưa có)"
+echo "==> [tuning] 4/4 Swap 8G (tao hoac nang cap tu 4G)"
 if [[ "${DEPLOY_SKIP_SWAP:-0}" == "1" ]]; then
   echo "    DEPLOY_SKIP_SWAP=1 — bỏ qua."
-elif swapon --show 2>/dev/null | grep -q .; then
-  swapon --show
 else
   SWAP_SCRIPT="${ROOT}/deploy/setup-swap.sh"
   if [[ -f "${SWAP_SCRIPT}" ]]; then
     if [[ "$(id -u)" -eq 0 ]]; then
-      bash "${SWAP_SCRIPT}" || echo "    ⚠️  setup-swap thất bại — tiếp tục deploy"
+      bash "${SWAP_SCRIPT}" 8G || echo "    ⚠️  setup-swap thất bại — tiếp tục deploy"
     elif command -v sudo >/dev/null 2>&1; then
-      sudo bash "${SWAP_SCRIPT}" || echo "    ⚠️  setup-swap thất bại — tiếp tục deploy"
+      sudo bash "${SWAP_SCRIPT}" 8G || echo "    ⚠️  setup-swap thất bại — tiếp tục deploy"
     else
       echo "    (bỏ qua swap — cần root hoặc sudo)"
     fi
