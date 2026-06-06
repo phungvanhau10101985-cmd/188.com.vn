@@ -42,10 +42,14 @@ function parseWebConversionsFromJson(data: Record<string, unknown>): GoogleAdsWe
 }
 
 export async function fetchPublicSiteEmbeds(): Promise<PublicSiteEmbeds> {
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    return empty;
+  }
   const base = getApiBaseUrl();
   try {
     const res = await fetch(`${base}/embed-codes/public`, {
       next: { revalidate: 120 },
+      signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) return empty;
     const data = (await res.json()) as Record<string, unknown>;

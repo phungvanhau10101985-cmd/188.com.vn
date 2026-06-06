@@ -7,6 +7,7 @@
 #   Mỗi lần — chỉ pull tay rồi deploy (không git trong script):
 #     cd /var/www/188.com.vn && git pull origin main
 #     DEPLOY_SKIP_GIT=1 DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
+#     (DEPLOY_STOP_PM2_BEFORE_BUILD chỉ stop 188-web — giữ 188-api cho next build SSR)
 #   Hoặc một lệnh (script đã TÍCH HỢP git pull origin <nhánh>): bỏ DEPLOY_SKIP_GIT
 #     → trong script: deploy_git_sync → git pull origin <nhánh> --no-rebase (đối số đầu, mặc định main)
 #   DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
@@ -68,9 +69,22 @@ ensure_postgres_database_for_deploy() {
 
 cd "${PROJECT_ROOT}"
 
+port_is_listening() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tln 2>/dev/null | grep -qE ":${port}\\b"
+    return $?
+  fi
+  if command -v nc >/dev/null 2>&1; then
+    nc -z 127.0.0.1 "${port}" >/dev/null 2>&1
+    return $?
+  fi
+  return 1
+}
+
 if [[ "${DEPLOY_STOP_PM2_BEFORE_BUILD:-0}" == "1" ]]; then
-  echo "==> PM2 stop: ${PM2_API} ${PM2_WEB}"
-  pm2 stop "${PM2_API}" 2>/dev/null || true
+  # next build SSR layout gọi API :8001 — KHÔNG stop 188-api (chỉ dừng web giải phóng RAM).
+  echo "==> PM2 stop: chỉ ${PM2_WEB} (giữ ${PM2_API} cho next build)"
   pm2 stop "${PM2_WEB}" 2>/dev/null || true
 fi
 
@@ -156,11 +170,31 @@ if [[ "${DEPLOY_BUILD_VPS:-1}" != "1" ]]; then
   exit 0
 fi
 
+echo "==> Frontend: đảm bảo API listen trước next build (layout SSR cần :${API_INTERNAL_PORT})"
+if ! port_is_listening "${API_INTERNAL_PORT}"; then
+  echo "    Khởi động ${PM2_API}…"
+  pm2 start "${PROJECT_ROOT}/deploy/ecosystem.config.cjs" --only "${PM2_API}" 2>/dev/null \
+    || pm2 restart "${PM2_API}" --update-env
+  for _w in $(seq 1 45); do
+    port_is_listening "${API_INTERNAL_PORT}" && break
+    sleep 1
+  done
+fi
+if port_is_listening "${API_INTERNAL_PORT}"; then
+  _hc=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 \
+    "http://127.0.0.1:${API_INTERNAL_PORT}/health" 2>/dev/null || echo "000")
+  echo "    API health → ${_hc}"
+else
+  echo "⚠️  API chưa listen :${API_INTERNAL_PORT} — next build có thể timeout (layout gọi API)."
+fi
+
 echo "==> Frontend: xóa .next (nếu có)"
 rm -rf "${FRONTEND}/.next"
 
 HEAP="${NODE_BUILD_HEAP_MB:-3072}"
 export NODE_OPTIONS="--max-old-space-size=${HEAP}"
+# Giảm worker song song — tránh 7× layout × category tree làm đầy pool DB khi build.
+export NEXT_PRIVATE_BUILD_WORKERS="${NEXT_PRIVATE_BUILD_WORKERS:-2}"
 
 cd "${FRONTEND}"
 npm ci
@@ -175,19 +209,6 @@ fi
 if [[ "${DEPLOY_SKIP_TYPECHECK:-0}" == "1" ]]; then
   echo "==> Lưu ý: DEPLOY_SKIP_TYPECHECK=1 không tự tắt TS — cần ignoreBuildErrors trong next.config nếu muốn bỏ qua lỗi type."
 fi
-
-port_is_listening() {
-  local port="$1"
-  if command -v ss >/dev/null 2>&1; then
-    ss -tln 2>/dev/null | grep -qE ":${port}\\b"
-    return $?
-  fi
-  if command -v nc >/dev/null 2>&1; then
-    nc -z 127.0.0.1 "${port}" >/dev/null 2>&1
-    return $?
-  fi
-  return 1
-}
 
 curl_http_code() {
   local url="$1"

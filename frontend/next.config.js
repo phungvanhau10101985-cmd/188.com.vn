@@ -4,6 +4,8 @@ const path = require("path");
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
+  /** VPS: layout SSR có thể chậm khi API/DB bận — tránh fail build sau 60s mặc định. */
+  staticPageGenerationTimeout: 180,
   // Trình duyệt mặc định GET /favicon.ico — không có file .ico thì trả về favicon.png (200).
   async rewrites() {
     return [

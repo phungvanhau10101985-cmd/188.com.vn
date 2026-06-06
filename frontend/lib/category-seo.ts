@@ -105,8 +105,16 @@ export async function getCategoryCatalogTilesForPage(
   }
 }
 
+/** next build prerender — bỏ qua category tree nặng; runtime request vẫn SSR đầy đủ. */
+function isNextProductionBuild(): boolean {
+  return process.env.NEXT_PHASE === "phase-production-build";
+}
+
 /** Server-side: lấy cây danh mục 3 cấp từ API (dùng trong layout để thanh danh mục luôn có dữ liệu). */
 export async function getCategoryTreeForLayout(): Promise<CategoryLevel1[]> {
+  if (isNextProductionBuild()) {
+    return [];
+  }
   try {
     const url = `${API_BASE}/categories/from-products`;
     const res = await fetch(url, {
