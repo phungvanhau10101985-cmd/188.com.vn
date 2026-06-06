@@ -258,7 +258,7 @@ curl_homepage_smoke() {
   local max_sec="${HEALTH_HOMEPAGE_CURL_MAX_SEC:-120}"
   local code_file
   code_file=$(mktemp)
-  echo "    GET ${base_url}/ (SSR smoke — timeout ${max_sec}s, lần đầu sau restart thường 30-120s)…"
+  echo "    GET ${base_url}/ (SSR smoke — timeout ${max_sec}s, lần đầu sau restart thường 30-120s)…" >&2
   curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time "${max_sec}" \
     "${base_url}/" >"${code_file}" 2>/dev/null &
   local pid=$!
@@ -266,7 +266,7 @@ curl_homepage_smoke() {
   while kill -0 "${pid}" 2>/dev/null; do
     sleep 10
     elapsed=$((elapsed + 10))
-    echo "    … vẫn đang render homepage (${elapsed}s / tối đa ${max_sec}s)"
+    echo "    … vẫn đang render homepage (${elapsed}s / tối đa ${max_sec}s)" >&2
   done
   wait "${pid}" 2>/dev/null || true
   local code
