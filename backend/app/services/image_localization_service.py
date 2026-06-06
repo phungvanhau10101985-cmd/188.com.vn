@@ -19,6 +19,8 @@ import requests
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.db.retry import release_db_session, run_db_write
+from app.db.session import SessionLocal
 from app.models.product import Product
 from app.services.image_localization_temp_cleanup import (
     cleanup_merge_batch_files,
@@ -2428,6 +2430,15 @@ class ProductImageLocalizationService:
         db.refresh(product)
         return True
 
+    def _persist_product_fields(self, product_pk: int, apply_fn: Callable[[Product], None]) -> None:
+        def write(db: Session) -> None:
+            fresh = db.query(Product).filter(Product.id == product_pk).first()
+            if fresh is None:
+                raise ImageLocalizationError(f"Sản phẩm id={product_pk} không còn trong DB")
+            apply_fn(fresh)
+
+        run_db_write(SessionLocal, write)
+
     def process_product(self, db: Session, product: Product, should_cancel=None) -> Dict[str, Any]:
         self._should_cancel = should_cancel
         self._abort_if_requested(should_cancel)
@@ -2441,6 +2452,10 @@ class ProductImageLocalizationService:
             )
             return {"status": "skipped", "processed_images": 0, "message": msg}
 
+        product_pk = product.id
+        # Trả connection về pool trước bước xử lý ảnh lâu — tránh SSL idle timeout khi commit.
+        release_db_session(db)
+
         refs = self._collect_refs(product)
         unique_urls = []
         seen = set()
@@ -2452,11 +2467,15 @@ class ProductImageLocalizationService:
             unique_urls.append(u)
 
         if not unique_urls:
-            product.image_localization_status = "skipped"
-            product.image_localization_language = self.language
-            product.image_localization_error = "Sản phẩm không có URL ảnh ở O/P/Q/T"
-            db.commit()
-            return {"status": "skipped", "processed_images": 0, "message": product.image_localization_error}
+            skip_msg = "Sản phẩm không có URL ảnh ở O/P/Q/T"
+
+            def _apply_skipped(fresh: Product) -> None:
+                fresh.image_localization_status = "skipped"
+                fresh.image_localization_language = self.language
+                fresh.image_localization_error = skip_msg
+
+            self._persist_product_fields(product_pk, _apply_skipped)
+            return {"status": "skipped", "processed_images": 0, "message": skip_msg}
 
         limit = max(0, int(getattr(settings, "IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT", 80) or 80))
         if limit:
@@ -2519,21 +2538,30 @@ class ProductImageLocalizationService:
         changed = [r for r in results.values() if r.final_url and r.final_url != r.original_url]
         if failed and not changed:
             self._abort_if_requested(should_cancel)
-            product.image_localization_status = "failed"
-            product.image_localization_error = failed[0].message[:2000]
-            db.commit()
-            return {"status": "failed", "processed_images": 0, "message": product.image_localization_error}
+            fail_msg = failed[0].message[:2000]
+
+            def _apply_failed(fresh: Product) -> None:
+                fresh.image_localization_status = "failed"
+                fresh.image_localization_language = self.language
+                fresh.image_localization_error = fail_msg
+
+            self._persist_product_fields(product_pk, _apply_failed)
+            return {"status": "failed", "processed_images": 0, "message": fail_msg}
 
         if not self.dry_run:
             self._abort_if_requested(should_cancel)
-            self._apply_results(product, results)
-            self._stash_originals(product, refs, results)
-            product.image_localization_status = "localized"
-            product.image_localization_language = self.language
-            product.image_localized_at = datetime.now(timezone.utc)
-            product.image_localization_error = failed[0].message[:2000] if failed else None
-            db.commit()
-            db.refresh(product)
+            partial_err = failed[0].message[:2000] if failed else None
+            localized_at = datetime.now(timezone.utc)
+
+            def _apply_localized(fresh: Product) -> None:
+                self._apply_results(fresh, results)
+                self._stash_originals(fresh, refs, results)
+                fresh.image_localization_status = "localized"
+                fresh.image_localization_language = self.language
+                fresh.image_localized_at = localized_at
+                fresh.image_localization_error = partial_err
+
+            self._persist_product_fields(product_pk, _apply_localized)
 
         return {
             "status": "localized",

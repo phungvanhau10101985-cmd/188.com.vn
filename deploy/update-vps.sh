@@ -401,10 +401,22 @@ health_check_local() {
   return 0
 }
 
+print_safe_deploy_checklist() {
+  echo ""
+  echo "==> Checklist deploy an toàn (chống treo) — lần sau chạy nhanh:"
+  echo "   1) Trước deploy: tạm dừng app không liên quan (vd: pm2 stop thu-do-online worksheet-worker)."
+  echo "   2) Deploy chuẩn: git pull -> backend pip/init -> frontend build -> pm2 restart ${PM2_API} ${PM2_WEB}."
+  echo "   3) Luôn pm2 save sau restart để reboot không chạy cấu hình cũ."
+  echo "   4) Flush log rồi theo dõi lỗi mới: pm2 flush ${PM2_API}; pm2 flush ${PM2_WEB}; pm2 logs ..."
+  echo "   5) Nếu web lag: kiểm tra DB active query (pg_stat_activity), hủy query nặng/idle transaction kéo dài."
+  echo "   6) Sau deploy lớn Next.js: hard refresh (Ctrl+F5) hoặc tab ẩn danh để tránh Server Action mismatch."
+}
+
 if [[ "${DEPLOY_RESTART_PM2:-1}" != "1" ]]; then
   echo ""
   echo "==> DEPLOY_RESTART_PM2=0 — không restart PM2. Chạy tay: pm2 restart ${PM2_API} ${PM2_WEB}"
   health_check_local || true
+  print_safe_deploy_checklist
   exit 0
 fi
 
@@ -434,6 +446,7 @@ if [[ -f "${PROJECT_ROOT}/deploy/relieve-db-after-restart.sh" ]]; then
 fi
 
 health_check_local || true
+print_safe_deploy_checklist
 
 echo ""
 echo "==> Deploy xong."

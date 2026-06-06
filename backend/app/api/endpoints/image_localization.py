@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.security import require_module_permission
 from app.core.config import settings
 from app.crud import image_localization_job as image_loc_job_crud
+from app.db.retry import is_transient_db_error, release_db_session, run_db_write
 from app.db.session import SessionLocal, get_db
 from app.models.admin import AdminUser
 from app.models.product import Product
@@ -583,6 +584,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
         )
         register_running_service(job_id, service)
         consecutive_product_failures = 0
+        transient_db_retries: Dict[str, int] = {}
 
         def should_cancel() -> bool:
             return _job_cancel_signal(job_id)
@@ -724,14 +726,73 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                         skipped_reports=skipped_reports,
                     )
                     return
+                err_tail = str(exc)[:1000]
+                release_db_session(db)
+
+                if is_transient_db_error(exc):
+                    retry_n = transient_db_retries.get(product_id, 0) + 1
+                    transient_db_retries[product_id] = retry_n
+                    if retry_n < 3:
+                        def _reset_pending(sess: Session) -> None:
+                            fresh = sess.query(Product).filter(Product.id == product.id).first()
+                            if fresh is None:
+                                return
+                            if (fresh.image_localization_status or "").strip() == "processing":
+                                fresh.image_localization_status = "pending"
+                                fresh.image_localization_error = (
+                                    f"Lỗi kết nối DB tạm thời (lần {retry_n}/3): {err_tail}"[:2000]
+                                )
+
+                        try:
+                            run_db_write(SessionLocal, _reset_pending)
+                        except Exception:
+                            logger.exception(
+                                "Không reset pending sau lỗi DB tạm thời product_id=%s",
+                                product_id,
+                            )
+                        results.append(
+                            {
+                                "product_id": product_id,
+                                "status": "retry",
+                                "message": _clip_job_message(
+                                    f"Lỗi kết nối DB tạm thời — thử lại ({retry_n}/3): {exc}",
+                                    600,
+                                ),
+                            }
+                        )
+                        current, percent = _job_progress(
+                            done=done, failed=failed, skipped=skipped, total=total
+                        )
+                        _job_update(
+                            job_id,
+                            phase="processing",
+                            current=current,
+                            percent=percent,
+                            message=(
+                                f"Lỗi DB tạm thời tại {product_id} — chờ {retry_n * 2}s rồi thử lại "
+                                f"({current}/{total})"
+                            ),
+                            current_product_id=product_id,
+                            recent_results=results[-_JOB_RECENT_RESULTS_MAX:],
+                        )
+                        time.sleep(min(retry_n * 2, 8))
+                        continue
+
                 failed += 1
-                db.rollback()
-                fresh = db.query(Product).filter(Product.id == product.id).first()
-                if fresh is not None:
+
+                def _mark_failed(sess: Session) -> None:
+                    fresh = sess.query(Product).filter(Product.id == product.id).first()
+                    if fresh is None:
+                        return
                     fresh.image_localization_status = "failed"
                     fresh.image_localization_language = payload.language
                     fresh.image_localization_error = str(exc)[:2000]
-                    db.commit()
+
+                try:
+                    run_db_write(SessionLocal, _mark_failed)
+                except Exception:
+                    logger.exception("Không ghi trạng thái failed product_id=%s", product_id)
+
                 results.append(
                     {
                         "product_id": product_id,
@@ -739,7 +800,6 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                         "message": _clip_job_message(exc, 600),
                     }
                 )
-                err_tail = str(exc)[:1000]
                 if is_image_localization_fatal_dependency_error(exc):
                     _mark_processed_product(processed_ids, processed_set, product_id)
                     current, percent = _job_progress(
