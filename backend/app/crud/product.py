@@ -284,7 +284,7 @@ def _schedule_google_sheets_sku_sync(*, immediate: bool = False) -> None:
 
 
 def normalize_product_list_sort(sort: Optional[str]) -> str:
-    """Giá trị nội bộ: id_desc | newest | oldest | views_desc | purchases_desc | id_asc."""
+    """Giá trị nội bộ: id_desc | newest | oldest | views_desc | purchases_desc | available_desc | available_asc | id_asc."""
     s = (sort or "").strip().lower().replace("-", "_")
     if s in ("", "default", "id_desc", "id_newest"):
         return "id_desc"
@@ -294,6 +294,10 @@ def normalize_product_list_sort(sort: Optional[str]) -> str:
         return "views_desc"
     if s in ("purchases_desc", "purchases", "bestselling", "best_selling", "sold"):
         return "purchases_desc"
+    if s in ("available_desc", "stock_desc", "inventory_desc", "ton_kho_desc"):
+        return "available_desc"
+    if s in ("available_asc", "stock_asc", "inventory_asc", "ton_kho_asc"):
+        return "available_asc"
     if s in ("newest", "new", "created_desc"):
         return "newest"
     if s in ("oldest", "created_asc"):
@@ -336,6 +340,10 @@ def _order_exprs_for_product_list(sort: str, view_totals_subq):
         return [Product.created_at.asc().nullslast(), Product.id.asc()]
     if sort == "purchases_desc":
         return [Product.purchases.desc().nullslast(), Product.id.desc()]
+    if sort == "available_desc":
+        return [sql_func.coalesce(Product.available, 0).desc(), Product.id.desc()]
+    if sort == "available_asc":
+        return [sql_func.coalesce(Product.available, 0).asc(), Product.id.asc()]
     if sort == "id_asc":
         return [Product.id.asc()]
     # id_desc: ID hệ thống giảm dần — nhập/import mới lên đầu
@@ -2906,14 +2914,16 @@ def get_product_sitemap_slugs(
     is_active: Optional[bool] = True,
 ) -> dict:
     """Chỉ slug + updated_at — payload nhẹ cho sitemap Next.js (tránh giới hạn cache 2MB)."""
-    filters = [Product.slug.isnot(None), Product.slug != ""]
+    from app.services.warehouse_clearance import apply_catalog_visibility_filter
+
+    query = db.query(Product.slug, Product.updated_at, Product.id)
+    query = query.filter(Product.slug.isnot(None), Product.slug != "")
     if is_active is not None:
-        filters.append(Product.is_active == is_active)
-    total = db.query(Product.id).filter(*filters).count()
+        query = query.filter(Product.is_active == is_active)
+    query = apply_catalog_visibility_filter(query)
+    total = query.count()
     rows = (
-        db.query(Product.slug, Product.updated_at)
-        .filter(*filters)
-        .order_by(Product.id)
+        query.order_by(Product.id)
         .offset(skip)
         .limit(limit)
         .all()
@@ -4380,6 +4390,7 @@ def count_products_for_category_path(
     is_active: bool = True,
     *,
     cat3_by_triple: Optional[Dict[str, int]] = None,
+    storefront_visible: bool = False,
 ) -> int:
     """
     Đếm sản phẩm active khớp đường danh mục (cùng logic filter với get_category_by_path).
@@ -4388,12 +4399,20 @@ def count_products_for_category_path(
     name1 = (name1 or "").strip()
     if not name1:
         return 0
+
+    def _apply_storefront_filters(q):
+        if not storefront_visible:
+            return q
+        from app.services.warehouse_clearance import apply_catalog_visibility_filter
+
+        return apply_catalog_visibility_filter(q)
+
     filt_l1 = [Product.is_active == is_active]
     _e = category_field_equals_ci(Product.category, name1)
     if _e is not None:
         filt_l1.append(_e)
     if not name2 or not str(name2).strip():
-        return db.query(Product).filter(*filt_l1).count()
+        return _apply_storefront_filters(db.query(Product).filter(*filt_l1)).count()
     name2 = str(name2).strip()
     subcat_group = get_subcategory_group_for_query(name1, name2)
     q = db.query(Product).filter(Product.is_active == is_active)
@@ -4409,7 +4428,7 @@ def count_products_for_category_path(
             _e2 = category_field_equals_ci(Product.subcategory, name2)
             if _e2 is not None:
                 q = q.filter(_e2)
-        return q.count()
+        return _apply_storefront_filters(q).count()
     name3 = str(name3).strip()
     _ca = category_field_equals_ci(Product.category, name1)
     _ss = category_field_equals_ci(Product.sub_subcategory, name3)
@@ -4431,24 +4450,47 @@ def count_products_for_category_path(
     # → Nhánh nguồn sau map (SP đã đổi FK) không còn bị đếm nhờ text cũ; nhánh đích vẫn nhận SP lệch chữ.
     if cid is not None and text_parts:
         text_match = and_(*text_parts)
-        return (
+        return _apply_storefront_filters(
             db.query(Product)
             .filter(
                 Product.is_active == is_active,
                 or_(Product.category_id == cid, and_(Product.category_id.is_(None), text_match)),
             )
-            .count()
-        )
+        ).count()
     if cid is not None:
-        return (
+        return _apply_storefront_filters(
             db.query(Product)
             .filter(Product.is_active == is_active, Product.category_id == cid)
-            .count()
-        )
+        ).count()
     q = db.query(Product).filter(Product.is_active == is_active)
     for p in text_parts:
         q = q.filter(p)
-    return q.count()
+    return _apply_storefront_filters(q).count()
+
+
+_SIZE_ONLY_LEVEL1_RE = re.compile(
+    r"^(?:xxs|xs|s|m|l|xl|xxl|xxxl|2xl|3xl|4xl|5xl|\d{1,2}(?:\.\d)?|\d{2,3})$",
+    re.IGNORECASE,
+)
+_JUNK_LEVEL1_MENU_RES = (
+    re.compile(r"^(?:chỉ|chi|only)\s+size\b", re.IGNORECASE),
+    re.compile(
+        r"^size\s+(?:xxs|xs|s|m|l|xl|xxl|xxxl|2xl|3xl|4xl|5xl|\d+)\s*$",
+        re.IGNORECASE,
+    ),
+    _SIZE_ONLY_LEVEL1_RE,
+)
+
+
+def _is_junk_level1_menu_category(name: str) -> bool:
+    """Ẩn danh mục cấp 1 kiểu «Chỉ size XL» — size/marketing không phải ngành hàng."""
+    text = re.sub(r"\s+", " ", (name or "")).strip()
+    if not text:
+        return True
+    for pat in _JUNK_LEVEL1_MENU_RES:
+        if pat.search(text):
+            return True
+    return False
 
 
 def prune_category_tree_empty_branches(
@@ -4482,7 +4524,7 @@ def prune_category_tree_empty_branches(
     triple_idx = _build_cat3_triple_name_lookup(db)
     for c1 in tree:
         name1 = (c1.get("name") or "").strip()
-        if not name1:
+        if not name1 or _is_junk_level1_menu_category(name1):
             continue
         children2_in = c1.get("children") or []
         pruned_l2: List[Dict[str, Any]] = []
@@ -4498,7 +4540,13 @@ def prune_category_tree_empty_branches(
                 if not n3s:
                     continue
                 cnt = count_products_for_category_path(
-                    db, name1, name2, n3s, is_active, cat3_by_triple=triple_idx
+                    db,
+                    name1,
+                    name2,
+                    n3s,
+                    is_active,
+                    cat3_by_triple=triple_idx,
+                    storefront_visible=True,
                 )
                 if _l3_meets_menu_min(cnt):
                     pruned_l3.append(c3)

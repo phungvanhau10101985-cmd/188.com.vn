@@ -152,7 +152,9 @@ def _serialize_products_for_api(
     for product in raw_products:
         try:
             d = Product.model_validate(product).model_dump()
-            sale_calendar_svc.enrich_product_payload_with_site_sale(d, sale_state)
+            # Dòng kho thanh lý: giá sale kho riêng — không chồng lịch Sale site (6/6, …).
+            if not getattr(product, "is_warehouse_clearance", False):
+                sale_calendar_svc.enrich_product_payload_with_site_sale(d, sale_state)
             paired.append((product, d))
         except Exception:
             paired.append((None, product))
@@ -526,7 +528,7 @@ def read_products(
     order_random: bool = Query(False, description="Trộn ngẫu nhiên (chỉ áp dụng khi không có q); phân trang theo random không ổn định giữa các lần tải"),
     sort: Optional[str] = Query(
         None,
-        description="Sắp xếp: id_desc | newest | oldest | views_desc | id_asc (bị bỏ qua khi order_random=true)",
+        description="Sắp xếp: id_desc | newest | oldest | views_desc | available_desc | available_asc | id_asc (bị bỏ qua khi order_random=true)",
     ),
     size: Optional[str] = Query(None, description="Lọc size (khớp mảng JSON `sizes` của SP)"),
     color: Optional[str] = Query(
@@ -619,7 +621,7 @@ def read_products_full_list(
     order_random: bool = Query(False, description="Trộn ngẫu nhiên (chỉ áp dụng khi không có q); phân trang theo random không ổn định giữa các lần tải"),
     sort: Optional[str] = Query(
         None,
-        description="Sắp xếp: id_desc | newest | oldest | views_desc | id_asc (bị bỏ qua khi order_random=true)",
+        description="Sắp xếp: id_desc | newest | oldest | views_desc | available_desc | available_asc | id_asc (bị bỏ qua khi order_random=true)",
     ),
     size: Optional[str] = Query(None, description="Lọc size (khớp mảng JSON `sizes` của SP)"),
     color: Optional[str] = Query(

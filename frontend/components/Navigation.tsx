@@ -13,6 +13,12 @@ import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { useCart } from '@/features/cart/hooks/useCart';
 import type { CategoryLevel1, CategoryLevel2 } from '@/types/api';
 import { categorySegmentForUrl } from '@/lib/category-url';
+import {
+  isKhoSaleMenuCategory,
+  KHO_SALE_HREF,
+  KHO_SALE_MENU_NAME,
+  level1CategoryHref,
+} from '@/lib/kho-sale-menu-category';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 
 export interface CategoryFilter {
@@ -71,6 +77,7 @@ export default function Navigation({
   const [openLevel1, setOpenLevel1] = useState<string | null>(null);
   const [stickySearchTerm, setStickySearchTerm] = useState('');
   const [stickyMenuOpen, setStickyMenuOpen] = useState(false);
+  const [catalogMenuOpen, setCatalogMenuOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const stickyMenuCloseTimerRef = useRef<number | null>(null);
   const { isAuthenticated, isLoading, user } = useAuth();
@@ -171,6 +178,7 @@ export default function Navigation({
       if (dropdownRef.current && !dropdownRef.current.contains(target)) {
         setOpenLevel1(null);
         setStickyMenuOpen(false);
+        setCatalogMenuOpen(false);
       }
     }
     document.addEventListener('click', handleClickOutside);
@@ -283,7 +291,23 @@ export default function Navigation({
     );
   }
 
+  const isKhoSaleActive = pathname === KHO_SALE_HREF || pathname?.startsWith(`${KHO_SALE_HREF}/`);
   const openCategory = tree.find((c) => c.name === openLevel1);
+  const catalogMenuCloseTimerRef = useRef<number | null>(null);
+
+  const handleCatalogMenuEnter = () => {
+    if (catalogMenuCloseTimerRef.current) {
+      window.clearTimeout(catalogMenuCloseTimerRef.current);
+      catalogMenuCloseTimerRef.current = null;
+    }
+    setCatalogMenuOpen(true);
+    if (!openLevel1 && tree.length) setOpenLevel1(tree[0].name);
+  };
+
+  const handleCatalogMenuLeave = () => {
+    if (catalogMenuCloseTimerRef.current) window.clearTimeout(catalogMenuCloseTimerRef.current);
+    catalogMenuCloseTimerRef.current = window.setTimeout(() => setCatalogMenuOpen(false), 150);
+  };
   const handleStickyMenuEnter = () => {
     if (stickyMenuCloseTimerRef.current) {
       window.clearTimeout(stickyMenuCloseTimerRef.current);
@@ -346,7 +370,7 @@ export default function Navigation({
                 </svg>
                 Danh mục
               </button>
-              {showStickyBar && stickyMenuOpen && openCategory && (
+              {showStickyBar && stickyMenuOpen && (
                 <div
                   className="absolute left-0 top-full mt-1 w-[720px] bg-white border border-gray-200 shadow-lg rounded-xl overflow-hidden z-[60] py-2"
                   onMouseEnter={handleStickyMenuEnter}
@@ -359,16 +383,17 @@ export default function Navigation({
                           <div className="text-xs text-gray-500">Chưa có danh mục.</div>
                         )}
                         {tree.map((level1) => {
-                          const slug1 =
-                            categorySegmentForUrl(level1.slug) || categorySegmentForUrl(level1.name);
                           const isActive = openLevel1 === level1.name;
+                          const l1Active =
+                            isActive ||
+                            (isKhoSaleMenuCategory(level1) && isKhoSaleActive);
                           return (
                             <Link
                               key={level1.name}
-                              href={`/danh-muc/${encodeURIComponent(slug1)}`}
+                              href={level1CategoryHref(level1)}
                               onMouseEnter={() => setOpenLevel1(level1.name)}
                               className={`px-2.5 py-2 rounded-md text-xs font-medium truncate ${
-                                isActive ? 'bg-orange-50 text-orange-700' : 'text-gray-700 hover:bg-white'
+                                l1Active ? 'bg-orange-50 text-orange-700' : 'text-gray-700 hover:bg-white'
                               }`}
                             >
                               {level1.name}
@@ -381,7 +406,16 @@ export default function Navigation({
                       {!openCategory && (
                         <div className="text-xs text-gray-500">Di chuột vào danh mục để xem cấp 2, cấp 3.</div>
                       )}
-                      {openCategory && (
+                      {openCategory && isKhoSaleMenuCategory(openCategory) && (
+                        <div className="text-xs text-gray-600 leading-relaxed">
+                          <p className="font-semibold text-gray-800 mb-1">{KHO_SALE_MENU_NAME}</p>
+                          <p>Hàng hoàn và tồn thanh lý — giá ưu đãi, số lượng có hạn.</p>
+                          <Link href={KHO_SALE_HREF} className="inline-block mt-2 text-[#ea580c] font-medium hover:underline">
+                            Xem tất cả →
+                          </Link>
+                        </div>
+                      )}
+                      {openCategory && !isKhoSaleMenuCategory(openCategory) && (
                         <div className="grid grid-cols-2 gap-3">
                           {openCategory.children.map((level2) => {
                             const slug1 =
@@ -521,13 +555,120 @@ export default function Navigation({
             ref={pillsScrollRef}
             className="flex items-center gap-1.5 py-1.5 overflow-x-auto overflow-y-visible scroll-smooth hide-scrollbar"
           >
-            <span className="hidden sm:inline-flex text-[11px] font-semibold text-white/80 uppercase tracking-wider mr-1 flex-shrink-0">
-              Danh mục
-            </span>
+            <div
+              className="relative flex-shrink-0"
+              onMouseEnter={handleCatalogMenuEnter}
+              onMouseLeave={handleCatalogMenuLeave}
+            >
+              <button
+                type="button"
+                className={`${basePill} ${
+                  catalogMenuOpen ? 'bg-white text-[#ea580c] shadow-sm' : 'bg-white/25 text-white hover:bg-white/35 shadow-sm'
+                }`}
+                aria-expanded={catalogMenuOpen}
+                aria-haspopup="true"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+                <span>Danh mục</span>
+              </button>
+              {catalogMenuOpen && (
+                <div
+                  className="absolute left-0 top-full mt-1 w-[min(720px,calc(100vw-1.5rem))] bg-white border border-gray-200 shadow-lg rounded-xl overflow-hidden z-[100] py-2"
+                  onMouseEnter={handleCatalogMenuEnter}
+                  onMouseLeave={handleCatalogMenuLeave}
+                >
+                  <div className="grid grid-cols-[220px_1fr]">
+                    <div className="bg-gray-50/80 border-r border-gray-100 p-3 max-h-[min(70vh,420px)] overflow-y-auto">
+                      <div className="grid grid-cols-1 gap-1">
+                        {tree.map((level1) => {
+                          const isActive = openLevel1 === level1.name;
+                          const l1Active =
+                            isActive ||
+                            (isKhoSaleMenuCategory(level1) && isKhoSaleActive);
+                          return (
+                            <Link
+                              key={level1.name}
+                              href={level1CategoryHref(level1)}
+                              onMouseEnter={() => setOpenLevel1(level1.name)}
+                              className={`px-2.5 py-2 rounded-md text-xs font-medium truncate ${
+                                l1Active ? 'bg-orange-50 text-orange-700' : 'text-gray-700 hover:bg-white'
+                              }`}
+                            >
+                              {level1.name}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="p-3 max-h-[min(70vh,420px)] overflow-y-auto">
+                      {!openCategory && (
+                        <div className="text-xs text-gray-500">Di chuột vào danh mục để xem cấp 2, cấp 3.</div>
+                      )}
+                      {openCategory && isKhoSaleMenuCategory(openCategory) && (
+                        <div className="text-xs text-gray-600 leading-relaxed">
+                          <p className="font-semibold text-gray-800 mb-1">{KHO_SALE_MENU_NAME}</p>
+                          <p>Hàng hoàn và tồn thanh lý — giá ưu đãi, số lượng có hạn.</p>
+                          <Link href={KHO_SALE_HREF} className="inline-block mt-2 text-[#ea580c] font-medium hover:underline">
+                            Xem tất cả →
+                          </Link>
+                        </div>
+                      )}
+                      {openCategory && !isKhoSaleMenuCategory(openCategory) && openCategory.children.length > 0 && (
+                        <div className="grid grid-cols-2 gap-3">
+                          {openCategory.children.map((level2) => {
+                            const slug1 =
+                              categorySegmentForUrl(openCategory.slug) || categorySegmentForUrl(openCategory.name);
+                            const slug2 =
+                              categorySegmentForUrl(level2.slug) || categorySegmentForUrl(level2.name);
+                            return (
+                              <div key={level2ReactKey(slug1, slug2, level2.name)} className="min-w-0">
+                                <Link
+                                  href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`}
+                                  className="block text-xs font-semibold text-gray-800 hover:text-[#ea580c]"
+                                >
+                                  {level2.name}
+                                </Link>
+                                {level2.children && level2.children.length > 0 && (
+                                  <div className="mt-1 flex flex-col gap-1">
+                                    {level2.children.map((level3) => {
+                                      const name3 =
+                                        typeof level3 === 'object' && level3 !== null && 'name' in level3
+                                          ? (level3 as { name: string }).name
+                                          : String(level3);
+                                      const slug3 =
+                                        (typeof level3 === 'object' && level3 !== null && 'slug' in level3
+                                          ? categorySegmentForUrl((level3 as { slug?: string }).slug)
+                                          : '') || categorySegmentForUrl(name3);
+                                      return (
+                                        <Link
+                                          key={level3ReactKey(slug2, slug3 || undefined, name3)}
+                                          href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
+                                          className="text-[11px] text-gray-600 hover:text-[#ea580c] truncate"
+                                        >
+                                          {name3}
+                                        </Link>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
             {tree.map((level1) => {
               const slug1 =
                 categorySegmentForUrl(level1.slug) || categorySegmentForUrl(level1.name);
-              const isL1Active = effectiveFilter.category === level1.name;
+              const isL1Active =
+                effectiveFilter.category === level1.name ||
+                (isKhoSaleMenuCategory(level1) && isKhoSaleActive);
               const isOpen = openLevel1 === level1.name;
               const hasChildren = level1.children && level1.children.length > 0;
 
@@ -546,7 +687,7 @@ export default function Navigation({
                     className={`${basePill} ${isL1Active ? activePill : inactivePill} pr-0 gap-0`}
                   >
                     <Link
-                      href={`/danh-muc/${encodeURIComponent(slug1)}`}
+                      href={level1CategoryHref(level1)}
                       className={`flex-1 min-w-0 text-left px-2 py-1 -my-1 max-w-[6.5rem] truncate ${hasChildren ? 'rounded-l-full' : 'rounded-full'}`}
                       onClick={() => setOpenLevel1(null)}
                     >

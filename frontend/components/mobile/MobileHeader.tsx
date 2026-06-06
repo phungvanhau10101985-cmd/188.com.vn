@@ -5,6 +5,11 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import type { CategoryLevel1, CategoryLevel2, CategoryLevel3 } from '@/types/api';
+import {
+  isKhoSaleMenuCategory,
+  KHO_SALE_HREF,
+  level1CategoryHref,
+} from '@/lib/kho-sale-menu-category';
 import { storePendingImageAndNavigate } from '@/lib/nanoai-pending-image';
 import {
   PRODUCT_RELATED_TABS,
@@ -276,6 +281,7 @@ export default function MobileHeader({
   );
 
   const list = initialCategoryTree || [];
+  const isKhoSaleActive = pathname === KHO_SALE_HREF || pathname?.startsWith(`${KHO_SALE_HREF}/`);
 
   /** Gợi ý tìm kiếm (đăng nhập) hoặc chip danh mục cấp 1 — tránh hàng trống dưới ô search */
   const searchStripContent = useMemo(() => {
@@ -564,13 +570,14 @@ export default function MobileHeader({
                   ))}
                 {searchStripContent.mode === 'categories' &&
                   searchStripContent.categories.map((cat) => {
-                    const slug = cat.slug || slugOf(cat.name);
+                    const href = level1CategoryHref(cat);
+                    const active = isKhoSaleMenuCategory(cat) && isKhoSaleActive;
                     return (
                       <button
                         key={cat.name}
                         type="button"
-                        onClick={() => router.push(`/danh-muc/${encodeURIComponent(slug)}`)}
-                        className={chipClass}
+                        onClick={() => router.push(href)}
+                        className={`${chipClass} ${active ? '!bg-white !text-[#ea580c]' : ''}`}
                       >
                         {cat.name}
                       </button>
@@ -610,6 +617,7 @@ export default function MobileHeader({
             <nav className="py-2" aria-label="Danh mục sản phẩm">
               {list.map((cat) => {
                 const slug1 = cat.slug || slugOf(cat.name);
+                const l1Active = isKhoSaleMenuCategory(cat) && isKhoSaleActive;
                 const hasChildren = cat.children && cat.children.length > 0;
                 const isOpen = openL1.has(cat.name);
 
@@ -618,8 +626,10 @@ export default function MobileHeader({
                     <div className="flex items-center w-full py-3 px-4 text-gray-900 font-medium text-sm active:bg-gray-50">
                       <button
                         type="button"
-                        onClick={() => closePanelAndGo(`/danh-muc/${encodeURIComponent(slug1)}`)}
-                        className="flex-1 text-left min-w-0 uppercase hover:text-[#ea580c] transition-colors"
+                        onClick={() => closePanelAndGo(level1CategoryHref(cat))}
+                        className={`flex-1 text-left min-w-0 uppercase hover:text-[#ea580c] transition-colors ${
+                          l1Active ? 'text-[#ea580c]' : ''
+                        }`}
                       >
                         {cat.name}
                       </button>

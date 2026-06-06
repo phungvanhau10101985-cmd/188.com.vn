@@ -667,9 +667,12 @@ def iter_merchant_feed_lines(
     img_base = (image_site_base or shop_base_url).rstrip("/")
     sale_state = sale_calendar_svc.resolve_sale_calendar_state(db)
     yield merchant_feed_header_row()
+    from app.services.warehouse_clearance import apply_catalog_visibility_filter
+
     q = db.query(Product).order_by(Product.id)
     if only_active:
         q = q.filter(Product.is_active.is_(True))
+    q = apply_catalog_visibility_filter(q)
     for p in q.yield_per(max(50, yield_per)):
         yield merchant_feed_line_for_product(
             p,

@@ -261,6 +261,8 @@ const ADMIN_PRODUCTS_LIST_SORT_VALUES: readonly AdminProductListSort[] = [
   'newest',
   'oldest',
   'views_desc',
+  'available_desc',
+  'available_asc',
 ];
 
 function parseStoredProductListSort(raw: string | null): AdminProductListSort | null {
@@ -1002,7 +1004,7 @@ export default function AdminProductsPage() {
   useEffect(() => {
     if (!listSortReady) return;
     fetchProducts();
-  }, [listSortReady, fetchProducts]);
+  }, [listSortReady, page, searchName, searchId, listSort, fetchProducts]);
 
   useEffect(() => {
     setSelectedProductIds(new Set());
@@ -4412,7 +4414,7 @@ export default function AdminProductsPage() {
                   onChange={(e) => {
                     const v = e.target.value as AdminProductListSort;
                     setListSort(v);
-                    setPage(1);
+                    if (page !== 1) setPage(1);
                     try {
                       localStorage.setItem(ADMIN_PRODUCTS_LIST_SORT_KEY, v);
                     } catch {
@@ -4426,6 +4428,8 @@ export default function AdminProductsPage() {
                   <option value="newest">Mới nhất trước</option>
                   <option value="oldest">Cũ nhất trước</option>
                   <option value="views_desc">Nhiều lượt xem nhất trước</option>
+                  <option value="available_desc">Tồn kho: nhiều → ít</option>
+                  <option value="available_asc">Tồn kho: ít → nhiều</option>
                 </select>
               </div>
               <div className="flex flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-1 xl:justify-end">

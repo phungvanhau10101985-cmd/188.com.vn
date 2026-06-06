@@ -2,6 +2,8 @@ import type { Product, SiteSaleCalendarState, SiteSaleProductPricing } from '@/t
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import {
   isWarehouseCartLine,
+  isWarehouseClearanceProduct,
+  productShowsClearanceOnCard,
   resolveWarehouseCartLineUnitPricing,
 } from '@/lib/warehouse-clearance';
 
@@ -62,11 +64,38 @@ export function formatCountdownCompact(targetIso: string | null | undefined): st
   return hms;
 }
 
+/**
+ * Giá đầu thẻ SP có box kho: sale site trên giá list catalog (original_price / price gốc),
+ * không dùng giá kho đã giảm 60%. Giá kho chỉ hiển thị trong ProductCardClearanceMeta.
+ */
+export function productForCatalogCardPricing(
+  product: Product,
+  calendar: SiteSaleCalendarState | null | undefined,
+): Product {
+  if (!productShowsClearanceOnCard(product)) {
+    return mergeProductSiteSaleFromCalendar(product, calendar);
+  }
+  const listPrice =
+    product.original_price != null && product.original_price > (product.price ?? 0)
+      ? product.original_price
+      : Math.max(0, Number(product.price ?? 0));
+  const catalogStub: Product = {
+    ...product,
+    price: listPrice,
+    original_price: undefined,
+    is_warehouse_clearance: false,
+    site_sale: undefined,
+  };
+  return mergeProductSiteSaleFromCalendar(catalogStub, calendar);
+}
+
 /** Gắn / bổ sung site_sale từ calendar khi SSR chưa có (vd. test sale sau đăng nhập). */
 export function mergeProductSiteSaleFromCalendar(
   product: Product,
   calendar: SiteSaleCalendarState | null | undefined,
 ): Product {
+  // Hàng kho thanh lý có giá riêng — không chồng Sale site (6/6, …) lên giá đã giảm kho.
+  if (isWarehouseClearanceProduct(product)) return product;
   if (!calendar?.enabled || !calendar.phase) return product;
 
   const existing = product.site_sale;

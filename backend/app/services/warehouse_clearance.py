@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, exists, func as sql_func, or_, select
+from sqlalchemy.orm import Session, aliased
 
 from app.models.product import Product
 
@@ -217,6 +217,60 @@ def parse_warehouse_product_id(product_id: Optional[str]) -> Optional[Dict[str, 
     return _parse_legacy_warehouse_product_segments(parts)
 
 
+def _source_can_order_expr():
+    """Khớp frontend canOrderSourceProduct — tồn nguồn > 0 và không cờ out_of_stock."""
+    not_oos = or_(
+        Product.source_stock_status.is_(None),
+        sql_func.trim(Product.source_stock_status) == "",
+        sql_func.lower(sql_func.trim(Product.source_stock_status)) != "out_of_stock",
+    )
+    return and_(sql_func.coalesce(Product.available, 0) > 0, not_oos)
+
+
+def _parent_has_warehouse_stock_exists():
+    """SP gốc còn biến thể kho thanh lý có tồn > 0."""
+    Wh = aliased(Product)
+    code_trim = sql_func.trim(Product.code)
+    pid_trim = sql_func.trim(Product.product_id)
+    code_ok = and_(Product.code.isnot(None), code_trim != "")
+    pid_ok = and_(Product.product_id.isnot(None), pid_trim != "")
+    link = or_(
+        and_(code_ok, Wh.base_sku == code_trim),
+        and_(code_ok, Wh.product_id.like(sql_func.concat(code_trim, "/%"))),
+        and_(pid_ok, Wh.base_sku == pid_trim),
+        and_(pid_ok, Wh.product_id.like(sql_func.concat(pid_trim, "/%"))),
+    )
+    return (
+        select(1)
+        .select_from(Wh)
+        .where(
+            Wh.is_warehouse_clearance == True,  # noqa: E712
+            Wh.is_active == True,  # noqa: E712
+            sql_func.coalesce(Wh.available, 0) > 0,
+            link,
+        )
+        .correlate(Product)
+    )
+
+
+def storefront_sellable_expr():
+    """
+    Khớp frontend canOrderAnyVariant — ẩn SP «Hết hàng» khỏi web (coi như không tồn tại).
+    - Dòng kho thanh lý: chỉ cần available > 0.
+    - SP gốc: đặt nguồn được HOẶC còn tồn kho thanh lý.
+    """
+    return or_(
+        and_(
+            Product.is_warehouse_clearance == True,  # noqa: E712
+            sql_func.coalesce(Product.available, 0) > 0,
+        ),
+        and_(
+            or_(Product.is_warehouse_clearance == False, Product.is_warehouse_clearance.is_(None)),  # noqa: E712
+            or_(_source_can_order_expr(), exists(_parent_has_warehouse_stock_exists())),
+        ),
+    )
+
+
 def apply_catalog_visibility_filter(
     query,
     *,
@@ -229,16 +283,17 @@ def apply_catalog_visibility_filter(
     - warehouse_clearance_only: chỉ SP is_warehouse_clearance (trang /kho-sale).
     - has_text_search: tìm theo q — gồm cả SP thường và kho thanh lý.
     - include_warehouse_products: admin — không lọc.
+    - Luôn ẩn SP hết hàng hoàn toàn (tồn = 0 / nguồn OOS không còn kho TL).
     """
     if include_warehouse_products:
         return query
     if warehouse_clearance_only:
-        return query.filter(Product.is_warehouse_clearance == True)  # noqa: E712
-    if has_text_search:
-        return query
-    return query.filter(
-        or_(Product.is_warehouse_clearance == False, Product.is_warehouse_clearance.is_(None))  # noqa: E712
-    )
+        query = query.filter(Product.is_warehouse_clearance == True)  # noqa: E712
+    elif not has_text_search:
+        query = query.filter(
+            or_(Product.is_warehouse_clearance == False, Product.is_warehouse_clearance.is_(None))  # noqa: E712
+        )
+    return query.filter(storefront_sellable_expr())
 
 
 def is_warehouse_clearance_product_id(product_id: Optional[str]) -> bool:

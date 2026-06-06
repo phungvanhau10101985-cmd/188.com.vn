@@ -341,6 +341,30 @@ export function canOrderAnyVariant(product: Product): boolean {
   return canOrderSourceProduct(product) || warehouseVariantsInStock(product).length > 0;
 }
 
+/** Storefront: ẩn SP hết hàng — khớp backend storefront_sellable_expr. */
+export function isStorefrontVisibleProduct(product: Product): boolean {
+  return canOrderAnyVariant(product);
+}
+
+export function filterStorefrontVisibleProducts(products: Product[]): Product[] {
+  return products.filter(isStorefrontVisibleProduct);
+}
+
+/** Loại SP hết hàng khỏi payload listing (cache cũ / edge case). */
+export function sanitizeStorefrontProductList<T extends { products?: Product[]; total?: number }>(
+  body: T,
+): T {
+  const raw = body.products ?? [];
+  const visible = filterStorefrontVisibleProducts(raw);
+  if (visible.length === raw.length) return body;
+  const stripped = raw.length - visible.length;
+  const total =
+    visible.length === 0 && stripped > 0
+      ? 0
+      : Math.max(0, (body.total ?? raw.length) - stripped);
+  return { ...body, products: visible, total };
+}
+
 export function isWarehouseCartLine(item: {
   product_code?: string | null;
   product_data?: Record<string, unknown> | null;

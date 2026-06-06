@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { sortCategoryLevel1Tree } from '@/lib/category-tree-sort';
+import { withKhoSaleMenuCategory } from '@/lib/kho-sale-menu-category';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { CategoryLevel1 } from '@/types/api';
 
@@ -42,7 +43,7 @@ export function usePersonalizedCategoryTree(
   }, [pathname, isAuthenticated, user?.gender, viewTick]);
 
   return useMemo(
-    () => sortCategoryLevel1Tree(baseTree || [], genderSuffix),
+    () => withKhoSaleMenuCategory(sortCategoryLevel1Tree(baseTree || [], genderSuffix)),
     [baseTree, genderSuffix],
   );
 }

@@ -187,9 +187,12 @@ def _filter_pool_exclude_self_views(db: Session, user_id: int, product_ids: List
 def _hydrate_products(db: Session, product_ids: List[int], limit: int) -> List[Product]:
     if not product_ids:
         return []
+    from app.services.warehouse_clearance import apply_catalog_visibility_filter
+
     rows = (
-        db.query(Product)
-        .filter(Product.id.in_(product_ids), Product.is_active == True)  # noqa: E712
+        apply_catalog_visibility_filter(
+            db.query(Product).filter(Product.id.in_(product_ids), Product.is_active == True)  # noqa: E712
+        )
         .all()
     )
     order_map = {pid: i for i, pid in enumerate(product_ids)}
@@ -226,10 +229,14 @@ def sample_cohort_products_from_pool(
 
     if cohort_mode == "popular_fallback" or not pool_ids:
         self_viewed = _self_viewed_product_ids_subquery(db, user_id)
+        from app.services.warehouse_clearance import apply_catalog_visibility_filter
+
         popular = (
-            db.query(Product)
-            .filter(Product.is_active == True)  # noqa: E712
-            .filter(~Product.id.in_(db.query(self_viewed.c.product_id)))
+            apply_catalog_visibility_filter(
+                db.query(Product)
+                .filter(Product.is_active == True)  # noqa: E712
+                .filter(~Product.id.in_(db.query(self_viewed.c.product_id)))
+            )
             .order_by(Product.purchases.desc().nullslast(), Product.id)
             .limit(limit)
             .all()

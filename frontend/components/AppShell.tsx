@@ -435,7 +435,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
             <Navigation
               selectedFilter={selectedFilter}
               onCategoryChange={handleCategoryChange}
-              initialCategoryTree={initialCategoryTree}
+              initialCategoryTree={categoryTree}
               headerVisible={headerVisible}
               embedInStickyChrome={false}
               disableStickyBar={Boolean(isProductDetailPage)}

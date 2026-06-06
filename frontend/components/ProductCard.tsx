@@ -15,7 +15,7 @@ import SiteSaleProductBadge from '@/components/SiteSaleProductBadge';
 import SiteSaleCountdownChip from '@/components/SiteSaleCountdownChip';
 import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
 import ProductCardClearanceImageBadges from '@/components/ProductCardClearanceImageBadges';
-import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { productForCatalogCardPricing, resolveProductDisplayPricing } from '@/lib/site-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
 import {
   canOrderAnyVariant,
@@ -137,13 +137,24 @@ function ProductCardPricePromo({
 function useProductCardPricing(product: Product) {
   const birthdayDiscount = useBirthdayDiscount();
   const { state: siteSaleState } = useSiteSale();
-  const productForPricing = mergeProductSiteSaleFromCalendar(product, siteSaleState);
+  const productForMainPricing = useMemo(
+    () => productForCatalogCardPricing(product, siteSaleState),
+    [product, siteSaleState],
+  );
   const pricing = resolveProductDisplayPricing(
-    productForPricing,
+    productForMainPricing,
     birthdayDiscount.active,
     birthdayDiscount.percent,
   );
-  return { pricing, displayPrice: pricing.displayPrice, birthdayDiscount };
+  const catalogListPrice =
+    productForMainPricing.site_sale?.list_price ?? productForMainPricing.price ?? 0;
+  return {
+    pricing,
+    displayPrice: pricing.displayPrice,
+    birthdayDiscount,
+    catalogSiteSale: productForMainPricing.site_sale,
+    catalogListPrice,
+  };
 }
 
 function ProductVideoBadge({ videoLink }: { videoLink?: string | null }) {
@@ -253,7 +264,8 @@ export default function ProductCard({
   const [imageLoading, setImageLoading] = useState(true);
   
   const canOrder = canOrderAnyVariant(product);
-  const { pricing, displayPrice, birthdayDiscount } = useProductCardPricing(product);
+  const { pricing, displayPrice, birthdayDiscount, catalogSiteSale, catalogListPrice } =
+    useProductCardPricing(product);
   const clearanceHero = useMemo(() => getClearanceCardHero(product), [product]);
   const showsClearance = productShowsClearanceOnCard(product);
   const hasDiscount =
@@ -360,12 +372,12 @@ export default function ProductCard({
               product={product}
               compact={size === 'small'}
             />
-            <SiteSaleProductBadge siteSale={product.site_sale} />
-            <SiteSaleCountdownChip siteSale={product.site_sale} />
+            <SiteSaleProductBadge siteSale={catalogSiteSale ?? product.site_sale} />
+            <SiteSaleCountdownChip siteSale={catalogSiteSale ?? product.site_sale} />
             <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
           </>
         )}
-        {hasDiscount && !imageError && !birthdayDiscount.active && !product.site_sale?.phase ? (
+        {hasDiscount && !imageError && !birthdayDiscount.active && !(catalogSiteSale ?? product.site_sale)?.phase ? (
           <div className="absolute top-2 left-2 bg-red-500 text-white px-1.5 py-0.5 rounded-full text-xs font-bold shadow-md">
             -{getDiscountPercentage(product.original_price!, product.price)}%
           </div>
@@ -425,7 +437,7 @@ export default function ProductCard({
               displayPrice={displayPrice}
               birthdayActive={birthdayDiscount.active}
               birthdayPercent={birthdayDiscount.percent}
-              productListPrice={product.price}
+              productListPrice={showsClearance ? catalogListPrice : product.price}
               priceClassName={`font-bold text-red-600 ${sizeClasses.price}`}
               strikeClassName="text-xs text-gray-500 line-through decoration-1 decoration-gray-400"
               savingsClassName="text-xs font-medium text-emerald-600"
@@ -437,9 +449,10 @@ export default function ProductCard({
                 {formatPrice(displayPrice)}
               </span>
               <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
-              {birthdayDiscount.active && displayPrice < (product.price || 0) && (
+              {birthdayDiscount.active &&
+                displayPrice < (showsClearance ? catalogListPrice : product.price || 0) && (
                 <span className="text-xs text-gray-500 line-through decoration-1 decoration-gray-400">
-                  {formatPrice(product.price)}
+                  {formatPrice(showsClearance ? catalogListPrice : product.price)}
                 </span>
               )}
               {pricing.compareAt != null && pricing.compareAt > displayPrice && !birthdayDiscount.active && (
@@ -447,7 +460,10 @@ export default function ProductCard({
                   {formatPrice(pricing.compareAt)}
                 </span>
               )}
-              {hasDiscount && pricing.compareAt == null && !birthdayDiscount.active && !product.site_sale?.phase && (
+              {hasDiscount &&
+                pricing.compareAt == null &&
+                !birthdayDiscount.active &&
+                !(catalogSiteSale ?? product.site_sale)?.phase && (
                 <span className="text-xs text-gray-500 line-through">
                   {formatPrice(product.original_price!)}
                 </span>
@@ -513,7 +529,8 @@ export const SimpleProductCard = ({
   priority?: boolean;
 }) => {
   const [imageError, setImageError] = useState(false);
-  const { pricing, displayPrice, birthdayDiscount } = useProductCardPricing(product);
+  const { pricing, displayPrice, birthdayDiscount, catalogSiteSale, catalogListPrice } =
+    useProductCardPricing(product);
   const clearanceHero = useMemo(() => getClearanceCardHero(product), [product]);
   const showsClearance = productShowsClearanceOnCard(product);
   const fullyOutOfStock = isFullyOutOfStock(product);
@@ -581,8 +598,11 @@ export const SimpleProductCard = ({
           <>
             <ProductCardClearanceImageBadges product={product} compact />
             {showPersonalizedBadge ? <PersonalizedCohortImageBadge /> : null}
-            <SiteSaleProductBadge siteSale={product.site_sale} className={stackedPromoBadgeClass} />
-            <SiteSaleCountdownChip siteSale={product.site_sale} />
+            <SiteSaleProductBadge
+              siteSale={catalogSiteSale ?? product.site_sale}
+              className={stackedPromoBadgeClass}
+            />
+            <SiteSaleCountdownChip siteSale={catalogSiteSale ?? product.site_sale} />
             <BirthdayPromoImageBadge
               active={birthdayDiscount.active}
               percent={birthdayDiscount.percent}
@@ -625,7 +645,7 @@ export const SimpleProductCard = ({
               displayPrice={displayPrice}
               birthdayActive={birthdayDiscount.active}
               birthdayPercent={birthdayDiscount.percent}
-              productListPrice={product.price}
+              productListPrice={showsClearance ? catalogListPrice : product.price}
               priceClassName="text-sm font-bold text-gray-900"
             />
           </div>
@@ -633,9 +653,10 @@ export const SimpleProductCard = ({
           <div className="mb-1 flex flex-wrap items-baseline gap-x-1 gap-y-0">
             <span className="text-sm font-bold text-gray-900">{formatPrice(displayPrice)}</span>
             <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
-            {birthdayDiscount.active && displayPrice < (product.price || 0) && (
+            {birthdayDiscount.active &&
+              displayPrice < (showsClearance ? catalogListPrice : product.price || 0) && (
               <span className="text-[10px] text-gray-500 line-through decoration-1 decoration-gray-400">
-                {formatPrice(product.price)}
+                {formatPrice(showsClearance ? catalogListPrice : product.price)}
               </span>
             )}
           </div>

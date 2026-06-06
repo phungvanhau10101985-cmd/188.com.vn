@@ -31,6 +31,10 @@ import {
   writeSearchResultCache,
 } from '@/lib/search-result-cache';
 import {
+  filterStorefrontVisibleProducts,
+  sanitizeStorefrontProductList,
+} from '@/lib/warehouse-clearance';
+import {
   cloneUrlSearchParams,
   searchParamsToEncodedQueryString,
   urlSearchParamsSemanticsEqual,
@@ -403,12 +407,14 @@ export default function HomePageClient({
         limit,
       });
       const hit = readSearchResultCache(fp);
-      if (hit) return hit;
-      const response = await apiClient.getProducts({
-        ...searchApiParams,
-        limit,
-        skip,
-      });
+      if (hit) return sanitizeStorefrontProductList(hit);
+      const response = sanitizeStorefrontProductList(
+        await apiClient.getProducts({
+          ...searchApiParams,
+          limit,
+          skip,
+        }),
+      );
       if (!cancelled && !response.redirect_path) {
         writeSearchResultCache(fp, response);
       }
@@ -1143,13 +1149,19 @@ export default function HomePageClient({
 
   const shouldApplyPriceFilter = Boolean(minPriceFromUrl || maxPriceFromUrl);
   const showPagination = totalPages > 1 && !shouldApplyPriceFilter;
+  const sellableProducts = useMemo(
+    () => filterStorefrontVisibleProducts(products),
+    [products],
+  );
+  const visibleProductTotal =
+    sellableProducts.length === 0 && products.length > 0 ? 0 : totalProducts;
   // Filter sản phẩm client-side cho price range (tạm thời)
   const filteredProducts = shouldApplyPriceFilter
-    ? products.filter(product => {
+    ? sellableProducts.filter(product => {
       const productPrice = product.price || 0;
       return productPrice >= priceRange[0] && productPrice <= priceRange[1];
     })
-    : products;
+    : sellableProducts;
 
   const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());
 
@@ -1338,7 +1350,7 @@ export default function HomePageClient({
                   {isSearching ? (
                     <>
                       Từ khóa: <span className="font-medium text-gray-900">&quot;{qFromUrl}&quot;</span> —{' '}
-                      {totalProducts} sản phẩm trong kho
+                      {visibleProductTotal} sản phẩm trong kho
                       {nanoaiTextProducts.length > 0 && (
                         <span className="text-gray-700">
                           {' '}

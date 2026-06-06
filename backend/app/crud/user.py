@@ -818,11 +818,14 @@ def get_products_same_shop_as_recent_views(
 
     shop_cn_norm = func.lower(func.trim(Product.shop_name_chinese))
     # Một query + LIMIT thay vì COUNT rồi .all() — cùng tập candidate (≤ SAME_SHOP_MAX_POOL).
+    from app.services.warehouse_clearance import apply_catalog_visibility_filter
+
     candidates = (
-        db.query(Product)
-        .filter(
-            shop_cn_norm.in_(list(shops_lower)),
-            Product.is_active == True,  # noqa: E712
+        apply_catalog_visibility_filter(
+            db.query(Product).filter(
+                shop_cn_norm.in_(list(shops_lower)),
+                Product.is_active == True,  # noqa: E712
+            )
         )
         .order_by(Product.id)
         .limit(SAME_SHOP_MAX_POOL)

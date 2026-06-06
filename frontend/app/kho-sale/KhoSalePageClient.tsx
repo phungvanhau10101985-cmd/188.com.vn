@@ -8,6 +8,7 @@ import type { CategoryProductFacets } from '@/lib/category-seo';
 import { getListingFreshnessMonthLabel } from '@/lib/listing-freshness-label';
 import type { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
+import { filterStorefrontVisibleProducts } from '@/lib/warehouse-clearance';
 
 type Props = {
   initialProducts: Product[];
@@ -33,7 +34,9 @@ export default function KhoSalePageClient({
   listingQueryString,
 }: Props) {
   const basePath = '/kho-sale';
-  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [products, setProducts] = useState<Product[]>(
+    filterStorefrontVisibleProducts(initialProducts),
+  );
   const [total, setTotal] = useState(initialTotal);
   const [totalPages, setTotalPages] = useState(initialTotalPages);
   const [loading, setLoading] = useState(false);
@@ -77,8 +80,9 @@ export default function KhoSalePageClient({
         min_price: minRaw ? parseFloat(minRaw) : undefined,
         max_price: maxRaw ? parseFloat(maxRaw) : undefined,
       });
-      setProducts(res.products ?? []);
-      setTotal(res.total ?? 0);
+      const visible = filterStorefrontVisibleProducts(res.products ?? []);
+      setProducts(visible);
+      setTotal(visible.length === 0 && (res.products?.length ?? 0) > 0 ? 0 : (res.total ?? 0));
       setTotalPages(res.total_pages ?? 1);
     } catch {
       setError('Không tải được danh sách kho sale. ');
@@ -91,8 +95,12 @@ export default function KhoSalePageClient({
 
   useEffect(() => {
     if (!hasNonPageFilters(listingQueryString) && currentPage === initialPage) {
-      setProducts(initialProducts);
-      setTotal(initialTotal);
+      setProducts(filterStorefrontVisibleProducts(initialProducts));
+      setTotal(
+        filterStorefrontVisibleProducts(initialProducts).length === 0 && initialProducts.length > 0
+          ? 0
+          : initialTotal,
+      );
       setTotalPages(initialTotalPages);
       return;
     }
@@ -132,16 +140,16 @@ export default function KhoSalePageClient({
           Trang chủ
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-gray-900 font-medium">Kho sale — thanh lý</span>
+        <span className="text-gray-900 font-medium">Sale hàng hoàn</span>
       </nav>
 
       <header className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">
-          Kho sale — hàng thanh lý xả kho {monthLabel}
+          Sale hàng hoàn — thanh lý xả kho {monthLabel}
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-gray-600 leading-relaxed">
-          Sản phẩm <strong className="text-amber-900">Sale Sốc</strong> — chỉ còn một số size, giá ưu đãi từ kho
-          thanh lý. Mỗi thẻ vẫn gắn loại <strong>hàng thanh lý kho</strong>; đặt hàng qua nút thanh lý trên trang
+          Hàng hoàn và tồn kho thanh lý — <strong className="text-amber-900">giá ưu đãi</strong>, thường chỉ còn
+          một số size. Mỗi thẻ gắn loại <strong>hàng thanh lý kho</strong>; đặt hàng qua nút thanh lý trên trang
           chi tiết.
         </p>
         {total > 0 && (

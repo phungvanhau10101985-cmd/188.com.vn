@@ -260,11 +260,10 @@ def count_products_for_scope(
         cat_ids = _cluster_cat_ids(db, cluster.id)
         if not cat_ids:
             return 0
-        return (
-            db.query(Product)
-            .filter(Product.category_id.in_(cat_ids), Product.is_active.is_(True))
-            .count()
-        )
+        from app.services.warehouse_clearance import apply_catalog_visibility_filter
+
+        q = db.query(Product).filter(Product.category_id.in_(cat_ids), Product.is_active.is_(True))
+        return apply_catalog_visibility_filter(q).count()
 
     from app.crud.product import count_products_for_category_path
 
@@ -273,10 +272,10 @@ def count_products_for_scope(
     c2 = parts[1] if len(parts) > 1 else (subcategory or None)
     c3 = parts[2] if len(parts) > 2 else (sub_subcategory or None)
     if scope_type == SCOPE_CATEGORY_L1:
-        return count_products_for_category_path(db, c1)
+        return count_products_for_category_path(db, c1, storefront_visible=True)
     if scope_type == SCOPE_CATEGORY_L2:
-        return count_products_for_category_path(db, c1, c2)
-    return count_products_for_category_path(db, c1, c2, c3)
+        return count_products_for_category_path(db, c1, c2, storefront_visible=True)
+    return count_products_for_category_path(db, c1, c2, c3, storefront_visible=True)
 
 
 def maybe_cache_listing_facets(db: Session, *, facets: Dict[str, Any], **listing_kwargs) -> None:
@@ -469,7 +468,7 @@ def rebuild_category_scope(
     c1 = (category or "").strip()
     c2 = (subcategory or "").strip() or None
     c3 = (sub_subcategory or "").strip() or None
-    product_count = count_products_for_category_path(db, c1, c2, c3)
+    product_count = count_products_for_category_path(db, c1, c2, c3, storefront_visible=True)
     existing = facet_cache_crud.get_by_scope(db, scope[0], scope[1])
     is_manual = bool(existing.is_manual) if existing else False
     return facet_cache_crud.upsert_facet_cache(

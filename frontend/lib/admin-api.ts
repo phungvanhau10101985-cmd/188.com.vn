@@ -1117,8 +1117,14 @@ function postImportExcelAsyncMultipart(
 /** Timeout danh sách SP admin — tránh treo "Đang tải..." khi API/pool DB chờ quá lâu */
 const ADMIN_PRODUCTS_LIST_TIMEOUT_MS = 120_000;
 
-/** Admin /admin/products — 4 kiểu sắp xếp danh sách. */
-export type AdminProductListSort = 'id_desc' | 'newest' | 'oldest' | 'views_desc';
+/** Admin /admin/products — kiểu sắp xếp danh sách. */
+export type AdminProductListSort =
+  | 'id_desc'
+  | 'newest'
+  | 'oldest'
+  | 'views_desc'
+  | 'available_desc'
+  | 'available_asc';
 
 /** Một mục tiêu trong POST /import-export/sync/google-sheet-skus */
 export type AdminGoogleSheetSkuSyncTargetResult = {
@@ -1192,7 +1198,7 @@ export const adminProductAPI = {
     sp.set('limit', String(params?.limit ?? 100));
     if (params?.q) sp.set('q', params.q);
     if (params?.product_id) sp.set('product_id', params.product_id);
-    if (params?.sort && params.sort !== 'id_desc') sp.set('sort', params.sort);
+    if (params?.sort) sp.set('sort', params.sort);
     if (params?.skipTotal) sp.set('skip_total', 'true');
     sp.set('admin_list', 'true');
     sp.set('include_warehouse_clearance', 'false');
