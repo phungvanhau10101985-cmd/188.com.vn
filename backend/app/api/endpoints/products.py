@@ -499,6 +499,8 @@ def _read_products_list_impl(
         skip_total = True
     if order_random and not raw_q and not pid:
         response.headers["Cache-Control"] = "private, no-store"
+    elif raw_q and crud.product.normalize_product_list_sort(sort) == "random":
+        response.headers["Cache-Control"] = "private, no-store"
     else:
         # Admin / công cụ nội bộ cần dữ liệu mới sau PUT; public cache gây hiển thị cũ ~60s.
         response.headers["Cache-Control"] = "private, no-cache, must-revalidate"
@@ -506,7 +508,8 @@ def _read_products_list_impl(
     skip_search_cache = admin_list or (
         user is not None and sale_calendar_svc.is_site_sale_test_enabled(db, user)
     )
-    if use_search_cache and raw_q and not pid and not skip_search_cache:
+    sort_norm = crud.product.normalize_product_list_sort(sort)
+    if use_search_cache and raw_q and not pid and not skip_search_cache and sort_norm != "random":
         norm_q = crud.product._normalize_search_key(raw_q)
         cache_key = product_search_cache_crud.build_cache_key(
             norm_q=norm_q,
@@ -525,7 +528,7 @@ def _read_products_list_impl(
             min_price=min_price,
             max_price=max_price,
             is_active=is_active,
-            sort=crud.product.normalize_product_list_sort(sort),
+            sort=sort_norm,
             filter_size=filter_size,
             filter_color=filter_color,
             filter_style_tag=filter_style_tag,
@@ -604,7 +607,7 @@ def _read_products_list_impl(
                     min_price=min_price,
                     max_price=max_price,
                     is_active=is_active,
-                    sort=crud.product.normalize_product_list_sort(sort),
+                    sort=sort_norm,
                     filter_size=filter_size,
                     filter_color=filter_color,
                     filter_style_tag=filter_style_tag,

@@ -284,8 +284,10 @@ def _schedule_google_sheets_sku_sync(*, immediate: bool = False) -> None:
 
 
 def normalize_product_list_sort(sort: Optional[str]) -> str:
-    """Giá trị nội bộ: id_desc | newest | oldest | views_desc | purchases_desc | available_desc | available_asc | id_asc."""
+    """Giá trị nội bộ: random | id_desc | newest | oldest | views_desc | purchases_desc | available_desc | available_asc | id_asc."""
     s = (sort or "").strip().lower().replace("-", "_")
+    if s in ("random", "shuffle", "ngau_nhien", "ngẫu_nhiên"):
+        return "random"
     if s in ("", "default", "id_desc", "id_newest"):
         return "id_desc"
     if s in ("id", "id_asc"):
@@ -346,6 +348,8 @@ def _order_exprs_for_product_list(sort: str, view_totals_subq):
         return [sql_func.coalesce(Product.available, 0).asc(), Product.id.asc()]
     if sort == "id_asc":
         return [Product.id.asc()]
+    if sort == "random":
+        return [sql_func.random()]
     # id_desc: ID hệ thống giảm dần — nhập/import mới lên đầu
     return [Product.id.desc()]
 

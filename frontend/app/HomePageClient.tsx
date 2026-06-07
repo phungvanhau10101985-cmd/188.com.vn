@@ -38,8 +38,9 @@ import {
   writeSearchResultCache,
 } from '@/lib/search-result-cache';
 import {
+  isSearchRandomSort,
+  resolveSearchListingSort,
   shouldBypassSearchSessionCache,
-  sortSearchResultProducts,
 } from '@/lib/search-list-sort';
 import {
   filterStorefrontVisibleProducts,
@@ -376,7 +377,9 @@ export default function HomePageClient({
     const isStaleSearchResponse = () =>
       cancelled || fetchGen !== searchFetchGenRef.current;
 
-    const resolvedSearchSort = (sortFromUrl || '').trim() || 'id_desc';
+    const resolvedSearchSort = resolveSearchListingSort(sortFromUrl);
+    const skipSearchSessionCache =
+      isSearchRandomSort(sortFromUrl) || shouldBypassSearchSessionCache();
 
     const searchApiParams = {
       q: qFromUrl,
@@ -399,11 +402,6 @@ export default function HomePageClient({
       sort: resolvedSearchSort,
     };
 
-    const applyStableSearchList = (body: ProductListResponse): ProductListResponse => {
-      const products = sortSearchResultProducts(body.products ?? [], resolvedSearchSort);
-      return { ...body, products };
-    };
-
     const fetchSearchPage = async (skip: number, limit: number): Promise<ProductListResponse> => {
       const fp = searchRequestCacheFingerprint({
         q: qFromUrl,
@@ -424,18 +422,20 @@ export default function HomePageClient({
         skip,
         limit,
       });
-      const hit = shouldBypassSearchSessionCache() ? null : readSearchResultCache(fp);
-      if (hit) return applyStableSearchList(sanitizeStorefrontProductList(hit));
-      const response = applyStableSearchList(
-        sanitizeStorefrontProductList(
-          await apiClient.getProducts({
-            ...searchApiParams,
-            limit,
-            skip,
-          }),
-        ),
+      const hit = skipSearchSessionCache ? null : readSearchResultCache(fp);
+      if (hit) return sanitizeStorefrontProductList(hit);
+      const response = sanitizeStorefrontProductList(
+        await apiClient.getProducts({
+          ...searchApiParams,
+          limit,
+          skip,
+        }),
       );
-      if (!isStaleSearchResponse() && !response.redirect_path) {
+      if (
+        !isStaleSearchResponse() &&
+        !response.redirect_path &&
+        !isSearchRandomSort(sortFromUrl)
+      ) {
         writeSearchResultCache(fp, response);
       }
       return response;
@@ -1099,17 +1099,6 @@ export default function HomePageClient({
   useLayoutEffect(() => {
     if (typeof window === 'undefined') return;
     if (window.location.pathname !== '/') return;
-    if (!qFromUrl.trim()) return;
-    if ((sortFromUrl || '').trim()) return;
-    const params = cloneUrlSearchParams(searchParams);
-    params.set('sort', 'id_desc');
-    const q = searchParamsToEncodedQueryString(params);
-    router.replace(q ? `/?${q}` : '/', { scroll: false });
-  }, [qFromUrl, sortFromUrl, searchParams, router]);
-
-  useLayoutEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (window.location.pathname !== '/') return;
     const curRaw = window.location.search.startsWith('?') ? window.location.search.slice(1) : '';
     if (curRaw === canonicalListingQs) return;
     const curSp = new URLSearchParams(curRaw);
@@ -1368,7 +1357,6 @@ export default function HomePageClient({
                   }
                   enableEmptyListing={isSearching}
                   enableListingFacetShell={!isSearching && hasFilterParams}
-                  stableSortDefault
                   compact
                 />
               </div>

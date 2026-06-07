@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Legacy: TTL > 0 bật hết hạn theo giây; 0 = vĩnh viễn đến khi refresh.
 DEFAULT_TTL_SECONDS = 0
-_CACHE_QUERY_PAYLOAD_VERSION = 15
+_CACHE_QUERY_PAYLOAD_VERSION = 16
 
 
 def _configured_ttl_seconds() -> Optional[int]:
