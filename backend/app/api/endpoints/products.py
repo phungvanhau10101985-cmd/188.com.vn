@@ -307,8 +307,11 @@ def search_products(
                 norm_q = normalize_for_search_no_accent(raw_q)
 
         # Stage 2: Category Match (exact/fuzzy >= 90%)
+        # Dùng cây menu đã cache — tránh DISTINCT+prune toàn bảng mỗi lần search (treo pool/CPU).
         try:
-            tree = crud.product.get_category_tree_from_products(db, is_active=is_active)
+            tree = crud.product.get_cached_menu_category_tree(
+                is_active if is_active is not None else True
+            )
         except Exception:
             tree = []
 

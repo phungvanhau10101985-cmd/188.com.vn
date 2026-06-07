@@ -4339,7 +4339,9 @@ def get_products(
         mapping = None if sale_keyword_search else _get_search_mapping(db, normalized_key)
 
         try:
-            category_tree = get_category_tree_from_products(db, is_active=is_active if is_active is not None else True)
+            category_tree = get_cached_menu_category_tree(
+                is_active if is_active is not None else True
+            )
         except Exception:
             category_tree = []
 
