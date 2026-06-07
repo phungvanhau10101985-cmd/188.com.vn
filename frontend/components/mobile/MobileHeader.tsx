@@ -69,6 +69,7 @@ export default function MobileHeader({
   const [openL1, setOpenL1] = useState<Set<string>>(new Set());
   const [openL2, setOpenL2] = useState<Set<string>>(new Set());
   const panelRef = useRef<HTMLDivElement>(null);
+  const mobileSearchFormRef = useRef<HTMLFormElement | null>(null);
   const mobileImageInputId = useId();
   const categoryPanelId = useId();
 
@@ -433,6 +434,7 @@ export default function MobileHeader({
             </button>
 
             <form
+              ref={mobileSearchFormRef}
               onSubmit={handleSearch}
               className={`relative z-[60] flex-1 min-w-0 flex items-stretch rounded-xl bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] touch-manipulation ${tightToolbar ? 'h-10 min-h-[40px]' : 'h-11'}`}
             >
@@ -475,6 +477,7 @@ export default function MobileHeader({
                 onSelect={handleHistorySelect}
                 className="left-0 right-0"
                 zClass="z-[70]"
+                ignoreRefs={[mobileSearchFormRef]}
               />
               <div className="flex shrink-0 self-stretch divide-x divide-gray-200/90 border-l border-gray-100">
                 <label

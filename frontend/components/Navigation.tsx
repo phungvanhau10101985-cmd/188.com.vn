@@ -92,6 +92,7 @@ export default function Navigation({
   const { getCartItemCount } = useCart();
   const displayCartCount = getCartItemCount();
   const dropdownRef = useRef<HTMLElement | null>(null);
+  const stickySearchRef = useRef<HTMLFormElement | null>(null);
   const thinBarOuterRef = useRef<HTMLDivElement | null>(null);
   /** Căn mega-menu theo đúng pill cấp 1 — container và từng pill (không ép full-width trái). */
   const categoryBarWrapRef = useRef<HTMLDivElement>(null);
@@ -470,7 +471,11 @@ export default function Navigation({
               )}
               </div>
             </div>
-            <form onSubmit={handleStickySearch} className="relative z-[105] w-full max-w-md justify-self-center">
+            <form
+              ref={stickySearchRef}
+              onSubmit={handleStickySearch}
+              className="relative z-[105] w-full max-w-md justify-self-center"
+            >
               <input
                 type="text"
                 value={stickySearchTerm}
@@ -487,6 +492,7 @@ export default function Navigation({
                 onClose={() => setStickySearchHistoryOpen(false)}
                 onSelect={handleStickyHistorySelect}
                 zClass="z-[115]"
+                ignoreRefs={[stickySearchRef]}
               />
               <LazyDesktopImageSearchPopover panelZClass="z-[110]" />
               <button

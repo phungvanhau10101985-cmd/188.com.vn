@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient, type SearchHistoryItem } from '@/lib/api-client';
 
 function dedupeSearchHistory(rows: SearchHistoryItem[]): SearchHistoryItem[] {
@@ -23,6 +23,7 @@ type SearchHistoryPanelProps = {
   onSelect: (query: string) => void;
   className?: string;
   zClass?: string;
+  ignoreRefs?: Array<RefObject<HTMLElement | null>>;
 };
 
 export default function SearchHistoryPanel({
@@ -31,6 +32,7 @@ export default function SearchHistoryPanel({
   onSelect,
   className = '',
   zClass = 'z-[120]',
+  ignoreRefs = [],
 }: SearchHistoryPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [items, setItems] = useState<SearchHistoryItem[]>([]);
@@ -63,6 +65,9 @@ export default function SearchHistoryPanel({
     const onPointerDown = (e: MouseEvent | TouchEvent) => {
       const target = e.target as Node | null;
       if (panelRef.current?.contains(target)) return;
+      for (const ref of ignoreRefs) {
+        if (ref.current?.contains(target)) return;
+      }
       onClose();
     };
     document.addEventListener('mousedown', onPointerDown);
@@ -71,7 +76,7 @@ export default function SearchHistoryPanel({
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('touchstart', onPointerDown);
     };
-  }, [open, onClose]);
+  }, [open, onClose, ignoreRefs]);
 
   const handleRemove = async (query: string) => {
     setRemovingQuery(query);

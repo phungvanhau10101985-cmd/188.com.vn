@@ -338,6 +338,33 @@ def find_parent_product_by_base_sku(db: Session, base_sku: str) -> Optional[Prod
     )
 
 
+def is_standalone_warehouse_without_parent(db: Session, product: Optional[Product]) -> bool:
+    """
+    True khi là dòng kho thanh lý nhưng không còn sản phẩm gốc để gắn.
+    Dùng để chặn kế thừa số liệu tương tác (hỏi/đánh giá/thích/đã bán) từ group cũ.
+    """
+    if product is None or not getattr(product, "is_warehouse_clearance", False):
+        return False
+    base = (getattr(product, "base_sku", None) or "").strip()
+    if not base:
+        parsed = parse_warehouse_product_id(getattr(product, "product_id", None))
+        base = str((parsed or {}).get("base_sku") or "").strip()
+    if not base:
+        return True
+    return find_parent_product_by_base_sku(db, base) is None
+
+
+def apply_zero_engagement_stats(payload: Dict[str, Any]) -> None:
+    """Ép toàn bộ số liệu tương tác về 0 cho dòng kho standalone."""
+    payload["likes"] = 0
+    payload["purchases"] = 0
+    payload["rating_total"] = 0
+    payload["question_total"] = 0
+    payload["rating_point"] = 0.0
+    payload["group_rating"] = 0
+    payload["group_question"] = 0
+
+
 def parent_pdp_slug_for_warehouse_product(db: Session, product: Product) -> Optional[str]:
     """Slug PDP của SP gốc — không dùng slug dòng kho (thường có suffix product_id)."""
     parsed = parse_warehouse_product_id(getattr(product, "product_id", None))
@@ -1183,6 +1210,7 @@ def enrich_standalone_warehouse_product(db: Session, payload: Dict[str, Any], pr
         "enabled": enabled,
         "discount_percent": pct,
     }
+    apply_zero_engagement_stats(payload)
     variant_img = (warehouse_variant_payload(db, product).get("color_image") or "").strip()
     if variant_img:
         payload["main_image"] = variant_img

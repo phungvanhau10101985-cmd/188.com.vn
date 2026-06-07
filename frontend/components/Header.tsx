@@ -37,6 +37,7 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [mounted, setMounted] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const loginHref = useLoginRedirectHref();
   const { user, isAuthenticated, isLoading, logout } = useAuth();
@@ -119,7 +120,10 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
   const searchBar = (
     <>
       <form onSubmit={handleSearch} className="relative z-[60]">
-        <div className={`relative transition-all duration-200 ${isSearchFocused ? 'ring-2 ring-white/50 rounded-xl shadow-lg shadow-black/10' : 'rounded-xl shadow-sm'}`}>
+        <div
+          ref={searchBoxRef}
+          className={`relative transition-all duration-200 ${isSearchFocused ? 'ring-2 ring-white/50 rounded-xl shadow-lg shadow-black/10' : 'rounded-xl shadow-sm'}`}
+        >
           <input
             type="text"
             value={searchTerm}
@@ -142,6 +146,7 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
             }}
             onSelect={(term) => handleSuggestionClick(term)}
             zClass="z-[70]"
+            ignoreRefs={[searchBoxRef]}
           />
           <LazyDesktopImageSearchPopover />
           <button

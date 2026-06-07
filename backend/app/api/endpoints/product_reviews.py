@@ -26,6 +26,7 @@ from app.schemas.product_review import (
 from app.core.admin_permissions import admin_allowed_operation
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission
 from app.utils.display_timeline import merge_imported_display_created_at, merge_review_reply_display_times
+from app.services import warehouse_clearance as warehouse_clearance_svc
 
 router = APIRouter()
 
@@ -83,6 +84,8 @@ def get_reviews_for_product(
     product = crud.product.get_product(db, product_id=product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại")
+    if warehouse_clearance_svc.is_standalone_warehouse_without_parent(db, product):
+        return []
     group_rating = getattr(product, "group_rating", 0) or 0
     items = crud.product_review.get_reviews_for_product(
         db, product_db_id=product_id, group_rating=group_rating, limit=limit
