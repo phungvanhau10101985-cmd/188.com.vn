@@ -229,6 +229,31 @@ export default function HomePageClient({
   const pageFromUrl = Number(searchParams.get('page') || 1);
   const currentPage = Number.isFinite(pageFromUrl) && pageFromUrl > 0 ? pageFromUrl : 1;
   const PAGE_SIZE = 48;
+  const randomSearchRefresh = useMemo(
+    () =>
+      isSearchRandomSort(sortFromUrl)
+        ? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        : undefined,
+    [
+      qFromUrl,
+      shopIdFromUrl,
+      shopNameFromUrl,
+      shopNameChineseFromUrl,
+      chineseNameFromUrl,
+      styleFromUrl,
+      proLowerFromUrl,
+      proHighFromUrl,
+      minPriceFromUrl,
+      maxPriceFromUrl,
+      sizeFromUrl,
+      colorFromUrl,
+      styleTagFromUrl,
+      sortFromUrl,
+      categoryFromUrl,
+      subcategoryFromUrl,
+      subSubcategoryFromUrl,
+    ],
+  );
 
   /** ?q=sale: ưu tiên kết quả kho; chỉ sang /kho-sale khi API báo redirect hoặc 0 SP catalog. */
   const saleSearchIntent = useMemo(
@@ -431,7 +456,7 @@ export default function HomePageClient({
           limit,
           skip,
           ...(isSearchRandomSort(sortFromUrl)
-            ? { search_refresh: String(Date.now()) }
+            ? { search_refresh: randomSearchRefresh }
             : {}),
         }),
       );
@@ -555,6 +580,7 @@ export default function HomePageClient({
     subcategoryFromUrl,
     subSubcategoryFromUrl,
     currentPage,
+    randomSearchRefresh,
   ]);
 
   useEffect(() => {

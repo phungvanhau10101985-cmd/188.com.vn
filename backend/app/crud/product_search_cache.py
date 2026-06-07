@@ -60,10 +60,17 @@ def build_cache_query_payload(
     max_price: Optional[float],
     is_active: Optional[bool],
     sort: str = "id_desc",
+    search_refresh: Optional[str] = None,
     filter_size: Optional[str] = None,
     filter_color: Optional[str] = None,
     filter_style_tag: Optional[str] = None,
 ) -> Dict[str, Any]:
+    sort_norm = (sort or "").strip() or "id_desc"
+    refresh = (search_refresh or "").strip()
+    # sort=random: cache theo từ khóa/filter, không tách key theo refresh token
+    # để tránh phình nhiều dòng cho cùng một truy vấn.
+    if sort_norm.lower() == "random":
+        refresh = ""
     return {
         "q": norm_q or "",
         "sk": int(skip),
@@ -81,7 +88,8 @@ def build_cache_query_payload(
         "min": "" if min_price is None else float(min_price),
         "max": "" if max_price is None else float(max_price),
         "ia": True if is_active is not False else False,
-        "sort": (sort or "").strip() or "id_desc",
+        "sort": sort_norm,
+        "sr": refresh,
         "sz": (filter_size or "").strip(),
         "cl": (filter_color or "").strip(),
         "stylet": (filter_style_tag or "").strip(),
@@ -108,6 +116,7 @@ def build_cache_key(
     max_price: Optional[float],
     is_active: Optional[bool],
     sort: str = "id_desc",
+    search_refresh: Optional[str] = None,
     filter_size: Optional[str] = None,
     filter_color: Optional[str] = None,
     filter_style_tag: Optional[str] = None,
@@ -130,6 +139,7 @@ def build_cache_key(
         max_price=max_price,
         is_active=is_active,
         sort=sort,
+        search_refresh=search_refresh,
         filter_size=filter_size,
         filter_color=filter_color,
         filter_style_tag=filter_style_tag,
@@ -363,6 +373,7 @@ def _payload_to_get_products_kwargs(payload: Dict[str, Any]) -> Dict[str, Any]:
         "is_active": True if is_active is not False else False,
         "q": q or None,
         "sort": product_crud.normalize_product_list_sort(str(payload.get("sort") or "id_desc")),
+        "search_refresh": _opt_str("sr"),
         "filter_size": _opt_str("sz"),
         "filter_color": _opt_str("cl"),
         "filter_style_tag": _opt_str("stylet"),

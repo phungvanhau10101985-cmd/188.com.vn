@@ -1,6 +1,7 @@
 # backend/app/api/endpoints/products.py - COMPLETE FIXED VERSION WITH BOTH ENDPOINTS
 from datetime import datetime
 import io
+import random
 from urllib.parse import unquote
 
 import pandas as pd
@@ -284,6 +285,21 @@ def _product_to_response(
     return Product(**d)
 
 
+def _shuffle_cached_products_response(result: dict) -> dict:
+    """
+    Trả bản copy response với products đã shuffle để sort=random
+    vẫn đổi lưới mỗi lần đọc từ cache.
+    """
+    rows = result.get("products")
+    if not isinstance(rows, list) or len(rows) <= 1:
+        return result
+    cloned = dict(result)
+    shuffled = list(rows)
+    random.shuffle(shuffled)
+    cloned["products"] = shuffled
+    return cloned
+
+
 @router.get("/search", response_model=dict, include_in_schema=False)
 @router.get("/search/", response_model=dict)
 def search_products(
@@ -510,7 +526,7 @@ def _read_products_list_impl(
         user is not None and sale_calendar_svc.is_site_sale_test_enabled(db, user)
     )
     sort_norm = crud.product.normalize_product_list_sort(sort)
-    if use_search_cache and raw_q and not pid and not skip_search_cache and sort_norm != "random":
+    if use_search_cache and raw_q and not pid and not skip_search_cache:
         norm_q = crud.product._normalize_search_key(raw_q)
         cache_key = product_search_cache_crud.build_cache_key(
             norm_q=norm_q,
@@ -530,12 +546,15 @@ def _read_products_list_impl(
             max_price=max_price,
             is_active=is_active,
             sort=sort_norm,
+            search_refresh=search_refresh,
             filter_size=filter_size,
             filter_color=filter_color,
             filter_style_tag=filter_style_tag,
         )
         cached = product_search_cache_crud.get_cached_result(db, cache_key)
         if cached is not None:
+            if sort_norm == "random":
+                return _shuffle_cached_products_response(cached)
             return cached
 
     result = crud.product.get_products(
@@ -610,6 +629,7 @@ def _read_products_list_impl(
                     max_price=max_price,
                     is_active=is_active,
                     sort=sort_norm,
+                    search_refresh=search_refresh,
                     filter_size=filter_size,
                     filter_color=filter_color,
                     filter_style_tag=filter_style_tag,
