@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import random
 import threading
 from datetime import datetime, timedelta, timezone
@@ -24,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 # Legacy: TTL > 0 bật hết hạn theo giây; 0 = vĩnh viễn đến khi refresh.
 DEFAULT_TTL_SECONDS = 0
-_CACHE_QUERY_PAYLOAD_VERSION = 16
+_CACHE_QUERY_PAYLOAD_VERSION = 18
+# Một dòng cache / từ khóa + filter — lưu danh sách SP; phân trang chỉ khi trả response.
+SEARCH_LIST_CACHE_MAX_PRODUCTS = 5000
 
 
 def _configured_ttl_seconds() -> Optional[int]:
@@ -97,6 +100,117 @@ def build_cache_query_payload(
     }
 
 
+def build_keyword_list_cache_payload(
+    *,
+    norm_q: str,
+    category: Optional[str],
+    subcategory: Optional[str],
+    sub_subcategory: Optional[str],
+    shop_name: Optional[str],
+    shop_id: Optional[str],
+    style: Optional[str],
+    shop_name_chinese: Optional[str],
+    chinese_name: Optional[str],
+    pro_lower_price: Optional[str],
+    pro_high_price: Optional[str],
+    min_price: Optional[float],
+    max_price: Optional[float],
+    is_active: Optional[bool],
+    sort: str = "id_desc",
+    search_refresh: Optional[str] = None,
+    filter_size: Optional[str] = None,
+    filter_color: Optional[str] = None,
+    filter_style_tag: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Payload cache danh sách theo từ khóa — không có skip/limit (không cache theo trang)."""
+    sort_norm = (sort or "").strip() or "id_desc"
+    refresh = (search_refresh or "").strip()
+    if sort_norm.lower() == "random":
+        refresh = ""
+    return {
+        "q": norm_q or "",
+        "c1": (category or "").strip(),
+        "c2": (subcategory or "").strip(),
+        "c3": (sub_subcategory or "").strip(),
+        "sn": (shop_name or "").strip(),
+        "sid": (shop_id or "").strip(),
+        "st": (style or "").strip(),
+        "stc": (shop_name_chinese or "").strip(),
+        "cn": (chinese_name or "").strip(),
+        "pl": (pro_lower_price or "").strip(),
+        "ph": (pro_high_price or "").strip(),
+        "min": "" if min_price is None else float(min_price),
+        "max": "" if max_price is None else float(max_price),
+        "ia": True if is_active is not False else False,
+        "sort": sort_norm,
+        "sr": refresh,
+        "sz": (filter_size or "").strip(),
+        "cl": (filter_color or "").strip(),
+        "stylet": (filter_style_tag or "").strip(),
+        "pv": _CACHE_QUERY_PAYLOAD_VERSION,
+    }
+
+
+def build_keyword_list_cache_key(
+    *,
+    norm_q: str,
+    category: Optional[str],
+    subcategory: Optional[str],
+    sub_subcategory: Optional[str],
+    shop_name: Optional[str],
+    shop_id: Optional[str],
+    style: Optional[str],
+    shop_name_chinese: Optional[str],
+    chinese_name: Optional[str],
+    pro_lower_price: Optional[str],
+    pro_high_price: Optional[str],
+    min_price: Optional[float],
+    max_price: Optional[float],
+    is_active: Optional[bool],
+    sort: str = "id_desc",
+    search_refresh: Optional[str] = None,
+    filter_size: Optional[str] = None,
+    filter_color: Optional[str] = None,
+    filter_style_tag: Optional[str] = None,
+) -> str:
+    payload = build_keyword_list_cache_payload(
+        norm_q=norm_q,
+        category=category,
+        subcategory=subcategory,
+        sub_subcategory=sub_subcategory,
+        shop_name=shop_name,
+        shop_id=shop_id,
+        style=style,
+        shop_name_chinese=shop_name_chinese,
+        chinese_name=chinese_name,
+        pro_lower_price=pro_lower_price,
+        pro_high_price=pro_high_price,
+        min_price=min_price,
+        max_price=max_price,
+        is_active=is_active,
+        sort=sort,
+        search_refresh=search_refresh,
+        filter_size=filter_size,
+        filter_color=filter_color,
+        filter_style_tag=filter_style_tag,
+    )
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]
+
+
+def is_legacy_paginated_cache_payload(payload: Dict[str, Any]) -> bool:
+    """Dòng cache cũ (sk/li theo trang) — không dùng cho phân trang mới."""
+    if "sk" not in payload and "li" not in payload:
+        return False
+    try:
+        return int(payload.get("sk") or 0) > 0 or int(payload.get("li") or 0) not in (
+            0,
+            SEARCH_LIST_CACHE_MAX_PRODUCTS,
+        )
+    except (TypeError, ValueError):
+        return True
+
+
 def build_cache_key(
     *,
     norm_q: str,
@@ -146,6 +260,50 @@ def build_cache_key(
     )
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]
+
+
+def list_cache_fetch_limit(requested_skip: int, requested_limit: int) -> int:
+    """Số SP cần SELECT từ đầu để phục vụ trang (tránh OFFSET sâu trên DB)."""
+    need = max(0, int(requested_skip)) + max(1, int(requested_limit))
+    return min(SEARCH_LIST_CACHE_MAX_PRODUCTS, need)
+
+
+def cached_list_covers_page(cached: Dict[str, Any], skip: int, limit: int) -> bool:
+    products = cached.get("products")
+    if not isinstance(products, list):
+        return False
+    total = cached.get("total")
+    if isinstance(total, int) and total >= 0:
+        if skip >= total:
+            return True
+        return len(products) >= min(skip + limit, total)
+    return len(products) >= skip + limit
+
+
+def paginate_cached_search_response(
+    cached: Dict[str, Any],
+    skip: int,
+    limit: int,
+    *,
+    shuffle_random: bool = False,
+) -> Dict[str, Any]:
+    """Cắt một trang từ JSON cache danh sách đầy đủ."""
+    products = list(cached.get("products") or [])
+    total = cached.get("total")
+    if not isinstance(total, int) or total < 0:
+        total = len(products)
+    page_products = products[skip : skip + limit]
+    if shuffle_random and len(page_products) > 1:
+        random.shuffle(page_products)
+    page_num = skip // limit + 1 if limit > 0 else 1
+    total_pages = math.ceil(total / limit) if limit > 0 else 1
+    out = dict(cached)
+    out["products"] = page_products
+    out["page"] = page_num
+    out["size"] = limit
+    out["total_pages"] = total_pages
+    out["total"] = total
+    return out
 
 
 def get_cached_result(db: Session, cache_key: str) -> Optional[Dict[str, Any]]:
@@ -316,10 +474,8 @@ def _query_payload_for_row(row: ProductSearchCache) -> Optional[Dict[str, Any]]:
     except (TypeError, ValueError, json.JSONDecodeError):
         pass
 
-    return build_cache_query_payload(
+    return build_keyword_list_cache_payload(
         norm_q=nq,
-        skip=skip,
-        limit=limit,
         category=None,
         subcategory=None,
         sub_subcategory=None,
@@ -355,9 +511,15 @@ def _payload_to_get_products_kwargs(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     q = (payload.get("q") or "").strip()
     is_active = payload.get("ia")
+    if is_legacy_paginated_cache_payload(payload):
+        limit = int(payload.get("li") or 48)
+        skip = int(payload.get("sk") or 0)
+    else:
+        skip = 0
+        limit = SEARCH_LIST_CACHE_MAX_PRODUCTS
     return {
-        "skip": int(payload.get("sk") or 0),
-        "limit": int(payload.get("li") or 48),
+        "skip": skip,
+        "limit": limit,
         "category": _opt_str("c1"),
         "subcategory": _opt_str("c2"),
         "sub_subcategory": _opt_str("c3"),
@@ -378,6 +540,71 @@ def _payload_to_get_products_kwargs(payload: Dict[str, Any]) -> Dict[str, Any]:
         "filter_color": _opt_str("cl"),
         "filter_style_tag": _opt_str("stylet"),
     }
+
+
+def _normalize_keyword_list_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Chuẩn hóa payload cũ (sk/li theo trang) → một danh sách / từ khóa."""
+    if not is_legacy_paginated_cache_payload(payload) and "sk" not in payload and "li" not in payload:
+        return payload
+
+    def _opt_str(key: str) -> Optional[str]:
+        v = (payload.get(key) or "").strip()
+        return v or None
+
+    def _opt_float(key: str) -> Optional[float]:
+        v = payload.get(key)
+        if v == "" or v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    return build_keyword_list_cache_payload(
+        norm_q=str(payload.get("q") or ""),
+        category=_opt_str("c1"),
+        subcategory=_opt_str("c2"),
+        sub_subcategory=_opt_str("c3"),
+        shop_name=_opt_str("sn"),
+        shop_id=_opt_str("sid"),
+        style=_opt_str("st"),
+        shop_name_chinese=_opt_str("stc"),
+        chinese_name=_opt_str("cn"),
+        pro_lower_price=_opt_str("pl"),
+        pro_high_price=_opt_str("ph"),
+        min_price=_opt_float("min"),
+        max_price=_opt_float("max"),
+        is_active=True if payload.get("ia") is not False else False,
+        sort=str(payload.get("sort") or "id_desc"),
+        search_refresh=_opt_str("sr"),
+        filter_size=_opt_str("sz"),
+        filter_color=_opt_str("cl"),
+        filter_style_tag=_opt_str("stylet"),
+    )
+
+
+def clear_legacy_paginated_cache_rows(db: Session) -> int:
+    """Xóa dòng cache cũ lưu theo skip/limit (từng trang khách xem)."""
+    deleted = 0
+    try:
+        rows = db.query(ProductSearchCache).all()
+        for row in rows:
+            raw = (getattr(row, "cache_query_json", None) or "").strip()
+            if not raw:
+                continue
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and is_legacy_paginated_cache_payload(payload):
+                db.delete(row)
+                deleted += 1
+        if deleted:
+            db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return deleted
 
 
 def rebuild_search_cache_response(db: Session, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -402,22 +629,104 @@ def rebuild_search_cache_response(db: Session, payload: Dict[str, Any]) -> Optio
     return result
 
 
+def _payload_cache_key_kwargs(payload: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = _normalize_keyword_list_payload(payload)
+
+    def _opt_str(key: str) -> Optional[str]:
+        v = (normalized.get(key) or "").strip()
+        return v or None
+
+    def _opt_float(key: str) -> Optional[float]:
+        v = normalized.get(key)
+        if v == "" or v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "norm_q": str(normalized.get("q") or ""),
+        "category": _opt_str("c1"),
+        "subcategory": _opt_str("c2"),
+        "sub_subcategory": _opt_str("c3"),
+        "shop_name": _opt_str("sn"),
+        "shop_id": _opt_str("sid"),
+        "style": _opt_str("st"),
+        "shop_name_chinese": _opt_str("stc"),
+        "chinese_name": _opt_str("cn"),
+        "pro_lower_price": _opt_str("pl"),
+        "pro_high_price": _opt_str("ph"),
+        "min_price": _opt_float("min"),
+        "max_price": _opt_float("max"),
+        "is_active": True if normalized.get("ia") is not False else False,
+        "sort": str(normalized.get("sort") or "id_desc"),
+        "search_refresh": _opt_str("sr"),
+        "filter_size": _opt_str("sz"),
+        "filter_color": _opt_str("cl"),
+        "filter_style_tag": _opt_str("stylet"),
+    }
+
+
+def keyword_cache_key_from_payload(payload: Dict[str, Any]) -> str:
+    return build_keyword_list_cache_key(**_payload_cache_key_kwargs(payload))
+
+
+def _delete_cache_row(db: Session, row: ProductSearchCache) -> None:
+    try:
+        db.delete(row)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
 def _refresh_cache_row(db: Session, row: ProductSearchCache) -> bool:
-    payload = _query_payload_for_row(row)
-    if not payload:
+    raw_payload = _query_payload_for_row(row)
+    if not raw_payload:
         return False
+    payload = _normalize_keyword_list_payload(raw_payload)
     refreshed = rebuild_search_cache_response(db, payload)
     if refreshed is None:
         return False
     nq = (payload.get("q") or _norm_q_for_row(row) or "").strip() or None
+    new_key = keyword_cache_key_from_payload(payload)
+    if new_key != row.cache_key:
+        db.delete(row)
+        db.flush()
     set_cached_result(
         db,
-        row.cache_key,
+        new_key,
         refreshed,
         norm_q=nq,
         query_payload=payload,
     )
     return True
+
+
+def _refresh_cache_rows_deduped(db: Session, rows: List[ProductSearchCache]) -> int:
+    """Làm mới mỗi từ khóa một lần; xóa dòng legacy trùng (cache theo trang cũ)."""
+    refreshed = 0
+    done_keys: set[str] = set()
+    for row in rows:
+        raw_payload = _query_payload_for_row(row)
+        if not raw_payload:
+            continue
+        canonical_key = keyword_cache_key_from_payload(raw_payload)
+        if canonical_key in done_keys:
+            if row.cache_key != canonical_key:
+                _delete_cache_row(db, row)
+            continue
+        done_keys.add(canonical_key)
+        try:
+            if _refresh_cache_row(db, row):
+                refreshed += 1
+        except Exception:
+            logger.exception(
+                "product_search_cache: refresh failed for key=%s",
+                row.cache_key,
+            )
+    return refreshed
 
 
 def refresh_caches_for_product_states(db: Session, *product_states: Any) -> int:
@@ -432,21 +741,16 @@ def refresh_caches_for_product_states(db: Session, *product_states: Any) -> int:
         return 0
 
     rows = db.query(ProductSearchCache).all()
-    refreshed = 0
+    related_rows: List[ProductSearchCache] = []
     for row in rows:
         keyword = _norm_q_for_row(row)
         if not keyword:
             continue
         if not any(product_matches_search_keyword(state, keyword) for state in states):
             continue
-        try:
-            if _refresh_cache_row(db, row):
-                refreshed += 1
-        except Exception:
-            logger.exception(
-                "product_search_cache: refresh failed for key=%s",
-                row.cache_key,
-            )
+        related_rows.append(row)
+
+    refreshed = _refresh_cache_rows_deduped(db, related_rows)
 
     if refreshed:
         logger.info(
@@ -459,16 +763,7 @@ def refresh_caches_for_product_states(db: Session, *product_states: Any) -> int:
 def refresh_all_caches(db: Session) -> int:
     """Bulk import — làm mới toàn bộ cache tìm kiếm đang lưu."""
     rows = db.query(ProductSearchCache).all()
-    refreshed = 0
-    for row in rows:
-        try:
-            if _refresh_cache_row(db, row):
-                refreshed += 1
-        except Exception:
-            logger.exception(
-                "product_search_cache: refresh_all failed for key=%s",
-                row.cache_key,
-            )
+    refreshed = _refresh_cache_rows_deduped(db, rows)
     if refreshed:
         logger.info("product_search_cache: refreshed all %s row(s)", refreshed)
     return refreshed

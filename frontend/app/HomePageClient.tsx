@@ -33,16 +33,10 @@ import type {
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import {
-  readSearchResultCache,
-  searchRequestCacheFingerprint,
-  writeSearchResultCache,
-} from '@/lib/search-result-cache';
-import {
   isLegacySearchStableSortParam,
   isSearchRandomSort,
   resolveSearchListingSort,
   shuffleSearchProducts,
-  shouldBypassSearchSessionCache,
 } from '@/lib/search-list-sort';
 import {
   filterStorefrontVisibleProducts,
@@ -405,7 +399,6 @@ export default function HomePageClient({
       cancelled || fetchGen !== searchFetchGenRef.current;
 
     const resolvedSearchSort = resolveSearchListingSort(sortFromUrl);
-    const skipSearchSessionCache = shouldBypassSearchSessionCache(sortFromUrl);
 
     const searchApiParams = {
       q: qFromUrl,
@@ -429,27 +422,6 @@ export default function HomePageClient({
     };
 
     const fetchSearchPage = async (skip: number, limit: number): Promise<ProductListResponse> => {
-      const fp = searchRequestCacheFingerprint({
-        q: qFromUrl,
-        is_active: true,
-        shop_id: shopIdFromUrl,
-        shop_name: shopNameFromUrl,
-        shop_name_chinese: shopNameChineseFromUrl,
-        chinese_name: chineseNameFromUrl,
-        style: styleFromUrl,
-        pro_lower_price: proLowerFromUrl,
-        pro_high_price: proHighFromUrl,
-        min_price: parseNumberParam(minPriceFromUrl),
-        max_price: parseNumberParam(maxPriceFromUrl),
-        size: sizeFromUrl,
-        color: colorFromUrl,
-        style_tag: styleTagFromUrl,
-        sort: resolvedSearchSort,
-        skip,
-        limit,
-      });
-      const hit = skipSearchSessionCache ? null : readSearchResultCache(fp);
-      if (hit) return sanitizeStorefrontProductList(hit);
       const raw = sanitizeStorefrontProductList(
         await apiClient.getProducts({
           ...searchApiParams,
@@ -463,15 +435,7 @@ export default function HomePageClient({
       const products = isSearchRandomSort(sortFromUrl)
         ? shuffleSearchProducts(raw.products ?? [])
         : (raw.products ?? []);
-      const response = { ...raw, products };
-      if (
-        !isStaleSearchResponse() &&
-        !response.redirect_path &&
-        !isSearchRandomSort(sortFromUrl)
-      ) {
-        writeSearchResultCache(fp, response);
-      }
-      return response;
+      return { ...raw, products };
     };
 
     (async () => {
@@ -710,7 +674,7 @@ export default function HomePageClient({
   );
 
   useEffect(() => {
-    if (authLoading) return;
+    if (authLoading || hasFilterParams) return;
     let cancelled = false;
     snapshotMainFeedAppliedRef.current = false;
     setRecommendationSource('pending');
@@ -738,10 +702,10 @@ export default function HomePageClient({
     return () => {
       cancelled = true;
     };
-  }, [shopBehaviorKey, authLoading, applyRecommendationSnapshot]);
+  }, [shopBehaviorKey, authLoading, hasFilterParams, applyRecommendationSnapshot]);
 
   useEffect(() => {
-    if (authLoading || recommendationSource !== 'fresh') return;
+    if (authLoading || hasFilterParams || recommendationSource !== 'fresh') return;
     if (!isAuthenticated || user?.id == null) {
       setSameAgeGenderProducts([]);
       setSameAgeGenderCohortMode('requires_login');
@@ -769,14 +733,22 @@ export default function HomePageClient({
     return () => {
       cancelled = true;
     };
-  }, [authLoading, isAuthenticated, user?.id, user?.gender, user?.date_of_birth, recommendationSource]);
+  }, [
+    authLoading,
+    hasFilterParams,
+    isAuthenticated,
+    user?.id,
+    user?.gender,
+    user?.date_of_birth,
+    recommendationSource,
+  ]);
 
   useEffect(() => {
     hasDisplayedRecommendationRef.current = displayedRecommendationProducts.length > 0;
   }, [displayedRecommendationProducts]);
 
   useEffect(() => {
-    if (authLoading || recommendationSource !== 'fresh') return;
+    if (authLoading || hasFilterParams || recommendationSource !== 'fresh') return;
     let cancelled = false;
     if (!hasDisplayedRecommendationRef.current) setSameShopLoading(true);
     setSameShopCanLoadMore(false);
@@ -828,7 +800,7 @@ export default function HomePageClient({
     return () => {
       cancelled = true;
     };
-  }, [shopBehaviorKey, authLoading, recommendationSource]);
+  }, [shopBehaviorKey, authLoading, hasFilterParams, recommendationSource]);
 
   const cohortProductsForMix = useMemo(() => {
     if (sameAgeGenderLoading) return [];
@@ -1162,7 +1134,7 @@ export default function HomePageClient({
       params.set('page', String(next));
     }
     const q = searchParamsToEncodedQueryString(params);
-    router.push(q ? `/?${q}` : '/');
+    router.push(q ? `/?${q}` : '/', { scroll: false });
   };
 
   const shouldApplyPriceFilter = Boolean(minPriceFromUrl || maxPriceFromUrl);

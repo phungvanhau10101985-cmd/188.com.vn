@@ -1,13 +1,17 @@
 import type { ProductListResponse } from '@/types/api';
 
-const PREFIX = '188-sr-cache:v8';
+/**
+ * Cache sessionStorage theo từ khóa (đã ngừng dùng cho phân trang tìm kiếm).
+ * Danh sách SP được cache server-side (DB) theo từ khóa + filter — không theo trang.
+ */
+
+const PREFIX = '188-sr-cache:v9';
 const META_KEY = `${PREFIX}:meta`;
 
-/** Thời gian sống cache — sau đó gọi API lại (đồng bộ kho / giá). */
+/** @deprecated Không dùng cho luồng tìm kiếm — giữ để dọn session cũ. */
 export const SEARCH_RESULT_CACHE_TTL_MS = 5 * 60 * 1000;
 
-/** Giới hạn số entry / tab (mỗi entry ≈ một cặp skip+limit của một truy vấn). */
-const MAX_CACHE_KEYS = 36;
+const MAX_CACHE_KEYS = 24;
 
 type Meta = { order: string[] };
 
@@ -24,9 +28,45 @@ function fnv1a32(str: string): string {
   return (h >>> 0).toString(36);
 }
 
-/**
- * Fingerprint ổn định cho một request tìm theo `q` + filter + phân trang (skip/limit).
- */
+/** Fingerprint theo từ khóa + filter — không có skip/limit. */
+export function searchKeywordCacheFingerprint(params: {
+  q: string;
+  is_active?: boolean;
+  shop_id?: string | undefined;
+  shop_name?: string | undefined;
+  shop_name_chinese?: string | undefined;
+  chinese_name?: string | undefined;
+  style?: string | undefined;
+  pro_lower_price?: string | undefined;
+  pro_high_price?: string | undefined;
+  min_price?: number | undefined;
+  max_price?: number | undefined;
+  size?: string | undefined;
+  color?: string | undefined;
+  style_tag?: string | undefined;
+  sort?: string | undefined;
+}): string {
+  const n = {
+    q: String(params.q).trim(),
+    ia: params.is_active !== false ? 1 : 0,
+    sid: params.shop_id ?? '',
+    sn: params.shop_name ?? '',
+    stc: params.shop_name_chinese ?? '',
+    cn: params.chinese_name ?? '',
+    sty: params.style ?? '',
+    pl: params.pro_lower_price ?? '',
+    ph: params.pro_high_price ?? '',
+    min: params.min_price ?? '',
+    max: params.max_price ?? '',
+    sz: params.size ?? '',
+    cl: params.color ?? '',
+    stylet: params.style_tag ?? '',
+    so: params.sort ?? '',
+  };
+  return fnv1a32(JSON.stringify(n));
+}
+
+/** @deprecated Dùng searchKeywordCacheFingerprint — không gồm skip/limit. */
 export function searchRequestCacheFingerprint(params: {
   q: string;
   is_active?: boolean;
@@ -46,26 +86,8 @@ export function searchRequestCacheFingerprint(params: {
   skip: number;
   limit: number;
 }): string {
-  const n = {
-    q: String(params.q).trim(),
-    ia: params.is_active !== false ? 1 : 0,
-    sid: params.shop_id ?? '',
-    sn: params.shop_name ?? '',
-    stc: params.shop_name_chinese ?? '',
-    cn: params.chinese_name ?? '',
-    sty: params.style ?? '',
-    pl: params.pro_lower_price ?? '',
-    ph: params.pro_high_price ?? '',
-    min: params.min_price ?? '',
-    max: params.max_price ?? '',
-    sz: params.size ?? '',
-    cl: params.color ?? '',
-    stylet: params.style_tag ?? '',
-    so: params.sort ?? '',
-    sk: params.skip,
-    li: params.limit,
-  };
-  return fnv1a32(JSON.stringify(n));
+  const { skip: _skip, limit: _limit, ...rest } = params;
+  return searchKeywordCacheFingerprint(rest);
 }
 
 function readMeta(): Meta {
@@ -113,6 +135,7 @@ interface StoredPayload {
   body: ProductListResponse;
 }
 
+/** @deprecated Tìm kiếm dùng cache server — không đọc session theo trang. */
 export function readSearchResultCache(fp: string): ProductListResponse | null {
   if (typeof window === 'undefined') return null;
   try {
@@ -135,6 +158,7 @@ export function readSearchResultCache(fp: string): ProductListResponse | null {
   }
 }
 
+/** @deprecated Tìm kiếm dùng cache server — không ghi session theo trang. */
 export function writeSearchResultCache(fp: string, body: ProductListResponse): void {
   if (typeof window === 'undefined') return;
   if (body.redirect_path) return;

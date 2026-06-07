@@ -522,16 +522,21 @@ def _read_products_list_impl(
         # Admin / công cụ nội bộ cần dữ liệu mới sau PUT; public cache gây hiển thị cũ ~60s.
         response.headers["Cache-Control"] = "private, no-cache, must-revalidate"
     cache_key = None
+    list_query_payload = None
+    norm_q = None
     skip_search_cache = admin_list or (
         user is not None and sale_calendar_svc.is_site_sale_test_enabled(db, user)
     )
     sort_norm = crud.product.normalize_product_list_sort(sort)
-    if use_search_cache and raw_q and not pid and not skip_search_cache:
+    search_cache_active = use_search_cache and raw_q and not pid and not skip_search_cache
+    fetch_skip = skip
+    fetch_limit = limit
+    paginate_from_list_cache = False
+
+    if search_cache_active:
         norm_q = crud.product._normalize_search_key(raw_q)
-        cache_key = product_search_cache_crud.build_cache_key(
+        list_query_payload = product_search_cache_crud.build_keyword_list_cache_payload(
             norm_q=norm_q,
-            skip=skip,
-            limit=limit,
             category=category,
             subcategory=subcategory,
             sub_subcategory=sub_subcategory,
@@ -551,16 +556,46 @@ def _read_products_list_impl(
             filter_color=filter_color,
             filter_style_tag=filter_style_tag,
         )
-        cached = product_search_cache_crud.get_cached_result(db, cache_key)
-        if cached is not None:
-            if sort_norm == "random":
-                return _shuffle_cached_products_response(cached)
-            return cached
+        cache_key = product_search_cache_crud.build_keyword_list_cache_key(
+            norm_q=norm_q,
+            category=category,
+            subcategory=subcategory,
+            sub_subcategory=sub_subcategory,
+            shop_name=shop_name,
+            shop_id=shop_id,
+            style=style,
+            shop_name_chinese=shop_name_chinese,
+            chinese_name=chinese_name,
+            pro_lower_price=pro_lower_price,
+            pro_high_price=pro_high_price,
+            min_price=min_price,
+            max_price=max_price,
+            is_active=is_active,
+            sort=sort_norm,
+            search_refresh=search_refresh,
+            filter_size=filter_size,
+            filter_color=filter_color,
+            filter_style_tag=filter_style_tag,
+        )
+        cached_full = product_search_cache_crud.get_cached_result(db, cache_key)
+        if cached_full is not None and product_search_cache_crud.cached_list_covers_page(
+            cached_full, skip, limit
+        ):
+            shuffle_page = sort_norm == "random"
+            return product_search_cache_crud.paginate_cached_search_response(
+                cached_full, skip, limit, shuffle_random=shuffle_page
+            )
+
+        beyond_list_cap = skip + limit > product_search_cache_crud.SEARCH_LIST_CACHE_MAX_PRODUCTS
+        if not beyond_list_cap:
+            fetch_skip = 0
+            fetch_limit = product_search_cache_crud.list_cache_fetch_limit(skip, limit)
+            paginate_from_list_cache = True
 
     result = crud.product.get_products(
         db,
-        skip=skip,
-        limit=limit,
+        skip=fetch_skip,
+        limit=fetch_limit,
         category=category,
         subcategory=subcategory,
         sub_subcategory=sub_subcategory,
@@ -598,10 +633,10 @@ def _read_products_list_impl(
         )
 
     if (
-        use_search_cache
+        search_cache_active
         and cache_key
-        and raw_q
-        and not pid
+        and list_query_payload
+        and paginate_from_list_cache
         and not result.get("redirect_path")
         and not result.get("error")
     ):
@@ -611,32 +646,16 @@ def _read_products_list_impl(
                 cache_key,
                 result,
                 norm_q=norm_q,
-                query_payload=product_search_cache_crud.build_cache_query_payload(
-                    norm_q=norm_q,
-                    skip=skip,
-                    limit=limit,
-                    category=category,
-                    subcategory=subcategory,
-                    sub_subcategory=sub_subcategory,
-                    shop_name=shop_name,
-                    shop_id=shop_id,
-                    style=style,
-                    shop_name_chinese=shop_name_chinese,
-                    chinese_name=chinese_name,
-                    pro_lower_price=pro_lower_price,
-                    pro_high_price=pro_high_price,
-                    min_price=min_price,
-                    max_price=max_price,
-                    is_active=is_active,
-                    sort=sort_norm,
-                    search_refresh=search_refresh,
-                    filter_size=filter_size,
-                    filter_color=filter_color,
-                    filter_style_tag=filter_style_tag,
-                ),
+                query_payload=list_query_payload,
             )
         except Exception:
             pass
+
+    if paginate_from_list_cache and not result.get("redirect_path") and not result.get("error"):
+        shuffle_page = sort_norm == "random"
+        return product_search_cache_crud.paginate_cached_search_response(
+            result, skip, limit, shuffle_random=shuffle_page
+        )
 
     return result
 
