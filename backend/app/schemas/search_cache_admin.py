@@ -23,7 +23,9 @@ class SearchKeywordStatsResponse(BaseModel):
 
 class ProductSearchCacheRowItem(BaseModel):
     cache_key: str
-    expires_at: datetime
+    expires_at: Optional[datetime] = Field(
+        None, description="NULL = cache vĩnh viễn; có giá trị = TTL legacy"
+    )
     created_at: Optional[datetime] = None
     response_size_bytes: int
     hint_query: Optional[str] = Field(

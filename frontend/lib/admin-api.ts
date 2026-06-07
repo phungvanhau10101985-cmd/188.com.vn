@@ -2077,7 +2077,7 @@ export interface SearchKeywordStatsResponse {
 
 export interface ProductSearchCacheRowItem {
   cache_key: string;
-  expires_at: string;
+  expires_at: string | null;
   created_at: string | null;
   response_size_bytes: number;
   hint_query: string | null;
