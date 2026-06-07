@@ -410,8 +410,10 @@ export interface ProductSearchParams {
   color?: string;
   /** Lọc kiểu phổ thông tự rút từ tên/thông tin sản phẩm */
   style_tag?: string;
-  /** Sắp xếp: default | views_desc | newest | oldest | purchases_desc */
+  /** Sắp xếp: random | id_desc | views_desc | newest | oldest | purchases_desc */
   sort?: string;
+  /** Cache-bust khi sort=random (client gửi mỗi lần F5/tìm lại) */
+  search_refresh?: string;
   /** Bỏ COUNT(*) — PDP / khối liên quan */
   skip_total?: boolean;
   /** Gắn biến thể kho thanh lý (storefront; admin không dùng) */

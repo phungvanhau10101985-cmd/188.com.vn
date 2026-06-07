@@ -38,8 +38,10 @@ import {
   writeSearchResultCache,
 } from '@/lib/search-result-cache';
 import {
+  isLegacySearchStableSortParam,
   isSearchRandomSort,
   resolveSearchListingSort,
+  shuffleSearchProducts,
   shouldBypassSearchSessionCache,
 } from '@/lib/search-list-sort';
 import {
@@ -378,8 +380,7 @@ export default function HomePageClient({
       cancelled || fetchGen !== searchFetchGenRef.current;
 
     const resolvedSearchSort = resolveSearchListingSort(sortFromUrl);
-    const skipSearchSessionCache =
-      isSearchRandomSort(sortFromUrl) || shouldBypassSearchSessionCache();
+    const skipSearchSessionCache = shouldBypassSearchSessionCache(sortFromUrl);
 
     const searchApiParams = {
       q: qFromUrl,
@@ -424,13 +425,20 @@ export default function HomePageClient({
       });
       const hit = skipSearchSessionCache ? null : readSearchResultCache(fp);
       if (hit) return sanitizeStorefrontProductList(hit);
-      const response = sanitizeStorefrontProductList(
+      const raw = sanitizeStorefrontProductList(
         await apiClient.getProducts({
           ...searchApiParams,
           limit,
           skip,
+          ...(isSearchRandomSort(sortFromUrl)
+            ? { search_refresh: String(Date.now()) }
+            : {}),
         }),
       );
+      const products = isSearchRandomSort(sortFromUrl)
+        ? shuffleSearchProducts(raw.products ?? [])
+        : (raw.products ?? []);
+      const response = { ...raw, products };
       if (
         !isStaleSearchResponse() &&
         !response.redirect_path &&
@@ -1095,6 +1103,17 @@ export default function HomePageClient({
     () => searchParamsToEncodedQueryString(cloneUrlSearchParams(searchParams)),
     [searchParams]
   );
+
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.location.pathname !== '/') return;
+    if (!qFromUrl.trim()) return;
+    if (!isLegacySearchStableSortParam(sortFromUrl)) return;
+    const params = cloneUrlSearchParams(searchParams);
+    params.delete('sort');
+    const q = searchParamsToEncodedQueryString(params);
+    router.replace(q ? `/?${q}` : '/', { scroll: false });
+  }, [qFromUrl, sortFromUrl, searchParams, router]);
 
   useLayoutEffect(() => {
     if (typeof window === 'undefined') return;
