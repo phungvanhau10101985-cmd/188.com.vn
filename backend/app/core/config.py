@@ -96,6 +96,10 @@ class Settings:
         self.CATEGORY_CATALOG_TILES_TTL_SECONDS: float = float(
             os.getenv("CATEGORY_CATALOG_TILES_TTL_SECONDS", "300")
         )
+        # 0 = cache JSON kết quả tìm vĩnh viễn; invalidate khi SP liên quan thêm/xóa.
+        self.PRODUCT_SEARCH_CACHE_TTL_SECONDS: int = int(
+            os.getenv("PRODUCT_SEARCH_CACHE_TTL_SECONDS", "0")
+        )
         
         # Cây danh mục /menu (GET /categories/from-products): chỉ giữ nhánh có số SP active **lớn hơn** ngưỡng này.
         # 0 = hành vi cũ (ẩn nhánh 0 SP). Mặc định 10 → hiển thị khi có ≥11 SP; ≤10 SP thì ẩn khỏi menu/sitemap dùng cây này.

@@ -10,6 +10,11 @@ import {
 const KW_PAGE = 100;
 const CACHE_PAGE = 40;
 
+function formatExpires(iso: string | null | undefined): string {
+  if (!iso) return 'Vĩnh viễn';
+  return formatDt(iso);
+}
+
 function formatDt(iso: string | null | undefined): string {
   if (!iso) return '—';
   try {
@@ -113,7 +118,8 @@ export default function AdminSearchCachePage() {
             <p className="text-sm text-gray-600 mt-1">
               Thống kê dựa trên nhật ký <code className="text-xs bg-gray-100 px-1 rounded">search_logs</code> (mỗi lần
               tìm có <code className="text-xs bg-gray-100 px-1 rounded">q</code> trên API sản phẩm). Cache hiển thị là
-              bảng <code className="text-xs bg-gray-100 px-1 rounded">product_search_cache</code> (~5 phút TTL).
+              bảng <code className="text-xs bg-gray-100 px-1 rounded">product_search_cache</code> (lưu vĩnh viễn;
+              tự làm mới JSON khi SP liên quan từ khóa được thêm/xóa — không đụng cache từ khóa khác).
             </p>
           </div>
           {toast && (
@@ -225,10 +231,10 @@ export default function AdminSearchCachePage() {
                 Tổng: {cacheData?.total_rows ?? '—'}
               </span>
               <span className="px-2 py-1 rounded bg-green-50 text-green-800">
-                Còn hạn: {cacheData?.active_rows ?? '—'}
+                Đang dùng: {cacheData?.active_rows ?? '—'}
               </span>
               <span className="px-2 py-1 rounded bg-amber-50 text-amber-900">
-                Hết hạn: {cacheData?.expired_rows ?? '—'}
+                TTL hết (legacy): {cacheData?.expired_rows ?? '—'}
               </span>
             </div>
             <div className="flex flex-wrap gap-2 ml-auto">
@@ -274,7 +280,7 @@ export default function AdminSearchCachePage() {
                       <th className="py-2 pr-3 font-medium">Gợi ý</th>
                       <th className="py-2 pr-3 font-medium text-right">Kích thước</th>
                       <th className="py-2 pr-3 font-medium">Tạo</th>
-                      <th className="py-2 font-medium">Hết hạn</th>
+                      <th className="py-2 font-medium">Hiệu lực</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -288,7 +294,7 @@ export default function AdminSearchCachePage() {
                         </td>
                         <td className="py-2 pr-3 text-right tabular-nums">{row.response_size_bytes} B</td>
                         <td className="py-2 pr-3 whitespace-nowrap text-gray-600">{formatDt(row.created_at)}</td>
-                        <td className="py-2 whitespace-nowrap text-gray-600">{formatDt(row.expires_at)}</td>
+                        <td className="py-2 whitespace-nowrap text-gray-600">{formatExpires(row.expires_at)}</td>
                       </tr>
                     ))}
                   </tbody>

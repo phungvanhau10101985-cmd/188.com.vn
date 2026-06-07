@@ -10,5 +10,10 @@ class ProductSearchCache(Base):
 
     cache_key = Column(String(64), primary_key=True, index=True)
     response_json = Column(Text, nullable=False)
-    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    # NULL = cache vĩnh viễn (mặc định); có giá trị = TTL legacy.
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    # Từ khóa chuẩn — dùng refresh khi SP liên quan thêm/xóa.
+    norm_q = Column(String(500), nullable=True, index=True)
+    # Tham số query (q, skip, limit, filter…) — replay khi làm mới cache.
+    cache_query_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

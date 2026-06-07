@@ -830,7 +830,8 @@ def admin_list_product_search_cache(
                 expires_at=row.expires_at,
                 created_at=row.created_at,
                 response_size_bytes=len(body.encode("utf-8")),
-                hint_query=product_search_cache_crud.hint_from_cached_json(body),
+                hint_query=(row.norm_q or "").strip()
+                or product_search_cache_crud.hint_from_cached_json(body),
             )
         )
     return ProductSearchCacheListResponse(

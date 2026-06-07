@@ -743,6 +743,9 @@ def refresh_caches_after_products_change(
 
 def refresh_caches_after_bulk_import(db: Session) -> None:
     try:
+        from app.crud import product_search_cache as product_search_cache_crud
+
+        product_search_cache_crud.refresh_all_caches(db)
         rebuild_all_category_caches(db)
         facet_cache_crud.mark_stale_by_types(db, (SCOPE_SEARCH_Q,))
         rebuild_all_search_caches(db)

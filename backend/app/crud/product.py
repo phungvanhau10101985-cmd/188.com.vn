@@ -5386,6 +5386,12 @@ def create_product(db: Session, product: ProductCreate):
     _maybe_schedule_category_gemini_for_product(db, db_product)
     _schedule_google_sheets_sku_sync()
     try:
+        from app.crud import product_search_cache as product_search_cache_crud
+
+        product_search_cache_crud.schedule_refresh_caches_for_product_states(db_product)
+    except Exception:
+        pass
+    try:
         from app.services.listing_facet_cache import refresh_caches_after_product_change
 
         refresh_caches_after_product_change(db, db_product)
@@ -5484,6 +5490,12 @@ def delete_product(db: Session, product_id: int, *, admin_force: bool = False):
         db.commit()
         _schedule_google_sheets_sku_sync()
         try:
+            from app.crud import product_search_cache as product_search_cache_crud
+
+            product_search_cache_crud.schedule_refresh_caches_for_product_states(snapshot)
+        except Exception:
+            pass
+        try:
             refresh_caches_after_product_change(db, snapshot)
         except Exception:
             pass
@@ -5517,24 +5529,26 @@ def _schedule_bunny_cleanup_for_deleted_products(products: List[Product]) -> Non
 
 
 def _schedule_facet_cache_refresh_after_bulk_delete(snapshots: List[Any]) -> None:
-    """Làm mới cache facet sau bulk xóa — nền để tránh 504 gateway trên lô lớn."""
+    """Làm mới cache facet + invalidate cache tìm kiếm sau bulk xóa — nền tránh 504."""
     if not snapshots:
         return
     snap_copy = list(snapshots)
 
     def _run() -> None:
         from app.db.session import SessionLocal
+        from app.crud import product_search_cache as product_search_cache_crud
         from app.services.listing_facet_cache import refresh_caches_after_products_change
 
         db_bg = SessionLocal()
         try:
+            product_search_cache_crud.refresh_caches_for_product_states(db_bg, *snap_copy)
             refresh_caches_after_products_change(db_bg, snap_copy)
             logger.info(
-                "Bulk xóa SP: đã làm mới cache facet (nền), %s snapshot",
+                "Bulk xóa SP: đã làm mới cache facet + search JSON (nền), %s snapshot",
                 len(snap_copy),
             )
         except Exception as exc:
-            logger.warning("Bulk xóa SP — làm mới cache facet nền lỗi: %s", exc)
+            logger.warning("Bulk xóa SP — làm mới cache nền lỗi: %s", exc)
         finally:
             db_bg.close()
 

@@ -568,7 +568,34 @@ def _read_products_list_impl(
         and not result.get("error")
     ):
         try:
-            product_search_cache_crud.set_cached_result(db, cache_key, result)
+            product_search_cache_crud.set_cached_result(
+                db,
+                cache_key,
+                result,
+                norm_q=norm_q,
+                query_payload=product_search_cache_crud.build_cache_query_payload(
+                    norm_q=norm_q,
+                    skip=skip,
+                    limit=limit,
+                    category=category,
+                    subcategory=subcategory,
+                    sub_subcategory=sub_subcategory,
+                    shop_name=shop_name,
+                    shop_id=shop_id,
+                    style=style,
+                    shop_name_chinese=shop_name_chinese,
+                    chinese_name=chinese_name,
+                    pro_lower_price=pro_lower_price,
+                    pro_high_price=pro_high_price,
+                    min_price=min_price,
+                    max_price=max_price,
+                    is_active=is_active,
+                    sort=crud.product.normalize_product_list_sort(sort),
+                    filter_size=filter_size,
+                    filter_color=filter_color,
+                    filter_style_tag=filter_style_tag,
+                ),
+            )
         except Exception:
             pass
 

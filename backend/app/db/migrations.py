@@ -632,6 +632,50 @@ class MigrationManager:
             logger.warning("migrate_same_shop_recommendation_indexes: %s", e)
             return True
 
+    def migrate_product_search_cache_permanent(self) -> bool:
+        """Cache JSON tìm kiếm vĩnh viễn: expires_at NULL + backfill norm_q từ JSON."""
+        try:
+            inspector = inspect(engine)
+            if "product_search_cache" not in inspector.get_table_names():
+                return True
+            from app.crud import product_search_cache as psc_crud
+
+            with engine.connect() as conn:
+                if IS_POSTGRESQL:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE product_search_cache "
+                            "ALTER COLUMN expires_at DROP NOT NULL"
+                        )
+                    )
+                conn.execute(
+                    text("UPDATE product_search_cache SET expires_at = NULL WHERE expires_at IS NOT NULL")
+                )
+                conn.commit()
+
+            from app.db.session import SessionLocal
+
+            db = SessionLocal()
+            try:
+                rows = db.execute(text("SELECT cache_key, response_json, norm_q FROM product_search_cache")).fetchall()
+                for cache_key, response_json, norm_q in rows:
+                    if (norm_q or "").strip():
+                        continue
+                    hint = psc_crud.hint_from_cached_json(response_json or "")
+                    if hint:
+                        db.execute(
+                            text("UPDATE product_search_cache SET norm_q = :nq WHERE cache_key = :ck"),
+                            {"nq": hint[:500], "ck": cache_key},
+                        )
+                db.commit()
+            finally:
+                db.close()
+            logger.info("✅ product_search_cache: permanent cache + norm_q backfill")
+            return True
+        except Exception as e:
+            logger.warning("migrate_product_search_cache_permanent: %s", e)
+            return True
+
     def migrate_product_category_active_index(self) -> bool:
         """Index COUNT menu/catalog: is_active + category_id."""
         try:
@@ -925,6 +969,16 @@ class MigrationManager:
         results['user_cohort_view_pool_cache_sync'] = self._sync_table_columns(
             "user_cohort_view_pool_cache", UserCohortViewPoolCache
         )
+
+        from app.models.product_search_cache import ProductSearchCache
+
+        results['product_search_cache_create'] = self._create_table_if_not_exists(
+            "product_search_cache", ProductSearchCache
+        )
+        results['product_search_cache_sync'] = self._sync_table_columns(
+            "product_search_cache", ProductSearchCache
+        )
+        results['product_search_cache_permanent'] = self.migrate_product_search_cache_permanent()
 
         return results
 
