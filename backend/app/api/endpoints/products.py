@@ -55,8 +55,17 @@ _DB_UNAVAILABLE_DETAIL = "Cơ sở dữ liệu tạm thời không phản hồi 
 
 
 def _lookup_product_by_slug(db: Session, slug: str):
+    from app.services.product_image_visibility import (
+        deactivate_product_without_storefront_image,
+        product_has_storefront_image,
+    )
+
     try:
-        return crud.product.get_product_by_slug(db, slug=slug)
+        row = crud.product.get_product_by_slug(db, slug=slug)
+        if row is not None and not product_has_storefront_image(row):
+            deactivate_product_without_storefront_image(db, row)
+            return None
+        return row
     except TransientDbError as exc:
         raise HTTPException(
             status_code=503,

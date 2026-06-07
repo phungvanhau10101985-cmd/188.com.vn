@@ -293,7 +293,10 @@ def apply_catalog_visibility_filter(
         query = query.filter(
             or_(Product.is_warehouse_clearance == False, Product.is_warehouse_clearance.is_(None))  # noqa: E712
         )
-    return query.filter(storefront_sellable_expr())
+    query = query.filter(storefront_sellable_expr())
+    from app.services.product_image_visibility import apply_storefront_image_filter
+
+    return apply_storefront_image_filter(query)
 
 
 def is_warehouse_clearance_product_id(product_id: Optional[str]) -> bool:

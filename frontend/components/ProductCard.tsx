@@ -7,7 +7,7 @@ import dynamic from 'next/dynamic';
 import { useMemo, useState } from 'react';
 import { Product } from '@/types/api';
 import { formatPrice, getDiscountPercentage, truncateText } from '@/lib/utils';
-import { getOptimizedImage } from '@/lib/image-utils';
+import { getOptimizedImage, hasValidProductImageUrl } from '@/lib/image-utils';
 import { hasVideoLink } from '@/lib/video-utils';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
@@ -281,6 +281,9 @@ export default function ProductCard({
   // Sử dụng image utils với kích thước tối ưu — ảnh màu thanh lý thay ảnh đại diện khi có kho sale
   const cardImageSource =
     clearanceHero?.imageUrl || warehouseStandaloneSaleImage(product) || product.main_image;
+  if (!hasValidProductImageUrl(cardImageSource)) {
+    return null;
+  }
   const imageUrl = getOptimizedImage(cardImageSource, {
     width: getImageSize(size).width,
     height: getImageSize(size).height,
@@ -541,6 +544,9 @@ export const SimpleProductCard = ({
   const fullyOutOfStock = isFullyOutOfStock(product);
   const cardImageSource =
     clearanceHero?.imageUrl || warehouseStandaloneSaleImage(product) || product.main_image;
+  if (!hasValidProductImageUrl(cardImageSource)) {
+    return null;
+  }
 
   const imageUrl = getOptimizedImage(cardImageSource, {
     width: 250,

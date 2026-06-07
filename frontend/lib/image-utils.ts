@@ -246,6 +246,19 @@ const isValidUrl = (url: string): boolean => {
   }
 };
 
+/** Ảnh đại diện SP đủ điều kiện hiển thị trên lưới (không placeholder / domain trống). */
+export function hasValidProductImageUrl(url: string | undefined | null): boolean {
+  const raw = (url || '').trim();
+  if (!raw) return false;
+  const lower = raw.toLowerCase();
+  if (['null', 'none', 'nan', 'undefined', 'n/a', '-', '0'].includes(lower)) return false;
+  if (/^(?:https?:\/\/)?(?:www\.)?188\.com\.vn\/?$/i.test(raw)) return false;
+  if (lower.startsWith('data:image')) return raw.length > 16;
+  if (raw.startsWith('//')) return raw.length > 4 && raw.includes('.');
+  if (raw.startsWith('/')) return raw.length > 2;
+  return isValidUrl(raw.startsWith('//') ? `https:${raw}` : raw);
+}
+
 export const getProductImages = (product: any, opts?: { hideProductPng?: boolean }) => {
   const hideProductPng = Boolean(opts?.hideProductPng);
   const rawGallery = hideProductPng

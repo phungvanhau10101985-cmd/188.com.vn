@@ -611,6 +611,20 @@ async def startup_event():
     except Exception as _e_pool:
         print(f"   ⚠️  DB pool relief startup: {_e_pool}")
 
+    try:
+        from app.db.session import SessionLocal
+        from app.services.product_image_visibility import deactivate_products_without_storefront_image
+
+        _img_db = SessionLocal()
+        try:
+            _removed = deactivate_products_without_storefront_image(_img_db, limit=500)
+            if _removed:
+                print(f"   🖼️  Gỡ { _removed } SP không có ảnh khỏi storefront (is_active=false).")
+        finally:
+            _img_db.close()
+    except Exception as _e_no_img:
+        print(f"   ⚠️  No-image product cleanup startup: {_e_no_img}")
+
     from app.core.config import settings as _startup_settings
     _db_url = (_startup_settings.DATABASE_URL or "").lower()
     if _db_url.startswith("postgresql"):
