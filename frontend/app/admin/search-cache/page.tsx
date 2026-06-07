@@ -231,21 +231,25 @@ export default function AdminSearchCachePage() {
                 Tổng: {cacheData?.total_rows ?? '—'}
               </span>
               <span className="px-2 py-1 rounded bg-green-50 text-green-800">
-                Đang dùng: {cacheData?.active_rows ?? '—'}
+                Vĩnh viễn: {cacheData?.active_rows ?? '—'}
               </span>
-              <span className="px-2 py-1 rounded bg-amber-50 text-amber-900">
-                TTL hết (legacy): {cacheData?.expired_rows ?? '—'}
-              </span>
+              {(cacheData?.expired_rows ?? 0) > 0 && (
+                <span className="px-2 py-1 rounded bg-amber-50 text-amber-900">
+                  TTL cũ hết hạn: {cacheData?.expired_rows}
+                </span>
+              )}
             </div>
             <div className="flex flex-wrap gap-2 ml-auto">
-              <button
-                type="button"
-                disabled={!!clearing}
-                onClick={() => handleClear('expired')}
-                className="text-sm px-3 py-1.5 rounded-lg border border-amber-300 text-amber-900 hover:bg-amber-50 disabled:opacity-50"
-              >
-                {clearing === 'expired' ? 'Đang xóa…' : 'Xóa cache hết hạn'}
-              </button>
+              {(cacheData?.expired_rows ?? 0) > 0 && (
+                <button
+                  type="button"
+                  disabled={!!clearing}
+                  onClick={() => handleClear('expired')}
+                  className="text-sm px-3 py-1.5 rounded-lg border border-amber-300 text-amber-900 hover:bg-amber-50 disabled:opacity-50"
+                >
+                  {clearing === 'expired' ? 'Đang xóa…' : 'Xóa cache TTL cũ'}
+                </button>
+              )}
               <button
                 type="button"
                 disabled={!!clearing}
@@ -280,7 +284,7 @@ export default function AdminSearchCachePage() {
                       <th className="py-2 pr-3 font-medium">Gợi ý</th>
                       <th className="py-2 pr-3 font-medium text-right">Kích thước</th>
                       <th className="py-2 pr-3 font-medium">Tạo</th>
-                      <th className="py-2 font-medium">Hiệu lực</th>
+                      <th className="py-2 font-medium">Lưu trữ</th>
                     </tr>
                   </thead>
                   <tbody>
