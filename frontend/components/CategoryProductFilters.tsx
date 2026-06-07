@@ -11,7 +11,8 @@ type Props = {
   /** Trang `/?q=` — hiện khung lọc ngay khi đang tìm (facets có thể tải sau). */
   enableEmptyListing?: boolean;
   /** Listing `/?style=…`, cùng loại — không có `q` nhưng vẫn cần khung lọc trước khi facets về. */
-  enableListingFacetShell?: boolean;
+  /** Trang chủ / tìm kiếm — mặc định sort ổn định (id_desc), không «Ngẫu nhiên». */
+  stableSortDefault?: boolean;
 };
 
 function formatVndHint(n: number): string {
@@ -24,6 +25,7 @@ function CategoryProductFiltersInner({
   compact,
   enableEmptyListing,
   enableListingFacetShell,
+  stableSortDefault,
 }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -33,7 +35,7 @@ function CategoryProductFiltersInner({
   const size = searchParams.get('size') || '';
   const color = searchParams.get('color') || '';
   const styleTag = searchParams.get('style_tag') || '';
-  const sort = searchParams.get('sort') || '';
+  const sort = searchParams.get('sort') || (stableSortDefault ? 'id_desc' : '');
 
   const [minLocal, setMinLocal] = useState(minPriceQ);
   const [maxLocal, setMaxLocal] = useState(maxPriceQ);
@@ -262,7 +264,9 @@ function CategoryProductFiltersInner({
             className={compact ? "h-8 w-full min-w-0 rounded-md border border-gray-300 bg-white px-1.5 text-[11px] sm:min-w-[150px] sm:px-2 sm:text-xs" : "h-10 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-xs sm:min-w-[160px] sm:px-3 sm:text-sm"}
             aria-label="Sắp xếp danh sách"
           >
-            <option value="">Ngẫu nhiên</option>
+            <option value={stableSortDefault ? 'id_desc' : ''}>
+              {stableSortDefault ? 'Mặc định' : 'Ngẫu nhiên'}
+            </option>
             <option value="newest">Mới nhất</option>
             <option value="oldest">Cũ nhất</option>
             <option value="views_desc">Xem nhiều</option>

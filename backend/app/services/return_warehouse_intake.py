@@ -905,6 +905,9 @@ def intake_return_to_warehouse(
     )
 
     normalize_product_data_image_urls_for_db(product_data)
+    from app.services.product_search_document import assign_search_document_to_mapping
+
+    assign_search_document_to_mapping(product_data)
 
     row = Product(**_product_orm_payload(product_data))
     db.add(row)

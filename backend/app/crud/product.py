@@ -1977,10 +1977,8 @@ def _search_products_by_words(
     return total, products
 
 
-def apply_product_search_word_filters(query, words: List[str]):
-    """
-    Áp lọc «tất cả từ khớp ilike» trên chuỗi tổng hợp (giống _search_products_by_words).
-    """
+def _apply_product_search_word_filters_concat(query, words: List[str]):
+    """Fallback SQLite / trước backfill — concat runtime như cũ."""
     from sqlalchemy.sql import func
     from sqlalchemy import cast, String
 
@@ -2006,6 +2004,20 @@ def apply_product_search_word_filters(query, words: List[str]):
             continue
         query = query.filter(search_concat_norm.ilike(f"%{w_norm}%"))
     return query
+
+
+def apply_product_search_word_filters(query, words: List[str]):
+    """
+    Áp lọc «tất cả từ khớp ilike» — Postgres dùng cột search_document + index pg_trgm.
+    """
+    if settings.IS_POSTGRESQL:
+        for w in words:
+            w_norm = (w or "").strip().lower()
+            if not w_norm:
+                continue
+            query = query.filter(Product.search_document.ilike(f"%{w_norm}%"))
+        return query
+    return _apply_product_search_word_filters_concat(query, words)
 
 
 def _count_products_query(query) -> int:
@@ -4405,8 +4417,16 @@ def get_products(
                 }
             mapped_query = mapping.keyword_target.strip()
 
-        # Ưu tiên tìm theo mapping nếu có
-        if mapped_query:
+        # Luôn tìm theo từ khóa gốc trước — F5 / reload phải ra cùng thứ tự (id_desc).
+        # SearchMapping chỉ fallback khi gốc không có kết quả (tránh nhảy giữa mapped vs raw).
+        normalized = normalize_search_query(raw_query)
+        words = [w.strip() for w in normalized.split() if w.strip()]
+        if words:
+            total, products = _search_products_by_words(db, query, words, limit, skip, sort=sort_norm)
+            if total > 0:
+                applied_query = normalized
+
+        if total == 0 and mapped_query:
             mapped_normalized = normalize_search_query(mapped_query)
             mapped_words = [w.strip() for w in mapped_normalized.split() if w.strip()]
             if mapped_words:
@@ -4415,16 +4435,8 @@ def get_products(
                 )
                 if total > 0:
                     applied_query = mapped_normalized
-                    _touch_search_mapping(db, mapping)
-
-        # Nếu mapping không có kết quả thì tìm theo từ khóa gốc
-        if total == 0:
-            normalized = normalize_search_query(raw_query)
-            words = [w.strip() for w in normalized.split() if w.strip()]
-            if words:
-                total, products = _search_products_by_words(db, query, words, limit, skip, sort=sort_norm)
-                if total > 0:
-                    applied_query = normalized
+                    if mapping:
+                        _touch_search_mapping(db, mapping)
         if total > 0:
             _log_search(db, raw_query, total, ai_processed=False)
         if total == 0 and not sale_keyword_search:
@@ -5425,6 +5437,9 @@ def create_product(db: Session, product: ProductCreate):
     for k in _RESPONSE_ONLY_PRODUCT_KEYS:
         data.pop(k, None)
 
+    from app.services.product_search_document import assign_search_document_to_mapping
+
+    assign_search_document_to_mapping(data)
     db_product = Product(**data)
     db.add(db_product)
     db.commit()
@@ -5493,6 +5508,10 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
         for field, value in update_data.items():
             if hasattr(db_product, field):
                 setattr(db_product, field, value)
+
+        from app.services.product_search_document import assign_search_document_to_product
+
+        assign_search_document_to_product(db_product)
         
         db.commit()
         db.refresh(db_product)
@@ -6161,6 +6180,9 @@ def bulk_import_products(
 
         product_data["slug"] = generate_consistent_slug(product_data.get("name", ""), product_id)
         normalize_product_data_image_urls_for_db(product_data)
+        from app.services.product_search_document import assign_search_document_to_mapping
+
+        assign_search_document_to_mapping(product_data)
 
         existing_wh = db.query(Product).filter(Product.product_id == product_id).first()
         try:
@@ -6344,6 +6366,9 @@ def bulk_import_products(
                     product_data["code"],
                 )
                 normalize_product_data_image_urls_for_db(product_data)
+                from app.services.product_search_document import assign_search_document_to_mapping
+
+                assign_search_document_to_mapping(product_data)
                 if not existing:
                     late = find_product_by_listing_source_prefix(db, source_prefix)
                     if late is None:

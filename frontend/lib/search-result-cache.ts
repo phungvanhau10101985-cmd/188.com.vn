@@ -1,6 +1,6 @@
 import type { ProductListResponse } from '@/types/api';
 
-const PREFIX = '188-sr-cache:v3';
+const PREFIX = '188-sr-cache:v5';
 const META_KEY = `${PREFIX}:meta`;
 
 /** Thời gian sống cache — sau đó gọi API lại (đồng bộ kho / giá). */

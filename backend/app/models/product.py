@@ -82,6 +82,8 @@ class Product(Base):
 
     # ========== ADDITIONAL FIELDS ==========
     slug = Column(String(500), unique=True, index=True)
+    # Gom sẵn text tìm kiếm (lower) — index pg_trgm trên Postgres; tránh concat runtime mỗi query.
+    search_document = Column(Text, nullable=True)
     
     # ForeignKey đến Category (quan hệ database)
     category_id = Column(

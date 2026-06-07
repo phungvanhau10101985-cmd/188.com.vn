@@ -228,9 +228,6 @@ export default function HomePageClient({
     () => isSaleListingSearchTerm(qFromUrl.trim()),
     [qFromUrl],
   );
-  /** Tìm kiếm trang 1: hiện trước N SP, sau đó gọi tiếp để đủ một “trang” (PAGE_SIZE). */
-  const SEARCH_INITIAL_LIMIT = 12;
-  const [searchCatalogAppending, setSearchCatalogAppending] = useState(false);
   const [searchListingFacets, setSearchListingFacets] = useState<CategoryProductFacets | null>(null);
 
   const fetchProducts = useCallback(async (filters?: any) => {
@@ -308,6 +305,7 @@ export default function HomePageClient({
     let cancelled = false;
     (async () => {
       try {
+        const facetSort = (sortFromUrl || '').trim() || 'id_desc';
         const baseArgs = {
           category: categoryFromUrl,
           subcategory: subcategoryFromUrl,
@@ -324,7 +322,7 @@ export default function HomePageClient({
           size: sizeFromUrl,
           color: colorFromUrl,
           style_tag: styleTagFromUrl,
-          ...(sortFromUrl ? { sort: sortFromUrl } : {}),
+          sort: facetSort,
         };
         const f = fetchSearchFacets
           ? await apiClient.getSearchProductFacets({ q: qTrim, ...baseArgs })
@@ -362,7 +360,6 @@ export default function HomePageClient({
 
   useEffect(() => {
     if (!qFromUrl.trim()) {
-      setSearchCatalogAppending(false);
       setSearchSuggestions([]);
       setSuggestedCategories([]);
       setNanoaiTextProducts([]);
@@ -370,7 +367,12 @@ export default function HomePageClient({
       setNanoaiTextError(null);
       return;
     }
+    const fetchGen = ++searchFetchGenRef.current;
     let cancelled = false;
+    const isStaleSearchResponse = () =>
+      cancelled || fetchGen !== searchFetchGenRef.current;
+
+    const resolvedSearchSort = (sortFromUrl || '').trim() || 'id_desc';
 
     const searchApiParams = {
       q: qFromUrl,
@@ -390,7 +392,7 @@ export default function HomePageClient({
       size: sizeFromUrl,
       color: colorFromUrl,
       style_tag: styleTagFromUrl,
-      ...(sortFromUrl ? { sort: sortFromUrl } : {}),
+      sort: resolvedSearchSort,
     };
 
     const fetchSearchPage = async (skip: number, limit: number): Promise<ProductListResponse> => {
@@ -409,7 +411,7 @@ export default function HomePageClient({
         size: sizeFromUrl,
         color: colorFromUrl,
         style_tag: styleTagFromUrl,
-        sort: sortFromUrl,
+        sort: resolvedSearchSort,
         skip,
         limit,
       });
@@ -422,7 +424,7 @@ export default function HomePageClient({
           skip,
         }),
       );
-      if (!cancelled && !response.redirect_path) {
+      if (!isStaleSearchResponse() && !response.redirect_path) {
         writeSearchResultCache(fp, response);
       }
       return response;
@@ -431,54 +433,25 @@ export default function HomePageClient({
     (async () => {
       try {
         setError(null);
-        setSearchCatalogAppending(false);
         setLoading(true);
 
-        if (currentPage !== 1) {
-          const response = await fetchSearchPage((currentPage - 1) * PAGE_SIZE, PAGE_SIZE);
-          if (cancelled) return;
-          if (response.redirect_path) {
-            window.location.assign(response.redirect_path);
-            return;
-          }
-          const latestSuggestions = response.total === 0 ? (response.suggested_queries ?? []) : [];
-          setProducts(response.products ?? []);
-          setTotalProducts(response.total ?? (response.products?.length ?? 0));
-          setSuggestedCategories(response.suggested_categories ?? []);
-          setSearchSuggestions(latestSuggestions);
-          if (response.total > 0 && response.applied_query && response.applied_query.trim()) {
-            apiClient.addSearchHistory(response.applied_query).catch(() => {});
-          }
-          if (typeof window !== 'undefined') {
-            localStorage.setItem(
-              'latest_search_suggestions',
-              JSON.stringify({ term: qFromUrl.trim(), suggestions: latestSuggestions }),
-            );
-          }
-          setNanoaiTextProducts([]);
-          setNanoaiTextLoading(false);
-          setNanoaiTextError(null);
+        const response = await fetchSearchPage((currentPage - 1) * PAGE_SIZE, PAGE_SIZE);
+        if (isStaleSearchResponse()) return;
+        if (response.redirect_path) {
+          window.location.assign(response.redirect_path);
           return;
         }
 
-        const first = await fetchSearchPage(0, SEARCH_INITIAL_LIMIT);
-        if (cancelled) return;
-        if (first.redirect_path) {
-          window.location.assign(first.redirect_path);
-          return;
-        }
+        const catalogTotal = response.total ?? 0;
+        const latestSuggestions = catalogTotal === 0 ? (response.suggested_queries ?? []) : [];
 
-        const catalogTotal = first.total ?? 0;
-        const firstList = first.products ?? [];
-        const latestSuggestions = catalogTotal === 0 ? (first.suggested_queries ?? []) : [];
-
-        setProducts(firstList);
+        setProducts(response.products ?? []);
         setTotalProducts(catalogTotal);
-        setSuggestedCategories(first.suggested_categories ?? []);
+        setSuggestedCategories(response.suggested_categories ?? []);
         setSearchSuggestions(latestSuggestions);
 
-        if (catalogTotal > 0 && first.applied_query && first.applied_query.trim()) {
-          apiClient.addSearchHistory(first.applied_query).catch(() => {});
+        if (catalogTotal > 0 && response.applied_query && response.applied_query.trim()) {
+          apiClient.addSearchHistory(response.applied_query).catch(() => {});
         }
         if (typeof window !== 'undefined') {
           localStorage.setItem(
@@ -489,7 +462,7 @@ export default function HomePageClient({
 
         if (catalogTotal === 0) {
           if (saleSearchIntent && currentPage === 1) {
-            const dest = first.redirect_path?.trim() || '/kho-sale';
+            const dest = response.redirect_path?.trim() || '/kho-sale';
             router.replace(dest);
             return;
           }
@@ -499,19 +472,19 @@ export default function HomePageClient({
             setNanoaiTextLoading(true);
             try {
               const nano = await apiClient.nanoaiTextSearch(qFromUrl.trim(), NANOAI_TEXT_SEARCH_LIMIT);
-              if (cancelled) return;
+              if (isStaleSearchResponse()) return;
               const list = Array.isArray(nano.products) ? nano.products : [];
               setNanoaiTextProducts(list);
               if (nano.error && list.length === 0) {
                 setNanoaiTextError(nano.error);
               }
             } catch {
-              if (!cancelled) {
+              if (!isStaleSearchResponse()) {
                 setNanoaiTextProducts([]);
                 setNanoaiTextError(null);
               }
             } finally {
-              if (!cancelled) setNanoaiTextLoading(false);
+              if (!isStaleSearchResponse()) setNanoaiTextLoading(false);
             }
           } else {
             setNanoaiTextLoading(false);
@@ -522,32 +495,9 @@ export default function HomePageClient({
         setNanoaiTextProducts([]);
         setNanoaiTextLoading(false);
         setNanoaiTextError(null);
-
-        setLoading(false);
-
-        const wantOnFirstScreen = Math.min(PAGE_SIZE, catalogTotal);
-        if (
-          firstList.length === SEARCH_INITIAL_LIMIT &&
-          catalogTotal > firstList.length &&
-          wantOnFirstScreen > firstList.length
-        ) {
-          setSearchCatalogAppending(true);
-          try {
-            const more = await fetchSearchPage(
-              firstList.length,
-              wantOnFirstScreen - firstList.length,
-            );
-            if (cancelled) return;
-            if (!more.redirect_path && (more.products?.length ?? 0) > 0) {
-              setProducts((prev) => [...prev, ...(more.products ?? [])]);
-            }
-          } finally {
-            setSearchCatalogAppending(false);
-          }
-        }
       } catch (err) {
         console.error('Search error:', err);
-        if (!cancelled) {
+        if (!isStaleSearchResponse()) {
           setError('Lỗi tìm kiếm sản phẩm');
           setProducts([]);
           setTotalProducts(0);
@@ -558,10 +508,9 @@ export default function HomePageClient({
           setNanoaiTextError(null);
         }
       } finally {
-        if (!cancelled) {
+        if (!isStaleSearchResponse()) {
           setLoading(false);
         }
-        setSearchCatalogAppending(false);
       }
     })();
 
@@ -674,6 +623,7 @@ export default function HomePageClient({
     'pending' | 'snapshot' | 'fresh'
   >('pending');
   const snapshotMainFeedAppliedRef = useRef(false);
+  const searchFetchGenRef = useRef(0);
   const lastSearchTrackedRef = useRef<string>('');
   const lastFilterTrackedRef = useRef<string>('');
 
@@ -1396,6 +1346,7 @@ export default function HomePageClient({
                   }
                   enableEmptyListing={isSearching}
                   enableListingFacetShell={!isSearching && hasFilterParams}
+                  stableSortDefault
                   compact
                 />
               </div>
@@ -1426,15 +1377,6 @@ export default function HomePageClient({
                     />
                   ))}
                 </div>
-                {isSearching && currentPage === 1 && searchCatalogAppending && (
-                  <p className="mt-4 flex items-center justify-center gap-2 text-sm text-gray-600" aria-live="polite">
-                    <span
-                      className="inline-block w-4 h-4 border-2 border-[#ea580c] border-t-transparent rounded-full animate-spin"
-                      aria-hidden
-                    />
-                    Đang tải thêm sản phẩm…
-                  </p>
-                )}
                 </>
               ) : (
                 <div className="space-y-6">

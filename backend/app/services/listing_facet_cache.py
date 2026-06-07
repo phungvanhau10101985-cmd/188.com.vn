@@ -35,6 +35,7 @@ def snapshot_product_for_facet_refresh(product: Any) -> SimpleNamespace:
         sub_subcategory=getattr(product, "sub_subcategory", None),
         category_id=getattr(product, "category_id", None),
         name=getattr(product, "name", None),
+        slug=getattr(product, "slug", None),
         code=getattr(product, "code", None),
         material=getattr(product, "material", None),
         style=getattr(product, "style", None),
@@ -43,32 +44,14 @@ def snapshot_product_for_facet_refresh(product: Any) -> SimpleNamespace:
         features=getattr(product, "features", None),
         sizes=getattr(product, "sizes", None),
         product_info=getattr(product, "product_info", None),
+        search_document=getattr(product, "search_document", None),
     )
 
 
 def _product_search_blob(product: Any) -> str:
-    def _part(value: Any) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, (list, dict)):
-            return json.dumps(value, ensure_ascii=False)
-        return str(value)
+    from app.services.product_search_document import product_search_blob
 
-    parts = (
-        _part(getattr(product, "name", None)),
-        _part(getattr(product, "code", None)),
-        _part(getattr(product, "category", None)),
-        _part(getattr(product, "subcategory", None)),
-        _part(getattr(product, "sub_subcategory", None)),
-        _part(getattr(product, "material", None)),
-        _part(getattr(product, "style", None)),
-        _part(getattr(product, "color", None)),
-        _part(getattr(product, "occasion", None)),
-        _part(getattr(product, "features", None)),
-        _part(getattr(product, "sizes", None)),
-        _part(getattr(product, "product_info", None)),
-    )
-    return " ".join(parts).lower()
+    return product_search_blob(product)
 
 
 def product_matches_search_keyword(product: Any, keyword: str) -> bool:

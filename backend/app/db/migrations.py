@@ -707,6 +707,74 @@ class MigrationManager:
             logger.warning("migrate_product_category_active_index: %s", e)
             return True
 
+    def migrate_product_search_document_trgm(self) -> bool:
+        """Cột search_document + backfill + index pg_trgm (Postgres)."""
+        try:
+            from app.services.product_search_document import assign_search_document_to_product
+
+            inspector = inspect(engine)
+            if "products" not in inspector.get_table_names():
+                return True
+
+            cols = {c["name"] for c in inspector.get_columns("products")}
+            if "search_document" not in cols:
+                with engine.connect() as conn:
+                    if IS_POSTGRESQL:
+                        conn.execute(text("ALTER TABLE products ADD COLUMN search_document TEXT"))
+                    else:
+                        conn.execute(text("ALTER TABLE products ADD COLUMN search_document TEXT"))
+                    conn.commit()
+                logger.info("✅ products.search_document column added")
+
+            from app.db.session import SessionLocal
+
+            batch_size = 500
+            updated_total = 0
+            db = SessionLocal()
+            try:
+                while True:
+                    rows = (
+                        db.query(Product)
+                        .filter(
+                            (Product.search_document.is_(None))
+                            | (Product.search_document == "")
+                        )
+                        .limit(batch_size)
+                        .all()
+                    )
+                    if not rows:
+                        break
+                    for row in rows:
+                        assign_search_document_to_product(row)
+                    db.commit()
+                    updated_total += len(rows)
+                    if updated_total % 2000 == 0 or len(rows) < batch_size:
+                        logger.info(
+                            "… search_document backfill: %s rows",
+                            updated_total,
+                        )
+            finally:
+                db.close()
+
+            if updated_total:
+                logger.info("✅ search_document backfill: %s product(s)", updated_total)
+
+            if IS_POSTGRESQL:
+                with engine.connect() as conn:
+                    conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_products_search_document_trgm "
+                            "ON products USING gin (search_document gin_trgm_ops)"
+                        )
+                    )
+                    conn.commit()
+                logger.info("✅ ix_products_search_document_trgm (pg_trgm) ensured")
+            return True
+        except Exception as e:
+            logger.warning("migrate_product_search_document_trgm: %s", e)
+            return True
+
     def migrate_all_tables(self) -> Dict[str, bool]:
         """Chạy tất cả migrations cần thiết"""
         results = {}
@@ -942,6 +1010,7 @@ class MigrationManager:
 
         results['same_shop_recommendation_indexes'] = self.migrate_same_shop_recommendation_indexes()
         results['product_category_active_index'] = self.migrate_product_category_active_index()
+        results['product_search_document_trgm'] = self.migrate_product_search_document_trgm()
 
         from app.models.home_recommendation_snapshot import UserHomeRecommendationSnapshot
 
