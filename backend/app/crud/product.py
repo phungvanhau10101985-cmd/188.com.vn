@@ -1570,13 +1570,17 @@ def get_product_by_product_id(db: Session, product_id: str):
 
 
 def get_product_by_code(db: Session, code: str) -> Optional[Product]:
+    from app.db.retry import TransientDbError, is_transient_db_error
+
     c = (code or "").strip()
     if not c:
         return None
     try:
         return db.query(Product).filter(sql_func.lower(Product.code) == c.lower()).first()
     except Exception as e:
-        logger.error(f"Database error get_product_by_code: {str(e)}")
+        logger.error("Database error get_product_by_code: %s", e)
+        if is_transient_db_error(e):
+            raise TransientDbError(str(e)) from e
         return None
 
 
@@ -2082,45 +2086,25 @@ def _product_slug_lookup_variants(slug: str) -> List[str]:
     return out
 
 
-def _is_transient_db_lookup_error(exc: BaseException) -> bool:
-    """Pool timeout / kết nối đứt lúc VPS vừa restart — retry một lần."""
-    try:
-        from sqlalchemy.exc import DBAPIError, OperationalError, TimeoutError
-
-        if isinstance(exc, (OperationalError, TimeoutError)):
-            return True
-        if isinstance(exc, DBAPIError) and getattr(exc, "connection_invalidated", False):
-            return True
-    except ImportError:
-        pass
-    msg = str(exc).lower()
-    return any(
-        token in msg
-        for token in (
-            "queuepool",
-            "timeout",
-            "connection",
-            "closed",
-            "server closed",
-            "could not connect",
-        )
-    )
-
-
 def get_product_by_slug(db: Session, slug: str) -> Optional[Product]:
     """Tra SP theo slug; dòng kho thanh lý trả SP gốc (PDP nhóm) hoặc chính nó nếu không có gốc."""
+    from app.db.retry import TransientDbError, is_transient_db_error
+
     s = (slug or "").strip()
     if not s:
         return None
     import time as _time
 
-    for attempt in range(2):
+    last_exc: Optional[Exception] = None
+    for attempt in range(3):
         try:
             return _get_product_by_slug_impl(db, s)
         except Exception as e:
-            if attempt == 0 and _is_transient_db_lookup_error(e):
+            last_exc = e
+            if is_transient_db_error(e) and attempt + 1 < 3:
                 logger.warning(
-                    "get_product_by_slug transient DB error (retry once): %s | slug=%s",
+                    "get_product_by_slug transient DB error (retry %s/3): %s | slug=%s",
+                    attempt + 1,
                     e,
                     s[:120],
                 )
@@ -2128,10 +2112,14 @@ def get_product_by_slug(db: Session, slug: str) -> Optional[Product]:
                     db.rollback()
                 except Exception:
                     pass
-                _time.sleep(0.35)
+                _time.sleep(0.35 * (attempt + 1))
                 continue
             logger.error("Database error get_product_by_slug: %s | slug=%s", e, s[:120])
+            if is_transient_db_error(e):
+                raise TransientDbError(str(e)) from e
             return None
+    if last_exc is not None and is_transient_db_error(last_exc):
+        raise TransientDbError(str(last_exc)) from last_exc
     return None
 
 
@@ -5002,14 +4990,23 @@ _CATEGORY_MENU_TREE_KEY_ALL = "category_tree_v1:from_products:active=false"
 
 def _build_menu_tree_session(is_active: bool) -> List[Dict[str, Any]]:
     from app.db.session import SessionLocal
+    from app.db.retry import TransientDbError, is_transient_db_error
+
     db = SessionLocal()
     try:
         try:
             return get_category_tree_from_products(db, is_active=is_active, hide_empty_branches=True)
-        except Exception:
+        except Exception as prune_exc:
+            if is_transient_db_error(prune_exc):
+                raise TransientDbError(str(prune_exc)) from prune_exc
             # Prune/đếm SP từng nhánh có thể lỗi với dữ liệu lạ; trả cây chưa prune vẫn hơn 500.
             return get_category_tree_from_products(db, is_active=is_active, hide_empty_branches=False)
-    except Exception:
+    except TransientDbError:
+        raise
+    except Exception as e:
+        if is_transient_db_error(e):
+            raise TransientDbError(str(e)) from e
+        logger.exception("menu tree build failed (is_active=%s)", is_active)
         return []
     finally:
         db.close()

@@ -367,6 +367,37 @@ async def health_check():
         "newsletter_ok": len(newsletter_paths) > 0,
     }
 
+
+@app.get("/health/db")
+async def health_db_check():
+    """Ping Postgres — phát hiện API sống nhưng DB pool kẹt / chậm."""
+    from sqlalchemy import text
+    from app.db.session import engine
+
+    started = datetime.now()
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        elapsed_ms = int((datetime.now() - started).total_seconds() * 1000)
+        return {
+            "status": "ok",
+            "db": "connected",
+            "latency_ms": elapsed_ms,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as exc:
+        elapsed_ms = int((datetime.now() - started).total_seconds() * 1000)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "db": "unavailable",
+                "latency_ms": elapsed_ms,
+                "detail": str(exc)[:500],
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
 @app.get("/api")
 async def api_root():
     return {

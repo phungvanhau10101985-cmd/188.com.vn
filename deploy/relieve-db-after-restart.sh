@@ -77,6 +77,14 @@ if command -v curl >/dev/null 2>&1; then
     bash "${PROJECT_ROOT}/deploy/free-api-now.sh" || true
     exit 1
   fi
+
+  db_code=$(health_curl_http_code "http://127.0.0.1:${API_PORT}/health/db" 8)
+  echo "    GET /health/db → ${db_code}"
+
+  echo "    Warm menu cache (tránh stampede COUNT sau restart)…"
+  menu_code=$(health_curl_http_code \
+    "http://127.0.0.1:${API_PORT}/api/v1/categories/from-products?is_active=true" 120)
+  echo "    GET /categories/from-products → ${menu_code}"
 fi
 
 echo "✅ relieve-db OK"

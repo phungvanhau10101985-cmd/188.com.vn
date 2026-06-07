@@ -91,10 +91,17 @@ class Settings:
         self.DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "20"))
         # Cache menu / catalog — giảm bão COUNT khi SSR; dữ liệu giống, chỉ refresh chậm hơn vài phút.
         self.CATEGORY_MENU_TREE_TTL_SECONDS: float = float(
-            os.getenv("CATEGORY_MENU_TREE_TTL_SECONDS", "300")
+            os.getenv("CATEGORY_MENU_TREE_TTL_SECONDS", "600")
         )
         self.CATEGORY_CATALOG_TILES_TTL_SECONDS: float = float(
-            os.getenv("CATEGORY_CATALOG_TILES_TTL_SECONDS", "300")
+            os.getenv("CATEGORY_CATALOG_TILES_TTL_SECONDS", "600")
+        )
+        _env = os.getenv("ENVIRONMENT", "development").lower()
+        _probe_env = os.getenv("SETTINGS_DB_PROBE_ON_LOAD", "").strip().lower()
+        self.SETTINGS_DB_PROBE_ON_LOAD: bool = (
+            _probe_env in ("1", "true", "yes")
+            if _probe_env
+            else _env != "production"
         )
         # 0 = cache JSON kết quả tìm vĩnh viễn; invalidate khi SP liên quan thêm/xóa.
         self.PRODUCT_SEARCH_CACHE_TTL_SECONDS: int = int(
@@ -916,11 +923,16 @@ class Settings:
                 with engine.connect() as conn:
                     result = conn.execute(text("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'"))
                     tables = result.scalar()
-                    result = conn.execute(text("SELECT COUNT(*) FROM products"))
-                    product_count = result.scalar()
+                    product_count = None
+                    if self.SETTINGS_DB_PROBE_ON_LOAD:
+                        result = conn.execute(text("SELECT COUNT(*) FROM products"))
+                        product_count = result.scalar()
                 print(f"   Mode: PostgreSQL (production)")
                 print(f"   Tables: {tables} bảng")
-                print(f"   Products: {product_count} sản phẩm")
+                if product_count is not None:
+                    print(f"   Products: {product_count} sản phẩm")
+                else:
+                    print("   Products: (bỏ qua COUNT — SETTINGS_DB_PROBE_ON_LOAD=false)")
             elif self.ACTUAL_DATABASE_PATH and self.ACTUAL_DATABASE_PATH.exists():
                 import sqlite3
                 size = self.ACTUAL_DATABASE_PATH.stat().st_size

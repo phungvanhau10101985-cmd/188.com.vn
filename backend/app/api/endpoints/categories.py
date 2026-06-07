@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Any, Dict, Optional
 import logging
 from app.db.session import SessionLocal, get_db
+from app.db.retry import TransientDbError
 from app.schemas.category import Category, CategoryCreate, CategoryUpdate
 from app.crud import category as crud_category
 from app.crud import product as crud_product
@@ -31,6 +32,12 @@ def read_category_tree_from_products(is_active: bool = True):
     """
     try:
         return crud_product.get_cached_menu_category_tree(is_active)
+    except TransientDbError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Cơ sở dữ liệu tạm thời không phản hồi — vui lòng thử lại sau vài giây",
+            headers={"Retry-After": "5"},
+        ) from exc
     except Exception:
         _log.exception("GET /categories/from-products failed (is_active=%s)", is_active)
         # Menu trống vẫn tốt hơn 500/plain text cho SSR + Navigation
@@ -201,9 +208,16 @@ def read_category_by_path(
     Resolve path slugs thành thông tin danh mục cho SEO.
     Trả về: { level, name, full_name, breadcrumb_names, product_count }
     """
-    info = crud_product.get_category_by_path(
-        db, level1_slug=level1, level2_slug=level2, level3_slug=level3, is_active=is_active
-    )
+    try:
+        info = crud_product.get_category_by_path(
+            db, level1_slug=level1, level2_slug=level2, level3_slug=level3, is_active=is_active
+        )
+    except TransientDbError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Cơ sở dữ liệu tạm thời không phản hồi — vui lòng thử lại sau vài giây",
+            headers={"Retry-After": "5"},
+        ) from exc
     if info is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy danh mục")
     return info

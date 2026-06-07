@@ -27,13 +27,32 @@ _TRANSIENT_DB_MARKERS = (
     "lost connection",
     "connection refused",
     "connection is closed",
+    "queuepool",
+    "pool timeout",
+    "timeout expired",
+    "timed out",
 )
+
+
+class TransientDbError(Exception):
+    """Lỗi hạ tầng DB tạm thời — client nên retry (503), không phải 404."""
 
 
 def is_transient_db_error(exc: BaseException) -> bool:
     """True when failure is likely infra/connection related, not product data."""
+    if isinstance(exc, TransientDbError):
+        return True
     if isinstance(exc, DisconnectionError):
         return True
+    try:
+        from sqlalchemy.exc import DBAPIError, TimeoutError
+
+        if isinstance(exc, TimeoutError):
+            return True
+        if isinstance(exc, DBAPIError) and getattr(exc, "connection_invalidated", False):
+            return True
+    except ImportError:
+        pass
     if isinstance(exc, OperationalError):
         msg = str(exc).lower()
         return any(marker in msg for marker in _TRANSIENT_DB_MARKERS)

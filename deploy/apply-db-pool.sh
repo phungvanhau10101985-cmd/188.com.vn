@@ -36,8 +36,9 @@ upsert DATABASE_POOL_SIZE                  8    "$ENV_FILE"
 upsert DATABASE_MAX_OVERFLOW               12   "$ENV_FILE"
 upsert DATABASE_POOL_TIMEOUT               20   "$ENV_FILE"
 upsert DATABASE_POOL_RECYCLE               1800 "$ENV_FILE"
-upsert CATEGORY_MENU_TREE_TTL_SECONDS      300  "$ENV_FILE"
-upsert CATEGORY_CATALOG_TILES_TTL_SECONDS  300  "$ENV_FILE"
+upsert CATEGORY_MENU_TREE_TTL_SECONDS      600  "$ENV_FILE"
+upsert CATEGORY_CATALOG_TILES_TTL_SECONDS  600  "$ENV_FILE"
+upsert SETTINGS_DB_PROBE_ON_LOAD           false "$ENV_FILE"
 
 bash "${ROOT}/deploy/ensure-api-safe-env.sh" 2>/dev/null || true
 

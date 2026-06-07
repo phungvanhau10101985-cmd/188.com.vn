@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from typing import Annotated, List, Literal, Optional
 
 from app.db.session import get_db
+from app.db.retry import TransientDbError
 from app import crud
 from app.crud import product_search_cache as product_search_cache_crud
 from app.models.search_mapping import SearchMapping, SearchMappingType
@@ -48,6 +49,19 @@ from app.services.admin_source_stock_batch import (
 )
 
 router = APIRouter()
+
+_DB_UNAVAILABLE_DETAIL = "Cơ sở dữ liệu tạm thời không phản hồi — vui lòng thử lại sau vài giây"
+
+
+def _lookup_product_by_slug(db: Session, slug: str):
+    try:
+        return crud.product.get_product_by_slug(db, slug=slug)
+    except TransientDbError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=_DB_UNAVAILABLE_DETAIL,
+            headers={"Retry-After": "3"},
+        ) from exc
 
 
 class AdminSourceStockBatchBody(BaseModel):
@@ -1029,7 +1043,7 @@ def read_product_group_listing_path(
     """API nhẹ: chỉ trả đường dẫn listing nhóm (cache HTTP 10 phút)."""
     response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=120"
     source = (slug or "").strip()
-    current = crud.product.get_product_by_slug(db, slug=source)
+    current = _lookup_product_by_slug(db, slug=source)
     pid = getattr(current, "product_id", None) if current else None
     path = crud.product.resolve_product_group_listing_path(
         db,
@@ -1062,7 +1076,7 @@ def read_product_oos_group_redirect(
     """
     response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=120"
     source = (slug or "").strip()
-    current = crud.product.get_product_by_slug(db, slug=source)
+    current = _lookup_product_by_slug(db, slug=source)
     pid = getattr(current, "product_id", None) if current else None
     path = crud.product.resolve_product_group_listing_path(
         db,
@@ -1103,7 +1117,7 @@ def read_product_by_slug(
     Get product by slug (path parameter version)
     - URL: /api/v1/products/by-slug/{slug}
     """
-    db_product = crud.product.get_product_by_slug(db, slug=slug)
+    db_product = _lookup_product_by_slug(db, slug=slug)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return _product_to_response(db, db_product, user=current_user)
@@ -1125,7 +1139,7 @@ def read_product_by_slug_query(
     - URL: /api/v1/products/by-slug?slug={slug}
     - Frontend hiện đang gọi theo cách này
     """
-    db_product = crud.product.get_product_by_slug(db, slug=slug)
+    db_product = _lookup_product_by_slug(db, slug=slug)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return _product_to_response(
