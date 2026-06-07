@@ -458,6 +458,7 @@ def _read_products_list_impl(
     filter_size: Optional[str] = None,
     filter_color: Optional[str] = None,
     filter_style_tag: Optional[str] = None,
+    search_refresh: Optional[str] = None,
     skip_total: bool = False,
     user: Optional[User] = None,
     include_warehouse_clearance: bool = False,
@@ -561,6 +562,7 @@ def _read_products_list_impl(
         filter_size=filter_size,
         filter_color=filter_color,
         filter_style_tag=filter_style_tag,
+        search_refresh=search_refresh,
         skip_total=skip_total,
         include_warehouse_products=admin_list,
         warehouse_clearance_only=warehouse_clearance_only,
@@ -659,6 +661,10 @@ def read_products(
         description="Lọc màu (khớp tên SP, cột color, hoặc JSON colors — nên dùng giá trị từ category facets)",
     ),
     style_tag: Optional[str] = Query(None, description="Lọc kiểu phổ thông tự rút từ tên/thông tin sản phẩm"),
+    search_refresh: Optional[str] = Query(
+        None,
+        description="Token làm mới random sort cho mỗi lượt search (giữ ổn định trong cùng lần phân trang).",
+    ),
     skip_total: bool = Query(
         False,
         description="Bỏ COUNT(*) — dùng cho khối SP liên quan PDP (chỉ cần danh sách)",
@@ -706,6 +712,7 @@ def read_products(
             filter_size=size,
             filter_color=color,
             filter_style_tag=style_tag,
+            search_refresh=search_refresh,
             skip_total=skip_total,
             user=current_user,
             include_warehouse_clearance=include_warehouse_clearance,
@@ -755,6 +762,10 @@ def read_products_full_list(
         description="Lọc màu (khớp tên SP, cột color, hoặc JSON colors — nên dùng giá trị từ category facets)",
     ),
     style_tag: Optional[str] = Query(None, description="Lọc kiểu phổ thông tự rút từ tên/thông tin sản phẩm"),
+    search_refresh: Optional[str] = Query(
+        None,
+        description="Token làm mới random sort cho mỗi lượt search (giữ ổn định trong cùng lần phân trang).",
+    ),
 ):
     """
     Danh sách sản phẩm **đầy đủ trường** (khớp schema `Product`: mọi cột bảng `products`, gồm `category_id`,
@@ -788,6 +799,7 @@ def read_products_full_list(
             filter_size=size,
             filter_color=color,
             filter_style_tag=style_tag,
+            search_refresh=search_refresh,
             user=current_user,
         )
     except Exception as e:

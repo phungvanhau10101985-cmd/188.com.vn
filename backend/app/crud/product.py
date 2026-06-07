@@ -331,7 +331,12 @@ def _product_view_totals_subquery():
     )
 
 
-def _order_exprs_for_product_list(sort: str, view_totals_subq):
+def _order_exprs_for_product_list(
+    sort: str,
+    view_totals_subq,
+    *,
+    random_seed: Optional[str] = None,
+):
     """Cặp/order_by expressions; view_totals_subq chỉ dùng khi sort == views_desc."""
     if sort == "views_desc" and view_totals_subq is not None:
         cnt = sql_func.coalesce(view_totals_subq.c.view_total, 0)
@@ -349,6 +354,10 @@ def _order_exprs_for_product_list(sort: str, view_totals_subq):
     if sort == "id_asc":
         return [Product.id.asc()]
     if sort == "random":
+        seed = str(random_seed or "").strip()
+        if seed:
+            # Seed theo request để mỗi lần tìm có lưới khác nhau nhưng phân trang vẫn ổn định.
+            return [sql_func.md5(sql_func.concat(cast(Product.id, String), ":", seed)).asc(), Product.id.asc()]
         return [sql_func.random()]
     # id_desc: ID hệ thống giảm dần — nhập/import mới lên đầu
     return [Product.id.desc()]
@@ -1890,6 +1899,7 @@ def _search_products_sale_keyword(
     skip: int,
     *,
     sort: str = "id_desc",
+    random_seed: Optional[str] = None,
 ):
     """
     Từ khóa «sale» / kho thanh lý: tên hoặc slug chứa sale, hoặc SP gốc còn biến thể kho thanh lý.
@@ -1950,7 +1960,7 @@ def _search_products_sale_keyword(
         vt_sub = _product_view_totals_subquery()
         q2 = q2.outerjoin(vt_sub, Product.id == vt_sub.c.product_id)
     total = _count_products_query(q2)
-    order_exprs = _order_exprs_for_product_list(sort, vt_sub)
+    order_exprs = _order_exprs_for_product_list(sort, vt_sub, random_seed=random_seed)
     products = q2.order_by(*order_exprs).offset(skip).limit(limit).all()
     return total, products
 
@@ -1963,6 +1973,7 @@ def _search_products_by_words(
     skip: int,
     *,
     sort: str = "id_desc",
+    random_seed: Optional[str] = None,
 ):
     """
     Tìm sản phẩm khi chuỗi tổng hợp chứa TẤT CẢ các từ (ilike).
@@ -1976,7 +1987,7 @@ def _search_products_by_words(
         vt_sub = _product_view_totals_subquery()
         query = query.outerjoin(vt_sub, Product.id == vt_sub.c.product_id)
     total = _count_products_query(query)
-    order_exprs = _order_exprs_for_product_list(sort, vt_sub)
+    order_exprs = _order_exprs_for_product_list(sort, vt_sub, random_seed=random_seed)
     products = query.order_by(*order_exprs).offset(skip).limit(limit).all()
     return total, products
 
@@ -4251,6 +4262,7 @@ def get_products(
     include_warehouse_products: bool = False,
     warehouse_clearance_only: bool = False,
     admin_list_query: bool = False,
+    search_refresh: Optional[str] = None,
 ):
     query = db.query(Product)
     if admin_list_query:
@@ -4379,7 +4391,7 @@ def get_products(
 
         if sale_keyword_search:
             total, products = _search_products_sale_keyword(
-                db, query, limit, skip, sort=sort_norm,
+                db, query, limit, skip, sort=sort_norm, random_seed=search_refresh,
             )
             if total > 0:
                 applied_query = normalize_search_query(raw_query)
@@ -4426,7 +4438,9 @@ def get_products(
         normalized = normalize_search_query(raw_query)
         words = [w.strip() for w in normalized.split() if w.strip()]
         if words:
-            total, products = _search_products_by_words(db, query, words, limit, skip, sort=sort_norm)
+            total, products = _search_products_by_words(
+                db, query, words, limit, skip, sort=sort_norm, random_seed=search_refresh
+            )
             if total > 0:
                 applied_query = normalized
 
@@ -4435,7 +4449,7 @@ def get_products(
             mapped_words = [w.strip() for w in mapped_normalized.split() if w.strip()]
             if mapped_words:
                 total, products = _search_products_by_words(
-                    db, query, mapped_words, limit, skip, sort=sort_norm,
+                    db, query, mapped_words, limit, skip, sort=sort_norm, random_seed=search_refresh,
                 )
                 if total > 0:
                     applied_query = mapped_normalized
@@ -4472,7 +4486,7 @@ def get_products(
                     words2 = [w.strip() for w in norm2.split() if w.strip()]
                     if words2:
                         total, products = _search_products_by_words(
-                            db, query, words2, limit, skip, sort=sort_norm,
+                            db, query, words2, limit, skip, sort=sort_norm, random_seed=search_refresh,
                         )
                         if total > 0:
                             if total >= 20:
@@ -4504,13 +4518,19 @@ def get_products(
         else:
             total = _count_products_query(query)
         if use_random_order:
-            products = query.order_by(sql_func.random()).offset(skip).limit(limit).all()
+            products = query.order_by(
+                *_order_exprs_for_product_list("random", None, random_seed=search_refresh)
+            ).offset(skip).limit(limit).all()
         elif sort_norm == "views_desc":
             vt_sub = _product_view_totals_subquery()
             q2 = query.outerjoin(vt_sub, Product.id == vt_sub.c.product_id)
-            products = q2.order_by(*_order_exprs_for_product_list(sort_norm, vt_sub)).offset(skip).limit(limit).all()
+            products = q2.order_by(
+                *_order_exprs_for_product_list(sort_norm, vt_sub, random_seed=search_refresh)
+            ).offset(skip).limit(limit).all()
         else:
-            products = query.order_by(*_order_exprs_for_product_list(sort_norm, None)).offset(skip).limit(limit).all()
+            products = query.order_by(
+                *_order_exprs_for_product_list(sort_norm, None, random_seed=search_refresh)
+            ).offset(skip).limit(limit).all()
     
     page_num = skip // limit + 1 if limit > 0 else 1
     if total < 0:
