@@ -1,8 +1,8 @@
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.core.security import get_current_user, require_module_permission
+from app.core.security import get_current_user, get_current_user_optional, require_module_permission
 from app.models.user import User
 from app.models.notification import Notification
 from app.models.admin import AdminUser
@@ -30,8 +30,10 @@ def get_my_notifications(
 @router.get("/unread-count", response_model=int)
 def get_unread_count(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
+    if not current_user:
+        return 0
     return crud_notification.get_unread_count(db, user_id=current_user.id)
 
 @router.put("/{notification_id}/read", response_model=NotificationResponse)

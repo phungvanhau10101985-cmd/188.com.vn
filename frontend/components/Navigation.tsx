@@ -8,6 +8,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
+import SearchHistoryPanel from '@/components/search/SearchHistoryPanel';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { useCart } from '@/features/cart/hooks/useCart';
@@ -77,6 +78,7 @@ export default function Navigation({
   const [isScrolled, setIsScrolled] = useState(false);
   const [openLevel1, setOpenLevel1] = useState<string | null>(null);
   const [stickySearchTerm, setStickySearchTerm] = useState('');
+  const [stickySearchHistoryOpen, setStickySearchHistoryOpen] = useState(false);
   const [stickyMenuOpen, setStickyMenuOpen] = useState(false);
   const [catalogMenuOpen, setCatalogMenuOpen] = useState(false);
   const clientMounted = useClientMounted();
@@ -225,12 +227,19 @@ export default function Navigation({
 
   const handleStickySearch = (e: React.FormEvent) => {
     e.preventDefault();
+    setStickySearchHistoryOpen(false);
     const raw = stickySearchTerm.trim();
     if (!raw) {
       router.push('/');
       return;
     }
     navigateProductTextSearch(router, raw, tree);
+  };
+
+  const handleStickyHistorySelect = (query: string) => {
+    setStickySearchTerm(query);
+    setStickySearchHistoryOpen(false);
+    navigateProductTextSearch(router, query, tree);
   };
 
   const basePill =
@@ -461,14 +470,23 @@ export default function Navigation({
               )}
               </div>
             </div>
-            <form onSubmit={handleStickySearch} className="relative w-full max-w-md justify-self-center">
+            <form onSubmit={handleStickySearch} className="relative z-[105] w-full max-w-md justify-self-center">
               <input
                 type="text"
                 value={stickySearchTerm}
                 onChange={(e) => setStickySearchTerm(e.target.value)}
+                onFocus={() => setStickySearchHistoryOpen(true)}
                 placeholder="Tìm kiếm..."
                 autoComplete="off"
+                aria-expanded={stickySearchHistoryOpen}
+                aria-haspopup="listbox"
                 className="w-full pl-4 pr-24 py-2 text-xs rounded-lg border-0 bg-white focus:outline-none focus:ring-2 focus:ring-orange-200"
+              />
+              <SearchHistoryPanel
+                open={stickySearchHistoryOpen}
+                onClose={() => setStickySearchHistoryOpen(false)}
+                onSelect={handleStickyHistorySelect}
+                zClass="z-[115]"
               />
               <LazyDesktopImageSearchPopover panelZClass="z-[110]" />
               <button

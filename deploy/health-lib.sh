@@ -45,6 +45,7 @@ health_curl_products_probe() {
 
 health_terminate_idle_db_transactions() {
   local db_name="${POSTGRES_DB_NAME:-188comvn}"
+  local min_idle_sec="${DB_RELIEF_MIN_IDLE_SECONDS:-22}"
   if ! command -v sudo >/dev/null 2>&1 || ! id postgres >/dev/null 2>&1; then
     echo "    (bỏ qua terminate idle — không có sudo/postgres)" >&2
     return 0
@@ -54,10 +55,13 @@ health_terminate_idle_db_transactions() {
     "SELECT count(*) FROM (
        SELECT pg_terminate_backend(pid)
        FROM pg_stat_activity
-       WHERE datname='${db_name}' AND state='idle in transaction' AND pid <> pg_backend_pid()
+       WHERE datname='${db_name}'
+         AND state='idle in transaction'
+         AND pid <> pg_backend_pid()
+         AND now() - state_change > make_interval(secs => ${min_idle_sec})
      ) t;" \
     2>/dev/null || echo "0")
-  echo "    Đã terminate idle-in-transaction: ${terminated:-0}" >&2
+  echo "    Đã terminate idle-in-transaction (>=${min_idle_sec}s): ${terminated:-0}" >&2
 }
 
 health_curl_homepage_smoke() {

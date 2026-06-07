@@ -19,12 +19,20 @@ Copy-Item $EnvFile $bak
 Write-Host "Backup: $bak"
 
 $settings = [ordered]@{
-    DATABASE_POOL_SIZE                  = "8"
-    DATABASE_MAX_OVERFLOW               = "12"
-    DATABASE_POOL_TIMEOUT               = "20"
-    DATABASE_POOL_RECYCLE               = "1800"
-    CATEGORY_MENU_TREE_TTL_SECONDS      = "300"
-    CATEGORY_CATALOG_TILES_TTL_SECONDS  = "300"
+    DATABASE_POOL_SIZE                               = "10"
+    DATABASE_MAX_OVERFLOW                            = "15"
+    DATABASE_POOL_TIMEOUT                            = "20"
+    DATABASE_POOL_RECYCLE                            = "1800"
+    DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS   = "35"
+    DATABASE_STATEMENT_TIMEOUT_SECONDS               = "0"
+    DATABASE_POOL_RELIEF_ENABLED                     = "true"
+    DATABASE_POOL_RELIEF_INTERVAL_SECONDS            = "15"
+    DATABASE_POOL_RELIEF_MIN_IDLE_SECONDS            = "22"
+    DATABASE_POOL_RELIEF_AGGRESSIVE_MIN_IDLE_SECONDS = "18"
+    DATABASE_POOL_RELIEF_TRIGGER_IDLE_COUNT          = "14"
+    CATEGORY_MENU_TREE_TTL_SECONDS                   = "600"
+    CATEGORY_CATALOG_TILES_TTL_SECONDS               = "600"
+    SETTINGS_DB_PROBE_ON_LOAD                        = "false"
 }
 
 $lines = [System.Collections.Generic.List[string]]@(Get-Content $EnvFile -Encoding UTF8)
@@ -46,7 +54,7 @@ foreach ($key in $settings.Keys) {
     } else {
         if (-not $addedAny) {
             if ($lines.Count -gt 0 -and $lines[-1].Trim() -ne "") { $lines.Add("") }
-            $lines.Add("# DB tuning (shared VPS / lower Postgres load)")
+            $lines.Add("# DB tuning (pool 25 + idle-in-xact relief)")
             $addedAny = $true
         }
         $lines.Add("${key}=${val}")
@@ -57,4 +65,4 @@ foreach ($key in $settings.Keys) {
 Set-Content -Path $EnvFile -Value $lines -Encoding UTF8
 Write-Host ""
 Write-Host "Done: $EnvFile"
-Write-Host "Local: restart uvicorn. VPS: pm2 restart 188-api --update-env; pm2 save"
+Write-Host "Local: restart uvicorn. VPS: bash deploy/relieve-db-after-restart.sh"

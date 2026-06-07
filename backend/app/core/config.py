@@ -83,12 +83,41 @@ class Settings:
             self.ACTUAL_DATABASE_PATH = actual_db_path
             self.IS_POSTGRESQL = False
         
-        # PostgreSQL QueuePool — VPS chia sẻ (nanoai + Postgres local): 8+12 đủ; VPS riêng 188: 10+15.
+        # PostgreSQL QueuePool — VPS chia sẻ nanoai: 10+15 (tối đa 25 / 188-api).
         # Tổng connection mọi app < Postgres max_connections (mặc định 100).
         self.DATABASE_POOL_SIZE: int = int(os.getenv("DATABASE_POOL_SIZE", "10"))
         self.DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "15"))
         self.DATABASE_POOL_RECYCLE: int = int(os.getenv("DATABASE_POOL_RECYCLE", "1800"))
         self.DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "20"))
+        # Postgres tự đóng session kẹt; daemon API terminate thêm khi gần đầy pool.
+        self.DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS: int = int(
+            os.getenv("DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS", "35")
+        )
+        # 0 = tắt — tránh cắt import/export admin chạy query dài.
+        self.DATABASE_STATEMENT_TIMEOUT_SECONDS: int = int(
+            os.getenv("DATABASE_STATEMENT_TIMEOUT_SECONDS", "0")
+        )
+        self.DATABASE_POOL_RELIEF_ENABLED: bool = os.getenv(
+            "DATABASE_POOL_RELIEF_ENABLED", "true"
+        ).lower() in ("1", "true", "yes")
+        self.DATABASE_POOL_RELIEF_INTERVAL_SECONDS: int = int(
+            os.getenv("DATABASE_POOL_RELIEF_INTERVAL_SECONDS", "15")
+        )
+        self.DATABASE_POOL_RELIEF_MIN_IDLE_SECONDS: int = int(
+            os.getenv("DATABASE_POOL_RELIEF_MIN_IDLE_SECONDS", "22")
+        )
+        self.DATABASE_POOL_RELIEF_TRIGGER_IDLE_COUNT: int = int(
+            os.getenv("DATABASE_POOL_RELIEF_TRIGGER_IDLE_COUNT", "14")
+        )
+        self.DATABASE_POOL_RELIEF_AGGRESSIVE_MIN_IDLE_SECONDS: int = int(
+            os.getenv("DATABASE_POOL_RELIEF_AGGRESSIVE_MIN_IDLE_SECONDS", "18")
+        )
+        self.DATABASE_POOL_RELIEF_AGGRESSIVE_WHEN_IDLE_COUNT: int = int(
+            os.getenv("DATABASE_POOL_RELIEF_AGGRESSIVE_WHEN_IDLE_COUNT", "0")
+        )
+        self.DATABASE_APPLY_PG_IDLE_TIMEOUT_ON_STARTUP: bool = os.getenv(
+            "DATABASE_APPLY_PG_IDLE_TIMEOUT_ON_STARTUP", "true"
+        ).lower() in ("1", "true", "yes")
         # Cache menu / catalog — giảm bão COUNT khi SSR; dữ liệu giống, chỉ refresh chậm hơn vài phút.
         self.CATEGORY_MENU_TREE_TTL_SECONDS: float = float(
             os.getenv("CATEGORY_MENU_TREE_TTL_SECONDS", "600")

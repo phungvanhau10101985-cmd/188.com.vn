@@ -198,6 +198,20 @@ def clear_guest_search_history(db: Session, session_id: str) -> None:
     db.commit()
 
 
+def delete_guest_search_history_by_query(db: Session, session_id: str, search_query: str) -> int:
+    sid = _norm_session(session_id)
+    q = (search_query or "").strip()
+    if not sid or not q:
+        return 0
+    deleted = (
+        db.query(GuestSearchHistory)
+        .filter(GuestSearchHistory.session_id == sid, GuestSearchHistory.search_query == q)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return int(deleted or 0)
+
+
 def merge_guest_session_to_user(db: Session, user_id: int, session_id: str) -> dict:
     """Gộp hành vi phiên khách vào tài khoản; xóa bản ghi guest."""
     sid = _norm_session(session_id)

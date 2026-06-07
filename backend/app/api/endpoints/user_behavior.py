@@ -3,7 +3,7 @@ import math
 import logging
 from datetime import date, datetime
 from typing import Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, Header, Response, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, Response, BackgroundTasks
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.user import User
@@ -41,7 +41,11 @@ from app.crud.user import (
     get_user_favorites, is_product_favorited,
     add_category_view_with_name, get_user_viewed_categories,
     add_brand_view, get_user_viewed_brands,
-    add_search_history, get_user_search_history, clear_search_history, get_search_suggestions,
+    add_search_history,
+    get_user_search_history,
+    clear_search_history,
+    delete_user_search_history_by_query,
+    get_search_suggestions,
     get_popular_categories_for_gender,
     get_popular_categories_from_recent_views,
     add_shop_interaction, get_user_shop_interactions,
@@ -629,6 +633,27 @@ def clear_user_search_history(
         raise HTTPException(status_code=400, detail="Cần đăng nhập hoặc gửi header X-Guest-Session-Id")
     guest_behavior_crud.clear_guest_search_history(db, sid)
     return {"message": "Đã xóa lịch sử tìm kiếm"}
+
+
+@router.delete("/search/history/item")
+def delete_search_history_item(
+    search_query: str = Query(..., min_length=1, max_length=500, description="Từ khóa cần xóa"),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
+):
+    """Xóa một từ khóa khỏi lịch sử (mọi bản ghi trùng từ khóa)."""
+    q = search_query.strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="Từ khóa không hợp lệ")
+    if current_user:
+        delete_user_search_history_by_query(db, current_user.id, q)
+        return {"message": "Đã xóa từ khóa"}
+    sid = (x_guest_session_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="Cần đăng nhập hoặc gửi header X-Guest-Session-Id")
+    guest_behavior_crud.delete_guest_search_history_by_query(db, sid, q)
+    return {"message": "Đã xóa từ khóa"}
 
 
 @router.get("/categories/inferred-gender")

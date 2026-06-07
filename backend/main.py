@@ -581,6 +581,36 @@ async def startup_event():
     except Exception as _e_hhc:
         print(f"   ⚠️  home hero category cache startup: {_e_hhc}")
 
+    try:
+        from app.db.pool_relief import start_pool_relief_daemon_if_enabled
+
+        start_pool_relief_daemon_if_enabled()
+        from app.core.config import settings as _pool_settings
+
+        if getattr(_pool_settings, "IS_POSTGRESQL", False) and getattr(
+            _pool_settings, "DATABASE_POOL_RELIEF_ENABLED", True
+        ):
+            _pool_max = (
+                _pool_settings.DATABASE_POOL_SIZE + _pool_settings.DATABASE_MAX_OVERFLOW
+            )
+            _agg_when = _pool_settings.DATABASE_POOL_RELIEF_AGGRESSIVE_WHEN_IDLE_COUNT
+            if _agg_when <= 0:
+                _agg_when = max(
+                    _pool_settings.DATABASE_POOL_RELIEF_TRIGGER_IDLE_COUNT + 2,
+                    _pool_max - 5,
+                )
+            print(
+                "   🔄 DB pool relief: pool max "
+                f"{_pool_max}, idle-in-xact timeout "
+                f"{_pool_settings.DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS}s, "
+                f"daemon {_pool_settings.DATABASE_POOL_RELIEF_INTERVAL_SECONDS}s "
+                f"(trigger >= {_pool_settings.DATABASE_POOL_RELIEF_TRIGGER_IDLE_COUNT}, "
+                f"aggressive >= {_agg_when} @ "
+                f"{_pool_settings.DATABASE_POOL_RELIEF_AGGRESSIVE_MIN_IDLE_SECONDS}s)."
+            )
+    except Exception as _e_pool:
+        print(f"   ⚠️  DB pool relief startup: {_e_pool}")
+
     from app.core.config import settings as _startup_settings
     _db_url = (_startup_settings.DATABASE_URL or "").lower()
     if _db_url.startswith("postgresql"):

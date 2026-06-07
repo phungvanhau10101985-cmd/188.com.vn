@@ -1023,6 +1023,20 @@ def clear_search_history(db: Session, user_id: int) -> None:
     db.commit()
 
 
+def delete_user_search_history_by_query(db: Session, user_id: int, search_query: str) -> int:
+    """Xóa mọi bản ghi lịch sử trùng từ khóa (sau khi gộp hiển thị)."""
+    q = (search_query or "").strip()
+    if not q:
+        return 0
+    deleted = (
+        db.query(UserSearchHistory)
+        .filter(UserSearchHistory.user_id == user_id, UserSearchHistory.search_query == q)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return int(deleted or 0)
+
+
 def get_search_suggestions(
     db: Session,
     user_id: Optional[int],

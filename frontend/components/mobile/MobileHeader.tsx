@@ -11,6 +11,7 @@ import {
   level1CategoryHref,
 } from '@/lib/kho-sale-menu-category';
 import { storePendingImageAndNavigate } from '@/lib/nanoai-pending-image';
+import SearchHistoryPanel from '@/components/search/SearchHistoryPanel';
 import {
   PRODUCT_RELATED_TABS,
   parseRelatedTabFromSearch,
@@ -62,6 +63,7 @@ export default function MobileHeader({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchHistoryOpen, setSearchHistoryOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
   const [openL1, setOpenL1] = useState<Set<string>>(new Set());
@@ -212,8 +214,15 @@ export default function MobileHeader({
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    setSearchHistoryOpen(false);
     const term = searchTerm.trim();
     onSuggestionClick(term || '');
+  };
+
+  const handleHistorySelect = (term: string) => {
+    setSearchTerm(term);
+    setSearchHistoryOpen(false);
+    onSuggestionClick(term);
   };
 
   const onImagePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -425,7 +434,7 @@ export default function MobileHeader({
 
             <form
               onSubmit={handleSearch}
-              className={`flex-1 min-w-0 flex items-stretch rounded-xl bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] overflow-hidden touch-manipulation ${tightToolbar ? 'h-10 min-h-[40px]' : 'h-11'}`}
+              className={`relative z-[60] flex-1 min-w-0 flex items-stretch rounded-xl bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] touch-manipulation ${tightToolbar ? 'h-10 min-h-[40px]' : 'h-11'}`}
             >
               <input
                 id={mobileImageInputId}
@@ -445,6 +454,9 @@ export default function MobileHeader({
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
+                  onFocus={() => setSearchHistoryOpen(true)}
+                  aria-expanded={searchHistoryOpen}
+                  aria-haspopup="listbox"
                   placeholder={
                     compactHomeChrome
                       ? 'Tìm trên 188.COM.VN…'
@@ -457,6 +469,13 @@ export default function MobileHeader({
                   className={`flex-1 min-w-0 h-full bg-transparent border-0 text-gray-900 placeholder:text-gray-500 focus:ring-0 focus:outline-none ${tightToolbar ? 'text-sm' : 'text-[15px]'}`}
                 />
               </div>
+              <SearchHistoryPanel
+                open={searchHistoryOpen}
+                onClose={() => setSearchHistoryOpen(false)}
+                onSelect={handleHistorySelect}
+                className="left-0 right-0"
+                zClass="z-[70]"
+              />
               <div className="flex shrink-0 self-stretch divide-x divide-gray-200/90 border-l border-gray-100">
                 <label
                   htmlFor={mobileImageInputId}

@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
+from app.db.pool_relief import apply_postgres_connect_timeouts
 
 SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL or "sqlite:///./app.db"
 is_sqlite = SQLALCHEMY_DATABASE_URL.startswith("sqlite")
@@ -26,12 +27,14 @@ else:
     engine_kwargs["pool_reset_on_return"] = "rollback"
     # Giữ TCP sống để giảm lỗi "SSL connection has been closed unexpectedly"
     # khi kết nối idle lâu qua proxy/LB.
-    engine_kwargs["connect_args"] = {
-        "keepalives": 1,
-        "keepalives_idle": 30,
-        "keepalives_interval": 10,
-        "keepalives_count": 5,
-    }
+    engine_kwargs["connect_args"] = apply_postgres_connect_timeouts(
+        {
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
+        }
+    )
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL, **engine_kwargs)
 

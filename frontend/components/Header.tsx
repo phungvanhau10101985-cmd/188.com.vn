@@ -9,6 +9,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCart } from '@/features/cart/hooks/useCart';
 import { apiClient } from '@/lib/api-client';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
+import SearchHistoryPanel from '@/components/search/SearchHistoryPanel';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { getOptimizedImage } from '@/lib/image-utils';
 
@@ -30,6 +31,7 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
   const qFromUrl = searchParams.get('q') ?? '';
   const [searchTerm, setSearchTerm] = useState(initialSearchTerm ?? qFromUrl);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [searchHistoryOpen, setSearchHistoryOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
@@ -97,6 +99,8 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    setSearchHistoryOpen(false);
+    setIsSearchFocused(false);
     onSearch(searchTerm);
   };
 
@@ -114,16 +118,30 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
 
   const searchBar = (
     <>
-      <form onSubmit={handleSearch} className="relative">
+      <form onSubmit={handleSearch} className="relative z-[60]">
         <div className={`relative transition-all duration-200 ${isSearchFocused ? 'ring-2 ring-white/50 rounded-xl shadow-lg shadow-black/10' : 'rounded-xl shadow-sm'}`}>
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            onFocus={() => setIsSearchFocused(true)}
-            onBlur={() => setIsSearchFocused(false)}
+            onFocus={() => {
+              setIsSearchFocused(true);
+              setSearchHistoryOpen(true);
+            }}
             placeholder="Tìm kiếm sản phẩm, thương hiệu..."
+            autoComplete="off"
+            aria-expanded={searchHistoryOpen}
+            aria-haspopup="listbox"
             className="w-full pl-4 pr-24 py-3 bg-white border-0 rounded-xl focus:outline-none text-gray-800 placeholder-gray-500 text-sm"
+          />
+          <SearchHistoryPanel
+            open={searchHistoryOpen}
+            onClose={() => {
+              setSearchHistoryOpen(false);
+              setIsSearchFocused(false);
+            }}
+            onSelect={(term) => handleSuggestionClick(term)}
+            zClass="z-[70]"
           />
           <LazyDesktopImageSearchPopover />
           <button

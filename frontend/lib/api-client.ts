@@ -147,6 +147,11 @@ export interface BankAccountInfo {
   bank_short_name?: string | null;
 }
 
+export type SearchHistoryItem = {
+  id: number;
+  search_query: string;
+};
+
 export interface AnalyticsEventCreate {
   event_name: string;
   session_id?: string | null;
@@ -231,7 +236,17 @@ class ApiClient {
         throw new Error(errorData.detail || `API Error: ${response.status}`);
       }
 
-      const data = await response.json();
+      const raw = await response.text();
+      let data: T;
+      if (!raw.trim()) {
+        data = null as T;
+      } else {
+        try {
+          data = JSON.parse(raw) as T;
+        } catch {
+          throw new Error(`Phản hồi không phải JSON hợp lệ từ ${endpoint}`);
+        }
+      }
       if (!IS_PRODUCTION && !quiet) {
         console.log('✅ API Success:', data);
       }
@@ -802,14 +817,28 @@ class ApiClient {
   }
 
   /** Lịch sử tìm kiếm (tài khoản hoặc phiên khách qua X-Guest-Session-Id). */
-  async getSearchHistory(limit = 5): Promise<{ search_query: string }[]> {
-    const rows = await this.fetch<{ search_query?: string }[]>(
+  async getSearchHistory(limit = 20): Promise<SearchHistoryItem[]> {
+    const rows = await this.fetch<SearchHistoryItem[]>(
       `/user-behavior/search/history?limit=${limit}`
     ).catch(() => []);
     if (!Array.isArray(rows)) return [];
     return rows
-      .map((r) => ({ search_query: (r.search_query ?? '').trim() }))
-      .filter((r) => r.search_query.length > 0);
+      .map((r) => ({
+        id: Number(r.id),
+        search_query: (r.search_query ?? '').trim(),
+      }))
+      .filter((r) => Number.isFinite(r.id) && r.search_query.length > 0);
+  }
+
+  async deleteSearchHistoryItem(searchQuery: string): Promise<void> {
+    const q = encodeURIComponent(searchQuery.trim());
+    await this.fetch(`/user-behavior/search/history/item?search_query=${q}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async clearSearchHistory(): Promise<void> {
+    await this.fetch('/user-behavior/search/history', { method: 'DELETE' });
   }
 
   // ANALYTICS EVENTS (conversion funnel)
@@ -1696,7 +1725,12 @@ class ApiClient {
   }
 
   async getUnreadNotificationCount(): Promise<number> {
-    const call = () => this.fetch<number>('/notifications/unread-count', { quiet: true });
+    const call = async () => {
+      const n = await this.fetch<number | null>('/notifications/unread-count', { quiet: true });
+      if (n == null || n === undefined) return 0;
+      const parsed = typeof n === 'number' ? n : Number(n);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
     try {
       return await call();
     } catch {
