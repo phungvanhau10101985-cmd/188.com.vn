@@ -11,6 +11,7 @@ type Props = {
   /** Trang `/?q=` — hiện khung lọc ngay khi đang tìm (facets có thể tải sau). */
   enableEmptyListing?: boolean;
   /** Listing `/?style=…`, cùng loại — không có `q` nhưng vẫn cần khung lọc trước khi facets về. */
+  enableListingFacetShell?: boolean;
   /** Trang chủ / tìm kiếm — mặc định sort ổn định (id_desc), không «Ngẫu nhiên». */
   stableSortDefault?: boolean;
 };
