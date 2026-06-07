@@ -2024,8 +2024,9 @@ def _count_products_query(query) -> int:
             return int(base.count() or 0)
 
 
+# Suffix slug = product_id lower (A/T/S/B + số + a188 + SKU), vd. ...-t734290881638a188s1782
 _PRODUCT_SLUG_ID_SUFFIX_RE = re.compile(
-    r"-(?:a|b)(\d{6,}a188[a-z0-9]+)$",
+    r"-((?:a|b|t|s)\d{6,}a188[a-z0-9]+)$",
     flags=re.IGNORECASE,
 )
 
@@ -2081,11 +2082,60 @@ def _product_slug_lookup_variants(slug: str) -> List[str]:
     return out
 
 
+def _is_transient_db_lookup_error(exc: BaseException) -> bool:
+    """Pool timeout / kết nối đứt lúc VPS vừa restart — retry một lần."""
+    try:
+        from sqlalchemy.exc import DBAPIError, OperationalError, TimeoutError
+
+        if isinstance(exc, (OperationalError, TimeoutError)):
+            return True
+        if isinstance(exc, DBAPIError) and getattr(exc, "connection_invalidated", False):
+            return True
+    except ImportError:
+        pass
+    msg = str(exc).lower()
+    return any(
+        token in msg
+        for token in (
+            "queuepool",
+            "timeout",
+            "connection",
+            "closed",
+            "server closed",
+            "could not connect",
+        )
+    )
+
+
 def get_product_by_slug(db: Session, slug: str) -> Optional[Product]:
     """Tra SP theo slug; dòng kho thanh lý trả SP gốc (PDP nhóm) hoặc chính nó nếu không có gốc."""
     s = (slug or "").strip()
     if not s:
         return None
+    import time as _time
+
+    for attempt in range(2):
+        try:
+            return _get_product_by_slug_impl(db, s)
+        except Exception as e:
+            if attempt == 0 and _is_transient_db_lookup_error(e):
+                logger.warning(
+                    "get_product_by_slug transient DB error (retry once): %s | slug=%s",
+                    e,
+                    s[:120],
+                )
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                _time.sleep(0.35)
+                continue
+            logger.error("Database error get_product_by_slug: %s | slug=%s", e, s[:120])
+            return None
+    return None
+
+
+def _get_product_by_slug_impl(db: Session, s: str) -> Optional[Product]:
     try:
         from app.services.warehouse_clearance import (
             find_parent_product_by_base_sku,
@@ -2118,7 +2168,7 @@ def get_product_by_slug(db: Session, slug: str) -> Optional[Product]:
         # Slug marketing có suffix mã (vd. ...-a606864241417a188m7147) — thử tra product_id nhúng cuối slug
         m = _PRODUCT_SLUG_ID_SUFFIX_RE.search(s)
         if m:
-            embedded = (m.group(0) or "").lstrip("-")
+            embedded = (m.group(1) or "").strip()
             if embedded:
                 by_pid = get_product_by_product_id(db, product_id=embedded)
                 if by_pid is not None:
@@ -2147,9 +2197,8 @@ def get_product_by_slug(db: Session, slug: str) -> Optional[Product]:
                 if by_code is not None:
                     return _parent_for_warehouse_row(by_code)
         return None
-    except Exception as e:
-        logger.error(f"Database error: {str(e)}")
-        return None
+    except Exception:
+        raise
 
 
 # URL marketing một segment: /moi-ma-...-gia-1520k-giay-da-nam-...-g03-... (mã biến thể -g0x)
