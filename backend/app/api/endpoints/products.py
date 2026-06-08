@@ -1143,32 +1143,52 @@ def _lookup_product_for_group_listing(db: Session, slug: str):
         ) from exc
 
 
+def _group_listing_path_fast_no_db(source: str) -> Optional[str]:
+    """Redirect OOS không mở DB — tránh chờ pool khi VPS tải cao (bot slug catalog a188)."""
+    s = (source or "").strip()
+    if len(s) < 3:
+        return "/"
+    if "a188" in s.lower():
+        return crud.product._fast_group_listing_fallback(s, None)
+    return None
+
+
+def _resolve_group_listing_path_with_db(source: str) -> str:
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        current = _lookup_product_for_group_listing(db, slug=source)
+        pid = getattr(current, "product_id", None) if current else None
+        return crud.product.resolve_product_group_listing_path(
+            db,
+            source_slug=source,
+            product=current,
+            product_id=pid,
+        )
+    finally:
+        db.close()
+
+
 @router.get("/group-listing-path", response_model=dict)
 def read_product_group_listing_path(
     response: Response,
-    slug: str = Query(..., min_length=3, description="Slug PDP / URL marketing"),
-    db: Session = Depends(get_db),
+    slug: str = Query(..., min_length=1, description="Slug PDP / URL marketing"),
 ):
     """API nhẹ: chỉ trả đường dẫn listing nhóm (cache HTTP 10 phút)."""
     response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=120"
     source = (slug or "").strip()
-    if len(source) < 3:
-        return {"redirect_path": "/", "redirect_type": "group_listing"}
-    current = _lookup_product_for_group_listing(db, slug=source)
-    pid = getattr(current, "product_id", None) if current else None
-    path = crud.product.resolve_product_group_listing_path(
-        db,
-        source_slug=source,
-        product=current,
-        product_id=pid,
-    )
+    fast = _group_listing_path_fast_no_db(source)
+    if fast is not None:
+        return {"redirect_path": fast, "redirect_type": "group_listing"}
+    path = _resolve_group_listing_path_with_db(source)
     return {"redirect_path": path, "redirect_type": "group_listing"}
 
 
 @router.get("/oos-group-redirect", response_model=dict)
 def read_product_oos_group_redirect(
     response: Response,
-    slug: str = Query(..., min_length=3, description="Slug PDP / URL marketing đang mở"),
+    slug: str = Query(..., min_length=1, description="Slug PDP / URL marketing đang mở"),
     min_similarity: float = Query(
         0.8,
         ge=0.5,
@@ -1179,7 +1199,6 @@ def read_product_oos_group_redirect(
         False,
         description="Giữ tương thích URL marketing một segment",
     ),
-    db: Session = Depends(get_db),
 ):
     """
     Hết hàng / không có SP: trả ``redirect_path`` tới listing nhóm (/c/..., /danh-muc/..., /?q=...),
@@ -1187,22 +1206,8 @@ def read_product_oos_group_redirect(
     """
     response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=120"
     source = (slug or "").strip()
-    if len(source) < 3:
-        return {
-            "redirect_slug": None,
-            "redirect_path": "/",
-            "redirect_type": "group_listing",
-            "similarity_min": min_similarity,
-            "legacy_path": legacy_path,
-        }
-    current = _lookup_product_for_group_listing(db, slug=source)
-    pid = getattr(current, "product_id", None) if current else None
-    path = crud.product.resolve_product_group_listing_path(
-        db,
-        source_slug=source,
-        product=current,
-        product_id=pid,
-    )
+    fast = _group_listing_path_fast_no_db(source)
+    path = fast if fast is not None else _resolve_group_listing_path_with_db(source)
     return {
         "redirect_slug": None,
         "redirect_path": path,

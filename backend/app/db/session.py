@@ -50,6 +50,26 @@ def get_db():
     Database dependency for FastAPI endpoints
     Usage: db: Session = Depends(get_db)
     """
+    if not is_sqlite:
+        try:
+            from app.db.pool_self_heal import get_pool_usage_snapshot
+
+            snap = get_pool_usage_snapshot()
+            checked_out = int(snap.get("checked_out") or 0)
+            pool_max = int(snap.get("pool_max") or 0)
+            if pool_max > 0 and checked_out >= pool_max:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=503,
+                    detail="Cơ sở dữ liệu tạm thời không phản hồi — vui lòng thử lại sau vài giây",
+                    headers={"Retry-After": "3"},
+                )
+        except Exception as exc:
+            from fastapi import HTTPException
+
+            if isinstance(exc, HTTPException):
+                raise
     db = SessionLocal()
     try:
         yield db
