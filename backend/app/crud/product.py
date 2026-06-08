@@ -2727,6 +2727,25 @@ def _home_search_listing_path(pool_or_query: str) -> str:
     return f"/?q={quote(q)}" if q else "/"
 
 
+def _fast_group_listing_fallback(source_slug: str, product_id: Optional[str] = None) -> str:
+    """Redirect nhanh không quét ILIKE slug trên bảng products."""
+    source = normalize_legacy_source_slug(source_slug or "")
+    legacy_pool = extract_legacy_url_name_prefix(source)
+    if legacy_pool:
+        short_pool = product_slug_oos_pool_prefix_fast(legacy_pool, source_slug=source)
+        search_path = _oos_home_search_fallback(short_pool or legacy_pool)
+        if search_path:
+            return search_path
+    name_prefix = product_slug_name_prefix(source, product_id)
+    pool = product_slug_oos_pool_prefix_fast(name_prefix, source_slug=source) or (
+        (name_prefix or source or "").strip().lower()
+    )
+    search_path = _oos_home_search_fallback(pool)
+    if search_path:
+        return search_path
+    return "/"
+
+
 def _resolve_missing_product_listing_path(
     db: Session,
     *,
@@ -2933,7 +2952,12 @@ def _resolve_product_group_listing_path_uncached(
     Đường dẫn listing nhóm khi SP hết hàng / không tồn tại — không mở PDP sản phẩm khác.
     Thứ tự: cluster từ SP → pool slug ILIKE + nhóm SP → cluster trong URL → ``/?q=`` pool ngắn.
     """
+    from app.core.config import settings
     from app.services.warehouse_clearance import WAREHOUSE_CLEARANCE_GROUP_LISTING_PATH
+
+    source = normalize_legacy_source_slug(source_slug or "")
+    pid = product_id or (getattr(product, "product_id", None) if product else None)
+    skip_slow = getattr(settings, "GROUP_LISTING_SKIP_SLOW_SLUG_POOL", True)
 
     if product is not None and getattr(product, "is_warehouse_clearance", False):
         return WAREHOUSE_CLEARANCE_GROUP_LISTING_PATH
@@ -2942,14 +2966,15 @@ def _resolve_product_group_listing_path_uncached(
         path = _cluster_listing_path_for_product(db, product)
         if path:
             return path
-
-    source = normalize_legacy_source_slug(source_slug or "")
-    pid = product_id or (getattr(product, "product_id", None) if product else None)
+        if skip_slow:
+            return _fast_group_listing_fallback(source, pid)
 
     if product is None:
-        return _resolve_missing_product_listing_path(
+        path = _resolve_missing_product_listing_path(
             db, source_slug=source, product_id=pid
         )
+        if skip_slow:
+            return path
 
     legacy_pool = extract_legacy_url_name_prefix(source)
     if legacy_pool:

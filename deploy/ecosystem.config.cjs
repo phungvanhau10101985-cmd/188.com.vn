@@ -33,6 +33,8 @@ module.exports = {
         DATABASE_POOL_SELF_HEAL_PROBE_TIMEOUT_SECONDS: '3',
         DATABASE_POOL_SELF_HEAL_MAX_FAILURES: '1',
         EMS_TRACKING_INTERNAL_SCHEDULER_ENABLED: 'false',
+        LEGACY_OOS_DEEPSEEK_ENABLED: 'false',
+        GROUP_LISTING_SKIP_SLOW_SLUG_POOL: 'true',
       },
       max_restarts: 10,
       min_uptime: '10s',
@@ -48,6 +50,7 @@ module.exports = {
       env: {
         PORT: '3001',
         NODE_ENV: 'production',
+        LAYOUT_CATEGORY_TREE_TIMEOUT_MS: '12000',
       },
       max_restarts: 10,
       min_uptime: '10s',

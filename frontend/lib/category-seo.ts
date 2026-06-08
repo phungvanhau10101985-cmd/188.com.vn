@@ -21,7 +21,7 @@ const LAYOUT_FETCH_TIMEOUT_MS = 8000;
  */
 const LAYOUT_CATEGORY_TREE_TIMEOUT_MS = Math.min(
   110_000,
-  Math.max(15_000, parseInt(process.env.LAYOUT_CATEGORY_TREE_TIMEOUT_MS || "60000", 10) || 60000),
+  Math.max(8_000, parseInt(process.env.LAYOUT_CATEGORY_TREE_TIMEOUT_MS || "12000", 10) || 12000),
 );
 
 /** Trong development hoặc khi set DISABLE_CACHE=1: không cache để thấy thay đổi ngay. Production: cache 2–5 phút. */

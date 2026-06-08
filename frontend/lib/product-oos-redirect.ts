@@ -17,6 +17,24 @@ function cacheKeyForListingPath(slug: string, legacyMarketingPath?: boolean): st
   return `${legacyMarketingPath ? 'legacy' : 'normal'}:${slug.toLowerCase()}`;
 }
 
+/** Redirect tìm kiếm nhanh từ slug marketing — không gọi API (bot/link SP ẩn ảnh). */
+export function fastSearchListingPathFromSlug(slug: string): string | null {
+  const key = normalizeLegacyProductPath(slug).toLowerCase();
+  if (!key || key.length < 6) return null;
+  const parts = key
+    .split("-")
+    .filter(
+      (p) =>
+        p.length > 0 &&
+        !/^\d{5,}$/.test(p) &&
+        !p.includes("a188") &&
+        !/^a?\d{6,}$/i.test(p),
+    );
+  if (parts.length < 2) return null;
+  const q = parts.slice(0, 4).join(" ");
+  return `/?q=${encodeURIComponent(q)}`;
+}
+
 export async function resolveProductGroupListingPath(
   slug: string,
   options?: {

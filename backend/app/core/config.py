@@ -571,7 +571,11 @@ class Settings:
         self.DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
         # URL legacy / SP đã xóa: DeepSeek tạo từ khóa → /?q= (một dòng, không JSON)
         self.LEGACY_OOS_DEEPSEEK_ENABLED: bool = os.getenv(
-            "LEGACY_OOS_DEEPSEEK_ENABLED", "true"
+            "LEGACY_OOS_DEEPSEEK_ENABLED", "false"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        # group-listing-path: bỏ quét ILIKE/COUNT slug trên ~30k SP (giữ connection DB khi tải cao).
+        self.GROUP_LISTING_SKIP_SLOW_SLUG_POOL: bool = os.getenv(
+            "GROUP_LISTING_SKIP_SLOW_SLUG_POOL", "true"
         ).strip().lower() in ("1", "true", "yes", "on")
         # Import từ link 1688/Hibox: gán danh mục 3 cấp bằng DeepSeek theo tên SP + taxonomy trong DB
         self.IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED: bool = os.getenv(
