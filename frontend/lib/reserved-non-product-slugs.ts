@@ -31,6 +31,16 @@ const EXACT_BLOCKED = new Set(
     'favicon.ico',
     'robots.txt',
     'sitemap.xml',
+    'vi',
+    'en',
+    'zh',
+    'cn',
+    'ja',
+    'ko',
+    'xml-facebook',
+    'facebook',
+    'feed',
+    'rss',
   ].map((s) => s.toLowerCase()),
 );
 
@@ -39,7 +49,8 @@ const BLOCKED_EXTENSION = /\.(js|json|xml|php|env|txt|ico|css|map|woff2?|ttf|svg
 
 export function isReservedNonProductSlug(raw: string): boolean {
   const s = (raw || '').trim().toLowerCase();
-  if (!s || s.length < 2) return true;
+  /** Khớp API group-listing-path (min_length=3) — tránh 422 + SSR treo. */
+  if (!s || s.length < 3) return true;
   if (EXACT_BLOCKED.has(s)) return true;
   if (BLOCKED_EXTENSION.test(s)) return true;
   // Path traversal / probe

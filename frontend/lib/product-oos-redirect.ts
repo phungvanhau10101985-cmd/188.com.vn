@@ -27,7 +27,7 @@ export async function resolveProductGroupListingPath(
   },
 ): Promise<string | null> {
   const key = normalizeLegacyProductPath(slug);
-  if (!key) return null;
+  if (!key || key.length < 3) return null;
   const normalizedKey = key.replace(/^\/+|\/+$/g, '').toLowerCase();
   const cacheKey = cacheKeyForListingPath(normalizedKey, options?.legacyMarketingPath);
   if (options?.allowCache) {

@@ -1152,6 +1152,8 @@ def read_product_group_listing_path(
     """API nhẹ: chỉ trả đường dẫn listing nhóm (cache HTTP 10 phút)."""
     response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=120"
     source = (slug or "").strip()
+    if len(source) < 3:
+        return {"redirect_path": "/", "redirect_type": "group_listing"}
     current = _lookup_product_for_group_listing(db, slug=source)
     pid = getattr(current, "product_id", None) if current else None
     path = crud.product.resolve_product_group_listing_path(
@@ -1185,6 +1187,14 @@ def read_product_oos_group_redirect(
     """
     response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=120"
     source = (slug or "").strip()
+    if len(source) < 3:
+        return {
+            "redirect_slug": None,
+            "redirect_path": "/",
+            "redirect_type": "group_listing",
+            "similarity_min": min_similarity,
+            "legacy_path": legacy_path,
+        }
     current = _lookup_product_for_group_listing(db, slug=source)
     pid = getattr(current, "product_id", None) if current else None
     path = crud.product.resolve_product_group_listing_path(
