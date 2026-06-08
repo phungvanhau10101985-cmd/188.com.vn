@@ -33,6 +33,7 @@
 #   DEPLOY_SKIP_PLAYWRIGHT=1       không chạy playwright install chromium (đã cài browser)
 #   DEPLOY_SKIP_DB_TUNING=1        không chạy tune-db-vps (.env pool/TTL + index + swap)
 #   DEPLOY_SKIP_SWAP=1             không tạo/bật swap (vẫn chạy pool .env + index nếu tuning bật)
+#   DEPLOY_APPLY_NGINX_RATE_LIMIT=1 áp rule rate-limit API nặng (by-slug/seo-clusters/user-behavior)
 #
 set -euo pipefail
 
@@ -184,6 +185,24 @@ if [[ "${DEPLOY_SKIP_DB_TUNING:-0}" != "1" ]]; then
     echo "⚠️  tune-db-vps có bước lỗi — tiếp tục deploy"
 else
   echo "==> VPS tuning: DEPLOY_SKIP_DB_TUNING=1 — bỏ qua."
+fi
+
+if [[ "${DEPLOY_APPLY_NGINX_RATE_LIMIT:-0}" == "1" ]]; then
+  echo ""
+  echo "==> Nginx: áp rate-limit API nặng (bot/crawler burst protection)"
+  if [[ -f "${PROJECT_ROOT}/deploy/apply-nginx-188-rate-limit.sh" ]]; then
+    if [[ "$(id -u)" -eq 0 ]]; then
+      bash "${PROJECT_ROOT}/deploy/apply-nginx-188-rate-limit.sh" || \
+        echo "⚠️  apply-nginx-188-rate-limit thất bại — kiểm tra nginx -t"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo bash "${PROJECT_ROOT}/deploy/apply-nginx-188-rate-limit.sh" || \
+        echo "⚠️  apply-nginx-188-rate-limit thất bại — kiểm tra nginx -t"
+    else
+      echo "⚠️  Cần root/sudo để áp nginx rate-limit. Bỏ qua."
+    fi
+  else
+    echo "⚠️  Thiếu deploy/apply-nginx-188-rate-limit.sh — bỏ qua."
+  fi
 fi
 
 deactivate
@@ -431,6 +450,8 @@ print_safe_deploy_checklist() {
   echo "   4) Flush log rồi theo dõi lỗi mới: pm2 flush ${PM2_API}; pm2 flush ${PM2_WEB}; pm2 logs ..."
   echo "   5) Nếu web lag: kiểm tra DB active query (pg_stat_activity), hủy query nặng/idle transaction kéo dài."
   echo "   6) Sau deploy lớn Next.js: hard refresh (Ctrl+F5) hoặc tab ẩn danh để tránh Server Action mismatch."
+  echo "   7) Đỡ nghẽn sau deploy: ưu tiên DEPLOY_RESTART_ALL_PM2=0; chỉ restart 188-api + 188-web."
+  echo "   8) Chống bot burst API: bật DEPLOY_APPLY_NGINX_RATE_LIMIT=1 (một lần hoặc khi đổi nginx)."
 }
 
 if [[ "${DEPLOY_RESTART_PM2:-1}" != "1" ]]; then

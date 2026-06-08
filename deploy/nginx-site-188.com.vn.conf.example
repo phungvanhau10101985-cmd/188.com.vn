@@ -139,6 +139,57 @@ server {
         proxy_read_timeout 3600s;
     }
 
+    # Chống burst bot/crawler lên PDP API (đường nặng DB) — cần zone trong /etc/nginx/conf.d/188-rate-limit.conf
+    location ~ ^/api/v1/products/by-slug/ {
+        limit_req zone=api_byslug burst=40 nodelay;
+        limit_req_status 429;
+
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 15s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # Chặn quét dày các trang cluster products/facets (SEO bot)
+    location ~ ^/api/v1/seo-clusters/.+/(products|facets)$ {
+        limit_req zone=api_cluster_products burst=30 nodelay;
+        limit_req_status 429;
+
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 15s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # User-behavior là khối phụ UI: giới hạn nhẹ để không cướp pool khi bot/phóng nhiều tab
+    location ~ ^/api/v1/user-behavior/ {
+        limit_req zone=api_user_behavior burst=20 nodelay;
+        limit_req_status 429;
+
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 15s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
     location /api/ {
         proxy_pass http://127.0.0.1:8001;
         proxy_http_version 1.1;
