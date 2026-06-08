@@ -3,6 +3,7 @@
  * Dùng trong layout/products/[slug] và generateMetadata.
  */
 import type { Product } from "@/types/api";
+import { cache } from "react";
 import { displayableBrandWithDefault } from "@/lib/utils";
 import { productPublicPdpUrl } from "@/lib/product-path-slug";
 import { getApiBaseUrl } from "@/lib/api-base";
@@ -39,28 +40,50 @@ export interface ProductForSeo {
   raw_subcategory?: string;
 }
 
-export async function getProductBySlugForSeo(
-  slug: string
-): Promise<ProductForSeo | null> {
+async function fetchProductBySlug(
+  normalized: string,
+  opts: { attachGroupListing: boolean; noStore: boolean },
+): Promise<Product | null> {
   try {
+    const { attachGroupListing, noStore } = opts;
     const apiBase = apiBaseForProductFetch();
-    const encoded = encodeURIComponent(slug);
-    let res = await fetch(`${apiBase}/products/by-slug/${encoded}`, {
-      next: { revalidate: 60 },
+    const encoded = encodeURIComponent(normalized);
+    const params = new URLSearchParams({ slug: normalized });
+    if (attachGroupListing) {
+      params.set("attach_group_listing", "true");
+    }
+
+    let res = await fetch(`${apiBase}/products/by-slug/?${params}`, {
+      ...(noStore ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
-      res = await fetch(`${apiBase}/products/by-slug/?slug=${encoded}`, {
-        next: { revalidate: 60 },
+      const attachQs = attachGroupListing ? "?attach_group_listing=true" : "";
+      res = await fetch(`${apiBase}/products/by-slug/${encoded}${attachQs}`, {
+        ...(noStore ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(15_000),
       });
     }
     if (!res.ok) return null;
     const data = await res.json();
-    return data as ProductForSeo;
+    return data as Product;
   } catch {
     return null;
   }
+}
+
+const fetchProductBySlugCached = cache(
+  async (normalized: string, attachGroupListing: boolean): Promise<Product | null> =>
+    fetchProductBySlug(normalized, { attachGroupListing, noStore: false }),
+);
+
+export async function getProductBySlugForSeo(
+  slug: string
+): Promise<ProductForSeo | null> {
+  const product = await getProductBySlugForSSR(slug, { attachGroupListing: true });
+  return product as ProductForSeo | null;
 }
 
 export type ProductSSRLoadOptions = {
@@ -75,33 +98,13 @@ export async function getProductBySlugForSSR(
   slug: string,
   options?: ProductSSRLoadOptions,
 ): Promise<Product | null> {
-  try {
-    const normalized = normalizeProductRouteSlug(slug);
-    const apiBase = apiBaseForProductFetch();
-    const encoded = encodeURIComponent(normalized);
-    const params = new URLSearchParams({ slug: normalized });
-    if (options?.attachGroupListing) {
-      params.set("attach_group_listing", "true");
-    }
-    const attachQs = options?.attachGroupListing ? "?attach_group_listing=true" : "";
-    let res = await fetch(`${apiBase}/products/by-slug/${encoded}${attachQs}`, {
-      ...(options?.noStore ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
-      headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!res.ok) {
-      res = await fetch(`${apiBase}/products/by-slug/?${params}`, {
-        ...(options?.noStore ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
-        headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(15_000),
-      });
-    }
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data as Product;
-  } catch {
-    return null;
+  const normalized = normalizeProductRouteSlug(slug);
+  if (!normalized) return null;
+  const attach = Boolean(options?.attachGroupListing);
+  if (options?.noStore) {
+    return fetchProductBySlug(normalized, { attachGroupListing: attach, noStore: true });
   }
+  return fetchProductBySlugCached(normalized, attach);
 }
 
 /** Server-side: lấy full product theo SKU (product_id, slug hoặc code). */
