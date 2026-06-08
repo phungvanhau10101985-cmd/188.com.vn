@@ -415,7 +415,7 @@ export default function Navigation({
 
   const renderCatalogDropdownPanel = (
     pos: { top: number; left: number },
-    panelRef: React.RefObject<HTMLDivElement | null>,
+    panelRef: React.Ref<HTMLDivElement>,
     onEnter: () => void,
     onLeave: () => void,
   ) => (
