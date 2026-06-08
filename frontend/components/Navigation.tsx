@@ -22,6 +22,11 @@ import {
 } from '@/lib/kho-sale-menu-category';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { useClientMounted } from '@/lib/use-client-mounted';
+import {
+  isNavCategoryTreeCacheStale,
+  readNavCategoryTreeCache,
+  writeNavCategoryTreeCache,
+} from '@/lib/nav-category-tree-cache';
 
 export interface CategoryFilter {
   category?: string;
@@ -60,6 +65,12 @@ function level2ReactKey(slug1: string | undefined, slug2: string | undefined, na
   return `${slugNorm(slug1)}::${slugNorm(slug2 ?? name2)}`;
 }
 
+function triggerDropdownPos(el: HTMLDivElement | null): { top: number; left: number } | null {
+  if (!el || typeof window === 'undefined') return null;
+  const r = el.getBoundingClientRect();
+  return { top: r.bottom, left: r.left };
+}
+
 export default function Navigation({
   selectedFilter,
   onCategoryChange,
@@ -73,8 +84,13 @@ export default function Navigation({
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [tree, setTree] = useState<CategoryLevel1[]>(() => initialCategoryTree ?? []);
-  const [loading, setLoading] = useState(() => (initialCategoryTree?.length ?? 0) === 0);
+  const [tree, setTree] = useState<CategoryLevel1[]>(() => {
+    if ((initialCategoryTree?.length ?? 0) > 0) return initialCategoryTree ?? [];
+    return readNavCategoryTreeCache();
+  });
+  const [loading, setLoading] = useState(
+    () => (initialCategoryTree?.length ?? 0) === 0 && readNavCategoryTreeCache().length === 0,
+  );
   const [isScrolled, setIsScrolled] = useState(false);
   const [openLevel1, setOpenLevel1] = useState<string | null>(null);
   const [stickySearchTerm, setStickySearchTerm] = useState('');
@@ -97,8 +113,16 @@ export default function Navigation({
   /** Căn mega-menu theo đúng pill cấp 1 — container và từng pill (không ép full-width trái). */
   const categoryBarWrapRef = useRef<HTMLDivElement>(null);
   const pillsScrollRef = useRef<HTMLDivElement>(null);
+  const catalogTriggerWrapRef = useRef<HTMLDivElement>(null);
+  const stickyCatalogTriggerWrapRef = useRef<HTMLDivElement>(null);
+  const catalogDropdownRef = useRef<HTMLDivElement>(null);
+  const stickyCatalogDropdownRef = useRef<HTMLDivElement>(null);
   const level1WrapRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const [megaPlacement, setMegaPlacement] = useState<{ left: number; width: number } | null>(null);
+  const [catalogDropdownPos, setCatalogDropdownPos] = useState<{ top: number; left: number } | null>(null);
+  const [stickyCatalogDropdownPos, setStickyCatalogDropdownPos] = useState<{ top: number; left: number } | null>(
+    null,
+  );
 
   // Khi đang ở /danh-muc/... thì highlight theo slug (resolve từ tree)
   const effectiveFilter = useMemo(() => {
@@ -126,25 +150,54 @@ export default function Navigation({
 
   useEffect(() => {
     const next = initialCategoryTree ?? [];
-    setTree(next);
-    if (next.length > 0) setLoading(false);
+    if (next.length > 0) {
+      setTree(next);
+      setLoading(false);
+      writeNavCategoryTreeCache(next);
+    }
   }, [initialCategoryTree]);
 
   useEffect(() => {
-    if ((initialCategoryTree?.length ?? 0) > 0) return;
     let cancelled = false;
-    setLoading(true);
+
+    const applyTree = (next: CategoryLevel1[]) => {
+      if (cancelled || next.length === 0) return;
+      setTree(next);
+      setLoading(false);
+      writeNavCategoryTreeCache(next);
+    };
+
+    const cached = readNavCategoryTreeCache();
+    if ((initialCategoryTree?.length ?? 0) === 0 && cached.length > 0) {
+      setTree((prev) => (prev.length > 0 ? prev : cached));
+      setLoading(false);
+    }
+
+    const needsFetch = (initialCategoryTree?.length ?? 0) === 0 && cached.length === 0;
+    const needsBackgroundRefresh =
+      (initialCategoryTree?.length ?? 0) === 0 &&
+      cached.length > 0 &&
+      isNavCategoryTreeCacheStale();
+
+    if (!needsFetch && !needsBackgroundRefresh) return;
+
+    if (needsFetch) setLoading(true);
+
     (async () => {
       try {
         const data = await apiClient.getCategoryTreeFromProducts();
-        if (!cancelled) setTree(Array.isArray(data) ? data : []);
+        if (cancelled) return;
+        const next = Array.isArray(data) ? data : [];
+        if (next.length > 0) applyTree(next);
+        else if (needsFetch && !cancelled) setTree([]);
       } catch (error) {
         console.error('Error fetching category tree:', error);
-        if (!cancelled) setTree([]);
+        if (!cancelled && needsFetch && cached.length === 0) setTree([]);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && needsFetch) setLoading(false);
       }
     })();
+
     return () => {
       cancelled = true;
     };
@@ -176,18 +229,54 @@ export default function Navigation({
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       const target = e.target as Node;
-      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
-        setOpenLevel1(null);
-        setStickyMenuOpen(false);
-        setCatalogMenuOpen(false);
-      }
+      const inNav = dropdownRef.current?.contains(target);
+      const inThinBar = thinBarOuterRef.current?.contains(target);
+      const inCatalogDrop = catalogDropdownRef.current?.contains(target);
+      const inStickyCatalogDrop = stickyCatalogDropdownRef.current?.contains(target);
+      if (inNav || inThinBar || inCatalogDrop || inStickyCatalogDrop) return;
+      setOpenLevel1(null);
+      setStickyMenuOpen(false);
+      setCatalogMenuOpen(false);
     }
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
+  const updateCatalogDropdownPos = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    if (catalogMenuOpen && catalogTriggerWrapRef.current) {
+      const r = catalogTriggerWrapRef.current.getBoundingClientRect();
+      setCatalogDropdownPos({ top: r.bottom, left: r.left });
+    } else {
+      setCatalogDropdownPos(null);
+    }
+    if (stickyMenuOpen && stickyCatalogTriggerWrapRef.current) {
+      const r = stickyCatalogTriggerWrapRef.current.getBoundingClientRect();
+      setStickyCatalogDropdownPos({ top: r.bottom, left: r.left });
+    } else {
+      setStickyCatalogDropdownPos(null);
+    }
+  }, [catalogMenuOpen, stickyMenuOpen]);
+
+  useLayoutEffect(() => {
+    updateCatalogDropdownPos();
+  }, [updateCatalogDropdownPos]);
+
+  useEffect(() => {
+    if (!catalogMenuOpen && !stickyMenuOpen) return;
+    const onSync = () => updateCatalogDropdownPos();
+    window.addEventListener('resize', onSync);
+    window.addEventListener('scroll', onSync, { passive: true });
+    pillsScrollRef.current?.addEventListener('scroll', onSync, { passive: true });
+    return () => {
+      window.removeEventListener('resize', onSync);
+      window.removeEventListener('scroll', onSync);
+      pillsScrollRef.current?.removeEventListener('scroll', onSync);
+    };
+  }, [catalogMenuOpen, stickyMenuOpen, updateCatalogDropdownPos]);
+
   const updateMegaPlacement = useCallback(() => {
-    if (!openLevel1 || typeof window === 'undefined') {
+    if (!openLevel1 || catalogMenuOpen || typeof window === 'undefined') {
       setMegaPlacement(null);
       return;
     }
@@ -206,7 +295,7 @@ export default function Navigation({
     let left = pr.left - wr.left;
     left = Math.max(gutter, Math.min(left, innerW - desiredW - gutter));
     setMegaPlacement({ left, width: desiredW });
-  }, [openLevel1]);
+  }, [openLevel1, catalogMenuOpen]);
 
   useLayoutEffect(() => {
     updateMegaPlacement();
@@ -285,49 +374,155 @@ export default function Navigation({
     return () => ro.disconnect();
   }, [embedInStickyChrome, onDesktopThinChromeHeight, showStickyBar]);
 
-  if (loading && !hideListingCategoryPills) {
-    return (
-      <nav className={`bg-white/95 backdrop-blur border-b border-gray-100 ${navLayoutClass} z-40 shadow-sm`.trim()}>
-        <div className="max-w-7xl mx-auto px-3">
-          <div className="flex gap-1.5 overflow-hidden py-1.5">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="h-7 w-20 rounded-full bg-gray-200 animate-pulse flex-shrink-0" />
-            ))}
-          </div>
-        </div>
-      </nav>
-    );
-  }
-
   const isKhoSaleActive = pathname === KHO_SALE_HREF || pathname?.startsWith(`${KHO_SALE_HREF}/`);
   const openCategory = tree.find((c) => c.name === openLevel1);
 
-  const handleCatalogMenuEnter = () => {
+  const openCatalogMenu = useCallback(() => {
     if (catalogMenuCloseTimerRef.current) {
       window.clearTimeout(catalogMenuCloseTimerRef.current);
       catalogMenuCloseTimerRef.current = null;
     }
+    const pos = triggerDropdownPos(catalogTriggerWrapRef.current);
+    if (pos) setCatalogDropdownPos(pos);
     setCatalogMenuOpen(true);
-    if (!openLevel1 && tree.length) setOpenLevel1(tree[0].name);
-  };
+    setOpenLevel1((prev) => prev ?? (tree.length ? tree[0].name : null));
+  }, [tree]);
+
+  const handleCatalogMenuEnter = openCatalogMenu;
 
   const handleCatalogMenuLeave = () => {
     if (catalogMenuCloseTimerRef.current) window.clearTimeout(catalogMenuCloseTimerRef.current);
     catalogMenuCloseTimerRef.current = window.setTimeout(() => setCatalogMenuOpen(false), 150);
   };
-  const handleStickyMenuEnter = () => {
+
+  const openStickyCatalogMenu = useCallback(() => {
     if (stickyMenuCloseTimerRef.current) {
       window.clearTimeout(stickyMenuCloseTimerRef.current);
       stickyMenuCloseTimerRef.current = null;
     }
+    const pos = triggerDropdownPos(stickyCatalogTriggerWrapRef.current);
+    if (pos) setStickyCatalogDropdownPos(pos);
     setStickyMenuOpen(true);
-    if (!openLevel1 && tree.length) setOpenLevel1(tree[0].name);
-  };
+    setOpenLevel1((prev) => prev ?? (tree.length ? tree[0].name : null));
+  }, [tree]);
+
+  const handleStickyMenuEnter = openStickyCatalogMenu;
 
   const handleStickyMenuLeave = () => {
     if (stickyMenuCloseTimerRef.current) window.clearTimeout(stickyMenuCloseTimerRef.current);
     stickyMenuCloseTimerRef.current = window.setTimeout(() => setStickyMenuOpen(false), 150);
   };
+
+  const renderCatalogDropdownPanel = (
+    pos: { top: number; left: number },
+    panelRef: React.RefObject<HTMLDivElement | null>,
+    onEnter: () => void,
+    onLeave: () => void,
+  ) => (
+    <div
+      ref={panelRef}
+      className="fixed w-[min(720px,calc(100vw-1.5rem))] bg-white border border-gray-200 shadow-xl rounded-xl overflow-hidden z-[85] py-2"
+      style={{ top: pos.top, left: pos.left }}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+    >
+      {loading && tree.length === 0 ? (
+        <div className="grid grid-cols-[220px_1fr] animate-pulse">
+          <div className="space-y-2 border-r border-gray-100 bg-gray-50/80 p-3">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="h-8 rounded-md bg-gray-200" />
+            ))}
+          </div>
+          <div className="space-y-3 p-3">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="h-4 rounded bg-gray-200" />
+            ))}
+          </div>
+        </div>
+      ) : (
+      <div className="grid grid-cols-[220px_1fr]">
+        <div className="bg-gray-50/80 border-r border-gray-100 p-3 max-h-[min(70vh,420px)] overflow-y-auto">
+          <div className="grid grid-cols-1 gap-1">
+            {tree.length === 0 && !loading && (
+              <div className="text-xs text-gray-500">Chưa có danh mục.</div>
+            )}
+            {tree.map((level1) => {
+              const isActive = openLevel1 === level1.name;
+              const l1Active = isActive || (isKhoSaleMenuCategory(level1) && isKhoSaleActive);
+              return (
+                <Link
+                  key={level1.name}
+                  href={level1CategoryHref(level1)}
+                  onMouseEnter={() => setOpenLevel1(level1.name)}
+                  className={`px-2.5 py-2 rounded-md text-xs font-medium truncate ${
+                    l1Active ? 'bg-orange-50 text-orange-700' : 'text-gray-700 hover:bg-white'
+                  }`}
+                >
+                  {level1.name}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+        <div className="p-3 max-h-[min(70vh,420px)] overflow-y-auto">
+          {!openCategory && (
+            <div className="text-xs text-gray-500">Di chuột vào danh mục để xem cấp 2, cấp 3.</div>
+          )}
+          {openCategory && isKhoSaleMenuCategory(openCategory) && (
+            <div className="text-xs text-gray-600 leading-relaxed">
+              <p className="font-semibold text-gray-800 mb-1">{KHO_SALE_MENU_NAME}</p>
+              <p>Hàng hoàn và tồn thanh lý — giá ưu đãi, số lượng có hạn.</p>
+              <Link href={KHO_SALE_HREF} className="inline-block mt-2 text-[#ea580c] font-medium hover:underline">
+                Xem tất cả →
+              </Link>
+            </div>
+          )}
+          {openCategory && !isKhoSaleMenuCategory(openCategory) && openCategory.children.length > 0 && (
+            <div className="grid grid-cols-2 gap-3">
+              {openCategory.children.map((level2) => {
+                const slug1 = categorySegmentForUrl(openCategory.slug) || categorySegmentForUrl(openCategory.name);
+                const slug2 = categorySegmentForUrl(level2.slug) || categorySegmentForUrl(level2.name);
+                return (
+                  <div key={level2ReactKey(slug1, slug2, level2.name)} className="min-w-0">
+                    <Link
+                      href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`}
+                      className="block text-xs font-semibold text-gray-800 hover:text-[#ea580c]"
+                    >
+                      {level2.name}
+                    </Link>
+                    {level2.children && level2.children.length > 0 && (
+                      <div className="mt-1 flex flex-col gap-1">
+                        {level2.children.map((level3) => {
+                          const name3 =
+                            typeof level3 === 'object' && level3 !== null && 'name' in level3
+                              ? (level3 as { name: string }).name
+                              : String(level3);
+                          const slug3 =
+                            (typeof level3 === 'object' && level3 !== null && 'slug' in level3
+                              ? categorySegmentForUrl((level3 as { slug?: string }).slug)
+                              : '') || categorySegmentForUrl(name3);
+                          return (
+                            <Link
+                              key={level3ReactKey(slug2, slug3 || undefined, name3)}
+                              href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
+                              className="text-[11px] text-gray-600 hover:text-[#ea580c] truncate"
+                            >
+                              {name3}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+      )}
+    </div>
+  );
 
   return (
     <>
@@ -364,6 +559,7 @@ export default function Navigation({
                 />
               </Link>
               <div
+                ref={stickyCatalogTriggerWrapRef}
                 className="relative"
                 onMouseEnter={handleStickyMenuEnter}
                 onMouseLeave={handleStickyMenuLeave}
@@ -371,104 +567,15 @@ export default function Navigation({
               <button
                 type="button"
                 className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium bg-white/20 text-white hover:bg-white/30 shadow-sm whitespace-nowrap"
+                aria-expanded={stickyMenuOpen}
+                aria-haspopup="true"
+                onClick={openStickyCatalogMenu}
               >
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
                 Danh mục
               </button>
-              {showStickyBar && stickyMenuOpen && (
-                <div
-                  className="absolute left-0 top-full mt-1 w-[720px] bg-white border border-gray-200 shadow-lg rounded-xl overflow-hidden z-[60] py-2"
-                  onMouseEnter={handleStickyMenuEnter}
-                  onMouseLeave={handleStickyMenuLeave}
-                >
-                  <div className="grid grid-cols-[220px_1fr]">
-                    <div className="bg-gray-50/80 border-r border-gray-100 p-3">
-                      <div className="grid grid-cols-1 gap-1">
-                        {tree.length === 0 && (
-                          <div className="text-xs text-gray-500">Chưa có danh mục.</div>
-                        )}
-                        {tree.map((level1) => {
-                          const isActive = openLevel1 === level1.name;
-                          const l1Active =
-                            isActive ||
-                            (isKhoSaleMenuCategory(level1) && isKhoSaleActive);
-                          return (
-                            <Link
-                              key={level1.name}
-                              href={level1CategoryHref(level1)}
-                              onMouseEnter={() => setOpenLevel1(level1.name)}
-                              className={`px-2.5 py-2 rounded-md text-xs font-medium truncate ${
-                                l1Active ? 'bg-orange-50 text-orange-700' : 'text-gray-700 hover:bg-white'
-                              }`}
-                            >
-                              {level1.name}
-                            </Link>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    <div className="p-3">
-                      {!openCategory && (
-                        <div className="text-xs text-gray-500">Di chuột vào danh mục để xem cấp 2, cấp 3.</div>
-                      )}
-                      {openCategory && isKhoSaleMenuCategory(openCategory) && (
-                        <div className="text-xs text-gray-600 leading-relaxed">
-                          <p className="font-semibold text-gray-800 mb-1">{KHO_SALE_MENU_NAME}</p>
-                          <p>Hàng hoàn và tồn thanh lý — giá ưu đãi, số lượng có hạn.</p>
-                          <Link href={KHO_SALE_HREF} className="inline-block mt-2 text-[#ea580c] font-medium hover:underline">
-                            Xem tất cả →
-                          </Link>
-                        </div>
-                      )}
-                      {openCategory && !isKhoSaleMenuCategory(openCategory) && (
-                        <div className="grid grid-cols-2 gap-3">
-                          {openCategory.children.map((level2) => {
-                            const slug1 =
-                              categorySegmentForUrl(openCategory.slug) || categorySegmentForUrl(openCategory.name);
-                            const slug2 =
-                              categorySegmentForUrl(level2.slug) || categorySegmentForUrl(level2.name);
-                            return (
-                              <div
-                                key={level2ReactKey(slug1, slug2, level2.name)}
-                                className="min-w-0"
-                              >
-                                <Link
-                                  href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`}
-                                  className="block text-xs font-semibold text-gray-800 hover:text-[#ea580c]"
-                                >
-                                  {level2.name}
-                                </Link>
-                                {level2.children && level2.children.length > 0 && (
-                                  <div className="mt-1 flex flex-col gap-1">
-                                    {level2.children.map((level3) => {
-                                      const name3 = typeof level3 === 'object' && level3 !== null && 'name' in level3 ? (level3 as { name: string }).name : String(level3);
-                                      const slug3 =
-                                        (typeof level3 === 'object' && level3 !== null && 'slug' in level3
-                                          ? categorySegmentForUrl((level3 as { slug?: string }).slug)
-                                          : '') || categorySegmentForUrl(name3);
-                                      return (
-                                        <Link
-                                          key={level3ReactKey(slug2, slug3 || undefined, name3)}
-                                          href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
-                                          className="text-[11px] text-gray-600 hover:text-[#ea580c] truncate"
-                                        >
-                                          {name3}
-                                        </Link>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
               </div>
             </div>
             <form
@@ -567,7 +674,7 @@ export default function Navigation({
       {!hideListingCategoryPills && (
       <nav
         ref={dropdownRef}
-        className={`${navLayoutClass} z-40 transition-all duration-300 ${
+        className={`${navLayoutClass} ${catalogMenuOpen || openLevel1 ? 'z-[68]' : 'z-40'} transition-all duration-300 ${
           isScrolled ? 'bg-[#ea580c]/95 backdrop-blur-md shadow-md border-b border-orange-600' : 'bg-[#ea580c] border-b border-orange-600 shadow-sm'
         }`}
       >
@@ -577,6 +684,7 @@ export default function Navigation({
             className="flex items-center gap-1.5 py-1.5 overflow-x-auto overflow-y-visible scroll-smooth hide-scrollbar"
           >
             <div
+              ref={catalogTriggerWrapRef}
               className="relative flex-shrink-0"
               onMouseEnter={handleCatalogMenuEnter}
               onMouseLeave={handleCatalogMenuLeave}
@@ -588,102 +696,19 @@ export default function Navigation({
                 }`}
                 aria-expanded={catalogMenuOpen}
                 aria-haspopup="true"
+                onClick={openCatalogMenu}
               >
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
                 <span>Danh mục</span>
               </button>
-              {catalogMenuOpen && (
-                <div
-                  className="absolute left-0 top-full mt-1 w-[min(720px,calc(100vw-1.5rem))] bg-white border border-gray-200 shadow-lg rounded-xl overflow-hidden z-[100] py-2"
-                  onMouseEnter={handleCatalogMenuEnter}
-                  onMouseLeave={handleCatalogMenuLeave}
-                >
-                  <div className="grid grid-cols-[220px_1fr]">
-                    <div className="bg-gray-50/80 border-r border-gray-100 p-3 max-h-[min(70vh,420px)] overflow-y-auto">
-                      <div className="grid grid-cols-1 gap-1">
-                        {tree.map((level1) => {
-                          const isActive = openLevel1 === level1.name;
-                          const l1Active =
-                            isActive ||
-                            (isKhoSaleMenuCategory(level1) && isKhoSaleActive);
-                          return (
-                            <Link
-                              key={level1.name}
-                              href={level1CategoryHref(level1)}
-                              onMouseEnter={() => setOpenLevel1(level1.name)}
-                              className={`px-2.5 py-2 rounded-md text-xs font-medium truncate ${
-                                l1Active ? 'bg-orange-50 text-orange-700' : 'text-gray-700 hover:bg-white'
-                              }`}
-                            >
-                              {level1.name}
-                            </Link>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    <div className="p-3 max-h-[min(70vh,420px)] overflow-y-auto">
-                      {!openCategory && (
-                        <div className="text-xs text-gray-500">Di chuột vào danh mục để xem cấp 2, cấp 3.</div>
-                      )}
-                      {openCategory && isKhoSaleMenuCategory(openCategory) && (
-                        <div className="text-xs text-gray-600 leading-relaxed">
-                          <p className="font-semibold text-gray-800 mb-1">{KHO_SALE_MENU_NAME}</p>
-                          <p>Hàng hoàn và tồn thanh lý — giá ưu đãi, số lượng có hạn.</p>
-                          <Link href={KHO_SALE_HREF} className="inline-block mt-2 text-[#ea580c] font-medium hover:underline">
-                            Xem tất cả →
-                          </Link>
-                        </div>
-                      )}
-                      {openCategory && !isKhoSaleMenuCategory(openCategory) && openCategory.children.length > 0 && (
-                        <div className="grid grid-cols-2 gap-3">
-                          {openCategory.children.map((level2) => {
-                            const slug1 =
-                              categorySegmentForUrl(openCategory.slug) || categorySegmentForUrl(openCategory.name);
-                            const slug2 =
-                              categorySegmentForUrl(level2.slug) || categorySegmentForUrl(level2.name);
-                            return (
-                              <div key={level2ReactKey(slug1, slug2, level2.name)} className="min-w-0">
-                                <Link
-                                  href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`}
-                                  className="block text-xs font-semibold text-gray-800 hover:text-[#ea580c]"
-                                >
-                                  {level2.name}
-                                </Link>
-                                {level2.children && level2.children.length > 0 && (
-                                  <div className="mt-1 flex flex-col gap-1">
-                                    {level2.children.map((level3) => {
-                                      const name3 =
-                                        typeof level3 === 'object' && level3 !== null && 'name' in level3
-                                          ? (level3 as { name: string }).name
-                                          : String(level3);
-                                      const slug3 =
-                                        (typeof level3 === 'object' && level3 !== null && 'slug' in level3
-                                          ? categorySegmentForUrl((level3 as { slug?: string }).slug)
-                                          : '') || categorySegmentForUrl(name3);
-                                      return (
-                                        <Link
-                                          key={level3ReactKey(slug2, slug3 || undefined, name3)}
-                                          href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
-                                          className="text-[11px] text-gray-600 hover:text-[#ea580c] truncate"
-                                        >
-                                          {name3}
-                                        </Link>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
+            {loading && tree.length === 0
+              ? [...Array(5)].map((_, i) => (
+                  <div key={`cat-skel-${i}`} className={`${basePill} bg-white/15 animate-pulse w-20`} aria-hidden />
+                ))
+              : null}
             {tree.map((level1) => {
               const slug1 =
                 categorySegmentForUrl(level1.slug) || categorySegmentForUrl(level1.name);
@@ -757,7 +782,7 @@ export default function Navigation({
 
 
         {/* Panel danh mục cấp 2 & 3 - hiển thị dưới thanh, không bị overflow cắt */}
-        {openCategory && megaPlacement && openCategory.children && openCategory.children.length > 0 && (
+        {openCategory && megaPlacement && !catalogMenuOpen && openCategory.children && openCategory.children.length > 0 && (
           <div
             className="absolute z-[100] -mt-1.5 pt-1.5 border-t border-gray-100 bg-gray-50/90 py-2.5 shadow-lg rounded-b-xl"
             style={{
@@ -835,6 +860,24 @@ export default function Navigation({
         </div>
       </nav>
       )}
+      {catalogMenuOpen
+        ? renderCatalogDropdownPanel(
+            catalogDropdownPos ??
+              triggerDropdownPos(catalogTriggerWrapRef.current) ?? { top: 0, left: 0 },
+            catalogDropdownRef,
+            handleCatalogMenuEnter,
+            handleCatalogMenuLeave,
+          )
+        : null}
+      {showStickyBar && stickyMenuOpen
+        ? renderCatalogDropdownPanel(
+            stickyCatalogDropdownPos ??
+              triggerDropdownPos(stickyCatalogTriggerWrapRef.current) ?? { top: 0, left: 0 },
+            stickyCatalogDropdownRef,
+            handleStickyMenuEnter,
+            handleStickyMenuLeave,
+          )
+        : null}
     </>
   );
 }

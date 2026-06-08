@@ -1049,6 +1049,15 @@ class MigrationManager:
         )
         results['product_search_cache_permanent'] = self.migrate_product_search_cache_permanent()
 
+        from app.models.category_menu_cache import CategoryMenuCache
+
+        results['category_menu_cache_create'] = self._create_table_if_not_exists(
+            "category_menu_cache", CategoryMenuCache
+        )
+        results['category_menu_cache_sync'] = self._sync_table_columns(
+            "category_menu_cache", CategoryMenuCache
+        )
+
         return results
 
     def migrate_sale_calendar_settings_date_columns(self) -> bool:

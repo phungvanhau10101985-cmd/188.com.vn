@@ -129,6 +129,9 @@ print("[OK] ProductSearchCache model loaded")
 from app.models.listing_facet_cache import ListingFacetCache
 print("[OK] ListingFacetCache model loaded")
 
+from app.models.category_menu_cache import CategoryMenuCache
+print("[OK] CategoryMenuCache model loaded")
+
 # 9. Search mappings/logs
 try:
     from app.models.search_mapping import SearchMapping, SearchMappingType
@@ -234,6 +237,7 @@ __all__ = [
     "SearchQueryMapping",
     "ProductSearchCache",
     "ListingFacetCache",
+    "CategoryMenuCache",
     "SearchMapping",
     "SearchMappingType",
     "SearchLog",

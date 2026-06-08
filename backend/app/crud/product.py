@@ -5074,31 +5074,30 @@ _CATEGORY_MENU_TREE_KEY_ALL = "category_tree_v1:from_products:active=false"
 
 def _build_menu_tree_session(is_active: bool) -> List[Dict[str, Any]]:
     from app.db.session import SessionLocal
-    from app.db.retry import TransientDbError, is_transient_db_error
+    from app.crud import category_menu_cache as menu_cache_crud
+    from app.models.category_menu_cache import CategoryMenuCache
 
     db = SessionLocal()
     try:
-        try:
-            return get_category_tree_from_products(db, is_active=is_active, hide_empty_branches=True)
-        except Exception as prune_exc:
-            if is_transient_db_error(prune_exc):
-                raise TransientDbError(str(prune_exc)) from prune_exc
-            # Prune/đếm SP từng nhánh có thể lỗi với dữ liệu lạ; trả cây chưa prune vẫn hơn 500.
-            return get_category_tree_from_products(db, is_active=is_active, hide_empty_branches=False)
-    except TransientDbError:
-        raise
-    except Exception as e:
-        if is_transient_db_error(e):
-            raise TransientDbError(str(e)) from e
-        logger.exception("menu tree build failed (is_active=%s)", is_active)
-        return []
+        cached = menu_cache_crud.read_cached_tree(db, is_active, allow_stale=True)
+        if cached:
+            row = (
+                db.query(CategoryMenuCache)
+                .filter(CategoryMenuCache.cache_key == menu_cache_crud.cache_key_for_is_active(is_active))
+                .first()
+            )
+            if row and row.is_stale:
+                menu_cache_crud.schedule_rebuild_both_trees()
+            return cached
+        return menu_cache_crud.rebuild_tree_in_session(db, is_active)
     finally:
         db.close()
 
 
 def get_cached_menu_category_tree(is_active: bool = True) -> List[Dict[str, Any]]:
-    """Cây danh mục trên menu (đã lọc theo CATEGORY_MENU_MIN_PRODUCT_COUNT). Cache in-process (mặc định 300s)."""
+    """Cây danh mục menu: RAM → DB JSON → build từ products."""
     from app.utils.ttl_cache import cache as ttl_cache
+
     key = _CATEGORY_MENU_TREE_KEY_ACTIVE if is_active else _CATEGORY_MENU_TREE_KEY_ALL
     return ttl_cache.get_or_fetch(key, _category_menu_tree_ttl_sec(), lambda: _build_menu_tree_session(is_active))
 

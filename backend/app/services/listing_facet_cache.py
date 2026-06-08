@@ -723,15 +723,31 @@ def refresh_caches_after_products_change(
         except Exception as exc:
             logger.warning("Refresh search facet cache failed (%s): %s", row.scope_key, exc)
 
+    try:
+        from app.crud import category_menu_cache as menu_cache_crud
+
+        menu_cache_crud.schedule_refresh_after_product_changes(
+            products,
+            previous_products=previous_products,
+            old_category=old_category,
+            old_subcategory=old_subcategory,
+            old_sub_subcategory=old_sub_subcategory,
+            old_category_id=old_category_id,
+        )
+    except Exception as exc:
+        logger.warning("Refresh category menu cache failed: %s", exc)
+
 
 def refresh_caches_after_bulk_import(db: Session) -> None:
     try:
         from app.crud import product_search_cache as product_search_cache_crud
+        from app.crud import category_menu_cache as menu_cache_crud
 
         product_search_cache_crud.refresh_all_caches(db)
         rebuild_all_category_caches(db)
         facet_cache_crud.mark_stale_by_types(db, (SCOPE_SEARCH_Q,))
         rebuild_all_search_caches(db)
         rebuild_all_seo_cluster_caches(db)
+        menu_cache_crud.rebuild_both_trees(db)
     except Exception as exc:
         logger.warning("Refresh facet caches after bulk import failed: %s", exc)

@@ -473,6 +473,12 @@ def execute_taxonomy_sheets(db: Session, sheets: Dict[str, pd.DataFrame]) -> Dic
     e_paths = _validate_paths(df_paths, cat_ext_to_id, cluster_ext_to_id)
 
     ttl_cache.invalidate_all()
+    try:
+        from app.crud import category_menu_cache as menu_cache_crud
+
+        menu_cache_crud.invalidate_all_menu_caches()
+    except Exception:
+        pass
 
     meta_kv: Dict[str, str] = {}
     if {"key", "value"} <= set(df_meta.columns):

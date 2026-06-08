@@ -6,6 +6,7 @@ import { apiClient } from '@/lib/api-client';
 import { sortCategoryLevel1Tree } from '@/lib/category-tree-sort';
 import { withKhoSaleMenuCategory } from '@/lib/kho-sale-menu-category';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { readNavCategoryTreeCache } from '@/lib/nav-category-tree-cache';
 import type { CategoryLevel1 } from '@/types/api';
 
 /**
@@ -19,6 +20,13 @@ export function usePersonalizedCategoryTree(
   const { user, isAuthenticated } = useAuth();
   const [genderSuffix, setGenderSuffix] = useState<string | null>(null);
   const [viewTick, setViewTick] = useState(0);
+  const [cachedTree, setCachedTree] = useState<CategoryLevel1[]>([]);
+
+  useEffect(() => {
+    if ((baseTree?.length ?? 0) > 0) return;
+    const cached = readNavCategoryTreeCache();
+    if (cached.length > 0) setCachedTree(cached);
+  }, [baseTree]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -42,8 +50,11 @@ export function usePersonalizedCategoryTree(
     };
   }, [pathname, isAuthenticated, user?.gender, viewTick]);
 
+  const resolvedBase =
+    (baseTree?.length ?? 0) > 0 ? baseTree! : cachedTree;
+
   return useMemo(
-    () => withKhoSaleMenuCategory(sortCategoryLevel1Tree(baseTree || [], genderSuffix)),
-    [baseTree, genderSuffix],
+    () => withKhoSaleMenuCategory(sortCategoryLevel1Tree(resolvedBase, genderSuffix)),
+    [resolvedBase, genderSuffix],
   );
 }

@@ -110,6 +110,19 @@ export async function getCategoryCatalogTilesForPage(
 }
 
 /** Server-side: lấy cây danh mục 3 cấp từ API (dùng trong layout để thanh danh mục luôn có dữ liệu). */
+async function fetchCategoryTreeForLayoutOnce(): Promise<CategoryLevel1[]> {
+  const url = `${API_BASE}/categories/from-products`;
+  const res = await fetch(url, {
+    next: { revalidate: REVALIDATE_CATEGORY, tags: [CACHE_TAG_CATEGORY_SEO] },
+    headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(LAYOUT_CATEGORY_TREE_TIMEOUT_MS),
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  const tree = Array.isArray(data) ? (data as CategoryLevel1[]) : [];
+  return withKhoSaleMenuCategory(tree);
+}
+
 export async function getCategoryTreeForLayout(): Promise<CategoryLevel1[]> {
   if (isNextProductionBuild()) {
     return [];
@@ -124,23 +137,29 @@ export async function getCategoryTreeForLayout(): Promise<CategoryLevel1[]> {
   }
   categoryTreeInflight = (async () => {
     try {
-      const url = `${API_BASE}/categories/from-products`;
-      const res = await fetch(url, {
-        next: { revalidate: REVALIDATE_CATEGORY, tags: [CACHE_TAG_CATEGORY_SEO] },
-        headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(LAYOUT_CATEGORY_TREE_TIMEOUT_MS),
-      });
-      if (!res.ok) return [];
-      const data = await res.json();
-      const tree = Array.isArray(data) ? (data as CategoryLevel1[]) : [];
-      const value = withKhoSaleMenuCategory(tree);
+      let value = await fetchCategoryTreeForLayoutOnce();
+      // Backend cache lạnh / timeout ngắn — thử lại một lần trước khi SSR trả tree rỗng.
+      if (value.length === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 450));
+        value = await fetchCategoryTreeForLayoutOnce();
+      }
       categoryTreeMemCache = {
         expiresAt: Date.now() + CATEGORY_TREE_MEM_TTL_MS,
         value,
       };
       return value;
     } catch {
-      return [];
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 450));
+        const value = await fetchCategoryTreeForLayoutOnce();
+        categoryTreeMemCache = {
+          expiresAt: Date.now() + CATEGORY_TREE_MEM_TTL_MS,
+          value,
+        };
+        return value;
+      } catch {
+        return [];
+      }
     } finally {
       categoryTreeInflight = null;
     }
