@@ -5,6 +5,7 @@
 
 import type { CategoryLevel1, HeroCategoryTile } from "@/types/api";
 import { withKhoSaleMenuCategory } from "@/lib/kho-sale-menu-category";
+import { isNextProductionBuild } from "@/lib/build-phase";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001/api/v1";
@@ -106,11 +107,6 @@ export async function getCategoryCatalogTilesForPage(
   } catch {
     return [];
   }
-}
-
-/** next build prerender — bỏ qua category tree nặng; runtime request vẫn SSR đầy đủ. */
-function isNextProductionBuild(): boolean {
-  return process.env.NEXT_PHASE === "phase-production-build";
 }
 
 /** Server-side: lấy cây danh mục 3 cấp từ API (dùng trong layout để thanh danh mục luôn có dữ liệu). */

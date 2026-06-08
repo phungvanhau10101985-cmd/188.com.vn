@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { CATEGORY_SEO_SITEMAP_PATH } from "@/lib/category-sitemap";
 import { getSiteOrigin } from "@/lib/site-origin";
 
+export const dynamic = "force-dynamic";
 export const revalidate = 3600;
 
 function escapeXml(text: string): string {

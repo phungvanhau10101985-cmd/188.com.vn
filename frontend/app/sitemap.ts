@@ -4,6 +4,11 @@ import type { CategoryLevel1 } from "@/types/api";
 import { INFO_PAGES } from "@/app/info/info-pages.config";
 import { listSeoClusters } from "@/lib/seo-cluster";
 import { productPublicPdpUrl } from "@/lib/product-path-slug";
+import { isNextProductionBuild } from "@/lib/build-phase";
+
+/** Không prerender lúc build — generate khi request (tránh timeout khi API/DB bận). */
+export const dynamic = "force-dynamic";
+export const revalidate = 3600;
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ||
@@ -13,14 +18,18 @@ const BASE_URL =
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001/api/v1";
 
-/** Lấy tất cả slug sản phẩm từ API (phân trang, payload nhẹ). */
+/** Lấy slug SP từ API (runtime). Bỏ qua lúc `next build` — tránh treo deploy. */
 async function getAllProductSlugs(): Promise<{ slug: string; updated_at?: string }[]> {
+  if (isNextProductionBuild()) {
+    return [];
+  }
   const results: { slug: string; updated_at?: string }[] = [];
   let skip = 0;
   let useLegacyList = false;
   const limit = 5000;
+  const maxPages = 12;
   try {
-    while (true) {
+    for (let page = 0; page < maxPages; page++) {
       const pageLimit = useLegacyList ? 500 : limit;
       const url = useLegacyList
         ? `${API_BASE}/products/?limit=${pageLimit}&skip=${skip}&is_active=true`
@@ -28,6 +37,7 @@ async function getAllProductSlugs(): Promise<{ slug: string; updated_at?: string
       const res = await fetch(url, {
         ...(useLegacyList ? { cache: "no-store" as const } : { next: { revalidate: 3600 } }),
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(45_000),
       });
       if (!useLegacyList && res.status === 404) {
         useLegacyList = true;

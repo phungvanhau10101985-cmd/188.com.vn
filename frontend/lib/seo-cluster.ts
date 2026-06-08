@@ -7,6 +7,7 @@
  */
 
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
+import { isNextProductionBuild } from '@/lib/build-phase';
 
 const REVALIDATE_TTL = process.env.NODE_ENV === "development" ? 0 : 120;
 export const SEO_CLUSTER_TAG = "seo-clusters";
@@ -159,10 +160,14 @@ export async function getSeoClusterFacets(
 }
 
 export async function listSeoClusters(): Promise<SeoClusterListItem[]> {
+  if (isNextProductionBuild()) {
+    return [];
+  }
   try {
     const res = await fetch(`${getApiBaseUrl()}/seo-clusters/`, {
       next: { revalidate: REVALIDATE_TTL, tags: [SEO_CLUSTER_TAG] },
       headers: { "Content-Type": "application/json", ...ngrokFetchHeaders() },
+      signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) return [];
     const data = await res.json();

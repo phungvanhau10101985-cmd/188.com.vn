@@ -7,6 +7,7 @@ import {
 } from '@/lib/category-sitemap';
 import { listSeoClusters } from '@/lib/seo-cluster';
 
+export const dynamic = "force-dynamic";
 export const revalidate = 3600;
 
 function siteBaseFromRequest(request: Request): string {
