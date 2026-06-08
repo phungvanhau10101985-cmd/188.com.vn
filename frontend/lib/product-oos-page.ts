@@ -10,7 +10,9 @@ import {
 
 export async function loadProductForOosPage(slug: string): Promise<Product | null> {
   return getProductBySlugForSSR(slug, {
-    noStore: true,
+    // Dùng cache ngắn để chặn bot burst gọi by-slug liên tục làm cạn pool DB.
+    // Luồng redirect OOS vẫn được cập nhật nhờ revalidate 60s.
+    noStore: false,
     attachGroupListing: true,
   });
 }
