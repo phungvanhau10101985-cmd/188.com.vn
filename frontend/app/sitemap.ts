@@ -3,8 +3,6 @@ import { getCategoryTreeForLayout } from "@/lib/category-seo";
 import type { CategoryLevel1 } from "@/types/api";
 import { INFO_PAGES } from "@/app/info/info-pages.config";
 import { listSeoClusters } from "@/lib/seo-cluster";
-import { productPublicPdpUrl } from "@/lib/product-path-slug";
-import { isNextProductionBuild } from "@/lib/build-phase";
 
 /** Không prerender lúc build — generate khi request (tránh timeout khi API/DB bận). */
 export const dynamic = "force-dynamic";
@@ -15,53 +13,7 @@ const BASE_URL =
   process.env.NEXT_PUBLIC_DOMAIN ||
   "https://188.com.vn";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001/api/v1";
-
-/** Lấy slug SP từ API (runtime). Bỏ qua lúc `next build` — tránh treo deploy. */
-async function getAllProductSlugs(): Promise<{ slug: string; updated_at?: string }[]> {
-  if (isNextProductionBuild()) {
-    return [];
-  }
-  const results: { slug: string; updated_at?: string }[] = [];
-  let skip = 0;
-  let useLegacyList = false;
-  const limit = 5000;
-  const maxPages = 12;
-  try {
-    for (let page = 0; page < maxPages; page++) {
-      const pageLimit = useLegacyList ? 500 : limit;
-      const url = useLegacyList
-        ? `${API_BASE}/products/?limit=${pageLimit}&skip=${skip}&is_active=true`
-        : `${API_BASE}/products/sitemap-slugs?limit=${pageLimit}&skip=${skip}&is_active=true`;
-      const res = await fetch(url, {
-        ...(useLegacyList ? { cache: "no-store" as const } : { next: { revalidate: 3600 } }),
-        headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(45_000),
-      });
-      if (!useLegacyList && res.status === 404) {
-        useLegacyList = true;
-        skip = 0;
-        results.length = 0;
-        continue;
-      }
-      if (!res.ok) break;
-      const data = (await res.json()) as { products?: { slug?: string; updated_at?: string }[] };
-      const products = data.products || [];
-      if (products.length === 0) break;
-      for (const p of products) {
-        if (p.slug) results.push({ slug: p.slug, updated_at: p.updated_at });
-      }
-      if (products.length < pageLimit) break;
-      skip += pageLimit;
-    }
-  } catch {
-    // Bỏ qua nếu API lỗi (vd: build không có backend)
-  }
-  return results;
-}
-
-/** Flatten cây danh mục 2 cấp đầu (cat1 + cat2) cho sitemap. Cat3 đã gom về `/c/<cluster>`. */
+/** Trang tĩnh + danh mục + cluster + info. SP nằm ở /sitemap-san-pham/<page> (sitemap index). */
 function flattenCategoryPaths(tree: CategoryLevel1[]): string[] {
   const paths: string[] = [];
   for (const c1 of tree) {
@@ -128,17 +80,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       lastModified: now,
       changeFrequency: "monthly",
       priority: 0.5,
-    });
-  }
-
-  // Trang sản phẩm
-  const products = await getAllProductSlugs();
-  for (const p of products) {
-    entries.push({
-      url: productPublicPdpUrl(p.slug, BASE_URL),
-      lastModified: p.updated_at ? new Date(p.updated_at) : now,
-      changeFrequency: "weekly",
-      priority: 0.7,
     });
   }
 

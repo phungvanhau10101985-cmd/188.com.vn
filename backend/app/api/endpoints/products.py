@@ -1163,10 +1163,13 @@ def read_product_sitemap_slugs(
     skip: int = Query(0, ge=0),
     limit: int = Query(5000, ge=1, le=10000),
     is_active: bool = Query(True),
+    skip_total: bool = Query(False),
 ):
     """slug + updated_at only — lightweight for Next.js sitemap (avoids >2MB list payloads)."""
     response.headers["Cache-Control"] = "public, max-age=3600"
-    return crud.product.get_product_sitemap_slugs(db, skip=skip, limit=limit, is_active=is_active)
+    return crud.product.get_product_sitemap_slugs(
+        db, skip=skip, limit=limit, is_active=is_active, skip_total=skip_total
+    )
 
 
 # Phải đăng ký TRƯỚC /{product_id} — nếu không "by-slug" bị nuốt như product_id.

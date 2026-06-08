@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 
 import { CATEGORY_SEO_SITEMAP_PATH } from "@/lib/category-sitemap";
 import { getSiteOrigin } from "@/lib/site-origin";
+import {
+  SITEMAP_PRODUCT_PATH_PREFIX,
+  countProductSitemapPages,
+  fetchProductSitemapPage,
+} from "@/lib/sitemap-products";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 3600;
@@ -15,10 +20,14 @@ function escapeXml(text: string): string {
     .replace(/'/g, "&apos;");
 }
 
-function buildSitemapIndexXml(origin: string): string {
+function buildSitemapIndexXml(origin: string, productPages: number): string {
   const sitemaps = [
     `${origin}/sitemap.xml`,
     `${origin}${CATEGORY_SEO_SITEMAP_PATH}`,
+    ...Array.from(
+      { length: productPages },
+      (_, i) => `${origin}${SITEMAP_PRODUCT_PATH_PREFIX}/${i + 1}`,
+    ),
   ];
   const now = new Date().toISOString();
   const entries = sitemaps
@@ -33,7 +42,9 @@ function buildSitemapIndexXml(origin: string): string {
 
 export async function GET() {
   const origin = getSiteOrigin();
-  const xml = buildSitemapIndexXml(origin);
+  const { total } = await fetchProductSitemapPage(1, { skipTotal: false });
+  const productPages = countProductSitemapPages(total);
+  const xml = buildSitemapIndexXml(origin, productPages);
   return new NextResponse(xml, {
     status: 200,
     headers: {

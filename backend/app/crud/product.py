@@ -3092,6 +3092,7 @@ def get_product_sitemap_slugs(
     skip: int = 0,
     limit: int = 5000,
     is_active: Optional[bool] = True,
+    skip_total: bool = False,
 ) -> dict:
     """Chỉ slug + updated_at — payload nhẹ cho sitemap Next.js (tránh giới hạn cache 2MB)."""
     from app.services.warehouse_clearance import apply_catalog_visibility_filter
@@ -3101,13 +3102,15 @@ def get_product_sitemap_slugs(
     if is_active is not None:
         query = query.filter(Product.is_active == is_active)
     query = apply_catalog_visibility_filter(query)
-    total = int(
-        query.enable_eagerloads(False)
-        .order_by(None)
-        .with_entities(sql_func.count(Product.id))
-        .scalar()
-        or 0
-    )
+    total = 0
+    if not skip_total:
+        total = int(
+            query.enable_eagerloads(False)
+            .order_by(None)
+            .with_entities(sql_func.count(Product.id))
+            .scalar()
+            or 0
+        )
     rows = (
         query.order_by(Product.id)
         .offset(skip)
