@@ -674,7 +674,23 @@ async def global_unhandled_exception(request: Request, exc: Exception):
     Mặc định uvicorn/Starlette có thể trả HTML/text cho 500 — admin XHR (import Excel) chỉ parse JSON
     → báo 'Phản hồi không hợp lệ'. Handler này bắt phần còn lại sau HTTPException / RequestValidationError, v.v.
     """
+    from app.db.retry import TransientDbError, is_transient_db_error
     from app.services.auth_failure_alert import maybe_notify_auth_login_failure
+
+    if isinstance(exc, TransientDbError) or is_transient_db_error(exc):
+        logger.warning(
+            "Transient DB error %s %s: %s",
+            request.method,
+            request.url.path,
+            exc,
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "Cơ sở dữ liệu tạm thời không phản hồi — vui lòng thử lại sau vài giây"
+            },
+            headers={"Retry-After": "3"},
+        )
 
     logger.exception("Unhandled exception %s %s", request.method, request.url.path)
     msg = str(exc).strip() or exc.__class__.__name__
