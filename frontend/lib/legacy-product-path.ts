@@ -77,16 +77,16 @@ export async function resolveProductFromLegacyPath(path: string): Promise<Produc
   return null;
 }
 
-/** Tra SP + đường dẫn listing song song (SSR legacy URL). */
+/** Tra SP + đường dẫn listing (SSR legacy URL). Chỉ gọi group-listing khi không có SP. */
 export async function resolveLegacyProductAndListingPath(path: string): Promise<{
   product: Product | null;
   listingPath: string | null;
 }> {
   const key = normalizeLegacyProductPath(path);
-  const [product, listingPath] = await Promise.all([
-    resolveProductFromLegacyPath(key),
-    resolveProductGroupListingPath(key, { legacyMarketingPath: true }),
-  ]);
+  const product = await resolveProductFromLegacyPath(key);
+  const listingPath = product
+    ? null
+    : await resolveProductGroupListingPath(key, { legacyMarketingPath: true });
   return { product, listingPath };
 }
 

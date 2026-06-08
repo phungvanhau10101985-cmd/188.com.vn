@@ -48,6 +48,7 @@ export async function resolveProductGroupListingPath(
         ? { next: { revalidate: 300 } }
         : { cache: 'no-store' as const }),
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as ProductGroupListingRedirectResult;

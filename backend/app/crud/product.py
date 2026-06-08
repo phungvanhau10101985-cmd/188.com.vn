@@ -2734,7 +2734,7 @@ def _resolve_missing_product_listing_path(
     product_id: Optional[str] = None,
 ) -> str:
     """
-    SP không còn trong DB: DeepSeek → ``/?q=``; fallback parse URL (không quét pool 600 slug).
+    SP không còn trong DB (hoặc ẩn storefront): fallback nhanh trước; DeepSeek chỉ URL legacy lạ.
     """
     from app.services.legacy_oos_deepseek_keywords import deepseek_legacy_oos_search_query
 
@@ -2742,7 +2742,27 @@ def _resolve_missing_product_listing_path(
     if not source:
         return "/"
 
-    ai_q = deepseek_legacy_oos_search_query(source)
+    # SP catalog (slug có a188 / còn dòng DB ẩn ảnh) — cluster hoặc ?q= ngắn, không gọi DeepSeek.
+    if "a188" in source.lower() or (product_id or "").strip():
+        row = get_product_by_slug(db, slug=source)
+        if row is None and (product_id or "").strip():
+            row = get_product_by_product_id(db, product_id=(product_id or "").strip())
+        if row is not None:
+            path = _cluster_listing_path_for_product(db, row)
+            if path:
+                return path
+            pid = getattr(row, "product_id", None) or product_id
+            name_prefix = product_slug_name_prefix(source, pid)
+            pool = product_slug_oos_pool_prefix_fast(name_prefix, source_slug=source) or (
+                (name_prefix or "").strip().lower()
+            )
+            search_path = _oos_home_search_fallback(pool)
+            if search_path:
+                return search_path
+
+    ai_q = None
+    if "a188" not in source.lower():
+        ai_q = deepseek_legacy_oos_search_query(source)
     if ai_q:
         return _home_search_listing_path(ai_q)
 

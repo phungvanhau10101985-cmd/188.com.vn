@@ -87,11 +87,13 @@ export async function getProductBySlugForSSR(
     let res = await fetch(`${apiBase}/products/by-slug/${encoded}${attachQs}`, {
       ...(options?.noStore ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
       res = await fetch(`${apiBase}/products/by-slug/?${params}`, {
         ...(options?.noStore ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(15_000),
       });
     }
     if (!res.ok) return null;

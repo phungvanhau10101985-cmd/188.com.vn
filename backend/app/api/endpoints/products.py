@@ -1128,6 +1128,21 @@ def create_product(
     return _product_to_response(db, created)
 
 
+def _lookup_product_for_group_listing(db: Session, slug: str):
+    """Storefront trước; nếu SP ẩn (không ảnh) vẫn dùng để redirect listing — không gọi DeepSeek."""
+    row = _lookup_product_by_slug(db, slug=slug)
+    if row is not None:
+        return row
+    try:
+        return crud.product.get_product_by_slug(db, slug=slug)
+    except TransientDbError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=_DB_UNAVAILABLE_DETAIL,
+            headers={"Retry-After": "3"},
+        ) from exc
+
+
 @router.get("/group-listing-path", response_model=dict)
 def read_product_group_listing_path(
     response: Response,
@@ -1137,7 +1152,7 @@ def read_product_group_listing_path(
     """API nhẹ: chỉ trả đường dẫn listing nhóm (cache HTTP 10 phút)."""
     response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=120"
     source = (slug or "").strip()
-    current = _lookup_product_by_slug(db, slug=source)
+    current = _lookup_product_for_group_listing(db, slug=source)
     pid = getattr(current, "product_id", None) if current else None
     path = crud.product.resolve_product_group_listing_path(
         db,
@@ -1170,7 +1185,7 @@ def read_product_oos_group_redirect(
     """
     response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=120"
     source = (slug or "").strip()
-    current = _lookup_product_by_slug(db, slug=source)
+    current = _lookup_product_for_group_listing(db, slug=source)
     pid = getattr(current, "product_id", None) if current else None
     path = crud.product.resolve_product_group_listing_path(
         db,

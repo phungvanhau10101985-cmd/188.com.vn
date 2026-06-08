@@ -18,7 +18,7 @@ _LEGACY_OOS_KEYWORDS_CACHE: Dict[str, Tuple[float, str]] = {}
 _LEGACY_OOS_KEYWORDS_CACHE_TTL_SEC = 3600
 _LEGACY_OOS_KEYWORDS_CACHE_MAX = 2000
 _LEGACY_OOS_KEYWORDS_CACHE_VER = "v8-vietnamese-only"
-_TIMEOUT_SEC = 30
+_TIMEOUT_SEC = 8
 
 
 def _legacy_oos_deepseek_enabled() -> bool:
