@@ -25,5 +25,7 @@ upsert() {
 
 upsert IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP false "${ENV_FILE}"
 upsert RUN_DB_INIT_ON_STARTUP               0       "${ENV_FILE}"
+upsert LEGACY_OOS_DEEPSEEK_ENABLED           false   "${ENV_FILE}"
+upsert GROUP_LISTING_SKIP_SLOW_SLUG_POOL     true    "${ENV_FILE}"
 
-echo "✓ API safe env: không resume job ảnh/OCR khi khởi động."
+echo "✓ API safe env: không resume job ảnh/OCR; OOS redirect không gọi DeepSeek."

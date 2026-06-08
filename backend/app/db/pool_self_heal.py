@@ -153,9 +153,9 @@ def run_pool_self_heal_tick() -> Tuple[bool, Optional[str]]:
     near_full = snap.get("near_full")
 
     if near_full:
-        from app.db.pool_relief import release_stale_idle_in_transaction_connections
+        from app.db.pool_relief import relieve_pool_pressure
 
-        release_stale_idle_in_transaction_connections(force=True)
+        relieve_pool_pressure(force=True)
 
     if _probe_db_via_pool(probe_timeout):
         if _consecutive_probe_failures > 0:

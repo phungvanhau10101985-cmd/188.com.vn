@@ -88,7 +88,7 @@ class Settings:
         self.DATABASE_POOL_SIZE: int = int(os.getenv("DATABASE_POOL_SIZE", "10"))
         self.DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "15"))
         self.DATABASE_POOL_RECYCLE: int = int(os.getenv("DATABASE_POOL_RECYCLE", "1800"))
-        self.DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "20"))
+        self.DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "8"))
         # Postgres tự đóng session kẹt; daemon API terminate thêm khi gần đầy pool.
         self.DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS: int = int(
             os.getenv("DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS", "35")
@@ -96,6 +96,10 @@ class Settings:
         # 0 = tắt — tránh cắt import/export admin chạy query dài.
         self.DATABASE_STATEMENT_TIMEOUT_SECONDS: int = int(
             os.getenv("DATABASE_STATEMENT_TIMEOUT_SECONDS", "0")
+        )
+        # Khi pool gần đầy: terminate query «active» quá lâu (không cắt export admin ngắn).
+        self.DATABASE_ACTIVE_QUERY_KILL_SECONDS: int = int(
+            os.getenv("DATABASE_ACTIVE_QUERY_KILL_SECONDS", "45")
         )
         self.DATABASE_POOL_RELIEF_ENABLED: bool = os.getenv(
             "DATABASE_POOL_RELIEF_ENABLED", "true"
@@ -120,7 +124,7 @@ class Settings:
             "DATABASE_POOL_SELF_HEAL_ENABLED", "true"
         ).lower() in ("1", "true", "yes")
         self.DATABASE_POOL_SELF_HEAL_INTERVAL_SECONDS: int = int(
-            os.getenv("DATABASE_POOL_SELF_HEAL_INTERVAL_SECONDS", "20")
+            os.getenv("DATABASE_POOL_SELF_HEAL_INTERVAL_SECONDS", "15")
         )
         self.DATABASE_POOL_SELF_HEAL_PROBE_TIMEOUT_SECONDS: float = float(
             os.getenv("DATABASE_POOL_SELF_HEAL_PROBE_TIMEOUT_SECONDS", "3")

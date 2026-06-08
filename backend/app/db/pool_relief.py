@@ -202,6 +202,84 @@ def release_stale_idle_in_transaction_connections(*, force: bool = False) -> int
         return 0
 
 
+def release_long_active_queries_when_pool_stressed(
+    *,
+    checked_out: int,
+    pool_max: int,
+    force: bool = False,
+) -> int:
+    """
+    Pool gần đầy → terminate SELECT/query «active» chạy quá lâu (bot slug ILIKE, v.v.).
+    Không dùng statement_timeout toàn cục để tránh cắt export admin 3–15 phút.
+    """
+    if not getattr(settings, "IS_POSTGRESQL", False):
+        return 0
+    min_age = int(getattr(settings, "DATABASE_ACTIVE_QUERY_KILL_SECONDS", 45) or 45)
+    if min_age <= 0:
+        return 0
+    if pool_max <= 0:
+        return 0
+    if not force and checked_out < max(1, pool_max - 2):
+        return 0
+
+    from app.db.session import engine
+
+    try:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT pid, left(query, 120) AS q
+                    FROM pg_stat_activity
+                    WHERE datname = current_database()
+                      AND pid <> pg_backend_pid()
+                      AND state = 'active'
+                      AND backend_type = 'client backend'
+                      AND now() - query_start > make_interval(secs => :min_age)
+                    """
+                ),
+                {"min_age": min_age},
+            ).fetchall()
+            terminated = 0
+            for pid, qpreview in rows:
+                ok = conn.execute(
+                    text("SELECT pg_terminate_backend(:pid)"),
+                    {"pid": int(pid)},
+                ).scalar()
+                if ok:
+                    terminated += 1
+                    _logger.warning(
+                        "Pool relief: terminated long active query pid=%s age>=%ss q=%s",
+                        pid,
+                        min_age,
+                        (qpreview or "")[:100],
+                    )
+            return terminated
+    except Exception as exc:
+        _logger.warning("release_long_active_queries_when_pool_stressed failed: %s", exc)
+        return 0
+
+
+def relieve_pool_pressure(*, force: bool = False) -> dict:
+    """Idle-in-xact + query active quá lâu khi pool áp lực cao."""
+    from app.db.pool_self_heal import get_pool_usage_snapshot
+
+    snap = get_pool_usage_snapshot()
+    checked_out = int(snap.get("checked_out") or 0)
+    pool_max = int(snap.get("pool_max") or 0)
+    idle_killed = release_stale_idle_in_transaction_connections(force=force)
+    active_killed = release_long_active_queries_when_pool_stressed(
+        checked_out=checked_out,
+        pool_max=pool_max,
+        force=force,
+    )
+    return {
+        "idle_terminated": idle_killed,
+        "active_terminated": active_killed,
+        "pool": snap,
+    }
+
+
 def _pool_relief_loop() -> None:
     interval = max(10, int(getattr(settings, "DATABASE_POOL_RELIEF_INTERVAL_SECONDS", 15) or 15))
     while True:
