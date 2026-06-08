@@ -2,6 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session
 from app.db.session import get_db
+from app.db.retry import is_transient_db_error
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission
 from app.models.user import User
 from app.models.notification import Notification
@@ -34,7 +35,17 @@ def get_unread_count(
 ):
     if not current_user:
         return 0
-    return crud_notification.get_unread_count(db, user_id=current_user.id)
+    try:
+        return crud_notification.get_unread_count(db, user_id=current_user.id)
+    except Exception as exc:
+        # Badge thông báo là dữ liệu phụ; DB quá tải thì trả 0 để tránh lan 500 làm treo UI.
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        if is_transient_db_error(exc):
+            return 0
+        return 0
 
 @router.put("/{notification_id}/read", response_model=NotificationResponse)
 def mark_as_read(

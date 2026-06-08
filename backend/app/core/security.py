@@ -173,18 +173,22 @@ def get_current_user_optional(
     token_type = payload.get("type")
     if not user_identifier or token_type != "user":
         return None
-    user = None
-    if user_id:
-        try:
-            user = crud.user.get_user(db, user_id=int(user_id))
-        except (ValueError, TypeError):
-            pass
-    if not user and user_identifier:
-        if "@" in user_identifier:
-            user = crud.user.get_user_by_email(db, email=user_identifier)
-        else:
-            user = crud.user.get_user_by_phone(db, phone=user_identifier)
-    return user
+    try:
+        user = None
+        if user_id:
+            try:
+                user = crud.user.get_user(db, user_id=int(user_id))
+            except (ValueError, TypeError):
+                pass
+        if not user and user_identifier:
+            if "@" in user_identifier:
+                user = crud.user.get_user_by_email(db, email=user_identifier)
+            else:
+                user = crud.user.get_user_by_phone(db, phone=user_identifier)
+        return user
+    except Exception:
+        # Endpoint dùng optional auth (badge, behavior, trang công khai) không được fail cứng vì DB đang căng.
+        return None
 
 
 # ========== ADMIN FUNCTIONS ==========

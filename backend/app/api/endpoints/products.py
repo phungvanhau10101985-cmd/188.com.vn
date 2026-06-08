@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from typing import Annotated, List, Literal, Optional
 
 from app.db.session import get_db
-from app.db.retry import TransientDbError
+from app.db.retry import TransientDbError, is_transient_db_error
 from app import crud
 from app.crud import product_search_cache as product_search_cache_crud
 from app.models.search_mapping import SearchMapping, SearchMappingType
@@ -1302,15 +1302,27 @@ def read_product_by_id(
     """
     Get product by database ID (integer primary key)
     """
-    db_product = crud.product.get_product(db, product_id=id)
-    if db_product is None:
-        raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(
-        db,
-        db_product,
-        user=current_user,
-        attach_group_listing=attach_group_listing,
-    )
+    try:
+        db_product = crud.product.get_product(db, product_id=id)
+        if db_product is None:
+            raise HTTPException(status_code=404, detail="Product not found")
+        return _product_to_response(
+            db,
+            db_product,
+            user=current_user,
+            attach_group_listing=attach_group_listing,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if is_transient_db_error(exc):
+            raise HTTPException(
+                status_code=503,
+                detail=_DB_UNAVAILABLE_DETAIL,
+                headers={"Retry-After": "3"},
+            ) from exc
+        logger.exception("read_product_by_id failed id=%s", id)
+        raise HTTPException(status_code=404, detail="Product not found") from exc
 
 
 def _normalize_excel_product_id(product_id: str) -> str:
