@@ -29,6 +29,7 @@ const isDev = process.env.NODE_ENV === "development";
 const disableCache = process.env.NEXT_PUBLIC_DISABLE_CACHE === "1" || process.env.DISABLE_CACHE === "1";
 const REVALIDATE_CATEGORY = isDev || disableCache ? 0 : 120;
 const REVALIDATE_SEO_DATA = isDev || disableCache ? 0 : 300;
+const REVALIDATE_CATEGORY_PRODUCTS = isDev || disableCache ? 0 : 60;
 const CATEGORY_TREE_MEM_TTL_MS = Math.max(15_000, REVALIDATE_CATEGORY * 1000 || 60_000);
 let categoryTreeMemCache: { expiresAt: number; value: CategoryLevel1[] } | null = null;
 let categoryTreeInflight: Promise<CategoryLevel1[]> | null = null;
@@ -280,7 +281,7 @@ export async function getCategoryProductFacets(
     if (filters?.styleTag?.trim()) params.set("style_tag", filters.styleTag.trim());
     const url = `${API_BASE}/products/category-facets?${params.toString()}`;
     const res = await fetch(url, {
-      cache: "no-store",
+      next: { revalidate: REVALIDATE_CATEGORY, tags: [CACHE_TAG_CATEGORY_SEO] },
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(LAYOUT_FETCH_TIMEOUT_MS),
     });
@@ -363,9 +364,9 @@ export async function getProductsByCategory(
     if (f.styleTag?.trim()) params.set("style_tag", f.styleTag.trim());
 
     const url = `${API_BASE}/products/?${params.toString()}`;
-    /** Không cache ISR/CDN: mỗi lần mở danh mục gọi API mới để thứ tự random thay đổi. */
+    /** Cache ngắn theo URL: mở danh mục nhanh hơn, vẫn làm mới thường xuyên. */
     const res = await fetch(url, {
-      cache: "no-store",
+      next: { revalidate: REVALIDATE_CATEGORY_PRODUCTS, tags: [CACHE_TAG_CATEGORY_SEO] },
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(LAYOUT_FETCH_TIMEOUT_MS),
     });

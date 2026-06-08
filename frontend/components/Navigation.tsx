@@ -110,6 +110,7 @@ export default function Navigation({
   const dropdownRef = useRef<HTMLElement | null>(null);
   const stickySearchRef = useRef<HTMLFormElement | null>(null);
   const thinBarOuterRef = useRef<HTMLDivElement | null>(null);
+  const prefetchedCategoryHrefsRef = useRef<Set<string>>(new Set());
   /** Căn mega-menu theo đúng pill cấp 1 — container và từng pill (không ép full-width trái). */
   const categoryBarWrapRef = useRef<HTMLDivElement>(null);
   const pillsScrollRef = useRef<HTMLDivElement>(null);
@@ -332,6 +333,17 @@ export default function Navigation({
     navigateProductTextSearch(router, query, tree);
   };
 
+  const prefetchCategoryHref = useCallback(
+    (href: string) => {
+      if (!href.startsWith('/danh-muc/')) return;
+      const seen = prefetchedCategoryHrefsRef.current;
+      if (seen.has(href)) return;
+      seen.add(href);
+      router.prefetch(href);
+    },
+    [router],
+  );
+
   const basePill =
     'inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium whitespace-nowrap transition-all duration-200 flex-shrink-0';
   const activePill = 'bg-white/20 text-white shadow-sm';
@@ -449,11 +461,16 @@ export default function Navigation({
             {tree.map((level1) => {
               const isActive = openLevel1 === level1.name;
               const l1Active = isActive || (isKhoSaleMenuCategory(level1) && isKhoSaleActive);
+              const href = level1CategoryHref(level1);
               return (
                 <Link
                   key={level1.name}
-                  href={level1CategoryHref(level1)}
-                  onMouseEnter={() => setOpenLevel1(level1.name)}
+                  href={href}
+                  onMouseEnter={() => {
+                    setOpenLevel1(level1.name);
+                    prefetchCategoryHref(href);
+                  }}
+                  onFocus={() => prefetchCategoryHref(href)}
                   className={`px-2.5 py-2 rounded-md text-xs font-medium truncate ${
                     l1Active ? 'bg-orange-50 text-orange-700' : 'text-gray-700 hover:bg-white'
                   }`}
@@ -486,6 +503,8 @@ export default function Navigation({
                   <div key={level2ReactKey(slug1, slug2, level2.name)} className="min-w-0">
                     <Link
                       href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`}
+                      onMouseEnter={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
+                      onFocus={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
                       className="block text-xs font-semibold text-gray-800 hover:text-[#ea580c]"
                     >
                       {level2.name}
@@ -505,6 +524,8 @@ export default function Navigation({
                             <Link
                               key={level3ReactKey(slug2, slug3 || undefined, name3)}
                               href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
+                              onMouseEnter={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
+                              onFocus={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
                               className="text-[11px] text-gray-600 hover:text-[#ea580c] truncate"
                             >
                               {name3}
@@ -712,6 +733,7 @@ export default function Navigation({
             {tree.map((level1) => {
               const slug1 =
                 categorySegmentForUrl(level1.slug) || categorySegmentForUrl(level1.name);
+              const href = level1CategoryHref(level1);
               const isL1Active =
                 effectiveFilter.category === level1.name ||
                 (isKhoSaleMenuCategory(level1) && isKhoSaleActive);
@@ -733,8 +755,10 @@ export default function Navigation({
                     className={`${basePill} ${isL1Active ? activePill : inactivePill} pr-0 gap-0`}
                   >
                     <Link
-                      href={level1CategoryHref(level1)}
+                      href={href}
                       className={`flex-1 min-w-0 text-left px-2 py-1 -my-1 max-w-[6.5rem] truncate ${hasChildren ? 'rounded-l-full' : 'rounded-full'}`}
+                      onMouseEnter={() => prefetchCategoryHref(href)}
+                      onFocus={() => prefetchCategoryHref(href)}
                       onClick={() => setOpenLevel1(null)}
                     >
                       {level1.name}
@@ -810,6 +834,8 @@ export default function Navigation({
                   >
                     <Link
                       href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`}
+                      onMouseEnter={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
+                      onFocus={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
                       onClick={() => setOpenLevel1(null)}
                       className={`block w-full text-left px-3 py-2 text-xs font-medium flex items-center justify-between gap-1.5 ${
                         isL2Active ? 'bg-orange-50 text-orange-700' : 'text-gray-700 hover:bg-gray-50 hover:text-[#ea580c]'
@@ -838,6 +864,8 @@ export default function Navigation({
                             <Link
                               key={level3ReactKey(slug2, slug3 || undefined, name3)}
                               href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
+                              onMouseEnter={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
+                              onFocus={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
                               onClick={() => setOpenLevel1(null)}
                               className={`inline-block text-[11px] px-2 py-1 rounded ${
                                 isL3Active

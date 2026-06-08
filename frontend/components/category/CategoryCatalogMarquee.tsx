@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { categorySegmentForUrl } from '@/lib/category-url';
 import type { HeroCategoryTile } from '@/types/api';
@@ -66,6 +67,7 @@ function CategoryGridTile({
   isLastInRow?: boolean;
   priorityImage?: boolean;
 }) {
+  const router = useRouter();
   const href = categoryTileHref(tile);
   const title = tileTitle(tile);
   const itemCountLabel = formatItemCount(tile.product_count);
@@ -82,6 +84,8 @@ function CategoryGridTile({
     <Link
       href={href}
       title={itemCountLabel ? `${tile.name} · ${itemCountLabel}` : tile.name}
+      onMouseEnter={() => router.prefetch(href)}
+      onFocus={() => router.prefetch(href)}
       className={`hero-category-tile group relative flex h-full min-w-0 flex-1 flex-col overflow-hidden border-r border-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white active:brightness-105 ${isLastInRow ? 'border-r-0' : ''}`}
     >
       <div className="relative flex-1 min-h-0 overflow-hidden bg-gradient-to-br from-orange-600/95 via-orange-500/90 to-amber-700/95">

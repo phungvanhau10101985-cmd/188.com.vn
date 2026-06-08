@@ -2,12 +2,10 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import {
-  getCategoryByPathForSeo,
   getCategorySeoData,
   getProductsByCategory,
   getCategoryCatalogTilesForPage,
   getCategoryTreeForLayout,
-  getCategoryProductFacets,
   type CategoryListingFilters,
 } from '@/lib/category-seo';
 import {
@@ -158,9 +156,9 @@ export default async function CategoryPage({ params, searchParams }: Props) {
     );
   }
 
-  // Lấy thông tin danh mục (không còn redirect canonical, SEO tất cả trang danh mục)
-  const info = await getCategoryByPathForSeo(level1, level2, level3);
-  if (!info) {
+  // `seo-data` đã gồm breadcrumb/product_count; dùng luôn để tránh thêm request by-path.
+  const seoData = await getCategorySeoData(level1, level2, level3);
+  if (!seoData) {
     return (
       <main className="max-w-7xl mx-auto px-4 py-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-4">Danh mục không tồn tại</h1>
@@ -174,32 +172,22 @@ export default async function CategoryPage({ params, searchParams }: Props) {
     );
   }
 
-  const breadcrumbNames = info.breadcrumb_names || [];
+  const breadcrumbNames = seoData.breadcrumb_names || [];
   const pathSegments = [level1];
   if (level2) pathSegments.push(level2);
   if (level3) pathSegments.push(level3);
 
-  // Song song hóa: giảm chờ tuyến tính; Next vẫn SSR đầy đủ HTML + metadata (layout generateMetadata).
-  const [
-    { products, total, total_pages, page: currentPage },
+  const { products, total, total_pages, page: currentPage } = await getProductsByCategory(
+    level1,
+    level2,
+    level3,
+    { limit: PAGE_SIZE, skip, filters: listingFilters },
     seoData,
-    categoryTree,
-    facets,
-  ] = await Promise.all([
-    getProductsByCategory(
-      level1,
-      level2,
-      level3,
-      { limit: PAGE_SIZE, skip, filters: listingFilters },
-      info,
-    ),
-    getCategorySeoData(level1, level2, level3),
-    getCategoryTreeForLayout(),
-    getCategoryProductFacets(level1, level2, level3, info, listingFilters),
-  ]);
+  );
 
   const seoBody = seoData?.seo_body ?? null;
-  const internalLinkMap = buildInternalLinkMap(categoryTree, pathSegments);
+  const categoryTree = seoBody ? await getCategoryTreeForLayout() : [];
+  const internalLinkMap = seoBody ? buildInternalLinkMap(categoryTree, pathSegments) : [];
 
   return (
     <CategoryPageClient
@@ -213,7 +201,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
       seoBody={seoBody}
       internalLinkMap={internalLinkMap}
       error={null}
-      facets={facets}
+      facets={null}
       listingQueryString={listingQueryString}
     />
   );
