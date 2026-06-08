@@ -53,14 +53,14 @@ async function fetchProductBySlug(
       params.set("attach_group_listing", "true");
     }
 
-    let res = await fetch(`${apiBase}/products/by-slug/?${params}`, {
+    const attachQs = attachGroupListing ? "?attach_group_listing=true" : "";
+    let res = await fetch(`${apiBase}/products/by-slug/${encoded}${attachQs}`, {
       ...(noStore ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
-      const attachQs = attachGroupListing ? "?attach_group_listing=true" : "";
-      res = await fetch(`${apiBase}/products/by-slug/${encoded}${attachQs}`, {
+      res = await fetch(`${apiBase}/products/by-slug/?${params}`, {
         ...(noStore ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
         headers: { "Content-Type": "application/json" },
         signal: AbortSignal.timeout(15_000),
