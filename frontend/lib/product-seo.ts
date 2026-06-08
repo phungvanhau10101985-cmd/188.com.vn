@@ -55,16 +55,7 @@ export async function getProductBySlugForSeo(
         headers: { "Content-Type": "application/json" },
       });
     }
-    if (!res.ok) {
-      const fallbackUrl = `${apiBase}/products/${encoded}`;
-      const fallbackRes = await fetch(fallbackUrl, {
-        next: { revalidate: 60 },
-        headers: { "Content-Type": "application/json" },
-      });
-      if (!fallbackRes.ok) return null;
-      const fallbackData = await fallbackRes.json();
-      return fallbackData as ProductForSeo;
-    }
+    if (!res.ok) return null;
     const data = await res.json();
     return data as ProductForSeo;
   } catch {
@@ -103,16 +94,7 @@ export async function getProductBySlugForSSR(
         headers: { "Content-Type": "application/json" },
       });
     }
-    if (!res.ok) {
-      const fallbackUrl = `${apiBase}/products/${encoded}`;
-      const fallbackRes = await fetch(fallbackUrl, {
-        next: { revalidate: 60 },
-        headers: { "Content-Type": "application/json" },
-      });
-      if (!fallbackRes.ok) return null;
-      const fallbackData = await fallbackRes.json();
-      return fallbackData as Product;
-    }
+    if (!res.ok) return null;
     const data = await res.json();
     return data as Product;
   } catch {

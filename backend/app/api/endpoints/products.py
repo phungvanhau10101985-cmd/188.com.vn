@@ -1,6 +1,7 @@
 # backend/app/api/endpoints/products.py - COMPLETE FIXED VERSION WITH BOTH ENDPOINTS
 from datetime import datetime
 import io
+import logging
 import random
 from urllib.parse import unquote
 
@@ -50,22 +51,44 @@ from app.services.admin_source_stock_batch import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 _DB_UNAVAILABLE_DETAIL = "Cơ sở dữ liệu tạm thời không phản hồi — vui lòng thử lại sau vài giây"
 
 
-def _lookup_product_by_slug(db: Session, slug: str):
+def _apply_storefront_image_gate(db: Session, row):
+    """SP không có ảnh storefront → gỡ khỏi catalog (404 cho khách)."""
     from app.services.product_image_visibility import (
         deactivate_product_without_storefront_image,
         product_has_storefront_image,
     )
 
+    if row is None:
+        return None
+    if not product_has_storefront_image(row):
+        deactivate_product_without_storefront_image(db, row)
+        return None
+    return row
+
+
+def _lookup_product_by_slug(db: Session, slug: str):
     try:
         row = crud.product.get_product_by_slug(db, slug=slug)
-        if row is not None and not product_has_storefront_image(row):
-            deactivate_product_without_storefront_image(db, row)
-            return None
-        return row
+        return _apply_storefront_image_gate(db, row)
+    except TransientDbError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=_DB_UNAVAILABLE_DETAIL,
+            headers={"Retry-After": "3"},
+        ) from exc
+
+
+def _resolve_storefront_product(db: Session, key: str):
+    """Tra SP theo product_id / slug / code — cùng luật ẩn ảnh như by-slug."""
+    try:
+        pid = _normalize_excel_product_id(key)
+        row = crud.product.resolve_product_by_sku(db, sku=pid)
+        return _apply_storefront_image_gate(db, row)
     except TransientDbError as exc:
         raise HTTPException(
             status_code=503,
@@ -291,7 +314,15 @@ def _product_to_response(
                     product=row,
                     product_id=getattr(row, "product_id", None),
                 )
-    return Product(**d)
+    try:
+        return Product(**d)
+    except Exception as exc:
+        logger.exception(
+            "serialize product failed id=%s product_id=%s",
+            getattr(row, "id", None),
+            getattr(row, "product_id", None),
+        )
+        raise HTTPException(status_code=404, detail="Product not found") from exc
 
 
 def _shuffle_cached_products_response(result: dict) -> dict:
@@ -1225,7 +1256,7 @@ def read_product_by_code(
     """
     Get product by product_id, slug, or internal code (SKU).
     """
-    db_product = crud.product.resolve_product_by_sku(db, sku=product_code)
+    db_product = _resolve_storefront_product(db, product_code)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return _product_to_response(db, db_product, user=current_user)
@@ -1654,7 +1685,7 @@ def read_product(
 ):
     """Get product by product_id, slug, or internal code (SKU)."""
     pid = _normalize_excel_product_id(product_id)
-    db_product = crud.product.resolve_product_by_sku(db, sku=pid)
+    db_product = _resolve_storefront_product(db, pid)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return _product_to_response(db, db_product, user=current_user)
