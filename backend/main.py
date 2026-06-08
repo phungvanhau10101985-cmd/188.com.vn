@@ -1,5 +1,5 @@
 # backend/main.py - FIXED VERSION WITH IMPORT/EXPORT DEBUG
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 import logging
 import uvicorn
 import sys
@@ -397,6 +398,66 @@ async def health_db_check():
                 "timestamp": datetime.now().isoformat(),
             },
         )
+
+
+@app.get("/health/storefront")
+async def health_storefront_check():
+    """
+    Sức khỏe storefront thật (DB pool + ping) — dùng UptimeRobot / monitor VPS.
+    Khác /health (chỉ process sống): trả 503 khi pool kẹt → khách sắp treo.
+    """
+    from app.db.pool_self_heal import get_pool_usage_snapshot, probe_db_pool
+
+    started = datetime.now()
+    snap = get_pool_usage_snapshot()
+    db_ok = probe_db_pool(3.0)
+    elapsed_ms = int((datetime.now() - started).total_seconds() * 1000)
+    near_full = bool(snap.get("near_full"))
+    ok = db_ok and not near_full
+
+    payload = {
+        "status": "ok" if ok else "unavailable",
+        "storefront": ok,
+        "db_pool": snap,
+        "latency_ms": elapsed_ms,
+        "timestamp": datetime.now().isoformat(),
+    }
+    if ok:
+        return payload
+    return JSONResponse(status_code=503, content=payload)
+
+
+@app.post("/health/ops-alert")
+async def health_ops_alert_manual(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+):
+    """
+    Gửi email cảnh báo admin — KHÔNG cần DB (chỉ SMTP + OPS_HEALTH_ALERT_EMAILS).
+    Dùng khi monitor phát hiện storefront 503: curl từ VPS với CRON_SECRET.
+    """
+    from app.db.pool_self_heal import get_pool_usage_snapshot, probe_db_pool
+    from app.services.ops_health_alert import collect_heavy_process_hints, notify_ops_health_alert
+
+    secret = (getattr(_settings, "CRON_SECRET", None) or "").strip()
+    if not secret:
+        raise HTTPException(status_code=503, detail="CRON_SECRET chưa cấu hình")
+    auth = (authorization or "").strip()
+    if auth != f"Bearer {secret}":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    snap = get_pool_usage_snapshot()
+    db_ok = probe_db_pool(2.0)
+    notify_ops_health_alert(
+        "manual_ops_alert",
+        "Cảnh báo thủ công / monitor — storefront hoặc pool DB bất thường",
+        detail=f"Gọi POST /health/ops-alert. db_probe={db_ok} pool={snap}",
+        pool_snap=snap,
+        heavy_hints=collect_heavy_process_hints(),
+        action="Chạy block lệnh SSH trong email (free-api-now + health-check).",
+        force=True,
+        env_recipients_only=True,
+    )
+    return {"ok": True, "message": "Đã xếp hàng gửi email admin (SMTP)."}
 
 @app.get("/api")
 async def api_root():

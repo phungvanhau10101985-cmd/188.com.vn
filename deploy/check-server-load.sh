@@ -70,6 +70,7 @@ echo ""
 echo "========== HEALTH 188 (neu chay) =========="
 for url in \
   "http://127.0.0.1:8001/health" \
+  "http://127.0.0.1:8001/health/storefront" \
   "http://127.0.0.1:3001/robots.txt" \
   "http://127.0.0.1:3000/"; do
   code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "$url" 2>/dev/null || echo "000")
@@ -83,3 +84,5 @@ echo "  - postgres SELECT/count nhieu dong = DB nang (menu/catalog)."
 echo "  - 188-api RAM > 2G = API/import/anh dang nang."
 echo "  - next-server + npm run build = deploy dang nang."
 echo "  - Swap USED tang nhieu = thieu RAM tam thoi."
+echo "  - /health/storefront != 200 = pool DB sap treo (UptimeRobot: https://188.com.vn/health/storefront)."
+echo "  - Monitor VPS: bash deploy/monitor-storefront.sh (cron */2 * * * * tuỳ chọn)."

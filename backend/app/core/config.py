@@ -705,6 +705,19 @@ class Settings:
             60,
             int(os.getenv("AUTH_LOGIN_FAILURE_ALERT_COOLDOWN_SECONDS", "180") or "180"),
         )
+        # Email cảnh báo pool DB kẹt / storefront down / job nặng → admin_users + OPS_HEALTH_ALERT_EMAILS
+        self.OPS_HEALTH_ALERT_ENABLED: bool = os.getenv(
+            "OPS_HEALTH_ALERT_ENABLED", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.OPS_HEALTH_ALERT_COOLDOWN_SECONDS: int = max(
+            300,
+            int(os.getenv("OPS_HEALTH_ALERT_COOLDOWN_SECONDS", "900") or "900"),
+        )
+        self.OPS_HEALTH_ALERT_EMAILS: List[str] = [
+            x.strip()
+            for x in os.getenv("OPS_HEALTH_ALERT_EMAILS", "").split(",")
+            if x.strip()
+        ]
 
         # ========================
         # GOOGLE OAUTH CONFIGURATION

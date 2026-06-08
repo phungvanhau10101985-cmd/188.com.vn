@@ -164,6 +164,14 @@ export interface AnalyticsEventCreate {
 type ApiFetchOptions = RequestInit & { quiet?: boolean };
 
 class ApiClient {
+  private static readonly RETRYABLE_STATUSES = new Set([502, 503, 504]);
+  /** Retry lỗi DB/pool tạm thời — khách không thấy treo khi API trả 503 ngắn. */
+  private static readonly MAX_TRANSIENT_RETRIES = 2;
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   private compactErrorText(errorText: string, status: number): string {
     const raw = (errorText || '').trim();
     if (!raw) return `API Error: ${status}`;
@@ -198,65 +206,107 @@ class ApiClient {
       console.log(`🔍 API Call: ${url}`, { headers: { ...headers, Authorization: 'Bearer ***' } });
     }
 
-    try {
-      const response = await fetch(url, {
-        ...restInit,
-        headers,
-        credentials: 'include',
-      });
+    const maxAttempts = 1 + ApiClient.MAX_TRANSIENT_RETRIES;
+    let lastError: unknown;
 
-      if (!IS_PRODUCTION && !quiet) {
-        console.log(`📡 Response: ${response.status} ${response.statusText}`);
-      }
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const response = await fetch(url, {
+          ...restInit,
+          headers,
+          credentials: 'include',
+        });
 
-      if (response.status === 401) {
-        console.error('❌ 401 Unauthorized - Token invalid or missing');
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('access_token');
-          // Chỉ xoá user khi request từng gửi Bearer — tránh mất phiên chỉ-cookie / race sau đăng nhập
-          if (token) {
-            localStorage.removeItem('user');
+        if (!IS_PRODUCTION && !quiet) {
+          console.log(`📡 Response: ${response.status} ${response.statusText}`);
+        }
+
+        if (response.status === 401) {
+          console.error('❌ 401 Unauthorized - Token invalid or missing');
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('access_token');
+            // Chỉ xoá user khi request từng gửi Bearer — tránh mất phiên chỉ-cookie / race sau đăng nhập
+            if (token) {
+              localStorage.removeItem('user');
+            }
+          }
+          throw new Error('Authentication required');
+        }
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          const compactErrorText = this.compactErrorText(errorText, response.status);
+          if (
+            ApiClient.RETRYABLE_STATUSES.has(response.status) &&
+            attempt < maxAttempts - 1
+          ) {
+            const retryAfterSec = Number(response.headers.get('Retry-After') || '0');
+            const delayMs =
+              retryAfterSec > 0
+                ? Math.min(retryAfterSec * 1000, 5000)
+                : 700 * (attempt + 1);
+            if (!quiet) {
+              console.warn(
+                `↻ API tạm thời ${response.status}, thử lại ${attempt + 1}/${ApiClient.MAX_TRANSIENT_RETRIES} sau ${delayMs}ms: ${endpoint}`,
+              );
+            }
+            await this.sleep(delayMs);
+            continue;
+          }
+          if (!quiet) {
+            console.error(`❌ API Error ${response.status}:`, compactErrorText);
+          }
+          let errorData;
+          try {
+            errorData = JSON.parse(errorText);
+          } catch {
+            errorData = { detail: compactErrorText };
+          }
+          throw new Error(errorData.detail || `API Error: ${response.status}`);
+        }
+
+        const raw = await response.text();
+        let data: T;
+        if (!raw.trim()) {
+          data = null as T;
+        } else {
+          try {
+            data = JSON.parse(raw) as T;
+          } catch {
+            throw new Error(`Phản hồi không phải JSON hợp lệ từ ${endpoint}`);
           }
         }
-        throw new Error('Authentication required');
-      }
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        const compactErrorText = this.compactErrorText(errorText, response.status);
+        if (!IS_PRODUCTION && !quiet) {
+          console.log('✅ API Success:', data);
+        }
+        return data;
+      } catch (error) {
+        lastError = error;
+        const msg = error instanceof Error ? error.message : String(error);
+        const isNetwork =
+          error instanceof TypeError ||
+          /failed to fetch|network|load failed/i.test(msg);
+        if (isNetwork && attempt < maxAttempts - 1) {
+          const delayMs = 700 * (attempt + 1);
+          if (!quiet) {
+            console.warn(
+              `↻ Lỗi mạng, thử lại ${attempt + 1}/${ApiClient.MAX_TRANSIENT_RETRIES} sau ${delayMs}ms: ${endpoint}`,
+            );
+          }
+          await this.sleep(delayMs);
+          continue;
+        }
         if (!quiet) {
-          console.error(`❌ API Error ${response.status}:`, compactErrorText);
+          console.error(`🔥 Fetch error at ${url}:`, error);
         }
-        let errorData;
-        try {
-          errorData = JSON.parse(errorText);
-        } catch {
-          errorData = { detail: compactErrorText };
-        }
-        throw new Error(errorData.detail || `API Error: ${response.status}`);
+        throw error;
       }
-
-      const raw = await response.text();
-      let data: T;
-      if (!raw.trim()) {
-        data = null as T;
-      } else {
-        try {
-          data = JSON.parse(raw) as T;
-        } catch {
-          throw new Error(`Phản hồi không phải JSON hợp lệ từ ${endpoint}`);
-        }
-      }
-      if (!IS_PRODUCTION && !quiet) {
-        console.log('✅ API Success:', data);
-      }
-      return data;
-    } catch (error) {
-      if (!quiet) {
-        console.error(`🔥 Fetch error at ${url}:`, error);
-      }
-      throw error;
     }
+
+    if (!quiet && lastError) {
+      console.error(`🔥 Fetch error at ${url}:`, lastError);
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'API request failed'));
   }
 
   // PRODUCT

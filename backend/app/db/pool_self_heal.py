@@ -59,6 +59,11 @@ def get_pool_usage_snapshot() -> dict:
     }
 
 
+def probe_db_pool(timeout_sec: float = 3.0) -> bool:
+    """Probe SELECT 1 qua pool — dùng cho /health/storefront và monitor ngoài."""
+    return _probe_db_via_pool(timeout_sec)
+
+
 def _probe_db_via_pool(timeout_sec: float) -> bool:
     """Thử SELECT 1 qua pool — timeout ngắn, không chờ pool_timeout 20s."""
 
@@ -105,6 +110,20 @@ def _attempt_pool_recovery(*, reason: str) -> None:
 def _maybe_exit_for_pm2_restart(*, reason: str) -> None:
     if not getattr(settings, "DATABASE_POOL_SELF_HEAL_EXIT_ON_FAILURE", True):
         return
+
+    from app.services.ops_health_alert import collect_heavy_process_hints, notify_ops_health_alert
+
+    notify_ops_health_alert(
+        "pool_restart",
+        "API sắp restart — pool DB không phục hồi",
+        detail=reason,
+        pool_snap=get_pool_usage_snapshot(),
+        heavy_hints=collect_heavy_process_hints(),
+        action="PM2 sẽ restart 188-api trong vài giây — nếu chưa ổn, chạy block lệnh SSH trong email.",
+        force=True,
+    )
+    time.sleep(1.5)
+
     _logger.error(
         "Pool self-heal: %s — exiting process so PM2 restarts API (exit code 42)",
         reason,
@@ -149,7 +168,7 @@ def run_pool_self_heal_tick() -> Tuple[bool, Optional[str]]:
 
     _consecutive_probe_failures += 1
     fail_n = _consecutive_probe_failures
-    max_fail = int(getattr(settings, "DATABASE_POOL_SELF_HEAL_MAX_FAILURES", 2) or 2)
+    max_fail = int(getattr(settings, "DATABASE_POOL_SELF_HEAL_MAX_FAILURES", 1) or 1)
     max_fail = max(1, max_fail)
 
     _logger.warning(
@@ -157,6 +176,17 @@ def run_pool_self_heal_tick() -> Tuple[bool, Optional[str]]:
         fail_n,
         max_fail,
         snap,
+    )
+
+    from app.services.ops_health_alert import collect_heavy_process_hints, notify_ops_health_alert
+
+    notify_ops_health_alert(
+        "pool_exhaustion",
+        "API pool DB kẹt — web có thể treo",
+        detail=f"Probe DB thất bại lần {fail_n}/{max_fail}. Thường do QueuePool đầy (25/25).",
+        pool_snap=snap,
+        heavy_hints=collect_heavy_process_hints(),
+        action="Hệ thống đang tự dispose pool; nếu web vẫn treo — chạy block lệnh SSH trong email.",
     )
 
     _attempt_pool_recovery(reason=f"probe_fail_{fail_n}")
