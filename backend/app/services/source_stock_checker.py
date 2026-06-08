@@ -1040,17 +1040,24 @@ def _claim_due_product_id() -> Optional[int]:
 
 
 def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResult]:
-    db = SessionLocal()
+    """Kiểm tra tồn kho nguồn — không giữ connection DB trong lúc Playwright scrape."""
     progressed = False
     final_st: Optional[str] = None
     products_commit_ok = False
     products_commit_detail = "Chưa xác nhận commit bảng products."
+    link_default = ""
+    fallback_product_id = None
+    previous_status = ""
+
+    db = SessionLocal()
     try:
         product = db.query(Product).filter(Product.id == product_id).first()
         if not product or not _link_eligible_for_hibox_stock_check(product.link_default or ""):
             return None
 
         previous_status = (product.source_stock_status or "").strip().lower()
+        link_default = product.link_default or ""
+        fallback_product_id = product.product_id or None
         product.source_stock_status = "checking"
         product.source_stock_error = None
         product.source_stock_next_check_at = _utcnow()
@@ -1059,12 +1066,25 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
 
         _worker_progress_mark_started(product_id)
         progressed = True
+    except Exception as exc:
+        db.rollback()
+        logger.exception("source stock check prepare failed: product_id=%s", product_id)
+        return SourceStockCheckResult(status="error", error=str(exc)[:1000])
+    finally:
+        db.close()
 
+    try:
         result = _evaluate_stock_primary_cssbuy_with_hibox_fallback(
-            product.link_default or "",
-            fallback_product_id=(product.product_id or None),
+            link_default,
+            fallback_product_id=fallback_product_id,
         )
-        product = db.query(Product).filter(Product.id == product_id).first()
+    except Exception as exc:
+        logger.exception("source stock scrape failed: product_id=%s", product_id)
+        result = SourceStockCheckResult(status="error", error=str(exc)[:1000])
+
+    db2 = SessionLocal()
+    try:
+        product = db2.query(Product).filter(Product.id == product_id).first()
         if not product:
             final_st = getattr(result, "status", None) or "error"
             products_commit_ok = False
@@ -1089,7 +1109,7 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
             product.available = 0
         elif result.status == "in_stock" and (product.available or 0) <= 0 and previous_status == "out_of_stock":
             product.available = 500
-        db.commit()
+        db2.commit()
         if result.status in {"error", "unknown", "blocked"}:
             logger.warning(
                 "source stock check issue: product_id=%s status=%s error=%s",
@@ -1109,22 +1129,24 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
         return result
 
     except Exception as exc:
-        db.rollback()
-        logger.exception("source stock check failed: product_id=%s", product_id)
+        db2.rollback()
+        logger.exception("source stock check commit failed: product_id=%s", product_id)
         committed_fallback = False
         try:
-            product = db.query(Product).filter(Product.id == product_id).first()
+            product = db2.query(Product).filter(Product.id == product_id).first()
             if product:
                 now = _utcnow()
                 product.source_stock_status = "error"
                 product.source_stock_checked_at = now
                 product.source_stock_error = str(exc)[:1000]
                 product.source_stock_check_platform = None
-                product.source_stock_next_check_at = now + timedelta(minutes=settings.SOURCE_STOCK_CHECK_ERROR_RETRY_MINUTES)
-                db.commit()
+                product.source_stock_next_check_at = now + timedelta(
+                    minutes=settings.SOURCE_STOCK_CHECK_ERROR_RETRY_MINUTES
+                )
+                db2.commit()
                 committed_fallback = True
         except Exception:
-            db.rollback()
+            db2.rollback()
         final_st = final_st or "error"
         if committed_fallback:
             products_commit_ok = True
@@ -1143,7 +1165,7 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
                 products_commit_ok=products_commit_ok,
                 products_commit_detail=products_commit_detail,
             )
-        db.close()
+        db2.close()
 
 
 def _worker_loop() -> None:

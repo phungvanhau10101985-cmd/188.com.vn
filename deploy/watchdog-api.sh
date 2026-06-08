@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Cron watchdog: phát hiện API storefront timeout và tự phục hồi.
-# Usage (VPS, mỗi 5 phút):
-#   */5 * * * * cd /var/www/188.com.vn && bash deploy/watchdog-api.sh >> /var/log/188-watchdog.log 2>&1
+# Watchdog ngoài process (tuỳ chọn — backup). Phục hồi chính đã chạy trong API:
+#   DATABASE_POOL_SELF_HEAL_* (daemon ~20s trong backend/app/db/pool_self_heal.py).
+#
+# Usage (VPS, tuỳ chọn mỗi 15–30 phút backup):
+#   */30 * * * * cd /var/www/188.com.vn && bash deploy/watchdog-api.sh >> /var/log/188-watchdog.log 2>&1
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

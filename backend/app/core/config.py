@@ -115,6 +115,25 @@ class Settings:
         self.DATABASE_POOL_RELIEF_AGGRESSIVE_WHEN_IDLE_COUNT: int = int(
             os.getenv("DATABASE_POOL_RELIEF_AGGRESSIVE_WHEN_IDLE_COUNT", "0")
         )
+        # Tự phục hồi pool trong process API (~20s) — không cần cron watchdog 5 phút.
+        self.DATABASE_POOL_SELF_HEAL_ENABLED: bool = os.getenv(
+            "DATABASE_POOL_SELF_HEAL_ENABLED", "true"
+        ).lower() in ("1", "true", "yes")
+        self.DATABASE_POOL_SELF_HEAL_INTERVAL_SECONDS: int = int(
+            os.getenv("DATABASE_POOL_SELF_HEAL_INTERVAL_SECONDS", "20")
+        )
+        self.DATABASE_POOL_SELF_HEAL_PROBE_TIMEOUT_SECONDS: float = float(
+            os.getenv("DATABASE_POOL_SELF_HEAL_PROBE_TIMEOUT_SECONDS", "3")
+        )
+        self.DATABASE_POOL_SELF_HEAL_STARTUP_GRACE_SECONDS: int = int(
+            os.getenv("DATABASE_POOL_SELF_HEAL_STARTUP_GRACE_SECONDS", "45")
+        )
+        self.DATABASE_POOL_SELF_HEAL_MAX_FAILURES: int = int(
+            os.getenv("DATABASE_POOL_SELF_HEAL_MAX_FAILURES", "1")
+        )
+        self.DATABASE_POOL_SELF_HEAL_EXIT_ON_FAILURE: bool = os.getenv(
+            "DATABASE_POOL_SELF_HEAL_EXIT_ON_FAILURE", "true"
+        ).lower() in ("1", "true", "yes")
         self.DATABASE_APPLY_PG_IDLE_TIMEOUT_ON_STARTUP: bool = os.getenv(
             "DATABASE_APPLY_PG_IDLE_TIMEOUT_ON_STARTUP", "true"
         ).lower() in ("1", "true", "yes")

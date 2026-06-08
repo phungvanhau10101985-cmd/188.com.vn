@@ -612,6 +612,24 @@ async def startup_event():
         print(f"   ⚠️  DB pool relief startup: {_e_pool}")
 
     try:
+        from app.db.pool_self_heal import start_pool_self_heal_daemon_if_enabled
+
+        start_pool_self_heal_daemon_if_enabled()
+        from app.core.config import settings as _self_heal_settings
+
+        if getattr(_self_heal_settings, "IS_POSTGRESQL", False) and getattr(
+            _self_heal_settings, "DATABASE_POOL_SELF_HEAL_ENABLED", True
+        ):
+            print(
+                "   🩺 DB pool self-heal: probe mỗi "
+                f"{_self_heal_settings.DATABASE_POOL_SELF_HEAL_INTERVAL_SECONDS}s, "
+                f"tự dispose pool hoặc thoát để PM2 restart khi pool kẹt "
+                f"(không cần cron watchdog 5 phút)."
+            )
+    except Exception as _e_self_heal:
+        print(f"   ⚠️  DB pool self-heal startup: {_e_self_heal}")
+
+    try:
         from app.db.session import SessionLocal
         from app.services.product_image_visibility import deactivate_products_without_storefront_image
 
