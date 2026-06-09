@@ -7,6 +7,7 @@ import {
   NANO_AI_CTX_SOURCE_PRODUCT_PDP,
 } from '@/lib/nanoai-hosted-chat';
 import { useNanoAiMessaging } from '@/lib/use-nanoai-messaging';
+import Button from '@/components/ui/Button';
 
 interface ProductActionsProps {
   product: Product;
@@ -75,33 +76,35 @@ export default function ProductActions({
   return (
     <div className="pt-3">
       <div className="flex flex-col sm:flex-row gap-2">
-        <button
+        <Button
           type="button"
+          variant="secondary"
           onClick={handleAddToCart}
           disabled={!canPurchase}
+          loading={uiCartLoading}
           title={blockHint}
-          className={`flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all flex items-center justify-center space-x-2 group ${
+          className={`flex-1 py-3 shadow hover:shadow-md ${
             canPurchase
-              ? 'bg-gray-500 hover:bg-gray-600 text-white shadow hover:shadow-md'
-              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-          } ${uiCartLoading ? 'opacity-70' : ''}`}
+              ? 'bg-gray-500 hover:bg-gray-600 border-transparent'
+              : 'bg-gray-300 text-gray-500 border-transparent cursor-not-allowed'
+          }`}
         >
-          <span className="text-base group-hover:scale-105 transition-transform">🛒</span>
-          <span>{uiCartLoading ? 'Đang thêm...' : 'Thêm Vào Giỏ'}</span>
-        </button>
-        <button
+          <span className="text-base">🛒</span>
+          Thêm Vào Giỏ
+        </Button>
+        <Button
           type="button"
+          variant="primary"
           onClick={handleBuyNow}
           disabled={!canPurchase}
+          loading={uiCartLoading}
           title={blockHint}
-          className={`flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
-            canPurchase
-              ? 'bg-[#ea580c] hover:bg-[#c2410c] text-white shadow hover:shadow-md'
-              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-          } ${uiCartLoading ? 'opacity-70' : ''}`}
+          className={`flex-1 py-3 shadow hover:shadow-md ${
+            canPurchase ? '' : 'bg-gray-300 text-gray-500 border-transparent cursor-not-allowed hover:bg-gray-300'
+          }`}
         >
-          {uiCartLoading ? 'Đang xử lý...' : 'Mua ngay'}
-        </button>
+          Mua ngay
+        </Button>
         <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
@@ -120,6 +123,7 @@ export default function ProductActions({
             <span className="text-[9px] leading-none">Thử đồ</span>
           </button>
           <button
+            type="button"
             onClick={handleToggleFavorite}
             disabled={uiCartLoading}
             className={`w-11 h-11 border-2 rounded-lg flex items-center justify-center transition-all shrink-0 ${

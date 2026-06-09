@@ -7,6 +7,7 @@ import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ToastProvider';
 import type { UserResponse } from '@/features/auth/types/auth';
 import AccountSessionActions from '@/components/account/AccountSessionActions';
+import Button from '@/components/ui/Button';
 
 function normalizeUserFromApi(raw: Record<string, unknown>): UserResponse {
   const prev = raw as unknown as UserResponse;
@@ -315,13 +316,9 @@ export default function AccountProfilePage() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
-            <button
-              type="submit"
-              disabled={loading}
-              className="inline-flex justify-center rounded-xl bg-[#ea580c] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#c2410c] disabled:opacity-60 transition-colors"
-            >
-              {loading ? 'Đang lưu…' : 'Lưu thay đổi'}
-            </button>
+            <Button type="submit" variant="primary" disabled={loading} loading={loading} className="rounded-xl px-5 py-2.5">
+              Lưu thay đổi
+            </Button>
             <Link
               href="/account"
               className="inline-flex justify-center rounded-xl border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"

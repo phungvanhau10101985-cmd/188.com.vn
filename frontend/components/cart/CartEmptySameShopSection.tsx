@@ -1,6 +1,7 @@
 'use client';
 
-import Link from 'next/link';
+import LoadingLink from '@/components/ui/LoadingLink';
+import Button from '@/components/ui/Button';
 import { useState, useEffect, useCallback } from 'react';
 import { SimpleProductCard } from '@/components/ProductCard';
 import { apiClient } from '@/lib/api-client';
@@ -141,19 +142,19 @@ export default function CartEmptySameShopSection() {
           SẢN PHẨM CÙNG SHOP BẠN VỪA XEM
         </h2>
         {!sameShopLoading && (
-          <Link
+          <LoadingLink
             href={
               sameShopSeed != null
                 ? `/luot-video-cung-shop?seed=${sameShopSeed}`
                 : '/luot-video-cung-shop'
             }
-            className="inline-flex items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-[#ea580c] to-orange-600 text-white text-xs font-semibold px-3.5 py-2 shadow-md shrink-0 self-start sm:self-center min-h-[40px] active:scale-[0.98] transition-transform"
+            className="inline-flex items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-[#ea580c] to-orange-600 text-white text-xs font-semibold px-3.5 py-2 shadow-md shrink-0 self-start sm:self-center min-h-[40px]"
           >
             <svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
               <path d="M8 5v14l11-7z" />
             </svg>
             Lướt video
-          </Link>
+          </LoadingLink>
         )}
       </div>
       <div className="mt-4">
@@ -185,14 +186,15 @@ export default function CartEmptySameShopSection() {
             </div>
             {sameShopHasMore && (
               <div className="flex justify-center py-6">
-                <button
+                <Button
                   type="button"
+                  variant="primary"
                   onClick={loadMoreSameShop}
-                  disabled={sameShopLoadMoreLoading}
-                  className="bg-[#ea580c] hover:bg-[#c2410c] disabled:opacity-60 text-white px-6 py-2.5 rounded-xl font-medium transition-colors text-sm shadow-sm"
+                  loading={sameShopLoadMoreLoading}
+                  className="rounded-xl px-6 py-2.5 shadow-sm"
                 >
-                  {sameShopLoadMoreLoading ? 'Đang tải...' : 'Xem thêm'}
-                </button>
+                  Xem thêm
+                </Button>
               </div>
             )}
           </>

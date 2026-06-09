@@ -19,6 +19,8 @@ const CategoryProductFilters = dynamic(() => import('@/components/CategoryProduc
 import PersonalizedHeroBanner from '@/components/home/PersonalizedHeroBanner';
 import SameShopRecommendationHeader from '@/components/home/SameShopRecommendationHeader';
 import HomeProductPagination from '@/components/home/HomeProductPagination';
+import Button from '@/components/ui/Button';
+import LoadingLink from '@/components/ui/LoadingLink';
 import { apiClient, NANOAI_TEXT_SEARCH_LIMIT } from '@/lib/api-client';
 import { getGuestSessionId } from '@/lib/guest-session';
 import { useLazyRevealList } from '@/hooks/useLazyRevealList';
@@ -144,6 +146,7 @@ export default function HomePageClient({
   const [products, setProducts] = useState<Product[]>(ssrProducts);
   const [totalProducts, setTotalProducts] = useState(initialPlainHome?.total ?? 0);
   const [loading, setLoading] = useState(!ssrHasList);
+  const [retryLoading, setRetryLoading] = useState(false);
   const [homeFeedRefreshing, setHomeFeedRefreshing] = useState(plainHomeAwaitingPersonalized);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState(qFromUrl);
@@ -958,6 +961,7 @@ export default function HomePageClient({
 
   const retryHomeDataLoad = useCallback(() => {
     if (qFromUrl.trim()) {
+      setRetryLoading(true);
       if (typeof window !== 'undefined') window.location.reload();
       return;
     }
@@ -1305,13 +1309,15 @@ export default function HomePageClient({
         {error && (
           <div className="mb-6 bg-red-50/90 border border-red-200 rounded-xl p-4 flex items-center justify-between gap-4 shadow-sm">
             <p className="text-red-700 font-medium">{error}</p>
-            <button
+            <Button
               type="button"
+              variant="primary"
               onClick={() => retryHomeDataLoad()}
-              className="flex-shrink-0 bg-red-500 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-red-600 transition-colors shadow-sm"
+              loading={loading || retryLoading}
+              className="flex-shrink-0 bg-red-500 hover:bg-red-600 border-red-500 shadow-sm"
             >
               Thử lại
-            </button>
+            </Button>
           </div>
         )}
 
@@ -1450,23 +1456,23 @@ export default function HomePageClient({
                     <div className="mt-3 flex flex-wrap gap-2">
                       {suggestedCategories.length > 0 ? (
                         suggestedCategories.map((c, idx) => (
-                          <Link
+                          <LoadingLink
                             key={`${c.path}-${idx}`}
                             href={c.path || '#'}
                             className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-[#ea580c] hover:bg-[#d97706] transition-colors"
                           >
                             {c.name || 'Danh mục'}
-                          </Link>
+                          </LoadingLink>
                         ))
                       ) : isSearching && searchSuggestions.length > 0 ? (
                         searchSuggestions.map((term) => (
-                          <Link
+                          <LoadingLink
                             key={term}
                             href={`/?q=${encodeURIComponent(term)}`}
                             className="text-xs text-[#ea580c] bg-white border border-[#ea580c]/30 px-2 py-1 rounded-full hover:bg-[#ea580c] hover:text-white transition-colors"
                           >
                             {term}
-                          </Link>
+                          </LoadingLink>
                         ))
                       ) : null}
                     </div>
@@ -1480,6 +1486,7 @@ export default function HomePageClient({
                 totalPages={totalPages}
                 totalProducts={totalProducts}
                 onPageChange={setPage}
+                loading={loading}
               />
             )}
           </section>
@@ -1525,14 +1532,15 @@ export default function HomePageClient({
               ) : null}
               {sameShopCanLoadMore && displayedRecommendationProducts.length > 0 && (
                 <div className="flex justify-center pt-5 pb-2">
-                  <button
+                  <Button
                     type="button"
+                    variant="primary"
                     onClick={loadMoreSameShop}
-                    disabled={sameShopLoadMoreLoading}
-                    className="inline-flex min-h-[44px] items-center rounded-xl bg-[#ea580c] px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#c2410c] disabled:opacity-60"
+                    loading={sameShopLoadMoreLoading}
+                    className="rounded-xl px-6 py-2.5"
                   >
-                    {sameShopLoadMoreLoading ? 'Đang tải...' : 'Xem thêm'}
-                  </button>
+                    Xem thêm
+                  </Button>
                 </div>
               )}
             </div>
@@ -1587,6 +1595,7 @@ export default function HomePageClient({
                     totalPages={totalPages}
                     totalProducts={totalProducts}
                     onPageChange={setPage}
+                    loading={loading}
                   />
                 )}
               </>

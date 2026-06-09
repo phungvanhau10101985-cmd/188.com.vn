@@ -11,6 +11,8 @@ import { formatPrice } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { buildAuthLoginHrefFromParts } from '@/lib/auth-redirect';
 import { useToast } from '@/components/ToastProvider';
+import Button from '@/components/ui/Button';
+import LoadingLink from '@/components/ui/LoadingLink';
 import VerifiedPurchaserBadge from '../VerifiedPurchaserBadge';
 import { qaSlotShowsVerifiedPurchaserBadge } from '@/lib/product-qa-verified-display';
 
@@ -344,25 +346,27 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
             rows={2}
             className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm resize-none"
           />
-          <button
+          <Button
             type="submit"
+            variant="primary"
             disabled={!askContent.trim() || submitting}
-            className="px-4 py-2 bg-[#ea580c] text-white rounded-lg hover:bg-[#c2410c] text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+            loading={submitting}
+            className="shrink-0"
           >
-            {submitting ? 'Đang gửi...' : 'Gửi câu hỏi'}
-          </button>
+            Gửi câu hỏi
+          </Button>
         </form>
       ) : (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <p className="mb-3">
             Đặt câu hỏi cho sản phẩm chỉ dành cho tài khoản đã đăng nhập.
           </p>
-          <Link
+          <LoadingLink
             href={askLoginHref}
             className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-[#ea580c] text-white font-medium hover:bg-[#c2410c] transition-colors"
           >
             Đăng nhập để đặt câu hỏi
-          </Link>
+          </LoadingLink>
         </div>
       )}
     </div>

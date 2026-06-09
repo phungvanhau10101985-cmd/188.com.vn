@@ -12,6 +12,7 @@ import { trackEvent } from '@/lib/analytics';
 import ProductReviewFormModal from '@/app/products/[slug]/components/ProductReviewFormModal/ProductReviewFormModal';
 import OrderReviewActions from '@/app/account/orders/components/OrderReviewActions';
 import { pushOrderReceivedConfirmedToast } from '@/app/account/orders/components/orderReceivedToast';
+import Button from '@/components/ui/Button';
 
 interface OrderItem {
   id: number;
@@ -275,9 +276,16 @@ export default function AccountOrdersPage() {
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
           {error}{' '}
-          <button type="button" onClick={() => loadOrders()} className="underline font-medium">
+          <Button
+            type="button"
+            variant="ghost"
+            size="inline"
+            onClick={() => loadOrders()}
+            loading={loading}
+            className="underline font-medium hover:bg-transparent"
+          >
             Thử lại
-          </button>
+          </Button>
         </div>
       )}
 
@@ -487,19 +495,18 @@ export default function AccountOrdersPage() {
               Bấm <strong>{'"'}Xác nhận{'"'}</strong> nghĩa là <strong>188.com.vn</strong> đã hoàn thành trách nhiệm giao trả đầy đủ đơn hàng <strong>{confirmReceivedModalOrder.order_code}</strong> cho quý khách đúng hẹn và không có khiếu nại gì.
             </p>
             <div className="flex gap-2 justify-end">
-              <button 
-                onClick={() => setConfirmReceivedModalOrder(null)} 
-                className="px-4 py-2 border rounded-lg hover:bg-gray-50"
-              >
+              <Button type="button" variant="outline" onClick={() => setConfirmReceivedModalOrder(null)}>
                 Hủy bỏ
-              </button>
-              <button 
-                onClick={handleConfirmReceivedSubmit} 
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={handleConfirmReceivedSubmit}
                 disabled={!!confirmingId}
-                className="px-4 py-2 bg-[#ea580c] text-white rounded-lg hover:bg-[#c2410c] disabled:opacity-50"
+                loading={confirmingId === confirmReceivedModalOrder.id}
               >
-                {confirmingId === confirmReceivedModalOrder.id ? 'Đang xử lý...' : 'Xác nhận'}
-              </button>
+                Xác nhận
+              </Button>
             </div>
           </div>
         </div>

@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import ProductGrid from '@/components/ProductGrid';
 import CategoryProductFilters from '@/components/CategoryProductFilters';
+import Button from '@/components/ui/Button';
+import ListingPagePagination from '@/components/ui/ListingPagePagination';
 import type { CategoryProductFacets } from '@/lib/category-seo';
 import { linkifySeoBody, type InternalLinkItem } from '@/lib/internal-links';
 import { getListingFreshnessMonthLabel } from '@/lib/listing-freshness-label';
@@ -53,6 +55,7 @@ export default function CategoryPageClient({
   const basePath = `/danh-muc/${pathSegments.join('/')}`;
   const from = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const to = Math.min(currentPage * pageSize, total);
+  const [goingHome, setGoingHome] = useState(false);
 
   const monthLabel = getListingFreshnessMonthLabel();
   const h1Text = `${leafName} mới nhất ${monthLabel} | ${total} sản phẩm`;
@@ -135,12 +138,17 @@ export default function CategoryPageClient({
       {error && (
         <div className="mb-6 bg-red-50 border border-red-200 rounded-xl p-4 flex items-center justify-between">
           <p className="text-red-700 font-medium">{error}</p>
-          <button
-            onClick={() => router.push('/')}
-            className="px-4 py-2 rounded-lg bg-red-500 text-white text-sm font-medium hover:bg-red-600"
+          <Button
+            variant="primary"
+            className="bg-red-500 hover:bg-red-600 border-red-500"
+            loading={goingHome}
+            onClick={() => {
+              setGoingHome(true);
+              router.push('/');
+            }}
           >
             Về trang chủ
-          </button>
+          </Button>
         </div>
       )}
 
@@ -160,29 +168,13 @@ export default function CategoryPageClient({
             selectedCategory={leafName}
             showFilters={false}
           />
-          {totalPages > 1 && (
-            <nav className="mt-8 flex flex-wrap items-center justify-center gap-2" aria-label="Phân trang danh mục">
-              {currentPage > 1 && (
-                <Link
-                  href={queryWithPage(currentPage - 1)}
-                  className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 font-medium text-sm"
-                >
-                  ← Trang trước
-                </Link>
-              )}
-              <span className="px-3 py-2 text-gray-600 text-sm">
-                Trang {currentPage} / {totalPages}
-              </span>
-              {currentPage < totalPages && (
-                <Link
-                  href={queryWithPage(currentPage + 1)}
-                  className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 font-medium text-sm"
-                >
-                  Trang sau →
-                </Link>
-              )}
-            </nav>
-          )}
+          {totalPages > 1 ? (
+            <ListingPagePagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              getHref={queryWithPage}
+            />
+          ) : null}
 
           {seoBody && (
             <section

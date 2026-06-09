@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import Button from '@/components/ui/Button';
 import { apiClient } from '@/lib/api-client';
 import { sortCategoryTiles } from '@/lib/category-tree-sort';
 import CategoryCatalogMarquee from '@/components/category/CategoryCatalogMarquee';
@@ -142,13 +143,19 @@ export default function CategoryListPage({
       {error && !loading ? (
         <div className="mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 md:mx-auto md:max-w-7xl">
           {error}{' '}
-          <button
+          <Button
             type="button"
-            onClick={() => setReloadKey((k) => k + 1)}
-            className="font-medium underline"
+            variant="ghost"
+            size="inline"
+            onClick={() => {
+              setError(null);
+              setLoading(true);
+              setReloadKey((k) => k + 1);
+            }}
+            className="underline font-medium text-red-700 hover:bg-transparent"
           >
             Thử lại
-          </button>
+          </Button>
         </div>
       ) : null}
 

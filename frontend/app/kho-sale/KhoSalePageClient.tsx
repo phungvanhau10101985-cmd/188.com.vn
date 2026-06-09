@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ProductGrid from '@/components/ProductGrid';
 import CategoryProductFilters from '@/components/CategoryProductFilters';
+import ListingPagePagination from '@/components/ui/ListingPagePagination';
+import Button from '@/components/ui/Button';
 import type { CategoryProductFacets } from '@/lib/category-seo';
 import { getListingFreshnessMonthLabel } from '@/lib/listing-freshness-label';
 import type { Product } from '@/types/api';
@@ -47,6 +49,17 @@ export default function KhoSalePageClient({
   const from = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const to = Math.min(currentPage * pageSize, total);
   const monthLabel = getListingFreshnessMonthLabel();
+
+  const queryWithPage = useCallback(
+    (nextPage: number) => {
+      const p = new URLSearchParams(listingQueryString);
+      if (nextPage <= 1) p.delete('page');
+      else p.set('page', String(nextPage));
+      const q = p.toString();
+      return q ? `${basePath}?${q}` : basePath;
+    },
+    [listingQueryString],
+  );
 
   const filterParams = useMemo(() => {
     const p = new URLSearchParams(listingQueryString);
@@ -172,10 +185,17 @@ export default function KhoSalePageClient({
 
       {error && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-          <button type="button" onClick={() => void reload()} className="ml-2 font-medium underline">
+          {error}{' '}
+          <Button
+            type="button"
+            variant="ghost"
+            size="inline"
+            onClick={() => void reload()}
+            loading={loading}
+            className="ml-2 underline font-medium text-red-700 hover:bg-transparent"
+          >
             Thử lại
-          </button>
+          </Button>
         </div>
       )}
 
@@ -190,29 +210,13 @@ export default function KhoSalePageClient({
         />
       )}
 
-      {totalPages > 1 && (
-        <nav className="mt-8 flex justify-center gap-2" aria-label="Phân trang">
-          {currentPage > 1 && (
-            <Link
-              href={`${basePath}?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(listingQueryString)), page: String(currentPage - 1) }).toString()}`}
-              className="rounded-lg border px-4 py-2 text-sm hover:bg-gray-50"
-            >
-              Trước
-            </Link>
-          )}
-          <span className="flex items-center px-3 text-sm text-gray-600">
-            Trang {currentPage} / {totalPages}
-          </span>
-          {currentPage < totalPages && (
-            <Link
-              href={`${basePath}?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(listingQueryString)), page: String(currentPage + 1) }).toString()}`}
-              className="rounded-lg border px-4 py-2 text-sm hover:bg-gray-50"
-            >
-              Sau
-            </Link>
-          )}
-        </nav>
-      )}
+      {totalPages > 1 ? (
+        <ListingPagePagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          getHref={queryWithPage}
+        />
+      ) : null}
     </main>
   );
 }

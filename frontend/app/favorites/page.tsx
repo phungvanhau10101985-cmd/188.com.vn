@@ -8,6 +8,8 @@ import { getOptimizedImage } from '@/lib/image-utils';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useToast } from '@/components/ToastProvider';
+import Button from '@/components/ui/Button';
+import LoadingLink from '@/components/ui/LoadingLink';
 import { trackEvent } from '@/lib/analytics';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
@@ -242,9 +244,11 @@ export default function FavoritesPage() {
     [pushToast, refreshFavorites],
   );
 
+  const [retryLoading, setRetryLoading] = useState(false);
+
   const reload = () => {
     setError(null);
-    setLoading(true);
+    setRetryLoading(true);
     window.location.reload();
   };
 
@@ -259,21 +263,28 @@ export default function FavoritesPage() {
             </p>
           </div>
           {!loading && items.length > 0 ? (
-            <Link
+            <LoadingLink
               href="/"
-              className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:border-orange-200 hover:text-[#ea580c] sm:text-sm"
+              className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:border-orange-200 hover:text-[#ea580c] sm:text-sm inline-flex items-center"
             >
               Tiếp tục mua sắm
-            </Link>
+            </LoadingLink>
           ) : null}
         </header>
 
         {error ? (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}{' '}
-            <button type="button" onClick={reload} className="font-medium underline">
+            <Button
+              type="button"
+              variant="ghost"
+              size="inline"
+              onClick={reload}
+              loading={retryLoading}
+              className="font-medium underline hover:bg-transparent"
+            >
               Thử lại
-            </button>
+            </Button>
           </div>
         ) : null}
 
@@ -292,12 +303,12 @@ export default function FavoritesPage() {
             </div>
             <p className="mb-1 text-base font-medium text-gray-900">Chưa có sản phẩm yêu thích</p>
             <p className="mb-6 text-sm text-gray-500">Nhấn ♥ trên sản phẩm để lưu vào danh sách này.</p>
-            <Link
+            <LoadingLink
               href="/"
               className="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-[#ea580c] px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#c2410c]"
             >
               Khám phá sản phẩm
-            </Link>
+            </LoadingLink>
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 md:gap-4 lg:grid-cols-4">

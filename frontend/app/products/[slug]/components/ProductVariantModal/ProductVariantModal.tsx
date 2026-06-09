@@ -18,6 +18,7 @@ import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
+import Button from '@/components/ui/Button';
 import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
 import WarehouseClearanceBlock from '@/components/product-detail/WarehouseClearanceBlock';
@@ -767,40 +768,40 @@ export default function ProductVariantModal({
           ) : null}
           <div className="flex flex-row gap-2">
             {(action === 'add' || action === 'both') && (
-              <button
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={handleConfirmAddToCart}
                 disabled={
                   orderingWarehouse || !available || maxQty === 0 || effectiveQuantity < 1 || uiCartLoading
                 }
-                className="flex-1 py-3.5 rounded-xl font-semibold text-sm bg-gray-500 text-white hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                loading={uiCartLoading}
+                className="flex-1 rounded-xl py-3.5 text-sm font-semibold bg-gray-500 text-white hover:bg-gray-600 border-transparent"
               >
                 {!available && warehouseInStock.length === 0
                   ? 'Hết hàng'
                   : maxQty === 0 && !orderingWarehouse
                     ? 'Hết hàng'
-                    : uiCartLoading
-                      ? 'Đang thêm...'
-                      : 'Thêm vào Giỏ hàng'}
-              </button>
+                    : 'Thêm vào Giỏ hàng'}
+              </Button>
             )}
             {(action === 'buy' || action === 'both') && (
-              <button
+              <Button
                 type="button"
+                variant="primary"
                 onClick={handleConfirmBuyNow}
                 disabled={
                   orderingWarehouse || !available || maxQty === 0 || effectiveQuantity < 1 || uiCartLoading
                 }
-                className="flex-1 py-3.5 rounded-xl font-semibold text-sm bg-[#ea580c] text-white hover:bg-[#c2410c] disabled:opacity-50 disabled:cursor-not-allowed"
+                loading={uiCartLoading}
+                className="flex-1 rounded-xl py-3.5 text-sm font-semibold"
               >
                 {!available && warehouseInStock.length === 0
                   ? 'Hết hàng'
                   : maxQty === 0 && !orderingWarehouse
                     ? 'Hết hàng'
-                    : uiCartLoading
-                      ? 'Đang xử lý...'
-                      : 'Mua hàng'}
-              </button>
+                    : 'Mua hàng'}
+              </Button>
             )}
           </div>
         </div>

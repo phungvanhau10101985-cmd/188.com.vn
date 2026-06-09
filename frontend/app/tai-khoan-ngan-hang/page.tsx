@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ToastProvider';
+import Button from '@/components/ui/Button';
 
 export default function UserBankAccountPage() {
   const { pushToast } = useToast();
@@ -183,13 +184,15 @@ export default function UserBankAccountPage() {
             </p>
           </div>
         ) : null}
-        <button
+        <Button
           type="submit"
+          variant="primary"
           disabled={saving || sendingOtp}
-          className="w-full sm:w-auto rounded-lg bg-[#ea580c] text-white px-5 py-2.5 text-sm font-semibold hover:bg-[#c2410c] disabled:opacity-60"
+          loading={saving || sendingOtp}
+          className="w-full sm:w-auto"
         >
-          {saving ? 'Đang lưu…' : sendingOtp ? 'Đang gửi OTP…' : otpSentTo ? 'Xác minh & lưu tài khoản' : 'Gửi OTP xác minh'}
-        </button>
+          {otpSentTo ? 'Xác minh & lưu tài khoản' : 'Gửi OTP xác minh'}
+        </Button>
       </form>
     </div>
   );

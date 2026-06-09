@@ -15,6 +15,7 @@ import {
   warehouseVariantSizeLabel,
   warehouseVariantsInStock,
 } from '@/lib/warehouse-clearance';
+import Button from '@/components/ui/Button';
 
 type WarehouseClearanceBlockProps = {
   product: Product;
@@ -285,22 +286,26 @@ export default function WarehouseClearanceBlock({
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row">
-        <button
+        <Button
           type="button"
+          variant="secondary"
           disabled={!selected || uiCartLoading}
+          loading={uiCartLoading}
           onClick={handleAdd}
-          className="flex-1 rounded-xl border-2 border-gray-600 bg-gray-700 py-3 text-sm font-bold text-white shadow-sm hover:bg-gray-800 disabled:opacity-50 sm:text-base"
+          className="flex-1 rounded-xl border-2 border-gray-600 bg-gray-700 py-3 text-sm font-bold text-white shadow-sm hover:bg-gray-800 sm:text-base"
         >
-          {uiCartLoading ? 'Đang thêm…' : 'Thêm giỏ (thanh lý)'}
-        </button>
-        <button
+          Thêm giỏ (thanh lý)
+        </Button>
+        <Button
           type="button"
+          variant="primary"
           disabled={!selected || uiCartLoading}
+          loading={uiCartLoading}
           onClick={handleBuy}
-          className="flex-1 rounded-xl bg-gradient-to-r from-[#ea580c] to-orange-600 py-3 text-sm font-bold text-white shadow-md hover:from-[#c2410c] hover:to-orange-700 disabled:opacity-50 sm:text-base"
+          className="flex-1 rounded-xl bg-gradient-to-r from-[#ea580c] to-orange-600 py-3 text-sm font-bold text-white shadow-md hover:from-[#c2410c] hover:to-orange-700 sm:text-base border-transparent"
         >
-          {uiCartLoading ? 'Đang xử lý…' : 'Mua ngay (thanh lý)'}
-        </button>
+          Mua ngay (thanh lý)
+        </Button>
       </div>
     </section>
   );

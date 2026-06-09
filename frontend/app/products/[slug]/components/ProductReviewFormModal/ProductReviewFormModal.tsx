@@ -5,6 +5,7 @@ import { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useToast } from '@/components/ToastProvider';
+import Button from '@/components/ui/Button';
 
 interface ProductReviewFormModalProps {
   product: Product;
@@ -197,13 +198,15 @@ export default function ProductReviewFormModal({
           </div>
 
           {/* Nút gửi */}
-          <button
+          <Button
             type="submit"
+            variant="primary"
             disabled={submitting || !content.trim()}
-            className="w-full py-3 bg-[#ea580c] text-white font-medium rounded-lg hover:bg-[#c2410c] disabled:opacity-50 disabled:cursor-not-allowed transition"
+            loading={submitting}
+            className="w-full py-3"
           >
-            {submitting ? 'Đang gửi...' : 'Gửi'}
-          </button>
+            Gửi
+          </Button>
 
           {/* Lưu ý */}
           <p className="text-xs text-red-600">

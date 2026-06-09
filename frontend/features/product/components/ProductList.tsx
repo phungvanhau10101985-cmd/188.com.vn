@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import type { Product, ProductSearchParams } from '@/types/api';
 import { productAPI } from '../api/product-api';
 import ProductCard from './ProductCard';
+import Button from '@/components/ui/Button';
 
 interface ProductListProps {
   initialProducts?: Product[];
@@ -191,13 +192,14 @@ export default function ProductList({
       {/* Load More */}
       {products.length > 0 && (
         <div className="text-center mt-8">
-          <button
+          <Button
+            variant="primary"
             onClick={handleLoadMore}
-            disabled={loading}
-            className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-lg font-medium disabled:opacity-50"
+            loading={loading}
+            className="bg-orange-500 hover:bg-orange-600 border-transparent px-6 py-3"
           >
-            {loading ? 'Đang tải...' : 'Xem thêm sản phẩm'}
-          </button>
+            Xem thêm sản phẩm
+          </Button>
         </div>
       )}
     </div>

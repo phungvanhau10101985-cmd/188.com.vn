@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { syncPushSubscription, requestPermissionAndSyncPush } from '@/lib/web-push-subscribe';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ToastProvider';
+import Button from '@/components/ui/Button';
 
 function isStandalonePwa(): boolean {
   if (typeof window === 'undefined') return false;
@@ -126,23 +127,27 @@ export default function PushNotificationsCard() {
         </div>
         <div className="flex flex-col sm:flex-row gap-2 shrink-0">
           {!granted ? (
-            <button
+            <Button
               type="button"
+              variant="primary"
               onClick={handleEnable}
               disabled={busy || serverPush === false}
-              className="min-h-[44px] px-4 rounded-xl bg-[#ea580c] text-white text-sm font-semibold hover:bg-[#c2410c] disabled:opacity-50"
+              loading={busy}
+              className="rounded-xl"
             >
-              {busy ? 'Đang xử lý…' : 'Bật thông báo đẩy'}
-            </button>
+              Bật thông báo đẩy
+            </Button>
           ) : (
-            <button
+            <Button
               type="button"
+              variant="outline"
               onClick={handleResync}
               disabled={busy}
-              className="min-h-[44px] px-4 rounded-xl border border-orange-200 bg-white text-[#ea580c] text-sm font-semibold hover:bg-orange-50 disabled:opacity-50"
+              loading={busy}
+              className="rounded-xl border-orange-200 text-[#ea580c] hover:bg-orange-50"
             >
-              {busy ? 'Đang đồng bộ…' : 'Đồng bộ lại thiết bị'}
-            </button>
+              Đồng bộ lại thiết bị
+            </Button>
           )}
         </div>
       </div>

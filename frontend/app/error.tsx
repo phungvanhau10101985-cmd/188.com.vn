@@ -1,5 +1,7 @@
 'use client';
 
+import Button from '@/components/ui/Button';
+
 export default function RootError({ reset }: { reset: () => void }) {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-6">
@@ -8,13 +10,9 @@ export default function RootError({ reset }: { reset: () => void }) {
         <p className="text-sm text-gray-600 mb-6">
           Vui lòng thử tải lại trang. Nếu lỗi vẫn tiếp tục, hãy thử lại sau.
         </p>
-        <button
-          type="button"
-          onClick={() => reset()}
-          className="px-5 py-2.5 bg-[#ea580c] text-white rounded-lg font-medium hover:bg-[#c2410c]"
-        >
+        <Button type="button" variant="primary" onClick={() => reset()}>
           Thử lại
-        </button>
+        </Button>
       </div>
     </div>
   );

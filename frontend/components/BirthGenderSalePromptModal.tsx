@@ -6,6 +6,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/lib/api-client';
 import { clearFreshLoginSession, isFreshLoginSession } from '@/lib/birthday-prompt-session';
 import { useToast } from '@/components/ToastProvider';
+import Button from '@/components/ui/Button';
 import type { UserResponse } from '@/features/auth/types/auth';
 
 const DISMISS_KEY = '188_birth_gender_prompt_dismissed';
@@ -333,20 +334,12 @@ export default function BirthGenderSalePromptModal() {
             )}
 
             <div className="flex flex-col-reverse sm:flex-row gap-2 pt-1">
-              <button
-                type="button"
-                onClick={handleDefer}
-                className="w-full sm:flex-1 py-2.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
+              <Button type="button" variant="outline" onClick={handleDefer} className="w-full sm:flex-1 py-2.5">
                 Để sau
-              </button>
-              <button
-                type="submit"
-                disabled={saving}
-                className="w-full sm:flex-1 py-2.5 rounded-lg bg-[#ea580c] text-white text-sm font-medium hover:bg-orange-600 disabled:opacity-50"
-              >
-                {saving ? 'Đang lưu…' : 'Lưu thông tin'}
-              </button>
+              </Button>
+              <Button type="submit" variant="primary" disabled={saving} loading={saving} className="w-full sm:flex-1 py-2.5">
+                Lưu thông tin
+              </Button>
             </div>
           </form>
         </div>

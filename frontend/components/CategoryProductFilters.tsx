@@ -1,8 +1,10 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { CategoryProductFacets } from '@/lib/category-seo';
+import Button from '@/components/ui/Button';
+import ButtonSpinner from '@/components/ui/ButtonSpinner';
 
 type Props = {
   basePath: string;
@@ -30,6 +32,7 @@ function CategoryProductFiltersInner({
 }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [isNavPending, startTransition] = useTransition();
 
   const minPriceQ = searchParams.get('min_price') || '';
   const maxPriceQ = searchParams.get('max_price') || '';
@@ -61,9 +64,11 @@ function CategoryProductFiltersInner({
       }
       const q = p.toString();
       const dest = q ? `${basePath}?${q}` : basePath;
-      router.push(dest, { scroll: false });
+      startTransition(() => {
+        router.push(dest, { scroll: false });
+      });
     },
-    [basePath, router, searchParams]
+    [basePath, router, searchParams, startTransition]
   );
 
   const applyPriceFilters = useCallback(() => {
@@ -138,7 +143,20 @@ function CategoryProductFiltersInner({
   const showColorFilter = facetsLoading || (facets != null && facets.colors.length > 0);
 
   return (
-    <div className={compact ? "flex w-full flex-col gap-1" : "flex flex-col gap-2 sm:gap-3 w-full"} aria-label="Bộ lọc sản phẩm">
+    <div
+      className={compact ? "relative flex w-full flex-col gap-1" : "relative flex flex-col gap-2 sm:gap-3 w-full"}
+      aria-label="Bộ lọc sản phẩm"
+      aria-busy={isNavPending || facetsLoading || undefined}
+    >
+      {isNavPending ? (
+        <div
+          className="pointer-events-none absolute right-0 top-0 z-10 inline-flex items-center gap-1.5 rounded-full border border-orange-200 bg-white/95 px-2 py-1 text-[11px] font-medium text-[#c2410c] shadow-sm"
+          aria-live="polite"
+        >
+          <ButtonSpinner size="xs" />
+          Đang tải…
+        </div>
+      ) : null}
       <div className={compact ? "grid grid-cols-3 gap-1.5 sm:flex sm:flex-row sm:flex-wrap sm:items-end sm:justify-start" : "grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:flex-wrap sm:items-end sm:justify-start"}>
         {showSizeFilter ? (
           <label className={compact ? "flex min-w-0 flex-col text-left" : "flex min-w-0 flex-col gap-1 text-left"}>
@@ -276,13 +294,15 @@ function CategoryProductFiltersInner({
 
         {hasActiveFilters ? (
           <div className={compact ? "flex items-end leading-none" : "flex items-end"}>
-            <button
+            <Button
               type="button"
-              onClick={() => router.push(basePath, { scroll: false })}
-              className={compact ? "h-8 shrink-0 whitespace-nowrap px-1 text-xs font-medium text-[#ea580c] hover:underline sm:px-2" : "h-10 shrink-0 whitespace-nowrap rounded-full bg-orange-50 px-3 text-xs font-medium text-[#ea580c] hover:underline sm:bg-transparent sm:px-0 sm:text-sm"}
+              variant="ghost"
+              onClick={() => startTransition(() => router.push(basePath, { scroll: false }))}
+              loading={isNavPending}
+              className={compact ? "h-8 min-h-0 shrink-0 whitespace-nowrap px-1 text-xs sm:px-2" : "h-10 min-h-0 shrink-0 whitespace-nowrap rounded-full bg-orange-50 px-3 text-xs sm:bg-transparent sm:px-0 sm:text-sm"}
             >
               Xóa bộ lọc
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>

@@ -2,6 +2,7 @@
 
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient, type SearchHistoryItem } from '@/lib/api-client';
+import Button from '@/components/ui/Button';
 
 function dedupeSearchHistory(rows: SearchHistoryItem[]): SearchHistoryItem[] {
   const seen = new Set<string>();
@@ -127,9 +128,16 @@ export default function SearchHistoryPanel({
       {error && (
         <div className="mx-2 mt-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-700">
           {error}{' '}
-          <button type="button" onClick={() => void loadHistory()} className="font-medium underline">
+          <Button
+            type="button"
+            variant="ghost"
+            size="inline"
+            onClick={() => void loadHistory()}
+            loading={loading}
+            className="font-medium underline hover:bg-transparent"
+          >
             Thử lại
-          </button>
+          </Button>
         </div>
       )}
 
@@ -170,14 +178,16 @@ export default function SearchHistoryPanel({
 
       {items.length > 0 && (
         <div className="border-t border-gray-100 p-2">
-          <button
+          <Button
             type="button"
-            className="w-full rounded-md px-2 py-2 text-center text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-red-600 disabled:opacity-40"
-            disabled={clearingAll || removingQuery != null}
+            variant="ghost"
             onClick={() => void handleClearAll()}
+            loading={clearingAll}
+            disabled={removingQuery != null}
+            className="w-full min-h-[36px] rounded-md text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-red-600"
           >
-            {clearingAll ? 'Đang xóa…' : 'Xóa tất cả lịch sử'}
-          </button>
+            Xóa tất cả lịch sử
+          </Button>
         </div>
       )}
     </div>

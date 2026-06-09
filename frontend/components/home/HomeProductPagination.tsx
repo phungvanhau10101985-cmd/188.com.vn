@@ -1,10 +1,14 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+import Button from '@/components/ui/Button';
+
 type HomeProductPaginationProps = {
   currentPage: number;
   totalPages: number;
   totalProducts: number;
   onPageChange: (page: number) => void;
+  loading?: boolean;
 };
 
 function buildVisiblePageNumbers(current: number, total: number): (number | 'ellipsis')[] {
@@ -31,7 +35,16 @@ export default function HomeProductPagination({
   totalPages,
   totalProducts,
   onPageChange,
+  loading = false,
 }: HomeProductPaginationProps) {
+  const [pendingPage, setPendingPage] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!loading) {
+      setPendingPage(null);
+    }
+  }, [loading]);
+
   if (totalPages <= 1) return null;
 
   const pageItems = buildVisiblePageNumbers(currentPage, totalPages);
@@ -49,18 +62,26 @@ export default function HomeProductPagination({
         : 'border-gray-200 bg-white text-gray-700 hover:border-orange-200 hover:bg-orange-50 hover:text-[#c2410c]',
     ].join(' ');
 
+  const handlePageChange = (page: number) => {
+    if (loading) return;
+    setPendingPage(page);
+    onPageChange(page);
+  };
+
   return (
     <nav className="mt-6 flex flex-col items-start gap-2" aria-label="Phân trang sản phẩm">
       <div className="flex flex-wrap items-center gap-1.5">
-        <button
+        <Button
           type="button"
-          onClick={() => onPageChange(currentPage - 1)}
+          variant="outline"
+          onClick={() => handlePageChange(currentPage - 1)}
           disabled={!canGoPrev}
-          className={navButtonClass}
+          loading={loading && pendingPage === currentPage - 1}
+          className={`${navButtonClass} min-w-[44px] px-3`}
           aria-label="Trang trước"
         >
           ←
-        </button>
+        </Button>
 
         {pageItems.map((item, index) =>
           item === 'ellipsis' ? (
@@ -72,28 +93,33 @@ export default function HomeProductPagination({
               …
             </span>
           ) : (
-            <button
+            <Button
               key={item}
               type="button"
-              onClick={() => onPageChange(item)}
+              variant="outline"
+              onClick={() => handlePageChange(item)}
+              loading={loading && pendingPage === item}
+              disabled={loading && pendingPage !== item}
               className={pageButtonClass(item === currentPage)}
               aria-label={`Trang ${item}`}
               aria-current={item === currentPage ? 'page' : undefined}
             >
               {item}
-            </button>
+            </Button>
           )
         )}
 
-        <button
+        <Button
           type="button"
-          onClick={() => onPageChange(currentPage + 1)}
+          variant="outline"
+          onClick={() => handlePageChange(currentPage + 1)}
           disabled={!canGoNext}
-          className={navButtonClass}
+          loading={loading && pendingPage === currentPage + 1}
+          className={`${navButtonClass} min-w-[44px] px-3`}
           aria-label="Trang sau"
         >
           →
-        </button>
+        </Button>
       </div>
 
       <p className="text-xs text-gray-500">

@@ -8,6 +8,8 @@ import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import Button from '@/components/ui/Button';
+import LoadingLink from '@/components/ui/LoadingLink';
 import type { UserAddress, AddressCreateInput } from '@/types/api';
 import { VIETNAM_PROVINCES } from '@/lib/vietnam-provinces';
 import { getStoredReferralCode } from '@/lib/affiliate-ref';
@@ -1336,20 +1338,22 @@ export default function CartPage() {
               </p>
             ) : null}
             <div className="mt-4 flex flex-col md:flex-row gap-3">
-              <Link
+              <LoadingLink
                 href="/"
-                className="w-full md:w-1/2 bg-gray-100 border border-gray-200 text-gray-700 font-semibold py-3 rounded-lg hover:bg-gray-200 text-center transition-colors"
+                className="w-full md:w-1/2 bg-gray-100 border border-gray-200 text-gray-700 font-semibold py-3 rounded-lg hover:bg-gray-200 text-center transition-colors inline-flex items-center justify-center"
               >
                 Mua sắm tiếp
-              </Link>
-              <button
+              </LoadingLink>
+              <Button
                 type="button"
+                variant="primary"
                 onClick={handleCheckout}
                 disabled={isCheckingOut || noneSelected}
-                className="w-full md:w-1/2 bg-[#ea580c] text-white font-semibold py-3 rounded-lg hover:bg-[#c2410c] transition-colors disabled:opacity-70"
+                loading={isCheckingOut}
+                className="w-full md:w-1/2 font-semibold py-3"
               >
-                {isCheckingOut ? 'Đang xử lý...' : 'Đặt hàng'}
-              </button>
+                Đặt hàng
+              </Button>
             </div>
           </div>
         </div>
@@ -1458,20 +1462,21 @@ export default function CartPage() {
                   <label htmlFor="cart_addr_default" className="text-sm text-gray-700">Đặt làm mặc định</label>
                 </div>
                 <div className="flex gap-3 pt-2">
-                  <button
+                  <Button
                     type="submit"
+                    variant="primary"
                     disabled={savingAddress}
-                    className="px-4 py-2 bg-[#ea580c] text-white font-medium rounded-lg hover:bg-[#c2410c] disabled:opacity-70"
+                    loading={savingAddress}
                   >
-                    {savingAddress ? 'Đang lưu...' : 'Lưu vào sổ địa chỉ'}
-                  </button>
-                  <button
+                    Lưu vào sổ địa chỉ
+                  </Button>
+                  <Button
                     type="button"
+                    variant="outline"
                     onClick={() => setShowAddAddress(false)}
-                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
                   >
                     Hủy
-                  </button>
+                  </Button>
                 </div>
               </form>
             </div>

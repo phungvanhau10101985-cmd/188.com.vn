@@ -6,6 +6,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { UserAddress, AddressCreateInput } from '@/types/api';
 import { VIETNAM_PROVINCES } from '@/lib/vietnam-provinces';
 import { useToast } from '@/components/ToastProvider';
+import Button from '@/components/ui/Button';
 
 function formatAddressLine(addr: UserAddress): string {
   const parts = [addr.street_address];
@@ -326,20 +327,12 @@ export default function AddressesPage() {
               </div>
 
               <div className="flex gap-3 pt-2">
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="px-4 py-2 bg-[#ea580c] text-white font-medium rounded-lg hover:bg-[#c2410c] disabled:opacity-70"
-                >
-                  {saving ? 'Đang lưu...' : 'Lưu địa chỉ'}
-                </button>
-                <button
-                  type="button"
-                  onClick={closeForm}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50"
-                >
+                <Button type="submit" variant="primary" disabled={saving} loading={saving}>
+                  Lưu địa chỉ
+                </Button>
+                <Button type="button" variant="outline" onClick={closeForm}>
                   Hủy
-                </button>
+                </Button>
               </div>
             </form>
           </div>

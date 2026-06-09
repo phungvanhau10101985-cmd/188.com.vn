@@ -6,6 +6,8 @@ import { useSearchParams } from 'next/navigation';
 import { cdnUrl } from '@/lib/cdn-url';
 import Image from 'next/image';
 import Link from 'next/link';
+import Button from '@/components/ui/Button';
+import LoadingLink from '@/components/ui/LoadingLink';
 import type { Product, ProductSearchParams } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
 import { formatPrice, getProductMainImage } from '@/lib/utils';
@@ -559,21 +561,22 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
         )}
         {canShowAll &&
           (fullListingHref ? (
-            <Link
+            <LoadingLink
               href={fullListingHref}
               className="inline-flex shrink-0 items-center justify-center px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-orange-600"
             >
               Xem tất cả
-            </Link>
+            </LoadingLink>
           ) : (
-            <button
+            <Button
               type="button"
+              variant="primary"
               onClick={handleShowAll}
-              disabled={showAllLoading}
-              className="shrink-0 px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium disabled:opacity-60"
+              loading={showAllLoading}
+              className="shrink-0"
             >
-              {showAllLoading ? 'Đang tải...' : 'Xem tất cả'}
-            </button>
+              Xem tất cả
+            </Button>
           ))}
       </div>
     ) : null;
@@ -603,21 +606,22 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
         )}
         {shopGroupCanShowAll &&
           (sameChineseShopCat2GroupHref ? (
-            <Link
+            <LoadingLink
               href={sameChineseShopCat2GroupHref}
               className="inline-flex shrink-0 items-center justify-center px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-orange-600"
             >
               Xem tất cả
-            </Link>
+            </LoadingLink>
           ) : (
-            <button
+            <Button
               type="button"
+              variant="primary"
               onClick={handleShopGroupShowAll}
-              disabled={shopGroupShowAllLoading}
-              className="shrink-0 px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium disabled:opacity-60"
+              loading={shopGroupShowAllLoading}
+              className="shrink-0"
             >
-              {shopGroupShowAllLoading ? 'Đang tải...' : 'Xem tất cả'}
-            </button>
+              Xem tất cả
+            </Button>
           ))}
       </div>
     ) : null;

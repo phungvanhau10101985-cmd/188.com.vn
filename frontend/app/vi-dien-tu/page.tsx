@@ -7,6 +7,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ToastProvider';
 import AffiliateLinkConverter from '@/components/affiliate/AffiliateLinkConverter';
+import Button from '@/components/ui/Button';
 
 function fmt(amount: number) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount || 0);
@@ -165,9 +166,16 @@ export default function WalletPage() {
     return (
       <div className="bg-white rounded-xl border border-gray-100 p-6 text-center text-sm text-gray-600">
         Không tải được thông tin ví.{' '}
-        <button type="button" onClick={() => void reload()} className="text-[#ea580c] underline font-medium">
+        <Button
+          type="button"
+          variant="ghost"
+          size="inline"
+          onClick={() => void reload()}
+          loading={loading}
+          className="text-[#ea580c] underline font-medium hover:bg-transparent"
+        >
           Thử lại
-        </button>
+        </Button>
       </div>
     );
   }
@@ -263,14 +271,16 @@ export default function WalletPage() {
                       className="mt-1 w-full rounded-lg border border-orange-200 px-3 py-2 text-sm"
                     />
                   </label>
-                  <button
+                  <Button
                     type="button"
+                    variant="primary"
                     disabled={applying}
+                    loading={applying}
                     onClick={() => void submitApplication()}
-                    className="rounded-lg bg-[#ea580c] px-4 py-2 text-sm font-semibold text-white hover:bg-[#c2410c] disabled:opacity-60"
+                    className="font-semibold"
                   >
-                    {applying ? 'Đang gửi…' : application ? 'Gửi lại hồ sơ' : 'Gửi yêu cầu xét duyệt'}
-                  </button>
+                    {application ? 'Gửi lại hồ sơ' : 'Gửi yêu cầu xét duyệt'}
+                  </Button>
                 </div>
               ) : null}
             </div>
@@ -330,14 +340,16 @@ export default function WalletPage() {
                       Rút tối đa
                     </button>
                   ) : null}
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
                     disabled={withdrawing || Number(affiliate.balance) < Number(affiliate.min_withdrawal)}
+                    loading={withdrawing}
                     onClick={() => void handleWithdraw()}
-                    className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold hover:bg-gray-50 disabled:opacity-60"
+                    className="font-semibold"
                   >
-                    {withdrawing ? 'Đang gửi…' : 'Gửi yêu cầu rút'}
-                  </button>
+                    Gửi yêu cầu rút
+                  </Button>
                 </div>
                 {Number(affiliate.balance) > 0 && Number(affiliate.balance) < Number(affiliate.min_withdrawal) ? (
                   <p className="text-xs text-orange-600 mt-2">
@@ -470,14 +482,15 @@ export default function WalletPage() {
               </ul>
               {referredOrdersHasMore ? (
                 <div className="mt-4 text-center">
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
                     disabled={referredOrdersLoading}
+                    loading={referredOrdersLoading}
                     onClick={() => void loadReferredOrders(referredOrdersSkip, true)}
-                    className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
                   >
-                    {referredOrdersLoading ? 'Đang tải…' : 'Xem thêm'}
-                  </button>
+                    Xem thêm
+                  </Button>
                 </div>
               ) : null}
             </>

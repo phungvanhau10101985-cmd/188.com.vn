@@ -374,11 +374,20 @@ html[data-nanoai188-shop-overlay="1"] [id*="nanoai-chat-widget"] * {
   font-weight: 500;
   padding: 0.5rem 1rem;
   border-radius: 0.5rem;
-  transition: background-color 0.2s;
+  transition:
+    background-color 0.15s ease,
+    transform 0.12s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background-color: var(--color-primary-hover);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.98);
+  filter: brightness(0.96);
 }
 
 .btn-secondary {
@@ -387,11 +396,53 @@ html[data-nanoai188-shop-overlay="1"] [id*="nanoai-chat-widget"] * {
   font-weight: 500;
   padding: 0.5rem 1rem;
   border-radius: 0.5rem;
-  transition: background-color 0.2s;
+  transition:
+    background-color 0.15s ease,
+    transform 0.12s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
 }
 
-.btn-secondary:hover {
+.btn-secondary:hover:not(:disabled) {
   background-color: var(--color-secondary-hover);
+}
+
+.btn-secondary:active:not(:disabled) {
+  transform: scale(0.98);
+  filter: brightness(0.96);
+}
+
+/* Phản hồi bấm + trạng thái đang tải — dùng trên button/link nút toàn site */
+button:not(:disabled):not([data-no-press]),
+.btn-interactive:not([aria-disabled='true']):not([data-no-press]) {
+  transition:
+    transform 0.12s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
+}
+
+button:not(:disabled):active:not([data-no-press]),
+.btn-interactive:not([aria-disabled='true']):active:not([data-no-press]):not([data-loading='true']) {
+  transform: scale(0.98);
+}
+
+button[data-loading='true'],
+.btn-interactive[data-loading='true'] {
+  cursor: wait;
+  pointer-events: none;
+  opacity: 0.88;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled):active:not([data-no-press]),
+  .btn-interactive:not([aria-disabled='true']):active:not([data-no-press]):not([data-loading='true']),
+  .btn-primary:active:not(:disabled),
+  .btn-secondary:active:not(:disabled) {
+    transform: none;
+  }
 }
 
 /* Product card - hiện đại */
