@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
-import Link from 'next/link';
+import LoadingLink from '@/components/ui/LoadingLink';
 import { useRouter } from 'next/navigation';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { categorySegmentForUrl } from '@/lib/category-url';
@@ -81,12 +81,12 @@ function CategoryGridTile({
     : null;
 
   return (
-    <Link
+    <LoadingLink
       href={href}
       title={itemCountLabel ? `${tile.name} · ${itemCountLabel}` : tile.name}
       onMouseEnter={() => router.prefetch(href)}
       onFocus={() => router.prefetch(href)}
-      className={`hero-category-tile group relative flex h-full min-w-0 flex-1 flex-col overflow-hidden border-r border-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white active:brightness-105 ${isLastInRow ? 'border-r-0' : ''}`}
+      className={`hero-category-tile btn-interactive group relative flex h-full min-w-0 flex-1 flex-col overflow-hidden border-r border-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white active:brightness-105 ${isLastInRow ? 'border-r-0' : ''}`}
     >
       <div className="relative flex-1 min-h-0 overflow-hidden bg-gradient-to-br from-orange-600/95 via-orange-500/90 to-amber-700/95">
         {img ? (
@@ -117,7 +117,7 @@ function CategoryGridTile({
           {title}
         </p>
       </div>
-    </Link>
+    </LoadingLink>
   );
 }
 

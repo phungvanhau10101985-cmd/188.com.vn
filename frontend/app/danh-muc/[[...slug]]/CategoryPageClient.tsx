@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import ProductGrid from '@/components/ProductGrid';
 import CategoryProductFilters from '@/components/CategoryProductFilters';
 import Button from '@/components/ui/Button';
+import LoadingLink from '@/components/ui/LoadingLink';
 import ListingPagePagination from '@/components/ui/ListingPagePagination';
 import type { CategoryProductFacets } from '@/lib/category-seo';
 import { linkifySeoBody, type InternalLinkItem } from '@/lib/internal-links';
@@ -112,12 +113,12 @@ export default function CategoryPageClient({
         {breadcrumbNames.map((name, i) => (
           <span key={i}>
             <span className="mx-2">/</span>
-            <Link
+            <LoadingLink
               href={`/danh-muc/${pathSegments.slice(0, i + 1).join('/')}`}
               className="hover:text-[#ea580c]"
             >
               {name}
-            </Link>
+            </LoadingLink>
           </span>
         ))}
       </nav>

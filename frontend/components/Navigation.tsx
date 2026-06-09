@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import Link from 'next/link';
+import LoadingLink from '@/components/ui/LoadingLink';
 import Image from 'next/image';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
@@ -463,7 +464,7 @@ export default function Navigation({
               const l1Active = isActive || (isKhoSaleMenuCategory(level1) && isKhoSaleActive);
               const href = level1CategoryHref(level1);
               return (
-                <Link
+                <LoadingLink
                   key={level1.name}
                   href={href}
                   onMouseEnter={() => {
@@ -476,7 +477,7 @@ export default function Navigation({
                   }`}
                 >
                   {level1.name}
-                </Link>
+                </LoadingLink>
               );
             })}
           </div>
@@ -489,9 +490,9 @@ export default function Navigation({
             <div className="text-xs text-gray-600 leading-relaxed">
               <p className="font-semibold text-gray-800 mb-1">{KHO_SALE_MENU_NAME}</p>
               <p>Hàng hoàn và tồn thanh lý — giá ưu đãi, số lượng có hạn.</p>
-              <Link href={KHO_SALE_HREF} className="inline-block mt-2 text-[#ea580c] font-medium hover:underline">
+              <LoadingLink href={KHO_SALE_HREF} className="inline-block mt-2 text-[#ea580c] font-medium hover:underline">
                 Xem tất cả →
-              </Link>
+              </LoadingLink>
             </div>
           )}
           {openCategory && !isKhoSaleMenuCategory(openCategory) && openCategory.children.length > 0 && (
@@ -501,14 +502,14 @@ export default function Navigation({
                 const slug2 = categorySegmentForUrl(level2.slug) || categorySegmentForUrl(level2.name);
                 return (
                   <div key={level2ReactKey(slug1, slug2, level2.name)} className="min-w-0">
-                    <Link
+                    <LoadingLink
                       href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`}
                       onMouseEnter={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
                       onFocus={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
                       className="block text-xs font-semibold text-gray-800 hover:text-[#ea580c]"
                     >
                       {level2.name}
-                    </Link>
+                    </LoadingLink>
                     {level2.children && level2.children.length > 0 && (
                       <div className="mt-1 flex flex-col gap-1">
                         {level2.children.map((level3) => {
@@ -521,7 +522,7 @@ export default function Navigation({
                               ? categorySegmentForUrl((level3 as { slug?: string }).slug)
                               : '') || categorySegmentForUrl(name3);
                           return (
-                            <Link
+                            <LoadingLink
                               key={level3ReactKey(slug2, slug3 || undefined, name3)}
                               href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
                               onMouseEnter={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
@@ -529,7 +530,7 @@ export default function Navigation({
                               className="text-[11px] text-gray-600 hover:text-[#ea580c] truncate"
                             >
                               {name3}
-                            </Link>
+                            </LoadingLink>
                           );
                         })}
                       </div>
@@ -754,7 +755,7 @@ export default function Navigation({
                   <div
                     className={`${basePill} ${isL1Active ? activePill : inactivePill} pr-0 gap-0`}
                   >
-                    <Link
+                    <LoadingLink
                       href={href}
                       className={`flex-1 min-w-0 text-left px-2 py-1 -my-1 max-w-[6.5rem] truncate ${hasChildren ? 'rounded-l-full' : 'rounded-full'}`}
                       onMouseEnter={() => prefetchCategoryHref(href)}
@@ -762,7 +763,7 @@ export default function Navigation({
                       onClick={() => setOpenLevel1(null)}
                     >
                       {level1.name}
-                    </Link>
+                    </LoadingLink>
                     {hasChildren ? (
                       <button
                         type="button"
@@ -832,7 +833,7 @@ export default function Navigation({
                     key={level2ReactKey(slug1, slug2, level2.name)}
                     className="rounded-md bg-white border border-gray-100 shadow-sm overflow-hidden"
                   >
-                    <Link
+                    <LoadingLink
                       href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`}
                       onMouseEnter={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
                       onFocus={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
@@ -847,7 +848,7 @@ export default function Navigation({
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>
                       )}
-                    </Link>
+                    </LoadingLink>
                     {hasL3 && (
                       <div className="px-3 pb-2 pt-0 flex flex-wrap gap-1">
                         {level2.children!.map((level3) => {
@@ -861,7 +862,7 @@ export default function Navigation({
                             effectiveFilter.subcategory === level2.name &&
                             effectiveFilter.category === openCategory.name;
                           return (
-                            <Link
+                            <LoadingLink
                               key={level3ReactKey(slug2, slug3 || undefined, name3)}
                               href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
                               onMouseEnter={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
@@ -874,7 +875,7 @@ export default function Navigation({
                               }`}
                             >
                               {name3}
-                            </Link>
+                            </LoadingLink>
                           );
                         })}
                       </div>

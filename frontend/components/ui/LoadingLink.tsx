@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import type { ComponentProps, MouseEvent, ReactNode } from 'react';
-import { useCallback, useEffect, useState, useTransition } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import ButtonSpinner from './ButtonSpinner';
 
 type LoadingLinkProps = Omit<ComponentProps<typeof Link>, 'onClick'> & {
@@ -12,25 +12,7 @@ type LoadingLinkProps = Omit<ComponentProps<typeof Link>, 'onClick'> & {
   showSpinner?: boolean;
 };
 
-function hrefToString(href: ComponentProps<typeof Link>['href']): string {
-  if (typeof href === 'string') return href;
-  const pathname = href.pathname ?? '';
-  const query = href.query;
-  if (!query) return pathname;
-  const params = new URLSearchParams();
-  Object.entries(query).forEach(([key, value]) => {
-    if (value == null) return;
-    if (Array.isArray(value)) {
-      value.forEach((item) => params.append(key, String(item)));
-      return;
-    }
-    params.set(key, String(value));
-  });
-  const qs = params.toString();
-  return qs ? `${pathname}?${qs}` : pathname;
-}
-
-export default function LoadingLink({
+function LoadingLinkInner({
   href,
   onClick,
   children,
@@ -39,17 +21,21 @@ export default function LoadingLink({
   showSpinner = true,
   ...rest
 }: LoadingLinkProps) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [clicked, setClicked] = useState(false);
-  const destination = hrefToString(href);
-  const loading = clicked && isPending;
+  const searchKey = searchParams.toString();
+  const loading = clicked;
 
   useEffect(() => {
-    if (!isPending) {
-      setClicked(false);
-    }
-  }, [isPending]);
+    setClicked(false);
+  }, [pathname, searchKey]);
+
+  useEffect(() => {
+    if (!clicked) return;
+    const timer = window.setTimeout(() => setClicked(false), 12000);
+    return () => window.clearTimeout(timer);
+  }, [clicked]);
 
   const handleClick = useCallback(
     (event: MouseEvent<HTMLAnchorElement>) => {
@@ -58,13 +44,9 @@ export default function LoadingLink({
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
         return;
       }
-      event.preventDefault();
       setClicked(true);
-      startTransition(() => {
-        router.push(destination);
-      });
     },
-    [destination, onClick, router, startTransition]
+    [onClick],
   );
 
   return (
@@ -85,5 +67,20 @@ export default function LoadingLink({
         children
       )}
     </Link>
+  );
+}
+
+export default function LoadingLink(props: LoadingLinkProps) {
+  const { className = '', children, href, ...rest } = props;
+  return (
+    <Suspense
+      fallback={
+        <Link href={href} className={`btn-interactive ${className}`.trim()} {...rest}>
+          {children}
+        </Link>
+      }
+    >
+      <LoadingLinkInner {...props} />
+    </Suspense>
   );
 }

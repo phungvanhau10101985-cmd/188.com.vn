@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import LoadingLink from '@/components/ui/LoadingLink';
 import { apiClient } from '@/lib/api-client';
 import CategoryCatalogMarquee from '@/components/category/CategoryCatalogMarquee';
 import type { HeroCategoryTilesResponse, Product } from '@/types/api';
@@ -160,10 +161,10 @@ export default function PersonalizedHeroBanner({
           />
         </div>
         <div className="relative z-30 flex shrink-0 items-center justify-center border-t border-white/15 bg-black/15 px-3 py-2 backdrop-blur-sm md:py-2.5">
-          <Link
+          <LoadingLink
             href="/danh-muc"
             prefetch
-            className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-full border border-white/40 bg-white/95 px-3.5 py-1.5 text-[11px] font-medium leading-none text-[#9a3412] shadow-sm ring-1 ring-black/5 transition-[background-color,transform,box-shadow] hover:bg-white hover:shadow active:scale-[0.98] md:min-h-[38px] md:gap-2 md:px-4 md:text-xs"
+            className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-full border border-white/40 bg-white/95 px-3.5 py-1.5 text-[11px] font-medium leading-none text-[#9a3412] shadow-sm ring-1 ring-black/5 transition-[background-color,transform,box-shadow] hover:bg-white hover:shadow md:min-h-[38px] md:gap-2 md:px-4 md:text-xs"
           >
             <span>Xem tất cả danh mục</span>
             <svg
@@ -176,7 +177,7 @@ export default function PersonalizedHeroBanner({
             >
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
             </svg>
-          </Link>
+          </LoadingLink>
         </div>
       </div>
     </section>

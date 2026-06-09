@@ -12,6 +12,8 @@ import {
 } from '@/lib/kho-sale-menu-category';
 import { storePendingImageAndNavigate } from '@/lib/nanoai-pending-image';
 import SearchHistoryPanel from '@/components/search/SearchHistoryPanel';
+import ButtonSpinner from '@/components/ui/ButtonSpinner';
+import { useNavigateWithLoading } from '@/lib/use-navigate-with-loading';
 import {
   PRODUCT_RELATED_TABS,
   parseRelatedTabFromSearch,
@@ -60,6 +62,7 @@ export default function MobileHeader({
   initialCategoryTree = [],
 }: MobileHeaderProps) {
   const router = useRouter();
+  const { navigate, markPending, push, isNavigating } = useNavigateWithLoading();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
@@ -257,6 +260,7 @@ export default function MobileHeader({
 
   const closePanelAndGo = useCallback(
     (href: string) => {
+      markPending(href);
       setOpenL1(new Set());
       setOpenL2(new Set());
       setCategoryPanelOpen(false);
@@ -264,14 +268,14 @@ export default function MobileHeader({
       const hadPanelHistory =
         typeof window !== 'undefined' && isMobileCategoryPanelHistoryState(window.history.state);
 
-      const navigate = () => router.push(href);
+      const navigateTo = () => push(href);
 
       if (hadPanelHistory) {
         let finished = false;
         const finish = () => {
           if (finished) return;
           finished = true;
-          navigate();
+          navigateTo();
         };
         const onPop = () => {
           window.removeEventListener('popstate', onPop);
@@ -284,10 +288,10 @@ export default function MobileHeader({
           finish();
         }, 350);
       } else {
-        navigate();
+        navigateTo();
       }
     },
-    [router],
+    [markPending, push],
   );
 
   const list = initialCategoryTree || [];
@@ -594,14 +598,25 @@ export default function MobileHeader({
                   searchStripContent.categories.map((cat) => {
                     const href = level1CategoryHref(cat);
                     const active = isKhoSaleMenuCategory(cat) && isKhoSaleActive;
+                    const loading = isNavigating(href);
                     return (
                       <button
                         key={cat.name}
                         type="button"
-                        onClick={() => router.push(href)}
+                        onClick={() => navigate(href)}
+                        disabled={loading}
+                        data-loading={loading ? 'true' : undefined}
+                        aria-busy={loading || undefined}
                         className={`${chipClass} ${active ? '!bg-white !text-[#ea580c]' : ''}`}
                       >
-                        {cat.name}
+                        {loading ? (
+                          <span className="inline-flex items-center gap-1">
+                            <ButtonSpinner size="xs" />
+                            {cat.name}
+                          </span>
+                        ) : (
+                          cat.name
+                        )}
                       </button>
                     );
                   })}
@@ -642,17 +657,23 @@ export default function MobileHeader({
                 const l1Active = isKhoSaleMenuCategory(cat) && isKhoSaleActive;
                 const hasChildren = cat.children && cat.children.length > 0;
                 const isOpen = openL1.has(cat.name);
+                const l1Href = level1CategoryHref(cat);
+                const l1Loading = isNavigating(l1Href);
 
                 return (
                   <div key={cat.name} className="border-b border-gray-100">
                     <div className="flex items-center w-full py-3 px-4 text-gray-900 font-medium text-sm active:bg-gray-50">
                       <button
                         type="button"
-                        onClick={() => closePanelAndGo(level1CategoryHref(cat))}
-                        className={`flex-1 text-left min-w-0 uppercase hover:text-[#ea580c] transition-colors ${
+                        onClick={() => closePanelAndGo(l1Href)}
+                        disabled={l1Loading}
+                        data-loading={l1Loading ? 'true' : undefined}
+                        aria-busy={l1Loading || undefined}
+                        className={`flex-1 text-left min-w-0 uppercase hover:text-[#ea580c] transition-colors inline-flex items-center gap-2 ${
                           l1Active ? 'text-[#ea580c]' : ''
                         }`}
                       >
+                        {l1Loading ? <ButtonSpinner size="xs" /> : null}
                         {cat.name}
                       </button>
                       {hasChildren ? (
@@ -678,17 +699,21 @@ export default function MobileHeader({
                           const hasL3 = c2.children && c2.children.length > 0;
                           const keyL2 = `${slug1}/${slug2}`;
                           const isOpenL2 = openL2.has(keyL2);
+                          const l2Href = `/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`;
+                          const l2Loading = isNavigating(l2Href);
 
                           return (
                             <div key={c2.name} className="border border-gray-200 rounded-lg bg-white overflow-hidden">
                               <div className="flex items-center w-full py-2.5 px-3 text-gray-800 font-medium text-sm min-h-[44px]">
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    closePanelAndGo(`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}`)
-                                  }
-                                  className="flex-1 text-left min-w-0 line-clamp-2 hover:text-[#ea580c] transition-colors"
+                                  onClick={() => closePanelAndGo(l2Href)}
+                                  disabled={l2Loading}
+                                  data-loading={l2Loading ? 'true' : undefined}
+                                  aria-busy={l2Loading || undefined}
+                                  className="flex-1 text-left min-w-0 line-clamp-2 hover:text-[#ea580c] transition-colors inline-flex items-center gap-1.5"
                                 >
+                                  {l2Loading ? <ButtonSpinner size="xs" /> : null}
                                   {capitalizeFirst(c2.name)}
                                 </button>
                                 {hasL3 ? (
@@ -711,17 +736,19 @@ export default function MobileHeader({
                                 <div className="bg-gray-100/80 border-t border-gray-100">
                                   {(c2.children as CategoryLevel3[]).map((c3) => {
                                     const slug3 = c3.slug || slugOf(c3.name);
+                                    const l3Href = `/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`;
+                                    const l3Loading = isNavigating(l3Href);
                                     return (
                                       <button
                                         key={c3.name}
                                         type="button"
-                                        onClick={() =>
-                                          closePanelAndGo(
-                                            `/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`
-                                          )
-                                        }
-                                        className="flex items-center w-full py-2 px-3 text-gray-500 font-medium text-xs active:bg-gray-200 border-b border-gray-100 last:border-b-0 text-left hover:text-[#ea580c] transition-colors"
+                                        onClick={() => closePanelAndGo(l3Href)}
+                                        disabled={l3Loading}
+                                        data-loading={l3Loading ? 'true' : undefined}
+                                        aria-busy={l3Loading || undefined}
+                                        className="flex items-center w-full py-2 px-3 text-gray-500 font-medium text-xs active:bg-gray-200 border-b border-gray-100 last:border-b-0 text-left hover:text-[#ea580c] transition-colors gap-1.5"
                                       >
+                                        {l3Loading ? <ButtonSpinner size="xs" /> : null}
                                         {capitalizeFirst(c3.name)}
                                       </button>
                                     );

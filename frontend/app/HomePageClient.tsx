@@ -846,7 +846,8 @@ export default function HomePageClient({
 
   useEffect(() => {
     if (qFromUrl.trim()) return;
-    if (recommendationSource === 'pending') return;
+    // Trang lọc (?category=…, sxc=…) không chờ snapshot gợi ý trang chủ — nếu không fetch sẽ kẹt skeleton.
+    if (recommendationSource === 'pending' && !hasFilterParams) return;
     setSelectedFilter({
       category: categoryFromUrl,
       subcategory: subcategoryFromUrl,
@@ -957,6 +958,7 @@ export default function HomePageClient({
     initialPlainHome,
     authLoading,
     recommendationSource,
+    hasFilterParams,
   ]);
 
   const retryHomeDataLoad = useCallback(() => {
@@ -1360,7 +1362,7 @@ export default function HomePageClient({
                     </>
                   ) : (
                     <>
-                      {totalProducts} sản phẩm
+                      {loading ? 'Đang tải…' : `${totalProducts} sản phẩm`}
                     </>
                   )}
                 </p>
