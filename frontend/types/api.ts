@@ -261,6 +261,8 @@ export interface ProductListResponse {
   suggested_categories?: { name?: string; path?: string }[];
   redirect_path?: string;
   ai_processed?: boolean;
+  category_listing_cache_status?: 'hit' | 'refreshed' | string;
+  category_listing_cache_updated_at?: string | null;
 }
 
 /** API GET /user-behavior/categories/popular-for-profile */
@@ -420,6 +422,8 @@ export interface ProductSearchParams {
   include_warehouse_clearance?: boolean;
   /** Chỉ SP hàng thanh lý kho — trang /kho-sale */
   warehouse_clearance_only?: boolean;
+  /** Nội bộ: bật/tắt cache JSON lưới danh mục phía backend nếu API hỗ trợ */
+  use_category_listing_cache?: boolean;
   min_rating?: number;
   is_active?: boolean;
   has_deposit?: boolean;

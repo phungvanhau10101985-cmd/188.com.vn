@@ -6,7 +6,7 @@ import random
 from urllib.parse import unquote
 
 import pandas as pd
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
@@ -15,6 +15,7 @@ from typing import Annotated, List, Literal, Optional
 from app.db.session import get_db
 from app.db.retry import TransientDbError, is_transient_db_error
 from app import crud
+from app.crud import category_listing_cache as category_listing_cache_crud
 from app.crud import product_search_cache as product_search_cache_crud
 from app.models.search_mapping import SearchMapping, SearchMappingType
 from app.utils.vietnamese import normalize_for_search_no_accent
@@ -135,6 +136,22 @@ class AdminBulkDeleteProductsByDbIdBody(BaseModel):
 
 class AdminSingleProductDbIdBody(BaseModel):
     db_id: int = Field(..., gt=0, description="Khóa chính products.id")
+
+
+class CategoryListingCacheWarmBody(BaseModel):
+    category: str = Field(..., min_length=1, max_length=500)
+    subcategory: Optional[str] = Field(None, max_length=500)
+    sub_subcategory: Optional[str] = Field(None, max_length=500)
+    skip: int = Field(0, ge=0)
+    limit: int = Field(96, ge=1, le=1000)
+    min_price: Optional[float] = Field(None, ge=0)
+    max_price: Optional[float] = Field(None, ge=0)
+    size: Optional[str] = Field(None, max_length=120)
+    color: Optional[str] = Field(None, max_length=120)
+    style_tag: Optional[str] = Field(None, max_length=120)
+    sort: str = Field("random", max_length=32)
+    is_active: bool = True
+    search_refresh: Optional[str] = Field(None, max_length=300)
 
 
 class AdminSourceStockWorkerPauseBody(BaseModel):
@@ -487,6 +504,73 @@ def search_products(
         return {"error": str(e), "status": "serialization_error", "products": [], "total": 0}
 
 
+def _category_listing_cache_allowed(
+    *,
+    category: Optional[str],
+    raw_q: str,
+    pid: str,
+    admin_list: bool,
+    skip_search_cache: bool,
+    order_random: bool,
+    skip_total: bool,
+    warehouse_clearance_only: bool,
+    shop_name: Optional[str],
+    shop_id: Optional[str],
+    style: Optional[str],
+    shop_name_chinese: Optional[str],
+    chinese_name: Optional[str],
+    pro_lower_price: Optional[str],
+    pro_high_price: Optional[str],
+) -> bool:
+    if not (category or "").strip():
+        return False
+    if raw_q or pid or admin_list or skip_search_cache or order_random or skip_total:
+        return False
+    if warehouse_clearance_only:
+        return False
+    internal_filters = (
+        shop_name,
+        shop_id,
+        style,
+        shop_name_chinese,
+        chinese_name,
+        pro_lower_price,
+        pro_high_price,
+    )
+    return not any(value is not None and str(value).strip() for value in internal_filters)
+
+
+def _build_category_listing_cache_payload(
+    *,
+    skip: int,
+    limit: int,
+    category: Optional[str],
+    subcategory: Optional[str],
+    sub_subcategory: Optional[str],
+    min_price: Optional[float],
+    max_price: Optional[float],
+    is_active: Optional[bool],
+    sort_norm: str,
+    filter_size: Optional[str],
+    filter_color: Optional[str],
+    filter_style_tag: Optional[str],
+) -> dict:
+    return category_listing_cache_crud.build_cache_query_payload(
+        skip=skip,
+        limit=limit,
+        category=category,
+        subcategory=subcategory,
+        sub_subcategory=sub_subcategory,
+        min_price=min_price,
+        max_price=max_price,
+        is_active=is_active,
+        sort=sort_norm,
+        filter_size=filter_size,
+        filter_color=filter_color,
+        filter_style_tag=filter_style_tag,
+    )
+
+
 def _read_products_list_impl(
     response: Response,
     db: Session,
@@ -520,6 +604,7 @@ def _read_products_list_impl(
     include_warehouse_clearance: bool = False,
     warehouse_clearance_only: bool = False,
     admin_list: bool = False,
+    use_category_listing_cache: bool = True,
 ) -> dict:
     from app.services import sale_calendar as sale_calendar_svc
 
@@ -569,6 +654,65 @@ def _read_products_list_impl(
     )
     sort_norm = crud.product.normalize_product_list_sort(sort)
     search_cache_active = use_search_cache and raw_q and not pid and not skip_search_cache
+    category_listing_payload = None
+    category_listing_cache_key = None
+    category_listing_cache_active = (
+        use_category_listing_cache
+        and _category_listing_cache_allowed(
+            category=category,
+            raw_q=raw_q,
+            pid=pid,
+            admin_list=admin_list,
+            skip_search_cache=skip_search_cache,
+            order_random=order_random,
+            skip_total=skip_total,
+            warehouse_clearance_only=warehouse_clearance_only,
+            shop_name=shop_name,
+            shop_id=shop_id,
+            style=style,
+            shop_name_chinese=shop_name_chinese,
+            chinese_name=chinese_name,
+            pro_lower_price=pro_lower_price,
+            pro_high_price=pro_high_price,
+        )
+    )
+    if category_listing_cache_active:
+        category_listing_payload = _build_category_listing_cache_payload(
+            skip=skip,
+            limit=limit,
+            category=category,
+            subcategory=subcategory,
+            sub_subcategory=sub_subcategory,
+            min_price=min_price,
+            max_price=max_price,
+            is_active=is_active,
+            sort_norm=sort_norm,
+            filter_size=filter_size,
+            filter_color=filter_color,
+            filter_style_tag=filter_style_tag,
+        )
+        category_listing_cache_key = category_listing_cache_crud.build_cache_key(
+            skip=skip,
+            limit=limit,
+            category=category,
+            subcategory=subcategory,
+            sub_subcategory=sub_subcategory,
+            min_price=min_price,
+            max_price=max_price,
+            is_active=is_active,
+            sort=sort_norm,
+            filter_size=filter_size,
+            filter_color=filter_color,
+            filter_style_tag=filter_style_tag,
+        )
+        try:
+            cached_listing = category_listing_cache_crud.get_cached_result(
+                db, category_listing_cache_key
+            )
+            if cached_listing is not None:
+                return cached_listing
+        except Exception as exc:
+            logger.debug("category_listing_cache: read skipped: %s", exc)
     fetch_skip = skip
     fetch_limit = limit
     paginate_from_list_cache = False
@@ -673,6 +817,23 @@ def _read_products_list_impl(
         )
 
     if (
+        category_listing_cache_active
+        and category_listing_cache_key
+        and category_listing_payload
+        and not result.get("redirect_path")
+        and not result.get("error")
+    ):
+        try:
+            category_listing_cache_crud.set_cached_result(
+                db,
+                category_listing_cache_key,
+                result,
+                query_payload=category_listing_payload,
+            )
+        except Exception as exc:
+            logger.debug("category_listing_cache: write skipped: %s", exc)
+
+    if (
         search_cache_active
         and cache_key
         and list_query_payload
@@ -698,6 +859,48 @@ def _read_products_list_impl(
         )
 
     return result
+
+
+def _warm_category_listing_cache_background(body: CategoryListingCacheWarmBody) -> None:
+    from app.db.session import SessionLocal
+
+    db_bg = SessionLocal()
+    try:
+        sort_norm = crud.product.normalize_product_list_sort(body.sort or "random")
+        payload = category_listing_cache_crud.build_cache_query_payload(
+            skip=body.skip,
+            limit=body.limit,
+            category=body.category,
+            subcategory=body.subcategory,
+            sub_subcategory=body.sub_subcategory,
+            min_price=body.min_price,
+            max_price=body.max_price,
+            is_active=body.is_active,
+            sort=sort_norm,
+            filter_size=body.size,
+            filter_color=body.color,
+            filter_style_tag=body.style_tag,
+        )
+        seed = (body.search_refresh or "").strip() or f"category-warm:{datetime.utcnow().timestamp()}:{random.random()}"
+        category_listing_cache_crud.refresh_category_listing_cache(
+            db_bg,
+            payload,
+            random_seed=seed,
+        )
+    except Exception as exc:
+        logger.warning("category_listing_cache: warmup failed: %s", exc)
+    finally:
+        db_bg.close()
+
+
+@router.post("/category-listing-cache/warm", response_model=dict)
+def warm_category_listing_cache(
+    body: CategoryListingCacheWarmBody,
+    background_tasks: BackgroundTasks,
+):
+    """Chuẩn bị lưới danh mục kế tiếp ở nền; khách vẫn xem bản cache hiện tại."""
+    background_tasks.add_task(_warm_category_listing_cache_background, body)
+    return {"status": "accepted"}
 
 
 @router.get("", response_model=dict, include_in_schema=False)
@@ -760,6 +963,10 @@ def read_products(
         False,
         description="Lưới admin: bỏ enrich sale/size-guide, không cache tìm kiếm, mặc định hiện cả SP ẩn.",
     ),
+    use_category_listing_cache: bool = Query(
+        True,
+        description="Storefront danh mục: đọc/ghi JSON cache lưới sản phẩm đã chuẩn bị.",
+    ),
 ):
     """
     Get products with filtering and search (by name; the product_id filter matches Excel id or SKU code).
@@ -797,6 +1004,7 @@ def read_products(
             include_warehouse_clearance=include_warehouse_clearance,
             warehouse_clearance_only=warehouse_clearance_only,
             admin_list=admin_list,
+            use_category_listing_cache=use_category_listing_cache,
         )
     except Exception as e:
         return {"error": str(e), "status": "serialization_error"}
@@ -880,6 +1088,7 @@ def read_products_full_list(
             filter_style_tag=style_tag,
             search_refresh=search_refresh,
             user=current_user,
+            use_category_listing_cache=False,
         )
     except Exception as e:
         return {"error": str(e), "status": "serialization_error"}

@@ -126,6 +126,9 @@ except ImportError:
 from app.models.product_search_cache import ProductSearchCache
 print("[OK] ProductSearchCache model loaded")
 
+from app.models.category_listing_cache import CategoryListingCache
+print("[OK] CategoryListingCache model loaded")
+
 from app.models.listing_facet_cache import ListingFacetCache
 print("[OK] ListingFacetCache model loaded")
 

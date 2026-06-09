@@ -48,6 +48,7 @@ from app.models.bank_account import BankAccount
 from app.models.site_embed_code import SiteEmbedCode
 from app.models.category_seo import CategorySeoGeminiTarget, CategorySeoSettings
 from app.models.category_final_mapping import CategoryFinalMapping
+from app.models.category_listing_cache import CategoryListingCache
 from app.models.guest_behavior import GuestProductView, GuestFavorite, GuestSearchHistory
 from app.models.admin import AdminUser
 from app.models.source_stock_worker_state import SourceStockWorkerState
@@ -1048,6 +1049,13 @@ class MigrationManager:
             "product_search_cache", ProductSearchCache
         )
         results['product_search_cache_permanent'] = self.migrate_product_search_cache_permanent()
+
+        results['category_listing_cache_create'] = self._create_table_if_not_exists(
+            "category_listing_cache", CategoryListingCache
+        )
+        results['category_listing_cache_sync'] = self._sync_table_columns(
+            "category_listing_cache", CategoryListingCache
+        )
 
         from app.models.category_menu_cache import CategoryMenuCache
 

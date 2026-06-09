@@ -724,6 +724,21 @@ def refresh_caches_after_products_change(
             logger.warning("Refresh search facet cache failed (%s): %s", row.scope_key, exc)
 
     try:
+        from app.crud import category_listing_cache as category_listing_cache_crud
+
+        stale_count = category_listing_cache_crud.mark_stale_for_product_states(
+            db,
+            *search_states,
+        )
+        if stale_count:
+            logger.info(
+                "category_listing_cache: marked %s row(s) stale after product change",
+                stale_count,
+            )
+    except Exception as exc:
+        logger.warning("Mark category listing cache stale failed: %s", exc)
+
+    try:
         from app.crud import category_menu_cache as menu_cache_crud
 
         menu_cache_crud.schedule_refresh_after_product_changes(
@@ -748,6 +763,9 @@ def refresh_caches_after_bulk_import(db: Session) -> None:
         facet_cache_crud.mark_stale_by_types(db, (SCOPE_SEARCH_Q,))
         rebuild_all_search_caches(db)
         rebuild_all_seo_cluster_caches(db)
+        from app.crud import category_listing_cache as category_listing_cache_crud
+
+        category_listing_cache_crud.mark_all_stale(db)
         menu_cache_crud.rebuild_both_trees(db)
     except Exception as exc:
         logger.warning("Refresh facet caches after bulk import failed: %s", exc)

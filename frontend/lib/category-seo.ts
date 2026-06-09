@@ -29,7 +29,6 @@ const isDev = process.env.NODE_ENV === "development";
 const disableCache = process.env.NEXT_PUBLIC_DISABLE_CACHE === "1" || process.env.DISABLE_CACHE === "1";
 const REVALIDATE_CATEGORY = isDev || disableCache ? 0 : 120;
 const REVALIDATE_SEO_DATA = isDev || disableCache ? 0 : 300;
-const REVALIDATE_CATEGORY_PRODUCTS = isDev || disableCache ? 0 : 60;
 const CATEGORY_TREE_MEM_TTL_MS = Math.max(15_000, REVALIDATE_CATEGORY * 1000 || 60_000);
 let categoryTreeMemCache: { expiresAt: number; value: CategoryLevel1[] } | null = null;
 let categoryTreeInflight: Promise<CategoryLevel1[]> | null = null;
@@ -369,9 +368,9 @@ export async function getProductsByCategory(
 
   const fetchListing = async (params: URLSearchParams) => {
     const url = `${API_BASE}/products/?${params.toString()}`;
-    /** Cache ngắn theo URL: mở danh mục nhanh hơn, vẫn làm mới thường xuyên. */
+    /** DB category_listing_cache là lớp tăng tốc chính; no-store để F5 lấy lưới đã warmup mới nhất. */
     const res = await fetch(url, {
-      next: { revalidate: REVALIDATE_CATEGORY_PRODUCTS, tags: [CACHE_TAG_CATEGORY_SEO] },
+      cache: "no-store",
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(LAYOUT_FETCH_TIMEOUT_MS),
     });

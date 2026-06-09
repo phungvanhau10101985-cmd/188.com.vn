@@ -10,6 +10,11 @@ import { linkifySeoBody, type InternalLinkItem } from '@/lib/internal-links';
 import { getListingFreshnessMonthLabel } from '@/lib/listing-freshness-label';
 import type { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
+import {
+  buildCategoryListingClientCacheKey,
+  readCategoryListingClientCache,
+  writeCategoryListingClientCache,
+} from '@/lib/category-listing-cache';
 
 interface CategoryPageClientProps {
   breadcrumbNames: string[];
@@ -60,14 +65,39 @@ export default function CategoryPageClient({
   const h1Text = `${leafName} mới nhất ${monthLabel} | ${total} sản phẩm`;
   const [displayProducts, setDisplayProducts] = useState<Product[]>(products);
   const [displayTotal, setDisplayTotal] = useState(total);
+  const [displayTotalPages, setDisplayTotalPages] = useState(totalPages);
   const [clientFacets, setClientFacets] = useState<CategoryProductFacets | null>(facets);
+  const listingCacheKey = useMemo(
+    () => buildCategoryListingClientCacheKey(pathKey, listingQueryString),
+    [pathKey, listingQueryString],
+  );
   const from = displayTotal === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const to = Math.min(currentPage * pageSize, displayTotal);
 
   useEffect(() => {
     setDisplayProducts(products);
     setDisplayTotal(total);
-  }, [products, total]);
+    setDisplayTotalPages(totalPages);
+  }, [products, total, totalPages]);
+
+  useEffect(() => {
+    const cached = readCategoryListingClientCache(listingCacheKey);
+    if (products.length > 0) return;
+    if (!cached || cached.products.length === 0) return;
+    setDisplayProducts(cached.products);
+    setDisplayTotal(cached.total);
+    setDisplayTotalPages(cached.totalPages);
+  }, [listingCacheKey, products.length]);
+
+  useEffect(() => {
+    writeCategoryListingClientCache(listingCacheKey, {
+      products,
+      total,
+      totalPages,
+      currentPage,
+      pageSize,
+    });
+  }, [currentPage, listingCacheKey, pageSize, products, total, totalPages]);
 
   const facetParams = useMemo(() => {
     const p = new URLSearchParams(listingQueryString);
@@ -91,6 +121,24 @@ export default function CategoryPageClient({
     return p.toString().length === 0 && (!sort || sort === 'random');
   }, [listingQueryString]);
 
+  const warmupFilterParams = useMemo(() => {
+    const p = new URLSearchParams(listingQueryString);
+    const toNumber = (key: string) => {
+      const raw = p.get(key);
+      if (raw == null || raw.trim() === '') return null;
+      const n = Number(raw);
+      return Number.isFinite(n) && n >= 0 ? n : null;
+    };
+    return {
+      min_price: toNumber('min_price'),
+      max_price: toNumber('max_price'),
+      size: p.get('size'),
+      color: p.get('color'),
+      style_tag: p.get('style_tag'),
+      sort: (p.get('sort') || 'random').trim() || 'random',
+    };
+  }, [listingQueryString]);
+
   useEffect(() => {
     if (!shouldRefreshRandomGrid || !category) return;
 
@@ -101,29 +149,31 @@ export default function CategoryPageClient({
         : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     apiClient
-      .getProducts({
+      .warmCategoryListingCache({
         limit: pageSize,
         skip: Math.max(0, (currentPage - 1) * pageSize),
-        is_active: true,
         category,
         subcategory,
         sub_subcategory: subSubcategory,
-        sort: 'random',
+        min_price: warmupFilterParams.min_price,
+        max_price: warmupFilterParams.max_price,
+        size: warmupFilterParams.size,
+        color: warmupFilterParams.color,
+        style_tag: warmupFilterParams.style_tag,
+        sort: warmupFilterParams.sort,
         search_refresh: `category-client:${pathKey}:${seed}`,
       })
-      .then((next) => {
-        if (cancelled || !Array.isArray(next.products) || next.products.length === 0) return;
-        setDisplayProducts(next.products as Product[]);
-        if (typeof next.total === 'number') setDisplayTotal(next.total);
+      .then(() => {
+        if (cancelled) return;
       })
       .catch(() => {
-        // Giữ lưới SSR/cache nếu request làm mới bị lỗi.
+        // Giữ lưới SSR/cache nếu warmup nền bị lỗi.
       });
 
     return () => {
       cancelled = true;
     };
-  }, [category, currentPage, pageSize, pathKey, shouldRefreshRandomGrid, subSubcategory, subcategory]);
+  }, [category, currentPage, pageSize, pathKey, shouldRefreshRandomGrid, subSubcategory, subcategory, warmupFilterParams]);
 
   useEffect(() => {
     if (!category) return;
@@ -201,9 +251,9 @@ export default function CategoryPageClient({
         <>
           <h2 className="text-lg font-semibold text-gray-800 mb-4">
             {displayTotal} {leafName} dành cho bạn
-            {totalPages > 1 && (
+            {displayTotalPages > 1 && (
               <span className="text-gray-500 font-normal text-base ml-2">
-                (trang {currentPage}/{totalPages}, hiển thị {from}–{to})
+                (trang {currentPage}/{displayTotalPages}, hiển thị {from}–{to})
               </span>
             )}
           </h2>
@@ -213,7 +263,7 @@ export default function CategoryPageClient({
             selectedCategory={leafName}
             showFilters={false}
           />
-          {totalPages > 1 && (
+          {displayTotalPages > 1 && (
             <nav className="mt-8 flex flex-wrap items-center justify-center gap-2" aria-label="Phân trang danh mục">
               {currentPage > 1 && (
                 <Link
@@ -224,9 +274,9 @@ export default function CategoryPageClient({
                 </Link>
               )}
               <span className="px-3 py-2 text-gray-600 text-sm">
-                Trang {currentPage} / {totalPages}
+                Trang {currentPage} / {displayTotalPages}
               </span>
-              {currentPage < totalPages && (
+              {currentPage < displayTotalPages && (
                 <Link
                   href={queryWithPage(currentPage + 1)}
                   className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 font-medium text-sm"

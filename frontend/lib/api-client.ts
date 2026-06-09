@@ -321,6 +321,27 @@ class ApiClient {
     return this.fetch<ProductListResponse>(`/products/?${query.toString()}`);
   }
 
+  async warmCategoryListingCache(params: {
+    category: string;
+    subcategory?: string | null;
+    sub_subcategory?: string | null;
+    skip?: number;
+    limit?: number;
+    min_price?: number | null;
+    max_price?: number | null;
+    size?: string | null;
+    color?: string | null;
+    style_tag?: string | null;
+    sort?: string;
+    search_refresh?: string | null;
+  }): Promise<{ status: string }> {
+    return this.fetch<{ status: string }>('/products/category-listing-cache/warm', {
+      method: 'POST',
+      body: JSON.stringify(params),
+      quiet: true,
+    });
+  }
+
   /** Facets (size/màu/giá) cho tập kết quả tìm `q` — `GET /products/search-facets`. */
   async getSearchProductFacets(
     params: Record<string, string | undefined | null>
