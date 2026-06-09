@@ -481,6 +481,12 @@ export default function AdminNewsletterPage() {
                   <p className="text-xs text-gray-500 mt-1">
                     Gửi {emailMgmt.birthday_send_days_before} ngày trước sinh nhật
                   </p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Giờ gửi tự động:{' '}
+                    <span className="font-medium text-gray-700">
+                      {emailMgmt.birthday_cron_schedule_label ?? '9:00 sáng (giờ Việt Nam)'}
+                    </span>
+                  </p>
                 </div>
               </div>
 
@@ -502,14 +508,20 @@ export default function AdminNewsletterPage() {
                     />
                     Bật giới hạn warm-up hàng ngày
                   </label>
-                  <label className="flex items-center gap-2 text-sm">
+                  <label className="flex items-start gap-2 text-sm">
                     <input
                       type="checkbox"
                       checked={birthdayCronEnabled}
                       onChange={(e) => setBirthdayCronEnabled(e.target.checked)}
-                      className="rounded border-gray-300"
+                      className="rounded border-gray-300 mt-0.5"
                     />
-                    Tự động gửi CMSN (cron hàng ngày)
+                    <span>
+                      Tự động gửi CMSN (cron hàng ngày)
+                      <span className="block text-xs text-gray-500 mt-0.5">
+                        Lịch VPS: {emailMgmt.birthday_cron_schedule_label ?? '9:00 sáng (giờ Việt Nam)'} · Bấm
+                        &quot;Chạy batch CMSN ngay&quot; để gửi thủ công bất kỳ lúc nào
+                      </span>
+                    </span>
                   </label>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div>

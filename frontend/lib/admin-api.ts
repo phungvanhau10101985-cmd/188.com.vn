@@ -3175,6 +3175,10 @@ export type AdminEmailSendManagement = {
   birthday_pending_today: number;
   birthday_sent_all_time: number;
   birthday_send_days_before: number;
+  birthday_cron_hour: number;
+  birthday_cron_minute: number;
+  birthday_cron_timezone: string;
+  birthday_cron_schedule_label: string;
   recent_days: Array<{ date: string; birthday_sent: number }>;
   recent_sent: Array<{
     id: number;

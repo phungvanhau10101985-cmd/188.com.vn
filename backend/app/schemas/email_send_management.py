@@ -40,5 +40,9 @@ class EmailSendManagementOut(BaseModel):
     birthday_pending_today: int
     birthday_sent_all_time: int
     birthday_send_days_before: int
+    birthday_cron_hour: int
+    birthday_cron_minute: int
+    birthday_cron_timezone: str
+    birthday_cron_schedule_label: str
     recent_days: list[EmailSendDailyHistoryItem]
     recent_sent: list[EmailBirthdaySentLogItem] = []

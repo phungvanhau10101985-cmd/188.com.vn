@@ -28,7 +28,16 @@ export const AI_CRAWLER_USER_AGENTS = [
   "ChatGPT-User",
   "OAI-SearchBot",
   "ClaudeBot",
+  "Claude-SearchBot",
+  "Claude-User",
   "anthropic-ai",
   "PerplexityBot",
+  "Perplexity-User",
   "Google-Extended",
+  "Applebot-Extended",
+  "CCBot",
+  "Meta-ExternalAgent",
 ] as const;
+
+/** Gợi ý giảm tải cho AI crawler; bot không bắt buộc tuân thủ nhưng bot tốt thường đọc. */
+export const AI_CRAWLER_CRAWL_DELAY_SECONDS = 10;

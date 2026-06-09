@@ -13,6 +13,17 @@ from app.services.birthday_discount import BIRTHDAY_EMAIL_SEND_DAYS_BEFORE, birt
 DEFAULT_START_LIMIT = 5
 DEFAULT_DAILY_INCREMENT = 5
 UNLIMITED_QUOTA = 999_999
+# Khớp deploy/crontab.188.com.vn.example — cron CMSN chạy lúc 9:00 giờ VN
+BIRTHDAY_CRON_HOUR = 9
+BIRTHDAY_CRON_MINUTE = 0
+BIRTHDAY_CRON_TIMEZONE = "Asia/Ho_Chi_Minh"
+
+
+def birthday_cron_schedule_label() -> str:
+    hour = BIRTHDAY_CRON_HOUR
+    minute = BIRTHDAY_CRON_MINUTE
+    period = "sáng" if hour < 12 else ("trưa" if hour == 12 else "chiều" if hour < 18 else "tối")
+    return f"{hour}:{minute:02d} {period} (giờ Việt Nam)"
 
 
 def get_or_create_management(db: Session) -> EmailSendManagement:
@@ -193,6 +204,10 @@ def management_payload(db: Session) -> dict:
         "birthday_pending_today": count_birthday_pending(db),
         "birthday_sent_all_time": int(total_birthday),
         "birthday_send_days_before": BIRTHDAY_EMAIL_SEND_DAYS_BEFORE,
+        "birthday_cron_hour": BIRTHDAY_CRON_HOUR,
+        "birthday_cron_minute": BIRTHDAY_CRON_MINUTE,
+        "birthday_cron_timezone": BIRTHDAY_CRON_TIMEZONE,
+        "birthday_cron_schedule_label": birthday_cron_schedule_label(),
         "recent_days": get_birthday_send_history(db, days=14),
         "recent_sent": get_recent_birthday_sent_logs(db, days=14, limit=100),
     }

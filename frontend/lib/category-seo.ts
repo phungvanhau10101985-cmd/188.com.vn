@@ -301,13 +301,13 @@ export async function getCategoryProductFacets(
 
 /** Server-side: lấy sản phẩm theo danh mục (cho SSR). Hỗ trợ phân trang qua skip/limit.
  *  Có thể truyền sẵn info danh mục (CategoryByPathInfo) để tránh gọi API by-path lần nữa.
- *  Khi có min/max giá, size hoặc màu: tắt order_random để phân trang ổn định; mặc định sort `newest`.
+ *  Khi có min/max giá, size hoặc màu: dùng sort ổn định; mặc định danh mục dùng random có seed để cache vẫn hiệu quả.
  */
 export async function getProductsByCategory(
   level1: string,
   level2?: string | null,
   level3?: string | null,
-  options: { limit?: number; skip?: number; filters?: CategoryListingFilters } = {},
+  options: { limit?: number; skip?: number; filters?: CategoryListingFilters; randomSeed?: string } = {},
   resolvedInfo?: CategoryByPathInfo | null
 ): Promise<{
   products: unknown[];
@@ -318,7 +318,7 @@ export async function getProductsByCategory(
   subcategory?: string;
   sub_subcategory?: string;
 }> {
-  const { limit = 96, skip = 0, filters } = options;
+  const { limit = 96, skip = 0, filters, randomSeed } = options;
   const info = resolvedInfo ?? (await getCategoryByPathForSeo(level1, level2, level3));
   if (!info) return { products: [], total: 0, total_pages: 0, page: 1 };
   const breadcrumb = info.breadcrumb_names || [];
@@ -336,7 +336,7 @@ export async function getProductsByCategory(
   const sortTrim = f.sort?.trim();
   const useDeterministicOrder = hasAttrFilters || Boolean(sortTrim);
 
-  try {
+  const buildParams = (sortOverride?: string, seedOverride?: string) => {
     const params = new URLSearchParams({
       limit: String(limit),
       skip: String(skip),
@@ -346,11 +346,13 @@ export async function getProductsByCategory(
     if (subcategory) params.set("subcategory", subcategory);
     if (sub_subcategory) params.set("sub_subcategory", sub_subcategory);
 
-    if (useDeterministicOrder) {
-      params.set("order_random", "false");
-      params.set("sort", sortTrim || "newest");
+    const sortValue = sortOverride || (useDeterministicOrder ? sortTrim || "newest" : "random");
+    if (sortValue.trim().toLowerCase() === "random") {
+      params.set("sort", "random");
+      if (seedOverride?.trim()) params.set("search_refresh", seedOverride.trim());
     } else {
-      params.set("order_random", "true");
+      params.set("order_random", "false");
+      params.set("sort", sortValue);
     }
 
     if (f.minPrice != null && !Number.isNaN(f.minPrice) && f.minPrice >= 0) {
@@ -362,7 +364,10 @@ export async function getProductsByCategory(
     if (f.size?.trim()) params.set("size", f.size.trim());
     if (f.color?.trim()) params.set("color", f.color.trim());
     if (f.styleTag?.trim()) params.set("style_tag", f.styleTag.trim());
+    return params;
+  };
 
+  const fetchListing = async (params: URLSearchParams) => {
     const url = `${API_BASE}/products/?${params.toString()}`;
     /** Cache ngắn theo URL: mở danh mục nhanh hơn, vẫn làm mới thường xuyên. */
     const res = await fetch(url, {
@@ -370,14 +375,14 @@ export async function getProductsByCategory(
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(LAYOUT_FETCH_TIMEOUT_MS),
     });
-    if (!res.ok) {
-      return { products: [], total: 0, total_pages: 0, page: 1, category, subcategory, sub_subcategory };
-    }
+    if (!res.ok) return null;
     const data = (await res.json()) as {
       products?: unknown[];
       total?: number;
       total_pages?: number;
+      error?: unknown;
     };
+    if (data.error) return null;
     const total = typeof data.total === "number" ? data.total : (Array.isArray(data.products) ? data.products.length : 0);
     const totalPages = typeof data.total_pages === "number" ? data.total_pages : (limit > 0 ? Math.ceil(total / limit) : 1);
     const page = limit > 0 ? Math.floor(skip / limit) + 1 : 1;
@@ -390,9 +395,28 @@ export async function getProductsByCategory(
       subcategory,
       sub_subcategory,
     };
+  };
+
+  try {
+    const primary = await fetchListing(buildParams(undefined, randomSeed));
+    if (primary && (primary.products.length > 0 || primary.total > 0 || info.product_count === 0)) {
+      return primary;
+    }
+
+    // API random/cache lạnh đôi khi lỗi tạm; dùng thứ tự ổn định để tránh render danh mục có sản phẩm thành lưới rỗng.
+    const fallbackSort = sortTrim?.toLowerCase() === "random" ? "newest" : sortTrim || "newest";
+    const fallback = await fetchListing(buildParams(fallbackSort));
+    if (fallback) return fallback;
   } catch {
-    return { products: [], total: 0, total_pages: 0, page: 1, category, subcategory, sub_subcategory };
+    try {
+      const fallbackSort = sortTrim?.toLowerCase() === "random" ? "newest" : sortTrim || "newest";
+      const fallback = await fetchListing(buildParams(fallbackSort));
+      if (fallback) return fallback;
+    } catch {
+      // fall through
+    }
   }
+  return { products: [], total: info.product_count || 0, total_pages: 0, page: 1, category, subcategory, sub_subcategory };
 }
 
 /** URL path danh mục (không có leading slash). */

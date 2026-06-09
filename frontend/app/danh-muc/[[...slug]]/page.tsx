@@ -21,6 +21,7 @@ import CategoryListPage from './CategoryListPage';
 import type { Product } from '@/types/api';
 
 const PAGE_SIZE = 96;
+const CATEGORY_RANDOM_SEED_BUCKET_MS = 60_000;
 
 function parseListingFilters(sp: Record<string, string | string[] | undefined>): {
   page: number;
@@ -176,12 +177,14 @@ export default async function CategoryPage({ params, searchParams }: Props) {
   const pathSegments = [level1];
   if (level2) pathSegments.push(level2);
   if (level3) pathSegments.push(level3);
+  const pathStr = pathSegments.join('/');
+  const randomSeed = `category:${pathStr}:${Math.floor(Date.now() / CATEGORY_RANDOM_SEED_BUCKET_MS)}`;
 
   const { products, total, total_pages, page: currentPage } = await getProductsByCategory(
     level1,
     level2,
     level3,
-    { limit: PAGE_SIZE, skip, filters: listingFilters },
+    { limit: PAGE_SIZE, skip, filters: listingFilters, randomSeed },
     seoData,
   );
 

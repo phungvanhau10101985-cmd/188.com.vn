@@ -70,6 +70,7 @@ export default function MobileHeader({
   const [openL2, setOpenL2] = useState<Set<string>>(new Set());
   const panelRef = useRef<HTMLDivElement>(null);
   const mobileSearchFormRef = useRef<HTMLFormElement | null>(null);
+  const mobileSearchInputRef = useRef<HTMLInputElement>(null);
   const mobileImageInputId = useId();
   const categoryPanelId = useId();
 
@@ -150,12 +151,23 @@ export default function MobileHeader({
     router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
   };
 
+  const dismissSearchKeyboard = useCallback(() => {
+    mobileSearchInputRef.current?.blur();
+    const active = document.activeElement as HTMLElement | null;
+    if (active?.tagName === 'INPUT' || active?.tagName === 'TEXTAREA') {
+      active.blur();
+    }
+  }, []);
+
   useEffect(() => {
     if (isHome) {
       const q = searchParams.get('q') ?? '';
       setSearchTerm(q);
+      if (q.trim()) {
+        dismissSearchKeyboard();
+      }
     }
-  }, [isHome, searchParams]);
+  }, [isHome, searchParams, dismissSearchKeyboard]);
 
   /** Vuốt/nút back: nghe popstate khi panel mở */
   useEffect(() => {
@@ -216,6 +228,7 @@ export default function MobileHeader({
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setSearchHistoryOpen(false);
+    dismissSearchKeyboard();
     const term = searchTerm.trim();
     onSuggestionClick(term || '');
   };
@@ -223,6 +236,12 @@ export default function MobileHeader({
   const handleHistorySelect = (term: string) => {
     setSearchTerm(term);
     setSearchHistoryOpen(false);
+    dismissSearchKeyboard();
+    onSuggestionClick(term);
+  };
+
+  const handleSuggestionChipClick = (term: string) => {
+    dismissSearchKeyboard();
     onSuggestionClick(term);
   };
 
@@ -453,6 +472,7 @@ export default function MobileHeader({
                   </svg>
                 </span>
                 <input
+                  ref={mobileSearchInputRef}
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
@@ -584,7 +604,7 @@ export default function MobileHeader({
                     <button
                       key={term}
                       type="button"
-                      onClick={() => onSuggestionClick(term)}
+                      onClick={() => handleSuggestionChipClick(term)}
                       className={chipClass}
                     >
                       {term}

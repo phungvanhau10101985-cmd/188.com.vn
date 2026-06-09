@@ -51,29 +51,82 @@ export default function CategoryPageClient({
   const fullName = breadcrumbNames.join(' - ');
   const leafName = breadcrumbNames[breadcrumbNames.length - 1] || 'sản phẩm';
   const basePath = `/danh-muc/${pathSegments.join('/')}`;
-  const from = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-  const to = Math.min(currentPage * pageSize, total);
+  const category = breadcrumbNames[0];
+  const subcategory = breadcrumbNames[1];
+  const subSubcategory = breadcrumbNames[2];
+  const pathKey = pathSegments.join('/');
 
   const monthLabel = getListingFreshnessMonthLabel();
   const h1Text = `${leafName} mới nhất ${monthLabel} | ${total} sản phẩm`;
+  const [displayProducts, setDisplayProducts] = useState<Product[]>(products);
+  const [displayTotal, setDisplayTotal] = useState(total);
   const [clientFacets, setClientFacets] = useState<CategoryProductFacets | null>(facets);
+  const from = displayTotal === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const to = Math.min(currentPage * pageSize, displayTotal);
+
+  useEffect(() => {
+    setDisplayProducts(products);
+    setDisplayTotal(total);
+  }, [products, total]);
 
   const facetParams = useMemo(() => {
     const p = new URLSearchParams(listingQueryString);
     return {
-      category: breadcrumbNames[0],
-      subcategory: breadcrumbNames[1],
-      sub_subcategory: breadcrumbNames[2],
+      category,
+      subcategory,
+      sub_subcategory: subSubcategory,
       min_price: p.get('min_price'),
       max_price: p.get('max_price'),
       size: p.get('size'),
       color: p.get('color'),
       style_tag: p.get('style_tag'),
     };
-  }, [breadcrumbNames, listingQueryString]);
+  }, [category, subcategory, subSubcategory, listingQueryString]);
+
+  const shouldRefreshRandomGrid = useMemo(() => {
+    const p = new URLSearchParams(listingQueryString);
+    p.delete('page');
+    const sort = (p.get('sort') || '').trim().toLowerCase();
+    p.delete('sort');
+    return p.toString().length === 0 && (!sort || sort === 'random');
+  }, [listingQueryString]);
 
   useEffect(() => {
-    if (!breadcrumbNames[0]) return;
+    if (!shouldRefreshRandomGrid || !category) return;
+
+    let cancelled = false;
+    const seed =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    apiClient
+      .getProducts({
+        limit: pageSize,
+        skip: Math.max(0, (currentPage - 1) * pageSize),
+        is_active: true,
+        category,
+        subcategory,
+        sub_subcategory: subSubcategory,
+        sort: 'random',
+        search_refresh: `category-client:${pathKey}:${seed}`,
+      })
+      .then((next) => {
+        if (cancelled || !Array.isArray(next.products) || next.products.length === 0) return;
+        setDisplayProducts(next.products as Product[]);
+        if (typeof next.total === 'number') setDisplayTotal(next.total);
+      })
+      .catch(() => {
+        // Giữ lưới SSR/cache nếu request làm mới bị lỗi.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [category, currentPage, pageSize, pathKey, shouldRefreshRandomGrid, subSubcategory, subcategory]);
+
+  useEffect(() => {
+    if (!category) return;
     let cancelled = false;
     setClientFacets(facets);
     if (facets != null) {
@@ -92,7 +145,7 @@ export default function CategoryPageClient({
     return () => {
       cancelled = true;
     };
-  }, [breadcrumbNames, facetParams, facets]);
+  }, [category, facetParams, facets]);
 
   const queryWithPage = (nextPage: number) => {
     const p = new URLSearchParams(listingQueryString);
@@ -147,7 +200,7 @@ export default function CategoryPageClient({
       {!error && (
         <>
           <h2 className="text-lg font-semibold text-gray-800 mb-4">
-            {total} {leafName} dành cho bạn
+            {displayTotal} {leafName} dành cho bạn
             {totalPages > 1 && (
               <span className="text-gray-500 font-normal text-base ml-2">
                 (trang {currentPage}/{totalPages}, hiển thị {from}–{to})
@@ -155,7 +208,7 @@ export default function CategoryPageClient({
             )}
           </h2>
           <ProductGrid
-            products={products}
+            products={displayProducts}
             loading={false}
             selectedCategory={leafName}
             showFilters={false}

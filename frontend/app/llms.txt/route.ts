@@ -26,23 +26,18 @@ function buildLlmsTxt(origin: string): string {
 - Sitemap index: ${origin}/sitemap-index.xml
 - Sitemap chính (sản phẩm, trang tĩnh): ${origin}/sitemap.xml
 - Sitemap danh mục SEO: ${origin}${CATEGORY_SEO_SITEMAP_PATH}
+- Sitemap sản phẩm phân trang: ${origin}/sitemap-san-pham/1
 - Robots: ${origin}/robots.txt
 
-## Dữ liệu sản phẩm (đọc công khai, không cần đăng nhập)
-Base API (proxy qua frontend): ${origin}/api/v1
-
-- Danh sách phân trang: GET ${origin}/api/v1/products/?limit=48&skip=0&is_active=true
-- Chi tiết theo slug: GET ${origin}/api/v1/products/by-slug/?slug={slug}
-- Tìm kiếm: GET ${origin}/api/v1/products/search/?q={tu_khoa}&limit=48&skip=0
-- Danh sách đầy đủ schema: GET ${origin}/api/v1/products/list/full?limit=100&skip=0
-
-## Feed catalog (TSV)
-- Google Merchant: GET ${origin}/api/v1/import-export/export/merchant-center-feed.tsv
-- Meta catalog: GET ${origin}/api/v1/import-export/export/meta-catalog-feed.tsv
-- TikTok catalog: GET ${origin}/api/v1/import-export/export/tiktok-catalog-feed.tsv
+## Dữ liệu sản phẩm public
+- Ưu tiên đọc danh sách URL từ sitemap index và các sitemap sản phẩm.
+- Đọc chi tiết sản phẩm từ trang HTML public /products/{slug}; trang có metadata, Open Graph và JSON-LD Product.
+- Đọc danh mục từ /danh-muc và landing SEO /c/{slug}; các trang này có CollectionPage và BreadcrumbList.
+- Không crawl API /api trực tiếp. API bị chặn trong robots.txt để bảo vệ server khỏi truy vấn hàng loạt; nếu cần feed/catalog khối lượng lớn, vui lòng liên hệ trước.
 
 ## Chính sách thu thập
 - Được phép index và trích dẫn các trang sản phẩm, danh mục và nội dung thông tin công khai.
+- Ưu tiên tuần tự theo sitemap, hạn chế tải song song và tôn trọng crawl-delay trong robots.txt.
 - Không thu thập các khu vực sau:
 ${disallowList}
 - Không thu thập thông tin tài khoản, giỏ hàng, checkout hoặc khu admin.
