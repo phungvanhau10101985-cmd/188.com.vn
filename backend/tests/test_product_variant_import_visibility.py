@@ -12,6 +12,19 @@ def test_colors_valid_for_import_requires_name_and_http_image():
     assert colors_valid_for_import([{"name": "Đỏ"}]) is False
     assert colors_valid_for_import([{"name": "Đỏ", "img": "ftp://x/y.jpg"}]) is False
     assert colors_valid_for_import([{"name": "Đỏ", "img": "https://cdn.example/a.jpg"}]) is True
+    assert colors_valid_for_import(
+        [
+            {"name": "Trắng", "img": "https://cdn.example/a.jpg"},
+            {"name": "Đen"},
+            {"name": "Xám", "img": "https://cdn.example/b.jpg"},
+        ]
+    ) is True
+    assert colors_valid_for_import(
+        [
+            {"name": "Trắng"},
+            {"name": "Đen"},
+        ]
+    ) is False
 
 
 def test_product_should_remove_after_localization():

@@ -780,7 +780,7 @@ def _publish_payload(product_data: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(
             status_code=400,
             detail=(
-                "Draft thiếu biến thể Variant (mỗi màu cần tên + URL ảnh http/https) — "
+                "Draft thiếu biến thể Variant (mỗi màu cần tên; ít nhất một màu có URL ảnh http/https) — "
                 "không cho import sản phẩm."
             ),
         )

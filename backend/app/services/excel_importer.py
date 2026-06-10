@@ -189,7 +189,7 @@ class ExcelImporter:
                         ):
                             error_msg = (
                                 f"Dòng {row_number}: Thiếu biến thể Variant "
-                                "(mỗi màu cần tên + URL ảnh http/https) — không import."
+                                "(mỗi màu cần tên; ít nhất một màu có URL ảnh http/https) — không import."
                             )
                             errors.append(error_msg)
                             logger.warning(error_msg)
