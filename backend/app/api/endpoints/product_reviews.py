@@ -191,7 +191,11 @@ def admin_list_reviews(
     from app.models.product_review import ProductReview
     from app.models.product import Product
 
-    q = db.query(ProductReview).filter().order_by(ProductReview.id.desc())
+    q = db.query(ProductReview).order_by(
+        ProductReview.is_imported.asc(),
+        ProductReview.created_at.desc(),
+        ProductReview.id.desc(),
+    )
     total = q.count()
     items = q.offset(skip).limit(limit).all()
     product_ids = [r.product_id for r in items if r.product_id]

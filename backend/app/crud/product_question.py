@@ -38,8 +38,16 @@ def get_questions(
             q = q.filter(ProductQuestion.group == g)
         except ValueError:
             pass
-    order_col = getattr(ProductQuestion, sort_by, ProductQuestion.id)
-    q = q.order_by(order_col.desc() if sort_desc else order_col.asc())
+    # Admin: khách thật (is_imported=False) trước, import sau; trong mỗi nhóm mới → cũ.
+    if sort_by in ("id", "created_at", "admin_default"):
+        q = q.order_by(
+            ProductQuestion.is_imported.asc(),
+            ProductQuestion.created_at.desc(),
+            ProductQuestion.id.desc(),
+        )
+    else:
+        order_col = getattr(ProductQuestion, sort_by, ProductQuestion.id)
+        q = q.order_by(order_col.desc() if sort_desc else order_col.asc())
     return q.offset(skip).limit(limit).all()
 
 

@@ -103,11 +103,13 @@ from app.middleware.http_safe import (
     ClientDisconnectSafeMiddleware,
     LastResortJsonMiddleware,
 )
+from app.middleware.rate_limit import RateLimitMiddleware
 
-# Thứ tự: thêm sau = chạy trước (ngoài cùng). ClientDisconnectSafe bọc send cuối cùng.
+# Thứ tự: thêm sau = chạy trước (ngoài cùng). RateLimit chặn sớm; ClientDisconnectSafe bọc send.
 app.add_middleware(LastResortJsonMiddleware)
 app.add_middleware(AuthLoginBodyMiddleware)
 app.add_middleware(ClientDisconnectSafeMiddleware)
+app.add_middleware(RateLimitMiddleware)
 
 # ========== DATABASE INITIALIZATION ==========
 def init_database_tables():

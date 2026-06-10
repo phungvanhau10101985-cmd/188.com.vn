@@ -334,7 +334,7 @@ def admin_list_questions(
     group: Optional[int] = Query(None, description="Lọc theo nhóm câu hỏi"),
     product_id: Optional[int] = Query(None, description="Lọc theo ID sản phẩm"),
     search_group: Optional[str] = Query(None, description="Tìm theo nhóm câu hỏi"),
-    sort_by: str = Query("id", description="Sắp xếp theo"),
+    sort_by: str = Query("created_at", description="Sắp xếp theo (mặc định: khách thật trước, mới → cũ)"),
     sort_desc: bool = Query(True, description="Giảm dần"),
     db: Session = Depends(get_db),
     current_admin: AdminUser = Depends(require_module_permission("product_questions")),

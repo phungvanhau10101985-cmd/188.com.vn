@@ -121,7 +121,7 @@ export default function AdminProductQuestionsPage() {
         skip: (page - 1) * PAGE_SIZE,
         limit: PAGE_SIZE,
         search_group: searchGroup.trim() || undefined,
-        sort_by: 'id',
+        sort_by: 'created_at',
         sort_desc: true,
       });
       setData(res);
