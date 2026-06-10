@@ -22,6 +22,19 @@ type NanoEmbedLayout = {
   mobileBubbleSize: number;
 };
 
+function findActiveEmbedScript(widgetId: string): HTMLScriptElement | null {
+  const scripts = Array.from(
+    document.querySelectorAll<HTMLScriptElement>('script[src*="nanoai-chat-widget.js"]'),
+  );
+  if (scripts.length === 0) return null;
+
+  const withMatchingWidgetId = scripts.filter((s) => (s.getAttribute('data-widget-id') || '') === widgetId);
+  if (withMatchingWidgetId.length > 0) {
+    return withMatchingWidgetId[withMatchingWidgetId.length - 1] ?? null;
+  }
+  return scripts[scripts.length - 1] ?? null;
+}
+
 function parseIntClamp(raw: string | null, fallback: number, min: number, max: number): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) return fallback;
@@ -29,7 +42,8 @@ function parseIntClamp(raw: string | null, fallback: number, min: number, max: n
 }
 
 function readEmbedLayout(): NanoEmbedLayout {
-  const script = document.querySelector<HTMLScriptElement>('script[src*="nanoai-chat-widget.js"]');
+  const widgetId = 'nanoai-chat-widget-v1';
+  const script = findActiveEmbedScript(widgetId);
   const side = script?.getAttribute('data-side') === 'left' ? 'left' : 'right';
   return {
     side,
@@ -174,12 +188,15 @@ export default function NanoAiMobileLauncherAdjust() {
     releaseNanoAiClickBlockers();
     enforceViewportAnchoring();
 
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let rafId: number | undefined;
+    let rafQueued = false;
     const schedule = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
+      if (rafQueued) return;
+      rafQueued = true;
+      rafId = window.requestAnimationFrame(() => {
+        rafQueued = false;
         enforceViewportAnchoring();
-      }, 120);
+      });
     };
 
     const mo = new MutationObserver(schedule);
@@ -191,7 +208,7 @@ export default function NanoAiMobileLauncherAdjust() {
       mo.disconnect();
       window.removeEventListener('resize', schedule);
       window.removeEventListener('188-site-embeds-ready', schedule);
-      if (timer) clearTimeout(timer);
+      if (rafId !== undefined) window.cancelAnimationFrame(rafId);
       clearMobileLayout();
       clearNanoAiOverlayPassThrough();
     };
