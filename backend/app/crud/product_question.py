@@ -135,6 +135,7 @@ def get_questions_for_product(
     Lấy câu hỏi hiển thị trên trang chi tiết sản phẩm:
     - Câu hỏi theo nhóm: group = product.group_question (và product_id NULL)
     - Câu hỏi theo sản phẩm: product_id = product.id (khách hỏi)
+    Sắp xếp: khách thật trước (is_imported ASC), rồi useful DESC, created_at DESC.
     """
     q = db.query(ProductQuestion).filter(
         ProductQuestion.is_active == True,
@@ -142,7 +143,11 @@ def get_questions_for_product(
             and_(ProductQuestion.group == group_question, ProductQuestion.product_id.is_(None)),
             ProductQuestion.product_id == product_db_id,
         ),
-    ).order_by(ProductQuestion.useful.desc(), ProductQuestion.created_at.desc())
+    ).order_by(
+        ProductQuestion.is_imported.asc(),
+        ProductQuestion.useful.desc(),
+        ProductQuestion.created_at.desc(),
+    )
     return q.limit(limit).all()
 
 

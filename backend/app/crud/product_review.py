@@ -21,7 +21,7 @@ def get_reviews_for_product(
     Lấy đánh giá hiển thị trên trang sản phẩm (giống logic câu hỏi).
     - Khách đánh giá: product_id = product.id → hiển thị theo sản phẩm đã mua.
     - Import: group = product.group_rating, product_id NULL → hiển thị theo nhóm.
-    Sắp xếp: useful DESC, created_at DESC.
+    Sắp xếp: khách thật trước (is_imported ASC), rồi useful DESC, created_at DESC.
     """
     q = db.query(ProductReview).filter(
         ProductReview.is_active == True,
@@ -29,7 +29,11 @@ def get_reviews_for_product(
             and_(ProductReview.group == group_rating, ProductReview.product_id.is_(None)),
             ProductReview.product_id == product_db_id,
         ),
-    ).order_by(ProductReview.useful.desc(), ProductReview.created_at.desc())
+    ).order_by(
+        ProductReview.is_imported.asc(),
+        ProductReview.useful.desc(),
+        ProductReview.created_at.desc(),
+    )
     return q.limit(limit).all()
 
 

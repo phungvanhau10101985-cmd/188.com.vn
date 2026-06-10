@@ -22,7 +22,7 @@ class Product(Base):
     shop_id = Column(String(100))
     pro_lower_price = Column(String(255))
     pro_high_price = Column(String(255))
-    group_rating = Column(Integer, default=0)
+    group_rating = Column(Integer, default=888)
     group_question = Column(Integer, default=0)
     sizes = Column(JSON, default=list)
     colors = Column(JSON, default=list)

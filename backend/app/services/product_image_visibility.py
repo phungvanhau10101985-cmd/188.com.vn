@@ -76,6 +76,75 @@ def product_has_storefront_image(product: Product) -> bool:
     return resolve_product_display_image_url(product) is not None
 
 
+def _variant_image_url(entry: dict) -> str:
+    for key in ("img", "image_url", "url", "image"):
+        s = _norm_url(entry.get(key))
+        if s:
+            return s
+    return ""
+
+
+def colors_valid_for_import(colors: Any) -> bool:
+    """Variant/colors hợp lệ trước import: ít nhất 1 màu có tên + URL ảnh http(s)."""
+    if not isinstance(colors, list) or len(colors) == 0:
+        return False
+    for entry in colors:
+        if not isinstance(entry, dict):
+            return False
+        name = _norm_url(entry.get("name"))
+        img = _variant_image_url(entry)
+        if not name:
+            return False
+        if not (img.startswith("http://") or img.startswith("https://")):
+            return False
+    return True
+
+
+def product_should_remove_after_localization(product: Product) -> bool:
+    """SP không còn Variant hoặc ảnh hiển thị sau bản địa hóa."""
+    colors = getattr(product, "colors", None) or []
+    if not isinstance(colors, list) or len(colors) == 0:
+        return True
+    if not product_has_storefront_image(product):
+        return True
+    return False
+
+
+def delete_product_if_no_variant_or_images(
+    db: Session,
+    product: Product,
+    *,
+    reason: str = "Variant/ảnh rỗng",
+) -> str:
+    """
+    Xóa SP khi không còn Variant/ảnh; nếu nghiệp vụ kho chặn xóa thì gỡ khỏi web.
+    Trả về 'deleted', 'deactivated', hoặc 'kept'.
+    """
+    if not product_should_remove_after_localization(product):
+        return "kept"
+
+    from app.crud.product import _delete_product_orm_only
+    from app.services import warehouse_clearance as wh_clearance_svc
+
+    pk = getattr(product, "id", None)
+    pid = getattr(product, "product_id", None)
+    try:
+        wh_clearance_svc.assert_product_deletion_allowed(db, product)
+        _delete_product_orm_only(db, product)
+        _logger.info("Đã xóa SP (%s): id=%s product_id=%s", reason, pk, pid)
+        return "deleted"
+    except ValueError as exc:
+        product.is_active = False
+        _logger.warning(
+            "SP không xóa được (%s), đã gỡ khỏi web: id=%s product_id=%s — %s",
+            reason,
+            pk,
+            pid,
+            exc,
+        )
+        return "deactivated"
+
+
 def storefront_image_sql_filter():
     """
     Lọc nhanh ở SQL — chỉ loại main_image *đã set* nhưng rõ ràng không hợp lệ.

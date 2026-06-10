@@ -50,7 +50,10 @@ from app.schemas.import_1688 import (
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.services.import_link_deepseek_taxonomy import apply_deepseek_taxonomy_to_product_data
 from app.services.alicdn_urls import normalize_product_data_image_urls_for_db
-from app.services.product_rating_question_groups import apply_import_rating_question_groups_to_product_data
+from app.services.product_rating_question_groups import (
+    RATING_GROUP_ID_UNASSIGNED,
+    apply_import_rating_question_groups_to_product_data,
+)
 from app.services.product_info_web_compact import compact_product_info_for_web
 from app.services.import_hibox_scraper import (
     ImportHiboxError,
@@ -771,6 +774,16 @@ def _publish_payload(product_data: Dict[str, Any]) -> Dict[str, Any]:
             detail=f"Draft thiếu {', '.join(missing_categories)} — không cho import sản phẩm.",
         )
     payload["colors"] = _coerce_colors_for_create(payload.get("colors"))
+    from app.services.product_image_visibility import colors_valid_for_import
+
+    if not colors_valid_for_import(payload.get("colors")):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Draft thiếu biến thể Variant (mỗi màu cần tên + URL ảnh http/https) — "
+                "không cho import sản phẩm."
+            ),
+        )
     # Khớp nghiệp vụ + cột Excel mẫu (=1): lưu DB dạng bool; draft/export dùng số 1/0.
     payload["deposit_require"] = True
     return payload
@@ -836,7 +849,7 @@ def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
         "shop_id": "",
         "pro_lower_price": "",
         "pro_high_price": "",
-        "rating_group_id": product_data.get("group_rating", 0),
+        "rating_group_id": product_data.get("group_rating") or RATING_GROUP_ID_UNASSIGNED,
         "question_group_id": product_data.get("group_question", 0),
         "sizes": j(product_data.get("sizes", [])),
         "Variant": j(product_data.get("colors", [])),

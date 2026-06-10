@@ -179,8 +179,21 @@ class ExcelImporter:
                     
                     product_dict = excel_row_to_product(row_dict)
                     product_dict = apply_category_final_mapping_to_product(product_dict, mappings)
-                    
+
+                    from app.services.product_image_visibility import colors_valid_for_import
+
                     if product_dict and product_dict.get("product_id"):
+                        is_delete_row = product_dict.get("excel_import_listed", 1) == 0
+                        if not is_delete_row and not colors_valid_for_import(
+                            product_dict.get("colors")
+                        ):
+                            error_msg = (
+                                f"Dòng {row_number}: Thiếu biến thể Variant "
+                                "(mỗi màu cần tên + URL ảnh http/https) — không import."
+                            )
+                            errors.append(error_msg)
+                            logger.warning(error_msg)
+                            continue
                         products_data.append(product_dict)
                         
                         if idx < 10:

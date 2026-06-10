@@ -1397,6 +1397,8 @@ def excel_row_to_product(row: Dict) -> Dict:
             product_info_value,
             color_full=color_full,
         )
+        from app.services.product_rating_question_groups import coalesce_group_rating
+
         product_data = {
             'product_id': product_id,
             'code': _clean_excel_text(row.get('sku'), max_len=100),
@@ -1409,7 +1411,7 @@ def excel_row_to_product(row: Dict) -> Dict:
             'shop_id': style_cell,
             'pro_lower_price': _clean_excel_text(row.get('pro_lower_price'), max_len=255),
             'pro_high_price': _clean_excel_text(row.get('pro_high_price'), max_len=255),
-            'group_rating': safe_int(row.get('rating_group_id', 0)),
+            'group_rating': coalesce_group_rating(row.get('rating_group_id', 0)),
             'group_question': safe_int(row.get('question_group_id', 0)),
             'sizes': parse_json_field(row.get('sizes', '[]')),
             'colors': parse_json_field(row.get('Variant', '[]')),
@@ -1509,6 +1511,8 @@ def product_to_excel_row(product: Product) -> Dict:
         # 37 CỘT EXPORT MAPPING - ĐÃ FIX
         # H–K (shop_name, shop_id, pro_lower_price, pro_high_price): để trống trên file Excel xuất ra.
         _style_out = (product.style or "").strip() if isinstance(product.style, str) else (str(product.style).strip() if product.style is not None else "")
+        from app.services.product_rating_question_groups import coalesce_group_rating
+
         excel_row = {
             'id': product.product_id or '',
             'sku': product.code or '',
@@ -1521,7 +1525,7 @@ def product_to_excel_row(product: Product) -> Dict:
             'shop_id': '',
             'pro_lower_price': '',
             'pro_high_price': '',
-            'rating_group_id': product.group_rating or 0,
+            'rating_group_id': coalesce_group_rating(product.group_rating),
             'question_group_id': product.group_question or 0,
             'sizes': json.dumps(product.sizes or [], ensure_ascii=False),
             'Variant': json.dumps(product.colors or [], ensure_ascii=False),
@@ -6354,6 +6358,15 @@ def bulk_import_products(
         if missing_categories:
             errors.append(
                 f"Dòng {idx + 1} ({product_id}): Thiếu {', '.join(missing_categories)} — không import."
+            )
+            continue
+
+        from app.services.product_image_visibility import colors_valid_for_import
+
+        if not colors_valid_for_import(product_data.get("colors")):
+            errors.append(
+                f"Dòng {idx + 1} ({product_id}): Thiếu biến thể Variant "
+                "(mỗi màu cần tên + URL ảnh http/https) — không import."
             )
             continue
 

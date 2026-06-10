@@ -31,6 +31,15 @@ from app.services import warehouse_clearance as warehouse_clearance_svc
 router = APIRouter()
 
 
+def _dt_sort_key(dt) -> float:
+    if dt is None:
+        return 0.0
+    try:
+        return dt.timestamp()
+    except (AttributeError, OSError):
+        return 0.0
+
+
 def _serialize_shop_review(
     r,
     *,
@@ -80,7 +89,7 @@ def get_reviews_for_product(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """Lấy đánh giá cho trang sản phẩm. Đánh giá của user đăng nhập xếp lên đầu, còn lại theo useful DESC."""
+    """Lấy đánh giá cho trang sản phẩm. Khách thật trước import; đánh giá của user đang xem lên đầu."""
     product = crud.product.get_product(db, product_id=product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại")
@@ -107,8 +116,15 @@ def get_reviews_for_product(
                 is_current_user=is_mine,
             )
         )
-    # Đánh giá của khách đang xem (is_current_user) lên trên nhất, còn lại giữ thứ tự useful/created
-    result.sort(key=lambda x: (not (x.is_current_user or False), -(x.useful or 0)))
+    # 1) Đánh giá của khách đang xem; 2) khách thật; 3) import; trong từng nhóm: useful, mới hơn trước
+    result.sort(
+        key=lambda x: (
+            not (x.is_current_user or False),
+            x.is_imported,
+            -(x.useful or 0),
+            -_dt_sort_key(x.display_created_at or x.created_at),
+        )
+    )
     return result
 
 

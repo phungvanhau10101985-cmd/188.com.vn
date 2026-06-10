@@ -667,7 +667,7 @@ def normalize_1688_payload(source_url: str, offer_id: Optional[str], payload: Di
         "shop_id": shop_id,
         "pro_lower_price": lower,
         "pro_high_price": higher,
-        "group_rating": 0,
+        "group_rating": 888,
         "group_question": 0,
         "sizes": merged_sizes,
         "colors": colors_out,

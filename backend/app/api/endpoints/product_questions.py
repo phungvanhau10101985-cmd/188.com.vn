@@ -107,7 +107,7 @@ def _reorder_questions_shop_list(
     Thứ tự hiển thị trên trang sản phẩm:
     1) Câu deep-link #question-{id} (nếu có trong payload và được yêu cầu)
     2) Các câu do chính viewer đặt (ask_user_id), mới nhất trước — chỉ khi có đăng nhập
-    3) Phần còn lại giữ đúng thứ tự gốc (useful DESC, …)
+    3) Câu khách thật (is_imported=False), rồi import; trong từng nhóm: useful, mới hơn trước
     """
     if not items_list:
         return items_list
@@ -131,10 +131,16 @@ def _reorder_questions_shop_list(
         for q in mine:
             out.append(q)
             placed.add(q.id)
-    for q in items_list:
-        if q.id not in placed:
-            out.append(q)
-            placed.add(q.id)
+    rest = [q for q in items_list if q.id not in placed]
+    rest.sort(
+        key=lambda q: (
+            bool(getattr(q, "is_imported", False)),
+            -int(getattr(q, "useful", 0) or 0),
+            -_dt_sort_key(getattr(q, "created_at", None)),
+            -q.id,
+        )
+    )
+    out.extend(rest)
     return out
 
 

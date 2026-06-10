@@ -274,6 +274,7 @@ def _run_import_excel_job(
         data = {
             "created": result.get("created", 0),
             "updated": result.get("updated", 0),
+            "deleted": int(result.get("deleted") or 0),
             "skipped_count": int(result.get("skipped_count") or 0),
             "total_processed": result.get("total_processed", 0),
             "success_rate": result.get("success_rate", "0%"),
@@ -296,7 +297,7 @@ def _run_import_excel_job(
                 "success": True,
                 "message": f"Đã import {result.get('total_processed', 0)} dòng trong file "
                 f"({result.get('created', 0)} mới, {result.get('updated', 0)} cập nhật, "
-                f"{data['skipped_count']} bỏ qua).",
+                f"{data['deleted']} xóa khỏi DB, {data['skipped_count']} bỏ qua).",
                 "data": data,
                 "warnings": result.get("warnings", [])[:50],
                 "errors": result.get("errors", [])[:150],
@@ -309,11 +310,12 @@ def _run_import_excel_job(
         else:
             seo_spawned = "skipped_warehouse_only"
         logger.info(
-            "%s done job=%s created=%s updated=%s processed=%s file=%s (auto_scan_seo_spawned=%s)",
+            "%s done job=%s created=%s updated=%s deleted=%s processed=%s file=%s (auto_scan_seo_spawned=%s)",
             IMPORT_EXCEL_LOG_PREFIX,
             job_id,
             result.get("created"),
             result.get("updated"),
+            result.get("deleted"),
             result.get("total_processed"),
             original_filename,
             seo_spawned,
@@ -546,17 +548,19 @@ async def import_excel(
         print(f"✅ IMPORT HOÀN TẤT")
         print(f"   ➕ Tạo mới: {result.get('created', 0)}")
         print(f"   🔄 Cập nhật: {result.get('updated', 0)}")
+        print(f"   🗑 Xóa khỏi DB (listed=0): {int(result.get('deleted') or 0)}")
         print(f"   ⏭ Bỏ qua: {int(result.get('skipped_count') or 0)}")
         print(f"   ⚠️  Cảnh báo: {len(result.get('warnings', []))}")
         print(f"   ❌ Lỗi: {len(result.get('errors', []))}")
         print(f"{'='*60}")
 
         logger.info(
-            "%s sync_done file=%s created=%s updated=%s skipped=%s total_processed=%s warnings=%s errors=%s",
+            "%s sync_done file=%s created=%s updated=%s deleted=%s skipped=%s total_processed=%s warnings=%s errors=%s",
             IMPORT_EXCEL_LOG_PREFIX,
             file.filename,
             result.get("created", 0),
             result.get("updated", 0),
+            int(result.get("deleted") or 0),
             int(result.get("skipped_count") or 0),
             result.get("total_processed", 0),
             len(result.get("warnings", []) or []),
@@ -579,11 +583,13 @@ async def import_excel(
             "message": (
                 f"Đã xử lý {result.get('total_processed', 0)} dòng: "
                 f"{result.get('created', 0)} mới, {result.get('updated', 0)} cập nhật, "
+                f"{int(result.get('deleted') or 0)} xóa khỏi DB, "
                 f"{int(result.get('skipped_count') or 0)} bỏ qua.{seo_note}"
             ),
             "data": {
                 "created": result.get("created", 0),
                 "updated": result.get("updated", 0),
+                "deleted": int(result.get("deleted") or 0),
                 "skipped_count": int(result.get("skipped_count") or 0),
                 "total_processed": result.get("total_processed", 0),
                 "success_rate": result.get("success_rate", "0%"),

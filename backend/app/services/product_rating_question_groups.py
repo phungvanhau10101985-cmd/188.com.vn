@@ -12,9 +12,7 @@ cho luồng import link — suy luận từ tên hiển thị + taxonomy đầy 
       IF(find("nữ", BH2)>0, 88, "")),
       99)
 
-- Fallback: nếu không gán được nhóm đánh giá (rating) bằng luật:
-  gọi Gemini 2.5 Flash trước (IMPORT_LINK_GEMINI_GROUPS_FALLBACK_ENABLED + GEMINI_API_KEY),
-  rồi mới thử DeepSeek nếu Gemini không trả mã hợp lệ.
+- Không khớp luật từ-khóa → group_rating = RATING_GROUP_ID_UNASSIGNED (888).
 """
 from __future__ import annotations
 
@@ -118,6 +116,12 @@ _RATING_GROUPS_RAW: Iterable[Tuple[str, int]] = (
     ("giày thể thao nam nữ", 23),
     ("máy hút bụi", 84),
     ("áo hai dây nữ", 85),
+    ("bóng golf", 88),
+    ("cỏ nhân tạo", 89),
+    ("găng tay chơi golf", 91),
+    ("gậy đánh golf", 92),
+    ("túi gậy golf", 93),
+    ("vali túi du lịch", 94),
 )
 
 # Cụm từ đồng nghĩa / cách gọi thực tế trên tên SP (không liền với cụm chuẩn trong bảng trên).
@@ -136,6 +140,16 @@ _RATING_ALIASES_RAW: Iterable[Tuple[str, int]] = (
     ("boot cổ cao nữ", 66),
     ("túi đeo chéo nữ", 69),
     ("balo nữ", 69),
+    ("vali du lịch", 94),
+    ("vali hành lý", 94),
+    ("hành lý du lịch", 94),
+    ("vali điện", 94),
+    ("túi du lịch", 94),
+    ("gậy golf", 92),
+    ("gậy chơi golf", 92),
+    ("túi đựng gậy golf", 93),
+    ("găng tay golf", 91),
+    ("thảm cỏ nhân tạo", 89),
 )
 
 _WS_RE = re.compile(r"\s+")
@@ -157,6 +171,9 @@ def _rating_phrases_sorted() -> Tuple[Tuple[str, int], ...]:
 
 
 _RATING_SORTED = _rating_phrases_sorted()
+
+# SP chưa xếp được nhóm đánh giá (vali, phụ kiện lạ, …) — không dùng 0.
+RATING_GROUP_ID_UNASSIGNED: int = 888
 
 RATING_GROUP_ID_WHITELIST: frozenset[int] = frozenset(
     gid for _, gid in (*_RATING_GROUPS_RAW, *_RATING_ALIASES_RAW)
@@ -287,6 +304,33 @@ def infer_rating_group_id(*, name: str, category: str = "", subcategory: str = "
     )
 
 
+def coalesce_group_rating(raw: Any, *, inferred: int = 0) -> int:
+    """Ưu tiên mã suy luận; ô Excel/API 0 hoặc trống → 888."""
+    if inferred > 0:
+        return inferred
+    if raw is None or raw == "":
+        return RATING_GROUP_ID_UNASSIGNED
+    if isinstance(raw, bool):
+        return RATING_GROUP_ID_UNASSIGNED
+    if isinstance(raw, (int, float)):
+        try:
+            val = int(raw)
+        except (TypeError, ValueError):
+            return RATING_GROUP_ID_UNASSIGNED
+        if val in (0, 1000):
+            return RATING_GROUP_ID_UNASSIGNED
+        return val if val > 0 else RATING_GROUP_ID_UNASSIGNED
+    s = str(raw).strip()
+    if not s or s.lower() in {"nan", "none", "null"}:
+        return RATING_GROUP_ID_UNASSIGNED
+    if s.isdigit() or (s.startswith("-") and s[1:].isdigit()):
+        val = int(s)
+        if val in (0, 1000):
+            return RATING_GROUP_ID_UNASSIGNED
+        return val if val > 0 else RATING_GROUP_ID_UNASSIGNED
+    return RATING_GROUP_ID_UNASSIGNED
+
+
 def infer_question_group_id_from_product_name(product_name: str) -> int:
     """
     Bám công thức Excel (FIND trên ô tên):
@@ -308,10 +352,7 @@ def apply_import_rating_question_groups_to_product_data(
     product_data: dict,
     warnings: Optional[List[str]] = None,
 ) -> None:
-    """
-    Gán group_rating / group_question (rule-first). Nếu group_rating == 0,
-    fallback AI một lần theo whitelist (Gemini trước, DeepSeek dự phòng).
-    """
+    """Gán group_rating (luật từ-khóa, không khớp → 888) và group_question từ tên SP."""
     if not isinstance(product_data, dict):
         return
 
@@ -320,44 +361,7 @@ def apply_import_rating_question_groups_to_product_data(
     rid = infer_rating_group_id_from_text(ctx)
     qid = infer_question_group_id_from_product_name(pname)
 
-    if rid == 0:
-        try:
-            from app.services.import_link_gemini_groups import gemini_fallback_import_groups
-
-            dr, dq, fw = gemini_fallback_import_groups(ctx, pname)
-            if warnings is not None:
-                warnings.extend(fw)
-            if dr is not None:
-                rid = dr
-            if dq is not None:
-                qid = dq
-        except Exception as exc:
-            if warnings is not None:
-                warnings.append(f"gemini_groups: lỗi không mong đợi — {type(exc).__name__}: {exc}")
-
-    if rid == 0:
-        try:
-            from app.core.config import settings as _settings
-            from app.services.import_link_deepseek_groups import deepseek_fallback_import_groups
-
-            fb = getattr(_settings, "IMPORT_LINK_DEEPSEEK_GROUPS_FALLBACK_ENABLED", False)
-            has_key = bool((_settings.DEEPSEEK_API_KEY or "").strip())
-            if fb and not has_key and warnings is not None and pname:
-                warnings.append("deepseek_groups: thiếu DEEPSEEK_API_KEY — không fallback nhóm đánh giá.")
-            if fb and has_key and pname:
-                dr, dq, fw = deepseek_fallback_import_groups(ctx, pname)
-                if warnings is not None:
-                    warnings.extend(fw)
-                if dr is not None:
-                    rid = dr
-                if dq is not None:
-                    qid = dq
-        except Exception as exc:
-            if warnings is not None:
-                warnings.append(f"deepseek_groups: lỗi không mong đợi — {type(exc).__name__}: {exc}")
-
-    if rid > 0:
-        product_data["group_rating"] = rid
-
+    explicit = product_data.get("group_rating")
+    product_data["group_rating"] = coalesce_group_rating(explicit, inferred=rid)
     product_data["group_question"] = qid
 

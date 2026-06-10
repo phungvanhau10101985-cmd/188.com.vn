@@ -2453,6 +2453,9 @@ class ProductImageLocalizationService:
             return {"status": "skipped", "processed_images": 0, "message": msg}
 
         product_pk = product.id
+        from app.services.listing_facet_cache import snapshot_product_for_facet_refresh
+
+        product_facet_snapshot = snapshot_product_for_facet_refresh(product)
         # Trả connection về pool trước bước xử lý ảnh lâu — tránh SSL idle timeout khi commit.
         preload_product_for_offline_use(product)
         release_db_session(db, detach_objects=(product,))
@@ -2554,6 +2557,8 @@ class ProductImageLocalizationService:
             partial_err = failed[0].message[:2000] if failed else None
             localized_at = datetime.now(timezone.utc)
 
+            post_localization_action: List[str] = []
+
             def _apply_localized(fresh: Product) -> None:
                 self._apply_results(fresh, results)
                 self._stash_originals(fresh, refs, results)
@@ -2561,8 +2566,40 @@ class ProductImageLocalizationService:
                 fresh.image_localization_language = self.language
                 fresh.image_localized_at = localized_at
                 fresh.image_localization_error = partial_err
+                from sqlalchemy.orm import object_session
+
+                from app.services.product_image_visibility import (
+                    delete_product_if_no_variant_or_images,
+                )
+
+                sess = object_session(fresh)
+                if sess is not None:
+                    post_localization_action.append(
+                        delete_product_if_no_variant_or_images(
+                            sess,
+                            fresh,
+                            reason="sau bản địa hóa (Variant/ảnh rỗng)",
+                        )
+                    )
 
             self._persist_product_fields(product_pk, _apply_localized)
+
+            if post_localization_action and post_localization_action[0] == "deleted":
+                try:
+                    from app.services.listing_facet_cache import refresh_caches_after_product_change
+
+                    refresh_caches_after_product_change(SessionLocal(), product_facet_snapshot)
+                except Exception:
+                    pass
+                return {
+                    "status": "deleted",
+                    "processed_images": len(changed),
+                    "failed_images": len(failed),
+                    "message": (
+                        f"Đã cập nhật {len(changed)} ảnh nhưng SP bị xóa vì Variant/ảnh rỗng sau bản địa hóa"
+                        + (f", lỗi {len(failed)} ảnh" if failed else "")
+                    ),
+                }
 
         return {
             "status": "localized",

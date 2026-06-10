@@ -364,7 +364,7 @@ def apply_zero_engagement_stats(payload: Dict[str, Any]) -> None:
     payload["rating_total"] = 0
     payload["question_total"] = 0
     payload["rating_point"] = 0.0
-    payload["group_rating"] = 0
+    payload["group_rating"] = 888
     payload["group_question"] = 0
 
 

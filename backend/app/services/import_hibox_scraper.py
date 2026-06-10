@@ -657,7 +657,7 @@ def hibox_row_to_product_data(row: Dict[str, Any], source_url: str, slug: str) -
         "shop_id": slug,
         "pro_lower_price": cny_for_excel,
         "pro_high_price": cny_for_excel,
-        "group_rating": 0,
+        "group_rating": 888,
         "group_question": 0,
         "sizes": sizes,
         "colors": colors_out,

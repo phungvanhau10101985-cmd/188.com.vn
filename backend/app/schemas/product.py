@@ -45,7 +45,7 @@ class ProductBase(BaseModel):
     pro_high_price: Optional[str] = Field(None, description="11: pro_high_price")
     
     # Cột 12: rating_group_id
-    group_rating: int = Field(0, description="12: rating_group_id")
+    group_rating: int = Field(888, description="12: rating_group_id (888 = chưa có nhóm)")
     
     # Cột 13: question_group_id
     group_question: int = Field(0, description="13: question_group_id")
