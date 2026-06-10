@@ -66,26 +66,6 @@ export default function DesktopImageSearchPopover({
     return () => window.clearTimeout(t);
   }, [open]);
 
-  useEffect(() => {
-    const raw = imageUrlInput.trim();
-    if (!raw) {
-      lastAutoFetchedUrlRef.current = null;
-      return;
-    }
-    if (!looksLikeHttpUrl(raw)) return;
-    if (raw === lastAutoFetchedUrlRef.current) return;
-
-    const id = window.setTimeout(() => {
-      const latest = imageUrlInput.trim();
-      if (latest !== raw) return;
-      if (!looksLikeHttpUrl(latest)) return;
-      if (latest === lastAutoFetchedUrlRef.current) return;
-      void fetchUrlAndNavigate(latest);
-    }, 520);
-
-    return () => window.clearTimeout(id);
-  }, [imageUrlInput, fetchUrlAndNavigate]);
-
   const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     e.target.value = '';
@@ -128,6 +108,26 @@ export default function DesktopImageSearchPopover({
       setPanelBusy(false);
     }
   }, [router]);
+
+  useEffect(() => {
+    const raw = imageUrlInput.trim();
+    if (!raw) {
+      lastAutoFetchedUrlRef.current = null;
+      return;
+    }
+    if (!looksLikeHttpUrl(raw)) return;
+    if (raw === lastAutoFetchedUrlRef.current) return;
+
+    const id = window.setTimeout(() => {
+      const latest = imageUrlInput.trim();
+      if (latest !== raw) return;
+      if (!looksLikeHttpUrl(latest)) return;
+      if (latest === lastAutoFetchedUrlRef.current) return;
+      void fetchUrlAndNavigate(latest);
+    }, 520);
+
+    return () => window.clearTimeout(id);
+  }, [imageUrlInput, fetchUrlAndNavigate]);
 
   const runPendingNavigate = useCallback(
     async (file: File) => {
