@@ -16,6 +16,10 @@ function pathNorm(p: string | null | undefined): string {
   return t === '' ? '/' : t;
 }
 
+function isProductDetailPath(pathname: string | null | undefined): boolean {
+  return Boolean(pathname?.match(/^\/products\/[^/]+$/));
+}
+
 /**
  * Icon nổi cố định viewport → feed lướt video.
  * Vị trí (px): API `/shop-video-fab/public`, chỉnh trong admin » Vị trí nút lướt video.
@@ -56,8 +60,15 @@ export default function FloatingShopVideoFeedButton() {
   const hidden =
     norm === SHOP_VIDEO_FEED_PATH || pathname?.startsWith('/auth/') || pathname?.startsWith('/admin');
   const rightPx = isMd ? fab.right_desktop_px : fab.right_mobile_px;
-  /** Đồng bộ mọi trang mobile với PDP: luôn dùng offset "không thanh nav". */
-  const bottomPx = isMd ? fab.bottom_desktop_px : fab.bottom_mobile_px_no_nav;
+  /**
+   * PDP mobile có sticky action bar riêng ở đáy màn hình,
+   * nên dùng offset "with_nav" để nút video không đè / chui dưới thanh này.
+   */
+  const bottomPx = isMd
+    ? fab.bottom_desktop_px
+    : isProductDetailPath(pathname)
+      ? fab.bottom_mobile_px_with_nav
+      : fab.bottom_mobile_px_no_nav;
 
   useEffect(() => {
     if (hidden || isMd) return;
