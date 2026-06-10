@@ -33,6 +33,7 @@ function readEmbedLayout(): NanoEmbedLayout {
   const side = script?.getAttribute('data-side') === 'left' ? 'left' : 'right';
   return {
     side,
+    // Chuẩn hóa theo mép phải viewport: chỉ nhận số dương (0..300).
     offsetX: parseIntClamp(script?.getAttribute('data-offset-x') ?? null, 16, 0, 300),
     bottom: parseIntClamp(script?.getAttribute('data-bottom') ?? null, 20, 0, 1200),
     mobileBreakpoint: parseIntClamp(script?.getAttribute('data-mobile-breakpoint') ?? null, 768, 320, 1600),
@@ -55,11 +56,55 @@ function clampBottomOffset(bottom: number, sizePx: number): number {
   return Math.min(bottom, maxBottom);
 }
 
+function rectsOverlap(
+  a: { left: number; right: number; top: number; bottom: number },
+  b: { left: number; right: number; top: number; bottom: number },
+): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+function computeBubbleBottomAvoidingVideoFab(
+  side: 'left' | 'right',
+  offsetX: number,
+  bubbleSize: number,
+  bottomPx: number,
+): number {
+  const videoFab = document.querySelector<HTMLElement>('[data-188-video-fab]');
+  if (!videoFab) return bottomPx;
+
+  const r = videoFab.getBoundingClientRect();
+  if (r.width < 20 || r.height < 20) return bottomPx;
+
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  if (!vw || !vh) return bottomPx;
+
+  const bubbleLeft = side === 'left' ? offsetX : vw - offsetX - bubbleSize;
+  const bubbleTop = vh - bottomPx - bubbleSize;
+  const bubbleRect = {
+    left: bubbleLeft,
+    right: bubbleLeft + bubbleSize,
+    top: bubbleTop,
+    bottom: bubbleTop + bubbleSize,
+  };
+  const videoRect = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+
+  if (!rectsOverlap(bubbleRect, videoRect)) return bottomPx;
+
+  const gapPx = 10;
+  const minBottomToStayAboveVideo = Math.ceil(vh - bubbleSize - r.top + gapPx);
+  return Math.max(bottomPx, minBottomToStayAboveVideo);
+}
+
 function enforceViewportAnchoring() {
   const layout = readEmbedLayout();
   const isMobile = window.innerWidth <= layout.mobileBreakpoint;
   const bubbleSize = isMobile ? layout.mobileBubbleSize : layout.bubbleSize;
-  const safeBottom = clampBottomOffset(layout.bottom, bubbleSize);
+  const safeBottomBase = clampBottomOffset(layout.bottom, bubbleSize);
+  const safeBottom = clampBottomOffset(
+    computeBubbleBottomAvoidingVideoFab(layout.side, layout.offsetX, bubbleSize, safeBottomBase),
+    bubbleSize,
+  );
 
   ROOT_SELECTORS.forEach((sel) => {
     document.querySelectorAll<HTMLElement>(sel).forEach((root) => {
