@@ -180,6 +180,7 @@ def toggle_useful(
 def admin_list_reviews(
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
+    search_group: Optional[str] = Query(None, description="Tìm theo mã nhóm đánh giá (group_rating)"),
     db: Session = Depends(get_db),
     current_admin: AdminUser = Depends(require_module_permission("product_reviews")),
 ):
@@ -191,7 +192,14 @@ def admin_list_reviews(
     from app.models.product_review import ProductReview
     from app.models.product import Product
 
-    q = db.query(ProductReview).order_by(
+    q = db.query(ProductReview)
+    if search_group is not None and search_group.strip():
+        try:
+            g = int(search_group.strip())
+            q = q.filter(ProductReview.group == g)
+        except ValueError:
+            pass
+    q = q.order_by(
         ProductReview.is_imported.asc(),
         ProductReview.created_at.desc(),
         ProductReview.id.desc(),

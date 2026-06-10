@@ -63,7 +63,6 @@ _RATING_GROUPS_RAW: Iterable[Tuple[str, int]] = (
     ("đồ bộ nam", 38),
     ("áo lót nữ", 39),
     ("váy đầm liền thân dự tiệc nữ", 40),
-    ("váy đầm liền thân nam nữ", 41),
     ("set đồ bộ nam nữ", 42),
     ("đồ bộ nam nữ", 61),
     ("áo len nam nữ", 43),

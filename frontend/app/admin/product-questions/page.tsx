@@ -11,19 +11,20 @@ const PAGE_SIZE = 10;
 const COL_WIDTHS_STORAGE_KEY = 'admin_product_questions_column_widths';
 
 const COLUMN_KEYS = [
-  'stt', 'user_name', 'content', 'created_at', 'group', 'product_id', 'updated_at', 'is_active',
-  'useful',
-  'reply_admin_name', 'reply_admin_content', 'reply_admin_at', 'reply_user_one_id', 'reply_user_one_name',
-  'reply_user_one_content', 'reply_user_one_at', 'reply_user_two_id', 'reply_user_two_name',
-  'reply_user_two_content', 'reply_user_two_at', 'reply_count', 'actions',
+  'stt', 'view', 'user_name', 'content', 'group', 'is_active', 'useful',
+  'reply_admin_name', 'reply_admin_content', 'reply_user_one_name', 'reply_user_one_content',
+  'reply_user_two_name', 'reply_user_two_content', 'actions',
+  'created_at', 'product_id', 'updated_at', 'reply_admin_at', 'reply_user_one_id', 'reply_user_one_at',
+  'reply_user_two_id', 'reply_user_two_at', 'reply_count',
 ] as const;
 
 const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
-  stt: 44, user_name: 110, content: 140, created_at: 115, group: 52, product_id: 56, updated_at: 115,
-  is_active: 88, useful: 88, reply_admin_name: 120, reply_admin_content: 150, reply_admin_at: 115,
-  reply_user_one_id: 72, reply_user_one_name: 90, reply_user_one_content: 110, reply_user_one_at: 115,
-  reply_user_two_id: 72, reply_user_two_name: 90, reply_user_two_content: 110, reply_user_two_at: 115,
-  reply_count: 78, actions: 100,
+  stt: 44, view: 88, user_name: 110, content: 140, group: 52, is_active: 88, useful: 88,
+  reply_admin_name: 120, reply_admin_content: 150, reply_user_one_name: 90, reply_user_one_content: 110,
+  reply_user_two_name: 90, reply_user_two_content: 110, actions: 72,
+  created_at: 115, product_id: 56, updated_at: 115, reply_admin_at: 115,
+  reply_user_one_id: 72, reply_user_one_at: 115, reply_user_two_id: 72, reply_user_two_at: 115,
+  reply_count: 78,
 };
 
 function loadColumnWidths(): Record<string, number> {
@@ -331,27 +332,28 @@ export default function AdminProductQuestionsPage() {
                   <tr className="bg-gray-50 border-b border-gray-200">
                     {[
                       ['stt', 'STT'],
+                      ['view', 'Xem'],
                       ['user_name', 'Tên người hỏi'],
                       ['content', 'Nội dung hỏi'],
-                      ['created_at', 'Thời gian hỏi'],
                       ['group', 'Nhóm'],
-                      ['product_id', 'ID SP'],
-                      ['updated_at', 'Thời gian\nupdate'],
                       ['is_active', 'Kích hoạt'],
                       ['useful', 'Lượt thấy\nhữu ích'],
                       ['reply_admin_name', 'Tên Admin\ntrả lời'],
                       ['reply_admin_content', 'Nội dung admin\ntrả lời'],
-                      ['reply_admin_at', 'Thời gian\nadmin TL'],
-                      ['reply_user_one_id', 'ID user 1'],
                       ['reply_user_one_name', 'Tên user 1'],
                       ['reply_user_one_content', 'Nội dung\nuser 1'],
-                      ['reply_user_one_at', 'Thời gian\nuser 1'],
-                      ['reply_user_two_id', 'ID user 2'],
                       ['reply_user_two_name', 'Tên user 2'],
                       ['reply_user_two_content', 'Nội dung\nuser 2'],
+                      ['actions', 'Lưu / Xóa'],
+                      ['created_at', 'Thời gian hỏi'],
+                      ['product_id', 'ID SP'],
+                      ['updated_at', 'Thời gian\nupdate'],
+                      ['reply_admin_at', 'Thời gian\nadmin TL'],
+                      ['reply_user_one_id', 'ID user 1'],
+                      ['reply_user_one_at', 'Thời gian\nuser 1'],
+                      ['reply_user_two_id', 'ID user 2'],
                       ['reply_user_two_at', 'Thời gian\nuser 2'],
                       ['reply_count', 'Số TL'],
-                      ['actions', 'Chức năng'],
                     ].map(([key, label]) => (
                       <th
                         key={key}
@@ -378,9 +380,22 @@ export default function AdminProductQuestionsPage() {
                   {data.items.map((q, idx) => (
                     <tr key={q.id} className="border-b border-gray-100 hover:bg-gray-50/50 align-top">
                       <td className="py-2 px-2 overflow-hidden">{ (page - 1) * PAGE_SIZE + idx + 1 }</td>
+                      <td className="py-2 px-2 whitespace-nowrap overflow-hidden">
+                        {!q.is_imported && (q.product_slug || q.product_id) ? (
+                          <a
+                            href={q.product_slug ? `/products/${q.product_slug}#question-${q.id}` : `/products?product_id=${q.product_id}#question-${q.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline text-xs"
+                          >
+                            Xem câu hỏi
+                          </a>
+                        ) : (
+                          <span className="text-gray-400 text-xs">—</span>
+                        )}
+                      </td>
                       <td className="py-2 px-2 overflow-hidden">{ q.user_name || '—' }</td>
                       <td className="py-2 px-2 break-words overflow-hidden">{ q.content || '—' }</td>
-                      <td className="py-2 px-2 text-gray-600 whitespace-nowrap overflow-hidden">{ formatDate(q.created_at) }</td>
                       <td className="py-2 px-2 overflow-hidden">
                         <input
                           type="number"
@@ -391,8 +406,6 @@ export default function AdminProductQuestionsPage() {
                           className="rounded border border-gray-300 px-1 py-0.5 text-xs w-full max-w-[48px]"
                         />
                       </td>
-                      <td className="py-2 px-2 overflow-hidden">{ q.product_id ?? '—' }</td>
-                      <td className="py-2 px-2 text-gray-600 whitespace-nowrap overflow-hidden">{ formatDate(q.updated_at) }</td>
                       <td className="py-2 px-2 overflow-hidden">
                         <select
                           value={getRowVal(q, 'is_active') ? '1' : '0'}
@@ -436,8 +449,6 @@ export default function AdminProductQuestionsPage() {
                           placeholder="Nội dung trả lời"
                         />
                       </td>
-                      <td className="py-2 px-2 text-gray-600 whitespace-nowrap overflow-hidden">{ formatDate(q.reply_admin_at) }</td>
-                      <td className="py-2 px-2 overflow-hidden">{ q.reply_user_one_id ?? '—' }</td>
                       <td className="py-2 px-2 overflow-hidden">
                         <input
                           type="text"
@@ -458,8 +469,6 @@ export default function AdminProductQuestionsPage() {
                           placeholder="Nội dung user 1"
                         />
                       </td>
-                      <td className="py-2 px-2 text-gray-600 whitespace-nowrap overflow-hidden">{ formatDate(q.reply_user_one_at) }</td>
-                      <td className="py-2 px-2 overflow-hidden">{ q.reply_user_two_id ?? '—' }</td>
                       <td className="py-2 px-2 overflow-hidden">
                         <input
                           type="text"
@@ -480,19 +489,7 @@ export default function AdminProductQuestionsPage() {
                           placeholder="Nội dung user 2"
                         />
                       </td>
-                      <td className="py-2 px-2 text-gray-600 whitespace-nowrap overflow-hidden">{ formatDate(q.reply_user_two_at) }</td>
-                      <td className="py-2 px-2 overflow-hidden">{ q.reply_count } (2=khóa)</td>
                       <td className="py-2 px-2 whitespace-nowrap overflow-hidden">
-                        {!q.is_imported && (q.product_slug || q.product_id) && (
-                          <a
-                            href={q.product_slug ? `/products/${q.product_slug}#question-${q.id}` : `/products?product_id=${q.product_id}#question-${q.id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:underline text-xs mr-1"
-                          >
-                            Xem câu hỏi
-                          </a>
-                        )}
                         <button
                           type="button"
                           onClick={() => handleSaveRow(q)}
@@ -509,6 +506,15 @@ export default function AdminProductQuestionsPage() {
                           Xóa
                         </button>
                       </td>
+                      <td className="py-2 px-2 text-gray-600 whitespace-nowrap overflow-hidden">{ formatDate(q.created_at) }</td>
+                      <td className="py-2 px-2 overflow-hidden">{ q.product_id ?? '—' }</td>
+                      <td className="py-2 px-2 text-gray-600 whitespace-nowrap overflow-hidden">{ formatDate(q.updated_at) }</td>
+                      <td className="py-2 px-2 text-gray-600 whitespace-nowrap overflow-hidden">{ formatDate(q.reply_admin_at) }</td>
+                      <td className="py-2 px-2 overflow-hidden">{ q.reply_user_one_id ?? '—' }</td>
+                      <td className="py-2 px-2 text-gray-600 whitespace-nowrap overflow-hidden">{ formatDate(q.reply_user_one_at) }</td>
+                      <td className="py-2 px-2 overflow-hidden">{ q.reply_user_two_id ?? '—' }</td>
+                      <td className="py-2 px-2 text-gray-600 whitespace-nowrap overflow-hidden">{ formatDate(q.reply_user_two_at) }</td>
+                      <td className="py-2 px-2 overflow-hidden">{ q.reply_count } (2=khóa)</td>
                     </tr>
                   ))}
                 </tbody>

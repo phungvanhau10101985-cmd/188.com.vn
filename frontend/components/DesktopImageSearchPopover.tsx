@@ -32,10 +32,12 @@ export default function DesktopImageSearchPopover({
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
-  const pasteRef = useRef<HTMLDivElement>(null);
+  const urlInputRef = useRef<HTMLInputElement>(null);
+  const lastAutoFetchedUrlRef = useRef<string | null>(null);
   const [open, setOpen] = useState(initialOpen);
   const [panelError, setPanelError] = useState<string | null>(null);
   const [panelBusy, setPanelBusy] = useState(false);
+  const [imageUrlInput, setImageUrlInput] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -55,10 +57,34 @@ export default function DesktopImageSearchPopover({
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
-    const t = window.setTimeout(() => pasteRef.current?.focus(), 0);
+    if (!open) {
+      setImageUrlInput('');
+      lastAutoFetchedUrlRef.current = null;
+      return;
+    }
+    const t = window.setTimeout(() => urlInputRef.current?.focus(), 0);
     return () => window.clearTimeout(t);
   }, [open]);
+
+  useEffect(() => {
+    const raw = imageUrlInput.trim();
+    if (!raw) {
+      lastAutoFetchedUrlRef.current = null;
+      return;
+    }
+    if (!looksLikeHttpUrl(raw)) return;
+    if (raw === lastAutoFetchedUrlRef.current) return;
+
+    const id = window.setTimeout(() => {
+      const latest = imageUrlInput.trim();
+      if (latest !== raw) return;
+      if (!looksLikeHttpUrl(latest)) return;
+      if (latest === lastAutoFetchedUrlRef.current) return;
+      void fetchUrlAndNavigate(latest);
+    }, 520);
+
+    return () => window.clearTimeout(id);
+  }, [imageUrlInput, fetchUrlAndNavigate]);
 
   const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -77,7 +103,7 @@ export default function DesktopImageSearchPopover({
   const fetchUrlAndNavigate = useCallback(async (raw: string) => {
     const t = raw.trim();
     if (!t) {
-      setPanelError('Dán link ảnh (https://…) vào khung bên dưới.');
+      setPanelError('Dán link ảnh (https://…) vào ô link.');
       return;
     }
     if (!looksLikeHttpUrl(t)) {
@@ -88,9 +114,11 @@ export default function DesktopImageSearchPopover({
     setPanelBusy(true);
     try {
       const file = await imageUrlToFile(t);
+      lastAutoFetchedUrlRef.current = t;
       await storePendingImageAndNavigate(file, router);
       setOpen(false);
     } catch (err) {
+      lastAutoFetchedUrlRef.current = null;
       setPanelError(
         err instanceof Error
           ? err.message
@@ -114,16 +142,16 @@ export default function DesktopImageSearchPopover({
     [router]
   );
 
-  const onPaste = (e: React.ClipboardEvent) => {
+  const pasteImageFromClipboard = (e: React.ClipboardEvent) => {
     const cd = e.clipboardData;
-    if (!cd) return;
+    if (!cd) return false;
     for (const it of Array.from(cd.items)) {
       if (it.kind === 'file' && it.type.startsWith('image/')) {
         const f = it.getAsFile();
         if (f) {
           e.preventDefault();
           void runPendingNavigate(f);
-          return;
+          return true;
         }
       }
     }
@@ -131,14 +159,25 @@ export default function DesktopImageSearchPopover({
       if (f.type.startsWith('image/')) {
         e.preventDefault();
         void runPendingNavigate(f);
-        return;
+        return true;
       }
     }
-    const text = cd.getData('text/plain')?.trim() ?? '';
+    return false;
+  };
+
+  const onDropZonePaste = (e: React.ClipboardEvent) => {
+    if (e.target === urlInputRef.current) return;
+    if (pasteImageFromClipboard(e)) return;
+    const text = e.clipboardData?.getData('text/plain')?.trim() ?? '';
     if (looksLikeHttpUrl(text)) {
       e.preventDefault();
+      setImageUrlInput(text);
       void fetchUrlAndNavigate(text);
     }
+  };
+
+  const onInputPaste = (e: React.ClipboardEvent) => {
+    pasteImageFromClipboard(e);
   };
 
   const onDrop = (e: React.DragEvent) => {
@@ -206,20 +245,40 @@ export default function DesktopImageSearchPopover({
               </button>
             </div>
             <div
-              ref={pasteRef}
-              tabIndex={0}
-              onPaste={onPaste}
+              onPaste={onDropZonePaste}
               onDragOver={(e) => e.preventDefault()}
               onDrop={onDrop}
-              className="rounded-xl border-2 border-dashed border-[#ea580c]/80 bg-orange-50/50 px-4 py-4 text-center outline-none focus-visible:border-[#ea580c] focus-visible:ring-2 focus-visible:ring-[#ea580c]/25"
-              aria-label="Dán ảnh, dán link ảnh hoặc kéo thả file ảnh vào đây"
+              className="rounded-xl border-2 border-dashed border-[#ea580c]/80 bg-orange-50/50 px-4 py-4 text-center"
+              aria-label="Dán ảnh hoặc kéo thả file ảnh vào đây"
             >
               <span className="font-semibold text-sm text-gray-900">Dán ảnh hoặc link</span>
               <span className="block mt-1.5 text-xs text-gray-600 leading-relaxed">
-                Một chỗ duy nhất: <strong className="font-medium text-gray-800">Ctrl+V</strong> dán ảnh từ clipboard
-                hoặc dán link <span className="whitespace-nowrap">(https://…)</span> — hoặc{' '}
-                <strong className="font-medium text-gray-800">kéo thả</strong> ảnh vào khung này.
+                <strong className="font-medium text-gray-800">Ctrl+V</strong> dán ảnh vào khung hoặc{' '}
+                <strong className="font-medium text-gray-800">kéo thả</strong> ảnh — dán link vào ô bên dưới.
               </span>
+              <input
+                ref={urlInputRef}
+                type="url"
+                inputMode="url"
+                autoComplete="off"
+                placeholder="https://…"
+                value={imageUrlInput}
+                disabled={panelBusy}
+                onChange={(e) => {
+                  setImageUrlInput(e.target.value);
+                  setPanelError(null);
+                }}
+                onPaste={onInputPaste}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    lastAutoFetchedUrlRef.current = null;
+                    void fetchUrlAndNavigate(imageUrlInput);
+                  }
+                }}
+                className="mt-3 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#ea580c]/30 focus:border-[#ea580c] disabled:opacity-50"
+                aria-label="Dán link ảnh https://"
+              />
               {panelBusy && (
                 <span className="mt-2 inline-block text-xs text-[#ea580c] font-medium">Đang tải ảnh…</span>
               )}

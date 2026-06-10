@@ -2858,10 +2858,11 @@ export interface ProductReviewsListResponse {
 }
 
 export const adminProductReviewsAPI = {
-  getList: (params?: { skip?: number; limit?: number }) => {
+  getList: (params?: { skip?: number; limit?: number; search_group?: string }) => {
     const sp = new URLSearchParams();
     sp.set('skip', String(params?.skip ?? 0));
     sp.set('limit', String(params?.limit ?? 10));
+    if (params?.search_group) sp.set('search_group', params.search_group);
     return fetchAdmin<ProductReviewsListResponse>(`/product-reviews/admin/list?${sp.toString()}`);
   },
 

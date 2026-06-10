@@ -19,6 +19,7 @@ function formatDate(s: string | null | undefined) {
 export default function AdminProductReviewsPage() {
   const [data, setData] = useState<ProductReviewsListResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [searchGroup, setSearchGroup] = useState('');
   const [page, setPage] = useState(1);
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -33,26 +34,33 @@ export default function AdminProductReviewsPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const fetchList = useCallback(async (pageOverride?: number) => {
+  const fetchList = useCallback(async (pageOverride?: number, options?: { silent?: boolean }) => {
     const p = typeof pageOverride === 'number' ? pageOverride : page;
-    setLoading(true);
+    if (!options?.silent) setLoading(true);
     try {
       const res = await adminProductReviewsAPI.getList({
         skip: (p - 1) * PAGE_SIZE,
         limit: PAGE_SIZE,
+        search_group: searchGroup.trim() || undefined,
       });
       setData(res);
     } catch {
       showToast('err', 'Lỗi tải danh sách');
-      setData(null);
+      if (!options?.silent) setData(null);
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
-  }, [page]);
+  }, [page, searchGroup]);
 
   useEffect(() => {
     fetchList();
   }, [fetchList]);
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPage(1);
+    fetchList(1);
+  };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -62,7 +70,7 @@ export default function AdminProductReviewsPage() {
       const result = await adminProductReviewsAPI.importExcel(file);
       const created = (result as { created?: number })?.created ?? 0;
       showToast('ok', `Import xong: ${created} đánh giá`);
-      fetchList();
+      await fetchList();
     } catch (err: unknown) {
       showToast('err', (err as Error)?.message || 'Import thất bại');
     } finally {
@@ -75,8 +83,13 @@ export default function AdminProductReviewsPage() {
     if (!confirm('Bạn có chắc muốn xóa đánh giá này?')) return;
     try {
       await adminProductReviewsAPI.delete(id);
+      setRowEdit((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       showToast('ok', 'Đã xóa');
-      fetchList();
+      await fetchList(undefined, { silent: true });
     } catch {
       showToast('err', 'Xóa thất bại');
     }
@@ -116,6 +129,9 @@ export default function AdminProductReviewsPage() {
 
   const handleSaveRow = async (r: ProductReviewAdmin) => {
     const e = rowEdit[r.id];
+    if (!e || Object.keys(e).length === 0) return;
+    if (savingId === r.id) return;
+
     const payload: Partial<ProductReviewAdmin> = {
       user_name: (e?.user_name !== undefined ? e.user_name : r.user_name) ?? '',
       star: Math.max(1, Math.min(5, (e?.star ?? r.star ?? 5) as number)),
@@ -129,14 +145,20 @@ export default function AdminProductReviewsPage() {
     };
     setSavingId(r.id);
     try {
-      await adminProductReviewsAPI.update(r.id, payload);
+      const updated = await adminProductReviewsAPI.update(r.id, payload);
       setRowEdit((prev) => {
         const next = { ...prev };
         delete next[r.id];
         return next;
       });
+      setData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          items: prev.items.map((item) => (item.id === r.id ? { ...item, ...updated } : item)),
+        };
+      });
       showToast('ok', 'Đã lưu');
-      fetchList();
     } catch {
       showToast('err', 'Lưu thất bại');
     } finally {
@@ -196,6 +218,43 @@ export default function AdminProductReviewsPage() {
         <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
           <strong>Logic hiển thị:</strong> Đánh giá từ khách hàng (product_id có) → hiển thị trên sản phẩm đã mua.
           Đánh giá import (product_id trống) → hiển thị trên sản phẩm có nhóm đánh giá (group_rating) trùng với cột Nhóm.
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
+          <form onSubmit={handleSearch} className="flex flex-wrap items-end gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Tìm kiếm theo mã nhóm đánh giá
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={searchGroup}
+                onChange={(e) => setSearchGroup(e.target.value)}
+                placeholder="Ví dụ: 24, 94..."
+                className="w-48 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#ea580c]/30 focus:border-[#ea580c]"
+                aria-label="Mã nhóm đánh giá"
+              />
+            </div>
+            <button
+              type="submit"
+              className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 text-sm font-medium"
+            >
+              Tìm kiếm
+            </button>
+            {searchGroup.trim() && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchGroup('');
+                  setPage(1);
+                }}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Xóa lọc
+              </button>
+            )}
+          </form>
         </div>
 
         <div className="mb-2 flex items-center justify-between flex-wrap gap-2">
