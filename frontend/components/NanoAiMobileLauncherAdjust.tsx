@@ -204,8 +204,7 @@ function computeMobileBottomPx(
   const hasNav = showMobileBottomNav(pathname);
 
   if (hasVideo) {
-    const videoBottom = hasNav ? fab.bottom_mobile_px_with_nav : fab.bottom_mobile_px_no_nav;
-    return videoBottom + VIDEO_FAB_SIZE_PX + FLOAT_GAP_PX;
+    return fab.bottom_mobile_px_no_nav + VIDEO_FAB_SIZE_PX + FLOAT_GAP_PX;
   }
 
   if (hasNav) {

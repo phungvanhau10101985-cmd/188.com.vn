@@ -99,18 +99,19 @@ export default function CartAddedPopup() {
 
   const modal = (
     <div
-      className={`fixed inset-0 ${POPUP_Z} flex items-end md:items-center justify-center p-3 md:p-4`}
+      data-188-cart-added-popup
+      className={`fixed inset-0 ${POPUP_Z} isolate flex items-center justify-center p-4`}
       role="dialog"
       aria-modal="true"
       aria-labelledby="cart-added-popup-title"
     >
       <div
-        className="absolute inset-0 z-0 bg-black/40"
+        className="absolute inset-0 z-0 bg-black/50"
         onClick={handleClose}
         aria-hidden
       />
       <div
-        className="relative z-10 bg-white rounded-xl shadow-xl w-full max-w-md md:max-w-lg touch-manipulation"
+        className="relative z-10 w-full max-w-md md:max-w-lg max-h-[calc(100dvh-2rem)] overflow-auto rounded-xl bg-white shadow-2xl touch-manipulation"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 p-3 md:p-4 border-b border-gray-100">

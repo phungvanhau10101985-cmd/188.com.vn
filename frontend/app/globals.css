@@ -248,6 +248,19 @@ html[data-nanoai188-shop-overlay="1"] [id*="nanoai-chat-widget"] * {
   }
 }
 
+/* Mobile: ẩn nút nổi khi popup thêm giỏ mở — popup nằm giữa màn và trên cùng. */
+@media (max-width: 767px) {
+  html[data-nanoai188-shop-overlay="1"] [data-188-video-fab],
+  html[data-nanoai188-shop-overlay="1"] [data-188-pdp-sticky-actions],
+  html[data-nanoai188-shop-overlay="1"] [data-188-mobile-bottom-nav],
+  html[data-nanoai188-shop-overlay="1"] #nanoai-chat-widget-v1,
+  html[data-nanoai188-shop-overlay="1"] [id^="nanoai-chat-widget"],
+  html[data-nanoai188-shop-overlay="1"] [id*="nanoai-chat-widget"] {
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+}
+
 @media (max-width: 767px) {
   [data-nanoai188-mobile-adjusted="1"][data-nanoai-chat-bubble],
   [data-nanoai188-mobile-adjusted="1"][data-nanoai-launcher],

@@ -53,20 +53,20 @@ export default function FloatingShopVideoFeedButton() {
     return () => mq.removeEventListener('change', apply);
   }, []);
 
-  if (norm === SHOP_VIDEO_FEED_PATH || pathname?.startsWith('/auth/') || pathname?.startsWith('/admin')) {
+  const hidden =
+    norm === SHOP_VIDEO_FEED_PATH || pathname?.startsWith('/auth/') || pathname?.startsWith('/admin');
+  const rightPx = isMd ? fab.right_desktop_px : fab.right_mobile_px;
+  /** Đồng bộ mọi trang mobile với PDP: luôn dùng offset "không thanh nav". */
+  const bottomPx = isMd ? fab.bottom_desktop_px : fab.bottom_mobile_px_no_nav;
+
+  useEffect(() => {
+    if (hidden || isMd) return;
+    window.dispatchEvent(new Event('resize'));
+  }, [hidden, bottomPx, rightPx, isMd]);
+
+  if (hidden) {
     return null;
   }
-
-  const isProductDetail = Boolean(pathname?.match(/^\/products\/[^/]+$/));
-  const reserveMobileBottom =
-    !pathname?.startsWith('/auth/') && !isProductDetail && norm !== SHOP_VIDEO_FEED_PATH;
-
-  const rightPx = isMd ? fab.right_desktop_px : fab.right_mobile_px;
-  const bottomPx = isMd
-    ? fab.bottom_desktop_px
-    : reserveMobileBottom
-      ? fab.bottom_mobile_px_with_nav
-      : fab.bottom_mobile_px_no_nav;
 
   return (
     <Link
