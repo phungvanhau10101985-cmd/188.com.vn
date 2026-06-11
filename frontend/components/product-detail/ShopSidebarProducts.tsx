@@ -1,7 +1,8 @@
 // frontend/components/product-detail/ShopSidebarProducts.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNearViewport } from '@/lib/use-near-viewport';
 import { cdnUrl } from '@/lib/cdn-url';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -29,11 +30,15 @@ function shuffle<T>(items: T[]): T[] {
 }
 
 export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProductsProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isNear = useNearViewport(containerRef);
   const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const birthdayDiscount = useBirthdayDiscount();
 
   useEffect(() => {
+    if (!isNear) return;
+
     let isMounted = true;
     const fetchSameStyle = async () => {
       try {
@@ -61,14 +66,18 @@ export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProdu
     return () => {
       isMounted = false;
     };
-  }, [currentProduct.id, currentProduct.style]);
+  }, [isNear, currentProduct.id, currentProduct.style]);
 
   const visibleProducts = useMemo(() => products, [products]);
+
+  if (!isNear) {
+    return <div ref={containerRef} className="min-h-[8rem] w-full" aria-hidden="true" />;
+  }
 
   if (loading || visibleProducts.length === 0) return null;
 
   return (
-    <aside className="w-full">
+    <aside ref={containerRef} className="w-full">
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <div className="divide-y divide-gray-100">
           {visibleProducts.map((product) => {

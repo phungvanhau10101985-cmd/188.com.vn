@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Product } from '@/types/api';
-import type { ProductQuestionItem, ProductReviewItem } from '@/types/api';
+import type { ProductQuestionItem } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { useProductReviews } from '@/lib/product-reviews-context';
 import ProductReviewFormModal from '../ProductReviewFormModal/ProductReviewFormModal';
 import { useToast } from '@/components/ToastProvider';
 import VerifiedPurchaserBadge from '../VerifiedPurchaserBadge';
@@ -43,43 +44,21 @@ export default function ProductQAReviewCards({
   const [sampleQuestion, setSampleQuestion] = useState<ProductQuestionItem | null>(null);
   const [questionCount, setQuestionCount] = useState<number>(0);
   const [togglingUsefulId, setTogglingUsefulId] = useState<number | null>(null);
-  const [sampleReview, setSampleReview] = useState<ProductReviewItem | null>(null);
-  const [reviewCount, setReviewCount] = useState<number>(0);
   const [togglingReviewUsefulId, setTogglingReviewUsefulId] = useState<number | null>(null);
   const [reviewFormOpen, setReviewFormOpen] = useState(false);
-  const [canReview, setCanReview] = useState(false);
-  const [hasReviewed, setHasReviewed] = useState(false);
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { pushToast } = useToast();
+  const {
+    reviews,
+    canReview,
+    hasReviewed,
+    setReviews,
+    setHasReviewed,
+    refreshReviews,
+  } = useProductReviews();
 
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setCanReview(false);
-      setHasReviewed(false);
-      return;
-    }
-    Promise.all([
-      apiClient.canReviewProduct(product.id).then((r) => r.can_review ?? false),
-      apiClient.getUserReviewedProductIds([product.id]).then((r) => (r.product_ids || []).includes(product.id)),
-    ])
-      .then(([can, reviewed]) => {
-        setCanReview(can);
-        setHasReviewed(reviewed);
-      })
-      .catch(() => {
-        setCanReview(false);
-        setHasReviewed(false);
-      });
-  }, [isAuthenticated, product.id]);
-
-  const refreshReviews = () => {
-    apiClient.getProductReviews(product.id).then((list) => {
-      if (Array.isArray(list)) {
-        setReviewCount(list.length);
-        setSampleReview(list.length > 0 ? list[0] : null);
-      }
-    }).catch(() => {});
-  };
+  const reviewCount = reviews.length;
+  const sampleReview = reviews.length > 0 ? reviews[0] : null;
 
   useEffect(() => {
     if (authLoading) return;
@@ -100,25 +79,6 @@ export default function ProductQAReviewCards({
       });
     return () => { cancelled = true; };
   }, [product.id, isAuthenticated, user?.id, authLoading]);
-
-  useEffect(() => {
-    let cancelled = false;
-    apiClient
-      .getProductReviews(product.id)
-      .then((list) => {
-        if (!cancelled && Array.isArray(list)) {
-          setReviewCount(list.length);
-          setSampleReview(list.length > 0 ? list[0] : null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSampleReview(null);
-          setReviewCount(0);
-        }
-      });
-    return () => { cancelled = true; };
-  }, [product.id]);
 
   const handleToggleUseful = async (questionId: number) => {
     if (!isAuthenticated) {
@@ -146,8 +106,10 @@ export default function ProductQAReviewCards({
     setTogglingReviewUsefulId(reviewId);
     try {
       const res = await apiClient.toggleReviewUseful(reviewId);
-      setSampleReview((prev) =>
-        prev && prev.id === reviewId ? { ...prev, useful: res.useful, user_has_voted: res.user_has_voted } : prev
+      setReviews((prev) =>
+        prev.map((r) =>
+          r.id === reviewId ? { ...r, useful: res.useful, user_has_voted: res.user_has_voted } : r
+        )
       );
     } catch {
       // ignore

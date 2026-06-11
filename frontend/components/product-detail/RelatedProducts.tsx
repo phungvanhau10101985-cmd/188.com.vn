@@ -1,7 +1,8 @@
 // frontend/components/product-detail/RelatedProducts.tsx
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useNearViewport } from '@/lib/use-near-viewport';
 import { useSearchParams } from 'next/navigation';
 import { cdnUrl } from '@/lib/cdn-url';
 import Image from 'next/image';
@@ -287,6 +288,8 @@ function relatedStripStep(): number {
 }
 
 export default function RelatedProducts({ currentProduct }: RelatedProductsProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isNear = useNearViewport(containerRef);
   const searchParams = useSearchParams();
   const relatedTab = parseRelatedTabFromSearch(searchParams.get('rt'));
 
@@ -298,7 +301,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
 
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
   const [shopGroupProducts, setShopGroupProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [visibleCount, setVisibleCount] = useState(5);
   const [showAllLoading, setShowAllLoading] = useState(false);
 
@@ -315,6 +318,8 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   }, [currentProduct]);
 
   useEffect(() => {
+    if (!isNear) return;
+
     const ac = new AbortController();
 
     const applySnapshot = (list: Product[], sgList: Product[]) => {
@@ -377,12 +382,22 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
     return () => {
       ac.abort();
     };
-  }, [currentProduct, relatedTab]);
+  }, [isNear, currentProduct, relatedTab]);
+
+  if (!isNear) {
+    return (
+      <div
+        ref={containerRef}
+        className="border-t border-gray-200 pt-5 min-h-[14rem]"
+        aria-hidden="true"
+      />
+    );
+  }
 
   if (loading) {
     const showShopGroupSkeleton = relatedTab === 'bestselling' && !!chineseShopCat2GroupParams;
     return (
-      <div className="border-t border-gray-200 pt-5">
+      <div ref={containerRef} className="border-t border-gray-200 pt-5">
         {showShopGroupSkeleton && (
           <div className="mb-8">
             <div className="h-6 bg-gray-200 rounded w-72 mb-3 animate-pulse max-w-full" />

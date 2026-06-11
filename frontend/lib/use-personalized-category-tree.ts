@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { apiClient } from '@/lib/api-client';
 import { sortCategoryLevel1Tree } from '@/lib/category-tree-sort';
 import { withKhoSaleMenuCategory } from '@/lib/kho-sale-menu-category';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { readNavCategoryTreeCache } from '@/lib/nav-category-tree-cache';
+import { useInferredCategoryGender } from '@/lib/use-inferred-category-gender';
 import type { CategoryLevel1 } from '@/types/api';
 
 /**
@@ -18,7 +18,6 @@ export function usePersonalizedCategoryTree(
 ): CategoryLevel1[] {
   const pathname = usePathname();
   const { user, isAuthenticated } = useAuth();
-  const [genderSuffix, setGenderSuffix] = useState<string | null>(null);
   const [viewTick, setViewTick] = useState(0);
   const [cachedTree, setCachedTree] = useState<CategoryLevel1[]>([]);
 
@@ -35,20 +34,8 @@ export function usePersonalizedCategoryTree(
     return () => window.removeEventListener('188-product-viewed', onView);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    apiClient
-      .getInferredCategoryGender(8)
-      .then((res) => {
-        if (!cancelled) setGenderSuffix(res.gender_suffix);
-      })
-      .catch(() => {
-        if (!cancelled) setGenderSuffix(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [pathname, isAuthenticated, user?.gender, viewTick]);
+  const genderFetchKey = `${pathname}|${isAuthenticated}|${user?.gender ?? ''}|${viewTick}`;
+  const genderSuffix = useInferredCategoryGender(genderFetchKey);
 
   const resolvedBase =
     (baseTree?.length ?? 0) > 0 ? baseTree! : cachedTree;

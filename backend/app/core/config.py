@@ -948,7 +948,7 @@ class Settings:
         # RATE LIMITING
         # ========================
         self.RATE_LIMIT_ENABLED: bool = os.getenv("RATE_LIMIT_ENABLED", "True").lower() == "true"
-        self.RATE_LIMIT_REQUESTS_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "60"))
+        self.RATE_LIMIT_REQUESTS_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "98"))
         self.RATE_LIMIT_OTP_PER_HOUR: int = int(os.getenv("RATE_LIMIT_OTP_PER_HOUR", "10"))
         
         # ========================

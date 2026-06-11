@@ -49,6 +49,7 @@ import {
 import { consumeAndOpenNanoAiChatLauncher } from '@/lib/nanoai-hosted-chat';
 import { trackPathForHomeRecommendationFresh } from '@/lib/home-navigation-mode';
 import NanoAiShopOverlayGuard from '@/components/NanoAiShopOverlayGuard';
+import { AppCategoryTreeProvider } from '@/lib/app-category-tree-context';
 import NanoAiEmbedContextRouteSync from '@/components/NanoAiEmbedContextRouteSync';
 
 /** Chiều cao thanh cam mỏng (logo + tìm + icon) khi trang listing ghim header đã thu gọn — khớp offset sticky bộ lọc. */
@@ -375,6 +376,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     !isProductDetailPage && !isShopVideoFeedPage && !isCartAddLandingPage;
 
   return (
+    <AppCategoryTreeProvider tree={initialCategoryTree ?? []}>
     <div
       className={`min-h-screen flex flex-col ${isCartAddLandingPage ? 'bg-black/50' : 'bg-gray-50'}`}
       style={
@@ -488,5 +490,6 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       {!isAuthPage && !isCartAddLandingPage && <BirthGenderSalePromptModal />}
       {!isAuthPage && !isCartAddLandingPage && !pathname?.startsWith('/admin') && <BirthdayPromoWelcomeModal />}
     </div>
+    </AppCategoryTreeProvider>
   );
 }

@@ -3,9 +3,10 @@
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { Product } from '@/types/api';
-import { apiClient } from '@/lib/api-client';
 import type { ProductReviewItem } from '@/types/api';
+import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { useProductReviews } from '@/lib/product-reviews-context';
 import { formatPrice } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
 import ProductReviewFormModal from '../ProductReviewFormModal/ProductReviewFormModal';
@@ -53,50 +54,19 @@ export default function ProductReviewSection({
 }: ProductReviewSectionProps) {
   const { isAuthenticated } = useAuth();
   const { pushToast } = useToast();
-  const [reviews, setReviews] = useState<ProductReviewItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    reviews,
+    loading,
+    canReview,
+    hasReviewed,
+    setReviews,
+    setHasReviewed,
+    refreshReviews,
+  } = useProductReviews();
   const [togglingUsefulId, setTogglingUsefulId] = useState<number | null>(null);
   const [reviewFormOpen, setReviewFormOpen] = useState(false);
-  const [canReview, setCanReview] = useState(false);
-  const [hasReviewed, setHasReviewed] = useState(false);
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setCanReview(false);
-      setHasReviewed(false);
-      return;
-    }
-    Promise.all([
-      apiClient.canReviewProduct(product.id).then((r) => r.can_review ?? false),
-      apiClient.getUserReviewedProductIds([product.id]).then((r) => (r.product_ids || []).includes(product.id)),
-    ])
-      .then(([can, reviewed]) => {
-        setCanReview(can);
-        setHasReviewed(reviewed);
-      })
-      .catch(() => {
-        setCanReview(false);
-        setHasReviewed(false);
-      });
-  }, [isAuthenticated, product.id]);
   const modalOpen = modalOnly ? (modalOpenProp ?? false) : false;
   const setModalOpen = modalOnly ? () => onModalClose?.() : () => {};
-
-  useEffect(() => {
-    let cancelled = false;
-    apiClient
-      .getProductReviews(product.id)
-      .then((list) => {
-        if (!cancelled) setReviews(Array.isArray(list) ? list : []);
-      })
-      .catch(() => {
-        if (!cancelled) setReviews([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [product.id]);
 
   useEffect(() => {
     if (!modalOpen) return;
@@ -264,9 +234,7 @@ export default function ProductReviewSection({
         onClose={() => setReviewFormOpen(false)}
         onSuccess={() => {
           setHasReviewed(true);
-          apiClient.getProductReviews(product.id).then((list) => {
-            setReviews(Array.isArray(list) ? list : []);
-          }).catch(() => {});
+          void refreshReviews();
         }}
         purchaseRequired={!canReview}
       />

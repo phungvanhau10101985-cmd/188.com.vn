@@ -8,8 +8,10 @@ import { apiClient } from '@/lib/api-client';
 import { useCart } from '@/features/cart/hooks/useCart';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
-import type { Product, CategoryLevel1 } from '@/types/api';
+import type { Product } from '@/types/api';
 import { usePersonalizedCategoryTree } from '@/lib/use-personalized-category-tree';
+import { useAppCategoryTreeBase } from '@/lib/app-category-tree-context';
+import { ProductReviewsProvider } from '@/lib/product-reviews-context';
 import ProductHeader from './components/ProductHeader/ProductHeader';
 import ProductGallery from './components/ProductGallery/ProductGallery';
 import ProductInfo from './components/ProductInfo/ProductInfo';
@@ -57,8 +59,8 @@ export default function ProductDetailClient({
   const [qaModalOpen, setQaModalOpen] = useState(false);
   const [reviewsModalOpen, setReviewsModalOpen] = useState(false);
   const [selectedColorImage, setSelectedColorImage] = useState<string | null>(null);
-  const [categoryTreeBase, setCategoryTreeBase] = useState<CategoryLevel1[]>([]);
-  const categoryTree = usePersonalizedCategoryTree(categoryTreeBase);
+  const appCategoryTree = useAppCategoryTreeBase();
+  const categoryTree = usePersonalizedCategoryTree(appCategoryTree.length > 0 ? appCategoryTree : undefined);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [openLevel1, setOpenLevel1] = useState<string | null>(null);
   const [isStickyPinned, setIsStickyPinned] = useState(false);
@@ -141,35 +143,6 @@ export default function ProductDetailClient({
   useEffect(() => {
     persistRelatedFiltersFromProduct(product);
   }, [product]);
-
-  useEffect(() => {
-    let active = true;
-    let idleHandle: number | undefined;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const load = () => {
-      apiClient.getCategoryTreeFromProducts()
-        .then((data) => {
-          if (!active) return;
-          const tree = Array.isArray(data) ? data : [];
-          setCategoryTreeBase(tree);
-        })
-        .catch(() => {
-          if (active) setCategoryTreeBase([]);
-        });
-    };
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-      idleHandle = window.requestIdleCallback(load, { timeout: 2800 });
-    } else {
-      timeoutId = setTimeout(load, 0);
-    }
-    return () => {
-      active = false;
-      if (idleHandle !== undefined && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-        window.cancelIdleCallback(idleHandle);
-      }
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-    };
-  }, []);
 
   useEffect(() => {
     if (categoryTree.length && !openLevel1) setOpenLevel1(categoryTree[0].name);
@@ -400,6 +373,7 @@ export default function ProductDetailClient({
   );
 
   return (
+    <ProductReviewsProvider productId={product.id}>
     <div className="min-h-screen bg-gray-50">
       <NanoAiProductPageContext
         sku={nanoSku}
@@ -715,5 +689,6 @@ export default function ProductDetailClient({
         </main>
       </div>
     </div>
+    </ProductReviewsProvider>
   );
 }
