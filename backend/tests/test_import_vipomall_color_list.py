@@ -1,0 +1,72 @@
+"""Vipomall: màu + ảnh từ .product-type-list-size (section «Màu sắc»)."""
+
+from app.services.import_vipomall_scraper import vipomall_row_to_product_data
+
+_VIPOMALL_COLOR_LIST_RAW = {
+    "title": "Túi xách unicorn",
+    "colors": [
+        {
+            "label": "Vàng cổ điển",
+            "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN01EK9l6d1JwdcJCpDCd_!!2200953351093-0-cib.jpg",
+        },
+        {
+            "label": "Nâu cổ điển",
+            "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN01FhjZwi1JwdcO4j2T1_!!2200953351093-0-cib.jpg",
+        },
+        {
+            "label": "Xanh lá cổ điển",
+            "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN013vTt661JwdcNKeCTJ_!!2200953351093-0-cib.jpg",
+        },
+    ],
+    "variant_rows": [
+        {
+            "color": "Vàng cổ điển",
+            "size": "",
+            "stock": 14,
+            "price_vnd": 663850,
+            "price_text": "663.850 đ",
+            "stock_text": "(14 SP có sẵn)",
+            "in_stock": True,
+        },
+        {
+            "color": "Nâu cổ điển",
+            "size": "",
+            "stock": 38,
+            "price_vnd": 663850,
+            "price_text": "663.850 đ",
+            "stock_text": "(38 SP có sẵn)",
+            "in_stock": True,
+        },
+        {
+            "color": "Xanh lá cổ điển",
+            "size": "",
+            "stock": 37,
+            "price_vnd": 663850,
+            "price_text": "663.850 đ",
+            "stock_text": "(37 SP có sẵn)",
+            "in_stock": True,
+        },
+    ],
+    "sizes": [],
+    "gallery_images": [],
+    "detail_images": [],
+}
+
+
+def test_vipomall_color_list_section_maps_to_colors_with_images():
+    product = vipomall_row_to_product_data(
+        _VIPOMALL_COLOR_LIST_RAW,
+        "https://vipomall.vn/san-pham/123?platform_type=10",
+        "123",
+    )
+    colors = product.get("colors") or []
+    assert len(colors) == 3
+    assert colors[0]["name"] == "Vàng cổ điển"
+    assert "O1CN01EK9l6d1JwdcJCpDCd" in colors[0]["img"]
+    assert colors[1]["name"] == "Nâu cổ điển"
+    assert "O1CN01FhjZwi1JwdcO4j2T1" in colors[1]["img"]
+    assert colors[2]["name"] == "Xanh lá cổ điển"
+    assert "O1CN013vTt661JwdcNKeCTJ" in colors[2]["img"]
+    assert product.get("color_swatch_images_1688") == [c["img"] for c in colors]
+    assert product.get("sizes") == []
+    assert product.get("price") == 663850.0

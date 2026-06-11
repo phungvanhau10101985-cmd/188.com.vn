@@ -7,10 +7,12 @@ from app.services.product_image_visibility import (
 )
 
 
-def test_colors_valid_for_import_requires_name_and_http_image():
+def test_colors_valid_for_import_accepts_name_or_http_image():
     assert colors_valid_for_import([]) is False
-    assert colors_valid_for_import([{"name": "Đỏ"}]) is False
-    assert colors_valid_for_import([{"name": "Đỏ", "img": "ftp://x/y.jpg"}]) is False
+    assert colors_valid_for_import([{"name": ""}]) is False
+    assert colors_valid_for_import([{"name": "Đỏ"}]) is True
+    assert colors_valid_for_import([{"img": "https://cdn.example/a.jpg"}]) is True
+    assert colors_valid_for_import([{"name": "Đỏ", "img": "ftp://x/y.jpg"}]) is True
     assert colors_valid_for_import([{"name": "Đỏ", "img": "https://cdn.example/a.jpg"}]) is True
     assert colors_valid_for_import(
         [
@@ -24,7 +26,8 @@ def test_colors_valid_for_import_requires_name_and_http_image():
             {"name": "Trắng"},
             {"name": "Đen"},
         ]
-    ) is False
+    ) is True
+    assert colors_valid_for_import([{"name": ""}, {"name": "Xanh"}]) is True
 
 
 def test_product_should_remove_after_localization():

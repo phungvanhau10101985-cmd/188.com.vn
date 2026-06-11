@@ -267,31 +267,52 @@ _SCRAPE_JS = r"""() => {
 
   const colors = [];
   const seenColor = new Set();
+  const pushColor = (label, imgEl) => {
+    const l = normText(label);
+    if (!l || l.length > 160 || seenColor.has(l.toLowerCase())) return;
+    colors.push({ label: l, image_url: imgUrl(imgEl) || null });
+    seenColor.add(l.toLowerCase());
+  };
   document.querySelectorAll(".product-type-list .product-type-item, .product-type-list [title]").forEach((el) => {
     const label = normText(el.getAttribute("title") || el.querySelector(".title")?.innerText || el.textContent);
-    if (!label || label.length > 160 || seenColor.has(label.toLowerCase())) return;
-    const img = el.querySelector("img");
-    colors.push({ label, image_url: imgUrl(img) || null });
-    seenColor.add(label.toLowerCase());
+    if (!label) return;
+    pushColor(label, el.querySelector("img"));
   });
 
+  const sectionHeaderText = (section) =>
+    normText(
+      section.querySelector(".header .select span, .header .select .csdf, .header .select")?.innerText || "",
+    );
+  const isColorSectionHeader = (t) => /màu\s*sắc|颜色|colour|color/i.test(t);
+  const isSizeSectionHeader = (t) => /kích\s*cỡ|尺码|size/i.test(t) && !isColorSectionHeader(t);
+  const rowVariantLabel = (row) => {
+    const titles = Array.from(
+      row.querySelectorAll(".size [title], [data-toggle='tooltip'][title], .size-1 [title]"),
+    )
+      .map((el) => normText(el.getAttribute("title") || el.textContent))
+      .filter(Boolean);
+    const visible = normText(row.querySelector(".size span span, .size-1 span span")?.innerText || "");
+    return { titles, visible };
+  };
   const sizeRows = [];
   const sizeSet = new Set();
   const pairSeen = new Set();
-  document.querySelectorAll(".product-size-content-item").forEach((row) => {
-    const titles = Array.from(row.querySelectorAll(".size [title], [data-toggle='tooltip'][title]"))
-      .map((el) => normText(el.getAttribute("title") || el.textContent))
-      .filter(Boolean);
+  const pushVariantRow = (row, sectionKind) => {
+    const { titles, visible } = rowVariantLabel(row);
     let color = "";
     let size = "";
-    if (titles.length >= 2) {
+    if (sectionKind === "color") {
+      color = titles[0] || visible;
+    } else if (sectionKind === "size") {
+      size = titles[0] || visible;
+    } else if (titles.length >= 2) {
       color = titles[0];
       size = titles[1];
     } else if (titles.length === 1) {
       size = titles[0];
+    } else if (visible) {
+      size = visible;
     }
-    const visibleSize = normText(row.querySelector(".size span span")?.innerText || "");
-    if (!size && visibleSize) size = visibleSize;
     const stockText = normText(row.querySelector(".product")?.innerText || "");
     const isOutOfStock = /hết\s*hàng/i.test(stockText);
     let stock = null;
@@ -299,7 +320,9 @@ _SCRAPE_JS = r"""() => {
     if (sm) stock = parseInt(sm[1].replace(/[^\d]/g, ""), 10);
     const hasAvailableText = /có\s*sẵn/i.test(stockText);
     const inStock = !isOutOfStock && (hasAvailableText || (stock != null && stock > 0));
-    const priceText = normText(row.querySelector(".main-price")?.innerText || row.querySelector("[appformatcurrency]")?.innerText || "");
+    const priceText = normText(
+      row.querySelector(".main-price")?.innerText || row.querySelector("[appformatcurrency]")?.innerText || "",
+    );
     const priceVnd = parseInt(priceText.replace(/[^\d]/g, ""), 10) || null;
     if (!inStock) return;
     if (size) sizeSet.add(size);
@@ -318,6 +341,25 @@ _SCRAPE_JS = r"""() => {
         });
       }
     }
+  };
+
+  document.querySelectorAll(".product-type-list-size").forEach((section) => {
+    const header = sectionHeaderText(section);
+    const kind = isColorSectionHeader(header) ? "color" : isSizeSectionHeader(header) ? "size" : "unknown";
+    if (kind === "color") {
+      section.querySelectorAll(".product-size-content-item").forEach((row) => {
+        const { titles, visible } = rowVariantLabel(row);
+        const label = titles[0] || visible;
+        if (label) pushColor(label, row.querySelector("img"));
+      });
+    }
+    section.querySelectorAll(".product-size-content-item").forEach((row) => {
+      pushVariantRow(row, kind);
+    });
+  });
+  document.querySelectorAll(".product-size-content-item").forEach((row) => {
+    if (row.closest(".product-type-list-size")) return;
+    pushVariantRow(row, "unknown");
   });
 
   const gallery = [];
@@ -561,8 +603,8 @@ def _scrape_vipomall_for_import_sync(source_url: str) -> Tuple[Dict[str, Any], D
 
     product_data = vipomall_row_to_product_data(raw, page_url, offer_id, platform_type=platform_type)
     if not product_data.get("colors"):
-        warnings.append("Vipomall: chưa thu được variant màu từ .product-type-list.")
-    if not product_data.get("sizes"):
+        warnings.append("Vipomall: chưa thu được variant màu từ .product-type-list / .product-type-list-size.")
+    if not product_data.get("sizes") and not product_data.get("colors"):
         raw_variant_count = len([r for r in (raw.get("variant_rows") or []) if isinstance(r, dict)])
         if raw_variant_count:
             warnings.append(

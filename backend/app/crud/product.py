@@ -6365,8 +6365,8 @@ def bulk_import_products(
 
         if not colors_valid_for_import(product_data.get("colors")):
             errors.append(
-                f"Dòng {idx + 1} ({product_id}): Thiếu biến thể Variant "
-                "(mỗi màu cần tên; ít nhất một màu có URL ảnh http/https) — không import."
+                f"Dòng {idx + 1} ({product_id}): Variant rỗng "
+                "([] hoặc không có tên/ảnh http/https) — không import."
             )
             continue
 

@@ -123,27 +123,23 @@ function sizesMeetApparelFootwearRule(sizes: string[]): boolean {
   return nonFree.length >= 3;
 }
 
+function variantEntryHasNameOrHttpImage(rec: Record<string, unknown>): boolean {
+  if (trimStr(rec.name)) return true;
+  const img = trimStr(rec.img ?? rec.image_url ?? rec.url ?? rec.image);
+  return /^https?:\/\//i.test(img);
+}
+
 function validateColorVariants(colorsRaw: unknown): string[] {
   const issues: string[] = [];
   if (!Array.isArray(colorsRaw) || colorsRaw.length === 0) {
-    issues.push('Thiếu biến thể màu (mỗi màu cần tên; ít nhất một màu có URL ảnh)');
+    issues.push('Variant rỗng ([]) — không đăng lên web');
     return issues;
   }
-  let hasValidImage = false;
-  for (let i = 0; i < colorsRaw.length; i++) {
-    const c = colorsRaw[i];
-    if (typeof c !== 'object' || c === null) {
-      issues.push(`Màu #${i + 1}: dữ liệu không hợp lệ`);
-      continue;
-    }
-    const rec = c as Record<string, unknown>;
-    const name = trimStr(rec.name);
-    const img = trimStr(rec.img ?? rec.image_url ?? rec.url);
-    if (!name) issues.push(`Màu #${i + 1}: thiếu tên`);
-    if (/^https?:\/\//i.test(img)) hasValidImage = true;
-  }
-  if (!hasValidImage) {
-    issues.push('Variant: cần ít nhất một màu có URL ảnh http/https');
+  const hasUsable = colorsRaw.some(
+    (c) => typeof c === 'object' && c !== null && variantEntryHasNameOrHttpImage(c as Record<string, unknown>),
+  );
+  if (!hasUsable) {
+    issues.push('Variant rỗng — cần ít nhất một màu có tên hoặc URL ảnh http/https');
   }
   return issues;
 }

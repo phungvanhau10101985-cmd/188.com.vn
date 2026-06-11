@@ -84,21 +84,21 @@ def _variant_image_url(entry: dict) -> str:
     return ""
 
 
+def _variant_entry_has_name_or_http_image(entry: dict) -> bool:
+    if _norm_url(entry.get("name")):
+        return True
+    img = _variant_image_url(entry)
+    return img.startswith("http://") or img.startswith("https://")
+
+
 def colors_valid_for_import(colors: Any) -> bool:
-    """Variant/colors hợp lệ trước import: mỗi màu có tên; ít nhất 1 màu có URL ảnh http(s)."""
+    """Variant/colors hợp lệ trước import: không rỗng []; ít nhất 1 màu có tên hoặc URL ảnh http(s)."""
     if not isinstance(colors, list) or len(colors) == 0:
         return False
-    has_valid_image = False
     for entry in colors:
-        if not isinstance(entry, dict):
-            return False
-        name = _norm_url(entry.get("name"))
-        if not name:
-            return False
-        img = _variant_image_url(entry)
-        if img.startswith("http://") or img.startswith("https://"):
-            has_valid_image = True
-    return has_valid_image
+        if isinstance(entry, dict) and _variant_entry_has_name_or_http_image(entry):
+            return True
+    return False
 
 
 def product_should_remove_after_localization(product: Product) -> bool:
