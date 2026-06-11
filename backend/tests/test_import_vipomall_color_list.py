@@ -69,4 +69,19 @@ def test_vipomall_color_list_section_maps_to_colors_with_images():
     assert "O1CN013vTt661JwdcNKeCTJ" in colors[2]["img"]
     assert product.get("color_swatch_images_1688") == [c["img"] for c in colors]
     assert product.get("sizes") == []
+    assert product.get("product_info", {}).get("variants", {}).get("sizes") is None
     assert product.get("price") == 663850.0
+
+
+def test_vipomall_color_only_layout_ignores_stale_size_list_from_scraper():
+    """Dù JS còn sizeSet cũ (tên màu), layout chỉ-màu vẫn ép sizes=[]."""
+    raw = {
+        **_VIPOMALL_COLOR_LIST_RAW,
+        "sizes": ["Vàng cổ điển", "Nâu cổ điển"],
+    }
+    product = vipomall_row_to_product_data(
+        raw,
+        "https://vipomall.vn/san-pham/123?platform_type=10",
+        "123",
+    )
+    assert product.get("sizes") == []

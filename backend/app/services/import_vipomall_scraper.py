@@ -758,7 +758,13 @@ def vipomall_row_to_product_data(
             for sw, raw_c in zip(swatches, colors_raw)
             if _clean_text(raw_c.get("label"), limit=160) in in_stock_raw_colors
         ]
-    if not sizes:
+    # Layout «Màu sắc» only (túi, phụ kiện đồng hồ…): variant có color, size rỗng → sizes phải [].
+    color_only_layout = bool(colors_out) and bool(variant_rows) and all(
+        not _clean_text(r.get("size"), limit=80) for r in variant_rows
+    )
+    if color_only_layout:
+        sizes = []
+    elif not sizes:
         sizes = [_clean_text(s, limit=80) for s in row.get("sizes") or [] if _clean_text(s, limit=80)]
 
     price_vnd = min(prices) if prices else 0.0
