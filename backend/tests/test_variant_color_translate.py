@@ -36,3 +36,15 @@ def test_hibox_source_always_enables_translate_when_api_key():
         pd = {"product_info": {"variants": {"source": "hibox"}}}
         assert variant_color_translate_enabled(product_data=pd) is True
         assert variant_color_translate_enabled(import_source="hibox") is True
+
+
+def test_excel_import_skips_deepseek_when_only_import_link_taxonomy():
+    from unittest.mock import patch
+    from app.core import config as config_mod
+    from app.services.variant_color_translate import variant_color_deepseek_translate_effective
+
+    with patch.object(config_mod.settings, "DEEPSEEK_API_KEY", "test-key"), patch.object(
+        config_mod.settings, "IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED", True
+    ), patch.object(config_mod.settings, "EXCEL_VARIANT_COLORS_DEEPSEEK_TRANSLATE", False):
+        assert variant_color_translate_enabled() is True
+        assert variant_color_deepseek_translate_effective() is False

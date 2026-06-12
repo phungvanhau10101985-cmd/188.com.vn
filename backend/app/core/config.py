@@ -605,7 +605,7 @@ class Settings:
             "EXCEL_VARIANT_COLORS_DEEPSEEK_TRANSLATE", ""
         ).strip().lower() in ("1", "true", "yes", "on")
         self.EXCEL_VARIANT_COLORS_DEEPSEEK_FORCE_ALL: bool = os.getenv(
-            "EXCEL_VARIANT_COLORS_DEEPSEEK_FORCE_ALL", "True"
+            "EXCEL_VARIANT_COLORS_DEEPSEEK_FORCE_ALL", "false"
         ).strip().lower() in ("1", "true", "yes", "on")
         # Đổi tên từ DEEPSEEK_SEARCH_CORRECTION_ENABLED -> AI_SEARCH_CORRECTION_ENABLED cho đúng bản chất (dùng Gemini)
         # Vẫn giữ fallback đọc biến cũ để tương thích ngược

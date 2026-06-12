@@ -214,6 +214,8 @@ class ExcelImporter:
             
             logger.info(f"📊 ĐÃ CHUẨN BỊ: {len(products_data)} sản phẩm hợp lệ, {len(errors)} lỗi")
 
+            # Variant đã chuẩn ở khâu chuẩn bị file — import Excel chỉ ghi DB (không DeepSeek).
+            # Opt-in: EXCEL_VARIANT_COLORS_DEEPSEEK_TRANSLATE=true + DEEPSEEK_API_KEY.
             if products_data:
                 try:
                     from app.services.variant_color_translate import (

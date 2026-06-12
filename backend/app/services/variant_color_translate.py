@@ -3,8 +3,8 @@ Dịch tên biến thể màu (JSON [{"name","img"}]) sang tiếng Việt qua De
 
 Bật dịch khi một trong các điều kiện:
   • Nguồn **Hibox** (`variants.source` / `import_source="hibox"`) — bắt buộc mọi luồng lấy SP qua hibox.mn;
-  • EXCEL_VARIANT_COLORS_DEEPSEEK_TRANSLATE (import Excel);
-  • IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED (import link Vipomall/1688 khác).
+  • EXCEL_VARIANT_COLORS_DEEPSEEK_TRANSLATE=true (import Excel — mặc định tắt; file đã chuẩn Variant thì không bật);
+  • IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED (import link Vipomall/1688 khi scrape — không áp import Excel).
 
 Mặc định dịch khi tên có CJK/Kirin/Cyrillic; thêm nhãn Latin (vd. Black Suede, 15 Black Suede (91536)).
 """
@@ -79,8 +79,10 @@ def variant_color_translate_enabled(
 
 
 def variant_color_deepseek_translate_effective() -> bool:
-    """Alias tương thích Excel importer (không truyền product_data)."""
-    return variant_color_translate_enabled()
+    """Import Excel: chỉ dịch khi bật EXCEL_VARIANT_COLORS_DEEPSEEK_TRANSLATE (opt-in)."""
+    if not (settings.DEEPSEEK_API_KEY or "").strip():
+        return False
+    return bool(getattr(settings, "EXCEL_VARIANT_COLORS_DEEPSEEK_TRANSLATE", False))
 
 
 def _looks_like_unlocalized_latin_label(s: str) -> bool:
