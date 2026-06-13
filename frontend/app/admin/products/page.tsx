@@ -775,6 +775,7 @@ export default function AdminProductsPage() {
   const [importScraperCookieLoading, setImportScraperCookieLoading] = useState(false);
   const [importScraperCookieDeleting, setImportScraperCookieDeleting] = useState(false);
   const [importScraperCookieDeleteConfirm, setImportScraperCookieDeleteConfirm] = useState(false);
+  const [import1688Url, setImport1688Url] = useState('');
   const [importing1688, setImporting1688] = useState(false);
   const [import1688Progress, setImport1688Progress] = useState<{
     message: string;
