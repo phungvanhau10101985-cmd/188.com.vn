@@ -13,6 +13,9 @@ const ROOT_SELECTORS = [
   '[id*="nanoai-chat-widget"]',
 ];
 
+const VIDEO_FAB_SELECTOR = '[data-188-video-fab]';
+const STACK_GAP_PX = 10;
+
 type NanoEmbedLayout = {
   side: 'left' | 'right';
   offsetX: number;
@@ -20,6 +23,12 @@ type NanoEmbedLayout = {
   mobileBreakpoint: number;
   bubbleSize: number;
   mobileBubbleSize: number;
+};
+
+type BubbleAnchor = {
+  bottom: number;
+  offsetX: number;
+  fromVideoFab: boolean;
 };
 
 function findActiveEmbedScript(widgetId: string): HTMLScriptElement | null {
@@ -47,7 +56,6 @@ function readEmbedLayout(): NanoEmbedLayout {
   const side = script?.getAttribute('data-side') === 'left' ? 'left' : 'right';
   return {
     side,
-    // Chuẩn hóa theo mép phải viewport: chỉ nhận số dương (0..300).
     offsetX: parseIntClamp(script?.getAttribute('data-offset-x') ?? null, 16, 0, 300),
     bottom: parseIntClamp(script?.getAttribute('data-bottom') ?? null, 20, 0, 1200),
     mobileBreakpoint: parseIntClamp(script?.getAttribute('data-mobile-breakpoint') ?? null, 768, 320, 1600),
@@ -65,60 +73,73 @@ function viewportHeight(): number {
   );
 }
 
+function viewportWidth(): number {
+  return window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth || 360;
+}
+
 function clampBottomOffset(bottom: number, sizePx: number): number {
   const maxBottom = Math.max(8, viewportHeight() - sizePx - 8);
-  return Math.min(bottom, maxBottom);
+  return Math.min(Math.max(8, bottom), maxBottom);
 }
 
-function rectsOverlap(
-  a: { left: number; right: number; top: number; bottom: number },
-  b: { left: number; right: number; top: number; bottom: number },
-): boolean {
-  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+function clampHorizontalOffset(offset: number, bubbleWidth: number): number {
+  const vw = viewportWidth();
+  const maxOffset = Math.max(8, vw - bubbleWidth - 8);
+  return Math.min(Math.max(8, offset), maxOffset);
 }
 
-function computeBubbleBottomAvoidingVideoFab(
-  side: 'left' | 'right',
-  offsetX: number,
-  bubbleSize: number,
-  bottomPx: number,
-): number {
-  const videoFab = document.querySelector<HTMLElement>('[data-188-video-fab]');
-  if (!videoFab) return bottomPx;
+/**
+ * Căn bubble Tư vấn thẳng cột với nút video shop (đọc rect thật — desktop + mobile).
+ * Fallback: thuộc tính embed script khi không có nút video.
+ */
+function computeBubbleAnchor(
+  layout: NanoEmbedLayout,
+  bubbleEl: HTMLElement | null,
+  bubbleSizeFallback: number,
+): BubbleAnchor {
+  const fallback: BubbleAnchor = {
+    bottom: clampBottomOffset(layout.bottom, bubbleSizeFallback),
+    offsetX: layout.offsetX,
+    fromVideoFab: false,
+  };
+
+  const videoFab = document.querySelector<HTMLElement>(VIDEO_FAB_SELECTOR);
+  if (!videoFab) return fallback;
 
   const r = videoFab.getBoundingClientRect();
-  if (r.width < 20 || r.height < 20) return bottomPx;
+  if (r.width < 20 || r.height < 20) return fallback;
 
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  if (!vw || !vh) return bottomPx;
+  const vw = viewportWidth();
+  const vh = viewportHeight();
+  if (!vw || !vh) return fallback;
 
-  const bubbleLeft = side === 'left' ? offsetX : vw - offsetX - bubbleSize;
-  const bubbleTop = vh - bottomPx - bubbleSize;
-  const bubbleRect = {
-    left: bubbleLeft,
-    right: bubbleLeft + bubbleSize,
-    top: bubbleTop,
-    bottom: bubbleTop + bubbleSize,
+  const bubbleWidth = Math.max(bubbleEl?.offsetWidth || 0, bubbleSizeFallback);
+  const bubbleHeight = Math.max(bubbleEl?.offsetHeight || 0, bubbleSizeFallback);
+  const videoCenterX = r.left + r.width / 2;
+
+  const bottom = clampBottomOffset(vh - r.top + STACK_GAP_PX, bubbleHeight);
+
+  if (layout.side === 'left') {
+    const left = clampHorizontalOffset(videoCenterX - bubbleWidth / 2, bubbleWidth);
+    return {
+      bottom,
+      offsetX: left,
+      fromVideoFab: true,
+    };
+  }
+
+  const right = clampHorizontalOffset(vw - videoCenterX - bubbleWidth / 2, bubbleWidth);
+  return {
+    bottom,
+    offsetX: right,
+    fromVideoFab: true,
   };
-  const videoRect = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
-
-  if (!rectsOverlap(bubbleRect, videoRect)) return bottomPx;
-
-  const gapPx = 10;
-  const minBottomToStayAboveVideo = Math.ceil(vh - bubbleSize - r.top + gapPx);
-  return Math.max(bottomPx, minBottomToStayAboveVideo);
 }
 
 function enforceViewportAnchoring() {
   const layout = readEmbedLayout();
   const isMobile = window.innerWidth <= layout.mobileBreakpoint;
-  const bubbleSize = isMobile ? layout.mobileBubbleSize : layout.bubbleSize;
-  const safeBottomBase = clampBottomOffset(layout.bottom, bubbleSize);
-  const safeBottom = clampBottomOffset(
-    computeBubbleBottomAvoidingVideoFab(layout.side, layout.offsetX, bubbleSize, safeBottomBase),
-    bubbleSize,
-  );
+  const bubbleSizeFallback = isMobile ? layout.mobileBubbleSize : layout.bubbleSize;
 
   ROOT_SELECTORS.forEach((sel) => {
     document.querySelectorAll<HTMLElement>(sel).forEach((root) => {
@@ -138,15 +159,23 @@ function enforceViewportAnchoring() {
       const bubble = root.querySelector<HTMLElement>('[data-nanoai-chat-bubble]');
       if (!bubble) return;
 
+      const anchor = computeBubbleAnchor(layout, bubble, bubbleSizeFallback);
+
       bubble.style.setProperty('position', 'absolute', 'important');
-      bubble.style.setProperty('bottom', `${safeBottom}px`, 'important');
+      bubble.style.setProperty('bottom', `${anchor.bottom}px`, 'important');
       bubble.style.setProperty('margin', '0', 'important');
       if (layout.side === 'left') {
-        bubble.style.setProperty('left', `${layout.offsetX}px`, 'important');
+        bubble.style.setProperty('left', `${anchor.offsetX}px`, 'important');
         bubble.style.setProperty('right', 'auto', 'important');
       } else {
-        bubble.style.setProperty('right', `${layout.offsetX}px`, 'important');
+        bubble.style.setProperty('right', `${anchor.offsetX}px`, 'important');
         bubble.style.setProperty('left', 'auto', 'important');
+      }
+
+      if (anchor.fromVideoFab) {
+        bubble.dataset.nanoai188VideoAnchored = '1';
+      } else {
+        delete bubble.dataset.nanoai188VideoAnchored;
       }
     });
   });
@@ -167,6 +196,7 @@ function clearMobileLayoutOn(el: HTMLElement) {
   el.style.removeProperty('bottom');
   el.style.removeProperty('right');
   delete el.dataset.nanoai188MobileAdjusted;
+  delete el.dataset.nanoai188VideoAnchored;
 }
 
 function clearMobileLayout() {
@@ -174,8 +204,8 @@ function clearMobileLayout() {
 }
 
 /**
- * Không ép vị trí launcher NanoAI.
- * Vị trí launcher sẽ do script embed (`data-bottom`, `data-offset-x`, `data-side`, ...) quyết định.
+ * Căn launcher NanoAI theo nút video shop (desktop + mobile).
+ * Không có nút video → dùng `data-bottom` / `data-offset-x` từ script embed.
  */
 export default function NanoAiMobileLauncherAdjust() {
   const pathname = usePathname();
@@ -183,7 +213,6 @@ export default function NanoAiMobileLauncherAdjust() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // Dọn mọi inline style cũ từng ghi đè vị trí launcher.
     clearMobileLayout();
     releaseNanoAiClickBlockers();
     enforceViewportAnchoring();
@@ -196,6 +225,10 @@ export default function NanoAiMobileLauncherAdjust() {
       rafId = window.requestAnimationFrame(() => {
         rafQueued = false;
         enforceViewportAnchoring();
+        // Bubble pill rộng hơn bubble-size — căn lại sau khi layout xong.
+        rafId = window.requestAnimationFrame(() => {
+          enforceViewportAnchoring();
+        });
       });
     };
 

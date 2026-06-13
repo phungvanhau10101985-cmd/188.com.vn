@@ -38,7 +38,10 @@ export default function FloatingShopVideoFeedButton() {
     }
     let cancelled = false;
     fetchShopVideoFabPublicSettings().then((s) => {
-      if (!cancelled) setFab(s);
+      if (!cancelled) {
+        setFab(s);
+        window.dispatchEvent(new Event('resize'));
+      }
     });
     return () => {
       cancelled = true;

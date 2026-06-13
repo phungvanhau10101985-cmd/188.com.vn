@@ -53,10 +53,16 @@ async def image_search(
         limit,
     )
     if status == 200:
-        return enrich_nanoai_response_body(db, body)
-    if isinstance(body, dict):
-        return JSONResponse(content=body, status_code=status)
-    return JSONResponse(content={"detail": str(body)}, status_code=status)
+        try:
+            return enrich_nanoai_response_body(db, body)
+        except Exception:
+            logger.exception("NanoAI image-search enrichment failed")
+            db.rollback()
+            if isinstance(body, dict):
+                return body
+            return _empty_search_response("Không xử lý được kết quả NanoAI.")
+    logger.warning("NanoAI image-search returned status %s: %s", status, body)
+    return _empty_search_response(nanoai.extract_nanoai_error(body))
 
 
 @router.post("/text-search")

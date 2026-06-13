@@ -6,6 +6,14 @@ export function humanizeNanoaiImageSearchError(raw: string | null | undefined): 
   if (!raw || !String(raw).trim()) return '';
   const t = String(raw).trim();
   if (
+    /<!doctype\s+html/i.test(t) ||
+    /<html[\s>]/i.test(t) ||
+    /cloudflare/i.test(t) ||
+    /cf-browser-verification/i.test(t)
+  ) {
+    return 'Dịch vụ nhận diện ảnh NanoAI tạm thời không phản hồi. Vui lòng thử lại sau vài phút, thử ảnh khác hoặc dùng Tìm theo chữ.';
+  }
+  if (
     /gemini embed failed/i.test(t) ||
     /internal error encountered/i.test(t) ||
     /"status"\s*:\s*"INTERNAL"/i.test(t)

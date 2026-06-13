@@ -29,6 +29,7 @@ import {
 
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
 import { getGuestSessionId } from '@/lib/guest-session';
+import { humanizeNanoaiImageSearchError } from '@/lib/nanoai-search-errors';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
@@ -1886,11 +1887,14 @@ class ApiClient {
           : Array.isArray(detail)
             ? detail.join(', ')
             : d.error || `Lỗi ${response.status}`;
-      throw new Error(msg);
+      throw new Error(humanizeNanoaiImageSearchError(msg) || msg);
     }
     const out = data as NanoaiSearchResponse;
     if (!Array.isArray(out.products)) {
       out.products = [];
+    }
+    if (out.error) {
+      out.error = humanizeNanoaiImageSearchError(String(out.error)) || out.error;
     }
     return out;
   }
