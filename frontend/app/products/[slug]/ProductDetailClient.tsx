@@ -29,7 +29,9 @@ import {
   buildHomeListingSearchParams,
   filtersFromProduct,
   searchParamsToEncodedQueryString,
+  parseRelatedTabFromSearch,
 } from '@/lib/product-related-tabs';
+import { prefetchRelatedProductsForPdp } from '@/lib/related-products-pdp-fetch';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { warehouseCartProductDataExtras } from '@/lib/warehouse-clearance';
 import { filterVisibleWebImageUrls } from '@/lib/image-utils';
@@ -142,6 +144,18 @@ export default function ProductDetailClient({
 
   useEffect(() => {
     persistRelatedFiltersFromProduct(product);
+  }, [product]);
+
+  /** Làm ấm cache SP liên quan (tab mặc định + tab trên URL) trước khi scroll tới khối dưới. */
+  useEffect(() => {
+    if (!product?.id) return;
+    if (typeof window === 'undefined') return;
+    const rt = new URLSearchParams(window.location.search).get('rt');
+    const tab = parseRelatedTabFromSearch(rt);
+    prefetchRelatedProductsForPdp(product, tab);
+    if (tab !== 'bestselling') {
+      prefetchRelatedProductsForPdp(product, 'bestselling');
+    }
   }, [product]);
 
   useEffect(() => {

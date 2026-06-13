@@ -13,21 +13,21 @@ import { apiClient } from '@/lib/api-client';
 import { formatPrice, getProductMainImage } from '@/lib/utils';
 import {
   parseRelatedTabFromSearch,
-  excelCell,
   filtersFromProduct,
   buildHomeListingHref,
-  listingParamsForPriceSiblingTab,
-  listingParamsSameChineseShopCat2,
   type ProductRelatedTabId,
 } from '@/lib/product-related-tabs';
+import {
+  buildRelatedFetchPlan,
+  getCachedRelatedProductsSnapshot,
+  loadRelatedProductsSnapshot,
+  productSearchParamsFromChineseShopCat2,
+} from '@/lib/related-products-pdp-fetch';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
 import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
-
-/** Lấy đủ cho lưới 5 + «Xem thêm»; tránh limit=120 + COUNT(*) trên PDP. */
-const RELATED_PDP_FETCH_LIMIT = 36;
 
 const RELATED_LIST_BASE: Pick<ProductSearchParams, 'skip_total' | 'is_active'> = {
   skip_total: true,
@@ -85,6 +85,7 @@ function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSi
           alt={product.name}
           fill
           sizes={imageSizes}
+          loading="lazy"
           className="object-cover group-hover:scale-110 transition-transform duration-300"
           onError={(e) => {
             (e.currentTarget as HTMLImageElement).src = cdnUrl('/images/placeholder.jpg');
@@ -118,159 +119,6 @@ function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSi
   );
 }
 
-type FetchPlan =
-  | {
-      ok: true;
-      params: ProductSearchParams;
-      sortPurchasesDesc?: boolean;
-    }
-  | { ok: false };
-
-function productSearchParamsFromChineseShopCat2(product: Product): ProductSearchParams | null {
-  const sibling = listingParamsSameChineseShopCat2(product);
-  if (!sibling) return null;
-  const { category, subcategory, ...rest } = sibling;
-  return {
-    ...rest,
-    ...(category ? { category } : {}),
-    ...(subcategory ? { subcategory } : {}),
-  };
-}
-
-function buildFetchPlan(product: Product, tab: ProductRelatedTabId): FetchPlan {
-  const base: ProductSearchParams = { ...RELATED_LIST_BASE, limit: RELATED_PDP_FETCH_LIMIT };
-
-  switch (tab) {
-    case 'bestselling': {
-      const st = excelCell(product.style);
-      if (st) {
-        return {
-          ok: true,
-          params: { ...base, style: st, sort: 'purchases_desc' },
-          sortPurchasesDesc: true,
-        };
-      }
-      const sub2 = excelCell(product.subcategory);
-      if (sub2) {
-        const cat = excelCell(product.category);
-        return {
-          ok: true,
-          params: {
-            ...base,
-            ...(cat ? { category: cat } : {}),
-            subcategory: sub2,
-            sort: 'purchases_desc',
-          },
-          sortPurchasesDesc: true,
-        };
-      }
-      return { ok: false };
-    }
-    case 'same_price': {
-      const sibling = listingParamsSameChineseShopCat2(product);
-      if (!sibling) return { ok: false };
-      const { category, subcategory, ...rest } = sibling;
-      return {
-        ok: true,
-        params: {
-          ...base,
-          ...rest,
-          ...(category ? { category } : {}),
-          ...(subcategory ? { subcategory } : {}),
-        },
-      };
-    }
-    case 'lower_price': {
-      const sibling = listingParamsForPriceSiblingTab('lower_price', product);
-      if (!sibling) return { ok: false };
-      const { category, subcategory, ...rest } = sibling;
-      return {
-        ok: true,
-        params: {
-          ...base,
-          ...rest,
-          ...(category ? { category } : {}),
-          ...(subcategory ? { subcategory } : {}),
-        },
-      };
-    }
-    case 'higher_price': {
-      const sibling = listingParamsForPriceSiblingTab('higher_price', product);
-      if (!sibling) return { ok: false };
-      const { category, subcategory, ...rest } = sibling;
-      return {
-        ok: true,
-        params: {
-          ...base,
-          ...rest,
-          ...(category ? { category } : {}),
-          ...(subcategory ? { subcategory } : {}),
-        },
-      };
-    }
-    default:
-      return { ok: false };
-  }
-}
-
-/** Hai khối RelatedProducts trên cùng trang (tabs + cuối trang) chia sẻ một request — giảm TBT và gánh mạng. */
-type RelatedFetchSnapshot = {
-  relatedProducts: Product[];
-  shopGroupProducts: Product[];
-};
-
-function relatedFetchDedupeKey(productId: number, tab: ProductRelatedTabId, plan: Extract<FetchPlan, { ok: true }>): string {
-  return `${productId}:${tab}:${plan.sortPurchasesDesc ? '1' : '0'}:${JSON.stringify(plan.params)}`;
-}
-
-const inflightRelatedFetches = new Map<string, Promise<RelatedFetchSnapshot>>();
-
-/** Tab bán chạy: lưới phụ cùng danh mục cấp 2 + shop Trung Quốc (`shop_name_chinese`). */
-async function loadChineseShopGroupSnapshot(currentProduct: Product): Promise<Product[]> {
-  const parallelParams = productSearchParamsFromChineseShopCat2(currentProduct);
-  if (!parallelParams) return [];
-  const shopGroupResponse = await apiClient.getProducts({
-    ...RELATED_LIST_BASE,
-    limit: RELATED_PDP_FETCH_LIMIT,
-    sort: 'purchases_desc',
-    ...parallelParams,
-  });
-  return (shopGroupResponse.products || []).filter((p) => p.id !== currentProduct.id);
-}
-
-async function loadRelatedProductsSnapshot(
-  currentProduct: Product,
-  relatedTab: ProductRelatedTabId
-): Promise<RelatedFetchSnapshot> {
-  const plan = buildFetchPlan(currentProduct, relatedTab);
-  if (!plan.ok) {
-    return { relatedProducts: [], shopGroupProducts: [] };
-  }
-
-  const key = relatedFetchDedupeKey(currentProduct.id, relatedTab, plan);
-  let batch = inflightRelatedFetches.get(key);
-  if (!batch) {
-    batch = (async () => {
-      const shopPromise =
-        relatedTab === 'bestselling' ? loadChineseShopGroupSnapshot(currentProduct) : Promise.resolve([]);
-
-      const [response, sgList] = await Promise.all([
-        apiClient.getProducts(plan.params),
-        shopPromise,
-      ]);
-
-      const list = (response.products || []).filter((p) => p.id !== currentProduct.id);
-
-      return { relatedProducts: list, shopGroupProducts: sgList };
-    })().finally(() => {
-      inflightRelatedFetches.delete(key);
-    });
-    inflightRelatedFetches.set(key, batch);
-  }
-
-  return batch;
-}
-
 const BESTSELLING_GRID_CLASS = 'grid grid-cols-2 lg:grid-cols-5 gap-4';
 const BESTSELLING_IMAGE_SIZES = '(max-width: 1023px) 50vw, (min-width: 1024px) 20vw';
 
@@ -298,7 +146,8 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
 
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
   const [shopGroupProducts, setShopGroupProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingRelated, setLoadingRelated] = useState(true);
+  const [loadingShopGroup, setLoadingShopGroup] = useState(true);
   const [visibleCount, setVisibleCount] = useState(5);
   const [showAllLoading, setShowAllLoading] = useState(false);
 
@@ -315,8 +164,10 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   }, [currentProduct]);
 
   useEffect(() => {
-    setLoading(true);
     const ac = new AbortController();
+    const plan = buildRelatedFetchPlan(currentProduct, relatedTab);
+    const shopOnlyBestselling =
+      relatedTab === 'bestselling' && !!productSearchParamsFromChineseShopCat2(currentProduct);
 
     const applySnapshot = (list: Product[], sgList: Product[]) => {
       setRelatedProducts(list);
@@ -325,103 +176,110 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
       setShopGroupVisibleCount(relatedStripInitialVisible(sgList.length));
     };
 
-    const runFetch = async () => {
-      const plan = buildFetchPlan(currentProduct, relatedTab);
-      const shopOnlyBestselling =
-        relatedTab === 'bestselling' && !!productSearchParamsFromChineseShopCat2(currentProduct);
+    const cached = getCachedRelatedProductsSnapshot(currentProduct, relatedTab);
+    if (cached) {
+      applySnapshot(cached.relatedProducts, cached.shopGroupProducts);
+      setLoadingRelated(false);
+      setLoadingShopGroup(false);
+      return () => {
+        ac.abort();
+      };
+    }
 
-      if (!plan.ok) {
-        if (shopOnlyBestselling) {
-          try {
-            setLoading(true);
-            const sgList = await loadChineseShopGroupSnapshot(currentProduct);
-            if (ac.signal.aborted) return;
-            applySnapshot([], sgList);
-          } catch (error) {
-            console.error('Error fetching related products:', error);
-            if (ac.signal.aborted) return;
-            setRelatedProducts([]);
-            setShopGroupProducts([]);
-            setShopGroupVisibleCount(relatedStripInitialVisible(0));
-          } finally {
-            if (!ac.signal.aborted) setLoading(false);
-          }
-          return;
-        }
-        if (ac.signal.aborted) return;
-        setRelatedProducts([]);
-        setShopGroupProducts([]);
-        setShopGroupVisibleCount(relatedStripInitialVisible(0));
-        setLoading(false);
-        return;
+    setLoadingRelated(!!plan.ok);
+    setLoadingShopGroup(!!shopOnlyBestselling);
+
+    if (!plan.ok && !shopOnlyBestselling) {
+      applySnapshot([], []);
+      setLoadingRelated(false);
+      setLoadingShopGroup(false);
+      return () => {
+        ac.abort();
+      };
+    }
+
+    void loadRelatedProductsSnapshot(currentProduct, relatedTab, (partial) => {
+      if (ac.signal.aborted) return;
+      applySnapshot(partial.relatedProducts, partial.shopGroupProducts);
+      if (partial.shopGroupProducts.length > 0 || !shopOnlyBestselling) {
+        setLoadingShopGroup(false);
       }
-
-      try {
-        setLoading(true);
-        const { relatedProducts: list, shopGroupProducts: sgList } =
-          await loadRelatedProductsSnapshot(currentProduct, relatedTab);
+      if (partial.relatedProducts.length > 0 || !plan.ok) {
+        setLoadingRelated(false);
+      }
+    })
+      .then((final) => {
         if (ac.signal.aborted) return;
-        applySnapshot(list, sgList);
-      } catch (error) {
+        applySnapshot(final.relatedProducts, final.shopGroupProducts);
+      })
+      .catch((error) => {
         console.error('Error fetching related products:', error);
         if (ac.signal.aborted) return;
         setRelatedProducts([]);
         setShopGroupProducts([]);
         setShopGroupVisibleCount(relatedStripInitialVisible(0));
-      } finally {
-        if (!ac.signal.aborted) setLoading(false);
-      }
-    };
-
-    void runFetch();
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) {
+          setLoadingRelated(false);
+          setLoadingShopGroup(false);
+        }
+      });
 
     return () => {
       ac.abort();
     };
   }, [currentProduct, relatedTab]);
 
-  if (loading) {
-    const showShopGroupSkeleton = relatedTab === 'bestselling' && !!chineseShopCat2GroupParams;
+  const plan = buildRelatedFetchPlan(currentProduct, relatedTab);
+  const canShowShopGroupSection = relatedTab === 'bestselling' && !!chineseShopCat2GroupParams;
+  const showShopGroupSkeleton = loadingShopGroup && canShowShopGroupSection;
+  const showRelatedSkeleton = loadingRelated && plan.ok;
+
+  const relatedSkeleton = relatedTab === 'bestselling' ? (
+    <>
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        {[...Array(5)].map((_, index) => (
+          <div key={index} className="animate-pulse">
+            <div className="aspect-square bg-gray-200 rounded-lg mb-2"></div>
+            <div className="h-4 bg-gray-200 rounded mb-1"></div>
+            <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 flex w-full justify-between gap-4 lg:justify-center">
+        <div className="h-9 w-24 rounded bg-gray-100 animate-pulse" />
+        <div className="h-9 w-28 rounded bg-gray-200 animate-pulse" />
+      </div>
+    </>
+  ) : (
+    <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+      {[...Array(4)].map((_, index) => (
+        <div key={index} className="animate-pulse">
+          <div className="aspect-square bg-gray-200 rounded-lg mb-2"></div>
+          <div className="h-4 bg-gray-200 rounded mb-1"></div>
+          <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      ))}
+    </div>
+  );
+
+  if (showShopGroupSkeleton && showRelatedSkeleton && !canShowShopGroupSection) {
     return (
       <div className="border-t border-gray-200 pt-5">
-        {showShopGroupSkeleton && (
-          <div className="mb-8">
-            <div className="h-6 bg-gray-200 rounded w-72 mb-3 animate-pulse max-w-full" />
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-              {[...Array(5)].map((_, index) => (
-                <div key={index} className="animate-pulse">
-                  <div className="aspect-square bg-gray-200 rounded-lg mb-2"></div>
-                  <div className="h-4 bg-gray-200 rounded mb-1"></div>
-                  <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 flex w-full justify-between gap-4 lg:justify-center">
-              <div className="h-9 w-24 rounded bg-gray-100 animate-pulse" />
-              <div className="h-9 w-28 rounded bg-gray-200 animate-pulse" />
-            </div>
-          </div>
-        )}
         <h3 className="text-lg font-bold text-gray-900 mb-3">{title}</h3>
-        {relatedTab === 'bestselling' ? (
-          <>
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-              {[...Array(5)].map((_, index) => (
-                <div key={index} className="animate-pulse">
-                  <div className="aspect-square bg-gray-200 rounded-lg mb-2"></div>
-                  <div className="h-4 bg-gray-200 rounded mb-1"></div>
-                  <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 flex w-full justify-between gap-4 lg:justify-center">
-              <div className="h-9 w-24 rounded bg-gray-100 animate-pulse" />
-              <div className="h-9 w-28 rounded bg-gray-200 animate-pulse" />
-            </div>
-          </>
-        ) : (
-          <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
-            {[...Array(4)].map((_, index) => (
+        {relatedSkeleton}
+      </div>
+    );
+  }
+
+  if (showShopGroupSkeleton && showRelatedSkeleton) {
+    return (
+      <div className="border-t border-gray-200 pt-5">
+        <div className="mb-8">
+          <div className="h-6 bg-gray-200 rounded w-72 mb-3 animate-pulse max-w-full" />
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            {[...Array(5)].map((_, index) => (
               <div key={index} className="animate-pulse">
                 <div className="aspect-square bg-gray-200 rounded-lg mb-2"></div>
                 <div className="h-4 bg-gray-200 rounded mb-1"></div>
@@ -429,16 +287,20 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
               </div>
             ))}
           </div>
-        )}
+          <div className="mt-4 flex w-full justify-between gap-4 lg:justify-center">
+            <div className="h-9 w-24 rounded bg-gray-100 animate-pulse" />
+            <div className="h-9 w-28 rounded bg-gray-200 animate-pulse" />
+          </div>
+        </div>
+        <h3 className="text-lg font-bold text-gray-900 mb-3">{title}</h3>
+        {relatedSkeleton}
       </div>
     );
   }
 
-  const plan = buildFetchPlan(currentProduct, relatedTab);
-  const canShowShopGroupSection = relatedTab === 'bestselling' && !!chineseShopCat2GroupParams;
   const hasShopGroupProducts = shopGroupProducts.length > 0;
 
-  if (!plan.ok && !canShowShopGroupSection) {
+  if (!loadingRelated && !loadingShopGroup && !plan.ok && !canShowShopGroupSection) {
     return (
       <div className="border-t border-gray-200 pt-5">
         <h3 className="text-base font-bold text-gray-900 mb-2 uppercase">{title}</h3>
@@ -447,7 +309,12 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
     );
   }
 
-  if (plan.ok && relatedProducts.length === 0 && !canShowShopGroupSection) {
+  if (
+    !loadingRelated &&
+    plan.ok &&
+    relatedProducts.length === 0 &&
+    !canShowShopGroupSection
+  ) {
     return (
       <div className="border-t border-gray-200 pt-5">
         <h3 className="text-base font-bold text-gray-900 mb-2 uppercase">{title}</h3>
@@ -469,7 +336,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
     if (visibleCount >= relatedProducts.length) return;
     try {
       setShowAllLoading(true);
-      const p = buildFetchPlan(currentProduct, relatedTab);
+      const p = buildRelatedFetchPlan(currentProduct, relatedTab);
       if (!p.ok) return;
       const response = await apiClient.getProducts({
         ...p.params,
@@ -634,7 +501,23 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
           <h3 className="text-base font-bold text-gray-900 mb-3 uppercase">
             Sản phẩm tương tự
           </h3>
-          {hasShopGroupProducts ? (
+          {showShopGroupSkeleton ? (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                {[...Array(5)].map((_, index) => (
+                  <div key={index} className="animate-pulse">
+                    <div className="aspect-square bg-gray-200 rounded-lg mb-2"></div>
+                    <div className="h-4 bg-gray-200 rounded mb-1"></div>
+                    <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 flex w-full justify-between gap-4 lg:justify-center">
+                <div className="h-9 w-24 rounded bg-gray-100 animate-pulse" />
+                <div className="h-9 w-28 rounded bg-gray-200 animate-pulse" />
+              </div>
+            </>
+          ) : hasShopGroupProducts ? (
             shopGroupActionsRow ? (
               <>
                 {shopGroupGrid}
@@ -651,7 +534,12 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
         </section>
       )}
 
-      {relatedProducts.length > 0 ? (
+      {showRelatedSkeleton ? (
+        <>
+          <h3 className="text-base font-bold text-gray-900 mb-3 uppercase">{title}</h3>
+          {relatedSkeleton}
+        </>
+      ) : relatedProducts.length > 0 ? (
         <>
           <h3 className="text-base font-bold text-gray-900 mb-3 uppercase">{title}</h3>
 
@@ -671,7 +559,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
             </>
           )}
         </>
-      ) : relatedTab === 'bestselling' ? (
+      ) : !loadingRelated && relatedTab === 'bestselling' ? (
         <>
           <h3 className="text-base font-bold text-gray-900 mb-2 uppercase">{title}</h3>
           <p className="text-sm text-gray-500">
