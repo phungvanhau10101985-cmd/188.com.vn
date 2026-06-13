@@ -511,7 +511,7 @@ export default function ProductDetailClient({
                   </div>
                   <form
                     onSubmit={handleStickySearch}
-                    className="relative ml-2 flex w-full min-w-[8rem] flex-1 items-stretch overflow-hidden rounded-lg bg-white focus-within:ring-2 focus-within:ring-orange-200 lg:ml-3"
+                    className="relative z-[105] ml-2 flex w-full min-w-[8rem] flex-1 items-stretch overflow-visible rounded-lg bg-white focus-within:ring-2 focus-within:ring-orange-200 lg:ml-3"
                   >
                     <input
                       type="text"

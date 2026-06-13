@@ -282,15 +282,15 @@ export default function DesktopImageSearchPopover({
               {panelBusy && (
                 <span className="mt-2 inline-block text-xs text-[#ea580c] font-medium">Đang tải ảnh…</span>
               )}
+              <button
+                type="button"
+                disabled={panelBusy}
+                onClick={() => fileInputRef.current?.click()}
+                className="mt-3 w-full rounded-lg bg-[#ea580c] text-white text-sm font-medium py-2.5 hover:bg-orange-600 disabled:opacity-50"
+              >
+                Chọn ảnh từ máy
+              </button>
             </div>
-            <button
-              type="button"
-              disabled={panelBusy}
-              onClick={() => fileInputRef.current?.click()}
-              className="mt-3 w-full rounded-lg bg-[#ea580c] text-white text-sm font-medium py-2.5 hover:bg-orange-600 disabled:opacity-50"
-            >
-              Chọn ảnh từ máy
-            </button>
             {panelError && (
               <p className="mt-2 text-xs text-red-600" role="alert">
                 {panelError}
