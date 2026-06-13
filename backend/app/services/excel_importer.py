@@ -19,6 +19,7 @@ from app.crud.product import (
     apply_category_final_mapping_to_product,
 )
 from app.core.config import settings
+from app.services.import_excel_job_store import ImportExcelJobCancelled
 from app.utils.product_synthetic_engagement import synthetic_engagement_counts
 
 logger = logging.getLogger(__name__)
@@ -188,6 +189,7 @@ class ExcelImporter:
         file_path: str,
         overwrite: bool = False,
         progress_callback: Optional[Callable[[str, int, Optional[int]], None]] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         """
         Import sản phẩm từ file Excel (~40 cột mẫu / ~41 cột export: thêm «listed» sau Slug).
@@ -201,6 +203,11 @@ class ExcelImporter:
         """
         try:
             logger.info(f"📥 BẮT ĐẦU IMPORT: {file_path}")
+
+            def _check_cancel() -> bool:
+                if should_cancel and should_cancel():
+                    return True
+                return False
             
             if not os.path.exists(file_path):
                 return {"error": f"File không tồn tại: {file_path}"}
@@ -248,6 +255,14 @@ class ExcelImporter:
 
             for i, (idx, row) in enumerate(df.iterrows()):
                 try:
+                    if _check_cancel():
+                        return {
+                            "cancelled": True,
+                            "message": "Import đã hủy trong lúc xử lý dòng Excel.",
+                            "errors": errors,
+                            "total_rows": row_count,
+                        }
+
                     if progress_callback and (
                         i % parse_tick == 0 or i == row_count - 1
                     ):
@@ -309,10 +324,18 @@ class ExcelImporter:
 
             if products_data:
                 logger.info("🔄 ĐANG IMPORT VÀO DATABASE...")
+                if _check_cancel():
+                    return {
+                        "cancelled": True,
+                        "message": "Import đã hủy trước khi ghi CSDL.",
+                        "errors": errors,
+                        "total_rows": row_count,
+                    }
                 result = bulk_import_products(
                     self.db,
                     products_data,
                     progress_callback=progress_callback,
+                    should_cancel=should_cancel,
                 )
                 
                 all_errors = errors + result.get("errors", [])
@@ -350,6 +373,8 @@ class ExcelImporter:
                     "total_rows": len(df)
                 }
                 
+        except ImportExcelJobCancelled:
+            raise
         except Exception as e:
             logger.error(f"❌ LỖI IMPORT EXCEL: {str(e)}")
             logger.error(traceback.format_exc())

@@ -9,6 +9,11 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+
+class ImportExcelJobCancelled(Exception):
+    """Import Excel dừng theo yêu cầu admin (cooperative cancel)."""
+
+
 # job_id do uuid4 — chỉ cho phép dạng an toàn để không path traversal
 _SAFE_JOB_ID = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", re.I)
 

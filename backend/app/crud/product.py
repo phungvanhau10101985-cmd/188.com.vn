@@ -6135,6 +6135,7 @@ def bulk_import_products(
     db: Session,
     products_data: List[Dict],
     progress_callback=None,
+    should_cancel=None,
 ):
     """Import multiple products from Excel data. progress_callback(phase, current, total) optional."""
     created = 0
@@ -6287,6 +6288,11 @@ def bulk_import_products(
             return "error"
 
     for idx, product_data in enumerate(products_data):
+        if should_cancel and should_cancel():
+            from app.services.import_excel_job_store import ImportExcelJobCancelled
+
+            raise ImportExcelJobCancelled("Admin đã yêu cầu hủy import Excel.")
+
         wh_action = _bulk_import_one_warehouse_row(idx, product_data)
         if wh_action is not None:
             if wh_action in ("created", "updated", "deleted"):

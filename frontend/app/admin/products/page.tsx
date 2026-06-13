@@ -301,6 +301,20 @@ function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
   panel: { variant: 'err' | 'warn' | 'ok'; title: string; body: string } | null;
   toast: { type: 'ok' | 'err'; msg: string };
 } {
+  if (job.status === 'cancelled') {
+    const parts: string[] = [
+      job.message?.trim() || 'Import đã hủy theo yêu cầu.',
+    ];
+    if (job.current != null && job.total != null) {
+      parts.push('', `Tiến trình khi hủy: ${job.current.toLocaleString()} / ${job.total.toLocaleString()} dòng (${job.phase || '—'}).`);
+    }
+    parts.push('', 'Các dòng đã commit trước khi hủy vẫn giữ trên DB.');
+    return {
+      panel: { variant: 'warn', title: 'Import đã hủy', body: parts.join('\n') },
+      toast: { type: 'err', msg: 'Đã hủy import Excel.' },
+    };
+  }
+
   if (job.status === 'error') {
     const parts: string[] = [];
     parts.push(job.detail?.trim() || job.message?.trim() || 'Import thất bại');
@@ -744,7 +758,10 @@ export default function AdminProductsPage() {
     phase?: string | null;
     /** Cảnh báo poll lỗi tạm thời. */
     warn?: string | null;
+    cancel_requested?: boolean;
   } | null>(null);
+  const [importCancelBusy, setImportCancelBusy] = useState(false);
+  const activeImportJobIdRef = useRef<string | null>(null);
   /** Chi tiết lỗi/cảnh báo sau import (giữ đến khi import lại hoặc đóng) */
   const [importDetailPanel, setImportDetailPanel] = useState<{
     variant: 'err' | 'warn' | 'ok';
@@ -1041,9 +1058,10 @@ export default function AdminProductsPage() {
             total: job.total ?? null,
             phase: job.phase || null,
             warn: null,
+            cancel_requested: Boolean(job.cancel_requested),
           });
 
-          if (job.status === 'done' || job.status === 'error') return job;
+          if (job.status === 'done' || job.status === 'error' || job.status === 'cancelled') return job;
         } catch (err) {
           consecutiveErrors += 1;
           const msg = err instanceof Error ? err.message : String(err);
@@ -1070,6 +1088,29 @@ export default function AdminProductsPage() {
     },
     [],
   );
+
+  const handleCancelImportExcel = useCallback(async () => {
+    const jobId = activeImportJobIdRef.current;
+    if (!jobId || importCancelBusy) return;
+    setImportCancelBusy(true);
+    try {
+      const job = await adminProductAPI.cancelImportExcelJob(jobId);
+      setImportProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              message: job.message || 'Đang hủy import… dừng sau bước hiện tại.',
+              cancel_requested: true,
+            }
+          : prev,
+      );
+      showToast('ok', 'Đã gửi yêu cầu hủy — chờ server dừng sau bước hiện tại.', 5000);
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Không thể hủy import', 8000);
+    } finally {
+      setImportCancelBusy(false);
+    }
+  }, [importCancelBusy, showToast]);
 
   const pollImport1688Job = useCallback(async (jobId: string): Promise<AdminImport1688Job> => {
     let lastJob: AdminImport1688Job | null = null;
@@ -2062,6 +2103,7 @@ export default function AdminProductsPage() {
           percent: pct,
         });
       });
+      activeImportJobIdRef.current = job_id;
 
       try {
         localStorage.setItem(
@@ -2105,6 +2147,7 @@ export default function AdminProductsPage() {
       setImporting(false);
       setImportProgress(null);
       cancelTrackRef.current = false;
+      activeImportJobIdRef.current = null;
       e.target.value = '';
     }
   };
@@ -2133,6 +2176,7 @@ export default function AdminProductsPage() {
       }
 
       cancelTrackRef.current = false;
+      activeImportJobIdRef.current = saved.job_id;
       setImporting(true);
       setImportProgress({
         message: `Khôi phục theo dõi job đang chạy (file: ${saved.file || '?'})…`,
@@ -2161,6 +2205,7 @@ export default function AdminProductsPage() {
         if (!cancelled) {
           setImporting(false);
           setImportProgress(null);
+          activeImportJobIdRef.current = null;
         }
       }
     })();
@@ -4629,15 +4674,39 @@ export default function AdminProductsPage() {
                 {importProgress.warn ? (
                   <p className="text-[11px] text-amber-800">{importProgress.warn}</p>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    cancelTrackRef.current = true;
-                  }}
-                  className="text-[11px] text-gray-500 underline hover:text-gray-700"
-                >
-                  Ẩn theo dõi (job vẫn chạy ở server)
-                </button>
+                {importProgress.cancel_requested ? (
+                  <p className="text-[11px] text-amber-800">
+                    Đang chờ server dừng sau bước hiện tại…
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => void handleCancelImportExcel()}
+                    disabled={
+                      importCancelBusy ||
+                      Boolean(importProgress.cancel_requested) ||
+                      !activeImportJobIdRef.current
+                    }
+                    className="text-[11px] font-medium text-red-700 underline hover:text-red-900 disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
+                    aria-label="Hủy import Excel đang chạy"
+                  >
+                    {importProgress.cancel_requested
+                      ? 'Đang chờ hủy…'
+                      : importCancelBusy
+                        ? 'Đang gửi yêu cầu hủy…'
+                        : 'Hủy import'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      cancelTrackRef.current = true;
+                    }}
+                    className="text-[11px] text-gray-500 underline hover:text-gray-700"
+                  >
+                    Ẩn theo dõi (job vẫn chạy ở server)
+                  </button>
+                </div>
               </div>
             ) : null}
           </form>

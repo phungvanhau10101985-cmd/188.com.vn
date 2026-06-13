@@ -785,12 +785,13 @@ export interface AdminGeminiAuthStatus {
 /** Trạng thái import Excel async (GET .../import/excel/job/{id}) */
 export interface AdminImportExcelJob {
   job_id: string;
-  status: 'queued' | 'running' | 'done' | 'error';
+  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled';
   phase: string;
   current: number;
   total: number | null;
   percent: number | null;
   message: string;
+  cancel_requested?: boolean;
   created_at?: string;
   finished_at?: string | null;
   result?: {
@@ -1587,6 +1588,12 @@ export const adminProductAPI = {
       throw err;
     }
   },
+
+  cancelImportExcelJob: (jobId: string) =>
+    fetchAdmin<AdminImportExcelJob>(
+      `/import-export/import/excel/job/${encodeURIComponent(jobId)}/cancel`,
+      { method: 'POST', timeoutMs: 30_000 },
+    ),
 
   startImport1688: (url: string, downloadImages = true, source?: '1688' | 'hibox' | 'vipomall') =>
     fetchAdmin<{ job_id: string; draft_id: number; message?: string; poll_url?: string }>(

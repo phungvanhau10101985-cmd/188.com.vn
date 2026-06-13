@@ -26,7 +26,11 @@ IMPORT_EXCEL_LOG_PREFIX = "[IMPORT_EXCEL]"
 from app.services.excel_importer import ExcelImporter
 from app.core.config import settings
 from app.services.category_seo_analyzer import scan_and_create_mappings
-from app.services.import_excel_job_store import load_import_job, persist_import_job
+from app.services.import_excel_job_store import (
+    ImportExcelJobCancelled,
+    load_import_job,
+    persist_import_job,
+)
 
 excel_to_db_mapping = {
     # ID & Basic Info
@@ -163,6 +167,31 @@ def _import_job_update(job_id: str, **kwargs) -> None:
             pass
 
 
+def _import_job_get_locked(job_id: str) -> Optional[dict]:
+    job = IMPORT_EXCEL_JOBS.get(job_id)
+    if job is None:
+        loaded = load_import_job(job_id)
+        if loaded:
+            IMPORT_EXCEL_JOBS[job_id] = loaded
+            job = loaded
+    return job
+
+
+def _import_job_is_cancel_requested(job_id: str) -> bool:
+    with _import_job_lock:
+        st = _import_job_get_locked(job_id)
+    if not st:
+        return False
+    if (st.get("status") or "").strip().lower() == "cancelled":
+        return True
+    return bool(st.get("cancel_requested"))
+
+
+def _import_job_check_cancel(job_id: str) -> None:
+    if _import_job_is_cancel_requested(job_id):
+        raise ImportExcelJobCancelled("Admin đã yêu cầu hủy import Excel.")
+
+
 def _run_import_excel_job(
     job_id: str,
     temp_file_path: str,
@@ -174,7 +203,11 @@ def _run_import_excel_job(
 
     _tick = {"phase": "", "mono": 0.0}
 
+    def should_cancel() -> bool:
+        return _import_job_is_cancel_requested(job_id)
+
     def on_progress(phase: str, current: int, total: Optional[int]) -> None:
+        _import_job_check_cancel(job_id)
         _import_job_update(
             job_id,
             status="running",
@@ -236,7 +269,13 @@ def _run_import_excel_job(
             temp_file_path,
             overwrite,
             progress_callback=on_progress,
+            should_cancel=should_cancel,
         )
+
+        if result.get("cancelled"):
+            raise ImportExcelJobCancelled(
+                str(result.get("message") or "Import Excel đã hủy theo yêu cầu.")
+            )
 
         if result.get("error"):
             err_lines = result.get("errors") or []
@@ -321,6 +360,22 @@ def _run_import_excel_job(
             seo_spawned,
         )
 
+    except ImportExcelJobCancelled as exc:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        _import_job_update(
+            job_id,
+            status="cancelled",
+            phase="cancelled",
+            cancel_requested=True,
+            finished_at=datetime.now().isoformat(),
+            message="Import đã hủy theo yêu cầu.",
+            detail=str(exc) or None,
+            percent=None,
+        )
+        logger.info("%s cancelled job=%s", IMPORT_EXCEL_LOG_PREFIX, job_id)
     except Exception as e:
         traceback.print_exc()
         tb = traceback.format_exc()
@@ -457,15 +512,37 @@ async def import_excel_async(
 def get_import_excel_job(job_id: str):
     """Trạng thái import async (tiến trình + kết quả khi xong). Đọc từ RAM hoặc file (sau khi restart API)."""
     with _import_job_lock:
-        job = IMPORT_EXCEL_JOBS.get(job_id)
-        if job is None:
-            loaded = load_import_job(job_id)
-            if loaded:
-                IMPORT_EXCEL_JOBS[job_id] = loaded
-                job = loaded
+        job = _import_job_get_locked(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Không tìm thấy job import.")
     return job
+
+
+@router.post("/import/excel/job/{job_id}/cancel")
+def cancel_import_excel_job(
+    job_id: str,
+    _: AdminUser = Depends(require_privileged_admin),
+):
+    """
+    Yêu cầu hủy import Excel đang chạy (cooperative — dừng sau bước parse/DB hiện tại).
+    """
+    with _import_job_lock:
+        job = _import_job_get_locked(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Không tìm thấy job import.")
+        status = (job.get("status") or "").strip().lower()
+        if status in {"done", "error", "cancelled"}:
+            return job
+        job["cancel_requested"] = True
+        job["message"] = "Đang hủy import… dừng sau bước hiện tại."
+        IMPORT_EXCEL_JOBS[job_id] = job
+        try:
+            persist_import_job(job_id, job)
+        except OSError:
+            pass
+        out = dict(job)
+    logger.info("%s cancel_requested job=%s", IMPORT_EXCEL_LOG_PREFIX, job_id)
+    return out
 
 
 @router.post("/import/excel")
