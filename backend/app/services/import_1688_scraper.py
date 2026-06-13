@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 from app.core.config import settings
 from app.services.alicdn_urls import normalize_product_image_url
+from app.services.import_scraper_cookies import load_scraper_cookies, seed_playwright_context_cookies
 from app.utils.product_synthetic_engagement import synthetic_engagement_counts
 
 
@@ -107,50 +108,6 @@ def _prefer_larger_offer_image(url: str) -> str:
             return u.replace(sm, lg, 1)
     return u
 
-
-def _normalize_playwright_cookie(item: Dict[str, Any]) -> Dict[str, Any]:
-    cookie = dict(item)
-    cookie.setdefault("domain", ".1688.com")
-    cookie.setdefault("path", "/")
-    # Playwright does not require sameSite for imported cookies. Browser exporters use
-    # inconsistent values (for example no_restriction), so omit it to avoid rejection.
-    cookie.pop("sameSite", None)
-    return cookie
-
-
-def _load_cookie_json() -> List[Dict[str, Any]]:
-    raw = settings.IMPORT_1688_COOKIE_JSON
-    if not raw and settings.IMPORT_1688_COOKIE_FILE:
-        path = Path(settings.IMPORT_1688_COOKIE_FILE)
-        if not path.is_absolute():
-            path = Path(__file__).resolve().parents[2] / path
-        if path.exists():
-            raw = path.read_text(encoding="utf-8").strip()
-    if not raw:
-        return []
-
-    # Cho phép cả JSON export từ browser lẫn chuỗi cookie "a=b; c=d".
-    if raw.lstrip().startswith(("[", "{")):
-        data = json.loads(raw)
-        cookies = data.get("cookies") if isinstance(data, dict) else data
-        if not isinstance(cookies, list):
-            raise Import1688Error("IMPORT_1688_COOKIE_JSON phải là list cookie hoặc object có key cookies.")
-        normalized = []
-        for c in cookies:
-            if not isinstance(c, dict) or not c.get("name"):
-                continue
-            normalized.append(_normalize_playwright_cookie(c))
-        return normalized
-
-    cookies = []
-    for part in raw.split(";"):
-        if "=" not in part:
-            continue
-        name, value = part.split("=", 1)
-        name = name.strip()
-        if name:
-            cookies.append({"name": name, "value": value.strip(), "domain": ".1688.com", "path": "/"})
-    return cookies
 
 
 def _looks_like_company_h1(text: str) -> bool:
@@ -1008,10 +965,10 @@ def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[
             "Backend chưa cài Playwright. Chạy pip install -r requirements.txt và playwright install chromium."
         ) from exc
 
-    cookies = _load_cookie_json()
+    cookies = load_scraper_cookies()
     warnings: List[str] = []
     if not cookies:
-        warnings.append("Chưa cấu hình cookie 1688; trang có thể bị chặn hoặc thiếu dữ liệu.")
+        warnings.append("Chưa cấu hình cookie scrape; trang có thể bị chặn hoặc thiếu dữ liệu.")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -1020,9 +977,14 @@ def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[
             viewport={"width": 1366, "height": 900},
             locale="zh-CN",
         )
-        if cookies:
-            context.add_cookies([_normalize_playwright_cookie(c) for c in cookies])
         page = context.new_page()
+        if cookies:
+            seed_playwright_context_cookies(
+                context,
+                page,
+                prefer_hosts={"1688.com", "alibaba.com"},
+                target_url=fetch_url,
+            )
         detail_dom_richness_before = 0
         detail_dom_richness_after = 0
         preview_layer_urls: List[str] = []

@@ -580,6 +580,17 @@ def _scrape_vipomall_for_import_sync(source_url: str) -> Tuple[Dict[str, Any], D
             )
             page = context.new_page()
             try:
+                from app.services.import_scraper_cookies import seed_playwright_context_cookies
+
+                seed_playwright_context_cookies(
+                    context,
+                    page,
+                    prefer_hosts={"vipomall.vn"},
+                    target_url=page_url,
+                )
+            except Exception:
+                pass
+            try:
                 page.goto(page_url, wait_until="domcontentloaded", timeout=90_000)
                 try:
                     page.wait_for_load_state("networkidle", timeout=35_000)

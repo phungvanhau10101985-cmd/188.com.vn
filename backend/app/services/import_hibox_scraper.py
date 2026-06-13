@@ -1,6 +1,6 @@
 """
 Chuyển trang chi tiết hibox.mn (Nuxt SPA) → product_data thống nhất với import 1688 / export Excel draft.
-Không cookie; Playwright được gọi qua scripts/export_hibox_item_excel.py.
+Không cookie; Playwright được gọi qua scripts/export_hibox_item_excel.py (cookie scrape chung nếu đã cấu hình).
 
 Giá (`price`, VNĐ): giá hiển thị trang Hibox là ₮ (số nối chữ số) → chia `HIBOX_MNT_PER_CNY_FOR_LISTING`
 (~CN¥) × hệ số lưới IF (`listing_cny_grid`) × `LISTING_IMPORT_VND_PER_CNY`, làm tròn lên 10.000 ₫

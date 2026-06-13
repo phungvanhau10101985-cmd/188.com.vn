@@ -852,6 +852,17 @@ def _hibox_quick_cart_cta_via_playwright(page_url: str) -> Optional[bool]:
             )
             page = ctx.new_page()
             try:
+                from app.services.import_scraper_cookies import seed_playwright_context_cookies
+
+                seed_playwright_context_cookies(
+                    ctx,
+                    page,
+                    prefer_hosts={"hibox.mn", "taobao1688.kz"},
+                    target_url=opened,
+                )
+            except Exception:
+                pass
+            try:
                 page.goto(opened, wait_until="domcontentloaded", timeout=90_000)
                 try:
                     page.wait_for_load_state("networkidle", timeout=40_000)

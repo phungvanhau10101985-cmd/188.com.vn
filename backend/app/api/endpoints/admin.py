@@ -80,6 +80,12 @@ from app.services.linked_admin_staff import apply_linked_staff_role
 from app.services.user_public_response import admin_panel_user_response, batch_admin_panel_user_responses
 from app.core.security import create_admin_token, require_privileged_admin, require_module_permission, require_super_admin
 from app.core.config import settings
+from app.services.import_scraper_cookies import (
+    delete_scraper_cookies,
+    save_scraper_cookies_from_text,
+    scraper_cookie_settings_dict,
+    upsert_scraper_cookie_env_local,
+)
 from app.core.admin_permissions import (
     effective_module_keys,
     normalize_module_list,
@@ -102,112 +108,8 @@ class Import1688CookieSettingsIn(BaseModel):
     cookie_text: str
 
 
-def _backend_root() -> Path:
-    return Path(__file__).resolve().parents[3]
-
-
-def _import_1688_cookie_file() -> Path:
-    return _backend_root() / "1688-cookies.json"
-
-
-def _import_1688_env_local_file() -> Path:
-    return _backend_root() / ".env.local"
-
-
-def _cookie_items_from_text(cookie_text: str) -> list[dict]:
-    text = (cookie_text or "").strip()
-    if not text:
-        return []
-    if text.lstrip().startswith(("[", "{")):
-        data = json.loads(text)
-        cookies = data.get("cookies") if isinstance(data, dict) else data
-        if not isinstance(cookies, list):
-            raise ValueError("JSON cookie phải là list hoặc object có key cookies.")
-        out = []
-        for item in cookies:
-            if not isinstance(item, dict) or not item.get("name"):
-                continue
-            c = dict(item)
-            c["name"] = str(c.get("name") or "").strip()
-            c["value"] = str(c.get("value") or "")
-            c.setdefault("domain", ".1688.com")
-            c.setdefault("path", "/")
-            same_site = c.get("sameSite")
-            if same_site is not None:
-                normalized = str(same_site).strip().lower().replace("-", "_")
-                same_site_map = {
-                    "strict": "Strict",
-                    "lax": "Lax",
-                    "none": "None",
-                    "no_restriction": "None",
-                }
-                if normalized in same_site_map:
-                    c["sameSite"] = same_site_map[normalized]
-                else:
-                    c.pop("sameSite", None)
-            out.append(c)
-        return out
-    out = []
-    for part in text.split(";"):
-        if "=" not in part:
-            continue
-        name, value = part.split("=", 1)
-        name = name.strip()
-        if name:
-            out.append({"name": name, "value": value.strip(), "domain": ".1688.com", "path": "/"})
-    return out
-
-
-def _read_import_1688_cookie_items() -> list[dict]:
-    raw = (getattr(settings, "IMPORT_1688_COOKIE_JSON", "") or "").strip()
-    cookie_file = (getattr(settings, "IMPORT_1688_COOKIE_FILE", "") or "").strip()
-    try:
-        if raw:
-            return _cookie_items_from_text(raw)
-        if cookie_file:
-            path = Path(cookie_file)
-            if not path.is_absolute():
-                path = _backend_root() / path
-            if path.exists():
-                return _cookie_items_from_text(path.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-    return []
-
-
-def _upsert_import_1688_env_local(values: dict[str, str]) -> None:
-    path = _import_1688_env_local_file()
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    lines = existing.splitlines()
-    handled = set()
-    next_lines = []
-    for line in lines:
-        replaced = False
-        for key, value in values.items():
-            if re.match(rf"^\s*{re.escape(key)}\s*=", line):
-                next_lines.append(f"{key}={value}")
-                handled.add(key)
-                replaced = True
-                break
-        if not replaced:
-            next_lines.append(line)
-    for key, value in values.items():
-        if key not in handled:
-            next_lines.append(f"{key}={value}")
-    path.write_text("\n".join(next_lines).rstrip() + "\n", encoding="utf-8")
-
-
 def _import_1688_cookie_settings_out(message: str | None = None) -> dict:
-    cookies = _read_import_1688_cookie_items()
-    names = [str(c.get("name") or "") for c in cookies if c.get("name")]
-    return {
-        "enabled": bool(getattr(settings, "IMPORT_1688_ENABLED", True)),
-        "cookie_file": (getattr(settings, "IMPORT_1688_COOKIE_FILE", "") or None),
-        "has_cookie": bool(cookies),
-        "cookie_count": len(cookies),
-        "cookie_names": names[:30],
-        "message": message,
-    }
+    return scraper_cookie_settings_dict(message)
 
 FIRST_ADMIN_HINT = (
     "Trên server, trong thư mục backend: python create_first_admin.py — "
@@ -263,25 +165,42 @@ def admin_save_import_1688_cookie_settings(
 ):
     """Fallback endpoint lưu cookie 1688 khi router import-1688 chưa được load."""
     try:
-        cookies = _cookie_items_from_text(payload.cookie_text)
+        count = save_scraper_cookies_from_text(payload.cookie_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Cookie không hợp lệ: {exc}") from exc
-    if not cookies:
-        raise HTTPException(status_code=400, detail="Cookie trống hoặc không đọc được name=value.")
 
-    cookie_file = _import_1688_cookie_file()
-    cookie_file.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding="utf-8")
-    _upsert_import_1688_env_local(
+    upsert_scraper_cookie_env_local(
         {
-            "IMPORT_1688_COOKIE_FILE": cookie_file.name,
+            "IMPORT_SCRAPER_COOKIE_FILE": settings.IMPORT_SCRAPER_COOKIE_FILE,
+            "IMPORT_SCRAPER_COOKIE_JSON": "",
+            "IMPORT_1688_COOKIE_FILE": settings.IMPORT_SCRAPER_COOKIE_FILE,
             "IMPORT_1688_COOKIE_JSON": "",
             "IMPORT_1688_ENABLED": "true",
         }
     )
-    settings.IMPORT_1688_COOKIE_FILE = cookie_file.name
-    settings.IMPORT_1688_COOKIE_JSON = ""
     settings.IMPORT_1688_ENABLED = True
-    return _import_1688_cookie_settings_out("Đã lưu cookie 1688.")
+    return _import_1688_cookie_settings_out(
+        f"Đã lưu {count} cookie scrape chung (Hibox, Vipomall, kiểm tra tồn kho)."
+    )
+
+
+@router.delete("/import-1688-cookie")
+def admin_delete_import_1688_cookie_settings(
+    _: AdminUser = Depends(require_privileged_admin),
+):
+    """Fallback xóa cookie scrape khi router import-1688 chưa được load."""
+    delete_scraper_cookies()
+    upsert_scraper_cookie_env_local(
+        {
+            "IMPORT_SCRAPER_COOKIE_FILE": "",
+            "IMPORT_SCRAPER_COOKIE_JSON": "",
+            "IMPORT_1688_COOKIE_FILE": "",
+            "IMPORT_1688_COOKIE_JSON": "",
+        }
+    )
+    return _import_1688_cookie_settings_out("Đã xóa cookie scrape trên server.")
 
 
 @router.post("/login", response_model=AdminTokenResponse)

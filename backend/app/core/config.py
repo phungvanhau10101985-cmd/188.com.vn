@@ -364,10 +364,19 @@ class Settings:
             except ValueError:
                 self.IMAGE_LOCALIZATION_LOCAL_OVERLAP_ABORT_THRESHOLD = None
 
+        # Scrape Playwright (Hibox, Vipomall, 1688, kiểm tra tồn kho) — một bộ cookie JSON trên server.
+        self.IMPORT_SCRAPER_COOKIE_JSON: str = (
+            os.getenv("IMPORT_SCRAPER_COOKIE_JSON", "").strip()
+            or os.getenv("IMPORT_1688_COOKIE_JSON", "").strip()
+        )
+        self.IMPORT_SCRAPER_COOKIE_FILE: str = (
+            os.getenv("IMPORT_SCRAPER_COOKIE_FILE", "").strip()
+            or os.getenv("IMPORT_1688_COOKIE_FILE", "").strip()
+        )
         # 1688 import — Playwright dùng cookie đăng nhập để đọc trang detail ổn định hơn request thường.
         self.IMPORT_1688_ENABLED: bool = os.getenv("IMPORT_1688_ENABLED", "True").strip().lower() in ("1", "true", "yes")
-        self.IMPORT_1688_COOKIE_JSON: str = os.getenv("IMPORT_1688_COOKIE_JSON", "").strip()
-        self.IMPORT_1688_COOKIE_FILE: str = os.getenv("IMPORT_1688_COOKIE_FILE", "").strip()
+        self.IMPORT_1688_COOKIE_JSON: str = self.IMPORT_SCRAPER_COOKIE_JSON
+        self.IMPORT_1688_COOKIE_FILE: str = self.IMPORT_SCRAPER_COOKIE_FILE
         self.IMPORT_1688_TIMEOUT_MS: int = int(os.getenv("IMPORT_1688_TIMEOUT_MS", "45000"))
         self.IMPORT_1688_USER_AGENT: str = (
             os.getenv("IMPORT_1688_USER_AGENT", "").strip()

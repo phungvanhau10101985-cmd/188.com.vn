@@ -1377,6 +1377,17 @@ def scrape_hibox_item(url: str) -> Dict[str, Any]:
             "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
         )
         page = ctx.new_page()
+        try:
+            from app.services.import_scraper_cookies import seed_playwright_context_cookies
+
+            seed_playwright_context_cookies(
+                ctx,
+                page,
+                prefer_hosts={"hibox.mn", "taobao1688.kz"},
+                target_url=url,
+            )
+        except Exception:
+            pass
 
         def _grab_variant_sheet_visual() -> tuple[List[str], List[str], List[str]]:
             try:

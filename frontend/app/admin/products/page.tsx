@@ -12,6 +12,7 @@ import {
 import {
   adminProductAPI,
   type AdminImport1688Draft,
+  type AdminImport1688CookieSettings,
   type AdminImport1688ExcelBatchSummary,
   type AdminImport1688BatchStatus,
   type AdminImport1688Job,
@@ -768,7 +769,12 @@ export default function AdminProductsPage() {
     title: string;
     body: string;
   } | null>(null);
-  const [import1688Url, setImport1688Url] = useState('');
+  const [importScraperCookieText, setImportScraperCookieText] = useState('');
+  const [importScraperCookieSettings, setImportScraperCookieSettings] = useState<AdminImport1688CookieSettings | null>(null);
+  const [importScraperCookieSaving, setImportScraperCookieSaving] = useState(false);
+  const [importScraperCookieLoading, setImportScraperCookieLoading] = useState(false);
+  const [importScraperCookieDeleting, setImportScraperCookieDeleting] = useState(false);
+  const [importScraperCookieDeleteConfirm, setImportScraperCookieDeleteConfirm] = useState(false);
   const [importing1688, setImporting1688] = useState(false);
   const [import1688Progress, setImport1688Progress] = useState<{
     message: string;
@@ -1362,6 +1368,62 @@ export default function AdminProductsPage() {
       setLocalizationJobsLoading(false);
     }
   }, [beginLocalizationJobPoll, registerLocalizationJobId]);
+
+  const loadImportScraperCookieSettings = useCallback(async () => {
+    setImportScraperCookieLoading(true);
+    try {
+      const st = await adminProductAPI.getImport1688CookieSettings();
+      setImportScraperCookieSettings(st);
+    } catch {
+      setImportScraperCookieSettings(null);
+    } finally {
+      setImportScraperCookieLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadImportScraperCookieSettings();
+  }, [loadImportScraperCookieSettings]);
+
+  const handleSaveImportScraperCookie = async () => {
+    const cookie = importScraperCookieText.trim();
+    if (!cookie) {
+      showToast('err', 'Vui lòng dán JSON cookie (hibox.mn / vipomall.vn / taobao…)');
+      return;
+    }
+    setImportScraperCookieSaving(true);
+    try {
+      const st = await adminProductAPI.saveImport1688CookieSettings(cookie);
+      setImportScraperCookieSettings(st);
+      setImportScraperCookieText('');
+      setImportScraperCookieDeleteConfirm(false);
+      showToast('ok', st.message || `Đã lưu ${st.cookie_count} cookie`);
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Không lưu được cookie', 9000);
+    } finally {
+      setImportScraperCookieSaving(false);
+    }
+  };
+
+  const handleDeleteImportScraperCookie = async () => {
+    if (!importScraperCookieDeleteConfirm) {
+      setImportScraperCookieDeleteConfirm(true);
+      showToast('err', 'Bấm «Xác nhận xóa cookie» lần nữa để xóa trên server.', 5000);
+      return;
+    }
+    setImportScraperCookieDeleting(true);
+    try {
+      const st = await adminProductAPI.deleteImport1688CookieSettings();
+      setImportScraperCookieSettings(st);
+      setImportScraperCookieText('');
+      setImportScraperCookieDeleteConfirm(false);
+      showToast('ok', st.message || 'Đã xóa cookie scrape trên server');
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Không xóa được cookie', 9000);
+    } finally {
+      setImportScraperCookieDeleting(false);
+    }
+  };
 
   const handleSaveGeminiCookie = async () => {
     const cookie = imageLocalizationCookie.trim();
@@ -2746,11 +2808,164 @@ export default function AdminProductsPage() {
                   </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <span className="inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-950">
-                      Hibox · không cần cookie 1688
+                      Hibox · Vipomall · kiểm tra tồn kho — một bộ cookie
                     </span>
                     <span className="inline-flex items-center rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-950">
                       Vipomall · 1688 (platform_type=10) · Taobao/Tmall (platform_type=21)
                     </span>
+                  </div>
+                  <div className="mt-4 rounded-xl border border-amber-200/90 bg-amber-50/60 px-3 py-3 text-sm text-amber-950">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="font-medium">Cookie scrape chung</p>
+                      {importScraperCookieLoading ? (
+                        <span className="inline-flex items-center rounded-full border border-amber-300 bg-white px-2.5 py-0.5 text-[11px] font-medium text-amber-900">
+                          Đang kiểm tra…
+                        </span>
+                      ) : importScraperCookieSettings?.has_cookie ? (
+                        <span
+                          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${
+                            importScraperCookieSettings.cookie_status === 'expired'
+                              ? 'border-red-300 bg-red-50 text-red-800'
+                              : importScraperCookieSettings.cookie_status === 'warning'
+                                ? 'border-amber-400 bg-amber-100 text-amber-950'
+                                : 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                          }`}
+                        >
+                          {importScraperCookieSettings.cookie_status === 'expired'
+                            ? 'Đã hết hạn — cần cập nhật'
+                            : importScraperCookieSettings.cookie_status === 'warning'
+                              ? 'Đã lưu — kiểm tra domain'
+                              : 'Đã có cookie trên server'}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-700">
+                          Chưa có cookie
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-xs leading-snug text-amber-900/95">
+                      Một bộ cookie cho lấy thông tin SP (Hibox, Vipomall), import link và kiểm tra hết hàng. Link
+                      không cần đăng nhập vẫn scrape được; cookie giúp trang khó hoặc đã login. Dán JSON export từ
+                      Chrome khi đã đăng nhập <strong className="font-semibold">hibox.mn</strong> /{' '}
+                      <strong className="font-semibold">vipomall.vn</strong> / taobao — không dùng cookie{' '}
+                      <strong className="font-semibold">188.com.vn</strong>.
+                    </p>
+                    {importScraperCookieSettings?.has_cookie && !importScraperCookieLoading ? (
+                      <div className="mt-2 rounded-lg border border-emerald-200/80 bg-white/80 px-3 py-2 text-xs text-slate-700 space-y-1">
+                        <p>
+                          <span className="font-medium text-slate-900">{importScraperCookieSettings.cookie_count}</span> cookie
+                          {importScraperCookieSettings.cookie_file ? (
+                            <>
+                              {' '}
+                              · file <code className="text-[10px] bg-slate-100 px-1 rounded">{importScraperCookieSettings.cookie_file}</code>
+                            </>
+                          ) : null}
+                        </p>
+                        {importScraperCookieSettings.cookie_domains?.length ? (
+                          <p>
+                            Domain:{' '}
+                            <span className="font-mono text-[11px]">{importScraperCookieSettings.cookie_domains.join(', ')}</span>
+                          </p>
+                        ) : null}
+                        {importScraperCookieSettings.cookie_saved_at ? (
+                          <p>
+                            Lưu lần cuối:{' '}
+                            {new Date(importScraperCookieSettings.cookie_saved_at).toLocaleString('vi-VN', {
+                              dateStyle: 'short',
+                              timeStyle: 'short',
+                            })}
+                          </p>
+                        ) : null}
+                        {importScraperCookieSettings.cookies_all_expired ? (
+                          <p className="text-red-700 font-medium">Tất cả cookie đã hết hạn — export và cập nhật lại.</p>
+                        ) : null}
+                        {importScraperCookieSettings.cookie_names?.length ? (
+                          <p className="text-slate-500 truncate" title={importScraperCookieSettings.cookie_names.join(', ')}>
+                            Tên: {importScraperCookieSettings.cookie_names.slice(0, 8).join(', ')}
+                            {importScraperCookieSettings.cookie_names.length > 8 ? '…' : ''}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {importScraperCookieSettings?.cookie_warnings?.length ? (
+                      <div className="mt-2 rounded-lg border border-amber-300 bg-amber-100/80 px-3 py-2 text-xs text-amber-950 space-y-1">
+                        {importScraperCookieSettings.cookie_warnings.map((w) => (
+                          <p key={w}>{w}</p>
+                        ))}
+                      </div>
+                    ) : null}
+                    <label className="mt-3 block">
+                      <span className="mb-1 block text-xs font-medium text-amber-950">
+                        {importScraperCookieSettings?.has_cookie
+                          ? 'Dán JSON cookie mới để cập nhật (thay toàn bộ bộ cũ)'
+                          : 'Dán JSON cookie để lưu lần đầu'}
+                      </span>
+                      <textarea
+                        value={importScraperCookieText}
+                        onChange={(e) => {
+                          setImportScraperCookieText(e.target.value);
+                          setImportScraperCookieDeleteConfirm(false);
+                        }}
+                        rows={4}
+                        placeholder='[{"domain":"hibox.mn","name":"...","value":"..."}, …] hoặc export Cookie-Editor'
+                        className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-mono text-gray-800 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                        aria-label="JSON cookie scrape Hibox Vipomall"
+                      />
+                    </label>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveImportScraperCookie()}
+                        disabled={importScraperCookieSaving || !importScraperCookieText.trim()}
+                        className="rounded-lg bg-amber-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-800 disabled:opacity-50"
+                      >
+                        {importScraperCookieSaving
+                          ? 'Đang lưu…'
+                          : importScraperCookieSettings?.has_cookie
+                            ? 'Cập nhật cookie'
+                            : 'Lưu cookie'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setImportScraperCookieText('');
+                          setImportScraperCookieDeleteConfirm(false);
+                        }}
+                        disabled={!importScraperCookieText.trim()}
+                        className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-950 hover:bg-amber-50 disabled:opacity-50"
+                      >
+                        Xóa nội dung ô
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void loadImportScraperCookieSettings()}
+                        disabled={importScraperCookieLoading}
+                        className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-950 hover:bg-amber-50 disabled:opacity-50"
+                      >
+                        Tải lại trạng thái
+                      </button>
+                      {importScraperCookieSettings?.has_cookie ? (
+                        importScraperCookieDeleteConfirm ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteImportScraperCookie()}
+                            disabled={importScraperCookieDeleting}
+                            className="rounded-lg border border-red-400 bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                          >
+                            {importScraperCookieDeleting ? 'Đang xóa…' : 'Xác nhận xóa cookie'}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteImportScraperCookie()}
+                            disabled={importScraperCookieDeleting}
+                            className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            Xóa cookie trên server
+                          </button>
+                        )
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               </header>

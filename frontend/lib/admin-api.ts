@@ -994,6 +994,14 @@ export interface AdminImport1688CookieSettings {
   has_cookie: boolean;
   cookie_count: number;
   cookie_names: string[];
+  cookie_domains?: string[];
+  cookie_saved_at?: string | null;
+  cookie_status?: 'missing' | 'configured' | 'expired' | 'warning' | string;
+  cookie_warnings?: string[];
+  cookie_expiry_known_for_all?: boolean;
+  cookies_all_expired?: boolean;
+  cookies_expired_count?: number;
+  usage_note?: string | null;
   message?: string | null;
 }
 
@@ -1923,6 +1931,19 @@ export const adminProductAPI = {
       return fetchAdmin<AdminImport1688CookieSettings>('/admin/import-1688-cookie', {
         method: 'PUT',
         body: JSON.stringify({ cookie_text: cookieText }),
+        timeoutMs: 60_000,
+      });
+    }),
+
+  deleteImport1688CookieSettings: () =>
+    fetchAdmin<AdminImport1688CookieSettings>('/import-1688/settings/cookie', {
+      method: 'DELETE',
+      timeoutMs: 60_000,
+    }).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/\b404\b|not found/i.test(msg)) throw err;
+      return fetchAdmin<AdminImport1688CookieSettings>('/admin/import-1688-cookie', {
+        method: 'DELETE',
         timeoutMs: 60_000,
       });
     }),
