@@ -303,7 +303,7 @@ function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
 } {
   if (job.status === 'cancelled') {
     const parts: string[] = [
-      job.message?.trim() || 'Import đã hủy theo yêu cầu.',
+      job.message?.trim() || 'Import đã hủy ngay.',
     ];
     if (job.current != null && job.total != null) {
       parts.push('', `Tiến trình khi hủy: ${job.current.toLocaleString()} / ${job.total.toLocaleString()} dòng (${job.phase || '—'}).`);
@@ -849,6 +849,8 @@ export default function AdminProductsPage() {
   const [imageLocReportProductId, setImageLocReportProductId] = useState<string | null>(null);
   /** Cờ huỷ theo dõi (job vẫn chạy ở server). */
   const cancelTrackRef = useRef(false);
+  /** Admin bấm Hủy ngay — poll/handleImport không hiện lỗi theo dõi trùng. */
+  const importUserCancelledRef = useRef(false);
   const [exporting, setExporting] = useState(false);
   const [googleSheetSyncing, setGoogleSheetSyncing] = useState(false);
   const [googleSheetCatalogSyncing, setGoogleSheetCatalogSyncing] = useState(false);
@@ -1042,6 +1044,20 @@ export default function AdminProductsPage() {
 
       for (;;) {
         if (cancelTrackRef.current) {
+          if (lastJob?.status === 'cancelled') return lastJob;
+          if (importUserCancelledRef.current) {
+            return (
+              lastJob ?? {
+                job_id: jobId,
+                status: 'cancelled',
+                phase: 'cancelled',
+                current: 0,
+                total: null,
+                percent: null,
+                message: 'Import đã hủy ngay.',
+              }
+            );
+          }
           if (lastJob) return lastJob;
           throw new Error('Đã dừng theo dõi job (job vẫn chạy ở server, refresh để xem lại).');
         }
@@ -1093,18 +1109,31 @@ export default function AdminProductsPage() {
     const jobId = activeImportJobIdRef.current;
     if (!jobId || importCancelBusy) return;
     setImportCancelBusy(true);
+    cancelTrackRef.current = true;
+    importUserCancelledRef.current = true;
     try {
       const job = await adminProductAPI.cancelImportExcelJob(jobId);
       setImportProgress((prev) =>
         prev
           ? {
               ...prev,
-              message: job.message || 'Đang hủy import… dừng sau bước hiện tại.',
+              message: job.message || 'Import đã hủy ngay.',
               cancel_requested: true,
+              phase: 'cancelled',
             }
           : prev,
       );
-      showToast('ok', 'Đã gửi yêu cầu hủy — chờ server dừng sau bước hiện tại.', 5000);
+      setImporting(false);
+      setImportProgress(null);
+      activeImportJobIdRef.current = null;
+      try {
+        localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+      } catch {
+        /* noop */
+      }
+      const { panel, toast: tmsg } = formatImportExcelJobOutcome(job);
+      if (panel) setImportDetailPanel(panel);
+      showToast(tmsg.type, tmsg.msg, 5000);
     } catch (err) {
       showToast('err', err instanceof Error ? err.message : 'Không thể hủy import', 8000);
     } finally {
@@ -2085,6 +2114,7 @@ export default function AdminProductsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     cancelTrackRef.current = false;
+    importUserCancelledRef.current = false;
     setImporting(true);
     setImportDetailPanel(null);
     const szMb = file.size / (1024 * 1024);
@@ -2120,6 +2150,11 @@ export default function AdminProductsPage() {
       });
 
       const job = await pollImportJob(job_id);
+
+      if (importUserCancelledRef.current) {
+        importUserCancelledRef.current = false;
+        return;
+      }
 
       try {
         localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
@@ -4674,28 +4709,15 @@ export default function AdminProductsPage() {
                 {importProgress.warn ? (
                   <p className="text-[11px] text-amber-800">{importProgress.warn}</p>
                 ) : null}
-                {importProgress.cancel_requested ? (
-                  <p className="text-[11px] text-amber-800">
-                    Đang chờ server dừng sau bước hiện tại…
-                  </p>
-                ) : null}
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-0.5">
                   <button
                     type="button"
                     onClick={() => void handleCancelImportExcel()}
-                    disabled={
-                      importCancelBusy ||
-                      Boolean(importProgress.cancel_requested) ||
-                      !activeImportJobIdRef.current
-                    }
+                    disabled={importCancelBusy || !activeImportJobIdRef.current}
                     className="text-[11px] font-medium text-red-700 underline hover:text-red-900 disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
-                    aria-label="Hủy import Excel đang chạy"
+                    aria-label="Hủy ngay import Excel đang chạy"
                   >
-                    {importProgress.cancel_requested
-                      ? 'Đang chờ hủy…'
-                      : importCancelBusy
-                        ? 'Đang gửi yêu cầu hủy…'
-                        : 'Hủy import'}
+                    {importCancelBusy ? 'Đang hủy…' : 'Hủy ngay'}
                   </button>
                   <button
                     type="button"

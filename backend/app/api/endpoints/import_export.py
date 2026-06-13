@@ -31,6 +31,11 @@ from app.services.import_excel_job_store import (
     load_import_job,
     persist_import_job,
 )
+from app.services.import_excel_job_runtime import (
+    force_abort_import_session,
+    register_import_session,
+    unregister_import_session,
+)
 
 excel_to_db_mapping = {
     # ID & Basic Info
@@ -244,6 +249,7 @@ def _run_import_excel_job(
             )
 
     db = SessionLocal()
+    register_import_session(job_id, db)
     try:
         fz = os.path.getsize(temp_file_path) if os.path.isfile(temp_file_path) else 0
         logger.info(
@@ -365,18 +371,31 @@ def _run_import_excel_job(
             db.rollback()
         except Exception:
             pass
-        _import_job_update(
-            job_id,
-            status="cancelled",
-            phase="cancelled",
-            cancel_requested=True,
-            finished_at=datetime.now().isoformat(),
-            message="Import đã hủy theo yêu cầu.",
-            detail=str(exc) or None,
-            percent=None,
-        )
+        with _import_job_lock:
+            existing = _import_job_get_locked(job_id) or {}
+        if (existing.get("status") or "").strip().lower() != "cancelled":
+            _import_job_update(
+                job_id,
+                status="cancelled",
+                phase="cancelled",
+                cancel_requested=True,
+                finished_at=datetime.now().isoformat(),
+                message="Import đã hủy ngay.",
+                detail=str(exc) or None,
+                percent=None,
+            )
         logger.info("%s cancelled job=%s", IMPORT_EXCEL_LOG_PREFIX, job_id)
     except Exception as e:
+        with _import_job_lock:
+            existing = _import_job_get_locked(job_id) or {}
+        if (existing.get("status") or "").strip().lower() == "cancelled":
+            logger.info(
+                "%s worker stopped after force cancel job=%s err=%s",
+                IMPORT_EXCEL_LOG_PREFIX,
+                job_id,
+                str(e)[:200],
+            )
+            return
         traceback.print_exc()
         tb = traceback.format_exc()
         tb_lines = [ln for ln in tb.strip().splitlines() if ln.strip()][-40:]
@@ -397,7 +416,11 @@ def _run_import_excel_job(
             str(e)[:400],
         )
     finally:
-        db.close()
+        unregister_import_session(job_id)
+        try:
+            db.close()
+        except Exception:
+            pass
         if temp_file_path and os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)
@@ -524,8 +547,10 @@ def cancel_import_excel_job(
     _: AdminUser = Depends(require_privileged_admin),
 ):
     """
-    Yêu cầu hủy import Excel đang chạy (cooperative — dừng sau bước parse/DB hiện tại).
+    Hủy ngay import Excel: đánh dấu cancelled + rollback/cancel query/đóng session worker.
+    Bước đang chạy bị bỏ — transaction chưa commit sẽ không ghi thêm.
     """
+    now = datetime.now().isoformat()
     with _import_job_lock:
         job = _import_job_get_locked(job_id)
         if not job:
@@ -533,15 +558,19 @@ def cancel_import_excel_job(
         status = (job.get("status") or "").strip().lower()
         if status in {"done", "error", "cancelled"}:
             return job
+        job["status"] = "cancelled"
+        job["phase"] = "cancelled"
         job["cancel_requested"] = True
-        job["message"] = "Đang hủy import… dừng sau bước hiện tại."
+        job["finished_at"] = now
+        job["message"] = "Import đã hủy ngay."
         IMPORT_EXCEL_JOBS[job_id] = job
         try:
             persist_import_job(job_id, job)
         except OSError:
             pass
         out = dict(job)
-    logger.info("%s cancel_requested job=%s", IMPORT_EXCEL_LOG_PREFIX, job_id)
+    force_abort_import_session(job_id)
+    logger.info("%s force_cancel job=%s", IMPORT_EXCEL_LOG_PREFIX, job_id)
     return out
 
 

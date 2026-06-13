@@ -23,8 +23,9 @@ def test_import_job_cancel_requested_raises():
         mod.IMPORT_EXCEL_JOBS.pop(job_id, None)
 
 
-def test_cancel_endpoint_marks_job(tmp_path):
+def test_cancel_endpoint_force_marks_cancelled_immediately():
     from app.api.endpoints import import_export as mod
+    from app.services import import_excel_job_runtime as runtime
 
     job_id = "11111111-2222-3333-4444-555555555555"
     mod.IMPORT_EXCEL_JOBS[job_id] = {
@@ -35,8 +36,17 @@ def test_cancel_endpoint_marks_job(tmp_path):
         "total": 150,
         "message": "Đang ghi CSDL",
     }
+    aborted = {"called": False}
+
+    def _fake_abort(jid: str) -> bool:
+        aborted["called"] = jid == job_id
+        return True
+
     with patch.object(mod, "persist_import_job", persist_import_job):
-        out = mod.cancel_import_excel_job(job_id, _=None)  # type: ignore[arg-type]
-    assert out["cancel_requested"] is True
-    assert "hủy" in (out.get("message") or "").lower()
+        with patch.object(runtime, "force_abort_import_session", _fake_abort):
+            out = mod.cancel_import_excel_job(job_id, _=None)  # type: ignore[arg-type]
+    assert out["status"] == "cancelled"
+    assert out.get("finished_at")
+    assert aborted["called"] is True
+    assert "ngay" in (out.get("message") or "").lower()
     mod.IMPORT_EXCEL_JOBS.pop(job_id, None)

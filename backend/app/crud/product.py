@@ -6396,12 +6396,19 @@ def bulk_import_products(
             existing = db.query(Product).filter(Product.product_id == owner_pid).first()
         if existing is None:
             existing = db.query(Product).filter(Product.product_id == product_id).first()
-        if existing is None:
-            if slow_conflict_fallback:
-                conflict_pid = find_conflicting_product_id_for_same_listing_source(db, product_id)
-                if conflict_pid:
-                    existing = db.query(Product).filter(Product.product_id == conflict_pid).first()
         if existing is None and slow_conflict_fallback:
+            if should_cancel and should_cancel():
+                from app.services.import_excel_job_store import ImportExcelJobCancelled
+
+                raise ImportExcelJobCancelled("Admin đã yêu cầu hủy import Excel.")
+            conflict_pid = find_conflicting_product_id_for_same_listing_source(db, product_id)
+            if conflict_pid:
+                existing = db.query(Product).filter(Product.product_id == conflict_pid).first()
+        if existing is None and slow_conflict_fallback:
+            if should_cancel and should_cancel():
+                from app.services.import_excel_job_store import ImportExcelJobCancelled
+
+                raise ImportExcelJobCancelled("Admin đã yêu cầu hủy import Excel.")
             existing = find_product_by_listing_source_prefix(db, source_prefix)
         ex_pid_early = existing.id if existing else None
         proposed_raw = product_data.get("code")
