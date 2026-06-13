@@ -832,6 +832,15 @@ class Settings:
         self.EXCEL_IMPORT_PARSE_PROGRESS_EVERY_ROWS: int = int(
             os.getenv("EXCEL_IMPORT_PARSE_PROGRESS_EVERY_ROWS", "50")
         )
+        # Tắt mặc định các fallback/query quét toàn bảng trong bulk import để ưu tiên tốc độ ghi DB.
+        # Bật lại khi cần chẩn đoán xung đột cũ: true.
+        self.EXCEL_IMPORT_ENABLE_SLOW_CONFLICT_FALLBACK: bool = os.getenv(
+            "EXCEL_IMPORT_ENABLE_SLOW_CONFLICT_FALLBACK", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        # Cảnh báo trùng prefix (mã cột A) quét toàn bảng products — hữu ích debug, mặc định tắt để nhanh hơn.
+        self.EXCEL_IMPORT_DUPLICATE_PREFIX_WARNING: bool = os.getenv(
+            "EXCEL_IMPORT_DUPLICATE_PREFIX_WARNING", "false"
+        ).strip().lower() in ("1", "true", "yes", "on")
         # bulk_import_products: sau khi ghi DB có thể chạy Gemini (meta description + seo_body) theo từng path danh mục.
         # Với batch rất lớn (vd. ~30k SP) luồng nền có thể lâu — nếu số dòng import ≥ ngưỡng dưới thì BỎ QUA tự động (chạy script / admin sau).
         # Đặt 0 để luôn cho phép chạy nền khi CATEGORY_GEMINI_SEO_AUTO_ENABLED bật.

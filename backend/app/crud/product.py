@@ -6174,23 +6174,30 @@ def bulk_import_products(
     db_prefix_owner, db_code_owner = _bulk_import_conflict_maps_initial(db)
     batch_prefix_owner: Dict[str, str] = {}
     batch_code_owner: Dict[str, str] = {}
+    slow_conflict_fallback = bool(
+        getattr(settings, "EXCEL_IMPORT_ENABLE_SLOW_CONFLICT_FALLBACK", False)
+    )
+    duplicate_prefix_warn_enabled = bool(
+        getattr(settings, "EXCEL_IMPORT_DUPLICATE_PREFIX_WARNING", False)
+    )
 
-    prefix_counts: Dict[str, int] = {}
-    prefix_sample: Dict[str, str] = {}
-    for pid_row in db.query(Product.product_id).filter(Product.product_id.isnot(None)).all():
-        pid_s = (pid_row[0] or "").strip()
-        src0 = _listing_source_prefix_from_product_id(pid_s)
-        if not src0:
-            continue
-        pk0 = src0["prefix_key"]
-        prefix_counts[pk0] = prefix_counts.get(pk0, 0) + 1
-        prefix_sample.setdefault(pk0, src0["prefix"])
-    for pk0, cnt in prefix_counts.items():
-        if cnt > 1:
-            warnings.append(
-                f"Mã cột A «{prefix_sample.get(pk0, pk0)}» đang có {cnt} sản phẩm trên web — "
-                "import chỉ cập nhật một bản, không tạo thêm trùng offer."
-            )
+    if duplicate_prefix_warn_enabled:
+        prefix_counts: Dict[str, int] = {}
+        prefix_sample: Dict[str, str] = {}
+        for pid_row in db.query(Product.product_id).filter(Product.product_id.isnot(None)).all():
+            pid_s = (pid_row[0] or "").strip()
+            src0 = _listing_source_prefix_from_product_id(pid_s)
+            if not src0:
+                continue
+            pk0 = src0["prefix_key"]
+            prefix_counts[pk0] = prefix_counts.get(pk0, 0) + 1
+            prefix_sample.setdefault(pk0, src0["prefix"])
+        for pk0, cnt in prefix_counts.items():
+            if cnt > 1:
+                warnings.append(
+                    f"Mã cột A «{prefix_sample.get(pk0, pk0)}» đang có {cnt} sản phẩm trên web — "
+                    "import chỉ cập nhật một bản, không tạo thêm trùng offer."
+                )
 
     def _missing_required_category_labels(data: Dict, *, warehouse_row: bool = False) -> List[str]:
         if warehouse_row:
@@ -6384,10 +6391,11 @@ def bulk_import_products(
         if existing is None:
             existing = db.query(Product).filter(Product.product_id == product_id).first()
         if existing is None:
-            conflict_pid = find_conflicting_product_id_for_same_listing_source(db, product_id)
-            if conflict_pid:
-                existing = db.query(Product).filter(Product.product_id == conflict_pid).first()
-        if existing is None:
+            if slow_conflict_fallback:
+                conflict_pid = find_conflicting_product_id_for_same_listing_source(db, product_id)
+                if conflict_pid:
+                    existing = db.query(Product).filter(Product.product_id == conflict_pid).first()
+        if existing is None and slow_conflict_fallback:
             existing = find_product_by_listing_source_prefix(db, source_prefix)
         ex_pid_early = existing.id if existing else None
         proposed_raw = product_data.get("code")
@@ -6459,17 +6467,18 @@ def bulk_import_products(
 
                 assign_search_document_to_mapping(product_data)
                 if not existing:
-                    late = find_product_by_listing_source_prefix(db, source_prefix)
+                    late = find_product_by_listing_source_prefix(db, source_prefix) if slow_conflict_fallback else None
                     if late is None:
-                        late_pid = find_conflicting_product_id_for_same_listing_source(
-                            db, product_id
-                        )
-                        if late_pid:
-                            late = (
-                                db.query(Product)
-                                .filter(Product.product_id == late_pid)
-                                .first()
+                        if slow_conflict_fallback:
+                            late_pid = find_conflicting_product_id_for_same_listing_source(
+                                db, product_id
                             )
+                            if late_pid:
+                                late = (
+                                    db.query(Product)
+                                    .filter(Product.product_id == late_pid)
+                                    .first()
+                                )
                     if late is not None:
                         existing = late
                         warnings.append(
