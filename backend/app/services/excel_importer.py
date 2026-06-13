@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import threading
 from datetime import datetime
 import traceback
 from pathlib import Path
@@ -22,11 +23,90 @@ from app.utils.product_synthetic_engagement import synthetic_engagement_counts
 
 logger = logging.getLogger(__name__)
 
-# Báo tiến trình parse file (tránh gọi quá dày với file lớn)
-PARSE_PROGRESS_EVERY = 200
-
 # Tự chỉnh độ rộng cột trên file nhỏ; catalog lớn bỏ qua (tránh timeout trên VPS).
 _EXPORT_AUTO_COLUMN_WIDTH_MAX_ROWS = 2500
+
+
+def _spawn_post_import_variant_translation(products_data: List[Dict[str, Any]]) -> bool:
+    """
+    Chạy dịch tên Variant bằng DeepSeek sau khi import DB đã hoàn tất.
+    Không chặn API import; cập nhật dần `products.colors` ở nền.
+    """
+    # Snapshot tối thiểu để giảm RAM và tránh giữ toàn bộ payload import.
+    items: List[Dict[str, Any]] = []
+    for p in products_data or []:
+        pid = str((p or {}).get("product_id") or "").strip()
+        colors = (p or {}).get("colors")
+        if not pid or not isinstance(colors, list) or not colors:
+            continue
+        items.append(
+            {
+                "product_id": pid,
+                "colors": json.loads(json.dumps(colors, ensure_ascii=False)),
+            }
+        )
+    if not items:
+        return False
+
+    def _run() -> None:
+        from app.db.session import SessionLocal
+        from app.models.product import Product
+        from app.services.variant_color_translate import apply_deepseek_translations_to_variant_colors
+
+        try:
+            before_by_pid = {
+                str(it.get("product_id")): json.dumps(it.get("colors") or [], ensure_ascii=False, sort_keys=True)
+                for it in items
+            }
+            apply_deepseek_translations_to_variant_colors(items)
+            changed = [
+                it
+                for it in items
+                if before_by_pid.get(str(it.get("product_id")))
+                != json.dumps(it.get("colors") or [], ensure_ascii=False, sort_keys=True)
+            ]
+            if not changed:
+                return
+
+            db = SessionLocal()
+            try:
+                chunk_size = 200
+                updated_rows = 0
+                for i in range(0, len(changed), chunk_size):
+                    chunk = changed[i : i + chunk_size]
+                    pids = [str(it.get("product_id")) for it in chunk if str(it.get("product_id") or "").strip()]
+                    if not pids:
+                        continue
+                    rows = db.query(Product).filter(Product.product_id.in_(pids)).all()
+                    by_pid = {str(r.product_id): r for r in rows}
+                    for it in chunk:
+                        pid = str(it.get("product_id") or "").strip()
+                        row = by_pid.get(pid)
+                        if row is None:
+                            continue
+                        row.colors = it.get("colors") or []
+                        row.updated_at = datetime.now()
+                        updated_rows += 1
+                    db.commit()
+                if updated_rows > 0:
+                    logger.info(
+                        "DeepSeek Variant hậu import: đã cập nhật %s sản phẩm trên DB.",
+                        updated_rows,
+                    )
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.warning("DeepSeek Variant hậu import lỗi: %s", exc)
+
+    threading.Thread(
+        target=_run,
+        daemon=True,
+        name="excel-variant-deepseek-post-import",
+    ).start()
+    return True
 
 
 def _resolve_export_dir() -> Path:
@@ -161,11 +241,15 @@ class ExcelImporter:
             warnings = []
             
             mappings = get_category_final_mappings_for_runtime(self.db)
+            parse_tick = max(
+                10,
+                int(getattr(settings, "EXCEL_IMPORT_PARSE_PROGRESS_EVERY_ROWS", 50) or 50),
+            )
 
             for i, (idx, row) in enumerate(df.iterrows()):
                 try:
                     if progress_callback and (
-                        i % PARSE_PROGRESS_EVERY == 0 or i == row_count - 1
+                        i % parse_tick == 0 or i == row_count - 1
                     ):
                         progress_callback("parsing", i + 1, row_count)
 
@@ -214,19 +298,14 @@ class ExcelImporter:
             
             logger.info(f"📊 ĐÃ CHUẨN BỊ: {len(products_data)} sản phẩm hợp lệ, {len(errors)} lỗi")
 
-            # Variant đã chuẩn ở khâu chuẩn bị file — import Excel chỉ ghi DB (không DeepSeek).
-            # Opt-in: EXCEL_VARIANT_COLORS_DEEPSEEK_TRANSLATE=true + DEEPSEEK_API_KEY.
+            deepseek_variant_post_import = False
             if products_data:
                 try:
-                    from app.services.variant_color_translate import (
-                        apply_deepseek_translations_to_variant_colors,
-                        variant_color_deepseek_translate_effective,
-                    )
+                    from app.services.variant_color_translate import variant_color_deepseek_translate_effective
 
-                    if variant_color_deepseek_translate_effective():
-                        apply_deepseek_translations_to_variant_colors(products_data)
+                    deepseek_variant_post_import = bool(variant_color_deepseek_translate_effective())
                 except Exception as exc:
-                    logger.warning("Dịch tên Variant (DeepSeek) bỏ qua do lỗi: %s", exc)
+                    logger.warning("Không đọc được trạng thái DeepSeek Variant: %s", exc)
 
             if products_data:
                 logger.info("🔄 ĐANG IMPORT VÀO DATABASE...")
@@ -245,6 +324,14 @@ class ExcelImporter:
                 result["warnings"] = all_warnings
                 result["skipped"] = skipped if isinstance(skipped, list) else []
                 result["skipped_count"] = skipped_count
+
+                # Ưu tiên tốc độ import: ghi DB trước, dịch màu Variant làm ở nền.
+                if deepseek_variant_post_import:
+                    if _spawn_post_import_variant_translation(products_data):
+                        result["warnings"].append(
+                            "DeepSeek Variant đang chạy hậu xử lý nền sau khi import DB; "
+                            "màu có thể cập nhật dần trong vài phút."
+                        )
                 
                 logger.info(f"📦 KẾT QUẢ IMPORT:")
                 logger.info(f"   ➕ Tạo mới: {result.get('created', 0)}")

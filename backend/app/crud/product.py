@@ -6155,7 +6155,12 @@ def bulk_import_products(
     )
 
     n_products = len(products_data)
-    db_tick = max(50, batch_size)
+    # Tiến trình DB nên cập nhật mượt (không phụ thuộc commit batch 250 dòng).
+    # Commit vẫn theo EXCEL_IMPORT_COMMIT_BATCH_SIZE để giữ hiệu năng ghi.
+    db_tick = max(
+        10,
+        int(getattr(settings, "EXCEL_IMPORT_PROGRESS_EVERY_ROWS", 25) or 25),
+    )
 
     if progress_callback and n_products:
         progress_callback("database", 0, n_products)

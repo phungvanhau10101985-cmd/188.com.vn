@@ -1,4 +1,4 @@
-"""Vipomall: màu + ảnh từ .product-type-list-size (section «Màu sắc»)."""
+"""Vipomall: màu/variant + ảnh từ .product-type-list-size (section «Màu sắc» / «Mẫu»)."""
 
 from app.services.import_vipomall_scraper import vipomall_row_to_product_data
 
@@ -85,3 +85,104 @@ def test_vipomall_color_only_layout_ignores_stale_size_list_from_scraper():
         "123",
     )
     assert product.get("sizes") == []
+
+
+_VIPOMALL_VARIANT_ONLY_RAW = {
+    "title": "JZQ012 bóng bơm hơi thông minh",
+    "colors": [
+        {
+            "label": "JZQ012 bóng bơm hơi thông minh màu đen",
+            "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN01Hm7Csd1POBoG5SVRY_!!946661830-0-cib.jpg",
+        },
+        {
+            "label": "JZQ012 bóng bơm hơi thông minh màu xám",
+            "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN01qp6L1B1POBoFdCMLI_!!946661830-0-cib.jpg",
+        },
+        {
+            "label": "JZQ012 bóng bơm hơi thông minh màu đỏ hồng",
+            "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN01FW9Fqy1POBoGfvOya_!!946661830-0-cib.jpg",
+        },
+    ],
+    "variant_rows": [
+        {
+            "color": "JZQ012 bóng bơm hơi thông minh màu đen",
+            "size": "",
+            "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN01Hm7Csd1POBoG5SVRY_!!946661830-0-cib.jpg",
+            "stock": 5368,
+            "price_vnd": 140971,
+            "price_text": "140.971 đ",
+            "stock_text": "(5368 SP có sẵn)",
+            "in_stock": True,
+        },
+        {
+            "color": "JZQ012 bóng bơm hơi thông minh màu xám",
+            "size": "",
+            "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN01qp6L1B1POBoFdCMLI_!!946661830-0-cib.jpg",
+            "stock": 1495,
+            "price_vnd": 140971,
+            "price_text": "140.971 đ",
+            "stock_text": "(1495 SP có sẵn)",
+            "in_stock": True,
+        },
+        {
+            "color": "JZQ012 bóng bơm hơi thông minh màu đỏ hồng",
+            "size": "",
+            "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN01FW9Fqy1POBoGfvOya_!!946661830-0-cib.jpg",
+            "stock": 1033,
+            "price_vnd": 140971,
+            "price_text": "140.971 đ",
+            "stock_text": "(1033 SP có sẵn)",
+            "in_stock": True,
+        },
+    ],
+    "sizes": [],
+    "gallery_images": [],
+    "detail_images": [],
+}
+
+
+def test_vipomall_variant_only_product_names_map_to_colors_without_sizes():
+    product = vipomall_row_to_product_data(
+        _VIPOMALL_VARIANT_ONLY_RAW,
+        "https://vipomall.vn/san-pham/456?platform_type=10",
+        "456",
+    )
+    colors = product.get("colors") or []
+    assert len(colors) == 3
+    assert "màu đen" in colors[0]["name"]
+    assert "O1CN01Hm7Csd1POBoG5SVRY" in colors[0]["img"]
+    assert product.get("sizes") == []
+    assert product.get("product_info", {}).get("variants", {}).get("variant_only") is True
+    assert product.get("price") == 140971.0
+    pairs = product.get("product_info", {}).get("variants", {}).get("pairs") or []
+    assert len(pairs) == 3
+    assert pairs[0].get("size") == ""
+
+
+def test_vipomall_remaps_mislabeled_variant_rows_from_size_field():
+    """JS section unknown có thể gán tên variant vào size — Python chuyển về colors."""
+    raw = {
+        "title": "JZQ012",
+        "colors": [],
+        "variant_rows": [
+            {
+                "color": "",
+                "size": "JZQ012 bóng bơm hơi thông minh màu đen",
+                "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN01Hm7Csd1POBoG5SVRY_!!946661830-0-cib.jpg",
+                "stock": 100,
+                "price_vnd": 140971,
+                "in_stock": True,
+            },
+        ],
+        "sizes": ["JZQ012 bóng bơm hơi thông minh màu đen"],
+        "gallery_images": [],
+        "detail_images": [],
+    }
+    product = vipomall_row_to_product_data(
+        raw,
+        "https://vipomall.vn/san-pham/456?platform_type=10",
+        "456",
+    )
+    assert len(product.get("colors") or []) == 1
+    assert product.get("sizes") == []
+    assert "màu đen" in (product.get("colors") or [])[0]["name"]

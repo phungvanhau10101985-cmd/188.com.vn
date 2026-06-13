@@ -453,6 +453,16 @@ class Settings:
         self.IMPORT_1688_BATCH_RESUME_ON_STARTUP: bool = os.getenv(
             "IMPORT_1688_BATCH_RESUME_ON_STARTUP", ""
         ).strip().lower() in ("1", "true", "yes")
+        _import_batch_delay_raw = os.getenv(
+            "IMPORT_1688_BATCH_INTER_JOB_DELAY_SECONDS", "0"
+        ).strip()
+        try:
+            _import_batch_delay = float(_import_batch_delay_raw or "0")
+        except ValueError:
+            _import_batch_delay = 0.0
+        # Delay giữa từng job trong batch import link: mặc định 0 để không chậm hàng đợi.
+        # Có thể tăng (vd. 0.2 - 1.0s) khi cần giảm tải CPU/network trên VPS nhỏ.
+        self.IMPORT_1688_BATCH_INTER_JOB_DELAY_SECONDS: float = max(0.0, _import_batch_delay)
         # CN¥ listing → Excel batch / quy đổi Giá Tệ: VNĐ/CN¥ (mặc định khớp frontend parse HTML listing `3580`).
         _listing_cny_rate = os.getenv("LISTING_IMPORT_VND_PER_CNY", "3580").strip().replace(",", ".")
         try:
@@ -815,6 +825,13 @@ class Settings:
         # Import Excel: tối đa số dòng/lần (mặc định 30k); commit DB theo lô để giảm overhead transaction
         self.MAX_EXCEL_IMPORT_ROWS: int = int(os.getenv("MAX_EXCEL_IMPORT_ROWS", "30000"))
         self.EXCEL_IMPORT_COMMIT_BATCH_SIZE: int = int(os.getenv("EXCEL_IMPORT_COMMIT_BATCH_SIZE", "250"))
+        # Cập nhật tiến trình import (UI poll job): nhỏ hơn commit batch để thanh tiến trình nhảy mượt.
+        self.EXCEL_IMPORT_PROGRESS_EVERY_ROWS: int = int(
+            os.getenv("EXCEL_IMPORT_PROGRESS_EVERY_ROWS", "25")
+        )
+        self.EXCEL_IMPORT_PARSE_PROGRESS_EVERY_ROWS: int = int(
+            os.getenv("EXCEL_IMPORT_PARSE_PROGRESS_EVERY_ROWS", "50")
+        )
         # bulk_import_products: sau khi ghi DB có thể chạy Gemini (meta description + seo_body) theo từng path danh mục.
         # Với batch rất lớn (vd. ~30k SP) luồng nền có thể lâu — nếu số dòng import ≥ ngưỡng dưới thì BỎ QUA tự động (chạy script / admin sau).
         # Đặt 0 để luôn cho phép chạy nền khi CATEGORY_GEMINI_SEO_AUTO_ENABLED bật.

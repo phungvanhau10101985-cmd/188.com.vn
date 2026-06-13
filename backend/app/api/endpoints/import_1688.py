@@ -360,6 +360,9 @@ def _run_import_1688_chain_from_meta(meta_path_str: str) -> None:
         logger.warning("import batch meta không tồn tại: %s", meta_path_str)
         return
     token = p.stem
+    inter_job_delay_s = float(getattr(settings, "IMPORT_1688_BATCH_INTER_JOB_DELAY_SECONDS", 0.0) or 0.0)
+    if inter_job_delay_s < 0:
+        inter_job_delay_s = 0.0
     with _batch_chain_lock:
         if token in _batch_tokens_running:
             logger.info("import batch chain đang chạy — bỏ qua lần gọi trùng: %s…", token[:12])
@@ -390,7 +393,8 @@ def _run_import_1688_chain_from_meta(meta_path_str: str) -> None:
                     "import batch chain: job lỗi không mong đợi (tiếp tục các job sau): job_id=%s…",
                     (jid[:16] if jid else ""),
                 )
-            time.sleep(2)
+            if inter_job_delay_s > 0:
+                time.sleep(inter_job_delay_s)
     finally:
         with _batch_chain_lock:
             _batch_tokens_running.discard(token)

@@ -283,17 +283,44 @@ _SCRAPE_JS = r"""() => {
     normText(
       section.querySelector(".header .select span, .header .select .csdf, .header .select")?.innerText || "",
     );
+  const sectionTotalText = (section) =>
+    normText(
+      section.querySelector(".header .total-select span, .header .total-select .csdf, .header .total-select")?.innerText ||
+        "",
+    );
   const isColorSectionHeader = (t) => /màu\s*sắc|颜色|colour|color/i.test(t);
-  const isSizeSectionHeader = (t) => /kích\s*cỡ|尺码|size/i.test(t) && !isColorSectionHeader(t);
+  const isVariantSectionHeader = (t) =>
+    /mẫu|phân\s*loại|规格|款式|kiểu|loại hàng|biến\s*thể|variant|model|style/i.test(t) &&
+    !isColorSectionHeader(t);
+  const isSizeSectionHeader = (t) =>
+    /kích\s*cỡ|尺码|size/i.test(t) && !isColorSectionHeader(t) && !isVariantSectionHeader(t);
   const rowVariantLabel = (row) => {
     const titles = Array.from(
       row.querySelectorAll(".size [title], [data-toggle='tooltip'][title], .size-1 [title]"),
     )
       .map((el) => normText(el.getAttribute("title") || el.textContent))
       .filter(Boolean);
-    const visible = normText(row.querySelector(".size span span, .size-1 span span")?.innerText || "");
+    const visible = normText(
+      row.querySelector(".size span span, .size-1 span span, .size-1 span, .size-1")?.innerText || "",
+    );
     return { titles, visible };
   };
+  const rowLooksVariantOnly = (row) => {
+    if (!row.querySelector(".size-1, .size-content .size-1")) return false;
+    const sizeCells = Array.from(row.querySelectorAll(".size-content .size, .size-content > .size"));
+    return sizeCells.length === 0;
+  };
+  const resolveSectionKind = (section) => {
+    const header = sectionHeaderText(section);
+    const total = sectionTotalText(section);
+    if (isColorSectionHeader(header)) return "color";
+    if (isVariantSectionHeader(header) || /\d+\s*mẫu/i.test(total)) return "variant";
+    if (isSizeSectionHeader(header)) return "size";
+    const rows = Array.from(section.querySelectorAll(".product-size-content-item"));
+    if (rows.length && rows.every((row) => rowLooksVariantOnly(row))) return "variant";
+    return "unknown";
+  };
+  const variantLabelKind = (kind) => kind === "color" || kind === "variant";
   const sizeRows = [];
   const sizeSet = new Set();
   const pairSeen = new Set();
@@ -301,7 +328,7 @@ _SCRAPE_JS = r"""() => {
     const { titles, visible } = rowVariantLabel(row);
     let color = "";
     let size = "";
-    if (sectionKind === "color") {
+    if (variantLabelKind(sectionKind)) {
       color = titles[0] || visible;
     } else if (sectionKind === "size") {
       size = titles[0] || visible;
@@ -309,9 +336,11 @@ _SCRAPE_JS = r"""() => {
       color = titles[0];
       size = titles[1];
     } else if (titles.length === 1) {
-      size = titles[0];
+      if (rowLooksVariantOnly(row)) color = titles[0];
+      else size = titles[0];
     } else if (visible) {
-      size = visible;
+      if (rowLooksVariantOnly(row)) color = visible;
+      else size = visible;
     }
     const stockText = normText(row.querySelector(".product")?.innerText || "");
     const isOutOfStock = /hết\s*hàng/i.test(stockText);
@@ -325,7 +354,7 @@ _SCRAPE_JS = r"""() => {
     );
     const priceVnd = parseInt(priceText.replace(/[^\d]/g, ""), 10) || null;
     if (!inStock) return;
-    if (size) sizeSet.add(size);
+    if (size && !variantLabelKind(sectionKind) && !rowLooksVariantOnly(row)) sizeSet.add(size);
     if (color || size) {
       const key = `${color}###${size}`;
       if (!pairSeen.has(key)) {
@@ -333,6 +362,7 @@ _SCRAPE_JS = r"""() => {
         sizeRows.push({
           color,
           size,
+          image_url: imgUrl(row.querySelector("img")) || null,
           stock,
           price_vnd: priceVnd,
           price_text: priceText,
@@ -343,10 +373,9 @@ _SCRAPE_JS = r"""() => {
     }
   };
 
-  document.querySelectorAll(".product-type-list-size").forEach((section) => {
-    const header = sectionHeaderText(section);
-    const kind = isColorSectionHeader(header) ? "color" : isSizeSectionHeader(header) ? "size" : "unknown";
-    if (kind === "color") {
+  document.querySelectorAll(".product-type-content .product-type-list-size, .product-type-list-size").forEach((section) => {
+    const kind = resolveSectionKind(section);
+    if (variantLabelKind(kind)) {
       section.querySelectorAll(".product-size-content-item").forEach((row) => {
         const { titles, visible } = rowVariantLabel(row);
         const label = titles[0] || visible;
@@ -674,6 +703,92 @@ def _is_vipomall_variant_in_stock(r: Dict[str, Any]) -> bool:
     return False
 
 
+def _vipomall_variant_rows_are_color_only(variant_rows: List[Dict[str, Any]]) -> bool:
+    return bool(variant_rows) and all(not _clean_text(r.get("size"), limit=80) for r in variant_rows)
+
+
+def _vipomall_append_color_entry(
+    *,
+    label: str,
+    image_url: str,
+    colors_raw: List[Dict[str, Any]],
+    colors_out: List[Dict[str, str]],
+    swatches: List[Dict[str, Optional[str]]],
+    seen: set[str],
+) -> None:
+    name = _clean_text(label, limit=160)
+    if not name:
+        return
+    key = name.casefold()
+    if key in seen:
+        return
+    seen.add(key)
+    img = _norm_img_url(image_url)
+    colors_raw.append({"label": name, "image_url": img or None})
+    colors_out.append({"name": name, "img": img})
+    swatches.append({"label": name, "image_url": img or None})
+
+
+def _vipomall_remap_variant_only_rows(
+    colors_raw: List[Dict[str, Any]],
+    colors_out: List[Dict[str, str]],
+    swatches: List[Dict[str, Optional[str]]],
+    variant_rows: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]], List[Dict[str, Optional[str]]], List[Dict[str, Any]]]:
+    """
+    Section «Mẫu» / chỉ variant (.size-1, không size): JS đôi khi gán nhãn vào `size`.
+    Chuyển về `color` và bổ sung `colors[]` + ảnh từ từng dòng.
+    """
+    if colors_out:
+        return colors_raw, colors_out, swatches, variant_rows
+
+    remapped_rows: List[Dict[str, Any]] = []
+    new_colors_raw = list(colors_raw)
+    new_colors_out = list(colors_out)
+    new_swatches = list(swatches)
+    seen = {_clean_text(c.get("name"), limit=160).casefold() for c in new_colors_out if c.get("name")}
+
+    has_color_field = any(_clean_text(r.get("color"), limit=160) for r in variant_rows)
+    if has_color_field:
+        for r in variant_rows:
+            label = _clean_text(r.get("color"), limit=160)
+            img = _norm_img_url(str(r.get("image_url") or ""))
+            if label:
+                _vipomall_append_color_entry(
+                    label=label,
+                    image_url=img,
+                    colors_raw=new_colors_raw,
+                    colors_out=new_colors_out,
+                    swatches=new_swatches,
+                    seen=seen,
+                )
+            remapped_rows.append(r)
+        return new_colors_raw, new_colors_out, new_swatches, remapped_rows
+
+    for r in variant_rows:
+        label = _clean_text(r.get("size"), limit=160)
+        if not label:
+            remapped_rows.append(r)
+            continue
+        nr = dict(r)
+        nr["color"] = label
+        nr["size"] = ""
+        remapped_rows.append(nr)
+        img = _norm_img_url(str(r.get("image_url") or ""))
+        _vipomall_append_color_entry(
+            label=label,
+            image_url=img,
+            colors_raw=new_colors_raw,
+            colors_out=new_colors_out,
+            swatches=new_swatches,
+            seen=seen,
+        )
+
+    if new_colors_out:
+        return new_colors_raw, new_colors_out, new_swatches, remapped_rows
+    return colors_raw, colors_out, swatches, variant_rows
+
+
 def vipomall_row_to_product_data(
     row: Dict[str, Any],
     source_url: str,
@@ -701,6 +816,14 @@ def vipomall_row_to_product_data(
             continue
         detail_imgs.append(u)
 
+    variant_rows = [
+        r for r in row.get("variant_rows") or [] if isinstance(r, dict) and _is_vipomall_variant_in_stock(r)
+    ]
+    colors_raw, colors_out, swatches, variant_rows = _vipomall_remap_variant_only_rows(
+        colors_raw, colors_out, swatches, variant_rows
+    )
+    exclude_detail_keys.update(c["img"].split("?")[0] for c in colors_out if c.get("img"))
+
     try:
         from app.services.variant_color_translate import apply_deepseek_translations_to_color_entries
 
@@ -718,9 +841,6 @@ def vipomall_row_to_product_data(
         if i < len(colors_out):
             sw["label"] = _clean_text(colors_out[i].get("name"), limit=160) or sw.get("label")
 
-    variant_rows = [
-        r for r in row.get("variant_rows") or [] if isinstance(r, dict) and _is_vipomall_variant_in_stock(r)
-    ]
     pair_objs: List[Dict[str, str]] = []
     sizes: List[str] = []
     seen_size: set[str] = set()
@@ -758,12 +878,16 @@ def vipomall_row_to_product_data(
             for sw, raw_c in zip(swatches, colors_raw)
             if _clean_text(raw_c.get("label"), limit=160) in in_stock_raw_colors
         ]
-    # Layout «Màu sắc» only (túi, phụ kiện đồng hồ…): variant có color, size rỗng → sizes phải [].
-    color_only_layout = bool(colors_out) and bool(variant_rows) and all(
-        not _clean_text(r.get("size"), limit=80) for r in variant_rows
-    )
+    # Layout chỉ variant (túi, phụ kiện, SP nhiều mẫu «3 Mẫu»…): không có size → sizes=[].
+    variant_only_layout = _vipomall_variant_rows_are_color_only(variant_rows)
+    color_only_layout = bool(colors_out) and variant_only_layout
     if color_only_layout:
         sizes = []
+        for r in variant_rows:
+            raw_color = _clean_text(r.get("color"), limit=160)
+            color = color_map.get(raw_color, raw_color)
+            if color:
+                pair_objs.append({"color": color, "size": ""})
     elif not sizes:
         sizes = [_clean_text(s, limit=80) for s in row.get("sizes") or [] if _clean_text(s, limit=80)]
 
@@ -795,8 +919,9 @@ def vipomall_row_to_product_data(
     info_texts = _clean_vipomall_info_texts(row.get("info_texts") or [])
     variant_context_parts: List[str] = []
     if colors_out:
+        label = "Biến thể" if color_only_layout else "Màu sắc"
         variant_context_parts.append(
-            "Màu sắc: " + ", ".join([c.get("name", "") for c in colors_out if c.get("name")])
+            f"{label}: " + ", ".join([c.get("name", "") for c in colors_out if c.get("name")])
         )
     if sizes:
         variant_context_parts.append("Kích cỡ: " + ", ".join(sizes))
@@ -818,6 +943,8 @@ def vipomall_row_to_product_data(
         "vipomall_product_url": source_url,
         "vipomall_platform_type": platform_type,
     }
+    if color_only_layout:
+        variants["variant_only"] = True
     if swatches:
         variants["color_swatches"] = swatches
     if sizes:
