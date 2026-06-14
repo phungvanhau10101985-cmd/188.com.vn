@@ -355,6 +355,24 @@ export function hasNanoAiChatWidgetRoot(): boolean {
   return WIDGET_ROOT_SELECTORS.some((sel) => Boolean(document.querySelector(sel)));
 }
 
+function attachNanoAiLoaderLoadedMarker(script: HTMLScriptElement): void {
+  const src = script.getAttribute('src') || '';
+  if (!LOADER_SRC_RE.test(src)) return;
+  if (script.dataset['188NanoaiLoaderLoaded'] === '1') return;
+  script.addEventListener('load', () => {
+    script.dataset['188NanoaiLoaderLoaded'] = '1';
+  });
+  script.addEventListener('error', () => {
+    script.dataset['188NanoaiLoaderLoaded'] = '1';
+  });
+}
+
+function isNanoAiChatLoaderScriptLoaded(script: HTMLScriptElement): boolean {
+  if (script.dataset['188NanoaiLoaderLoaded'] === '1') return true;
+  const src = script.getAttribute('src') || '';
+  return !src;
+}
+
 function cloneNanoAiLoaderScript(source: HTMLScriptElement): HTMLScriptElement {
   const nu = document.createElement('script');
   for (let i = 0; i < source.attributes.length; i++) {
@@ -372,6 +390,7 @@ function cloneNanoAiLoaderScript(source: HTMLScriptElement): HTMLScriptElement {
       nu.src = rawSrc;
     }
   }
+  attachNanoAiLoaderLoadedMarker(nu);
   return nu;
 }
 
@@ -416,7 +435,7 @@ export function startNanoAiChatWidgetBootWatch(opts?: { timeoutMs?: number }): (
     const last = scripts[scripts.length - 1];
     if (!last) return false;
 
-    const loaded = last.complete || last.dataset['188NanoaiLoaderLoaded'] === '1';
+    const loaded = isNanoAiChatLoaderScriptLoaded(last);
     if (!loaded) return false;
 
     if (!retryDone) retryDone = retryNanoAiChatWidgetLoaderOnce();
