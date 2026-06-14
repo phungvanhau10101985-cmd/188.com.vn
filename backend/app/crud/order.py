@@ -192,6 +192,52 @@ def get_user_orders(
     query = query.order_by(desc(Order.created_at))
     return query.offset(skip).limit(limit).all()
 
+def _admin_orders_filtered_query(
+    db: Session,
+    *,
+    status: Optional[str] = None,
+    payment_status: Optional[str] = None,
+    requires_deposit: Optional[bool] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    q: Optional[str] = None,
+):
+    """Query đơn admin sau bộ lọc (chưa order/limit)."""
+    query = db.query(Order)
+
+    if status:
+        status_list = [s.strip() for s in status.split(",") if s.strip()]
+        if len(status_list) == 1:
+            query = query.filter(Order.status == status_list[0])
+        elif status_list:
+            query = query.filter(Order.status.in_(status_list))
+
+    if payment_status:
+        query = query.filter(Order.payment_status == payment_status)
+
+    if requires_deposit is not None:
+        query = query.filter(Order.requires_deposit == requires_deposit)
+
+    if date_from:
+        query = query.filter(Order.created_at >= date_from)
+
+    if date_to:
+        query = query.filter(Order.created_at <= date_to)
+
+    term = (q or "").strip()
+    if term:
+        like = f"%{term}%"
+        query = query.filter(
+            or_(
+                Order.order_code.ilike(like),
+                Order.customer_name.ilike(like),
+                Order.customer_phone.ilike(like),
+            )
+        )
+
+    return query
+
+
 def get_orders_admin(
     db: Session,
     skip: int = 0,
@@ -200,32 +246,46 @@ def get_orders_admin(
     payment_status: Optional[str] = None,
     requires_deposit: Optional[bool] = None,
     date_from: Optional[datetime] = None,
-    date_to: Optional[datetime] = None
+    date_to: Optional[datetime] = None,
+    q: Optional[str] = None,
 ) -> List[Order]:
     """Admin: Get all orders with filters. status có thể là một giá trị hoặc nhiều giá trị cách nhau bởi dấu phẩy."""
-    query = db.query(Order)
-    
-    if status:
-        status_list = [s.strip() for s in status.split(",") if s.strip()]
-        if len(status_list) == 1:
-            query = query.filter(Order.status == status_list[0])
-        elif status_list:
-            query = query.filter(Order.status.in_(status_list))
-    
-    if payment_status:
-        query = query.filter(Order.payment_status == payment_status)
-    
-    if requires_deposit is not None:
-        query = query.filter(Order.requires_deposit == requires_deposit)
-    
-    if date_from:
-        query = query.filter(Order.created_at >= date_from)
-    
-    if date_to:
-        query = query.filter(Order.created_at <= date_to)
-    
-    query = query.order_by(desc(Order.created_at))
-    return query.offset(skip).limit(limit).all()
+    query = _admin_orders_filtered_query(
+        db,
+        status=status,
+        payment_status=payment_status,
+        requires_deposit=requires_deposit,
+        date_from=date_from,
+        date_to=date_to,
+        q=q,
+    )
+    return query.order_by(desc(Order.created_at)).offset(skip).limit(limit).all()
+
+
+def get_orders_admin_paginated(
+    db: Session,
+    skip: int = 0,
+    limit: int = 50,
+    status: Optional[str] = None,
+    payment_status: Optional[str] = None,
+    requires_deposit: Optional[bool] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    q: Optional[str] = None,
+) -> tuple[List[Order], int]:
+    """Admin: danh sách đơn + tổng sau lọc (phân trang)."""
+    query = _admin_orders_filtered_query(
+        db,
+        status=status,
+        payment_status=payment_status,
+        requires_deposit=requires_deposit,
+        date_from=date_from,
+        date_to=date_to,
+        q=q,
+    )
+    filtered_total = query.count()
+    items = query.order_by(desc(Order.created_at)).offset(skip).limit(limit).all()
+    return items, filtered_total
 
 def admin_update_order(
     db: Session,

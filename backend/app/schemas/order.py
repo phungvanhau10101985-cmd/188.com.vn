@@ -174,6 +174,17 @@ class AdminOrderResponse(OrderResponse):
         from_attributes = True
 
 
+class AdminOrderListPagination(BaseModel):
+    skip: int = 0
+    limit: int = 50
+    filtered_total: int = 0
+
+
+class AdminOrderListResponse(BaseModel):
+    items: List[AdminOrderResponse]
+    pagination: AdminOrderListPagination
+
+
 class DepositConfirmedEmailOut(BaseModel):
     """Kết quả gửi email «Đã nhận cọc» cho khách (admin xác nhận cọc)."""
     sent: bool = False

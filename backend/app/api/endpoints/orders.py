@@ -620,7 +620,7 @@ def read_order(
     return _serialize_user_order(db, order)
 
 # ========== ADMIN ORDER ENDPOINTS ==========
-@router.get("/admin/all", response_model=List[schemas.AdminOrderResponse])
+@router.get("/admin/all", response_model=schemas.AdminOrderListResponse)
 def admin_get_orders(
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("orders")),
@@ -630,12 +630,13 @@ def admin_get_orders(
     payment_status: Optional[str] = None,
     requires_deposit: Optional[bool] = None,
     date_from: Optional[datetime] = None,
-    date_to: Optional[datetime] = None
+    date_to: Optional[datetime] = None,
+    q: Optional[str] = Query(None, description="Tra mã đơn, tên hoặc SĐT khách"),
 ):
     """
-    Admin: Get all orders with filters
+    Admin: Get all orders with filters + pagination
     """
-    return crud.order.get_orders_admin(
+    items, filtered_total = crud.order.get_orders_admin_paginated(
         db=db,
         skip=skip,
         limit=limit,
@@ -643,8 +644,17 @@ def admin_get_orders(
         payment_status=payment_status,
         requires_deposit=requires_deposit,
         date_from=date_from,
-        date_to=date_to
+        date_to=date_to,
+        q=q,
     )
+    return {
+        "items": items,
+        "pagination": {
+            "skip": skip,
+            "limit": limit,
+            "filtered_total": filtered_total,
+        },
+    }
 
 @router.get("/admin/stats", response_model=schemas.AdminOrderStats)
 def admin_order_stats(

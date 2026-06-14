@@ -121,6 +121,7 @@ _RATING_GROUPS_RAW: Iterable[Tuple[str, int]] = (
     ("gậy đánh golf", 92),
     ("túi gậy golf", 93),
     ("vali túi du lịch", 94),
+    ("ốp điện thoại", 95),
 )
 
 # Cụm từ đồng nghĩa / cách gọi thực tế trên tên SP (không liền với cụm chuẩn trong bảng trên).
@@ -144,6 +145,9 @@ _RATING_ALIASES_RAW: Iterable[Tuple[str, int]] = (
     ("hành lý du lịch", 94),
     ("vali điện", 94),
     ("túi du lịch", 94),
+    ("ốp lưng điện thoại", 95),
+    ("case điện thoại", 95),
+    ("ốp lưng", 95),
     ("gậy golf", 92),
     ("gậy chơi golf", 92),
     ("túi đựng gậy golf", 93),

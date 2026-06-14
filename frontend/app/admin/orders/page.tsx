@@ -147,6 +147,15 @@ const EMPTY_REVENUE_FILTER: RevenueFilterState = {
   preset: null,
 };
 
+const ADMIN_ORDERS_DEFAULT_PAGE_SIZE = 25;
+
+function resolveAdminOrderStatusParam(activeTab: string, statusFilter: string): string | undefined {
+  const key = statusFilter || activeTab;
+  if (!key || key === 'all') return undefined;
+  if (key === 'waiting_ship') return 'deposit_paid,confirmed,processing';
+  return key;
+}
+
 function todayIsoVn(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date());
 }
@@ -165,11 +174,14 @@ export default function AdminOrdersPage() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
-  const [filteredOrders, setFilteredOrders] = useState<AdminOrder[]>([]);
+  const [filteredTotal, setFilteredTotal] = useState(0);
+  const [listPage, setListPage] = useState(1);
+  const [listPageSize, setListPageSize] = useState(ADMIN_ORDERS_DEFAULT_PAGE_SIZE);
   const [stats, setStats] = useState<any>(null);
   const [statusCounts, setStatusCounts] = useState<any>(null); // Số đơn theo trạng thái (period=all) cho tab
   const [activeTab, setActiveTab] = useState('all');
   const [search, setSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('');
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
@@ -218,22 +230,28 @@ export default function AdminOrdersPage() {
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
-      let statusParam: string | undefined;
-      if (activeTab === 'all') statusParam = undefined;
-      else if (activeTab === 'waiting_ship') statusParam = 'deposit_paid,confirmed,processing';
-      else statusParam = activeTab;
+      const skip = (listPage - 1) * listPageSize;
       const data = await adminOrderAPI.getAllOrders({
-        status: statusParam,
-        limit: 100,
+        status: resolveAdminOrderStatusParam(activeTab, statusFilter),
+        payment_status: paymentFilter || undefined,
+        q: appliedSearch || undefined,
+        skip,
+        limit: listPageSize,
       });
-      setOrders(data);
-      setFilteredOrders(data);
+      const total = data.pagination?.filtered_total ?? data.items.length;
+      const maxPage = Math.max(1, Math.ceil(total / listPageSize));
+      if (total > 0 && listPage > maxPage) {
+        setListPage(maxPage);
+        return;
+      }
+      setOrders(data.items);
+      setFilteredTotal(total);
     } catch {
       showToast('err', 'Lỗi tải đơn hàng');
     } finally {
       setLoading(false);
     }
-  }, [activeTab]);
+  }, [activeTab, statusFilter, paymentFilter, appliedSearch, listPage, listPageSize]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -322,12 +340,27 @@ export default function AdminOrdersPage() {
   }, [fetchOrders, fetchStats]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setAppliedSearch(search.trim());
+      setListPage(1);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    setListPage(1);
+  }, [activeTab, statusFilter, paymentFilter, listPageSize]);
+
+  useEffect(() => {
     void adminOrderAPI.getStats({ preset: 'today' }).then(setRevenueReport).catch(() => {});
   }, []);
 
   useEffect(() => {
     const q = (searchParams.get('q') || searchParams.get('highlight') || '').trim();
-    if (q) setSearch(q);
+    if (q) {
+      setSearch(q);
+      setAppliedSearch(q);
+    }
   }, [searchParams]);
 
   const loadShipmentTimeline = useCallback(async (orderId: number) => {
@@ -351,27 +384,9 @@ export default function AdminOrdersPage() {
     void loadShipmentTimeline(selectedOrder.id);
   }, [detailOpen, selectedOrder, loadShipmentTimeline]);
 
-  useEffect(() => {
-    let result = orders;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (o) =>
-          o.order_code.toLowerCase().includes(q) ||
-          o.customer_name.toLowerCase().includes(q) ||
-          o.customer_phone.includes(q)
-      );
-    }
-    if (statusFilter) {
-      if (statusFilter === 'waiting_ship') {
-        result = result.filter((o) => ['deposit_paid', 'confirmed', 'processing'].includes(o.status));
-      } else {
-        result = result.filter((o) => o.status === statusFilter);
-      }
-    }
-    if (paymentFilter) result = result.filter((o) => o.payment_status === paymentFilter);
-    setFilteredOrders(result);
-  }, [orders, search, statusFilter, paymentFilter]);
+  const totalPages = Math.max(1, Math.ceil(filteredTotal / listPageSize));
+  const displayFrom = filteredTotal === 0 ? 0 : (listPage - 1) * listPageSize + 1;
+  const displayTo = Math.min(listPage * listPageSize, filteredTotal);
 
   const openPaymentModal = async (order: AdminOrder) => {
     setSelectedOrder(order);
@@ -928,13 +943,25 @@ export default function AdminOrdersPage() {
             <button
               onClick={() => {
                 setSearch('');
+                setAppliedSearch('');
                 setStatusFilter('');
                 setPaymentFilter('');
+                setListPage(1);
               }}
               className="px-3 py-2 border rounded-lg hover:bg-gray-50"
             >
               Xóa bộ lọc
             </button>
+            <select
+              value={listPageSize}
+              onChange={(e) => setListPageSize(Number(e.target.value))}
+              className="border rounded-lg px-3 py-2 w-36"
+              aria-label="Số đơn mỗi trang"
+            >
+              <option value={25}>25 / trang</option>
+              <option value={50}>50 / trang</option>
+              <option value={100}>100 / trang</option>
+            </select>
           </div>
 
           <div className="overflow-x-auto">
@@ -964,7 +991,7 @@ export default function AdminOrdersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredOrders.map((order) => (
+                  {orders.map((order) => (
                     <tr key={order.id} className="border-b hover:bg-gray-50">
                       <td className="p-3 font-mono text-sm">{order.order_code}</td>
                       <td className="p-3 text-center">
@@ -1038,8 +1065,50 @@ export default function AdminOrdersPage() {
                 </tbody>
               </table>
             )}
-            {!loading && filteredOrders.length === 0 && (
+            {!loading && orders.length === 0 && (
               <div className="p-8 text-center text-gray-500">Không có đơn hàng nào.</div>
+            )}
+            {!loading && filteredTotal > 0 && (
+              <div className="px-4 py-3 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
+                <span>
+                  Hiển thị {displayFrom}–{displayTo} / {filteredTotal} đơn · Trang {listPage} / {totalPages}
+                  {appliedSearch ? ` · tra «${appliedSearch}»` : ''}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setListPage(1)}
+                    disabled={listPage <= 1 || loading}
+                    className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    Đầu
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setListPage((p) => Math.max(1, p - 1))}
+                    disabled={listPage <= 1 || loading}
+                    className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    Trước
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setListPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={listPage >= totalPages || loading}
+                    className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    Sau
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setListPage(totalPages)}
+                    disabled={listPage >= totalPages || loading}
+                    className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    Cuối
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>

@@ -311,6 +311,17 @@ export interface AdminOrder {
   items: AdminOrderItem[];
 }
 
+export interface AdminOrderListPagination {
+  skip: number;
+  limit: number;
+  filtered_total: number;
+}
+
+export interface AdminOrderListResponse {
+  items: AdminOrder[];
+  pagination: AdminOrderListPagination;
+}
+
 export interface AdminOrderStats {
   total_orders: number;
   total_revenue: number;
@@ -2234,12 +2245,20 @@ export const adminListingFacetCacheAPI = {
 };
 
 export const adminOrderAPI = {
-  getAllOrders: (params?: { status?: string; limit?: number; skip?: number }) => {
+  getAllOrders: (params?: {
+    status?: string;
+    payment_status?: string;
+    q?: string;
+    limit?: number;
+    skip?: number;
+  }) => {
     const sp = new URLSearchParams();
     if (params?.status) sp.set('status', params.status);
-    if (params?.limit) sp.set('limit', String(params.limit));
-    if (params?.skip) sp.set('skip', String(params.skip ?? 0));
-    return fetchAdmin<AdminOrder[]>(`/orders/admin/all?${sp.toString()}`);
+    if (params?.payment_status) sp.set('payment_status', params.payment_status);
+    if (params?.q?.trim()) sp.set('q', params.q.trim());
+    sp.set('limit', String(params?.limit ?? 50));
+    sp.set('skip', String(params?.skip ?? 0));
+    return fetchAdmin<AdminOrderListResponse>(`/orders/admin/all?${sp.toString()}`);
   },
 
   getStats: (params?: AdminOrderStatsQuery | 'today' | 'week' | 'month' | 'year' | 'all') => {

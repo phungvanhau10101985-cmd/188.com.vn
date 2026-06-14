@@ -48,6 +48,20 @@ def test_apply_import_matches_golf_groups():
     assert infer_rating_group_id_from_text("Túi gậy golf stand bag") == 93
 
 
+def test_apply_import_matches_phone_case_group():
+    assert infer_rating_group_id_from_text("Ốp điện thoại iPhone 15 Pro Max") == 95
+    assert infer_rating_group_id_from_text("Ốp lưng điện thoại Samsung S24") == 95
+    pd = {
+        "name": "Ốp lưng iPhone 15 trong suốt chống sốc",
+        "category": "Phụ kiện điện thoại & công nghệ",
+        "subcategory": "Ốp lưng điện thoại",
+        "sub_subcategory": "Ốp lưng iPhone",
+        "group_rating": 0,
+    }
+    apply_import_rating_question_groups_to_product_data(pd)
+    assert pd["group_rating"] == 95
+
+
 def test_apply_import_keeps_rule_match():
     pd = {
         "name": "Giày sneaker nữ cao cấp",
