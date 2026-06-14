@@ -179,6 +179,3 @@ export async function loadRelatedProductsSnapshot(
   inflightRelatedFetches.set(key, batch);
   return batch;
 }
-
-/** Params listing cho «Xem tất cả» / load-more — vẫn dùng GET /products trực tiếp. */
-export { RELATED_LIST_BASE, buildRelatedFetchPlan, productSearchParamsFromChineseShopCat2 };
