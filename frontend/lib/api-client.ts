@@ -417,20 +417,26 @@ class ApiClient {
     productId: number,
     tab: 'bestselling' | 'same_price' | 'lower_price' | 'higher_price',
     limit = 20
-  ): Promise<{ related_products: Product[]; shop_group_products: Product[] }> {
+  ): Promise<{ related_products: Product[]; shop_group_products: Product[]; sidebar_products: Product[] }> {
     const params = new URLSearchParams({
       product_id: String(productId),
       tab,
       limit: String(limit),
     });
-    const empty = { related_products: [] as Product[], shop_group_products: [] as Product[] };
-    return this.fetch<{ related_products?: Product[]; shop_group_products?: Product[] }>(
-      `/products/pdp-related?${params}`,
-      { quiet: true }
-    )
+    const empty = {
+      related_products: [] as Product[],
+      shop_group_products: [] as Product[],
+      sidebar_products: [] as Product[],
+    };
+    return this.fetch<{
+      related_products?: Product[];
+      shop_group_products?: Product[];
+      sidebar_products?: Product[];
+    }>(`/products/pdp-related?${params}`, { quiet: true })
       .then((res) => ({
         related_products: res?.related_products ?? [],
         shop_group_products: res?.shop_group_products ?? [],
+        sidebar_products: res?.sidebar_products ?? [],
       }))
       .catch(() => empty);
   }

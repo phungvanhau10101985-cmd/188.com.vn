@@ -1349,7 +1349,7 @@ def read_pdp_related_products(
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
-    Gom SP liên quan PDP (main + shop group) — một session DB, tối đa 2 listing query.
+    Gom SP liên quan PDP (main + shop group + sidebar style) — một session DB.
     """
     from app.services.pdp_related_products import fetch_pdp_related_rows
 
@@ -1360,7 +1360,7 @@ def read_pdp_related_products(
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    related_rows, shop_rows = fetch_pdp_related_rows(db, db_product, tab, limit=limit)
+    related_rows, shop_rows, sidebar_rows = fetch_pdp_related_rows(db, db_product, tab, limit=limit)
     related_payload = _serialize_products_for_api(
         db,
         related_rows,
@@ -1373,9 +1373,16 @@ def read_pdp_related_products(
         user=current_user,
         include_warehouse_clearance=True,
     )
+    sidebar_payload = _serialize_products_for_api(
+        db,
+        sidebar_rows,
+        user=current_user,
+        include_warehouse_clearance=True,
+    )
     return {
         "related_products": related_payload,
         "shop_group_products": shop_payload,
+        "sidebar_products": sidebar_payload,
     }
 
 

@@ -126,10 +126,12 @@ export function releaseNanoAiClickBlockers(opts?: { mode?: NanoAiOverlayReleaseM
   if (typeof document === 'undefined') return;
 
   const mode = opts?.mode ?? 'passThrough';
+  // Luôn cập nhật cờ HTML — kể cả khi widget chưa mount / đang re-render DOM.
+  // Trước đây return sớm khi roots=0 khiến `visibility:hidden` kẹt sau khi đóng popup.
+  setShopOverlayHtmlFlag(mode === 'fullSuppress');
+
   const roots = collectNanoAiRoots();
   if (roots.length === 0) return;
-
-  setShopOverlayHtmlFlag(mode === 'fullSuppress');
 
   for (const root of roots) {
     if (mode === 'fullSuppress') {

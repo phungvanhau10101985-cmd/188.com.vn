@@ -61,9 +61,11 @@ export default function NanoAiShopOverlayGuard() {
 
     const mo = new MutationObserver(run);
     mo.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('188-site-embeds-ready', run);
 
     return () => {
       mo.disconnect();
+      window.removeEventListener('188-site-embeds-ready', run);
     };
   }, [isShopBrowse, shouldSuppress]);
 

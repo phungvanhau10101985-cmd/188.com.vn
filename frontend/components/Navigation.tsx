@@ -16,10 +16,13 @@ import { useCart } from '@/features/cart/hooks/useCart';
 import type { CategoryLevel1, CategoryLevel2 } from '@/types/api';
 import { categorySegmentForUrl } from '@/lib/category-url';
 import {
+  hasRealCategoryTree,
   isKhoSaleMenuCategory,
+  isPlaceholderOnlyCategoryTree,
   KHO_SALE_HREF,
   KHO_SALE_MENU_NAME,
   level1CategoryHref,
+  withKhoSaleMenuCategory,
 } from '@/lib/kho-sale-menu-category';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { useClientMounted } from '@/lib/use-client-mounted';
@@ -86,12 +89,15 @@ export default function Navigation({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [tree, setTree] = useState<CategoryLevel1[]>(() => {
-    if ((initialCategoryTree?.length ?? 0) > 0) return initialCategoryTree ?? [];
-    return readNavCategoryTreeCache();
+    if (hasRealCategoryTree(initialCategoryTree)) return initialCategoryTree ?? [];
+    const cached = readNavCategoryTreeCache();
+    if (hasRealCategoryTree(cached)) return withKhoSaleMenuCategory(cached);
+    return [];
   });
-  const [loading, setLoading] = useState(
-    () => (initialCategoryTree?.length ?? 0) === 0 && readNavCategoryTreeCache().length === 0,
-  );
+  const [loading, setLoading] = useState(() => {
+    if (hasRealCategoryTree(initialCategoryTree)) return false;
+    return !hasRealCategoryTree(readNavCategoryTreeCache());
+  });
   const [isScrolled, setIsScrolled] = useState(false);
   const [openLevel1, setOpenLevel1] = useState<string | null>(null);
   const [stickySearchTerm, setStickySearchTerm] = useState('');
@@ -152,10 +158,13 @@ export default function Navigation({
 
   useEffect(() => {
     const next = initialCategoryTree ?? [];
-    if (next.length > 0) {
-      setTree(next);
+    if (hasRealCategoryTree(next)) {
+      setTree(withKhoSaleMenuCategory(next));
       setLoading(false);
       writeNavCategoryTreeCache(next);
+    } else if (isPlaceholderOnlyCategoryTree(next)) {
+      setTree([]);
+      setLoading(true);
     }
   }, [initialCategoryTree]);
 
@@ -163,22 +172,23 @@ export default function Navigation({
     let cancelled = false;
 
     const applyTree = (next: CategoryLevel1[]) => {
-      if (cancelled || next.length === 0) return;
-      setTree(next);
+      if (cancelled || !hasRealCategoryTree(next)) return;
+      setTree(withKhoSaleMenuCategory(next));
       setLoading(false);
       writeNavCategoryTreeCache(next);
     };
 
     const cached = readNavCategoryTreeCache();
-    if ((initialCategoryTree?.length ?? 0) === 0 && cached.length > 0) {
-      setTree((prev) => (prev.length > 0 ? prev : cached));
+    if (!hasRealCategoryTree(initialCategoryTree) && hasRealCategoryTree(cached)) {
+      setTree((prev) => (hasRealCategoryTree(prev) ? prev : withKhoSaleMenuCategory(cached)));
       setLoading(false);
     }
 
-    const needsFetch = (initialCategoryTree?.length ?? 0) === 0 && cached.length === 0;
+    const needsFetch =
+      !hasRealCategoryTree(initialCategoryTree) && !hasRealCategoryTree(cached);
     const needsBackgroundRefresh =
-      (initialCategoryTree?.length ?? 0) === 0 &&
-      cached.length > 0 &&
+      !hasRealCategoryTree(initialCategoryTree) &&
+      hasRealCategoryTree(cached) &&
       isNavCategoryTreeCacheStale();
 
     if (!needsFetch && !needsBackgroundRefresh) return;
@@ -194,7 +204,7 @@ export default function Navigation({
         else if (needsFetch && !cancelled) setTree([]);
       } catch (error) {
         console.error('Error fetching category tree:', error);
-        if (!cancelled && needsFetch && cached.length === 0) setTree([]);
+        if (!cancelled && needsFetch && !hasRealCategoryTree(cached)) setTree([]);
       } finally {
         if (!cancelled && needsFetch) setLoading(false);
       }

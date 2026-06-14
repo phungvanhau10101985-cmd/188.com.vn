@@ -18,7 +18,10 @@ const RELATED_LIST_BASE: Pick<ProductSearchParams, 'skip_total' | 'is_active'> =
 export type RelatedFetchSnapshot = {
   relatedProducts: Product[];
   shopGroupProducts: Product[];
+  sidebarProducts: Product[];
 };
+
+const SIDEBAR_VISIBLE_COUNT = 8;
 
 type FetchPlan =
   | {
@@ -121,6 +124,36 @@ function relatedFetchCacheKey(productId: number, tab: ProductRelatedTabId): stri
 
 const inflightRelatedFetches = new Map<string, Promise<RelatedFetchSnapshot>>();
 const relatedResultsCache = new Map<string, RelatedFetchSnapshot>();
+const sidebarByProductId = new Map<number, Product[]>();
+
+function applySidebarCache(productId: number, sidebarProducts: Product[]): void {
+  if (sidebarProducts.length > 0) {
+    sidebarByProductId.set(productId, sidebarProducts);
+  }
+}
+
+/** Sidebar desktop — dùng payload đã gom từ GET /pdp-related (không gọi GET /products riêng). */
+export function getCachedPdpSidebarProducts(productId: number): Product[] | null {
+  const direct = sidebarByProductId.get(productId);
+  if (direct && direct.length > 0) return direct;
+  for (const tab of ['bestselling', 'same_price', 'lower_price', 'higher_price'] as const) {
+    const snap = relatedResultsCache.get(relatedFetchCacheKey(productId, tab));
+    if (snap?.sidebarProducts?.length) return snap.sidebarProducts;
+  }
+  return null;
+}
+
+export function pickRandomSidebarProducts(
+  pool: Product[],
+  count = SIDEBAR_VISIBLE_COUNT
+): Product[] {
+  const arr = [...pool];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, count);
+}
 
 export function getCachedRelatedProductsSnapshot(
   currentProduct: Product,
@@ -168,7 +201,9 @@ export async function loadRelatedProductsSnapshot(
     const snapshot: RelatedFetchSnapshot = {
       relatedProducts: res.related_products ?? [],
       shopGroupProducts: res.shop_group_products ?? [],
+      sidebarProducts: res.sidebar_products ?? [],
     };
+    applySidebarCache(currentProduct.id, snapshot.sidebarProducts);
     relatedResultsCache.set(key, snapshot);
     onPartial?.(snapshot);
     return snapshot;

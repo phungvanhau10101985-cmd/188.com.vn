@@ -1,4 +1,5 @@
 import type { CategoryLevel1 } from '@/types/api';
+import { hasRealCategoryTree, isPlaceholderOnlyCategoryTree, stripKhoSaleMenuCategory } from '@/lib/kho-sale-menu-category';
 
 /** Cache cây danh mục menu desktop — localStorage, tồn tại qua tab/session. */
 export const NAV_CATEGORY_TREE_CACHE_KEY = '188-nav-category-tree-v1';
@@ -50,10 +51,20 @@ export function readNavCategoryTreeCache(): CategoryLevel1[] {
     const raw = localStorage.getItem(NAV_CATEGORY_TREE_CACHE_KEY);
     if (raw) {
       const payload = parsePayload(raw);
-      if (payload?.tree?.length) return payload.tree;
+      if (payload?.tree?.length) {
+        if (isPlaceholderOnlyCategoryTree(payload.tree)) {
+          try {
+            localStorage.removeItem(NAV_CATEGORY_TREE_CACHE_KEY);
+          } catch {
+            /* ignore */
+          }
+          return [];
+        }
+        return payload.tree;
+      }
     }
     const legacy = readLegacySessionCategoryTree();
-    if (legacy.length > 0) {
+    if (hasRealCategoryTree(legacy)) {
       writeNavCategoryTreeCache(legacy);
       try {
         sessionStorage.removeItem(NAV_CATEGORY_TREE_CACHE_KEY);
@@ -88,12 +99,13 @@ export function isNavCategoryTreeCacheStale(
 }
 
 export function writeNavCategoryTreeCache(tree: CategoryLevel1[]): void {
-  if (typeof window === 'undefined' || tree.length === 0) return;
+  const stripped = stripKhoSaleMenuCategory(tree);
+  if (typeof window === 'undefined' || !hasRealCategoryTree(stripped)) return;
   try {
     const payload: NavCategoryTreeCachePayload = {
       v: 1,
       savedAt: Date.now(),
-      tree,
+      tree: stripped,
     };
     localStorage.setItem(NAV_CATEGORY_TREE_CACHE_KEY, JSON.stringify(payload));
   } catch {

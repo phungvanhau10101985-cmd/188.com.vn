@@ -22,6 +22,15 @@ function cloneExecutableScript(old: HTMLScriptElement): HTMLScriptElement {
   if (!old.getAttribute('src') && old.textContent != null && old.textContent !== '') {
     nu.textContent = old.textContent;
   }
+  const src = nu.getAttribute('src') || '';
+  if (/nanoai-chat-widget|nanoai\.vn\/embed/i.test(src)) {
+    nu.addEventListener('load', () => {
+      nu.dataset['188NanoaiLoaderLoaded'] = '1';
+    });
+    nu.addEventListener('error', () => {
+      nu.dataset['188NanoaiLoaderLoaded'] = '1';
+    });
+  }
   return nu;
 }
 

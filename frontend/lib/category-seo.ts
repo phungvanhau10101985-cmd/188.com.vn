@@ -4,7 +4,6 @@
  */
 
 import type { CategoryLevel1, HeroCategoryTile } from "@/types/api";
-import { withKhoSaleMenuCategory } from "@/lib/kho-sale-menu-category";
 import { isNextProductionBuild } from "@/lib/build-phase";
 
 const API_BASE =
@@ -121,7 +120,7 @@ async function fetchCategoryTreeForLayoutOnce(): Promise<CategoryLevel1[]> {
   if (!res.ok) return [];
   const data = await res.json();
   const tree = Array.isArray(data) ? (data as CategoryLevel1[]) : [];
-  return withKhoSaleMenuCategory(tree);
+  return tree;
 }
 
 export async function getCategoryTreeForLayout(): Promise<CategoryLevel1[]> {

@@ -13,6 +13,7 @@ from app import crud
 PdpRelatedTab = Literal["bestselling", "same_price", "lower_price", "higher_price"]
 PRICE_BAND_VND = 300_000
 DEFAULT_LIMIT = 20
+SIDEBAR_STYLE_FETCH_LIMIT = 40
 
 
 def _excel_cell(value: Optional[str]) -> Optional[str]:
@@ -133,14 +134,33 @@ def _fetch_listing(db: Session, kwargs: Dict[str, Any]) -> List[Any]:
     return list(products or [])
 
 
+def fetch_sidebar_style_rows(db: Session, product) -> List[Any]:
+    """Sidebar desktop: cùng cột Style (AF), limit 40 — khớp ShopSidebarProducts."""
+    st = _excel_cell(getattr(product, "style", None))
+    if not st:
+        return []
+    rows = _fetch_listing(
+        db,
+        {
+            "skip": 0,
+            "limit": SIDEBAR_STYLE_FETCH_LIMIT,
+            "is_active": True,
+            "skip_total": True,
+            "style": st,
+        },
+    )
+    current_id = int(getattr(product, "id", 0) or 0)
+    return [r for r in rows if int(getattr(r, "id", 0) or 0) != current_id]
+
+
 def fetch_pdp_related_rows(
     db: Session,
     product,
     tab: PdpRelatedTab,
     *,
     limit: int = DEFAULT_LIMIT,
-) -> Tuple[List[Any], List[Any]]:
-    """Trả (related_rows, shop_group_rows) — đã loại SP hiện tại."""
+) -> Tuple[List[Any], List[Any], List[Any]]:
+    """Trả (related_rows, shop_group_rows, sidebar_style_rows) — đã loại SP hiện tại."""
     current_id = int(getattr(product, "id", 0) or 0)
     main_kw, _ = build_related_list_kwargs(product, tab, limit=limit)
     shop_kw = listing_params_same_chinese_shop_cat2(product)
@@ -179,4 +199,5 @@ def fetch_pdp_related_rows(
     def _filter_current(rows: List[Any]) -> List[Any]:
         return [r for r in rows if int(getattr(r, "id", 0) or 0) != current_id]
 
-    return _filter_current(related_rows), _filter_current(shop_rows)
+    sidebar_rows = fetch_sidebar_style_rows(db, product)
+    return _filter_current(related_rows), _filter_current(shop_rows), sidebar_rows

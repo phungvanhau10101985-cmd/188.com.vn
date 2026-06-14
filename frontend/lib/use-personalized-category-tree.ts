@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { sortCategoryLevel1Tree } from '@/lib/category-tree-sort';
-import { withKhoSaleMenuCategory } from '@/lib/kho-sale-menu-category';
+import { hasRealCategoryTree, withKhoSaleMenuCategory } from '@/lib/kho-sale-menu-category';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { readNavCategoryTreeCache } from '@/lib/nav-category-tree-cache';
 import { useInferredCategoryGender } from '@/lib/use-inferred-category-gender';
@@ -22,9 +22,9 @@ export function usePersonalizedCategoryTree(
   const [cachedTree, setCachedTree] = useState<CategoryLevel1[]>([]);
 
   useEffect(() => {
-    if ((baseTree?.length ?? 0) > 0) return;
+    if (hasRealCategoryTree(baseTree)) return;
     const cached = readNavCategoryTreeCache();
-    if (cached.length > 0) setCachedTree(cached);
+    if (hasRealCategoryTree(cached)) setCachedTree(cached);
   }, [baseTree]);
 
   useEffect(() => {
@@ -37,11 +37,11 @@ export function usePersonalizedCategoryTree(
   const genderFetchKey = `${pathname}|${isAuthenticated}|${user?.gender ?? ''}|${viewTick}`;
   const genderSuffix = useInferredCategoryGender(genderFetchKey);
 
-  const resolvedBase =
-    (baseTree?.length ?? 0) > 0 ? baseTree! : cachedTree;
+  const resolvedBase = hasRealCategoryTree(baseTree) ? baseTree! : cachedTree;
 
-  return useMemo(
-    () => withKhoSaleMenuCategory(sortCategoryLevel1Tree(resolvedBase, genderSuffix)),
-    [resolvedBase, genderSuffix],
-  );
+  return useMemo(() => {
+    const sorted = sortCategoryLevel1Tree(resolvedBase, genderSuffix);
+    if (!hasRealCategoryTree(sorted)) return [];
+    return withKhoSaleMenuCategory(sorted);
+  }, [resolvedBase, genderSuffix]);
 }

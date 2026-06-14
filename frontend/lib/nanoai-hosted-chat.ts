@@ -343,6 +343,101 @@ function absolutizeUrl(raw: string, origin: string): string {
 
 const LOADER_SRC_RE = /nanoai-chat-widget|nanoai\.vn\/embed/i;
 
+const WIDGET_ROOT_SELECTORS = [
+  '#nanoai-chat-widget-v1',
+  '[id^="nanoai-chat-widget"]',
+  '[id*="nanoai-chat-widget"]',
+] as const;
+
+/** Widget chat NanoAI đã mount trong DOM (bubble/FAB). */
+export function hasNanoAiChatWidgetRoot(): boolean {
+  if (typeof document === 'undefined') return false;
+  return WIDGET_ROOT_SELECTORS.some((sel) => Boolean(document.querySelector(sel)));
+}
+
+function cloneNanoAiLoaderScript(source: HTMLScriptElement): HTMLScriptElement {
+  const nu = document.createElement('script');
+  for (let i = 0; i < source.attributes.length; i++) {
+    const a = source.attributes[i];
+    if (!a || a.name === 'src') continue;
+    nu.setAttribute(a.name, a.value);
+  }
+  const rawSrc = source.getAttribute('src') || '';
+  if (rawSrc) {
+    try {
+      const u = new URL(rawSrc, window.location.href);
+      u.searchParams.set('_188retry', String(Date.now()));
+      nu.src = u.toString();
+    } catch {
+      nu.src = rawSrc;
+    }
+  }
+  return nu;
+}
+
+/** Thử tải lại script widget một lần khi lần đầu không mount (mạng/CDN lỗi tạm). */
+export function retryNanoAiChatWidgetLoaderOnce(): boolean {
+  if (typeof document === 'undefined') return false;
+  if (hasNanoAiChatWidgetRoot()) return false;
+
+  const scripts = findNanoAiChatLoaderScripts();
+  const source = scripts[scripts.length - 1];
+  if (!source) return false;
+  if (source.dataset['188NanoaiLoaderRetried'] === '1') return false;
+
+  source.dataset['188NanoaiLoaderRetried'] = '1';
+  document.body.appendChild(cloneNanoAiLoaderScript(source));
+  return true;
+}
+
+/**
+ * Theo dõi sau khi embed inject — nếu script đã load mà widget chưa xuất hiện thì retry một lần.
+ * Trả về hàm dọn interval/listener.
+ */
+export function startNanoAiChatWidgetBootWatch(opts?: { timeoutMs?: number }): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  const timeoutMs = opts?.timeoutMs ?? 20_000;
+  const started = Date.now();
+  let retryDone = false;
+
+  const stopIfReady = (): boolean => {
+    if (hasNanoAiChatWidgetRoot()) return true;
+    if (Date.now() - started > timeoutMs) return true;
+    return false;
+  };
+
+  const tick = () => {
+    if (stopIfReady()) return true;
+
+    const scripts = findNanoAiChatLoaderScripts();
+    if (scripts.length === 0) return false;
+
+    const last = scripts[scripts.length - 1];
+    if (!last) return false;
+
+    const loaded = last.complete || last.dataset['188NanoaiLoaderLoaded'] === '1';
+    if (!loaded) return false;
+
+    if (!retryDone) retryDone = retryNanoAiChatWidgetLoaderOnce();
+    return false;
+  };
+
+  const id = window.setInterval(() => {
+    if (tick()) window.clearInterval(id);
+  }, 500);
+
+  const onEmbedsReady = () => {
+    if (hasNanoAiChatWidgetRoot()) window.clearInterval(id);
+  };
+  window.addEventListener('188-site-embeds-ready', onEmbedsReady);
+
+  return () => {
+    window.clearInterval(id);
+    window.removeEventListener('188-site-embeds-ready', onEmbedsReady);
+  };
+}
+
 /** Mọi thẻ script loader NanoAI trên trang (thường một). */
 export function findNanoAiChatLoaderScripts(): HTMLScriptElement[] {
   if (typeof document === 'undefined') return [];

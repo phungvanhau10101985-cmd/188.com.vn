@@ -42,6 +42,7 @@ export default function CartAddedPopup() {
     return () => {
       mo.disconnect();
       document.body.style.overflow = prev;
+      releaseNanoAiClickBlockers({ mode: 'passThrough' });
     };
   }, [showAddToCartPopup]);
 

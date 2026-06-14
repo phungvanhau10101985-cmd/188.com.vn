@@ -7,10 +7,14 @@ import { cdnUrl } from '@/lib/cdn-url';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Product } from '@/types/api';
-import { apiClient } from '@/lib/api-client';
 import { formatPrice, getProductMainImage } from '@/lib/utils';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { excelCell } from '@/lib/product-related-tabs';
+import {
+  getCachedPdpSidebarProducts,
+  loadRelatedProductsSnapshot,
+  pickRandomSidebarProducts,
+} from '@/lib/related-products-pdp-fetch';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
@@ -18,15 +22,6 @@ import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
 
 interface ShopSidebarProductsProps {
   currentProduct: Product;
-}
-
-function shuffle<T>(items: T[]): T[] {
-  const arr = [...items];
-  for (let i = arr.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
 }
 
 export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProductsProps) {
@@ -39,34 +34,43 @@ export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProdu
   useEffect(() => {
     if (!isNear) return;
 
-    let isMounted = true;
-    const fetchSameStyle = async () => {
-      try {
-        setLoading(true);
-        /** Sidebar: lọc theo cột Style (AF) — khác với nhóm «cùng shop TQ / shop_name_chinese» trên tab liên quan. */
-        const st = excelCell(currentProduct.style);
-        if (!st) {
-          if (isMounted) setProducts([]);
-          return;
-        }
-        const response = await apiClient.getProducts({
-          style: st,
-          limit: 40,
-          is_active: true,
-        });
-        const filtered = response.products.filter((p) => p.id !== currentProduct.id);
-        if (isMounted) setProducts(shuffle(filtered).slice(0, 8));
-      } catch {
-        if (isMounted) setProducts([]);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
+    const st = excelCell(currentProduct.style);
+    if (!st) {
+      setProducts([]);
+      return;
+    }
+
+    const applyPool = (pool: Product[]) => {
+      setProducts(pickRandomSidebarProducts(pool));
     };
-    fetchSameStyle();
+
+    const cached = getCachedPdpSidebarProducts(currentProduct.id);
+    if (cached?.length) {
+      applyPool(cached);
+      return;
+    }
+
+    let isMounted = true;
+    setLoading(true);
+    void loadRelatedProductsSnapshot(currentProduct, 'bestselling')
+      .then((snap) => {
+        if (!isMounted) return;
+        const pool = snap.sidebarProducts?.length
+          ? snap.sidebarProducts
+          : getCachedPdpSidebarProducts(currentProduct.id) ?? [];
+        applyPool(pool);
+      })
+      .catch(() => {
+        if (isMounted) setProducts([]);
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false);
+      });
+
     return () => {
       isMounted = false;
     };
-  }, [isNear, currentProduct.id, currentProduct.style]);
+  }, [isNear, currentProduct]);
 
   const visibleProducts = useMemo(() => products, [products]);
 

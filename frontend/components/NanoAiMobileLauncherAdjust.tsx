@@ -6,6 +6,7 @@ import {
   clearNanoAiOverlayPassThrough,
   releaseNanoAiClickBlockers,
 } from '@/lib/nanoai-overlay-pass-through';
+import { startNanoAiChatWidgetBootWatch } from '@/lib/nanoai-hosted-chat';
 
 const ROOT_SELECTORS = [
   '#nanoai-chat-widget-v1',
@@ -216,6 +217,7 @@ export default function NanoAiMobileLauncherAdjust() {
     clearMobileLayout();
     releaseNanoAiClickBlockers();
     enforceViewportAnchoring();
+    const stopBootWatch = startNanoAiChatWidgetBootWatch();
 
     let rafId: number | undefined;
     let rafQueued = false;
@@ -242,6 +244,7 @@ export default function NanoAiMobileLauncherAdjust() {
       window.removeEventListener('resize', schedule);
       window.removeEventListener('188-site-embeds-ready', schedule);
       if (rafId !== undefined) window.cancelAnimationFrame(rafId);
+      stopBootWatch();
       clearMobileLayout();
       clearNanoAiOverlayPassThrough();
     };
