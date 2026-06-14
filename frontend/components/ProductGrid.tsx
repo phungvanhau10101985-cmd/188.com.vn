@@ -14,6 +14,7 @@ interface ProductGridProps {
   selectedCategory?: string;
   onReload?: () => void;
   showFilters?: boolean;
+  randomize?: boolean;
 }
 
 // Skeleton Loading Component
@@ -125,8 +126,9 @@ const FilterBar = ({
             id="sort-select"
             onChange={(e) => onSortChange(e.target.value)}
             className="h-8 rounded-md border border-gray-300 px-2 text-xs transition-colors focus:border-transparent focus:ring-2 focus:ring-blue-500"
-            defaultValue="popular"
+            defaultValue="default"
           >
+            <option value="default">Mặc định</option>
             <option value="popular">Phổ biến nhất</option>
             <option value="newest">Mới nhất</option>
             <option value="price_asc">Giá: Thấp đến cao</option>
@@ -167,12 +169,22 @@ export default function ProductGrid({
   searchTerm = '',
   selectedCategory = 'all',
   onReload,
-  showFilters = true
+  showFilters = true,
+  randomize = false
 }: ProductGridProps) {
   const { isAuthenticated } = useAuth();
   const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());
-  const [sortBy, setSortBy] = useState('popular');
+  const [sortBy, setSortBy] = useState('default');
   const [priceRange, setPriceRange] = useState('all');
+  const [shuffledProducts, setShuffledProducts] = useState<Product[]>(products);
+
+  useEffect(() => {
+    if (randomize) {
+      setShuffledProducts([...products].sort(() => Math.random() - 0.5));
+    } else {
+      setShuffledProducts(products);
+    }
+  }, [products, randomize]);
 
   useEffect(() => {
     let cancelled = false;
@@ -237,7 +249,7 @@ export default function ProductGrid({
   };
 
   // Apply local filters (tạm thời - có thể thay bằng API call)
-  const filteredProducts = products.filter(product => {
+  const filteredProducts = shuffledProducts.filter(product => {
     // Price filter logic
     const price = product.price || 0;
     switch (priceRange) {
@@ -274,8 +286,10 @@ export default function ProductGrid({
       case 'newest':
         return new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime();
       case 'popular':
-      default:
         return (b.purchases || 0) - (a.purchases || 0);
+      case 'default':
+      default:
+        return 0; // Giữ nguyên thứ tự (đã được random nếu randomize=true)
     }
   });
 

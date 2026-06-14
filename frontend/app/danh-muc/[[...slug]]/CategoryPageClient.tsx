@@ -168,6 +168,7 @@ export default function CategoryPageClient({
             loading={false}
             selectedCategory={leafName}
             showFilters={false}
+            randomize={!hasNonPageFilters(listingQueryString)}
           />
           {totalPages > 1 ? (
             <ListingPagePagination
