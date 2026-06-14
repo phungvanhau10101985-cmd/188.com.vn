@@ -16,6 +16,7 @@ import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
 import { snapshotProductDataAsProduct } from '@/lib/viewed-product-card';
 import { buildHomeListingHrefByChineseShop } from '@/lib/product-related-tabs';
 import { displayableBrandOrOrigin } from '@/lib/utils';
+import { enrichItemsWithProductBatch } from '@/lib/batch-product-enrich';
 
 interface FavoriteItem {
   id: number;
@@ -171,37 +172,33 @@ export default function FavoritesPage() {
       .getFavorites()
       .then(async (list) => {
         const raw = Array.isArray(list) ? list : [];
-        const enriched = await Promise.all(
-          raw.map(async (item: FavoriteItem) => {
+        const enriched = await enrichItemsWithProductBatch(
+          raw,
+          (item: FavoriteItem) => {
             const data = item.product_data || {};
-            const needsEnrich =
+            return (
               !data.name ||
               data.price == null ||
               data.price === undefined ||
               !data.main_image ||
-              !data.shop_name_chinese;
-            if (!needsEnrich) return item;
-            try {
-              const product = await apiClient.getProductById(item.product_id);
-              return {
-                ...item,
-                product_data: {
-                  ...data,
-                  id: product.id,
-                  code: product.code,
-                  product_id: product.product_id,
-                  name: product.name,
-                  price: product.price,
-                  main_image: product.main_image,
-                  brand_name: product.brand_name ?? data.brand_name,
-                  slug: product.slug ?? data.slug,
-                  shop_name_chinese: product.shop_name_chinese ?? data.shop_name_chinese,
-                },
-              };
-            } catch {
-              return item;
-            }
-          }),
+              !data.shop_name_chinese
+            );
+          },
+          (item, product) => ({
+            ...item,
+            product_data: {
+              ...(item.product_data || {}),
+              id: product.id,
+              code: product.code,
+              product_id: product.product_id,
+              name: product.name,
+              price: product.price,
+              main_image: product.main_image,
+              brand_name: product.brand_name ?? item.product_data?.brand_name,
+              slug: product.slug ?? item.product_data?.slug,
+              shop_name_chinese: product.shop_name_chinese ?? item.product_data?.shop_name_chinese,
+            },
+          })
         );
         if (cancelled) return;
         setItems(enriched);

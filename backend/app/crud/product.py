@@ -1582,6 +1582,45 @@ def product_to_excel_row(product: Product) -> Dict:
 def get_product(db: Session, product_id: int):
     return db.query(Product).filter(Product.id == product_id).first()
 
+
+def get_storefront_products_by_ids(
+    db: Session,
+    db_ids: List[int],
+    *,
+    is_active: bool = True,
+) -> List[Product]:
+    """Trả SP theo thứ tự ids yêu cầu — bỏ id không tồn tại / không active."""
+    from app.services.product_image_visibility import product_has_storefront_image
+
+    ordered_unique: List[int] = []
+    seen: set[int] = set()
+    for raw in db_ids:
+        try:
+            pk = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if pk <= 0 or pk in seen:
+            continue
+        seen.add(pk)
+        ordered_unique.append(pk)
+
+    if not ordered_unique:
+        return []
+
+    rows = db.query(Product).filter(Product.id.in_(ordered_unique)).all()
+    by_id = {row.id: row for row in rows}
+    out: List[Product] = []
+    for pk in ordered_unique:
+        row = by_id.get(pk)
+        if row is None:
+            continue
+        if is_active and not getattr(row, "is_active", True):
+            continue
+        if not product_has_storefront_image(row):
+            continue
+        out.append(row)
+    return out
+
 def get_product_by_product_id(db: Session, product_id: str):
     return db.query(Product).filter(Product.product_id == product_id).first()
 

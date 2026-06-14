@@ -168,6 +168,9 @@ class ApiClient {
   private static readonly RETRYABLE_STATUSES = new Set([502, 503, 504]);
   /** Retry lỗi DB/pool tạm thời — khách không thấy treo khi API trả 503 ngắn. */
   private static readonly MAX_TRANSIENT_RETRIES = 2;
+  private trackViewQueue = new Map<number, Record<string, unknown> | undefined>();
+  private trackViewFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private trackViewFlushBound = false;
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -391,6 +394,47 @@ class ApiClient {
     return this.fetch<Product>(`/products/by-id/${id}`);
   }
 
+  /** Nhiều SP storefront — một request (giỏ / yêu thích / đã xem). */
+  async getProductsByIds(ids: number[]): Promise<Product[]> {
+    const unique = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
+    if (unique.length === 0) return [];
+    if (unique.length === 1) {
+      try {
+        return [await this.getProductById(unique[0])];
+      } catch {
+        return [];
+      }
+    }
+    const res = await this.fetch<{ products?: Product[] }>(
+      `/products/by-ids?ids=${unique.map(String).join(',')}`,
+      { quiet: true }
+    ).catch(() => ({ products: [] as Product[] }));
+    return Array.isArray(res?.products) ? res.products : [];
+  }
+
+  /** SP liên quan PDP — gom main + shop group, một session DB. */
+  async getPdpRelatedProducts(
+    productId: number,
+    tab: 'bestselling' | 'same_price' | 'lower_price' | 'higher_price',
+    limit = 20
+  ): Promise<{ related_products: Product[]; shop_group_products: Product[] }> {
+    const params = new URLSearchParams({
+      product_id: String(productId),
+      tab,
+      limit: String(limit),
+    });
+    const empty = { related_products: [] as Product[], shop_group_products: [] as Product[] };
+    return this.fetch<{ related_products?: Product[]; shop_group_products?: Product[] }>(
+      `/products/pdp-related?${params}`,
+      { quiet: true }
+    )
+      .then((res) => ({
+        related_products: res?.related_products ?? [],
+        shop_group_products: res?.shop_group_products ?? [],
+      }))
+      .catch(() => empty);
+  }
+
   async getProductByProductId(productId: string): Promise<Product> {
     return this.fetch<Product>(`/products/${encodeURIComponent(productId)}`);
   }
@@ -612,20 +656,49 @@ class ApiClient {
   }
 
   // USER BEHAVIOR
-  async trackProductView(productId: number, productData?: any): Promise<void> {
-    return this.fetch('/user-behavior/products/view', {
-      method: 'POST',
-      body: JSON.stringify({
-        product_id: productId,
-        product_data: productData,
-      }),
-    })
-      .then(() => {
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('188-product-viewed'));
-        }
+  private ensureTrackViewFlushOnHide(): void {
+    if (typeof window === 'undefined' || this.trackViewFlushBound) return;
+    this.trackViewFlushBound = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        void this.flushTrackProductViews();
+      }
+    });
+  }
+
+  private async flushTrackProductViews(): Promise<void> {
+    if (this.trackViewFlushTimer) {
+      clearTimeout(this.trackViewFlushTimer);
+      this.trackViewFlushTimer = null;
+    }
+    if (this.trackViewQueue.size === 0) return;
+    const entries = [...this.trackViewQueue.entries()];
+    this.trackViewQueue.clear();
+    for (const [productId, productData] of entries) {
+      await this.fetch('/user-behavior/products/view', {
+        method: 'POST',
+        body: JSON.stringify({
+          product_id: productId,
+          product_data: productData,
+        }),
+        quiet: true,
       })
-      .catch(() => {});
+        .then(() => {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('188-product-viewed'));
+          }
+        })
+        .catch(() => {});
+    }
+  }
+
+  async trackProductView(productId: number, productData?: Record<string, unknown>): Promise<void> {
+    this.ensureTrackViewFlushOnHide();
+    this.trackViewQueue.set(productId, productData);
+    if (this.trackViewFlushTimer) return;
+    this.trackViewFlushTimer = setTimeout(() => {
+      void this.flushTrackProductViews();
+    }, 2500);
   }
 
   /** Danh sách sản phẩm đã xem (tài khoản hoặc phiên khách qua X-Guest-Session-Id). */

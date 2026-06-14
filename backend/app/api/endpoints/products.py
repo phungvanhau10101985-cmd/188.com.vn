@@ -632,8 +632,64 @@ def _read_products_list_impl(
             fetch_limit = product_search_cache_crud.list_cache_fetch_limit(skip, limit)
             paginate_from_list_cache = True
 
-    result = crud.product.get_products(
-        db,
+    from app.services.storefront_listing_cache import (
+        build_listing_filter_cache_key,
+        get_or_fetch_listing_raw,
+        hydrate_listing_result_from_cache,
+        should_use_listing_filter_cache,
+    )
+
+    listing_filter_cache_key = None
+    use_listing_filter_cache = should_use_listing_filter_cache(
+        admin_list=admin_list,
+        raw_q=raw_q,
+        pid=pid,
+        order_random=order_random,
+        warehouse_clearance_only=warehouse_clearance_only,
+        skip_total=skip_total,
+        skip=fetch_skip,
+        limit=fetch_limit,
+        category=category,
+        subcategory=subcategory,
+        sub_subcategory=sub_subcategory,
+        shop_name=shop_name,
+        shop_id=shop_id,
+        style=style,
+        shop_name_chinese=shop_name_chinese,
+        chinese_name=chinese_name,
+        pro_lower_price=pro_lower_price,
+        pro_high_price=pro_high_price,
+        min_price=min_price,
+        max_price=max_price,
+        filter_size=filter_size,
+        filter_color=filter_color,
+        filter_style_tag=filter_style_tag,
+    )
+    if use_listing_filter_cache:
+        listing_filter_cache_key = build_listing_filter_cache_key(
+            skip=fetch_skip,
+            limit=fetch_limit,
+            category=category,
+            subcategory=subcategory,
+            sub_subcategory=sub_subcategory,
+            shop_name=shop_name,
+            shop_id=shop_id,
+            style=style,
+            shop_name_chinese=shop_name_chinese,
+            chinese_name=chinese_name,
+            pro_lower_price=pro_lower_price,
+            pro_high_price=pro_high_price,
+            min_price=min_price,
+            max_price=max_price,
+            is_active=is_active,
+            sort=sort_norm,
+            filter_size=filter_size,
+            filter_color=filter_color,
+            filter_style_tag=filter_style_tag,
+            skip_total=skip_total,
+        )
+
+    _list_query_kwargs = dict(
         skip=fetch_skip,
         limit=fetch_limit,
         category=category,
@@ -662,6 +718,22 @@ def _read_products_list_impl(
         warehouse_clearance_only=warehouse_clearance_only,
         admin_list_query=admin_list,
     )
+
+    if listing_filter_cache_key:
+
+        def _fetch_listing_for_cache() -> dict:
+            from app.db.session import SessionLocal
+
+            own_db = SessionLocal()
+            try:
+                return crud.product.get_products(own_db, **_list_query_kwargs)
+            finally:
+                own_db.close()
+
+        slim = get_or_fetch_listing_raw(listing_filter_cache_key, _fetch_listing_for_cache)
+        result = hydrate_listing_result_from_cache(db, slim)
+    else:
+        result = crud.product.get_products(db, **_list_query_kwargs)
 
     if result and "products" in result:
         result["products"] = _serialize_products_for_api(
@@ -1231,6 +1303,80 @@ def read_product_sitemap_slugs(
     return crud.product.get_product_sitemap_slugs(
         db, skip=skip, limit=limit, is_active=is_active, skip_total=skip_total
     )
+
+
+@router.get("/by-ids", response_model=dict)
+def read_products_by_ids(
+    ids: str = Query(..., description="Danh sách products.id cách nhau bởi dấu phẩy (tối đa 50)"),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Lấy nhiều SP storefront trong một request — giảm N round-trip từ giỏ / yêu thích / đã xem."""
+    parsed: List[int] = []
+    seen: set[int] = set()
+    for part in (ids or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            pk = int(part)
+        except ValueError:
+            continue
+        if pk <= 0 or pk in seen:
+            continue
+        seen.add(pk)
+        parsed.append(pk)
+        if len(parsed) >= 50:
+            break
+
+    rows = crud.product.get_storefront_products_by_ids(db, parsed, is_active=True)
+    products = [
+        _product_to_response(db, row, user=current_user).model_dump(mode="json")
+        for row in rows
+    ]
+    return {"products": products}
+
+
+@router.get("/pdp-related", response_model=dict)
+def read_pdp_related_products(
+    product_id: int = Query(..., gt=0, description="products.id của SP đang xem"),
+    tab: Literal["bestselling", "same_price", "lower_price", "higher_price"] = Query(
+        "bestselling",
+        description="Tab SP liên quan — cùng logic frontend RelatedProducts",
+    ),
+    limit: int = Query(20, ge=1, le=120),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    Gom SP liên quan PDP (main + shop group) — một session DB, tối đa 2 listing query.
+    """
+    from app.services.pdp_related_products import fetch_pdp_related_rows
+
+    db_product = crud.product.get_product(db, product_id)
+    if db_product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    db_product = _apply_storefront_image_gate(db, db_product)
+    if db_product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    related_rows, shop_rows = fetch_pdp_related_rows(db, db_product, tab, limit=limit)
+    related_payload = _serialize_products_for_api(
+        db,
+        related_rows,
+        user=current_user,
+        include_warehouse_clearance=True,
+    )
+    shop_payload = _serialize_products_for_api(
+        db,
+        shop_rows,
+        user=current_user,
+        include_warehouse_clearance=True,
+    )
+    return {
+        "related_products": related_payload,
+        "shop_group_products": shop_payload,
+    }
 
 
 # Phải đăng ký TRƯỚC /{product_id} — nếu không "by-slug" bị nuốt như product_id.

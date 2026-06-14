@@ -159,6 +159,10 @@ class Settings:
         self.PRODUCT_SEARCH_CACHE_TTL_SECONDS: int = int(
             os.getenv("PRODUCT_SEARCH_CACHE_TTL_SECONDS", "0")
         )
+        # Listing lọc storefront (PDP related, danh mục có filter) — cache query thô in-process.
+        self.STOREFRONT_LISTING_FILTER_CACHE_TTL_SECONDS: float = float(
+            os.getenv("STOREFRONT_LISTING_FILTER_CACHE_TTL_SECONDS", "600")
+        )
         
         # Cây danh mục /menu (GET /categories/from-products): chỉ giữ nhánh có số SP active **lớn hơn** ngưỡng này.
         # 0 = hành vi cũ (ẩn nhánh 0 SP). Mặc định 10 → hiển thị khi có ≥11 SP; ≤10 SP thì ẩn khỏi menu/sitemap dùng cây này.

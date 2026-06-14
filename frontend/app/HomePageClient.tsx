@@ -709,101 +709,52 @@ export default function HomePageClient({
 
   useEffect(() => {
     if (authLoading || hasFilterParams || recommendationSource !== 'fresh') return;
-    if (!isAuthenticated || user?.id == null) {
-      setSameAgeGenderProducts([]);
-      setSameAgeGenderCohortMode('requires_login');
-      setSameAgeGenderLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setSameAgeGenderLoading(true);
-    apiClient
-      .getProductsViewedBySameAgeGender(HOME_COHORT_MIX_POOL_SIZE)
-      .then(({ products, cohort_mode }) => {
-        if (cancelled) return;
-        setSameAgeGenderProducts(products ?? []);
-        setSameAgeGenderCohortMode(cohort_mode);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSameAgeGenderProducts([]);
-          setSameAgeGenderCohortMode('requires_login');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setSameAgeGenderLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    authLoading,
-    hasFilterParams,
-    isAuthenticated,
-    user?.id,
-    user?.gender,
-    user?.date_of_birth,
-    recommendationSource,
-  ]);
-
-  useEffect(() => {
-    hasDisplayedRecommendationRef.current = displayedRecommendationProducts.length > 0;
-  }, [displayedRecommendationProducts]);
-
-  useEffect(() => {
-    if (authLoading || hasFilterParams || recommendationSource !== 'fresh') return;
     let cancelled = false;
     if (!hasDisplayedRecommendationRef.current) setSameShopLoading(true);
+    setSameAgeGenderLoading(true);
     setSameShopCanLoadMore(false);
     cohortAppendedIdsRef.current = new Set();
     pendingCohortProductsRef.current = [];
     apiClient
-      .getProductsSameShopAsRecentViews(HOME_MIX_INITIAL_LIMIT, 0)
-      .then(({ products, total, seed }) => {
+      .getHomeRecommendationBlock(HOME_MIX_INITIAL_LIMIT, HOME_COHORT_MIX_POOL_SIZE)
+      .then((block) => {
         if (cancelled) return;
-        const list = products || [];
-        const reported = total ?? 0;
-        const normalizedTotal = normalizeSameShopTotal(
-          list.length,
-          reported,
-          HOME_MIX_INITIAL_LIMIT
-        );
-        const nextSeed = seed ?? null;
-        const initialMix = mixShopAndCohortProducts(list, [], nextSeed);
-        sameShopMergedCountRef.current = list.length;
-        const pendingCohort = pendingCohortProductsRef.current;
+        const shopList = block.same_shop_products ?? [];
+        const mixed = block.mixed_recommendation_products ?? shopList;
+        cohortAppendedIdsRef.current = new Set(block.cohort_badge_product_ids ?? []);
         pendingCohortProductsRef.current = [];
-        const mixIds = new Set(initialMix.map((p) => p.id));
-        const cohortTail = pendingCohort.filter((p) => !mixIds.has(p.id));
-        const nextDisplay = cohortTail.length > 0 ? [...initialMix, ...cohortTail] : initialMix;
-        setSameShopProducts(list);
-        setSameShopTotal(normalizedTotal);
-        setSameShopSeed(nextSeed);
-        setDisplayedRecommendationProducts(nextDisplay);
-        setSameShopCanLoadMore(
-          inferSameShopLoadMoreAvailable(
-            list.length,
-            list.length,
-            HOME_MIX_INITIAL_LIMIT,
-            normalizedTotal
-          )
-        );
+        sameShopMergedCountRef.current = shopList.length;
+        setSameShopProducts(shopList);
+        setSameShopTotal(block.same_shop_total ?? 0);
+        setSameShopSeed(block.same_shop_seed ?? null);
+        setSameAgeGenderProducts(block.same_age_gender_products ?? []);
+        setSameAgeGenderCohortMode(block.same_age_gender_cohort_mode ?? 'requires_login');
+        setDisplayedRecommendationProducts(mixed);
+        setSameShopCanLoadMore(Boolean(block.same_shop_can_load_more));
         setSameShopLoading(false);
+        setSameAgeGenderLoading(false);
       })
       .catch(() => {
         if (cancelled) return;
         setSameShopProducts([]);
         setSameShopTotal(0);
         setSameShopSeed(null);
+        setSameAgeGenderProducts([]);
+        setSameAgeGenderCohortMode('requires_login');
         setSameShopCanLoadMore(false);
         setDisplayedRecommendationProducts([]);
         sameShopMergedCountRef.current = 0;
         setSameShopLoading(false);
+        setSameAgeGenderLoading(false);
       });
     return () => {
       cancelled = true;
     };
   }, [shopBehaviorKey, authLoading, hasFilterParams, recommendationSource]);
+
+  useEffect(() => {
+    hasDisplayedRecommendationRef.current = displayedRecommendationProducts.length > 0;
+  }, [displayedRecommendationProducts]);
 
   const cohortProductsForMix = useMemo(() => {
     if (sameAgeGenderLoading) return [];

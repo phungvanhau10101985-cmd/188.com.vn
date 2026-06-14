@@ -14,6 +14,7 @@ import {
   snapshotNeedsProductRefresh,
   snapshotProductDataAsProduct,
 } from '@/lib/viewed-product-card';
+import { enrichItemsWithProductBatch } from '@/lib/batch-product-enrich';
 
 interface ViewedItem {
   id: number;
@@ -38,21 +39,18 @@ export default function DaXemPage() {
       .getViewedProducts(24)
       .then(async (list) => {
         const raw = Array.isArray(list) ? list : [];
-        const enriched = await Promise.all(
-          raw.map(async (item: ViewedItem) => {
+        const enriched = await enrichItemsWithProductBatch(
+          raw,
+          (item: ViewedItem) => {
             const data = (item.product_data || {}) as Record<string, unknown>;
-            const needsRefresh =
-              snapshotNeedsProductRefresh(data) || snapshotNeedsClearanceEnrich(data);
-            if (!needsRefresh) return item;
-            try {
-              const product = await apiClient.getProductById(item.product_id);
-              return {
-                ...item,
-                product_data: mergeProductSnapshotFromApi(data, product),
-              };
-            } catch {
-              return item;
-            }
+            return snapshotNeedsProductRefresh(data) || snapshotNeedsClearanceEnrich(data);
+          },
+          (item, product) => ({
+            ...item,
+            product_data: mergeProductSnapshotFromApi(
+              (item.product_data || {}) as Record<string, unknown>,
+              product
+            ),
           })
         );
         setItems(enriched);

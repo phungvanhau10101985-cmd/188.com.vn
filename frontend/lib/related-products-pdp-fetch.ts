@@ -115,53 +115,18 @@ export function buildRelatedFetchPlan(product: Product, tab: ProductRelatedTabId
   }
 }
 
-function relatedFetchCacheKey(
-  productId: number,
-  tab: ProductRelatedTabId,
-  plan: Extract<FetchPlan, { ok: true }> | null,
-  shopGroup: boolean
-): string {
-  const planPart = plan ? `${plan.sortPurchasesDesc ? '1' : '0'}:${JSON.stringify(plan.params)}` : 'none';
-  return `${productId}:${tab}:${shopGroup ? 'shop' : 'main'}:${planPart}`;
-}
-
-function snapshotCacheKey(productId: number, tab: ProductRelatedTabId, plan: Extract<FetchPlan, { ok: true }>): string {
-  return `${productId}:${tab}:${plan.sortPurchasesDesc ? '1' : '0'}:${JSON.stringify(plan.params)}`;
+function relatedFetchCacheKey(productId: number, tab: ProductRelatedTabId): string {
+  return `${productId}:${tab}`;
 }
 
 const inflightRelatedFetches = new Map<string, Promise<RelatedFetchSnapshot>>();
 const relatedResultsCache = new Map<string, RelatedFetchSnapshot>();
 
-function filterOutCurrent(products: Product[] | undefined, currentProduct: Product): Product[] {
-  return (products || []).filter((p) => p.id !== currentProduct.id);
-}
-
-async function loadChineseShopGroupSnapshot(currentProduct: Product): Promise<Product[]> {
-  const parallelParams = productSearchParamsFromChineseShopCat2(currentProduct);
-  if (!parallelParams) return [];
-  const shopGroupResponse = await apiClient.getProducts({
-    ...RELATED_LIST_BASE,
-    limit: RELATED_PDP_FETCH_LIMIT,
-    sort: 'purchases_desc',
-    ...parallelParams,
-  });
-  return filterOutCurrent(shopGroupResponse.products, currentProduct);
-}
-
 export function getCachedRelatedProductsSnapshot(
   currentProduct: Product,
   relatedTab: ProductRelatedTabId
 ): RelatedFetchSnapshot | null {
-  const plan = buildRelatedFetchPlan(currentProduct, relatedTab);
-  if (!plan.ok) {
-    if (relatedTab === 'bestselling' && productSearchParamsFromChineseShopCat2(currentProduct)) {
-      const shopKey = relatedFetchCacheKey(currentProduct.id, relatedTab, null, true);
-      const shopOnly = relatedResultsCache.get(shopKey);
-      return shopOnly ? { relatedProducts: [], shopGroupProducts: shopOnly.shopGroupProducts } : null;
-    }
-    return null;
-  }
-  return relatedResultsCache.get(snapshotCacheKey(currentProduct.id, relatedTab, plan)) ?? null;
+  return relatedResultsCache.get(relatedFetchCacheKey(currentProduct.id, relatedTab)) ?? null;
 }
 
 /** Gọi sớm từ PDP — làm ấm cache trước khi user scroll tới khối SP liên quan. */
@@ -178,37 +143,7 @@ export async function loadRelatedProductsSnapshot(
   relatedTab: ProductRelatedTabId,
   onPartial?: (snapshot: RelatedFetchSnapshot) => void
 ): Promise<RelatedFetchSnapshot> {
-  const plan = buildRelatedFetchPlan(currentProduct, relatedTab);
-  const shopParams = relatedTab === 'bestselling' ? productSearchParamsFromChineseShopCat2(currentProduct) : null;
-
-  if (!plan.ok) {
-    if (shopParams) {
-      const shopKey = relatedFetchCacheKey(currentProduct.id, relatedTab, null, true);
-      const cachedShop = relatedResultsCache.get(shopKey);
-      if (cachedShop) {
-        onPartial?.(cachedShop);
-        return cachedShop;
-      }
-      let inflight = inflightRelatedFetches.get(shopKey);
-      if (!inflight) {
-        inflight = (async () => {
-          const sgList = await loadChineseShopGroupSnapshot(currentProduct);
-          const snapshot = { relatedProducts: [] as Product[], shopGroupProducts: sgList };
-          relatedResultsCache.set(shopKey, snapshot);
-          return snapshot;
-        })().finally(() => {
-          inflightRelatedFetches.delete(shopKey);
-        });
-        inflightRelatedFetches.set(shopKey, inflight);
-      }
-      const result = await inflight;
-      onPartial?.(result);
-      return result;
-    }
-    return { relatedProducts: [], shopGroupProducts: [] };
-  }
-
-  const key = snapshotCacheKey(currentProduct.id, relatedTab, plan);
+  const key = relatedFetchCacheKey(currentProduct.id, relatedTab);
   const cached = relatedResultsCache.get(key);
   if (cached) {
     onPartial?.(cached);
@@ -223,37 +158,27 @@ export async function loadRelatedProductsSnapshot(
       return snapshot;
     });
   }
+
   batch = (async () => {
-      let relatedProducts: Product[] = [];
-      let shopGroupProducts: Product[] = [];
+    const res = await apiClient.getPdpRelatedProducts(
+      currentProduct.id,
+      relatedTab,
+      RELATED_PDP_FETCH_LIMIT
+    );
+    const snapshot: RelatedFetchSnapshot = {
+      relatedProducts: res.related_products ?? [],
+      shopGroupProducts: res.shop_group_products ?? [],
+    };
+    relatedResultsCache.set(key, snapshot);
+    onPartial?.(snapshot);
+    return snapshot;
+  })().finally(() => {
+    inflightRelatedFetches.delete(key);
+  });
 
-      const emit = () => {
-        onPartial?.({ relatedProducts, shopGroupProducts });
-      };
-
-      const relatedPromise = apiClient.getProducts(plan.params).then((response) => {
-        relatedProducts = filterOutCurrent(response.products, currentProduct);
-        emit();
-        return relatedProducts;
-      });
-
-      const shopPromise =
-        relatedTab === 'bestselling' && shopParams
-          ? loadChineseShopGroupSnapshot(currentProduct).then((sgList) => {
-              shopGroupProducts = sgList;
-              emit();
-              return sgList;
-            })
-          : Promise.resolve([] as Product[]);
-
-      await Promise.all([relatedPromise, shopPromise]);
-      const snapshot = { relatedProducts, shopGroupProducts };
-      relatedResultsCache.set(key, snapshot);
-      return snapshot;
-    })().finally(() => {
-      inflightRelatedFetches.delete(key);
-    });
   inflightRelatedFetches.set(key, batch);
-
   return batch;
 }
+
+/** Params listing cho «Xem tất cả» / load-more — vẫn dùng GET /products trực tiếp. */
+export { RELATED_LIST_BASE, buildRelatedFetchPlan, productSearchParamsFromChineseShopCat2 };
