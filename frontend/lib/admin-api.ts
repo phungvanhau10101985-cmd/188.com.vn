@@ -2256,7 +2256,7 @@ export const adminOrderAPI = {
     if (params?.status) sp.set('status', params.status);
     if (params?.payment_status) sp.set('payment_status', params.payment_status);
     if (params?.q?.trim()) sp.set('q', params.q.trim());
-    sp.set('limit', String(params?.limit ?? 50));
+    sp.set('limit', String(params?.limit ?? 100));
     sp.set('skip', String(params?.skip ?? 0));
     return fetchAdmin<AdminOrderListResponse>(`/orders/admin/all?${sp.toString()}`);
   },

@@ -147,7 +147,7 @@ const EMPTY_REVENUE_FILTER: RevenueFilterState = {
   preset: null,
 };
 
-const ADMIN_ORDERS_DEFAULT_PAGE_SIZE = 25;
+const ADMIN_ORDERS_DEFAULT_PAGE_SIZE = 100;
 
 function resolveAdminOrderStatusParam(activeTab: string, statusFilter: string): string | undefined {
   const key = statusFilter || activeTab;
