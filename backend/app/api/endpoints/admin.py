@@ -203,28 +203,6 @@ def admin_delete_import_1688_cookie_settings(
     return _import_1688_cookie_settings_out("Đã xóa cookie scrape trên server.")
 
 
-class PandamallAccountIn(BaseModel):
-    username: str
-    password: str
-
-@router.get("/pandamall-account")
-def admin_get_pandamall_account(
-    _: AdminUser = Depends(require_privileged_admin),
-):
-    from app.services.import_scraper_cookies import get_pandamall_account
-    acc = get_pandamall_account()
-    return {"username": acc.get("username", "")}
-
-@router.put("/pandamall-account")
-def admin_save_pandamall_account(
-    payload: PandamallAccountIn,
-    _: AdminUser = Depends(require_privileged_admin),
-):
-    from app.services.import_scraper_cookies import save_pandamall_account
-    save_pandamall_account(payload.username, payload.password)
-    return {"message": "Đã lưu tài khoản PandaMall thành công.", "username": payload.username}
-
-
 
 @router.post("/login", response_model=AdminTokenResponse)
 def admin_login(login_data: AdminLogin, db: Session = Depends(get_db)):
@@ -1294,9 +1272,9 @@ def admin_get_pandamall_account(
     try:
         from app.services.import_scraper_cookies import get_pandamall_account
         data = get_pandamall_account()
-        return {"username": data.get("username", ""), "password": data.get("password", "")}
+        return {"username": data.get("username", "")}
     except ImportError:
-        return {"username": "", "password": ""}
+        return {"username": ""}
 
 
 @router.put("/pandamall-account")

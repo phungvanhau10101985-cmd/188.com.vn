@@ -439,10 +439,12 @@ def get_pandamall_account() -> Dict[str, str]:
 def save_pandamall_account(username: str, password: str) -> None:
     """Lưu username/password vào pandamall-account.json."""
     path = _pandamall_account_file()
+    existing = get_pandamall_account()
+    pwd = password.strip() if password else (existing.get("password") or "")
     try:
         data = {
             "username": username.strip() if username else "",
-            "password": password.strip() if password else "",
+            "password": pwd,
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

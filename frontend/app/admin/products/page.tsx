@@ -1446,7 +1446,7 @@ export default function AdminProductsPage() {
     try {
       const st = await adminProductAPI.getPandamallAccount();
       setPandamallUsername(st.username || '');
-      setPandamallPassword(st.password || '');
+      setPandamallPassword('');
       setPandamallAccountSaved(!!st.username);
     } catch {
       setPandamallUsername('');
@@ -3051,7 +3051,7 @@ export default function AdminProductsPage() {
                           type="text"
                           value={pandamallPassword}
                           onChange={(e) => setPandamallPassword(e.target.value)}
-                          placeholder="Mật khẩu của bạn"
+                          placeholder={pandamallAccountSaved ? 'Nhập lại khi đổi mật khẩu' : 'Mật khẩu của bạn'}
                           className="w-full rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs text-gray-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
                         />
                       </label>
@@ -3060,7 +3060,11 @@ export default function AdminProductsPage() {
                       <button
                         type="button"
                         onClick={() => void handleSavePandamallAccount()}
-                        disabled={pandamallAccountSaving || !pandamallUsername.trim()}
+                        disabled={
+                          pandamallAccountSaving ||
+                          !pandamallUsername.trim() ||
+                          (!pandamallAccountSaved && !pandamallPassword.trim())
+                        }
                         className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
                       >
                         {pandamallAccountSaving ? 'Đang lưu…' : 'Lưu tài khoản'}

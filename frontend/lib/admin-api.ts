@@ -1195,8 +1195,8 @@ export type AdminGoogleSheetSkuSyncResult = {
 };
 
 export const adminProductAPI = {
-  getPandamallAccount: async (): Promise<{ username?: string; password?: string }> => {
-    return fetchAdmin<{ username?: string; password?: string }>('/admin/pandamall-account');
+  getPandamallAccount: async (): Promise<{ username?: string }> => {
+    return fetchAdmin<{ username?: string }>('/admin/pandamall-account');
   },
 
   savePandamallAccount: async (username: string, password?: string): Promise<{ message: string }> => {
@@ -1955,19 +1955,6 @@ export const adminProductAPI = {
         timeoutMs: 60_000,
       });
     }),
-
-  getPandamallAccount: () =>
-    fetchAdmin<{ username: string }>('/admin/pandamall-account', {
-      timeoutMs: 60_000,
-    }),
-
-  savePandamallAccount: (username: string, password: string) =>
-    fetchAdmin<{ message: string; username: string }>('/admin/pandamall-account', {
-      method: 'PUT',
-      body: JSON.stringify({ username, password }),
-      timeoutMs: 60_000,
-    }),
-
 
   restartBackendApi: () =>
     fetchAdmin<{ success: boolean; message: string }>('/import-1688/settings/restart-api', {
