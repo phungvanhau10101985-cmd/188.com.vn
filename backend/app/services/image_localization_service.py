@@ -8,7 +8,6 @@ import sys
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,86 +28,6 @@ from app.services.image_localization_temp_cleanup import (
 
 logger = logging.getLogger(__name__)
 
-# Playwright Sync API không chạy an toàn trong asyncio loop (uvicorn/Jupyter). Dồn vào 1 worker thread.
-_GEMINI_PW_EXECUTOR: Optional[ThreadPoolExecutor] = None
-_GEMINI_PW_EXEC_LOCK = threading.Lock()
-
-
-def _gemini_pw_dispatch(fn: Callable[[], Any], *, timeout_sec: Optional[float] = None) -> Any:
-    global _GEMINI_PW_EXECUTOR
-    ms = int(getattr(settings, "IMAGE_LOCALIZATION_PLAYWRIGHT_TIMEOUT_MS", 180000) or 180000)
-    to = timeout_sec if timeout_sec is not None else max(300.0, ms / 1000.0 * 5)
-    with _GEMINI_PW_EXEC_LOCK:
-        if _GEMINI_PW_EXECUTOR is None:
-            _GEMINI_PW_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gemini_pw")
-    fut = _GEMINI_PW_EXECUTOR.submit(fn)
-    try:
-        return fut.result(timeout=to)
-    except Exception:
-        try:
-            fut.cancel()
-        except Exception:
-            pass
-        raise
-
-
-def _normalize_playwright_cookie(cookie: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Chuẩn hoá cookie export (Chrome/JSON) → field Playwright chấp nhận."""
-    if not isinstance(cookie, dict):
-        return None
-    name = str(cookie.get("name") or "").strip()
-    if not name:
-        return None
-    value = cookie.get("value")
-    if value is None:
-        return None
-    value = str(value)
-    domain = str(cookie.get("domain") or ".google.com").strip() or ".google.com"
-    if domain.startswith("http://") or domain.startswith("https://"):
-        try:
-            domain = urlparse(domain).hostname or ".google.com"
-        except Exception:
-            domain = ".google.com"
-    path = str(cookie.get("path") or "/").strip() or "/"
-
-    out: Dict[str, Any] = {"name": name, "value": value, "domain": domain, "path": path}
-
-    exp = cookie.get("expires")
-    if exp is None and cookie.get("expirationDate") is not None:
-        try:
-            exp = int(float(cookie["expirationDate"]))
-        except (TypeError, ValueError):
-            exp = None
-    if exp is None and cookie.get("expiry") is not None:
-        try:
-            exp = int(float(cookie["expiry"]))
-        except (TypeError, ValueError):
-            exp = None
-    if exp is not None:
-        try:
-            out["expires"] = int(exp)
-        except (TypeError, ValueError):
-            pass
-
-    if isinstance(cookie.get("httpOnly"), bool):
-        out["httpOnly"] = cookie["httpOnly"]
-    if isinstance(cookie.get("secure"), bool):
-        out["secure"] = cookie["secure"]
-
-    ss = cookie.get("sameSite")
-    if isinstance(ss, str) and ss.strip():
-        sm = ss.strip().lower()
-        mp = {
-            "strict": "Strict",
-            "lax": "Lax",
-            "none": "None",
-            "unspecified": "Lax",
-            "no_restriction": "None",
-        }
-        if sm in mp:
-            out["sameSite"] = mp[sm]
-
-    return out
 
 
 def resolve_allows_ai_image_models(
@@ -520,138 +439,6 @@ def is_188_cdn_url(url: str) -> bool:
     return bool(host and (host == public_host or "188.com.vn" in host or "188comvn.b-cdn.net" in host))
 
 
-def parse_cookie_text(raw: str) -> List[Dict[str, Any]]:
-    """Accept JSON cookie export or a Cookie header string."""
-    text = (raw or "").strip()
-    if not text:
-        return []
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict) and isinstance(parsed.get("cookies"), list):
-            parsed = parsed["cookies"]
-        if isinstance(parsed, list):
-            cookies = []
-            for item in parsed:
-                if not isinstance(item, dict):
-                    continue
-                name = str(item.get("name") or "").strip()
-                value = str(item.get("value") or "")
-                if not name:
-                    continue
-                cookie = {
-                    "name": name,
-                    "value": value,
-                    "domain": item.get("domain") or ".google.com",
-                    "path": item.get("path") or "/",
-                }
-                if item.get("expiry") is not None:
-                    cookie["expiry"] = int(item["expiry"])
-                cookies.append(cookie)
-            return cookies
-    except Exception:
-        pass
-
-    cookies = []
-    for part in text.split(";"):
-        if "=" not in part:
-            continue
-        name, value = part.split("=", 1)
-        name = name.strip()
-        if not name:
-            continue
-        cookies.append({"name": name, "value": value.strip(), "domain": ".google.com", "path": "/"})
-    return cookies
-
-
-def save_gemini_cookie(raw_cookie: str) -> int:
-    cookies = parse_cookie_text(raw_cookie)
-    if not cookies:
-        raise ValueError("Cookie Gemini không hợp lệ hoặc trống")
-    runtime = ensure_runtime_dir()
-    cookie_file = Path(settings.IMAGE_LOCALIZATION_GEMINI_COOKIE_FILE)
-    if not cookie_file.is_absolute():
-        cookie_file = runtime / cookie_file
-    cookie_file.parent.mkdir(parents=True, exist_ok=True)
-    cookie_file.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding="utf-8")
-    return len(cookies)
-
-
-def load_gemini_cookies() -> List[Dict[str, Any]]:
-    cookie_file = Path(settings.IMAGE_LOCALIZATION_GEMINI_COOKIE_FILE)
-    if not cookie_file.is_absolute():
-        cookie_file = ensure_runtime_dir() / cookie_file
-    if not cookie_file.exists():
-        return []
-    try:
-        data = json.loads(cookie_file.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-    return data if isinstance(data, list) else []
-
-
-def _raw_cookie_expires_unix(cookie: Dict[str, Any]) -> Optional[int]:
-    """Thời điểm hết hạn (Unix sec) của một object cookie export; None = session/thiếu metadata."""
-    exp = cookie.get("expires")
-    if exp is None and cookie.get("expirationDate") is not None:
-        try:
-            exp = int(float(cookie["expirationDate"]))
-        except (TypeError, ValueError):
-            exp = None
-    if exp is None and cookie.get("expiry") is not None:
-        try:
-            exp = int(float(cookie["expiry"]))
-        except (TypeError, ValueError):
-            exp = None
-    if exp is None:
-        return None
-    try:
-        return int(exp)
-    except (TypeError, ValueError):
-        return None
-
-
-def analyze_gemini_stored_cookie_expiry() -> Dict[str, Any]:
-    """
-    Phân tích file cookie đã lưu: chỉ báo `all_expired` khi mọi mục đều có expires và đều đã qua `now`.
-    Nếu thiếu metadata hạn của bất kỳ mục nào → không kết luận hết hạn (tránh báo sai).
-    """
-    cookies = load_gemini_cookies()
-    rows = [c for c in cookies if isinstance(c, dict) and str(c.get("name") or "").strip()]
-    if not rows:
-        return {
-            "cookie_count": 0,
-            "all_expired": False,
-            "expiry_known_for_all": False,
-        }
-    now = int(time.time())
-    timestamps: List[int] = []
-    for c in rows:
-        ts = _raw_cookie_expires_unix(c)
-        if ts is None:
-            return {
-                "cookie_count": len(rows),
-                "all_expired": False,
-                "expiry_known_for_all": False,
-            }
-        timestamps.append(ts)
-    all_expired = bool(timestamps) and all(ts < now for ts in timestamps)
-    return {
-        "cookie_count": len(rows),
-        "all_expired": all_expired,
-        "expiry_known_for_all": True,
-    }
-
-
-def gemini_deploy_cookie_blocked_message(cookie_analysis: Dict[str, Any]) -> Optional[str]:
-    """Thông báo lỗi triển khai khi file cookie chỉ toàn cookie đã quá expires."""
-    if not cookie_analysis.get("all_expired"):
-        return None
-    return (
-        "Cookie Gemini trong file đã hết hạn (expires). "
-        "Dán cookie mới trong admin hoặc mở trình duyệt một lần (headed), đăng nhập Gemini để làm mới phiên/profile."
-    )
-
-
 def _language_prompt(language: str) -> str:
     target = LANGUAGE_LABELS.get(language, language or "Vietnamese")
     return f"""ROLE: E-commerce Image Localization Agent
@@ -978,17 +765,12 @@ def build_gemini_image_adapter(
     openai_image_quality: Optional[str] = None,
     openai_image_size: Optional[str] = None,
     inference_tier: Optional[str] = None,
-    playwright_headless: Optional[bool] = None,
 ) -> Any:
-    m = (mode or getattr(settings, "IMAGE_LOCALIZATION_GEMINI_MODE", "web") or "web").strip().lower()
-    if m == "api":
-        return GeminiApiImageAdapter(
-            language,
-            image_model=gemini_image_model,
-            image_size=gemini_image_size,
-            inference_tier=inference_tier,
-        )
-    if m == "openai":
+    raw = (mode or getattr(settings, "IMAGE_LOCALIZATION_GEMINI_MODE", "api") or "api").strip().lower()
+    if raw == "web":
+        logger.warning("gemini_mode=web không còn hỗ trợ — chuyển sang Gemini API.")
+        raw = "api"
+    if raw == "openai":
         return OpenAiGptImageAdapter(
             language,
             image_model=openai_image_model,
@@ -996,851 +778,12 @@ def build_gemini_image_adapter(
             image_size=openai_image_size,
             inference_tier=inference_tier,
         )
-    return GeminiWebImageAdapter(language, playwright_headless_override=playwright_headless)
-
-
-class GeminiWebImageAdapter:
-    """Playwright adapter for Gemini image localization."""
-
-    def __init__(self, language: str, *, playwright_headless_override: Optional[bool] = None):
-        self.language = language
-        self._playwright_headless_override = playwright_headless_override
-        self._playwright = None
-        self._context = None
-        self._page = None
-        self._gemini_sso_click_attempts = 0
-        self._google_accounts_row_click_attempts = 0
-
-    def _effective_playwright_headless(self) -> bool:
-        if self._playwright_headless_override is not None:
-            return bool(self._playwright_headless_override)
-        return bool(getattr(settings, "IMAGE_LOCALIZATION_PLAYWRIGHT_HEADLESS", True))
-
-    def has_auth_hint(self) -> bool:
-        if load_gemini_cookies():
-            return True
-        profile = self._chrome_profile_path()
-        return (profile / "gemini_logged_in.marker").exists() or (profile / "Default").exists()
-
-    def check_auth(self) -> Dict[str, Any]:
-        cookies = load_gemini_cookies()
-        cookie_count = len(cookies)
-        profile = self._chrome_profile_path()
-        cookie_analysis = analyze_gemini_stored_cookie_expiry()
-        profile_logged_in_explicit = (profile / "gemini_logged_in.marker").exists()
-        profile_has_data = profile_logged_in_explicit or (profile / "Default").exists()
-        blocked = gemini_deploy_cookie_blocked_message(cookie_analysis)
-        stale_cookie_deploy = cookie_count > 0 and bool(cookie_analysis.get("all_expired")) and not profile_logged_in_explicit
-        if stale_cookie_deploy:
-            ready = False
-        else:
-            ready = bool(cookie_count > 0) or profile_has_data
-        requires_cookie_or_login_marker_for_headless = cookie_count == 0 and not profile_logged_in_explicit
-        return {
-            "cookie_count": cookie_count,
-            "cookie_configured": bool(cookies),
-            "cookies_all_expired": bool(cookie_analysis.get("all_expired")),
-            "cookie_expiry_known_for_all": bool(cookie_analysis.get("expiry_known_for_all")),
-            "cookie_deploy_block_reason": blocked if stale_cookie_deploy else None,
-            "profile_path": str(profile),
-            "profile_marker": profile_has_data,
-            "profile_logged_in_marker": profile_logged_in_explicit,
-            "requires_cookie_or_login_marker_for_headless": requires_cookie_or_login_marker_for_headless,
-            "ready": ready,
-        }
-
-    def process(self, image_bytes: bytes, filename: str, source_url: str) -> Tuple[str, Optional[bytes], str]:
-        suffix = Path(filename).suffix or ".jpg"
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(image_bytes)
-            tmp_path = tmp.name
-        ms = int(getattr(settings, "IMAGE_LOCALIZATION_PLAYWRIGHT_TIMEOUT_MS", 180000) or 180000)
-        base_timeout = max(300.0, ms / 1000.0 * 5)
-        login_extra_sec = (
-            float(
-                int(getattr(settings, "IMAGE_LOCALIZATION_GEMINI_MANUAL_LOGIN_WAIT_MS", 900000) or 900000)
-            )
-            / 1000.0
-            if not self._effective_playwright_headless()
-            else 0.0
-        )
-        timeout_sec = base_timeout + login_extra_sec
-
-        def _run() -> Tuple[str, Optional[bytes], str]:
-            try:
-                page = self._ensure_page()
-                prompt = _language_prompt(self.language)
-                before_images = self._image_count(page)
-                self._upload_image(page, tmp_path)
-                self._submit_prompt(page, prompt)
-                output = self._wait_for_generated_image(page, before_images, source_url)
-                return "processed", output, "Gemini Playwright đã xử lý ảnh"
-            finally:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-
-        return _gemini_pw_dispatch(_run, timeout_sec=timeout_sec)
-
-    def _chrome_profile_path(self) -> Path:
-        if settings.IMAGE_LOCALIZATION_CHROME_PROFILE_PATH:
-            return Path(settings.IMAGE_LOCALIZATION_CHROME_PROFILE_PATH)
-        return ensure_runtime_dir() / "chrome-profile"
-
-    def _ensure_page(self):
-        if self._page is not None:
-            return self._page
-        self._gemini_sso_click_attempts = 0
-        self._google_accounts_row_click_attempts = 0
-        profile = self._chrome_profile_path()
-        cookies = load_gemini_cookies()
-        cand = analyze_gemini_stored_cookie_expiry()
-        blocked = gemini_deploy_cookie_blocked_message(cand)
-        profile_login_marker_exists = (profile / "gemini_logged_in.marker").exists()
-        stale_cookie_deploy = len(cookies) > 0 and bool(cand.get("all_expired")) and not profile_login_marker_exists
-        if stale_cookie_deploy and blocked:
-            raise ImageLocalizationError(f"[Triển khai] {blocked}")
-        try:
-            from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-            from playwright.sync_api import sync_playwright
-        except ImportError as exc:
-            raise ImageLocalizationError("Backend chưa cài Playwright. Chạy: pip install playwright && playwright install chromium") from exc
-
-        self._playwright_timeout = PlaywrightTimeoutError
-        profile.mkdir(parents=True, exist_ok=True)
-        headless = self._effective_playwright_headless()
-        if headless and len(cookies) == 0 and not profile_login_marker_exists:
-            raise ImageLocalizationError(
-                "[Triển khai] Chế độ ẩn trình duyệt (headless) bắt buộc có cookie Gemini đã lưu (Cookie Gemini → Lưu) "
-                "hoặc profile đã có gemini_logged_in.marker (đăng nhập thành công một lần khi Hiện cửa sổ). "
-                "Nạp xong rồi bấm Chạy lại."
-            )
-        timeout_ms = int(getattr(settings, "IMAGE_LOCALIZATION_PLAYWRIGHT_TIMEOUT_MS", 180000) or 180000)
-        login_wait_ms = int(getattr(settings, "IMAGE_LOCALIZATION_GEMINI_MANUAL_LOGIN_WAIT_MS", 900000) or 900000)
-        self._playwright = sync_playwright().start()
-        self._context = self._playwright.chromium.launch_persistent_context(
-            str(profile),
-            headless=headless,
-            viewport={"width": 1366, "height": 900},
-            user_agent=getattr(settings, "IMPORT_1688_USER_AGENT", None) or None,
-            accept_downloads=True,
-            args=["--disable-blink-features=AutomationControlled", "--disable-notifications"],
-        )
-        self._context.set_default_timeout(timeout_ms)
-        skip_json_cookies = (
-            profile_login_marker_exists
-            and bool(getattr(settings, "IMAGE_LOCALIZATION_GEMINI_SKIP_JSON_COOKIES_WHEN_PROFILE_MARKER", False))
-            and len(cookies) > 0
-        )
-        if skip_json_cookies:
-            logger.info(
-                "Đã có gemini_logged_in.marker và IMAGE_LOCALIZATION_GEMINI_SKIP_JSON_COOKIES_WHEN_PROFILE_MARKER=true — "
-                "bỏ qua merge cookie từ file JSON để không ghi đè phiên profile."
-            )
-        else:
-            self._add_cookies()
-        self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
-        self._page.goto("https://gemini.google.com/app", wait_until="domcontentloaded", timeout=timeout_ms)
-        try:
-            self._page.wait_for_load_state("domcontentloaded", timeout=min(12000, timeout_ms))
-        except Exception:
-            pass
-        if not headless:
-            try:
-                self._page.bring_to_front()
-            except Exception:
-                pass
-
-        settle_ms = int(min(max(25000.0, timeout_ms * 0.5), 90000.0))
-        settle = self._settle_gemini_ui(self._page, settle_ms)
-        logger.info(
-            "Gemini sau khi tải: settle=%s (chờ tối đa %sms) — chỉ chạy pipeline khi có ô nhập hoặc đã chờ đăng nhập headed.",
-            settle,
-            settle_ms,
-        )
-
-        if settle == "ready":
-            try:
-                if not headless:
-                    self._page.bring_to_front()
-            except Exception:
-                pass
-            return self._page
-
-        expired_file_hint = blocked
-        if expired_file_hint:
-            raise ImageLocalizationError(f"[Triển khai] {expired_file_hint}")
-
-        if headless:
-            raise ImageLocalizationError(
-                "[Triển khai] Headless: đã có cookie nhưng Gemini chưa hiện ô nhập (phiên hết hạn hoặc cookie thiếu domain). "
-                "Dán cookie mới trong admin hoặc chọn Hiện cửa sổ để đăng nhập."
-            )
-
-        logger.info(
-            "Gemini (hiện cửa sổ): chưa có ô nhập (settle=%s) — thử bấm Sign in (SSO profile) hoặc đăng nhập tay trong Chromium.",
-            settle,
-        )
-        self._try_click_gemini_sign_in_for_sso(self._page)
-        self._try_click_google_accounts_account_row(self._page)
-        self._page.wait_for_timeout(2200)
-        settle_sso = self._settle_gemini_ui(self._page, min(settle_ms, 35000))
-        if settle_sso == "ready":
-            try:
-                self._page.bring_to_front()
-            except Exception:
-                pass
-            return self._page
-
-        self._wait_until_gemini_logged_in(self._page, login_wait_ms)
-
-        if not self._gemini_prompt_editor_visible(self._page):
-            raise ImageLocalizationError(
-                "Gemini vẫn chưa có ô nhập sau khi chờ — hoàn thành đăng nhập Google rồi Chạy lại."
-            )
-        try:
-            self._page.bring_to_front()
-        except Exception:
-            pass
-        return self._page
-
-    def _gemini_prompt_editor_visible(self, page) -> bool:
-        """
-        Chỉ true khi **đã đăng nhập** Gemini: Gemini marketing vẫn có ô 'Ask Gemini' khi có nút Sign In — không tính là ready.
-        """
-        try:
-            if self._gemini_on_google_accounts_url(page):
-                return False
-            if self._sign_in_ui_visible(page):
-                return False
-            return self._prompt_locator(page).count() > 0
-        except Exception:
-            return False
-
-    @staticmethod
-    def _gemini_on_google_accounts_url(page) -> bool:
-        """Đang ở trang OAuth/đăng nhập Google (chưa về Gemini app)."""
-        try:
-            u = (page.url or "").lower()
-            return (
-                "accounts.google.com" in u
-                or "google.com/v3/signin" in u
-                or "signin/oauth" in u
-                or ("/signin/" in u and "google." in u)
-            )
-        except Exception:
-            return False
-
-    def _settle_gemini_ui(self, page, timeout_ms: int) -> str:
-        """
-        Chờ UI ổn định. Tránh lỗi: chưa Sign in, chưa có editor, trang đang load → _looks_logged_out=False → return sớm.
-        Trả về: ready | logged_out | unsettled
-        """
-        deadline = time.monotonic() + timeout_ms / 1000.0
-        while time.monotonic() < deadline:
-            try:
-                if self._gemini_prompt_editor_visible(page):
-                    return "ready"
-                if self._looks_logged_out(page):
-                    return "logged_out"
-            except Exception:
-                pass
-            page.wait_for_timeout(450)
-            try:
-                page.wait_for_load_state("networkidle", timeout=1800)
-            except Exception:
-                pass
-        if self._gemini_prompt_editor_visible(page):
-            return "ready"
-        if self._looks_logged_out(page):
-            return "logged_out"
-        return "unsettled"
-
-    def _wait_until_gemini_logged_in(self, page, wait_ms: int) -> None:
-        logger.info(
-            "Gemini (hiện cửa sổ): chưa đăng nhập — đăng nhập trong Chromium; chờ tối đa %.1f phút.",
-            wait_ms / 60000.0,
-        )
-        deadline = time.monotonic() + wait_ms / 1000.0
-        nav_interval = 55.0
-        last_nav = time.monotonic()
-        playwright_timeout_ms = int(getattr(settings, "IMAGE_LOCALIZATION_PLAYWRIGHT_TIMEOUT_MS", 180000) or 180000)
-
-        while time.monotonic() < deadline:
-            try:
-                if self._gemini_prompt_editor_visible(page):
-                    logger.info("Gemini (hiện cửa sổ): đã có ô nhập prompt — tiếp tục pipeline.")
-                    try:
-                        page.bring_to_front()
-                    except Exception:
-                        pass
-                    return
-            except Exception:
-                pass
-            self._try_click_google_accounts_account_row(page)
-            self._try_click_gemini_sign_in_for_sso(page)
-            page.wait_for_timeout(2500)
-            if time.monotonic() - last_nav >= nav_interval:
-                try:
-                    self._try_click_google_accounts_account_row(page)
-                    self._try_click_gemini_sign_in_for_sso(page)
-                    page.goto(
-                        "https://gemini.google.com/app",
-                        wait_until="domcontentloaded",
-                        timeout=playwright_timeout_ms,
-                    )
-                    page.wait_for_timeout(1500)
-                    try:
-                        page.bring_to_front()
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-                last_nav = time.monotonic()
-
-        raise ImageLocalizationError(
-            f"Hết thời gian chờ đăng nhập Gemini (~{max(1, int(wait_ms / 60000))} phút). "
-            "Hoàn thành đăng nhập rồi Chạy lại, hoặc lưu cookie qua admin để chạy ẩn trình duyệt."
-        )
-
-    def _sign_in_ui_visible(self, page) -> bool:
-        """Nút/link đăng nhập Google/Gemini (kể cả khi có ô Ask Gemini không đăng nhập)."""
-        try:
-            if self._gemini_on_google_accounts_url(page):
-                return True
-            if page.locator('a[href*="accounts.google.com"][href*="signin"]').count() > 0:
-                return True
-            if page.locator('a[href*="ServiceLogin"]').count() > 0:
-                return True
-            if page.locator('[aria-label*="Sign in"]').count() > 0:
-                return True
-            if page.locator('[aria-label*="sign in"]').count() > 0:
-                return True
-            if page.locator('[data-test-id*="sign-in"], [jsname*="signIn"]').count() > 0:
-                return True
-            if page.get_by_role("link", name=re.compile(r"sign\s*in", re.I)).count() > 0:
-                return True
-            if page.get_by_role("button", name=re.compile(r"sign\s*in|đăng nhập", re.I)).count() > 0:
-                return True
-            if (
-                page.locator('[role="banner"] >> a:has-text("Sign in"), [role="banner"] >> button:has-text("Sign In"), '
-                '[role="banner"] >> a:has-text("Sign In"), [role="banner"] >> button:has-text("Sign in")').count()
-                > 0
-            ):
-                return True
-            if page.locator('button:has-text("Sign In")').count() > 0:
-                return True
-            if page.locator('button:has-text("Sign in")').count() > 0:
-                return True
-        except Exception:
-            pass
-        return False
-
-    def _try_click_gemini_sign_in_for_sso(self, page) -> None:
-        """
-        Headed: bấm Sign in trên gemini/google.com để kích hoạt SSO khi Chromium profile
-        đã có phiên Google — thường đăng nhập tự động không cần gõ lại.
-        """
-        if self._effective_playwright_headless():
-            return
-        if self._gemini_sso_click_attempts >= 4:
-            return
-        try:
-            u = (page.url or "").lower()
-        except Exception:
-            u = ""
-        # Chỉ bấm trên trang Gemini — tránh nhầm trên accounts.google.com / chọn TK.
-        if "gemini.google" not in u and "bard.google" not in u:
-            return
-        if self._gemini_prompt_editor_visible(page):
-            return
-        if not self._sign_in_ui_visible(page):
-            return
-        self._gemini_sso_click_attempts += 1
-        logger.info(
-            "Gemini (headed): bấm Sign in để SSO (lần %s/4, profile Chromium đã đăng nhập Google thì Gemini sẽ vào luôn).",
-            self._gemini_sso_click_attempts,
-        )
-        try:
-            page.bring_to_front()
-        except Exception:
-            pass
-        selectors = (
-            '[role="banner"] a[href*="accounts.google.com"][href*="signin"]',
-            '[role="banner"] a[href*="accounts.google.com"]',
-            'header >> a[href*="accounts.google.com"][href*="signin"]',
-            '[role="navigation"] a[href*="accounts.google.com"][href*="signin"]',
-            '[role="banner"] button:has-text("Sign In")',
-            '[role="banner"] button:has-text("Sign in")',
-            'button:has-text("Sign In"):visible',
-            'button:has-text("Sign in"):visible',
-            'a[href*="ServiceLogin"]',
-        )
-        for sel in selectors:
-            try:
-                base = page.locator(sel)
-                if base.count() < 1:
-                    continue
-                el = base.first
-                el.scroll_into_view_if_needed(timeout=4000)
-                el.click(timeout=12000)
-                page.wait_for_timeout(1600)
-                try:
-                    page.wait_for_load_state("domcontentloaded", timeout=min(25000, 12000))
-                except Exception:
-                    pass
-                return
-            except Exception:
-                continue
-        try:
-            page.get_by_role("link", name=re.compile(r"^\s*sign\s*in\s*$", re.I)).first.click(timeout=9000)
-            page.wait_for_timeout(1600)
-        except Exception as exc:
-            logger.warning("Không click được Sign in SSO: %s", exc)
-
-    def _try_click_google_accounts_account_row(self, page) -> None:
-        """
-        Headed: đang accounts.google.com (chọn TK) — bấm vào **dòng tài khoản** (screenshot: tên + email + "Signed out").
-        Ưu tiên IMAGE_LOCALIZATION_GOOGLE_ACCOUNT_EMAIL; không có thì thử hàng chứa "Signed out" / @ / data-email.
-        """
-        if self._effective_playwright_headless():
-            return
-        if not self._gemini_on_google_accounts_url(page):
-            return
-        if self._google_accounts_row_click_attempts >= 20:
-            return
-        try:
-            page.bring_to_front()
-        except Exception:
-            pass
-
-        configured = (getattr(settings, "IMAGE_LOCALIZATION_GOOGLE_ACCOUNT_EMAIL", "") or "").strip()
-
-        def _escape_attr_css(v: str) -> str:
-            return v.replace("\\", "\\\\").replace('"', '\\"')
-
-        self._google_accounts_row_click_attempts += 1
-        logger.info(
-            "Google Accounts (headed): thử chọn dòng tài khoản (%s/20)%s.",
-            self._google_accounts_row_click_attempts,
-            f" — email .env: {configured}" if configured else " — ưu tiên Signed out / data-email",
-        )
-
-        if configured:
-            esc = _escape_attr_css(configured)
-            for sel in (f'[data-email="{esc}"]', f'[data-identifier="{esc}"]'):
-                try:
-                    loc = page.locator(sel)
-                    if loc.count() < 1:
-                        continue
-                    loc.first.scroll_into_view_if_needed(timeout=4000)
-                    loc.first.click(timeout=10000)
-                    page.wait_for_timeout(1200)
-                    return
-                except Exception:
-                    continue
-            try:
-                page.get_by_role("link", name=re.compile(re.escape(configured), re.I)).first.click(timeout=9000)
-                page.wait_for_timeout(1200)
-                return
-            except Exception:
-                pass
-            try:
-                page.get_by_text(configured, exact=True).first.click(timeout=9000)
-                page.wait_for_timeout(1200)
-                return
-            except Exception:
-                pass
-
-        signed_out_rx = re.compile(r"signed\s+out|đã\s+đăng\s+xuất", re.I)
-        for meth in (
-            lambda: page.get_by_role("option").filter(has_text=signed_out_rx).first.click(timeout=9000),
-            lambda: page.get_by_role("listitem").filter(has_text=signed_out_rx).first.click(timeout=9000),
-            lambda: page.locator("[data-identifier]").filter(has_text=signed_out_rx).first.click(timeout=9000),
-        ):
-            try:
-                meth()
-                page.wait_for_timeout(1200)
-                return
-            except Exception:
-                continue
-
-        try:
-            loc = page.locator("[data-email]").filter(has_text=re.compile(r".+@.+\..+"))
-            if loc.count() > 0:
-                loc.first.click(timeout=9000)
-                page.wait_for_timeout(1200)
-                return
-        except Exception:
-            pass
-
-        try:
-            page.locator('[role="listbox"] [role="option"]').filter(has_text=re.compile(r"@")).first.click(timeout=9000)
-            page.wait_for_timeout(1200)
-        except Exception as exc:
-            logger.debug("Chưa click được dòng tài khoản Google Accounts: %s", exc)
-
-    def _add_cookies(self) -> None:
-        cookies = load_gemini_cookies()
-        if not cookies or self._context is None:
-            return
-        normalized: List[Dict[str, Any]] = []
-        for cookie in cookies:
-            if not isinstance(cookie, dict):
-                continue
-            nc = _normalize_playwright_cookie(cookie)
-            if nc:
-                normalized.append(nc)
-        if not normalized:
-            return
-        try:
-            self._context.add_cookies(normalized)
-        except Exception as exc:
-            logger.warning("add_cookies batch lỗi (%s) — thử từng cookie", exc)
-            for c in normalized:
-                try:
-                    self._context.add_cookies([c])
-                except Exception as e2:
-                    logger.warning("Bỏ cookie %s@%s: %s", c.get("name"), c.get("domain"), e2)
-
-    def _looks_logged_out(self, page) -> bool:
-        """Đang có luồng đăng nhập (Sign In / OAuth) — không dùng 'có ô text' một mình làm dấu hiệu đã login."""
-        try:
-            if self._gemini_on_google_accounts_url(page):
-                return True
-            if self._sign_in_ui_visible(page):
-                return True
-        except Exception:
-            pass
-        text = ""
-        try:
-            text = page.locator("body").inner_text(timeout=5000).lower()
-        except Exception:
-            text = ""
-        logged_out_markers = ("sign in", "đăng nhập", "use gemini with your google account")
-        markers_hit = bool(text) and any(marker in text for marker in logged_out_markers)
-        try:
-            has_editor = self._prompt_locator(page).count() > 0
-        except Exception:
-            has_editor = False
-        return markers_hit and not has_editor
-
-    def _prompt_locator(self, page):
-        locators = [
-            'div[contenteditable="true"][role="textbox"]',
-            'div[contenteditable="true"]',
-            'textarea',
-            '[role="textbox"]',
-        ]
-        for selector in locators:
-            loc = page.locator(selector)
-            if loc.count() > 0:
-                return loc.last
-        return page.locator('div[contenteditable="true"]').last
-
-    def _image_count(self, page) -> int:
-        """Chỉ đếm ảnh đủ lớn ngoài header — tránh baseline sai vì avatar/Material icon."""
-        return len(self._gemini_eligible_image_urls(page))
-
-    def _gemini_eligible_image_urls(self, page) -> List[str]:
-        """Ảnh ứng viên trong nội dung Gemini: loại avatar, toolbar, icon nhỏ."""
-        try:
-            raw = page.evaluate(
-                r"""() => {
-                    const imgs = Array.from(document.querySelectorAll('body img'));
-                    const out = [];
-                    const seen = new Set();
-                    for (const img of imgs) {
-                        try {
-                            if (img.closest('[role="banner"], header')) continue;
-                            if (img.closest('aside[role="complementary"], nav[role="navigation"]')) continue;
-                            const mtb = img.closest('[class*="mat-toolbar"]');
-                            if (mtb && mtb.closest('[role="banner"], header')) continue;
-                            const rect = img.getBoundingClientRect();
-                            const vw = window.innerWidth || document.documentElement.clientWidth || 0;
-                            const rtop = rect.top;
-                            const rleft = rect.left;
-                            const nw = img.naturalWidth || 0;
-                            const nh = img.naturalHeight || 0;
-                            const rw = rect.width || 0;
-                            const rh = rect.height || 0;
-                            const w = nw || rw;
-                            const h = nh || rh;
-                            if (w < 140 || h < 140) continue;
-                            if (vw > 400 && rtop < 96 && rleft > vw - 260 && w < 360 && h < 360) continue;
-                            const src = String(img.currentSrc || img.src || '').trim();
-                            if (!src || seen.has(src)) continue;
-                            const sl = src.toLowerCase();
-                            if (/googleusercontent\.com\/a(\/|-)/.test(sl)) continue;
-                            if (sl.includes('googleusercontent.com') && w < 280 && h < 280) continue;
-                            if (sl.includes('gstatic.com') && w < 320) continue;
-                            const alt = String(img.alt || '').toLowerCase();
-                            if (alt.includes('profile') || alt.includes('avatar') || alt.includes('account')) continue;
-                            seen.add(src);
-                            out.push(src);
-                        } catch (e) {}
-                    }
-                    return out;
-                }"""
-            )
-            return list(raw) if isinstance(raw, list) else []
-        except Exception:
-            return []
-
-    def _upload_image(self, page, image_path: str) -> None:
-        """
-        Giao diện Gemini Material: thường cần bấm '+' mở menu rồi 'Tải tệp lên' / 'Upload file'.
-        Fallback: input file ẩn hoặc nút Attach cũ.
-        """
-        try:
-            self._gemini_click_plus_then_upload_via_menu(page, image_path)
-            return
-        except Exception:
-            logger.debug("_gemini_click_plus_then_upload_via_menu thất bại, thử các cách khác", exc_info=True)
-
-        input_file = page.locator('input[type="file"]')
-        if input_file.count() > 0:
-            input_file.last.set_input_files(image_path)
-            return
-
-        upload_buttons = [
-            'button[aria-label*="Upload"]',
-            'button[aria-label*="Attach"]',
-            'button[aria-label*="Add"]',
-            'button:has-text("Upload")',
-            'button:has-text("Tải")',
-            'button:has-text("Thêm")',
-        ]
-        for selector in upload_buttons:
-            button = page.locator(selector)
-            if button.count() == 0:
-                continue
-            try:
-                with page.expect_file_chooser(timeout=8000) as chooser_info:
-                    button.last.click()
-                chooser_info.value.set_files(image_path)
-                return
-            except Exception:
-                continue
-        raise ImageLocalizationError(
-            "Không tìm thấy nút/input upload ảnh trên Gemini (+ → Tải tệp lên hoặc input file ẩn)."
-        )
-
-    def _gemini_click_plus_then_upload_via_menu(self, page, image_path: str) -> None:
-        clicked_plus = False
-        plus_by_text = page.locator("button").filter(has_text=re.compile(r"^\s*\+\s*$"))
-        try:
-            if plus_by_text.count() > 0:
-                plus_by_text.last.click(timeout=6500)
-                clicked_plus = True
-        except Exception:
-            clicked_plus = False
-
-        if not clicked_plus:
-            for pat in (
-                r"^thêm$",
-                r"add( to prompt)?",
-                r"attach",
-                r"expand more",
-                r"more options",
-            ):
-                try:
-                    page.get_by_role("button", name=re.compile(pat, re.I)).last.click(timeout=4500)
-                    clicked_plus = True
-                    break
-                except Exception:
-                    continue
-
-        if not clicked_plus:
-            for sel in (
-                'button[aria-label*="Thêm" i][aria-haspopup]',
-                'button[aria-label*="Add" i][aria-haspopup]',
-                'button[aria-label*="Attach" i][aria-haspopup]',
-            ):
-                loc = page.locator(sel)
-                try:
-                    if loc.count() > 0:
-                        loc.last.click(timeout=4500)
-                        clicked_plus = True
-                        break
-                except Exception:
-                    continue
-
-        if not clicked_plus:
-            raise ImageLocalizationError("Không thấy nút + / menu đính kèm Gemini để upload")
-
-        page.wait_for_timeout(600)
-
-        try:
-            page.locator('input[type="file"]').first.set_input_files(image_path, timeout=3500)
-            return
-        except Exception:
-            pass
-
-        last_err: Optional[Exception] = None
-        with page.expect_file_chooser(timeout=18000) as chooser_info:
-            clicked_menu = False
-            for menuitem_pat in (
-                re.compile(r"tải\s*tệp\s*lên|upload\s*file|^upload\b|đính\s*tệp|attach\s*file", re.I),
-            ):
-                try:
-                    page.get_by_role("menuitem", name=menuitem_pat).first.click(timeout=8000)
-                    clicked_menu = True
-                    break
-                except Exception as e:
-                    last_err = e
-                    continue
-
-            if not clicked_menu:
-                for label in ("Tải tệp lên", "Upload file", "Upload", "Đính tệp", "Attach file"):
-                    try:
-                        page.get_by_text(label, exact=True).first.click(timeout=6000)
-                        clicked_menu = True
-                        break
-                    except Exception as e:
-                        last_err = e
-                        continue
-
-            if not clicked_menu:
-                try:
-                    page.get_by_text(re.compile(r"tải\s+tệp\s+lên|upload\s+file", re.I)).first.click(timeout=6000)
-                    clicked_menu = True
-                except Exception as e:
-                    last_err = e
-
-            if not clicked_menu:
-                raise ImageLocalizationError(
-                    "Đã mở menu '+' nhưng không bấm được mục Tải tệp lên / Upload file."
-                ) from last_err
-
-        chooser_info.value.set_files(image_path)
-
-    def _submit_prompt(self, page, prompt: str) -> None:
-        editor = self._prompt_locator(page)
-        try:
-            editor.click()
-            editor.fill(prompt)
-        except Exception:
-            editor.click()
-            page.keyboard.insert_text(prompt)
-
-        submit_selectors = [
-            'button[aria-label*="Send"]',
-            'button[aria-label*="Submit"]',
-            'button[aria-label*="Gửi"]',
-            'button:has-text("Send")',
-            'button:has-text("Gửi")',
-        ]
-        for selector in submit_selectors:
-            button = page.locator(selector)
-            if button.count() > 0:
-                try:
-                    button.last.click()
-                    return
-                except Exception:
-                    pass
-        page.keyboard.press("Enter")
-
-    def _wait_for_generated_image(self, page, before_images: int, source_url: str) -> bytes:
-        timeout_ms = int(getattr(settings, "IMAGE_LOCALIZATION_PLAYWRIGHT_TIMEOUT_MS", 180000) or 180000)
-        deadline = time.monotonic() + timeout_ms / 1000
-        last_error = ""
-        while time.monotonic() < deadline:
-            try:
-                page.wait_for_load_state("networkidle", timeout=5000)
-            except Exception:
-                pass
-            candidates = self._candidate_image_sources(page, before_images)
-            best: Optional[bytes] = None
-            best_len = 0
-            for src in reversed(candidates):
-                try:
-                    data = self._read_image_src(page, src, source_url)
-                    if data and len(data) > best_len:
-                        best_len = len(data)
-                        best = data
-                except Exception as exc:
-                    last_error = str(exc)
-            if best is not None and best_len > 1024:
-                return best
-            page.wait_for_timeout(3000)
-        raise ImageLocalizationError(f"Gemini không trả ảnh kết quả trong thời gian chờ. {last_error}".strip())
-
-    def _candidate_image_sources(self, page, before_images: int) -> List[str]:
-        urls = self._gemini_eligible_image_urls(page)
-        cut = max(0, int(before_images))
-        return urls[cut:] if cut < len(urls) else []
-
-    def _read_image_src(self, page, src: str, referer: str) -> bytes:
-        if src.startswith("data:"):
-            _, b64 = src.split(",", 1)
-            return base64.b64decode(b64)
-        if src.startswith("blob:"):
-            b64 = page.evaluate(
-                """async (url) => {
-                    const res = await fetch(url);
-                    const blob = await res.blob();
-                    const buf = await blob.arrayBuffer();
-                    let binary = '';
-                    const bytes = new Uint8Array(buf);
-                    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-                    return btoa(binary);
-                }""",
-                src,
-            )
-            return base64.b64decode(b64)
-        headers = {"Referer": referer or "https://gemini.google.com/"}
-        if self._context is not None:
-            res = self._context.request.get(src, headers=headers, timeout=60000)
-            if not res.ok:
-                raise ImageLocalizationError(f"Tải ảnh Gemini lỗi HTTP {res.status}")
-            return res.body()
-        res = requests.get(src, headers=headers, timeout=60)
-        res.raise_for_status()
-        return res.content
-
-    def close(self) -> None:
-        if self._playwright is None and self._context is None and self._page is None:
-            return
-
-        def _do() -> None:
-            self._close_playwright_sync()
-
-        try:
-            _gemini_pw_dispatch(_do, timeout_sec=120)
-        except Exception as exc:
-            logger.warning("GeminiWebImageAdapter.close: %s", exc)
-
-    def force_abort(self) -> None:
-        """Đóng Playwright ngay từ thread bất kỳ (hủy ngay job)."""
-        try:
-            self._close_playwright_sync()
-        except Exception as exc:
-            logger.warning("GeminiWebImageAdapter.force_abort: %s", exc)
-
-    def _close_playwright_sync(self) -> None:
-        page = self._page
-        context = self._context
-        playwright = self._playwright
-        self._page = None
-        self._context = None
-        self._playwright = None
-        if page is not None:
-            try:
-                page.close()
-            except Exception:
-                pass
-        if context is not None:
-            try:
-                context.close()
-            except Exception:
-                pass
-        if playwright is not None:
-            try:
-                playwright.stop()
-            except Exception:
-                pass
+    return GeminiApiImageAdapter(
+        language,
+        image_model=gemini_image_model,
+        image_size=gemini_image_size,
+        inference_tier=inference_tier,
+    )
 
 
 class _LegacySheetsAdapter:
@@ -1868,10 +811,21 @@ class _LegacySheetsAdapter:
 class LegacyImageLocalizationPipeline:
     """Run the old Google Vision/classifier/split/local pipeline against DB image URLs."""
 
-    def __init__(self, language: str, gemini: Any, *, allows_ai_image_models: bool = True):
+    def __init__(
+        self,
+        language: str,
+        gemini: Any,
+        *,
+        allows_ai_image_models: bool = True,
+        gemini_mode: str = "api",
+    ):
         self.language = language
         self.gemini = gemini
         self.allows_ai_image_models = bool(allows_ai_image_models)
+        self.gemini_mode = (gemini_mode or "api").strip().lower()
+        self.use_gemini_api_for_rich_images = (
+            self.allows_ai_image_models and self.gemini_mode == "api"
+        )
         self._modules = self._prepare_modules()
         self.ImageMerger = self._modules["ImageMerger"]
         self.ImageSplitter = self._modules["ImageSplitter"]
@@ -1907,8 +861,6 @@ class LegacyImageLocalizationPipeline:
             "text_overlap_detector",
             "bunny_uploader",
             "gemini_post_checker",
-            "gemini_processor",
-            "playwright_shim",
             "utils_logger",
         ]
         for mod_name in module_names:
@@ -1928,11 +880,6 @@ class LegacyImageLocalizationPipeline:
             "DOWNLOADS_DIR": str(runtime / "downloads"),
             "LOGS_DIR": str(runtime / "logs"),
             "CACHE_DIR": str(runtime / "processed_images_cache"),
-            "CHROME_PROFILE_PATH": str(
-                Path(settings.IMAGE_LOCALIZATION_CHROME_PROFILE_PATH)
-                if settings.IMAGE_LOCALIZATION_CHROME_PROFILE_PATH
-                else runtime / "chrome-profile"
-            ),
             "GCP_KEY_FILE": gcp_key,
             "DEEPSEEK_API_KEY": settings.DEEPSEEK_API_KEY,
             "DEEPSEEK_URL": settings.DEEPSEEK_API_URL,
@@ -1946,7 +893,7 @@ class LegacyImageLocalizationPipeline:
         }
         for key, value in overrides.items():
             setattr(config_mod, key, value)
-        for dirname in ("TEMP_DIR", "TEMP_IMAGES_DIR", "DOWNLOADS_DIR", "LOGS_DIR", "CACHE_DIR", "CHROME_PROFILE_PATH"):
+        for dirname in ("TEMP_DIR", "TEMP_IMAGES_DIR", "DOWNLOADS_DIR", "LOGS_DIR", "CACHE_DIR"):
             try:
                 Path(getattr(config_mod, dirname)).mkdir(parents=True, exist_ok=True)
             except Exception:
@@ -2166,6 +1113,7 @@ class LegacyImageLocalizationPipeline:
         cls = self.image_classifier.classify_image(norm_ocr, [], data.get("original_url") or "")
         image = data["image_data"]
         filename = data.get("filename") or "image.jpg"
+        delete_size_and_laundry = not self.use_gemini_api_for_rich_images
         if cls.get("type") == "delete":
             return "deleted", None, f"Xóa theo classifier: {cls.get('details', {}).get('detected_keyword') or 'keyword'}"
         if cls.get("type") == "keep":
@@ -2176,10 +1124,23 @@ class LegacyImageLocalizationPipeline:
                     "Classifier=yêu cầu Gemini/GPT nhưng không có chỉ định AI — dùng DeepSeek+vẽ: %s",
                     (data.get("original_url") or "")[:120],
                 )
-                return self._process_local(data, translator, img_proc, data.get("original_url") or "")
+                return self._process_local(
+                    data, translator, img_proc, data.get("original_url") or "",
+                    delete_size_and_laundry=True,
+                )
             return self._run_gemini_image_edit(data, translator, img_proc, image, filename)
 
-        local_res = self._process_local(data, translator, img_proc, data.get("original_url") or "")
+        if self.use_gemini_api_for_rich_images and translator.has_size_or_laundry_context(norm_ocr):
+            logger.info(
+                "Phát hiện bảng size/giặt tẩy — Gemini API (không xóa): %s",
+                (data.get("original_url") or "")[:120],
+            )
+            return self._run_gemini_image_edit(data, translator, img_proc, image, filename)
+
+        local_res = self._process_local(
+            data, translator, img_proc, data.get("original_url") or "",
+            delete_size_and_laundry=delete_size_and_laundry,
+        )
         if (
             self.allows_ai_image_models
             and local_res[0] == "kept"
@@ -2204,6 +1165,11 @@ class LegacyImageLocalizationPipeline:
     ) -> Tuple[str, Any, str]:
         """Gọi Gemini hoặc GPT Image (adapter); tái sử dụng cho classifier gemini và leo thang sau overlap local."""
         url = data.get("original_url") or ""
+        norm_ocr = self._normalize_ocr(data.get("ocr_results") or [])
+        preserve_rich = (
+            self.use_gemini_api_for_rich_images
+            and translator.has_size_or_laundry_context(norm_ocr)
+        )
         if not self.allows_ai_image_models:
             return "kept", image, "Không gọi Gemini/GPT (chưa chỉ định AI ảnh)"
         fail_suffix = ""
@@ -2212,30 +1178,56 @@ class LegacyImageLocalizationPipeline:
                 _encode_image_bytes(image, filename), filename, url
             )
             if status == "deleted":
+                if preserve_rich:
+                    return (
+                        "kept",
+                        image,
+                        f"Giữ ảnh bảng size/giặt tẩy (Gemini API báo xóa): {msg}",
+                    )
                 return "deleted", None, msg
             if output_bytes:
                 processed = self._decode_image_bytes(output_bytes)
                 post_ocr = self._post_check_ocr(output_bytes)
                 if _has_chinese_text_blocks(post_ocr):
                     loc = self._process_local(
-                        {"image_data": processed, "ocr_results": post_ocr}, translator, img_proc, url
+                        {"image_data": processed, "ocr_results": post_ocr},
+                        translator,
+                        img_proc,
+                        url,
+                        delete_size_and_laundry=not self.use_gemini_api_for_rich_images,
                     )
                     if loc[0] == "processed":
                         return loc
                 return "processed", processed, msg
-            fail_suffix = " (không nhận được bytes ảnh từ model; kiểm tra chế độ API/Web/OpenAI và quota)"
+            fail_suffix = " (không nhận được bytes ảnh từ model; kiểm tra chế độ API/OpenAI và quota)"
         except Exception as exc:
             logger.warning("Gemini/GPT ảnh lỗi: %s", exc)
             fail_suffix = f" — {exc}"
+        if preserve_rich:
+            return (
+                "kept",
+                image,
+                f"Gemini API không xử lý được — giữ ảnh bảng size/giặt tẩy{fail_suffix}",
+            )
         return "kept", image, f"Gemini/GPT không tạo ảnh dùng được{fail_suffix}"
 
-    def _process_local(self, data: Dict[str, Any], translator: Any, img_proc: Any, url: str) -> Tuple[str, Any, str]:
+    def _process_local(
+        self,
+        data: Dict[str, Any],
+        translator: Any,
+        img_proc: Any,
+        url: str,
+        *,
+        delete_size_and_laundry: bool = True,
+    ) -> Tuple[str, Any, str]:
         valid_ocr = []
         for item in self._normalize_ocr(data.get("ocr_results") or []):
             bbox = item.get("bbox") or []
             if len(bbox) >= 4:
                 valid_ocr.append({"text": item.get("text", ""), "bbox": [int(x) for x in bbox[:4]]})
-        translated = translator.classify_and_process_blocks(valid_ocr, url)
+        translated = translator.classify_and_process_blocks(
+            valid_ocr, url, delete_size_and_laundry=delete_size_and_laundry
+        )
         if translated is None:
             return "deleted", None, "Xóa theo keyword cấm trong local translator"
         if not translated:
@@ -2348,14 +1340,16 @@ class ProductImageLocalizationService:
         openai_image_size: Optional[str] = None,
         inference_tier: Optional[str] = None,
         allow_ai_image_models: Optional[bool] = None,
-        playwright_headless: Optional[bool] = None,
     ):
         self.language = language or "vi"
         self.force = force
         self.dry_run = dry_run
         self.allow_ai_image_models_override = allow_ai_image_models
-        gm = (gemini_mode or getattr(settings, "IMAGE_LOCALIZATION_GEMINI_MODE", "web") or "web").strip().lower()
-        self.gemini_mode = gm if gm in ("web", "api", "openai") else "web"
+        gm = (gemini_mode or getattr(settings, "IMAGE_LOCALIZATION_GEMINI_MODE", "api") or "api").strip().lower()
+        if gm == "web":
+            logger.warning("gemini_mode=web không còn hỗ trợ — job dùng Gemini API.")
+            gm = "api"
+        self.gemini_mode = gm if gm in ("api", "openai") else "api"
         self.session = requests.Session()
         self.inference_tier = "standard"  # Chỉ pipeline chất lượng đầy đủ; flex không còn dùng trong adapter.
         self.gemini = build_gemini_image_adapter(
@@ -2367,7 +1361,6 @@ class ProductImageLocalizationService:
             openai_image_quality=openai_image_quality,
             openai_image_size=openai_image_size,
             inference_tier=self.inference_tier,
-            playwright_headless=playwright_headless,
         )
         self._abort_requested = False
 
@@ -2375,7 +1368,7 @@ class ProductImageLocalizationService:
         self.gemini.close()
 
     def force_abort(self) -> None:
-        """Hủy ngay: đóng HTTP session + Playwright (nếu có) đang xử lý SP dở."""
+        """Hủy ngay: đóng HTTP session + adapter AI ảnh đang xử lý SP dở."""
         self._abort_requested = True
         try:
             self.session.close()
@@ -2493,6 +1486,7 @@ class ProductImageLocalizationService:
                     self.language,
                     self.gemini,
                     allows_ai_image_models=allow_ai,
+                    gemini_mode=self.gemini_mode,
                 ).process_urls(
                     product,
                     unique_urls,
@@ -2509,6 +1503,7 @@ class ProductImageLocalizationService:
                     self.language,
                     self.gemini,
                     allows_ai_image_models=allow_ai,
+                    gemini_mode=self.gemini_mode,
                 )
                 results = {}
                 for url in unique_urls:

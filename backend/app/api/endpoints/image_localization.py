@@ -29,7 +29,6 @@ from app.services.image_localization_job_runtime import (
 )
 from app.services.image_localization_service import (
     GeminiApiImageAdapter,
-    GeminiWebImageAdapter,
     ImageLocalizationError,
     OpenAiGptImageAdapter,
     ProductImageLocalizationService,
@@ -38,7 +37,6 @@ from app.services.image_localization_service import (
     products_pending_localization,
     reset_stale_processing_before_fresh_job,
     reset_stale_processing_in_queue,
-    save_gemini_cookie,
 )
 from app.services.image_localization_temp_cleanup import cleanup_runtime_temp_now
 from app.services.image_localization_temp_cleanup import cleanup_stale_image_localization_temp
@@ -146,10 +144,6 @@ def _account_localized_queue_skips(
     return skipped
 
 
-class GeminiCookiePayload(BaseModel):
-    cookie: str = Field(..., min_length=4)
-
-
 class StartImageLocalizationPayload(BaseModel):
     language: str = Field("vi", description="vi, en, th, id")
     force: bool = False
@@ -158,7 +152,7 @@ class StartImageLocalizationPayload(BaseModel):
     limit: Optional[int] = Field(None, ge=1, le=10000)
     gemini_mode: Optional[str] = Field(
         None,
-        description="web | api | openai. web = Playwright+cookie; api = GEMINI_API_KEY+Nano Banana; openai = OPENAI_API_KEY+GPT Image edits. Để trống = IMAGE_LOCALIZATION_GEMINI_MODE.",
+        description="api | openai. api = GEMINI_API_KEY+Nano Banana; openai = OPENAI_API_KEY+GPT Image edits. Để trống = IMAGE_LOCALIZATION_GEMINI_MODE.",
     )
     gemini_image_model: Optional[str] = Field(None, max_length=120)
     gemini_image_size: Optional[str] = Field(
@@ -190,29 +184,15 @@ class StartImageLocalizationPayload(BaseModel):
             "nếu explicit_only tắt thì cho phép AI như cũ."
         ),
     )
-    playwright_headless: Optional[bool] = Field(
-        None,
-        description=(
-            "Gemini Web (Playwright): True = ẩn Chromium, False = hiện cửa sổ. "
-            "None = IMAGE_LOCALIZATION_PLAYWRIGHT_HEADLESS (.env)."
-        ),
-    )
-
-
 def _resolve_gemini_mode(raw: Optional[str]) -> str:
-    m = (raw or getattr(settings, "IMAGE_LOCALIZATION_GEMINI_MODE", "web") or "web").strip().lower()
-    return m if m in ("web", "api", "openai") else "web"
+    m = (raw or getattr(settings, "IMAGE_LOCALIZATION_GEMINI_MODE", "api") or "api").strip().lower()
+    if m == "web":
+        m = "api"
+    return m if m in ("api", "openai") else "api"
 
 
 def _resolve_inference_tier(raw: Optional[str]) -> str:
     return "standard"
-
-
-def _effective_payload_playwright_headless(payload: StartImageLocalizationPayload) -> bool:
-    """Headless trong job Gemini Web — request ghi đè .env khi playwright_headless khác None."""
-    if payload.playwright_headless is not None:
-        return bool(payload.playwright_headless)
-    return bool(getattr(settings, "IMAGE_LOCALIZATION_PLAYWRIGHT_HEADLESS", True))
 
 
 def _persist_job_to_db(job_id: str) -> None:
@@ -600,7 +580,6 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             openai_image_size=payload.openai_image_size,
             inference_tier=_resolve_inference_tier(payload.inference_tier),
             allow_ai_image_models=payload.allow_ai_image_models,
-            playwright_headless=payload.playwright_headless,
         )
         register_running_service(job_id, service)
         consecutive_product_failures = 0
@@ -949,25 +928,15 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
         db.close()
 
 
-@router.post("/settings/gemini-cookie")
-def save_cookie(
-    payload: GeminiCookiePayload,
-    _: AdminUser = Depends(require_module_permission("products")),
-):
-    count = save_gemini_cookie(payload.cookie)
-    return {"success": True, "cookie_count": count}
-
-
 @router.get("/settings/gemini-auth")
 def check_gemini_auth(
     language: str = "vi",
     _: AdminUser = Depends(require_module_permission("products")),
 ):
-    _pw_h = bool(getattr(settings, "IMAGE_LOCALIZATION_PLAYWRIGHT_HEADLESS", True))
     _ai_jobs_ok = bool(getattr(settings, "IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED", False))
     return {
         "ai_image_jobs_allowed": _ai_jobs_ok,
-        "default_gemini_mode": getattr(settings, "IMAGE_LOCALIZATION_GEMINI_MODE", "web"),
+        "default_gemini_mode": _resolve_gemini_mode(None),
         "image_model": getattr(settings, "IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL", "gemini-3-pro-image-preview"),
         "gemini_api_default_image_size": getattr(
             settings, "IMAGE_LOCALIZATION_GEMINI_API_DEFAULT_IMAGE_SIZE", ""
@@ -988,14 +957,6 @@ def check_gemini_auth(
             ),
             "batch": "Gemini Batch API (async, ~24h) không dùng trong job bản địa hóa tức thì.",
         },
-        # Hai cài đặt triển khai Gemini Web (Playwright trên backend)
-        "playwright_headless": _pw_h,
-        "playwright_browser_visible": not _pw_h,
-        "deploy_browser_help": (
-            "Mặc định server: IMAGE_LOCALIZATION_PLAYWRIGHT_HEADLESS=true (ẩn) hoặc false (hiện cửa sổ, cần DISPLAY/RDP). "
-            "Admin có thể chọn ẩn/hiện theo từng job Gemini Web để ghi đè .env trong lần chạy đó."
-        ),
-        "web": GeminiWebImageAdapter(language).check_auth(),
         "api": GeminiApiImageAdapter(language).check_auth(),
         "openai": OpenAiGptImageAdapter(language).check_auth(),
     }
@@ -1064,23 +1025,7 @@ def start_job(
                     status_code=400,
                     detail="Chế độ OpenAI GPT Image: thiếu OPENAI_API_KEY trong cấu hình backend.",
                 )
-        else:
-            web = GeminiWebImageAdapter(payload.language).check_auth()
-            if not web.get("ready"):
-                reason = web.get("cookie_deploy_block_reason")
-                tail = (
-                    " Có thể chọn ẩn/hiện Chromium ngay trong job admin (Gemini Web) hoặc dùng .env "
-                    "IMAGE_LOCALIZATION_PLAYWRIGHT_HEADLESS (true = ẩn, false = hiện cửa sổ khi có DISPLAY/RDP)."
-                )
-                if reason:
-                    detail = "[Triển khai Gemini Web] " + reason + tail
-                else:
-                    detail = (
-                        "Chưa cấu hình cookie Gemini hoặc Chrome profile đăng nhập." + tail
-                    )
-                raise HTTPException(status_code=400, detail=detail)
     job_id = uuid.uuid4().hex
-    _pw_eff = _effective_payload_playwright_headless(payload)
     initial: Dict[str, Any] = {
         "status": "queued",
         "phase": "queued",
@@ -1105,8 +1050,6 @@ def start_job(
         "allow_ai_image_models": payload.allow_ai_image_models,
         "local_image_only": bool(payload.allow_ai_image_models is False),
         "ai_image_explicit_only": bool(getattr(settings, "IMAGE_LOCALIZATION_AI_IMAGE_EXPLICIT_ONLY", False)),
-        "playwright_headless_requested": payload.playwright_headless,
-        "playwright_headless_effective": _pw_eff,
         "processed_product_ids": [],
         "queue_product_ids": [],
     }
@@ -1208,7 +1151,7 @@ def cancel_job(
     job_id: str,
     mode: Literal["graceful", "force"] = Query(
         "graceful",
-        description="graceful = chờ xong SP/ảnh hiện tại; force = dừng ngay (đóng Playwright/session, SP dở → pending).",
+        description="graceful = chờ xong SP/ảnh hiện tại; force = dừng ngay (đóng adapter AI ảnh/session, SP dở → pending).",
     ),
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("products")),

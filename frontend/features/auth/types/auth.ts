@@ -47,6 +47,8 @@ export interface AuthState {
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  /** false cho đến khi client đọc xong localStorage/cookie — tránh hydration mismatch. */
+  isAuthReady: boolean;
 }
 
 export interface OTPRequest {

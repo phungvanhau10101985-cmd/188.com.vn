@@ -31,6 +31,7 @@ _HOST_SEED_URLS: Dict[str, str] = {
     "tmall.com": "https://www.tmall.com/",
     "1688.com": "https://www.1688.com/",
     "alibaba.com": "https://www.alibaba.com/",
+    "pandamall.vn": "https://pandamall.vn/",
 }
 
 
@@ -219,12 +220,12 @@ def cookie_domain_warnings(domains: List[str]) -> List[str]:
                 "Export lại từ hibox.mn / vipomall.vn."
             )
             break
-    scrape_hosts = {"hibox.mn", "vipomall.vn", "taobao.com", "tmall.com", "1688.com", "taobao1688.kz"}
+    scrape_hosts = {"hibox.mn", "vipomall.vn", "pandamall.vn", "taobao.com", "tmall.com", "1688.com", "taobao1688.kz"}
     if domains and not any(
         any(d == h or d.endswith("." + h) for h in scrape_hosts) for d in domains
     ):
         warnings.append(
-            "Không thấy domain scrape (hibox.mn, vipomall.vn, taobao…). Kiểm tra lại file export."
+            "Không thấy domain scrape (hibox.mn, vipomall.vn, pandamall.vn, taobao…). Kiểm tra lại file export."
         )
     return warnings
 
@@ -243,18 +244,35 @@ def delete_scraper_cookies() -> None:
 
 
 def save_scraper_cookies_from_text(cookie_text: str) -> int:
-    cookies = parse_cookie_text(cookie_text, default_domain="")
-    if not cookies:
+    new_cookies = parse_cookie_text(cookie_text, default_domain="")
+    if not new_cookies:
         raise ValueError("Cookie trống hoặc không đọc được name=value hợp lệ (cần domain trong JSON export).")
 
+    existing_cookies = []
+    try:
+        existing_cookies = load_scraper_cookies()
+    except Exception:
+        pass
+
+    cookie_map = {}
+    for c in existing_cookies:
+        key = (c.get("domain", ""), c.get("name", ""), c.get("path", ""))
+        cookie_map[key] = c
+
+    for c in new_cookies:
+        key = (c.get("domain", ""), c.get("name", ""), c.get("path", ""))
+        cookie_map[key] = c
+
+    merged_cookies = list(cookie_map.values())
+
     cookie_file = default_cookie_file()
-    cookie_file.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding="utf-8")
+    cookie_file.write_text(json.dumps(merged_cookies, ensure_ascii=False, indent=2), encoding="utf-8")
 
     settings.IMPORT_SCRAPER_COOKIE_FILE = cookie_file.name
     settings.IMPORT_SCRAPER_COOKIE_JSON = ""
     settings.IMPORT_1688_COOKIE_FILE = cookie_file.name
     settings.IMPORT_1688_COOKIE_JSON = ""
-    return len(cookies)
+    return len(merged_cookies)
 
 
 def upsert_scraper_cookie_env_local(values: dict[str, str]) -> None:
@@ -322,9 +340,9 @@ def scraper_cookie_settings_dict(message: str | None = None) -> dict[str, Any]:
         "cookie_warnings": warnings,
         "message": message,
         "usage_note": (
-            "Một bộ cookie cho Hibox, Vipomall, kiểm tra tồn kho và scrape 1688 (nếu bật). "
+            "Một bộ cookie cho Hibox, Vipomall, PandaMall, kiểm tra tồn kho và scrape 1688 (nếu bật). "
             "Dán JSON export từ Chrome (EditThisCookie / Cookie-Editor) khi đã đăng nhập "
-            "hibox.mn / vipomall.vn / taobao / 1688 — không dùng cookie 188.com.vn."
+            "hibox.mn / vipomall.vn / pandamall.vn / taobao / 1688 — không dùng cookie 188.com.vn."
         ),
         **expiry,
     }
@@ -396,3 +414,38 @@ def seed_playwright_context_cookies(
         except Exception as exc:
             logger.warning("import_scraper_cookies: seed %s failed: %s", seed_url, exc)
     return applied
+
+
+def _pandamall_account_file() -> Path:
+    return backend_root() / "pandamall-account.json"
+
+def get_pandamall_account() -> Dict[str, str]:
+    """Trả về dict {'username': '...', 'password': '...'} từ file."""
+    path = _pandamall_account_file()
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return {
+                "username": str(data.get("username") or ""),
+                "password": str(data.get("password") or ""),
+            }
+        return {}
+    except Exception as e:
+        logger.warning(f"Lỗi đọc pandamall-account.json: {e}")
+        return {}
+
+def save_pandamall_account(username: str, password: str) -> None:
+    """Lưu username/password vào pandamall-account.json."""
+    path = _pandamall_account_file()
+    try:
+        data = {
+            "username": username.strip() if username else "",
+            "password": password.strip() if password else "",
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.error(f"Lỗi ghi pandamall-account.json: {e}")
+        raise ValueError(f"Không thể lưu cấu hình: {e}")

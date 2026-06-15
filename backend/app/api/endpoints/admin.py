@@ -203,6 +203,29 @@ def admin_delete_import_1688_cookie_settings(
     return _import_1688_cookie_settings_out("Đã xóa cookie scrape trên server.")
 
 
+class PandamallAccountIn(BaseModel):
+    username: str
+    password: str
+
+@router.get("/pandamall-account")
+def admin_get_pandamall_account(
+    _: AdminUser = Depends(require_privileged_admin),
+):
+    from app.services.import_scraper_cookies import get_pandamall_account
+    acc = get_pandamall_account()
+    return {"username": acc.get("username", "")}
+
+@router.put("/pandamall-account")
+def admin_save_pandamall_account(
+    payload: PandamallAccountIn,
+    _: AdminUser = Depends(require_privileged_admin),
+):
+    from app.services.import_scraper_cookies import save_pandamall_account
+    save_pandamall_account(payload.username, payload.password)
+    return {"message": "Đã lưu tài khoản PandaMall thành công.", "username": payload.username}
+
+
+
 @router.post("/login", response_model=AdminTokenResponse)
 def admin_login(login_data: AdminLogin, db: Session = Depends(get_db)):
     """Đăng nhập admin - trả về JWT token"""
@@ -1256,3 +1279,35 @@ def admin_integrations_api_keys_overview(
         groups=groups,
         disclaimer="Trang chỉ hiển thị đã cấu hình hay chưa — không đọc và không hiển thị giá trị bí mật. Sau khi sửa .env, cần khởi động lại backend.",
     )
+
+
+class PandamallAccountUpdate(BaseModel):
+    username: str
+    password: Optional[str] = None
+
+
+@router.get("/pandamall-account")
+def admin_get_pandamall_account(
+    _: models.AdminUser = Depends(require_privileged_admin),
+):
+    """Lấy tài khoản Pandamall đã cấu hình (chỉ trả về username)."""
+    try:
+        from app.services.import_scraper_cookies import get_pandamall_account
+        data = get_pandamall_account()
+        return {"username": data.get("username", ""), "password": data.get("password", "")}
+    except ImportError:
+        return {"username": "", "password": ""}
+
+
+@router.put("/pandamall-account")
+def admin_update_pandamall_account(
+    payload: PandamallAccountUpdate,
+    _: models.AdminUser = Depends(require_privileged_admin),
+):
+    """Cập nhật tài khoản Pandamall."""
+    try:
+        from app.services.import_scraper_cookies import save_pandamall_account
+        save_pandamall_account(payload.username, payload.password or "")
+        return {"message": "Đã lưu tài khoản Pandamall thành công"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

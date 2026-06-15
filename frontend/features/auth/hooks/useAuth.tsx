@@ -27,12 +27,13 @@ interface AuthContextType extends AuthState {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  /** SSR + lần hydrate đầu luôn guest — đọc localStorage/cookie trong useEffect để tránh lệch DOM. */
+  /** SSR + hydrate đầu: isAuthReady=false — đọc session trong useEffect để DOM khớp server/client. */
   const [authState, setAuthState] = useState<AuthState>({
     user: null,
     token: null,
     isAuthenticated: false,
     isLoading: true,
+    isAuthReady: false,
   });
 
   const router = useRouter();
@@ -47,12 +48,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         token,
         isAuthenticated: true,
         isLoading: false,
+        isAuthReady: true,
       });
     };
 
     const finishGuest = () => {
       if (cancelled) return;
-      setAuthState((prev) => ({ ...prev, isLoading: false }));
+      setAuthState((prev) => ({ ...prev, isLoading: false, isAuthReady: true }));
     };
 
     (async () => {
@@ -104,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           token,
           isAuthenticated: true,
           isLoading: false,
+          isAuthReady: true,
         });
         return;
       }
@@ -113,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           token: null,
           isAuthenticated: false,
           isLoading: false,
+          isAuthReady: true,
         });
       }
     };
@@ -138,7 +142,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: result.user,
       token: result.access_token,
       isAuthenticated: true,
-      isLoading: false
+      isLoading: false,
+      isAuthReady: true,
     });
     markFreshLoginSession();
     if (typeof window !== 'undefined') {
@@ -158,6 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token: null,
       isAuthenticated: true,
       isLoading: false,
+      isAuthReady: true,
     });
     markFreshLoginSession();
     if (typeof window !== 'undefined') {
@@ -205,7 +211,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: null,
       token: null,
       isAuthenticated: false,
-      isLoading: false
+      isLoading: false,
+      isAuthReady: true,
     });
 
     router.push('/');
@@ -229,6 +236,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token: null,
       isAuthenticated: false,
       isLoading: false,
+      isAuthReady: true,
     });
     router.push(
       '/auth/login?redirect=' + encodeURIComponent(safe) + '&switch=1'

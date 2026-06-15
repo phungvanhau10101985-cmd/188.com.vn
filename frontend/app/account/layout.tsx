@@ -13,19 +13,20 @@ export default function AccountLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { isAuthenticated, isLoading, updateUser, user } = useAuth();
+  const { isAuthenticated, isAuthReady, updateUser, user } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (!isAuthReady) return;
+    if (!isAuthenticated) {
       router.push('/auth/login?redirect=' + encodeURIComponent(pathname || '/account'));
     }
-  }, [isAuthenticated, isLoading, router, pathname]);
+  }, [isAuthenticated, isAuthReady, router, pathname]);
 
   /** Làm mới quyền liên kết admin sau khi quản trị gán — tránh localStorage user cũ thiếu has_linked_admin */
   useEffect(() => {
-    if (!isAuthenticated || isLoading) return;
+    if (!isAuthReady || !isAuthenticated) return;
     let cancelled = false;
     apiClient
       .getProfile()
@@ -36,9 +37,9 @@ export default function AccountLayout({
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, isLoading, pathname, updateUser]);
+  }, [isAuthReady, isAuthenticated, pathname, updateUser]);
 
-  if (isLoading) {
+  if (!isAuthReady) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="animate-spin w-10 h-10 border-2 border-blue-600 border-t-transparent rounded-full" />

@@ -104,13 +104,6 @@ def get_module_logger(module_name: str) -> logging.Logger:
 # Logger chính
 main_logger = setup_logger("MAIN")
 
-# Gemini Logger: Quan trọng - Dùng file riêng và Level DEBUG để theo dõi Selenium/Clipboard
-gemini_logger = setup_logger(
-    "GEMINI", 
-    log_level=logging.DEBUG, 
-    specific_filename="gemini_processor.log"
-)
-
 bunny_logger = setup_logger("BUNNY")
 sheets_logger = setup_logger("SHEETS")
 download_logger = setup_logger("DOWNLOAD")

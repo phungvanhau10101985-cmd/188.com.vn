@@ -43,7 +43,7 @@ def test_cancel_endpoint_force_marks_cancelled_immediately():
         return True
 
     with patch.object(mod, "persist_import_job", persist_import_job):
-        with patch.object(runtime, "force_abort_import_session", _fake_abort):
+        with patch.object(mod, "force_abort_import_session", _fake_abort):
             out = mod.cancel_import_excel_job(job_id, _=None)  # type: ignore[arg-type]
     assert out["status"] == "cancelled"
     assert out.get("finished_at")

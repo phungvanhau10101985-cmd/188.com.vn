@@ -181,6 +181,13 @@ export default async function RootLayout({
         />
       </head>
       <body className="antialiased font-sans bg-[#fafafa] text-gray-900 min-h-screen" suppressHydrationWarning>
+        {process.env.NODE_ENV === "development" ? (
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `(function(){var K="188-chunk-reload-v1";function R(m){if(!/ChunkLoadError|Loading chunk .* failed/i.test(String(m||"")))return;if(sessionStorage.getItem(K))return;sessionStorage.setItem(K,"1");location.reload()}window.addEventListener("error",function(e){R(e.message)});window.addEventListener("unhandledrejection",function(e){var r=e.reason;R(r&&r.message?r.message:r)});window.addEventListener("load",function(){sessionStorage.removeItem(K)})})();`,
+            }}
+          />
+        ) : null}
         <SiteEmbedsRoot embeds={siteEmbeds} headClientRemainders={headClientRemainders} />
         <DeferredLayoutFloaters />
         {/* Global Providers + Header/Footer xuyên suốt */}

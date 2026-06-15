@@ -185,8 +185,6 @@ def row_to_job_dict(row: ImageLocalizationJob) -> Dict[str, Any]:
         "inference_tier",
         "allow_ai_image_models",
         "ai_image_explicit_only",
-        "playwright_headless_requested",
-        "playwright_headless_effective",
     ):
         if key in payload:
             d[key] = payload[key]

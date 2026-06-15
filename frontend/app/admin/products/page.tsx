@@ -201,7 +201,7 @@ const IMAGE_LOC_GEMINI_MODEL_PRESETS: { id: string; label: string; model: string
   { id: 'server', label: 'Theo backend (.env) — để trống ô Model', model: '' },
   {
     id: 'pro',
-    label: 'Gemini 3 Pro Image — chữ đúng & bố cục chuẩn (pipeline mặc định)',
+    label: 'Nano Banana Pro — gemini-3-pro-image-preview (2K/4K, khuyến nghị)',
     model: 'gemini-3-pro-image-preview',
   },
 ];
@@ -292,7 +292,7 @@ type Stored1688LinkJob = {
   job_id: string;
   draft_id?: number;
   started_at: number;
-  source: '1688' | 'hibox' | 'vipomall';
+  source: '1688' | 'hibox' | 'vipomall' | 'pandamall';
 };
 
 type ImportExcelFetchTarget = 'auto' | 'hibox' | 'vipomall';
@@ -468,6 +468,23 @@ function isTaobaoTmallImportInput(raw: string): boolean {
     const u = new URL(absolute);
     const host = u.hostname.replace(/^www\./i, '').toLowerCase();
     return host.includes('taobao.com') || host.includes('tmall.com');
+  } catch {
+    return false;
+  }
+}
+
+/** PDP gương Taobao / 1688 trên PandaMall — backend scrape Playwright (`source: pandamall`). */
+function isPandamallProductUrl(raw: string): boolean {
+  try {
+    const resolved = resolveImportLinkUrl(raw);
+    const absolute = /^[a-z][a-z0-9+.-]*:/i.test(resolved)
+      ? resolved
+      : `https://${resolved.replace(/^\/+/, '')}`;
+    const u = new URL(absolute);
+    let host = u.hostname.replace(/^www\./i, '').toLowerCase();
+    host = host.endsWith('.') ? host.slice(0, -1) : host;
+    if (host !== 'pandamall.vn') return false;
+    return /^\/(taobao|1688)\/detail\/\d+/i.test(u.pathname || '');
   } catch {
     return false;
   }
@@ -775,6 +792,13 @@ export default function AdminProductsPage() {
   const [importScraperCookieLoading, setImportScraperCookieLoading] = useState(false);
   const [importScraperCookieDeleting, setImportScraperCookieDeleting] = useState(false);
   const [importScraperCookieDeleteConfirm, setImportScraperCookieDeleteConfirm] = useState(false);
+
+  const [pandamallUsername, setPandamallUsername] = useState('');
+  const [pandamallPassword, setPandamallPassword] = useState('');
+  const [pandamallAccountSaved, setPandamallAccountSaved] = useState(false);
+  const [pandamallAccountSaving, setPandamallAccountSaving] = useState(false);
+  const [pandamallAccountLoading, setPandamallAccountLoading] = useState(false);
+
   const [import1688Url, setImport1688Url] = useState('');
   const [importing1688, setImporting1688] = useState(false);
   const [import1688Progress, setImport1688Progress] = useState<{
@@ -816,19 +840,15 @@ export default function AdminProductsPage() {
   const [importBatchDeleting, setImportBatchDeleting] = useState(false);
   const [imageLocalizationLanguage, setImageLocalizationLanguage] = useState('vi');
   const [imageLocalizationGeminiMode, setImageLocalizationGeminiMode] = useState<
-    'web' | 'api' | 'openai' | 'local_only'
-  >('local_only');
+    'api' | 'openai' | 'local_only'
+  >('api');
   const [imageLocalizationGeminiApiModel, setImageLocalizationGeminiApiModel] = useState('');
-  const [imageLocalizationGeminiImageSize, setImageLocalizationGeminiImageSize] = useState('');
+  const [imageLocalizationGeminiImageSize, setImageLocalizationGeminiImageSize] = useState('2K');
   const [imageLocalizationOpenaiModel, setImageLocalizationOpenaiModel] = useState('');
   const [imageLocalizationOpenaiQuality, setImageLocalizationOpenaiQuality] = useState('high');
   const [imageLocalizationOpenaiSize, setImageLocalizationOpenaiSize] = useState('auto');
-  const [imageLocalizationCookie, setImageLocalizationCookie] = useState('');
   const [imageLocalizationForce, setImageLocalizationForce] = useState(false);
-  const [imageLocalizationPlaywrightHeadless, setImageLocalizationPlaywrightHeadless] = useState(true);
-  const imageLocalizationPlaywrightSyncedRef = useRef(false);
   const [imageLocalizationSelectedOnly, setImageLocalizationSelectedOnly] = useState(false);
-  const [imageLocalizationSavingCookie, setImageLocalizationSavingCookie] = useState(false);
   /** Đang có ít nhất một vòng poll GET job trên tab này (có thể nhiều job song song phía server). */
   const [localizationPollActive, setLocalizationPollActive] = useState(false);
   /** Lần đầu tải danh sách job từ server (khôi phục Tiến trình). */
@@ -889,24 +909,19 @@ export default function AdminProductsPage() {
     process.env.NEXT_PUBLIC_GOOGLE_SHEETS_CATALOG_EDITOR_URL || ''
   ).trim();
 
-  const imageLocalizationHeadlessNeedsSavedCookie =
-    imageLocalizationGeminiMode === 'web' &&
-    imageLocalizationPlaywrightHeadless &&
-    Boolean(geminiAuthStatus?.web?.requires_cookie_or_login_marker_for_headless);
-
   const imageLocalizationGeminiReady = useMemo(() => {
     if (imageLocalizationGeminiMode === 'local_only') return true;
     if (!geminiAuthStatus) return false;
     if (imageLocalizationGeminiMode === 'api') return Boolean(geminiAuthStatus.api?.ready);
     if (imageLocalizationGeminiMode === 'openai') return Boolean(geminiAuthStatus.openai?.ready);
-    if (!geminiAuthStatus.web?.ready) return false;
-    if (imageLocalizationHeadlessNeedsSavedCookie) return false;
-    return true;
-  }, [geminiAuthStatus, imageLocalizationGeminiMode, imageLocalizationHeadlessNeedsSavedCookie]);
+    return false;
+  }, [geminiAuthStatus, imageLocalizationGeminiMode]);
 
-  /** Gemini Web/API và GPT Image chỉ khi backend cho phép (IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED). Chưa có auth = chưa chọn được các nhánh AI. */
+  /** Gemini API và GPT Image: backend cho phép + phải chọn ít nhất 1 SP trong bảng. Hàng loạt chỉ DeepSeek + vẽ local. */
   const imageLocAiImageModesSelectable =
-    geminiAuthStatus != null && (geminiAuthStatus.ai_image_jobs_allowed ?? true);
+    selectedProductIds.size > 0 &&
+    geminiAuthStatus != null &&
+    (geminiAuthStatus.ai_image_jobs_allowed ?? true);
 
   const geminiApiModelPresetSelectValue = useMemo(() => {
     const id = resolveGeminiApiModelPresetId(imageLocalizationGeminiApiModel.trim());
@@ -1426,40 +1441,61 @@ export default function AdminProductsPage() {
     }
   };
 
-  const handleSaveGeminiCookie = async () => {
-    const cookie = imageLocalizationCookie.trim();
-    if (!cookie) {
-      showToast('err', 'Vui lòng dán cookie Gemini');
-      return;
-    }
-    setImageLocalizationSavingCookie(true);
-    setImageLocalizationError(null);
+  const loadPandamallAccount = useCallback(async () => {
+    setPandamallAccountLoading(true);
     try {
-      const res = await adminProductAPI.saveGeminiImageLocalizationCookie(cookie);
-      setImageLocalizationCookie('');
-      showToast('ok', `Đã lưu ${res.cookie_count} cookie Gemini`);
-      await loadImageLocalizationSummary();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Không lưu được cookie Gemini';
-      setImageLocalizationError(msg);
-      showToast('err', msg, 9000);
+      const st = await adminProductAPI.getPandamallAccount();
+      setPandamallUsername(st.username || '');
+      setPandamallPassword(st.password || '');
+      setPandamallAccountSaved(!!st.username);
+    } catch {
+      setPandamallUsername('');
+      setPandamallPassword('');
     } finally {
-      setImageLocalizationSavingCookie(false);
+      setPandamallAccountLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPandamallAccount();
+  }, [loadPandamallAccount]);
+
+  const handleSavePandamallAccount = async () => {
+    setPandamallAccountSaving(true);
+    try {
+      const st = await adminProductAPI.savePandamallAccount(pandamallUsername, pandamallPassword);
+      setPandamallAccountSaved(true);
+      showToast('ok', st.message || 'Đã lưu tài khoản PandaMall');
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Không lưu được tài khoản', 9000);
+    } finally {
+      setPandamallAccountSaving(false);
     }
   };
 
   const handleStartImageLocalization = async () => {
     setImageLocalizationError(null);
+    const isAiImageMode =
+      imageLocalizationGeminiMode === 'api' || imageLocalizationGeminiMode === 'openai';
+    if (isAiImageMode && selectedProductIds.size === 0) {
+      const msg = 'Gemini / GPT Image chỉ chạy khi đã chọn ít nhất một sản phẩm trong bảng.';
+      setImageLocalizationError(msg);
+      showToast('err', msg, 8000);
+      return;
+    }
     setLocalizationStartBusy(true);
     let startedJobId: string | null = null;
     try {
-      const productIds =
-        imageLocalizationSelectedOnly && selectedProductIds.size > 0 ? Array.from(selectedProductIds) : undefined;
+      const productIds = isAiImageMode
+        ? Array.from(selectedProductIds)
+        : imageLocalizationSelectedOnly && selectedProductIds.size > 0
+          ? Array.from(selectedProductIds)
+          : undefined;
       const started = await adminProductAPI.startImageLocalization({
         language: imageLocalizationLanguage,
         force: imageLocalizationForce,
         product_ids: productIds,
-        gemini_mode: imageLocalizationGeminiMode === 'local_only' ? 'web' : imageLocalizationGeminiMode,
+        gemini_mode: imageLocalizationGeminiMode === 'local_only' ? 'api' : imageLocalizationGeminiMode,
         allow_ai_image_models: imageLocalizationGeminiMode === 'local_only' ? false : null,
         ...(imageLocalizationGeminiMode === 'api' && {
           gemini_image_model: imageLocalizationGeminiApiModel.trim() || undefined,
@@ -1469,9 +1505,6 @@ export default function AdminProductsPage() {
           openai_image_model: imageLocalizationOpenaiModel.trim() || undefined,
           openai_image_quality: imageLocalizationOpenaiQuality.trim() || undefined,
           openai_image_size: imageLocalizationOpenaiSize.trim() || undefined,
-        }),
-        ...(imageLocalizationGeminiMode === 'web' && {
-          playwright_headless: imageLocalizationPlaywrightHeadless,
         }),
       });
       startedJobId = started.job_id;
@@ -1654,21 +1687,12 @@ export default function AdminProductsPage() {
   };
 
   useEffect(() => {
-    if (
-      geminiAuthStatus &&
-      typeof geminiAuthStatus.playwright_headless === 'boolean' &&
-      !imageLocalizationPlaywrightSyncedRef.current
-    ) {
-      setImageLocalizationPlaywrightHeadless(Boolean(geminiAuthStatus.playwright_headless));
-      imageLocalizationPlaywrightSyncedRef.current = true;
-    }
-  }, [geminiAuthStatus]);
-
-  useEffect(() => {
-    if (geminiAuthStatus?.ai_image_jobs_allowed === false && imageLocalizationGeminiMode !== 'local_only') {
+    const aiBlocked = geminiAuthStatus?.ai_image_jobs_allowed === false;
+    const noSelection = selectedProductIds.size === 0;
+    if ((aiBlocked || noSelection) && imageLocalizationGeminiMode !== 'local_only') {
       setImageLocalizationGeminiMode('local_only');
     }
-  }, [geminiAuthStatus?.ai_image_jobs_allowed, imageLocalizationGeminiMode]);
+  }, [geminiAuthStatus?.ai_image_jobs_allowed, selectedProductIds.size, imageLocalizationGeminiMode]);
 
   useEffect(() => {
     void loadImageLocalizationSummary();
@@ -1686,20 +1710,25 @@ export default function AdminProductsPage() {
     e.preventDefault();
     const url = resolveImportLinkUrl(import1688Url);
     if (!url) {
-      showToast('err', 'Vui lòng dán link Hibox, Taobao/Tmall, T{id}, taobao1688.kz hoặc Vipomall');
+      showToast('err', 'Vui lòng dán link Hibox, PandaMall, Taobao/Tmall, taobao1688.kz hoặc Vipomall');
       return;
     }
+    const fromPandamall = isPandamallProductUrl(url);
     const fromVipomall = isVipomallProductUrl(url);
     const fromTaobaoTmall = isTaobaoTmallImportInput(url);
-    if (!isHiboxProductUrl(url) && !fromVipomall && !fromTaobaoTmall) {
+    if (!isHiboxProductUrl(url) && !fromPandamall && !fromVipomall && !fromTaobaoTmall) {
       showToast(
         'err',
-        'Chỉ hỗ trợ link Hibox / taobao1688.kz / Vipomall / Taobao / Tmall / T{id}. Import trực tiếp từ 1688.com đã tắt.',
+        'Chỉ hỗ trợ link Hibox / taobao1688.kz / PandaMall / Vipomall / Taobao / Tmall / T{id}. Import trực tiếp từ 1688.com đã tắt.',
         8000,
       );
       return;
     }
-    const importLabel = fromVipomall || fromTaobaoTmall ? 'Vipomall' : 'Hibox';
+    const importLabel = fromPandamall
+      ? 'PandaMall'
+      : fromVipomall || fromTaobaoTmall
+        ? 'Vipomall'
+        : 'Hibox';
     try {
       localStorage.removeItem(ADMIN_1688_LINK_JOB_KEY);
     } catch {
@@ -1707,9 +1736,17 @@ export default function AdminProductsPage() {
     }
     setImporting1688(true);
     setImport1688Draft(null);
-    const importSource = fromVipomall || fromTaobaoTmall ? 'vipomall' : 'hibox';
+    const importSource = fromPandamall
+      ? 'pandamall'
+      : fromVipomall || fromTaobaoTmall
+        ? 'vipomall'
+        : 'hibox';
     setImport1688Progress({
-      message: fromVipomall ? 'Đang gửi link Vipomall lên server…' : 'Đang gửi link Hibox lên server…',
+      message: fromPandamall
+        ? 'Đang gửi link PandaMall lên server…'
+        : fromVipomall
+          ? 'Đang gửi link Vipomall lên server…'
+          : 'Đang gửi link Hibox lên server…',
       percent: null,
     });
     try {
@@ -1726,7 +1763,11 @@ export default function AdminProductsPage() {
         /* noop */
       }
       setImport1688Progress({
-        message: fromVipomall ? 'Đã nhận link, đang mở trang Vipomall…' : 'Đã nhận link, đang mở trang Hibox…',
+        message: fromPandamall
+          ? 'Đã nhận link, đang mở trang PandaMall…'
+          : fromVipomall
+            ? 'Đã nhận link, đang mở trang Vipomall…'
+            : 'Đã nhận link, đang mở trang Hibox…',
         percent: null,
       });
       const job = await pollImport1688Job(started.job_id);
@@ -2804,12 +2845,15 @@ export default function AdminProductsPage() {
                     Import Hibox
                   </h2>
                   <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                    Một URL hoặc Excel nhiều dòng → bản nháp (Hibox, taobao1688.kz hoặc Vipomall). Luôn kiểm tra nháp trước khi
+                    Một URL hoặc Excel nhiều dòng → bản nháp (Hibox, PandaMall, taobao1688.kz hoặc Vipomall). Luôn kiểm tra nháp trước khi
                     đăng hoặc xuất Excel.
                   </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <span className="inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-950">
-                      Hibox · Vipomall · kiểm tra tồn kho — một bộ cookie
+                      Hibox · PandaMall · Vipomall · kiểm tra tồn kho — một bộ cookie
+                    </span>
+                    <span className="inline-flex items-center rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-950">
+                      PandaMall · /1688/detail/{'{id}'} · /taobao/detail/{'{id}'}
                     </span>
                     <span className="inline-flex items-center rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-950">
                       Vipomall · 1688 (platform_type=10) · Taobao/Tmall (platform_type=21)
@@ -2845,9 +2889,10 @@ export default function AdminProductsPage() {
                       )}
                     </div>
                     <p className="mt-1 text-xs leading-snug text-amber-900/95">
-                      Một bộ cookie cho lấy thông tin SP (Hibox, Vipomall), import link và kiểm tra hết hàng. Link
+                      Một bộ cookie cho lấy thông tin SP (Hibox, PandaMall, Vipomall), import link và kiểm tra hết hàng. Link
                       không cần đăng nhập vẫn scrape được; cookie giúp trang khó hoặc đã login. Dán JSON export từ
                       Chrome khi đã đăng nhập <strong className="font-semibold">hibox.mn</strong> /{' '}
+                      <strong className="font-semibold">pandamall.vn</strong> /{' '}
                       <strong className="font-semibold">vipomall.vn</strong> / taobao — không dùng cookie{' '}
                       <strong className="font-semibold">188.com.vn</strong>.
                     </p>
@@ -2966,6 +3011,60 @@ export default function AdminProductsPage() {
                           </button>
                         )
                       ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 rounded-xl border border-indigo-200/90 bg-indigo-50/60 px-3 py-3 text-sm text-indigo-950">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="font-medium">Tài khoản PandaMall (Tự động đăng nhập)</p>
+                      {pandamallAccountLoading ? (
+                        <span className="inline-flex items-center rounded-full border border-indigo-300 bg-white px-2.5 py-0.5 text-[11px] font-medium text-indigo-900">
+                          Đang tải…
+                        </span>
+                      ) : pandamallAccountSaved ? (
+                        <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800">
+                          Đã có tài khoản
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-700">
+                          Chưa cấu hình
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-xs leading-snug text-indigo-900/95">
+                      Sử dụng cho các link PandaMall. Khi bị yêu cầu đăng nhập, hệ thống sẽ tự động điền thông tin này để lấy dữ liệu.
+                    </p>
+                    <div className="mt-3 flex gap-3 flex-wrap">
+                      <label className="block flex-1 min-w-[200px]">
+                        <span className="mb-1 block text-xs font-medium text-indigo-950">Số điện thoại / Email</span>
+                        <input
+                          type="text"
+                          value={pandamallUsername}
+                          onChange={(e) => setPandamallUsername(e.target.value)}
+                          placeholder="09xxxxxxxx"
+                          className="w-full rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs text-gray-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                        />
+                      </label>
+                      <label className="block flex-1 min-w-[200px]">
+                        <span className="mb-1 block text-xs font-medium text-indigo-950">Mật khẩu</span>
+                        <input
+                          type="text"
+                          value={pandamallPassword}
+                          onChange={(e) => setPandamallPassword(e.target.value)}
+                          placeholder="Mật khẩu của bạn"
+                          className="w-full rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs text-gray-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                        />
+                      </label>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void handleSavePandamallAccount()}
+                        disabled={pandamallAccountSaving || !pandamallUsername.trim()}
+                        className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        {pandamallAccountSaving ? 'Đang lưu…' : 'Lưu tài khoản'}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -3912,9 +4011,9 @@ export default function AdminProductsPage() {
               </>
             ) : (
               <>
-                <span className="font-semibold text-slate-900">Mặc định giao diện:</span>{' '}
-                <span className="font-medium">DeepSeek + vẽ local</span> (OCR → dịch → vẽ chữ); Gemini / GPT chỉ khi chọn chủ động — model Pro và ảnh{' '}
-                <span className="font-medium">2K hoặc 4K</span>; GPT chỉ <span className="font-medium">high/auto</span> và cỡ ảnh lớn.
+                <span className="font-semibold text-slate-900">Chạy hàng loạt (không chọn SP):</span> chỉ{' '}
+                <span className="font-medium">DeepSeek + vẽ local</span>.{' '}
+                <span className="font-medium">Gemini API</span> / <span className="font-medium">GPT Image</span> chỉ bật khi đã tick chọn sản phẩm trong bảng — mặc định Gemini 2K dịch bảng size &amp; giặt qua API (không xóa); DeepSeek + local vẫn xóa các loại ảnh đó.
               </>
             )}
           </p>
@@ -3938,29 +4037,8 @@ export default function AdminProductsPage() {
                         <span className="font-medium">DeepSeek + vẽ local (không AI ảnh Gemini/GPT)</span>
                         <span className="mt-0.5 block text-xs text-gray-500">
                           OCR (Vision) → <span className="font-medium">DeepSeek</span> dịch → <span className="font-medium">vẽ local</span>{' '}
-                          chữ trên ảnh. Không gọi Gemini/GPT sinh/chỉnh cả khung (ổn với ảnh dài / split). Không cần cookie hay key
+                          chữ trên ảnh. Không gọi Gemini/GPT sinh/chỉnh cả khung (ổn với ảnh dài / split). Không cần key
                           Gemini/OpenAI cho nhánh này.
-                        </span>
-                      </span>
-                    </label>
-                    <label
-                      className={`flex items-start gap-2 ${imageLocAiImageModesSelectable ? 'cursor-pointer' : 'cursor-not-allowed opacity-55'}`}
-                    >
-                      <input
-                        type="radio"
-                        name="imageLocalizationGeminiMode"
-                        className="mt-1"
-                        checked={imageLocalizationGeminiMode === 'web'}
-                        onChange={() => setImageLocalizationGeminiMode('web')}
-                        disabled={localizationStartBusy || !imageLocAiImageModesSelectable}
-                      />
-                      <span>
-                        <span className="font-medium">Gemini trên trình duyệt</span>
-                        {geminiAuthStatus?.ai_image_jobs_allowed === false ? (
-                          <span className="ml-1 text-xs font-normal text-gray-400">(tạm tắt)</span>
-                        ) : null}
-                        <span className="mt-0.5 block text-xs text-gray-500">
-                          Playwright + cookie / profile (Nano Banana như khi dùng tay trên gemini.google.com).
                         </span>
                       </span>
                     </label>
@@ -3979,10 +4057,14 @@ export default function AdminProductsPage() {
                         <span className="font-medium">Gemini API (GEMINI_API_KEY)</span>
                         {geminiAuthStatus?.ai_image_jobs_allowed === false ? (
                           <span className="ml-1 text-xs font-normal text-gray-400">(tạm tắt)</span>
+                        ) : selectedProductIds.size === 0 ? (
+                          <span className="ml-1 text-xs font-normal text-gray-400">(chọn SP trong bảng)</span>
                         ) : null}
                         <span className="mt-0.5 block text-xs text-gray-500">
                           Model sinh/sửa ảnh trên server (mặc định{' '}
-                          {geminiAuthStatus?.image_model || 'gemini-3-pro-image-preview'}). Không cần cookie; cần key trong backend.
+                          {geminiAuthStatus?.image_model || 'gemini-3-pro-image-preview'}). Bảng size &amp; giặt tẩy → dịch API, không xóa. Cần{' '}
+                          <code className="text-[11px]">GEMINI_API_KEY</code> và{' '}
+                          <code className="text-[11px]">IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED=true</code>.
                         </span>
                       </span>
                     </label>
@@ -4001,6 +4083,8 @@ export default function AdminProductsPage() {
                         <span className="font-medium">OpenAI GPT Image (OPENAI_API_KEY)</span>
                         {geminiAuthStatus?.ai_image_jobs_allowed === false ? (
                           <span className="ml-1 text-xs font-normal text-gray-400">(tạm tắt)</span>
+                        ) : selectedProductIds.size === 0 ? (
+                          <span className="ml-1 text-xs font-normal text-gray-400">(chọn SP trong bảng)</span>
                         ) : null}
                         <span className="mt-0.5 block text-xs text-gray-500">
                           API <code className="text-[11px]">/v1/images/edits</code>, mặc định model{' '}
@@ -4010,70 +4094,6 @@ export default function AdminProductsPage() {
                       </span>
                     </label>
                   </div>
-                  {imageLocalizationGeminiMode === 'web' && (
-                    <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50/90 px-3 py-2 space-y-2">
-                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                        Gemini Web — Playwright Chromium
-                      </p>
-                      <div className="flex flex-wrap gap-4 text-sm">
-                        <label className="flex cursor-pointer items-center gap-2">
-                          <input
-                            type="radio"
-                            name="imageLocPlaywrightDisplay"
-                            className="mt-0.5"
-                            checked={imageLocalizationPlaywrightHeadless}
-                            onChange={() => setImageLocalizationPlaywrightHeadless(true)}
-                            disabled={localizationStartBusy}
-                          />
-                          <span>
-                            <span className="font-medium text-gray-800">Ẩn trình duyệt</span>
-                            <span className="ml-1 text-xs text-gray-500">
-                              (headless — kiểu server sau khi cookie/profile ổn)
-                            </span>
-                          </span>
-                        </label>
-                        <label className="flex cursor-pointer items-center gap-2">
-                          <input
-                            type="radio"
-                            name="imageLocPlaywrightDisplay"
-                            className="mt-0.5"
-                            checked={!imageLocalizationPlaywrightHeadless}
-                            onChange={() => setImageLocalizationPlaywrightHeadless(false)}
-                            disabled={localizationStartBusy}
-                          />
-                          <span>
-                            <span className="font-medium text-gray-800">Hiện cửa sổ</span>
-                            <span className="ml-1 text-xs text-gray-500">
-                              (headed — màn hình hoặc RDP/VNC để xem/đăng nhập Gemini)
-                            </span>
-                          </span>
-                        </label>
-                      </div>
-                      {imageLocalizationHeadlessNeedsSavedCookie ? (
-                        <div
-                          role="alert"
-                          className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs text-amber-950 leading-relaxed"
-                        >
-                          <span className="font-semibold">Ẩn trình duyệt:</span> backend chưa có cookie Gemini đã lưu và chưa có{' '}
-                          <code className="text-[11px]">gemini_logged_in.marker</code> — dán cookie vào ô phía dưới rồi bấm &quot;Lưu cookie
-                          Gemini&quot;, hoặc chọn <span className="font-medium">Hiện cửa sổ</span> và đăng nhập một lần để tạo marker. Sau đó mới Chạy
-                          ở chế độ ẩn.
-                        </div>
-                      ) : null}
-                      {!imageLocalizationPlaywrightHeadless ? (
-                        <p className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-2 text-xs text-sky-950 leading-relaxed">
-                          <span className="font-semibold">Hiện cửa sổ:</span> nếu có Sign in / đăng nhập, hoàn thành đăng nhập trong Chromium — backend
-                          sẽ <span className="font-medium">chờ</span> (mặc định ~15 phút qua{' '}
-                          <code className="text-[11px]">IMAGE_LOCALIZATION_GEMINI_MANUAL_LOGIN_WAIT_MS</code>) rồi tự tiếp tục. Đã đăng nhập sẵn thì chạy
-                          luôn.
-                        </p>
-                      ) : null}
-                      <p className="text-xs text-gray-500 leading-relaxed">
-                        Gửi kèm job và ghi đè <code className="text-[11px]">IMAGE_LOCALIZATION_PLAYWRIGHT_HEADLESS</code> cho lần chạy
-                        này. Lần đầu mở trang, mặc định lấy theo cấu hình server (.env).
-                      </p>
-                    </div>
-                  )}
                   {imageLocalizationGeminiMode === 'api' && (
                     <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">
                       <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Gemini API — model (chữ &amp; bố cục)</p>
@@ -4301,25 +4321,7 @@ export default function AdminProductsPage() {
                 </div>
               </div>
 
-              <label className="block text-sm">
-                <span className="mb-1 block font-medium text-gray-700">Cookie Gemini</span>
-                <textarea
-                  value={imageLocalizationCookie}
-                  onChange={(e) => setImageLocalizationCookie(e.target.value)}
-                  placeholder="Dán Cookie header hoặc JSON cookie export của Gemini..."
-                  rows={3}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
-                />
-              </label>
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void handleSaveGeminiCookie()}
-                  disabled={imageLocalizationSavingCookie || !imageLocalizationCookie.trim()}
-                  className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-60"
-                >
-                  {imageLocalizationSavingCookie ? 'Đang lưu cookie...' : 'Lưu cookie Gemini'}
-                </button>
                 <button
                   type="button"
                   onClick={() => void handleStartImageLocalization()}
@@ -4344,21 +4346,8 @@ export default function AdminProductsPage() {
 
               {geminiAuthStatus ? (
                 <p className="text-xs text-gray-600">
-                  Web: {geminiAuthStatus.web?.ready ? 'sẵn sàng' : 'chưa sẵn sàng'}
-                  {geminiAuthStatus.web?.cookie_deploy_block_reason ? (
-                    <span className="text-red-600"> · {geminiAuthStatus.web.cookie_deploy_block_reason}</span>
-                  ) : null}
-                  {' · '}cookie {geminiAuthStatus.web?.cookie_count ?? 0}
-                  {' · '}Playwright{' '}
-                  {typeof geminiAuthStatus.playwright_headless === 'boolean'
-                    ? geminiAuthStatus.playwright_headless
-                      ? 'ẩn trình duyệt'
-                      : 'hiện trình duyệt'
-                    : '—'}
-                  · profile {geminiAuthStatus.web?.profile_marker ? 'có' : 'không'}
-                  {' · '}API Gemini: {geminiAuthStatus.api?.ready ? 'sẵn sàng' : 'chưa sẵn sàng'} (
-                  {geminiAuthStatus.image_model}). OpenAI: {geminiAuthStatus.openai?.ready ? 'sẵn sàng' : 'chưa sẵn sàng'}{' '}
-                  ({geminiAuthStatus.openai_image_model})
+                  API Gemini: {geminiAuthStatus.api?.ready ? 'sẵn sàng' : 'chưa sẵn sàng'} ({geminiAuthStatus.image_model}). OpenAI:{' '}
+                  {geminiAuthStatus.openai?.ready ? 'sẵn sàng' : 'chưa sẵn sàng'} ({geminiAuthStatus.openai_image_model})
                 </p>
               ) : null}
               {imageLocalizationError ? (
@@ -4497,20 +4486,6 @@ export default function AdminProductsPage() {
                         </p>
                       ) : null}
 
-                      {job.gemini_mode === 'web' &&
-                      !job.local_image_only &&
-                      typeof job.playwright_headless_effective === 'boolean' ? (
-                        <p className="mt-1 text-[11px] text-gray-500">
-                          Playwright:{' '}
-                          <span className="font-medium text-gray-700">
-                            {job.playwright_headless_effective ? 'ẩn trình duyệt' : 'hiện cửa sổ'}
-                          </span>
-                          {job.playwright_headless_requested == null ? (
-                            <span> (mặc định server / .env)</span>
-                          ) : null}
-                        </p>
-                      ) : null}
-
                       {job.total != null ? (
                         <p className="mt-1 text-[11px] text-gray-500">
                           {imageLocalizationJobProgress(job)}/{job.total} · xong {job.done ?? 0} · lỗi{' '}
@@ -4587,8 +4562,7 @@ export default function AdminProductsPage() {
                     Job{' '}
                     <code className="rounded bg-gray-100 px-1 py-0.5 text-xs">{localizationForceCancelTarget}</code>{' '}
                     sẽ chuyển sang <strong className="font-medium text-gray-800">cancelled</strong> ngay và{' '}
-                    <strong className="font-medium text-gray-800">dừng sản phẩm đang xử lý dở</strong> (đóng
-                    Playwright/Gemini nếu đang chạy). Không xử lý sản phẩm kế tiếp.
+                    <strong className="font-medium text-gray-800">dừng sản phẩm đang xử lý dở</strong> (đóng adapter AI ảnh nếu đang chạy). Không xử lý sản phẩm kế tiếp.
                   </p>
                   <div className="mt-5 flex flex-wrap justify-end gap-2">
                     <button

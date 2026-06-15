@@ -26,6 +26,14 @@ from app.services.import_hibox_scraper import (
     normalize_product_import_url,
     parse_t_prefixed_item_id,
 )
+from app.services.import_pandamall_scraper import (
+    build_pandamall_1688_pdp_url,
+    build_pandamall_taobao_pdp_url,
+    extract_pandamall_detail,
+    is_pandamall_import_url,
+    pandamall_canonical_import_url,
+    resolve_pandamall_import_url,
+)
 from app.services.import_vipomall_scraper import is_vipomall_import_url, resolve_vipomall_import_url, vipomall_canonical_import_url
 from app.services.vipomall_source_stock import build_vipomall_1688_pdp_url, build_vipomall_taobao_pdp_url
 
@@ -34,6 +42,7 @@ FETCH_TARGET_HIBOX = "hibox"
 FETCH_TARGET_1688 = "1688"
 FETCH_TARGET_CSSBUY = "cssbuy"
 FETCH_TARGET_VIPOMALL = "vipomall"
+FETCH_TARGET_PANDAMALL = "pandamall"
 
 
 def normalize_fetch_target_param(raw: Optional[str]) -> str:
@@ -46,6 +55,8 @@ def normalize_fetch_target_param(raw: Optional[str]) -> str:
         return FETCH_TARGET_CSSBUY
     if s in {"vipomall", "vipo", "vipomail", "vipo_mall", "vipo-mall"}:
         return FETCH_TARGET_VIPOMALL
+    if s in {"pandamall", "panda", "panda_mall", "panda-mall"}:
+        return FETCH_TARGET_PANDAMALL
     if s in {"1688", "detail_1688", "alibaba_1688"}:
         return FETCH_TARGET_1688
     return FETCH_TARGET_AUTO
@@ -62,7 +73,7 @@ def coerce_url_for_excel_batch_import(
     Trả (url_sau_khi_chuẩn, lỗi_skip).
 
     * `lỗi_skip` khác None → bỏ dòng với thông báo tiếng Việt.
-    * `fetch_target` phải là một trong `auto` / `hibox` / `1688` / `cssbuy` / `vipomall` (đã normalize).
+    * `fetch_target` phải là một trong `auto` / `hibox` / `1688` / `cssbuy` / `vipomall` / `pandamall` (đã normalize).
       `auto` = quy về Hibox như `hibox`.
     """
     ft = (fetch_target or FETCH_TARGET_AUTO).strip().lower()
@@ -74,6 +85,13 @@ def coerce_url_for_excel_batch_import(
         return coerce_url_for_excel_batch_import(norm, FETCH_TARGET_HIBOX)
 
     if ft == FETCH_TARGET_HIBOX:
+        detail = extract_pandamall_detail(norm) if is_pandamall_import_url(norm) else None
+        if detail:
+            item_id, platform = detail
+            if platform == "1688":
+                return f"https://hibox.mn/v/abb-{item_id}", None
+            return f"https://hibox.mn/v/{item_id}", None
+
         if is_vipomall_import_url(norm):
             return vipomall_canonical_import_url(norm), None
 
@@ -158,6 +176,44 @@ def coerce_url_for_excel_batch_import(
         return (
             norm,
             "không quy đổi được sang Vipomall — cần link Taobao/Tmall, T{id}, offer 1688, Hibox abb-* / số, hoặc vipomall.vn/san-pham/{id}.",
+        )
+
+    if ft == FETCH_TARGET_PANDAMALL:
+        tid_early = parse_t_prefixed_item_id((raw_url or "").strip())
+        if tid_early:
+            return build_pandamall_taobao_pdp_url(tid_early), None
+
+        try:
+            url, _platform = resolve_pandamall_import_url(norm)
+            return url, None
+        except Exception:
+            pass
+        if is_pandamall_import_url(norm):
+            return pandamall_canonical_import_url(norm), None
+
+        oid = extract_offer_id(norm)
+        if oid and oid.isdigit():
+            return build_pandamall_1688_pdp_url(oid), None
+
+        slug = extract_hibox_slug(norm)
+        if slug and slug != "hibox_import":
+            abb = extract_hibox_1688_offer_digits(slug)
+            if abb:
+                return build_pandamall_1688_pdp_url(abb), None
+            if re.fullmatch(r"\d+", slug):
+                return build_pandamall_taobao_pdp_url(slug), None
+            return (
+                norm,
+                "link Hibox không nhận dạng offer 1688 (abb-*) hoặc id Taobao số — không quy đổi sang PandaMall.",
+            )
+
+        tid = _extract_taobao_tmall_item_id(norm) or parse_t_prefixed_item_id(norm)
+        if tid:
+            return build_pandamall_taobao_pdp_url(tid), None
+
+        return (
+            norm,
+            "không quy đổi được sang PandaMall — cần link Taobao/Tmall, T{id}, offer 1688, Hibox abb-* / số, hoặc pandamall.vn/taobao|1688/detail/{id}.",
         )
 
     if ft == FETCH_TARGET_1688:

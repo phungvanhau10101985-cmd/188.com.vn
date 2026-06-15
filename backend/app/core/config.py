@@ -217,7 +217,7 @@ class Settings:
             not in ("0", "false", "no", "off")
         )
 
-        # Bản địa hóa ảnh sản phẩm — Selenium/Gemini web profile + Bunny upload.
+        # Bản địa hóa ảnh sản phẩm — Google Vision + DeepSeek + Gemini/OpenAI API + Bunny upload.
         self.IMAGE_LOCALIZATION_ENABLED: bool = os.getenv(
             "IMAGE_LOCALIZATION_ENABLED", "True"
         ).strip().lower() in ("1", "true", "yes", "on")
@@ -248,31 +248,6 @@ class Settings:
         _ocr_slow_raw = os.getenv("IMAGE_LOCALIZATION_OCR_MAX_SLOW_WAITS", "1").strip()
         self.IMAGE_LOCALIZATION_OCR_MAX_SLOW_WAITS: int = int(_ocr_slow_raw) if _ocr_slow_raw.isdigit() else 1
         self.IMAGE_LOCALIZATION_BATCH_SIZE: int = int(os.getenv("IMAGE_LOCALIZATION_BATCH_SIZE", "10") or "10")
-        self.IMAGE_LOCALIZATION_CHROME_PROFILE_PATH: str = os.getenv(
-            "IMAGE_LOCALIZATION_CHROME_PROFILE_PATH", ""
-        ).strip()
-        self.IMAGE_LOCALIZATION_GEMINI_COOKIE_FILE: str = os.getenv(
-            "IMAGE_LOCALIZATION_GEMINI_COOKIE_FILE",
-            os.path.join(self.IMAGE_LOCALIZATION_RUNTIME_DIR, "gemini_cookies.json"),
-        ).strip()
-        self.IMAGE_LOCALIZATION_PLAYWRIGHT_HEADLESS: bool = (
-            os.getenv("IMAGE_LOCALIZATION_PLAYWRIGHT_HEADLESS", "true").strip().lower()
-            not in ("0", "false", "no", "off")
-        )
-        self.IMAGE_LOCALIZATION_PLAYWRIGHT_TIMEOUT_MS: int = int(
-            os.getenv("IMAGE_LOCALIZATION_PLAYWRIGHT_TIMEOUT_MS", "180000") or "180000"
-        )
-        self.IMAGE_LOCALIZATION_GEMINI_MANUAL_LOGIN_WAIT_MS: int = int(
-            os.getenv("IMAGE_LOCALIZATION_GEMINI_MANUAL_LOGIN_WAIT_MS", "900000") or "900000"
-        )
-        self.IMAGE_LOCALIZATION_GEMINI_SKIP_JSON_COOKIES_WHEN_PROFILE_MARKER: bool = (
-            os.getenv("IMAGE_LOCALIZATION_GEMINI_SKIP_JSON_COOKIES_WHEN_PROFILE_MARKER", "false").strip().lower()
-            in ("1", "true", "yes", "on")
-        )
-        # Gemini Web headed: khi SSO mở accounts.google.com, bấm dòng TK có email này (tránh nhầm TK khác). Để trống → bấm dòng có "Signed out" hoặc mục đầu trong listbox.
-        self.IMAGE_LOCALIZATION_GOOGLE_ACCOUNT_EMAIL: str = os.getenv(
-            "IMAGE_LOCALIZATION_GOOGLE_ACCOUNT_EMAIL", ""
-        ).strip()
         # 0 = một job chạy lần lượt hết SP pending (theo id); N>0 = mỗi job tối đa N SP.
         # Nhiều job song song vẫn không trùng product_id nhờ claim processing trong DB.
         self.IMAGE_LOCALIZATION_BATCH_LIMIT: int = int(os.getenv("IMAGE_LOCALIZATION_BATCH_LIMIT", "0") or "0")
@@ -326,10 +301,11 @@ class Settings:
             self.IMAGE_LOCALIZATION_OUTPUT_JPEG_QUALITY = max(70, min(100, _q))
         except ValueError:
             self.IMAGE_LOCALIZATION_OUTPUT_JPEG_QUALITY = 95
-        # Gemini cho bản địa hóa ảnh: web (Playwright + cookie) hoặc api (GEMINI_API_KEY + model sinh/sửa ảnh).
-        # openai = OpenAI GPT Image (/v1/images/edits), dùng OPENAI_API_KEY.
-        _ilm = os.getenv("IMAGE_LOCALIZATION_GEMINI_MODE", "web").strip().lower()
-        self.IMAGE_LOCALIZATION_GEMINI_MODE: str = _ilm if _ilm in ("web", "api", "openai") else "web"
+        # Gemini cho bản địa hóa ảnh: api (GEMINI_API_KEY + model sinh/sửa ảnh) hoặc openai (GPT Image).
+        _ilm = os.getenv("IMAGE_LOCALIZATION_GEMINI_MODE", "api").strip().lower()
+        if _ilm == "web":
+            _ilm = "api"
+        self.IMAGE_LOCALIZATION_GEMINI_MODE: str = _ilm if _ilm in ("api", "openai") else "api"
         self.IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL: str = (
             os.getenv("IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL", "gemini-3-pro-image-preview").strip()
             or "gemini-3-pro-image-preview"
@@ -369,6 +345,8 @@ class Settings:
                 self.IMAGE_LOCALIZATION_LOCAL_OVERLAP_ABORT_THRESHOLD = None
 
         # Scrape Playwright (Hibox, Vipomall, 1688, kiểm tra tồn kho) — một bộ cookie JSON trên server.
+        self.PANDAMALL_USERNAME: str = os.getenv("PANDAMALL_USERNAME", "").strip()
+        self.PANDAMALL_PASSWORD: str = os.getenv("PANDAMALL_PASSWORD", "").strip()
         self.IMPORT_SCRAPER_COOKIE_JSON: str = (
             os.getenv("IMPORT_SCRAPER_COOKIE_JSON", "").strip()
             or os.getenv("IMPORT_1688_COOKIE_JSON", "").strip()

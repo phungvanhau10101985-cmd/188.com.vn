@@ -26,7 +26,6 @@ TEMP_IMAGES_DIR = str(_RUNTIME_DIR / "temp_images")
 DOWNLOADS_DIR = str(_RUNTIME_DIR / "downloads")
 LOGS_DIR = str(_RUNTIME_DIR / "logs")
 CACHE_DIR = str(_RUNTIME_DIR / "processed_images_cache")
-CHROME_PROFILE_PATH = os.getenv("IMAGE_LOCALIZATION_CHROME_PROFILE_PATH", str(_RUNTIME_DIR / "chrome-profile")).strip()
 
 # ==================== BATCH PROCESSING CONFIG ====================
 BATCH_SIZE = 10  # Số lượng ảnh mỗi batch
@@ -39,61 +38,6 @@ BUNNY_CDN_PUBLIC_BASE = os.getenv("BUNNY_CDN_PUBLIC_BASE", "https://188comvn.b-c
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
 DEEPSEEK_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions").strip()
-
-# ==================== GEMINI CONFIGURATION ====================
-GEMINI_URL = "https://gemini.google.com/app"
-
-# PROMPT MỚI: Đã thêm xử lý từ khóa giặt tẩy
-GEMINI_PROMPT = """ROLE: E-commerce Image Localization Agent
-
-Please use Nano Banana to translate the images I send into 100% Vietnamese. The images are high quality, with large, easily readable text on mobile phones, professional product photography, studio lighting, ultra-sharp detail, and 4K resolution. All product details are preserved; any vandalism or alteration of original product details is strictly prohibited.
-
-MAIN OBJECTIVE: Translate ALL Chinese text to Vietnamese and remove ALL Chinese text from the image, including proper names, into natural Vietnamese. Carefully analyze the image, find all Chinese text, translate it into Vietnamese, and remove all Chinese text from the image; analyze it very carefully. Strictly preserve the original text color. Translate all the Chinese text in this image into Vietnamese, including detailed descriptions, and preserve the original formatting. Convert Chinese weight units to the international weight unit kg.
-Pay special attention to translating and completely removing small footnotes, measurement instructions, and formulas located beside or below tables. Do not overlook any Chinese characters, even the smallest ones. If the image violates the policy, return the text 'Policy violation'.
-
-TASK: Process the attached image and execute the following translation logic:
-
-ACTION: Generate a new image with the following edits:
-
-1. **TRANSLATE:** Convert ABSOLUTELY ALL Chinese characters and Chinese text found anywhere on the image into Vietnamese. There are NO exceptions; every piece of Chinese text must be translated to Vietnamese 100%.
-
-2. **REMOVE:** Erase all Website URLs/Domains (e.g., .com, .cn, www, .vn, .net, .org) and inpaint the background seamlessly.
-
-3. **UNIT CONVERSION:** If Chinese weight units are found within the text, convert them during translation:
-   - 1斤 -> 0.5kg
-   - 1两 -> 50g
-
-4. **PRESERVE STRUCTURE:** Maintain the original layout, fonts, text positioning, and formatting as closely as possible.
-
-5. **QUALITY CONTROL:**
-   - STRICTLY maintain the original image resolution and dimensions
-   - DO NOT resize, crop, or alter the aspect ratio
-   - Preserve original image quality - high resolution, sharp details
-   - Keep all product details and specifications intact
-   - Only translate text, do not alter product images
-
-6. **COMPOSITION LABEL DISCLAIMER:** If and ONLY IF the image is identified as a **material composition label** (listing ingredients, fabric percentages, material content, etc.), you MUST add the following specific Vietnamese text clearly on the image (e.g., at the bottom or in an empty space):
-   - **"Thông tin được dịch sát nghĩa từ nhãn gốc. Mác áo thực tế là tiếng Trung."**
-
-IMPORTANT NOTES:
-- This image has ALREADY been pre-filtered and approved for translation
-- NO need to check for price information, contact details, or other blocking content
-- NO need to analyze if the image contains Chinese text - it does
-- NO need to check if the image is "clean" - it's ready for processing
-- Your ONLY task is to translate all Chinese text to Vietnamese
-
-TRANSLATION GUIDELINES:
-- Product names: Translate meaningfully, not literally
-- Technical specifications: Keep accuracy, use Vietnamese technical terms
-- Color names: Use common Vietnamese color terms
-- Size charts: Translate completely, maintain table structure
-- Measurements: Convert Chinese units to metric where applicable
-- Marketing text: Make it sound natural in Vietnamese
-
-FINAL OUTPUT: Return ONLY the PROCESSED IMAGE FILE (Do not describe it, do not add text, just show the translated image)."""
-
-HEADLESS = False
-GEMINI_PROCESS_TIMEOUT = 300
 
 # ==================== GEMINI POST-CHECK CONFIG ====================
 GEMINI_POST_CHECK_ENABLED = True  # Bật kiểm tra ảnh sau Gemini
@@ -756,9 +700,6 @@ def setup_directories():
         os.path.join(DOWNLOADS_DIR, "temp_download"),
         LOGS_DIR,
         CACHE_DIR,
-        CHROME_PROFILE_PATH,
-        os.path.join(CHROME_PROFILE_PATH, "Default"),
-        os.path.join(CHROME_PROFILE_PATH, "Default", "Extensions"),
         *([os.path.dirname(GCP_KEY_FILE)] if GCP_KEY_FILE else []),
     ]
     
@@ -963,7 +904,6 @@ __all__ = [
     # Paths
     'BASE_DIR', 'LOGO_PATH', 'FONT_PATH', 'GCP_KEY_FILE',
     'TEMP_DIR', 'TEMP_IMAGES_DIR', 'DOWNLOADS_DIR', 'LOGS_DIR', 'CACHE_DIR',
-    'CHROME_PROFILE_PATH',
     
     # Batch Processing
     'BATCH_SIZE',
@@ -972,10 +912,7 @@ __all__ = [
     'BUNNY_API_KEY', 'STORAGE_ZONE_NAME', 'BUNNY_STORAGE_HOSTNAME', 'BUNNY_CDN_PUBLIC_BASE',
     'DEEPSEEK_API_KEY', 'DEEPSEEK_URL',
     
-    # Gemini
-    'GEMINI_URL', 'GEMINI_PROMPT', 'HEADLESS', 'GEMINI_PROCESS_TIMEOUT',
-    
-    # Gemini Post-Check
+    # Gemini post-check (OCR lại ảnh sau Gemini API)
     'GEMINI_POST_CHECK_ENABLED', 'GEMINI_BATCH_CHECK_SIZE',
     'GEMINI_ERROR_THRESHOLD', 'GEMINI_CHECK_TIMEOUT', 'GEMINI_MAX_WORKERS',
     

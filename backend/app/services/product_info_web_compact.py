@@ -60,7 +60,7 @@ def _should_compact_hibox_style_product_info(pi: Dict[str, Any]) -> bool:
             return True
     var_chk = pi.get("variants")
     if isinstance(var_chk, dict):
-        if str(var_chk.get("source") or "").lower() in {"hibox", "vipomall"}:
+        if str(var_chk.get("source") or "").lower() in {"hibox", "vipomall", "pandamall"}:
             return True
     mk = pi.get("market_info")
     if isinstance(mk, dict):

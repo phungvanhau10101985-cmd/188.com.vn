@@ -1,0 +1,48 @@
+[
+  {
+    "name": "_fbp",
+    "value": "fb.1.1781356577343.347298968490727758",
+    "domain": ".pandamall.vn",
+    "path": "/",
+    "expires": 1789315773,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "_ga_D957Z4XHWQ",
+    "value": "GS2.1.s1781539773$o6$g0$t1781539773$j60$l0$h157051447",
+    "domain": ".pandamall.vn",
+    "path": "/",
+    "expires": 1816099773,
+    "httpOnly": false,
+    "secure": false
+  },
+  {
+    "name": "x-hng",
+    "value": "lang=en-US&domain=pandamall.vn",
+    "domain": "pandamall.vn",
+    "path": "/",
+    "expires": 1784131773,
+    "httpOnly": false,
+    "secure": false
+  },
+  {
+    "name": "_ga",
+    "value": "GA1.1.945142775.1781356571",
+    "domain": ".pandamall.vn",
+    "path": "/",
+    "expires": 1816099773,
+    "httpOnly": false,
+    "secure": false
+  },
+  {
+    "name": "_gcl_au",
+    "value": "1.1.1627631205.1781356571.1395056727.1781356624.1781356623",
+    "domain": ".pandamall.vn",
+    "path": "/",
+    "expires": 1789132571,
+    "httpOnly": false,
+    "secure": false
+  }
+]

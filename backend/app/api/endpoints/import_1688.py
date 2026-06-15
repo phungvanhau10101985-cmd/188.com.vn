@@ -73,6 +73,13 @@ from app.services.import_hibox_scraper import (
     parse_t_prefixed_item_id,
     scrape_hibox_for_import,
 )
+from app.services.import_pandamall_scraper import (
+    ImportPandamallError,
+    extract_pandamall_detail,
+    is_pandamall_import_url,
+    resolve_pandamall_import_url,
+    scrape_pandamall_for_import,
+)
 from app.services.import_vipomall_scraper import (
     ImportVipomallError,
     extract_vipomall_offer_id,
@@ -86,6 +93,7 @@ from app.services.import_1688_scraper import (
     build_canonical_1688_product_id,
     extract_1688_numeric_offer_id,
     extract_offer_id,
+    scrape_1688_product,
 )
 from app.services.import_batch_url_coercion import (
     FETCH_TARGET_AUTO,
@@ -204,8 +212,20 @@ def _batch_status_out_for_draft_ids(db: Session, batch_token: str, draft_ids: Li
 
 
 def _infer_import_source_for_url(norm_url: str, requested_source: Optional[str] = None) -> Tuple[str, str]:
-    """Trả (external_id, source). Raises ValueError nếu không phải 1688/Hibox/Vipomall/Taobao."""
+    """Trả (external_id, source). Raises ValueError nếu không phải 1688/Hibox/Vipomall/PandaMall/Taobao."""
     req = (requested_source or "").strip().lower()
+    if req in {"pandamall", "panda", "panda_mall"} or is_pandamall_import_url(norm_url):
+        try:
+            canonical, _platform = resolve_pandamall_import_url(norm_url)
+            detail = extract_pandamall_detail(canonical) or extract_pandamall_detail(norm_url)
+            if detail:
+                return detail[0], "pandamall"
+        except ImportPandamallError:
+            pass
+        detail = extract_pandamall_detail(norm_url)
+        if detail:
+            return detail[0], "pandamall"
+
     if req in {"vipomall", "vipo", "vipomail"} or is_vipomall_import_url(norm_url):
         try:
             canonical, _pt = resolve_vipomall_import_url(norm_url)
@@ -474,6 +494,7 @@ def start_import_batch_resume_daemon_if_enabled() -> None:
 
 def _apply_deepseek_taxonomy_after_scrape(db: Session, product_data: Dict[str, Any], warnings: List[str]) -> None:
     try:
+        from app.services.import_link_deepseek_taxonomy import apply_deepseek_taxonomy_to_product_data
         warnings.extend(apply_deepseek_taxonomy_to_product_data(db, product_data))
     except Exception as exc:
         logger.warning("import link DeepSeek taxonomy: %s", exc)
@@ -818,12 +839,33 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             return
         norm_url = normalize_product_import_url(draft.source_url or "")
         saved_source = (draft.source or "1688").strip().lower()
-        if saved_source == "vipomall" or is_vipomall_import_url(norm_url):
+        if saved_source == "pandamall" or is_pandamall_import_url(norm_url):
+            source = "pandamall"
+        elif saved_source == "vipomall" or is_vipomall_import_url(norm_url):
             source = "vipomall"
         elif saved_source == "hibox" or "hibox.mn" in norm_url.lower() or is_hibox_import_url(norm_url):
             source = "hibox"
         else:
             source = saved_source
+
+        if source == "pandamall":
+            draft_crud.mark_running(db, draft, "scraping", "Đang mở trang PandaMall bằng Playwright...", 15)
+            raw_payload, product_data, warnings = scrape_pandamall_for_import(draft.source_url)
+            _merge_excel_overlay_for_job(db, job_id, product_data)
+            _prefer_excel_chinese_name_for_import_ai(product_data)
+            _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
+            _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
+            _reapply_excel_locale_overlay_for_job(db, job_id, product_data)
+            _finalize_product_data_for_db(product_data)
+            draft_crud.mark_done(
+                db,
+                draft,
+                raw_payload=raw_payload,
+                product_data=product_data,
+                warnings=warnings,
+                success_message="Đã tạo bản nháp từ link PandaMall.",
+            )
+            return
 
         if source == "hibox":
             draft_crud.mark_running(db, draft, "scraping", "Đang mở trang Hibox bằng Playwright...", 15)
@@ -863,16 +905,39 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             )
             return
 
+        if source == "1688" and settings.IMPORT_1688_ENABLED:
+            draft_crud.mark_running(db, draft, "scraping", "Đang mở trang 1688 bằng Playwright...", 15)
+            raw_payload, product_data, warnings = scrape_1688_product(draft.source_url)
+            _merge_excel_overlay_for_job(db, job_id, product_data)
+            _prefer_excel_chinese_name_for_import_ai(product_data)
+            _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
+            _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
+            _reapply_excel_locale_overlay_for_job(db, job_id, product_data)
+            _finalize_product_data_for_db(product_data)
+            draft_crud.mark_done(
+                db,
+                draft,
+                raw_payload=raw_payload,
+                product_data=product_data,
+                warnings=warnings,
+                success_message="Đã tạo bản nháp từ link 1688 trực tiếp.",
+            )
+            return
+
         draft_crud.mark_error(
             db,
             draft,
             message=(
                 "Import trực tiếp từ 1688 đã tắt. Tạo lại nháp từ link Hibox "
-                "(hibox.mn / taobao1688.kz) hoặc Vipomall."
+                "(hibox.mn / taobao1688.kz), Vipomall hoặc PandaMall."
             ),
             errors=["import_1688_disabled"],
         )
         return
+    except ImportPandamallError as exc:
+        draft = draft_crud.get_by_job_id(db, job_id)
+        if draft:
+            draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
     except ImportHiboxError as exc:
         draft = draft_crud.get_by_job_id(db, job_id)
         if draft:
@@ -925,7 +990,7 @@ def create_import_1688_job(
             detail={
                 "reason": "unsupported_import_link",
                 "message": (
-                    "Không nhận dạng được link Hibox / taobao1688.kz / Vipomall / Taobao / Tmall / T{id}."
+                    "Không nhận dạng được link Hibox / taobao1688.kz / Vipomall / PandaMall / Taobao / Tmall / T{id}."
                 ),
                 "normalized_length": len(source_url),
                 "normalized_preview": source_url[:200],
@@ -933,17 +998,27 @@ def create_import_1688_job(
                     "Hibox: https://hibox.mn/v/{mã}. Mirror: https://taobao1688.kz/item?id={mã}. "
                     "Vipomall 1688: https://vipomall.vn/san-pham/{offerId}?platform_type=10. "
                     "Vipomall Taobao/Tmall: https://vipomall.vn/san-pham/{itemId}?platform_type=21 hoặc T{itemId}. "
+                    "PandaMall 1688: https://pandamall.vn/1688/detail/{offerId}. "
+                    "PandaMall Taobao: https://pandamall.vn/taobao/detail/{itemId}. "
                     "Import trực tiếp từ 1688.com không còn hỗ trợ."
                 ),
             },
         )
+    if src == "pandamall":
+        try:
+            source_url, _platform = resolve_pandamall_import_url(source_url)
+            detail = extract_pandamall_detail(source_url)
+            if detail:
+                ext_id = detail[0]
+        except ImportPandamallError:
+            pass
     if src == "vipomall":
         try:
             source_url, _pt = resolve_vipomall_import_url(source_url)
             ext_id = extract_vipomall_offer_id(source_url) or ext_id
         except ImportVipomallError:
             pass
-    if src == "1688":
+    if src == "1688" and not settings.IMPORT_1688_ENABLED:
         raise HTTPException(
             status_code=400,
             detail={

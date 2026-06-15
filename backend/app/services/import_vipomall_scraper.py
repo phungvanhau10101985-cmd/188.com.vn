@@ -314,8 +314,8 @@ _SCRAPE_JS = r"""() => {
     const header = sectionHeaderText(section);
     const total = sectionTotalText(section);
     if (isColorSectionHeader(header)) return "color";
-    if (isVariantSectionHeader(header) || /\d+\s*mẫu/i.test(total)) return "variant";
     if (isSizeSectionHeader(header)) return "size";
+    if (isVariantSectionHeader(header) || /\d+\s*mẫu/i.test(total)) return "variant";
     const rows = Array.from(section.querySelectorAll(".product-size-content-item"));
     if (rows.length && rows.every((row) => rowLooksVariantOnly(row))) return "variant";
     return "unknown";
@@ -331,7 +331,12 @@ _SCRAPE_JS = r"""() => {
     if (variantLabelKind(sectionKind)) {
       color = titles[0] || visible;
     } else if (sectionKind === "size") {
-      size = titles[0] || visible;
+      if (titles.length >= 2) {
+        color = titles[0];
+        size = titles[1];
+      } else {
+        size = titles[0] || visible;
+      }
     } else if (titles.length >= 2) {
       color = titles[0];
       size = titles[1];

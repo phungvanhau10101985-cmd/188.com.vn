@@ -671,7 +671,7 @@ export interface AdminImageLocalizationJob {
   skipped?: number;
   percent?: number | null;
   language?: string;
-  gemini_mode?: 'web' | 'api' | 'openai';
+  gemini_mode?: 'api' | 'openai';
   gemini_image_model?: string;
   gemini_image_size?: string;
   openai_image_model?: string;
@@ -680,8 +680,6 @@ export interface AdminImageLocalizationJob {
   inference_tier?: 'standard' | 'flex';
   allow_ai_image_models?: boolean | null;
   local_image_only?: boolean;
-  playwright_headless_requested?: boolean | null;
-  playwright_headless_effective?: boolean;
   current_product_id?: string | null;
   cancel_requested?: boolean;
   /** Snapshot id trong lượt chạy (backend có thể cắt nếu batch rất lớn — xem job_queue_truncated). */
@@ -777,7 +775,7 @@ export interface AdminGeminiAuthBranch {
 export interface AdminGeminiAuthStatus {
   /** false = admin chỉ được pipeline OCR + DeepSeek + vẽ local (Gemini/GPT ảnh tắt trên server). */
   ai_image_jobs_allowed?: boolean;
-  default_gemini_mode: 'web' | 'api' | 'openai';
+  default_gemini_mode: 'api' | 'openai';
   image_model: string;
   openai_image_model: string;
   gemini_api_image_sizes?: string[];
@@ -785,10 +783,6 @@ export interface AdminGeminiAuthStatus {
   openai_image_sizes?: string[];
   inference_tier_options?: string[];
   inference_tier_notes?: Record<string, string>;
-  playwright_headless?: boolean;
-  playwright_browser_visible?: boolean;
-  deploy_browser_help?: string;
-  web: AdminGeminiAuthBranch;
   api: AdminGeminiAuthBranch;
   openai: AdminGeminiAuthBranch;
 }
@@ -1201,6 +1195,17 @@ export type AdminGoogleSheetSkuSyncResult = {
 };
 
 export const adminProductAPI = {
+  getPandamallAccount: async (): Promise<{ username?: string; password?: string }> => {
+    return fetchAdmin<{ username?: string; password?: string }>('/admin/pandamall-account');
+  },
+
+  savePandamallAccount: async (username: string, password?: string): Promise<{ message: string }> => {
+    return fetchAdmin<{ message: string }>('/admin/pandamall-account', {
+      method: 'PUT',
+      body: JSON.stringify({ username, password }),
+    });
+  },
+
   getProducts: (
     params?: {
       skip?: number;
@@ -1465,13 +1470,6 @@ export const adminProductAPI = {
     };
   },
 
-  saveGeminiImageLocalizationCookie: (cookie: string) =>
-    fetchAdmin<{ success: boolean; cookie_count: number }>('/image-localization/settings/gemini-cookie', {
-      method: 'POST',
-      body: JSON.stringify({ cookie }),
-      timeoutMs: 60_000,
-    }),
-
   getGeminiImageLocalizationAuth: (language = 'vi') =>
     fetchAdmin<AdminGeminiAuthStatus>(
       `/image-localization/settings/gemini-auth?language=${encodeURIComponent(language)}`,
@@ -1503,10 +1501,9 @@ export const adminProductAPI = {
     dry_run?: boolean;
     product_ids?: string[];
     limit?: number;
-    gemini_mode?: 'web' | 'api' | 'openai';
+    gemini_mode?: 'api' | 'openai';
     /** false = chỉ DeepSeek + vẽ, không Gemini/GPT ảnh cho cả batch */
     allow_ai_image_models?: boolean | null;
-    playwright_headless?: boolean | null;
     gemini_image_model?: string;
     gemini_image_size?: string;
     openai_image_model?: string;
@@ -1614,7 +1611,7 @@ export const adminProductAPI = {
       { method: 'POST', timeoutMs: 30_000 },
     ),
 
-  startImport1688: (url: string, downloadImages = true, source?: '1688' | 'hibox' | 'vipomall') =>
+  startImport1688: (url: string, downloadImages = true, source?: '1688' | 'hibox' | 'vipomall' | 'pandamall') =>
     fetchAdmin<{ job_id: string; draft_id: number; message?: string; poll_url?: string }>(
       '/import-1688/jobs',
       {
@@ -1838,7 +1835,7 @@ export const adminProductAPI = {
 
   uploadImport1688ExcelBatch: async (
     file: File,
-    fetchTarget: 'auto' | 'hibox' | 'vipomall' = 'auto',
+    fetchTarget: 'auto' | 'hibox' | 'vipomall' | 'pandamall' = 'auto',
   ): Promise<AdminImport1688ExcelBatchStart> => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
@@ -1958,6 +1955,19 @@ export const adminProductAPI = {
         timeoutMs: 60_000,
       });
     }),
+
+  getPandamallAccount: () =>
+    fetchAdmin<{ username: string }>('/admin/pandamall-account', {
+      timeoutMs: 60_000,
+    }),
+
+  savePandamallAccount: (username: string, password: string) =>
+    fetchAdmin<{ message: string; username: string }>('/admin/pandamall-account', {
+      method: 'PUT',
+      body: JSON.stringify({ username, password }),
+      timeoutMs: 60_000,
+    }),
+
 
   restartBackendApi: () =>
     fetchAdmin<{ success: boolean; message: string }>('/import-1688/settings/restart-api', {
@@ -2276,6 +2286,10 @@ export const adminOrderAPI = {
       sp.set('period', 'today');
     }
     return fetchAdmin<AdminOrderStats>(`/orders/admin/stats?${sp.toString()}`);
+  },
+
+  exportOrderStatsToExcel: async () => {
+    return fetchAdmin<any>('/orders/admin/shipping/export-excel');
   },
 
   updateOrder: (orderId: number, data: {

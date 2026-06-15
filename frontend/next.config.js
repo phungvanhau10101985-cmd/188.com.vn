@@ -71,6 +71,7 @@ const nextConfig = {
   transpilePackages: ["antd", "@ant-design/icons"],
   experimental: {
     scrollRestoration: true,
+    optimizePackageImports: ["antd", "@ant-design/icons"],
     // Sau Nginx: Server Actions cần Origin hợp lệ — tránh "Missing origin header"
     serverActions: {
       allowedOrigins: ["188.com.vn", "www.188.com.vn", "localhost:3001"],
@@ -87,13 +88,31 @@ const nextConfig = {
   },
   typescript: { ignoreBuildErrors: false },
   /** Next.js 16: build mặc định dùng Turbopack — cần `next build --webpack` (xem package.json) vì alias antd ở dưới. */
-  webpack: (config) => {
+  webpack: (config, { dev }) => {
     const root = process.cwd();
     config.resolve.alias = {
       ...config.resolve.alias,
       // Antd compat: lib → es (tree-shaking + tránh build chậm).
       "antd/lib": path.resolve(root, "node_modules/antd/es"),
     };
+    // Windows dev: poll + cache trong node_modules — giảm errno -4094 khi HMR ghi/đọc chunk.
+    if (dev && process.platform === "win32") {
+      config.watchOptions = {
+        ...(config.watchOptions || {}),
+        poll: 1000,
+        aggregateTimeout: 500,
+      };
+      config.cache = {
+        type: "filesystem",
+        cacheDirectory: path.join(root, "node_modules", ".cache", "next-webpack"),
+        compression: false,
+      };
+      // layout.js dev có thể >2MB — tăng timeout tránh ChunkLoadError khi compile song song.
+      config.output = {
+        ...(config.output || {}),
+        chunkLoadTimeout: 300000,
+      };
+    }
     // KHÔNG alias 'react' / 'react-dom' về node_modules ở đây —
     // Next 14.2.18 client runtime gọi React.use() (chỉ có trong bản React canary mà Next bundle sẵn ở
     // next/dist/compiled/react). Nếu ép alias về node_modules/react@18.2.0 → React.use undefined →

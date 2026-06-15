@@ -331,8 +331,33 @@ YÊU CẦU:
 
     def summarize_product_info(self, raw_text_list: List[str]) -> str:
         return "" 
+
+    def _normalize_ocr_items(self, ocr_results: List[Any]) -> List[Tuple[str, tuple]]:
+        normalized_items: List[Tuple[str, tuple]] = []
+        for item in ocr_results or []:
+            if isinstance(item, dict):
+                text = item.get("text", "")
+                bbox = item.get("bbox", [])
+            else:
+                text = item[0] if len(item) > 0 else ""
+                bbox = item[1] if len(item) > 1 else []
+            if text:
+                normalized_items.append((text, bbox))
+        return normalized_items
+
+    def has_size_or_laundry_context(self, ocr_results: List[Any]) -> bool:
+        items = self._normalize_ocr_items(ocr_results)
+        if not items:
+            return False
+        return self._has_size_table_context(items) or self._has_laundry_care_context(items)
     
-    def classify_and_process_blocks(self, ocr_results: List[Any], image_url: str = "") -> Tuple[List[Tuple[str, tuple]], List[Tuple[str, tuple]]]:
+    def classify_and_process_blocks(
+        self,
+        ocr_results: List[Any],
+        image_url: str = "",
+        *,
+        delete_size_and_laundry: bool = True,
+    ) -> Tuple[List[Tuple[str, tuple]], List[Tuple[str, tuple]]]:
         """
         Phân loại và xử lý text blocks. 
         Hỗ trợ input cả Dict và Tuple để tránh lỗi format.
@@ -344,30 +369,27 @@ YÊU CẦU:
         
         print(f"  📝 Phân tích {len(ocr_results)} khối text để dịch...")
 
-        normalized_items = []
-        for item in ocr_results:
-            # FIX: Handle mixed format
-            if isinstance(item, dict):
-                text = item.get('text', '')
-                bbox = item.get('bbox', [])
-            else:
-                text = item[0] if len(item) > 0 else ''
-                bbox = item[1] if len(item) > 1 else []
-            if text:
-                normalized_items.append((text, bbox))
+        normalized_items = self._normalize_ocr_items(ocr_results)
+        if not normalized_items:
+            return [], []
 
         if self._has_factory_intro_context(normalized_items):
             print("    [FACTORY INTRO] delete image")
             return None
 
         size_table_context = self._has_size_table_context(normalized_items)
-        if size_table_context:
+        if size_table_context and delete_size_and_laundry:
             print("    [SIZE TABLE] delete image")
             return None
 
-        if self._has_laundry_care_context(normalized_items):
+        if self._has_laundry_care_context(normalized_items) and delete_size_and_laundry:
             print("    [LAUNDRY CARE] delete image")
             return None
+
+        if size_table_context and not delete_size_and_laundry:
+            print("    [SIZE TABLE] giữ ảnh — không xóa (Gemini API)")
+        elif self._has_laundry_care_context(normalized_items) and not delete_size_and_laundry:
+            print("    [LAUNDRY CARE] giữ ảnh — không xóa (Gemini API)")
 
         for text, bbox in normalized_items:
             if self._is_standalone_cm_measurement(text.strip()):
