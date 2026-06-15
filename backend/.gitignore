@@ -28,6 +28,14 @@ MANIFEST
 .env.dev
 .env.test
 
+# Scraper credentials (admin lưu trên server — không commit)
+scraper-cookies.json
+1688-cookies.json
+pandamall-account.json
+scraper-cookies.json.pre-deploy.bak
+pandamall-account.json.pre-deploy.bak
+1688-cookies.json.pre-deploy.bak
+
 # Logs
 *.log
 logs/

@@ -103,6 +103,33 @@ else
 fi
 
 # Git ≥2.27: pull cần strategy khi có commit local không có trên origin (divergent). Mặc định merge.
+_deploy_secret_files=(
+  backend/scraper-cookies.json
+  backend/pandamall-account.json
+  backend/1688-cookies.json
+)
+
+deploy_preserve_untracked_secrets() {
+  local f
+  for f in "${_deploy_secret_files[@]}"; do
+    if [[ -f "${PROJECT_ROOT}/${f}" ]] && ! git -C "${PROJECT_ROOT}" ls-files --error-unmatch "${f}" &>/dev/null; then
+      cp -a "${PROJECT_ROOT}/${f}" "${PROJECT_ROOT}/${f}.pre-deploy.bak"
+      rm -f "${PROJECT_ROOT}/${f}"
+      echo "==> Git: backup untracked ${f} → ${f}.pre-deploy.bak (tránh pull bị chặn)"
+    fi
+  done
+}
+
+deploy_restore_untracked_secrets() {
+  local f
+  for f in "${_deploy_secret_files[@]}"; do
+    if [[ -f "${PROJECT_ROOT}/${f}.pre-deploy.bak" ]]; then
+      mv -f "${PROJECT_ROOT}/${f}.pre-deploy.bak" "${PROJECT_ROOT}/${f}"
+      echo "==> Git: khôi phục ${f} từ backup trước deploy"
+    fi
+  done
+}
+
 deploy_git_sync() {
   local mode="${DEPLOY_GIT_SYNC:-merge}"
   case "${mode}" in
@@ -132,7 +159,9 @@ deploy_git_sync() {
 if [[ "${DEPLOY_SKIP_GIT:-0}" == "1" ]]; then
   echo "==> Git: DEPLOY_SKIP_GIT=1 — bỏ qua (đã git pull / sync tay trước khi chạy script)."
 else
+  deploy_preserve_untracked_secrets
   if ! deploy_git_sync; then
+    deploy_restore_untracked_secrets
     echo ""
     echo "❌ Git sync thất bại (vd. unmerged files / conflict)."
     echo "   Khôi phục site không cần pull: DEPLOY_SKIP_GIT=1 bash ./deploy/update-vps.sh ${BRANCH}"
@@ -140,6 +169,7 @@ else
     echo "   Xem file conflict: git status"
     exit 1
   fi
+  deploy_restore_untracked_secrets
 fi
 
 echo "==> Backend: venv + pip"

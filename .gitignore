@@ -9,6 +9,12 @@ venv/
 # Cookie thử scrape (đừng commit)
 **/backend/.tmp_otdemo_cookies.json
 .tmp_otdemo_cookies.json
+**/backend/scraper-cookies.json
+**/backend/1688-cookies.json
+**/backend/pandamall-account.json
+**/backend/scraper-cookies.json.pre-deploy.bak
+**/backend/pandamall-account.json.pre-deploy.bak
+**/backend/1688-cookies.json.pre-deploy.bak
 
 # Env (giữ *.env.example trong repo)
 .env
