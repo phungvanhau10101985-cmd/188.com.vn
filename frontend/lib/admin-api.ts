@@ -1836,12 +1836,15 @@ export const adminProductAPI = {
   uploadImport1688ExcelBatch: async (
     file: File,
     fetchTarget: 'auto' | 'hibox' | 'vipomall' | 'pandamall' = 'auto',
+    appendBatchToken?: string | null,
   ): Promise<AdminImport1688ExcelBatchStart> => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
     const form = new FormData();
     form.append('file', file);
     form.append('fetch_target', fetchTarget);
+    const appendTok = (appendBatchToken || '').trim();
+    if (appendTok) form.append('append_batch_token', appendTok);
     const url = `${getApiBaseUrl()}/import-1688/jobs/batch-from-excel`;
     const res = await fetch(url, {
       method: 'POST',

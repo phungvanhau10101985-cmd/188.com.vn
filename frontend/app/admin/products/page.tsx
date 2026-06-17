@@ -295,7 +295,7 @@ type Stored1688LinkJob = {
   source: '1688' | 'hibox' | 'vipomall' | 'pandamall';
 };
 
-type ImportExcelFetchTarget = 'auto' | 'hibox' | 'vipomall';
+type ImportExcelFetchTarget = 'auto' | 'hibox' | 'vipomall' | 'pandamall';
 
 /** Nội dung panel + toast sau khi poll job import xong */
 function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
@@ -813,10 +813,13 @@ export default function AdminProductsPage() {
   const [excelBatchBusy, setExcelBatchBusy] = useState(false);
   /** File đã chọn; upload chỉ khi bấm «Chạy lấy dữ liệu». */
   const [excelBatchFile, setExcelBatchFile] = useState<File | null>(null);
-  /** Batch Excel: `fetch_target` gửi backend — auto | hibox | vipomall (không còn 1688 trực tiếp). */
+  /** Batch Excel: `fetch_target` gửi backend — auto | hibox | vipomall | pandamall (không còn 1688 trực tiếp). */
   const [excelBatchFetchTarget, setExcelBatchFetchTarget] = useState<ImportExcelFetchTarget>('auto');
   const [excelBatchTrackToken, setExcelBatchTrackToken] = useState<string | null>(null);
   const [excelBatchHint, setExcelBatchHint] = useState<string | null>(null);
+  const [excelBatchChoiceOpen, setExcelBatchChoiceOpen] = useState(false);
+  /** Đợt đích khi modal mở — cố định, tránh đổi token giữa lúc chọn và submit. */
+  const [excelBatchAppendTarget, setExcelBatchAppendTarget] = useState<string | null>(null);
   const [bulkExport1688Busy, setBulkExport1688Busy] = useState(false);
   const [resumeBatchBusy, setResumeBatchBusy] = useState(false);
   /** Tab trong khối Import Hibox — tách luồng để giao diện không chồng chéo. */
@@ -2172,47 +2175,134 @@ export default function AdminProductsPage() {
     if (!file) return;
     setExcelBatchFile(file);
     setExcelBatchHint(
-      `Đã chọn «${file.name}». Chế độ «Tự động» sẽ đổi link Taobao/1688 sang Hibox khi có thể; hoặc chọn «Ép về Hibox». Bấm «Chạy lấy dữ liệu».`,
+      `Đã chọn «${file.name}». «Tự động» đổi link Taobao/1688 sang Hibox khi có thể; hoặc chọn Ép về Hibox / Vipomall / PandaMall. Bấm «Chạy lấy dữ liệu».`,
     );
   };
 
-  const handleExcelBatchRun = async () => {
+  const runningExcelBatches = useMemo(
+    () => importExcelBatches.filter((b) => b.pending > 0),
+    [importExcelBatches],
+  );
+
+  const excelBatchAppendTargetSummary = useMemo(() => {
+    if (!excelBatchAppendTarget) return null;
+    return importExcelBatches.find((b) => b.batch_token === excelBatchAppendTarget) ?? null;
+  }, [excelBatchAppendTarget, importExcelBatches]);
+
+  const submitExcelBatchRun = useCallback(
+    async (mode: 'append' | 'new') => {
+      if (!excelBatchFile) {
+        showToast('err', 'Chưa chọn file Excel (.xlsx).', 6000);
+        return;
+      }
+      const appendTarget =
+        mode === 'append' ? (excelBatchAppendTarget || '').trim() || null : null;
+      if (mode === 'append' && !appendTarget) {
+        showToast('err', 'Chưa chọn đợt đích để thêm link.', 6000);
+        return;
+      }
+      setExcelBatchBusy(true);
+      setExcelBatchHint('Đang tải file và tạo draft cho từng dòng…');
+      try {
+        const res = await adminProductAPI.uploadImport1688ExcelBatch(
+          excelBatchFile,
+          excelBatchFetchTarget,
+          appendTarget,
+        );
+        if (
+          mode === 'append' &&
+          appendTarget &&
+          res.batch_token &&
+          res.batch_token !== appendTarget
+        ) {
+          throw new Error(
+            `Server trả batch_token khác đợt đích (${res.batch_token.slice(0, 12)}… ≠ ${appendTarget.slice(0, 12)}…) — có thể backend chưa restart sau cập nhật.`,
+          );
+        }
+        if (res.skipped?.length) {
+          const head = res.skipped.slice(0, 4).join(' — ');
+          showToast(
+            'err',
+            `${head}${res.skipped.length > 4 ? '…' : ''} (${res.skipped.length} dòng bỏ qua)`,
+            14000,
+          );
+        }
+        setExcelBatchFile(null);
+        setExcelBatchChoiceOpen(false);
+        setExcelBatchAppendTarget(null);
+        const trackTok = appendTarget || res.batch_token;
+        setExcelBatchTrackToken(trackTok);
+        try {
+          localStorage.setItem(
+            ADMIN_1688_EXCEL_BATCH_TOKEN_KEY,
+            JSON.stringify({ batch_token: trackTok, started_at: Date.now() }),
+          );
+        } catch {
+          /* noop */
+        }
+        const targetShort = appendTarget ? appendTarget.slice(0, 12) : '';
+        showToast(
+          'ok',
+          appendTarget
+            ? `Đã thêm ${res.total} link vào đợt ${targetShort}… (tổng đợt tăng thêm, không tạo đợt mới).`
+            : `Đã nhận ${res.total} link — đợt mới ${res.batch_token.slice(0, 12)}…`,
+          8000,
+        );
+        setImport1688SectionTab('history');
+      } catch (err) {
+        setExcelBatchHint(null);
+        showToast('err', err instanceof Error ? err.message : 'Upload batch thất bại', 10000);
+      } finally {
+        setExcelBatchBusy(false);
+      }
+      void loadImportExcelBatchesList();
+    },
+    [
+      excelBatchFile,
+      excelBatchFetchTarget,
+      excelBatchAppendTarget,
+      showToast,
+      loadImportExcelBatchesList,
+    ],
+  );
+
+  const openExcelBatchChoice = useCallback(() => {
+    const running = importExcelBatches.filter((b) => b.pending > 0);
+    const tracked = excelBatchTrackToken?.trim();
+    const defaultTarget =
+      (tracked && running.some((b) => b.batch_token === tracked) ? tracked : null) ||
+      running[0]?.batch_token?.trim() ||
+      null;
+    setExcelBatchAppendTarget(defaultTarget);
+    setExcelBatchChoiceOpen(true);
+  }, [importExcelBatches, excelBatchTrackToken]);
+
+  const handleExcelBatchRun = () => {
     if (!excelBatchFile) {
       showToast('err', 'Chưa chọn file Excel (.xlsx).', 6000);
       return;
     }
-    setExcelBatchBusy(true);
-    setExcelBatchHint('Đang tải file và tạo draft cho từng dòng…');
-    try {
-      const res = await adminProductAPI.uploadImport1688ExcelBatch(excelBatchFile, excelBatchFetchTarget);
-      if (res.skipped?.length) {
-        const head = res.skipped.slice(0, 4).join(' — ');
-        showToast(
-          'err',
-          `${head}${res.skipped.length > 4 ? '…' : ''} (${res.skipped.length} dòng bỏ qua)`,
-          14000,
-        );
-      }
-      setExcelBatchFile(null);
-      setExcelBatchTrackToken(res.batch_token);
-      try {
-        localStorage.setItem(
-          ADMIN_1688_EXCEL_BATCH_TOKEN_KEY,
-          JSON.stringify({ batch_token: res.batch_token, started_at: Date.now() }),
-        );
-      } catch {
-        /* noop */
-      }
-      showToast('ok', `Đã nhận ${res.total} link. Server xử lý tuần tự (có thể vài phút).`, 6000);
-      setImport1688SectionTab('history');
-    } catch (err) {
-      setExcelBatchHint(null);
-      showToast('err', err instanceof Error ? err.message : 'Upload batch thất bại', 10000);
-    } finally {
-      setExcelBatchBusy(false);
+    if (runningExcelBatches.length > 0) {
+      openExcelBatchChoice();
+      return;
     }
-    void loadImportExcelBatchesList();
+    void submitExcelBatchRun('new');
   };
+
+  const cancelExcelBatchChoice = useCallback(() => {
+    if (excelBatchBusy) return;
+    setExcelBatchChoiceOpen(false);
+    setExcelBatchAppendTarget(null);
+  }, [excelBatchBusy]);
+
+  useEffect(() => {
+    if (!excelBatchChoiceOpen) return;
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape' && !excelBatchBusy) cancelExcelBatchChoice();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [excelBatchChoiceOpen, excelBatchBusy, cancelExcelBatchChoice]);
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -3144,7 +3234,8 @@ export default function AdminProductsPage() {
                 >
                 <h3 className="text-sm font-semibold text-slate-900">Import một link</h3>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Dán link Hibox, <span className="whitespace-nowrap">taobao1688.kz</span>, Taobao/Tmall,{' '}
+                  Dán link Hibox, <span className="whitespace-nowrap">taobao1688.kz</span>, PandaMall{' '}
+                  <span className="whitespace-nowrap">(pandamall.vn/1688|taobao/detail/{'{id}'})</span>, Taobao/Tmall,{' '}
                   <span className="whitespace-nowrap">T{'{id}'}</span> hoặc Vipomall{' '}
                   <span className="whitespace-nowrap">(vipomall.vn/san-pham/…?platform_type=10|21)</span>.
                 </p>
@@ -3158,7 +3249,7 @@ export default function AdminProductsPage() {
                       type="url"
                       value={import1688Url}
                       onChange={(e) => setImport1688Url(e.target.value)}
-                      placeholder="https://hibox.mn/v/… · taobao/Tmall · T801… · vipomall.vn/san-pham/…"
+                      placeholder="https://hibox.mn/v/… · pandamall.vn/1688/detail/… · taobao/Tmall · T801… · vipomall.vn/san-pham/…"
                       className="w-full rounded-lg border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-orange-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-orange-300/80"
                       autoComplete="off"
                       spellCheck={false}
@@ -3212,7 +3303,9 @@ export default function AdminProductsPage() {
                   <strong>Tự động / Hibox:</strong> offer 1688 → <span className="whitespace-nowrap">hibox.mn/v/abb-…</span>; Taobao/Tmall →{' '}
                   <span className="whitespace-nowrap">hibox.mn/v/{'{id}'}</span>.{' '}
                   <strong>Vipomall:</strong> 1688 → <span className="whitespace-nowrap">…?platform_type=10</span>; Taobao/Tmall / T{'{id}'} →{' '}
-                  <span className="whitespace-nowrap">…?platform_type=21</span> (cần SP đã có trên Vipomall).
+                  <span className="whitespace-nowrap">…?platform_type=21</span> (cần SP đã có trên Vipomall).{' '}
+                  <strong>PandaMall:</strong> 1688 → <span className="whitespace-nowrap">pandamall.vn/1688/detail/{'{id}'}</span>; Taobao/Tmall / T{'{id}'} →{' '}
+                  <span className="whitespace-nowrap">pandamall.vn/taobao/detail/{'{id}'}</span> (cần tài khoản PandaMall ở trên).
                   Dòng không quy đổi được sẽ bị bỏ qua kèm lý do.
                 </p>
                 <div className="mt-3 flex flex-col gap-3">
@@ -3241,6 +3334,7 @@ export default function AdminProductsPage() {
                         <option value="auto">Tự động — Taobao / 1688 → Hibox khi đổi được</option>
                         <option value="hibox">Ép về Hibox (hibox.mn)</option>
                         <option value="vipomall">Ép về Vipomall (vipomall.vn) — 1688 + Taobao/Tmall</option>
+                        <option value="pandamall">Ép về PandaMall (pandamall.vn) — 1688 + Taobao/Tmall</option>
                       </select>
                     </div>
                     <button
@@ -5560,6 +5654,122 @@ export default function AdminProductsPage() {
             </div>
           </div>
         )}
+
+        {excelBatchChoiceOpen && excelBatchFile ? (
+          <div
+            className="fixed inset-0 z-[101] flex items-center justify-center bg-black/45 p-3 sm:p-6"
+            role="presentation"
+            onClick={() => {
+              if (!excelBatchBusy) cancelExcelBatchChoice();
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="excel-batch-choice-title"
+              className="bg-white rounded-xl shadow-xl max-w-md w-full border border-slate-200 p-4 space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div>
+                <h2 id="excel-batch-choice-title" className="text-lg font-semibold text-slate-900">
+                  Chạy file Excel lấy dữ liệu
+                </h2>
+                <p className="text-sm text-slate-600 mt-1">
+                  File: <strong className="font-medium">{excelBatchFile.name}</strong>
+                </p>
+                <p className="text-sm text-slate-600 mt-1">
+                  Đang có {runningExcelBatches.length} đợt xử lý link trên server. Chọn cách thêm file này:
+                </p>
+                {runningExcelBatches.length > 1 ? (
+                  <fieldset className="mt-3 space-y-2">
+                    <legend className="text-xs font-medium text-slate-700">
+                      Thêm vào đợt nào?
+                    </legend>
+                    {runningExcelBatches.map((batch) => {
+                      const checked = excelBatchAppendTarget === batch.batch_token;
+                      return (
+                        <label
+                          key={batch.batch_token}
+                          className={`flex cursor-pointer gap-2 rounded-lg border px-3 py-2 text-sm ${
+                            checked
+                              ? 'border-indigo-400 bg-indigo-50/80'
+                              : 'border-slate-200 bg-white hover:bg-slate-50'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="excel-batch-append-target"
+                            className="mt-0.5"
+                            checked={checked}
+                            onChange={() => setExcelBatchAppendTarget(batch.batch_token)}
+                          />
+                          <span className="min-w-0">
+                            <span className="font-mono text-xs text-slate-800">
+                              {batch.batch_token.slice(0, 12)}…
+                            </span>
+                            <span className="block text-xs text-slate-500 mt-0.5">
+                              {batch.completed}/{batch.total_links} xong
+                              {batch.failed ? ` · ${batch.failed} lỗi` : ''} · {batch.pending} chờ
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </fieldset>
+                ) : excelBatchAppendTarget ? (
+                  <p className="text-xs text-slate-600 mt-2 font-mono">
+                    Đợt đích: {excelBatchAppendTarget.slice(0, 12)}…
+                    {excelBatchAppendTargetSummary ? (
+                      <span className="block font-sans text-slate-500 mt-1 normal-case">
+                        Tiến độ: {excelBatchAppendTargetSummary.completed}/
+                        {excelBatchAppendTargetSummary.total_links} xong
+                        {excelBatchAppendTargetSummary.failed
+                          ? ` · ${excelBatchAppendTargetSummary.failed} lỗi`
+                          : ''}{' '}
+                        · {excelBatchAppendTargetSummary.pending} chờ
+                      </span>
+                    ) : null}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  disabled={excelBatchBusy || !excelBatchAppendTarget}
+                  onClick={() => void submitExcelBatchRun('append')}
+                  className="w-full px-4 py-2.5 rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-950 text-sm font-medium text-left hover:bg-indigo-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <span className="block font-semibold">Thêm vào đợt đang xử lý</span>
+                  <span className="block text-xs font-normal text-indigo-900/90 mt-0.5">
+                    Gộp link file mới vào hàng đợi đã chọn — không tạo đợt mới.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  disabled={excelBatchBusy}
+                  onClick={() => void submitExcelBatchRun('new')}
+                  className="w-full px-4 py-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 text-sm font-medium text-left hover:bg-slate-50 disabled:opacity-40"
+                >
+                  <span className="block font-semibold">Tạo đợt xử lý mới</span>
+                  <span className="block text-xs font-normal text-slate-600 mt-0.5">
+                    Batch token riêng — chạy song song với đợt khác trên server.
+                  </span>
+                </button>
+              </div>
+              <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={excelBatchBusy}
+                  onClick={cancelExcelBatchChoice}
+                  className="px-3 py-1.5 rounded-md border border-slate-300 text-sm text-slate-700 disabled:opacity-40"
+                >
+                  Huỷ
+                </button>
+                {excelBatchBusy ? <span className="text-xs text-slate-600">Đang tải file…</span> : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {toast && (
           <div

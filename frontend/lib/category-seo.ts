@@ -13,6 +13,15 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_DOM
 /** Tránh treo SSR khi backend tắt / mạng chặn (Windows hay gặp). */
 const LAYOUT_FETCH_TIMEOUT_MS = 8000;
 
+/** Listing danh mục L1 lớn (vd. Thời trang Nữ ~9k SP) có thể >8s — timeout riêng. */
+const CATEGORY_PRODUCTS_FETCH_TIMEOUT_MS = Math.min(
+  110_000,
+  Math.max(
+    LAYOUT_FETCH_TIMEOUT_MS,
+    parseInt(process.env.CATEGORY_PRODUCTS_FETCH_TIMEOUT_MS || "15000", 10) || 15000,
+  ),
+);
+
 /**
  * GET /categories/from-products có thể lâu lúc cache lạnh (prune + đếm SP trên PostgreSQL lớn).
  * 8s thường làm AbortSignal cắt kết nối → ECONNRESET phía server, initialCategoryTree rỗng,
@@ -334,6 +343,8 @@ export async function getProductsByCategory(
     Boolean(f.styleTag?.trim());
   const sortTrim = f.sort?.trim();
   const useDeterministicOrder = hasAttrFilters || Boolean(sortTrim);
+  /** Trang danh mục mặc định: bỏ COUNT + ORDER BY random() (chậm, dễ vượt timeout SSR 8s). ProductGrid vẫn trộn client-side. */
+  const useFastCategoryListing = !useDeterministicOrder;
 
   try {
     const params = new URLSearchParams({
@@ -345,11 +356,10 @@ export async function getProductsByCategory(
     if (subcategory) params.set("subcategory", subcategory);
     if (sub_subcategory) params.set("sub_subcategory", sub_subcategory);
 
-    if (useDeterministicOrder) {
-      params.set("order_random", "false");
-      params.set("sort", sortTrim || "newest");
-    } else {
-      params.set("order_random", "true");
+    params.set("order_random", "false");
+    params.set("sort", sortTrim || "newest");
+    if (useFastCategoryListing) {
+      params.set("skip_total", "true");
     }
 
     if (f.minPrice != null && !Number.isNaN(f.minPrice) && f.minPrice >= 0) {
@@ -367,7 +377,7 @@ export async function getProductsByCategory(
     const res = await fetch(url, {
       next: { revalidate: REVALIDATE_CATEGORY_PRODUCTS, tags: [CACHE_TAG_CATEGORY_SEO] },
       headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(LAYOUT_FETCH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(CATEGORY_PRODUCTS_FETCH_TIMEOUT_MS),
     });
     if (!res.ok) {
       return { products: [], total: 0, total_pages: 0, page: 1, category, subcategory, sub_subcategory };
@@ -377,11 +387,22 @@ export async function getProductsByCategory(
       total?: number;
       total_pages?: number;
     };
-    const total = typeof data.total === "number" ? data.total : (Array.isArray(data.products) ? data.products.length : 0);
-    const totalPages = typeof data.total_pages === "number" ? data.total_pages : (limit > 0 ? Math.ceil(total / limit) : 1);
+    const products = Array.isArray(data.products) ? data.products : [];
+    let total =
+      typeof data.total === "number" && data.total >= 0
+        ? data.total
+        : typeof info.product_count === "number" && info.product_count > 0
+          ? info.product_count
+          : products.length;
+    const totalPages =
+      typeof data.total_pages === "number" && data.total_pages > 0 && (data.total ?? 0) >= 0
+        ? data.total_pages
+        : limit > 0
+          ? Math.max(1, Math.ceil(total / limit))
+          : 1;
     const page = limit > 0 ? Math.floor(skip / limit) + 1 : 1;
     return {
-      products: Array.isArray(data.products) ? data.products : [],
+      products,
       total,
       total_pages: totalPages,
       page,

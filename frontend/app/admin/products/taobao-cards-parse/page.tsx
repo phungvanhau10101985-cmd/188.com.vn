@@ -11,7 +11,6 @@ import {
   extractOfferId1688FromHref,
   parseTaobaoListingHtml,
   parsedListingRowsToLinkExportPayload,
-  rowsToCsv,
   type ParsedTaobaoCardRow,
 } from '@/lib/taobao-cards-html-parse';
 import Link from 'next/link';
@@ -594,7 +593,6 @@ export default function TaobaoCardsParsePage() {
   const [dbLookupPending, setDbLookupPending] = useState(false);
   const [dbLookupError, setDbLookupError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const headerSelectAllRef = useRef<HTMLInputElement>(null);
   const listingDraftPublishInFlightRef = useRef(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
@@ -769,7 +767,6 @@ export default function TaobaoCardsParsePage() {
 
   const parse = useCallback(() => {
     setError(null);
-    setCopied(false);
     setSelectedRowKeys(new Set());
     setFallbackShopInput('');
     try {
@@ -1694,46 +1691,6 @@ export default function TaobaoCardsParsePage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [doneDraftsModalToken, doneDraftsPublishing, doneDraftsModalLoading, closeDoneDraftsModal]);
 
-  const csv = useMemo(
-    () => (displayRows.length ? rowsToCsv(displayRows, effectiveRate) : ''),
-    [displayRows, effectiveRate],
-  );
-
-  const downloadCsv = useCallback(() => {
-    if (!csv) return;
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `taobao_listing_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [csv]);
-
-  const copyCsv = useCallback(async () => {
-    if (!csv) return;
-    try {
-      await navigator.clipboard.writeText(csv);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
-    } catch {
-      setError('Không copy được vào clipboard (trình duyệt chặn). Dùng «Tải CSV».');
-    }
-  }, [csv]);
-
-  const downloadSelectedCsv = useCallback(() => {
-    if (!selectedOnPage.length) return;
-    const text = rowsToCsv(selectedOnPage, effectiveRate);
-    const blob = new Blob([`\uFEFF${text}`], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `taobao_listing_selected_${selectedOnPage.length}_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast('ok', `Đã tải CSV ${selectedOnPage.length} dòng đã chọn.`);
-  }, [selectedOnPage, effectiveRate, showToast]);
-
   const downloadSelectedListingLinkExcel = useCallback(async () => {
     if (!selectedOnPage.length || listingLinkExporting) return;
     setListingLinkExporting(true);
@@ -2583,7 +2540,7 @@ export default function TaobaoCardsParsePage() {
             <code className="text-xs bg-slate-100 px-1 rounded">?platform_type=10</code>; Taobao/Tmall / ID T+số →{' '}
             <code className="text-xs bg-slate-100 px-1 rounded">?platform_type=21</code>. Server xử lý link{' '}
             <strong>lần lượt</strong> (Playwright). Có tạm dừng / tiếp tục / dừng hẳn, tải CSV tiến trình và thanh % bên dưới.
-            Hoặc «Export đã chọn» để tải CSV bảng parse, hoặc «Excel listing (đã chọn)» theo mẫu tái nhập (Link SP, Giá Tệ, Sku trống).
+            Hoặc «Excel listing (đã chọn)» theo mẫu tái nhập (Link SP, Giá Tệ, Sku trống).
           </span>
         </p>
       </div>
@@ -2603,32 +2560,6 @@ export default function TaobaoCardsParsePage() {
           className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-900"
         >
           Parse → bảng
-        </button>
-        <button
-          type="button"
-          disabled={!displayRows.length}
-          onClick={downloadCsv}
-          className="px-4 py-2 rounded-lg border border-slate-300 text-sm font-medium disabled:opacity-50"
-        >
-          Tải CSV (UTF‑8 BOM)
-        </button>
-        <button
-          type="button"
-          disabled={!displayRows.length}
-          onClick={() => void copyCsv()}
-          className="px-4 py-2 rounded-lg border border-slate-300 text-sm font-medium disabled:opacity-50"
-        >
-          {copied ? 'Đã copy' : 'Copy CSV'}
-        </button>
-        <button
-          type="button"
-          disabled={selectedOnPage.length === 0}
-          onClick={downloadSelectedCsv}
-          title="Chỉ xuất các dòng đang tick trong bảng (cùng cột và tỷ giá như «Tải CSV»)."
-          className="px-4 py-2 rounded-lg border border-slate-300 text-sm font-medium disabled:opacity-50"
-        >
-          Export đã chọn
-          {selectedOnPage.length > 0 ? ` (${selectedOnPage.length})` : ''}
         </button>
         <button
           type="button"

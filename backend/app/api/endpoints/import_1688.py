@@ -394,32 +394,45 @@ def _run_import_1688_chain_from_meta(meta_path_str: str) -> None:
             return
         _batch_tokens_running.add(token)
     try:
-        try:
-            meta = json.loads(p.read_text(encoding="utf-8"))
-        except Exception as exc:
-            logger.warning("import batch meta lỗi đọc: %s — %s", meta_path_str, exc)
-            return
-        job_ids = meta.get("job_ids") or []
-        for jid in job_ids:
-            if not (isinstance(jid, str) and jid.strip()):
-                continue
-            jid = jid.strip()
+        while True:
+            try:
+                meta = json.loads(p.read_text(encoding="utf-8"))
+            except Exception as exc:
+                logger.warning("import batch meta lỗi đọc: %s — %s", meta_path_str, exc)
+                return
+            job_ids = meta.get("job_ids") or []
+            draft_ids = [int(x) for x in (meta.get("draft_ids") or []) if x is not None]
+            ran_in_pass = False
+            for jid in job_ids:
+                if not (isinstance(jid, str) and jid.strip()):
+                    continue
+                jid = jid.strip()
+                db = SessionLocal()
+                try:
+                    draft = draft_crud.get_by_job_id(db, jid)
+                    if draft is not None and _draft_import_status_terminal(draft.status):
+                        continue
+                finally:
+                    db.close()
+                ran_in_pass = True
+                try:
+                    _run_import_1688_job(jid, False)
+                except Exception:
+                    logger.exception(
+                        "import batch chain: job lỗi không mong đợi (tiếp tục các job sau): job_id=%s…",
+                        (jid[:16] if jid else ""),
+                    )
+                if inter_job_delay_s > 0:
+                    time.sleep(inter_job_delay_s)
             db = SessionLocal()
             try:
-                draft = draft_crud.get_by_job_id(db, jid)
-                if draft is not None and _draft_import_status_terminal(draft.status):
-                    continue
+                st = _batch_status_out_for_draft_ids(db, token, draft_ids)
             finally:
                 db.close()
-            try:
-                _run_import_1688_job(jid, False)
-            except Exception:
-                logger.exception(
-                    "import batch chain: job lỗi không mong đợi (tiếp tục các job sau): job_id=%s…",
-                    (jid[:16] if jid else ""),
-                )
-            if inter_job_delay_s > 0:
-                time.sleep(inter_job_delay_s)
+            if st.pending <= 0:
+                break
+            if not ran_in_pass:
+                break
     finally:
         with _batch_chain_lock:
             _batch_tokens_running.discard(token)
@@ -1049,11 +1062,180 @@ def create_import_1688_job(
     )
 
 
+def _create_import_drafts_from_parsed_excel(
+    parsed: List[Dict[str, Any]],
+    *,
+    fetch_target: str,
+    batch_token: str,
+    db: Session,
+    admin: AdminUser,
+    skips: List[str],
+) -> Tuple[List[int], List[str]]:
+    """Tạo draft/job cho từng dòng Excel đã parse; trả (draft_ids, job_ids) mới."""
+    ft = normalize_fetch_target_param(fetch_target)
+    if ft == FETCH_TARGET_1688:
+        raise HTTPException(
+            status_code=400,
+            detail="fetch_target=1688 không còn hỗ trợ. Chọn auto hoặc hibox.",
+        )
+    draft_ids: List[int] = []
+    job_ids: List[str] = []
+    for it in parsed:
+        url_norm = normalize_product_import_url(it["url"])
+        if len(url_norm) < 10:
+            skips.append(f"Dòng {it.get('excel_row')}: URL quá ngắn.")
+            continue
+        coerced, skip_reason = coerce_url_for_excel_batch_import(url_norm, ft)
+        if skip_reason:
+            skips.append(f"Dòng {it.get('excel_row')}: {skip_reason}")
+            continue
+        url_norm = normalize_product_import_url(coerced)
+        if len(url_norm) < 10:
+            skips.append(f"Dòng {it.get('excel_row')}: URL sau chuẩn hoá quá ngắn.")
+            continue
+        try:
+            ext_id, src = _infer_import_source_for_url(url_norm, None)
+        except ValueError:
+            skips.append(f"Dòng {it.get('excel_row')}: link không nhận dạng Hibox/taobao1688.kz/Vipomall/PandaMall.")
+            continue
+        if src == "1688":
+            skips.append(
+                f"Dòng {it.get('excel_row')}: import trực tiếp 1688 đã tắt — chỉ hỗ trợ Hibox/taobao1688.kz/Vipomall/PandaMall."
+            )
+            continue
+        overlays = dict(it.get("overlays") or {})
+        overlays["_excel_row"] = int(it["excel_row"])
+        overlays["_batch_token"] = batch_token
+        jid = str(uuid.uuid4())
+        draft = draft_crud.create_draft(
+            db,
+            job_id=jid,
+            source_url=url_norm,
+            source_offer_id=ext_id,
+            created_by=getattr(admin, "id", None),
+            source=src,
+            excel_overlays=overlays,
+        )
+        draft_ids.append(draft.id)
+        job_ids.append(jid)
+    return draft_ids, job_ids
+
+
+def _merge_parsed_excel_into_batch(
+    parsed: List[Dict[str, Any]],
+    *,
+    batch_token: str,
+    fetch_target: str,
+    db: Session,
+    admin: AdminUser,
+    skips: List[str],
+) -> Import1688ExcelBatchOut:
+    """Gộp các dòng Excel đã parse vào meta đợt hiện có."""
+    tid = _safe_batch_token_param(batch_token)
+    meta_path = _batch_meta_json_path(tid)
+    if not meta_path.is_file():
+        raise HTTPException(status_code=404, detail="Không tìm thấy đợt import để thêm link.")
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Meta batch hỏng: {exc}") from exc
+    if meta.get("_deleted"):
+        raise HTTPException(status_code=400, detail="Đợt đã bị xóa — hãy tạo đợt mới.")
+    new_draft_ids, new_job_ids = _create_import_drafts_from_parsed_excel(
+        parsed,
+        fetch_target=fetch_target,
+        batch_token=tid,
+        db=db,
+        admin=admin,
+        skips=skips,
+    )
+    all_draft_ids = [int(x) for x in (meta.get("draft_ids") or []) if x is not None]
+    all_job_ids = [str(x).strip() for x in (meta.get("job_ids") or []) if str(x).strip()]
+    all_draft_ids.extend(new_draft_ids)
+    all_job_ids.extend(new_job_ids)
+    prev_skipped = meta.get("skipped")
+    if isinstance(prev_skipped, list):
+        skips = list(prev_skipped) + skips
+    meta["draft_ids"] = all_draft_ids
+    meta["job_ids"] = all_job_ids
+    meta["skipped"] = skips[-120:]
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    if new_job_ids:
+        _enqueue_import_1688_batch_chain(str(meta_path.absolute()))
+    return Import1688ExcelBatchOut(
+        batch_token=tid,
+        total=len(new_job_ids),
+        draft_ids=new_draft_ids,
+        job_ids=new_job_ids,
+        skipped=skips[:120],
+    )
+
+
+def _create_new_excel_batch_from_parsed(
+    parsed: List[Dict[str, Any]],
+    *,
+    fetch_target: str,
+    db: Session,
+    admin: AdminUser,
+    skips: List[str],
+) -> Import1688ExcelBatchOut:
+    batch_token = uuid.uuid4().hex
+    draft_ids, job_ids = _create_import_drafts_from_parsed_excel(
+        parsed,
+        fetch_target=fetch_target,
+        batch_token=batch_token,
+        db=db,
+        admin=admin,
+        skips=skips,
+    )
+    meta_path = _batch_meta_json_path(batch_token)
+    meta_path.write_text(
+        json.dumps(
+            {
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "job_ids": job_ids,
+                "draft_ids": draft_ids,
+                "skipped": skips[-80:],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    if job_ids:
+        _enqueue_import_1688_batch_chain(str(meta_path.absolute()))
+    return Import1688ExcelBatchOut(
+        batch_token=batch_token,
+        total=len(job_ids),
+        draft_ids=draft_ids,
+        job_ids=job_ids,
+        skipped=skips[:120],
+    )
+
+
+async def _read_excel_upload_to_temp(file: UploadFile) -> Path:
+    name = (file.filename or "").lower()
+    if not name.endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file .xlsx / .xlsm")
+    uploads = _import_static_uploads()
+    uploads.mkdir(parents=True, exist_ok=True)
+    tmp_name = f"excel_batch_upload_{uuid.uuid4().hex}.xlsx"
+    tmp_path = uploads / tmp_name
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="File rỗng")
+    tmp_path.write_bytes(raw)
+    return tmp_path
+
+
 @router.post("/jobs/batch-from-excel", response_model=Import1688ExcelBatchOut)
 async def create_import_jobs_batch_from_excel(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     fetch_target: str = Form("auto"),
+    append_batch_token: Optional[str] = Form(
+        None,
+        description="Nếu có — thêm link từ file vào đợt Excel đang chạy (meta hiện có).",
+    ),
     db: Session = Depends(get_db),
     admin: AdminUser = Depends(require_module_permission("products")),
 ):
@@ -1065,99 +1247,66 @@ async def create_import_jobs_batch_from_excel(
     rồi làm tròn lên bội 10.000 ₫.
     Cột **Mã sp / SKU** không còn đọc trong luồng lấy thông tin; SKU mặc định để trống.
 
-    Form **`fetch_target`**: `auto` (mặc định) | `hibox` | `cssbuy` | `vipomall` — chuẩn hoá URL từng dòng trước khi tạo job.
+    Form **`fetch_target`**: `auto` (mặc định) | `hibox` | `cssbuy` | `vipomall` | `pandamall` — chuẩn hoá URL từng dòng trước khi tạo job.
     **`auto`** quy Taobao/Tmall và offer 1688 sang URL Hibox (`hibox.mn/v/…`) khi quy đổi được.
-    **`vipomall`** quy offer 1688 / Hibox abb-* sang `vipomall.vn/san-pham/{offerId}?platform_type=10`.
+    **`vipomall`** / **`pandamall`**: quy offer 1688 / Taobao sang URL gương tương ứng.
+    Form **`append_batch_token`** (tuỳ chọn): gộp link mới vào meta đợt đang có thay vì tạo token mới.
     **`1688` không còn hỗ trợ.** Dòng không quy đổi được bị **bỏ qua** kèm lý do trong `skipped`.
     """
-    name = (file.filename or "").lower()
-    if not name.endswith((".xlsx", ".xlsm")):
-        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file .xlsx / .xlsm")
-
-    uploads = _import_static_uploads()
-    uploads.mkdir(parents=True, exist_ok=True)
-    tmp_name = f"excel_batch_upload_{uuid.uuid4().hex}.xlsx"
-    tmp_path = uploads / tmp_name
+    tmp_path = await _read_excel_upload_to_temp(file)
     try:
-        raw = await file.read()
-        if not raw:
-            raise HTTPException(status_code=400, detail="File rỗng")
-        tmp_path.write_bytes(raw)
         parsed, pskip = parse_link_import_excel(tmp_path)
         skips = list(pskip)
 
-        ft = normalize_fetch_target_param(fetch_target)
-        if ft == FETCH_TARGET_1688:
-            raise HTTPException(
-                status_code=400,
-                detail="fetch_target=1688 không còn hỗ trợ. Chọn auto hoặc hibox.",
+        append_raw = (append_batch_token or "").strip()
+        if append_raw:
+            return _merge_parsed_excel_into_batch(
+                parsed,
+                batch_token=append_raw,
+                fetch_target=fetch_target,
+                db=db,
+                admin=admin,
+                skips=skips,
             )
 
-        batch_token = uuid.uuid4().hex
-        draft_ids: List[int] = []
-        job_ids: List[str] = []
-
-        for it in parsed:
-            url_norm = normalize_product_import_url(it["url"])
-            if len(url_norm) < 10:
-                skips.append(f"Dòng {it.get('excel_row')}: URL quá ngắn.")
-                continue
-            coerced, skip_reason = coerce_url_for_excel_batch_import(url_norm, ft)
-            if skip_reason:
-                skips.append(f"Dòng {it.get('excel_row')}: {skip_reason}")
-                continue
-            url_norm = normalize_product_import_url(coerced)
-            if len(url_norm) < 10:
-                skips.append(f"Dòng {it.get('excel_row')}: URL sau chuẩn hoá quá ngắn.")
-                continue
-            try:
-                ext_id, src = _infer_import_source_for_url(url_norm, None)
-            except ValueError:
-                skips.append(f"Dòng {it.get('excel_row')}: link không nhận dạng Hibox/taobao1688.kz/Vipomall.")
-                continue
-            if src == "1688":
-                skips.append(
-                    f"Dòng {it.get('excel_row')}: import trực tiếp 1688 đã tắt — chỉ hỗ trợ Hibox/taobao1688.kz/Vipomall."
-                )
-                continue
-            overlays = dict(it.get("overlays") or {})
-            overlays["_excel_row"] = int(it["excel_row"])
-            overlays["_batch_token"] = batch_token
-            jid = str(uuid.uuid4())
-            draft = draft_crud.create_draft(
-                db,
-                job_id=jid,
-                source_url=url_norm,
-                source_offer_id=ext_id,
-                created_by=getattr(admin, "id", None),
-                source=src,
-                excel_overlays=overlays,
-            )
-            draft_ids.append(draft.id)
-            job_ids.append(jid)
-
-        meta_path = _batch_meta_json_path(batch_token)
-        meta_path.write_text(
-            json.dumps(
-                {
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "job_ids": job_ids,
-                    "draft_ids": draft_ids,
-                    "skipped": skips[-80:],
-                },
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
+        return _create_new_excel_batch_from_parsed(
+            parsed,
+            fetch_target=fetch_target,
+            db=db,
+            admin=admin,
+            skips=skips,
         )
-        if job_ids:
-            _enqueue_import_1688_batch_chain(str(meta_path.absolute()))
+    finally:
+        try:
+            if tmp_path.is_file():
+                tmp_path.unlink()
+        except Exception:
+            pass
 
-        return Import1688ExcelBatchOut(
+
+@router.post("/jobs/excel-batches/{batch_token}/append-from-excel", response_model=Import1688ExcelBatchOut)
+async def append_import_jobs_batch_from_excel(
+    batch_token: str,
+    file: UploadFile = File(...),
+    fetch_target: str = Form("auto"),
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(require_module_permission("products")),
+):
+    """
+    Thêm link từ file Excel vào **đợt import đang có** (cùng batch_token / meta JSON).
+    Dùng khi admin chọn «Thêm vào đợt đang xử lý» — tránh nhầm với tạo đợt mới.
+    """
+    tmp_path = await _read_excel_upload_to_temp(file)
+    try:
+        parsed, pskip = parse_link_import_excel(tmp_path)
+        skips = list(pskip)
+        return _merge_parsed_excel_into_batch(
+            parsed,
             batch_token=batch_token,
-            total=len(job_ids),
-            draft_ids=draft_ids,
-            job_ids=job_ids,
-            skipped=skips[:120],
+            fetch_target=fetch_target,
+            db=db,
+            admin=admin,
+            skips=skips,
         )
     finally:
         try:
