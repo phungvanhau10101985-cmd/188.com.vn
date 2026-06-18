@@ -81,7 +81,7 @@ def main() -> int:
         print(f"    {k}: {v}")
     creds = _credentials_path()
     print(f"    credentials_path: {creds or '(trống)'}")
-    print(f"    credentials_exists: {bool(creds and os.path.isfile(creds))}")
+    print(f"    drive_service_account_email: {payload.get('drive_service_account_email') or '(không đọc được)'}")
 
     if folder_id and wrong_id and folder_id != wrong_id:
         print("\n==> So sánh ID folder")

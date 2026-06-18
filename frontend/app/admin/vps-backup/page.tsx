@@ -313,7 +313,18 @@ export default function AdminVpsBackupPage() {
                   >
                     mở trên Drive
                   </a>
-                  . Nếu upload báo 404: Share folder Editor cho service account trong file JSON.
+                  .{' '}
+                  {settings.drive_service_account_email ? (
+                    <>
+                      Share folder quyền <strong>Editor</strong> cho:{' '}
+                      <code className="text-xs bg-green-100 px-1 rounded break-all">
+                        {settings.drive_service_account_email}
+                      </code>{' '}
+                      (nút <strong>Chia sẻ</strong> trên Drive — không cần là Chủ sở hữu).
+                    </>
+                  ) : (
+                    <>Nếu upload báo 404: Share folder Editor cho service account trong file JSON.</>
+                  )}
                 </>
               ) : null}
             </p>

@@ -12,7 +12,8 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-DRIVE_SCOPES = ("https://www.googleapis.com/auth/drive.file",)
+# Folder do user tạo rồi share — drive.file thường không đủ; dùng drive cho upload backup server-side.
+DRIVE_SCOPES = ("https://www.googleapis.com/auth/drive",)
 ARCHIVE_NAME_RE = re.compile(r"^backup-188-\d{8}-\d{6}\.tar\.gz$")
 
 
@@ -50,17 +51,34 @@ def is_drive_upload_configured() -> bool:
     return bool(path and os.path.isfile(path))
 
 
+def _service_account_email() -> Optional[str]:
+    path = _credentials_path()
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        import json
+
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        email = (data.get("client_email") or "").strip()
+        return email or None
+    except Exception:
+        return None
+
+
 def drive_settings_payload() -> dict:
     enabled = is_drive_upload_enabled()
     folder_id = (getattr(settings, "VPS_BACKUP_DRIVE_FOLDER_ID", None) or "").strip()
     keep = int(getattr(settings, "VPS_BACKUP_DRIVE_KEEP_COUNT", 5) or 5)
     creds_ok = bool(_credentials_path() and os.path.isfile(_credentials_path()))
+    sa_email = _service_account_email()
     return {
         "drive_upload_enabled": enabled,
         "drive_upload_configured": enabled and bool(folder_id) and creds_ok,
         "drive_folder_id": folder_id or None,
         "drive_keep_count": max(1, keep),
         "drive_credentials_configured": creds_ok,
+        "drive_service_account_email": sa_email,
     }
 
 
@@ -166,10 +184,9 @@ def _format_drive_upload_error(exc: Exception) -> str:
         folder_id = (fid_match.group(1) if fid_match else None) or configured or "?"
         return (
             f"Không truy cập được folder Drive (ID: {folder_id}). "
-            "Thường do: (1) VPS_BACKUP_DRIVE_FOLDER_ID sai — lấy ID từ URL "
-            "drive.google.com/drive/folders/ID; (2) chưa Share folder quyền Editor "
-            "cho email client_email trong file JSON service account; "
-            "(3) folder đã xóa. Sửa backend/.env rồi pm2 restart 188-api."
+            "Folder phải được Share (Chia sẻ) quyền Editor cho email service account "
+            "(client_email trong file JSON) — không cần là Chủ sở hữu. "
+            "Kiểm tra VPS_BACKUP_DRIVE_FOLDER_ID và pm2 restart 188-api sau khi share."
         )
     if "403" in raw and "insufficient" in raw.lower():
         return (

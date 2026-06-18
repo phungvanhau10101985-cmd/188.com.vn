@@ -22,6 +22,7 @@ class VpsBackupSettingsResponse(BaseModel):
     drive_folder_id: Optional[str] = None
     drive_keep_count: int = 5
     drive_credentials_configured: bool = False
+    drive_service_account_email: Optional[str] = None
 
 
 class VpsBackupSettingsUpdate(BaseModel):
