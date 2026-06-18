@@ -149,6 +149,30 @@ def _list_backup_files_in_folder(service, folder_id: str) -> List[Dict[str, Any]
     return files
 
 
+def _format_drive_upload_error(exc: Exception) -> str:
+    raw = str(exc)
+    if "accessNotConfigured" in raw or "has not been used in project" in raw:
+        m = re.search(r"project[= ](\d+)", raw)
+        pid = m.group(1) if m else "?"
+        return (
+            "Chưa bật Google Drive API trên Google Cloud (project "
+            f"{pid}). Vào console.cloud.google.com → APIs & Services → "
+            "Library → tìm “Google Drive API” → Enable, đợi 1–2 phút rồi backup lại. "
+            "Folder Drive phải share quyền Editor cho email service account trong file JSON."
+        )
+    if "404" in raw and ("not found" in raw.lower() or "Not Found" in raw):
+        return (
+            "Không tìm thấy folder Drive — kiểm tra VPS_BACKUP_DRIVE_FOLDER_ID "
+            "và share folder cho service account (Editor)."
+        )
+    if "403" in raw and "insufficient" in raw.lower():
+        return (
+            "Service account không có quyền ghi folder Drive — share folder Editor "
+            "cho email trong file JSON service account."
+        )
+    return raw[:2000]
+
+
 def _prune_old_drive_backups(service, folder_id: str, keep_count: int) -> int:
     keep = max(1, int(keep_count or 1))
     files = _list_backup_files_in_folder(service, folder_id)
@@ -209,4 +233,4 @@ def upload_backup_archive(archive_path: Path) -> Tuple[str, Optional[str], Optio
         return "success", str(web_link) if web_link else None, None
     except Exception as exc:
         logger.exception("VPS backup Drive upload failed for %s", path)
-        return "failed", None, str(exc)[:2000]
+        return "failed", None, _format_drive_upload_error(exc)
