@@ -48,6 +48,28 @@ def test_format_drive_error_folder_not_found():
     assert "Share folder" in msg or "share" in msg.lower()
 
 
+def test_format_drive_error_storage_quota_service_account():
+    exc = HttpErrorStub(
+        'Service Accounts do not have storage quota. Leverage shared drives. '
+        'reason: storageQuotaExceeded'
+    )
+    msg = drive_mod._format_drive_upload_error(exc)
+    assert "Shared drive" in msg or "Ổ dung chung" in msg
+    assert "Workspace" in msg or "VPS_BACKUP_DRIVE_ENABLED" in msg
+
+
+def test_validate_folder_rejects_my_drive():
+    service = SimpleNamespace()
+
+    def fake_get(**kwargs):
+        return SimpleNamespace(execute=lambda: {"id": "f1", "name": "MyFolder", "driveId": None, "capabilities": {"canAddChildren": True}})
+
+    service.files = lambda: SimpleNamespace(get=fake_get)
+    msg = drive_mod._validate_folder_for_service_account_upload(service, "f1")
+    assert msg is not None
+    assert "My Drive" in msg or "Drive cá nhân" in msg
+
+
 def test_notify_module_imports_and_builds_html_without_fstring_backslash_issue():
     """Regression: Python 3.11 rejects backslashes inside f-string {...} expressions."""
     importlib.reload(notify_mod)

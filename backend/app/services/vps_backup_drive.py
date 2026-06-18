@@ -79,6 +79,7 @@ def drive_settings_payload() -> dict:
         "drive_keep_count": max(1, keep),
         "drive_credentials_configured": creds_ok,
         "drive_service_account_email": sa_email,
+        "drive_requires_shared_drive": True,
     }
 
 
@@ -193,7 +194,49 @@ def _format_drive_upload_error(exc: Exception) -> str:
             "Service account không có quyền ghi folder Drive — share folder Editor "
             "cho email trong file JSON service account."
         )
+    if (
+        "storageQuotaExceeded" in raw
+        or "do not have storage quota" in raw.lower()
+        or "shared drives" in raw.lower() and "service accounts" in raw.lower()
+    ):
+        return (
+            "Service account không có dung lượng Drive cá nhân — không upload được vào "
+            "folder My Drive (kể cả đã Share). Cần Ổ dung chung (Shared drive): "
+            "tạo Shared drive → Thành viên → thêm email service account (Người quản lý nội dung) → "
+            "tạo folder bên trong → cập nhật VPS_BACKUP_DRIVE_FOLDER_ID. "
+            "Ổ dung chung thường cần Google Workspace; @gmail.com cá nhân có thể không có — "
+            "khi đó tắt VPS_BACKUP_DRIVE_ENABLED, backup vẫn lưu trên VPS."
+        )
     return raw[:2000]
+
+
+def _validate_folder_for_service_account_upload(service, folder_id: str) -> Optional[str]:
+    """Trả về thông báo lỗi nếu folder không phù hợp upload bằng service account."""
+    try:
+        meta = (
+            service.files()
+            .get(
+                fileId=folder_id,
+                fields="id,name,driveId,capabilities/canAddChildren",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+    except Exception as exc:
+        return _format_drive_upload_error(exc)
+    if not meta.get("driveId"):
+        return (
+            "Folder hiện nằm trong Drive cá nhân (My Drive), không phải Ổ dung chung. "
+            "Service account chỉ upload được vào folder bên trong Shared drive. "
+            "Tạo Ổ dung chung → thêm service account → folder con → đổi VPS_BACKUP_DRIVE_FOLDER_ID."
+        )
+    caps = meta.get("capabilities") or {}
+    if caps.get("canAddChildren") is False:
+        return (
+            "Service account không có quyền thêm file vào folder Shared drive này — "
+            "nâng quyền thành viên lên Người quản lý nội dung (Content manager)."
+        )
+    return None
 
 
 def _prune_old_drive_backups(service, folder_id: str, keep_count: int) -> int:
@@ -237,6 +280,9 @@ def upload_backup_archive(archive_path: Path) -> Tuple[str, Optional[str], Optio
         from googleapiclient.http import MediaFileUpload
 
         service = _get_drive_service()
+        preflight = _validate_folder_for_service_account_upload(service, folder_id)
+        if preflight:
+            return "failed", None, preflight
         file_metadata = {"name": path.name, "parents": [folder_id]}
         media = MediaFileUpload(str(path), mimetype="application/gzip", resumable=True)
         created = (

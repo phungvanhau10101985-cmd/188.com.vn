@@ -26,18 +26,22 @@ from app.services.vps_backup_drive import (  # noqa: E402
     _credentials_path,
     _format_drive_upload_error,
     _get_drive_service,
+    _validate_folder_for_service_account_upload,
     drive_settings_payload,
     is_drive_upload_configured,
 )
 
 
 def _check_folder(service, folder_id: str) -> tuple[bool, str]:
+    preflight = _validate_folder_for_service_account_upload(service, folder_id)
+    if preflight:
+        return False, preflight
     try:
         meta = (
             service.files()
             .get(
                 fileId=folder_id,
-                fields="id,name,mimeType,capabilities",
+                fields="id,name,mimeType,driveId,capabilities",
                 supportsAllDrives=True,
             )
             .execute()
@@ -47,16 +51,12 @@ def _check_folder(service, folder_id: str) -> tuple[bool, str]:
 
     mime = str(meta.get("mimeType") or "")
     name = str(meta.get("name") or "?")
-    caps = meta.get("capabilities") or {}
-    can_add = caps.get("canAddChildren")
+    drive_id = meta.get("driveId") or "?"
     if mime != "application/vnd.google-apps.folder":
         return False, f"ID trỏ tới '{name}' (mime={mime}) — cần folder, không phải file."
-    if can_add is False:
-        return False, (
-            f"Folder '{name}' tìm thấy nhưng service account không có quyền ghi. "
-            "Share folder quyền Editor cho client_email trong file JSON."
-        )
-    return True, f"OK — folder '{name}' ({folder_id}), service account có thể upload."
+    return True, (
+        f"OK — folder '{name}' trong Shared drive ({drive_id}), service account có thể upload."
+    )
 
 
 def main() -> int:

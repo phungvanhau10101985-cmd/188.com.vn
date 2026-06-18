@@ -23,6 +23,7 @@ class VpsBackupSettingsResponse(BaseModel):
     drive_keep_count: int = 5
     drive_credentials_configured: bool = False
     drive_service_account_email: Optional[str] = None
+    drive_requires_shared_drive: bool = True
 
 
 class VpsBackupSettingsUpdate(BaseModel):

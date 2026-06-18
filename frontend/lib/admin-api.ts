@@ -2265,6 +2265,7 @@ export interface VpsBackupSettings {
   drive_keep_count?: number;
   drive_credentials_configured?: boolean;
   drive_service_account_email?: string | null;
+  drive_requires_shared_drive?: boolean;
 }
 
 export interface VpsBackupRunItem {

@@ -316,7 +316,8 @@ export default function AdminVpsBackupPage() {
                   .{' '}
                   {settings.drive_service_account_email ? (
                     <>
-                      Share folder quyền <strong>Editor</strong> cho:{' '}
+                      Thêm vào <strong>Ổ dung chung</strong> (Shared drive) với quyền{' '}
+                      <strong>Người quản lý nội dung</strong>:{' '}
                       <code className="text-xs bg-green-100 px-1 rounded break-all">
                         {settings.drive_service_account_email}
                       </code>{' '}
@@ -334,45 +335,40 @@ export default function AdminVpsBackupPage() {
                       </button>
                     </>
                   ) : (
-                    <>Nếu upload báo 404: Share folder Editor cho service account trong file JSON.</>
+                    <>
+                      Folder phải nằm trong <strong>Ổ dung chung</strong> — My Drive + Share không đủ
+                      (service account không có dung lượng).
+                    </>
                   )}
                 </>
               ) : null}
               {settings.drive_upload_configured && settings.drive_service_account_email ? (
                 <details className="mt-3 rounded-lg border border-green-200 bg-white/80 px-3 py-2 text-green-900">
                   <summary className="cursor-pointer font-medium">
-                    Không thấy nút Chia sẻ? — hướng dẫn nhanh
+                    Cách tạo Ổ dung chung (Shared drive) cho backup
                   </summary>
                   <ol className="mt-2 list-decimal pl-5 space-y-1.5 text-sm">
                     <li>
-                      Mở folder{' '}
-                      <a
-                        href={`https://drive.google.com/drive/folders/${encodeURIComponent(settings.drive_folder_id || '')}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline"
-                      >
-                        188-VPS-Backup trên Drive
-                      </a>
-                      . <strong>Tắt mọi bộ lọc</strong> (xóa chip lọc người ở trên).
+                      Drive → menu trái <strong>Ổ dung chung</strong> / <strong>Shared drives</strong> →{' '}
+                      <strong>Tạo ổ dung chung</strong> (vd. <strong>188-VPS-Backup</strong>).
                     </li>
                     <li>
-                      Góc trên bên phải, cạnh tên folder — icon{' '}
-                      <strong>người + dấu +</strong> hoặc chữ <strong>Chia sẻ</strong> /{' '}
-                      <strong>Share</strong>.
+                      Mở ổ → <strong>Quản lý thành viên</strong> → thêm email service account đã copy → quyền{' '}
+                      <strong>Người quản lý nội dung</strong> (Content manager).
                     </li>
                     <li>
-                      Hoặc: quay lại danh sách Drive → <strong>chuột phải</strong> folder →{' '}
-                      <strong>Chia sẻ</strong>.
+                      Tạo <strong>folder con</strong> bên trong ổ dung chung → mở folder → copy ID từ URL{' '}
+                      <code className="text-xs bg-green-100 px-1 rounded">.../folders/ID</code>.
                     </li>
                     <li>
-                      Dán email đã copy → quyền <strong>Người chỉnh sửa</strong> → bỏ tick gửi thông báo →{' '}
-                      <strong>Xong</strong>.
+                      Cập nhật <code className="text-xs bg-green-100 px-1 rounded">VPS_BACKUP_DRIVE_FOLDER_ID</code>{' '}
+                      trên VPS → <code className="text-xs bg-green-100 px-1 rounded">pm2 restart 188-api</code>.
                     </li>
                     <li>
-                      Nếu vẫn không có Chia sẻ: tạo folder mới trong <strong>Drive của tôi</strong> (Tạo mới →
-                      Thư mục), share như trên, rồi cập nhật ID folder mới trong{' '}
-                      <code className="text-xs bg-green-100 px-1 rounded">backend/.env</code>.
+                      <strong>Lưu ý:</strong> Ổ dung chung thường cần <strong>Google Workspace</strong>. Tài khoản{' '}
+                      @gmail.com cá nhân có thể không có — khi đó tắt{' '}
+                      <code className="text-xs bg-green-100 px-1 rounded">VPS_BACKUP_DRIVE_ENABLED</code>; backup
+                      vẫn lưu trên VPS.
                     </li>
                   </ol>
                 </details>
@@ -388,8 +384,8 @@ export default function AdminVpsBackupPage() {
             <p>
               Chưa bật. Thêm vào <code className="text-xs bg-gray-100 px-1 rounded">backend/.env</code>:{' '}
               <code className="text-xs">VPS_BACKUP_DRIVE_ENABLED=true</code> và{' '}
-              <code className="text-xs">VPS_BACKUP_DRIVE_FOLDER_ID=...</code> (folder Drive share Editor cho
-              service account).
+              <code className="text-xs">VPS_BACKUP_DRIVE_FOLDER_ID=...</code> (folder trong{' '}
+              <strong>Ổ dung chung</strong>, không phải My Drive).
             </p>
           )}
         </div>
