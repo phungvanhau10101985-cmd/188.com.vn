@@ -320,12 +320,62 @@ export default function AdminVpsBackupPage() {
                       <code className="text-xs bg-green-100 px-1 rounded break-all">
                         {settings.drive_service_account_email}
                       </code>{' '}
-                      (nút <strong>Chia sẻ</strong> trên Drive — không cần là Chủ sở hữu).
+                      <button
+                        type="button"
+                        className="ml-1 text-green-800 underline font-medium"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(
+                            settings.drive_service_account_email || '',
+                          );
+                          showToast('ok', 'Đã copy email service account.');
+                        }}
+                      >
+                        Copy email
+                      </button>
                     </>
                   ) : (
                     <>Nếu upload báo 404: Share folder Editor cho service account trong file JSON.</>
                   )}
                 </>
+              ) : null}
+              {settings.drive_upload_configured && settings.drive_service_account_email ? (
+                <details className="mt-3 rounded-lg border border-green-200 bg-white/80 px-3 py-2 text-green-900">
+                  <summary className="cursor-pointer font-medium">
+                    Không thấy nút Chia sẻ? — hướng dẫn nhanh
+                  </summary>
+                  <ol className="mt-2 list-decimal pl-5 space-y-1.5 text-sm">
+                    <li>
+                      Mở folder{' '}
+                      <a
+                        href={`https://drive.google.com/drive/folders/${encodeURIComponent(settings.drive_folder_id || '')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline"
+                      >
+                        188-VPS-Backup trên Drive
+                      </a>
+                      . <strong>Tắt mọi bộ lọc</strong> (xóa chip lọc người ở trên).
+                    </li>
+                    <li>
+                      Góc trên bên phải, cạnh tên folder — icon{' '}
+                      <strong>người + dấu +</strong> hoặc chữ <strong>Chia sẻ</strong> /{' '}
+                      <strong>Share</strong>.
+                    </li>
+                    <li>
+                      Hoặc: quay lại danh sách Drive → <strong>chuột phải</strong> folder →{' '}
+                      <strong>Chia sẻ</strong>.
+                    </li>
+                    <li>
+                      Dán email đã copy → quyền <strong>Người chỉnh sửa</strong> → bỏ tick gửi thông báo →{' '}
+                      <strong>Xong</strong>.
+                    </li>
+                    <li>
+                      Nếu vẫn không có Chia sẻ: tạo folder mới trong <strong>Drive của tôi</strong> (Tạo mới →
+                      Thư mục), share như trên, rồi cập nhật ID folder mới trong{' '}
+                      <code className="text-xs bg-green-100 px-1 rounded">backend/.env</code>.
+                    </li>
+                  </ol>
+                </details>
               ) : null}
             </p>
           ) : settings.drive_upload_enabled ? (
