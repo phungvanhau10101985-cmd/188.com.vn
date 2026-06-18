@@ -161,9 +161,16 @@ def _format_drive_upload_error(exc: Exception) -> str:
             "Folder Drive phải share quyền Editor cho email service account trong file JSON."
         )
     if "404" in raw and ("not found" in raw.lower() or "Not Found" in raw):
+        fid_match = re.search(r"File not found:\s*([A-Za-z0-9_-]+)", raw)
+        folder_hint = fid_match.group(1) if fid_match else None
+        configured = (getattr(settings, "VPS_BACKUP_DRIVE_FOLDER_ID", None) or "").strip()
+        folder_id = folder_hint or configured or "?"
         return (
-            "Không tìm thấy folder Drive — kiểm tra VPS_BACKUP_DRIVE_FOLDER_ID "
-            "và share folder cho service account (Editor)."
+            f"Không truy cập được folder Drive (ID: {folder_id}). "
+            "Thường do: (1) VPS_BACKUP_DRIVE_FOLDER_ID sai — lấy ID từ URL "
+            "drive.google.com/drive/folders/ID; (2) chưa Share folder quyền Editor "
+            "cho email client_email trong file JSON service account; "
+            "(3) folder đã xóa. Sửa backend/.env rồi pm2 restart 188-api."
         )
     if "403" in raw and "insufficient" in raw.lower():
         return (

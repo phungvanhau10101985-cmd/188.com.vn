@@ -297,6 +297,25 @@ export default function AdminVpsBackupPage() {
             <p>
               Đã bật — sau mỗi backup thành công file tự upload lên Drive (giữ{' '}
               <strong>{settings.drive_keep_count ?? 5}</strong> bản mới nhất).
+              {settings.drive_folder_id ? (
+                <>
+                  {' '}
+                  Folder ID:{' '}
+                  <code className="text-xs bg-green-100 px-1 rounded break-all">
+                    {settings.drive_folder_id}
+                  </code>{' '}
+                  —{' '}
+                  <a
+                    href={`https://drive.google.com/drive/folders/${encodeURIComponent(settings.drive_folder_id)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-green-800 underline"
+                  >
+                    mở trên Drive
+                  </a>
+                  . Nếu upload báo 404: Share folder Editor cho service account trong file JSON.
+                </>
+              ) : null}
             </p>
           ) : settings.drive_upload_enabled ? (
             <p>
@@ -533,8 +552,11 @@ export default function AdminVpsBackupPage() {
                           Mở Drive
                         </a>
                       ) : r.drive_upload_status === 'failed' ? (
-                        <span className="text-red-600" title={r.drive_upload_error || undefined}>
-                          {driveStatusLabel(r.drive_upload_status)}
+                        <span className="text-red-600 block max-w-xs">
+                          <span className="font-medium">{driveStatusLabel(r.drive_upload_status)}</span>
+                          {r.drive_upload_error ? (
+                            <span className="block text-xs mt-0.5 break-words">{r.drive_upload_error}</span>
+                          ) : null}
                         </span>
                       ) : (
                         driveStatusLabel(r.drive_upload_status)
