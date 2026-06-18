@@ -397,6 +397,9 @@ health_check_local() {
   local ship_stats_code
   ship_stats_code=$(curl_http_code "http://127.0.0.1:${API_INTERNAL_PORT}/api/v1/orders/admin/shipping/operations-stats" 5)
   echo "    GET .../orders/admin/shipping/operations-stats → ${ship_stats_code} (401/403=OK, 404=cần pull+restart API)"
+  local vps_backup_code
+  vps_backup_code=$(curl_http_code "http://127.0.0.1:${API_INTERNAL_PORT}/api/v1/admin/vps-backup/settings" 5)
+  echo "    GET .../admin/vps-backup/settings → ${vps_backup_code} (401/403=OK, 404=cần pull+restart API; bash deploy/verify-vps-backup-api.sh)"
   echo "    GET http://127.0.0.1:${WEB_INTERNAL_PORT}${web_path} → ${web_code}"
   local products_code="000"
   local homepage_code="000"
