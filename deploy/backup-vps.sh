@@ -17,6 +17,7 @@
 #   BACKUP_INCLUDE_CACHE=1                backup cả bảng cache (mặc định bỏ qua data cache)
 #   BACKUP_EXTRA_EXCLUDE_TABLES="t1,t2"   thêm bảng loại trừ (phân tách bằng dấu phẩy)
 #   POSTGRES_DB_NAME=188comvn             override tên DB nếu không đọc được từ .env
+#   BACKUP_SKIP_DRIVE_UPLOAD=1            bỏ qua upload Drive trong script (Admin API tự upload)
 #
 set -euo pipefail
 
@@ -325,6 +326,39 @@ prune_old_backups() {
   find "${BACKUP_ROOT}" -maxdepth 1 -type d -name '20*' -mtime "+${BACKUP_RETENTION_DAYS}" -print -exec rm -rf {} + 2>/dev/null || true
 }
 
+upload_to_google_drive_if_enabled() {
+  if [[ "${BACKUP_SKIP_DRIVE_UPLOAD:-0}" == "1" ]]; then
+    return 0
+  fi
+  if [[ ! -f "${ENV_FILE}" ]]; then
+    return 0
+  fi
+  local drive_enabled
+  drive_enabled=$(grep -m1 '^VPS_BACKUP_DRIVE_ENABLED=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '\r"' | tr '[:upper:]' '[:lower:]' || true)
+  case "${drive_enabled}" in
+    1|true|yes|on) ;;
+    *) return 0 ;;
+  esac
+
+  local py="${BACKEND}/venv/bin/python"
+  local script="${BACKEND}/scripts/upload_vps_backup_to_drive.py"
+  if [[ ! -x "${py}" ]] || [[ ! -f "${script}" ]]; then
+    warn "Google Drive: thiếu venv hoặc upload_vps_backup_to_drive.py — bỏ qua."
+    return 0
+  fi
+  if [[ ! -f "${ARCHIVE}" ]]; then
+    warn "Google Drive: không tìm thấy ${ARCHIVE}"
+    return 0
+  fi
+
+  log "Upload Google Drive…"
+  if (cd "${BACKEND}" && "${py}" "${script}" "${ARCHIVE}"); then
+    ok "Đã upload Google Drive"
+  else
+    warn "Upload Google Drive thất bại (file local vẫn OK)"
+  fi
+}
+
 main() {
   log "Backup 188.com.vn — ${STAMP}"
   log "Project: ${PROJECT_ROOT}"
@@ -340,6 +374,7 @@ main() {
   write_manifest
   create_archive
   prune_old_backups
+  upload_to_google_drive_if_enabled
 
   echo ""
   ok "Backup hoàn tất"

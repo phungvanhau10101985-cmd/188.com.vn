@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.models.vps_backup import VpsBackupRun, VpsBackupSettings
 from app.services.vps_backup_notify import notify_backup_finished
+from app.services.vps_backup_drive import drive_settings_payload, upload_backup_archive
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,7 @@ def get_or_create_settings(db: Session) -> VpsBackupSettings:
 
 def settings_to_payload(row: VpsBackupSettings) -> dict:
     kc = effective_keep_count(row)
-    return {
+    payload = {
         "enabled": bool(row.enabled),
         "hour": int(row.hour or 0),
         "minute": int(row.minute or 0),
@@ -113,6 +114,8 @@ def settings_to_payload(row: VpsBackupSettings) -> dict:
         "backup_root": str(backup_root_dir()),
         "script_path": str(BACKUP_SCRIPT),
     }
+    payload.update(drive_settings_payload())
+    return payload
 
 
 def update_settings(db: Session, payload: dict) -> VpsBackupSettings:
@@ -165,6 +168,9 @@ def _finish_run_notify(db: Session, run: VpsBackupRun) -> None:
         archive_filename=run.archive_filename,
         archive_size_pretty=pretty_bytes(run.archive_size_bytes),
         error_message=run.error_message,
+        drive_upload_status=run.drive_upload_status,
+        drive_web_link=run.drive_web_link,
+        drive_upload_error=run.drive_upload_error,
     )
 
 
@@ -196,6 +202,7 @@ def _execute_backup_run(run_id: int) -> None:
         env["BACKUP_RETENTION_DAYS"] = "0"
         if run.include_cache:
             env["BACKUP_INCLUDE_CACHE"] = "1"
+        env["BACKUP_SKIP_DRIVE_UPLOAD"] = "1"
 
         proc = subprocess.run(
             ["bash", str(BACKUP_SCRIPT)],
@@ -224,6 +231,12 @@ def _execute_backup_run(run_id: int) -> None:
             run.archive_filename = archive.name
             run.archive_path = str(archive)
             run.archive_size_bytes = archive.stat().st_size
+            drv_status, drv_link, drv_err = upload_backup_archive(archive)
+            run.drive_upload_status = drv_status
+            run.drive_web_link = drv_link
+            run.drive_upload_error = drv_err
+        else:
+            run.drive_upload_status = "skipped"
         run.status = "success"
         run.finished_at = datetime.now(timezone.utc)
         db.commit()
@@ -312,6 +325,9 @@ def run_to_item(row: VpsBackupRun) -> dict:
         "keep_count": row.keep_count,
         "include_cache": bool(row.include_cache),
         "error_message": row.error_message,
+        "drive_upload_status": row.drive_upload_status,
+        "drive_web_link": row.drive_web_link,
+        "drive_upload_error": row.drive_upload_error,
         "started_at": row.started_at,
         "finished_at": row.finished_at,
         "created_at": row.created_at,

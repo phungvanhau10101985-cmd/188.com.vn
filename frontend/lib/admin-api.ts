@@ -2257,6 +2257,11 @@ export interface VpsBackupSettings {
   backup_available: boolean;
   backup_root: string;
   script_path: string;
+  drive_upload_enabled?: boolean;
+  drive_upload_configured?: boolean;
+  drive_folder_id?: string | null;
+  drive_keep_count?: number;
+  drive_credentials_configured?: boolean;
 }
 
 export interface VpsBackupRunItem {
@@ -2270,6 +2275,9 @@ export interface VpsBackupRunItem {
   keep_count: number | null;
   include_cache: boolean;
   error_message: string | null;
+  drive_upload_status?: string | null;
+  drive_web_link?: string | null;
+  drive_upload_error?: string | null;
   started_at: string | null;
   finished_at: string | null;
   created_at: string;

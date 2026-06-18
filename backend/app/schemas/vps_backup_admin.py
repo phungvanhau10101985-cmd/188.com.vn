@@ -17,6 +17,11 @@ class VpsBackupSettingsResponse(BaseModel):
     backup_available: bool
     backup_root: str
     script_path: str
+    drive_upload_enabled: bool = False
+    drive_upload_configured: bool = False
+    drive_folder_id: Optional[str] = None
+    drive_keep_count: int = 5
+    drive_credentials_configured: bool = False
 
 
 class VpsBackupSettingsUpdate(BaseModel):
@@ -38,6 +43,9 @@ class VpsBackupRunItem(BaseModel):
     keep_count: Optional[int] = None
     include_cache: bool
     error_message: Optional[str] = None
+    drive_upload_status: Optional[str] = None
+    drive_web_link: Optional[str] = None
+    drive_upload_error: Optional[str] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     created_at: datetime

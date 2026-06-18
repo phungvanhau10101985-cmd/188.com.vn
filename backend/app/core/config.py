@@ -738,6 +738,20 @@ class Settings:
             if x.strip()
         ]
 
+        # Upload file backup lên Google Drive sau mỗi lần backup thành công
+        _vps_drv = (os.getenv("VPS_BACKUP_DRIVE_ENABLED") or "false").strip().lower()
+        self.VPS_BACKUP_DRIVE_ENABLED: bool = _vps_drv in ("1", "true", "yes", "on")
+        self.VPS_BACKUP_DRIVE_FOLDER_ID: str = os.getenv("VPS_BACKUP_DRIVE_FOLDER_ID", "").strip()
+        self.VPS_BACKUP_DRIVE_CREDENTIALS_PATH: str = os.getenv(
+            "VPS_BACKUP_DRIVE_CREDENTIALS_PATH", ""
+        ).strip()
+        try:
+            self.VPS_BACKUP_DRIVE_KEEP_COUNT: int = max(
+                1, int(os.getenv("VPS_BACKUP_DRIVE_KEEP_COUNT", "5") or "5")
+            )
+        except ValueError:
+            self.VPS_BACKUP_DRIVE_KEEP_COUNT = 5
+
         # ========================
         # GOOGLE OAUTH CONFIGURATION
         # ========================

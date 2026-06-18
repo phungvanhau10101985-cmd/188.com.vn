@@ -420,14 +420,18 @@ export default function MobileHeader({
             <button
               type="button"
               onClick={() => (categoryPanelOpen ? closeCategoryPanel() : openCategoryPanel())}
-              className={`${tightToolbar ? iconBtnCondensed : iconBtn} ${categoryPanelOpen ? '!bg-white/45 ring-2 ring-white/55' : ''}`}
+              className={`${tightToolbar ? iconBtnCondensed : iconBtn} ${
+                categoryPanelOpen
+                  ? '!bg-white !text-[#ea580c] !shadow-lg ring-2 ring-white/90 hover:!bg-white active:!bg-orange-50'
+                  : ''
+              }`}
               aria-label={categoryPanelOpen ? 'Đóng danh mục' : 'Mở danh mục'}
               aria-expanded={categoryPanelOpen}
               aria-controls={categoryPanelOpen ? categoryPanelId : undefined}
               title={categoryPanelOpen ? 'Đóng danh mục' : 'Danh mục'}
             >
               {categoryPanelOpen ? (
-                <svg className="w-[22px] h-[22px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.25} aria-hidden>
+                <svg className="w-[22px] h-[22px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.75} aria-hidden>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               ) : (
@@ -651,6 +655,20 @@ export default function MobileHeader({
             id={categoryPanelId}
             className="absolute left-0 right-0 top-full z-[110] max-h-[70vh] overflow-y-auto overflow-x-hidden bg-white shadow-xl rounded-b-lg border-t border-gray-200 transition-all duration-200 touch-manipulation overscroll-contain pointer-events-auto"
           >
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-3 py-2.5 bg-white border-b border-gray-200 shadow-sm">
+              <span className="text-sm font-semibold text-gray-900">Danh mục sản phẩm</span>
+              <button
+                type="button"
+                onClick={() => closeCategoryPanel()}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#ea580c] text-white px-3.5 py-2 text-sm font-semibold shadow-md hover:bg-[#c2410c] active:bg-orange-800 transition-colors min-h-[44px]"
+                aria-label="Đóng danh mục"
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5} aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Đóng
+              </button>
+            </div>
             <nav className="py-2" aria-label="Danh mục sản phẩm">
               {list.map((cat) => {
                 const slug1 = cat.slug || slugOf(cat.name);

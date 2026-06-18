@@ -49,6 +49,9 @@ def _send_email_task(
     archive_filename: Optional[str],
     archive_size_pretty: Optional[str],
     error_message: Optional[str],
+    drive_upload_status: Optional[str] = None,
+    drive_web_link: Optional[str] = None,
+    drive_upload_error: Optional[str] = None,
 ) -> None:
     if not _notify_enabled():
         return
@@ -80,6 +83,10 @@ def _send_email_task(
     )
     if not ok:
         text_body += f"Lỗi: {err_line}\n"
+    if drive_upload_status == "success" and drive_web_link:
+        text_body += f"\nGoogle Drive: {drive_web_link}\n"
+    elif drive_upload_status == "failed":
+        text_body += f"\nGoogle Drive: thất bại — {(drive_upload_error or '').strip() or '—'}\n"
     text_body += "\nTải file: Admin → Backup VPS → Tải xuống\n"
 
     html_body = f"""
@@ -91,6 +98,19 @@ def _send_email_task(
       <p><b>Dung lượng:</b> {html.escape(size_line)}</p>
       <p><b>Thời gian:</b> {html.escape(finished)}</p>
       {"<p><b>Lỗi:</b> " + html.escape(err_line) + "</p>" if not ok else ""}
+      {
+        "<p><b>Google Drive:</b> <a href=\""
+        + html.escape(drive_web_link or "")
+        + "\">Mở file trên Drive</a></p>"
+        if drive_upload_status == "success" and drive_web_link
+        else (
+            "<p><b>Google Drive:</b> <span style=\"color:#b91c1c\">"
+            + html.escape((drive_upload_error or "Upload thất bại").strip())
+            + "</span></p>"
+            if drive_upload_status == "failed"
+            else ""
+        )
+      }
       <p>Vào <b>Quản trị → Backup VPS</b> để tải file hoặc xem nhật ký.</p>
     </div>
     """
@@ -110,6 +130,9 @@ def notify_backup_finished(
     archive_filename: Optional[str] = None,
     archive_size_pretty: Optional[str] = None,
     error_message: Optional[str] = None,
+    drive_upload_status: Optional[str] = None,
+    drive_web_link: Optional[str] = None,
+    drive_upload_error: Optional[str] = None,
 ) -> None:
     threading.Thread(
         target=_send_email_task,
@@ -120,6 +143,9 @@ def notify_backup_finished(
             "archive_filename": archive_filename,
             "archive_size_pretty": archive_size_pretty,
             "error_message": error_message,
+            "drive_upload_status": drive_upload_status,
+            "drive_web_link": drive_web_link,
+            "drive_upload_error": drive_upload_error,
         },
         daemon=True,
         name=f"vps-backup-email-{run_id}",

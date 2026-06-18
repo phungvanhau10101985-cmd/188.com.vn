@@ -59,6 +59,19 @@ function statusLabel(status: string): string {
   }
 }
 
+function driveStatusLabel(status: string | null | undefined): string {
+  switch (status) {
+    case 'success':
+      return 'Đã lên Drive';
+    case 'failed':
+      return 'Drive lỗi';
+    case 'skipped':
+      return '—';
+    default:
+      return status || '—';
+  }
+}
+
 export default function AdminVpsBackupPage() {
   const [settings, setSettings] = useState<VpsBackupSettings | null>(null);
   const [runs, setRuns] = useState<VpsBackupRunItem[]>([]);
@@ -222,8 +235,9 @@ export default function AdminVpsBackupPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Backup VPS</h1>
         <p className="text-sm text-gray-600 mt-1">
-          Giữ <strong>2 bản backup mới nhất</strong> trên server. Email gửi admin khi mỗi lần backup
-          xong. Kết hợp Snapshot panel VPS để khôi phục cả máy ảo.
+          Giữ <strong>2 bản backup mới nhất</strong> trên server. Có thể tự động đẩy lên{' '}
+          <strong>Google Drive</strong> sau mỗi lần backup. Email gửi admin khi xong. Kết hợp Snapshot
+          panel VPS để khôi phục cả máy ảo.
         </p>
       </div>
 
@@ -244,6 +258,39 @@ export default function AdminVpsBackupPage() {
           Backup script chỉ chạy trên <strong>VPS Linux</strong> (có{' '}
           <code className="text-xs bg-amber-100 px-1 rounded">deploy/backup-vps.sh</code>). Trên máy dev
           bạn vẫn xem được lịch sử nhưng không chạy backup từ đây.
+        </div>
+      )}
+
+      {settings && (
+        <div
+          className={`mb-4 rounded-lg border px-4 py-3 text-sm ${
+            settings.drive_upload_configured
+              ? 'border-green-200 bg-green-50 text-green-900'
+              : settings.drive_upload_enabled
+                ? 'border-amber-200 bg-amber-50 text-amber-900'
+                : 'border-gray-200 bg-gray-50 text-gray-700'
+          }`}
+        >
+          <p className="font-medium mb-1">Google Drive</p>
+          {settings.drive_upload_configured ? (
+            <p>
+              Đã bật — sau mỗi backup thành công file tự upload lên Drive (giữ{' '}
+              <strong>{settings.drive_keep_count ?? 5}</strong> bản mới nhất).
+            </p>
+          ) : settings.drive_upload_enabled ? (
+            <p>
+              Đã bật trong <code className="text-xs bg-amber-100 px-1 rounded">.env</code> nhưng thiếu
+              cấu hình: kiểm tra <strong>VPS_BACKUP_DRIVE_FOLDER_ID</strong> và file service account JSON,
+              rồi restart PM2.
+            </p>
+          ) : (
+            <p>
+              Chưa bật. Thêm vào <code className="text-xs bg-gray-100 px-1 rounded">backend/.env</code>:{' '}
+              <code className="text-xs">VPS_BACKUP_DRIVE_ENABLED=true</code> và{' '}
+              <code className="text-xs">VPS_BACKUP_DRIVE_FOLDER_ID=...</code> (folder Drive share Editor cho
+              service account).
+            </p>
+          )}
         </div>
       )}
 
@@ -426,6 +473,7 @@ export default function AdminVpsBackupPage() {
                   <th className="py-2 pr-3">Trạng thái</th>
                   <th className="py-2 pr-3">Nguồn</th>
                   <th className="py-2 pr-3">File</th>
+                  <th className="py-2 pr-3">Drive</th>
                   <th className="py-2 pr-3">Bắt đầu</th>
                   <th className="py-2 pr-3">Kết thúc</th>
                   <th className="py-2">Ghi chú</th>
@@ -451,6 +499,24 @@ export default function AdminVpsBackupPage() {
                         </span>
                       ) : (
                         '—'
+                      )}
+                    </td>
+                    <td className="py-2 pr-3 text-xs">
+                      {r.drive_upload_status === 'success' && r.drive_web_link ? (
+                        <a
+                          href={r.drive_web_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline"
+                        >
+                          Mở Drive
+                        </a>
+                      ) : r.drive_upload_status === 'failed' ? (
+                        <span className="text-red-600" title={r.drive_upload_error || undefined}>
+                          {driveStatusLabel(r.drive_upload_status)}
+                        </span>
+                      ) : (
+                        driveStatusLabel(r.drive_upload_status)
                       )}
                     </td>
                     <td className="py-2 pr-3">{formatDt(r.started_at)}</td>
