@@ -4,10 +4,11 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BACKEND="${ROOT}/backend"
 PORT="${API_INTERNAL_PORT:-8001}"
 BASE="http://127.0.0.1:${PORT}"
-ADMIN_PY="${ROOT}/backend/app/api/endpoints/admin.py"
-VPS_BACKUP_PY="${ROOT}/backend/app/api/endpoints/vps_backup_admin.py"
+MAIN_PY="${BACKEND}/main.py"
+VPS_BACKUP_PY="${BACKEND}/app/api/endpoints/vps_backup_admin.py"
 
 http_code() {
   local url="$1"
@@ -34,24 +35,35 @@ else
   echo "    LOI: thieu vps_backup_admin.py — can: git fetch origin && git reset --hard origin/main"
 fi
 
-echo "==> admin.py co mount vps-backup?"
-if [[ -f "${ADMIN_PY}" ]] && grep -q 'vps_backup_admin' "${ADMIN_PY}" 2>/dev/null; then
-  echo "    OK: admin.py include vps_backup_admin"
+echo "==> main.py co load vps_backup_admin?"
+if [[ -f "${MAIN_PY}" ]] && grep -q 'vps_backup_admin' "${MAIN_PY}" 2>/dev/null; then
+  echo "    OK: main.py routes_config co vps_backup_admin"
 else
-  echo "    LOI: admin.py chua mount vps-backup — can pull code moi"
+  echo "    LOI: main.py chua load vps-backup — can pull code moi"
 fi
 
-echo "==> Routes vps-backup trong process Python (cung .venv PM2)"
-if [[ -x "${ROOT}/backend/.venv/bin/python" ]]; then
-  "${ROOT}/backend/.venv/bin/python" -c "
+echo "==> Import vps_backup_admin (backend/.venv, cwd=backend)"
+if [[ -x "${BACKEND}/.venv/bin/python" ]]; then
+  if ! (cd "${BACKEND}" && "${BACKEND}/.venv/bin/python" -c "import app.api.endpoints.vps_backup_admin as m; print('OK routes', len(m.router.routes))" 2>&1); then
+    echo "    LOI: import vps_backup_admin that bai — xem traceback o tren"
+  fi
+else
+  echo "    (bo qua — khong co backend/.venv/bin/python)"
+fi
+
+echo "==> Routes vps-backup trong main:app (cwd=backend)"
+if [[ -x "${BACKEND}/.venv/bin/python" ]]; then
+  if ! (cd "${BACKEND}" && "${BACKEND}/.venv/bin/python" -c "
 from main import app
 paths = sorted({getattr(r, 'path', '') for r in app.routes if getattr(r, 'path', None) and 'vps-backup' in getattr(r, 'path', '')})
-print('    So route vps-backup:', len(paths))
+print('So route vps-backup:', len(paths))
 for p in paths:
-    print('   ', p)
+    print(' ', p)
 if not paths:
-    print('    LOI: 0 route vps-backup — admin chua load hoac code cu')
-" 2>/dev/null | sed 's/^/    /' || echo "    (khong import duoc main:app — xem pm2 logs 188-api)"
+    raise SystemExit('LOI: 0 route vps-backup trong main:app')
+" 2>&1); then
+    echo "    (xem loi import o tren; pm2 logs 188-api --lines 80 --nostream)"
+  fi
 else
   echo "    (bo qua — khong co backend/.venv/bin/python)"
 fi
@@ -89,15 +101,16 @@ fi
 
 echo ""
 if [[ "${admin_check}" == "401" || "${admin_check}" == "403" || "${admin_check}" == "200" ]]; then
-  echo "LOI: admin chay nhung vps-backup 404 — code tren VPS lech (can >= commit 4eb6e12)."
-  echo "  pm2 logs 188-api --lines 80 --nostream | grep -iE 'admin|vps|failed|error' | tail -20"
+  echo "LOI: admin chay nhung vps-backup 404 — module vps_backup_admin chua load."
+  echo "  pm2 logs 188-api --lines 120 --nostream | grep -iE 'vps_backup|failed|Import|Traceback' | tail -30"
 else
   echo "LOI: admin cung khong load (${admin_check}) — xem pm2 logs 188-api khi khoi dong."
+  echo "  pm2 logs 188-api --lines 120 --nostream | grep -iE 'admin|failed|Import|Traceback' | tail -30"
 fi
 echo ""
 echo "Sua nhanh (mat thay doi local tren VPS neu co):"
 echo "  cd ${ROOT}"
 echo "  git fetch origin && git reset --hard origin/main"
 echo "  pm2 delete 188-api 2>/dev/null; pm2 start deploy/ecosystem.config.cjs --only 188-api"
-echo "  sleep 4 && bash deploy/verify-vps-backup-api.sh"
+echo "  sleep 8 && bash deploy/verify-vps-backup-api.sh"
 exit 1

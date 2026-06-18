@@ -202,6 +202,7 @@ def load_api_routes():
         ("addresses", "/addresses", "addresses"),
         ("bank_accounts", "/bank-accounts", "bank-accounts"),
         ("admin", "/admin", "admin"),
+        ("vps_backup_admin", "/admin/vps-backup", "admin-vps-backup"),
         ("embed_codes", "/embed-codes", "embed-codes"),
         ("shop_video_fab", "/shop-video-fab", "shop-video-fab"),
         ("categories", "/categories", "categories"),
