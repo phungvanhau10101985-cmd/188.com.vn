@@ -9,6 +9,26 @@
 
 ## 2. Trên VPS
 
+### Backup (thủ công + tự động)
+
+**Một lệnh** (database, `.env`, Nginx, SSL, PM2, crontab):
+
+```bash
+cd /var/www/188.com.vn
+chmod +x deploy/backup-vps.sh   # một lần
+bash deploy/backup-vps.sh
+```
+
+File nén: `/var/backups/188.com.vn/backup-188-YYYYMMDD-HHMMSS.tar.gz` (mặc định giữ **14 ngày**).
+
+**Mặc định `pg_dump` bỏ data các bảng cache** (snapshot trang chủ, cache tìm kiếm, facet cache…) — app tự tạo lại khi khách vào / search. Xem danh sách trong `database.notes.txt` sau mỗi lần backup. Muốn backup đầy đủ DB: `BACKUP_INCLUDE_CACHE=1 bash deploy/backup-vps.sh`.
+
+Tải về máy: `scp root@IP_VPS:/var/backups/188.com.vn/backup-188-*.tar.gz ./`
+
+Nên **kết hợp** với **Full Snapshot** trên panel VPS (Sao lưu → + Create Backup).
+
+Lịch tự động: thêm dòng trong `deploy/crontab.188.com.vn.example` (2:30 sáng) hoặc `crontab -e`.
+
 **Git (một lần):** Git 2.x có thể báo *divergent branches* khi `git pull`. Trên VPS, trong repo:
 
 ```bash
