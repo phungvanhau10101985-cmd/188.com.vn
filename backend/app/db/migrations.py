@@ -1058,6 +1058,21 @@ class MigrationManager:
             "category_menu_cache", CategoryMenuCache
         )
 
+        from app.models.vps_backup import VpsBackupSettings, VpsBackupRun
+
+        results['vps_backup_settings_create'] = self._create_table_if_not_exists(
+            "vps_backup_settings", VpsBackupSettings
+        )
+        results['vps_backup_settings_sync'] = self._sync_table_columns(
+            "vps_backup_settings", VpsBackupSettings
+        )
+        results['vps_backup_runs_create'] = self._create_table_if_not_exists(
+            "vps_backup_runs", VpsBackupRun
+        )
+        results['vps_backup_runs_sync'] = self._sync_table_columns(
+            "vps_backup_runs", VpsBackupRun
+        )
+
         return results
 
     def migrate_sale_calendar_settings_date_columns(self) -> bool:

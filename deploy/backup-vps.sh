@@ -8,7 +8,8 @@
 #
 # Biến tuỳ chọn:
 #   BACKUP_ROOT=/var/backups/188.com.vn   thư mục gốc lưu backup
-#   BACKUP_RETENTION_DAYS=14              xóa tarball cũ hơn N ngày (0 = không xóa)
+#   BACKUP_RETENTION_DAYS=0               legacy: xóa theo ngày (0 = tắt, dùng BACKUP_KEEP_COUNT)
+#   BACKUP_KEEP_COUNT=2                   giữ N bản .tar.gz mới nhất (mặc định 2)
 #   BACKUP_INCLUDE_NGINX=1                backup cấu hình Nginx (mặc định 1)
 #   BACKUP_INCLUDE_SSL=1                  backup Let's Encrypt (mặc định 1)
 #   BACKUP_INCLUDE_CRONTAB=1              backup crontab user hiện tại (mặc định 1)
@@ -25,7 +26,8 @@ FRONTEND="${PROJECT_ROOT}/frontend"
 ENV_FILE="${BACKEND}/.env"
 
 BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/188.com.vn}"
-BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
+BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-0}"
+BACKUP_KEEP_COUNT="${BACKUP_KEEP_COUNT:-2}"
 BACKUP_INCLUDE_NGINX="${BACKUP_INCLUDE_NGINX:-1}"
 BACKUP_INCLUDE_SSL="${BACKUP_INCLUDE_SSL:-1}"
 BACKUP_INCLUDE_CRONTAB="${BACKUP_INCLUDE_CRONTAB:-1}"
@@ -294,6 +296,28 @@ create_archive() {
 }
 
 prune_old_backups() {
+  if [[ "${BACKUP_KEEP_COUNT}" =~ ^[0-9]+$ ]] && [[ "${BACKUP_KEEP_COUNT}" -gt 0 ]]; then
+    log "Giữ ${BACKUP_KEEP_COUNT} bản backup .tar.gz mới nhất"
+    mapfile -t _all_archives < <(find "${BACKUP_ROOT}" -maxdepth 1 -name 'backup-188-*.tar.gz' -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
+    local idx=0
+    for f in "${_all_archives[@]}"; do
+      idx=$((idx + 1))
+      if (( idx > BACKUP_KEEP_COUNT )); then
+        echo "    - xóa bản cũ: $(basename "${f}")"
+        rm -f "${f}"
+      fi
+    done
+    mapfile -t _all_dirs < <(find "${BACKUP_ROOT}" -maxdepth 1 -type d -name '20*' -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
+    idx=0
+    for d in "${_all_dirs[@]}"; do
+      idx=$((idx + 1))
+      if (( idx > BACKUP_KEEP_COUNT )); then
+        rm -rf "${d}"
+      fi
+    done
+    return 0
+  fi
+
   [[ "${BACKUP_RETENTION_DAYS}" =~ ^[0-9]+$ ]] || return 0
   [[ "${BACKUP_RETENTION_DAYS}" -gt 0 ]] || return 0
   log "Dọn backup cũ hơn ${BACKUP_RETENTION_DAYS} ngày"

@@ -1289,3 +1289,8 @@ def admin_update_pandamall_account(
         return {"message": "Đã lưu tài khoản Pandamall thành công"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+from app.api.endpoints.vps_backup_admin import router as vps_backup_admin_router
+
+router.include_router(vps_backup_admin_router, prefix="/vps-backup", tags=["admin-vps-backup"])

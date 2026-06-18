@@ -706,6 +706,14 @@ async def startup_event():
     except Exception as _e_no_img:
         print(f"   ⚠️  No-image product cleanup startup: {_e_no_img}")
 
+    try:
+        from app.services.vps_backup_service import start_vps_backup_scheduler_daemon_if_enabled
+
+        start_vps_backup_scheduler_daemon_if_enabled()
+        print("   💾 VPS backup scheduler: kiểm tra lịch mỗi 60s (VPS_BACKUP_SCHEDULER_ENABLED).")
+    except Exception as _e_vps_bk:
+        print(f"   ⚠️  VPS backup scheduler startup: {_e_vps_bk}")
+
     from app.core.config import settings as _startup_settings
     _db_url = (_startup_settings.DATABASE_URL or "").lower()
     if _db_url.startswith("postgresql"):

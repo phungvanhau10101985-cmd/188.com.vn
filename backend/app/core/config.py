@@ -728,6 +728,16 @@ class Settings:
             if x.strip()
         ]
 
+        # Email sau mỗi lần backup VPS (admin_users + VPS_BACKUP_NOTIFY_EMAILS)
+        self.VPS_BACKUP_NOTIFY_ENABLED: bool = os.getenv(
+            "VPS_BACKUP_NOTIFY_ENABLED", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.VPS_BACKUP_NOTIFY_EMAILS: List[str] = [
+            x.strip()
+            for x in os.getenv("VPS_BACKUP_NOTIFY_EMAILS", "").split(",")
+            if x.strip()
+        ]
+
         # ========================
         # GOOGLE OAUTH CONFIGURATION
         # ========================

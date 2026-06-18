@@ -26,8 +26,10 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Tra EMS vận chuyển (6:00 và 15:00)
 0 6,15 * * * curl -sS -H "Authorization: Bearer YOUR_CRON_SECRET" "https://YOUR_API_HOST/api/v1/orders/cron/refresh-ems-tracking"
 
-# Backup DB + cấu hình (hàng ngày 2:30 — giữ 14 ngày, xem deploy/backup-vps.sh)
-30 2 * * * cd /var/www/188.com.vn && bash deploy/backup-vps.sh >> /var/log/188-backup.log 2>&1
+# Backup DB + cấu hình — KHÔNG CẦN nếu đã bật lịch trong Admin → Backup VPS
+# (188-api tự chạy theo lịch lưu DB; VPS_BACKUP_SCHEDULER_ENABLED=1 mặc định).
+# Chỉ bật dòng dưới khi tắt scheduler trong .env (VPS_BACKUP_SCHEDULER_ENABLED=0):
+# 30 2 * * * cd /var/www/188.com.vn && bash deploy/backup-vps.sh >> /var/log/188-backup.log 2>&1
 
 # Dọn file tạm việt hóa ảnh (temp_images) — Chủ nhật 3:00, file cũ hơn 24 giờ
 0 3 * * 0 cd /var/www/188.com.vn/backend && PYTHONPATH=. .venv/bin/python -c "from app.services.image_localization_temp_cleanup import cleanup_stale_image_localization_temp; cleanup_stale_image_localization_temp(max_age_hours=24)"

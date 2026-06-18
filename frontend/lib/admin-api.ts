@@ -2244,6 +2244,100 @@ export const adminListingFacetCacheAPI = {
   },
 };
 
+export interface VpsBackupSettings {
+  enabled: boolean;
+  hour: number;
+  minute: number;
+  days_of_week: number[];
+  keep_count: number;
+  include_cache: boolean;
+  notify_on_complete: boolean;
+  last_triggered_at: string | null;
+  updated_at: string | null;
+  backup_available: boolean;
+  backup_root: string;
+  script_path: string;
+}
+
+export interface VpsBackupRunItem {
+  id: number;
+  trigger: string;
+  status: string;
+  archive_filename: string | null;
+  archive_path: string | null;
+  archive_size_bytes: number | null;
+  archive_size_pretty: string | null;
+  keep_count: number | null;
+  include_cache: boolean;
+  error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+}
+
+export interface VpsBackupArchiveItem {
+  filename: string;
+  path: string;
+  size_bytes: number;
+  size_pretty: string;
+  modified_at: string;
+  linked_run_id: number | null;
+}
+
+export const adminVpsBackupAPI = {
+  getSettings: () => fetchAdmin<VpsBackupSettings>('/admin/vps-backup/settings'),
+
+  updateSettings: (payload: Partial<VpsBackupSettings>) =>
+    fetchAdmin<VpsBackupSettings>('/admin/vps-backup/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  listRuns: (params?: { skip?: number; limit?: number }) => {
+    const sp = new URLSearchParams();
+    sp.set('skip', String(params?.skip ?? 0));
+    sp.set('limit', String(params?.limit ?? 50));
+    return fetchAdmin<{ total: number; items: VpsBackupRunItem[] }>(`/admin/vps-backup/runs?${sp}`);
+  },
+
+  listArchives: () =>
+    fetchAdmin<{
+      total: number;
+      total_size_bytes: number;
+      total_size_pretty: string;
+      items: VpsBackupArchiveItem[];
+    }>('/admin/vps-backup/archives'),
+
+  triggerRun: () =>
+    fetchAdmin<{ run_id: number; status: string; message: string }>('/admin/vps-backup/run', {
+      method: 'POST',
+    }),
+
+  downloadArchive: async (filename: string) => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const url = `${getApiBaseUrl()}/admin/vps-backup/archives/${encodeURIComponent(filename)}/download`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Tải backup thất bại');
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition');
+    const m = cd && /filename="?([^";]+)"?/i.exec(cd);
+    const outName = m?.[1]?.trim() || filename;
+    await triggerBlobDownloadPreferred(blob, outName);
+  },
+
+  deleteArchive: (filename: string) =>
+    fetchAdmin<{ deleted: boolean; filename: string }>(
+      `/admin/vps-backup/archives/${encodeURIComponent(filename)}`,
+      { method: 'DELETE' },
+    ),
+};
+
 export const adminOrderAPI = {
   getAllOrders: (params?: {
     status?: string;

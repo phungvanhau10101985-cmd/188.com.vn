@@ -48,6 +48,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: '/admin/embed-codes', label: 'Mã nhúng analytics' },
       { href: '/admin/bunny-cdn', label: 'Ảnh Bunny CDN' },
       { href: '/admin/api-keys', label: 'API & tích hợp', privilegedOnly: true },
+      { href: '/admin/vps-backup', label: 'Backup VPS', privilegedOnly: true },
     ],
   },
   {
