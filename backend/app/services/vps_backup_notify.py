@@ -89,31 +89,31 @@ def _send_email_task(
         text_body += f"\nGoogle Drive: thất bại — {(drive_upload_error or '').strip() or '—'}\n"
     text_body += "\nTải file: Admin → Backup VPS → Tải xuống\n"
 
-    html_body = f"""
-    <div style="font-family:Arial,sans-serif;font-size:14px;color:#111">
-      <h2 style="color:{'#15803d' if ok else '#b91c1c'}">{html.escape(subject)}</h2>
-      <p><b>Nguồn:</b> {html.escape(src)}</p>
-      <p><b>Trạng thái:</b> {html.escape(status)}</p>
-      <p><b>File:</b> <code>{html.escape(file_line)}</code></p>
-      <p><b>Dung lượng:</b> {html.escape(size_line)}</p>
-      <p><b>Thời gian:</b> {html.escape(finished)}</p>
-      {"<p><b>Lỗi:</b> " + html.escape(err_line) + "</p>" if not ok else ""}
-      {
-        "<p><b>Google Drive:</b> <a href=\""
-        + html.escape(drive_web_link or "")
-        + "\">Mở file trên Drive</a></p>"
-        if drive_upload_status == "success" and drive_web_link
-        else (
-            "<p><b>Google Drive:</b> <span style=\"color:#b91c1c\">"
-            + html.escape((drive_upload_error or "Upload thất bại").strip())
-            + "</span></p>"
-            if drive_upload_status == "failed"
-            else ""
+    heading_color = "#15803d" if ok else "#b91c1c"
+    html_parts = [
+        '<div style="font-family:Arial,sans-serif;font-size:14px;color:#111">',
+        f'<h2 style="color:{heading_color}">{html.escape(subject)}</h2>',
+        f"<p><b>Nguồn:</b> {html.escape(src)}</p>",
+        f"<p><b>Trạng thái:</b> {html.escape(status)}</p>",
+        f"<p><b>File:</b> <code>{html.escape(file_line)}</code></p>",
+        f"<p><b>Dung lượng:</b> {html.escape(size_line)}</p>",
+        f"<p><b>Thời gian:</b> {html.escape(finished)}</p>",
+    ]
+    if not ok:
+        html_parts.append(f"<p><b>Lỗi:</b> {html.escape(err_line)}</p>")
+    if drive_upload_status == "success" and drive_web_link:
+        link = html.escape(drive_web_link)
+        html_parts.append(f'<p><b>Google Drive:</b> <a href="{link}">Mở file trên Drive</a></p>')
+    elif drive_upload_status == "failed":
+        drive_err = html.escape((drive_upload_error or "Upload thất bại").strip())
+        html_parts.append(
+            f'<p><b>Google Drive:</b> <span style="color:#b91c1c">{drive_err}</span></p>'
         )
-      }
-      <p>Vào <b>Quản trị → Backup VPS</b> để tải file hoặc xem nhật ký.</p>
-    </div>
-    """
+    html_parts.append(
+        "<p>Vào <b>Quản trị → Backup VPS</b> để tải file hoặc xem nhật ký.</p>"
+    )
+    html_parts.append("</div>")
+    html_body = "\n      ".join(html_parts)
 
     for addr in recipients:
         try:

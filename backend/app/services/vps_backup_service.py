@@ -161,19 +161,22 @@ def _find_newest_archive(since_ts: float) -> Optional[Path]:
 
 
 def _finish_run_notify(db: Session, run: VpsBackupRun) -> None:
-    from app.services.vps_backup_notify import notify_backup_finished
+    try:
+        from app.services.vps_backup_notify import notify_backup_finished
 
-    notify_backup_finished(
-        run_id=run.id,
-        status=run.status,
-        trigger=run.trigger,
-        archive_filename=run.archive_filename,
-        archive_size_pretty=pretty_bytes(run.archive_size_bytes),
-        error_message=run.error_message,
-        drive_upload_status=run.drive_upload_status,
-        drive_web_link=run.drive_web_link,
-        drive_upload_error=run.drive_upload_error,
-    )
+        notify_backup_finished(
+            run_id=run.id,
+            status=run.status,
+            trigger=run.trigger,
+            archive_filename=run.archive_filename,
+            archive_size_pretty=pretty_bytes(run.archive_size_bytes),
+            error_message=run.error_message,
+            drive_upload_status=run.drive_upload_status,
+            drive_web_link=run.drive_web_link,
+            drive_upload_error=run.drive_upload_error,
+        )
+    except Exception:
+        logger.exception("VPS backup notify failed for run_id=%s (backup result unchanged)", run.id)
 
 
 def _execute_backup_run(run_id: int) -> None:
