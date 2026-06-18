@@ -364,11 +364,30 @@ async def health_check():
         for r in app.routes
         if getattr(r, "path", "") and "/newsletter/" in getattr(r, "path", "")
     ]
+    vps_backup_paths = [
+        getattr(r, "path", "")
+        for r in app.routes
+        if getattr(r, "path", "") and "/admin/vps-backup/" in getattr(r, "path", "")
+    ]
+    admin_paths = [
+        getattr(r, "path", "")
+        for r in app.routes
+        if getattr(r, "path", "") and r.path.startswith("/api/v1/admin/")
+    ]
+    failed_vps = next(
+        (err for name, err in API_FAILED_ROUTES if name == "vps_backup_admin"),
+        None,
+    )
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "newsletter_routes": len(newsletter_paths),
         "newsletter_ok": len(newsletter_paths) > 0,
+        "admin_routes": len(admin_paths),
+        "admin_ok": len(admin_paths) > 0,
+        "vps_backup_routes": len(vps_backup_paths),
+        "vps_backup_ok": len(vps_backup_paths) > 0,
+        "vps_backup_load_error": failed_vps[:240] if failed_vps else None,
     }
 
 

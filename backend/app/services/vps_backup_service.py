@@ -16,8 +16,6 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.models.vps_backup import VpsBackupRun, VpsBackupSettings
-from app.services.vps_backup_notify import notify_backup_finished
-from app.services.vps_backup_drive import drive_settings_payload, upload_backup_archive
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +112,8 @@ def settings_to_payload(row: VpsBackupSettings) -> dict:
         "backup_root": str(backup_root_dir()),
         "script_path": str(BACKUP_SCRIPT),
     }
+    from app.services.vps_backup_drive import drive_settings_payload
+
     payload.update(drive_settings_payload())
     return payload
 
@@ -161,6 +161,8 @@ def _find_newest_archive(since_ts: float) -> Optional[Path]:
 
 
 def _finish_run_notify(db: Session, run: VpsBackupRun) -> None:
+    from app.services.vps_backup_notify import notify_backup_finished
+
     notify_backup_finished(
         run_id=run.id,
         status=run.status,
@@ -231,6 +233,8 @@ def _execute_backup_run(run_id: int) -> None:
             run.archive_filename = archive.name
             run.archive_path = str(archive)
             run.archive_size_bytes = archive.stat().st_size
+            from app.services.vps_backup_drive import upload_backup_archive
+
             drv_status, drv_link, drv_err = upload_backup_archive(archive)
             run.drive_upload_status = drv_status
             run.drive_web_link = drv_link

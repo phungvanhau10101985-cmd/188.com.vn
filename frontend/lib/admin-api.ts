@@ -240,7 +240,9 @@ async function fetchAdmin<T>(
               ? `[404 ${url}] API chưa có endpoint thống kê vận hành — trên VPS chạy: git pull origin main && pm2 restart 188-api (chỉ build web không đủ). `
               : endpoint.includes('/orders/admin/shipping/return-warehouse')
                 ? `[404] API nhập hàng hoàn chưa được nạp — khởi động lại backend FastAPI (port 8001): dừng process cũ rồi chạy lại uvicorn/pm2 restart 188-api. `
-                : `[404 ${url}] `
+                : endpoint.includes('/admin/vps-backup')
+                  ? `[404 ${url}] API Backup VPS chưa load — trên VPS: git pull origin main && pm2 delete 188-api && pm2 start deploy/ecosystem.config.cjs --only 188-api && bash deploy/verify-vps-backup-api.sh. `
+                  : `[404 ${url}] `
             : '';
       throw new Error(statusHint + msg);
     }

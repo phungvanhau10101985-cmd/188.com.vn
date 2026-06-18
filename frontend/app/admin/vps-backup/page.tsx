@@ -83,6 +83,7 @@ export default function AdminVpsBackupPage() {
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
   const [downloadingFile, setDownloadingFile] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [formEnabled, setFormEnabled] = useState(false);
   const [formHour, setFormHour] = useState(3);
@@ -104,6 +105,7 @@ export default function AdminVpsBackupPage() {
   };
 
   const loadAll = useCallback(async () => {
+    setLoadError(null);
     try {
       const [s, r, a] = await Promise.all([
         adminVpsBackupAPI.getSettings(),
@@ -116,7 +118,9 @@ export default function AdminVpsBackupPage() {
       setArchives(a.items);
       setArchiveTotalPretty(a.total_size_pretty);
     } catch (err: unknown) {
-      showToast('err', (err as Error)?.message || 'Không tải được dữ liệu backup');
+      const msg = (err as Error)?.message || 'Không tải được dữ liệu backup';
+      setLoadError(msg);
+      showToast('err', msg);
     } finally {
       setLoading(false);
     }
@@ -253,7 +257,24 @@ export default function AdminVpsBackupPage() {
         </div>
       )}
 
-      {!backupAvailable && (
+      {loadError && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <p className="font-medium">Không kết nối được API Backup VPS</p>
+          <p className="mt-1">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              void loadAll();
+            }}
+            className="mt-2 underline font-medium"
+          >
+            Thử lại
+          </button>
+        </div>
+      )}
+
+      {!loadError && !backupAvailable && (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           Backup script chỉ chạy trên <strong>VPS Linux</strong> (có{' '}
           <code className="text-xs bg-amber-100 px-1 rounded">deploy/backup-vps.sh</code>). Trên máy dev

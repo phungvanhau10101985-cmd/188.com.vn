@@ -1,5 +1,7 @@
 """Admin API — lịch backup VPS, chạy tay & danh sách file backup."""
 
+from functools import lru_cache
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -15,9 +17,15 @@ from app.schemas.vps_backup_admin import (
     VpsBackupSettingsUpdate,
     VpsBackupTriggerResponse,
 )
-from app.services import vps_backup_service as backup_svc
 
 router = APIRouter()
+
+
+@lru_cache(maxsize=1)
+def _backup_svc():
+    from app.services import vps_backup_service
+
+    return vps_backup_service
 
 
 @router.get("/settings", response_model=VpsBackupSettingsResponse)
@@ -25,8 +33,9 @@ def get_vps_backup_settings(
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_privileged_admin),
 ):
-    row = backup_svc.get_or_create_settings(db)
-    return backup_svc.settings_to_payload(row)
+    svc = _backup_svc()
+    row = svc.get_or_create_settings(db)
+    return svc.settings_to_payload(row)
 
 
 @router.put("/settings", response_model=VpsBackupSettingsResponse)
@@ -35,10 +44,11 @@ def update_vps_backup_settings(
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_privileged_admin),
 ):
-    days = backup_svc.normalize_days_of_week(payload.days_of_week)
+    svc = _backup_svc()
+    days = svc.normalize_days_of_week(payload.days_of_week)
     if not days:
         raise HTTPException(status_code=400, detail="Chọn ít nhất một ngày trong tuần.")
-    row = backup_svc.update_settings(
+    row = svc.update_settings(
         db,
         {
             "enabled": payload.enabled,
@@ -48,7 +58,7 @@ def update_vps_backup_settings(
             "include_cache": payload.include_cache,
         },
     )
-    return backup_svc.settings_to_payload(row)
+    return svc.settings_to_payload(row)
 
 
 @router.get("/runs", response_model=VpsBackupRunListResponse)
@@ -58,10 +68,11 @@ def list_vps_backup_runs(
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_privileged_admin),
 ):
-    total, rows = backup_svc.list_runs(db, skip=skip, limit=limit)
+    svc = _backup_svc()
+    total, rows = svc.list_runs(db, skip=skip, limit=limit)
     return {
         "total": total,
-        "items": [backup_svc.run_to_item(r) for r in rows],
+        "items": [svc.run_to_item(r) for r in rows],
     }
 
 
@@ -70,11 +81,12 @@ def list_vps_backup_archives(
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_privileged_admin),
 ):
-    total, total_bytes, items = backup_svc.list_archives(db)
+    svc = _backup_svc()
+    total, total_bytes, items = svc.list_archives(db)
     return {
         "total": total,
         "total_size_bytes": total_bytes,
-        "total_size_pretty": backup_svc.pretty_bytes(total_bytes),
+        "total_size_pretty": svc.pretty_bytes(total_bytes),
         "items": items,
     }
 
@@ -85,7 +97,7 @@ def download_vps_backup_archive(
     _: AdminUser = Depends(require_privileged_admin),
 ):
     try:
-        path = backup_svc.resolve_archive_path(filename)
+        path = _backup_svc().resolve_archive_path(filename)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not path.is_file():
@@ -103,7 +115,7 @@ def trigger_vps_backup_manual(
     _: AdminUser = Depends(require_privileged_admin),
 ):
     try:
-        run = backup_svc.queue_backup_run(db, trigger="manual")
+        run = _backup_svc().queue_backup_run(db, trigger="manual")
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -121,7 +133,7 @@ def delete_vps_backup_archive(
     _: AdminUser = Depends(require_privileged_admin),
 ):
     try:
-        deleted = backup_svc.delete_archive(filename)
+        deleted = _backup_svc().delete_archive(filename)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not deleted:

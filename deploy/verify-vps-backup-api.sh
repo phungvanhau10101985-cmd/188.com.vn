@@ -71,6 +71,10 @@ fi
 echo "==> HTTP (${BASE})"
 health=$(http_code "${BASE}/health")
 echo "    health: ${health}"
+if [[ "${health}" == "200" ]]; then
+  curl -s "${BASE}/health" | grep -o '"vps_backup_ok":[^,]*' | sed 's/^/    /' || true
+  curl -s "${BASE}/health" | grep -o '"admin_ok":[^,]*' | sed 's/^/    /' || true
+fi
 admin_check=$(http_code "${BASE}/api/v1/admin/check-setup")
 echo "    admin/check-setup (khong token): ${admin_check}"
 
