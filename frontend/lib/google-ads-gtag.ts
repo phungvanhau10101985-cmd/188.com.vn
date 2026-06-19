@@ -240,9 +240,86 @@ export function peekGoogleAdsConversionSendTo(key: GoogleAdsWebConversionKey): s
   return conversionSendToFor(key);
 }
 
+/** CwCD — chiết khấu tự động Merchant Center (aw_merchant_id, feed country/language). */
+function readGoogleMerchantCwcdConfig(): {
+  merchantId: number | null;
+  feedCountry: string;
+  feedLanguage: string;
+} {
+  const midRaw = process.env.NEXT_PUBLIC_GOOGLE_MERCHANT_CENTER_ID?.trim();
+  let merchantId: number | null = null;
+  if (midRaw) {
+    const n = Number.parseInt(midRaw, 10);
+    if (Number.isFinite(n) && n > 0) merchantId = n;
+  }
+  const feedCountry = (process.env.NEXT_PUBLIC_GOOGLE_FEED_COUNTRY || 'VN').trim().toUpperCase();
+  const feedLanguage = (process.env.NEXT_PUBLIC_GOOGLE_FEED_LANGUAGE || 'vi').trim().toLowerCase();
+  return { merchantId, feedCountry, feedLanguage };
+}
+
+function cartLineListPrice(line: CartItem): number {
+  const pd =
+    line.product_data && typeof line.product_data === 'object' ? (line.product_data as Record<string, unknown>) : {};
+  const list =
+    (typeof line.list_price === 'number' && !Number.isNaN(line.list_price) ? line.list_price : null) ??
+    (typeof line.original_price === 'number' && !Number.isNaN(line.original_price) ? line.original_price : null) ??
+    (typeof pd.list_price === 'number' ? pd.list_price : null) ??
+    (typeof pd.original_price === 'number' ? pd.original_price : null);
+  return list != null && Number.isFinite(list) ? list : lineUnitPrice(line);
+}
+
+function cartDataDiscountTotal(lines: CartItem[]): number {
+  let total = 0;
+  for (const line of lines) {
+    const qty = Math.max(1, line.quantity || 1);
+    const unit = lineUnitPrice(line);
+    const list = cartLineListPrice(line);
+    if (list > unit) total += (list - unit) * qty;
+  }
+  return Math.max(0, Math.round(total));
+}
+
+/** items.id phải khớp cột `id` trong feed GMC (product_id). */
+function gtagCwcdItemsFromCartLines(lines: CartItem[]): Record<string, unknown>[] {
+  return lines.map((line) => {
+    const pd =
+      line.product_data && typeof line.product_data === 'object' ? (line.product_data as Record<string, unknown>) : {};
+    const feedId =
+      (pd.product_id != null ? String(pd.product_id).trim() : '') ||
+      (line.product_code != null ? String(line.product_code).trim() : '') ||
+      String(line.product_id);
+    return {
+      id: feedId,
+      quantity: line.quantity,
+      price: lineUnitPrice(line),
+    };
+  });
+}
+
+function applyCwcdToConversionBody(
+  body: Record<string, unknown>,
+  lines: CartItem[],
+): void {
+  const cwcd = readGoogleMerchantCwcdConfig();
+  if (!cwcd.merchantId || !lines.length) return;
+  body.aw_merchant_id = cwcd.merchantId;
+  body.aw_feed_country = cwcd.feedCountry;
+  body.aw_feed_language = cwcd.feedLanguage;
+  body.items = gtagCwcdItemsFromCartLines(lines);
+  const discount = cartDataDiscountTotal(lines);
+  if (discount > 0) {
+    body.discount = discount;
+  }
+}
+
 function fireGoogleAdsConversion(
   key: GoogleAdsWebConversionKey,
-  payload: { value: number; items: Record<string, unknown>[]; transaction_id?: string },
+  payload: {
+    value: number;
+    items: Record<string, unknown>[];
+    transaction_id?: string;
+    cart_lines?: CartItem[];
+  },
 ): void {
   const send_to = conversionSendToFor(key);
   if (!send_to) return;
@@ -258,6 +335,9 @@ function fireGoogleAdsConversion(
     };
     if (payload.transaction_id && String(payload.transaction_id).trim() !== '') {
       body.transaction_id = String(payload.transaction_id).trim();
+    }
+    if (key === 'purchase' && payload.cart_lines?.length) {
+      applyCwcdToConversionBody(body, payload.cart_lines);
     }
     /** Tiếp thị lại động: Google thường đọc ecomm_* + «id» trong items; Tag Assistant đôi khi chỉ hiện rõ các trường này. */
     if (payload.items.length > 0) {
@@ -592,15 +672,18 @@ export function trackGoogleAdsPurchase(params: {
   const { items, value, orderId } = params;
   if (!items.length) return;
   const v = Number.isFinite(value) && value > 0 ? value : 0;
-  fireGtagEvent('purchase', {
+  const purchasePayload: Record<string, unknown> = {
     currency: GOOGLE_ADS_CURRENCY,
     value: v,
     ...(orderId != null && String(orderId).trim() !== '' ? { transaction_id: String(orderId) } : {}),
     items: gtagItemsFromCartLines(items),
-  });
+  };
+  applyCwcdToConversionBody(purchasePayload, items);
+  fireGtagEvent('purchase', purchasePayload);
   fireGoogleAdsConversion('purchase', {
     value: v,
     items: gtagItemsFromCartLines(items),
+    cart_lines: items,
     ...(orderId != null && String(orderId).trim() !== '' ? { transaction_id: String(orderId) } : {}),
   });
   retailDynamicPageView({
