@@ -68,6 +68,24 @@ def _color_label_for_cart(colors: List[Any], index: int) -> str:
     return base
 
 
+def _color_image_at_index(product: Product, index: int) -> str:
+    colors = product.colors or []
+    if 0 <= index < len(colors):
+        img = _variant_dict_img(colors[index])
+        if img:
+            return img
+    gallery_pool: List[str] = []
+    for bucket in (product.gallery or [], product.images or []):
+        if isinstance(bucket, list):
+            for u in bucket:
+                s = str(u or "").strip()
+                if s and s not in gallery_pool:
+                    gallery_pool.append(s)
+    if 0 <= index < len(gallery_pool):
+        return gallery_pool[index]
+    return ""
+
+
 def _line_image_from_colors(product: Product, selected_color: Optional[str]) -> Optional[str]:
     colors = product.colors or []
     sel = (selected_color or "").strip()
@@ -75,15 +93,23 @@ def _line_image_from_colors(product: Product, selected_color: Optional[str]) -> 
         return None
     for i in range(len(colors)):
         if _color_label_for_cart(colors, i) == sel:
-            img = _variant_dict_img(colors[i])
+            img = _color_image_at_index(product, i)
             if img:
                 return img
             break
+    for i, c in enumerate(colors):
+        if not isinstance(c, dict):
+            continue
+        for key in ("name", "value"):
+            if (c.get(key) or "").strip() == sel:
+                img = _color_image_at_index(product, i)
+                if img:
+                    return img
     m = re.search(r"\((\d+)\)\s*$", sel)
     if m:
         idx = int(m.group(1)) - 1
         if 0 <= idx < len(colors):
-            img = _variant_dict_img(colors[idx])
+            img = _color_image_at_index(product, idx)
             if img:
                 return img
     return None

@@ -336,7 +336,7 @@ function fireGoogleAdsConversion(
     if (payload.transaction_id && String(payload.transaction_id).trim() !== '') {
       body.transaction_id = String(payload.transaction_id).trim();
     }
-    if (key === 'purchase' && payload.cart_lines?.length) {
+    if ((key === 'purchase' || key === 'begin_checkout') && payload.cart_lines?.length) {
       applyCwcdToConversionBody(body, payload.cart_lines);
     }
     /** Tiếp thị lại động: Google thường đọc ecomm_* + «id» trong items; Tag Assistant đôi khi chỉ hiện rõ các trường này. */
@@ -656,6 +656,7 @@ export function trackGoogleAdsCartPageView(lines: CartItem[], totalValue: number
   fireGoogleAdsConversion('begin_checkout', {
     value,
     items: gtagItemsFromCartLines(lines),
+    cart_lines: lines,
   });
   retailDynamicPageView({
     ecomm_pagetype: 'cart',

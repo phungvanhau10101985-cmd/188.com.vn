@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from app.db.session import get_db
 from app import crud, models, schemas
+from app.crud.cart import cart as cart_crud, _resolve_cart_line_image
 from app.crud import promotion as crud_promotion
 from app.crud.promotion import PromoValidationError
 from app.models.order import OrderStatus as OrderStatusEnum, DepositType as DepositTypeEnum, PaymentStatus as PaymentStatusEnum
@@ -131,7 +132,7 @@ def create_order(
 
         cart_lines_by_key: dict = {}
         if current_user is not None:
-            cart_items = crud.cart.get_user_cart_items(db, user_id=current_user.id)
+            cart_items = cart_crud.get_user_cart_items(db, user_id=current_user.id)
             for ci in cart_items:
                 key = (
                     int(ci.product_id),
@@ -197,10 +198,26 @@ def create_order(
                 regular_subtotal += item_total
                 regular_list_subtotal += list_unit * item.quantity
 
+            line_image = ""
+            if cart_line:
+                line_image = (cart_line.product_image or "").strip()
+                if not line_image:
+                    line_image = (cart_pd.get("main_image") or "").strip()
+            if not line_image:
+                color_for_image = (item.selected_color or item.selected_color_name or "").strip() or None
+                if not color_for_image and cart_line:
+                    color_for_image = (cart_line.selected_color or cart_line.selected_color_name or "").strip() or None
+                line_image = _resolve_cart_line_image(
+                    product,
+                    color_for_image,
+                    cart_pd if cart_line else {},
+                )
+            product_image = line_image or (product.main_image or "")
+
             items.append({
                 "product_id": product.id,
                 "product_name": product.name,
-                "product_image": product.main_image,
+                "product_image": product_image,
                 "unit_price": unit_price,
                 "quantity": item.quantity,
                 "total_price": item_total,
