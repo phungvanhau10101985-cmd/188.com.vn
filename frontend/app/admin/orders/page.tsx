@@ -4,6 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { adminOrderAPI, type AdminOrder, type AdminOrderStats, type AdminOrderStatsPreset, type PaymentRecord } from '@/lib/admin-api';
+import OrderItemVariantMeta, { orderItemImageLink } from '@/components/orders/OrderItemVariantMeta';
 import { cdnUrl, normalizeRemoteImageUrlForDisplay } from '@/lib/cdn-url';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 
@@ -115,16 +116,6 @@ function productPublicUrl(slug: string | null | undefined): string | null {
   const seg = productPathSlugFromApi(slug);
   if (!seg) return null;
   return `${shopOrigin()}/products/${encodeURIComponent(seg)}`;
-}
-
-function colorDisplay(item: {
-  selected_color_name?: string | null;
-  selected_color?: string | null;
-}): string | null {
-  const name = item.selected_color_name?.trim();
-  const code = item.selected_color?.trim();
-  if (name && code && name !== code) return `${name} (${code})`;
-  return name || code || null;
 }
 
 type RevenueReportMode = 'day' | 'week' | 'month' | 'year' | 'range';
@@ -1232,19 +1223,37 @@ export default function AdminOrdersPage() {
                   <tbody>
                     {(selectedOrder.items || []).map((item) => {
                       const href = productPublicUrl(item.product_slug);
-                      const color = colorDisplay(item);
-                      const size = item.selected_size?.trim();
+                      const rawImageUrl = orderItemImageLink(item);
                       return (
                         <tr key={item.id} className="border-b align-top">
                           <td className="py-2 pr-2 align-middle">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={orderItemImageUrl(item.product_image)}
-                              alt=""
-                              className="block w-32 h-32 shrink-0 aspect-square rounded-lg object-cover border border-gray-100 bg-gray-50"
-                              width={128}
-                              height={128}
-                            />
+                            {rawImageUrl ? (
+                              <a
+                                href={rawImageUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Mở ảnh biến thể"
+                                className="inline-block rounded-lg ring-offset-2 hover:ring-2 hover:ring-blue-300"
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={orderItemImageUrl(item.product_image)}
+                                  alt=""
+                                  className="block w-32 h-32 shrink-0 aspect-square rounded-lg object-cover border border-gray-100 bg-gray-50"
+                                  width={128}
+                                  height={128}
+                                />
+                              </a>
+                            ) : (
+                              /* eslint-disable-next-line @next/next/no-img-element */
+                              <img
+                                src={orderItemImageUrl(item.product_image)}
+                                alt=""
+                                className="block w-32 h-32 shrink-0 aspect-square rounded-lg object-cover border border-gray-100 bg-gray-50"
+                                width={128}
+                                height={128}
+                              />
+                            )}
                           </td>
                           <td className="py-2 min-w-0 pr-2">
                             <div className="font-medium text-gray-900 leading-snug">
@@ -1258,8 +1267,7 @@ export default function AdminOrdersPage() {
                             </div>
                             <div className="mt-1.5 space-y-0.5 text-xs text-gray-600">
                               {item.product_id != null ? <p>Mã SP (ID): {item.product_id}</p> : null}
-                              {color ? <p>Màu: {color}</p> : null}
-                              {size ? <p>Size: {size}</p> : null}
+                              <OrderItemVariantMeta item={item} className="space-y-0.5" />
                               {href ? (
                                 <p className="truncate" title={href}>
                                   <span className="text-gray-500">Link: </span>

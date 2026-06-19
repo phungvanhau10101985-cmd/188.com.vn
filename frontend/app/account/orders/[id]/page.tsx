@@ -9,6 +9,7 @@ import type { BankAccountInfo } from '@/lib/api-client';
 import ProductReviewFormModal from '@/app/products/[slug]/components/ProductReviewFormModal/ProductReviewFormModal';
 import OrderReviewActions from '@/app/account/orders/components/OrderReviewActions';
 import { pushOrderReceivedConfirmedToast } from '@/app/account/orders/components/orderReceivedToast';
+import OrderItemVariantMeta, { orderItemImageLink } from '@/components/orders/OrderItemVariantMeta';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
@@ -21,6 +22,9 @@ interface OrderItem {
   product_slug?: string | null;
   product_name: string;
   product_image?: string | null;
+  selected_size?: string | null;
+  selected_color?: string | null;
+  selected_color_name?: string | null;
   quantity: number;
   unit_price: number;
   total_price?: number;
@@ -311,22 +315,36 @@ export default function AccountOrderDetailPage() {
             {(order.items || []).map((item) => {
               const lineTotal = item.total_price ?? item.unit_price * item.quantity;
               const showReview = ['delivered', 'completed'].includes(order.status) && item.product_id;
+              const rawImageUrl = orderItemImageLink(item);
+              const thumb = rawImageUrl ? (
+                <div className="relative h-[4.75rem] w-[4.75rem] shrink-0 overflow-hidden rounded-lg bg-gray-100">
+                  <Image
+                    src={getOptimizedImage(item.product_image!, { fallbackStrategy: 'local' })}
+                    alt=""
+                    fill
+                    sizes="76px"
+                    className="object-cover"
+                  />
+                </div>
+              ) : null;
               return (
                 <li
                   key={item.id}
                   className="rounded-xl border border-gray-100 bg-gray-50/50 p-4 shadow-sm"
                 >
                   <div className="flex gap-3">
-                    {item.product_image ? (
-                      <div className="relative h-[4.75rem] w-[4.75rem] shrink-0 overflow-hidden rounded-lg bg-gray-100">
-                        <Image
-                          src={getOptimizedImage(item.product_image, { fallbackStrategy: 'local' })}
-                          alt=""
-                          fill
-                          sizes="76px"
-                          className="object-cover"
-                        />
-                      </div>
+                    {rawImageUrl ? (
+                      <a
+                        href={rawImageUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Mở ảnh biến thể"
+                        className="shrink-0 rounded-lg ring-offset-2 hover:ring-2 hover:ring-orange-300"
+                      >
+                        {thumb}
+                      </a>
+                    ) : item.product_image ? (
+                      thumb
                     ) : (
                       <div className="flex h-[4.75rem] w-[4.75rem] shrink-0 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-100 text-[10px] text-gray-400">
                         —
@@ -343,6 +361,10 @@ export default function AccountOrderDetailPage() {
                       ) : (
                         <p className="text-[15px] font-medium leading-snug text-gray-900">{item.product_name}</p>
                       )}
+                      <OrderItemVariantMeta
+                        item={item}
+                        className="mt-2 space-y-0.5 text-xs text-gray-600"
+                      />
                       <div className="mt-3 grid grid-cols-3 gap-2 border-t border-gray-200/80 pt-3">
                         <div>
                           <p className="text-[11px] uppercase tracking-wide text-gray-500">SL</p>
@@ -404,11 +426,29 @@ export default function AccountOrderDetailPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {(order.items || []).map((item) => (
+                {(order.items || []).map((item) => {
+                  const rawImageUrl = orderItemImageLink(item);
+                  return (
                   <tr key={item.id}>
                     <td className="px-3 py-3 align-top">
                       <div className="flex items-start gap-3">
-                        {item.product_image ? (
+                        {rawImageUrl ? (
+                          <a
+                            href={rawImageUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Mở ảnh biến thể"
+                            className="relative h-12 w-12 shrink-0 overflow-hidden rounded bg-gray-100 ring-offset-2 hover:ring-2 hover:ring-orange-300"
+                          >
+                            <Image
+                              src={getOptimizedImage(item.product_image!, { fallbackStrategy: 'local' })}
+                              alt=""
+                              fill
+                              sizes="48px"
+                              className="object-cover"
+                            />
+                          </a>
+                        ) : item.product_image ? (
                           <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded bg-gray-100">
                             <Image
                               src={getOptimizedImage(item.product_image, { fallbackStrategy: 'local' })}
@@ -419,7 +459,13 @@ export default function AccountOrderDetailPage() {
                             />
                           </div>
                         ) : null}
-                        <span className="min-w-0 break-words leading-snug">{item.product_name}</span>
+                        <div className="min-w-0">
+                          <span className="block min-w-0 break-words leading-snug">{item.product_name}</span>
+                          <OrderItemVariantMeta
+                            item={item}
+                            className="mt-1.5 space-y-0.5 text-xs text-gray-600"
+                          />
+                        </div>
                       </div>
                     </td>
                     <td className="px-3 py-3 text-center align-top font-medium tabular-nums">{item.quantity}</td>
@@ -450,7 +496,8 @@ export default function AccountOrderDetailPage() {
                       <td className="px-3 py-3" />
                     ) : null}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
