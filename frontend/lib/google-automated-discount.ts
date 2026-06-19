@@ -101,6 +101,13 @@ function base64UrlToBytes(input: string): Uint8Array {
   return bytes;
 }
 
+/** Sao chép bytes — TS strict DOM yêu cầu ArrayBuffer, không chấp nhận ArrayBufferLike. */
+function toCryptoBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(bytes.length);
+  out.set(bytes);
+  return out;
+}
+
 function roundPriceForCurrency(amount: number, currency: string): number {
   const cur = String(currency || '').trim().toUpperCase();
   if (cur === 'VND') return Math.max(0, Math.round(amount));
@@ -139,7 +146,7 @@ async function importGoogleDiscountPublicKey(): Promise<CryptoKey | null> {
     for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
     cachedGoogleDiscountPublicKey = await window.crypto.subtle.importKey(
       'spki',
-      bytes.buffer,
+      toCryptoBytes(bytes),
       { name: 'ECDSA', namedCurve: 'P-256' },
       false,
       ['verify'],
@@ -203,8 +210,8 @@ export async function verifyGoogleAutomatedDiscountTokenClient(
   const key = await importGoogleDiscountPublicKey();
   if (!key) return null;
 
-  const signed = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
-  const sig = base64UrlToBytes(parts[2]);
+  const signed = toCryptoBytes(new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
+  const sig = toCryptoBytes(base64UrlToBytes(parts[2]));
   const ok = await window.crypto.subtle.verify(
     { name: 'ECDSA', hash: 'SHA-256' },
     key,
