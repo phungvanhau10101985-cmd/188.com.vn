@@ -50,13 +50,17 @@ import {
 import { useSiteSale } from '@/lib/use-site-sale';
 import { formatPrice } from '@/lib/utils';
 import type { PromotionVoucherItem } from '@/lib/api-client';
-import { getActiveGoogleAutomatedDiscountToken } from '@/lib/google-automated-discount';
+import {
+  getActiveGoogleAutomatedDiscountToken,
+  googleDiscountPercentFromPricing,
+  isGoogleDiscountCartLine,
+} from '@/lib/google-automated-discount';
 import {
   calculateWelcomeDiscount,
   WELCOME_PROMO_CODE,
   type AppliedWelcomePromo,
 } from '@/lib/welcome-promo';
-import { applyGrandOrderDiscountCap, MAX_ORDER_DISCOUNT_PERCENT, resolveCappedPromoPercentDisplay } from '@/lib/order-discount-limits';
+import { applyGrandOrderDiscountCap, lineProgramSavingsFromList, MAX_ORDER_DISCOUNT_PERCENT, resolveCappedPromoPercentDisplay } from '@/lib/order-discount-limits';
 import CappedPromoPercentLabel from '@/components/cart/CappedPromoPercentLabel';
 import { useToast } from '@/components/ToastProvider';
 
@@ -268,6 +272,26 @@ export default function CartPage() {
     [selectedWarehouseItems],
   );
 
+  const googleCartSavings = useMemo(
+    () =>
+      selectedRegularItems.reduce((sum, item) => {
+        if (!isGoogleDiscountCartLine(item)) return sum;
+        const pricing = resolveCartLineDisplayPricing(
+          mergeCartLineSiteSaleFromCalendar(item, siteSaleState),
+          birthdayLineActive,
+          birthdayPercent,
+        );
+        return sum + pricing.lineSavings;
+      }, 0),
+    [selectedRegularItems, birthdayLineActive, birthdayPercent, siteSaleState],
+  );
+
+  /** Site sale + Google + mọi giảm dòng — đồng bộ backend (list − subtotal) cho trần 15%. */
+  const regularProgramSavings = useMemo(
+    () => lineProgramSavingsFromList(regularListSubtotal, regularSubtotal),
+    [regularListSubtotal, regularSubtotal],
+  );
+
   const selectedTeaserSavings = useMemo(
     () =>
       selectedRegularItems.reduce((sum, item) => {
@@ -294,7 +318,7 @@ export default function CartPage() {
     loyaltyPercent > 0 ? (subtotalAfterPrimary * loyaltyPercent) / 100 : 0;
   const cappedDiscounts = applyGrandOrderDiscountCap(
     regularListSubtotal,
-    regularSiteSaleSavings,
+    regularProgramSavings,
     rawWelcomeDiscount,
     rawBirthdayDiscount,
     rawLoyaltyDiscount,
@@ -310,10 +334,10 @@ export default function CartPage() {
   const selectedFinalPrice = regularFinalPrice + warehouseSubtotal;
   const regularPromoDiscount =
     selectedWelcomeDiscount + selectedBirthdayDiscount + selectedLoyaltyDiscount;
-  const regularTotalDiscount = regularSiteSaleSavings + regularPromoDiscount;
+  const regularTotalDiscount = regularProgramSavings + regularPromoDiscount;
   const cappedLabelBase = {
     listSubtotal: regularListSubtotal,
-    siteSaleSavings: regularSiteSaleSavings,
+    siteSaleSavings: regularProgramSavings,
     siteSaleActive,
     discountCapped,
   };
@@ -968,6 +992,10 @@ export default function CartPage() {
                   pricing.teaserUnitSavings > 0;
                 const maxLineQty = cartLineMaxQuantity(item);
                 const isWhLine = isWarehouseCartLine(item);
+                const isGoogleLine = isGoogleDiscountCartLine(item);
+                const googleDiscountPercent = isGoogleLine
+                  ? googleDiscountPercentFromPricing(pricing.compareUnitPrice, pricing.displayUnitPrice)
+                  : null;
                 return (
                   <div key={lineKey} className="px-3 md:px-5 py-3 md:py-4">
                     <div className={`grid grid-cols-1 gap-3 items-center ${mdCartGridCols}`}>
@@ -1013,6 +1041,7 @@ export default function CartPage() {
                                 {item.selected_color && item.product_data?.product_id && ' • '}
                                 {item.product_data?.product_id && `ID: ${item.product_data?.product_id}`}
                                 {isWhLine ? ' • Thanh lý kho' : ''}
+                                {isGoogleLine ? ' • Google Shopping' : ''}
                               </p>
                             )}
                           </div>
@@ -1063,9 +1092,14 @@ export default function CartPage() {
                                 Tiết kiệm {formatPrice(pricing.lineSavings / item.quantity)}
                               </p>
                             ) : null}
-                            {(pricing.sitePhase === 'active' || isWhLine) && pricing.sitePercent > 0 ? (
+                            {(pricing.sitePhase === 'active' || isWhLine) && pricing.sitePercent > 0 && !isGoogleLine ? (
                               <span className="mt-0.5 inline-block rounded bg-red-500 px-1 py-0.5 text-[10px] font-bold text-white">
                                 -{pricing.sitePercent}%
+                              </span>
+                            ) : null}
+                            {isGoogleLine && googleDiscountPercent != null ? (
+                              <span className="mt-0.5 inline-block rounded bg-emerald-600 px-1 py-0.5 text-[10px] font-bold text-white">
+                                Google -{googleDiscountPercent}%
                               </span>
                             ) : null}
                           </>
@@ -1214,11 +1248,24 @@ export default function CartPage() {
               </>
             ) : null}
 
-            {hasRegularSelection && regularListSubtotal > regularSubtotal && !siteSaleActive ? (
+            {hasRegularSelection && regularListSubtotal > regularSubtotal && !siteSaleActive && googleCartSavings <= 0 ? (
               <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
                 <span className="text-gray-500">Giá gốc (hàng thường)</span>
                 <span className="text-gray-400 line-through">{formatPrice(regularListSubtotal)}</span>
               </div>
+            ) : null}
+
+            {googleCartSavings > 0 ? (
+              <>
+                <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
+                  <span className="text-gray-500">Giá gốc (hàng thường)</span>
+                  <span className="text-gray-400 line-through">{formatPrice(regularListSubtotal)}</span>
+                </div>
+                <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
+                  <span className="text-gray-500">Giá ưu đãi Google Shopping</span>
+                  <span className="font-medium text-emerald-600">-{formatPrice(googleCartSavings)}</span>
+                </div>
+              </>
             ) : null}
 
             {welcomeApplied && selectedWelcomeDiscount > 0 ? (

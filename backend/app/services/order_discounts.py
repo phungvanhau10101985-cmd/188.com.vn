@@ -82,8 +82,9 @@ def apply_grand_discount_cap(
     loyalty: Decimal,
 ) -> tuple[Decimal, Decimal, Decimal, bool]:
     """
-    Trần 15% trên giá gốc (list): site sale + voucher/sinh nhật/hạng không vượt 15%.
-    Ví dụ sale 6% + sinh nhật 10% = 16% → chỉ còn 15% (cắt phần promo dư).
+    Trần 15% trên giá gốc (list): mọi giảm giá dòng (site sale, Google Shopping, …)
+    + voucher/sinh nhật/hạng không vượt 15%.
+    site_sale_savings = list_subtotal − subtotal (đã gồm Google nếu có).
     """
     list_base = max(Decimal("0"), list_subtotal)
     site_savings = max(Decimal("0"), site_sale_savings)
@@ -141,7 +142,7 @@ def calculate_order_discounts(
 ) -> OrderDiscountBreakdown:
     """
     Mã ví HOẶC sinh nhật, sau đó có thể cộng hạng thành viên trên phần còn lại.
-    Tổng giảm (site sale + promo) tối đa 15% giá gốc list_subtotal.
+    Tổng giảm (site sale / Google / … + promo) tối đa 15% giá gốc list_subtotal.
     """
     breakdown = OrderDiscountBreakdown(subtotal=subtotal)
     if user is None or subtotal <= 0:

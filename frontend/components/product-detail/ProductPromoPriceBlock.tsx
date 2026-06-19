@@ -22,8 +22,12 @@ export interface ProductPromoPriceBlockProps {
   showQuantityTotal?: boolean;
   /** Nhãn badge % giảm (vd. «Thanh lý kho») — mặc định «Giảm giá». */
   promoLabel?: string | null;
+  /** Nhãn giá đang bán khi có khuyến mãi (mặc định: thanh lý hoặc «Giá ưu đãi»). */
+  activePriceLabel?: string | null;
   /** SP kho thanh lý — badge % nổi bật hơn. */
   clearanceHighlight?: boolean;
+  /** Ẩn banner sale site khi giá Google Shopping đang áp dụng. */
+  suppressSiteSaleBanners?: boolean;
   className?: string;
 }
 
@@ -42,7 +46,9 @@ export default function ProductPromoPriceBlock({
   size = 'md',
   showQuantityTotal = false,
   promoLabel = null,
+  activePriceLabel = null,
   clearanceHighlight = false,
+  suppressSiteSaleBanners = false,
   className = '',
 }: ProductPromoPriceBlockProps) {
   const clientMounted = useClientMounted();
@@ -108,6 +114,9 @@ export default function ProductPromoPriceBlock({
   ]);
 
   const showPercentBadge = activeDiscountPercent > 0 && (showActivePromo || showTeaserPromo);
+  const resolvedActivePriceLabel =
+    activePriceLabel?.trim() ||
+    (clearanceHighlight ? 'Giá thanh lý' : 'Giá ưu đãi');
   const percentBadgeClass = clearanceHighlight
     ? size === 'lg'
       ? 'min-w-[4.5rem] rounded-xl bg-red-600 px-3.5 py-2 text-lg font-extrabold text-white shadow-md ring-2 ring-red-400/40'
@@ -138,14 +147,14 @@ export default function ProductPromoPriceBlock({
         </div>
       ) : null}
 
-      {sitePhase === 'active' && sitePercent > 0 && !birthdayActive ? (
+      {sitePhase === 'active' && sitePercent > 0 && !birthdayActive && !suppressSiteSaleBanners ? (
         <div className="inline-flex items-center gap-1.5 rounded-full bg-red-600 px-3 py-1 text-xs font-bold text-white shadow-sm">
           <span aria-hidden>🔥</span>
           {siteLabel ?? 'Sale ngày trùng tháng'} — giảm {sitePercent}%
         </div>
       ) : null}
 
-      {showTeaserPromo ? (
+      {showTeaserPromo && !suppressSiteSaleBanners ? (
         <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1 text-xs font-bold text-white shadow-sm">
           <span aria-hidden>⏳</span>
           {siteLabel ?? 'Sắp sale'} — giảm {sitePercent}% trong ngày sale
@@ -212,7 +221,7 @@ export default function ProductPromoPriceBlock({
           ) : null}
           {showActivePromo && !showTeaserPromo ? (
             <span className="w-full text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-              Giá thanh lý
+              {resolvedActivePriceLabel}
             </span>
           ) : null}
           <span className={`${priceClass} font-extrabold text-[#ea580c]`}>

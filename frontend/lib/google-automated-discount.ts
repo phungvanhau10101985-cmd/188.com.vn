@@ -177,13 +177,20 @@ function buildVerifyResponseFromPayload(
   if (priorPrice == null) priorPrice = derivePriorPriceFromDp(payload, price, currency);
   if (priorPrice != null) priorPrice = roundPriceForCurrency(priorPrice, currency);
 
+  const configuredMerchant = (process.env.NEXT_PUBLIC_GOOGLE_MERCHANT_CENTER_ID || '').trim();
+  const merchantId = String(payload.m || '').trim();
+  if (configuredMerchant && merchantId && merchantId !== configuredMerchant) return null;
+
+  const feedCurrency = (process.env.NEXT_PUBLIC_GOOGLE_FEED_CURRENCY || 'VND').trim().toUpperCase();
+  if (feedCurrency && currency && currency !== feedCurrency) return null;
+
   return {
     valid: true,
     price,
     prior_price: priorPrice,
     currency,
     offer_id: tokenOfferId,
-    merchant_id: String(payload.m || '').trim(),
+    merchant_id: merchantId,
     expires_at: exp,
   };
 }
@@ -242,6 +249,9 @@ export async function verifyGoogleAutomatedDiscountToken(
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok) {
+      if (data?.valid === false) {
+        throw new Error('Không xác thực được giá chiết khấu Google.');
+      }
       return data as GoogleAutomatedDiscountVerifyResponse;
     }
     if (res.status === 404 || res.status === 503) {
@@ -251,6 +261,13 @@ export async function verifyGoogleAutomatedDiscountToken(
     const detail = typeof data?.detail === 'string' ? data.detail : 'Không xác thực được giá chiết khấu Google.';
     throw new Error(detail);
   } catch (err) {
+    const isNetwork =
+      err instanceof TypeError ||
+      (err instanceof Error && /failed to fetch|networkerror|load failed/i.test(err.message));
+    if (!isNetwork) {
+      if (err instanceof Error) throw err;
+      throw new Error('Không xác thực được giá chiết khấu Google.');
+    }
     const clientVerified = await verifyGoogleAutomatedDiscountTokenClient(token, offerId);
     if (clientVerified) return clientVerified;
     if (err instanceof Error) throw err;
@@ -281,25 +298,42 @@ export function saveGoogleAutomatedDiscount(
   return record;
 }
 
+function findStoreRecordKey(
+  store: Record<string, GoogleAutomatedDiscountRecord>,
+  offerId: string,
+): string | null {
+  const id = String(offerId || '').trim();
+  if (!id) return null;
+  if (store[id]) return id;
+  for (const key of Object.keys(store)) {
+    if (offerIdsMatch(key, id)) return key;
+  }
+  return null;
+}
+
 export function touchGoogleAutomatedDiscountSession(offerId: string): void {
   const store = readStore();
-  const rec = store[offerId];
+  const storeKey = findStoreRecordKey(store, offerId);
+  if (!storeKey) return;
+  const rec = store[storeKey];
   if (!rec) return;
   const now = Date.now();
   rec.sessionExpiresAt = Math.min(now + SESSION_MS, rec.cartLockExpiresAt);
-  store[offerId] = rec;
+  store[storeKey] = rec;
   writeStore(store);
 }
 
 export function markGoogleAutomatedDiscountCartLock(offerId: string): void {
   const store = readStore();
-  const rec = store[offerId];
+  const storeKey = findStoreRecordKey(store, offerId);
+  if (!storeKey) return;
+  const rec = store[storeKey];
   if (!rec) return;
   const now = Date.now();
   const lockUntil = now + CART_LOCK_MS;
   rec.cartLockExpiresAt = Math.max(rec.cartLockExpiresAt, lockUntil);
   rec.sessionExpiresAt = Math.max(rec.sessionExpiresAt, rec.cartLockExpiresAt);
-  store[offerId] = rec;
+  store[storeKey] = rec;
   writeStore(store);
 }
 
@@ -357,10 +391,12 @@ export function getGoogleAutomatedDiscountCartLock(offerId: string | null | unde
   const id = String(offerId || '').trim();
   if (!id) return null;
   const store = readStore();
-  const rec = store[id];
+  const storeKey = findStoreRecordKey(store, id);
+  if (!storeKey) return null;
+  const rec = store[storeKey];
   if (!rec) return null;
   if (Date.now() > rec.cartLockExpiresAt) {
-    delete store[id];
+    delete store[storeKey];
     writeStore(store);
     return null;
   }
@@ -404,6 +440,13 @@ export function applyGoogleAutomatedDiscountToPricing<T extends ProductDisplayPr
     compareAt,
     compareUnitPrice: compareAt,
     savingsAmount: compareAt != null ? Math.max(0, compareAt - displayPrice) : base.savingsAmount,
+    sitePhase: null,
+    sitePercent: 0,
+    siteLabel: null,
+    countdownTo: null,
+    siteSavings: 0,
+    expectedSalePrice: null,
+    birthdaySavingsAmount: 0,
   };
 }
 
@@ -415,4 +458,44 @@ export async function capturePv2FromLocation(
   if (!token) return null;
   const verified = await verifyGoogleAutomatedDiscountToken(token, offerId || undefined);
   return saveGoogleAutomatedDiscount(verified, token);
+}
+
+export type CartLineGoogleDiscountData = {
+  price: number;
+  prior_price: number | null;
+  offer_id?: string;
+};
+
+export function readGoogleDiscountFromCartLine(productData: unknown): CartLineGoogleDiscountData | null {
+  if (!productData || typeof productData !== 'object') return null;
+  const block = (productData as Record<string, unknown>).google_automated_discount;
+  if (!block || typeof block !== 'object') return null;
+  const rec = block as Record<string, unknown>;
+  const price = Number(rec.price);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  let prior: number | null = null;
+  if (rec.prior_price != null) {
+    const pp = Number(rec.prior_price);
+    if (Number.isFinite(pp) && pp > price) prior = pp;
+  }
+  return {
+    price,
+    prior_price: prior,
+    offer_id: String(rec.offer_id || '').trim() || undefined,
+  };
+}
+
+export function isGoogleDiscountCartLine(item: { product_data?: unknown }): boolean {
+  return readGoogleDiscountFromCartLine(item.product_data) != null;
+}
+
+export function googleDiscountPercentFromPricing(
+  compareUnitPrice: number | null | undefined,
+  displayUnitPrice: number,
+): number | null {
+  if (compareUnitPrice == null || compareUnitPrice <= displayUnitPrice) return null;
+  return Math.max(
+    1,
+    Math.min(100, Math.round(((compareUnitPrice - displayUnitPrice) / compareUnitPrice) * 100)),
+  );
 }

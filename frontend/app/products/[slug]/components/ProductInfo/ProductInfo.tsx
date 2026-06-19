@@ -357,14 +357,16 @@ export default function ProductInfo({
           compareUnitPrice={pricing.compareUnitPrice}
           savingsAmount={pricing.savingsAmount}
           expectedSalePrice={pricing.expectedSalePrice}
-          sitePhase={pricing.sitePhase}
-          sitePercent={pricing.sitePercent}
-          siteLabel={pricing.siteLabel}
-          countdownTo={pricing.countdownTo}
-          birthdayActive={birthdayDiscount.active}
+          sitePhase={googleDiscount ? null : pricing.sitePhase}
+          sitePercent={googleDiscount ? 0 : pricing.sitePercent}
+          siteLabel={googleDiscount ? null : pricing.siteLabel}
+          countdownTo={googleDiscount ? null : pricing.countdownTo}
+          birthdayActive={googleDiscount ? false : birthdayDiscount.active}
           birthdayPercent={birthdayDiscount.percent}
           clearanceHighlight={isClearancePdp}
-          promoLabel={isClearancePdp ? 'Thanh lý kho' : null}
+          promoLabel={isClearancePdp ? 'Thanh lý kho' : googleDiscount ? 'Google Shopping' : null}
+          activePriceLabel={googleDiscount ? 'Giá ưu đãi Google' : null}
+          suppressSiteSaleBanners={!!googleDiscount}
           size="lg"
         />
         {googleDiscount ? (

@@ -108,8 +108,17 @@ export function applyTotalOrderDiscountCap(
 }
 
 /**
- * Trần 15% trên giá gốc: site sale + promo không vượt 15%.
- * Ví dụ sale 6% + sinh nhật 10% = 16% → chỉ còn 15%.
+ * Trần 15% trên giá gốc (list): mọi giảm giá dòng (site sale, Google Shopping, …)
+ * + voucher/sinh nhật/hạng không vượt 15%.
+ * Ví dụ sale 6% + sinh nhật 10% = 16% → chỉ còn 15% (cắt phần promo dư).
+ */
+export function lineProgramSavingsFromList(listSubtotal: number, subtotal: number): number {
+  if (!Number.isFinite(listSubtotal) || !Number.isFinite(subtotal)) return 0;
+  return Math.max(0, listSubtotal - subtotal);
+}
+
+/**
+ * Trần 15% trên giá gốc: siteSaleSavings = tổng tiết kiệm dòng (site sale + Google + …).
  */
 export function applyGrandOrderDiscountCap(
   listSubtotal: number,

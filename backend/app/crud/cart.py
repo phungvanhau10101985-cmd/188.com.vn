@@ -182,8 +182,9 @@ class CartItemCRUD:
                     product_data=client_pd,
                     google_pv2_token=google_token or None,
                 )
-            except GoogleAutomatedDiscountError:
-                pass
+            except GoogleAutomatedDiscountError as exc:
+                if google_token:
+                    raise ValueError(str(exc)) from exc
 
         if existing:
             new_qty = int(existing.quantity or 0) + int(cart_item.quantity or 0)

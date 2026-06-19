@@ -1,5 +1,6 @@
 import type { Product, SiteSaleCalendarState, SiteSaleProductPricing } from '@/types/api';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
+import { isGoogleDiscountCartLine } from '@/lib/google-automated-discount';
 import {
   isWarehouseCartLine,
   isWarehouseClearanceProduct,
@@ -153,6 +154,7 @@ export function mergeCartLineSiteSaleFromCalendar<T extends CartLinePricingInput
   calendar: SiteSaleCalendarState | null | undefined,
 ): T {
   if (isWarehouseCartLine(item)) return item;
+  if (isGoogleDiscountCartLine(item)) return item;
   if (!calendar?.enabled || !calendar.phase) return item;
 
   const existing = item.site_sale;
@@ -510,6 +512,7 @@ export function resolveCartLineDisplayPricing(
   }
 
   const unitSalePrice = item.product_price ?? item.product_data?.price ?? 0;
+  const googleLine = isGoogleDiscountCartLine(item);
 
   let siteSaleUnitPrice = unitSalePrice;
   if (sitePhase === 'active' && sitePercent > 0) {
@@ -538,9 +541,10 @@ export function resolveCartLineDisplayPricing(
     compareAt = item.product_data.original_price;
   }
 
-  const displayUnitPrice = birthdayActive
-    ? applyBirthdayDiscount(beforeBirthday, birthdayPercent)
-    : beforeBirthday;
+  const displayUnitPrice =
+    birthdayActive && !googleLine
+      ? applyBirthdayDiscount(beforeBirthday, birthdayPercent)
+      : beforeBirthday;
 
   const qty = Math.max(1, item.quantity || 1);
   const displayLineTotal = displayUnitPrice * qty;
