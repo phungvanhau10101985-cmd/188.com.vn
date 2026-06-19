@@ -18,6 +18,8 @@ import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { applyGoogleAutomatedDiscountToPricing } from '@/lib/google-automated-discount';
+import { useGoogleAutomatedDiscount } from '@/lib/use-google-automated-discount';
 import { useSiteSale } from '@/lib/use-site-sale';
 import {
   NANO_AI_CTX_SOURCE_PRODUCT_PDP,
@@ -91,10 +93,19 @@ export default function ProductInfo({
     () => mergeProductSiteSaleFromCalendar(product, siteSaleState),
     [product, siteSaleState],
   );
-  const pricing = resolveProductDisplayPricing(
-    productForPricing,
-    birthdayDiscount.active,
-    birthdayDiscount.percent,
+  const { record: googleDiscount } = useGoogleAutomatedDiscount(product.product_id);
+  const pricingBase = useMemo(
+    () =>
+      resolveProductDisplayPricing(
+        productForPricing,
+        birthdayDiscount.active,
+        birthdayDiscount.percent,
+      ),
+    [productForPricing, birthdayDiscount.active, birthdayDiscount.percent],
+  );
+  const pricing = useMemo(
+    () => applyGoogleAutomatedDiscountToPricing(product.product_id, pricingBase),
+    [product.product_id, pricingBase, googleDiscount?.price, googleDiscount?.priorPrice],
   );
   const displayPrice = pricing.displayPrice;
   const birthdaySavingsAmount = pricing.birthdaySavingsAmount;
@@ -353,6 +364,11 @@ export default function ProductInfo({
           promoLabel={isClearancePdp ? 'Thanh lý kho' : null}
           size="lg"
         />
+        {googleDiscount ? (
+          <p className="mt-2 text-xs text-emerald-800">
+            Giá ưu đãi từ quảng cáo Google Shopping — áp dụng khi mua trong phiên này.
+          </p>
+        ) : null}
       </div>
 
       {/* Variant Selectors — order nguồn */}

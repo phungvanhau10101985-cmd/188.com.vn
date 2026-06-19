@@ -50,6 +50,7 @@ import {
 import { useSiteSale } from '@/lib/use-site-sale';
 import { formatPrice } from '@/lib/utils';
 import type { PromotionVoucherItem } from '@/lib/api-client';
+import { getActiveGoogleAutomatedDiscountToken } from '@/lib/google-automated-discount';
 import {
   calculateWelcomeDiscount,
   WELCOME_PROMO_CODE,
@@ -653,6 +654,13 @@ export default function CartPage() {
           quantity: item.quantity,
           selected_size: item.selected_size ?? undefined,
           selected_color: item.selected_color ?? undefined,
+          google_pv2_token:
+            (item.product_data as { google_automated_discount?: unknown } | undefined)?.google_automated_discount
+              ? undefined
+              : getActiveGoogleAutomatedDiscountToken(
+                  item.product_code ??
+                    (item.product_data as { product_id?: string } | undefined)?.product_id,
+                ) ?? undefined,
         })),
       });
 

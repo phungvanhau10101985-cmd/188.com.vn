@@ -123,6 +123,22 @@ def create_order(
             is_warehouse_cart_product,
             resolve_checkout_line_prices,
         )
+        from app.services.google_automated_discount import (
+            GoogleAutomatedDiscountError,
+            apply_google_discount_to_cart_line,
+            read_google_discount_lock,
+        )
+
+        cart_lines_by_key: dict = {}
+        if current_user is not None:
+            cart_items = crud.cart.get_user_cart_items(db, user_id=current_user.id)
+            for ci in cart_items:
+                key = (
+                    int(ci.product_id),
+                    (ci.selected_size or "").strip() or None,
+                    (ci.selected_color or "").strip() or None,
+                )
+                cart_lines_by_key[key] = ci
 
         items = []
         total_amount = Decimal('0')
@@ -145,6 +161,31 @@ def create_order(
                 requires_deposit = True
             
             unit_f, list_f = resolve_checkout_line_prices(db, product, user=current_user)
+            list_unit = Decimal(str(list_f))
+
+            cart_key = (
+                int(product.id),
+                (item.selected_size or "").strip() or None,
+                (item.selected_color or "").strip() or None,
+            )
+            cart_line = cart_lines_by_key.get(cart_key)
+            cart_pd = dict(cart_line.product_data or {}) if cart_line and isinstance(cart_line.product_data, dict) else {}
+            google_lock = read_google_discount_lock(cart_pd) if not is_warehouse_cart_product(product) else None
+            if google_lock:
+                unit_f = float(google_lock["price"])
+                list_f = float(google_lock.get("prior_price") or list_f or unit_f)
+            elif (item.google_pv2_token or "").strip() and not is_warehouse_cart_product(product):
+                try:
+                    unit_f, list_f, _ = apply_google_discount_to_cart_line(
+                        product=product,
+                        unit_sale=float(unit_f),
+                        list_original=float(list_f),
+                        product_data={},
+                        google_pv2_token=item.google_pv2_token,
+                    )
+                except GoogleAutomatedDiscountError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
             unit_price = Decimal(str(unit_f))
             list_unit = Decimal(str(list_f))
             item_total = unit_price * item.quantity

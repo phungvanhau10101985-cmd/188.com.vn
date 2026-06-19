@@ -13,6 +13,7 @@ import {
   DeferredLayoutFloaters,
   DeferredPwaPushRegister,
 } from "@/components/DeferredLayoutBoot.client";
+import GoogleAutomatedDiscountCapture from "@/components/GoogleAutomatedDiscountCapture";
 import AnalyticsTracker from "@/components/AnalyticsTracker";
 import { fetchPublicSiteEmbeds } from "@/lib/site-embeds-public";
 import { GoogleCustomerReviewsMerchantProvider } from "@/components/GoogleCustomerReviewsMerchantProvider";
@@ -190,6 +191,9 @@ export default async function RootLayout({
         ) : null}
         <SiteEmbedsRoot embeds={siteEmbeds} headClientRemainders={headClientRemainders} />
         <DeferredLayoutFloaters />
+        <Suspense fallback={null}>
+          <GoogleAutomatedDiscountCapture />
+        </Suspense>
         {/* Global Providers + Header/Footer xuyên suốt */}
         <GoogleCustomerReviewsMerchantProvider
           merchantId={siteEmbeds.googleCustomerReviewsMerchantId}

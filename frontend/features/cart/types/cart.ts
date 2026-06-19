@@ -77,6 +77,8 @@ export interface AddToCartRequest {
   /** URL ảnh đúng biến thể — backend ưu tiên để không phụ thuộc khớp chuỗi màu. */
   line_image_url?: string;
   product_data?: any;
+  /** JWT pv2 — chiết khấu tự động Google Shopping */
+  google_pv2_token?: string;
 }
 
 export interface UpdateCartItemRequest {

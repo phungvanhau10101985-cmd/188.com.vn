@@ -7,7 +7,7 @@ from app.api.endpoints import (
     orders, category_seo, loyalty,
     notifications, push, nanoai_search, image_localization, birthday_promo,
     promotions,
-    sale_calendar, newsletter,
+    sale_calendar, newsletter, google_merchant,
 )
 
 api_router = APIRouter()
@@ -34,3 +34,4 @@ api_router.include_router(image_localization.router, prefix="/image-localization
 api_router.include_router(user_behavior.router, prefix="/user-behavior", tags=["user-behavior"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(nanoai_search.router, prefix="/nanoai", tags=["nanoai"])
+api_router.include_router(google_merchant.router, prefix="/google-merchant", tags=["google-merchant"])

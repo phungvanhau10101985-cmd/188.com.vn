@@ -476,6 +476,42 @@ class Settings:
         self.MERCHANT_FEED_CURRENCY: str = os.getenv("MERCHANT_FEED_CURRENCY", "VND").strip() or "VND"
         _merch_feed_img_base = os.getenv("MERCHANT_FEED_IMAGE_BASE_URL", "").strip().rstrip("/")
         self.MERCHANT_FEED_IMAGE_BASE_URL: str = _merch_feed_img_base or self.BUNNY_CDN_PUBLIC_BASE
+        # Chiết khấu tự động Google Shopping — JWT pv2 + feed auto_pricing_min_price / COGS
+        self.GOOGLE_MERCHANT_CENTER_ID: str = os.getenv("GOOGLE_MERCHANT_CENTER_ID", "").strip()
+        _gad_en = (os.getenv("GOOGLE_AUTOMATED_DISCOUNT_ENABLED") or "true").strip().lower()
+        self.GOOGLE_AUTOMATED_DISCOUNT_ENABLED: bool = _gad_en not in (
+            "0",
+            "false",
+            "no",
+            "off",
+            "disabled",
+        )
+        _gad_feed = (os.getenv("GOOGLE_AUTOMATED_DISCOUNT_FEED_AUTO_OPT_IN") or "true").strip().lower()
+        self.GOOGLE_AUTOMATED_DISCOUNT_FEED_AUTO_OPT_IN: bool = _gad_feed not in (
+            "0",
+            "false",
+            "no",
+            "off",
+            "disabled",
+        )
+        try:
+            self.GOOGLE_AUTOMATED_DISCOUNT_DEFAULT_COGS_PERCENT: float = float(
+                os.getenv("GOOGLE_AUTOMATED_DISCOUNT_DEFAULT_COGS_PERCENT", "65") or "65"
+            )
+        except ValueError:
+            self.GOOGLE_AUTOMATED_DISCOUNT_DEFAULT_COGS_PERCENT = 65.0
+        try:
+            self.GOOGLE_AUTOMATED_DISCOUNT_DEFAULT_MIN_PRICE_PERCENT: float = float(
+                os.getenv("GOOGLE_AUTOMATED_DISCOUNT_DEFAULT_MIN_PRICE_PERCENT", "95") or "95"
+            )
+        except ValueError:
+            self.GOOGLE_AUTOMATED_DISCOUNT_DEFAULT_MIN_PRICE_PERCENT = 95.0
+        self.GOOGLE_AUTOMATED_DISCOUNT_DEFAULT_COGS_PERCENT = max(
+            5.0, min(95.0, self.GOOGLE_AUTOMATED_DISCOUNT_DEFAULT_COGS_PERCENT)
+        )
+        self.GOOGLE_AUTOMATED_DISCOUNT_DEFAULT_MIN_PRICE_PERCENT = max(
+            5.0, min(95.0, self.GOOGLE_AUTOMATED_DISCOUNT_DEFAULT_MIN_PRICE_PERCENT)
+        )
         # Feed Meta catalogue (fb_product_category phải thuộc taxonomy Meta — đổi theo ngành hàng thật)
         self.META_FEED_FB_PRODUCT_CATEGORY: str = (
             os.getenv("META_FEED_FB_PRODUCT_CATEGORY", "").strip()

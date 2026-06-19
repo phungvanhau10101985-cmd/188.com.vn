@@ -57,6 +57,7 @@ def _cart_items_with_site_sale_pricing(
 ) -> tuple[List[CartItemResponse], float, dict]:
     from app.services.sale_calendar import apply_site_sale_to_price, resolve_sale_calendar_state
     from app.services import warehouse_clearance as wh_clearance_svc
+    from app.services.google_automated_discount import read_google_discount_lock
 
     sale_state = resolve_sale_calendar_state(db, user=user)
     wh_enabled, wh_pct = wh_clearance_svc.get_warehouse_clearance_settings(db)
@@ -67,6 +68,8 @@ def _cart_items_with_site_sale_pricing(
         is_wh = _is_warehouse_cart_line(item)
         base = _cart_line_list_price(item, is_wh=is_wh, db=db)
         sellable: Optional[int] = None
+        pd_raw = dict(resp.product_data or {})
+        google_lock = read_google_discount_lock(pd_raw) if not is_wh else None
         if is_wh:
             from app.services.warehouse_stock import warehouse_sellable_qty
 
@@ -78,6 +81,13 @@ def _cart_items_with_site_sale_pricing(
             resp.site_sale = None
             if item.product is not None:
                 sellable = warehouse_sellable_qty(item.product)
+        elif google_lock:
+            line_unit = float(google_lock["price"])
+            list_for_compare = float(google_lock.get("prior_price") or base or line_unit)
+            resp.product_price = line_unit
+            resp.list_price = list_for_compare if list_for_compare > 0 else None
+            resp.original_price = list_for_compare if list_for_compare > line_unit else None
+            resp.site_sale = None
         else:
             pricing = apply_site_sale_to_price(base, sale_state)
             line_unit = float(pricing["display_price"])
@@ -92,8 +102,15 @@ def _cart_items_with_site_sale_pricing(
                 "countdown_to": sale_state.countdown_to.isoformat() if sale_state.countdown_to else None,
             }
         pd = dict(resp.product_data or {})
-        pd["list_price"] = base
-        pd["price"] = line_unit
+        if google_lock:
+            pd["price"] = line_unit
+            pd["list_price"] = float(google_lock.get("prior_price") or base or line_unit)
+            if pd["list_price"] > line_unit:
+                pd["original_price"] = pd["list_price"]
+            pd["google_automated_discount"] = pd_raw.get("google_automated_discount")
+        else:
+            pd["list_price"] = base
+            pd["price"] = line_unit
         if is_wh:
             pd["is_warehouse_clearance"] = True
             pd["warehouse_clearance_percent"] = wh_pct

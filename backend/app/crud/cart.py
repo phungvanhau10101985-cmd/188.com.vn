@@ -164,6 +164,27 @@ class CartItemCRUD:
         
         unit_sale, list_original, is_wh, stock_cap, wh_pct = _cart_line_unit_prices(db, product)
 
+        client_pd = dict(cart_item.product_data or {})
+        google_token = (cart_item.google_pv2_token or client_pd.get("google_pv2_token") or "").strip()
+        if google_token:
+            client_pd["google_pv2_token"] = google_token
+        if not is_wh:
+            try:
+                from app.services.google_automated_discount import (
+                    GoogleAutomatedDiscountError,
+                    apply_google_discount_to_cart_line,
+                )
+
+                unit_sale, list_original, client_pd = apply_google_discount_to_cart_line(
+                    product=product,
+                    unit_sale=unit_sale,
+                    list_original=list_original,
+                    product_data=client_pd,
+                    google_pv2_token=google_token or None,
+                )
+            except GoogleAutomatedDiscountError:
+                pass
+
         if existing:
             new_qty = int(existing.quantity or 0) + int(cart_item.quantity or 0)
             if is_wh:
@@ -182,7 +203,7 @@ class CartItemCRUD:
             existing.selected_color_name = cart_item.selected_color_name
             existing.total_price = unit_sale * new_qty
             if isinstance(existing.product_data, dict):
-                pd = {**existing.product_data}
+                pd = {**existing.product_data, **client_pd}
                 pd["price"] = unit_sale
                 pd["list_price"] = list_original
                 pd["original_price"] = list_original
@@ -219,7 +240,6 @@ class CartItemCRUD:
             cart_item.product_data,
             cart_item.line_image_url,
         )
-        client_pd = dict(cart_item.product_data or {})
 
         product_data: Dict[str, Any] = {
             "id": product.id,
@@ -242,9 +262,15 @@ class CartItemCRUD:
 
             wh_clearance_svc.apply_warehouse_cart_product_data_slug(db, product, product_data)
         for k, v in client_pd.items():
-            if v is None or k in product_data:
+            if v is None:
+                continue
+            if k in product_data and product_data[k] == v:
                 continue
             product_data[k] = v
+        product_data["price"] = unit_sale
+        product_data["list_price"] = list_original
+        if list_original > unit_sale:
+            product_data["original_price"] = list_original
 
         now = datetime.now()
         db_cart_item = CartItem(
@@ -280,6 +306,13 @@ class CartItemCRUD:
             product = db.query(Product).filter(Product.id == db_cart_item.product_id).first()
             if product is not None:
                 unit_sale, list_original, is_wh, stock_cap, wh_pct = _cart_line_unit_prices(db, product)
+                pd_existing = dict(db_cart_item.product_data or {}) if isinstance(db_cart_item.product_data, dict) else {}
+                from app.services.google_automated_discount import read_google_discount_lock
+
+                lock = read_google_discount_lock(pd_existing)
+                if lock and not is_wh:
+                    unit_sale = float(lock["price"])
+                    list_original = float(lock.get("prior_price") or list_original or unit_sale)
                 qty = int(db_cart_item.quantity or 1)
                 if is_wh and stock_cap is not None:
                     if stock_cap <= 0:

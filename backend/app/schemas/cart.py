@@ -19,6 +19,11 @@ class CartItemCreate(CartItemBase):
         max_length=2000,
         description="URL ảnh đúng biến thể — ưu tiên khi lưu giỏ",
     )
+    google_pv2_token: Optional[str] = Field(
+        None,
+        max_length=4096,
+        description="JWT pv2 từ URL quảng cáo Mua sắm (chiết khấu tự động Google)",
+    )
 
 
 class CartItemUpdate(BaseModel):

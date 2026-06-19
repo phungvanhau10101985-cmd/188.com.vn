@@ -37,6 +37,10 @@ import { warehouseCartProductDataExtras } from '@/lib/warehouse-clearance';
 import { filterVisibleWebImageUrls } from '@/lib/image-utils';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
 import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
+import {
+  getActiveGoogleAutomatedDiscountToken,
+  markGoogleAutomatedDiscountCartLock,
+} from '@/lib/google-automated-discount';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
@@ -188,12 +192,14 @@ export default function ProductDetailClient({
 
   const handleAddToCart = async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
     const lineImg = cartLineMainImage(p, selectedColor);
+    const googlePv2Token = getActiveGoogleAutomatedDiscountToken(p.product_id);
     const payload = {
       product_id: p.id,
       quantity,
       selected_size: selectedSize,
       selected_color: selectedColor,
       line_image_url: lineImg,
+      google_pv2_token: googlePv2Token ?? undefined,
       product_data: {
         id: p.id,
         code: p.code,
@@ -224,6 +230,9 @@ export default function ProductDetailClient({
     }
     try {
       await addToCart(payload);
+      if (googlePv2Token && p.product_id) {
+        markGoogleAutomatedDiscountCartLock(p.product_id);
+      }
       pushToast({ title: 'Đã thêm vào giỏ hàng', variant: 'success', durationMs: 2000 });
       trackEvent('add_to_cart_click', { product_id: p.id, quantity });
     } catch (err: unknown) {
@@ -302,12 +311,14 @@ export default function ProductDetailClient({
 
   const handleBuyNow = async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
     const lineImg = cartLineMainImage(p, selectedColor);
+    const googlePv2Token = getActiveGoogleAutomatedDiscountToken(p.product_id);
     const payload = {
       product_id: p.id,
       quantity,
       selected_size: selectedSize,
       selected_color: selectedColor,
       line_image_url: lineImg,
+      google_pv2_token: googlePv2Token ?? undefined,
       product_data: {
         id: p.id,
         code: p.code,
@@ -338,6 +349,9 @@ export default function ProductDetailClient({
     }
     try {
       await addToCart(payload, { skipAddedPopup: true });
+      if (googlePv2Token && p.product_id) {
+        markGoogleAutomatedDiscountCartLock(p.product_id);
+      }
       trackEvent('buy_now', { product_id: p.id, quantity });
       router.push('/cart');
     } catch (err: unknown) {

@@ -7,7 +7,8 @@ Luôn xuất các cột `sale_price` và `sale_price_effective_date` (header c�
 Merchant Center). Khi chưa có chương trình giảm giá, hai cột để trống; khi bật sale có thể điền
 từ `.env` `CATALOG_SALE_*` (tạm thời) hoặc sau này nối nguồn campaign khác vào `_sale_price_and_effective`.
 
-`product_info` (AK) dùng cho: google_product_category, gender, custom_label, cogs, …
+`product_info` (AK) dùng cho: google_product_category, gender, custom_label, cogs,
+`auto_pricing_min_price`, …
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ TSV_COLUMNS = (
     "sale_price",
     "sale_price_effective_date",
     "cost_of_goods_sold",
+    "auto_pricing_min_price",
     "brand",
     "condition",
     "identifier_exists",
@@ -446,12 +448,60 @@ def _cost_of_goods_sold(product: Product, currency: str) -> str:
     pi = _product_info_dict(product)
     raw = pi.get("cost_of_goods_sold") or pi.get("cogs")
     if _is_blankish(raw):
+        if getattr(settings, "GOOGLE_AUTOMATED_DISCOUNT_FEED_AUTO_OPT_IN", False):
+            base = _list_price_for_feed(product)
+            if base > 0:
+                pct = float(getattr(settings, "GOOGLE_AUTOMATED_DISCOUNT_DEFAULT_COGS_PERCENT", 65) or 65)
+                pct = max(5.0, min(95.0, pct))
+                return _price_gmc(base * (pct / 100.0), currency)
         return ""
     try:
         fp = float(raw)
         return _price_gmc(fp, currency)
     except (TypeError, ValueError):
         return _tsv_cell(str(raw))
+
+
+def _auto_pricing_min_price(product: Product, currency: str, *, cogs_gmc: str) -> str:
+    """Giá tối thiểu cho chiết khấu tự động Google — bắt buộc kèm COGS."""
+    if _is_blankish(cogs_gmc):
+        return ""
+
+    base = _list_price_for_feed(product)
+    if base <= 0:
+        return ""
+
+    pi = _product_info_dict(product)
+    raw = pi.get("auto_pricing_min_price") or pi.get("google_auto_pricing_min_price")
+    min_raw: Optional[float] = None
+    if not _is_blankish(raw):
+        try:
+            min_raw = float(raw)
+        except (TypeError, ValueError):
+            min_raw = None
+
+    if min_raw is None:
+        if not getattr(settings, "GOOGLE_AUTOMATED_DISCOUNT_FEED_AUTO_OPT_IN", False):
+            return ""
+        pct = float(getattr(settings, "GOOGLE_AUTOMATED_DISCOUNT_DEFAULT_MIN_PRICE_PERCENT", 95) or 95)
+        pct = max(5.0, min(95.0, pct))
+        min_raw = base * (pct / 100.0)
+
+    if min_raw is None or min_raw <= 0:
+        return ""
+
+    # Parse COGS numeric from GMC string "650000 VND"
+    cogs_num = 0.0
+    try:
+        cogs_num = float(str(cogs_gmc).split()[0])
+    except (TypeError, ValueError, IndexError):
+        cogs_num = 0.0
+
+    min_raw = max(min_raw, cogs_num + 1.0)
+    min_raw = min(min_raw, base * 0.95)
+    if min_raw >= base:
+        return ""
+    return _price_gmc(min_raw, currency)
 
 
 def _custom_label_0_value(product: Product) -> str:
@@ -591,6 +641,7 @@ def merchant_row_values(
     ig = _item_group_id_value(product)
     vid = _video_feed_url(product)
     cogs = _cost_of_goods_sold(product, currency)
+    auto_min = _auto_pricing_min_price(product, currency, cogs_gmc=cogs)
 
     return [
         _tsv_cell(getattr(product, "product_id", "") or ""),
@@ -610,6 +661,7 @@ def merchant_row_values(
         sale_price,
         sale_eff,
         cogs,
+        auto_min,
         brand,
         "new",
         identifier,

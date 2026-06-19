@@ -44,6 +44,11 @@ class OrderItemCreate(BaseModel):
     selected_size: Optional[str] = None
     selected_color: Optional[str] = None
     selected_color_name: Optional[str] = None
+    google_pv2_token: Optional[str] = Field(
+        None,
+        max_length=4096,
+        description="JWT pv2 chiết khấu tự động Google (tuỳ chọn — ưu tiên khóa giá từ giỏ hàng)",
+    )
 
 class OrderItemResponse(BaseModel):
     id: int
