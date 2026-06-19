@@ -10,6 +10,20 @@ const STORAGE_KEY = '188_google_automated_discount_v1';
 const SESSION_MS = 30 * 60 * 1000;
 const CART_LOCK_MS = 48 * 60 * 60 * 1000;
 
+export const GOOGLE_AUTOMATED_DISCOUNT_UPDATED_EVENT = '188-google-automated-discount-updated';
+
+function notifyGoogleAutomatedDiscountUpdated(): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event(GOOGLE_AUTOMATED_DISCOUNT_UPDATED_EVENT));
+}
+
+function offerIdsMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  const left = String(a || '').trim();
+  const right = String(b || '').trim();
+  if (!left || !right) return false;
+  return left === right || left.toLowerCase() === right.toLowerCase();
+}
+
 export type GoogleAutomatedDiscountRecord = {
   offerId: string;
   price: number;
@@ -113,6 +127,7 @@ export function saveGoogleAutomatedDiscount(
   const store = readStore();
   store[record.offerId] = record;
   writeStore(store);
+  notifyGoogleAutomatedDiscountUpdated();
   return record;
 }
 
@@ -142,19 +157,50 @@ export function getGoogleAutomatedDiscountForOffer(offerId: string | null | unde
   const id = String(offerId || '').trim();
   if (!id) return null;
   const store = readStore();
-  const rec = store[id];
-  if (!rec) return null;
+  const direct = store[id];
+  if (direct) {
+    const active = validateActiveRecord(direct, id, store);
+    if (active) return active;
+  }
+  for (const [key, rec] of Object.entries(store)) {
+    if (!offerIdsMatch(key, id)) continue;
+    const active = validateActiveRecord(rec, key, store);
+    if (active) return active;
+  }
+  return null;
+}
+
+function validateActiveRecord(
+  rec: GoogleAutomatedDiscountRecord,
+  storeKey: string,
+  store: Record<string, GoogleAutomatedDiscountRecord>,
+): GoogleAutomatedDiscountRecord | null {
   const now = Date.now();
   if (now > rec.cartLockExpiresAt) {
-    delete store[id];
+    delete store[storeKey];
     writeStore(store);
     return null;
   }
   if (now > rec.sessionExpiresAt && now <= rec.cartLockExpiresAt) {
-    // Trong giỏ vẫn giữ giá; ngoài giỏ chỉ hiện nếu còn session
     return null;
   }
   return rec;
+}
+
+export function getGoogleAutomatedDiscountForProduct(
+  product: { product_id?: string | null; code?: string | null },
+): GoogleAutomatedDiscountRecord | null {
+  const feedId = String(product.product_id || '').trim();
+  if (feedId) {
+    const hit = getGoogleAutomatedDiscountForOffer(feedId);
+    if (hit) return hit;
+  }
+  const code = String(product.code || '').trim();
+  if (code) {
+    const hit = getGoogleAutomatedDiscountForOffer(code);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 export function getGoogleAutomatedDiscountCartLock(offerId: string | null | undefined): GoogleAutomatedDiscountRecord | null {
@@ -187,8 +233,11 @@ export type ProductDisplayPricingLike = {
 export function applyGoogleAutomatedDiscountToPricing<T extends ProductDisplayPricingLike>(
   productOfferId: string | null | undefined,
   base: T,
+  product?: { product_id?: string | null; code?: string | null },
 ): T {
-  const rec = getGoogleAutomatedDiscountForOffer(productOfferId);
+  const rec =
+    (product ? getGoogleAutomatedDiscountForProduct(product) : null) ??
+    getGoogleAutomatedDiscountForOffer(productOfferId);
   if (!rec) return base;
   const displayPrice = rec.price;
   const compareAt =

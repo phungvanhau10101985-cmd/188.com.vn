@@ -45,6 +45,14 @@ def _normalize_offer_id(value: object) -> str:
     return str(value or "").strip()
 
 
+def _offer_ids_match(a: object, b: object) -> bool:
+    left = _normalize_offer_id(a)
+    right = _normalize_offer_id(b)
+    if not left or not right:
+        return False
+    return left == right or left.lower() == right.lower()
+
+
 def _normalize_currency(value: object) -> str:
     return str(value or "").strip().upper()
 
@@ -130,7 +138,7 @@ def verify_google_automated_discount_token(
         prior_price = _round_price_for_currency(prior_price, currency)
 
     expected_offer = _normalize_offer_id(expected_offer_id)
-    if expected_offer and offer_id and offer_id != expected_offer:
+    if expected_offer and offer_id and not _offer_ids_match(offer_id, expected_offer):
         raise GoogleAutomatedDiscountError("Mã sản phẩm trong mã thông báo không khớp.")
 
     configured_merchant = _normalize_offer_id(

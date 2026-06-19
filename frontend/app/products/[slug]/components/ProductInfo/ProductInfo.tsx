@@ -93,7 +93,10 @@ export default function ProductInfo({
     () => mergeProductSiteSaleFromCalendar(product, siteSaleState),
     [product, siteSaleState],
   );
-  const { record: googleDiscount } = useGoogleAutomatedDiscount(product.product_id);
+  const { record: googleDiscount, error: googleDiscountError } = useGoogleAutomatedDiscount(
+    product.product_id,
+    product,
+  );
   const pricingBase = useMemo(
     () =>
       resolveProductDisplayPricing(
@@ -104,8 +107,8 @@ export default function ProductInfo({
     [productForPricing, birthdayDiscount.active, birthdayDiscount.percent],
   );
   const pricing = useMemo(
-    () => applyGoogleAutomatedDiscountToPricing(product.product_id, pricingBase),
-    [product.product_id, pricingBase, googleDiscount?.price, googleDiscount?.priorPrice],
+    () => applyGoogleAutomatedDiscountToPricing(product.product_id, pricingBase, product),
+    [product, pricingBase, googleDiscount?.price, googleDiscount?.priorPrice],
   );
   const displayPrice = pricing.displayPrice;
   const birthdaySavingsAmount = pricing.birthdaySavingsAmount;
@@ -367,6 +370,13 @@ export default function ProductInfo({
         {googleDiscount ? (
           <p className="mt-2 text-xs text-emerald-800">
             Giá ưu đãi từ quảng cáo Google Shopping — áp dụng khi mua trong phiên này.
+          </p>
+        ) : googleDiscountError ? (
+          <p className="mt-2 text-xs text-red-700">
+            {googleDiscountError}{' '}
+            <button type="button" className="underline font-medium" onClick={() => window.location.reload()}>
+              Thử lại
+            </button>
           </p>
         ) : null}
       </div>

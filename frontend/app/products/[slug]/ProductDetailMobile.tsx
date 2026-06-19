@@ -22,6 +22,8 @@ import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
 import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { applyGoogleAutomatedDiscountToPricing } from '@/lib/google-automated-discount';
+import { useGoogleAutomatedDiscount } from '@/lib/use-google-automated-discount';
 import { useSiteSale } from '@/lib/use-site-sale';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import AffiliateShareBar, { ProductShareIconButton } from '@/components/affiliate/AffiliateShareBar';
@@ -108,10 +110,22 @@ export default function ProductDetailMobile({
     () => mergeProductSiteSaleFromCalendar(product, siteSaleState),
     [product, siteSaleState],
   );
-  const pricing = resolveProductDisplayPricing(
-    productForPricing,
-    birthdayDiscount.active,
-    birthdayDiscount.percent,
+  const { record: googleDiscount, error: googleDiscountError } = useGoogleAutomatedDiscount(
+    product.product_id,
+    product,
+  );
+  const pricingBase = useMemo(
+    () =>
+      resolveProductDisplayPricing(
+        productForPricing,
+        birthdayDiscount.active,
+        birthdayDiscount.percent,
+      ),
+    [productForPricing, birthdayDiscount.active, birthdayDiscount.percent],
+  );
+  const pricing = useMemo(
+    () => applyGoogleAutomatedDiscountToPricing(product.product_id, pricingBase, product),
+    [product, pricingBase, googleDiscount?.price, googleDiscount?.priorPrice],
   );
   const isClearancePdp = product.is_warehouse_clearance === true;
   const displayPrice = pricing.displayPrice;
@@ -397,6 +411,13 @@ export default function ProductDetailMobile({
             promoLabel={isClearancePdp ? 'Thanh lý kho' : null}
             size="sm"
           />
+          {googleDiscount ? (
+            <p className="mt-2 text-xs text-emerald-800">
+              Giá ưu đãi từ quảng cáo Google Shopping.
+            </p>
+          ) : googleDiscountError ? (
+            <p className="mt-2 text-xs text-red-700">{googleDiscountError}</p>
+          ) : null}
         </div>
 
         <BirthdaySavingsCard
