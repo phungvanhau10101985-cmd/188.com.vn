@@ -118,6 +118,29 @@ function productPublicUrl(slug: string | null | undefined): string | null {
   return `${shopOrigin()}/products/${encodeURIComponent(seg)}`;
 }
 
+function orderItemSkuLabel(item: {
+  product_sku?: string | null;
+  product_code?: string | null;
+}): string | null {
+  const sku = item.product_sku?.trim();
+  if (sku) return sku;
+  const code = item.product_code?.trim();
+  return code || null;
+}
+
+function externalLinkLine(label: string, url: string | null | undefined) {
+  const href = url?.trim();
+  if (!href) return null;
+  return (
+    <p className="break-words" title={href}>
+      <span className="text-gray-500">{label}: </span>
+      <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline break-all">
+        {href.replace(/^https?:\/\//, '')}
+      </a>
+    </p>
+  );
+}
+
 type RevenueReportMode = 'day' | 'week' | 'month' | 'year' | 'range';
 
 type RevenueFilterState = {
@@ -1224,6 +1247,7 @@ export default function AdminOrdersPage() {
                     {(selectedOrder.items || []).map((item) => {
                       const href = productPublicUrl(item.product_slug);
                       const rawImageUrl = orderItemImageLink(item);
+                      const skuLabel = orderItemSkuLabel(item);
                       return (
                         <tr key={item.id} className="border-b align-top">
                           <td className="py-2 pr-2 align-middle">
@@ -1266,15 +1290,11 @@ export default function AdminOrdersPage() {
                               )}
                             </div>
                             <div className="mt-1.5 space-y-0.5 text-xs text-gray-600">
-                              {item.product_id != null ? <p>Mã SP (ID): {item.product_id}</p> : null}
+                              {skuLabel ? <p>Mã SP (SKU): {skuLabel}</p> : null}
                               <OrderItemVariantMeta item={item} className="space-y-0.5" />
+                              {externalLinkLine('Link Trung Quốc', item.product_url)}
                               {href ? (
-                                <p className="truncate" title={href}>
-                                  <span className="text-gray-500">Link: </span>
-                                  <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline break-all">
-                                    {href.replace(/^https?:\/\//, '')}
-                                  </a>
-                                </p>
+                                externalLinkLine('Link shop', href)
                               ) : (
                                 <p className="text-gray-400 italic">Không có slug — không tạo link trang SP</p>
                               )}

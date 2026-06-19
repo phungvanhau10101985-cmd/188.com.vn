@@ -156,6 +156,11 @@ class OrderItem(Base):
     def product_sku(self):
         return self.product.code if self.product else None
 
+    @property
+    def product_url(self):
+        """Link nguồn TQ (Excel `product_url` → `link_default`)."""
+        return self.product.link_default if self.product else None
+
 class Payment(Base):
     __tablename__ = "payments"
     

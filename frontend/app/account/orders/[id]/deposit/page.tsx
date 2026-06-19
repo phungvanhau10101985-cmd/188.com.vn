@@ -321,25 +321,31 @@ export default function OrderDepositPage() {
     if (!order || order.id !== id || order.status !== 'waiting_deposit') return;
 
     let cancelled = false;
+    const markQrReady = () => {
+      if (!cancelled) setQrBlobReady(true);
+    };
+
     apiClient
       .downloadOrderDepositQr(id)
       .then((blob) => {
         if (!cancelled) {
           qrBlobRef.current = blob;
-          setQrBlobReady(true);
+          markQrReady();
         }
       })
       .catch(() => {
-        if (cancelled || !qrValue) return;
+        if (cancelled) return;
+        if (!qrValue) {
+          markQrReady();
+          return;
+        }
         fetch(qrValue, { mode: 'cors' })
           .then((res) => (res.ok ? res.blob() : null))
           .then((blob) => {
-            if (!cancelled && blob) {
-              qrBlobRef.current = blob;
-              setQrBlobReady(true);
-            }
+            if (!cancelled && blob) qrBlobRef.current = blob;
           })
-          .catch(() => {});
+          .catch(() => {})
+          .finally(markQrReady);
       });
 
     return () => {

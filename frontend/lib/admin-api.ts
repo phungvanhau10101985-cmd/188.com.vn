@@ -267,6 +267,9 @@ export interface AdminOrderItem {
   id: number;
   product_id?: number;
   product_slug?: string | null;
+  product_code?: string | null;
+  product_sku?: string | null;
+  product_url?: string | null;
   product_name: string;
   product_image?: string | null;
   quantity: number;

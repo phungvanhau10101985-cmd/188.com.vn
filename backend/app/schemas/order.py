@@ -166,6 +166,14 @@ class OrderResponse(BaseModel):
         from_attributes = True
 
 # ========== ADMIN ORDER SCHEMAS ==========
+class AdminOrderItemResponse(OrderItemResponse):
+    """Chi tiết dòng đơn cho admin — gồm link nguồn TQ (không trả cho khách)."""
+    product_url: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class AdminOrderResponse(OrderResponse):
     """Extended order response for admin"""
     user_id: Optional[int]
@@ -174,6 +182,7 @@ class AdminOrderResponse(OrderResponse):
     cancelled_reason: Optional[str]
     updated_at: Optional[datetime]
     staff_consultation_contacted: bool = False
+    items: List[AdminOrderItemResponse]
     
     class Config:
         from_attributes = True
