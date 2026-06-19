@@ -64,6 +64,38 @@ def _round_price_for_currency(amount: float, currency: str) -> float:
     return round(max(0.0, amount), 2)
 
 
+def _read_prior_price_from_payload(payload: dict[str, Any]) -> Optional[float]:
+    if payload.get("pp") is None:
+        return None
+    try:
+        pp = float(payload.get("pp"))
+        if math.isfinite(pp) and pp > 0:
+            return pp
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def _derive_prior_price_from_dp(
+    payload: dict[str, Any],
+    discounted_price: float,
+    currency: str,
+) -> Optional[float]:
+    """Google pv2 thường chỉ gửi dp (%) — suy ra giá gốc để hiển thị gạch ngang."""
+    if payload.get("dp") is None:
+        return None
+    try:
+        dp = float(payload.get("dp"))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(dp) or dp <= 0 or dp >= 100:
+        return None
+    factor = 1.0 - (dp / 100.0)
+    if factor <= 0:
+        return None
+    return _round_price_for_currency(discounted_price / factor, currency)
+
+
 def automated_discount_enabled() -> bool:
     flag = getattr(settings, "GOOGLE_AUTOMATED_DISCOUNT_ENABLED", True)
     if isinstance(flag, str):
@@ -124,16 +156,10 @@ def verify_google_automated_discount_token(
     if not math.isfinite(price_raw) or price_raw <= 0:
         raise GoogleAutomatedDiscountError("Giá chiết khấu phải lớn hơn 0.")
 
-    prior_price: Optional[float] = None
-    if payload.get("pp") is not None:
-        try:
-            pp = float(payload.get("pp"))
-            if math.isfinite(pp) and pp > 0:
-                prior_price = pp
-        except (TypeError, ValueError):
-            prior_price = None
-
+    prior_price: Optional[float] = _read_prior_price_from_payload(payload)
     price = _round_price_for_currency(price_raw, currency)
+    if prior_price is None:
+        prior_price = _derive_prior_price_from_dp(payload, price, currency)
     if prior_price is not None:
         prior_price = _round_price_for_currency(prior_price, currency)
 
