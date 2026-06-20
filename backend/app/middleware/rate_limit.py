@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import math
 import time
 from collections import deque
 from typing import Iterable
@@ -130,9 +131,15 @@ class RateLimitMiddleware:
                 bucket.popleft()
 
             if len(bucket) >= limit:
+                oldest = bucket[0]
+                retry_after = max(1, int(math.ceil(oldest + _WINDOW_SEC - now)))
+                detail = (
+                    f"Bạn đang thao tác quá nhanh. Vui lòng thử lại sau {retry_after} giây."
+                )
                 response = JSONResponse(
                     status_code=429,
-                    content={"detail": "Bạn đang thao tác quá nhanh. Vui lòng thử lại sau vài giây."},
+                    content={"detail": detail, "retry_after_seconds": retry_after},
+                    headers={"Retry-After": str(retry_after)},
                 )
                 await response(scope, receive, send)
                 return

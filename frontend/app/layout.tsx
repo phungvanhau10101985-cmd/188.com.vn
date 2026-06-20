@@ -19,6 +19,7 @@ import { fetchPublicSiteEmbeds } from "@/lib/site-embeds-public";
 import { GoogleCustomerReviewsMerchantProvider } from "@/components/GoogleCustomerReviewsMerchantProvider";
 import { partitionHeadEmbedsForSsr } from "@/lib/site-embed-head-ssr";
 import { ToastProvider } from "@/components/ToastProvider";
+import { RateLimitNotice } from "@/components/RateLimitNotice";
 import { getCategoryTreeForLayout } from "@/lib/category-seo";
 import { APP_WEB_ICON_URL } from "@/lib/app-web-icon";
 import { getCdnPublicBase } from "@/lib/site-config";
@@ -199,6 +200,7 @@ export default async function RootLayout({
           merchantId={siteEmbeds.googleCustomerReviewsMerchantId}
         >
         <ToastProvider>
+          <RateLimitNotice />
           <AuthProvider>
             <DeferredPwaPushRegister />
             <CartProvider>

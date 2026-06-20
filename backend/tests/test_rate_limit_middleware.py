@@ -105,6 +105,8 @@ async def test_rate_limit_middleware(rate_limit_app):
             res = await client.get("/api/v1/test", headers={"cf-connecting-ip": "1.2.3.4"})
             assert res.status_code == 429
             assert "Bạn đang thao tác quá nhanh" in res.json()["detail"]
+            assert "retry_after_seconds" in res.json()
+            assert int(res.headers.get("retry-after", "0")) >= 1
 
             res = await client.get("/api/v1/test", headers={"cf-connecting-ip": "1.2.3.5"})
             assert res.status_code == 200

@@ -7,6 +7,8 @@ import {
   type VpsBackupRunItem,
   type VpsBackupSettings,
 } from '@/lib/admin-api';
+import { ActionCooldownToast } from '@/components/admin/ActionCooldownToast';
+import { useActionCooldown } from '@/lib/use-action-cooldown';
 
 const WEEKDAYS: { value: number; label: string }[] = [
   { value: 0, label: 'T2' },
@@ -91,6 +93,8 @@ export default function AdminVpsBackupPage() {
   const [formDays, setFormDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
   const [formIncludeCache, setFormIncludeCache] = useState(false);
 
+  const cooldown = useActionCooldown();
+
   const showToast = (type: 'ok' | 'err', msg: string) => {
     setToast({ type, msg });
     setTimeout(() => setToast(null), 5000);
@@ -164,64 +168,82 @@ export default function AdminVpsBackupPage() {
   };
 
   const handleSaveSchedule = async () => {
-    setSaving(true);
-    try {
-      const s = await adminVpsBackupAPI.updateSettings({
-        enabled: formEnabled,
-        hour: formHour,
-        minute: formMinute,
-        days_of_week: formDays,
-        include_cache: formIncludeCache,
-      });
-      setSettings(s);
-      applySettingsToForm(s);
-      showToast('ok', 'Đã lưu lịch backup.');
-    } catch (err: unknown) {
-      showToast('err', (err as Error)?.message || 'Lưu lịch thất bại');
-    } finally {
-      setSaving(false);
-    }
+    await cooldown.runGuarded('save-schedule', 2, async () => {
+      setSaving(true);
+      try {
+        const s = await adminVpsBackupAPI.updateSettings({
+          enabled: formEnabled,
+          hour: formHour,
+          minute: formMinute,
+          days_of_week: formDays,
+          include_cache: formIncludeCache,
+        });
+        setSettings(s);
+        applySettingsToForm(s);
+        showToast('ok', 'Đã lưu lịch backup.');
+      } catch (err: unknown) {
+        const msg = (err as Error)?.message || 'Lưu lịch thất bại';
+        cooldown.applyErrorCooldown('save-schedule', msg, 3, 'Lưu lịch');
+        showToast('err', msg);
+      } finally {
+        setSaving(false);
+      }
+    }, 'Lưu lịch');
   };
 
   const handleTrigger = async () => {
-    setTriggering(true);
-    try {
-      const r = await adminVpsBackupAPI.triggerRun();
-      showToast('ok', r.message);
-      await loadAll();
-    } catch (err: unknown) {
-      showToast('err', (err as Error)?.message || 'Không chạy được backup');
-    } finally {
-      setTriggering(false);
-    }
+    await cooldown.runGuarded('trigger-backup', 8, async () => {
+      setTriggering(true);
+      try {
+        const r = await adminVpsBackupAPI.triggerRun();
+        showToast('ok', r.message);
+        await loadAll();
+      } catch (err: unknown) {
+        const msg = (err as Error)?.message || 'Không chạy được backup';
+        cooldown.applyErrorCooldown('trigger-backup', msg, 8, 'Chạy backup');
+        showToast('err', msg);
+      } finally {
+        setTriggering(false);
+      }
+    }, 'Chạy backup ngay');
   };
 
   const handleDownloadArchive = async (filename: string) => {
-    setDownloadingFile(filename);
-    try {
-      await adminVpsBackupAPI.downloadArchive(filename);
-      showToast('ok', `Đang tải ${filename}`);
-    } catch (err: unknown) {
-      showToast('err', (err as Error)?.message || 'Tải file thất bại');
-    } finally {
-      setDownloadingFile(null);
-    }
+    const key = `download:${filename}`;
+    await cooldown.runGuarded(key, 2, async () => {
+      setDownloadingFile(filename);
+      try {
+        await adminVpsBackupAPI.downloadArchive(filename);
+        showToast('ok', `Đang tải ${filename}`);
+      } catch (err: unknown) {
+        const msg = (err as Error)?.message || 'Tải file thất bại';
+        cooldown.applyErrorCooldown(key, msg, 3, 'Tải xuống');
+        showToast('err', msg);
+      } finally {
+        setDownloadingFile(null);
+      }
+    }, 'Tải xuống');
   };
 
   const handleDeleteArchive = async (filename: string) => {
     if (!confirm(`Xóa file backup "${filename}"? Hành động không thể hoàn tác.`)) return;
-    setDeletingFile(filename);
-    try {
-      await adminVpsBackupAPI.deleteArchive(filename);
-      showToast('ok', `Đã xóa ${filename}`);
-      const a = await adminVpsBackupAPI.listArchives();
-      setArchives(a.items);
-      setArchiveTotalPretty(a.total_size_pretty);
-    } catch (err: unknown) {
-      showToast('err', (err as Error)?.message || 'Xóa file thất bại');
-    } finally {
-      setDeletingFile(null);
-    }
+    const key = `delete:${filename}`;
+    await cooldown.runGuarded(key, 3, async () => {
+      setDeletingFile(filename);
+      try {
+        await adminVpsBackupAPI.deleteArchive(filename);
+        showToast('ok', `Đã xóa ${filename}`);
+        const a = await adminVpsBackupAPI.listArchives();
+        setArchives(a.items);
+        setArchiveTotalPretty(a.total_size_pretty);
+      } catch (err: unknown) {
+        const msg = (err as Error)?.message || 'Xóa file thất bại';
+        cooldown.applyErrorCooldown(key, msg, 4, 'Xóa file');
+        showToast('err', msg);
+      } finally {
+        setDeletingFile(null);
+      }
+    }, 'Xóa file');
   };
 
   if (loading) {
@@ -233,6 +255,8 @@ export default function AdminVpsBackupPage() {
   }
 
   const backupAvailable = settings?.backup_available ?? false;
+  const saveCooldownSec = cooldown.getRemainingSec('save-schedule');
+  const triggerCooldownSec = cooldown.getRemainingSec('trigger-backup');
 
   return (
     <div className="p-6 max-w-6xl">
@@ -256,6 +280,12 @@ export default function AdminVpsBackupPage() {
           {toast.msg}
         </div>
       )}
+
+      <ActionCooldownToast
+        visible={cooldown.notice != null}
+        remainingSec={cooldown.remainingSec}
+        actionLabel={cooldown.notice?.label}
+      />
 
       {loadError && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -478,19 +508,29 @@ export default function AdminVpsBackupPage() {
         <div className="flex flex-wrap gap-3">
           <button
             type="button"
-            onClick={handleSaveSchedule}
+            onClick={() => void handleSaveSchedule()}
             disabled={saving}
             className="rounded-lg bg-gray-900 text-white px-4 py-2 text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
           >
-            {saving ? 'Đang lưu…' : 'Lưu lịch'}
+            {saving
+              ? 'Đang lưu…'
+              : saveCooldownSec > 0
+                ? `Chờ ${saveCooldownSec}s…`
+                : 'Lưu lịch'}
           </button>
           <button
             type="button"
-            onClick={handleTrigger}
+            onClick={() => void handleTrigger()}
             disabled={!backupAvailable || triggering || hasActiveRun}
             className="rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
           >
-            {triggering ? 'Đang xếp hàng…' : hasActiveRun ? 'Backup đang chạy…' : 'Chạy backup ngay'}
+            {triggering
+              ? 'Đang xếp hàng…'
+              : triggerCooldownSec > 0
+                ? `Chờ ${triggerCooldownSec}s…`
+                : hasActiveRun
+                  ? 'Backup đang chạy…'
+                  : 'Chạy backup ngay'}
           </button>
         </div>
 
@@ -523,7 +563,12 @@ export default function AdminVpsBackupPage() {
                 </tr>
               </thead>
               <tbody>
-                {archives.map((a) => (
+                {archives.map((a) => {
+                  const downloadKey = `download:${a.filename}`;
+                  const deleteKey = `delete:${a.filename}`;
+                  const downloadWait = cooldown.getRemainingSec(downloadKey);
+                  const deleteWait = cooldown.getRemainingSec(deleteKey);
+                  return (
                   <tr key={a.filename} className="border-b border-gray-100">
                     <td className="py-2 pr-4 font-mono text-xs">{a.filename}</td>
                     <td className="py-2 pr-4">{a.size_pretty}</td>
@@ -532,24 +577,33 @@ export default function AdminVpsBackupPage() {
                       <div className="flex flex-wrap gap-3">
                         <button
                           type="button"
-                          onClick={() => handleDownloadArchive(a.filename)}
+                          onClick={() => void handleDownloadArchive(a.filename)}
                           disabled={downloadingFile === a.filename}
                           className="text-blue-600 hover:underline text-xs disabled:opacity-50"
                         >
-                          {downloadingFile === a.filename ? 'Đang tải…' : 'Tải xuống'}
+                          {downloadingFile === a.filename
+                            ? 'Đang tải…'
+                            : downloadWait > 0
+                              ? `Chờ ${downloadWait}s…`
+                              : 'Tải xuống'}
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleDeleteArchive(a.filename)}
+                          onClick={() => void handleDeleteArchive(a.filename)}
                           disabled={deletingFile === a.filename}
                           className="text-red-600 hover:underline text-xs disabled:opacity-50"
                         >
-                          {deletingFile === a.filename ? 'Đang xóa…' : 'Xóa'}
+                          {deletingFile === a.filename
+                            ? 'Đang xóa…'
+                            : deleteWait > 0
+                              ? `Chờ ${deleteWait}s…`
+                              : 'Xóa'}
                         </button>
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -30,6 +30,7 @@ import {
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
 import { getGuestSessionId } from '@/lib/guest-session';
 import { humanizeNanoaiImageSearchError } from '@/lib/nanoai-search-errors';
+import { maybeNotifyRateLimitFromResponse } from '@/lib/rate-limit-notice';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
@@ -266,6 +267,16 @@ class ApiClient {
           } catch {
             errorData = { detail: compactErrorText };
           }
+          const detailStr =
+            typeof errorData.detail === 'string'
+              ? errorData.detail
+              : compactErrorText;
+          maybeNotifyRateLimitFromResponse(
+            response.status,
+            detailStr,
+            response.headers.get('Retry-After'),
+            errorData,
+          );
           throw new Error(errorData.detail || `API Error: ${response.status}`);
         }
 

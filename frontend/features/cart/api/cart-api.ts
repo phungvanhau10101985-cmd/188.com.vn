@@ -12,6 +12,7 @@ import {
   CartMigrationResponse
 } from '../types/cart';
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
+import { maybeNotifyRateLimitFromResponse } from '@/lib/rate-limit-notice';
 
 class CartAPI {
   private async fetchWithAuth(path: string, options: RequestInit = {}) {
@@ -47,6 +48,14 @@ class CartAPI {
         }
 
         const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        const detailStr =
+          typeof errorData.detail === 'string' ? errorData.detail : 'Request failed';
+        maybeNotifyRateLimitFromResponse(
+          response.status,
+          detailStr,
+          response.headers.get('Retry-After'),
+          errorData,
+        );
         throw new Error(errorData.detail || 'Request failed');
       }
 
