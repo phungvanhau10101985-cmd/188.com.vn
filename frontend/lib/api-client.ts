@@ -110,6 +110,11 @@ export interface PromotionVoucherListResponse {
   items: PromotionVoucherItem[];
 }
 
+export interface NanoAiCustomerTokenResponse {
+  token: string | null;
+  expires_at?: number | null;
+}
+
 /** Payload đúng schema backend OrderCreate */
 export interface OrderCreateRequest {
   customer_name: string;
@@ -2006,6 +2011,14 @@ class ApiClient {
       products: [],
       error: error instanceof Error ? error.message : 'NanoAI tạm thời không phản hồi.',
     }));
+  }
+
+  /** Token ngắn hạn để widget NanoAI tự đăng nhập theo user shop hiện tại. */
+  async nanoaiCustomerToken(): Promise<NanoAiCustomerTokenResponse> {
+    return this.fetch<NanoAiCustomerTokenResponse>('/nanoai/customer-token', {
+      method: 'GET',
+      quiet: true,
+    });
   }
 }
 

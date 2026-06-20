@@ -28,7 +28,9 @@ from app.core.security import get_current_user, get_current_user_optional, requi
 from app.utils.display_timeline import merge_imported_display_created_at, merge_question_reply_display_times
 from app.services import warehouse_clearance as warehouse_clearance_svc
 from app.services.product_reply_notify import (
+    ADMIN_REPLY_EMAIL_DEBOUNCE_SECONDS,
     collect_new_question_replies,
+    extract_question_reply_slots,
     schedule_question_reply_emails,
 )
 
@@ -319,19 +321,19 @@ def reply_to_question(
     )
     if not updated:
         raise HTTPException(status_code=400, detail="Không thể thêm trả lời")
-    reply_name = user_name
-    reply_content = data.content.strip()
     if not before_one and (updated.reply_user_one_content or "").strip():
-        reply_name = (updated.reply_user_one_name or user_name).strip() or user_name
-        reply_content = (updated.reply_user_one_content or "").strip()
+        reply_slot = "user_one"
     elif not before_two and (updated.reply_user_two_content or "").strip():
-        reply_name = (updated.reply_user_two_name or user_name).strip() or user_name
-        reply_content = (updated.reply_user_two_content or "").strip()
+        reply_slot = "user_two"
+    else:
+        reply_slot = "user_one"
     schedule_question_reply_emails(
         background_tasks,
+        db,
         question_id,
-        [(reply_name, reply_content)],
+        [reply_slot],
         exclude_replier_user_id=current_user.id,
+        debounce_seconds=0,
     )
     now = datetime.now(timezone.utc)
     voted_ids = crud.product_question.get_user_voted_question_ids(db, current_user.id, [updated.id])
@@ -427,7 +429,13 @@ def admin_update_question(
     obj = crud.product_question.update_question(db, question_id, data)
     if not obj:
         raise HTTPException(status_code=404, detail="Câu hỏi không tồn tại")
-    schedule_question_reply_emails(background_tasks, question_id, new_replies)
+    schedule_question_reply_emails(
+        background_tasks,
+        db,
+        question_id,
+        extract_question_reply_slots(new_replies),
+        debounce_seconds=ADMIN_REPLY_EMAIL_DEBOUNCE_SECONDS,
+    )
     return obj
 
 

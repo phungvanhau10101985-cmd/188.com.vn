@@ -8,6 +8,8 @@ import { authAPI } from '../api/auth-api';
 import { getLoginRedirectFromUrl } from '@/lib/auth-redirect';
 import { markFreshLoginSession } from '@/lib/birthday-prompt-session';
 import { probeCookieAuthSession, readClientAuthUser } from '@/lib/client-auth-session';
+import { apiClient } from '@/lib/api-client';
+import { clearNanoAiPartnerCustomer, setNanoAiPartnerCustomerToken } from '@/lib/nanoai-hosted-chat';
 
 interface AuthContextType extends AuthState {
   /** Gửi kèm deviceId để coi trình duyệt này là thiết bị đã xác thực (cùng logic đăng nhập bằng mã email) */
@@ -124,6 +126,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('188-auth-session-changed', syncFromStorage);
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || !authState.isAuthReady) return;
+
+    if (!authState.isAuthenticated) {
+      clearNanoAiPartnerCustomer();
+      return;
+    }
+
+    let cancelled = false;
+    const syncNanoAiCustomer = async () => {
+      try {
+        const resp = await apiClient.nanoaiCustomerToken();
+        if (cancelled) return;
+        const token = (resp.token || '').trim();
+        if (token) {
+          setNanoAiPartnerCustomerToken(token);
+        } else {
+          clearNanoAiPartnerCustomer();
+        }
+      } catch {
+        if (!cancelled) clearNanoAiPartnerCustomer();
+      }
+    };
+
+    void syncNanoAiCustomer();
+    const intervalId = window.setInterval(syncNanoAiCustomer, 240_000);
+    window.addEventListener('188-site-embeds-ready', syncNanoAiCustomer);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener('188-site-embeds-ready', syncNanoAiCustomer);
+    };
+  }, [authState.isAuthReady, authState.isAuthenticated, authState.user?.id, authState.user?.email]);
+
   const mergeGuestBehavior = async (): Promise<void> => {
     try {
       const { apiClient } = await import('@/lib/api-client');
@@ -195,6 +232,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    void authAPI.logout();
+    clearNanoAiPartnerCustomer();
     localStorage.removeItem('access_token');
     localStorage.removeItem('user');
     try {
@@ -221,8 +260,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const switchAccount = (returnPath: string) => {
     const safe =
       returnPath.startsWith('/') && !returnPath.startsWith('//') ? returnPath : '/account';
+    void authAPI.logout();
     localStorage.removeItem('access_token');
     localStorage.removeItem('user');
+    clearNanoAiPartnerCustomer();
     try {
       sessionStorage.removeItem('188_auto_push_prompt_v1');
     } catch {

@@ -2,9 +2,15 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { adminProductReviewsAPI, type ProductReviewAdmin, type ProductReviewsListResponse } from '@/lib/admin-api';
+import { useDebouncedRowSave } from '@/lib/use-debounced-row-save';
+import { pruneRowEditAfterSave } from '@/lib/admin-row-edit-utils';
 import ViewReviewModal from './components/ViewReviewModal';
 
 const PAGE_SIZE = 10;
+
+const REVIEW_EDIT_KEYS = [
+  'user_name', 'star', 'title', 'content', 'group', 'useful', 'reply_name', 'reply_content', 'is_active',
+] as const satisfies readonly (keyof ProductReviewAdmin)[];
 
 function formatDate(s: string | null | undefined) {
   if (!s) return '—';
@@ -24,10 +30,17 @@ export default function AdminProductReviewsPage() {
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
   const [importing, setImporting] = useState(false);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [savedFlashId, setSavedFlashId] = useState<number | null>(null);
   const [rowEdit, setRowEdit] = useState<Record<number, Partial<ProductReviewAdmin>>>({});
   const [viewModal, setViewModal] = useState<ProductReviewAdmin | null>(null);
   const [deletingAll, setDeletingAll] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const rowEditRef = useRef<Record<number, Partial<ProductReviewAdmin>>>({});
+  const dataRef = useRef<ProductReviewsListResponse | null>(null);
+  const composingRef = useRef<Record<number, boolean>>({});
+  const savingIdsRef = useRef<Set<number>>(new Set());
+  const pendingResaveRef = useRef<Set<number>>(new Set());
+  const { scheduleSave, flushSave } = useDebouncedRowSave();
 
   const showToast = (type: 'ok' | 'err', msg: string) => {
     setToast({ type, msg });
@@ -119,52 +132,124 @@ export default function AdminProductReviewsPage() {
   };
 
   const getRowVal = (r: ProductReviewAdmin, key: keyof ProductReviewAdmin) => {
-    if (rowEdit[r.id] && key in rowEdit[r.id]) return (rowEdit[r.id] as Record<string, unknown>)[key];
+    const e = rowEditRef.current[r.id] ?? rowEdit[r.id];
+    if (e && key in e) return (e as Record<string, unknown>)[key];
     return (r as unknown as Record<string, unknown>)[key];
   };
 
-  const setRowVal = (id: number, key: keyof ProductReviewAdmin, value: unknown) => {
-    setRowEdit((prev) => ({ ...prev, [id]: { ...prev[id], [key]: value } }));
-  };
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
 
-  const handleSaveRow = async (r: ProductReviewAdmin) => {
-    const e = rowEdit[r.id];
-    if (!e || Object.keys(e).length === 0) return;
-    if (savingId === r.id) return;
-
-    const payload: Partial<ProductReviewAdmin> = {
-      user_name: (e?.user_name !== undefined ? e.user_name : r.user_name) ?? '',
-      star: Math.max(1, Math.min(5, (e?.star ?? r.star ?? 5) as number)),
-      title: (e?.title !== undefined ? e.title : r.title) ?? '',
-      content: (e?.content !== undefined ? e.content : r.content) ?? '',
-      group: Math.max(0, (e?.group ?? r.group ?? 0) as number),
-      useful: Math.max(0, (e?.useful ?? r.useful ?? 0) as number),
-      reply_name: (e?.reply_name !== undefined ? e.reply_name : r.reply_name) ?? '',
-      reply_content: (e?.reply_content !== undefined ? e.reply_content : r.reply_content) ?? '',
-      is_active: e?.is_active !== undefined ? e.is_active! : r.is_active,
+  const buildReviewPayload = useCallback((r: ProductReviewAdmin, e?: Partial<ProductReviewAdmin>) => {
+    const edit = e ?? rowEditRef.current[r.id] ?? rowEdit[r.id];
+    return {
+      user_name: (edit?.user_name !== undefined ? edit.user_name : r.user_name) ?? '',
+      star: Math.max(1, Math.min(5, (edit?.star ?? r.star ?? 5) as number)),
+      title: (edit?.title !== undefined ? edit.title : r.title) ?? '',
+      content: (edit?.content !== undefined ? edit.content : r.content) ?? '',
+      group: Math.max(0, (edit?.group ?? r.group ?? 0) as number),
+      useful: Math.max(0, (edit?.useful ?? r.useful ?? 0) as number),
+      reply_name: (edit?.reply_name !== undefined ? edit.reply_name : r.reply_name) ?? '',
+      reply_content: (edit?.reply_content !== undefined ? edit.reply_content : r.reply_content) ?? '',
+      is_active: edit?.is_active !== undefined ? edit.is_active! : r.is_active,
     };
+  }, [rowEdit]);
+
+  const reviewRowDirty = useCallback((r: ProductReviewAdmin, payload: ReturnType<typeof buildReviewPayload>) => {
+    return (
+      payload.user_name !== (r.user_name ?? '') ||
+      payload.star !== (r.star ?? 5) ||
+      payload.title !== (r.title ?? '') ||
+      payload.content !== (r.content ?? '') ||
+      payload.group !== (r.group ?? 0) ||
+      payload.useful !== (r.useful ?? 0) ||
+      payload.reply_name !== (r.reply_name ?? '') ||
+      payload.reply_content !== (r.reply_content ?? '') ||
+      payload.is_active !== r.is_active
+    );
+  }, []);
+
+  const handleSaveRow = useCallback(async (r: ProductReviewAdmin, opts?: { silent?: boolean }) => {
+    if (savingIdsRef.current.has(r.id)) {
+      pendingResaveRef.current.add(r.id);
+      return;
+    }
+    const edit = rowEditRef.current[r.id];
+    const payload = buildReviewPayload(r, edit);
+    if (!reviewRowDirty(r, payload)) return;
+
+    savingIdsRef.current.add(r.id);
     setSavingId(r.id);
     try {
       const updated = await adminProductReviewsAPI.update(r.id, payload);
-      setRowEdit((prev) => {
-        const next = { ...prev };
-        delete next[r.id];
-        return next;
-      });
       setData((prev) => {
         if (!prev) return prev;
-        return {
+        const next = {
           ...prev,
           items: prev.items.map((item) => (item.id === r.id ? { ...item, ...updated } : item)),
         };
+        dataRef.current = next;
+        return next;
       });
-      showToast('ok', 'Đã lưu');
+      setRowEdit((prev) => {
+        const pruned = pruneRowEditAfterSave(edit, updated as ProductReviewAdmin, REVIEW_EDIT_KEYS);
+        const next = { ...prev };
+        if (Object.keys(pruned).length === 0) {
+          delete next[r.id];
+        } else {
+          next[r.id] = pruned;
+        }
+        rowEditRef.current = next;
+        return next;
+      });
+      setSavedFlashId(r.id);
+      setTimeout(() => setSavedFlashId((cur) => (cur === r.id ? null : cur)), 1500);
+      if (!opts?.silent) showToast('ok', 'Đã lưu');
     } catch {
       showToast('err', 'Lưu thất bại');
     } finally {
-      setSavingId(null);
+      savingIdsRef.current.delete(r.id);
+      setSavingId((cur) => (cur === r.id ? null : cur));
+      if (pendingResaveRef.current.has(r.id)) {
+        pendingResaveRef.current.delete(r.id);
+        const latest = dataRef.current?.items.find((item) => item.id === r.id);
+        if (latest) void handleSaveRow(latest, { silent: true });
+      }
     }
-  };
+  }, [buildReviewPayload, reviewRowDirty]);
+
+  const triggerAutoSave = useCallback((r: ProductReviewAdmin) => {
+    if (composingRef.current[r.id]) return;
+    scheduleSave(r.id, () => {
+      const latest = dataRef.current?.items.find((item) => item.id === r.id) ?? r;
+      void handleSaveRow(latest, { silent: true });
+    });
+  }, [handleSaveRow, scheduleSave]);
+
+  const setRowVal = useCallback((r: ProductReviewAdmin, key: keyof ProductReviewAdmin, value: unknown) => {
+    const nextEdit = { ...rowEditRef.current[r.id], [key]: value };
+    const next = { ...rowEditRef.current, [r.id]: nextEdit };
+    rowEditRef.current = next;
+    setRowEdit(next);
+    triggerAutoSave(r);
+  }, [triggerAutoSave]);
+
+  const flushRowSave = useCallback((r: ProductReviewAdmin) => {
+    flushSave(r.id, () => {
+      const latest = dataRef.current?.items.find((item) => item.id === r.id) ?? r;
+      void handleSaveRow(latest, { silent: true });
+    });
+  }, [flushSave, handleSaveRow]);
+
+  const onComposeStart = useCallback((id: number) => {
+    composingRef.current[id] = true;
+  }, []);
+
+  const onComposeEnd = useCallback((r: ProductReviewAdmin) => {
+    composingRef.current[r.id] = false;
+    triggerAutoSave(r);
+  }, [triggerAutoSave]);
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
@@ -213,6 +298,10 @@ export default function AdminProductReviewsPage() {
             className="hidden"
             onChange={handleImport}
           />
+        </div>
+
+        <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
+          Sửa trực tiếp trong bảng — hệ thống <strong>tự lưu</strong> sau ~0,7 giây. Email thông báo gửi <strong>sau 2 phút</strong> kể từ lần sửa cuối (một email duy nhất với nội dung cuối cùng).
         </div>
 
         <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
@@ -324,8 +413,10 @@ export default function AdminProductReviewsPage() {
                         <input
                           type="text"
                           value={String(getRowVal(r, 'user_name') ?? '')}
-                          onChange={(e) => setRowVal(r.id, 'user_name', e.target.value)}
-                          onBlur={() => handleSaveRow(r)}
+                          onChange={(e) => setRowVal(r, 'user_name', e.target.value)}
+                          onCompositionStart={() => onComposeStart(r.id)}
+                          onCompositionEnd={() => onComposeEnd(r)}
+                          onBlur={() => flushRowSave(r)}
                           className="rounded border border-gray-300 px-2 py-1 text-xs w-full min-w-0"
                         />
                       </td>
@@ -335,8 +426,8 @@ export default function AdminProductReviewsPage() {
                           min={1}
                           max={5}
                           value={Number(getRowVal(r, 'star') ?? 5)}
-                          onChange={(e) => setRowVal(r.id, 'star', Math.min(5, Math.max(1, parseInt(e.target.value, 10) || 5)))}
-                          onBlur={() => handleSaveRow(r)}
+                          onChange={(e) => setRowVal(r, 'star', Math.min(5, Math.max(1, parseInt(e.target.value, 10) || 5)))}
+                          onBlur={() => flushRowSave(r)}
                           className="rounded border border-gray-300 px-1 py-0.5 text-xs w-12"
                         />
                       </td>
@@ -344,8 +435,10 @@ export default function AdminProductReviewsPage() {
                         <input
                           type="text"
                           value={String(getRowVal(r, 'title') ?? '')}
-                          onChange={(e) => setRowVal(r.id, 'title', e.target.value)}
-                          onBlur={() => handleSaveRow(r)}
+                          onChange={(e) => setRowVal(r, 'title', e.target.value)}
+                          onCompositionStart={() => onComposeStart(r.id)}
+                          onCompositionEnd={() => onComposeEnd(r)}
+                          onBlur={() => flushRowSave(r)}
                           className="rounded border border-gray-300 px-2 py-1 text-xs w-full min-w-0"
                         />
                       </td>
@@ -353,8 +446,10 @@ export default function AdminProductReviewsPage() {
                         <input
                           type="text"
                           value={String(getRowVal(r, 'content') ?? '')}
-                          onChange={(e) => setRowVal(r.id, 'content', e.target.value)}
-                          onBlur={() => handleSaveRow(r)}
+                          onChange={(e) => setRowVal(r, 'content', e.target.value)}
+                          onCompositionStart={() => onComposeStart(r.id)}
+                          onCompositionEnd={() => onComposeEnd(r)}
+                          onBlur={() => flushRowSave(r)}
                           className="rounded border border-gray-300 px-2 py-1 text-xs w-full min-w-0"
                           placeholder="Nội dung"
                         />
@@ -364,8 +459,8 @@ export default function AdminProductReviewsPage() {
                           type="number"
                           min={0}
                           value={Math.max(0, Number(getRowVal(r, 'group') ?? 0) || 0)}
-                          onChange={(e) => setRowVal(r.id, 'group', Math.max(0, parseInt(e.target.value, 10) || 0))}
-                          onBlur={() => handleSaveRow(r)}
+                          onChange={(e) => setRowVal(r, 'group', Math.max(0, parseInt(e.target.value, 10) || 0))}
+                          onBlur={() => flushRowSave(r)}
                           className="rounded border border-gray-300 px-1 py-0.5 text-xs w-14"
                         />
                       </td>
@@ -374,8 +469,8 @@ export default function AdminProductReviewsPage() {
                           type="number"
                           min={0}
                           value={Math.max(0, Number(getRowVal(r, 'useful') ?? 0) || 0)}
-                          onChange={(e) => setRowVal(r.id, 'useful', Math.max(0, parseInt(e.target.value, 10) || 0))}
-                          onBlur={() => handleSaveRow(r)}
+                          onChange={(e) => setRowVal(r, 'useful', Math.max(0, parseInt(e.target.value, 10) || 0))}
+                          onBlur={() => flushRowSave(r)}
                           className="rounded border border-gray-300 px-1 py-0.5 text-xs w-16"
                         />
                       </td>
@@ -384,16 +479,20 @@ export default function AdminProductReviewsPage() {
                           <input
                             type="text"
                             value={String(getRowVal(r, 'reply_name') ?? '')}
-                            onChange={(e) => setRowVal(r.id, 'reply_name', e.target.value)}
-                            onBlur={() => handleSaveRow(r)}
+                            onChange={(e) => setRowVal(r, 'reply_name', e.target.value)}
+                            onCompositionStart={() => onComposeStart(r.id)}
+                            onCompositionEnd={() => onComposeEnd(r)}
+                            onBlur={() => flushRowSave(r)}
                             className="rounded border border-gray-300 px-2 py-0.5 text-xs w-full"
                             placeholder="Tên"
                           />
                           <input
                             type="text"
                             value={String(getRowVal(r, 'reply_content') ?? '')}
-                            onChange={(e) => setRowVal(r.id, 'reply_content', e.target.value)}
-                            onBlur={() => handleSaveRow(r)}
+                            onChange={(e) => setRowVal(r, 'reply_content', e.target.value)}
+                            onCompositionStart={() => onComposeStart(r.id)}
+                            onCompositionEnd={() => onComposeEnd(r)}
+                            onBlur={() => flushRowSave(r)}
                             className="rounded border border-gray-300 px-2 py-0.5 text-xs w-full"
                             placeholder="Nội dung"
                           />
@@ -402,8 +501,8 @@ export default function AdminProductReviewsPage() {
                       <td className="py-2 px-2">
                         <select
                           value={getRowVal(r, 'is_active') ? '1' : '0'}
-                          onChange={(e) => setRowVal(r.id, 'is_active', e.target.value === '1')}
-                          onBlur={() => handleSaveRow(r)}
+                          onChange={(e) => setRowVal(r, 'is_active', e.target.value === '1')}
+                          onBlur={() => flushRowSave(r)}
                           className="rounded border border-gray-300 px-1 py-0.5 text-xs"
                         >
                           <option value="1">Hiển thị</option>
@@ -423,14 +522,9 @@ export default function AdminProductReviewsPage() {
                             Xem đánh giá
                           </button>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => handleSaveRow(r)}
-                          disabled={savingId === r.id}
-                          className="text-blue-600 hover:underline text-xs mr-1 disabled:opacity-50"
-                        >
-                          {savingId === r.id ? 'Đang lưu...' : 'Lưu'}
-                        </button>
+                        <span className="text-xs text-gray-500 mr-1" aria-live="polite">
+                          {savingId === r.id ? 'Đang lưu...' : savedFlashId === r.id ? 'Đã lưu' : rowEdit[r.id] ? 'Chờ lưu...' : ''}
+                        </span>
                         <button
                           type="button"
                           onClick={() => handleDelete(r.id)}

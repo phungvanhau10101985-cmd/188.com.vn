@@ -6,6 +6,8 @@ import {
   type ProductQuestionAdmin,
   type ProductQuestionsListResponse,
 } from '@/lib/admin-api';
+import { useDebouncedRowSave } from '@/lib/use-debounced-row-save';
+import { pruneRowEditAfterSave } from '@/lib/admin-row-edit-utils';
 
 const PAGE_SIZE = 10;
 const COL_WIDTHS_STORAGE_KEY = 'admin_product_questions_column_widths';
@@ -62,6 +64,11 @@ type RowEdit = Partial<Pick<ProductQuestionAdmin,
   'reply_user_one_name' | 'reply_user_one_content' | 'reply_user_two_name' | 'reply_user_two_content'
 >>;
 
+const QUESTION_EDIT_KEYS: (keyof RowEdit)[] = [
+  'group', 'reply_admin_name', 'reply_admin_content', 'is_active', 'useful',
+  'reply_user_one_name', 'reply_user_one_content', 'reply_user_two_name', 'reply_user_two_content',
+];
+
 export default function AdminProductQuestionsPage() {
   const [data, setData] = useState<ProductQuestionsListResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,9 +78,16 @@ export default function AdminProductQuestionsPage() {
   const [importing, setImporting] = useState(false);
   const [rowEdit, setRowEdit] = useState<Record<number, RowEdit>>({});
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [savedFlashId, setSavedFlashId] = useState<number | null>(null);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(loadColumnWidths);
   const resizeRef = useRef<{ key: string; startX: number; startW: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const rowEditRef = useRef<Record<number, RowEdit>>({});
+  const dataRef = useRef<ProductQuestionsListResponse | null>(null);
+  const composingRef = useRef<Record<number, boolean>>({});
+  const savingIdsRef = useRef<Set<number>>(new Set());
+  const pendingResaveRef = useRef<Set<number>>(new Set());
+  const { scheduleSave, flushSave } = useDebouncedRowSave();
 
   const startResize = useCallback((key: string) => (e: React.MouseEvent) => {
     e.preventDefault();
@@ -173,46 +187,124 @@ export default function AdminProductQuestionsPage() {
   };
 
   const getRowVal = useCallback((q: ProductQuestionAdmin, key: keyof RowEdit) => {
-    if (rowEdit[q.id] && key in rowEdit[q.id]) return (rowEdit[q.id] as Record<string, unknown>)[key];
+    const e = rowEditRef.current[q.id] ?? rowEdit[q.id];
+    if (e && key in e) return (e as Record<string, unknown>)[key];
     return (q as unknown as Record<string, unknown>)[key];
   }, [rowEdit]);
 
-  const setRowVal = useCallback((id: number, key: keyof RowEdit, value: string | boolean | number) => {
-    setRowEdit((prev) => ({ ...prev, [id]: { ...prev[id], [key]: value } }));
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
+
+  const buildQuestionPayload = useCallback((q: ProductQuestionAdmin, e?: RowEdit) => {
+    const edit = e ?? rowEditRef.current[q.id] ?? rowEdit[q.id];
+    return {
+      group: Math.max(0, typeof (edit?.group ?? q.group) === 'number' ? (edit?.group ?? q.group ?? 0) : (parseInt(String(edit?.group ?? q.group), 10) || 0)),
+      reply_admin_name: (edit?.reply_admin_name !== undefined ? edit.reply_admin_name : q.reply_admin_name) ?? '',
+      reply_admin_content: (edit?.reply_admin_content !== undefined ? edit.reply_admin_content : q.reply_admin_content) ?? '',
+      is_active: edit?.is_active !== undefined ? edit.is_active! : q.is_active,
+      useful: Math.max(0, typeof (edit?.useful ?? q.useful) === 'number' ? (edit?.useful ?? q.useful ?? 0) : (parseInt(String(edit?.useful ?? q.useful), 10) || 0)),
+      reply_user_one_name: (edit?.reply_user_one_name !== undefined ? edit.reply_user_one_name : q.reply_user_one_name) ?? '',
+      reply_user_one_content: (edit?.reply_user_one_content !== undefined ? edit.reply_user_one_content : q.reply_user_one_content) ?? '',
+      reply_user_two_name: (edit?.reply_user_two_name !== undefined ? edit.reply_user_two_name : q.reply_user_two_name) ?? '',
+      reply_user_two_content: (edit?.reply_user_two_content !== undefined ? edit.reply_user_two_content : q.reply_user_two_content) ?? '',
+    };
+  }, [rowEdit]);
+
+  const questionRowDirty = useCallback((q: ProductQuestionAdmin, payload: ReturnType<typeof buildQuestionPayload>) => {
+    return (
+      payload.group !== (q.group ?? 0) ||
+      payload.reply_admin_name !== (q.reply_admin_name ?? '') ||
+      payload.reply_admin_content !== (q.reply_admin_content ?? '') ||
+      payload.is_active !== q.is_active ||
+      payload.useful !== (q.useful ?? 0) ||
+      payload.reply_user_one_name !== (q.reply_user_one_name ?? '') ||
+      payload.reply_user_one_content !== (q.reply_user_one_content ?? '') ||
+      payload.reply_user_two_name !== (q.reply_user_two_name ?? '') ||
+      payload.reply_user_two_content !== (q.reply_user_two_content ?? '')
+    );
   }, []);
 
-  const handleSaveRow = async (q: ProductQuestionAdmin) => {
-    const e = rowEdit[q.id];
-    const reply_admin_name = (e?.reply_admin_name !== undefined ? e.reply_admin_name : q.reply_admin_name) ?? '';
-    const reply_admin_content = (e?.reply_admin_content !== undefined ? e.reply_admin_content : q.reply_admin_content) ?? '';
-    const is_active = e?.is_active !== undefined ? e.is_active! : q.is_active;
-    const groupRaw = e?.group !== undefined ? e.group : q.group;
-    const group = Math.max(0, typeof groupRaw === 'number' ? groupRaw : (parseInt(String(groupRaw), 10) || 0));
-    const usefulRaw = e?.useful !== undefined ? e.useful : q.useful;
-    const useful = Math.max(0, typeof usefulRaw === 'number' ? usefulRaw : (parseInt(String(usefulRaw), 10) || 0));
-    const reply_user_one_name = (e?.reply_user_one_name !== undefined ? e.reply_user_one_name : q.reply_user_one_name) ?? '';
-    const reply_user_one_content = (e?.reply_user_one_content !== undefined ? e.reply_user_one_content : q.reply_user_one_content) ?? '';
-    const reply_user_two_name = (e?.reply_user_two_name !== undefined ? e.reply_user_two_name : q.reply_user_two_name) ?? '';
-    const reply_user_two_content = (e?.reply_user_two_content !== undefined ? e.reply_user_two_content : q.reply_user_two_content) ?? '';
+  const handleSaveRow = useCallback(async (q: ProductQuestionAdmin, opts?: { silent?: boolean }) => {
+    if (savingIdsRef.current.has(q.id)) {
+      pendingResaveRef.current.add(q.id);
+      return;
+    }
+    const edit = rowEditRef.current[q.id];
+    const payload = buildQuestionPayload(q, edit);
+    if (!questionRowDirty(q, payload)) return;
+
+    savingIdsRef.current.add(q.id);
     setSavingId(q.id);
     try {
-      await adminProductQuestionsAPI.update(q.id, {
-        group, reply_admin_name, reply_admin_content, is_active, useful,
-        reply_user_one_name, reply_user_one_content, reply_user_two_name, reply_user_two_content,
-      });
-      setRowEdit((prev) => {
-        const next = { ...prev };
-        delete next[q.id];
+      const updated = await adminProductQuestionsAPI.update(q.id, payload);
+      setData((prev) => {
+        if (!prev) return prev;
+        const next = {
+          ...prev,
+          items: prev.items.map((item) => (item.id === q.id ? { ...item, ...updated } : item)),
+        };
+        dataRef.current = next;
         return next;
       });
-      showToast('ok', 'Đã lưu');
-      fetchList();
+      setRowEdit((prev) => {
+        const pruned = pruneRowEditAfterSave(edit, updated as ProductQuestionAdmin, QUESTION_EDIT_KEYS);
+        const next = { ...prev };
+        if (Object.keys(pruned).length === 0) {
+          delete next[q.id];
+        } else {
+          next[q.id] = pruned;
+        }
+        rowEditRef.current = next;
+        return next;
+      });
+      setSavedFlashId(q.id);
+      setTimeout(() => setSavedFlashId((cur) => (cur === q.id ? null : cur)), 1500);
+      if (!opts?.silent) showToast('ok', 'Đã lưu');
     } catch {
       showToast('err', 'Lưu thất bại');
     } finally {
-      setSavingId(null);
+      savingIdsRef.current.delete(q.id);
+      setSavingId((cur) => (cur === q.id ? null : cur));
+      if (pendingResaveRef.current.has(q.id)) {
+        pendingResaveRef.current.delete(q.id);
+        const latest = dataRef.current?.items.find((item) => item.id === q.id);
+        if (latest) void handleSaveRow(latest, { silent: true });
+      }
     }
-  };
+  }, [buildQuestionPayload, questionRowDirty]);
+
+  const triggerAutoSave = useCallback((q: ProductQuestionAdmin) => {
+    if (composingRef.current[q.id]) return;
+    scheduleSave(q.id, () => {
+      const latest = dataRef.current?.items.find((item) => item.id === q.id) ?? q;
+      void handleSaveRow(latest, { silent: true });
+    });
+  }, [handleSaveRow, scheduleSave]);
+
+  const setRowVal = useCallback((q: ProductQuestionAdmin, key: keyof RowEdit, value: string | boolean | number) => {
+    const nextEdit = { ...rowEditRef.current[q.id], [key]: value };
+    const next = { ...rowEditRef.current, [q.id]: nextEdit };
+    rowEditRef.current = next;
+    setRowEdit(next);
+    triggerAutoSave(q);
+  }, [triggerAutoSave]);
+
+  const flushRowSave = useCallback((q: ProductQuestionAdmin) => {
+    flushSave(q.id, () => {
+      const latest = dataRef.current?.items.find((item) => item.id === q.id) ?? q;
+      void handleSaveRow(latest, { silent: true });
+    });
+  }, [flushSave, handleSaveRow]);
+
+  const onComposeStart = useCallback((id: number) => {
+    composingRef.current[id] = true;
+  }, []);
+
+  const onComposeEnd = useCallback((q: ProductQuestionAdmin) => {
+    composingRef.current[q.id] = false;
+    triggerAutoSave(q);
+  }, [triggerAutoSave]);
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
@@ -264,6 +356,10 @@ export default function AdminProductQuestionsPage() {
             className="hidden"
             onChange={handleImport}
           />
+        </div>
+
+        <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
+          Sửa trực tiếp trong bảng — hệ thống <strong>tự lưu</strong> sau ~0,7 giây. Email thông báo gửi <strong>sau 2 phút</strong> kể từ lần sửa cuối (một email duy nhất với nội dung cuối cùng).
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
@@ -344,7 +440,7 @@ export default function AdminProductQuestionsPage() {
                       ['reply_user_one_content', 'Nội dung\nuser 1'],
                       ['reply_user_two_name', 'Tên user 2'],
                       ['reply_user_two_content', 'Nội dung\nuser 2'],
-                      ['actions', 'Lưu / Xóa'],
+                      ['actions', 'Trạng thái / Xóa'],
                       ['created_at', 'Thời gian hỏi'],
                       ['product_id', 'ID SP'],
                       ['updated_at', 'Thời gian\nupdate'],
@@ -401,16 +497,16 @@ export default function AdminProductQuestionsPage() {
                           type="number"
                           min={0}
                           value={Math.max(0, Number(getRowVal(q, 'group') ?? q.group ?? 0) || 0)}
-                          onChange={(e) => setRowVal(q.id, 'group', Math.max(0, parseInt(e.target.value, 10) || 0))}
-                          onBlur={() => handleSaveRow(q)}
+                          onChange={(e) => setRowVal(q, 'group', Math.max(0, parseInt(e.target.value, 10) || 0))}
+                          onBlur={() => flushRowSave(q)}
                           className="rounded border border-gray-300 px-1 py-0.5 text-xs w-full max-w-[48px]"
                         />
                       </td>
                       <td className="py-2 px-2 overflow-hidden">
                         <select
                           value={getRowVal(q, 'is_active') ? '1' : '0'}
-                          onChange={(e) => setRowVal(q.id, 'is_active', e.target.value === '1')}
-                          onBlur={() => handleSaveRow(q)}
+                          onChange={(e) => setRowVal(q, 'is_active', e.target.value === '1')}
+                          onBlur={() => flushRowSave(q)}
                           className="rounded border border-gray-300 px-1 py-0.5 text-xs w-full max-w-[90px]"
                         >
                           <option value="1">Hiển thị</option>
@@ -422,8 +518,8 @@ export default function AdminProductQuestionsPage() {
                           type="number"
                           min={0}
                           value={Math.max(0, Number(getRowVal(q, 'useful') ?? q.useful ?? 0) || 0)}
-                          onChange={(e) => setRowVal(q.id, 'useful', Math.max(0, parseInt(e.target.value, 10) || 0))}
-                          onBlur={() => handleSaveRow(q)}
+                          onChange={(e) => setRowVal(q, 'useful', Math.max(0, parseInt(e.target.value, 10) || 0))}
+                          onBlur={() => flushRowSave(q)}
                           className="rounded border border-gray-300 px-1 py-0.5 text-xs w-full max-w-[72px]"
                           title="Số hiển thị bên cửa hàng (không khớp tự động với số tài khoản đã bấm hữu ích)"
                           aria-label="Lượt thấy hữu ích"
@@ -433,8 +529,10 @@ export default function AdminProductQuestionsPage() {
                         <input
                           type="text"
                           value={String(getRowVal(q, 'reply_admin_name') ?? '')}
-                          onChange={(e) => setRowVal(q.id, 'reply_admin_name', e.target.value)}
-                          onBlur={() => handleSaveRow(q)}
+                          onChange={(e) => setRowVal(q, 'reply_admin_name', e.target.value)}
+                          onCompositionStart={() => onComposeStart(q.id)}
+                          onCompositionEnd={() => onComposeEnd(q)}
+                          onBlur={() => flushRowSave(q)}
                           className="rounded border border-gray-300 px-2 py-1 text-xs w-full min-w-0 max-w-full"
                           placeholder="Tên admin"
                         />
@@ -443,8 +541,10 @@ export default function AdminProductQuestionsPage() {
                         <input
                           type="text"
                           value={String(getRowVal(q, 'reply_admin_content') ?? '')}
-                          onChange={(e) => setRowVal(q.id, 'reply_admin_content', e.target.value)}
-                          onBlur={() => handleSaveRow(q)}
+                          onChange={(e) => setRowVal(q, 'reply_admin_content', e.target.value)}
+                          onCompositionStart={() => onComposeStart(q.id)}
+                          onCompositionEnd={() => onComposeEnd(q)}
+                          onBlur={() => flushRowSave(q)}
                           className="rounded border border-gray-300 px-2 py-1 text-xs w-full min-w-0"
                           placeholder="Nội dung trả lời"
                         />
@@ -453,8 +553,10 @@ export default function AdminProductQuestionsPage() {
                         <input
                           type="text"
                           value={String(getRowVal(q, 'reply_user_one_name') ?? '')}
-                          onChange={(e) => setRowVal(q.id, 'reply_user_one_name', e.target.value)}
-                          onBlur={() => handleSaveRow(q)}
+                          onChange={(e) => setRowVal(q, 'reply_user_one_name', e.target.value)}
+                          onCompositionStart={() => onComposeStart(q.id)}
+                          onCompositionEnd={() => onComposeEnd(q)}
+                          onBlur={() => flushRowSave(q)}
                           className="rounded border border-gray-300 px-2 py-1 text-xs w-full min-w-0"
                           placeholder="Tên user 1"
                         />
@@ -463,8 +565,10 @@ export default function AdminProductQuestionsPage() {
                         <input
                           type="text"
                           value={String(getRowVal(q, 'reply_user_one_content') ?? '')}
-                          onChange={(e) => setRowVal(q.id, 'reply_user_one_content', e.target.value)}
-                          onBlur={() => handleSaveRow(q)}
+                          onChange={(e) => setRowVal(q, 'reply_user_one_content', e.target.value)}
+                          onCompositionStart={() => onComposeStart(q.id)}
+                          onCompositionEnd={() => onComposeEnd(q)}
+                          onBlur={() => flushRowSave(q)}
                           className="rounded border border-gray-300 px-2 py-1 text-xs w-full min-w-0"
                           placeholder="Nội dung user 1"
                         />
@@ -473,8 +577,10 @@ export default function AdminProductQuestionsPage() {
                         <input
                           type="text"
                           value={String(getRowVal(q, 'reply_user_two_name') ?? '')}
-                          onChange={(e) => setRowVal(q.id, 'reply_user_two_name', e.target.value)}
-                          onBlur={() => handleSaveRow(q)}
+                          onChange={(e) => setRowVal(q, 'reply_user_two_name', e.target.value)}
+                          onCompositionStart={() => onComposeStart(q.id)}
+                          onCompositionEnd={() => onComposeEnd(q)}
+                          onBlur={() => flushRowSave(q)}
                           className="rounded border border-gray-300 px-2 py-1 text-xs w-full min-w-0"
                           placeholder="Tên user 2"
                         />
@@ -483,21 +589,18 @@ export default function AdminProductQuestionsPage() {
                         <input
                           type="text"
                           value={String(getRowVal(q, 'reply_user_two_content') ?? '')}
-                          onChange={(e) => setRowVal(q.id, 'reply_user_two_content', e.target.value)}
-                          onBlur={() => handleSaveRow(q)}
+                          onChange={(e) => setRowVal(q, 'reply_user_two_content', e.target.value)}
+                          onCompositionStart={() => onComposeStart(q.id)}
+                          onCompositionEnd={() => onComposeEnd(q)}
+                          onBlur={() => flushRowSave(q)}
                           className="rounded border border-gray-300 px-2 py-1 text-xs w-full min-w-0"
                           placeholder="Nội dung user 2"
                         />
                       </td>
                       <td className="py-2 px-2 whitespace-nowrap overflow-hidden">
-                        <button
-                          type="button"
-                          onClick={() => handleSaveRow(q)}
-                          disabled={savingId === q.id}
-                          className="text-blue-600 hover:underline text-xs mr-1 disabled:opacity-50"
-                        >
-                          { savingId === q.id ? 'Đang lưu...' : 'Lưu' }
-                        </button>
+                        <span className="text-xs text-gray-500 mr-2" aria-live="polite">
+                          {savingId === q.id ? 'Đang lưu...' : savedFlashId === q.id ? 'Đã lưu' : rowEdit[q.id] ? 'Chờ lưu...' : ''}
+                        </span>
                         <button
                           type="button"
                           onClick={() => handleDelete(q.id)}

@@ -336,7 +336,16 @@ export const authAPI = {
   },
 
   // Đăng xuất
-  logout: (): void => {
+  logout: async (): Promise<void> => {
+    try {
+      await fetch(`${getApiBaseUrl()}/auth/logout`, {
+        ...withCreds(),
+        method: 'POST',
+        headers: jsonHeaders(),
+      });
+    } catch {
+      /* Vẫn xoá phiên client nếu backend/logout tạm lỗi. */
+    }
     if (typeof window !== 'undefined') {
       localStorage.removeItem('access_token');
       localStorage.removeItem('user');

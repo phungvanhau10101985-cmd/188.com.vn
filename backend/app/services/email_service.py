@@ -67,8 +67,18 @@ def _connect_smtp() -> smtplib.SMTP:
     return server
 
 
-def send_email(to_email: str, subject: str, text_body: str, html_body: Optional[str] = None) -> bool:
+def send_email(
+    to_email: str,
+    subject: str,
+    text_body: str,
+    html_body: Optional[str] = None,
+    *,
+    extra_headers: Optional[dict[str, str]] = None,
+    prevent_threading: bool = False,
+) -> bool:
     """Trả True nếu đã gửi SMTP; False nếu bỏ qua (cấu hình thiếu / không có người nhận)."""
+    from email.utils import make_msgid
+
     recipient = (to_email or "").strip()
     if not recipient:
         logger.warning("send_email skip: empty recipient")
@@ -87,6 +97,19 @@ def send_email(to_email: str, subject: str, text_body: str, html_body: Optional[
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = from_header
+    domain = "188.com.vn"
+    if "@" in from_header:
+        parsed = from_header.rsplit("@", 1)[-1].strip().strip(">")
+        if parsed:
+            domain = parsed
+    msg["Message-ID"] = make_msgid(domain=domain)
+    if prevent_threading:
+        # Không set In-Reply-To / References — mỗi thông báo là email độc lập.
+        msg["X-Entity-Ref-ID"] = make_msgid(domain=domain).strip("<>")
+    if extra_headers:
+        for key, value in extra_headers.items():
+            if key and value:
+                msg[key] = value
     if settings.REPLY_TO:
         msg["Reply-To"] = settings.REPLY_TO
     msg["To"] = recipient

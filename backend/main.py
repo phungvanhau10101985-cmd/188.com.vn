@@ -727,6 +727,16 @@ async def startup_event():
         print(f"   ⚠️  No-image product cleanup startup: {_e_no_img}")
 
     try:
+        from app.services.product_reply_notify import start_product_reply_email_daemon_if_needed
+
+        start_product_reply_email_daemon_if_needed()
+        print(
+            "   ✉️  Product reply email: debounce qua DB, daemon quét hàng đợi mỗi ~15s."
+        )
+    except Exception as _e_pre:
+        print(f"   ⚠️  Product reply email daemon startup: {_e_pre}")
+
+    try:
         from app.services.vps_backup_service import start_vps_backup_scheduler_daemon_if_enabled
 
         start_vps_backup_scheduler_daemon_if_enabled()

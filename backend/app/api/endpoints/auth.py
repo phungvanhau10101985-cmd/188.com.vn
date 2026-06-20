@@ -519,6 +519,18 @@ def get_current_user_info(current_user: User = Depends(get_current_user), db: Se
     """Lấy thông tin user hiện tại"""
     return user_response_with_linked_admin(db, current_user)
 
+
+@router.post("/logout")
+def logout(response: Response):
+    """Xoá cookie JWT httpOnly của luồng đăng nhập email."""
+    response.delete_cookie(
+        key=settings.AUTH_JWT_COOKIE_NAME,
+        path="/",
+        secure=settings.AUTH_COOKIE_SECURE,
+        samesite=settings.AUTH_COOKIE_SAMESITE,
+    )
+    return {"ok": True}
+
 @router.put("/me", response_model=UserResponse)
 def update_current_user_info(
     user_update: UserUpdate,

@@ -99,6 +99,9 @@ print("[OK] ProductQuestion model loaded")
 from app.models.product_review import ProductReview, ProductReviewUsefulVote
 print("[OK] ProductReview model loaded")
 
+from app.models.pending_product_reply_email import PendingProductReplyEmail, ProductReplyEmailSentLog
+print("[OK] PendingProductReplyEmail model loaded")
+
 # 6e. Category SEO mapping (quản lý canonical/redirect cho danh mục)
 from app.models.category_seo import CategorySeoMapping, CategorySeoDictionary, CategorySeoMeta, CategorySeoGeminiTarget, CategorySeoSettings
 print("[OK] CategorySeoMapping model loaded")

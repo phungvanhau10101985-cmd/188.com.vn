@@ -29,6 +29,7 @@ export type NanoAiGatewayPayload = {
   imageUrl: string;
   productUrl?: string;
   inventoryId?: string | null;
+  customerToken?: string;
 };
 
 export type NanoAiConsultOpenResult =
@@ -38,11 +39,14 @@ export type NanoAiConsultOpenResult =
 declare global {
   interface Window {
     NanoAIMessagingGateway?: {
+      setCustomer?: (payload: { token: string }) => void;
+      clearCustomer?: () => void;
       openConsult?: (payload: {
         sku: string;
         imageUrl: string;
         productUrl?: string;
         inventoryId?: string;
+        customerToken?: string;
       }) => void;
       openTryOn?: (payload: {
         imageUrl: string;
@@ -68,6 +72,32 @@ export function getNanoAiMessagingGateway(): Window['NanoAIMessagingGateway'] | 
   const gw = window.NanoAIMessagingGateway;
   if (!gw || typeof gw !== 'object') return null;
   return gw;
+}
+
+export function setNanoAiPartnerCustomerToken(token: string): void {
+  if (typeof window === 'undefined') return;
+  const trimmed = token.trim();
+  if (!trimmed) return;
+  for (const script of findNanoAiChatLoaderScripts()) {
+    script.setAttribute('data-partner-customer-token', trimmed);
+  }
+  try {
+    getNanoAiMessagingGateway()?.setCustomer?.({ token: trimmed });
+  } catch {
+    /* widget chưa sẵn sàng hoặc phiên bản cũ */
+  }
+}
+
+export function clearNanoAiPartnerCustomer(): void {
+  if (typeof window === 'undefined') return;
+  for (const script of findNanoAiChatLoaderScripts()) {
+    script.removeAttribute('data-partner-customer-token');
+  }
+  try {
+    getNanoAiMessagingGateway()?.clearCustomer?.();
+  } catch {
+    /* widget chưa sẵn sàng hoặc phiên bản cũ */
+  }
 }
 
 type NanoAi188ProductRef = {
@@ -283,12 +313,17 @@ export function openNanoAiConsultEmbed(payload: NanoAiGatewayPayload): NanoAiCon
   });
 
   const gw = getNanoAiMessagingGateway();
+  const customerToken = (payload.customerToken || '').trim();
+  if (customerToken) {
+    setNanoAiPartnerCustomerToken(customerToken);
+  }
   if (gw?.openConsult) {
     gw.openConsult({
       sku,
       imageUrl,
       productUrl: payload.productUrl || undefined,
       inventoryId: (payload.inventoryId ?? '').trim() || undefined,
+      customerToken: customerToken || undefined,
     });
     return { ok: true, mode: 'gateway' };
   }

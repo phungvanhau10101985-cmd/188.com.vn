@@ -200,6 +200,8 @@ class Settings:
         self.FACEBOOK_CAPI_INGEST_SECRET: str = os.getenv("FACEBOOK_CAPI_INGEST_SECRET", "").strip()
         # PDP: gọi từ Next (server) với header — gỡ URL ảnh 404 khỏi DB. Rỗng = tắt endpoint.
         self.BROKEN_MEDIA_PURGE_SECRET: str = os.getenv("BROKEN_MEDIA_PURGE_SECRET", "").strip()
+        # NanoAI hosted chat auto-login: chỉ dùng server-side để ký partner customer token.
+        self.NANOAI_EMBED_KEY: str = os.getenv("NANOAI_EMBED_KEY", "").strip()
 
         # Bunny.net — Storage Zone API + Pull Zone (ảnh). Frontend: NEXT_PUBLIC_CDN_URL nên trùng BUNNY_CDN_PUBLIC_BASE.
         self.BUNNY_STORAGE_ZONE_NAME: str = os.getenv("BUNNY_STORAGE_ZONE_NAME", "").strip()

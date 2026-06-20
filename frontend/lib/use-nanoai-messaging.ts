@@ -3,24 +3,47 @@
 import { useCallback } from 'react';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
+import { apiClient } from '@/lib/api-client';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
   buildNanoAiGatewayPayloadFrom188Product,
   buildNanoAiTryOnCtxFrom188Product,
+  clearNanoAiPartnerCustomer,
   openNanoAiConsultEmbed,
   openNanoAiTryOnEmbed,
+  setNanoAiPartnerCustomerToken,
   type NanoAiGatewayPayload,
   type NanoAiTryOnCtx,
 } from '@/lib/nanoai-hosted-chat';
 
 export function useNanoAiMessaging() {
   const { pushToast } = useToast();
+  const { isAuthReady, isAuthenticated } = useAuth();
 
   const openConsult = useCallback(
     async (
       payload: NanoAiGatewayPayload,
       analytics?: { source: string; productId?: number },
     ) => {
-      const result = openNanoAiConsultEmbed(payload);
+      let customerToken = '';
+      if (isAuthReady && isAuthenticated) {
+        try {
+          const resp = await apiClient.nanoaiCustomerToken();
+          customerToken = (resp.token || '').trim();
+          if (customerToken) {
+            setNanoAiPartnerCustomerToken(customerToken);
+          } else {
+            clearNanoAiPartnerCustomer();
+          }
+        } catch {
+          clearNanoAiPartnerCustomer();
+        }
+      }
+
+      const result = openNanoAiConsultEmbed({
+        ...payload,
+        customerToken: customerToken || payload.customerToken,
+      });
       if (!result.ok) {
         if (result.reason === 'missing_sku' || result.reason === 'missing_image') {
           pushToast({
@@ -39,7 +62,7 @@ export function useNanoAiMessaging() {
       });
       return result;
     },
-    [pushToast],
+    [isAuthReady, isAuthenticated, pushToast],
   );
 
   const openConsultForProduct = useCallback(
