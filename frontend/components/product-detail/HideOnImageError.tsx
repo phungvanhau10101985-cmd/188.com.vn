@@ -177,6 +177,7 @@ type GalleryThumbImageProps = {
   selected: boolean;
   onClick: () => void;
   onBroken?: () => void;
+  buttonRef?: (el: HTMLButtonElement | null) => void;
   sizeClass?: string;
   selectedClassName?: string;
   unselectedClassName?: string;
@@ -188,6 +189,7 @@ export function GalleryThumbImage({
   selected,
   onClick,
   onBroken,
+  buttonRef,
   sizeClass = 'w-16 h-16',
   selectedClassName = 'border-[#ea580c]',
   unselectedClassName = 'border-gray-200',
@@ -213,6 +215,7 @@ export function GalleryThumbImage({
 
   return (
     <button
+      ref={buttonRef}
       type="button"
       onClick={onClick}
       className={`relative flex-shrink-0 ${sizeClass} snap-center snap-always rounded-lg overflow-hidden border-2 transition-all ${
