@@ -1,5 +1,5 @@
 /** Giữ lại ô đang sửa nếu khách vẫn gõ trong lúc auto-save. */
-export function pruneRowEditAfterSave<T extends Record<string, unknown>>(
+export function pruneRowEditAfterSave<T extends object>(
   edit: Partial<T> | undefined,
   saved: T,
   keys: readonly (keyof T)[],
