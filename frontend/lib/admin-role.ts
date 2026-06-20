@@ -1,13 +1,38 @@
 /** Role JWT admin + danh sách mục (modules) — lưu khi /admin/login hoặc đổi phiên từ Cá nhân. */
 
+import { ADMIN_MODULE_NAV, ADMIN_MODULE_ORDER, presetModuleKeysForStaffRole } from '@/lib/admin-modules';
 import {
-  ADMIN_MODULE_NAV,
-  ADMIN_MODULE_ORDER,
-} from '@/lib/admin-modules';
-import { getPrivilegedOnlyAdminHrefs } from '@/lib/admin-nav-config';
+  ADMIN_NAV_GROUPS,
+  getAdminNavHrefsForModuleKeys,
+  getPrivilegedOnlyAdminHrefs,
+} from '@/lib/admin-nav-config';
 
 export const ADMIN_ROLE_STORAGE_KEY = 'admin_role';
 export const ADMIN_MODULES_STORAGE_KEY = 'admin_modules';
+
+/** Mục con vẫn hiện menu nếu có quyền mục cha (tương thích cấu hình cũ). */
+const MODULE_PARENT_GRANT: Record<string, string[]> = {
+  ems_shipping: ['orders'],
+  import_1688: ['products'],
+  source_stock_check: ['products'],
+  taobao_cards_parse: ['products'],
+};
+
+function moduleKeyAllowed(allowed: Set<string>, moduleKey: string): boolean {
+  if (allowed.has(moduleKey)) return true;
+  for (const parent of MODULE_PARENT_GRANT[moduleKey] || []) {
+    if (allowed.has(parent)) return true;
+  }
+  return false;
+}
+
+function expandGrantedModuleKeys(keys: string[]): string[] {
+  const set = new Set(keys);
+  for (const [child, parents] of Object.entries(MODULE_PARENT_GRANT)) {
+    if (parents.some((p) => set.has(p))) set.add(child);
+  }
+  return [...set];
+}
 
 function adminNavPathFromHref(href: string): string {
   return href.split('#')[0]?.split('?')[0] || href;
@@ -57,44 +82,31 @@ export function isPrivilegedAdminRole(role: string | null | undefined): boolean 
   return r === 'super_admin' || r === 'admin';
 }
 
-/**
- * Danh sách href được phép (sidebar) chỉ theo role — preset cũ.
- * null = toàn bộ (super/admin).
- */
-export function adminNavPrefixesForRole(role: string | null): string[] | null {
+/** Preset module keys theo role khi chưa có danh sách modules trong token/localStorage. */
+export function adminModuleKeysForRole(role: string | null): string[] | null {
   if (!role) return null;
   const r = role.toLowerCase();
   if (r === 'super_admin' || r === 'admin') return null;
-  if (r === 'order_manager') return ['/admin/orders'];
-  if (r === 'product_manager')
-    return [
-      '/admin/products',
-      '/admin/taxonomy',
-      '/admin/search-mappings',
-      '/admin/search-cache',
-      '/admin/listing-facet-cache',
-      '/admin/danh-muc-seo',
-      '/admin/bunny-cdn',
-    ];
-  if (r === 'content_manager')
-    return [
-      '/admin/product-questions',
-      '/admin/product-reviews',
-      '/admin/danh-muc-seo',
-      '/admin/embed-codes',
-      '/admin/chat-embeds',
-    ];
-  return ['/admin/orders'];
+  if (r === 'order_manager') return presetModuleKeysForStaffRole('order_manager');
+  if (r === 'product_manager') return presetModuleKeysForStaffRole('product_manager');
+  if (r === 'content_manager') return presetModuleKeysForStaffRole('content_manager');
+  return presetModuleKeysForStaffRole('order_manager');
 }
 
 export function getEffectiveNavPrefixesFor(role: string | null, modules: string[] | null): string[] | null {
   if (isPrivilegedAdminRole(role)) return null;
-  if (modules && modules.length > 0) {
-    const hrefs = [...new Set(modules.map((k) => ADMIN_MODULE_NAV[k]).filter(Boolean))];
-    if (hrefs.length > 0) return expandAdminNavPrefixes(hrefs);
+  const keys =
+    modules && modules.length > 0 ? modules : adminModuleKeysForRole(role);
+  if (!keys || keys.length === 0) return expandAdminNavPrefixes(['/admin/orders']);
+  const hrefs = getAdminNavHrefsForModuleKeys(expandGrantedModuleKeys(keys));
+  if (hrefs.length === 0) {
+    const legacy = keys
+      .map((k) => ADMIN_MODULE_NAV[k])
+      .filter(Boolean);
+    if (legacy.length > 0) return expandAdminNavPrefixes(legacy);
+    return expandAdminNavPrefixes(['/admin/orders']);
   }
-  const rolePrefixes = adminNavPrefixesForRole(role);
-  return rolePrefixes ? expandAdminNavPrefixes(rolePrefixes) : null;
+  return expandAdminNavPrefixes(hrefs);
 }
 
 /** href được phép: ưu tiên modules lưu trong localStorage, không có thì theo role. */
@@ -135,4 +147,24 @@ export function isAdminPathAllowedForState(pathname: string, role: string | null
 
 export function isAdminPathAllowed(pathname: string): boolean {
   return isAdminPathAllowedForState(pathname, getStoredAdminRole(), getStoredAdminModules());
+}
+
+/** Module keys được phép xem menu (sidebar) — dùng moduleKey trên từng link. */
+export function getEffectiveModuleKeysForNav(role: string | null, modules: string[] | null): Set<string> | null {
+  if (isPrivilegedAdminRole(role)) return null;
+  const keys = modules && modules.length > 0 ? modules : adminModuleKeysForRole(role);
+  return new Set(keys || []);
+}
+
+/** Lọc link sidebar theo moduleKey đã gán. */
+export function isAdminNavLinkVisible(
+  link: (typeof ADMIN_NAV_GROUPS)[number]['items'][number],
+  role: string | null,
+  modules: string[] | null,
+): boolean {
+  if (link.privilegedOnly) return isPrivilegedAdminRole(role);
+  if (isPrivilegedAdminRole(role)) return true;
+  const allowed = getEffectiveModuleKeysForNav(role, modules);
+  if (!allowed) return true;
+  return moduleKeyAllowed(allowed, link.moduleKey);
 }

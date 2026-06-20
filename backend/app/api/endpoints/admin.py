@@ -77,6 +77,7 @@ from app.schemas.integrations_admin import (
 from app.services.bunny_storage import build_public_object_url, upload_file_to_zone
 from app.services.image_raster_jpeg import raster_bytes_to_jpeg_bytes
 from app.services.linked_admin_staff import apply_linked_staff_role
+from app.services.staff_admin_cleanup import delete_staff_admin_account
 from app.services.user_public_response import admin_panel_user_response, batch_admin_panel_user_responses
 from app.core.security import create_admin_token, require_privileged_admin, require_module_permission, require_super_admin
 from app.core.config import settings
@@ -505,6 +506,22 @@ def admin_list_staff_accounts(
             )
         )
     return AdminStaffAccountListResponse(items=items)
+
+
+@router.delete("/admin-users/{admin_id}", status_code=204)
+def admin_delete_staff_account(
+    admin_id: int,
+    db: Session = Depends(get_db),
+    current_admin: AdminUser = Depends(require_privileged_admin),
+):
+    """Xóa tài khoản admin đã gỡ quyền (is_active=false, không liên kết thành viên)."""
+    target = db.query(AdminUser).filter(AdminUser.id == admin_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản admin")
+    try:
+        delete_staff_admin_account(db, current_admin, target)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.patch("/admin-users/{admin_id}/permissions", response_model=AdminStaffAccountRow)

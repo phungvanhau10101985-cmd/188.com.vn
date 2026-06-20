@@ -11,10 +11,9 @@ import {
 } from '@/lib/admin-api';
 import { getStoredAdminRole, isPrivilegedAdminRole } from '@/lib/admin-role';
 import {
-  ADMIN_MODULE_LABELS,
-  ADMIN_MODULE_KEYS_ASSIGNABLE,
   presetModuleKeysForStaffRole,
 } from '@/lib/admin-modules';
+import AdminModuleCheckboxGrid from '@/components/admin/AdminModuleCheckboxGrid';
 
 const PAGE_SIZE = 20;
 
@@ -509,21 +508,12 @@ export default function AdminMembersPage() {
                                   Chọn mục được phép trong menu quản trị. <strong>Lưu</strong> gửi danh sách lên server;
                                   đổi vai trò ở dropdown trên (không đánh dấu mục) = preset mặc định của vai đó.
                                 </p>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-4">
-                                  {ADMIN_MODULE_KEYS_ASSIGNABLE.map((key) => (
-                                    <label
-                                      key={key}
-                                      className="flex items-center gap-2 text-xs text-gray-800 cursor-pointer"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={staffPanelDraft.includes(key)}
-                                        onChange={() => toggleStaffPanelModule(key)}
-                                        className="rounded border-gray-300"
-                                      />
-                                      <span>{ADMIN_MODULE_LABELS[key] || key}</span>
-                                    </label>
-                                  ))}
+                                <div className="mb-4">
+                                  <AdminModuleCheckboxGrid
+                                    selected={staffPanelDraft}
+                                    onToggle={toggleStaffPanelModule}
+                                    disabled={linkedBusyId === m.id}
+                                  />
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                   <button

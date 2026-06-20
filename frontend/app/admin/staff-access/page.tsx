@@ -17,6 +17,7 @@ import {
 } from '@/lib/admin-modules';
 import { getStoredAdminRole, isPrivilegedAdminRole } from '@/lib/admin-role';
 import { crudCell } from '@/lib/staff-preset-crud-matrix';
+import AdminModuleCheckboxGrid from '@/components/admin/AdminModuleCheckboxGrid';
 
 function roleLabel(role: string): string {
   const m: Record<string, string> = {
@@ -85,6 +86,8 @@ export default function StaffAccessPage() {
   const [draftModules, setDraftModules] = useState<string[]>([]);
   const [saveBusyId, setSaveBusyId] = useState<number | null>(null);
   const [presetSavingRole, setPresetSavingRole] = useState<string | null>(null);
+  const [deleteConfirmRow, setDeleteConfirmRow] = useState<AdminStaffAccountRow | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const isSuperEditor =
     (typeof window !== 'undefined' ? getStoredAdminRole() || '' : '').toLowerCase() === 'super_admin';
@@ -158,6 +161,27 @@ export default function StaffAccessPage() {
   const isFullAdminRole = (r: string) => {
     const x = r.toLowerCase();
     return x === 'admin' || x === 'super_admin';
+  };
+
+  const canDeleteStaffRow = (row: AdminStaffAccountRow) =>
+    row.role.toLowerCase() !== 'super_admin' &&
+    !row.is_active &&
+    row.linked_user_id == null;
+
+  const confirmDeleteStaff = async () => {
+    if (!deleteConfirmRow) return;
+    setDeletingId(deleteConfirmRow.id);
+    try {
+      await adminStaffAPI.delete(deleteConfirmRow.id);
+      showToast('ok', 'Đã xóa tài khoản admin');
+      if (expandedId === deleteConfirmRow.id) setExpandedId(null);
+      setDeleteConfirmRow(null);
+      load();
+    } catch (e: unknown) {
+      showToast('err', (e as Error)?.message || 'Không xóa được');
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const handleSave = async (row: AdminStaffAccountRow) => {
@@ -268,8 +292,8 @@ export default function StaffAccessPage() {
             <h1 className="text-2xl font-bold text-gray-900">Quyền tài khoản nhân viên</h1>
             <p className="text-gray-600 text-sm mt-1 max-w-2xl">
               Cấu hình vai trò và quyền từng mục menu cho các tài khoản đăng nhập{' '}
-              <strong>/admin</strong> (bảng admin_users). Liên kết shop hiển thị cột{' '}
-              <em>Liên kết</em>.
+              <strong>/admin</strong> (bảng admin_users). Gỡ «Quản trị web» ở Thành viên sẽ xóa
+              luôn bản ghi admin; các dòng cũ còn sót có thể bấm <strong>Xóa</strong>.
             </p>
           </div>
           <button
@@ -297,7 +321,7 @@ export default function StaffAccessPage() {
                     <th className="py-3 px-4">Vai trò hiện tại</th>
                     <th className="py-3 px-4">Liên kết shop</th>
                     <th className="py-3 px-4">Quyền mục</th>
-                    <th className="py-3 px-4 text-center">Chi tiết</th>
+                    <th className="py-3 px-4 text-center">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -305,7 +329,14 @@ export default function StaffAccessPage() {
                     <Fragment key={row.id}>
                       <tr className="border-b border-gray-100 hover:bg-gray-50/60">
                         <td className="py-3 px-4 font-mono text-gray-600">{row.id}</td>
-                        <td className="py-3 px-4 font-medium">{row.username}</td>
+                        <td className="py-3 px-4 font-medium">
+                          {row.username}
+                          {!row.is_active ? (
+                            <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
+                              Đã tắt
+                            </span>
+                          ) : null}
+                        </td>
                         <td className="py-3 px-4 text-gray-600">{row.email || '—'}</td>
                         <td className="py-3 px-4">{roleLabel(row.role)}</td>
                         <td className="py-3 px-4 text-gray-600">
@@ -319,13 +350,25 @@ export default function StaffAccessPage() {
                           )}
                         </td>
                         <td className="py-3 px-4 text-center">
-                          <button
-                            type="button"
-                            onClick={() => openPanel(row)}
-                            className="text-xs font-semibold text-slate-700 underline-offset-2 hover:underline"
-                          >
-                            {expandedId === row.id ? 'Thu gọn' : 'Chỉnh sửa'}
-                          </button>
+                          <div className="flex flex-wrap items-center justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openPanel(row)}
+                              className="text-xs font-semibold text-slate-700 underline-offset-2 hover:underline"
+                            >
+                              {expandedId === row.id ? 'Thu gọn' : 'Chỉnh sửa'}
+                            </button>
+                            {canDeleteStaffRow(row) ? (
+                              <button
+                                type="button"
+                                onClick={() => setDeleteConfirmRow(row)}
+                                disabled={deletingId === row.id}
+                                className="text-xs font-semibold text-red-700 underline-offset-2 hover:underline disabled:opacity-50"
+                              >
+                                Xóa
+                              </button>
+                            ) : null}
+                          </div>
                         </td>
                       </tr>
                       {expandedId === row.id ? (
@@ -375,22 +418,12 @@ export default function StaffAccessPage() {
                             </div>
 
                             {!isFullAdminRole(draftRole) && useCustomModules ? (
-                              <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                                {ADMIN_MODULE_KEYS_ASSIGNABLE.map((key) => (
-                                  <label
-                                    key={key}
-                                    className="flex items-center gap-2 text-xs text-gray-800 cursor-pointer"
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={draftModules.includes(key)}
-                                      onChange={() => toggleDraftModule(key)}
-                                      disabled={saveBusyId === row.id}
-                                      className="rounded border-gray-300"
-                                    />
-                                    <span>{ADMIN_MODULE_LABELS[key] || key}</span>
-                                  </label>
-                                ))}
+                              <div className="mt-4">
+                                <AdminModuleCheckboxGrid
+                                  selected={draftModules}
+                                  onToggle={toggleDraftModule}
+                                  disabled={saveBusyId === row.id}
+                                />
                               </div>
                             ) : null}
 
@@ -557,6 +590,53 @@ export default function StaffAccessPage() {
             })}
           </div>
         </section>
+
+        {deleteConfirmRow ? (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-staff-title"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && deletingId == null) setDeleteConfirmRow(null);
+            }}
+          >
+            <div className="w-full max-w-md rounded-xl bg-white shadow-xl border border-gray-200 p-5 space-y-4">
+              <h3 id="delete-staff-title" className="text-lg font-semibold text-gray-900">
+                Xóa tài khoản admin?
+              </h3>
+              <p className="text-sm text-gray-600">
+                Bạn sắp xóa vĩnh viễn <strong>{deleteConfirmRow.username}</strong>
+                {deleteConfirmRow.email ? (
+                  <>
+                    {' '}
+                    (<span className="font-mono">{deleteConfirmRow.email}</span>)
+                  </>
+                ) : null}
+                . Tài khoản thành viên shop không bị ảnh hưởng. Thao tác này{' '}
+                <strong>không thể hoàn tác</strong>.
+              </p>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirmRow(null)}
+                  disabled={deletingId != null}
+                  className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmDeleteStaff()}
+                  disabled={deletingId != null}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {deletingId != null ? 'Đang xóa…' : 'Xóa vĩnh viễn'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
   );
 }

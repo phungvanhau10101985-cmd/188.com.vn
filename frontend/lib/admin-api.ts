@@ -2771,6 +2771,7 @@ export const adminStaffAPI = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
+  delete: (id: number) => fetchAdmin<void>(`/admin/admin-users/${id}`, { method: 'DELETE' }),
 };
 
 export interface StaffRolePresetCrudFlags {

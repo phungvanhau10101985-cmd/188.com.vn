@@ -1,88 +1,58 @@
 /**
- * Khóa mục quyền admin — đồng bộ với backend app/core/admin_permissions.py ALLOWED_MODULE_KEYS.
+ * Khóa mục quyền admin — đồng bộ với backend app/core/admin_permissions.py ALLOWED_MODULE_KEYS
+ * và frontend/lib/admin-nav-config.ts (sidebar).
  */
+import {
+  ADMIN_NAV_EXTRA_MODULES,
+  ADMIN_NAV_GROUPS,
+  getAdminNavHrefsForModuleKeys,
+} from '@/lib/admin-nav-config';
 
-export const ADMIN_MODULE_NAV: Record<string, string> = {
-  orders: '/admin/orders',
-  products: '/admin/products',
-  import_1688: '/admin/products#import-hibox',
-  taxonomy: '/admin/taxonomy',
-  search_mappings: '/admin/search-mappings',
-  search_cache: '/admin/search-cache',
-  listing_facet_cache: '/admin/listing-facet-cache',
-  category_seo: '/admin/danh-muc-seo',
-  bunny_cdn: '/admin/bunny-cdn',
-  product_questions: '/admin/product-questions',
-  product_reviews: '/admin/product-reviews',
-  members: '/admin/members',
-  bank_accounts: '/admin/bank-accounts',
-  loyalty: '/admin/loyalty',
-  promotions: '/admin/promotions',
-  sale_calendar: '/admin/promotions#site-sale',
-  affiliate: '/admin/affiliate',
-  embed_codes: '/admin/embed-codes',
-  chat_embeds: '/admin/chat-embeds',
-  shop_video_fab: '/admin/shop-video-fab',
-  notifications: '/admin/notifications',
-  newsletter: '/admin/newsletter',
-  staff_access: '/admin/staff-access',
-};
+function buildModuleCatalog() {
+  const labels: Record<string, string> = {};
+  const order: string[] = [];
+  const nav: Record<string, string> = {};
+
+  for (const g of ADMIN_NAV_GROUPS) {
+    for (const it of g.items) {
+      if (!order.includes(it.moduleKey)) order.push(it.moduleKey);
+      labels[it.moduleKey] = it.label;
+      nav[it.moduleKey] = it.href;
+    }
+  }
+  for (const extra of ADMIN_NAV_EXTRA_MODULES) {
+    if (!order.includes(extra.moduleKey)) order.push(extra.moduleKey);
+    labels[extra.moduleKey] = extra.label;
+    nav[extra.moduleKey] = extra.href;
+  }
+
+  return { labels, order, nav };
+}
+
+function isPrivilegedOnlyModuleKey(moduleKey: string): boolean {
+  for (const g of ADMIN_NAV_GROUPS) {
+    for (const it of g.items) {
+      if (it.moduleKey === moduleKey && it.privilegedOnly) return true;
+    }
+  }
+  return false;
+}
+
+const catalog = buildModuleCatalog();
+
+export const ADMIN_MODULE_NAV: Record<string, string> = catalog.nav;
 
 /** Thứ tự checkbox + ưu tiên trang mặc định sau đăng nhập. */
-export const ADMIN_MODULE_ORDER: string[] = [
-  'orders',
-  'products',
-  'import_1688',
-  'taxonomy',
-  'search_mappings',
-  'search_cache',
-  'listing_facet_cache',
-  'category_seo',
-  'bunny_cdn',
-  'product_questions',
-  'product_reviews',
-  'members',
-  'bank_accounts',
-  'loyalty',
-  'promotions',
-  'sale_calendar',
-  'affiliate',
-  'embed_codes',
-  'chat_embeds',
-  'shop_video_fab',
-  'notifications',
-  'newsletter',
-  'staff_access',
-];
+export const ADMIN_MODULE_ORDER: string[] = catalog.order;
 
-/** Checkbox gán quyền NV — không gán « Quản lý quyền nhân viên » qua granular. */
-export const ADMIN_MODULE_KEYS_ASSIGNABLE = ADMIN_MODULE_ORDER.filter((k) => k !== 'staff_access');
+/** Checkbox gán quyền NV — loại trừ staff_access và mục privilegedOnly. */
+export const ADMIN_MODULE_KEYS_ASSIGNABLE = ADMIN_MODULE_ORDER.filter(
+  (k) => k !== 'staff_access' && !isPrivilegedOnlyModuleKey(k),
+);
 
-export const ADMIN_MODULE_LABELS: Record<string, string> = {
-  orders: 'Đơn hàng',
-  products: 'Sản phẩm',
-  import_1688: 'Import Hibox (trang Sản phẩm)',
-  taxonomy: 'Cây danh mục',
-  search_mappings: 'Từ khóa mapping',
-  search_cache: 'Cache & thống kê tìm kiếm',
-  listing_facet_cache: 'Cache bộ lọc listing',
-  category_seo: 'Tổng hợp danh mục SEO',
-  bunny_cdn: 'Đăng ảnh Bunny CDN',
-  product_questions: 'Câu hỏi / trả lời SP',
-  product_reviews: 'Đánh giá sản phẩm',
-  members: 'Thành viên',
-  bank_accounts: 'Cấu hình nạp tiền',
-  loyalty: 'Cấu hình thành viên',
-  promotions: 'Khuyến mãi',
-  sale_calendar: 'Sale ngày trùng tháng',
-  affiliate: 'Affiliate & ví',
-  embed_codes: 'Mã nhúng (GA, FB…)',
-  chat_embeds: 'Nhúng chat',
-  shop_video_fab: 'Nút lướt video',
-  notifications: 'Thông báo',
-  newsletter: 'Quản lý gửi email',
-  staff_access: 'Quản lý quyền nhân viên',
-};
+export const ADMIN_MODULE_LABELS: Record<string, string> = catalog.labels;
+
+export { getAdminNavHrefsForModuleKeys };
 
 /** Preset khi gán NV theo vai trò (null = không áp dụng). */
 export function presetModuleKeysForStaffRole(
@@ -90,9 +60,20 @@ export function presetModuleKeysForStaffRole(
 ): string[] {
   switch (staffRole) {
     case 'order_manager':
-      return ['orders'];
+      return ['orders', 'ems_shipping'];
     case 'product_manager':
-      return ['products', 'import_1688', 'taxonomy', 'search_mappings', 'search_cache', 'listing_facet_cache', 'category_seo', 'bunny_cdn'];
+      return [
+        'products',
+        'import_1688',
+        'source_stock_check',
+        'taobao_cards_parse',
+        'taxonomy',
+        'search_mappings',
+        'search_cache',
+        'listing_facet_cache',
+        'category_seo',
+        'bunny_cdn',
+      ];
     case 'content_manager':
       return ['product_questions', 'product_reviews', 'category_seo', 'embed_codes', 'chat_embeds'];
     case 'admin':

@@ -768,7 +768,7 @@ def admin_list_ems_shipping_records(
     sync_status: Optional[str] = None,
     q: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Danh sách bảng quản lý vận chuyển EMS đã lưu (phân trang + tra cứu)."""
     return ems_import_svc.list_ems_shipping_records(
@@ -787,7 +787,7 @@ def admin_list_ems_shipping_records(
 def admin_list_ems_import_batches(
     limit: int = 30,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Danh sách các lần import file gửi EMS — mở lại báo cáo từng lần."""
     return ems_import_svc.list_ems_import_batches(db, limit=limit)
@@ -795,7 +795,7 @@ def admin_list_ems_import_batches(
 
 @router.get("/admin/shipping/ems-import/sample")
 def admin_download_ems_shipment_import_sample(
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Tải file Excel mẫu import gửi EMS (file gui ems.xlsx)."""
     content, filename = ems_sample_tpl_svc.build_ems_shipment_sample_xlsx()
@@ -810,7 +810,7 @@ def admin_download_ems_shipment_import_sample(
 async def admin_import_ems_shipment_excel(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Import file gui ems.xlsx — cột A mã vận đơn, I đơn hàng (DHxxx), G COD, D tên khách."""
     filename = (file.filename or "").lower()
@@ -846,7 +846,7 @@ async def admin_import_ems_shipment_excel(
 )
 def admin_resume_ems_tracking_refresh_job(
     job_id: str,
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Tiếp tục job tra EMS bị dừng giữa chừng (worker crash / restart server)."""
     job = ems_refresh_svc.resume_tracking_refresh_job(job_id)
@@ -860,7 +860,7 @@ def admin_resume_ems_tracking_refresh_job(
     response_model=shipment_schemas.EmsTrackingRefreshActiveResponse,
 )
 def admin_get_active_ems_tracking_refresh_job(
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Job tra EMS đang chạy gần nhất (queued/running) — dùng khi F5 trang admin."""
     job = ems_refresh_svc.get_active_tracking_refresh_job()
@@ -875,7 +875,7 @@ def admin_get_active_ems_tracking_refresh_job(
 )
 def admin_get_ems_tracking_refresh_job(
     job_id: str,
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Poll tiến trình tra EMS nền sau import / cron."""
     job = ems_refresh_svc.get_tracking_refresh_job(job_id)
@@ -891,7 +891,7 @@ def admin_get_ems_tracking_refresh_job(
 def admin_enqueue_ems_tracking_refresh(
     body: shipment_schemas.EmsTrackingRefreshRequest,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Tra lại EMS cho dòng đã chọn, kết quả tìm kiếm, hoặc bộ lọc trạng thái (chạy nền)."""
     ids = [int(x) for x in (body.ids or []) if int(x) > 0]
@@ -946,7 +946,7 @@ def admin_enqueue_ems_tracking_refresh(
 def admin_delete_ems_shipping_records(
     body: shipment_schemas.EmsShippingDeleteRequest,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Xóa vĩnh viễn các dòng khỏi bảng vận chuyển EMS."""
     deleted = ems_import_svc.delete_ems_shipping_records(db, body.ids)
@@ -959,7 +959,7 @@ def admin_delete_ems_shipping_records(
 )
 def admin_list_cod_settlement_batches(
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Danh sách các lần import đối soát COD đã thanh toán."""
     return cod_settlement_svc.list_cod_settlement_batches(db)
@@ -967,7 +967,7 @@ def admin_list_cod_settlement_batches(
 
 @router.get("/admin/shipping/cod-settlement-import/sample")
 def admin_download_cod_settlement_import_sample(
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Tải file Excel mẫu đối soát COD EMS trả shop."""
     content, filename = ems_sample_tpl_svc.build_cod_settlement_sample_xlsx()
@@ -985,7 +985,7 @@ def admin_download_cod_settlement_import_sample(
 async def admin_import_cod_settlement_excel(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Import file Doi soat cod — cột C mã vận chuyển EMS, cột D số tiền đã trả, E1 ngày trả tiền."""
     filename = (file.filename or "").lower()
@@ -1022,7 +1022,7 @@ def admin_shipping_operations_stats(
     preset: str | None = None,
     year: int | None = None,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Thống kê vận hành hoặc timeline (`view=timeline`)."""
     if (view or "").strip().lower() == "timeline":
@@ -1053,7 +1053,7 @@ def admin_shipping_timeline_stats(
     preset: str | None = None,
     year: int | None = None,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Thống kê vận đơn EMS theo năm / tháng / tuần / ngày (theo ngày import)."""
     try:
@@ -1079,7 +1079,7 @@ def admin_shipping_operations_records(
     skip: int = 0,
     limit: int = 25,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Danh sách vận đơn EMS theo nhóm thống kê vận hành."""
     try:
@@ -1108,7 +1108,7 @@ def admin_shipping_timeline_records(
     skip: int = 0,
     limit: int = 25,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Danh sách vận đơn EMS theo kỳ timeline và nhóm thống kê."""
     try:
@@ -1133,7 +1133,7 @@ def admin_approve_return_received(
     order_id: int,
     body: shipment_schemas.AdminApproveReturnReceivedIn,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Shop xác nhận đã nhận hàng hoàn — hủy hoa hồng affiliate."""
     try:
@@ -1155,7 +1155,7 @@ def admin_approve_return_received(
 def admin_preview_shop_returns_bulk(
     body: shipment_schemas.ShopReturnConfirmRequest,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Tra cứu trạng thái EMS/đơn — không xác nhận."""
     del current_admin
@@ -1179,7 +1179,7 @@ def admin_preview_shop_returns_bulk(
 def admin_confirm_shop_returns_bulk(
     body: shipment_schemas.ShopReturnConfirmRequest,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Xác nhận đơn hoàn đã trả shop — nhập / dán danh sách mã DHxxx."""
     text = (body.text or "").strip()
@@ -1212,7 +1212,7 @@ def admin_confirm_shop_returns_bulk(
 def admin_resolve_return_warehouse_sku(
     code: str = Query(..., min_length=1, description="Mã EMS / tham chiếu / DHxxx"),
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Trích mã SKU cột H file EMS → điền ô nhập kho thanh lý."""
     data = shop_return_confirm_svc.resolve_warehouse_sku_for_return_intake(db, code)
@@ -1226,7 +1226,7 @@ def admin_resolve_return_warehouse_sku(
 def admin_return_warehouse_lookup(
     sku: str = Query(..., min_length=1, description="Mã SKU gốc hoặc mã kho H0723/40/3"),
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Tra cứu màu/size của SKU để nhập hàng hoàn vào kho thanh lý."""
     from app.services import return_warehouse_intake as rw_intake_svc
@@ -1245,7 +1245,7 @@ def admin_return_warehouse_lookup(
 def admin_return_warehouse_intake(
     body: shipment_schemas.ReturnWarehouseIntakeRequest,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Nhập hàng hoàn vào kho thanh lý — tạo/cộng tồn dòng is_warehouse_clearance."""
     from app.services import return_warehouse_intake as rw_intake_svc
@@ -1296,7 +1296,7 @@ def admin_return_warehouse_intake(
 def admin_return_warehouse_publish_parent(
     body: shipment_schemas.ReturnWarehousePublishParentRequest,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Đăng SP gốc từ mã nguồn A/T (legacy — luồng nhập kho mặc định tạo SP sale độc lập)."""
     from app.services import return_warehouse_intake as rw_intake_svc
@@ -1322,7 +1322,7 @@ def admin_return_warehouse_publish_parent(
 
 @router.get("/admin/shipping/shop-return-confirm-import/sample")
 def admin_download_shop_return_confirm_import_sample(
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Tải file Excel mẫu xác nhận đơn hoàn đã trả shop."""
     content, filename = ems_sample_tpl_svc.build_shop_return_confirm_sample_xlsx()
@@ -1341,7 +1341,7 @@ async def admin_confirm_shop_returns_excel(
     file: UploadFile = File(...),
     note: Optional[str] = Form(None),
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Import Excel xác nhận đơn hoàn đã trả shop — cột có mã DHxxx; mã không tồn tại báo lỗi."""
     filename = (file.filename or "").lower()
@@ -1373,7 +1373,7 @@ async def admin_confirm_shop_returns_excel(
 )
 def admin_list_freight_settlement_batches(
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Danh sách các lần import đối soát cước EMS."""
     return freight_settlement_svc.list_freight_settlement_batches(db)
@@ -1381,7 +1381,7 @@ def admin_list_freight_settlement_batches(
 
 @router.get("/admin/shipping/freight-settlement-import/sample")
 def admin_download_freight_settlement_import_sample(
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Tải file Excel mẫu đối soát cước EMS."""
     content, filename = ems_sample_tpl_svc.build_freight_settlement_sample_xlsx()
@@ -1399,7 +1399,7 @@ def admin_download_freight_settlement_import_sample(
 async def admin_import_freight_settlement_excel(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
     """Import file Doi soat cuoc — cột A mã vận chuyển EMS, cột L cước phí."""
     filename = (file.filename or "").lower()

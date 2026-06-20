@@ -9,9 +9,10 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from app.core.admin_permissions import normalize_module_list
+from app.core.security import get_password_hash
 from app.models.admin import AdminUser, AdminRole
 from app.models.user import User
-from app.core.security import get_password_hash
+from app.services.staff_admin_cleanup import remove_linked_staff_admin_row
 
 LINKABLE_ROLES = frozenset(
     {
@@ -52,11 +53,7 @@ def apply_linked_staff_role(
     if role is None:
         row = db.query(AdminUser).filter(AdminUser.linked_user_id == user.id).first()
         if row:
-            if row.role == AdminRole.SUPER_ADMIN:
-                raise ValueError("Không thể gỡ liên kết tài khoản super_admin.")
-            row.linked_user_id = None
-            row.granular_permissions = None
-            row.is_active = False
+            remove_linked_staff_admin_row(db, row)
             db.commit()
         return
 

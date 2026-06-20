@@ -7,7 +7,7 @@ import {
   defaultAdminHomeFromState,
   getStoredAdminRole,
   getStoredAdminModules,
-  getEffectiveNavPrefixesFor,
+  isAdminNavLinkVisible,
   isAdminPathAllowedForState,
   isPrivilegedAdminRole,
 } from '@/lib/admin-role';
@@ -49,15 +49,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
   const visibleGroups = useMemo(() => {
     if (!hydrated) return [];
-    const filterItem = (l: AdminNavGroup['items'][number]) => {
-      if (l.privilegedOnly && !isPrivilegedAdminRole(adminRole)) return false;
-      // super_admin / admin: mục privilegedOnly luôn hiện (không bị «admin_modules» trong localStorage che)
-      if (l.privilegedOnly && isPrivilegedAdminRole(adminRole)) return true;
-      const prefixes = getEffectiveNavPrefixesFor(adminRole, adminModules);
-      if (!prefixes) return true;
-      const hrefPath = adminNavPathFromHref(l.href);
-      return prefixes.some((p) => hrefPath === p || hrefPath.startsWith(`${p}/`));
-    };
+    const filterItem = (l: AdminNavGroup['items'][number]) =>
+      isAdminNavLinkVisible(l, adminRole, adminModules);
 
     return ADMIN_NAV_GROUPS.map((g) => ({
       ...g,
@@ -85,9 +78,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     const role = getStoredAdminRole();
     const mods = getStoredAdminModules();
     if (!isAdminPathAllowedForState(pathname, role, mods)) {
-      const prefixes = getEffectiveNavPrefixesFor(role, mods);
-      const fallback = prefixes && prefixes.length > 0 ? prefixes[0] : '/admin/orders';
-      router.replace(fallback);
+      const home = defaultAdminHomeFromState(role, mods);
+      router.replace(home);
     }
   }, [pathname, router]);
 

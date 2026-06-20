@@ -10,7 +10,12 @@ from app.models.admin import AdminRole, AdminUser
 ALLOWED_MODULE_KEYS: Set[str] = {
     "staff_access",
     "orders",
+    "ems_shipping",
     "products",
+    "import_1688",
+    "source_stock_check",
+    "taobao_cards_parse",
+    "admin_test",
     "taxonomy",
     "search_mappings",
     "search_cache",
@@ -28,15 +33,20 @@ ALLOWED_MODULE_KEYS: Set[str] = {
     "embed_codes",
     "chat_embeds",
     "shop_video_fab",
+    "api_keys",
+    "vps_backup",
     "notifications",
     "newsletter",
 }
 
 LEGACY_ROLE_MODULES = {
-    AdminRole.ORDER_MANAGER: frozenset({"orders"}),
+    AdminRole.ORDER_MANAGER: frozenset({"orders", "ems_shipping"}),
     AdminRole.PRODUCT_MANAGER: frozenset(
         {
             "products",
+            "import_1688",
+            "source_stock_check",
+            "taobao_cards_parse",
             "taxonomy",
             "search_mappings",
             "search_cache",
@@ -59,6 +69,19 @@ LEGACY_ROLE_MODULES = {
 PRESET_STAFF_ROLES = frozenset(
     {AdminRole.ORDER_MANAGER, AdminRole.PRODUCT_MANAGER, AdminRole.CONTENT_MANAGER}
 )
+
+# Quyền mục con: vẫn cho phép nếu NV có mục cha (tương thích cấu hình cũ).
+MODULE_PARENT_GRANT: Dict[str, Tuple[str, ...]] = {
+    "ems_shipping": ("orders",),
+    "import_1688": ("products",),
+    "source_stock_check": ("products",),
+    "taobao_cards_parse": ("products",),
+}
+
+# Quyền mục cha: API mục cha vẫn mở nếu NV chỉ được gán mục con sản phẩm (vd. chỉ import_1688).
+MODULE_CHILDREN_OF: Dict[str, Tuple[str, ...]] = {
+    "products": ("import_1688", "source_stock_check", "taobao_cards_parse"),
+}
 
 AdminCrudNeed = Literal["view", "create", "update", "delete"]
 
@@ -152,6 +175,18 @@ def _parse_granular(raw: Any) -> Optional[Set[str]]:
     return None
 
 
+def _module_in_grant(module_key: str, granted: Set[str]) -> bool:
+    if module_key in granted:
+        return True
+    for parent in MODULE_PARENT_GRANT.get(module_key, ()):
+        if parent in granted:
+            return True
+    for child in MODULE_CHILDREN_OF.get(module_key, ()):
+        if child in granted:
+            return True
+    return False
+
+
 def admin_allowed_operation(admin: AdminUser, db: Session, module_key: str, need: AdminCrudNeed) -> bool:
     if module_key not in ALLOWED_MODULE_KEYS:
         return False
@@ -159,11 +194,17 @@ def admin_allowed_operation(admin: AdminUser, db: Session, module_key: str, need
         return True
     gp = _parse_granular(getattr(admin, "granular_permissions", None))
     if gp is not None:
-        return module_key in gp
+        if not _module_in_grant(module_key, gp):
+            return False
+        return True
     bundle = preset_module_bundle(db, admin.role)
-    if module_key not in bundle:
+    if not _module_in_grant(module_key, set(bundle)):
         return False
     flags = merged_preset_crud(db, admin.role, module_key)
+    if module_key not in bundle and module_key in MODULE_PARENT_GRANT:
+        parent = next((p for p in MODULE_PARENT_GRANT[module_key] if p in bundle), None)
+        if parent:
+            flags = merged_preset_crud(db, admin.role, parent)
     return bool(flags.get(need))
 
 

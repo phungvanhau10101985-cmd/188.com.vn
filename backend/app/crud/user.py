@@ -405,9 +405,7 @@ def delete_user(db: Session, user_id: int) -> Optional[User]:
     if linked:
         if linked.role == AdminRole.SUPER_ADMIN:
             raise ValueError("Không thể xóa thành viên liên kết với super_admin.")
-        linked.linked_user_id = None
-        linked.is_active = False
-        linked.granular_permissions = None
+        db.delete(linked)
 
     # analytics_events.user_id: giữ sự kiện, bỏ liên kết user
     db.query(AnalyticsEvent).filter(AnalyticsEvent.user_id == user_id).update(
