@@ -675,8 +675,8 @@ export default function OrderDepositPage() {
                 <div className="rounded-lg border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-950">
                   <p className="font-medium text-sky-900">Đánh giá khách hàng qua Google (tùy chọn)</p>
                   <p className="mt-1 text-sky-900/90 leading-relaxed">
-                    Lời mời từ Google có thể hiện ở <strong>cạnh đáy màn hình</strong> — chọn tham gia để sau khi nhận hàng
-                    Google gửi email khảo sát. Nếu không thấy, thử tắt chặn quảng cáo hoặc mở trang bằng Chrome/Safari.
+                    Google có thể hiện hộp thoại xác nhận — chọn tham gia để sau khi nhận hàng Google gửi email khảo sát.
+                    Nếu không thấy, thử tắt chặn quảng cáo hoặc mở trang bằng Chrome/Safari.
                   </p>
                 </div>
               ) : null}
