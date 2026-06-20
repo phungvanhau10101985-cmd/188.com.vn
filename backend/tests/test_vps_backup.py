@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -141,3 +142,94 @@ def test_normalize_days_of_week_dedupes_and_sorts():
 def test_pretty_bytes():
     assert backup_svc.pretty_bytes(1024) == "1.0 KB"
     assert backup_svc.pretty_bytes(None) == "—"
+
+
+def test_reconcile_stale_run_marks_success_when_archive_exists(tmp_path):
+    archive = tmp_path / "backup-188-20260620-032029.tar.gz"
+    archive.write_bytes(b"x" * 64)
+
+    started = datetime(2026, 6, 20, 3, 20, tzinfo=timezone.utc)
+    run = SimpleNamespace(
+        id=11,
+        status="running",
+        started_at=started,
+        created_at=started,
+        archive_filename=None,
+        archive_path=None,
+        archive_size_bytes=None,
+        drive_upload_status=None,
+        error_message=None,
+        finished_at=None,
+    )
+
+    class FakeQuery:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def filter(self, *args, **kwargs):
+            return self
+
+        def order_by(self, *args, **kwargs):
+            return self
+
+        def all(self):
+            return self._rows
+
+    class FakeSession:
+        def __init__(self):
+            self.committed = False
+
+        def query(self, model):
+            return FakeQuery([run])
+
+        def commit(self):
+            self.committed = True
+
+    db = FakeSession()
+    with patch.object(backup_svc, "is_backup_job_running", return_value=False), patch.object(
+        backup_svc, "backup_root_dir", return_value=tmp_path
+    ), patch.object(backup_svc, "_find_newest_archive", return_value=archive):
+        n = backup_svc.reconcile_stale_backup_runs(db)
+
+    assert n == 1
+    assert run.status == "success"
+    assert run.archive_filename == archive.name
+    assert run.finished_at is not None
+    assert db.committed is True
+
+
+def test_reconcile_skips_when_job_running_in_memory():
+    class FakeSession:
+        def query(self, model):
+            raise AssertionError("should not query when job running")
+
+    with patch.object(backup_svc, "is_backup_job_running", return_value=True):
+        assert backup_svc.reconcile_stale_backup_runs(FakeSession()) == 0
+
+
+def test_upload_backup_archive_with_timeout_returns_failed_on_timeout(tmp_path):
+    archive = tmp_path / "backup-188-20260620-032029.tar.gz"
+    archive.write_bytes(b"data")
+
+    class FakeExecutor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def submit(self, fn, *args, **kwargs):
+            class FakeFuture:
+                def result(self, timeout=None):
+                    raise backup_svc.concurrent.futures.TimeoutError()
+
+            return FakeFuture()
+
+    with patch.object(backup_svc.concurrent.futures, "ThreadPoolExecutor", return_value=FakeExecutor()):
+        status, link, err = backup_svc._upload_backup_archive_with_timeout(
+            archive, timeout_seconds=1
+        )
+
+    assert status == "failed"
+    assert link is None
+    assert "Google Drive" in (err or "")

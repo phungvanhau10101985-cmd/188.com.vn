@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import os
 import re
@@ -29,6 +30,12 @@ _scheduler_lock = threading.Lock()
 _scheduler_started = False
 _backup_job_lock = threading.Lock()
 _backup_job_running = False
+_backup_job_run_id: Optional[int] = None
+
+# Script timeout 3600s — reconcile sau thêm biên độ.
+STALE_RUN_SECONDS = 3900
+# Upload Drive ~98MB có thể lâu; quá hạn thì giữ backup local, không kẹt trạng thái.
+DRIVE_UPLOAD_TIMEOUT_SECONDS = 1800
 
 
 def backup_root_dir() -> Path:
@@ -143,6 +150,15 @@ def resolve_archive_path(filename: str) -> Path:
     return path
 
 
+def _run_reference_ts(run: VpsBackupRun) -> float:
+    ref = run.started_at or run.created_at
+    if ref is None:
+        return time.time()
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    return ref.timestamp()
+
+
 def _find_newest_archive(since_ts: float) -> Optional[Path]:
     root = backup_root_dir()
     if not root.is_dir():
@@ -158,6 +174,96 @@ def _find_newest_archive(since_ts: float) -> Optional[Path]:
         return None
     candidates.sort(key=lambda x: x[0], reverse=True)
     return candidates[0][1]
+
+
+def _upload_backup_archive_with_timeout(
+    archive: Path,
+    *,
+    timeout_seconds: float = DRIVE_UPLOAD_TIMEOUT_SECONDS,
+) -> Tuple[str, Optional[str], Optional[str]]:
+    from app.services.vps_backup_drive import upload_backup_archive
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(upload_backup_archive, archive)
+        try:
+            return future.result(timeout=max(60.0, float(timeout_seconds)))
+        except concurrent.futures.TimeoutError:
+            logger.warning("VPS backup Drive upload timed out after %ss: %s", timeout_seconds, archive.name)
+            return (
+                "failed",
+                None,
+                f"Upload Google Drive quá {int(timeout_seconds // 60)} phút — file backup trên VPS vẫn OK.",
+            )
+        except Exception as exc:
+            logger.exception("VPS backup Drive upload wrapper failed for %s", archive.name)
+            return "failed", None, str(exc)[:2000]
+
+
+def reconcile_stale_backup_runs(db: Session) -> int:
+    """
+    Khôi phục run queued/running khi worker crash hoặc upload Drive treo.
+    Chỉ chạy khi không có job in-memory đang chạy.
+    """
+    if is_backup_job_running():
+        return 0
+
+    now = datetime.now(timezone.utc)
+    rows = (
+        db.query(VpsBackupRun)
+        .filter(VpsBackupRun.status.in_(("queued", "running")))
+        .order_by(VpsBackupRun.id.asc())
+        .all()
+    )
+    if not rows:
+        return 0
+
+    fixed = 0
+    for run in rows:
+        ref = run.started_at or run.created_at
+        if ref is not None and ref.tzinfo is None:
+            ref = ref.replace(tzinfo=timezone.utc)
+        age_seconds = (now - ref).total_seconds() if ref else STALE_RUN_SECONDS + 1
+
+        archive = _find_newest_archive(_run_reference_ts(run))
+        if archive and archive.is_file():
+            run.status = "success"
+            run.archive_filename = archive.name
+            run.archive_path = str(archive)
+            run.archive_size_bytes = archive.stat().st_size
+            if not run.drive_upload_status:
+                run.drive_upload_status = "skipped"
+            if not run.error_message:
+                run.error_message = None
+            run.finished_at = now
+            fixed += 1
+            logger.info(
+                "VPS backup reconcile: run #%s → success (archive %s)",
+                run.id,
+                archive.name,
+            )
+            continue
+
+        if run.status == "queued" and age_seconds >= 600:
+            run.status = "failed"
+            run.error_message = "Backup không khởi chạy (worker dừng hoặc restart server)."
+            run.finished_at = now
+            fixed += 1
+            logger.warning("VPS backup reconcile: run #%s queued too long → failed", run.id)
+            continue
+
+        if run.status == "running" and age_seconds >= STALE_RUN_SECONDS:
+            run.status = "failed"
+            run.error_message = (
+                "Backup kẹt quá lâu (có thể upload Drive treo hoặc process restart). "
+                "Kiểm tra file trong thư mục backup trên VPS."
+            )
+            run.finished_at = now
+            fixed += 1
+            logger.warning("VPS backup reconcile: run #%s running too long → failed", run.id)
+
+    if fixed:
+        db.commit()
+    return fixed
 
 
 def _finish_run_notify(db: Session, run: VpsBackupRun) -> None:
@@ -180,7 +286,7 @@ def _finish_run_notify(db: Session, run: VpsBackupRun) -> None:
 
 
 def _execute_backup_run(run_id: int) -> None:
-    global _backup_job_running
+    global _backup_job_running, _backup_job_run_id
     db = SessionLocal()
     started_ts = time.time()
     run: Optional[VpsBackupRun] = None
@@ -236,17 +342,21 @@ def _execute_backup_run(run_id: int) -> None:
             run.archive_filename = archive.name
             run.archive_path = str(archive)
             run.archive_size_bytes = archive.stat().st_size
-            from app.services.vps_backup_drive import upload_backup_archive
-
-            drv_status, drv_link, drv_err = upload_backup_archive(archive)
-            run.drive_upload_status = drv_status
-            run.drive_web_link = drv_link
-            run.drive_upload_error = drv_err
         else:
             run.drive_upload_status = "skipped"
+
+        # Ghi nhận thành công ngay khi có file local — tránh kẹt nếu upload Drive treo.
         run.status = "success"
         run.finished_at = datetime.now(timezone.utc)
         db.commit()
+
+        if archive and archive.is_file() and run.drive_upload_status != "skipped":
+            drv_status, drv_link, drv_err = _upload_backup_archive_with_timeout(archive)
+            run.drive_upload_status = drv_status
+            run.drive_web_link = drv_link
+            run.drive_upload_error = drv_err
+            db.commit()
+
         _finish_run_notify(db, run)
     except subprocess.TimeoutExpired:
         run = db.query(VpsBackupRun).filter(VpsBackupRun.id == run_id).first()
@@ -269,6 +379,7 @@ def _execute_backup_run(run_id: int) -> None:
         db.close()
         with _backup_job_lock:
             _backup_job_running = False
+            _backup_job_run_id = None
 
 
 def is_backup_job_running() -> bool:
@@ -282,12 +393,21 @@ def queue_backup_run(
     trigger: str,
     include_cache: Optional[bool] = None,
 ) -> VpsBackupRun:
-    global _backup_job_running
+    global _backup_job_running, _backup_job_run_id
     if not is_backup_environment_available():
         raise ValueError("Backup chỉ khả dụng trên VPS Linux.")
 
+    reconcile_stale_backup_runs(db)
+
     with _backup_job_lock:
         if _backup_job_running:
+            raise RuntimeError("Đang có một backup khác chạy. Vui lòng đợi hoàn tất.")
+        active = (
+            db.query(VpsBackupRun)
+            .filter(VpsBackupRun.status.in_(("queued", "running")))
+            .first()
+        )
+        if active:
             raise RuntimeError("Đang có một backup khác chạy. Vui lòng đợi hoàn tất.")
         _backup_job_running = True
 
@@ -302,6 +422,8 @@ def queue_backup_run(
     db.add(run)
     db.commit()
     db.refresh(run)
+    with _backup_job_lock:
+        _backup_job_run_id = run.id
 
     thread = threading.Thread(
         target=_execute_backup_run,
@@ -314,6 +436,7 @@ def queue_backup_run(
 
 
 def list_runs(db: Session, *, skip: int = 0, limit: int = 50) -> Tuple[int, List[VpsBackupRun]]:
+    reconcile_stale_backup_runs(db)
     q = db.query(VpsBackupRun)
     total = q.count()
     rows = q.order_by(VpsBackupRun.created_at.desc()).offset(skip).limit(limit).all()
@@ -395,11 +518,13 @@ def _same_schedule_minute(a: Optional[datetime], b: datetime) -> bool:
 def scheduler_tick() -> None:
     if not is_backup_environment_available():
         return
-    if is_backup_job_running():
-        return
 
     db = SessionLocal()
     try:
+        reconcile_stale_backup_runs(db)
+        if is_backup_job_running():
+            return
+
         settings = get_or_create_settings(db)
         if not settings.enabled:
             return
@@ -449,6 +574,17 @@ def start_vps_backup_scheduler_daemon_if_enabled() -> None:
         if _scheduler_started:
             return
         _scheduler_started = True
+
+    db = SessionLocal()
+    try:
+        n = reconcile_stale_backup_runs(db)
+        if n:
+            logger.info("VPS backup: reconciled %s stale run(s) on startup", n)
+    except Exception:
+        logger.exception("VPS backup stale reconcile on startup failed")
+    finally:
+        db.close()
+
     threading.Thread(
         target=_scheduler_loop,
         args=(60.0,),
