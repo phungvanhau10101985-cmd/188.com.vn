@@ -830,6 +830,9 @@ async def admin_import_ems_shipment_excel(
             admin_id=current_admin.id,
             source_filename=file.filename,
         )
+    except ems_import_svc.EmsShipmentImportFormatError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Không đọc được file Excel: {exc}") from exc

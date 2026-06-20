@@ -71,6 +71,130 @@ _EMS_EXPORT_DEFAULTS: dict[str, int] = {
     "cod_amount": 15,
 }
 
+# Header/file của export sản phẩm listing — không phải file gửi EMS.
+_LISTING_PRODUCT_EXPORT_MARKERS = frozenset({
+    "ID",
+    "ID_SAN_PHAM",
+    "MA_SAN_PHAM",
+    "MO_TA_SAN_PHAM",
+    "LINK_MAC_DINH",
+    "LINK_IMG",
+    "THU_VIEN_ANH",
+    "DANH_MUC_CAP_1",
+    "DANH_MUC_CAP_2",
+    "SHOP_NAME_CHINESE",
+    "TEN_SHOP",
+    "SHOP_ID",
+    "BIEN_THE",
+    "XUAT_XU",
+    "THUONG_HIEU",
+    "PRODUCT_INFO",
+    "CHINESE_NAME",
+    "LISTED",
+    "GALLERY_IMAGES",
+    "DETAIL_IMAGES",
+    "PRODUCT_URL",
+    "MAIN_IMAGE",
+    "SKU",
+    "ORIGIN",
+    "BRAND",
+    "PRO_CONTENT",
+    "NAME",
+    "VARIANT",
+    "SIZES",
+})
+
+_WRONG_EMS_IMPORT_FILENAME_PREFIXES = (
+    "listing_queue_products_",
+    "import_1688_drafts_bulk_",
+)
+
+# file gui ems.xlsx — 9 cột; import linh hoạt khi đủ số cột + ≥80% tiêu đề quan trọng.
+_SHOP_TEMPLATE_COLUMN_COUNT = 9
+_SHOP_IMPORTANT_HEADER_FIELDS = (
+    "reference_code",
+    "customer_name",
+    "cod_amount",
+    "product_code",
+    "order_code",
+)
+_HEADER_IMPORTANT_MATCH_RATIO = 0.8
+
+
+class EmsShipmentImportFormatError(ValueError):
+    """File Excel không đúng mẫu gửi EMS (file gui ems.xlsx)."""
+
+
+def _collect_normalized_headers(rows: list[tuple[Any, ...]], *, max_rows: int = 5) -> set[str]:
+    headers: set[str] = set()
+    for row in rows[:max_rows]:
+        for cell in row:
+            key = _norm_header(cell)
+            if key:
+                headers.add(key)
+    return headers
+
+
+def _looks_like_listing_product_export(headers: set[str]) -> bool:
+    if "MA_VAN_DON" in headers or "MA_DON_HANG" in headers:
+        return False
+    hits = headers & _LISTING_PRODUCT_EXPORT_MARKERS
+    return len(hits) >= 2
+
+
+def _wrong_filename_hint(source_filename: Optional[str]) -> Optional[str]:
+    name = (source_filename or "").strip().lower()
+    if not name:
+        return None
+    for prefix in _WRONG_EMS_IMPORT_FILENAME_PREFIXES:
+        if prefix in name:
+            return (
+                f"Tên file «{source_filename}» là file export sản phẩm listing, "
+                "không phải file gửi EMS."
+            )
+    return None
+
+
+def validate_ems_shipment_import_file(
+    file_bytes: bytes,
+    *,
+    source_filename: Optional[str] = None,
+) -> None:
+    """Từ chối file không có header mẫu EMS / file export sản phẩm nhầm mục."""
+    filename_hint = _wrong_filename_hint(source_filename)
+    if filename_hint:
+        raise EmsShipmentImportFormatError(
+            f"{filename_hint} "
+            "Vui lòng tải mẫu «file gui ems.xlsx» trên trang Vận chuyển (cột A mã vận đơn, I đơn shop, G COD)."
+        )
+
+    bio = io.BytesIO(file_bytes)
+    wb = load_workbook(bio, read_only=True, data_only=True)
+    try:
+        raw_rows = [tuple(row) for row in wb.active.iter_rows(values_only=True)]
+    finally:
+        wb.close()
+
+    if not raw_rows:
+        raise EmsShipmentImportFormatError("File Excel trống.")
+
+    headers = _collect_normalized_headers(raw_rows)
+    if _looks_like_listing_product_export(headers):
+        raise EmsShipmentImportFormatError(
+            "File có tiêu đề export sản phẩm (Id sản phẩm, Mô tả, Link…), không phải file gửi EMS. "
+            "Chỉ import file «file gui ems.xlsx» với cột MA_VAN_DON (A), DON_HANG (I), COD (G), TEN_KH (D). "
+            "Tải mẫu đúng trên trang Vận chuyển."
+        )
+
+    header_map = _find_header_map(raw_rows)
+    if header_map is None:
+        raise EmsShipmentImportFormatError(
+            "Không nhận diện được mẫu file gửi EMS. "
+            f"Cần {_SHOP_TEMPLATE_COLUMN_COUNT} cột như file mẫu và khớp ≥80% tiêu đề quan trọng "
+            "(MA_VAN_DON, TEN_KH, COD, MA_SP, DON_HANG) — hoặc mẫu EMS cũ (MA_DON_HANG + TEN_NGUOI_NHAN). "
+            "Tải file mẫu trên trang Vận chuyển."
+        )
+
 
 def _norm_header(value: Any) -> str:
     text = unicodedata.normalize("NFD", str(value or "").strip())
@@ -349,15 +473,51 @@ def _match_header_field(key: str, aliases: tuple[str, ...]) -> bool:
     return key in aliases
 
 
-def _find_header_map(rows: list[tuple[Any, ...]]) -> tuple[int, str, dict[str, int]]:
+def _header_row_column_count(row: tuple[Any, ...]) -> int:
+    last = -1
+    for idx, cell in enumerate(row):
+        if _cell_str(cell):
+            last = idx
+    return last + 1 if last >= 0 else 0
+
+
+def _build_shop_header_map(row: tuple[Any, ...]) -> dict[str, int]:
+    shop_map: dict[str, int] = {}
+    for col_idx, cell in enumerate(row):
+        key = _norm_header(cell)
+        if not key:
+            continue
+        for field, aliases in _SHOP_EXPORT_HEADERS.items():
+            if _match_header_field(key, aliases):
+                shop_map[field] = col_idx
+    return shop_map
+
+
+def _shop_header_flex_match(row: tuple[Any, ...]) -> Optional[dict[str, int]]:
+    """9 cột như mẫu + ≥80% tiêu đề quan trọng (MA_VAN_DON bắt buộc)."""
+    if _header_row_column_count(row) != _SHOP_TEMPLATE_COLUMN_COUNT:
+        return None
+    shop_map = _build_shop_header_map(row)
+    if shop_map.get("reference_code") is None:
+        return None
+    important_total = len(_SHOP_IMPORTANT_HEADER_FIELDS)
+    matched = sum(1 for field in _SHOP_IMPORTANT_HEADER_FIELDS if field in shop_map)
+    if matched / important_total < _HEADER_IMPORTANT_MATCH_RATIO:
+        return None
+    return {**_SHOP_EXPORT_DEFAULTS, **shop_map}
+
+
+def _find_header_map(rows: list[tuple[Any, ...]]) -> Optional[tuple[int, str, dict[str, int]]]:
     for idx, row in enumerate(rows[:10]):
-        shop_map: dict[str, int] = {}
+        flex_map = _shop_header_flex_match(row)
+        if flex_map is not None:
+            return idx, "shop_export", flex_map
+
         ems_map: dict[str, int] = {}
         for col_idx, cell in enumerate(row):
             key = _norm_header(cell)
-            for field, aliases in _SHOP_EXPORT_HEADERS.items():
-                if _match_header_field(key, aliases):
-                    shop_map[field] = col_idx
+            if not key:
+                continue
             if _match_header_field(key, _COL_REF_NAMES):
                 ems_map["reference_code"] = col_idx
             if _match_header_field(key, _SHOP_EXPORT_HEADERS["product_code"]):
@@ -367,16 +527,11 @@ def _find_header_map(rows: list[tuple[Any, ...]]) -> tuple[int, str, dict[str, i
             if _match_header_field(key, _COL_COD_NAMES):
                 ems_map["cod_amount"] = col_idx
 
-        if shop_map.get("reference_code") is not None and (
-            shop_map.get("order_code") is not None or shop_map.get("product_code") is not None
-        ):
-            merged = {**_SHOP_EXPORT_DEFAULTS, **shop_map}
-            return idx, "shop_export", merged
         if ems_map.get("reference_code") is not None and ems_map.get("recipient_label") is not None:
             merged = {**_EMS_EXPORT_DEFAULTS, **ems_map}
             return idx, "ems_export", merged
 
-    return 0, "shop_export", dict(_SHOP_EXPORT_DEFAULTS)
+    return None
 
 
 def parse_ems_export_rows(file_bytes: bytes) -> tuple[list[dict[str, Any]], list[str]]:
@@ -403,7 +558,12 @@ def parse_ems_export_rows(file_bytes: bytes) -> tuple[list[dict[str, Any]], list
     if not raw_rows:
         return [], ["File Excel trống."]
 
-    header_idx, file_format, col_map = _find_header_map(raw_rows)
+    header_map = _find_header_map(raw_rows)
+    if header_map is None:
+        return [], [
+            "Không nhận diện được mẫu file gửi EMS (thiếu MA_VAN_DON / MA_DON_HANG trong tiêu đề)."
+        ]
+    header_idx, file_format, col_map = header_map
     if header_idx > 0:
         warnings.append(f"Phát hiện dòng tiêu đề ở hàng {header_idx + 1}.")
     if file_format == "shop_export":
@@ -1492,6 +1652,7 @@ def import_ems_shipment_excel(
     admin_id: Optional[int] = None,
     source_filename: Optional[str] = None,
 ) -> dict[str, Any]:
+    validate_ems_shipment_import_file(file_bytes, source_filename=source_filename)
     rows, warnings = parse_ems_export_rows(file_bytes)
     rows, dedupe_warnings = _dedupe_rows_by_reference(rows)
     warnings.extend(dedupe_warnings)

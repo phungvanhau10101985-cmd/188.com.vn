@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
 import { Product } from '@/types/api';
 import type { ProductReviewItem } from '@/types/api';
@@ -65,17 +65,57 @@ export default function ProductReviewSection({
   } = useProductReviews();
   const [togglingUsefulId, setTogglingUsefulId] = useState<number | null>(null);
   const [reviewFormOpen, setReviewFormOpen] = useState(false);
+  const onModalOpenRef = useRef(onModalOpen);
+  onModalOpenRef.current = onModalOpen;
   const modalOpen = modalOnly ? (modalOpenProp ?? false) : false;
-  const setModalOpen = modalOnly ? () => onModalClose?.() : () => {};
+  const setModalOpen = useCallback(
+    (open: boolean) => {
+      if (!open && typeof window !== 'undefined') {
+        const hash = window.location.hash;
+        if (/^#review-\d+$/.test(hash) || hash === '#reviews') {
+          const { pathname: p, search } = window.location;
+          window.history.replaceState(null, '', `${p}${search || ''}`);
+        }
+      }
+      if (!open) onModalClose?.();
+    },
+    [onModalClose],
+  );
 
   useEffect(() => {
     if (!modalOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onModalClose?.();
+      if (e.key === 'Escape') setModalOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [modalOpen, onModalClose]);
+  }, [modalOpen, setModalOpen]);
+
+  useEffect(() => {
+    if (loading) return;
+    const hash = typeof window !== 'undefined' ? window.location.hash : '';
+    if (hash === '#reviews' || /^#review-\d+$/.test(hash)) {
+      onModalOpenRef.current?.();
+    }
+  }, [loading]);
+
+  useEffect(() => {
+    if (!modalOpen || loading || reviews.length === 0) return;
+    const hash = typeof window !== 'undefined' ? window.location.hash : '';
+    const reviewMatch = hash.match(/^#review-(\d+)$/);
+    if (!reviewMatch) return;
+    const reviewId = reviewMatch[1];
+    const scrollToReview = () => {
+      const el = document.getElementById(`review-${reviewId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        el.classList.add('ring-2', 'ring-[#ea580c]', 'ring-offset-2');
+        setTimeout(() => el.classList.remove('ring-2', 'ring-[#ea580c]', 'ring-offset-2'), 2000);
+      }
+    };
+    const t = window.setTimeout(scrollToReview, 250);
+    return () => window.clearTimeout(t);
+  }, [modalOpen, loading, reviews.length]);
 
   const handleToggleUseful = async (reviewId: number) => {
     if (!isAuthenticated) {
@@ -121,7 +161,7 @@ export default function ProductReviewSection({
   const renderReviewList = (list: ProductReviewItem[]) => (
     <div className="space-y-4">
       {list.map((r) => (
-        <div key={r.id} className="bg-gray-50 rounded-lg p-4 space-y-2">
+        <div key={r.id} id={`review-${r.id}`} className="bg-gray-50 rounded-lg p-4 space-y-2 scroll-mt-24">
             <div className="flex items-start justify-between gap-2">
               <div>
               <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0">
@@ -177,7 +217,7 @@ export default function ProductReviewSection({
       {modalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-          onClick={() => onModalClose?.()}
+          onClick={() => setModalOpen(false)}
           role="dialog"
           aria-modal="true"
           aria-labelledby="reviews-modal-title"
@@ -202,7 +242,7 @@ export default function ProductReviewSection({
                 )}
                 <button
                 type="button"
-                onClick={() => onModalClose?.()}
+                onClick={() => setModalOpen(false)}
                 className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition"
                 aria-label="Đóng"
               >

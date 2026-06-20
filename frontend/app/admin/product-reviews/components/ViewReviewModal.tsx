@@ -202,7 +202,7 @@ export default function ViewReviewModal({ productSlug, selectedReview, onClose }
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-gray-900 truncate">{product.name}</p>
                     <a
-                      href={`/products/${productSlug}#reviews`}
+                      href={`/products/${productSlug}#review-${selectedReview.id}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-sm text-blue-600 hover:underline"

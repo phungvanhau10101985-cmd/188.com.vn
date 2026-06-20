@@ -310,7 +310,7 @@ export default function AdminProductReviewsPage() {
                           <span title="Đánh giá import: hiển thị trên SP có group_rating trùng Nhóm">Nhóm {r.group ?? 0}</span>
                         ) : r.product_id ? (
                           r.product_slug ? (
-                            <a href={`/products/${r.product_slug}#reviews`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                            <a href={`/products/${r.product_slug}#review-${r.id}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                               SP #{r.product_id}
                             </a>
                           ) : (

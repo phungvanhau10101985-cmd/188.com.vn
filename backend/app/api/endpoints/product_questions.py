@@ -2,7 +2,7 @@
 import io
 import random
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, File, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -27,6 +27,10 @@ from app.core.admin_permissions import admin_allowed_operation
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission
 from app.utils.display_timeline import merge_imported_display_created_at, merge_question_reply_display_times
 from app.services import warehouse_clearance as warehouse_clearance_svc
+from app.services.product_reply_notify import (
+    collect_new_question_replies,
+    schedule_question_reply_emails,
+)
 
 router = APIRouter()
 
@@ -287,6 +291,7 @@ def toggle_useful(
 def reply_to_question(
     question_id: int,
     data: ProductQuestionReplyCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -306,12 +311,28 @@ def reply_to_question(
             status_code=403,
             detail="Chỉ người đã mua sản phẩm này mới được trả lời câu hỏi",
         )
+    before_one = (q.reply_user_one_content or "").strip()
+    before_two = (q.reply_user_two_content or "").strip()
     user_name = getattr(current_user, "full_name", None) or getattr(current_user, "phone", None) or "Người mua"
     updated = crud.product_question.add_user_reply(
         db, question_id=question_id, user_id=current_user.id, user_name=user_name, content=data.content.strip()
     )
     if not updated:
         raise HTTPException(status_code=400, detail="Không thể thêm trả lời")
+    reply_name = user_name
+    reply_content = data.content.strip()
+    if not before_one and (updated.reply_user_one_content or "").strip():
+        reply_name = (updated.reply_user_one_name or user_name).strip() or user_name
+        reply_content = (updated.reply_user_one_content or "").strip()
+    elif not before_two and (updated.reply_user_two_content or "").strip():
+        reply_name = (updated.reply_user_two_name or user_name).strip() or user_name
+        reply_content = (updated.reply_user_two_content or "").strip()
+    schedule_question_reply_emails(
+        background_tasks,
+        question_id,
+        [(reply_name, reply_content)],
+        exclude_replier_user_id=current_user.id,
+    )
     now = datetime.now(timezone.utc)
     voted_ids = crud.product_question.get_user_voted_question_ids(db, current_user.id, [updated.id])
     alias_fz = frozenset(_viewer_qa_aliases(current_user))
@@ -394,12 +415,19 @@ def admin_create_question(
 def admin_update_question(
     question_id: int,
     data: ProductQuestionUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_admin: AdminUser = Depends(require_module_permission("product_questions")),
 ):
+    before = crud.product_question.get_question(db, question_id)
+    if not before:
+        raise HTTPException(status_code=404, detail="Câu hỏi không tồn tại")
+    update_data = data.model_dump(exclude_unset=True)
+    new_replies = collect_new_question_replies(before, update_data)
     obj = crud.product_question.update_question(db, question_id, data)
     if not obj:
         raise HTTPException(status_code=404, detail="Câu hỏi không tồn tại")
+    schedule_question_reply_emails(background_tasks, question_id, new_replies)
     return obj
 
 

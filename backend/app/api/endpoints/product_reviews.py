@@ -7,7 +7,7 @@ import tempfile
 from datetime import datetime, timezone, timedelta
 
 import pandas as pd
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -27,6 +27,7 @@ from app.core.admin_permissions import admin_allowed_operation
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission
 from app.utils.display_timeline import merge_imported_display_created_at, merge_review_reply_display_times
 from app.services import warehouse_clearance as warehouse_clearance_svc
+from app.services.product_reply_notify import collect_new_review_reply, schedule_review_reply_email
 
 router = APIRouter()
 
@@ -240,12 +241,21 @@ def admin_create_review(
 def admin_update_review(
     review_id: int,
     data: ProductReviewUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_admin: AdminUser = Depends(require_module_permission("product_reviews")),
 ):
+    before = crud.product_review.get_review(db, review_id)
+    if not before:
+        raise HTTPException(status_code=404, detail="Đánh giá không tồn tại")
+    update_data = data.model_dump(exclude_unset=True)
+    new_reply = collect_new_review_reply(before, update_data)
     obj = crud.product_review.update_review(db, review_id, data)
     if not obj:
         raise HTTPException(status_code=404, detail="Đánh giá không tồn tại")
+    if new_reply:
+        replier_name, reply_content = new_reply
+        schedule_review_reply_email(background_tasks, review_id, replier_name, reply_content)
     return obj
 
 
