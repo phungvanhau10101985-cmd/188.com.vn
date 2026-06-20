@@ -4,17 +4,21 @@ Xóa một lần import EMS nhầm (vd. file listing_queue_products_*.xlsx vào 
 
 Chạy trên server (thư mục backend):
 
-  # Xem trước — không xóa
-  python scripts/delete_wrong_ems_import_batch.py \\
+  # VPS 188.com.vn — dùng venv (khuyến nghị) hoặc python3
+  PYTHONPATH=. .venv/bin/python scripts/delete_wrong_ems_import_batch.py \\
+    --filename listing_queue_products_e67f30b31fbc_20260620_082152.xlsx
+
+  # Xem trước — không xóa (tương đương)
+  python3 scripts/delete_wrong_ems_import_batch.py \\
     --filename listing_queue_products_e67f30b31fbc_20260620_082152.xlsx
 
   # Xóa thật
-  python scripts/delete_wrong_ems_import_batch.py \\
+  PYTHONPATH=. .venv/bin/python scripts/delete_wrong_ems_import_batch.py \\
     --filename listing_queue_products_e67f30b31fbc_20260620_082152.xlsx \\
     --execute
 
   # Hoặc theo id batch (xem trong Lịch sử báo cáo import)
-  python scripts/delete_wrong_ems_import_batch.py --batch-id 7 --execute
+  PYTHONPATH=. .venv/bin/python scripts/delete_wrong_ems_import_batch.py --batch-id 7 --execute
 
 Mặc định chỉ xóa các dòng vận đơn được tạo mới (import_action=created) trong batch đó.
 """
