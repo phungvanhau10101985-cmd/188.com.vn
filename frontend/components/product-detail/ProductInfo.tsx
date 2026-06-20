@@ -200,7 +200,7 @@ export default function ProductInfo({ product, onAddToCart, onAddToFavorite, onB
       <div className="grid grid-cols-2 gap-4 pt-6 border-t border-gray-200">
         <InfoItem icon="🚚" label="Giao hàng" value="Miễn phí" />
         <InfoItem icon="🔄" label="Đổi trả" value="7 ngày" />
-        <InfoItem icon="🛡️" label="Bảo hành" value="Chính hãng" />
+        <InfoItem icon="🛡️" label="Bảo hành" value="Theo chính sách đổi trả" />
         <InfoItem icon="💳" label="Thanh toán" value="Đa dạng" />
       </div>
     </div>

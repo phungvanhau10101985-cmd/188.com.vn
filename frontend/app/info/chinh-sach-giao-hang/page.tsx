@@ -61,12 +61,12 @@ export default function ChinhSachGiaoHangPage() {
         <section>
           <h2 className="text-lg font-semibold text-zinc-900 mb-4">3. Phí vận chuyển</h2>
           <ul className="list-disc pl-5 space-y-2">
-            <li>Phí vận chuyển được hiển thị rõ ràng tại bước thanh toán, tùy theo khu vực giao hàng và trọng lượng đơn hàng.</li>
+            <li>Phí vận chuyển được hiển thị rõ ràng tại giỏ hàng trước khi đặt hàng.</li>
             <li>
               <strong className="text-zinc-800">Miễn phí giao hàng</strong> cho đơn hàng từ <strong className="text-zinc-800">500.000đ</strong> trở lên (áp dụng toàn quốc).
             </li>
             <li>
-              Đối với đơn hàng dưới 500.000đ, phí vận chuyển dao động từ <strong className="text-zinc-800">20.000đ – 35.000đ</strong>.
+              Đối với đơn hàng dưới 500.000đ, phí vận chuyển là <strong className="text-zinc-800">30.000đ</strong> (cố định).
             </li>
           </ul>
         </section>

@@ -62,6 +62,14 @@ import {
 } from '@/lib/welcome-promo';
 import { applyGrandOrderDiscountCap, lineProgramSavingsFromList, MAX_ORDER_DISCOUNT_PERCENT, resolveCappedPromoPercentDisplay } from '@/lib/order-discount-limits';
 import CappedPromoPercentLabel from '@/components/cart/CappedPromoPercentLabel';
+import {
+  computeShippingFee,
+  DEPOSIT_PERCENT,
+  PURCHASE_GUIDE_URL,
+  RETURN_POLICY_URL,
+  SHIPPING_POLICY_URL,
+  TERMS_URL,
+} from '@/lib/business-info';
 import { useToast } from '@/components/ToastProvider';
 
 function formatAddressLine(addr: UserAddress): string {
@@ -332,6 +340,8 @@ export default function CartPage() {
     regularSubtotal - selectedWelcomeDiscount - selectedBirthdayDiscount - selectedLoyaltyDiscount,
   );
   const selectedFinalPrice = regularFinalPrice + warehouseSubtotal;
+  const selectedShippingFee = computeShippingFee(selectedFinalPrice);
+  const orderTotalWithShipping = selectedFinalPrice + selectedShippingFee;
   const regularPromoDiscount =
     selectedWelcomeDiscount + selectedBirthdayDiscount + selectedLoyaltyDiscount;
   const regularTotalDiscount = regularProgramSavings + regularPromoDiscount;
@@ -360,9 +370,9 @@ export default function CartPage() {
     nominalPercent: loyaltyPercent,
   });
   const walletUsable = useWallet
-    ? Math.min(walletBalance, selectedCartItems.length > 0 ? selectedFinalPrice : 0)
+    ? Math.min(walletBalance, selectedCartItems.length > 0 ? orderTotalWithShipping : 0)
     : 0;
-  const payableAfterWallet = Math.max(0, selectedFinalPrice - walletUsable);
+  const payableAfterWallet = Math.max(0, orderTotalWithShipping - walletUsable);
 
   const prevSiteSalePhaseRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
@@ -476,6 +486,12 @@ export default function CartPage() {
       (item) =>
         item.requires_deposit === true || item.product_data?.deposit_require === true
     ) || false;
+  const depositAmountNow = depositRequiredForSelected
+    ? Math.round(selectedFinalPrice * (DEPOSIT_PERCENT / 100))
+    : 0;
+  const paymentMethodLabel = depositRequiredForSelected
+    ? `Chuyển khoản cọc ${DEPOSIT_PERCENT}%`
+    : 'Thanh toán khi nhận hàng (COD)';
 
   const selectedAddress = addresses.find((a) => a.id === selectedAddressId);
   const customerAddressLine = selectedAddress
@@ -1379,6 +1395,38 @@ export default function CartPage() {
               </label>
             ) : null}
 
+            <div className="mb-2 flex items-center justify-between text-[11px] md:text-sm">
+              <span className="text-gray-500">Phí vận chuyển</span>
+              <span className="font-medium text-gray-900">
+                {selectedShippingFee > 0
+                  ? formatPrice(selectedShippingFee)
+                  : selectedCartItems.length > 0
+                    ? 'Miễn phí'
+                    : formatPrice(0)}
+              </span>
+            </div>
+
+            <div className="mb-2 flex items-center justify-between text-[11px] md:text-sm">
+              <span className="text-gray-500">Phương thức thanh toán</span>
+              <span className="font-medium text-gray-900 text-right max-w-[60%]">
+                {selectedCartItems.length > 0 ? paymentMethodLabel : '—'}
+              </span>
+            </div>
+
+            {depositRequiredForSelected && selectedCartItems.length > 0 ? (
+              <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50/80 px-3 py-2 text-[11px] text-blue-900 md:text-sm">
+                <p>
+                  Đơn có sản phẩm yêu cầu đặt cọc{' '}
+                  <strong>{DEPOSIT_PERCENT}%</strong> ({formatPrice(depositAmountNow)}) trước khi xử lý. Số còn lại thanh toán khi nhận hàng.
+                </p>
+                <p className="mt-1">
+                  <Link href={PURCHASE_GUIDE_URL} className="text-blue-700 underline font-medium">
+                    Xem hướng dẫn mua hàng &amp; đặt cọc
+                  </Link>
+                </p>
+              </div>
+            ) : null}
+
             <div className="flex items-center justify-between">
               <span className="text-sm md:text-base font-semibold text-gray-900">Tổng thanh toán</span>
               <span className="text-lg md:text-xl font-bold text-[#ea580c]">
@@ -1387,11 +1435,33 @@ export default function CartPage() {
                 )}
               </span>
             </div>
-            {useWallet && walletUsable > 0 ? (
-              <p className="text-xs text-gray-500 mt-1 text-right line-through">
-                {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(selectedFinalPrice)}
+            {selectedCartItems.length > 0 && selectedShippingFee === 0 && selectedFinalPrice > 0 ? (
+              <p className="text-[11px] text-emerald-700 mt-1 text-right md:text-xs">
+                Miễn phí vận chuyển cho đơn từ 500.000đ
               </p>
             ) : null}
+            {useWallet && walletUsable > 0 ? (
+              <p className="text-xs text-gray-500 mt-1 text-right line-through">
+                {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(orderTotalWithShipping)}
+              </p>
+            ) : null}
+
+            <p className="mt-3 text-[11px] text-gray-500 leading-relaxed md:text-xs">
+              Bằng việc đặt hàng, bạn đồng ý với{' '}
+              <Link href={TERMS_URL} className="text-[#ea580c] underline">
+                Điều khoản sử dụng
+              </Link>
+              ,{' '}
+              <Link href={SHIPPING_POLICY_URL} className="text-[#ea580c] underline">
+                Chính sách giao hàng
+              </Link>{' '}
+              và{' '}
+              <Link href={RETURN_POLICY_URL} className="text-[#ea580c] underline">
+                Chính sách đổi trả
+              </Link>
+              .
+            </p>
+
             <div className="mt-4 flex flex-col md:flex-row gap-3">
               <LoadingLink
                 href="/"

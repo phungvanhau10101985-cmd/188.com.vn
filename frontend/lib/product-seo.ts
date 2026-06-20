@@ -4,6 +4,12 @@
  */
 import type { Product } from "@/types/api";
 import { cache } from "react";
+import {
+  BUSINESS_LEGAL_NAME,
+  RETURN_POLICY_URL,
+  SHIPPING_FEE_VND,
+  SHIPPING_FREE_THRESHOLD_VND,
+} from "@/lib/business-info";
 import { displayableBrandWithDefault } from "@/lib/utils";
 import { productPublicPdpUrl } from "@/lib/product-path-slug";
 import { getApiBaseUrl } from "@/lib/api-base";
@@ -193,6 +199,11 @@ export function buildProductJsonLd(product: ProductForSeo): object {
   const description = stripHtml(rawDesc);
 
   const pdpUrl = productPublicPdpUrl(product.slug, SITE_URL);
+  const listPrice =
+    product.original_price && product.original_price > product.price
+      ? product.original_price
+      : null;
+  const inStock = (product.available ?? 0) > 0;
 
   return {
     "@context": "https://schema.org",
@@ -208,11 +219,41 @@ export function buildProductJsonLd(product: ProductForSeo): object {
       url: pdpUrl,
       priceCurrency: "VND",
       price: product.price,
-      availability:
-        (product.available ?? 0) > 0
-          ? "https://schema.org/InStock"
-          : "https://schema.org/OutOfStock",
-      seller: { "@type": "Organization", name: "188.com.vn" },
+      ...(listPrice
+        ? {
+            priceSpecification: {
+              "@type": "UnitPriceSpecification",
+              price: listPrice,
+              priceCurrency: "VND",
+              priceType: "https://schema.org/ListPrice",
+            },
+          }
+        : {}),
+      availability: inStock
+        ? "https://schema.org/InStock"
+        : "https://schema.org/OutOfStock",
+      seller: { "@type": "Organization", name: BUSINESS_LEGAL_NAME },
+      shippingDetails: {
+        "@type": "OfferShippingDetails",
+        shippingRate: {
+          "@type": "MonetaryAmount",
+          value: product.price >= SHIPPING_FREE_THRESHOLD_VND ? 0 : SHIPPING_FEE_VND,
+          currency: "VND",
+        },
+        shippingDestination: {
+          "@type": "DefinedRegion",
+          addressCountry: "VN",
+        },
+      },
+      hasMerchantReturnPolicy: {
+        "@type": "MerchantReturnPolicy",
+        applicableCountry: "VN",
+        returnPolicyCategory: "https://schema.org/MerchantReturnFiniteReturnWindow",
+        merchantReturnDays: 7,
+        returnMethod: "https://schema.org/ReturnByMail",
+        returnFees: "https://schema.org/FreeReturn",
+        returnPolicyUrl: `${SITE_URL}${RETURN_POLICY_URL}`,
+      },
     },
     aggregateRating:
       product.rating_total != null && product.rating_total > 0

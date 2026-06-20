@@ -490,14 +490,18 @@ export default function ProductInfo({
       {/* Giao hàng & Đổi trả */}
       <div className="border-t border-gray-100 pt-3">
         <p className="text-xs text-gray-900 leading-snug">
-          🚚 Giao hàng toàn quốc – Miễn phí đơn từ 500k. 🔁 Đổi trả trong 7 ngày nếu sản phẩm lỗi hoặc không đúng mô tả.{' '}
-          👉 Xem chi tiết tại{' '}
+          🚚 Giao hàng toàn quốc – Miễn phí đơn từ 500k (phí ship 30k nếu dưới 500k). 🔁 Đổi trả trong 7 ngày nếu sản phẩm lỗi hoặc không đúng mô tả.{' '}
+          💳 Một số đơn yêu cầu đặt cọc 30% —{' '}
+          <Link href="/info/huong-dan-mua-hang" className="text-[#ea580c] hover:underline font-medium">
+            xem hướng dẫn
+          </Link>
+          . 👉 Chi tiết{' '}
           <Link href="/info/chinh-sach-giao-hang" className="text-[#ea580c] hover:underline font-medium">
-            Chính sách giao hàng
+            giao hàng
           </Link>{' '}
           và{' '}
           <Link href="/info/doi-tra-hoan-tien" className="text-[#ea580c] hover:underline font-medium">
-            Chính sách đổi trả
+            đổi trả
           </Link>
           .
         </p>

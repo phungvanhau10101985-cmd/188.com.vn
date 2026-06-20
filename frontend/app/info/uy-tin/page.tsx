@@ -21,20 +21,24 @@ export default function UyTinPage() {
 
         <ul className="list-none pl-0 space-y-8">
           <li>
-            <p className="font-semibold text-zinc-900 mb-3">— 188.com.vn đã hoạt động 5 năm</p>
+            <p className="font-semibold text-zinc-900 mb-3">— 188.com.vn hoạt động từ 2018</p>
             <div className="space-y-3 pl-0 sm:pl-4 border-l-2 border-orange-100 sm:ml-1">
               <p>
-                Với 5 năm kinh nghiệm và phục vụ hơn 20 ngàn khách hàng, chúng tôi đã và đang ngày một hoàn thiện dịch vụ.
+                Với nhiều năm kinh nghiệm và phục vụ hơn 20 ngàn khách hàng, chúng tôi đã và đang ngày một hoàn thiện dịch vụ.
               </p>
               <p>
-                Chúng tôi có hệ thống đối tác và tổng kho hàng tại nhiều quốc gia, hợp tác trực tiếp với các nhà sản xuất và thương hiệu uy tín trên toàn thế giới.
+                Chúng tôi có hệ thống đối tác và tổng kho hàng tại nhiều quốc gia, hợp tác với các nhà sản xuất và nhà phân phối uy tín trên toàn thế giới.
               </p>
               <p>
-                Thông tin và hình ảnh sản phẩm trên website đều được cung cấp trực tiếp từ nhà sản xuất chính hãng. Một số đơn vị khác có thể sao chép hình ảnh của chúng tôi để bán sản phẩm kém chất lượng với giá rẻ hơn; tuy nhiên chất lượng thực tế sẽ tương xứng với mức giá đó.{' '}
-                <strong className="text-zinc-800">188.COM.VN</strong> cam kết chỉ cung cấp sản phẩm chính hãng, đúng mô tả và được kiểm duyệt kỹ trước khi giao đến khách hàng.
+                Thông tin và hình ảnh sản phẩm trên website được cung cấp từ đối tác và nhà cung ứng đã kiểm duyệt. Một số đơn vị khác có thể sao chép hình ảnh của chúng tôi để bán sản phẩm kém chất lượng với giá rẻ hơn; tuy nhiên chất lượng thực tế sẽ tương xứng với mức giá đó.{' '}
+                <strong className="text-zinc-800">188.COM.VN</strong> cam kết sản phẩm đúng mô tả, được kiểm duyệt kỹ trước khi giao đến khách hàng. Xem thêm{' '}
+                <Link href="/info/nguon-goc-thuong-hieu" className="text-orange-600 underline hover:text-orange-700">
+                  Nguồn gốc &amp; Thương hiệu
+                </Link>
+                .
               </p>
               <p>
-                Với hơn 5 năm kinh nghiệm hoạt động, <strong className="text-zinc-800">188.COM.VN</strong> đã nhận được hàng nghìn phản hồi tích cực và đánh giá hài lòng từ khách hàng trên nhiều nền tảng khác nhau (mạng xã hội hoặc trên web), khẳng định uy tín và chất lượng dịch vụ mà chúng tôi mang lại.
+                Với nhiều năm kinh nghiệm hoạt động, <strong className="text-zinc-800">188.COM.VN</strong> đã nhận được hàng nghìn phản hồi tích cực và đánh giá hài lòng từ khách hàng trên nhiều nền tảng khác nhau (mạng xã hội hoặc trên web), khẳng định uy tín và chất lượng dịch vụ mà chúng tôi mang lại.
               </p>
               <figure className="mt-6 rounded-xl border border-zinc-200 bg-zinc-50 p-3 shadow-sm">
                 <Image

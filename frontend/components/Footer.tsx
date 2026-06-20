@@ -3,6 +3,16 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
+import {
+  BOCT_REGISTRATION_URL,
+  BUSINESS_ADDRESS,
+  BUSINESS_EMAIL,
+  BUSINESS_FACEBOOK,
+  BUSINESS_LEGAL_NAME,
+  BUSINESS_PHONE_DISPLAY,
+  BUSINESS_REGISTRATION,
+  BUSINESS_ZALO,
+} from '@/lib/business-info';
 
 const FooterNewsletterSubscribe = dynamic(
   () => import('@/components/FooterNewsletterSubscribe'),
@@ -21,7 +31,6 @@ const FooterNewsletterSubscribe = dynamic(
   },
 );
 
-// frontend/components/Footer.tsx - Đồng bộ thương hiệu 188, có chân trang mobile
 export default function Footer() {
   const supportLinks = [
     { href: '/info/lien-he', label: 'Thông tin liên hệ' },
@@ -33,6 +42,8 @@ export default function Footer() {
     { href: '/info/dieu-khoan-su-dung', label: 'Điều khoản sử dụng' },
     { href: '/info/huong-dan-mua-hang', label: 'Hướng dẫn mua hàng' },
   ];
+
+  const fullAddress = `${BUSINESS_ADDRESS.streetAddress}, ${BUSINESS_ADDRESS.addressLocality}, ${BUSINESS_ADDRESS.addressRegion}`;
 
   return (
     <footer className="bg-white text-gray-900 pb-20 md:pb-0">
@@ -61,33 +72,30 @@ export default function Footer() {
               </div>
             </Link>
             <p className="text-gray-700 text-sm leading-relaxed max-w-xs">
-              Thời trang nam nữ và nhiều sản phẩm khác — chất lượng cao, giá hợp lý. Cam kết chính hãng, giao hàng toàn quốc.
+              Nhà bán lẻ thời trang nam nữ trực tuyến — sản phẩm đúng mô tả, giá minh bạch, giao hàng toàn quốc.
             </p>
-            <div className="flex gap-3" role="group" aria-label="Mạng xã hội (đang hoàn thiện liên kết)">
-              <button
-                type="button"
-                disabled
-                className="min-h-[44px] min-w-[44px] rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center text-sm cursor-not-allowed opacity-70"
-                aria-label="Facebook — sắp cập nhật link"
+            <p className="text-gray-600 text-xs leading-relaxed max-w-xs">
+              {BUSINESS_LEGAL_NAME} · Mã HKD {BUSINESS_REGISTRATION}
+            </p>
+            <div className="flex gap-3" role="group" aria-label="Kênh liên hệ chính thức">
+              <a
+                href={BUSINESS_FACEBOOK}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-h-[44px] min-w-[44px] rounded-lg bg-gray-100 text-gray-700 flex items-center justify-center text-sm hover:bg-orange-50 hover:text-orange-700 transition-colors"
+                aria-label="Facebook 188.com.vn"
               >
-                📘
-              </button>
-              <button
-                type="button"
-                disabled
-                className="min-h-[44px] min-w-[44px] rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center text-sm cursor-not-allowed opacity-70"
-                aria-label="Instagram — sắp cập nhật link"
+                f
+              </a>
+              <a
+                href={BUSINESS_ZALO}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-h-[44px] min-w-[44px] rounded-lg bg-gray-100 text-gray-700 flex items-center justify-center text-xs font-bold hover:bg-orange-50 hover:text-orange-700 transition-colors"
+                aria-label="Zalo Official 188.com.vn"
               >
-                📷
-              </button>
-              <button
-                type="button"
-                disabled
-                className="min-h-[44px] min-w-[44px] rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center text-sm cursor-not-allowed opacity-70"
-                aria-label="Twitter — sắp cập nhật link"
-              >
-                🐦
-              </button>
+                Zalo
+              </a>
             </div>
           </div>
 
@@ -101,7 +109,7 @@ export default function Footer() {
               <Link href="/info/gioi-thieu" className="block text-gray-700 hover:text-gray-900 transition-colors">Giới thiệu</Link>
             </div>
             <a
-              href="http://online.gov.vn/Home/WebDetails/137314"
+              href={BOCT_REGISTRATION_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#ea580c] text-white font-medium shadow-md hover:bg-orange-600 hover:shadow-lg transition-all focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2 text-sm mt-4"
@@ -129,16 +137,16 @@ export default function Footer() {
           <div className="space-y-5">
             <h4 className="text-sm font-semibold uppercase tracking-wider text-gray-900">Liên hệ</h4>
             <div className="space-y-2.5 text-sm text-gray-700">
-              <div className="flex flex-wrap gap-x-2 gap-y-1 items-center"><span aria-hidden className="shrink-0">📍</span><span className="break-words min-w-[44px] py-1">Xóm Buối, Thôn Vật Lại 3, Xã Vật Lại, Ba Vì, Hà Nội</span></div>
+              <div className="flex flex-wrap gap-x-2 gap-y-1 items-center"><span aria-hidden className="shrink-0">📍</span><span className="break-words min-w-[44px] py-1">{fullAddress}</span></div>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
                 <span aria-hidden className="shrink-0">📞</span>
-                <a href="tel:0968659836" className="inline-flex min-h-[44px] items-center text-gray-800 hover:text-gray-900 underline-offset-2 transition-colors">0968 659 836</a>
+                <a href="tel:0968659836" className="inline-flex min-h-[44px] items-center text-gray-800 hover:text-gray-900 underline-offset-2 transition-colors">{BUSINESS_PHONE_DISPLAY}</a>
               </div>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
                 <span aria-hidden className="shrink-0">✉️</span>
-                <a href="mailto:hotro@188.com.vn" className="inline-flex min-h-[44px] items-center text-gray-800 hover:text-gray-900 underline-offset-2 transition-colors">hotro@188.com.vn</a>
+                <a href={`mailto:${BUSINESS_EMAIL}`} className="inline-flex min-h-[44px] items-center text-gray-800 hover:text-gray-900 underline-offset-2 transition-colors">{BUSINESS_EMAIL}</a>
               </div>
-              <div className="flex items-center gap-2 py-1"><span aria-hidden>🕒</span><span>8:00 – 16:30</span></div>
+              <div className="flex items-center gap-2 py-1"><span aria-hidden>🕒</span><span>8:00 – 16:30 (T2–T7)</span></div>
             </div>
             <FooterNewsletterSubscribe />
           </div>
@@ -149,10 +157,10 @@ export default function Footer() {
         <div className="max-w-7xl mx-auto px-4 py-4 md:py-5">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="text-gray-600 text-sm">
-              © 2018 – nay 188.com.vn. Bảo lưu mọi quyền.
+              © 2018 – nay 188.com.vn · {BUSINESS_LEGAL_NAME}. Bảo lưu mọi quyền.
             </div>
             <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
-              <span>Thanh toán: 💳 🏦 📱</span>
+              <span>Thanh toán: COD · Chuyển khoản · QR SePay</span>
             </div>
           </div>
         </div>

@@ -26,7 +26,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const canonical = `${siteOrigin}/c/${cluster.slug}`;
   const isIndex = cluster.index_policy !== "noindex";
   const title = `${cluster.name} - ${cluster.product_count}+ sản phẩm`;
-  const description = `${cluster.name} - tổng hợp sản phẩm chính hãng, giá tốt, giao nhanh tại 188.com.vn.`;
+  const description = `${cluster.name} - tổng hợp sản phẩm chất lượng, giá tốt, giao nhanh tại 188.com.vn.`;
   return {
     title,
     description,
@@ -61,7 +61,7 @@ export default async function ClusterLayout({ params, children }: Props) {
   }
 
   const siteOrigin = getSiteOrigin();
-  const description = `${cluster.name} - tổng hợp ${cluster.product_count}+ sản phẩm chính hãng tại 188.com.vn.`;
+  const description = `${cluster.name} - tổng hợp ${cluster.product_count}+ sản phẩm chất lượng tại 188.com.vn.`;
   const breadcrumbJsonLd = buildClusterBreadcrumbJsonLd(
     cluster.name,
     cluster.slug,

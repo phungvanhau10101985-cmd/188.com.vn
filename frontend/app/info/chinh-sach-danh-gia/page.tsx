@@ -33,7 +33,11 @@ export default function ChinhSachDanhGiaPage() {
           <h2 className="text-lg font-semibold text-zinc-900 mb-4">2. Quản lý chất lượng sản phẩm</h2>
           <ul className="list-disc pl-5 space-y-3">
             <li>
-              <strong className="text-zinc-800">188.COM.VN</strong> chỉ kinh doanh sản phẩm chính hãng, đúng hình – đúng mẫu – đúng mô tả.
+              <strong className="text-zinc-800">188.COM.VN</strong> kinh doanh sản phẩm đúng hình – đúng mẫu – đúng mô tả, tuân thủ{' '}
+              <Link href="/info/nguon-goc-thuong-hieu" className="text-orange-600 underline hover:text-orange-700">
+                chính sách nguồn gốc &amp; thương hiệu
+              </Link>
+              .
             </li>
             <li>Những sản phẩm kém chất lượng hoặc nhận nhiều đánh giá không tích cực sẽ được gỡ bỏ khỏi hệ thống.</li>
             <li>
