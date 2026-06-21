@@ -392,6 +392,7 @@ export default function AdminAffiliatePage() {
                   <tr>
                     <th className="px-4 py-3">ID</th>
                     <th className="px-4 py-3">User</th>
+                    <th className="px-4 py-3">Email</th>
                     <th className="px-4 py-3">Link MXH</th>
                     <th className="px-4 py-3">Ghi chú</th>
                     <th className="px-4 py-3">Trạng thái</th>
@@ -404,6 +405,15 @@ export default function AdminAffiliatePage() {
                     <tr key={row.id}>
                       <td className="px-4 py-3">#{row.id}</td>
                       <td className="px-4 py-3">#{row.user_id}</td>
+                      <td className="px-4 py-3">
+                        {row.user_email ? (
+                          <a href={`mailto:${row.user_email}`} className="text-orange-700 hover:underline">
+                            {row.user_email}
+                          </a>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="space-y-1">
                           {row.social_links.map((link) => (

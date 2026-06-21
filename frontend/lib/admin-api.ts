@@ -3516,6 +3516,7 @@ export interface AdminAffiliateSettings {
 export interface AdminAffiliateApplication {
   id: number;
   user_id: number;
+  user_email?: string | null;
   status: string;
   social_links: string[];
   note?: string | null;

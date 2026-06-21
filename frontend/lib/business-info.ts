@@ -15,7 +15,8 @@ export const BUSINESS_ADDRESS = {
 export const BUSINESS_HOURS = "Mo-Sa 08:00-16:30";
 export const BUSINESS_FACEBOOK = "https://facebook.com/188.com.vn";
 export const BUSINESS_ZALO = "https://zalo.me/1714121106420519241";
-export const BOCT_REGISTRATION_URL = "https://online.gov.vn/Home/WebDetails/137314";
+export const BOCT_REGISTRATION_URL =
+  "http://online.gov.vn/Home/WebDetails/137314?AspxAutoDetectCookieSupport=1";
 
 export const SHIPPING_FREE_THRESHOLD_VND = 500_000;
 export const SHIPPING_FEE_VND = 30_000;

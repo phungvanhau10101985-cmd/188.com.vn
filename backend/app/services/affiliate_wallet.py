@@ -25,6 +25,7 @@ from app.models.affiliate import (
     WalletWithdrawal,
 )
 from app.models.order import Order, OrderStatus
+from app.models.user import User
 from app.services.email_service import send_bank_account_otp_email
 
 logger = logging.getLogger(__name__)
@@ -96,7 +97,11 @@ def _clean_social_links(links: list[str]) -> list[str]:
     return cleaned[:10]
 
 
-def _application_to_dict(row: Optional[AffiliateApplication]) -> Optional[dict]:
+def _application_to_dict(
+    row: Optional[AffiliateApplication],
+    *,
+    user_email: Optional[str] = None,
+) -> Optional[dict]:
     if not row:
         return None
     try:
@@ -108,6 +113,7 @@ def _application_to_dict(row: Optional[AffiliateApplication]) -> Optional[dict]:
     return {
         "id": row.id,
         "user_id": row.user_id,
+        "user_email": (user_email or "").strip() or None,
         "status": row.status,
         "social_links": [str(x) for x in social_links],
         "note": row.note,
@@ -157,10 +163,17 @@ def submit_affiliate_application(
 
 
 def list_affiliate_applications(db: Session, status: Optional[str] = None, skip: int = 0, limit: int = 100) -> list[dict]:
-    q = db.query(AffiliateApplication).order_by(AffiliateApplication.submitted_at.desc())
+    q = (
+        db.query(AffiliateApplication, User.email)
+        .outerjoin(User, User.id == AffiliateApplication.user_id)
+        .order_by(AffiliateApplication.submitted_at.desc())
+    )
     if status:
         q = q.filter(AffiliateApplication.status == status.strip())
-    return [_application_to_dict(row) for row in q.offset(skip).limit(limit).all()]
+    return [
+        _application_to_dict(row, user_email=email)
+        for row, email in q.offset(skip).limit(limit).all()
+    ]
 
 
 def approve_affiliate_application(db: Session, application_id: int, admin_id: int, admin_note: Optional[str] = None) -> AffiliateApplication:

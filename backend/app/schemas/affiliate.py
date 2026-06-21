@@ -35,6 +35,7 @@ class AffiliateApplicationIn(BaseModel):
 class AffiliateApplicationResponse(BaseModel):
     id: int
     user_id: int
+    user_email: Optional[str] = None
     status: str
     social_links: List[str]
     note: Optional[str] = None
