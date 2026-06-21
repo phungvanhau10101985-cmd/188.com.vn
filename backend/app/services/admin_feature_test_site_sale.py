@@ -7,24 +7,15 @@ from sqlalchemy.orm import Session
 from app.models.admin import AdminUser
 from app.models.admin_feature_test import AdminFeatureTestSetting
 from app.services import sale_calendar as sale_calendar_svc
-from app.utils.display_timeline import to_utc_aware
+from app.utils.display_timeline import db_datetime_to_utc
 
 TEST_DURATION_MINUTES = sale_calendar_svc.SITE_SALE_TEST_DURATION_MINUTES
-
-
-def _utcnow_naive() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _site_sale_expires_at_utc(dt: datetime | None) -> datetime | None:
-    """Cột site_sale_test_expires_at lưu UTC naive — không dùng timezone-aware khi ghi."""
-    return to_utc_aware(dt)
 
 
 def site_sale_test_settings_payload(admin: AdminUser, row: AdminFeatureTestSetting | None) -> dict:
     test_email = ((row.test_email if row else None) or admin.email or "").strip()
     expires_at = row.site_sale_test_expires_at if row else None
-    expires_at_utc = _site_sale_expires_at_utc(expires_at)
+    expires_at_utc = db_datetime_to_utc(expires_at)
     is_enabled = bool(row.site_sale_test_enabled) if row else False
     if is_enabled and (not expires_at_utc or expires_at_utc <= datetime.now(timezone.utc)):
         is_enabled = False
@@ -72,7 +63,7 @@ def upsert_site_sale_test_settings(
     row.site_sale_test_enabled = bool(site_sale_test_enabled)
     row.site_sale_test_phase = site_sale_test_phase if site_sale_test_phase in ("teaser", "active") else "active"
     row.site_sale_test_expires_at = (
-        _utcnow_naive() + timedelta(minutes=TEST_DURATION_MINUTES)
+        datetime.now(timezone.utc) + timedelta(minutes=TEST_DURATION_MINUTES)
         if site_sale_test_enabled
         else None
     )

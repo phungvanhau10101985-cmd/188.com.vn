@@ -77,6 +77,15 @@ body {
   touch-action: pan-x pan-y;
 }
 
+/* Khung ảnh chính PDP mobile — vuốt ngang trượt từng ảnh (scroll-snap), không nhảy đột ngột */
+.product-gallery-media-carousel {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
+  scroll-snap-type: x mandatory;
+  touch-action: pan-x pan-y;
+}
+
 /* Scrollbar: ẩn mặc định, hover mới hiện */
 .scrollbar-on-hover {
   -ms-overflow-style: none;

@@ -142,6 +142,14 @@ export default function AdminFeatureTestPage() {
       setTestEmail(data.test_email || email);
       setSiteSalePhase(data.site_sale_test_phase || siteSalePhase);
       const phaseLabel = data.site_sale_test_phase === 'teaser' ? 'teaser (sắp giảm)' : 'active (đang giảm)';
+      if (enabled && !data.site_sale_test_enabled) {
+        setSiteSaleError(
+          `Backend trả về trạng thái tắt ngay sau khi bật (hết hạn: ${data.site_sale_test_expires_at ?? '—'}). ` +
+            'Thường do backend trên server chưa deploy bản sửa timezone — chạy deploy code mới rồi `pm2 restart backend`.',
+        );
+        setSiteSaleMessage(null);
+        return;
+      }
       setSiteSaleMessage(
         data.site_sale_test_enabled
           ? `Đã bật test Sale lịch (${phaseLabel}) trong ${data.test_duration_minutes || 10} phút. Tài khoản web đăng nhập bằng email ${data.test_email || email} sẽ thấy banner, badge và giá giảm giống ngày sale thật.`

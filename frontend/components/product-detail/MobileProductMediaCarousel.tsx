@@ -29,9 +29,12 @@ const MobileProductMediaCarousel = forwardRef<
   ref,
 ) {
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const selectedIndexRef = useRef(selectedIndex);
   const programmaticScrollRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const programmaticResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  selectedIndexRef.current = selectedIndex;
 
   const scrollToIndex = useCallback((index: number, behavior: ScrollBehavior = 'smooth') => {
     const el = scrollerRef.current;
@@ -39,12 +42,15 @@ const MobileProductMediaCarousel = forwardRef<
     const clamped = Math.min(slideCount - 1, Math.max(0, index));
     const width = el.clientWidth;
     if (width <= 0) return;
+    const targetLeft = clamped * width;
+    if (Math.abs(el.scrollLeft - targetLeft) < 1) return;
+
     programmaticScrollRef.current = true;
     if (programmaticResetTimerRef.current) clearTimeout(programmaticResetTimerRef.current);
-    el.scrollTo({ left: clamped * width, behavior });
+    el.scrollTo({ left: targetLeft, behavior });
     programmaticResetTimerRef.current = setTimeout(() => {
       programmaticScrollRef.current = false;
-    }, behavior === 'smooth' ? 420 : 0);
+    }, behavior === 'smooth' ? 420 : 48);
   }, [slideCount]);
 
   useImperativeHandle(ref, () => ({ scrollToIndex }), [scrollToIndex]);
@@ -55,8 +61,8 @@ const MobileProductMediaCarousel = forwardRef<
     const width = el.clientWidth;
     if (width <= 0) return;
     const idx = Math.min(slideCount - 1, Math.max(0, Math.round(el.scrollLeft / width)));
-    if (idx !== selectedIndex) onSelectedIndexChange(idx);
-  }, [onSelectedIndexChange, selectedIndex, slideCount]);
+    if (idx !== selectedIndexRef.current) onSelectedIndexChange(idx);
+  }, [onSelectedIndexChange, slideCount]);
 
   const handleScroll = useCallback(() => {
     if (programmaticScrollRef.current) return;
@@ -77,12 +83,13 @@ const MobileProductMediaCarousel = forwardRef<
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
+    scrollToIndex(selectedIndexRef.current, 'auto');
     const ro = new ResizeObserver(() => {
-      scrollToIndex(selectedIndex, 'auto');
+      scrollToIndex(selectedIndexRef.current, 'auto');
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [scrollToIndex, selectedIndex]);
+  }, [scrollToIndex]);
 
   if (slideCount <= 1) {
     return <div className={className}>{children}</div>;
@@ -91,8 +98,7 @@ const MobileProductMediaCarousel = forwardRef<
   return (
     <div
       ref={scrollerRef}
-      className={`flex overflow-x-auto snap-x snap-mandatory scrollbar-hide touch-pan-y ${className}`}
-      style={{ WebkitOverflowScrolling: 'touch' }}
+      className={`product-gallery-media-carousel flex min-w-0 overflow-x-auto snap-x snap-mandatory scrollbar-hide ${className}`}
       onScroll={handleScroll}
       aria-label="Thư viện ảnh sản phẩm"
     >
@@ -111,7 +117,10 @@ export function MobileProductMediaSlide({
   className?: string;
 }) {
   return (
-    <div className={`flex-shrink-0 w-full snap-center snap-always ${className}`}>
+    <div
+      className={`min-w-full w-full flex-[0_0_100%] snap-center snap-always ${className}`}
+      style={{ scrollSnapStop: 'always' }}
+    >
       {children}
     </div>
   );
