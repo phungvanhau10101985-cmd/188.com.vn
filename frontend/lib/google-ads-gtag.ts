@@ -12,6 +12,9 @@
  * | begin_checkout | ads_conversion_begin_checkout | /cart — trackGoogleAdsCartPageView |
  * | deposit_page | ads_conversion_deposit_page | /account/orders/[id]/deposit — trackGoogleAdsDepositCheckoutPage |
  * | purchase | ads_conversion_purchase | /cart checkout + deposit (COD) — trackGoogleAdsPurchase |
+ *
+ * CwCD (chiết khấu tự động GMC): purchase bắn `gtag('event','purchase')` tới AW-/label «Mua hàng»
+ * kèm aw_merchant_id + items — Google chỉ xử lý cart data trên sự kiện purchase, không phải conversion.
  */
 import type { AddToCartRequest } from '@/features/cart/types/cart';
 import type { CartItem } from '@/features/cart/types/cart';
@@ -240,6 +243,22 @@ export function peekGoogleAdsConversionSendTo(key: GoogleAdsWebConversionKey): s
   return conversionSendToFor(key);
 }
 
+/** null = chưa cấu hình từ embed; number = Merchant ID admin (customer_reviews). */
+let googleMerchantCenterIdFromEmbed: number | null | undefined;
+
+/** Gọi từ SiteEmbedsRoot — fallback CwCD khi thiếu NEXT_PUBLIC_GOOGLE_MERCHANT_CENTER_ID. */
+export function setGoogleMerchantCenterIdFromEmbed(id: number | null | undefined): void {
+  if (id == null || !Number.isFinite(id) || id <= 0) {
+    googleMerchantCenterIdFromEmbed = null;
+    return;
+  }
+  googleMerchantCenterIdFromEmbed = id;
+}
+
+export function clearGoogleMerchantCenterIdFromEmbed(): void {
+  googleMerchantCenterIdFromEmbed = undefined;
+}
+
 /** CwCD — chiết khấu tự động Merchant Center (aw_merchant_id, feed country/language). */
 function readGoogleMerchantCwcdConfig(): {
   merchantId: number | null;
@@ -252,6 +271,9 @@ function readGoogleMerchantCwcdConfig(): {
     const n = Number.parseInt(midRaw, 10);
     if (Number.isFinite(n) && n > 0) merchantId = n;
   }
+  if (merchantId == null && googleMerchantCenterIdFromEmbed != null && googleMerchantCenterIdFromEmbed > 0) {
+    merchantId = googleMerchantCenterIdFromEmbed;
+  }
   const feedCountry = (process.env.NEXT_PUBLIC_GOOGLE_FEED_COUNTRY || 'VN').trim().toUpperCase();
   const feedLanguage = (process.env.NEXT_PUBLIC_GOOGLE_FEED_LANGUAGE || 'vi').trim().toLowerCase();
   return { merchantId, feedCountry, feedLanguage };
@@ -260,6 +282,11 @@ function readGoogleMerchantCwcdConfig(): {
 function cartLineListPrice(line: CartItem): number {
   const pd =
     line.product_data && typeof line.product_data === 'object' ? (line.product_data as Record<string, unknown>) : {};
+  const googleBlock = pd.google_automated_discount;
+  if (googleBlock && typeof googleBlock === 'object') {
+    const prior = Number((googleBlock as Record<string, unknown>).prior_price);
+    if (Number.isFinite(prior) && prior > 0) return prior;
+  }
   const list =
     (typeof line.list_price === 'number' && !Number.isNaN(line.list_price) ? line.list_price : null) ??
     (typeof line.original_price === 'number' && !Number.isNaN(line.original_price) ? line.original_price : null) ??
@@ -279,7 +306,7 @@ function cartDataDiscountTotal(lines: CartItem[]): number {
   return Math.max(0, Math.round(total));
 }
 
-/** items.id phải khớp cột `id` trong feed GMC (product_id). */
+/** items.id / item_id phải khớp cột `id` trong feed GMC (product_id). */
 function gtagCwcdItemsFromCartLines(lines: CartItem[]): Record<string, unknown>[] {
   return lines.map((line) => {
     const pd =
@@ -290,6 +317,7 @@ function gtagCwcdItemsFromCartLines(lines: CartItem[]): Record<string, unknown>[
       String(line.product_id);
     return {
       id: feedId,
+      item_id: feedId,
       quantity: line.quantity,
       price: lineUnitPrice(line),
     };
@@ -353,7 +381,9 @@ function fireGoogleAdsConversion(
         body.ecomm_totalvalue = convValue;
       }
     }
-    gtag('event', 'conversion', body);
+    /** CwCD / chiết khấu tự động GMC: chỉ xử lý sự kiện «purchase» (bttype), không phải «conversion». */
+    const gtagEventName = key === 'purchase' ? 'purchase' : 'conversion';
+    gtag('event', gtagEventName, body);
   });
 }
 
@@ -424,6 +454,19 @@ function fireGtagEvent(eventName: string, payload: Record<string, unknown>): voi
     if (adsSendTo) {
       gtag('event', eventName, { send_to: adsSendTo, ...payload });
     }
+    ga4SendTo.forEach((send_to) => {
+      gtag('event', eventName, { send_to, ...payload });
+    });
+  });
+}
+
+/** GA4 purchase / funnel — không gửi AW- toàn cục (tránh trùng & sai loại sự kiện CwCD). */
+function fireGa4GtagEvent(eventName: string, payload: Record<string, unknown>): void {
+  const ga4SendTo = getGa4SendToTargets();
+  if (!ga4SendTo.length) return;
+  whenGtagReady(() => {
+    const gtag = getGtag();
+    if (!gtag) return;
     ga4SendTo.forEach((send_to) => {
       gtag('event', eventName, { send_to, ...payload });
     });
@@ -680,7 +723,7 @@ export function trackGoogleAdsPurchase(params: {
     items: gtagItemsFromCartLines(items),
   };
   applyCwcdToConversionBody(purchasePayload, items);
-  fireGtagEvent('purchase', purchasePayload);
+  fireGa4GtagEvent('purchase', purchasePayload);
   fireGoogleAdsConversion('purchase', {
     value: v,
     items: gtagItemsFromCartLines(items),

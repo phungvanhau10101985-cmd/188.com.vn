@@ -7,6 +7,8 @@ import {
   setGoogleAdsSendToFromAdmin,
   clearGoogleAdsWebConversionsFromEmbed,
   setGoogleAdsWebConversionsFromEmbed,
+  setGoogleMerchantCenterIdFromEmbed,
+  clearGoogleMerchantCenterIdFromEmbed,
 } from '@/lib/google-ads-gtag';
 
 /**
@@ -102,6 +104,7 @@ export default function SiteEmbedsRootClient({
       googleAdsAwIds,
       googleAdsWebConversions,
       googleAdsWebConversionsLegacyPdpOnly,
+      googleCustomerReviewsMerchantId,
     } = embeds;
     if (googleAdsAwIds !== undefined) {
       setGoogleAdsSendToFromAdmin(googleAdsAwIds);
@@ -114,6 +117,11 @@ export default function SiteEmbedsRootClient({
       });
     } else {
       clearGoogleAdsWebConversionsFromEmbed();
+    }
+    if (googleCustomerReviewsMerchantId !== undefined) {
+      setGoogleMerchantCenterIdFromEmbed(googleCustomerReviewsMerchantId);
+    } else {
+      clearGoogleMerchantCenterIdFromEmbed();
     }
   }
 
