@@ -4,6 +4,7 @@
  *
  * Windows: cache dev (.next-run) trỏ junction sang %LOCALAPPDATA%\188-com-vn-next-dev
  * để giảm lỗi errno -4094 (Defender/indexer khóa file trong thư mục dự án).
+ * Cần NODE_PATH → node_modules dự án: chunk dev trong AppData không tự resolve react/jsx-runtime.
  *
  * Dùng: npm run dev   hoặc   node scripts/next-dev.cjs
  *       npm run dev:clean  — xóa cache dev rồi chạy lại
@@ -131,6 +132,10 @@ const passthrough =
 const distDir = resolveDistDir();
 prepareDevDistDir(distDir);
 const nextCli = resolveNextCli();
+const projectNodeModules = path.join(root, 'node_modules');
+const nodePath = process.env.NODE_PATH
+  ? `${projectNodeModules}${path.delimiter}${process.env.NODE_PATH}`
+  : projectNodeModules;
 const result = spawnSync(
   process.execPath,
   [nextCli, 'dev', '-p', port, '--webpack', ...passthrough.filter((a) => a !== '--clean')],
@@ -141,6 +146,8 @@ const result = spawnSync(
       ...process.env,
       PORT: port,
       NEXT_DIST_DIR: distDir,
+      /** Chunk dev trong AppData (junction) cần NODE_PATH để require react/jsx-runtime. */
+      NODE_PATH: nodePath,
       /** Không ghi đè API_INTERNAL_ORIGIN ở đây — để .env.local / .env.development và next.config.js quyết định. */
     },
   },

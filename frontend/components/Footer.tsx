@@ -7,11 +7,9 @@ import {
   BOCT_REGISTRATION_URL,
   BUSINESS_ADDRESS,
   BUSINESS_EMAIL,
-  BUSINESS_FACEBOOK,
   BUSINESS_LEGAL_NAME,
   BUSINESS_PHONE_DISPLAY,
   BUSINESS_REGISTRATION,
-  BUSINESS_ZALO,
 } from '@/lib/business-info';
 
 const FooterNewsletterSubscribe = dynamic(
@@ -77,26 +75,6 @@ export default function Footer() {
             <p className="text-gray-600 text-xs leading-relaxed max-w-xs">
               {BUSINESS_LEGAL_NAME} · Mã HKD {BUSINESS_REGISTRATION}
             </p>
-            <div className="flex gap-3" role="group" aria-label="Kênh liên hệ chính thức">
-              <a
-                href={BUSINESS_FACEBOOK}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="min-h-[44px] min-w-[44px] rounded-lg bg-gray-100 text-gray-700 flex items-center justify-center text-sm hover:bg-orange-50 hover:text-orange-700 transition-colors"
-                aria-label="Facebook 188.com.vn"
-              >
-                f
-              </a>
-              <a
-                href={BUSINESS_ZALO}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="min-h-[44px] min-w-[44px] rounded-lg bg-gray-100 text-gray-700 flex items-center justify-center text-xs font-bold hover:bg-orange-50 hover:text-orange-700 transition-colors"
-                aria-label="Zalo Official 188.com.vn"
-              >
-                Zalo
-              </a>
-            </div>
           </div>
 
           {/* Hỗ trợ khách hàng */}

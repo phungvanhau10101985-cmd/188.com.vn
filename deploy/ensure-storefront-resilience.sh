@@ -28,7 +28,7 @@ sleep 2
 bash "${ROOT}/deploy/health-check.sh" || true
 
 echo
-echo "==> Gợi ý cron monitor (tuỳ chọn, chạy tay crontab -e):"
-echo "  */2 * * * * cd /var/www/188.com.vn && bash deploy/monitor-storefront.sh >> /var/log/188-storefront-monitor.log 2>&1"
+echo "==> Cron monitor storefront (mỗi 2 phút)"
+bash "${ROOT}/deploy/install-storefront-monitor-cron.sh" || true
 echo
 echo "✓ Xong. UptimeRobot: GET https://188.com.vn/health/storefront mỗi 1 phút."
