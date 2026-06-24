@@ -16,6 +16,10 @@ import {
 import { getListingFreshnessMonthLabel } from '@/lib/listing-freshness-label';
 import { buildInternalLinkMap } from '@/lib/internal-links';
 import { getClusterSlugForCat3 } from '@/lib/seo-cluster';
+import {
+  CATEGORY_LISTING_REFRESH_PARAM,
+  resolveCategoryListingRefresh,
+} from '@/lib/category-listing-random';
 import CategoryPageClient from './CategoryPageClient';
 import CategoryListPage from './CategoryListPage';
 import type { Product } from '@/types/api';
@@ -144,6 +148,12 @@ export default async function CategoryPage({ params, searchParams }: Props) {
   const page = pageParam;
   const skip = (page - 1) * PAGE_SIZE;
 
+  const refreshFromUrl = (() => {
+    const v = resolvedSearchParams[CATEGORY_LISTING_REFRESH_PARAM];
+    return Array.isArray(v) ? v[0] : v;
+  })();
+  const listingRefresh = resolveCategoryListingRefresh(refreshFromUrl, listingFilters);
+
   const listingQueryString = serializeSearchParamsForListing(resolvedSearchParams);
 
   // Trang danh mục tổng: SSR lưới catalog-tiles (cache 120s) — tránh chờ cây 3 cấp + fetch client lần 2.
@@ -181,7 +191,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
     level1,
     level2,
     level3,
-    { limit: PAGE_SIZE, skip, filters: listingFilters },
+    { limit: PAGE_SIZE, skip, filters: listingFilters, listingRefresh },
     seoData,
   );
 
@@ -203,6 +213,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
       error={null}
       facets={null}
       listingQueryString={listingQueryString}
+      listingRefresh={listingRefresh ?? null}
     />
   );
 }

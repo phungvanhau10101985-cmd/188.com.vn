@@ -5,6 +5,7 @@
 
 import type { CategoryLevel1, HeroCategoryTile } from "@/types/api";
 import { isNextProductionBuild } from "@/lib/build-phase";
+import { categoryListingUsesRandomSort } from "@/lib/category-listing-random";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001/api/v1";
@@ -309,13 +310,20 @@ export async function getCategoryProductFacets(
 
 /** Server-side: lấy sản phẩm theo danh mục (cho SSR). Hỗ trợ phân trang qua skip/limit.
  *  Có thể truyền sẵn info danh mục (CategoryByPathInfo) để tránh gọi API by-path lần nữa.
- *  Khi có min/max giá, size hoặc màu: tắt order_random để phân trang ổn định; mặc định sort `newest`.
+ *  Mặc định (không bộ lọc): random toàn danh mục qua cache ID + seed (`search_refresh`).
+ *  Khi có min/max giá, size, màu hoặc sort: thứ tự xác định (`newest` hoặc sort đã chọn).
  */
 export async function getProductsByCategory(
   level1: string,
   level2?: string | null,
   level3?: string | null,
-  options: { limit?: number; skip?: number; filters?: CategoryListingFilters } = {},
+  options: {
+    limit?: number;
+    skip?: number;
+    filters?: CategoryListingFilters;
+    /** Seed random — tái dùng khi phân trang; bỏ qua để tạo mới mỗi lần vào trang 1. */
+    listingRefresh?: string;
+  } = {},
   resolvedInfo?: CategoryByPathInfo | null
 ): Promise<{
   products: unknown[];
@@ -326,7 +334,7 @@ export async function getProductsByCategory(
   subcategory?: string;
   sub_subcategory?: string;
 }> {
-  const { limit = 96, skip = 0, filters } = options;
+  const { limit = 96, skip = 0, filters, listingRefresh } = options;
   const info = resolvedInfo ?? (await getCategoryByPathForSeo(level1, level2, level3));
   if (!info) return { products: [], total: 0, total_pages: 0, page: 1 };
   const breadcrumb = info.breadcrumb_names || [];
@@ -335,16 +343,8 @@ export async function getProductsByCategory(
   const sub_subcategory = breadcrumb[2];
 
   const f = filters || {};
-  const hasAttrFilters =
-    (f.minPrice != null && !Number.isNaN(f.minPrice)) ||
-    (f.maxPrice != null && !Number.isNaN(f.maxPrice)) ||
-    Boolean(f.size?.trim()) ||
-    Boolean(f.color?.trim()) ||
-    Boolean(f.styleTag?.trim());
   const sortTrim = f.sort?.trim();
-  const useDeterministicOrder = hasAttrFilters || Boolean(sortTrim);
-  /** Trang danh mục mặc định: bỏ COUNT + ORDER BY random() (chậm, dễ vượt timeout SSR 8s). ProductGrid vẫn trộn client-side. */
-  const useFastCategoryListing = !useDeterministicOrder;
+  const useRandomListing = categoryListingUsesRandomSort(f);
 
   try {
     const params = new URLSearchParams({
@@ -357,9 +357,12 @@ export async function getProductsByCategory(
     if (sub_subcategory) params.set("sub_subcategory", sub_subcategory);
 
     params.set("order_random", "false");
-    params.set("sort", sortTrim || "newest");
-    if (useFastCategoryListing) {
-      params.set("skip_total", "true");
+    if (useRandomListing) {
+      params.set("sort", "random");
+      const seed = (listingRefresh || "").trim();
+      if (seed) params.set("search_refresh", seed);
+    } else {
+      params.set("sort", sortTrim || "newest");
     }
 
     if (f.minPrice != null && !Number.isNaN(f.minPrice) && f.minPrice >= 0) {
@@ -373,9 +376,10 @@ export async function getProductsByCategory(
     if (f.styleTag?.trim()) params.set("style_tag", f.styleTag.trim());
 
     const url = `${API_BASE}/products/?${params.toString()}`;
-    /** Cache ngắn theo URL: mở danh mục nhanh hơn, vẫn làm mới thường xuyên. */
     const res = await fetch(url, {
-      next: { revalidate: REVALIDATE_CATEGORY_PRODUCTS, tags: [CACHE_TAG_CATEGORY_SEO] },
+      ...(useRandomListing
+        ? { cache: "no-store" as RequestCache }
+        : { next: { revalidate: REVALIDATE_CATEGORY_PRODUCTS, tags: [CACHE_TAG_CATEGORY_SEO] } }),
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(CATEGORY_PRODUCTS_FETCH_TIMEOUT_MS),
     });

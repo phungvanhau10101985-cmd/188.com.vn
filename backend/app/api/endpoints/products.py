@@ -558,6 +558,14 @@ def _read_products_list_impl(
         response.headers["Cache-Control"] = "private, no-store"
     elif raw_q and crud.product.normalize_product_list_sort(sort) == "random":
         response.headers["Cache-Control"] = "private, no-store"
+    elif (
+        crud.product.normalize_product_list_sort(sort) == "random"
+        and (search_refresh or "").strip()
+        and (category or subcategory or sub_subcategory)
+        and not raw_q
+        and not pid
+    ):
+        response.headers["Cache-Control"] = "private, no-store"
     else:
         # Admin / công cụ nội bộ cần dữ liệu mới sau PUT; public cache gây hiển thị cũ ~60s.
         response.headers["Cache-Control"] = "private, no-cache, must-revalidate"
@@ -664,6 +672,7 @@ def _read_products_list_impl(
         filter_size=filter_size,
         filter_color=filter_color,
         filter_style_tag=filter_style_tag,
+        sort=sort_norm,
     )
     if use_listing_filter_cache:
         listing_filter_cache_key = build_listing_filter_cache_key(

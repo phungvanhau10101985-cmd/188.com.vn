@@ -11,6 +11,7 @@ import ListingPagePagination from '@/components/ui/ListingPagePagination';
 import type { CategoryProductFacets } from '@/lib/category-seo';
 import { linkifySeoBody, type InternalLinkItem } from '@/lib/internal-links';
 import { getListingFreshnessMonthLabel } from '@/lib/listing-freshness-label';
+import { CATEGORY_LISTING_REFRESH_PARAM } from '@/lib/category-listing-random';
 import type { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
 
@@ -28,6 +29,8 @@ interface CategoryPageClientProps {
   facets: CategoryProductFacets | null;
   /** Query string hiện tại (không gồm ?) — dùng giữ bộ lọc khi phân trang. */
   listingQueryString: string;
+  /** Seed random toàn danh mục — giữ khi phân trang (param `r`). */
+  listingRefresh?: string | null;
 }
 
 function hasNonPageFilters(listingQs: string): boolean {
@@ -49,6 +52,7 @@ export default function CategoryPageClient({
   error,
   facets,
   listingQueryString,
+  listingRefresh = null,
 }: CategoryPageClientProps) {
   const router = useRouter();
   const fullName = breadcrumbNames.join(' - ');
@@ -102,6 +106,11 @@ export default function CategoryPageClient({
     const p = new URLSearchParams(listingQueryString);
     if (nextPage <= 1) p.delete('page');
     else p.set('page', String(nextPage));
+    if (listingRefresh && !hasNonPageFilters(listingQueryString)) {
+      p.set(CATEGORY_LISTING_REFRESH_PARAM, listingRefresh);
+    } else {
+      p.delete(CATEGORY_LISTING_REFRESH_PARAM);
+    }
     const q = p.toString();
     return q ? `${basePath}?${q}` : basePath;
   };
@@ -168,7 +177,6 @@ export default function CategoryPageClient({
             loading={false}
             selectedCategory={leafName}
             showFilters={false}
-            randomize={!hasNonPageFilters(listingQueryString)}
           />
           {totalPages > 1 ? (
             <ListingPagePagination

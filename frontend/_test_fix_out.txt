@@ -1,0 +1,19 @@
+
+> 188-frontend@1.0.0 dev
+> node scripts/next-dev.cjs
+
+[next-dev] Windows: .next-run → C:\Users\Mr Hau\AppData\Local\188-com-vn-next-dev
+▲ Next.js 16.2.6 (webpack)
+- Local:         http://localhost:3001
+- Network:       http://192.168.0.104:3001
+- Environments: .env.local
+✓ Ready in 1687ms
+- Experiments (use with caution):
+  · optimizePackageImports
+  ✓ scrollRestoration
+  · serverActions
+
+ GET / 200 in 2.9s (next.js: 1818ms, proxy.ts: 121ms, application-code: 1000ms)
+ GET /admin/products 200 in 3.9s (next.js: 1381ms, proxy.ts: 1652ms, application-code: 860ms)
+ GET / 200 in 633ms (next.js: 29ms, proxy.ts: 14ms, application-code: 590ms)
+ GET /admin/products 200 in 563ms (next.js: 5ms, proxy.ts: 5ms, application-code: 554ms)

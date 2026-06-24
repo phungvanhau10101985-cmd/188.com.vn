@@ -1,0 +1,658 @@
+============================================================
+🔧 CONFIGURATION STATUS CHECK
+============================================================
+
+🗄️  DATABASE:
+   Database URL: postgresql://postgres:10101985@localhost:5432/188comvn
+   Mode: PostgreSQL (production)
+   Tables: 88 bảng
+   Products: (bỏ qua COUNT — SETTINGS_DB_PROBE_ON_LOAD=false)
+
+🔐 SECURITY:
+   ✅ SECRET_KEY: Đã cấu hình
+
+📱 OTP SYSTEM:
+   Primary Provider: firebase
+   Fallback Enabled: True
+   Simulation Mode: False
+   OTP Length: 6
+   OTP Expire: 10 minutes
+
+💬 ZALO OTP:
+   ✅ ZALO: Access Token configured
+      OA ID: 1714121106420519241
+      Register Template: 303744
+      Reset Password Template: 303744
+      Verify Phone Template: 303744
+      Login Template: 303744
+
+🔥 FIREBASE:
+   ✅ FIREBASE: Fully configured for production
+      Project: comvn-320603
+      Client: firebase-adminsdk-t34so@comvn-...
+      Token URI: https://oauth2.googleapis.com/token
+      API Key: True
+
+🤖 AI APIs:
+   ✅ DEEPSEEK: Configured
+   ✅ OPENAI: Configured
+
+📧 EMAIL (OTP Backup):
+   ✅ EMAIL: Configured for OTP backup
+
+🌍 ENVIRONMENT:
+   Environment: production
+   Debug Mode: False
+   Server: 0.0.0.0:8001
+
+============================================================
+📋 SUMMARY:
+✅ OTP SYSTEM: READY FOR PRODUCTION
+   Primary: Firebase Authentication
+   Fallback: Zalo OTP
+============================================================
+
+🔧 LOADING API ROUTES...
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: AUTH
+   Import path: app.api.endpoints.auth
+   Full path: app.api.endpoints.auth
+[OK] Loading database models...
+[OK] SeoCluster model loaded
+[OK] Category model loaded
+[OK] Product model loaded
+[OK] InternalSkuExport model loaded
+[OK] ProductImportDraft model loaded
+[OK] ImageLocalizationJob model loaded
+[OK] ListingImportQueueSnapshot model loaded
+[OK] User models loaded
+[OK] Guest behavior models loaded
+[OK] UserTrustedDevice model loaded
+[OK] Email login challenge / trusted device models loaded
+[OK] BirthdayPromoEmailLog model loaded
+[OK] AdminFeatureTestSetting model loaded
+[OK] VpsBackup models loaded
+[OK] UserPushSubscription model loaded
+[OK] AnalyticsEvent model loaded
+[OK] UserAddress model loaded
+[OK] Cart models loaded
+[OK] AdminUser model loaded
+[OK] Order models loaded
+[OK] BankAccount model loaded
+[OK] SiteEmbedCode model loaded
+[OK] ShopVideoFabSetting model loaded
+[OK] ProductQuestion model loaded
+[OK] ProductReview model loaded
+[OK] PendingProductReplyEmail model loaded
+[OK] CategorySeoMapping model loaded
+[OK] CategoryTransformRule model loaded
+[OK] CategoryFinalMapping model loaded
+[OK] User behavior models loaded
+[OK] SearchQueryMapping model loaded
+[OK] ProductSearchCache model loaded
+[OK] ListingFacetCache model loaded
+[OK] CategoryMenuCache model loaded
+[OK] SearchMapping/SearchLog model loaded
+[OK] LoyaltyTier model loaded
+[OK] Affiliate/Wallet models loaded
+[OK] OrderShipmentEvent model loaded
+[OK] Notification model loaded
+[OK] NewsletterSubscriber model loaded
+[OK] EmailSendManagement model loaded
+[INFO] Total models loaded: 69
+   Models: AdminFeatureTestSetting, AdminRole, AdminUser, AffiliateApplication, AffiliateBankAccountOtp, AffiliateCommission, AffiliateProfile, AffiliateSettings, AnalyticsEvent, BankAccount, BirthdayPromoEmailLog, Cart, CartItem, Category, CategoryFinalMapping, CategoryMenuCache, CategorySeoDictionary, CategorySeoGeminiTarget, CategorySeoMapping, CategorySeoMeta, CategorySeoSettings, CategoryTransformRule, EmailLoginChallenge, EmailSendManagement, EmailTrustedDevice, GuestFavorite, GuestProductView, GuestSearchHistory, ImageLocalizationJob, InternalSkuExport, ListingFacetCache, ListingImportQueueRevocation, ListingImportQueueSnapshot, LoyaltyTier, NewsletterSubscriber, Notification, Order, OrderItem, Payment, Product, ProductImportDraft, ProductQuestion, ProductQuestionUsefulVote, ProductReview, ProductReviewUsefulVote, ProductSearchCache, SearchLog, SearchMapping, SearchMappingType, SearchQueryMapping, SeoCluster, ShopVideoFabSetting, SiteEmbedCode, User, UserAddress, UserBankAccount, UserBrandView, UserCategoryView, UserFavorite, UserProductView, UserPushSubscription, UserSearchHistory, UserShopInteraction, UserTrustedDevice, UserWallet, VpsBackupRun, VpsBackupSettings, WalletTransaction, WalletWithdrawal
+[OK] Category model loaded
+[OK] Product model loaded
+[OK] User models loaded
+[OK] Cart models loaded
+[OK] AdminUser model loaded
+[OK] Order models loaded
+[OK] All models imported successfully
+[INFO] Loading CRUD module from: E:\python-code\188-com-vn\backend\app\crud
+✅ Loading user CRUD module...
+✅ User CRUD module loaded successfully with get_user() function
+  [OK] User CRUD: Loaded successfully
+✅ Loading category CRUD module...
+✅ Category CRUD module loaded successfully
+  [OK] Category CRUD: Loaded successfully
+  [WARN] Product CRUD: Module not found (may be normal)
+  [WARN] Cart CRUD: Module not found (may be normal)
+  [WARN] Order CRUD: Module not found (may be normal)
+  [OK] ProductQuestion CRUD: Loaded successfully
+  [OK] ProductReview CRUD: Loaded successfully
+  [OK] Admin CRUD: Loaded successfully
+[OK] CRUD module initialization complete
+   ✓ Module imported successfully: <module 'app.api.endpoints.auth' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\auth.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\auth.py
+   Available attributes: ['APIRouter', 'AdminTokenResponse', 'AdminUser', 'BackgroundTasks', 'DateOfBirthResponse', 'Depends', 'ForgotDateOfBirthRequest', 'GoogleLoginRequest', 'HTTPException', 'OTP_EXPIRE_MINUTES']...
+   ✓ Found router attribute
+  ✅ auth: /api/v1/auth
+   Routes in auth: 17 endpoints
+     - /email/request
+     - /email/verify-otp
+     - /email/verify-magic
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: ADDRESSES
+   Import path: app.api.endpoints.addresses
+   Full path: app.api.endpoints.addresses
+   ✓ Module imported successfully: <module 'app.api.endpoints.addresses' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\addresses.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\addresses.py
+   Available attributes: ['APIRouter', 'AddressCreate', 'AddressResponse', 'AddressUpdate', 'Depends', 'HTTPException', 'List', 'Optional', 'Session', 'create_address']...
+   ✓ Found router attribute
+  ✅ addresses: /api/v1/addresses
+   Routes in addresses: 9 endpoints
+     - /
+     - 
+     - /
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: BANK_ACCOUNTS
+   Import path: app.api.endpoints.bank_accounts
+   Full path: app.api.endpoints.bank_accounts
+   ✓ Module imported successfully: <module 'app.api.endpoints.bank_accounts' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\bank_accounts.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\bank_accounts.py
+   Available attributes: ['APIRouter', 'Depends', 'HTTPException', 'List', 'Session', 'admin_create', 'admin_delete', 'admin_list_all', 'admin_update', 'crud']...
+   ✓ Found router attribute
+  ✅ bank_accounts: /api/v1/bank-accounts
+   Routes in bank_accounts: 6 endpoints
+     - /
+     - 
+     - /admin/all
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: ADMIN
+   Import path: app.api.endpoints.admin
+   Full path: app.api.endpoints.admin
+   ✓ Module imported successfully: <module 'app.api.endpoints.admin' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\admin.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\admin.py
+   Available attributes: ['APIRouter', 'AdminIntegrationKeyGroup', 'AdminIntegrationKeyRow', 'AdminIntegrationKeysOverviewOut', 'AdminLogin', 'AdminMemberImportResponse', 'AdminRole', 'AdminStaffAccountListResponse', 'AdminStaffAccountRow', 'AdminStaffPermissionsPatch']...
+   ✓ Found router attribute
+  ✅ admin: /api/v1/admin
+   Routes in admin: 45 endpoints
+     - /check-setup
+     - /restart-api
+     - /import-1688-cookie
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: VPS_BACKUP_ADMIN
+   Import path: app.api.endpoints.vps_backup_admin
+   Full path: app.api.endpoints.vps_backup_admin
+   ✓ Module imported successfully: <module 'app.api.endpoints.vps_backup_admin' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\vps_backup_admin.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\vps_backup_admin.py
+   Available attributes: ['APIRouter', 'AdminUser', 'Depends', 'FileResponse', 'HTTPException', 'Query', 'Session', 'VpsBackupArchiveListResponse', 'VpsBackupDeleteArchiveResponse', 'VpsBackupRunListResponse']...
+   ✓ Found router attribute
+  ✅ vps_backup_admin: /api/v1/admin/vps-backup
+   Routes in vps_backup_admin: 7 endpoints
+     - /settings
+     - /settings
+     - /runs
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: EMBED_CODES
+   Import path: app.api.endpoints.embed_codes
+   Full path: app.api.endpoints.embed_codes
+   ✓ Module imported successfully: <module 'app.api.endpoints.embed_codes' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\embed_codes.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\embed_codes.py
+   Available attributes: ['APIRouter', 'Depends', 'FacebookCapiEventIn', 'HTTPException', 'Header', 'Optional', 'PublicSiteEmbedsResponse', 'Session', 'SessionLocal', 'embed_crud']...
+   ✓ Found router attribute
+  ✅ embed_codes: /api/v1/embed-codes
+   Routes in embed_codes: 2 endpoints
+     - /public
+     - /facebook/capi/send-event
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: SHOP_VIDEO_FAB
+   Import path: app.api.endpoints.shop_video_fab
+   Full path: app.api.endpoints.shop_video_fab
+   ✓ Module imported successfully: <module 'app.api.endpoints.shop_video_fab' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\shop_video_fab.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\shop_video_fab.py
+   Available attributes: ['APIRouter', 'SessionLocal', 'ShopVideoFabPublicOut', 'get_public_shop_video_fab', 'router', 'shop_video_fab_crud', 'ttl_cache']...
+   ✓ Found router attribute
+  ✅ shop_video_fab: /api/v1/shop-video-fab
+   Routes in shop_video_fab: 1 endpoints
+     - /public
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: CATEGORIES
+   Import path: app.api.endpoints.categories
+   Full path: app.api.endpoints.categories
+   ✓ Module imported successfully: <module 'app.api.endpoints.categories' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\categories.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\categories.py
+   Available attributes: ['APIRouter', 'Any', 'Category', 'CategoryCreate', 'CategoryModel', 'CategoryUpdate', 'Depends', 'Dict', 'HTTPException', 'List']...
+   ✓ Found router attribute
+  ✅ categories: /api/v1/categories
+   Routes in categories: 18 endpoints
+     - /from-products/
+     - /from-products
+     - /from-products/hero-tiles-cached/
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: CATEGORY_SEO
+   Import path: app.api.endpoints.category_seo
+   Full path: app.api.endpoints.category_seo
+   ✓ Module imported successfully: <module 'app.api.endpoints.category_seo' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\category_seo.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\category_seo.py
+   Available attributes: ['APIRouter', 'BackgroundTasks', 'Body', 'CategoryFinalMapping', 'CategorySeoDictionary', 'CategorySeoGeminiTarget', 'CategorySeoMapping', 'CategorySeoMeta', 'CategorySeoSettings', 'CategoryTransformRule']...
+   ✓ Found router attribute
+  ✅ category_seo: /api/v1/category-seo
+   Routes in category_seo: 42 endpoints
+     - /scan
+     - /mappings
+     - /mappings/pending
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: TAXONOMY_ADMIN
+   Import path: app.api.endpoints.taxonomy_admin
+   Full path: app.api.endpoints.taxonomy_admin
+   ✓ Module imported successfully: <module 'app.api.endpoints.taxonomy_admin' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\taxonomy_admin.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\taxonomy_admin.py
+   Available attributes: ['APIRouter', 'Any', 'BaseModel', 'Category', 'CategorySizeGuideGenerateIn', 'CategorySizeGuideManualUrlIn', 'DEFAULT_SIZE_GUIDE_CAT1_SLUGS', 'Depends', 'Dict', 'Field']...
+   ✓ Found router attribute
+  ✅ taxonomy_admin: /api/v1/taxonomy
+   Routes in taxonomy_admin: 16 endpoints
+     - /import
+     - /form-tree
+     - /clusters-list
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: SEO_CLUSTERS
+   Import path: app.api.endpoints.seo_clusters
+   Full path: app.api.endpoints.seo_clusters
+   ✓ Module imported successfully: <module 'app.api.endpoints.seo_clusters' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\seo_clusters.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\seo_clusters.py
+   Available attributes: ['APIRouter', 'Any', 'Category', 'Depends', 'Dict', 'HTTPException', 'List', 'Optional', 'Product', 'Query']...
+   ✓ Found router attribute
+  ✅ seo_clusters: /api/v1/seo-clusters
+   Routes in seo_clusters: 5 endpoints
+     - 
+     - /
+     - /{slug}
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: CART
+   Import path: app.api.endpoints.cart
+   Full path: app.api.endpoints.cart
+   ✓ Module imported successfully: <module 'app.api.endpoints.cart' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\cart.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\cart.py
+   Available attributes: ['APIRouter', 'Cart', 'CartItem', 'CartItemCreate', 'CartItemResponse', 'CartItemUpdate', 'CartResponse', 'Depends', 'HTTPException', 'List']...
+   ✓ Found router attribute
+  ✅ cart: /api/v1/cart
+   Routes in cart: 9 endpoints
+     - /
+     - 
+     - /items
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: ORDERS
+   Import path: app.api.endpoints.orders
+   Full path: app.api.endpoints.orders
+   ✓ Module imported successfully: <module 'app.api.endpoints.orders' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\orders.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\orders.py
+   Available attributes: ['APIRouter', 'BackgroundTasks', 'Body', 'Decimal', 'Depends', 'DepositTypeEnum', 'File', 'Form', 'HTTPException', 'Header']...
+   ✓ Found router attribute
+  ✅ orders: /api/v1/orders
+   Routes in orders: 53 endpoints
+     - /
+     - 
+     - /
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: IMPORT_EXPORT
+   Import path: app.api.endpoints.import_export
+   Full path: app.api.endpoints.import_export
+   ✓ Module imported successfully: <module 'app.api.endpoints.import_export' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\import_export.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\import_export.py
+   Available attributes: ['APIRouter', 'AdminUser', 'BackgroundTasks', 'Depends', 'ExcelImporter', 'File', 'FileResponse', 'HTTPException', 'Header', 'IMPORT_EXCEL_JOBS']...
+   ✓ Found router attribute
+  ✅ import_export: /api/v1/import-export
+   Routes in import_export: 18 endpoints
+     - /import/excel/async
+     - /import/excel/job/{job_id}
+     - /import/excel/job/{job_id}/cancel
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: IMPORT_1688
+   Import path: app.api.endpoints.import_1688
+   Full path: app.api.endpoints.import_1688
+   ✓ Module imported successfully: <module 'app.api.endpoints.import_1688' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\import_1688.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\import_1688.py
+   Available attributes: ['APIRouter', 'AdminUser', 'Any', 'BackgroundTasks', 'BaseModel', 'BytesIO', 'Depends', 'Dict', 'FETCH_TARGET_1688', 'FETCH_TARGET_AUTO']...
+   ✓ Found router attribute
+  ✅ import_1688: /api/v1/import-1688
+   Routes in import_1688: 30 endpoints
+     - /debug/classify-url
+     - /settings/cookie
+     - /settings/cookie
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: IMAGE_LOCALIZATION
+   Import path: app.api.endpoints.image_localization
+   Full path: app.api.endpoints.image_localization
+   ✓ Module imported successfully: <module 'app.api.endpoints.image_localization' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\image_localization.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\image_localization.py
+   Available attributes: ['APIRouter', 'AdminUser', 'Any', 'BaseModel', 'Depends', 'Dict', 'Field', 'GeminiApiImageAdapter', 'HTTPException', 'IMAGE_LOCALIZATION_MAX_CONSECUTIVE_PRODUCT_FAILURES']...
+   ✓ Found router attribute
+  ✅ image_localization: /api/v1/image-localization
+   Routes in image_localization: 9 endpoints
+     - /settings/gemini-auth
+     - /summary
+     - /jobs
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: USER_BEHAVIOR
+   Import path: app.api.endpoints.user_behavior
+   Full path: app.api.endpoints.user_behavior
+   ✓ Module imported successfully: <module 'app.api.endpoints.user_behavior' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\user_behavior.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\user_behavior.py
+   Available attributes: ['APIRouter', 'Any', 'BackgroundTasks', 'BrandViewCreate', 'BrandViewResponse', 'CategoryViewCreate', 'CategoryViewResponse', 'Depends', 'FavoriteCreate', 'FavoriteResponse']...
+   ✓ Found router attribute
+  ✅ user_behavior: /api/v1/user-behavior
+   Routes in user_behavior: 30 endpoints
+     - /products/view
+     - /products/viewed
+     - /products/viewed-by-same-age-gender
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: ANALYTICS
+   Import path: app.api.endpoints.analytics
+   Full path: app.api.endpoints.analytics
+   ✓ Module imported successfully: <module 'app.api.endpoints.analytics' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\analytics.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\analytics.py
+   Available attributes: ['APIRouter', 'AnalyticsEventCreate', 'AnalyticsEventResponse', 'Depends', 'Optional', 'Request', 'Session', 'User', 'create_event', 'get_current_user_optional']...
+   ✓ Found router attribute
+  ✅ analytics: /api/v1/analytics
+   Routes in analytics: 1 endpoints
+     - /events
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: BIRTHDAY_PROMO
+   Import path: app.api.endpoints.birthday_promo
+   Full path: app.api.endpoints.birthday_promo
+   ✓ Module imported successfully: <module 'app.api.endpoints.birthday_promo' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\birthday_promo.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\birthday_promo.py
+   Available attributes: ['APIRouter', 'AdminFeatureTestSetting', 'AdminUser', 'BIRTHDAY_EMAIL_SEND_DAYS_BEFORE', 'BaseModel', 'BirthdayPromoEmailLog', 'BirthdayPromoTestSettingsIn', 'Depends', 'HTTPException', 'Header']...
+   ✓ Found router attribute
+  ✅ birthday_promo: /api/v1/birthday-promo
+   Routes in birthday_promo: 6 endpoints
+     - /admin/test-settings
+     - /admin/site-sale-test-settings
+     - /admin/site-sale-test-settings
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: PROMOTIONS
+   Import path: app.api.endpoints.promotions
+   Full path: app.api.endpoints.promotions
+   ✓ Module imported successfully: <module 'app.api.endpoints.promotions' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\promotions.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\promotions.py
+   Available attributes: ['APIRouter', 'AdminDailyPromotionCronResponse', 'AdminGrantSegmentRequest', 'AdminGrantSegmentResponse', 'AdminGrantVoucherRequest', 'AdminPromotionCreate', 'AdminPromotionListResponse', 'AdminPromotionOut', 'AdminPromotionUpdate', 'AdminUser']...
+   ✓ Found router attribute
+  ✅ promotions: /api/v1/promotions
+   Routes in promotions: 17 endpoints
+     - /my-vouchers
+     - /welcome-eligibility
+     - /welcome
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: SALE_CALENDAR
+   Import path: app.api.endpoints.sale_calendar
+   Full path: app.api.endpoints.sale_calendar
+   ✓ Module imported successfully: <module 'app.api.endpoints.sale_calendar' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\sale_calendar.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\sale_calendar.py
+   Available attributes: ['APIRouter', 'AdminUser', 'BaseModel', 'Depends', 'HTTPException', 'Literal', 'Optional', 'Request', 'SaleCalendarMonthRuleOut', 'SaleCalendarMonthRuleUpdate']...
+   ✓ Found router attribute
+  ✅ sale_calendar: /api/v1/sale-calendar
+   Routes in sale_calendar: 6 endpoints
+     - /current
+     - /admin/test-settings
+     - /admin/test-settings
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: NANOAI_SEARCH
+   Import path: app.api.endpoints.nanoai_search
+   Full path: app.api.endpoints.nanoai_search
+   ✓ Module imported successfully: <module 'app.api.endpoints.nanoai_search' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\nanoai_search.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\nanoai_search.py
+   Available attributes: ['APIRouter', 'BaseModel', 'Depends', 'Field', 'File', 'Form', 'HTTPException', 'JSONResponse', 'NanoAiCustomerTokenResponse', 'Optional']...
+   ✓ Found router attribute
+  ✅ nanoai_search: /api/v1/nanoai
+   Routes in nanoai_search: 3 endpoints
+     - /image-search
+     - /customer-token
+     - /text-search
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: SEPAY_WEBHOOK
+   Import path: app.api.endpoints.sepay_webhook
+   Full path: app.api.endpoints.sepay_webhook
+   ✓ Module imported successfully: <module 'app.api.endpoints.sepay_webhook' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\sepay_webhook.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\sepay_webhook.py
+   Available attributes: ['APIRouter', 'BackgroundTasks', 'Depends', 'JSONResponse', 'Request', 'Session', 'get_db', 'logger', 'logging', 'router']...
+   ✓ Found router attribute
+  ✅ sepay_webhook: /api/v1/sepay
+   Routes in sepay_webhook: 1 endpoints
+     - /webhook
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: DEBUG
+   Import path: app.api.endpoints.debug
+   Full path: app.api.endpoints.debug
+   ✓ Module imported successfully: <module 'app.api.endpoints.debug' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\debug.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\debug.py
+   Available attributes: ['APIRouter', 'Depends', 'HTTPException', 'ProductModel', 'Session', 'debug_products_count', 'debug_sample_slugs', 'debug_search_by_slug', 'debug_slug', 'get_db']...
+   ✓ Found router attribute
+  ✅ debug: /api/v1/debug
+   Routes in debug: 4 endpoints
+     - /debug/slug-test/{slug:path}
+     - /debug/products/count
+     - /debug/products/sample-slugs
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: FALLBACK
+   Import path: app.api.endpoints.fallback
+   Full path: app.api.endpoints.fallback
+   ✓ Module imported successfully: <module 'app.api.endpoints.fallback' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\fallback.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\fallback.py
+   Available attributes: ['APIRouter', 'Depends', 'HTTPException', 'ProductModel', 'Session', 'get_db', 'get_product_fallback', 'router']...
+   ✓ Found router attribute
+  ✅ fallback: /api/v1/fallback
+   Routes in fallback: 1 endpoints
+     - /products/fallback/{product_id}
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: FILTERS
+   Import path: app.api.endpoints.filters
+   Full path: app.api.endpoints.filters
+   ✓ Module imported successfully: <module 'app.api.endpoints.filters' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\filters.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\filters.py
+   Available attributes: ['APIRouter', 'Any', 'Category', 'Depends', 'Dict', 'HTTPException', 'List', 'Product', 'Session', 'get_all_filters']...
+   ✓ Found router attribute
+  ✅ filters: /api/v1/filters
+   Routes in filters: 1 endpoints
+     - /filters
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: PRODUCT_QUESTIONS
+   Import path: app.api.endpoints.product_questions
+   Full path: app.api.endpoints.product_questions
+   ✓ Module imported successfully: <module 'app.api.endpoints.product_questions' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\product_questions.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\product_questions.py
+   Available attributes: ['ADMIN_REPLY_EMAIL_DEBOUNCE_SECONDS', 'APIRouter', 'AdminUser', 'BackgroundTasks', 'Depends', 'EXCEL_COLUMN_MAP', 'File', 'HTTPException', 'List', 'Optional']...
+   ✓ Found router attribute
+  ✅ product_questions: /api/v1/product-questions
+   Routes in product_questions: 11 endpoints
+     - /for-product
+     - /ask
+     - /useful/{question_id}/toggle
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: PRODUCT_REVIEWS
+   Import path: app.api.endpoints.product_reviews
+   Full path: app.api.endpoints.product_reviews
+   ✓ Module imported successfully: <module 'app.api.endpoints.product_reviews' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\product_reviews.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\product_reviews.py
+   Available attributes: ['ADMIN_REPLY_EMAIL_DEBOUNCE_SECONDS', 'APIRouter', 'AdminUser', 'BackgroundTasks', 'Depends', 'File', 'HTTPException', 'List', 'Optional', 'ProductReviewCreate']...
+   ✓ Found router attribute
+  ✅ product_reviews: /api/v1/product-reviews
+   Routes in product_reviews: 12 endpoints
+     - /user-reviewed-ids
+     - /can-review
+     - /for-product
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: LOYALTY
+   Import path: app.api.endpoints.loyalty
+   Full path: app.api.endpoints.loyalty
+   ✓ Module imported successfully: <module 'app.api.endpoints.loyalty' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\loyalty.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\loyalty.py
+   Available attributes: ['APIRouter', 'AdminUser', 'Any', 'Decimal', 'Depends', 'HTTPException', 'List', 'LoyaltyTier', 'LoyaltyTierCreate', 'LoyaltyTierUpdate']...
+   ✓ Found router attribute
+  ✅ loyalty: /api/v1/loyalty
+   Routes in loyalty: 5 endpoints
+     - /my-status
+     - /tiers
+     - /tiers
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: AFFILIATE
+   Import path: app.api.endpoints.affiliate
+   Full path: app.api.endpoints.affiliate
+   ✓ Module imported successfully: <module 'app.api.endpoints.affiliate' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\affiliate.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\affiliate.py
+   Available attributes: ['APIRouter', 'AdminUser', 'Depends', 'HTTPException', 'List', 'Optional', 'Query', 'Session', 'User', 'admin_approve_application']...
+   ✓ Found router attribute
+  ✅ affiliate: /api/v1/affiliate
+   Routes in affiliate: 20 endpoints
+     - /me
+     - /attribute
+     - /application
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: NOTIFICATIONS
+   Import path: app.api.endpoints.notifications
+   Full path: app.api.endpoints.notifications
+   ✓ Module imported successfully: <module 'app.api.endpoints.notifications' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\notifications.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\notifications.py
+   Available attributes: ['APIRouter', 'AdminUser', 'Depends', 'File', 'HTTPException', 'List', 'Notification', 'NotificationCreate', 'NotificationImportResponse', 'NotificationResponse']...
+   ✓ Found router attribute
+  ✅ notifications: /api/v1/notifications
+   Routes in notifications: 6 endpoints
+     - /
+     - 
+     - /unread-count
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: NEWSLETTER
+   Import path: app.api.endpoints.newsletter
+   Full path: app.api.endpoints.newsletter
+   ✓ Module imported successfully: <module 'app.api.endpoints.newsletter' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\newsletter.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\newsletter.py
+   Available attributes: ['APIRouter', 'AdminNewsletterCampaignRequest', 'AdminNewsletterCampaignResponse', 'AdminNewsletterImportResponse', 'AdminNewsletterImportTextRequest', 'AdminNewsletterListResponse', 'AdminNewsletterSubscriberOut', 'AdminUser', 'Depends', 'Dict']...
+   ✓ Found router attribute
+  ✅ newsletter: /api/v1/newsletter
+   Routes in newsletter: 10 endpoints
+     - /subscribe
+     - /admin/subscribers
+     - /admin/subscribers/export.csv
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: PUSH
+   Import path: app.api.endpoints.push
+   Full path: app.api.endpoints.push
+   ✓ Module imported successfully: <module 'app.api.endpoints.push' from 'E:\\python-code\\188-com-vn\\backend\\app\\api\\endpoints\\push.py'>
+   Module file: E:\python-code\188-com-vn\backend\app\api\endpoints\push.py
+   Available attributes: ['APIRouter', 'Depends', 'HTTPException', 'OkOut', 'PushSubscribeIn', 'PushUnsubscribeIn', 'Request', 'Session', 'User', 'UserPushSubscription']...
+   ✓ Found router attribute
+  ✅ push: /api/v1/push
+   Routes in push: 3 endpoints
+     - /vapid-public-key
+     - /subscribe
+     - /unsubscribe
+
+📦 ==================================================
+📦 ATTEMPTING TO LOAD: PRODUCTS
+  ✅ products: /api/v1/products
+  ✅ sepay_webhook_alias: POST /api/sepay-webhook
+
+📊 ==================================================
+📊 ROUTE LOADING SUMMARY
+   ✅ Loaded: 35 routes
+   ❌ Failed: 0 routes
+
+🎯 LOADED ENDPOINTS:
+   🌐 /api/v1/auth
+   🌐 /api/v1/addresses
+   🌐 /api/v1/bank-accounts
+   🌐 /api/v1/admin
+   🌐 /api/v1/admin/vps-backup
+   🌐 /api/v1/embed-codes
+   🌐 /api/v1/shop-video-fab
+   🌐 /api/v1/categories
+   🌐 /api/v1/category-seo
+   🌐 /api/v1/taxonomy
+   🌐 /api/v1/seo-clusters
+   🌐 /api/v1/cart
+   🌐 /api/v1/orders
+   🌐 /api/v1/import-export
+   🌐 /api/v1/import-1688
+   🌐 /api/v1/image-localization
+   🌐 /api/v1/user-behavior
+   🌐 /api/v1/analytics
+   🌐 /api/v1/birthday-promo
+   🌐 /api/v1/promotions
+   🌐 /api/v1/sale-calendar
+   🌐 /api/v1/nanoai
+   🌐 /api/v1/sepay
+   🌐 /api/v1/debug
+   🌐 /api/v1/fallback
+   🌐 /api/v1/filters
+   🌐 /api/v1/product-questions
+   🌐 /api/v1/product-reviews
+   🌐 /api/v1/loyalty
+   🌐 /api/v1/affiliate
+   🌐 /api/v1/notifications
+   🌐 /api/v1/newsletter
+   🌐 /api/v1/push
+   🌐 /api/v1/products
+   🌐 /api/sepay-webhook
+==================================================
+
+
+============================================================
+🚀 188.com.vn API Server Starting...
+============================================================
+⏭️  Bỏ qua init DB lúc startup (mặc định). Deploy script đã chạy init_database_tables. Cần bật lại: RUN_DB_INIT_ON_STARTUP=1 trong backend/.env
+🔍 IMPORT/EXPORT ENDPOINTS (if loaded):
+   📤 /api/v1/import-export
+   📤 /api/v1/import-1688
+
+📌 IMPORTANT ENDPOINTS TO TEST:
+   POST   /api/v1/import-export/import/excel          (đồng bộ, cần Bearer admin)
+   POST   /api/v1/import-export/import/excel/async    (202 + job_id)
+   GET    /api/v1/import-export/import/excel/job/{job_id}
+   GET    /api/v1/import-export/export/excel
+   GET    /api/v1/import-export/export/sample
+   GET    /api/v1/import-export/download/sample       (file mẫu import — UI admin)
+   GET    /api/v1/import-export/download/latest-export
+   📎 IMPORT_1688_BATCH_RESUME_ON_STARTUP: sẽ quét batch Excel link còn pending sau ~3s (thread daemon).
+   🖼️  IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: sẽ tiếp tục job queued/running trong DB sau ~2.5s.
+   🧹 IMAGE_LOCALIZATION_TEMP_CLEANUP_SCHEDULER_ENABLED: dọn temp định kỳ mỗi ~10.0 phút.
+   📋 Listing import queue: đã dọn snapshot kẹt sau restart (link running → pending).
+   📦 SOURCE_STOCK_CHECK_ENABLED: worker kiểm tra tồn kho nguồn mỗi 60s.
+   📦 EMS_TRACKING_REFRESH: worker tra EMS nền sau import + cron hàng ngày (delay 0.6s/dòng).
+   ⏱️  EMS internal scheduler: tự enqueue tra EMS mỗi 30 phút.
+   🏷️  home_hero_category_groups: sẽ rebuild nếu DB trống sau ~4s (thread daemon).
+   🔄 DB pool relief: pool max 25, idle-in-xact timeout 120s, daemon 15s (trigger >= 14, aggressive >= 20 @ 18s).
+   🩺 DB pool self-heal: probe mỗi 15s, tự dispose pool hoặc thoát để PM2 restart khi pool kẹt (không cần cron watchdog 5 phút).
+   ✉️  Product reply email: debounce qua DB, daemon quét hàng đợi mỗi ~15s.
+   💾 VPS backup scheduler: kiểm tra lịch mỗi 60s (VPS_BACKUP_SCHEDULER_ENABLED).
+
+📌 QUICK ACCESS:
+   📄 API Documentation: http://localhost:8001/docs
+   📊 Database: PostgreSQL (DATABASE_URL)
+   🏃 Server: http://localhost:8001
+============================================================
+INFO:     127.0.0.1:58235 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58241 - "GET /health/db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58241 - "GET /health/storefront HTTP/1.1" 200 OK

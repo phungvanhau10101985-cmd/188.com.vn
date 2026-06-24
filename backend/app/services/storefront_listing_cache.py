@@ -102,8 +102,12 @@ def should_use_listing_filter_cache(
     filter_size: Optional[str] = None,
     filter_color: Optional[str] = None,
     filter_style_tag: Optional[str] = None,
+    sort: Optional[str] = None,
 ) -> bool:
     if admin_list or raw_q or pid or order_random or warehouse_clearance_only:
+        return False
+    sort_norm = (sort or "").strip().lower()
+    if sort_norm == "random":
         return False
     if not skip_total or skip > 0 or limit > 120:
         return False

@@ -4463,6 +4463,50 @@ def get_products(
         pid_filter = _build_product_id_or_code_filter(product_id)
         if pid_filter is not None:
             query = query.filter(pid_filter)
+
+    seed = str(search_refresh or "").strip()
+    if (
+        not has_q
+        and not product_id
+        and not admin_list_query
+        and not use_random_order
+        and sort_norm == "random"
+        and seed
+        and (category or subcategory or sub_subcategory)
+    ):
+        from app.services.category_listing_random import (
+            build_category_listing_ids_cache_key,
+            paginate_seeded_random_category_listing,
+        )
+
+        ids_cache_key = build_category_listing_ids_cache_key(
+            category=category,
+            subcategory=subcategory,
+            sub_subcategory=sub_subcategory,
+            shop_name=shop_name,
+            shop_id=shop_id,
+            style=style,
+            shop_name_chinese=shop_name_chinese,
+            chinese_name=chinese_name,
+            pro_lower_price=pro_lower_price,
+            pro_high_price=pro_high_price,
+            min_price=min_price,
+            max_price=max_price,
+            is_active=is_active,
+            filter_size=filter_size,
+            filter_color=filter_color,
+            filter_style_tag=filter_style_tag,
+            warehouse_clearance_only=warehouse_clearance_only,
+        )
+        return paginate_seeded_random_category_listing(
+            db,
+            query,
+            cache_key=ids_cache_key,
+            search_refresh=seed,
+            skip=skip,
+            limit=limit,
+        )
+
     total = 0
     products = []
     applied_query = None
