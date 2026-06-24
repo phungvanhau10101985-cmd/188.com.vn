@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG="${STOREFRONT_MONITOR_LOG:-/var/log/188-storefront-monitor.log}"
 MARKER="deploy/monitor-storefront.sh"
-JOB="*/2 * * * * cd ${ROOT} && bash deploy/monitor-storefront.sh >> ${LOG} 2>&1"
+JOB="*/2 * * * * cd ${ROOT} && bash deploy/monitor-storefront.sh"
 
 echo "==> Cài cron monitor storefront (mỗi 2 phút)"
 echo "    Project: ${ROOT}"

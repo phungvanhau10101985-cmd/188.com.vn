@@ -24,7 +24,7 @@ if command -v curl >/dev/null 2>&1; then
 fi
 
 if [[ "${code}" == "200" ]]; then
-  echo "${ts} OK ${URL}"
+  echo "${ts} OK ${URL}" | tee -a "${LOG}"
   exit 0
 fi
 
