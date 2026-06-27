@@ -49,6 +49,7 @@ import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
 import NanoAiLauncherGatewaySync from '@/components/NanoAiLauncherGatewaySync';
 import { buildNanoAiGatewayPayloadFrom188Product } from '@/lib/nanoai-hosted-chat';
 import { resolveProductGroupListingPath } from '@/lib/product-oos-redirect';
+import { cdnUrl } from '@/lib/cdn-url';
 
 interface ProductDetailClientProps {
   initialProduct: Product;
@@ -448,7 +449,7 @@ export default function ProductDetailClient({
                     aria-label="Về trang chủ 188.com.vn"
                   >
                     <Image
-                      src="https://188comvn.b-cdn.net/logo%20head%20188.png"
+                      src={cdnUrl('/logo head 188.png')}
                       data-allow-png
                       alt="188.com.vn"
                       width={140}

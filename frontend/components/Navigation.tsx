@@ -25,6 +25,7 @@ import {
   withKhoSaleMenuCategory,
 } from '@/lib/kho-sale-menu-category';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
+import { cdnUrl } from '@/lib/cdn-url';
 import { useClientMounted } from '@/lib/use-client-mounted';
 import {
   isNavCategoryTreeCacheStale,
@@ -582,7 +583,7 @@ export default function Navigation({
                 aria-label="Về trang chủ 188.com.vn"
               >
                 <Image
-                  src="https://188comvn.b-cdn.net/logo%20head%20188.png"
+                  src={cdnUrl('/logo head 188.png')}
                   data-allow-png
                   alt="188.com.vn"
                   width={140}

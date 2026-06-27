@@ -50,10 +50,8 @@ self.addEventListener("push", (event) => {
     /* dùng mặc định */
   }
   const title = data.title || "188.COM.VN";
-  /** Logo đầy màu cho khay thông báo (không dùng làm badge Android — xem comment dưới). */
-  const iconUrl =
-    data.icon ||
-    "https://188comvn.b-cdn.net/site/20260502/logo_1x1_0584d3f73e4a.png";
+  /** Logo đầy màu cho khay thông báo — same-origin để mọi khách load được (không phụ thuộc *.b-cdn.net). */
+  const iconUrl = data.icon || "/favicon.png";
   const options = {
     body: data.body || "",
     icon: iconUrl,

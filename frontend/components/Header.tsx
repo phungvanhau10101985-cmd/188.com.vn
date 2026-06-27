@@ -12,8 +12,9 @@ import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPo
 import SearchHistoryPanel from '@/components/search/SearchHistoryPanel';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { getOptimizedImage } from '@/lib/image-utils';
+import { cdnUrl } from '@/lib/cdn-url';
 
-const LOGO_URL = getOptimizedImage('https://188comvn.b-cdn.net/logo%20head%20188.png', {
+const LOGO_URL = getOptimizedImage(cdnUrl('/logo head 188.png'), {
   width: 320,
   height: 80,
   quality: 95,

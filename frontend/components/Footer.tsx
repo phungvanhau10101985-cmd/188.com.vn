@@ -11,6 +11,7 @@ import {
   BUSINESS_PHONE_DISPLAY,
   BUSINESS_REGISTRATION,
 } from '@/lib/business-info';
+import { cdnUrl } from '@/lib/cdn-url';
 
 const FooterNewsletterSubscribe = dynamic(
   () => import('@/components/FooterNewsletterSubscribe'),
@@ -55,7 +56,7 @@ export default function Footer() {
               className="flex items-center gap-3"
             >
               <Image
-                src="https://188comvn.b-cdn.net/logo188.png"
+                src={cdnUrl('/logo188.png')}
                 data-allow-png
                 alt="188.com.vn - Xem là thích click là mê"
                 width={160}

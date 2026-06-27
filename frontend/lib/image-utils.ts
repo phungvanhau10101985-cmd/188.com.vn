@@ -6,7 +6,7 @@
  * - Placeholder / fallback strategies
  */
 
-import { cdnUrl } from '@/lib/cdn-url';
+import { cdnUrl, rewriteLegacyBunnyCdnUrl } from '@/lib/cdn-url';
 import { getCdnPublicBase } from '@/lib/site-config';
 
 const CDN_CONFIG = {
@@ -194,7 +194,7 @@ export const getOptimizedImage = (
     return getFallbackImage(fallbackStrategy, width, height);
   }
 
-  let processedUrl = url.trim();
+  let processedUrl = rewriteLegacyBunnyCdnUrl(url.trim());
   if (processedUrl.startsWith('//')) {
     processedUrl = `https:${processedUrl}`;
   } else if (processedUrl.startsWith('/') && processedUrl.length > 1) {

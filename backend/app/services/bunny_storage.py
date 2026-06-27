@@ -105,6 +105,9 @@ def _bunny_image_hosts_for_delete() -> Set[str]:
         h = _host_from_public_base(str(base))
         if h:
             hosts.add(h)
+    # URL cũ trong DB vẫn trỏ *.b-cdn.net — cần nhận khi xoá object storage.
+    for legacy in ("188comvn.b-cdn.net",):
+        hosts.add(legacy)
     return hosts
 
 

@@ -14,6 +14,7 @@ import { storePendingImageAndNavigate } from '@/lib/nanoai-pending-image';
 import SearchHistoryPanel from '@/components/search/SearchHistoryPanel';
 import ButtonSpinner from '@/components/ui/ButtonSpinner';
 import { useNavigateWithLoading } from '@/lib/use-navigate-with-loading';
+import { cdnUrl } from '@/lib/cdn-url';
 import {
   PRODUCT_RELATED_TABS,
   parseRelatedTabFromSearch,
@@ -378,7 +379,7 @@ export default function MobileHeader({
               aria-hidden={isScrolled}
             >
               <Image
-                src="https://188comvn.b-cdn.net/logo%20head%20188.png"
+                src={cdnUrl('/logo head 188.png')}
                 data-allow-png
                 alt="188.com.vn"
                 width={200}
