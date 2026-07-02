@@ -41,6 +41,10 @@ from app.services.image_localization_service import (
 from app.services.image_localization_temp_cleanup import cleanup_runtime_temp_now
 from app.services.image_localization_temp_cleanup import cleanup_stale_image_localization_temp
 from app.services.image_localization_temp_cleanup import guard_runtime_disk_space
+from app.services.deepseek_pricing_schedule import (
+    off_peak_wait_message_vi,
+    seconds_until_deepseek_off_peak,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +104,39 @@ def _job_progress(
     else:
         percent = 0.0
     return current, percent
+
+
+def _wait_for_deepseek_off_peak_if_enabled(
+    job_id: str,
+    *,
+    should_cancel,
+    done: int = 0,
+    failed: int = 0,
+    skipped: int = 0,
+    total: int = 0,
+) -> bool:
+    """Chờ đến giờ thấp điểm DeepSeek. Trả False nếu job bị hủy trong lúc chờ."""
+    if not getattr(settings, "IMAGE_LOCALIZATION_DEEPSEEK_OFF_PEAK_ONLY", False):
+        return True
+    while True:
+        if _job_is_cancelled(job_id):
+            return False
+        if should_cancel():
+            return False
+        sec = seconds_until_deepseek_off_peak()
+        if sec <= 0:
+            return True
+        current, percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
+        _job_update(
+            job_id,
+            status="running",
+            phase="waiting_off_peak",
+            message=off_peak_wait_message_vi(sec),
+            current=current,
+            percent=percent,
+            current_product_id=None,
+        )
+        time.sleep(min(60, max(1, sec)))
 
 
 def _mark_processed_product(processed_ids: List[str], processed_set: set[str], product_id: str) -> bool:
@@ -568,6 +605,27 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             )
             return
 
+        if not _wait_for_deepseek_off_peak_if_enabled(
+            job_id,
+            should_cancel=lambda: _job_cancel_signal(job_id),
+            done=done,
+            failed=failed,
+            skipped=skipped,
+            total=total,
+        ):
+            _finalize_job_cancelled(
+                job_id,
+                done=done,
+                failed=failed,
+                skipped=skipped,
+                total=total,
+                processed_ids=processed_ids,
+                results=results,
+                skipped_reports=skipped_reports,
+                message="Đã hủy job trong lúc chờ giờ thấp điểm DeepSeek.",
+            )
+            return
+
         service = ProductImageLocalizationService(
             language=payload.language,
             force=payload.force,
@@ -605,6 +663,26 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     results=results,
                     skipped_reports=skipped_reports,
                     message="Đã hủy job sau khi xong bước hiện tại.",
+                )
+                return
+            if not _wait_for_deepseek_off_peak_if_enabled(
+                job_id,
+                should_cancel=should_cancel,
+                done=done,
+                failed=failed,
+                skipped=skipped,
+                total=total,
+            ):
+                _finalize_job_cancelled(
+                    job_id,
+                    done=done,
+                    failed=failed,
+                    skipped=skipped,
+                    total=total,
+                    processed_ids=processed_ids,
+                    results=results,
+                    skipped_reports=skipped_reports,
+                    message="Đã hủy job trong lúc chờ giờ thấp điểm DeepSeek.",
                 )
                 return
             # Dùng session ngắn cho từng sản phẩm:

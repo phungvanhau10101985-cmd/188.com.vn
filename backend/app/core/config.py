@@ -250,6 +250,10 @@ class Settings:
         _ocr_slow_raw = os.getenv("IMAGE_LOCALIZATION_OCR_MAX_SLOW_WAITS", "1").strip()
         self.IMAGE_LOCALIZATION_OCR_MAX_SLOW_WAITS: int = int(_ocr_slow_raw) if _ocr_slow_raw.isdigit() else 1
         self.IMAGE_LOCALIZATION_BATCH_SIZE: int = int(os.getenv("IMAGE_LOCALIZATION_BATCH_SIZE", "10") or "10")
+        # Ghép dọc nhiều ảnh/batch: tổng width×height tối đa (Vision OCR ≤75MP; mặc định 70MP an toàn).
+        self.IMAGE_LOCALIZATION_MERGE_MAX_PIXELS: int = int(
+            os.getenv("IMAGE_LOCALIZATION_MERGE_MAX_PIXELS", "70000000") or "70000000"
+        )
         # 0 = một job chạy lần lượt hết SP pending (theo id); N>0 = mỗi job tối đa N SP.
         # Nhiều job song song vẫn không trùng product_id nhờ claim processing trong DB.
         self.IMAGE_LOCALIZATION_BATCH_LIMIT: int = int(os.getenv("IMAGE_LOCALIZATION_BATCH_LIMIT", "0") or "0")
@@ -345,6 +349,11 @@ class Settings:
                 self.IMAGE_LOCALIZATION_LOCAL_OVERLAP_ABORT_THRESHOLD = float(_lo_abort)
             except ValueError:
                 self.IMAGE_LOCALIZATION_LOCAL_OVERLAP_ABORT_THRESHOLD = None
+
+        # Chỉ gọi DeepSeek trong job bản địa hóa khi ngoài giờ cao điểm (giá ×2 theo lịch DeepSeek UTC).
+        self.IMAGE_LOCALIZATION_DEEPSEEK_OFF_PEAK_ONLY: bool = os.getenv(
+            "IMAGE_LOCALIZATION_DEEPSEEK_OFF_PEAK_ONLY", "false"
+        ).strip().lower() in ("1", "true", "yes", "on")
 
         # Scrape Playwright (Hibox, Vipomall, 1688, kiểm tra tồn kho) — một bộ cookie JSON trên server.
         self.PANDAMALL_USERNAME: str = os.getenv("PANDAMALL_USERNAME", "").strip()

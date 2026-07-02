@@ -15,7 +15,16 @@ from io import BytesIO
 from PIL import Image, ImageSequence
 
 # Import từ config
-from config import TEMP_DIR, MERGE_SPACING, BACKGROUND_COLOR, SAVE_QUALITY, MAX_IMAGE_WIDTH, MIN_IMAGE_WIDTH, BATCH_SIZE
+from config import (
+    TEMP_DIR,
+    MERGE_SPACING,
+    BACKGROUND_COLOR,
+    SAVE_QUALITY,
+    MAX_IMAGE_WIDTH,
+    MIN_IMAGE_WIDTH,
+    BATCH_SIZE,
+    MERGE_MAX_PIXELS,
+)
 
 # Khởi tạo Logger
 logger = logging.getLogger(__name__)
@@ -35,7 +44,8 @@ class ImageMerger:
         self.temp_dir = Path(TEMP_DIR)
         self.max_image_width = MAX_IMAGE_WIDTH
         self.min_image_width = MIN_IMAGE_WIDTH
-        self.batch_size = BATCH_SIZE
+        self.batch_size = max(1, int(BATCH_SIZE or 10))
+        self.merge_max_pixels = max(1, int(MERGE_MAX_PIXELS or 70_000_000))
         self.small_images_found = set()
         
         os.makedirs(self.temp_dir, exist_ok=True)
@@ -278,7 +288,51 @@ class ImageMerger:
         new_w, new_h = self.max_image_width, int(h * ratio)
         if new_h < 10: return img, 1.0
         return cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4), ratio
-    
+
+    def estimate_merged_pixel_count(self, images: List[np.ndarray]) -> int:
+        """Ước lượng width×height canvas sau resize_if_too_wide (trước khi ghép dọc)."""
+        valid = [img for img in images if img is not None and getattr(img, "size", 0) > 0]
+        if not valid:
+            return 0
+        resized = [self.resize_if_too_wide(img)[0] for img in valid]
+        widths = [im.shape[1] for im in resized]
+        heights = [im.shape[0] for im in resized]
+        max_w = max(widths) if widths else 0
+        total_h = sum(heights) + max(0, len(heights) - 1) * MERGE_SPACING
+        return int(max_w) * int(total_h)
+
+    def plan_merge_batch_indices(self, images: List[np.ndarray]) -> List[List[int]]:
+        """
+        Chia indices ảnh thành các batch: không quá batch_size và không vượt merge_max_pixels.
+        """
+        if not images:
+            return []
+        batches: List[List[int]] = []
+        current: List[int] = []
+        for i, img in enumerate(images):
+            if img is None or getattr(img, "size", 0) == 0:
+                continue
+            if not current:
+                current = [i]
+                solo_px = self.estimate_merged_pixel_count([img])
+                if solo_px > self.merge_max_pixels:
+                    logger.warning(
+                        "   ⚠️ Ảnh đơn lẻ ~%.1f MP vượt MERGE_MAX_PIXELS=%.1f MP — vẫn OCR riêng (có thể lỗi Vision).",
+                        solo_px / 1e6,
+                        self.merge_max_pixels / 1e6,
+                    )
+                continue
+            trial = current + [i]
+            trial_px = self.estimate_merged_pixel_count([images[j] for j in trial])
+            if len(trial) > self.batch_size or trial_px > self.merge_max_pixels:
+                batches.append(current)
+                current = [i]
+            else:
+                current = trial
+        if current:
+            batches.append(current)
+        return batches
+
     def merge_batch_of_images(self, images: List[np.ndarray], filenames: List[str],
                              original_urls: List[str], original_paths: List[str],
                              batch_index: int) -> Tuple[np.ndarray, Dict[str, dict]]:
@@ -454,23 +508,36 @@ class ImageMerger:
         
         if all_images:
             num_images = len(all_images)
-            total_batches = (num_images + self.batch_size - 1) // self.batch_size
-            logger.info(f"📊 Đã tải thành công {num_images} ảnh -> Chia {total_batches} batch(es).")
-            
-            for batch_idx in range(total_batches):
-                start_idx = batch_idx * self.batch_size
-                end_idx = min((batch_idx + 1) * self.batch_size, num_images)
-                
-                b_imgs = all_images[start_idx:end_idx]
-                b_fnames = all_filenames[start_idx:end_idx]
-                b_urls = loaded_urls[start_idx:end_idx]
-                b_paths = all_original_paths[start_idx:end_idx]
-                
+            batch_plans = self.plan_merge_batch_indices(all_images)
+            total_batches = len(batch_plans)
+            logger.info(
+                "📊 Đã tải thành công %s ảnh -> Chia %s batch(es) "
+                "(tối đa %s ảnh/batch, ≤%.1f MP/batch).",
+                num_images,
+                total_batches,
+                self.batch_size,
+                self.merge_max_pixels / 1e6,
+            )
+
+            for batch_idx, indices in enumerate(batch_plans):
+                b_imgs = [all_images[i] for i in indices]
+                b_fnames = [all_filenames[i] for i in indices]
+                b_urls = [loaded_urls[i] for i in indices]
+                b_paths = [all_original_paths[i] for i in indices]
+                est_mp = self.estimate_merged_pixel_count(b_imgs) / 1e6
+
                 try:
                     merged_img, pos_dict = self.merge_batch_of_images(b_imgs, b_fnames, b_urls, b_paths, batch_idx)
                     merged_path, img_hash = self.save_merged_batch(merged_img, b_urls, batch_idx)
                     pos_file = self.save_batch_positions_info(img_hash, pos_dict, b_urls, batch_idx)
-                    
+                    logger.info(
+                        "   📦 Batch %s: %s ảnh, ~%.1f MP (giới hạn %.1f MP)",
+                        batch_idx + 1,
+                        len(b_imgs),
+                        est_mp,
+                        self.merge_max_pixels / 1e6,
+                    )
+
                     for i, url in enumerate(b_urls):
                         if url in url_to_columns:
                             batches_result['column_mapping'][url] = {
@@ -481,7 +548,8 @@ class ImageMerger:
                     batches_result['batches'].append({
                         'batch_index': batch_idx, 'merged_path': merged_path,
                         'positions_file': pos_file, 'image_count': len(b_imgs),
-                        'batch_size': self.batch_size
+                        'batch_size': self.batch_size,
+                        'estimated_megapixels': round(est_mp, 2),
                     })
                 except Exception as e:
                     logger.error(f"❌ Lỗi xử lý batch {batch_idx}: {e}")

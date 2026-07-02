@@ -887,6 +887,10 @@ class LegacyImageLocalizationPipeline:
             "STORAGE_ZONE_NAME": settings.BUNNY_STORAGE_ZONE_NAME,
             "BUNNY_STORAGE_HOSTNAME": "storage.bunnycdn.com",
             "BATCH_SIZE": max(1, int(getattr(settings, "IMAGE_LOCALIZATION_BATCH_SIZE", 10) or 10)),
+            "MERGE_MAX_PIXELS": max(
+                1,
+                int(getattr(settings, "IMAGE_LOCALIZATION_MERGE_MAX_PIXELS", 70_000_000) or 70_000_000),
+            ),
             "OCR_SMART_RETRY_MAX_SLOW_WAITS": max(
                 0, int(getattr(settings, "IMAGE_LOCALIZATION_OCR_MAX_SLOW_WAITS", 0) or 0)
             ),

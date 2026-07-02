@@ -28,7 +28,8 @@ LOGS_DIR = str(_RUNTIME_DIR / "logs")
 CACHE_DIR = str(_RUNTIME_DIR / "processed_images_cache")
 
 # ==================== BATCH PROCESSING CONFIG ====================
-BATCH_SIZE = 10  # Số lượng ảnh mỗi batch
+BATCH_SIZE = 10  # Số lượng ảnh mỗi batch (tối đa; có thể ít hơn nếu vượt MERGE_MAX_PIXELS)
+MERGE_MAX_PIXELS = int(os.getenv("IMAGE_LOCALIZATION_MERGE_MAX_PIXELS", "70000000") or "70000000")
 
 # ==================== API KEYS & SERVICES ====================
 BUNNY_API_KEY = os.getenv("BUNNY_STORAGE_ACCESS_KEY", os.getenv("BUNNY_API_KEY", "")).strip()
