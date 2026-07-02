@@ -42,8 +42,15 @@ from app.services.image_localization_temp_cleanup import cleanup_runtime_temp_no
 from app.services.image_localization_temp_cleanup import cleanup_stale_image_localization_temp
 from app.services.image_localization_temp_cleanup import guard_runtime_disk_space
 from app.services.deepseek_pricing_schedule import (
+    deepseek_pricing_status_for_admin,
     off_peak_wait_message_vi,
     seconds_until_deepseek_off_peak,
+)
+from app.services.image_localization_runtime_prefs import (
+    deepseek_off_peak_only_effective,
+    deepseek_off_peak_only_env_default,
+    deepseek_off_peak_only_runtime_overridden,
+    set_deepseek_off_peak_only,
 )
 
 logger = logging.getLogger(__name__)
@@ -116,7 +123,7 @@ def _wait_for_deepseek_off_peak_if_enabled(
     total: int = 0,
 ) -> bool:
     """Chờ đến giờ thấp điểm DeepSeek. Trả False nếu job bị hủy trong lúc chờ."""
-    if not getattr(settings, "IMAGE_LOCALIZATION_DEEPSEEK_OFF_PEAK_ONLY", False):
+    if not deepseek_off_peak_only_effective():
         return True
     while True:
         if _job_is_cancelled(job_id):
@@ -1006,6 +1013,18 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
         db.close()
 
 
+def _deepseek_pricing_for_admin() -> Dict[str, Any]:
+    effective = deepseek_off_peak_only_effective()
+    status = deepseek_pricing_status_for_admin(off_peak_only_enabled=effective)
+    status["off_peak_only_env_default"] = deepseek_off_peak_only_env_default()
+    status["off_peak_only_runtime_overridden"] = deepseek_off_peak_only_runtime_overridden()
+    return status
+
+
+class DeepseekOffPeakSettingsIn(BaseModel):
+    enabled: bool = Field(..., description="Chỉ gọi DeepSeek ngoài giờ cao điểm (job chờ giá rẻ).")
+
+
 @router.get("/settings/gemini-auth")
 def check_gemini_auth(
     language: str = "vi",
@@ -1037,7 +1056,17 @@ def check_gemini_auth(
         },
         "api": GeminiApiImageAdapter(language).check_auth(),
         "openai": OpenAiGptImageAdapter(language).check_auth(),
+        "deepseek_pricing": _deepseek_pricing_for_admin(),
     }
+
+
+@router.patch("/settings/deepseek-off-peak")
+def patch_deepseek_off_peak_settings(
+    payload: DeepseekOffPeakSettingsIn,
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    set_deepseek_off_peak_only(payload.enabled)
+    return {"deepseek_pricing": _deepseek_pricing_for_admin()}
 
 
 @router.get("/summary")

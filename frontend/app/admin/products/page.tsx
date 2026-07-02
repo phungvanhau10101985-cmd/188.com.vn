@@ -872,6 +872,7 @@ export default function AdminProductsPage() {
   const [imageLocalizationSummary, setImageLocalizationSummary] = useState<AdminImageLocalizationSummary | null>(null);
   const [geminiAuthStatus, setGeminiAuthStatus] = useState<AdminGeminiAuthStatus | null>(null);
   const [imageLocalizationError, setImageLocalizationError] = useState<string | null>(null);
+  const [deepseekOffPeakSaving, setDeepseekOffPeakSaving] = useState(false);
   const [imageLocReportOpen, setImageLocReportOpen] = useState(false);
   const [imageLocReportLoading, setImageLocReportLoading] = useState(false);
   const [imageLocReportData, setImageLocReportData] = useState<AdminImageLocalizationProductReport | null>(null);
@@ -1209,6 +1210,40 @@ export default function AdminProductsPage() {
       setImageLocalizationError(err instanceof Error ? err.message : 'Không tải được trạng thái bản địa hóa ảnh');
     }
   }, [imageLocalizationLanguage]);
+
+  useEffect(() => {
+    if (!geminiAuthStatus?.deepseek_pricing?.peak_now) return undefined;
+    const timer = window.setInterval(() => {
+      void adminProductAPI
+        .getGeminiImageLocalizationAuth(imageLocalizationLanguage)
+        .then((auth) => setGeminiAuthStatus(auth))
+        .catch(() => {});
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [geminiAuthStatus?.deepseek_pricing?.peak_now, imageLocalizationLanguage]);
+
+  const handleToggleDeepseekOffPeak = useCallback(async (enabled: boolean) => {
+    setDeepseekOffPeakSaving(true);
+    setImageLocalizationError(null);
+    try {
+      const res = await adminProductAPI.setImageLocalizationDeepseekOffPeak(enabled);
+      setGeminiAuthStatus((prev) =>
+        prev ? { ...prev, deepseek_pricing: res.deepseek_pricing } : prev,
+      );
+      showToast(
+        'ok',
+        enabled
+          ? 'Đã bật chờ giờ thấp điểm DeepSeek — job sẽ tạm dừng trong giờ cao điểm.'
+          : 'Đã tắt chờ giờ thấp điểm — job chạy ngay cả khi giá DeepSeek ×2.',
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Không lưu được cài đặt DeepSeek off-peak';
+      setImageLocalizationError(msg);
+      showToast('err', msg);
+    } finally {
+      setDeepseekOffPeakSaving(false);
+    }
+  }, []);
 
   const registerLocalizationJobId = useCallback((jobId: string) => {
     setLocalizationJobIdsOrdered((prev) => (prev.includes(jobId) ? prev : [...prev, jobId]));
@@ -4417,7 +4452,43 @@ export default function AdminProductsPage() {
                       : ''}
                   </div>
                 </div>
+                <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-violet-100 bg-violet-50/60 px-3 py-2 text-sm text-gray-800">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={Boolean(geminiAuthStatus?.deepseek_pricing?.off_peak_only_enabled)}
+                    disabled={deepseekOffPeakSaving || !geminiAuthStatus}
+                    onChange={(e) => void handleToggleDeepseekOffPeak(e.target.checked)}
+                    aria-label="Chỉ chạy DeepSeek ngoài giờ cao điểm"
+                  />
+                  <span>
+                    <span className="font-medium text-violet-950">Chờ giờ thấp điểm DeepSeek</span>
+                    <span className="mt-0.5 block text-xs leading-snug text-violet-900/90">
+                      Bật: job chờ hết giờ cao điểm (08–11h, 13–17h VN) rồi mới OCR/DeepSeek — tiết kiệm ~50% token.
+                      Tắt: chạy ngay dù giá ×2. Lưu trên server, không cần restart API.
+                    </span>
+                  </span>
+                </label>
               </div>
+
+              {geminiAuthStatus?.deepseek_pricing?.peak_now &&
+              geminiAuthStatus.deepseek_pricing.banner_message_vi ? (
+                <div
+                  className={
+                    geminiAuthStatus.deepseek_pricing.banner_variant === 'wait'
+                      ? 'rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-950'
+                      : 'rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-relaxed text-sky-950'
+                  }
+                  role="status"
+                >
+                  <span className="font-semibold">
+                    {geminiAuthStatus.deepseek_pricing.banner_variant === 'wait'
+                      ? 'Giờ cao điểm DeepSeek — job sẽ chờ'
+                      : 'Giờ cao điểm DeepSeek — giá ×2'}
+                  </span>
+                  <p className="mt-1">{geminiAuthStatus.deepseek_pricing.banner_message_vi}</p>
+                </div>
+              ) : null}
 
               <div className="flex flex-wrap items-center gap-2">
                 <button

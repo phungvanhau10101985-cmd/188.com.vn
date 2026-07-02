@@ -777,6 +777,19 @@ export interface AdminGeminiAuthBranch {
   openai_flex_removed?: boolean;
 }
 
+export interface AdminDeepseekPricingStatus {
+  peak_now: boolean;
+  off_peak_only_enabled: boolean;
+  off_peak_only_env_default?: boolean;
+  off_peak_only_runtime_overridden?: boolean;
+  seconds_until_off_peak: number;
+  minutes_until_off_peak: number;
+  resume_at_vn?: string | null;
+  schedule_summary_vn: string;
+  banner_message_vi?: string | null;
+  banner_variant?: 'wait' | 'cost' | null;
+}
+
 export interface AdminGeminiAuthStatus {
   /** false = admin chỉ được pipeline OCR + DeepSeek + vẽ local (Gemini/GPT ảnh tắt trên server). */
   ai_image_jobs_allowed?: boolean;
@@ -790,6 +803,7 @@ export interface AdminGeminiAuthStatus {
   inference_tier_notes?: Record<string, string>;
   api: AdminGeminiAuthBranch;
   openai: AdminGeminiAuthBranch;
+  deepseek_pricing?: AdminDeepseekPricingStatus;
 }
 
 /** Trạng thái import Excel async (GET .../import/excel/job/{id}) */
@@ -1479,6 +1493,17 @@ export const adminProductAPI = {
     fetchAdmin<AdminGeminiAuthStatus>(
       `/image-localization/settings/gemini-auth?language=${encodeURIComponent(language)}`,
       { timeoutMs: 60_000 },
+    ),
+
+  setImageLocalizationDeepseekOffPeak: (enabled: boolean) =>
+    fetchAdmin<{ deepseek_pricing: AdminDeepseekPricingStatus }>(
+      '/image-localization/settings/deepseek-off-peak',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+        timeoutMs: 30_000,
+      },
     ),
 
   getImageLocalizationSummary: () =>

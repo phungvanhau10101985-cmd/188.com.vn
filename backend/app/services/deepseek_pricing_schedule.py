@@ -96,3 +96,42 @@ def off_peak_wait_message_vi(seconds_remaining: int) -> str:
         f"Chờ giờ thấp điểm DeepSeek (giá rẻ) — còn ~{mins} phút, tiếp tục sau ~{resume_vn} (giờ VN). "
         f"{deepseek_pricing_schedule_summary_vn()}"
     )
+
+
+def deepseek_pricing_status_for_admin(*, off_peak_only_enabled: bool) -> dict:
+    """Trạng thái giá DeepSeek cho banner admin (bản địa hóa ảnh)."""
+    peak = is_deepseek_peak_utc()
+    sec = seconds_until_deepseek_off_peak() if peak else 0
+    mins = max(1, (sec + 59) // 60) if sec > 0 else 0
+    resume_vn: str | None = None
+    if peak and sec > 0:
+        resume_at = datetime.now(timezone.utc) + timedelta(seconds=sec)
+        resume_vn = resume_at.astimezone(_VN_TZ).strftime("%H:%M")
+
+    schedule = deepseek_pricing_schedule_summary_vn()
+    banner_message_vi: str | None = None
+    banner_variant: str | None = None
+    if peak:
+        if off_peak_only_enabled:
+            banner_variant = "wait"
+            banner_message_vi = (
+                f"Đang giờ cao điểm DeepSeek (giá ×2). Job sẽ chờ ~{mins} phút "
+                f"(tiếp tục sau ~{resume_vn} giờ VN) rồi mới OCR/DeepSeek. {schedule}"
+            )
+        else:
+            banner_variant = "cost"
+            banner_message_vi = (
+                f"Đang giờ cao điểm DeepSeek — token OCR→DeepSeek tính giá ×2. "
+                f"Job vẫn chạy ngay. {schedule}"
+            )
+
+    return {
+        "peak_now": peak,
+        "off_peak_only_enabled": bool(off_peak_only_enabled),
+        "seconds_until_off_peak": sec,
+        "minutes_until_off_peak": mins if peak else 0,
+        "resume_at_vn": resume_vn,
+        "schedule_summary_vn": schedule,
+        "banner_message_vi": banner_message_vi,
+        "banner_variant": banner_variant,
+    }
