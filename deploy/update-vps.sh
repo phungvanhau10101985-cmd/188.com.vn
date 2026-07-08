@@ -258,16 +258,41 @@ if port_is_listening "${API_INTERNAL_PORT}"; then
   echo "    API health → ${_hc}"
   if [[ "${_hc}" != "200" ]]; then
     echo "⚠️  API health ≠ 200 — next build có thể timeout (layout gọi API)."
-    if [[ "${DEPLOY_REQUIRE_API_BEFORE_BUILD:-1}" == "1" ]]; then
+    if [[ -f "${PROJECT_ROOT}/deploy/fix-api-health.sh" ]]; then
+      echo "    Thử deploy/fix-api-health.sh…"
+      bash "${PROJECT_ROOT}/deploy/fix-api-health.sh" || true
+      _hc=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 \
+        "http://127.0.0.1:${API_INTERNAL_PORT}/health" 2>/dev/null || echo "000")
+      echo "    API health sau fix → ${_hc}"
+    fi
+    if [[ "${_hc}" != "200" ]] && [[ "${DEPLOY_REQUIRE_API_BEFORE_BUILD:-1}" == "1" ]]; then
       echo "❌ DEPLOY_REQUIRE_API_BEFORE_BUILD=1 — dừng deploy. Sửa API trước: pm2 restart ${PM2_API}"
       exit 1
     fi
   fi
 else
   echo "⚠️  API chưa listen :${API_INTERNAL_PORT} — next build có thể timeout (layout gọi API)."
-  if [[ "${DEPLOY_REQUIRE_API_BEFORE_BUILD:-1}" == "1" ]]; then
-    echo "❌ DEPLOY_REQUIRE_API_BEFORE_BUILD=1 — dừng deploy."
-    exit 1
+  if [[ -f "${PROJECT_ROOT}/deploy/fix-api-health.sh" ]]; then
+    echo "    Thử deploy/fix-api-health.sh…"
+    bash "${PROJECT_ROOT}/deploy/fix-api-health.sh" || true
+    for _w in $(seq 1 30); do
+      port_is_listening "${API_INTERNAL_PORT}" && break
+      sleep 1
+    done
+    if port_is_listening "${API_INTERNAL_PORT}"; then
+      _hc=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 \
+        "http://127.0.0.1:${API_INTERNAL_PORT}/health" 2>/dev/null || echo "000")
+      echo "    API health sau fix → ${_hc}"
+      if [[ "${_hc}" == "200" ]]; then
+        echo "    ✓ API đã sẵn sàng — tiếp tục build."
+      fi
+    fi
+  fi
+  if ! port_is_listening "${API_INTERNAL_PORT}"; then
+    if [[ "${DEPLOY_REQUIRE_API_BEFORE_BUILD:-1}" == "1" ]]; then
+      echo "❌ DEPLOY_REQUIRE_API_BEFORE_BUILD=1 — dừng deploy."
+      exit 1
+    fi
   fi
 fi
 

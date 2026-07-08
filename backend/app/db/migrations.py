@@ -1308,33 +1308,38 @@ class MigrationManager:
         except Exception as e:
             logger.error(f"Error logging migration: {str(e)}")
 
+
+# Singleton — deploy/tune-db-vps.sh: `from app.db.migrations import migration_manager`
+migration_manager = MigrationManager()
+
+
 def run_migrations():
     """Chạy tất cả migrations cần thiết"""
     logger.info("🚀 Starting database migrations...")
     
-    migration_manager = MigrationManager()
+    mgr = migration_manager
     
     # Tạo bảng lịch sử migration
-    migration_manager.create_migration_history_table()
+    mgr.create_migration_history_table()
     
     # Kiểm tra sự nhất quán
-    consistency_check = migration_manager.check_database_consistency()
+    consistency_check = mgr.check_database_consistency()
     logger.info(f"🔍 Database consistency check: {consistency_check}")
     
     # Chạy migrations
-    results = migration_manager.migrate_all_tables()
+    results = mgr.migrate_all_tables()
     
     # Log kết quả
     for migration_name, success in results.items():
         if success:
-            migration_manager.log_migration(
+            mgr.log_migration(
                 migration_name, 
                 "SUCCESS", 
                 "Migration completed successfully"
             )
             logger.info(f"✅ {migration_name}: SUCCESS")
         else:
-            migration_manager.log_migration(
+            mgr.log_migration(
                 migration_name,
                 "FAILED",
                 "Migration failed"
@@ -1342,7 +1347,7 @@ def run_migrations():
             logger.error(f"❌ {migration_name}: FAILED")
     
     # Kiểm tra lại sau migration
-    final_check = migration_manager.check_database_consistency()
+    final_check = mgr.check_database_consistency()
     if final_check.get("is_consistent"):
         logger.info("🎉 All migrations completed successfully!")
     else:
