@@ -186,21 +186,6 @@ def _sanitize_facebook_pixel_html(html: str) -> str:
     return out
 
 
-# Dedupe PageView trên stub fbq (trước khi fbevents.js load) — khớp window.__188MetaPv* ở frontend.
-_FB_PIXEL_PV_DEDUPE_JS = (
-    "(function(){var g=window,f=g.fbq;if(!f||f.__188pv)return;"
-    "function w(){var a=arguments;"
-    "if(a[0]==='track'&&a[1]==='PageView'){"
-    "var k=g.location.pathname+g.location.search,t=Date.now();"
-    "if(g.__188MetaPvKey===k&&g.__188MetaPvAt!=null&&t-g.__188MetaPvAt<3500)return;"
-    "g.__188MetaPvKey=k;g.__188MetaPvAt=t;}"
-    "return f.apply(this,a);}"
-    "for(var p in f)if(Object.prototype.hasOwnProperty.call(f,p))w[p]=f[p];"
-    "if(f.queue)w.queue=f.queue;w.callMethod=f.callMethod;w.push=f.push;w.loaded=f.loaded;"
-    "w.version=f.version;g.fbq=w;w.__188pv=1;})();"
-)
-
-
 def expand_facebook_pixel(pixel_id: str) -> List[PlacementHtml]:
     pid = re.sub(r"\D", "", (pixel_id or "").strip())
     if not pid:
@@ -214,7 +199,6 @@ def expand_facebook_pixel(pixel_id: str) -> List[PlacementHtml]:
         "n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;"
         "t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}"
         "(window, document,'script','https://connect.facebook.net/en_US/fbevents.js');"
-        f"{_FB_PIXEL_PV_DEDUPE_JS}"
         f"fbq('init', '{pid}');"
         "</script>"
         f'<noscript><img height="1" width="1" style="display:none" '
