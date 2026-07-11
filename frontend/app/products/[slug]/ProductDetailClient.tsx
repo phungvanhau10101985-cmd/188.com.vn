@@ -112,22 +112,13 @@ export default function ProductDetailClient({
   }, [slug, initialProduct]);
 
   /**
-   * Meta ViewContent — useLayoutEffect (trước paint) + routeKey slug:
-   * SPA click từ trang chủ trước đây dùng useEffect + dedupe/adsConvCfgFp → dễ lỡ fbq.
+   * Meta ViewContent — nguồn DUY NHẤT ở PDP (dedupe theo sản phẩm trong meta-pixel).
+   * Không dùng thêm fallback ở AnalyticsTracker để tránh bắn đôi (event ID khác nhau).
    */
   useLayoutEffect(() => {
     if (!initialProduct?.id) return;
     trackMetaViewContentProduct(initialProduct, { routeKey: slug });
   }, [slug, initialProduct]);
-
-  /**
-   * Fallback cho SPA nav: khi product state cập nhật ổn định sau hydrate/refetch,
-   * bắn lại ViewContent cùng routeKey. Dedupe trong meta-pixel ngăn double event.
-   */
-  useEffect(() => {
-    if (!product?.id) return;
-    trackMetaViewContentProduct(product, { routeKey: slug });
-  }, [slug, product?.id, product?.price, product?.product_id, product?.code]);
 
   useEffect(() => {
     if (!initialProduct?.id) return;
