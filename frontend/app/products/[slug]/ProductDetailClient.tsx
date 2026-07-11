@@ -23,6 +23,10 @@ import ErrorState from './components/ErrorState/ErrorState';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { trackMetaViewContentProduct } from '@/lib/meta-pixel';
+import {
+  buildAddToCartRequestFromProduct,
+  trackMarketingAddToCartIntent,
+} from '@/lib/marketing-add-to-cart';
 import { trackGoogleAdsViewItemProduct, peekGoogleAdsConversionsFingerprint } from '@/lib/google-ads-gtag';
 import {
   persistRelatedFiltersFromProduct,
@@ -192,31 +196,11 @@ export default function ProductDetailClient({
   }, [product?.id]);
 
   const handleAddToCart = async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
-    const lineImg = cartLineMainImage(p, selectedColor);
     const googlePv2Token = getActiveGoogleAutomatedDiscountToken(p.product_id);
-    const payload = {
-      product_id: p.id,
-      quantity,
-      selected_size: selectedSize,
-      selected_color: selectedColor,
-      line_image_url: lineImg,
+    const payload = buildAddToCartRequestFromProduct(p, quantity, selectedSize, selectedColor, {
       google_pv2_token: googlePv2Token ?? undefined,
-      product_data: {
-        id: p.id,
-        code: p.code,
-        product_id: p.product_id,
-        name: p.name,
-        price: p.price,
-        list_price:
-          p.original_price != null && p.original_price > (p.price ?? 0) ? p.original_price : p.price,
-        main_image: lineImg,
-        brand_name: p.brand_name,
-        available: p.available,
-        original_price: p.original_price,
-        slug: p.slug,
-        ...warehouseCartProductDataExtras(p),
-      },
-    };
+    });
+    trackMarketingAddToCartIntent(payload);
     if (!isAuthenticated) {
       queuePendingCartAfterLogin(payload);
       pushToast({

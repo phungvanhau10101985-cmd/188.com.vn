@@ -9,7 +9,10 @@ import { useCart } from '@/features/cart/hooks/useCart';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
-import { cartLineMainImage } from '@/lib/product-color-variant';
+import {
+  buildAddToCartRequestFromProduct,
+  trackMarketingAddToCartIntent,
+} from '@/lib/marketing-add-to-cart';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
 import { isClientAuthLikelyLoggedIn, probeCookieAuthSession } from '@/lib/client-auth-session';
 import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
@@ -39,26 +42,7 @@ function buildCartPayload(
   selectedSize?: string,
   selectedColor?: string,
 ) {
-  const lineImg = cartLineMainImage(p, selectedColor);
-  return {
-    product_id: p.id,
-    quantity,
-    selected_size: selectedSize,
-    selected_color: selectedColor,
-    line_image_url: lineImg,
-    product_data: {
-      id: p.id,
-      code: p.code,
-      product_id: p.product_id,
-      name: p.name,
-      price: p.price,
-      main_image: lineImg,
-      brand_name: p.brand_name,
-      available: p.available,
-      original_price: p.original_price,
-      slug: p.slug,
-    },
-  };
+  return buildAddToCartRequestFromProduct(p, quantity, selectedSize, selectedColor);
 }
 
 export default function CartAddClient({ product, sku, closeMode, closePath }: CartAddClientProps) {
@@ -160,6 +144,7 @@ export default function CartAddClient({ product, sku, closeMode, closePath }: Ca
     selectedColor?: string,
   ) => {
     const payload = buildCartPayload(p, quantity, selectedSize, selectedColor);
+    trackMarketingAddToCartIntent(payload);
     if (await ensureAuthenticatedForCartAction(payload, 'add')) return;
     try {
       await addToCart(payload, { skipAddedPopup: true });

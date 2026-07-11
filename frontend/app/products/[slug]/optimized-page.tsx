@@ -14,6 +14,10 @@ import { warehouseCartProductDataExtras } from '@/lib/warehouse-clearance';
 import { useToast } from '@/components/ToastProvider';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
 import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
+import {
+  buildAddToCartRequestFromProduct,
+  trackMarketingAddToCartIntent,
+} from '@/lib/marketing-add-to-cart';
 
 // Import product detail components
 import ProductGallery from '@/components/product-detail/ProductGallery';
@@ -108,29 +112,8 @@ export default function ProductDetailPage() {
 
   const handleAddToCart = useCallback(
     async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
-      const lineImg = cartLineMainImage(p, selectedColor);
-      const payload = {
-        product_id: p.id,
-        quantity,
-        selected_size: selectedSize,
-        selected_color: selectedColor,
-        line_image_url: lineImg,
-        product_data: {
-          id: p.id,
-          code: p.code,
-          product_id: p.product_id,
-          name: p.name,
-          price: p.price,
-          list_price:
-            p.original_price != null && p.original_price > (p.price ?? 0) ? p.original_price : p.price,
-          main_image: lineImg,
-          brand_name: p.brand_name,
-          available: p.available,
-          original_price: p.original_price,
-          slug: p.slug,
-          ...warehouseCartProductDataExtras(p),
-        },
-      };
+      const payload = buildAddToCartRequestFromProduct(p, quantity, selectedSize, selectedColor);
+      trackMarketingAddToCartIntent(payload);
       if (!isAuthenticated) {
         queuePendingCartAfterLogin(payload);
         pushToast({

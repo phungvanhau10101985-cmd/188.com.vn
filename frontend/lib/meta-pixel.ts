@@ -17,6 +17,24 @@ let lastViewContentFingerprint: string | null = null;
 let lastViewContentAtMs = 0;
 const VIEW_CONTENT_DEDUPE_MS = 2500;
 
+let lastAddToCartFingerprint: string | null = null;
+let lastAddToCartAtMs = 0;
+const ADD_TO_CART_DEDUPE_MS = 2000;
+
+function addToCartFingerprint(item: AddToCartRequest): string {
+  const ids = metaContentIdsFromAddToCart(item);
+  return `${ids.join(',')}|${item.quantity}|${item.selected_size ?? ''}|${item.selected_color ?? ''}`;
+}
+
+function shouldDedupeAddToCart(fp: string, now: number): boolean {
+  if (lastAddToCartFingerprint === fp && now - lastAddToCartAtMs < ADD_TO_CART_DEDUPE_MS) {
+    return true;
+  }
+  lastAddToCartFingerprint = fp;
+  lastAddToCartAtMs = now;
+  return false;
+}
+
 function viewContentFingerprint(
   product: Product,
   contentIds: string[],
@@ -318,6 +336,8 @@ export function trackMetaViewContentProduct(product: Product): void {
 export function trackMetaAddToCart(item: AddToCartRequest): void {
   const content_ids = metaContentIdsFromAddToCart(item);
   if (!content_ids.length) return;
+  const fp = addToCartFingerprint(item);
+  if (shouldDedupeAddToCart(fp, Date.now())) return;
   const pd =
     item.product_data && typeof item.product_data === 'object' ? (item.product_data as Record<string, unknown>) : {};
   const rawPrice = pd.price;

@@ -12,10 +12,13 @@ import { useCart } from '@/features/cart/hooks/useCart';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { useToast } from '@/components/ToastProvider';
-import { cartLineMainImage } from '@/lib/product-color-variant';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
 import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
 import { trackEvent } from '@/lib/analytics';
+import {
+  buildAddToCartRequestFromProduct,
+  trackMarketingAddToCartIntent,
+} from '@/lib/marketing-add-to-cart';
 import ProductVariantModal from '@/app/products/[slug]/components/ProductVariantModal/ProductVariantModal';
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
 import NanoAiLauncherGatewaySync from '@/components/NanoAiLauncherGatewaySync';
@@ -459,26 +462,8 @@ export default function ShopVideoFeedClient() {
 
   const handleVariantModalAddToCart = useCallback(
     async (p: Product, qty: number, selectedSize?: string, selectedColor?: string) => {
-      const lineImg = cartLineMainImage(p, selectedColor);
-      const payload = {
-        product_id: p.id,
-        quantity: qty,
-        selected_size: selectedSize,
-        selected_color: selectedColor,
-        line_image_url: lineImg,
-        product_data: {
-          id: p.id,
-          code: p.code,
-          product_id: p.product_id,
-          name: p.name,
-          price: p.price,
-          main_image: lineImg,
-          brand_name: p.brand_name,
-          available: p.available,
-          original_price: p.original_price,
-          slug: p.slug,
-        },
-      };
+      const payload = buildAddToCartRequestFromProduct(p, qty, selectedSize, selectedColor);
+      trackMarketingAddToCartIntent(payload);
       if (!isAuthenticated) {
         queuePendingCartAfterLogin(payload);
         pushToast({
