@@ -43,6 +43,23 @@ function gtagLoaderId(src: string): string | null {
   return m?.[1]?.toUpperCase() ?? null;
 }
 
+function normalizeInlineJs(s: string): string {
+  return (s || '').replace(/\s+/g, ' ').trim();
+}
+
+function extractFbPixelIdFromInline(s: string): string | null {
+  const m = /fbq\s*\(\s*['"]init['"]\s*,\s*['"]?(\d{8,})['"]?/i.exec(s || '');
+  return m?.[1] ?? null;
+}
+
+function scriptDedupeKey(s: SsrHeadScriptSpec): string {
+  if (s.src) return `src:${s.src.toLowerCase()}`;
+  const inline = normalizeInlineJs(s.inline || '');
+  const pixelId = extractFbPixelIdFromInline(inline);
+  if (pixelId) return `fbq-init:${pixelId}`;
+  return `inline:${inline}`;
+}
+
 /**
  * Trích lần lượt mọi &lt;script&gt;…&lt;/script&gt; và phần HTML còn lại (meta, link, …).
  */
@@ -91,11 +108,16 @@ export function partitionHeadEmbedsForSsr(fragments: string[]): PartitionedHeadE
   const ssrScripts: SsrHeadScriptSpec[] = [];
   const headClientRemainders: string[] = [];
   const gtagConfigIds: string[] = [];
+  const seenScriptKeys = new Set<string>();
 
   for (const raw of fragments) {
     const { scripts, rest } = splitOneFragment(raw);
-    ssrScripts.push(...scripts);
     for (const script of scripts) {
+      const key = scriptDedupeKey(script);
+      if (!seenScriptKeys.has(key)) {
+        ssrScripts.push(script);
+        seenScriptKeys.add(key);
+      }
       if (script.inline) {
         for (const id of collectGtagConfigIds(script.inline)) {
           if (!gtagConfigIds.includes(id)) gtagConfigIds.push(id);
@@ -118,7 +140,14 @@ export function partitionHeadEmbedsForSsr(fragments: string[]): PartitionedHeadE
       defer: false,
     }));
   if (missingGtagLoaders.length) {
-    ssrScripts.unshift(...missingGtagLoaders);
+    const prepend: SsrHeadScriptSpec[] = [];
+    for (const s of missingGtagLoaders) {
+      const key = scriptDedupeKey(s);
+      if (seenScriptKeys.has(key)) continue;
+      prepend.push(s);
+      seenScriptKeys.add(key);
+    }
+    if (prepend.length) ssrScripts.unshift(...prepend);
   }
 
   return { ssrScripts, headClientRemainders };
