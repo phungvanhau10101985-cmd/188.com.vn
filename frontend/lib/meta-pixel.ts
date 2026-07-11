@@ -42,13 +42,12 @@ function viewContentFingerprint(
   product: Product,
   contentIds: string[],
   value: number,
-  category: string | undefined,
-  routeKey?: string
+  category: string | undefined
 ): string {
   const cat = category ?? '';
   const sheetId = (product.product_id || '').trim() || String(product.id);
-  const route = (routeKey ?? '').trim();
-  return `${route}|${sheetId}|${value}|${cat}|${contentIds.join(',')}|${product.name ?? ''}`;
+  /** Không gộp routeKey — dedupe theo sản phẩm để nhiều nguồn (PDP effect + tracker fallback) không bắn đôi. */
+  return `${sheetId}|${value}|${cat}|${contentIds.join(',')}|${product.name ?? ''}`;
 }
 
 function shouldDedupeViewContent(fp: string, now: number): boolean {
@@ -342,7 +341,7 @@ export function trackMetaViewContentProduct(
   if (!content_ids.length) return;
   const value = typeof product.price === 'number' && !Number.isNaN(product.price) ? product.price : 0;
   const category = product.category || product.subcategory;
-  const fp = viewContentFingerprint(product, content_ids, value, category, opts?.routeKey);
+  const fp = viewContentFingerprint(product, content_ids, value, category);
   const now = Date.now();
   if (!opts?.skipDedupe && shouldDedupeViewContent(fp, now)) return;
 
