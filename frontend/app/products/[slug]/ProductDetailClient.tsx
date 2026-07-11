@@ -120,6 +120,15 @@ export default function ProductDetailClient({
     trackMetaViewContentProduct(initialProduct, { routeKey: slug });
   }, [slug, initialProduct]);
 
+  /**
+   * Fallback cho SPA nav: khi product state cập nhật ổn định sau hydrate/refetch,
+   * bắn lại ViewContent cùng routeKey. Dedupe trong meta-pixel ngăn double event.
+   */
+  useEffect(() => {
+    if (!product?.id) return;
+    trackMetaViewContentProduct(product, { routeKey: slug });
+  }, [slug, product?.id, product?.price, product?.product_id, product?.code]);
+
   useEffect(() => {
     if (!initialProduct?.id) return;
     trackGoogleAdsViewItemProduct(initialProduct);
