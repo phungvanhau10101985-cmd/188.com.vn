@@ -55,9 +55,12 @@ function shouldDedupeViewContent(fp: string, now: number): boolean {
   if (lastViewContentFingerprint === fp && now - lastViewContentAtMs < VIEW_CONTENT_DEDUPE_MS) {
     return true;
   }
+  return false;
+}
+
+function markViewContentDedupe(fp: string, now: number): void {
   lastViewContentFingerprint = fp;
   lastViewContentAtMs = now;
-  return false;
 }
 
 function getFbq(): FbqFn | undefined {
@@ -166,7 +169,13 @@ export function metaContentIdsFromCartItem(
 function firePixelAndCapi(
   eventName: StandardEventName | string,
   customData: Record<string, unknown>,
-  opts?: { keepalive?: boolean; sendCapi?: boolean; mode?: PixelEventMode; syncPixel?: boolean }
+  opts?: {
+    keepalive?: boolean;
+    sendCapi?: boolean;
+    mode?: PixelEventMode;
+    syncPixel?: boolean;
+    onPixelFired?: () => void;
+  }
 ): void {
   const eventId = newMetaEventId(eventName);
   const trackFn = opts?.mode === 'custom' ? 'trackCustom' : 'track';
@@ -174,6 +183,7 @@ function firePixelAndCapi(
     const fbq = getFbq();
     if (fbq) {
       fbq(trackFn, eventName, customData, { eventID: eventId });
+      opts?.onPixelFired?.();
     }
   };
   if (opts?.syncPixel && getFbq()) {
@@ -333,7 +343,8 @@ export function trackMetaViewContentProduct(
   const value = typeof product.price === 'number' && !Number.isNaN(product.price) ? product.price : 0;
   const category = product.category || product.subcategory;
   const fp = viewContentFingerprint(product, content_ids, value, category, opts?.routeKey);
-  if (!opts?.skipDedupe && shouldDedupeViewContent(fp, Date.now())) return;
+  const now = Date.now();
+  if (!opts?.skipDedupe && shouldDedupeViewContent(fp, now)) return;
 
   const primaryId = content_ids[0]!;
 
@@ -346,7 +357,10 @@ export function trackMetaViewContentProduct(
     currency: META_PIXEL_CURRENCY,
     contents: [{ id: primaryId, quantity: 1, item_price: value }],
   };
-  firePixelAndCapi('ViewContent', customData, { syncPixel: true });
+  firePixelAndCapi('ViewContent', customData, {
+    syncPixel: true,
+    onPixelFired: () => markViewContentDedupe(fp, now),
+  });
 }
 
 export function trackMetaAddToCart(item: AddToCartRequest): void {
