@@ -106,11 +106,24 @@ export default function ProductDetailClient({
     }).catch(() => {});
   }, [product?.id, product?.name, product?.price, product?.main_image, product?.brand_name, product?.slug, product?.product_id]);
 
+  /** Đồng bộ SP khi client-nav sang slug khác (tránh state cũ). */
   useEffect(() => {
-    if (!product?.id) return;
-    trackMetaViewContentProduct(product);
-    trackGoogleAdsViewItemProduct(product);
-  }, [product?.id, adsConvCfgFp]);
+    setProduct(initialProduct);
+  }, [slug, initialProduct]);
+
+  /**
+   * Meta ViewContent — useLayoutEffect (trước paint) + routeKey slug:
+   * SPA click từ trang chủ trước đây dùng useEffect + dedupe/adsConvCfgFp → dễ lỡ fbq.
+   */
+  useLayoutEffect(() => {
+    if (!initialProduct?.id) return;
+    trackMetaViewContentProduct(initialProduct, { routeKey: slug });
+  }, [slug, initialProduct]);
+
+  useEffect(() => {
+    if (!initialProduct?.id) return;
+    trackGoogleAdsViewItemProduct(initialProduct);
+  }, [initialProduct, adsConvCfgFp]);
 
   useEffect(() => {
     setAccountNavReady(true);

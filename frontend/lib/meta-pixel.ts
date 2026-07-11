@@ -30,20 +30,25 @@ function shouldDedupeAddToCart(fp: string, now: number): boolean {
   if (lastAddToCartFingerprint === fp && now - lastAddToCartAtMs < ADD_TO_CART_DEDUPE_MS) {
     return true;
   }
+  return false;
+}
+
+function markAddToCartDedupe(fp: string, now: number): void {
   lastAddToCartFingerprint = fp;
   lastAddToCartAtMs = now;
-  return false;
 }
 
 function viewContentFingerprint(
   product: Product,
   contentIds: string[],
   value: number,
-  category: string | undefined
+  category: string | undefined,
+  routeKey?: string
 ): string {
   const cat = category ?? '';
   const sheetId = (product.product_id || '').trim() || String(product.id);
-  return `${sheetId}|${value}|${cat}|${contentIds.join(',')}|${product.name ?? ''}`;
+  const route = (routeKey ?? '').trim();
+  return `${route}|${sheetId}|${value}|${cat}|${contentIds.join(',')}|${product.name ?? ''}`;
 }
 
 function shouldDedupeViewContent(fp: string, now: number): boolean {
@@ -91,6 +96,8 @@ function whenFbqReady(run: () => void): void {
     if (ticks >= max) {
       window.clearInterval(id);
       window.removeEventListener('188-site-embeds-ready', onEmbeds);
+      /** SPA: pixel có thể inject ngay sau timeout — thử thêm một lần. */
+      window.requestAnimationFrame(() => fire());
     }
   }, 100);
 }
@@ -159,15 +166,21 @@ export function metaContentIdsFromCartItem(
 function firePixelAndCapi(
   eventName: StandardEventName | string,
   customData: Record<string, unknown>,
-  opts?: { keepalive?: boolean; sendCapi?: boolean; mode?: PixelEventMode }
+  opts?: { keepalive?: boolean; sendCapi?: boolean; mode?: PixelEventMode; syncPixel?: boolean }
 ): void {
   const eventId = newMetaEventId(eventName);
-  whenFbqReady(() => {
+  const trackFn = opts?.mode === 'custom' ? 'trackCustom' : 'track';
+  const firePixel = () => {
     const fbq = getFbq();
     if (fbq) {
-      fbq(opts?.mode === 'custom' ? 'trackCustom' : 'track', eventName, customData, { eventID: eventId });
+      fbq(trackFn, eventName, customData, { eventID: eventId });
     }
-  });
+  };
+  if (opts?.syncPixel && getFbq()) {
+    firePixel();
+  } else {
+    whenFbqReady(firePixel);
+  }
   if (opts?.sendCapi === false) {
     return;
   }
@@ -311,13 +324,16 @@ export function trackMetaDepositPageView(params: {
   firePixelAndCapi('DepositPageView', customData, { mode: 'custom' });
 }
 
-export function trackMetaViewContentProduct(product: Product): void {
+export function trackMetaViewContentProduct(
+  product: Product,
+  opts?: { routeKey?: string; skipDedupe?: boolean }
+): void {
   const content_ids = metaContentIdsForProduct(product);
   if (!content_ids.length) return;
   const value = typeof product.price === 'number' && !Number.isNaN(product.price) ? product.price : 0;
   const category = product.category || product.subcategory;
-  const fp = viewContentFingerprint(product, content_ids, value, category);
-  if (shouldDedupeViewContent(fp, Date.now())) return;
+  const fp = viewContentFingerprint(product, content_ids, value, category, opts?.routeKey);
+  if (!opts?.skipDedupe && shouldDedupeViewContent(fp, Date.now())) return;
 
   const primaryId = content_ids[0]!;
 
@@ -337,7 +353,8 @@ export function trackMetaAddToCart(item: AddToCartRequest): void {
   const content_ids = metaContentIdsFromAddToCart(item);
   if (!content_ids.length) return;
   const fp = addToCartFingerprint(item);
-  if (shouldDedupeAddToCart(fp, Date.now())) return;
+  const now = Date.now();
+  if (shouldDedupeAddToCart(fp, now)) return;
   const pd =
     item.product_data && typeof item.product_data === 'object' ? (item.product_data as Record<string, unknown>) : {};
   const rawPrice = pd.price;
@@ -359,7 +376,9 @@ export function trackMetaAddToCart(item: AddToCartRequest): void {
     currency: META_PIXEL_CURRENCY,
     contents: [{ id: primaryId, quantity: qty, item_price: price }],
   };
-  firePixelAndCapi('AddToCart', customData, { keepalive: true });
+  markAddToCartDedupe(fp, now);
+  /** syncPixel: bắn ngay trong stack click — Pixel Helper / Meta nhận AddToCart (không defer qua whenFbqReady). */
+  firePixelAndCapi('AddToCart', customData, { keepalive: true, syncPixel: true });
 }
 
 export function trackMetaPurchase(params: {
@@ -371,7 +390,7 @@ export function trackMetaPurchase(params: {
   if (!items.length) return;
 
   const customData = cartMetaCustomData({ items, value, orderId });
-  firePixelAndCapi('Purchase', customData, { keepalive: true });
+  firePixelAndCapi('Purchase', customData, { keepalive: true, syncPixel: true });
 }
 
 export function trackMetaOrderAwaitingDeposit(params: {
@@ -394,7 +413,7 @@ export function trackMetaOrderAwaitingDeposit(params: {
       ...(depositValue != null && Number.isFinite(depositValue) ? { deposit_amount: depositValue } : {}),
     },
   });
-  firePixelAndCapi('OrderAwaitingDeposit', customData, { keepalive: true, mode: 'custom' });
+  firePixelAndCapi('OrderAwaitingDeposit', customData, { keepalive: true, mode: 'custom', syncPixel: true });
 }
 
 /** Dòng đơn từ API `getOrder` — map sang CartItem để Purchase/Meta giữ đúng product_id & giá. */

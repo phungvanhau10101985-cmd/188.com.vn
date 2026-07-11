@@ -62,5 +62,5 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
     await redirectOosGroupIfAny();
   }
 
-  return <ProductDetailClient initialProduct={product} slug={slug} />;
+  return <ProductDetailClient key={slug} initialProduct={product} slug={slug} />;
 }
