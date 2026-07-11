@@ -346,7 +346,7 @@ export function trackMetaViewContentProduct(
     currency: META_PIXEL_CURRENCY,
     contents: [{ id: primaryId, quantity: 1, item_price: value }],
   };
-  firePixelAndCapi('ViewContent', customData);
+  firePixelAndCapi('ViewContent', customData, { syncPixel: true });
 }
 
 export function trackMetaAddToCart(item: AddToCartRequest): void {
