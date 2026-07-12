@@ -20,6 +20,7 @@ from typing import Iterator, Optional
 from sqlalchemy.orm import Session
 
 from app.models.product import Product
+from app.services.catalog_internal_labels import meta_internal_labels_for_product
 from app.services.merchant_feed_tsv import (
     _custom_label_0_value,
     _custom_labels_1_to_4,
@@ -78,6 +79,7 @@ META_TSV_COLUMNS = (
     "custom_label_2",
     "custom_label_3",
     "custom_label_4",
+    "internal_label",
     "video_url",
     "shipping_weight",
 )
@@ -165,6 +167,7 @@ def meta_row_values(
         c2,
         c3,
         c4,
+        meta_internal_labels_for_product(product),
         _video_feed_url(product),
         _weight_value(product),
     ]
