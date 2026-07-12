@@ -174,9 +174,11 @@ function firePixelAndCapi(
     mode?: PixelEventMode;
     syncPixel?: boolean;
     onPixelFired?: () => void;
+    capiRetries?: number;
   }
 ): void {
   const eventId = newMetaEventId(eventName);
+  const eventTime = Math.floor(Date.now() / 1000);
   const trackFn = opts?.mode === 'custom' ? 'trackCustom' : 'track';
   const firePixel = () => {
     const fbq = getFbq();
@@ -198,9 +200,10 @@ function firePixelAndCapi(
     {
       event_name: eventName,
       event_id: eventId,
+      event_time: eventTime,
       custom_data,
     },
-    { keepalive: opts?.keepalive === true }
+    { keepalive: opts?.keepalive === true, retries: opts?.capiRetries ?? 1 }
   );
 }
 
@@ -344,6 +347,7 @@ export function trackMetaViewContentProduct(
   const fp = viewContentFingerprint(product, content_ids, value, category);
   const now = Date.now();
   if (!opts?.skipDedupe && shouldDedupeViewContent(fp, now)) return;
+  markViewContentDedupe(fp, now);
 
   const primaryId = content_ids[0]!;
 
@@ -358,7 +362,8 @@ export function trackMetaViewContentProduct(
   };
   firePixelAndCapi('ViewContent', customData, {
     syncPixel: true,
-    onPixelFired: () => markViewContentDedupe(fp, now),
+    keepalive: true,
+    capiRetries: 2,
   });
 }
 

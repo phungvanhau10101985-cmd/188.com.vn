@@ -45,34 +45,61 @@ export function newMetaEventId(prefix: string): string {
   return `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
 }
 
-/**
- * Gửi CAPI qua route Next (`/api/facebook-capi`) — Bearer chỉ có trên server, không lộ ra trình duyệt.
- */
-export async function sendFacebookCapiFromBrowser(
-  payload: FacebookCapiPayload,
-  opts?: { keepalive?: boolean }
-): Promise<void> {
-  if (typeof window === 'undefined') return;
+function buildFacebookCapiBody(payload: FacebookCapiPayload): FacebookCapiPayload {
   const fromCookies = browserMetaCookiesUserData();
   const mergedUser: Record<string, unknown> = {
     ...(fromCookies || {}),
     ...(payload.user_data && typeof payload.user_data === 'object' ? payload.user_data : {}),
   };
   const user_data = Object.keys(mergedUser).length ? mergedUser : undefined;
-  const body: FacebookCapiPayload = {
+  return {
     ...payload,
     action_source: payload.action_source || 'website',
     event_source_url: payload.event_source_url ?? window.location.href,
+    event_time: payload.event_time ?? Math.floor(Date.now() / 1000),
     user_data,
   };
+}
+
+function postFacebookCapiBeacon(body: FacebookCapiPayload): boolean {
+  if (typeof navigator === 'undefined' || typeof navigator.sendBeacon !== 'function') return false;
   try {
-    await fetch(`${window.location.origin}/api/facebook-capi`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(body),
-      keepalive: opts?.keepalive === true,
-    });
+    const blob = new Blob([JSON.stringify(body)], { type: 'application/json' });
+    return navigator.sendBeacon(`${window.location.origin}/api/facebook-capi`, blob);
   } catch {
-    /* fire-and-forget */
+    return false;
   }
+}
+
+/**
+ * Gửi CAPI qua route Next (`/api/facebook-capi`) — Bearer chỉ có trên server, không lộ ra trình duyệt.
+ * Trả về true khi upstream nhận được (fetch ok hoặc sendBeacon dự phòng).
+ */
+export async function sendFacebookCapiFromBrowser(
+  payload: FacebookCapiPayload,
+  opts?: { keepalive?: boolean; retries?: number }
+): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  const body = buildFacebookCapiBody(payload);
+  const url = `${window.location.origin}/api/facebook-capi`;
+  const retries = Math.max(0, opts?.retries ?? 1);
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(body),
+        keepalive: opts?.keepalive === true,
+      });
+      if (res.ok) return true;
+    } catch {
+      /* retry / beacon */
+    }
+    if (attempt < retries) {
+      await new Promise((r) => window.setTimeout(r, 300 * (attempt + 1)));
+    }
+  }
+
+  return postFacebookCapiBeacon(body);
 }

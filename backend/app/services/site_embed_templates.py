@@ -199,7 +199,8 @@ def expand_facebook_pixel(pixel_id: str) -> List[PlacementHtml]:
         "n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;"
         "t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}"
         "(window, document,'script','https://connect.facebook.net/en_US/fbevents.js');"
-        f"if(!window.__188FbPixelInit){{window.__188FbPixelInit=1;fbq('init','{pid}');}}"
+        # autoConfig: false — chỉ ViewContent thủ công (meta-pixel + CAPI, cùng event_id).
+        f"if(!window.__188FbPixelInit){{window.__188FbPixelInit=1;fbq('init','{pid}',{{}},{{autoConfig:false}});}}"
         "</script>"
         f'<noscript><img height="1" width="1" style="display:none" '
         f'src="https://www.facebook.com/tr?id={pid}&ev=PageView&noscript=1" /></noscript>'
