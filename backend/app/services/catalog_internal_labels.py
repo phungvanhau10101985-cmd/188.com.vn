@@ -51,18 +51,56 @@ _RE_IPHONE = re.compile(
 )
 _RE_IPHONE_SLASH = re.compile(r"iphone\s*(\d{1,2})\s*/\s*(\d{1,2})", re.I)
 _RE_SAMSUNG_S = re.compile(
-    r"(?:samsung\s+)?(?:galaxy\s+)?s\s*(\d{1,2})\s*(ultra|plus|fe)?\b",
+    r"(?<!tab\s)(?<!watch\s)(?:samsung\s+)?(?:galaxy\s+)?s\s*(\d{1,2})\s*(ultra|plus|fe|edge)?\b",
     re.I,
 )
 _RE_SAMSUNG_ULTRA_SHORT = re.compile(r"\bultra\s*(\d{2})\b", re.I)
+_RE_SAMSUNG_A = re.compile(
+    r"(?:samsung\s+)?(?:galaxy\s+)?a\s*(\d{1,2})\s*(?:5g|lite|s)?\b",
+    re.I,
+)
+_RE_SAMSUNG_A_SLASH = re.compile(
+    r"(?:samsung\s+)?(?:galaxy\s+)?a\s*(\d{1,2})\s*/\s*a?\s*(\d{1,2})\b",
+    re.I,
+)
+_RE_SAMSUNG_M = re.compile(
+    r"(?:samsung\s+)?(?:galaxy\s+)?m\s*(\d{1,2})\s*(?:5g|lite)?\b",
+    re.I,
+)
+_RE_SAMSUNG_F = re.compile(
+    r"(?:samsung\s+)?(?:galaxy\s+)?f\s*(\d{1,2})\s*(?:5g)?\b",
+    re.I,
+)
+_RE_SAMSUNG_J = re.compile(
+    r"(?:samsung\s+)?(?:galaxy\s+)?j\s*(\d{1,2})\+?\b",
+    re.I,
+)
+_RE_SAMSUNG_TAB = re.compile(
+    r"(?:samsung\s+)?(?:galaxy\s+)?tab\s*(s|a)\s*(\d{1,2})(?:\s*(ultra|plus|fe|lite))?\b",
+    re.I,
+)
+_RE_SAMSUNG_WATCH = re.compile(
+    r"(?:samsung\s+)?(?:galaxy\s+)?watch\s*(\d{1,2})(?:\s*(ultra|classic|fe))?\b",
+    re.I,
+)
+_RE_SAMSUNG_BUDS = re.compile(
+    r"(?:samsung\s+)?(?:galaxy\s+)?buds\s*(\d{1,2})?(?:\s*(pro|fe|live))?\b",
+    re.I,
+)
 _RE_NOTE = re.compile(
-    r"(?:samsung\s+)?(?:galaxy\s+)?note\s*(\d{1,2})\b",
+    r"(?:samsung\s+)?(?:galaxy\s+)?note\s*(\d{1,2})(?:\s*(ultra|plus))?",
     re.I,
 )
 _RE_Z_FLIP_FOLD = re.compile(
     r"(?:samsung\s+)?(?:galaxy\s+)?z\s*(flip|fold)\s*(\d{1,2})?",
     re.I,
 )
+_RE_BRAND_GALAXY = re.compile(r"\bgalaxy\b", re.I)
+
+_RE_BRAND_SAMSUNG = re.compile(r"\bsamsung\b", re.I)
+_RE_BRAND_IPHONE = re.compile(r"\biphone\b", re.I)
+_RE_BRAND_XIAOMI = re.compile(r"\b(?:xiaomi|redmi)\b", re.I)
+_RE_BRAND_OPPO = re.compile(r"\b(?:oppo|realme|vivo)\b", re.I)
 
 
 def _normalize_label_token(raw: str) -> str:
@@ -135,8 +173,21 @@ def is_phone_accessory_product(product: Product) -> bool:
     return False
 
 
+def _append_samsung_s_labels(found: List[str], num: str, variant: str) -> None:
+    found.append("samsung_galaxy_s")
+    found.append(f"samsung_s{num}")
+    v = (variant or "").lower()
+    if v == "ultra":
+        found.append(f"samsung_s{num}_ultra")
+        found.append(f"samsung_ultra_{num}")
+    elif v == "edge":
+        found.append(f"samsung_s{num}_edge")
+    elif v:
+        found.append(f"samsung_s{num}_{v}")
+
+
 def extract_phone_device_labels(text: str) -> List[str]:
-    """Trích nhãn thiết bị từ tiêu đề SP (iphone_16, samsung_s24_ultra, …)."""
+    """Trích nhãn thiết bị từ tiêu đề SP (iphone_16, samsung_s24_ultra, samsung_a54, …)."""
     t = (text or "").strip()
     if not t:
         return []
@@ -154,30 +205,89 @@ def extract_phone_device_labels(text: str) -> List[str]:
             found.append(f"iphone_{num}_{variant}")
         found.append(f"iphone_{num}")
 
-    for m in _RE_SAMSUNG_S.finditer(t):
+    # Samsung — thứ tự: Tab/Watch/Buds trước S để tránh Tab S9 → samsung_s9.
+    for m in _RE_SAMSUNG_TAB.finditer(t):
+        series = (m.group(1) or "").lower()
+        num = m.group(2)
+        variant = (m.group(3) or "").lower()
+        found.append("samsung_galaxy_tab")
+        found.append(f"samsung_tab_{series}{num}")
+        if variant:
+            found.append(f"samsung_tab_{series}{num}_{variant}")
+
+    for m in _RE_SAMSUNG_WATCH.finditer(t):
         num = m.group(1)
         variant = (m.group(2) or "").lower()
-        if variant == "ultra":
-            found.append(f"samsung_s{num}_ultra")
-            found.append(f"samsung_ultra_{num}")
-        elif variant:
-            found.append(f"samsung_s{num}_{variant}")
-        else:
-            found.append(f"samsung_s{num}")
+        found.append("samsung_galaxy_watch")
+        found.append(f"samsung_watch_{num}")
+        if variant:
+            found.append(f"samsung_watch_{num}_{variant}")
 
-    for m in _RE_SAMSUNG_ULTRA_SHORT.finditer(t):
-        found.append(f"samsung_ultra_{m.group(1)}")
+    for m in _RE_SAMSUNG_BUDS.finditer(t):
+        gen = m.group(1)
+        variant = (m.group(2) or "").lower()
+        found.append("samsung_galaxy_buds")
+        if gen:
+            found.append(f"samsung_buds_{gen}")
+            if variant:
+                found.append(f"samsung_buds_{gen}_{variant}")
+        elif variant:
+            found.append(f"samsung_buds_{variant}")
+
+    for m in _RE_SAMSUNG_A_SLASH.finditer(t):
+        found.append("samsung_galaxy_a")
+        found.append(f"samsung_a{m.group(1)}")
+        found.append(f"samsung_a{m.group(2)}")
+
+    for m in _RE_SAMSUNG_A.finditer(t):
+        found.append("samsung_galaxy_a")
+        found.append(f"samsung_a{m.group(1)}")
+
+    for m in _RE_SAMSUNG_M.finditer(t):
+        found.append("samsung_galaxy_m")
+        found.append(f"samsung_m{m.group(1)}")
+
+    for m in _RE_SAMSUNG_F.finditer(t):
+        found.append("samsung_galaxy_f")
+        found.append(f"samsung_f{m.group(1)}")
+
+    for m in _RE_SAMSUNG_J.finditer(t):
+        found.append("samsung_galaxy_j")
+        found.append(f"samsung_j{m.group(1)}")
 
     for m in _RE_NOTE.finditer(t):
-        found.append(f"samsung_note_{m.group(1)}")
+        num = m.group(1)
+        variant = (m.group(2) or "").lower()
+        found.append("samsung_galaxy_note")
+        found.append(f"samsung_note_{num}")
+        if variant:
+            found.append(f"samsung_note_{num}_{variant}")
 
     for m in _RE_Z_FLIP_FOLD.finditer(t):
         kind = (m.group(1) or "").lower()
         gen = m.group(2)
+        found.append("samsung_galaxy_z")
+        found.append(f"samsung_z_{kind}")
         if gen:
             found.append(f"samsung_z_{kind}_{gen}")
-        else:
-            found.append(f"samsung_z_{kind}")
+
+    for m in _RE_SAMSUNG_S.finditer(t):
+        _append_samsung_s_labels(found, m.group(1), m.group(2) or "")
+
+    for m in _RE_SAMSUNG_ULTRA_SHORT.finditer(t):
+        found.append(f"samsung_ultra_{m.group(1)}")
+
+    # Nhãn hãng / dòng — Meta khớp nguyên nhãn; `samsung` ≠ `samsung_s26_plus`.
+    if _RE_BRAND_SAMSUNG.search(t) or _RE_BRAND_GALAXY.search(t):
+        found.append("samsung")
+    if _RE_BRAND_GALAXY.search(t):
+        found.append("samsung_galaxy")
+    if _RE_BRAND_IPHONE.search(t):
+        found.append("iphone")
+    if _RE_BRAND_XIAOMI.search(t):
+        found.append("xiaomi")
+    if _RE_BRAND_OPPO.search(t):
+        found.append("oppo")
 
     return _uniq_labels(found)
 
