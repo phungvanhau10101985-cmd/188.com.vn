@@ -94,19 +94,57 @@ def _tsv_cell(s: Optional[str]) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+def _is_legacy_bunny_cdn_host(hostname: str) -> bool:
+    return (hostname or "").strip().lower().endswith(".b-cdn.net")
+
+
+def _rewrite_legacy_bunny_cdn_url(url: str, cdn_base: str) -> str:
+    """
+    URL ảnh trong DB/HTML trỏ *.b-cdn.net → base CDN feed (vd. https://188.com.vn/cdn-media).
+    Frontend đã rewrite khi hiển thị; feed Meta/GMC phải gửi URL bot Meta tải được (cùng domain site).
+    """
+    s = (url or "").strip()
+    if not s:
+        return s
+    base = (cdn_base or "").strip().rstrip("/")
+    if not base:
+        return s
+    try:
+        with_scheme = s if re.match(r"^https?://", s, re.I) else (f"https:{s}" if s.startswith("//") else s)
+        if not re.match(r"^https?://", with_scheme, re.I):
+            return s
+        parsed = urlparse(with_scheme)
+        if not _is_legacy_bunny_cdn_host(parsed.hostname or ""):
+            return s
+        base_host = urlparse(f"{base}/").netloc.lower()
+        if (parsed.hostname or "").lower() == base_host:
+            return with_scheme
+        suffix = parsed.path or ""
+        if parsed.query:
+            suffix += f"?{parsed.query}"
+        if parsed.fragment:
+            suffix += f"#{parsed.fragment}"
+        return f"{base}{suffix}"
+    except Exception:
+        return s
+
+
 def _abs_url(site_base: str, path_or_url: Optional[str]) -> str:
     """Chuẩn hoá URL ảnh / link đầy đủ HTTPS."""
     if _is_blankish(path_or_url):
         return ""
     u = str(path_or_url).strip()
     if u.startswith("http://") or u.startswith("https://"):
-        return u
-    base = site_base.rstrip("/")
-    if u.startswith("//"):
-        return "https:" + u
-    if u.startswith("/"):
-        return base + u
-    return f"{base}/{u}"
+        out = u
+    elif u.startswith("//"):
+        out = "https:" + u
+    else:
+        base = site_base.rstrip("/")
+        if u.startswith("/"):
+            out = base + u
+        else:
+            out = f"{base}/{u}"
+    return _rewrite_legacy_bunny_cdn_url(out, site_base)
 
 
 def _pick_main_image(product: Product, site_base: str) -> str:
