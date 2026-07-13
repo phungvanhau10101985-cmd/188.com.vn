@@ -278,13 +278,134 @@ def process_first_delivered_grants(db: Session, user_id: int) -> None:
     )
 
 
-def process_comeback_grants_for_all(db: Session, *, inactive_days: int = 30) -> Dict[str, int]:
+def _valid_email(value: object) -> Optional[str]:
+    email = str(value or "").strip()
+    if "@" not in email:
+        return None
+    return email
+
+
+def _resolve_user_email(db: Session, user: User) -> Optional[str]:
+    """Email tài khoản hoặc từ đơn gần nhất (khách đăng nhập SĐT)."""
+    email = _valid_email(getattr(user, "email", None))
+    if email:
+        return email
+    for order in (
+        db.query(Order)
+        .filter(
+            Order.user_id == user.id,
+            Order.customer_email.isnot(None),
+            Order.customer_email != "",
+        )
+        .order_by(Order.created_at.desc())
+        .limit(10)
+    ):
+        order_email = _valid_email(getattr(order, "customer_email", None))
+        if order_email:
+            return order_email
+    return None
+
+
+def _has_recent_promo_grant(
+    db: Session,
+    user_id: int,
+    sources: tuple[str, ...],
+    *,
+    hours: int,
+) -> bool:
+    cutoff = _utc_now() - timedelta(hours=max(1, int(hours)))
+    return (
+        db.query(UserPromotionGrant.id)
+        .filter(
+            UserPromotionGrant.user_id == user_id,
+            UserPromotionGrant.source.in_(sources),
+            UserPromotionGrant.granted_at >= cutoff,
+        )
+        .first()
+        is not None
+    )
+
+
+def _user_eligible_for_cart_abandon(
+    db: Session,
+    user_id: int,
+    *,
+    abandon_hours: int,
+    cooldown_days: int = 7,
+) -> bool:
+    """True nếu user đủ điều kiện nhận CARTSAVE (giỏ treo) — ưu tiên hơn comeback."""
+    cart = (
+        db.query(Cart)
+        .options(joinedload(Cart.items))
+        .filter(Cart.user_id == user_id)
+        .first()
+    )
+    if not cart or not cart.items:
+        return False
+
+    now = _utc_now()
+    cutoff = now - timedelta(hours=abandon_hours)
+    last_touch = _cart_last_touch(cart)
+    if last_touch > cutoff:
+        return False
+
+    ordered_after_cart = (
+        db.query(Order.id)
+        .filter(
+            Order.user_id == user_id,
+            Order.status != OrderStatus.CANCELLED,
+            Order.created_at >= last_touch,
+        )
+        .first()
+    )
+    if ordered_after_cart:
+        return False
+
+    cart_promo = db.query(Promotion).filter(Promotion.code == PROMO_CART_ABANDON).first()
+    if not cart_promo:
+        return False
+
+    cooldown_cutoff = now - timedelta(days=cooldown_days)
+    recent_abandon_grant = (
+        db.query(UserPromotionGrant.id)
+        .filter(
+            UserPromotionGrant.user_id == user_id,
+            UserPromotionGrant.promotion_id == cart_promo.id,
+            UserPromotionGrant.source == "cart_abandon",
+            UserPromotionGrant.granted_at >= cooldown_cutoff,
+        )
+        .first()
+    )
+    if recent_abandon_grant:
+        return False
+
+    if _has_active_grant(db, user_id, cart_promo.id):
+        return False
+    return True
+
+
+def process_comeback_grants_for_all(
+    db: Session,
+    *,
+    inactive_days: int = 30,
+    abandon_hours: int = 24,
+    cooldown_days: Optional[int] = None,
+) -> Dict[str, int]:
     """Tặng COMEBACK cho khách có đơn giao thành công nhưng lâu chưa mua lại."""
     ensure_promotion_templates(db)
     cutoff = _utc_now() - timedelta(days=inactive_days)
     promo = db.query(Promotion).filter(Promotion.code == PROMO_COMEBACK).first()
     if not promo:
-        return {"granted": 0, "skipped": 0}
+        return {"granted": 0, "skipped": 0, "emails_sent": 0}
+
+    grant_cooldown_days = int(
+        cooldown_days
+        if cooldown_days is not None
+        else getattr(settings, "COMEBACK_GRANT_COOLDOWN_DAYS", 30)
+    )
+    promo_email_cooldown_hours = int(getattr(settings, "PROMO_EMAIL_COOLDOWN_HOURS", 24))
+    grant_cooldown_cutoff = _utc_now() - timedelta(days=grant_cooldown_days)
+    valid_days = int(promo.grant_valid_days or promo.eligible_within_days or 5)
 
     users_with_orders = (
         db.query(Order.user_id)
@@ -297,8 +418,24 @@ def process_comeback_grants_for_all(db: Session, *, inactive_days: int = 30) -> 
     )
     granted = 0
     skipped = 0
+    emails_sent = 0
     for (user_id,) in users_with_orders:
         if not user_id:
+            continue
+        if _user_eligible_for_cart_abandon(
+            db,
+            user_id,
+            abandon_hours=abandon_hours,
+        ):
+            skipped += 1
+            continue
+        if _has_recent_promo_grant(
+            db,
+            user_id,
+            ("cart_abandon",),
+            hours=promo_email_cooldown_hours,
+        ):
+            skipped += 1
             continue
         last_order = (
             db.query(Order.created_at)
@@ -315,6 +452,19 @@ def process_comeback_grants_for_all(db: Session, *, inactive_days: int = 30) -> 
         if _has_active_grant(db, user_id, promo.id):
             skipped += 1
             continue
+        recent_comeback_grant = (
+            db.query(UserPromotionGrant.id)
+            .filter(
+                UserPromotionGrant.user_id == user_id,
+                UserPromotionGrant.promotion_id == promo.id,
+                UserPromotionGrant.source == "comeback",
+                UserPromotionGrant.granted_at >= grant_cooldown_cutoff,
+            )
+            .first()
+        )
+        if recent_comeback_grant:
+            skipped += 1
+            continue
         g = grant_voucher(
             db,
             user_id=user_id,
@@ -325,9 +475,17 @@ def process_comeback_grants_for_all(db: Session, *, inactive_days: int = 30) -> 
         )
         if g:
             granted += 1
+            user = db.query(User).filter(User.id == user_id).first()
+            if user and _maybe_send_comeback_email(
+                db,
+                user=user,
+                promotion=promo,
+                valid_days=valid_days,
+            ):
+                emails_sent += 1
         else:
             skipped += 1
-    return {"granted": granted, "skipped": skipped}
+    return {"granted": granted, "skipped": skipped, "emails_sent": emails_sent}
 
 
 def _user_ever_had_welcome(db: Session, user_id: int, welcome_promo_id: int) -> bool:
@@ -406,7 +564,7 @@ def _maybe_send_cart_abandon_email(
 ) -> bool:
     if not getattr(settings, "CART_ABANDON_EMAIL_ENABLED", True):
         return False
-    to_email = (user.email or "").strip()
+    to_email = _resolve_user_email(db, user)
     if not to_email:
         return False
     try:
@@ -424,6 +582,48 @@ def _maybe_send_cart_abandon_email(
         return True
     except Exception as exc:
         logger.warning("cart_abandon email failed user=%s: %s", user.id, exc)
+        return False
+
+
+def _maybe_send_comeback_email(
+    db: Session,
+    *,
+    user: User,
+    promotion: Promotion,
+    valid_days: int,
+) -> bool:
+    if not getattr(settings, "COMEBACK_EMAIL_ENABLED", True):
+        return False
+    to_email = _resolve_user_email(db, user)
+    if not to_email:
+        return False
+    promo_email_cooldown_hours = int(getattr(settings, "PROMO_EMAIL_COOLDOWN_HOURS", 24))
+    if _has_recent_promo_grant(
+        db,
+        user.id,
+        ("cart_abandon",),
+        hours=promo_email_cooldown_hours,
+    ):
+        logger.info(
+            "comeback_email skip cooldown user=%s hours=%s",
+            user.id,
+            promo_email_cooldown_hours,
+        )
+        return False
+    try:
+        from app.services.email_service import send_comeback_email
+
+        send_comeback_email(
+            to_email,
+            customer_name=user.full_name or "",
+            promo_code=promotion.code,
+            discount_percent=int(promotion.discount_percent or 0),
+            max_discount_amount=int(promotion.max_discount_amount or 0),
+            valid_days=int(valid_days),
+        )
+        return True
+    except Exception as exc:
+        logger.warning("comeback email failed user=%s: %s", user.id, exc)
         return False
 
 

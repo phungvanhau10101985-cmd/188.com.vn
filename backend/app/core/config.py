@@ -742,6 +742,20 @@ class Settings:
             os.getenv("CART_ABANDON_EMAIL_ENABLED", "true").strip().lower()
             in ("1", "true", "yes", "on")
         )
+        # Email «nhớ bạn quay lại» (COMEBACK10) — 1 lần / chu kỳ, không trùng giỏ bỏ dở
+        self.COMEBACK_EMAIL_ENABLED: bool = (
+            os.getenv("COMEBACK_EMAIL_ENABLED", "true").strip().lower()
+            in ("1", "true", "yes", "on")
+        )
+        self.COMEBACK_GRANT_COOLDOWN_DAYS: int = max(
+            7,
+            int(os.getenv("COMEBACK_GRANT_COOLDOWN_DAYS", "30") or 30),
+        )
+        # Tối thiểu giữa 2 email marketing tự động (cart_abandon / comeback) cho cùng user
+        self.PROMO_EMAIL_COOLDOWN_HOURS: int = max(
+            1,
+            int(os.getenv("PROMO_EMAIL_COOLDOWN_HOURS", "24") or 24),
+        )
         self.NEWSLETTER_WELCOME_EMAIL_ENABLED: bool = (
             os.getenv("NEWSLETTER_WELCOME_EMAIL_ENABLED", "true").strip().lower()
             in ("1", "true", "yes", "on")

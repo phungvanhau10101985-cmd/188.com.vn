@@ -640,6 +640,62 @@ def send_cart_abandon_email(
     logger.info("cart_abandon_email sent to=%s promo=%s", to_email, promo_code)
 
 
+def send_comeback_email(
+    to_email: str,
+    *,
+    customer_name: str,
+    promo_code: str,
+    discount_percent: int,
+    max_discount_amount: int,
+    valid_days: int,
+) -> None:
+    """Email «nhớ bạn quay lại» — 1 lần kèm mã COMEBACK trong ví."""
+    if not to_email or not settings.is_smtp_configured():
+        return
+    if not getattr(settings, "COMEBACK_EMAIL_ENABLED", True):
+        return
+
+    origin = _frontend_origin()
+    shop_url = origin
+    wallet_url = f"{origin}/account/khuyen-mai"
+    display_name = (customer_name or "Quý khách").strip() or "Quý khách"
+    max_discount_label = _format_vnd_plain(max_discount_amount) if max_discount_amount else "0"
+
+    subject = "188.com.vn nhớ bạn — mã giảm dành riêng cho bạn"
+    text_body = (
+        f"Xin chào {display_name},\n\n"
+        "Bạn lâu chưa ghé 188.com.vn. Shop gửi riêng cho bạn một mã ưu đãi "
+        "để quay lại mua sắm.\n\n"
+        f"Mã {promo_code} — giảm {discount_percent}% "
+        f"(tối đa {max_discount_label}đ, hết hạn sau {valid_days} ngày). "
+        f"Mã đã có trong ví khuyến mãi của bạn.\n\n"
+        f"Mua sắm ngay: {shop_url}\n"
+        f"Ví mã ưu đãi: {wallet_url}\n\n"
+        "Trân trọng,\n188.com.vn\n"
+        f"--\nTin nhắn tự động từ 188.com.vn · {origin}"
+    )
+    html_body = f"""
+<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.55;color:#111827;max-width:560px;">
+  <p>Xin chào <strong>{html.escape(display_name)}</strong>,</p>
+  <p>Bạn lâu chưa ghé <strong>188.com.vn</strong>. Shop gửi riêng cho bạn một mã ưu đãi để quay lại mua sắm.</p>
+  <p>Mã <strong>{html.escape(promo_code)}</strong> — giảm <strong>{discount_percent}%</strong>
+     (tối đa <strong>{html.escape(max_discount_label)}đ</strong>, hết hạn sau <strong>{valid_days}</strong> ngày).
+     Mã đã nằm trong <a href="{html.escape(wallet_url)}">ví khuyến mãi</a> của bạn.</p>
+  <p style="margin:20px 0 12px;">
+    <a href="{html.escape(shop_url)}" style="display:inline-block;padding:12px 22px;background:#ea580c;color:#ffffff !important;text-decoration:none;border-radius:10px;font-weight:600;">
+      Khám phá 188.com.vn
+    </a>
+  </p>
+  <p style="font-size:12px;color:#6b7280;word-break:break-all;">Ví mã ưu đãi: <a href="{html.escape(wallet_url)}">{html.escape(wallet_url)}</a></p>
+  <p style="margin-top:24px;">Trân trọng,<br/>188.com.vn</p>
+  <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
+  <p style="font-size:12px;color:#9ca3af;">Tin nhắn tự động từ 188.com.vn</p>
+</div>
+"""
+    send_email(to_email, subject, text_body, html_body)
+    logger.info("comeback_email sent to=%s promo=%s", to_email, promo_code)
+
+
 def send_newsletter_welcome_email(to_email: str) -> None:
     """Email chào mừng sau khi đăng ký nhận tin footer."""
     if not to_email or not settings.is_smtp_configured():

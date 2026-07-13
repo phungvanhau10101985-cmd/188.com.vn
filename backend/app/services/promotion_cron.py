@@ -24,6 +24,7 @@ def run_daily_voucher_grants(
         "comeback": grant_svc.process_comeback_grants_for_all(
             db,
             inactive_days=inactive_days,
+            abandon_hours=abandon_hours,
         ),
     }
     if include_welcome_backfill:

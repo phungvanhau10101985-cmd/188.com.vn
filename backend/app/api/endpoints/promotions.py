@@ -283,6 +283,7 @@ def admin_grant_segment(
         result = grant_svc.process_comeback_grants_for_all(
             db,
             inactive_days=payload.inactive_days or 30,
+            abandon_hours=payload.abandon_hours or 24,
         )
     elif segment == "welcome_backfill":
         result = grant_svc.process_welcome_backfill(db)
@@ -311,12 +312,17 @@ def cron_cart_abandon_grants(
 @router.get("/cron/comeback", response_model=AdminGrantSegmentResponse)
 def cron_comeback_grants(
     inactive_days: int = Query(30, ge=7, le=180),
+    abandon_hours: int = Query(24, ge=6, le=168),
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
     """Cron: tặng COMEBACK10 cho khách lâu chưa mua. Authorization: Bearer CRON_SECRET."""
     _require_cron_secret(authorization)
-    result = grant_svc.process_comeback_grants_for_all(db, inactive_days=inactive_days)
+    result = grant_svc.process_comeback_grants_for_all(
+        db,
+        inactive_days=inactive_days,
+        abandon_hours=abandon_hours,
+    )
     return AdminGrantSegmentResponse(**result)
 
 
