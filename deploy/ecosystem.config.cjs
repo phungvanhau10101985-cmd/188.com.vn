@@ -6,12 +6,18 @@
  *   pm2 start deploy/ecosystem.config.cjs
  *   pm2 save
  */
+const path = require('path');
+
+const ROOT = path.join(__dirname, '..');
+const BACKEND = path.join(ROOT, 'backend');
+const FRONTEND = path.join(ROOT, 'frontend');
+
 module.exports = {
   apps: [
     {
       name: '188-api',
-      cwd: './backend',
-      script: './.venv/bin/python',
+      cwd: BACKEND,
+      script: path.join(BACKEND, '.venv/bin/python'),
       args: '-m uvicorn main:app --host 127.0.0.1 --port 8001',
       env: {
         SERVER_PORT: '8001',
@@ -47,8 +53,8 @@ module.exports = {
     },
     {
       name: '188-web',
-      cwd: './frontend',
-      script: './scripts/next-start.cjs',
+      cwd: FRONTEND,
+      script: path.join(FRONTEND, 'scripts/next-start.cjs'),
       interpreter: 'node',
       env: {
         PORT: '3001',
