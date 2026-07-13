@@ -52,6 +52,7 @@ from app.models.guest_behavior import GuestProductView, GuestFavorite, GuestSear
 from app.models.admin import AdminUser
 from app.models.source_stock_worker_state import SourceStockWorkerState
 from app.models.newsletter_subscriber import NewsletterSubscriber
+from app.models.marketing_email_suppression import MarketingEmailSuppression
 from app.db.session import engine
 from app.core.config import settings
 import os
@@ -997,6 +998,13 @@ class MigrationManager:
         )
         results['newsletter_subscribers_sync'] = self._sync_table_columns(
             "newsletter_subscribers", NewsletterSubscriber
+        )
+
+        results['marketing_email_suppressions_create'] = self._create_table_if_not_exists(
+            "marketing_email_suppressions", MarketingEmailSuppression
+        )
+        results['marketing_email_suppressions_sync'] = self._sync_table_columns(
+            "marketing_email_suppressions", MarketingEmailSuppression
         )
 
         from app.models.listing_facet_cache import ListingFacetCache

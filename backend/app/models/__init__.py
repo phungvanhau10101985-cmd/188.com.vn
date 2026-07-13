@@ -193,6 +193,8 @@ except ImportError:
 
 from app.models.newsletter_subscriber import NewsletterSubscriber
 print("[OK] NewsletterSubscriber model loaded")
+from app.models.marketing_email_suppression import MarketingEmailSuppression
+print("[OK] MarketingEmailSuppression model loaded")
 from app.models.email_send_management import EmailSendManagement
 print("[OK] EmailSendManagement model loaded")
 
@@ -260,6 +262,7 @@ __all__ = [
     "WalletWithdrawal",
     "Notification",
     "NewsletterSubscriber",
+    "MarketingEmailSuppression",
     "EmailSendManagement",
 ]
 

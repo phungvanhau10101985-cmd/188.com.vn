@@ -63,6 +63,22 @@ def subscribe_email(
     return row, True
 
 
+def unsubscribe_email(db: Session, email: str) -> bool:
+    """Tắt nhận tin newsletter cho email (đồng bộ khi ngừng marketing)."""
+    normalized = (email or "").strip().lower()
+    if not normalized:
+        return False
+    row = get_subscriber_by_email(db, normalized)
+    if not row:
+        return False
+    if row.is_active:
+        row.is_active = False
+        row.unsubscribed_at = _utc_now()
+        db.commit()
+        return True
+    return False
+
+
 def _iso(dt: Optional[datetime]) -> Optional[str]:
     if dt is None:
         return None

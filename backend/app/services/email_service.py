@@ -521,6 +521,10 @@ def send_birthday_promo_email(
     next_birthday_label: str,
     website_url: str,
 ) -> None:
+    if not to_email or not settings.is_smtp_configured():
+        return
+    if _skip_marketing_email(to_email, kind="birthday"):
+        return
     display_name = (customer_name or "bạn").strip() or "bạn"
     origin = website_url.rstrip("/")
     subject = f"188.com.vn - Ưu đãi sinh nhật {percent}% dành cho {display_name}"
@@ -532,17 +536,19 @@ def send_birthday_promo_email(
         f"Mua sắm ngay: {origin}\n\n"
         "Trân trọng,\n188.com.vn\n"
         f"--\nTin nhắn tự động từ 188.com.vn · {origin}"
+        f"{_marketing_unsubscribe_text(to_email)}"
     )
     html_body = f"""
 <div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.55;color:#111827;max-width:560px;">
-  <p>Xin chào <strong>{display_name}</strong>,</p>
+  <p>Xin chào <strong>{html.escape(display_name)}</strong>,</p>
   <p>Tuần lễ sinh nhật của bạn đã bắt đầu. 188.com.vn gửi tặng ưu đãi <strong>{percent}%</strong> tự động trên giá sản phẩm khi bạn đăng nhập và mua hàng trên web, không cần mã.</p>
-  <p style="color:#4b5563;font-size:14px;">Sinh nhật sắp tới: {next_birthday_label}.</p>
-  <p style="margin:20px 0 12px;"><a href="{origin}" style="display:inline-block;padding:12px 22px;background:#ea580c;color:#ffffff !important;text-decoration:none;border-radius:10px;font-weight:600;">Vào web xem giá ưu đãi</a></p>
-  <p style="font-size:12px;color:#6b7280;word-break:break-all;">Hoặc sao chép liên kết: <a href="{origin}">{origin}</a></p>
+  <p style="color:#4b5563;font-size:14px;">Sinh nhật sắp tới: {html.escape(next_birthday_label)}.</p>
+  <p style="margin:20px 0 12px;"><a href="{html.escape(origin)}" style="display:inline-block;padding:12px 22px;background:#ea580c;color:#ffffff !important;text-decoration:none;border-radius:10px;font-weight:600;">Vào web xem giá ưu đãi</a></p>
+  <p style="font-size:12px;color:#6b7280;word-break:break-all;">Hoặc sao chép liên kết: <a href="{html.escape(origin)}">{html.escape(origin)}</a></p>
   <p style="margin-top:24px;">Trân trọng,<br/>188.com.vn</p>
   <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
   <p style="font-size:12px;color:#9ca3af;">Tin nhắn tự động từ 188.com.vn</p>
+  {_marketing_unsubscribe_html(to_email)}
 </div>
 """
     send_email(to_email, subject, text_body, html_body)
@@ -551,6 +557,34 @@ def send_birthday_promo_email(
 def _frontend_origin() -> str:
     fe = (settings.FRONTEND_BASE_URL or settings.WEBSITE_URL or "").strip().rstrip("/")
     return fe or "https://188.com.vn"
+
+
+def _marketing_unsubscribe_text(to_email: str) -> str:
+    from app.services.marketing_email_unsubscribe import build_unsubscribe_page_url
+
+    url = build_unsubscribe_page_url(to_email)
+    return f"\nKhông muốn nhận tin khuyến mãi? Ngừng nhận tin: {url}\n"
+
+
+def _marketing_unsubscribe_html(to_email: str) -> str:
+    from app.services.marketing_email_unsubscribe import build_unsubscribe_page_url
+
+    url = build_unsubscribe_page_url(to_email)
+    return (
+        f'<p style="font-size:12px;color:#9ca3af;margin-top:12px;">'
+        f'Không muốn nhận tin khuyến mãi? '
+        f'<a href="{html.escape(url)}" style="color:#6b7280;text-decoration:underline;">Ngừng nhận tin</a>'
+        f"</p>"
+    )
+
+
+def _skip_marketing_email(to_email: str, *, kind: str) -> bool:
+    from app.services.marketing_email_unsubscribe import is_marketing_email_suppressed
+
+    if is_marketing_email_suppressed(to_email):
+        logger.info("%s_email skip suppressed to=%s", kind, to_email)
+        return True
+    return False
 
 
 def _cart_item_summary_lines(cart: "Cart", *, max_items: int = 5) -> List[str]:
@@ -589,6 +623,8 @@ def send_cart_abandon_email(
         return
     if not getattr(settings, "CART_ABANDON_EMAIL_ENABLED", True):
         return
+    if _skip_marketing_email(to_email, kind="cart_abandon"):
+        return
 
     origin = _frontend_origin()
     cart_url = f"{origin}/cart"
@@ -610,6 +646,7 @@ def send_cart_abandon_email(
         f"Ví mã ưu đãi: {wallet_url}\n\n"
         "Trân trọng,\n188.com.vn\n"
         f"--\nTin nhắn tự động từ 188.com.vn · {origin}"
+        f"{_marketing_unsubscribe_text(to_email)}"
     )
 
     items_html = ""
@@ -634,6 +671,7 @@ def send_cart_abandon_email(
   <p style="margin-top:24px;">Trân trọng,<br/>188.com.vn</p>
   <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
   <p style="font-size:12px;color:#9ca3af;">Tin nhắn tự động từ 188.com.vn</p>
+  {_marketing_unsubscribe_html(to_email)}
 </div>
 """
     send_email(to_email, subject, text_body, html_body)
@@ -654,6 +692,8 @@ def send_comeback_email(
         return
     if not getattr(settings, "COMEBACK_EMAIL_ENABLED", True):
         return
+    if _skip_marketing_email(to_email, kind="comeback"):
+        return
 
     origin = _frontend_origin()
     shop_url = origin
@@ -673,6 +713,7 @@ def send_comeback_email(
         f"Ví mã ưu đãi: {wallet_url}\n\n"
         "Trân trọng,\n188.com.vn\n"
         f"--\nTin nhắn tự động từ 188.com.vn · {origin}"
+        f"{_marketing_unsubscribe_text(to_email)}"
     )
     html_body = f"""
 <div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.55;color:#111827;max-width:560px;">
@@ -690,6 +731,7 @@ def send_comeback_email(
   <p style="margin-top:24px;">Trân trọng,<br/>188.com.vn</p>
   <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
   <p style="font-size:12px;color:#9ca3af;">Tin nhắn tự động từ 188.com.vn</p>
+  {_marketing_unsubscribe_html(to_email)}
 </div>
 """
     send_email(to_email, subject, text_body, html_body)
@@ -737,6 +779,8 @@ def send_marketing_email(to_email: str, *, subject: str, message: str) -> None:
     """Email marketing / broadcast — nội dung do admin nhập."""
     if not to_email or not settings.is_smtp_configured():
         return
+    if _skip_marketing_email(to_email, kind="marketing"):
+        return
 
     origin = _frontend_origin()
     shop_url = origin
@@ -747,6 +791,7 @@ def send_marketing_email(to_email: str, *, subject: str, message: str) -> None:
         f"Mua sắm tại: {shop_url}\n\n"
         "Trân trọng,\n188.com.vn\n"
         f"--\nTin nhắn từ 188.com.vn · {origin}"
+        f"{_marketing_unsubscribe_text(to_email)}"
     )
     html_message = html.escape(body_text).replace("\n", "<br/>")
     html_body = f"""
@@ -761,6 +806,7 @@ def send_marketing_email(to_email: str, *, subject: str, message: str) -> None:
   <p style="margin-top:24px;">Trân trọng,<br/>188.com.vn</p>
   <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
   <p style="font-size:12px;color:#9ca3af;">Bạn nhận email vì đã đăng ký nhận tin từ 188.com.vn</p>
+  {_marketing_unsubscribe_html(to_email)}
 </div>
 """
     send_email(to_email, safe_subject, text_body, html_body)
