@@ -2622,8 +2622,15 @@ export default function AdminProductsPage() {
   const handleExport = async () => {
     setExporting(true);
     try {
-      await adminProductAPI.exportExcel();
-      showToast('ok', 'Đã tải file Excel xuống');
+      const selectedIds =
+        selectedProductIds.size > 0 ? Array.from(selectedProductIds) : undefined;
+      await adminProductAPI.exportExcel(selectedIds);
+      showToast(
+        'ok',
+        selectedIds
+          ? `Đã tải file Excel (${selectedIds.length} sản phẩm đã chọn)`
+          : 'Đã tải file Excel (toàn bộ sản phẩm)',
+      );
     } catch (e) {
       const msg =
         e instanceof Error && e.message.trim()

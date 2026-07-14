@@ -44,6 +44,7 @@ from app.models.user_trusted_device import UserTrustedDevice
 print("[OK] UserTrustedDevice model loaded")
 from app.models.email_login_challenge import EmailLoginChallenge
 from app.models.email_trusted_device import EmailTrustedDevice
+from app.models.auth_challenge import AuthActionChallenge, AdminTrustedDevice
 print("[OK] Email login challenge / trusted device models loaded")
 from app.models.birthday_promo import BirthdayPromoEmailLog
 print("[OK] BirthdayPromoEmailLog model loaded")
@@ -216,6 +217,8 @@ __all__ = [
     "UserTrustedDevice",
     "EmailLoginChallenge",
     "EmailTrustedDevice",
+    "AuthActionChallenge",
+    "AdminTrustedDevice",
     "BirthdayPromoEmailLog",
     "AdminFeatureTestSetting",
     "VpsBackupSettings",

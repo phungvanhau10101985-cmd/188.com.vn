@@ -761,6 +761,10 @@ async def export_excel(
     category: str = None,
     subcategory: str = None,
     is_active: bool = True,
+    product_ids: Optional[List[str]] = Query(
+        None,
+        description="Chỉ export các product_id đã chọn; bỏ trống để export toàn bộ",
+    ),
     download: bool = Query(False, description="Set to true to download file directly"),
     db: Session = Depends(get_db)
 ):
@@ -772,6 +776,7 @@ async def export_excel(
     - Slug column is automatically added as last column
     - Set download=true to get file download
     - Default returns JSON info
+    - Truyền product_ids để chỉ export sản phẩm đã chọn
     """
     try:
         print(f"\n{'='*60}")
@@ -779,9 +784,18 @@ async def export_excel(
         print(f"   Download mode: {'✅ ON' if download else '📄 JSON'}")
         print(f"{'='*60}")
         
-        from app.crud.product import get_products, get_all_products_for_export
-        
-        if category or subcategory:
+        from app.crud.product import (
+            get_products,
+            get_all_products_for_export,
+            get_products_for_export_by_ids,
+        )
+
+        selected_ids = list(dict.fromkeys(str(pid).strip() for pid in (product_ids or []) if str(pid).strip()))
+
+        if selected_ids:
+            products_data = get_products_for_export_by_ids(db, selected_ids)
+            print(f"📊 Xuất {len(selected_ids)} sản phẩm đã chọn")
+        elif category or subcategory:
             export_cap = max(1, int(getattr(settings, "MAX_EXCEL_IMPORT_ROWS", 30000) or 30000))
             result = get_products(
                 db,
@@ -805,7 +819,9 @@ async def export_excel(
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"export_products_{timestamp}.xlsx"
-        if category:
+        if selected_ids:
+            filename = f"export_selected_products_{timestamp}.xlsx"
+        elif category:
             filename = f"export_{category}_{timestamp}.xlsx"
         
         result = importer.export_to_excel(products_data, filename)

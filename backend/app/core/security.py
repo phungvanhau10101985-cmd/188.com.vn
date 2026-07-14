@@ -1,5 +1,5 @@
 # backend/app/core/security.py - FIXED VERSION
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 import bcrypt
 from jose import JWTError, jwt
@@ -80,7 +80,13 @@ admin_oauth2_scheme = OAuth2PasswordBearer(
 def _get_secret_key() -> str:
     """Lấy SECRET_KEY từ config; bắt buộc phải cấu hình khi deploy."""
     key = getattr(settings, "SECRET_KEY", "") or ""
-    if not key or key == "your-secret-key-change-in-production" or "change-this" in (key or ""):
+    historical_fallback = "H8$kL3!pQ7@mR2#sV5%wZ9^yB1*nJ4(cF6_gH0)dA+eQ~lO{iU[Y}8P]3rT|5W"
+    if (
+        not key
+        or key == historical_fallback
+        or key == "your-secret-key-change-in-production"
+        or "change-this" in key
+    ):
         raise ValueError(
             "SECRET_KEY chưa được cấu hình. Đặt SECRET_KEY trong .env trước khi chạy production."
         )
@@ -281,6 +287,40 @@ def require_module_permission(
     return dep
 
 
+def verify_recent_user_auth(request: Request, current_user: User, purpose: str) -> None:
+    raw = request.cookies.get(settings.STEP_UP_COOKIE_NAME)
+    required = HTTPException(
+        status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+        detail={"code": "step_up_required", "purpose": purpose, "message": "Cần xác minh OTP để tiếp tục."},
+    )
+    if not raw:
+        raise required
+    try:
+        payload = jwt.decode(raw, _get_secret_key(), algorithms=[settings.ALGORITHM])
+        auth_time = float(payload.get("auth_time") or 0)
+        user_id = int(payload.get("user_id") or 0)
+    except (JWTError, TypeError, ValueError):
+        raise required
+    if payload.get("type") != "step_up" or user_id != int(current_user.id) or payload.get("purpose") != purpose:
+        raise required
+    age = datetime.now(timezone.utc).timestamp() - auth_time
+    if age < 0 or age > int(settings.STEP_UP_RECENT_MINUTES) * 60:
+        raise required
+
+
+def require_recent_user_auth(purpose: str):
+    """Require a short-lived, purpose-bound OTP step-up cookie."""
+
+    def dep(
+        request: Request,
+        current_user: User = Depends(get_current_user),
+    ) -> User:
+        verify_recent_user_auth(request, current_user, purpose)
+        return current_user
+
+    return dep
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create JWT token for regular users"""
     to_encode = data.copy()
@@ -302,19 +342,35 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     encoded_jwt = jwt.encode(to_encode, _get_secret_key(), algorithm=settings.ALGORITHM)
     return encoded_jwt
 
-def create_admin_token(admin_id: int) -> str:
+def create_admin_token(admin_id: int, *, amr: Optional[list[str]] = None) -> str:
     """Create JWT token for admin"""
-    expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    expire = datetime.utcnow() + expires_delta
+    expires_delta = timedelta(minutes=settings.ADMIN_ACCESS_TOKEN_EXPIRE_MINUTES)
+    now = datetime.now(timezone.utc)
+    expire = now + expires_delta
     
     to_encode = {
         "sub": str(admin_id),
         "type": "admin",
-        "exp": expire
+        "exp": expire,
+        "auth_time": int(now.timestamp()),
+        "amr": amr or ["password"],
     }
     
     encoded_jwt = jwt.encode(to_encode, _get_secret_key(), algorithm=settings.ALGORITHM)
     return encoded_jwt
+
+
+def create_step_up_token(user_id: int, purpose: str) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "user_id": user_id,
+        "type": "step_up",
+        "purpose": purpose,
+        "auth_time": int(now.timestamp()),
+        "exp": now + timedelta(minutes=int(settings.STEP_UP_RECENT_MINUTES)),
+    }
+    return jwt.encode(payload, _get_secret_key(), algorithm=settings.ALGORITHM)
 
 # ========== DEBUG/HELPER FUNCTIONS ==========
 def decode_token_for_debug(token: str) -> dict:

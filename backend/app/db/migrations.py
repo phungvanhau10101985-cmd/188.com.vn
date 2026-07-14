@@ -4,6 +4,7 @@ Professional migration system for database schema updates - PostgreSQL / SQLite
 """
 
 import logging
+import secrets
 from datetime import datetime, timezone
 from typing import List, Dict, Any
 from sqlalchemy import inspect, text
@@ -20,6 +21,7 @@ from app.models.search_log import SearchLog
 from app.models.push_subscription import UserPushSubscription
 from app.models.email_login_challenge import EmailLoginChallenge
 from app.models.email_trusted_device import EmailTrustedDevice
+from app.models.auth_challenge import AuthActionChallenge, AdminTrustedDevice
 from app.models.birthday_promo import BirthdayPromoEmailLog
 from app.models.promotion import Promotion, PromotionUsage, UserPromotionGrant
 from app.models.admin_feature_test import AdminFeatureTestSetting
@@ -394,6 +396,42 @@ class MigrationManager:
                 return True
         except Exception as e:
             logger.error(f"❌ _sync_table_columns({table_name}) failed: {str(e)}")
+            return False
+
+    def migrate_auth_action_challenge_public_ids(self) -> bool:
+        """Backfill opaque challenge identifiers for upgrades from early auth hardening builds."""
+        try:
+            inspector = inspect(engine)
+            if "auth_action_challenges" not in inspector.get_table_names():
+                return True
+            columns = {col["name"] for col in inspector.get_columns("auth_action_challenges")}
+            if "public_id" not in columns:
+                return False
+            with engine.begin() as conn:
+                rows = conn.execute(
+                    text("SELECT id FROM auth_action_challenges WHERE public_id IS NULL OR public_id = ''")
+                ).fetchall()
+                for row in rows:
+                    conn.execute(
+                        text("UPDATE auth_action_challenges SET public_id = :public_id WHERE id = :id"),
+                        {"public_id": secrets.token_urlsafe(32), "id": row[0]},
+                    )
+                if IS_POSTGRESQL:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE auth_action_challenges "
+                            "ALTER COLUMN public_id SET NOT NULL"
+                        )
+                    )
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS "
+                        "ix_auth_action_challenges_public_id ON auth_action_challenges (public_id)"
+                    )
+                )
+            return True
+        except Exception as exc:
+            logger.error("❌ migrate_auth_action_challenge_public_ids failed: %s", exc)
             return False
 
     def migrate_order_items_sync_columns(self) -> bool:
@@ -849,8 +887,27 @@ class MigrationManager:
         results['email_login_challenges'] = self._create_table_if_not_exists(
             "email_login_challenges", EmailLoginChallenge
         )
+        results['email_login_challenges_sync_columns'] = self._sync_table_columns(
+            "email_login_challenges", EmailLoginChallenge
+        )
         results['email_trusted_devices'] = self._create_table_if_not_exists(
             "email_trusted_devices", EmailTrustedDevice
+        )
+        results['email_trusted_devices_sync_columns'] = self._sync_table_columns(
+            "email_trusted_devices", EmailTrustedDevice
+        )
+        results['auth_action_challenges'] = self._create_table_if_not_exists(
+            "auth_action_challenges", AuthActionChallenge
+        )
+        results['auth_action_challenges_sync_columns'] = self._sync_table_columns(
+            "auth_action_challenges", AuthActionChallenge
+        )
+        results['auth_action_challenges_public_ids'] = self.migrate_auth_action_challenge_public_ids()
+        results['admin_trusted_devices'] = self._create_table_if_not_exists(
+            "admin_trusted_devices", AdminTrustedDevice
+        )
+        results['admin_trusted_devices_sync_columns'] = self._sync_table_columns(
+            "admin_trusted_devices", AdminTrustedDevice
         )
         # 14. bank_accounts: mã NH + URL mẫu QR SePay/VietQR
         results['bank_accounts_sync_columns'] = self._sync_table_columns("bank_accounts", BankAccount)

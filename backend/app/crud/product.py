@@ -6791,6 +6791,31 @@ def get_all_products_for_export(db: Session) -> List[Dict]:
         logger.error(f"❌ Error getting products for export: {str(e)}")
         raise
 
+
+def get_products_for_export_by_ids(db: Session, product_ids: List[str]) -> List[Dict]:
+    """Get selected products in Excel format by product_id."""
+    ids = list(dict.fromkeys(str(pid).strip() for pid in product_ids if str(pid).strip()))
+    if not ids:
+        return []
+    excel_rows: List[Dict] = []
+    try:
+        query = (
+            db.query(Product)
+            .filter(Product.product_id.in_(ids))
+            .order_by(Product.id.asc())
+        )
+        for product in query:
+            excel_row = product_to_excel_row(product)
+            if excel_row:
+                excel_rows.append(excel_row)
+        logger.info(
+            f"📤 Prepared {len(excel_rows)} selected products for export (requested {len(ids)})"
+        )
+        return excel_rows
+    except Exception as e:
+        logger.error(f"❌ Error getting selected products for export: {str(e)}")
+        raise
+
 # ========== UTILITY FUNCTIONS ==========
 
 def fix_all_slugs(db: Session) -> Dict[str, Any]:

@@ -4,10 +4,14 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { apiClient } from '@/lib/api-client';
+import { ApiRequestError, apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ToastProvider';
 import AffiliateLinkConverter from '@/components/affiliate/AffiliateLinkConverter';
 import Button from '@/components/ui/Button';
+import StepUpOtpModal, {
+  clearRecentStepUp,
+  hasRecentStepUp,
+} from '@/components/auth/StepUpOtpModal';
 
 function fmt(amount: number) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount || 0);
@@ -34,6 +38,8 @@ export default function WalletPage() {
   const REFERRED_ORDERS_PAGE = 20;
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [withdrawing, setWithdrawing] = useState(false);
+  const [pendingWithdrawAmount, setPendingWithdrawAmount] = useState<number | null>(null);
+  const [showWithdrawOtp, setShowWithdrawOtp] = useState(false);
   const [copied, setCopied] = useState(false);
   const [applying, setApplying] = useState(false);
   const [socialLinksText, setSocialLinksText] = useState('');
@@ -105,23 +111,40 @@ export default function WalletPage() {
     }
   };
 
+  const completeWithdraw = async (amount: number) => {
+    setWithdrawing(true);
+    try {
+      await apiClient.requestWalletWithdraw(amount);
+      pushToast({ title: 'Đã gửi yêu cầu rút tiền', description: 'Admin sẽ duyệt trong thời gian sớm nhất.', variant: 'success' });
+      setWithdrawAmount('');
+      setPendingWithdrawAmount(null);
+      setShowWithdrawOtp(false);
+      await reload();
+    } catch (err: any) {
+      if (err instanceof ApiRequestError && err.code === 'step_up_required') {
+        clearRecentStepUp('sensitive_action');
+        setPendingWithdrawAmount(amount);
+        setShowWithdrawOtp(true);
+        return;
+      }
+      pushToast({ title: 'Không thể rút tiền', description: err?.message || 'Vui lòng thử lại', variant: 'error' });
+    } finally {
+      setWithdrawing(false);
+    }
+  };
+
   const handleWithdraw = async () => {
     const amount = Number(String(withdrawAmount).replace(/\D/g, ''));
     if (!amount || amount <= 0) {
       pushToast({ title: 'Nhập số tiền hợp lệ', variant: 'info' });
       return;
     }
-    setWithdrawing(true);
-    try {
-      await apiClient.requestWalletWithdraw(amount);
-      pushToast({ title: 'Đã gửi yêu cầu rút tiền', description: 'Admin sẽ duyệt trong thời gian sớm nhất.', variant: 'success' });
-      setWithdrawAmount('');
-      await reload();
-    } catch (err: any) {
-      pushToast({ title: 'Không thể rút tiền', description: err?.message || 'Vui lòng thử lại', variant: 'error' });
-    } finally {
-      setWithdrawing(false);
+    if (!hasRecentStepUp('sensitive_action')) {
+      setPendingWithdrawAmount(amount);
+      setShowWithdrawOtp(true);
+      return;
     }
+    await completeWithdraw(amount);
   };
 
   const submitApplication = async () => {
@@ -185,6 +208,18 @@ export default function WalletPage() {
 
   return (
     <div className="space-y-4">
+      {showWithdrawOtp && pendingWithdrawAmount ? (
+        <StepUpOtpModal
+          purpose="sensitive_action"
+          title="Xác minh yêu cầu rút tiền"
+          description={`Xác minh OTP trước khi gửi yêu cầu rút ${fmt(pendingWithdrawAmount)}.`}
+          onClose={() => {
+            setShowWithdrawOtp(false);
+            setPendingWithdrawAmount(null);
+          }}
+          onVerified={() => completeWithdraw(pendingWithdrawAmount)}
+        />
+      ) : null}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="bg-gradient-to-r from-[#ea580c] to-[#c2410c] text-white px-5 py-6">
           <h1 className="text-xl font-bold">Ví Affiliate</h1>

@@ -1,0 +1,27 @@
+# Proxy ảnh Bunny qua cùng domain 188.com.vn — khách ISP chặn *.b-cdn.net vẫn xem được.
+# Include TRONG server { listen 443 … server_name 188.com.vn; } — trước location / {
+#
+# Sau khi bật:
+#   BUNNY_CDN_PUBLIC_BASE=https://188.com.vn/cdn-media
+#   NEXT_PUBLIC_CDN_URL=https://188.com.vn/cdn-media
+# Rebuild frontend + restart API. URL cũ *.b-cdn.net trong DB vẫn được frontend rewrite tự động.
+#
+# Ưu tiên dài hạn: custom host cdn.188.com.vn trên Bunny (cache edge, không tốn băng thông VPS).
+
+location /cdn-media/ {
+    proxy_pass https://188comvn.b-cdn.net/;
+    proxy_ssl_server_name on;
+    proxy_set_header Host 188comvn.b-cdn.net;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    proxy_http_version 1.1;
+    proxy_connect_timeout 15s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
+
+    # Cache nhẹ trên Nginx (ảnh ít đổi) — tuỳ chọn
+    proxy_cache_valid 200 7d;
+    add_header X-CDN-Proxy "188.com.vn" always;
+}

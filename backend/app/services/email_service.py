@@ -1146,6 +1146,31 @@ def send_login_otp_email(to_email: str, code: str, expire_minutes: int) -> None:
     send_email(to_email, subject, text_body, html_body)
 
 
+def send_security_otp_email(to_email: str, code: str, expire_minutes: int, purpose: str) -> None:
+    purpose_labels = {
+        "admin_login": "đăng nhập quản trị trên thiết bị mới",
+        "admin_elevation": "mở khu vực quản trị",
+        "sensitive_action": "thực hiện thao tác bảo mật",
+    }
+    label = purpose_labels.get(purpose, "xác minh thao tác")
+    subject = f"Mã xác minh {label} 188.com.vn"
+    if settings.EMAIL_SUBJECT_PREFIX:
+        subject = f"{settings.EMAIL_SUBJECT_PREFIX} {subject}"
+    text_body = (
+        f"Bạn đang {label}.\n\n"
+        f"Mã xác minh: {code}\n"
+        f"Mã có hiệu lực {expire_minutes} phút và chỉ dùng một lần.\n\n"
+        "Nếu bạn không thực hiện thao tác này, hãy bỏ qua email và kiểm tra bảo mật tài khoản."
+    )
+    html_body = (
+        f"<p>Bạn đang <strong>{label}</strong>.</p>"
+        f"<p>Mã xác minh: <strong style=\"font-size:22px;letter-spacing:4px;\">{code}</strong></p>"
+        f"<p>Hiệu lực {expire_minutes} phút và chỉ dùng một lần.</p>"
+        "<p>Nếu bạn không thực hiện thao tác này, hãy bỏ qua email và kiểm tra bảo mật tài khoản.</p>"
+    )
+    send_email(to_email, subject, text_body, html_body)
+
+
 def send_bank_account_otp_email(to_email: str, code: str, expire_minutes: int) -> None:
     subject = "Mã xác minh tài khoản ngân hàng 188.com.vn"
     if settings.EMAIL_SUBJECT_PREFIX:

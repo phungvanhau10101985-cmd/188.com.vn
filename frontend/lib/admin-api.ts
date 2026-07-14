@@ -2021,10 +2021,18 @@ export const adminProductAPI = {
       },
     ),
 
-  exportExcel: async () => {
+  exportExcel: async (productIds?: string[]) => {
     const token = getAdminToken();
     if (!token) throw new Error('Chưa đăng nhập admin');
-    const url = `${getApiBaseUrl()}/import-export/export/excel?download=true`;
+    const sp = new URLSearchParams();
+    sp.set('download', 'true');
+    if (productIds && productIds.length > 0) {
+      for (const id of productIds) {
+        const trimmed = id.trim();
+        if (trimmed) sp.append('product_ids', trimmed);
+      }
+    }
+    const url = `${getApiBaseUrl()}/import-export/export/excel?${sp.toString()}`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
       signal: AbortSignal.timeout(900_000),
@@ -4412,12 +4420,15 @@ export const adminFreightSettlementAPI = {
 };
 
 export interface AdminLoginResponse {
-  access_token: string;
+  access_token?: string | null;
   token_type?: string;
   admin_id?: number;
   username?: string;
-  role: string;
+  role?: string | null;
   modules?: string[] | null;
+  otp_required?: boolean;
+  challenge_id?: string | null;
+  message?: string | null;
 }
 
 export async function adminLogin(username: string, password: string): Promise<AdminLoginResponse> {
@@ -4425,10 +4436,34 @@ export async function adminLogin(username: string, password: string): Promise<Ad
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...ngrokFetchHeaders() },
     body: JSON.stringify({ username, password }),
+    credentials: 'include',
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     const msg = formatFastApiDetail((err as { detail?: unknown }).detail) || 'Đăng nhập thất bại';
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+export async function adminLoginVerifyOtp(
+  challengeId: string,
+  otp: string,
+  rememberDevice: boolean,
+): Promise<AdminLoginResponse> {
+  const res = await fetch(`${getApiBaseUrl()}/admin/login/verify-otp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...ngrokFetchHeaders() },
+    body: JSON.stringify({
+      challenge_id: challengeId,
+      otp,
+      remember_device: rememberDevice,
+    }),
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = formatFastApiDetail((err as { detail?: unknown }).detail) || 'Mã OTP không hợp lệ';
     throw new Error(msg);
   }
   return res.json();

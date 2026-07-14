@@ -5,12 +5,13 @@ import json
 import mimetypes
 import os
 import re
+import secrets
 import time
 import uuid
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import case, func
@@ -18,6 +19,7 @@ from typing import List, Optional
 from app.db.session import get_db
 from app import crud, models
 from app.models.admin import AdminUser, AdminRole
+from app.models.auth_challenge import AdminTrustedDevice, AuthActionChallenge
 from app.schemas.admin import (
     AdminLogin,
     AdminTokenResponse,
@@ -31,6 +33,7 @@ from app.schemas.admin import (
     StaffRolePresetPutPayload,
 )
 from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate, BankAccountResponse
+from app.schemas.step_up import AdminOtpVerify
 from app.schemas.user import (
     UserResponse,
     UserAdminUpdate,
@@ -79,8 +82,15 @@ from app.services.image_raster_jpeg import raster_bytes_to_jpeg_bytes
 from app.services.linked_admin_staff import apply_linked_staff_role
 from app.services.staff_admin_cleanup import delete_staff_admin_account
 from app.services.user_public_response import admin_panel_user_response, batch_admin_panel_user_responses
-from app.core.security import create_admin_token, require_privileged_admin, require_module_permission, require_super_admin
+from app.core.security import (
+    create_admin_token,
+    get_current_admin,
+    require_module_permission,
+    require_privileged_admin,
+    require_super_admin,
+)
 from app.core.config import settings
+from app.services.auth_challenge import consume_challenge, hash_secret, issue_challenge, utcnow
 from app.services.import_scraper_cookies import (
     delete_scraper_cookies,
     save_scraper_cookies_from_text,
@@ -206,8 +216,12 @@ def admin_delete_import_1688_cookie_settings(
 
 
 @router.post("/login", response_model=AdminTokenResponse)
-def admin_login(login_data: AdminLogin, db: Session = Depends(get_db)):
-    """Đăng nhập admin - trả về JWT token"""
+def admin_login(
+    login_data: AdminLogin,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Password first; a new administrator device must also complete email OTP."""
     admin = crud.verify_admin_password(db, login_data.username, login_data.password)
     if not admin:
         has_any = db.query(func.count(AdminUser.id)).scalar() or 0
@@ -224,9 +238,44 @@ def admin_login(login_data: AdminLogin, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail=msg)
     if not admin.is_active:
         raise HTTPException(status_code=403, detail="Tài khoản admin đã bị vô hiệu hóa")
+    trusted_raw = request.cookies.get(settings.ADMIN_TRUSTED_DEVICE_COOKIE_NAME)
+    trusted = None
+    if trusted_raw:
+        trusted = (
+            db.query(AdminTrustedDevice)
+            .filter(
+                AdminTrustedDevice.admin_id == admin.id,
+                AdminTrustedDevice.token_hash == hash_secret(trusted_raw),
+                AdminTrustedDevice.revoked_at.is_(None),
+                AdminTrustedDevice.expires_at > utcnow(),
+            )
+            .first()
+        )
+    if settings.ADMIN_MFA_ENABLED and not trusted:
+        try:
+            challenge = issue_challenge(
+                db,
+                subject_type="admin",
+                subject_id=admin.id,
+                purpose="admin_login",
+                email=admin.email,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Không gửi được OTP quản trị. Vui lòng thử lại.") from exc
+        return AdminTokenResponse(
+            otp_required=True,
+            challenge_id=challenge.public_id,
+            admin_id=admin.id,
+            username=admin.username,
+            role=admin.role.value if hasattr(admin.role, "value") else str(admin.role),
+            message="Thiết bị mới: đã gửi OTP tới email quản trị.",
+        )
+    if trusted:
+        trusted.last_used_at = utcnow()
+        db.commit()
     crud.update_admin_last_login(db, admin.id)
     db.refresh(admin)
-    token = create_admin_token(admin.id)
+    token = create_admin_token(admin.id, amr=["password", "trusted_device"] if trusted else ["password"])
     role_value = admin.role.value if hasattr(admin.role, "value") else str(admin.role)
     return AdminTokenResponse(
         access_token=token,
@@ -236,6 +285,93 @@ def admin_login(login_data: AdminLogin, db: Session = Depends(get_db)):
         role=role_value,
         modules=effective_module_keys(admin, db),
     )
+
+
+@router.post("/login/verify-otp", response_model=AdminTokenResponse)
+def admin_login_verify_otp(
+    body: AdminOtpVerify,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    challenge = db.query(AuthActionChallenge).filter(AuthActionChallenge.public_id == body.challenge_id).first()
+    if not challenge or challenge.subject_type != "admin" or challenge.purpose != "admin_login":
+        raise HTTPException(status_code=400, detail="Yêu cầu OTP quản trị không hợp lệ.")
+    admin = db.query(AdminUser).filter(AdminUser.id == challenge.subject_id).first()
+    if not admin or not admin.is_active:
+        raise HTTPException(status_code=403, detail="Tài khoản admin không hoạt động.")
+    try:
+        consume_challenge(
+            db,
+            challenge_id=body.challenge_id,
+            subject_type="admin",
+            subject_id=admin.id,
+            purpose="admin_login",
+            otp=body.otp,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if body.remember_device:
+        raw = secrets.token_urlsafe(48)
+        row = AdminTrustedDevice(
+            admin_id=admin.id,
+            token_hash=hash_secret(raw),
+            expires_at=utcnow() + timedelta(days=int(settings.ADMIN_TRUSTED_DEVICE_DAYS)),
+        )
+        db.add(row)
+        db.commit()
+        response.set_cookie(
+            key=settings.ADMIN_TRUSTED_DEVICE_COOKIE_NAME,
+            value=raw,
+            max_age=int(settings.ADMIN_TRUSTED_DEVICE_DAYS) * 24 * 60 * 60,
+            httponly=True,
+            secure=settings.AUTH_COOKIE_SECURE,
+            samesite=settings.AUTH_COOKIE_SAMESITE,
+            path="/",
+        )
+
+    crud.update_admin_last_login(db, admin.id)
+    db.refresh(admin)
+    token = create_admin_token(admin.id, amr=["password", "otp"])
+    role_value = admin.role.value if hasattr(admin.role, "value") else str(admin.role)
+    return AdminTokenResponse(
+        access_token=token,
+        token_type="bearer",
+        admin_id=admin.id,
+        username=admin.username,
+        role=role_value,
+        modules=effective_module_keys(admin, db),
+    )
+
+
+@router.post("/trusted-device/revoke")
+def admin_revoke_current_trusted_device(
+    request: Request,
+    response: Response,
+    current_admin: AdminUser = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    raw = request.cookies.get(settings.ADMIN_TRUSTED_DEVICE_COOKIE_NAME)
+    if raw:
+        row = (
+            db.query(AdminTrustedDevice)
+            .filter(
+                AdminTrustedDevice.admin_id == current_admin.id,
+                AdminTrustedDevice.token_hash == hash_secret(raw),
+                AdminTrustedDevice.revoked_at.is_(None),
+            )
+            .first()
+        )
+        if row:
+            row.revoked_at = utcnow()
+            db.commit()
+    response.delete_cookie(
+        key=settings.ADMIN_TRUSTED_DEVICE_COOKIE_NAME,
+        path="/",
+        secure=settings.AUTH_COOKIE_SECURE,
+        samesite=settings.AUTH_COOKIE_SAMESITE,
+    )
+    return {"ok": True}
 
 
 # ========== BANK ACCOUNTS (admin) - tránh 404 khi router bank_accounts load lỗi ==========

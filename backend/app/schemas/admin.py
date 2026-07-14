@@ -7,12 +7,15 @@ class AdminLogin(BaseModel):
     password: str = Field(..., description="Mật khẩu")
 
 class AdminTokenResponse(BaseModel):
-    access_token: str
+    access_token: Optional[str] = None
     token_type: str = "bearer"
-    admin_id: int
-    username: str
-    role: str
+    admin_id: Optional[int] = None
+    username: Optional[str] = None
+    role: Optional[str] = None
     modules: Optional[List[str]] = Field(None, description="Mục được phép (menu); null nếu không trả")
+    otp_required: bool = False
+    challenge_id: Optional[str] = None
+    message: Optional[str] = None
 
 class AdminCreate(BaseModel):
     username: str

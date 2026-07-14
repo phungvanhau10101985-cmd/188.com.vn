@@ -12,8 +12,10 @@ class EmailLoginChallenge(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email_normalized = Column(String(255), nullable=False, index=True)
+    request_ip_hash = Column(String(64), nullable=True, index=True)
     otp_hash = Column(String(64), nullable=False)
     magic_token_hash = Column(String(64), nullable=False, index=True)
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    attempts = Column(Integer, nullable=False, default=0)
     consumed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

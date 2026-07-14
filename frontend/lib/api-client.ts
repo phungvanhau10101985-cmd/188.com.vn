@@ -34,6 +34,17 @@ import { maybeNotifyRateLimitFromResponse } from '@/lib/rate-limit-notice';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
+export class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'ApiRequestError';
+  }
+}
+
 /** Node từ GET /categories/tree-v2 (taxonomy DB). */
 interface TaxonomyTreeV2Node {
   name: string;
@@ -282,7 +293,15 @@ class ApiClient {
             response.headers.get('Retry-After'),
             errorData,
           );
-          throw new Error(errorData.detail || `API Error: ${response.status}`);
+          const detail = errorData.detail;
+          const message =
+            typeof detail === 'string'
+              ? detail
+              : typeof detail?.message === 'string'
+                ? detail.message
+                : `API Error: ${response.status}`;
+          const code = typeof detail?.code === 'string' ? detail.code : undefined;
+          throw new ApiRequestError(message, response.status, code);
         }
 
         const raw = await response.text();
@@ -1107,6 +1126,25 @@ class ApiClient {
 
   async getProfile(): Promise<any> {
     return this.fetch('/auth/me');
+  }
+
+  async requestStepUp(
+    purpose: 'sensitive_action' | 'admin_elevation',
+  ): Promise<{ challenge_id: string; expires_in_minutes: number; message: string }> {
+    return this.fetch('/auth/step-up/request', {
+      method: 'POST',
+      body: JSON.stringify({ purpose }),
+    });
+  }
+
+  async verifyStepUp(
+    challengeId: string,
+    otp: string,
+  ): Promise<{ ok: boolean; expires_in_minutes: number; message: string }> {
+    return this.fetch('/auth/step-up/verify', {
+      method: 'POST',
+      body: JSON.stringify({ challenge_id: challengeId, otp }),
+    });
   }
 
   /** Phiên khách đã đăng nhập + admin được liên kết → JWT admin (lưu vào admin_token). */

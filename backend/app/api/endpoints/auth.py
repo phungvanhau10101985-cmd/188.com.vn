@@ -12,7 +12,14 @@ import requests
 
 from app.db.session import get_db
 from app.core.config import settings
-from app.core.security import create_access_token, get_current_user, create_admin_token
+from app.core.security import (
+    create_access_token,
+    create_admin_token,
+    create_step_up_token,
+    get_current_user,
+    require_recent_user_auth,
+    verify_recent_user_auth,
+)
 from app.schemas.user import (
     UserCreate, UserResponse, UserLogin, Token,
     UserUpdate, DateOfBirthResponse, SendRegisterOtpRequest, ForgotDateOfBirthRequest,
@@ -20,7 +27,9 @@ from app.schemas.user import (
     TryTrustedDeviceRequest, TryTrustedDeviceResponse,
 )
 from app.schemas.admin import AdminTokenResponse
+from app.schemas.step_up import StepUpRequest, StepUpResponse, StepUpVerify
 from app.models.admin import AdminUser
+from app.models.auth_challenge import AuthActionChallenge
 from app.core.admin_permissions import effective_module_keys
 from app.core.email_identity import identity_email
 from app.crud.user import (
@@ -29,6 +38,7 @@ from app.crud.user import (
 )
 from app import crud as app_crud
 from app.services.email_service import send_account_email, send_login_otp_email
+from app.services.auth_challenge import consume_challenge, issue_challenge
 from app.services.user_public_response import user_response_with_linked_admin
 from app.models.user import User
 from app.models.user_trusted_device import UserTrustedDevice
@@ -479,9 +489,84 @@ def forgot_date_of_birth(body: ForgotDateOfBirthRequest, db: Session = Depends(g
     """Deprecated: quên ngày sinh không còn hỗ trợ."""
     raise HTTPException(status_code=410, detail="Chức năng này không còn hỗ trợ. Vui lòng đăng nhập Gmail.")
 
+@router.post("/step-up/request", response_model=StepUpResponse)
+def request_step_up(
+    body: StepUpRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    recipient_email = current_user.email
+    if body.purpose == "admin_elevation":
+        linked_admin = (
+            db.query(AdminUser)
+            .filter(
+                AdminUser.linked_user_id == current_user.id,
+                AdminUser.is_active.is_(True),
+            )
+            .first()
+        )
+        if not linked_admin:
+            raise HTTPException(status_code=403, detail="Tài khoản không được gán quyền quản trị.")
+        recipient_email = linked_admin.email
+    try:
+        row = issue_challenge(
+            db,
+            subject_type="user",
+            subject_id=current_user.id,
+            purpose=body.purpose,
+            email=recipient_email,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Không gửi được OTP. Vui lòng thử lại.") from exc
+    return StepUpResponse(
+        challenge_id=row.public_id,
+        expires_in_minutes=int(settings.STEP_UP_OTP_EXPIRE_MINUTES),
+        message="Đã gửi mã OTP tới email tài khoản.",
+    )
+
+
+@router.post("/step-up/verify", response_model=StepUpResponse)
+def verify_step_up(
+    body: StepUpVerify,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    challenge = db.query(AuthActionChallenge).filter(AuthActionChallenge.public_id == body.challenge_id).first()
+    if not challenge or challenge.subject_type != "user" or challenge.subject_id != current_user.id:
+        raise HTTPException(status_code=400, detail="Yêu cầu xác minh không hợp lệ.")
+    try:
+        consume_challenge(
+            db,
+            challenge_id=body.challenge_id,
+            subject_type="user",
+            subject_id=current_user.id,
+            purpose=challenge.purpose,
+            otp=body.otp,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    token = create_step_up_token(current_user.id, challenge.purpose)
+    response.set_cookie(
+        key=settings.STEP_UP_COOKIE_NAME,
+        value=token,
+        max_age=int(settings.STEP_UP_RECENT_MINUTES) * 60,
+        httponly=True,
+        secure=settings.AUTH_COOKIE_SECURE,
+        samesite=settings.AUTH_COOKIE_SAMESITE,
+        path="/",
+    )
+    return StepUpResponse(
+        expires_in_minutes=int(settings.STEP_UP_RECENT_MINUTES),
+        message="Xác minh thành công. Bạn có thể tiếp tục thao tác.",
+    )
+
+
 @router.post("/admin-session-token", response_model=AdminTokenResponse)
 def issue_admin_token_for_linked_customer(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_recent_user_auth("admin_elevation")),
     db: Session = Depends(get_db),
 ):
     """
@@ -502,7 +587,7 @@ def issue_admin_token_for_linked_customer(
         )
     app_crud.update_admin_last_login(db, admin_row.id)
     db.refresh(admin_row)
-    token = create_admin_token(admin_row.id)
+    token = create_admin_token(admin_row.id, amr=["customer_session", "otp"])
     role_value = admin_row.role.value if hasattr(admin_row.role, "value") else str(admin_row.role)
     return AdminTokenResponse(
         access_token=token,
@@ -529,16 +614,25 @@ def logout(response: Response):
         secure=settings.AUTH_COOKIE_SECURE,
         samesite=settings.AUTH_COOKIE_SAMESITE,
     )
+    response.delete_cookie(
+        key=settings.STEP_UP_COOKIE_NAME,
+        path="/",
+        secure=settings.AUTH_COOKIE_SECURE,
+        samesite=settings.AUTH_COOKIE_SAMESITE,
+    )
     return {"ok": True}
 
 @router.put("/me", response_model=UserResponse)
 def update_current_user_info(
     user_update: UserUpdate,
     background_tasks: BackgroundTasks,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Cập nhật thông tin user (trừ số điện thoại)."""
+    if user_update.email and identity_email(str(user_update.email)) != identity_email(current_user.email):
+        verify_recent_user_auth(request, current_user, "sensitive_action")
     try:
         updated_user = update_user(db, current_user.id, user_update)
     except ValueError as exc:

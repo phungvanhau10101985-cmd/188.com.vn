@@ -171,13 +171,26 @@ class Settings:
         # ========================
         # SECURITY CONFIGURATION
         # ========================
-        self.SECRET_KEY: str = os.getenv("SECRET_KEY", "H8$kL3!pQ7@mR2#sV5%wZ9^yB1*nJ4(cF6_gH0)dA+eQ~lO{iU[Y}8P]3rT|5W")
+        self.SECRET_KEY: str = os.getenv("SECRET_KEY", "").strip()
         self.ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
         self.ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))  # 7 days
-        # Phiên sau đăng nhập OTP email (JWT) — mặc định 365 ngày, coi như "giữ đăng nhập" lâu trên từng trình duyệt
-        self.EMAIL_OTP_REMEMBER_DAYS: int = int(os.getenv("EMAIL_OTP_REMEMBER_DAYS", "365"))
+        self.ADMIN_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ADMIN_ACCESS_TOKEN_EXPIRE_MINUTES", "480"))
+        # Phiên OTP email không dài hơn thời gian tin cậy thiết bị mặc định.
+        self.EMAIL_OTP_REMEMBER_DAYS: int = int(os.getenv("EMAIL_OTP_REMEMBER_DAYS", "30"))
+        self.STEP_UP_OTP_EXPIRE_MINUTES: int = int(os.getenv("STEP_UP_OTP_EXPIRE_MINUTES", "10"))
+        self.STEP_UP_OTP_MAX_ATTEMPTS: int = int(os.getenv("STEP_UP_OTP_MAX_ATTEMPTS", "5"))
+        self.STEP_UP_RECENT_MINUTES: int = int(os.getenv("STEP_UP_RECENT_MINUTES", "10"))
+        self.ADMIN_TRUSTED_DEVICE_DAYS: int = int(os.getenv("ADMIN_TRUSTED_DEVICE_DAYS", "30"))
         # Cookie httpOnly cho JWT (luồng /auth/email/*)
         self.AUTH_JWT_COOKIE_NAME: str = os.getenv("AUTH_JWT_COOKIE_NAME", "188_access_token").strip() or "188_access_token"
+        self.AUTH_TRUSTED_DEVICE_COOKIE_NAME: str = os.getenv(
+            "AUTH_TRUSTED_DEVICE_COOKIE_NAME", "188_trusted_device"
+        ).strip() or "188_trusted_device"
+        self.STEP_UP_COOKIE_NAME: str = os.getenv("STEP_UP_COOKIE_NAME", "188_step_up").strip() or "188_step_up"
+        self.ADMIN_TRUSTED_DEVICE_COOKIE_NAME: str = os.getenv(
+            "ADMIN_TRUSTED_DEVICE_COOKIE_NAME", "188_admin_trusted"
+        ).strip() or "188_admin_trusted"
+        self.ADMIN_MFA_ENABLED: bool = os.getenv("ADMIN_MFA_ENABLED", "true").strip().lower() in ("1", "true", "yes")
         _env = os.getenv("ENVIRONMENT", "development").lower()
         _cookie_secure_env = os.getenv("AUTH_COOKIE_SECURE", "").strip().lower()
         self.AUTH_COOKIE_SECURE: bool = (
