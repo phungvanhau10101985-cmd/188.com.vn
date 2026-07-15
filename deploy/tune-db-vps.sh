@@ -18,6 +18,7 @@ else
 fi
 
 bash "${ROOT}/deploy/ensure-api-safe-env.sh" 2>/dev/null || true
+bash "${ROOT}/deploy/ensure-secret-key.sh" 2>/dev/null || true
 
 echo
 echo "==> [tuning] 2/4 Index ix_products_active_category_id"

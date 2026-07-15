@@ -197,6 +197,10 @@ else
   echo "==> Playwright: DEPLOY_SKIP_PLAYWRIGHT=1 — bỏ qua."
 fi
 
+echo "==> Security: SECRET_KEY (generate lần đầu nếu thiếu / key yếu)"
+bash "${PROJECT_ROOT}/deploy/ensure-secret-key.sh" 2>/dev/null || \
+  echo "⚠️  ensure-secret-key có bước lỗi — kiểm tra backend/.env"
+
 cd "${BACKEND}"
 if [[ "${DEPLOY_SKIP_DB_INIT:-0}" != "1" ]]; then
   echo "==> Database: PostgreSQL (tạo DB nếu bật) + init_database_tables (create_all + migrations: admin_users, orders, …)"
