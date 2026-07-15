@@ -12,8 +12,11 @@ from starlette.requests import Request
 from app.api.endpoints import auth_email
 from app.core.config import settings
 from app.core.security import (
+    ADMIN_DESTRUCTIVE_STEP_UP_PURPOSE,
+    create_admin_step_up_token,
     create_admin_token,
     create_step_up_token,
+    verify_recent_admin_auth,
     verify_recent_user_auth,
 )
 from app.models.auth_challenge import AuthActionChallenge
@@ -51,6 +54,17 @@ def test_step_up_token_is_user_and_purpose_bound():
 
     with pytest.raises(HTTPException) as exc:
         verify_recent_user_auth(request, user, "admin_elevation")
+    assert exc.value.status_code == 428
+
+
+def test_admin_step_up_token_is_admin_bound():
+    admin = SimpleNamespace(id=7)
+    token = create_admin_step_up_token(7, ADMIN_DESTRUCTIVE_STEP_UP_PURPOSE)
+    request = _request_with_cookie(settings.ADMIN_STEP_UP_COOKIE_NAME, token)
+    verify_recent_admin_auth(request, admin, ADMIN_DESTRUCTIVE_STEP_UP_PURPOSE)
+
+    with pytest.raises(HTTPException) as exc:
+        verify_recent_admin_auth(request, SimpleNamespace(id=8), ADMIN_DESTRUCTIVE_STEP_UP_PURPOSE)
     assert exc.value.status_code == 428
 
 

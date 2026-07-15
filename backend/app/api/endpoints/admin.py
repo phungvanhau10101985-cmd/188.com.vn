@@ -33,7 +33,7 @@ from app.schemas.admin import (
     StaffRolePresetPutPayload,
 )
 from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate, BankAccountResponse
-from app.schemas.step_up import AdminOtpVerify
+from app.schemas.step_up import AdminOtpVerify, AdminStepUpResponse
 from app.schemas.user import (
     UserResponse,
     UserAdminUpdate,
@@ -83,10 +83,14 @@ from app.services.linked_admin_staff import apply_linked_staff_role
 from app.services.staff_admin_cleanup import delete_staff_admin_account
 from app.services.user_public_response import admin_panel_user_response, batch_admin_panel_user_responses
 from app.core.security import (
+    ADMIN_DESTRUCTIVE_STEP_UP_PURPOSE,
+    create_admin_step_up_token,
     create_admin_token,
     get_current_admin,
     require_module_permission,
+    require_module_permission_with_destructive_step_up,
     require_privileged_admin,
+    require_privileged_admin_with_destructive_step_up,
     require_super_admin,
 )
 from app.core.config import settings
@@ -344,6 +348,76 @@ def admin_login_verify_otp(
     )
 
 
+@router.post("/step-up/request", response_model=AdminStepUpResponse)
+def admin_request_destructive_step_up(
+    current_admin: AdminUser = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Gửi OTP email admin trước thao tác xóa / import phá dữ liệu hàng loạt."""
+    if not (current_admin.email or "").strip():
+        raise HTTPException(status_code=400, detail="Tài khoản admin chưa có email để nhận OTP.")
+    try:
+        row = issue_challenge(
+            db,
+            subject_type="admin",
+            subject_id=current_admin.id,
+            purpose=ADMIN_DESTRUCTIVE_STEP_UP_PURPOSE,
+            email=current_admin.email,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Không gửi được OTP quản trị. Vui lòng thử lại.") from exc
+    return AdminStepUpResponse(
+        challenge_id=row.public_id,
+        expires_in_minutes=int(settings.STEP_UP_OTP_EXPIRE_MINUTES),
+        message="Đã gửi mã OTP tới email quản trị.",
+    )
+
+
+@router.post("/step-up/verify", response_model=AdminStepUpResponse)
+def admin_verify_destructive_step_up(
+    body: AdminOtpVerify,
+    response: Response,
+    current_admin: AdminUser = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    challenge = db.query(AuthActionChallenge).filter(AuthActionChallenge.public_id == body.challenge_id).first()
+    if (
+        not challenge
+        or challenge.subject_type != "admin"
+        or challenge.subject_id != current_admin.id
+        or challenge.purpose != ADMIN_DESTRUCTIVE_STEP_UP_PURPOSE
+    ):
+        raise HTTPException(status_code=400, detail="Yêu cầu xác minh không hợp lệ.")
+    try:
+        consume_challenge(
+            db,
+            challenge_id=body.challenge_id,
+            subject_type="admin",
+            subject_id=current_admin.id,
+            purpose=ADMIN_DESTRUCTIVE_STEP_UP_PURPOSE,
+            otp=body.otp,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    token = create_admin_step_up_token(current_admin.id)
+    response.set_cookie(
+        key=settings.ADMIN_STEP_UP_COOKIE_NAME,
+        value=token,
+        max_age=int(settings.STEP_UP_RECENT_MINUTES) * 60,
+        httponly=True,
+        secure=settings.AUTH_COOKIE_SECURE,
+        samesite=settings.AUTH_COOKIE_SAMESITE,
+        path="/",
+    )
+    return AdminStepUpResponse(
+        expires_in_minutes=int(settings.STEP_UP_RECENT_MINUTES),
+        message="Xác minh thành công. Bạn có thể tiếp tục thao tác.",
+        step_up_token=token,
+    )
+
+
 @router.post("/trusted-device/revoke")
 def admin_revoke_current_trusted_device(
     request: Request,
@@ -559,7 +633,7 @@ def admin_update_user(
 def admin_delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    _: models.AdminUser = Depends(require_module_permission("members")),
+    _: models.AdminUser = Depends(require_module_permission_with_destructive_step_up("members")),
 ):
     """Xóa vĩnh viễn tài khoản thành viên."""
     user = crud.user.get_user_by_id(db, user_id)
@@ -648,7 +722,7 @@ def admin_list_staff_accounts(
 def admin_delete_staff_account(
     admin_id: int,
     db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(require_privileged_admin),
+    current_admin: AdminUser = Depends(require_privileged_admin_with_destructive_step_up()),
 ):
     """Xóa tài khoản admin đã gỡ quyền (is_active=false, không liên kết thành viên)."""
     target = db.query(AdminUser).filter(AdminUser.id == admin_id).first()

@@ -3,6 +3,11 @@
  * Dùng proxy /api/v1 (ổn định trên VPS); tránh route riêng /api/admin/... có thể chưa deploy.
  */
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
+import {
+  adminStepUpHeaders,
+  isAdminStepUpRequiredDetail,
+  promptAdminStepUpAndRetry,
+} from '@/lib/admin-step-up';
 
 export type AdminBulkDeleteProductsResult = {
   deleted: string[];
@@ -15,9 +20,7 @@ function adminToken(): string | null {
   return localStorage.getItem('admin_token');
 }
 
-export async function bulkDeleteAdminProducts(
-  productIds: string[],
-): Promise<AdminBulkDeleteProductsResult> {
+async function bulkDeleteOnce(productIds: string[]): Promise<AdminBulkDeleteProductsResult> {
   const token = adminToken();
   if (!token) throw new Error('Chưa đăng nhập admin');
 
@@ -27,10 +30,19 @@ export async function bulkDeleteAdminProducts(
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
       ...ngrokFetchHeaders(),
+      ...adminStepUpHeaders(),
     },
     body: JSON.stringify({ product_ids: productIds }),
     cache: 'no-store',
+    credentials: 'include',
   });
+
+  if (res.status === 428) {
+    const err = await res.clone().json().catch(() => ({}));
+    if (isAdminStepUpRequiredDetail((err as { detail?: unknown }).detail)) {
+      return promptAdminStepUpAndRetry(() => bulkDeleteOnce(productIds));
+    }
+  }
 
   if (res.status === 401) {
     localStorage.removeItem('admin_token');
@@ -66,4 +78,10 @@ export async function bulkDeleteAdminProducts(
     deleted_count: data.deleted_count ?? 0,
     errors: data.errors ?? [],
   };
+}
+
+export async function bulkDeleteAdminProducts(
+  productIds: string[],
+): Promise<AdminBulkDeleteProductsResult> {
+  return bulkDeleteOnce(productIds);
 }

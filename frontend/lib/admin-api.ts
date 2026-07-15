@@ -2,6 +2,11 @@
  * Admin API client - dùng admin_token (Bearer) cho các endpoint /api/v1/orders/admin/*
  */
 import { getApiBaseUrl, getBackendOriginUrl, ngrokFetchHeaders } from '@/lib/api-base';
+import {
+  adminStepUpHeaders,
+  isAdminStepUpRequiredDetail,
+  promptAdminStepUpAndRetry,
+} from '@/lib/admin-step-up';
 
 /** Grep trên trình duyệt (Console): IMPORT_EXCEL_CLIENT */
 const IMPORT_EXCEL_CLIENT_TAG = '[IMPORT_EXCEL_CLIENT]';
@@ -185,6 +190,31 @@ function formatFastApiDetail(detail: unknown): string {
 /** Scrape nguồn có thể chạy lâu — phải ≥ timeout proxy/nginx (khuyến nghị 600s+ cho location API). */
 export const ADMIN_SOURCE_STOCK_SCAN_TIMEOUT_MS = 660_000;
 
+async function adminRawFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const token = getAdminToken();
+  if (!token) {
+    throw new Error('Chưa đăng nhập admin');
+  }
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    ...ngrokFetchHeaders(),
+    ...adminStepUpHeaders(),
+    ...(init.headers as Record<string, string>),
+  };
+  const res = await fetch(url, {
+    ...init,
+    headers,
+    credentials: 'include',
+  });
+  if (res.status === 428) {
+    const err = await res.clone().json().catch(() => ({}));
+    if (isAdminStepUpRequiredDetail((err as { detail?: unknown }).detail)) {
+      return promptAdminStepUpAndRetry(() => adminRawFetch(url, init));
+    }
+  }
+  return res;
+}
+
 async function fetchAdmin<T>(
   endpoint: string,
   options: RequestInit & { timeoutMs?: number } = {},
@@ -198,6 +228,7 @@ async function fetchAdmin<T>(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     ...ngrokFetchHeaders(),
+    ...adminStepUpHeaders(),
     ...(fetchOpts.headers as Record<string, string>),
   };
   if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
@@ -213,7 +244,13 @@ async function fetchAdmin<T>(
   }
 
   try {
-    const res = await fetch(url, { ...fetchOpts, headers, signal: ctrl.signal });
+    const res = await fetch(url, { ...fetchOpts, headers, signal: ctrl.signal, credentials: 'include' });
+    if (res.status === 428) {
+      const err = await res.clone().json().catch(() => ({}));
+      if (isAdminStepUpRequiredDetail((err as { detail?: unknown }).detail)) {
+        return promptAdminStepUpAndRetry(() => fetchAdmin<T>(endpoint, options));
+      }
+    }
     if (res.status === 401) {
       if (typeof window !== 'undefined') {
         localStorage.removeItem('admin_token');
@@ -1069,6 +1106,9 @@ function postImportExcelAsyncMultipart(
     xhr.open('POST', url);
     xhr.timeout = 35 * 60 * 1000;
     xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    Object.entries(adminStepUpHeaders()).forEach(([k, v]) => {
+      if (v) xhr.setRequestHeader(k, v);
+    });
     Object.entries(ng).forEach(([k, v]) => {
       if (v) xhr.setRequestHeader(k, v);
     });
@@ -1110,6 +1150,14 @@ function postImportExcelAsyncMultipart(
       const text = xhr.responseText || '';
       try {
         const data = text ? (JSON.parse(text) as { detail?: unknown; job_id?: string }) : {};
+        if (xhr.status === 428 && isAdminStepUpRequiredDetail(data?.detail)) {
+          void promptAdminStepUpAndRetry(() =>
+            postImportExcelAsyncMultipart(url, token, file, onUploadProgress),
+          )
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
         if (xhr.status === 202 && data.job_id) {
           resolve(data as { job_id: string; message?: string; poll_url?: string });
           return;
@@ -1577,16 +1625,13 @@ export const adminProductAPI = {
     ),
 
   importExcel: async (file: File, overwrite = false) => {
-    const token = getAdminToken();
-    if (!token) throw new Error('Chưa đăng nhập admin');
     const form = new FormData();
     form.append('file', file);
     const url = `${getApiBaseUrl()}/import-export/import/excel?overwrite=${overwrite}`;
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await adminRawFetch(url, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
         body: form,
       });
     } catch (err) {
@@ -4468,3 +4513,19 @@ export async function adminLoginVerifyOtp(
   }
   return res.json();
 }
+
+export const adminStepUpAPI = {
+  request: () =>
+    fetchAdmin<{ challenge_id: string; expires_in_minutes: number; message: string }>(
+      '/admin/step-up/request',
+      { method: 'POST', body: '{}' },
+    ),
+  verify: (challengeId: string, otp: string) =>
+    fetchAdmin<{ expires_in_minutes: number; message: string; step_up_token?: string }>(
+      '/admin/step-up/verify',
+      {
+        method: 'POST',
+        body: JSON.stringify({ challenge_id: challengeId, otp, remember_device: false }),
+      },
+    ),
+};

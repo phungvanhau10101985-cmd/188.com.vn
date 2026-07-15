@@ -190,6 +190,9 @@ class Settings:
         self.ADMIN_TRUSTED_DEVICE_COOKIE_NAME: str = os.getenv(
             "ADMIN_TRUSTED_DEVICE_COOKIE_NAME", "188_admin_trusted"
         ).strip() or "188_admin_trusted"
+        self.ADMIN_STEP_UP_COOKIE_NAME: str = os.getenv(
+            "ADMIN_STEP_UP_COOKIE_NAME", "188_admin_step_up"
+        ).strip() or "188_admin_step_up"
         self.ADMIN_MFA_ENABLED: bool = os.getenv("ADMIN_MFA_ENABLED", "true").strip().lower() in ("1", "true", "yes")
         _env = os.getenv("ENVIRONMENT", "development").lower()
         _cookie_secure_env = os.getenv("AUTH_COOKIE_SECURE", "").strip().lower()

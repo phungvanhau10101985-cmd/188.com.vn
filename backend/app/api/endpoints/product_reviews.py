@@ -24,7 +24,7 @@ from app.schemas.product_review import (
     UsefulToggleResponse,
 )
 from app.core.admin_permissions import admin_allowed_operation
-from app.core.security import get_current_user, get_current_user_optional, require_module_permission
+from app.core.security import get_current_user, get_current_user_optional, require_module_permission, require_module_permission_with_destructive_step_up
 from app.utils.display_timeline import merge_imported_display_created_at, merge_review_reply_display_times
 from app.services import warehouse_clearance as warehouse_clearance_svc
 from app.services.product_reply_notify import (
@@ -269,7 +269,7 @@ def admin_update_review(
 @router.delete("/admin/delete-all")
 def admin_delete_all_reviews(
     db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(require_module_permission("product_reviews")),
+    current_admin: AdminUser = Depends(require_module_permission_with_destructive_step_up("product_reviews")),
 ):
     """Xóa toàn bộ đánh giá sản phẩm."""
     if not admin_allowed_operation(current_admin, db, "product_reviews", "delete"):

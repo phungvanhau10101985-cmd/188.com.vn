@@ -30,7 +30,7 @@ from app.schemas.product import (
 )
 from app.crud.product_category_size_guide import enrich_product_payloads_with_category_size_guide
 from app.models.admin import AdminUser
-from app.core.security import require_module_permission, get_current_user_optional
+from app.core.security import require_module_permission, require_module_permission_with_destructive_step_up, get_current_user_optional
 from app.models.user import User
 from app.core.config import settings
 from app.crud import product_media_purge
@@ -1527,7 +1527,7 @@ class BulkDeleteByProductIdBody(BaseModel):
 def delete_product_by_product_id_body(
     body: ProductExcelIdBody,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission("products")),
+    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("products")),
 ):
     """Xóa SP theo product_id trong JSON body — an toàn khi ID có / hoặc khoảng trắng."""
     return _delete_product_by_excel_id(db, body.product_id)
@@ -1537,7 +1537,7 @@ def delete_product_by_product_id_body(
 def bulk_delete_products_by_product_id_body(
     body: BulkDeleteByProductIdBody,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission("products")),
+    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("products")),
 ):
     """Xóa nhiều SP admin — một transaction, không qua path URL."""
     deleted, errors = crud.product.bulk_delete_products_by_excel_product_ids(
@@ -1567,7 +1567,7 @@ def update_product_by_product_id_query(
 def delete_product_by_product_id_query(
     product_id: str = Query(..., description="product_id Excel / mã kho (có thể chứa /)"),
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission("products")),
+    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("products")),
 ):
     """Xóa SP khi product_id có dấu / — tránh 404 do path segment."""
     return _delete_product_by_excel_id(db, product_id)
@@ -1656,7 +1656,7 @@ def admin_source_stock_batch_run_next_from_db(
 def admin_source_stock_delete_products_by_db_ids(
     body: AdminBulkDeleteProductsByDbIdBody,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission("products")),
+    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("products")),
 ):
     """
     Xóa vĩnh viễn các sản trong CSDL (`products.id`), kèm dọn Bunny như DELETE sản đơn lẻ.
@@ -1916,7 +1916,7 @@ def update_product(
 def delete_product(
     product_id: str,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission("products")),
+    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("products")),
 ):
     """Delete product (product_id = Excel column A / product_id string)."""
     return _delete_product_by_excel_id(db, product_id)

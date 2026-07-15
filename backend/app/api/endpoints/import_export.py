@@ -17,7 +17,7 @@ import time
 
 from app.db.session import get_db
 from app.models.admin import AdminUser
-from app.core.security import require_privileged_admin
+from app.core.security import require_privileged_admin, require_module_permission_with_destructive_step_up
 
 logger = logging.getLogger(__name__)
 
@@ -457,6 +457,7 @@ async def import_excel_async(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     overwrite: bool = False,
+    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("products")),
 ):
     """
     Nhận file Excel, trả về job_id ngay (202). Client poll GET /import/excel/job/{job_id}
@@ -579,7 +580,8 @@ async def import_excel(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     overwrite: bool = False,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("products")),
 ):
     """
     Import products from Excel file (36 columns A-AJ)

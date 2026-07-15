@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.core.security import require_privileged_admin
+from app.core.security import require_privileged_admin, require_privileged_admin_with_destructive_step_up
 from app.db.session import get_db
 from app.models.admin import AdminUser
 from app.schemas.vps_backup_admin import (
@@ -130,7 +130,7 @@ def trigger_vps_backup_manual(
 @router.delete("/archives/{filename}", response_model=VpsBackupDeleteArchiveResponse)
 def delete_vps_backup_archive(
     filename: str,
-    _: AdminUser = Depends(require_privileged_admin),
+    _: AdminUser = Depends(require_privileged_admin_with_destructive_step_up()),
 ):
     try:
         deleted = _backup_svc().delete_archive(filename)

@@ -287,6 +287,87 @@ def require_module_permission(
     return dep
 
 
+ADMIN_DESTRUCTIVE_STEP_UP_PURPOSE = "admin_destructive"
+
+
+def create_admin_step_up_token(admin_id: int, purpose: str = ADMIN_DESTRUCTIVE_STEP_UP_PURPOSE) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(admin_id),
+        "admin_id": admin_id,
+        "type": "admin_step_up",
+        "purpose": purpose,
+        "auth_time": int(now.timestamp()),
+        "exp": now + timedelta(minutes=int(settings.STEP_UP_RECENT_MINUTES)),
+    }
+    return jwt.encode(payload, _get_secret_key(), algorithm=settings.ALGORITHM)
+
+
+def verify_recent_admin_auth(
+    request: Request,
+    admin: AdminUser,
+    purpose: str = ADMIN_DESTRUCTIVE_STEP_UP_PURPOSE,
+) -> None:
+    required = HTTPException(
+        status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+        detail={
+            "code": "admin_step_up_required",
+            "purpose": purpose,
+            "message": "Cần xác minh OTP quản trị để thực hiện thao tác này.",
+        },
+    )
+    raw = request.cookies.get(settings.ADMIN_STEP_UP_COOKIE_NAME)
+    if not raw:
+        raw = (request.headers.get("X-Admin-Step-Up") or request.headers.get("x-admin-step-up") or "").strip()
+    if not raw:
+        raise required
+    try:
+        payload = jwt.decode(raw, _get_secret_key(), algorithms=[settings.ALGORITHM])
+        auth_time = float(payload.get("auth_time") or 0)
+        admin_id = int(payload.get("admin_id") or 0)
+    except (JWTError, TypeError, ValueError):
+        raise required
+    if (
+        payload.get("type") != "admin_step_up"
+        or admin_id != int(admin.id)
+        or payload.get("purpose") != purpose
+    ):
+        raise required
+    age = datetime.now(timezone.utc).timestamp() - auth_time
+    if age < 0 or age > int(settings.STEP_UP_RECENT_MINUTES) * 60:
+        raise required
+
+
+def require_module_permission_with_destructive_step_up(
+    module_key: str,
+    *,
+    need: Optional[Literal["view", "create", "update", "delete"]] = None,
+):
+    """Module permission + recent admin OTP for bulk/destructive operations."""
+
+    def dep(
+        request: Request,
+        admin: AdminUser = Depends(require_module_permission(module_key, need=need)),
+    ) -> AdminUser:
+        verify_recent_admin_auth(request, admin)
+        return admin
+
+    return dep
+
+
+def require_privileged_admin_with_destructive_step_up():
+    """Privileged admin + recent admin OTP for destructive operations."""
+
+    def dep(
+        request: Request,
+        admin: AdminUser = Depends(require_privileged_admin),
+    ) -> AdminUser:
+        verify_recent_admin_auth(request, admin)
+        return admin
+
+    return dep
+
+
 def verify_recent_user_auth(request: Request, current_user: User, purpose: str) -> None:
     raw = request.cookies.get(settings.STEP_UP_COOKIE_NAME)
     required = HTTPException(

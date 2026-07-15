@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.core.security import require_module_permission, require_privileged_admin
+from app.core.security import require_module_permission, require_module_permission_with_destructive_step_up, require_privileged_admin
 from app.crud import product as product_crud
 from app.crud import product_import_draft as draft_crud
 from app.db.session import SessionLocal, get_db
@@ -1392,7 +1392,7 @@ def list_excel_import_batches(
 def delete_excel_import_batch(
     batch_token: str,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission("products")),
+    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("products")),
 ):
     """Xóa file meta đợt và toàn bộ bản nháp (draft) liệt kê trong meta."""
     tid = _safe_batch_token_param(batch_token)
@@ -1669,7 +1669,7 @@ def update_import_1688_draft(
 def delete_import_1688_draft(
     draft_id: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission("products")),
+    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("products")),
 ):
     ok = draft_crud.delete_draft_by_id(db, draft_id)
     if not ok:
@@ -1963,7 +1963,7 @@ def listing_import_queue_list_runs(
 @router.delete("/listing-queue/{queue_token}", response_model=ListingImportQueueDeleteOut)
 def listing_import_queue_delete_saved(
     queue_token: str,
-    _: AdminUser = Depends(require_module_permission("products")),
+    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("products")),
 ):
     from app.services import listing_import_queue as liq
 

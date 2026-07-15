@@ -14,7 +14,7 @@ from app.crud.cart import cart as cart_crud, _resolve_cart_line_image
 from app.crud import promotion as crud_promotion
 from app.crud.promotion import PromoValidationError
 from app.models.order import OrderStatus as OrderStatusEnum, DepositType as DepositTypeEnum, PaymentStatus as PaymentStatusEnum
-from app.core.security import get_current_user, get_current_user_optional, require_module_permission
+from app.core.security import get_current_user, get_current_user_optional, require_module_permission, require_module_permission_with_destructive_step_up
 from app.core.config import settings
 from app.services.email_service import (
     deliver_deposit_confirmed_email,
@@ -946,7 +946,7 @@ def admin_enqueue_ems_tracking_refresh(
 def admin_delete_ems_shipping_records(
     body: shipment_schemas.EmsShippingDeleteRequest,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
+    current_admin: models.AdminUser = Depends(require_module_permission_with_destructive_step_up("ems_shipping")),
 ):
     """Xóa vĩnh viễn các dòng khỏi bảng vận chuyển EMS."""
     deleted = ems_import_svc.delete_ems_shipping_records(db, body.ids)

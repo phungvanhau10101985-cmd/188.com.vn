@@ -1150,6 +1150,7 @@ def send_security_otp_email(to_email: str, code: str, expire_minutes: int, purpo
     purpose_labels = {
         "admin_login": "đăng nhập quản trị trên thiết bị mới",
         "admin_elevation": "mở khu vực quản trị",
+        "admin_destructive": "xác nhận thao tác quản trị quan trọng (xóa / import hàng loạt)",
         "sensitive_action": "thực hiện thao tác bảo mật",
     }
     label = purpose_labels.get(purpose, "xác minh thao tác")
