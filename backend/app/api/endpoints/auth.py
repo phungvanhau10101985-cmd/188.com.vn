@@ -566,11 +566,12 @@ def verify_step_up(
 
 @router.post("/admin-session-token", response_model=AdminTokenResponse)
 def issue_admin_token_for_linked_customer(
-    current_user: User = Depends(require_recent_user_auth("admin_elevation")),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Khách đã đăng nhập có admin_users.linked_user_id → cấp JWT admin (giống đăng nhập /admin/login).
+    Khách đã đăng nhập có admin_users.linked_user_id → cấp JWT admin.
+    Phiên khách (cookie JWT) đã xác thực email/OTP/Google — không yêu cầu step-up OTP lặp lại.
     """
     admin_row = (
         db.query(AdminUser)
@@ -587,7 +588,7 @@ def issue_admin_token_for_linked_customer(
         )
     app_crud.update_admin_last_login(db, admin_row.id)
     db.refresh(admin_row)
-    token = create_admin_token(admin_row.id, amr=["customer_session", "otp"])
+    token = create_admin_token(admin_row.id, amr=["customer_session"])
     role_value = admin_row.role.value if hasattr(admin_row.role, "value") else str(admin_row.role)
     return AdminTokenResponse(
         access_token=token,

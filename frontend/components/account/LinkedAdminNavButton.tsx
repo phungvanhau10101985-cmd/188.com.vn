@@ -3,13 +3,9 @@
 import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { ApiRequestError, apiClient } from '@/lib/api-client';
+import { apiClient } from '@/lib/api-client';
 import { defaultAdminHome, setStoredAdminModules } from '@/lib/admin-role';
 import { useToast } from '@/components/ToastProvider';
-import StepUpOtpModal, {
-  clearRecentStepUp,
-  hasRecentStepUp,
-} from '@/components/auth/StepUpOtpModal';
 
 type Props = {
   /** sidebar: trong nav trái | banner: khối nổi phía trên nội dung (mobile / đầu trang) */
@@ -21,9 +17,8 @@ export default function LinkedAdminNavButton({ variant = 'sidebar' }: Props) {
   const router = useRouter();
   const { pushToast } = useToast();
   const [busy, setBusy] = useState(false);
-  const [showStepUp, setShowStepUp] = useState(false);
 
-  const completeOpenAdmin = useCallback(async () => {
+  const openAdmin = useCallback(async () => {
     setBusy(true);
     try {
       const data = await apiClient.exchangeLinkedAdminSession();
@@ -33,27 +28,13 @@ export default function LinkedAdminNavButton({ variant = 'sidebar' }: Props) {
         setStoredAdminModules(data.modules ?? undefined);
       }
       router.push(defaultAdminHome());
-      setShowStepUp(false);
     } catch (err: unknown) {
-      if (err instanceof ApiRequestError && err.code === 'step_up_required') {
-        clearRecentStepUp('admin_elevation');
-        setShowStepUp(true);
-        return;
-      }
       const msg = err instanceof Error ? err.message : 'Không lấy được phiên quản trị.';
       pushToast({ title: 'Không vào được quản trị', description: msg, variant: 'error', durationMs: 3500 });
     } finally {
       setBusy(false);
     }
   }, [pushToast, router]);
-
-  const openAdmin = useCallback(async () => {
-    if (!hasRecentStepUp('admin_elevation')) {
-      setShowStepUp(true);
-      return;
-    }
-    await completeOpenAdmin();
-  }, [completeOpenAdmin]);
 
   if (!user?.has_linked_admin) return null;
 
@@ -89,39 +70,21 @@ export default function LinkedAdminNavButton({ variant = 'sidebar' }: Props) {
     </button>
   );
 
-  const stepUpModal = showStepUp ? (
-    <StepUpOtpModal
-      purpose="admin_elevation"
-      title="Xác minh trước khi vào quản trị"
-      description="Khu vực quản trị có quyền thay đổi dữ liệu cửa hàng nên cần OTP gần đây."
-      onClose={() => setShowStepUp(false)}
-      onVerified={completeOpenAdmin}
-    />
-  ) : null;
-
   if (variant === 'banner') {
     return (
-      <>
-        <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <p className="font-semibold text-gray-900">Quản trị cửa hàng</p>
-              <p className="mt-0.5 text-xs text-gray-600">
-                Tài khoản của bạn được gán quyền quản trị.{roleHint ? ` (${roleHint})` : ''}
-              </p>
-            </div>
-            {btn}
+      <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-gray-900">Quản trị cửa hàng</p>
+            <p className="mt-0.5 text-xs text-gray-600">
+              Tài khoản của bạn được gán quyền quản trị.{roleHint ? ` (${roleHint})` : ''}
+            </p>
           </div>
+          {btn}
         </div>
-        {stepUpModal}
-      </>
+      </div>
     );
   }
 
-  return (
-    <>
-      {btn}
-      {stepUpModal}
-    </>
-  );
+  return btn;
 }
