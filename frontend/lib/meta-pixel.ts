@@ -1,6 +1,6 @@
 import type { AddToCartRequest } from '@/features/cart/types/cart';
 import type { CartItem } from '@/features/cart/types/cart';
-import type { Product, ProductInfoJSON } from '@/types/api';
+import type { Product } from '@/types/api';
 import { newMetaEventId, sendFacebookCapiFromBrowser } from '@/lib/facebook-capi-client';
 
 export const META_PIXEL_CURRENCY = 'VND';
@@ -114,32 +114,15 @@ function uniqIds(ids: string[]): string[] {
   return out;
 }
 
-function skuFromProductInfo(pi: Product['product_info']): string | null {
-  if (!pi) return null;
-  if (typeof pi === 'string') {
-    try {
-      const j = JSON.parse(pi) as ProductInfoJSON | null;
-      const s = j?.product_info?.sku;
-      return typeof s === 'string' && s.trim() ? s.trim() : null;
-    } catch {
-      return null;
-    }
-  }
-  const o = pi as ProductInfoJSON;
-  const s = o?.product_info?.sku;
-  return typeof s === 'string' && s.trim() ? s.trim() : null;
-}
-
 /**
- * content_ids cho Meta — khớp file import: cột `id` → `product.product_id`; cột `sku` → `code` / product_info.sku.
+ * content_ids cho Meta — khớp feed catalogue: cột `id` = `product.product_id`.
+ * Chỉ gửi một ID (không gửi SKU/code) để tránh cảnh báo Meta Pixel Helper khi SKU không có trong catalogue.
  * Nếu thiếu `product_id` (SP cũ), tạm dùng id DB để không gãy pixel.
  */
-export function metaContentIdsForProduct(p: Pick<Product, 'id' | 'code' | 'product_id' | 'product_info'>): string[] {
+export function metaContentIdsForProduct(p: Pick<Product, 'id' | 'product_id'>): string[] {
   const fromSheetId = (p.product_id || '').trim();
   const remarketingId = fromSheetId || String(p.id);
-  const fromJson = skuFromProductInfo(p.product_info);
-  const sku = (fromJson || (p.code || '').trim()).trim();
-  return uniqIds([remarketingId, sku].filter(Boolean));
+  return remarketingId ? [remarketingId] : [];
 }
 
 export function metaContentIdsFromAddToCart(item: AddToCartRequest): string[] {
@@ -147,22 +130,15 @@ export function metaContentIdsFromAddToCart(item: AddToCartRequest): string[] {
     item.product_data && typeof item.product_data === 'object' ? (item.product_data as Record<string, unknown>) : {};
   const fromSheetId = pd.product_id != null ? String(pd.product_id).trim() : '';
   const remarketingId = fromSheetId || String(item.product_id);
-  const sku = (pd.code != null ? String(pd.code).trim() : '').trim();
-  return uniqIds([remarketingId, sku].filter(Boolean));
+  return remarketingId ? [remarketingId] : [];
 }
 
-export function metaContentIdsFromCartItem(
-  item: Pick<CartItem, 'product_id' | 'product_code' | 'product_data'>
-): string[] {
+export function metaContentIdsFromCartItem(item: Pick<CartItem, 'product_id' | 'product_data'>): string[] {
   const pd =
     item.product_data && typeof item.product_data === 'object' ? (item.product_data as Record<string, unknown>) : {};
   const fromSheetId = pd.product_id != null ? String(pd.product_id).trim() : '';
   const remarketingId = fromSheetId || String(item.product_id);
-  const sku =
-    (item.product_code != null && String(item.product_code).trim()) ||
-    (pd.code != null ? String(pd.code).trim() : '') ||
-    '';
-  return uniqIds([remarketingId, sku].filter(Boolean));
+  return remarketingId ? [remarketingId] : [];
 }
 
 function firePixelAndCapi(
