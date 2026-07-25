@@ -55,39 +55,69 @@ NĂM / THỜI GIAN (bắt buộc):
 - Giữ số đo kỹ thuật (cm, mm, kg, size) — không nhầm với năm.
 """
 
-_CJK_GUOFENG_STYLE_RES: tuple[re.Pattern[str], ...] = tuple(
+_CJK_CHINA_STYLE_RES: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p)
     for p in (
-        r"国风",
-        r"国潮",
+        r"国风(?:元素|系列|款)?",
+        r"国潮(?:风|元素|系列|款)?",
+        r"新国潮",
         r"新中式",
-        r"中国风",
-        r"中式风?",
+        r"中国风(?:元素|系列|款)?",
+        r"中式(?:风|美学|元素|复古|系列|款)?",
         r"汉风",
+        r"汉服(?:风|款|系|元素)?",
+        r"汉元素",
+        r"古风",
+        r"唐(?:装|风|式)",
+        r"民国风?",
+        r"宫廷风?",
+        r"禅(?:意|风|韵)",
+        r"东方(?:风|美学|元素|韵味)?",
+        r"国粹",
+        r"华夏(?:风|元素)?",
+        r"中国(?:风|元素|传统)",
+        r"复古国风",
+        r"水墨风?",
+        r"武侠风?",
     )
 )
 
-_VI_GUOFENG_STYLE_RES: tuple[re.Pattern[str], ...] = tuple(
+_VI_CHINA_STYLE_RES: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE | re.UNICODE)
     for p in (
         r"phong\s*cách\s*quốc\s*gia",
         r"phong\s*cách\s*trung\s*quốc",
         r"phong\s*cách\s*trung\s*hoa",
-        r"phong\s*cách\s*hán(?:\s*quốc)?",
+        r"phong\s*cách\s*hán(?:\s*quốc|\s*phục)?",
         r"phong\s*cách\s*tân\s*trung(?:\s*thức)?",
+        r"phong\s*cách\s*cổ\s*(?:phong|điển)(?:\s*trung(?:\s*hoa|\s*quốc)?)?",
+        r"phong\s*cách\s*đông\s*phương",
+        r"phong\s*cách\s*cung\s*đình",
+        r"phong\s*cách\s*dân\s*quốc",
+        r"phong\s*cách\s*thiền(?:\s*ý|\s*phong)?",
+        r"phong\s*cách\s*thủy\s*mặc",
+        r"phong\s*cách\s*võ\s*hiệp",
+        r"phong\s*cách\s*hán\s*phục",
+        r"kiểu\s*hán\s*phục",
         r"quốc\s*phong",
         r"tân\s*trung\s*thức",
-        r"kiểu\s*trung(?:\s*quốc)?",
+        r"trung\s*thức",
+        r"kiểu\s*trung(?:\s*quốc|\s*hoa)?",
+        r"thẩm\s*mỹ\s*đông\s*phương",
+        r"hoa\s*hạ",
+        r"quốc\s*túy",
         r"\bguofeng\b",
         r"\bguochao\b",
+        r"\bhanfu\b",
     )
 )
 
 LISTING_NO_CHINESE_STYLE_PROMPT_VI = """
-PHONG CÁCH QUỐC PHONG / TRUNG QUỐC (bắt buộc):
-- Cụm nguồn như 国风, 国潮, 新中式, 中国风, 中式… KHÔNG dịch sang tiếng Việt (vd. «phong cách quốc gia», «phong cách Trung Quốc», «tân trung thức», «quốc phong») — BỎ HẲN khỏi ten_tieng_viet, mo_ta_vi và phong_cach_vi.
-- Giữ mô tả sản phẩm thực tế (váy, thắt eo, không tay, chất liệu…); chỉ loại cụm marketing phong cách quốc phong Trung.
-- Vẫn được dùng phong cách cụ thể khác khi có ý nghĩa rõ (vd. «công sở», «casual», «thể thao»).
+PHONG CÁCH / MARKETING TRUNG QUỐC (bắt buộc):
+- Cụm nguồn liên quan phong cách Trung Quốc (vd. 国风, 国潮, 新中式, 中国风, 中式, 汉风, 汉服, 古风, 唐装, 民国风, 宫廷风, 禅意, 东方美学, 国粹, 华夏, 水墨风, 武侠风…) KHÔNG dịch sang tiếng Việt — BỎ HẲN khỏi ten_tieng_viet, mo_ta_vi và phong_cach_vi.
+- Không ghi bản dịch kiểu «phong cách quốc gia/Trung Quốc/Trung Hoa», «tân trung thức», «quốc phong», «phong cách đông phương», «Hán phục», «cung đình», «thiền ý»…
+- Giữ mô tả sản phẩm thực tế (váy, thắt eo, không tay, chất liệu, form…); chỉ loại cụm marketing phong cách Trung.
+- Vẫn được ghi xuất xứ «Trung Quốc» ở xuat_xu_vi khi có thông tin thật; vẫn dùng phong cách cụ thể khác (vd. «công sở», «casual», «thể thao»).
 """
 
 LISTING_SANITIZE_PROMPT_VI = LISTING_NO_YEAR_PROMPT_VI + LISTING_NO_CHINESE_STYLE_PROMPT_VI
@@ -115,13 +145,13 @@ def strip_listing_year_marketing(text: str, *, remove_standalone_years: bool = T
 
 
 def strip_listing_chinese_style_marketing(text: str) -> str:
-    """Bỏ cụm quốc phong / phong cách Trung Quốc (nguồn CJK hoặc bản dịch Việt)."""
+    """Bỏ cụm marketing phong cách Trung Quốc (nguồn CJK hoặc bản dịch Việt)."""
     if not text or not str(text).strip():
         return ""
     t = str(text)
-    for rx in _CJK_GUOFENG_STYLE_RES:
+    for rx in _CJK_CHINA_STYLE_RES:
         t = rx.sub("", t)
-    for rx in _VI_GUOFENG_STYLE_RES:
+    for rx in _VI_CHINA_STYLE_RES:
         t = rx.sub("", t)
     return _collapse_ws(t)
 

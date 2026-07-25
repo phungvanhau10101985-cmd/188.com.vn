@@ -59,3 +59,27 @@ def test_strip_vietnamese_guofeng_style_from_name():
 def test_keep_other_style_phrases():
     name = "Túi đeo hông nam phong cách thể thao ngoài trời"
     assert sanitize_vi_listing_field(name) == name
+
+
+def test_strip_more_chinese_style_terms():
+    raw = "复古国风汉服元素唐装宫廷风禅意东方美学水墨风武侠风连衣裙"
+    out = sanitize_listing_context_for_ai(raw)
+    for term in ("国风", "汉服", "唐装", "宫廷风", "禅意", "东方美学", "水墨风", "武侠风"):
+        assert term not in out
+    assert "连衣裙" in out
+
+
+def test_strip_more_vietnamese_china_style_terms():
+    cases = [
+        ("Váy nữ phong cách đông phương thắt eo", "Váy nữ thắt eo"),
+        ("Áo kiểu Hán phục cổ điển", "Áo cổ điển"),
+        ("Set đồ phong cách cung đình sang trọng", "Set đồ sang trọng"),
+    ]
+    for src, expected in cases:
+        assert sanitize_vi_listing_field(src) == expected
+
+
+def test_keep_origin_trung_quoc_in_description():
+    desc = "Sản phẩm xuất xứ Trung Quốc, chất liệu cotton cao cấp"
+    assert sanitize_vi_listing_field(desc) == desc
+    assert "Trung Quốc" in sanitize_vi_listing_field(desc)
