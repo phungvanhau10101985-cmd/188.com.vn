@@ -186,3 +186,48 @@ def test_vipomall_remaps_mislabeled_variant_rows_from_size_field():
     assert len(product.get("colors") or []) == 1
     assert product.get("sizes") == []
     assert "màu đen" in (product.get("colors") or [])[0]["name"]
+
+
+_VIPOMALL_SWATCH_LIST_RAW = {
+    "title": "Túi xách",
+    "swatch_colors": [
+        {"label": "Màu đen", "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN01ilBjA91fRQPZY3p6H_!!2210284314003-0-cib.jpg"},
+        {"label": "Màu xanh lam", "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN01hJNbLc1fRQVl9rmCZ_!!2210284314003-0-cib.jpg"},
+        {"label": "Màu camel", "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN011KLQOT1fRQPZxwsTo_!!2210284314003-0-cib.jpg"},
+        {"label": "Màu xám bạc", "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN01MABFTi1fRQUbfOuQn_!!2210284314003-0-cib.jpg"},
+        {"label": "Màu hồng", "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN01Mmnlt81fRQPavVD8Y_!!2210284314003-0-cib.jpg"},
+    ],
+    "colors": [
+        {"label": "Màu đen", "image_url": "https://cbu01.alicdn.com/img/ibank/O1CN01ilBjA91fRQPZY3p6H_!!2210284314003-0-cib.jpg"},
+    ],
+    "variant_rows": [
+        {
+            "color": "Màu đen",
+            "size": "Free size",
+            "stock": 12,
+            "price_vnd": 450000,
+            "price_text": "450.000 đ",
+            "stock_text": "(12 SP có sẵn)",
+            "in_stock": True,
+        },
+    ],
+    "sizes": ["Free size"],
+    "gallery_images": [],
+    "detail_images": [],
+}
+
+
+def test_vipomall_product_type_list_keeps_all_swatch_colors_when_one_variant_in_stock():
+    """`.product-type-list` có 5 màu nhưng bảng size chỉ còn hàng 1 màu — vẫn giữ đủ swatch."""
+    product = vipomall_row_to_product_data(
+        _VIPOMALL_SWATCH_LIST_RAW,
+        "https://vipomall.vn/san-pham/789?platform_type=10",
+        "789",
+    )
+    colors = product.get("colors") or []
+    assert len(colors) == 5
+    assert colors[0]["name"] == "Màu đen"
+    assert colors[2]["name"] == "Màu camel"
+    assert colors[4]["name"] == "Màu hồng"
+    assert len(product.get("color_swatch_images_1688") or []) == 5
+    assert product.get("sizes") == ["Free size"]

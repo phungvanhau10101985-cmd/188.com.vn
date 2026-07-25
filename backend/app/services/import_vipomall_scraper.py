@@ -266,15 +266,32 @@ _SCRAPE_JS = r"""() => {
   if (document.title) titleCandidates.push(document.title);
 
   const colors = [];
+  const swatchColors = [];
   const seenColor = new Set();
+  const seenSwatch = new Set();
   const pushColor = (label, imgEl) => {
     const l = normText(label);
     if (!l || l.length > 160 || seenColor.has(l.toLowerCase())) return;
     colors.push({ label: l, image_url: imgUrl(imgEl) || null });
     seenColor.add(l.toLowerCase());
   };
-  document.querySelectorAll(".product-type-list .product-type-item, .product-type-list [title]").forEach((el) => {
-    const label = normText(el.getAttribute("title") || el.querySelector(".title")?.innerText || el.textContent);
+  const pushSwatchColor = (label, imgEl) => {
+    const l = normText(label);
+    if (!l || l.length > 160 || seenSwatch.has(l.toLowerCase())) return;
+    swatchColors.push({ label: l, image_url: imgUrl(imgEl) || null });
+    seenSwatch.add(l.toLowerCase());
+    pushColor(label, imgEl);
+  };
+  document.querySelectorAll(".product-type-list .product-type-item").forEach((el) => {
+    const label = normText(
+      el.getAttribute("title") || el.querySelector(".title span, .title")?.innerText || el.textContent,
+    );
+    if (!label) return;
+    pushSwatchColor(label, el.querySelector("img"));
+  });
+  document.querySelectorAll(".product-type-list [title]").forEach((el) => {
+    if (el.classList?.contains("product-type-item")) return;
+    const label = normText(el.getAttribute("title") || el.querySelector(".title span, .title")?.innerText || el.textContent);
     if (!label) return;
     pushColor(label, el.querySelector("img"));
   });
@@ -504,6 +521,7 @@ _SCRAPE_JS = r"""() => {
     meta_image: meta("image"),
     body_text_sample: text.slice(0, 16000),
     colors,
+    swatch_colors: swatchColors,
     sizes: Array.from(sizeSet),
     variant_rows: sizeRows,
     gallery_images: gallery,
@@ -815,7 +833,9 @@ def vipomall_row_to_product_data(
     gallery = _dedupe_urls([str(u) for u in row.get("gallery_images") or []])
     meta_image = _norm_img_url(str(row.get("meta_image") or ""))
 
-    colors_raw = [c for c in row.get("colors") or [] if isinstance(c, dict)]
+    swatch_colors_raw = [c for c in row.get("swatch_colors") or [] if isinstance(c, dict)]
+    colors_raw = swatch_colors_raw or [c for c in row.get("colors") or [] if isinstance(c, dict)]
+    preserve_all_swatch_colors = bool(swatch_colors_raw)
     colors_out: List[Dict[str, str]] = []
     swatches: List[Dict[str, Optional[str]]] = []
     for idx, c in enumerate(colors_raw):
@@ -883,7 +903,18 @@ def vipomall_row_to_product_data(
             stock = 0
         if stock > 0:
             stocks.append(stock)
-    if in_stock_raw_colors:
+    raw_color_labels = {
+        _clean_text(c.get("label"), limit=160)
+        for c in colors_raw
+        if _clean_text(c.get("label"), limit=160)
+    }
+    variant_color_labels = {
+        _clean_text(r.get("color"), limit=160)
+        for r in variant_rows
+        if _clean_text(r.get("color"), limit=160)
+    }
+    has_extra_swatch_colors = bool(raw_color_labels - variant_color_labels)
+    if in_stock_raw_colors and not preserve_all_swatch_colors and not has_extra_swatch_colors:
         colors_out = [
             c
             for c, raw_c in zip(colors_out, colors_raw)
