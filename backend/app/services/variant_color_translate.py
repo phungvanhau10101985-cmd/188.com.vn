@@ -343,7 +343,7 @@ def _deepseek_translate_names_batch(names: List[str]) -> Dict[str, str]:
     if not key or not names:
         return {}
     url = (settings.DEEPSEEK_API_URL or "").strip() or "https://api.deepseek.com/v1/chat/completions"
-    model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-chat"
+    model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-v4-flash"
 
     payload_in = json.dumps(names, ensure_ascii=False)
     system = (

@@ -21,6 +21,7 @@ _SUPPLIER_IMAGE_BLOCK_MARKERS = ("viposeller", "viettelidc.com.vn")
 _FIRST_JPG = re.compile(r"\.jpg", flags=re.I)
 _URL_IN_TEXT = re.compile(r"https?://[^\s\"'<>]+|//[^\s\"'<>]+", flags=re.I)
 _WEBP_RESIZE_SUFFIX = re.compile(r"(_\d+x\d+q?\d*|\.sum)\.(jpg|jpeg|png|webp)$", flags=re.I)
+_STATIC_IMAGE_EXT_RE = re.compile(r"\.(jpg|jpeg|png|webp)$", flags=re.I)
 
 
 def truncate_alicdn_url_to_first_jpg(url: str) -> str:
@@ -41,6 +42,23 @@ def _split_url_query(url: str) -> tuple[str, str]:
 
 def _join_url_query(base: str, query: str) -> str:
     return f"{base}?{query}" if query else base
+
+
+def _strip_image_cache_query(base: str, query: str) -> str:
+    """Bỏ query cache-bust (?__r__=timestamp) trên URL ảnh tĩnh CDN."""
+    if not query:
+        return ""
+    if not _STATIC_IMAGE_EXT_RE.search(base):
+        return query
+    kept: List[str] = []
+    for part in query.split("&"):
+        if not part:
+            continue
+        key = part.split("=", 1)[0].strip().lower()
+        if key == "__r__":
+            continue
+        kept.append(part)
+    return "&".join(kept)
 
 
 def normalize_product_image_url(url: str) -> str:
@@ -69,6 +87,7 @@ def normalize_product_image_url(url: str) -> str:
         base = _WEBP_RESIZE_SUFFIX.sub("", base)
         base = re.sub(r"\.png\.jpg$", ".png", base, flags=re.I)
 
+    query = _strip_image_cache_query(base, query)
     out = _join_url_query(base, query)
     return "" if is_blocked_supplier_image_url(out) else out
 

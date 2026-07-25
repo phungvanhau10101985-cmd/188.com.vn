@@ -60,7 +60,7 @@ def deepseek_legacy_oos_search_query(legacy_path: str) -> Optional[str]:
 
     key = (settings.DEEPSEEK_API_KEY or "").strip()
     url = (settings.DEEPSEEK_API_URL or "").strip() or "https://api.deepseek.com/v1/chat/completions"
-    model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-chat"
+    model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-v4-flash"
 
     system = (
         "URL sản phẩm thời trang VN đã hết. Trả về DUY NHẤT một dòng từ khóa tìm SP (3-7 từ). "

@@ -522,7 +522,7 @@ def translate_product_listing_deepseek_only(
         )
 
     url = (settings.DEEPSEEK_API_URL or "").strip() or "https://api.deepseek.com/v1/chat/completions"
-    model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-chat"
+    model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-v4-flash"
 
     try:
         resp = requests.post(
@@ -770,7 +770,7 @@ def classify_product_taxonomy_deepseek(
     )
 
     url = (settings.DEEPSEEK_API_URL or "").strip() or "https://api.deepseek.com/v1/chat/completions"
-    model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-chat"
+    model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-v4-flash"
 
     try:
         resp = requests.post(

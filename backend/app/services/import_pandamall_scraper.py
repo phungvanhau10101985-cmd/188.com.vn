@@ -220,8 +220,17 @@ _SCRAPE_JS = r"""() => {
         return ext1 ? ext1 : "." + ext2;
     });
   };
+  const stripCacheQuery = (u) => {
+    const q = u.indexOf("?");
+    if (q < 0) return u;
+    const base = u.slice(0, q);
+    const query = u.slice(q + 1);
+    if (!/\.(jpg|jpeg|png|webp)$/i.test(base)) return u;
+    const kept = query.split("&").filter((part) => part && !/^__r__=\d+$/i.test(part));
+    return kept.length ? `${base}?${kept.join("&")}` : base;
+  };
   const pushUnique = (arr, seen, raw) => {
-    const u = upgradeImg(raw);
+    const u = stripCacheQuery(upgradeImg(raw));
     if (!/^https?:\/\//i.test(u)) return;
     const k = u.split("?")[0];
     if (seen.has(k)) return;

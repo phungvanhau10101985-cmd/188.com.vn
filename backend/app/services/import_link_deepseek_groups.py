@@ -72,7 +72,7 @@ def deepseek_fallback_import_groups(
     )
 
     url = (settings.DEEPSEEK_API_URL or "").strip() or "https://api.deepseek.com/v1/chat/completions"
-    model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-chat"
+    model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-v4-flash"
     allowed = RATING_GROUP_ID_WHITELIST
 
     try:

@@ -287,3 +287,23 @@ def test_pandamall_color_only_ignores_stale_size_list_from_scraper():
         "123456789",
     )
     assert product.get("sizes") == []
+
+
+def test_pandamall_detail_images_strip_cache_bust_query():
+    raw = {
+        **_PANDAMALL_BOOT_RAW,
+        "detail_images": [
+            "https://cbu01.alicdn.com/img/ibank/O1CN01gJUrtK1fRQb7t8Wt2_!!2210284314003-0-cib.jpg",
+            "https://cbu01.alicdn.com/img/ibank/O1CN01bDLH1h1fRQWkELLbt_!!2210284314003-0-cib.jpg?__r__=1753103929326",
+            "https://cbu01.alicdn.com/img/ibank/O1CN01jcJQD11fRQWiaj5ta_!!2210284314003-0-cib.jpg?__r__=1753084651930",
+        ],
+    }
+    product = pandamall_row_to_product_data(
+        raw,
+        "https://pandamall.vn/1688/detail/935969699245",
+        "935969699245",
+    )
+    detail = product.get("gallery") or []
+    assert len(detail) == 3
+    assert all("?__r__=" not in u for u in detail)
+    assert detail[1].endswith("O1CN01bDLH1h1fRQWkELLbt_!!2210284314003-0-cib.jpg")

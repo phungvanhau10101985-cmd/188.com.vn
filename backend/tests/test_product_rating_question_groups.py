@@ -62,6 +62,20 @@ def test_apply_import_matches_phone_case_group():
     assert pd["group_rating"] == 95
 
 
+def test_apply_import_matches_vay_maxi_nu_alias():
+    name = "Váy maxi nữ phong cách quốc gia mới thắt eo không tay dáng dài — Xanh lam"
+    assert infer_rating_group_id_from_text(name) == 6
+    pd = {
+        "name": name,
+        "category": "",
+        "subcategory": "",
+        "sub_subcategory": "",
+        "group_rating": 0,
+    }
+    apply_import_rating_question_groups_to_product_data(pd)
+    assert pd["group_rating"] == 6
+
+
 def test_apply_import_keeps_rule_match():
     pd = {
         "name": "Giày sneaker nữ cao cấp",

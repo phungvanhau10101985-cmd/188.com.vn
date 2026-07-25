@@ -274,7 +274,7 @@ YÊU CẦU:
 4. Không giải thích thêm."""
 
         payload = {
-            "model": "deepseek-chat",
+            "model": "deepseek-v4-flash",
             "messages": [{"role":"user","content":prompt}],
             "temperature": 0.1,
             "max_tokens": 100

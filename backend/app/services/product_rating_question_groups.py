@@ -126,6 +126,8 @@ _RATING_GROUPS_RAW: Iterable[Tuple[str, int]] = (
 
 # Cụm từ đồng nghĩa / cách gọi thực tế trên tên SP (không liền với cụm chuẩn trong bảng trên).
 _RATING_ALIASES_RAW: Iterable[Tuple[str, int]] = (
+    ("váy maxi nữ", 6),
+    ("đầm maxi nữ", 6),
     ("sandal cao gót nữ", 35),
     ("giày sandal cao gót nữ", 35),
     ("sandal gót nữ", 35),

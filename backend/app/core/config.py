@@ -636,7 +636,7 @@ class Settings:
         # ========================
         self.DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
         self.DEEPSEEK_API_URL: str = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
-        self.DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        self.DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
         # URL legacy / SP đã xóa: DeepSeek tạo từ khóa → /?q= (một dòng, không JSON)
         self.LEGACY_OOS_DEEPSEEK_ENABLED: bool = os.getenv(
             "LEGACY_OOS_DEEPSEEK_ENABLED", "false"
