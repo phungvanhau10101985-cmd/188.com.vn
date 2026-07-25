@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from app.services.product_rating_question_groups import (
     RATING_GROUP_ID_UNASSIGNED,
     apply_import_rating_question_groups_to_product_data,
@@ -24,8 +26,43 @@ def test_apply_import_sets_888_for_unknown_product_type():
         "sub_subcategory": "Lọc không khí",
         "group_rating": 0,
     }
-    apply_import_rating_question_groups_to_product_data(pd)
+    with patch(
+        "app.services.product_rating_question_groups._ai_fallback_import_groups",
+        return_value=(0, None, []),
+    ):
+        apply_import_rating_question_groups_to_product_data(pd)
     assert pd["group_rating"] == 888
+
+
+def test_apply_import_uses_deepseek_when_rules_miss():
+    pd = {
+        "name": "Áo dáng rộng nữ chất liệu rayon thêu đính cườm ánh sáng vàng",
+        "category": "Thời trang Nữ",
+        "subcategory": "Áo nữ",
+        "sub_subcategory": "Áo kiểu nữ",
+        "group_rating": 0,
+    }
+    with patch(
+        "app.services.product_rating_question_groups._ai_fallback_import_groups",
+        return_value=(58, 88, ["deepseek_groups: ok"]),
+    ):
+        apply_import_rating_question_groups_to_product_data(pd)
+    assert pd["group_rating"] == 58
+    assert pd["group_question"] == 88
+
+
+def test_apply_import_skips_ai_when_rule_matches():
+    pd = {
+        "name": "Giày sneaker nữ cao cấp",
+        "category": "Giày dép Nữ",
+        "subcategory": "Sneaker nữ",
+        "sub_subcategory": "Sneaker nữ",
+        "group_rating": 0,
+    }
+    with patch("app.services.product_rating_question_groups._ai_fallback_import_groups") as ai_mock:
+        apply_import_rating_question_groups_to_product_data(pd)
+        ai_mock.assert_not_called()
+    assert pd["group_rating"] == 27
 
 
 def test_apply_import_matches_vali_tui_du_lich():

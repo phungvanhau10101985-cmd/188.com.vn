@@ -12,7 +12,8 @@ cho luồng import link — suy luận từ tên hiển thị + taxonomy đầy 
       IF(find("nữ", BH2)>0, 88, "")),
       99)
 
-- Không khớp luật từ-khóa → group_rating = RATING_GROUP_ID_UNASSIGNED (888).
+- Không khớp luật từ-khóa → gọi DeepSeek (rồi Gemini nếu cần) để chọn rating_group_id + question_group_id trong whitelist.
+- Nếu AI cũng không gán được → group_rating = RATING_GROUP_ID_UNASSIGNED (888).
 """
 from __future__ import annotations
 
@@ -353,11 +354,40 @@ def infer_question_group_id_from_product_name(product_name: str) -> int:
     return 99
 
 
+def _ai_fallback_import_groups(
+    context_text: str,
+    product_name: str,
+) -> Tuple[int, Optional[int], List[str]]:
+    """
+    DeepSeek (ưu tiên) rồi Gemini khi luật từ-khóa không gán được rating_group_id.
+    Trả (rating_id, question_id|None, warnings).
+    """
+    from app.services.import_link_deepseek_groups import deepseek_fallback_import_groups
+    from app.services.import_link_gemini_groups import gemini_fallback_import_groups
+
+    warns: List[str] = []
+    ai_r: Optional[int] = None
+    ai_q: Optional[int] = None
+
+    ai_r, ai_q, ds_warns = deepseek_fallback_import_groups(context_text, product_name)
+    warns.extend(ds_warns)
+
+    if ai_r is None:
+        g_r, g_q, g_warns = gemini_fallback_import_groups(context_text, product_name)
+        warns.extend(g_warns)
+        if ai_r is None:
+            ai_r = g_r
+        if ai_q is None:
+            ai_q = g_q
+
+    return ai_r or 0, ai_q, warns
+
+
 def apply_import_rating_question_groups_to_product_data(
     product_data: dict,
     warnings: Optional[List[str]] = None,
 ) -> None:
-    """Gán group_rating (luật từ-khóa, không khớp → 888) và group_question từ tên SP."""
+    """Gán group_rating + group_question: luật từ-khóa trước, không khớp → DeepSeek/Gemini."""
     if not isinstance(product_data, dict):
         return
 
@@ -365,6 +395,15 @@ def apply_import_rating_question_groups_to_product_data(
     ctx = build_import_rating_context_text(product_data)
     rid = infer_rating_group_id_from_text(ctx)
     qid = infer_question_group_id_from_product_name(pname)
+
+    if rid == 0:
+        ai_r, ai_q, ai_warns = _ai_fallback_import_groups(ctx, pname)
+        if warnings is not None:
+            warnings.extend(ai_warns)
+        if ai_r > 0:
+            rid = ai_r
+        if ai_q is not None:
+            qid = ai_q
 
     explicit = product_data.get("group_rating")
     product_data["group_rating"] = coalesce_group_rating(explicit, inferred=rid)
