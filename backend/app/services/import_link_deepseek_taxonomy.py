@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.category import Category
 from app.services.listing_year_sanitize import (
-    LISTING_NO_YEAR_PROMPT_VI,
+    LISTING_SANITIZE_PROMPT_VI,
     apply_listing_year_sanitize_to_product_data,
     sanitize_listing_context_for_ai,
     sanitize_taxonomy_vi_fields,
@@ -309,7 +309,8 @@ QUY TẮC PHÂN LOẠI (bắt buộc — áp dụng khi đọc TÊN sản phẩm
   • **Giày dép / sandal / boot / cao gót**: nếu thông số có **chiều cao gót hoặc đế** (cm, hoặc inch → quy đổi gọn sang cm), ghép tự nhiên vào tên (vd. «gót 9 cm», «đế cao 3 cm», «đế bệt»); **không** bịa số.
   • **Túi xách / ví / ba lô / clutch**: nếu có **kích thước** (dài × rộng × cao, hoặc một cạnh cm), ghép gọn (vd. «25×18×10 cm», «khổ ~25 cm»); **không** bịa.
   • **Hàng khác** (vali, balô laptop…): nếu có kích thước/dung tích trong NGỮ CẢNH, có thể thêm cụm ngắn tương ứng.
-""" + LISTING_NO_YEAR_PROMPT_VI + """
+  • **KHÔNG** dịch cụm quốc phong Trung (国风, 国潮, 新中式, 中国风…) — bỏ hẳn, không ghi «phong cách quốc gia/Trung Quốc/tân trung thức».
+""" + LISTING_SANITIZE_PROMPT_VI + """
 - chat_lieu_vi: **chất liệu** tiếng Việt ngắn gọn (tối đa ~100 ký tự), chỉ điền khi suy ra được từ TÊN hoặc NGỮ CẢNH (vd. cotton, polyester, da PU, lụa…); có nhãn tiếng Anh «Material» trong thông số thì dịch/ghi lại bằng tiếng Việt; **không** đoán bừa — không có thông tin thì để chuỗi rỗng "".
 - mo_ta_vi: **mô tả sản phẩm** tiếng Việt để đăng bán (plain text), khoảng 350–1200 ký tự, 2–5 đoạn (xuống dòng \\n giữa đoạn); dựa trên TÊN + NGỮ CẢNH: đặc điểm nổi bật, phom/form (nếu rõ), phù hợp ai/mùa (nếu suy ra được), chất liệu đã biết; có thể nhắc lại ngắn kích thước/gót nếu hữu ích nhưng **không** copy nguyên khối dài những gì đã gói trong ten_tieng_viet; **không** spam từ khóa, **không** liệt kê đầy đủ mọi màu/size đặt hàng (đã có biến thể); không HTML; không nhét JSON/markdown trong chuỗi.
 - thuong_hieu_vi: thương hiệu / nhà cung (tiếng Việt hoặc phiên âm ngắn) nếu NGỮ CẢNH có; không có thì "".
@@ -502,7 +503,7 @@ def translate_product_listing_deepseek_only(
             '- ten_tieng_viet: luôn chuỗi rỗng "".\n'
             "- mo_ta_vi: plain text tiếng Việt 350–1200 ký tự, 2–5 đoạn, \\n giữa đoạn; không HTML;\n"
             "  không spam từ khóa; dựa trên TÊN + MÔ TẢ / NGỮ CẢNH bên dưới.\n"
-            f"{LISTING_NO_YEAR_PROMPT_VI.strip()}\n\n"
+            f"{LISTING_SANITIZE_PROMPT_VI.strip()}\n\n"
             f"TÊN SẢN PHẨM (đã có bản Việt ở hệ thống — không trả trong JSON):\n{name}\n\n"
             f"MÔ TẢ / THÔNG SỐ NGUỒN:\n{(desc + chr(10) + blob).strip()}\n\n"
             'Trả về: {"ten_tieng_viet":"","mo_ta_vi":"..."}'
@@ -513,7 +514,7 @@ def translate_product_listing_deepseek_only(
             '- ten_tieng_viet: tên SP tiếng Việt tự nhiên ≤220 ký tự (không liệt kê hết size/màu ở cuối).\n'
             "- mo_ta_vi: plain text tiếng Việt 350–1200 ký tự, 2–5 đoạn, \\n giữa đoạn; không HTML.\n"
             "- KHÔNG để tiếng Trung/Nhật/Hàn trong JSON.\n"
-            f"{LISTING_NO_YEAR_PROMPT_VI.strip()}\n\n"
+            f"{LISTING_SANITIZE_PROMPT_VI.strip()}\n\n"
             "NGỮ CẢNH (có thể tiếng nước ngoài):\n"
             f"{blob}\n\n"
             f"TÊN NGUỒN:\n{name}\n\n"
@@ -630,7 +631,7 @@ def translate_product_listing_gemini_only(
             "Chỉ trả JSON thuần đúng 2 key: ten_tieng_viet và mo_ta_vi.\n"
             'ten_tieng_viet luôn là "".\n'
             "mo_ta_vi: plain text tiếng Việt 350-1200 ký tự, 2-5 đoạn, không HTML, không markdown.\n"
-            f"{LISTING_NO_YEAR_PROMPT_VI.strip()}\n\n"
+            f"{LISTING_SANITIZE_PROMPT_VI.strip()}\n\n"
             f"TÊN SẢN PHẨM:\n{name}\n\n"
             f"MÔ TẢ / NGỮ CẢNH NGUỒN:\n{(desc + chr(10) + blob).strip()}\n\n"
             'Trả về: {"ten_tieng_viet":"","mo_ta_vi":"..."}'
@@ -642,7 +643,7 @@ def translate_product_listing_gemini_only(
             "Chỉ trả JSON thuần đúng 2 key: ten_tieng_viet và mo_ta_vi.\n"
             "ten_tieng_viet: tên sản phẩm tiếng Việt tự nhiên <=220 ký tự, không giữ nguyên chữ Cyrillic/Mông Cổ.\n"
             "mo_ta_vi: plain text tiếng Việt 350-1200 ký tự, 2-5 đoạn, không HTML, không markdown.\n"
-            f"{LISTING_NO_YEAR_PROMPT_VI.strip()}\n\n"
+            f"{LISTING_SANITIZE_PROMPT_VI.strip()}\n\n"
             f"NGỮ CẢNH:\n{blob}\n\n"
             f"TÊN NGUỒN:\n{name}\n\n"
             f"MÔ TẢ NGUỒN:\n{desc}\n\n"

@@ -37,3 +37,25 @@ def test_product_data_skips_chinese_name():
     assert "2025" not in pd["name"]
     assert "2024" not in pd["description"]
     assert "2023" not in pd["description"]
+
+
+def test_strip_chinese_guofeng_from_source_context():
+    raw = "国风新中式淑女高端连衣裙女国潮小众仙气收腰无袖长裙子 N6074"
+    out = sanitize_listing_context_for_ai(raw)
+    assert "国风" not in out
+    assert "国潮" not in out
+    assert "新中式" not in out
+    assert "连衣裙" in out
+
+
+def test_strip_vietnamese_guofeng_style_from_name():
+    name = "Váy maxi nữ phong cách quốc gia mới thắt eo không tay dáng dài — Xanh lam"
+    out = sanitize_vi_listing_field(name)
+    assert "phong cách quốc gia" not in out.casefold()
+    assert "Váy maxi nữ" in out
+    assert "thắt eo" in out
+
+
+def test_keep_other_style_phrases():
+    name = "Túi đeo hông nam phong cách thể thao ngoài trời"
+    assert sanitize_vi_listing_field(name) == name

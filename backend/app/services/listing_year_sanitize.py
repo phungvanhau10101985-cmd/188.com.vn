@@ -55,6 +55,43 @@ NĂM / THỜI GIAN (bắt buộc):
 - Giữ số đo kỹ thuật (cm, mm, kg, size) — không nhầm với năm.
 """
 
+_CJK_GUOFENG_STYLE_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p)
+    for p in (
+        r"国风",
+        r"国潮",
+        r"新中式",
+        r"中国风",
+        r"中式风?",
+        r"汉风",
+    )
+)
+
+_VI_GUOFENG_STYLE_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE | re.UNICODE)
+    for p in (
+        r"phong\s*cách\s*quốc\s*gia",
+        r"phong\s*cách\s*trung\s*quốc",
+        r"phong\s*cách\s*trung\s*hoa",
+        r"phong\s*cách\s*hán(?:\s*quốc)?",
+        r"phong\s*cách\s*tân\s*trung(?:\s*thức)?",
+        r"quốc\s*phong",
+        r"tân\s*trung\s*thức",
+        r"kiểu\s*trung(?:\s*quốc)?",
+        r"\bguofeng\b",
+        r"\bguochao\b",
+    )
+)
+
+LISTING_NO_CHINESE_STYLE_PROMPT_VI = """
+PHONG CÁCH QUỐC PHONG / TRUNG QUỐC (bắt buộc):
+- Cụm nguồn như 国风, 国潮, 新中式, 中国风, 中式… KHÔNG dịch sang tiếng Việt (vd. «phong cách quốc gia», «phong cách Trung Quốc», «tân trung thức», «quốc phong») — BỎ HẲN khỏi ten_tieng_viet, mo_ta_vi và phong_cach_vi.
+- Giữ mô tả sản phẩm thực tế (váy, thắt eo, không tay, chất liệu…); chỉ loại cụm marketing phong cách quốc phong Trung.
+- Vẫn được dùng phong cách cụ thể khác khi có ý nghĩa rõ (vd. «công sở», «casual», «thể thao»).
+"""
+
+LISTING_SANITIZE_PROMPT_VI = LISTING_NO_YEAR_PROMPT_VI + LISTING_NO_CHINESE_STYLE_PROMPT_VI
+
 
 def _collapse_ws(text: str) -> str:
     t = re.sub(r"[ \t]+\n", "\n", text)
@@ -77,14 +114,28 @@ def strip_listing_year_marketing(text: str, *, remove_standalone_years: bool = T
     return _collapse_ws(t)
 
 
+def strip_listing_chinese_style_marketing(text: str) -> str:
+    """Bỏ cụm quốc phong / phong cách Trung Quốc (nguồn CJK hoặc bản dịch Việt)."""
+    if not text or not str(text).strip():
+        return ""
+    t = str(text)
+    for rx in _CJK_GUOFENG_STYLE_RES:
+        t = rx.sub("", t)
+    for rx in _VI_GUOFENG_STYLE_RES:
+        t = rx.sub("", t)
+    return _collapse_ws(t)
+
+
 def sanitize_listing_context_for_ai(text: str) -> str:
-    """Ngữ cảnh đưa vào prompt AI — bỏ năm marketing."""
-    return strip_listing_year_marketing(text, remove_standalone_years=True)
+    """Ngữ cảnh đưa vào prompt AI — bỏ năm marketing và cụm quốc phong."""
+    t = strip_listing_year_marketing(text, remove_standalone_years=True)
+    return strip_listing_chinese_style_marketing(t)
 
 
 def sanitize_vi_listing_field(text: str) -> str:
     """Trường tiếng Việt hiển thị web."""
-    return strip_listing_year_marketing(text, remove_standalone_years=True)
+    t = strip_listing_year_marketing(text, remove_standalone_years=True)
+    return strip_listing_chinese_style_marketing(t)
 
 
 def sanitize_taxonomy_vi_fields(data: Dict[str, Any]) -> Dict[str, Any]:
