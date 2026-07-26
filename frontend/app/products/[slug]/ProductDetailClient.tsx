@@ -54,6 +54,7 @@ import NanoAiLauncherGatewaySync from '@/components/NanoAiLauncherGatewaySync';
 import { buildNanoAiGatewayPayloadFrom188Product } from '@/lib/nanoai-hosted-chat';
 import { resolveProductGroupListingPath } from '@/lib/product-oos-redirect';
 import { cdnUrl } from '@/lib/cdn-url';
+import AgeGenderRecommendationSection from '@/components/AgeGenderRecommendationSection';
 
 interface ProductDetailClientProps {
   initialProduct: Product;
@@ -720,6 +721,8 @@ export default function ProductDetailClient({
             <ProductQASection product={product} modalOnly modalOpen={qaModalOpen} onModalClose={() => setQaModalOpen(false)} onModalOpen={() => setQaModalOpen(true)} />
             <ProductReviewSection product={product} modalOnly modalOpen={reviewsModalOpen} onModalClose={() => setReviewsModalOpen(false)} onModalOpen={() => setReviewsModalOpen(true)} />
           </article>
+
+          <AgeGenderRecommendationSection excludeProductId={product.id} className="mt-6" />
         </main>
       </div>
     </div>

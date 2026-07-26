@@ -17,6 +17,7 @@ import { reportUnreachableProductMedia } from '@/lib/report-broken-product-media
 import { getOptimizedImage } from '@/lib/image-utils';
 import { hasVideoLink, parseVideoLink, buildYoutubeEmbedSrc } from '@/lib/video-utils';
 import RelatedProducts from '@/components/product-detail/RelatedProducts';
+import AgeGenderRecommendationSection from '@/components/AgeGenderRecommendationSection';
 import ProductTabs from '@/components/product-detail/ProductTabs';
 import ProductVariantModal from './components/ProductVariantModal/ProductVariantModal';
 import ProductQAReviewCards from './components/ProductQAReviewCards/ProductQAReviewCards';
@@ -504,6 +505,8 @@ export default function ProductDetailMobile({
         <div className="border-t border-gray-100 pt-4">
           <RelatedProducts currentProduct={product} />
         </div>
+
+        <AgeGenderRecommendationSection excludeProductId={product.id} className="mt-4 border-t border-gray-100 pt-4" />
       </div>
 
       {/* Sticky bottom bar: Trang · Thử đồ · Thích | THÊM GIỎ | MUA HÀNG */}
