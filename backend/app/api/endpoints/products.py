@@ -1527,7 +1527,7 @@ class BulkDeleteByProductIdBody(BaseModel):
 def delete_product_by_product_id_body(
     body: ProductExcelIdBody,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("products")),
+    _: AdminUser = Depends(require_module_permission("products", need="delete")),
 ):
     """Xóa SP theo product_id trong JSON body — an toàn khi ID có / hoặc khoảng trắng."""
     return _delete_product_by_excel_id(db, body.product_id)
@@ -1567,7 +1567,7 @@ def update_product_by_product_id_query(
 def delete_product_by_product_id_query(
     product_id: str = Query(..., description="product_id Excel / mã kho (có thể chứa /)"),
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("products")),
+    _: AdminUser = Depends(require_module_permission("products", need="delete")),
 ):
     """Xóa SP khi product_id có dấu / — tránh 404 do path segment."""
     return _delete_product_by_excel_id(db, product_id)
@@ -1916,7 +1916,7 @@ def update_product(
 def delete_product(
     product_id: str,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("products")),
+    _: AdminUser = Depends(require_module_permission("products", need="delete")),
 ):
     """Delete product (product_id = Excel column A / product_id string)."""
     return _delete_product_by_excel_id(db, product_id)

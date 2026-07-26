@@ -1,7 +1,7 @@
 # backend/app/api/endpoints/orders.py - COMPLETE ORDER API WITH DEPOSIT
 import io
 import re
-from fastapi import APIRouter, Depends, HTTPException, Query, Body, status, BackgroundTasks, Header, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, status, BackgroundTasks, Header, UploadFile, File, Form, Request
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -14,7 +14,7 @@ from app.crud.cart import cart as cart_crud, _resolve_cart_line_image
 from app.crud import promotion as crud_promotion
 from app.crud.promotion import PromoValidationError
 from app.models.order import OrderStatus as OrderStatusEnum, DepositType as DepositTypeEnum, PaymentStatus as PaymentStatusEnum
-from app.core.security import get_current_user, get_current_user_optional, require_module_permission, require_module_permission_with_destructive_step_up
+from app.core.security import get_current_user, get_current_user_optional, require_module_permission, verify_recent_admin_auth
 from app.core.config import settings
 from app.services.email_service import (
     deliver_deposit_confirmed_email,
@@ -945,10 +945,13 @@ def admin_enqueue_ems_tracking_refresh(
 @router.delete("/admin/shipping/ems-records", response_model=shipment_schemas.EmsShippingDeleteResponse)
 def admin_delete_ems_shipping_records(
     body: shipment_schemas.EmsShippingDeleteRequest,
+    request: Request,
     db: Session = Depends(get_db),
-    current_admin: models.AdminUser = Depends(require_module_permission_with_destructive_step_up("ems_shipping")),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping", need="delete")),
 ):
     """Xóa vĩnh viễn các dòng khỏi bảng vận chuyển EMS."""
+    if len(body.ids) > 1:
+        verify_recent_admin_auth(request, current_admin)
     deleted = ems_import_svc.delete_ems_shipping_records(db, body.ids)
     return {"ok": True, "deleted": deleted}
 

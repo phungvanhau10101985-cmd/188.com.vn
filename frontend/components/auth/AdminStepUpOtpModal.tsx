@@ -13,7 +13,7 @@ type Props = {
 
 export default function AdminStepUpOtpModal({
   title = 'Xác minh OTP quản trị',
-  description = 'Thao tác xóa hoặc import dữ liệu hàng loạt cần mã OTP gửi tới email quản trị.',
+  description = 'Xóa sản phẩm, thành viên, đơn hàng hoặc mã EMS hàng loạt cần mã OTP gửi tới email quản trị.',
   onClose,
   onVerified,
 }: Props) {
@@ -86,7 +86,7 @@ export default function AdminStepUpOtpModal({
         <h2 id="admin-step-up-title" className="text-xl font-semibold text-gray-900">{title}</h2>
         <p className="mt-2 text-sm text-gray-600">{description}</p>
         <p className="mt-2 text-sm text-gray-600">
-          Mã có hiệu lực khoảng 10 phút; các thao tác tiếp theo trong phiên không cần nhập lại.
+          Mã có hiệu lực khoảng 10 phút; các lần xóa hàng loạt tiếp theo trong phiên không cần nhập lại.
         </p>
 
         {error ? (

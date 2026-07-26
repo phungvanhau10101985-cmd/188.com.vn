@@ -88,9 +88,7 @@ from app.core.security import (
     create_admin_token,
     get_current_admin,
     require_module_permission,
-    require_module_permission_with_destructive_step_up,
     require_privileged_admin,
-    require_privileged_admin_with_destructive_step_up,
     require_super_admin,
 )
 from app.core.config import settings
@@ -353,7 +351,7 @@ def admin_request_destructive_step_up(
     current_admin: AdminUser = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """Gửi OTP email admin trước thao tác xóa / import phá dữ liệu hàng loạt."""
+    """Gửi OTP email admin trước thao tác xóa sản phẩm / thành viên / đơn hàng / mã EMS hàng loạt."""
     if not (current_admin.email or "").strip():
         raise HTTPException(status_code=400, detail="Tài khoản admin chưa có email để nhận OTP.")
     try:
@@ -633,7 +631,7 @@ def admin_update_user(
 def admin_delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    _: models.AdminUser = Depends(require_module_permission_with_destructive_step_up("members")),
+    _: models.AdminUser = Depends(require_module_permission("members", need="delete")),
 ):
     """Xóa vĩnh viễn tài khoản thành viên."""
     user = crud.user.get_user_by_id(db, user_id)
@@ -722,7 +720,7 @@ def admin_list_staff_accounts(
 def admin_delete_staff_account(
     admin_id: int,
     db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(require_privileged_admin_with_destructive_step_up()),
+    current_admin: AdminUser = Depends(require_privileged_admin),
 ):
     """Xóa tài khoản admin đã gỡ quyền (is_active=false, không liên kết thành viên)."""
     target = db.query(AdminUser).filter(AdminUser.id == admin_id).first()

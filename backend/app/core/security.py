@@ -343,7 +343,7 @@ def require_module_permission_with_destructive_step_up(
     *,
     need: Optional[Literal["view", "create", "update", "delete"]] = None,
 ):
-    """Module permission + recent admin OTP for bulk/destructive operations."""
+    """Module permission + recent admin OTP for bulk delete operations."""
 
     def dep(
         request: Request,

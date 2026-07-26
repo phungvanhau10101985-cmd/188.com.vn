@@ -14,7 +14,7 @@ from app.models.seo_cluster import SeoCluster
 from app.utils.ttl_cache import cache as ttl_cache
 from app.core.config import settings
 from app.models.admin import AdminUser
-from app.core.security import require_module_permission_with_destructive_step_up
+from app.core.security import require_module_permission
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -311,7 +311,7 @@ def update_category(category_id: int, category: CategoryUpdate, db: Session = De
 def delete_category(
     category_id: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("taxonomy")),
+    _: AdminUser = Depends(require_module_permission("taxonomy", need="delete")),
 ):
     """
     Xóa danh mục
