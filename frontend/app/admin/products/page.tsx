@@ -996,9 +996,11 @@ export default function AdminProductsPage() {
 
   const productsFetchAbortRef = useRef<AbortController | null>(null);
   const productsSilentFetchAbortRef = useRef<AbortController | null>(null);
+  const exportInProgressRef = useRef(false);
 
   const fetchProducts = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
+    if (exportInProgressRef.current) return;
     const abortRef = silent ? productsSilentFetchAbortRef : productsFetchAbortRef;
     abortRef.current?.abort();
     const ctrl = new AbortController();
@@ -2620,7 +2622,10 @@ export default function AdminProductsPage() {
   }, []);
 
   const handleExport = async () => {
+    productsFetchAbortRef.current?.abort();
+    productsSilentFetchAbortRef.current?.abort();
     setExporting(true);
+    exportInProgressRef.current = true;
     try {
       const selectedIds =
         selectedProductIds.size > 0 ? Array.from(selectedProductIds) : undefined;
@@ -2632,13 +2637,19 @@ export default function AdminProductsPage() {
           : 'Đã tải file Excel (toàn bộ sản phẩm)',
       );
     } catch (e) {
-      const msg =
-        e instanceof Error && e.message.trim()
+      const aborted =
+        (typeof DOMException !== 'undefined' && e instanceof DOMException && e.name === 'AbortError') ||
+        (e instanceof Error && e.name === 'AbortError');
+      const msg = aborted
+        ? 'Export quá lâu (timeout 15 phút). Catalog lớn có thể cần export theo lô (chọn từng trang) hoặc thử lại khi VPS ít tải — xem pm2 logs 188-api.'
+        : e instanceof Error && e.message.trim()
           ? e.message.trim()
           : 'Export thất bại — không nhận được phản hồi từ server';
       showToast('err', msg, 10_000);
     } finally {
+      exportInProgressRef.current = false;
       setExporting(false);
+      void fetchProducts({ silent: true });
     }
   };
 

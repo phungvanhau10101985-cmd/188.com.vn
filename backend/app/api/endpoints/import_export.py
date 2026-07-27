@@ -1,4 +1,5 @@
 # backend/app/api/endpoints/import_export.py - COMPLETE FINAL VERSION
+import asyncio
 import pandas as pd
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, BackgroundTasks, Query, Header
 from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse
@@ -750,6 +751,12 @@ async def import_excel(
 
 # ========== EXPORT FUNCTIONS ==========
 
+def _write_products_excel_export(products_data: list, filename: str) -> dict:
+    """Ghi file Excel ngoài request DB — tránh giữ connection pool trong lúc pandas/openpyxl."""
+    importer = ExcelImporter(None)
+    return importer.export_to_excel(products_data, filename)
+
+
 @router.get("/export/excel", responses={
     200: {
         "description": "Export products to Excel",
@@ -816,17 +823,28 @@ async def export_excel(
             raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm để export")
         
         print(f"✅ Tìm thấy {len(products_data)} sản phẩm")
-        
-        importer = ExcelImporter(db)
-        
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"export_products_{timestamp}.xlsx"
         if selected_ids:
             filename = f"export_selected_products_{timestamp}.xlsx"
         elif category:
             filename = f"export_{category}_{timestamp}.xlsx"
-        
-        result = importer.export_to_excel(products_data, filename)
+
+        # Trả connection về pool trước khi ghi Excel (catalog lớn có thể vài phút).
+        try:
+            db.close()
+        except Exception:
+            pass
+
+        t0 = time.perf_counter()
+        result = await asyncio.to_thread(_write_products_excel_export, products_data, filename)
+        logger.info(
+            "export_excel write thread rows=%s duration_s=%.2f filename=%s",
+            len(products_data),
+            time.perf_counter() - t0,
+            filename,
+        )
         
         if not result.get("success", False):
             err = result.get("error") or "Export failed"

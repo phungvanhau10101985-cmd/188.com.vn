@@ -2078,10 +2078,23 @@ export const adminProductAPI = {
       }
     }
     const url = `${getApiBaseUrl()}/import-export/export/excel?${sp.toString()}`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
-      signal: AbortSignal.timeout(900_000),
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+        signal: AbortSignal.timeout(900_000),
+      });
+    } catch (e) {
+      const aborted =
+        (typeof DOMException !== 'undefined' && e instanceof DOMException && e.name === 'AbortError') ||
+        (e instanceof Error && e.name === 'AbortError');
+      if (aborted) {
+        throw new Error(
+          'Export quá lâu (timeout 15 phút). Catalog lớn có thể cần export theo lô (chọn từng trang) hoặc thử lại khi VPS ít tải — xem pm2 logs 188-api.',
+        );
+      }
+      throw e;
+    }
     if (!res.ok) {
       const ct = (res.headers.get('content-type') || '').toLowerCase();
       if (ct.includes('application/json')) {
