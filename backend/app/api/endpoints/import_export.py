@@ -111,6 +111,40 @@ router = APIRouter()
 # --- Import Excel async (job + tiến trình) — dùng khi file lớn; server single-process ---
 _import_job_lock = threading.Lock()
 IMPORT_EXCEL_JOBS: dict = {}  # job_id -> trạng thái
+# Chỉ 1 import Excel (sync hoặc async) chạy tại một thời điểm — bảo vệ pool DB / CPU.
+_excel_import_flight_lock = threading.Lock()
+_excel_import_flight_holder: dict = {"job_id": None, "mode": None}
+
+
+def _active_excel_import_job_id() -> Optional[str]:
+    with _import_job_lock:
+        for jid, st in IMPORT_EXCEL_JOBS.items():
+            status = (st.get("status") or "").strip().lower()
+            if status in ("queued", "running"):
+                return jid
+    return None
+
+
+def _try_acquire_excel_import_flight(*, job_id: Optional[str], mode: str) -> Optional[str]:
+    """
+    Chiếm slot import Excel. Trả None nếu OK; nếu bận trả job_id đang chạy (hoặc 'sync').
+    """
+    if not _excel_import_flight_lock.acquire(blocking=False):
+        holder = _excel_import_flight_holder.get("job_id") or _active_excel_import_job_id() or "sync"
+        return str(holder)
+    _excel_import_flight_holder["job_id"] = job_id
+    _excel_import_flight_holder["mode"] = mode
+    return None
+
+
+def _release_excel_import_flight() -> None:
+    _excel_import_flight_holder["job_id"] = None
+    _excel_import_flight_holder["mode"] = None
+    if _excel_import_flight_lock.locked():
+        try:
+            _excel_import_flight_lock.release()
+        except RuntimeError:
+            pass
 
 
 def auto_scan_category_seo_safe() -> None:
@@ -427,6 +461,7 @@ def _run_import_excel_job(
                 os.remove(temp_file_path)
             except OSError:
                 pass
+        _release_excel_import_flight()
 
 
 def auto_scan_category_seo(db: Session):
@@ -478,50 +513,70 @@ async def import_excel_async(
         overwrite,
     )
 
+    job_id = str(uuid.uuid4())
+    busy = _try_acquire_excel_import_flight(job_id=job_id, mode="async")
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Đang có import Excel khác chạy (job {busy}). "
+                "Đợi hoàn tất hoặc hủy job đó trước khi import tiếp — tránh quá tải DB."
+            ),
+        )
+
     temp_dir = "temp_uploads"
     os.makedirs(temp_dir, exist_ok=True)
+    temp_file_path = None
 
-    with tempfile.NamedTemporaryFile(dir=temp_dir, suffix=".xlsx", delete=False) as tmp:
-        temp_file_path = tmp.name
-        content = await file.read()
-        tmp.write(content)
+    try:
+        with tempfile.NamedTemporaryFile(dir=temp_dir, suffix=".xlsx", delete=False) as tmp:
+            temp_file_path = tmp.name
+            content = await file.read()
+            tmp.write(content)
 
-    job_id = str(uuid.uuid4())
-    logger.info(
-        "%s queued job=%s file=%s bytes=%s overwrite=%s",
-        IMPORT_EXCEL_LOG_PREFIX,
-        job_id,
-        file.filename,
-        len(content) if content else 0,
-        overwrite,
-    )
-    initial = {
-        "job_id": job_id,
-        "status": "queued",
-        "phase": "queued",
-        "current": 0,
-        "total": None,
-        "percent": None,
-        "message": "Đã nhận file, đang vào hàng đợi...",
-        "created_at": datetime.now().isoformat(),
-        "finished_at": None,
-        "result": None,
-        "detail": None,
-    }
-    with _import_job_lock:
-        IMPORT_EXCEL_JOBS[job_id] = initial
-        try:
-            persist_import_job(job_id, IMPORT_EXCEL_JOBS[job_id])
-        except OSError:
-            pass
+        logger.info(
+            "%s queued job=%s file=%s bytes=%s overwrite=%s",
+            IMPORT_EXCEL_LOG_PREFIX,
+            job_id,
+            file.filename,
+            len(content) if content else 0,
+            overwrite,
+        )
+        initial = {
+            "job_id": job_id,
+            "status": "queued",
+            "phase": "queued",
+            "current": 0,
+            "total": None,
+            "percent": None,
+            "message": "Đã nhận file, đang vào hàng đợi...",
+            "created_at": datetime.now().isoformat(),
+            "finished_at": None,
+            "result": None,
+            "detail": None,
+        }
+        with _import_job_lock:
+            IMPORT_EXCEL_JOBS[job_id] = initial
+            try:
+                persist_import_job(job_id, IMPORT_EXCEL_JOBS[job_id])
+            except OSError:
+                pass
 
-    background_tasks.add_task(
-        _run_import_excel_job,
-        job_id,
-        temp_file_path,
-        overwrite,
-        file.filename,
-    )
+        background_tasks.add_task(
+            _run_import_excel_job,
+            job_id,
+            temp_file_path,
+            overwrite,
+            file.filename,
+        )
+    except Exception:
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except OSError:
+                pass
+        _release_excel_import_flight()
+        raise
 
     return JSONResponse(
         status_code=202,
@@ -596,6 +651,16 @@ async def import_excel(
         raise HTTPException(
             status_code=400, 
             detail="Chỉ hỗ trợ file Excel (.xlsx, .xls)."
+        )
+
+    busy = _try_acquire_excel_import_flight(job_id="sync", mode="sync")
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Đang có import Excel khác chạy (job {busy}). "
+                "Đợi hoàn tất hoặc hủy job đó trước khi import tiếp — tránh quá tải DB."
+            ),
         )
     
     temp_file_path = None
@@ -737,6 +802,7 @@ async def import_excel(
             detail=f"Import thất bại: {str(e)}"
         )
     finally:
+        _release_excel_import_flight()
         # Always try to cleanup
         if temp_file_path and os.path.exists(temp_file_path):
             try:

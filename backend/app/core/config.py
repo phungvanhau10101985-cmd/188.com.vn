@@ -916,7 +916,15 @@ class Settings:
         self.ALLOWED_EXTENSIONS: List[str] = os.getenv("ALLOWED_EXTENSIONS", "jpg,jpeg,png,gif,pdf,xlsx,xls").split(",")
         # Import Excel: tối đa số dòng/lần (mặc định 30k); commit DB theo lô để giảm overhead transaction
         self.MAX_EXCEL_IMPORT_ROWS: int = int(os.getenv("MAX_EXCEL_IMPORT_ROWS", "30000"))
-        self.EXCEL_IMPORT_COMMIT_BATCH_SIZE: int = int(os.getenv("EXCEL_IMPORT_COMMIT_BATCH_SIZE", "250"))
+        # Commit theo lô (cap 500 trong bulk_import_products) — mặc định 500 để giảm số lần COMMIT.
+        self.EXCEL_IMPORT_COMMIT_BATCH_SIZE: int = int(os.getenv("EXCEL_IMPORT_COMMIT_BATCH_SIZE", "500"))
+        # Prefetch Product theo IN(...) khi ghi DB (tránh N lần SELECT từng dòng).
+        try:
+            self.EXCEL_IMPORT_PREFETCH_CHUNK_SIZE: int = int(
+                os.getenv("EXCEL_IMPORT_PREFETCH_CHUNK_SIZE", "500")
+            )
+        except ValueError:
+            self.EXCEL_IMPORT_PREFETCH_CHUNK_SIZE = 500
         # Cập nhật tiến trình import (UI poll job): nhỏ hơn commit batch để thanh tiến trình nhảy mượt.
         self.EXCEL_IMPORT_PROGRESS_EVERY_ROWS: int = int(
             os.getenv("EXCEL_IMPORT_PROGRESS_EVERY_ROWS", "25")
@@ -924,10 +932,10 @@ class Settings:
         self.EXCEL_IMPORT_PARSE_PROGRESS_EVERY_ROWS: int = int(
             os.getenv("EXCEL_IMPORT_PARSE_PROGRESS_EVERY_ROWS", "50")
         )
-        # Tắt mặc định các fallback/query quét toàn bảng trong bulk import để ưu tiên tốc độ ghi DB.
+        # Fallback quét toàn bảng khi map prefix miss — chậm với catalog lớn; mặc định tắt.
         # Bật lại khi cần chẩn đoán xung đột cũ: true.
         self.EXCEL_IMPORT_ENABLE_SLOW_CONFLICT_FALLBACK: bool = os.getenv(
-            "EXCEL_IMPORT_ENABLE_SLOW_CONFLICT_FALLBACK", "true"
+            "EXCEL_IMPORT_ENABLE_SLOW_CONFLICT_FALLBACK", "false"
         ).strip().lower() in ("1", "true", "yes", "on")
         # Cảnh báo trùng prefix (mã cột A) quét toàn bảng products — hữu ích debug, mặc định tắt để nhanh hơn.
         self.EXCEL_IMPORT_DUPLICATE_PREFIX_WARNING: bool = os.getenv(

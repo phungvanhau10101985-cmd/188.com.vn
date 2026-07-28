@@ -197,25 +197,65 @@ def _bulk_import_conflict_maps_initial(db: Session) -> Tuple[Dict[str, str], Dic
     return pref_own, code_own
 
 
+def _bulk_import_slug_owner_map(db: Session) -> Dict[str, str]:
+    """slug → product_id (lần đầu gặp) — tránh SELECT slug từng dòng khi import."""
+    out: Dict[str, str] = {}
+    for slug, pid in db.query(Product.slug, Product.product_id).filter(Product.slug.isnot(None)).all():
+        s = str(slug or "").strip()
+        p = str(pid or "").strip()
+        if s and p and s not in out:
+            out[s] = p
+    return out
+
+
+def _bulk_import_prefetch_products_by_ids(
+    db: Session,
+    product_ids: Set[str],
+    *,
+    chunk_size: int = 500,
+) -> Dict[str, Product]:
+    """Load Product theo product_id IN chunks — dùng làm cache lookup trong bulk import."""
+    out: Dict[str, Product] = {}
+    ids = sorted({str(p).strip() for p in product_ids if p and str(p).strip()})
+    if not ids:
+        return out
+    step = max(1, min(int(chunk_size or 500), 1000))
+    for i in range(0, len(ids), step):
+        chunk = ids[i : i + step]
+        for row in db.query(Product).filter(Product.product_id.in_(chunk)).all():
+            pid = str(row.product_id or "").strip()
+            if pid:
+                out[pid] = row
+    return out
+
+
 def _ensure_bulk_import_internal_product_code(
     db: Session,
     proposed: Optional[str],
     *,
     exclude_product_id: Optional[int] = None,
     batch_reserved: Optional[Set[str]] = None,
+    sku_taken_fn=None,
 ) -> str:
     """
     Import Excel lên web chỉ chặn SKU đang có trên products; không chặn vì nháp import
     hoặc Google Sheet SKU vì các mã đó chính là pool admin dùng để import.
+
+    `sku_taken_fn(code_upper, exclude_product_pk)` — nếu truyền (map in-memory) thì bỏ SELECT từng dòng.
     """
     reserved = batch_reserved if batch_reserved is not None else set()
     cand = str(proposed or "").strip().upper()
     if internal_sku_is_valid_format(cand):
-        if cand not in reserved and not internal_sku_exists_on_other_product(
-            db,
-            cand,
-            exclude_product_id=exclude_product_id,
-        ):
+        taken = (
+            bool(sku_taken_fn(cand, exclude_product_id))
+            if sku_taken_fn is not None
+            else internal_sku_exists_on_other_product(
+                db,
+                cand,
+                exclude_product_id=exclude_product_id,
+            )
+        )
+        if cand not in reserved and not taken:
             reserved.add(cand)
             return cand
 
@@ -6221,6 +6261,32 @@ def bulk_import_products(
     should_cancel=None,
 ):
     """Import multiple products from Excel data. progress_callback(phase, current, total) optional."""
+    prev_expire = getattr(db, "expire_on_commit", True)
+    try:
+        db.expire_on_commit = False
+    except Exception:
+        prev_expire = True
+    try:
+        return _bulk_import_products_impl(
+            db,
+            products_data,
+            progress_callback=progress_callback,
+            should_cancel=should_cancel,
+        )
+    finally:
+        try:
+            db.expire_on_commit = prev_expire
+        except Exception:
+            pass
+
+
+def _bulk_import_products_impl(
+    db: Session,
+    products_data: List[Dict],
+    progress_callback=None,
+    should_cancel=None,
+):
+    """Hot path ghi DB: prefetch + map in-memory + commit theo lô."""
     created = 0
     updated = 0
     deleted = 0
@@ -6233,13 +6299,17 @@ def bulk_import_products(
     batch_size = max(
         1,
         min(
-            int(getattr(settings, "EXCEL_IMPORT_COMMIT_BATCH_SIZE", 250) or 250),
+            int(getattr(settings, "EXCEL_IMPORT_COMMIT_BATCH_SIZE", 500) or 500),
             500,
         ),
     )
+    prefetch_chunk = max(
+        1,
+        min(int(getattr(settings, "EXCEL_IMPORT_PREFETCH_CHUNK_SIZE", 500) or 500), 1000),
+    )
 
     n_products = len(products_data)
-    # Tiến trình DB nên cập nhật mượt (không phụ thuộc commit batch 250 dòng).
+    # Tiến trình DB nên cập nhật mượt (không phụ thuộc commit batch).
     # Commit vẫn theo EXCEL_IMPORT_COMMIT_BATCH_SIZE để giữ hiệu năng ghi.
     db_tick = max(
         10,
@@ -6258,11 +6328,33 @@ def bulk_import_products(
     db_prefix_owner, db_code_owner = _bulk_import_conflict_maps_initial(db)
     batch_prefix_owner: Dict[str, str] = {}
     batch_code_owner: Dict[str, str] = {}
+    slug_owner = _bulk_import_slug_owner_map(db)
     slow_conflict_fallback = bool(
         getattr(settings, "EXCEL_IMPORT_ENABLE_SLOW_CONFLICT_FALLBACK", False)
     )
     duplicate_prefix_warn_enabled = bool(
         getattr(settings, "EXCEL_IMPORT_DUPLICATE_PREFIX_WARNING", False)
+    )
+
+    prefetch_ids: Set[str] = set()
+    for pid in db_prefix_owner.values():
+        if pid:
+            prefetch_ids.add(str(pid).strip())
+    for pid in db_code_owner.values():
+        if pid:
+            prefetch_ids.add(str(pid).strip())
+    for row in products_data:
+        pid = str(row.get("product_id") or "").strip()
+        if pid:
+            prefetch_ids.add(pid)
+    existing_by_pid = _bulk_import_prefetch_products_by_ids(
+        db, prefetch_ids, chunk_size=prefetch_chunk
+    )
+    logger.info(
+        "📦 bulk_import prefetch: %s ids requested → %s Product rows (chunk=%s)",
+        len(prefetch_ids),
+        len(existing_by_pid),
+        prefetch_chunk,
     )
 
     if duplicate_prefix_warn_enabled:
@@ -6282,6 +6374,42 @@ def bulk_import_products(
                     f"Mã cột A «{prefix_sample.get(pk0, pk0)}» đang có {cnt} sản phẩm trên web — "
                     "import chỉ cập nhật một bản, không tạo thêm trùng offer."
                 )
+
+    def _cache_get_by_product_id(pid: Optional[str]) -> Optional[Product]:
+        key = str(pid or "").strip()
+        if not key:
+            return None
+        hit = existing_by_pid.get(key)
+        if hit is not None:
+            return hit
+        row = db.query(Product).filter(Product.product_id == key).first()
+        if row is not None:
+            existing_by_pid[key] = row
+        return row
+
+    def _cache_put(product: Product) -> None:
+        pid = str(getattr(product, "product_id", None) or "").strip()
+        if pid:
+            existing_by_pid[pid] = product
+
+    def _cache_drop_product(product: Product) -> None:
+        pid = str(getattr(product, "product_id", None) or "").strip()
+        if pid:
+            existing_by_pid.pop(pid, None)
+        slug = str(getattr(product, "slug", None) or "").strip()
+        if slug and slug_owner.get(slug) == pid:
+            slug_owner.pop(slug, None)
+
+    def _sku_taken_in_maps(code_u: str, exclude_product_pk: Optional[int]) -> bool:
+        owner_pid = batch_code_owner.get(code_u) or db_code_owner.get(code_u)
+        if not owner_pid:
+            return False
+        owner = _cache_get_by_product_id(owner_pid)
+        if owner is None:
+            return True
+        if exclude_product_pk is not None and owner.id == exclude_product_pk:
+            return False
+        return True
 
     def _missing_required_category_labels(data: Dict, *, warehouse_row: bool = False) -> List[str]:
         if warehouse_row:
@@ -6311,12 +6439,13 @@ def bulk_import_products(
 
         excel_listed = listed_from_excel_cell(product_data.pop("excel_import_listed", 1), default=1)
         if excel_listed == 0:
-            existing_del = db.query(Product).filter(Product.product_id == product_id).first()
+            existing_del = _cache_get_by_product_id(product_id)
             if existing_del:
                 try:
                     wh_svc.assert_product_deletion_allowed(db, existing_del)
                     with db.begin_nested():
                         _delete_product_orm_only(db, existing_del)
+                    _cache_drop_product(existing_del)
                     return "deleted"
                 except ValueError as exc:
                     errors.append(f"Dòng {idx + 1} ({product_id}): {exc}")
@@ -6355,16 +6484,28 @@ def bulk_import_products(
 
         assign_search_document_to_mapping(product_data)
 
-        existing_wh = db.query(Product).filter(Product.product_id == product_id).first()
+        existing_wh = _cache_get_by_product_id(product_id)
         try:
             with db.begin_nested():
                 if existing_wh:
+                    old_slug = str(getattr(existing_wh, "slug", None) or "").strip()
                     for key, value in product_data.items():
                         if hasattr(existing_wh, key) and key not in ["id", "created_at"]:
                             setattr(existing_wh, key, value)
                     existing_wh.updated_at = datetime.now()
+                    new_slug = str(product_data.get("slug") or existing_wh.slug or "").strip()
+                    if old_slug and old_slug != new_slug and slug_owner.get(old_slug) == product_id:
+                        slug_owner.pop(old_slug, None)
+                    if new_slug:
+                        slug_owner[new_slug] = product_id
+                    _cache_put(existing_wh)
                     return "updated"
-                db.add(Product(**product_data))
+                created_wh = Product(**product_data)
+                db.add(created_wh)
+                _cache_put(created_wh)
+                new_slug = str(product_data.get("slug") or "").strip()
+                if new_slug:
+                    slug_owner[new_slug] = product_id
                 return "created"
         except Exception as e:
             errors.append(f"Dòng {idx + 1} ({product_id}): Lỗi import kho — {e}")
@@ -6412,12 +6553,20 @@ def bulk_import_products(
             )
             if prefix_owner and prefix_owner not in delete_candidates:
                 delete_candidates.append(prefix_owner)
-            existing_del = (
-                db.query(Product)
-                .filter(Product.product_id.in_(delete_candidates))
-                .order_by(Product.id.asc())
-                .first()
-            )
+            existing_del = None
+            for cand in delete_candidates:
+                hit = _cache_get_by_product_id(cand)
+                if hit is not None and (existing_del is None or hit.id < existing_del.id):
+                    existing_del = hit
+            if existing_del is None:
+                existing_del = (
+                    db.query(Product)
+                    .filter(Product.product_id.in_(delete_candidates))
+                    .order_by(Product.id.asc())
+                    .first()
+                )
+                if existing_del is not None:
+                    _cache_put(existing_del)
             if existing_del:
                 try:
                     from app.services import warehouse_clearance as wh_clearance_svc
@@ -6427,6 +6576,7 @@ def bulk_import_products(
                     code_upper = str(existing_del.code or "").strip().upper()
                     with db.begin_nested():
                         _delete_product_orm_only(db, existing_del)
+                    _cache_drop_product(existing_del)
                     _bulk_import_maps_remove_product_id(
                         product_id,
                         batch_prefix_owner,
@@ -6476,9 +6626,9 @@ def bulk_import_products(
         existing: Optional[Product] = None
         owner_pid = batch_prefix_owner.get(pk) or db_prefix_owner.get(pk)
         if owner_pid:
-            existing = db.query(Product).filter(Product.product_id == owner_pid).first()
+            existing = _cache_get_by_product_id(owner_pid)
         if existing is None:
-            existing = db.query(Product).filter(Product.product_id == product_id).first()
+            existing = _cache_get_by_product_id(product_id)
         if existing is None and slow_conflict_fallback:
             if should_cancel and should_cancel():
                 from app.services.import_excel_job_store import ImportExcelJobCancelled
@@ -6486,13 +6636,15 @@ def bulk_import_products(
                 raise ImportExcelJobCancelled("Admin đã yêu cầu hủy import Excel.")
             conflict_pid = find_conflicting_product_id_for_same_listing_source(db, product_id)
             if conflict_pid:
-                existing = db.query(Product).filter(Product.product_id == conflict_pid).first()
+                existing = _cache_get_by_product_id(conflict_pid)
         if existing is None and slow_conflict_fallback:
             if should_cancel and should_cancel():
                 from app.services.import_excel_job_store import ImportExcelJobCancelled
 
                 raise ImportExcelJobCancelled("Admin đã yêu cầu hủy import Excel.")
             existing = find_product_by_listing_source_prefix(db, source_prefix)
+            if existing is not None:
+                _cache_put(existing)
         ex_pid_early = existing.id if existing else None
         proposed_raw = product_data.get("code")
         proposed_u = str(proposed_raw or "").strip().upper()
@@ -6504,7 +6656,7 @@ def bulk_import_products(
                         "trùng trong cùng file import."
                     )
                     continue
-                if internal_sku_exists_on_other_product(db, proposed_u, exclude_product_id=ex_pid_early):
+                if _sku_taken_in_maps(proposed_u, ex_pid_early):
                     skipped.append(
                         f"Dòng {idx + 1} ({product_id}): Bỏ qua — mã SKU «{proposed_u}» "
                         "đã có trên sản phẩm khác trên web."
@@ -6524,6 +6676,7 @@ def bulk_import_products(
                         proposed_u,
                         exclude_product_id=existing.id if existing else None,
                         batch_reserved=sku_batch_reserved,
+                        sku_taken_fn=_sku_taken_in_maps,
                     )
                 elif existing and internal_sku_is_valid_format(existing_code_u):
                     final_sku = existing_code_u
@@ -6534,6 +6687,7 @@ def bulk_import_products(
                         "",
                         exclude_product_id=existing.id if existing else None,
                         batch_reserved=sku_batch_reserved,
+                        sku_taken_fn=_sku_taken_in_maps,
                     )
                 final_product_id = _compose_listing_product_id(source_prefix["prefix"], final_sku)
                 product_data["product_id"] = final_product_id
@@ -6542,13 +6696,22 @@ def bulk_import_products(
 
                 slug_value = product_data.get("slug", "")
                 if slug_value:
-                    existing_slug = db.query(Product).filter(Product.slug == slug_value).first()
-                    if existing_slug and existing_slug.product_id != product_id:
-                        new_slug = generate_consistent_slug(product_data.get("name", ""), product_id)
-                        product_data["slug"] = new_slug
-                        row_slug_warning = (
-                            f"Dòng {idx + 1}: Slug '{slug_value}' bị trùng, đã đổi thành '{new_slug}'"
-                        )
+                    slug_owner_pid = slug_owner.get(slug_value)
+                    if slug_owner_pid and slug_owner_pid != product_id:
+                        # Map có thể lệch nếu SP đổi slug trước đó — xác nhận bằng cache/DB.
+                        conflict_slug_row = _cache_get_by_product_id(slug_owner_pid)
+                        if conflict_slug_row is None:
+                            conflict_slug_row = (
+                                db.query(Product).filter(Product.slug == slug_value).first()
+                            )
+                            if conflict_slug_row is not None:
+                                _cache_put(conflict_slug_row)
+                        if conflict_slug_row and conflict_slug_row.product_id != product_id:
+                            new_slug = generate_consistent_slug(product_data.get("name", ""), product_id)
+                            product_data["slug"] = new_slug
+                            row_slug_warning = (
+                                f"Dòng {idx + 1}: Slug '{slug_value}' bị trùng, đã đổi thành '{new_slug}'"
+                            )
 
                 resolved_cat_id = _resolve_category_id_from_row(product_data, cat3_idx)
                 product_data["category_id"] = resolved_cat_id
@@ -6570,13 +6733,10 @@ def bulk_import_products(
                                 db, product_id
                             )
                             if late_pid:
-                                late = (
-                                    db.query(Product)
-                                    .filter(Product.product_id == late_pid)
-                                    .first()
-                                )
+                                late = _cache_get_by_product_id(late_pid)
                     if late is not None:
                         existing = late
+                        _cache_put(existing)
                         warnings.append(
                             f"Dòng {idx + 1}: Mã cột A «{prefix_label}» đã có "
                             f"(«{existing.product_id}») — cập nhật, không thêm mới."
@@ -6584,11 +6744,13 @@ def bulk_import_products(
 
                 if existing:
                     old_product_id = existing.product_id
+                    old_slug = str(getattr(existing, "slug", None) or "").strip()
                     product_data["product_info"] = _merge_product_info_preserve_image_localization(
                         product_data.get("product_info"),
                         existing.product_info,
                     )
                     if old_product_id and old_product_id != product_id:
+                        existing_by_pid.pop(str(old_product_id).strip(), None)
                         _bulk_import_maps_remove_product_id(
                             old_product_id,
                             batch_prefix_owner,
@@ -6600,12 +6762,23 @@ def bulk_import_products(
                         if hasattr(existing, key) and key not in ["id", "created_at"]:
                             setattr(existing, key, value)
                     existing.updated_at = datetime.now()
+                    new_slug = str(product_data.get("slug") or "").strip()
+                    if old_slug and old_slug != new_slug and slug_owner.get(old_slug) == str(old_product_id or ""):
+                        slug_owner.pop(old_slug, None)
+                    if new_slug:
+                        slug_owner[new_slug] = product_id
+                    _cache_put(existing)
                     row_was_update = True
                     logger.debug("🔄 Updated product: %s", product_id)
                 else:
                     for k in _RESPONSE_ONLY_PRODUCT_KEYS:
                         product_data.pop(k, None)
-                    db.add(Product(**product_data))
+                    created_row = Product(**product_data)
+                    db.add(created_row)
+                    _cache_put(created_row)
+                    new_slug = str(product_data.get("slug") or "").strip()
+                    if new_slug:
+                        slug_owner[new_slug] = product_id
                     row_was_update = False
                     logger.debug("➕ Created product (pending flush): %s", product_id)
 
