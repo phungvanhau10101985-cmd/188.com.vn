@@ -6,6 +6,7 @@ import {
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { normalizeProductRouteSlug } from '@/lib/product-route-slug';
 import { isReservedNonProductSlug } from '@/lib/reserved-non-product-slugs';
+import { verifyPv2ForProductPage } from '@/lib/google-automated-discount-server';
 import ProductDetailClient from './ProductDetailClient';
 import ErrorState from './components/ErrorState/ErrorState';
 
@@ -62,5 +63,14 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
     await redirectOosGroupIfAny();
   }
 
-  return <ProductDetailClient key={slug} initialProduct={product} slug={slug} />;
+  const initialGoogleDiscount = await verifyPv2ForProductPage(sp, product.product_id);
+
+  return (
+    <ProductDetailClient
+      key={slug}
+      initialProduct={product}
+      slug={slug}
+      initialGoogleDiscount={initialGoogleDiscount}
+    />
+  );
 }

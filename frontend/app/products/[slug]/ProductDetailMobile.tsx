@@ -28,6 +28,7 @@ import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
 import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
 import { applyGoogleAutomatedDiscountToPricing } from '@/lib/google-automated-discount';
+import type { GoogleAutomatedDiscountSsrPayload } from '@/lib/google-automated-discount';
 import { useGoogleAutomatedDiscount } from '@/lib/use-google-automated-discount';
 import { useSiteSale } from '@/lib/use-site-sale';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
@@ -59,6 +60,7 @@ interface ProductDetailMobileProps {
   onAddToCart: (p: Product, qty: number, size?: string, color?: string) => void;
   onBuyNow: (p: Product, qty: number, size?: string, color?: string) => void;
   onToggleFavorite: (p: Product) => void;
+  initialGoogleDiscount?: GoogleAutomatedDiscountSsrPayload | null;
 }
 
 export default function ProductDetailMobile({
@@ -68,6 +70,7 @@ export default function ProductDetailMobile({
   onAddToCart,
   onBuyNow,
   onToggleFavorite,
+  initialGoogleDiscount = null,
 }: ProductDetailMobileProps) {
   const [selectedImage, setSelectedImage] = useState(0);
   const thumbStripRef = useRef<HTMLDivElement>(null);
@@ -118,6 +121,7 @@ export default function ProductDetailMobile({
   const { record: googleDiscount, error: googleDiscountError } = useGoogleAutomatedDiscount(
     product.product_id,
     product,
+    initialGoogleDiscount,
   );
   const pricingBase = useMemo(
     () =>
@@ -129,8 +133,14 @@ export default function ProductDetailMobile({
     [productForPricing, birthdayDiscount.active, birthdayDiscount.percent],
   );
   const pricing = useMemo(
-    () => applyGoogleAutomatedDiscountToPricing(product.product_id, pricingBase, product),
-    [product, pricingBase, googleDiscount?.price, googleDiscount?.priorPrice],
+    () =>
+      applyGoogleAutomatedDiscountToPricing(
+        product.product_id,
+        pricingBase,
+        product,
+        googleDiscount,
+      ),
+    [product, pricingBase, googleDiscount],
   );
   const isClearancePdp = product.is_warehouse_clearance === true;
   const displayPrice = pricing.displayPrice;

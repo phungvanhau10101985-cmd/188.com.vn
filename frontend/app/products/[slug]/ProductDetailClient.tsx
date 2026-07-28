@@ -44,6 +44,7 @@ import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session
 import {
   getActiveGoogleAutomatedDiscountToken,
   markGoogleAutomatedDiscountCartLock,
+  type GoogleAutomatedDiscountSsrPayload,
 } from '@/lib/google-automated-discount';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
@@ -59,11 +60,14 @@ import AgeGenderRecommendationSection from '@/components/AgeGenderRecommendation
 interface ProductDetailClientProps {
   initialProduct: Product;
   slug: string;
+  /** Giá chiết khấu Google đã verify trên RSC khi URL có ?pv2= */
+  initialGoogleDiscount?: GoogleAutomatedDiscountSsrPayload | null;
 }
 
 export default function ProductDetailClient({
   initialProduct,
   slug,
+  initialGoogleDiscount = null,
 }: ProductDetailClientProps) {
   const router = useRouter();
   const [product, setProduct] = useState<Product>(initialProduct);
@@ -427,6 +431,7 @@ export default function ProductDetailClient({
           onAddToCart={handleAddToCart}
           onBuyNow={handleBuyNow}
           onToggleFavorite={handleToggleFavorite}
+          initialGoogleDiscount={initialGoogleDiscount}
         />
       </div>
 
@@ -712,6 +717,7 @@ export default function ProductDetailClient({
                 isCartLoading={uiCartLoading}
                 isFavorited={isFavorited}
                 onColorImageChange={setSelectedColorImage}
+                initialGoogleDiscount={initialGoogleDiscount}
               />
             </div>
             </div>

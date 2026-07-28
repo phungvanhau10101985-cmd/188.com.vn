@@ -53,6 +53,33 @@ export type GoogleAutomatedDiscountVerifyResponse = {
   expires_at: number;
 };
 
+/** Payload serializable từ RSC → client (SSR PDP có pv2). */
+export type GoogleAutomatedDiscountSsrPayload = {
+  price: number;
+  prior_price: number | null;
+  currency: string;
+  offer_id: string;
+  token: string;
+  expires_at: number;
+};
+
+export function recordFromSsrPayload(
+  payload: GoogleAutomatedDiscountSsrPayload,
+): GoogleAutomatedDiscountRecord {
+  const now = Date.now();
+  const jwtExpMs = payload.expires_at * 1000;
+  return {
+    offerId: payload.offer_id,
+    price: payload.price,
+    priorPrice: payload.prior_price,
+    currency: payload.currency,
+    token: payload.token,
+    verifiedAt: now,
+    sessionExpiresAt: Math.min(now + SESSION_MS, jwtExpMs),
+    cartLockExpiresAt: Math.min(now + CART_LOCK_MS, jwtExpMs),
+  };
+}
+
 function readStore(): Record<string, GoogleAutomatedDiscountRecord> {
   if (typeof window === 'undefined') return {};
   try {
@@ -420,8 +447,11 @@ export function applyGoogleAutomatedDiscountToPricing<T extends ProductDisplayPr
   productOfferId: string | null | undefined,
   base: T,
   product?: { product_id?: string | null; code?: string | null },
+  /** SSR / hook record — dùng khi sessionStorage chưa có (render đầu). */
+  override?: GoogleAutomatedDiscountRecord | null,
 ): T {
   const rec =
+    override ??
     (product ? getGoogleAutomatedDiscountForProduct(product) : null) ??
     getGoogleAutomatedDiscountForOffer(productOfferId);
   if (!rec) return base;

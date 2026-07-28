@@ -6,23 +6,30 @@ import {
   extractPv2FromSearch,
   getGoogleAutomatedDiscountForProduct,
   GOOGLE_AUTOMATED_DISCOUNT_UPDATED_EVENT,
+  recordFromSsrPayload,
+  saveGoogleAutomatedDiscount,
   touchGoogleAutomatedDiscountSession,
   type GoogleAutomatedDiscountRecord,
+  type GoogleAutomatedDiscountSsrPayload,
 } from '@/lib/google-automated-discount';
 
 /** Giá chiết khấu Google cho một offer_id (product_id feed GMC). */
 export function useGoogleAutomatedDiscount(
   offerId: string | null | undefined,
   product?: { product_id?: string | null; code?: string | null },
+  /** Record từ SSR khi URL có pv2 — để HTML đầu đã có giá chiết khấu. */
+  initialSsr?: GoogleAutomatedDiscountSsrPayload | null,
 ) {
-  const [record, setRecord] = useState<GoogleAutomatedDiscountRecord | null>(null);
+  const [record, setRecord] = useState<GoogleAutomatedDiscountRecord | null>(() =>
+    initialSsr ? recordFromSsrPayload(initialSsr) : null,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const syncFromStore = useCallback(() => {
     const id = String(offerId || '').trim();
     if (!id && !product?.product_id) {
-      setRecord(null);
+      if (!initialSsr) setRecord(null);
       return;
     }
     const cached = product
@@ -33,8 +40,12 @@ export function useGoogleAutomatedDiscount(
       setRecord(getGoogleAutomatedDiscountForProduct(product ?? { product_id: id }));
       return;
     }
+    if (initialSsr) {
+      setRecord(recordFromSsrPayload(initialSsr));
+      return;
+    }
     setRecord(null);
-  }, [offerId, product]);
+  }, [offerId, product, initialSsr]);
 
   const refresh = useCallback(async () => {
     const id = String(offerId || product?.product_id || '').trim();
@@ -46,6 +57,10 @@ export function useGoogleAutomatedDiscount(
         : null;
     if (cached) {
       setRecord(cached);
+      return;
+    }
+    if (initialSsr) {
+      setRecord(recordFromSsrPayload(initialSsr));
       return;
     }
 
@@ -80,7 +95,23 @@ export function useGoogleAutomatedDiscount(
     } finally {
       setLoading(false);
     }
-  }, [offerId, product, syncFromStore]);
+  }, [offerId, product, syncFromStore, initialSsr]);
+
+  useEffect(() => {
+    if (!initialSsr || typeof window === 'undefined') return;
+    saveGoogleAutomatedDiscount(
+      {
+        valid: true,
+        price: initialSsr.price,
+        prior_price: initialSsr.prior_price,
+        currency: initialSsr.currency,
+        offer_id: initialSsr.offer_id,
+        merchant_id: '',
+        expires_at: initialSsr.expires_at,
+      },
+      initialSsr.token,
+    );
+  }, [initialSsr]);
 
   useEffect(() => {
     void refresh();

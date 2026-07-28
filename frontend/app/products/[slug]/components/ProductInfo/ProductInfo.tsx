@@ -19,6 +19,7 @@ import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPric
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
 import { applyGoogleAutomatedDiscountToPricing } from '@/lib/google-automated-discount';
+import type { GoogleAutomatedDiscountSsrPayload } from '@/lib/google-automated-discount';
 import { useGoogleAutomatedDiscount } from '@/lib/use-google-automated-discount';
 import { useSiteSale } from '@/lib/use-site-sale';
 import {
@@ -45,6 +46,7 @@ interface ProductInfoProps {
   onColorImageChange?: (imageUrl: string | null) => void;
   isCartLoading?: boolean;
   isFavorited?: boolean;
+  initialGoogleDiscount?: GoogleAutomatedDiscountSsrPayload | null;
 }
 
 export default function ProductInfo({ 
@@ -57,7 +59,8 @@ export default function ProductInfo({
   onOpenReviews,
   onColorImageChange,
   isCartLoading = false,
-  isFavorited = false
+  isFavorited = false,
+  initialGoogleDiscount = null,
 }: ProductInfoProps) {
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedColorIndex, setSelectedColorIndex] = useState(-1);
@@ -96,6 +99,7 @@ export default function ProductInfo({
   const { record: googleDiscount, error: googleDiscountError } = useGoogleAutomatedDiscount(
     product.product_id,
     product,
+    initialGoogleDiscount,
   );
   const pricingBase = useMemo(
     () =>
@@ -107,8 +111,14 @@ export default function ProductInfo({
     [productForPricing, birthdayDiscount.active, birthdayDiscount.percent],
   );
   const pricing = useMemo(
-    () => applyGoogleAutomatedDiscountToPricing(product.product_id, pricingBase, product),
-    [product, pricingBase, googleDiscount?.price, googleDiscount?.priorPrice],
+    () =>
+      applyGoogleAutomatedDiscountToPricing(
+        product.product_id,
+        pricingBase,
+        product,
+        googleDiscount,
+      ),
+    [product, pricingBase, googleDiscount],
   );
   const displayPrice = pricing.displayPrice;
   const birthdaySavingsAmount = pricing.birthdaySavingsAmount;
