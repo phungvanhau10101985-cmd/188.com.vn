@@ -15,6 +15,15 @@ const API_BASE =
 
 const CANON_HOST = "188.com.vn";
 
+/** ?pv2= (Google Shopping automated discount) — không cache HTML để SSR luôn có giá CK. */
+function nextPassthrough(request: NextRequest) {
+  const res = NextResponse.next();
+  if (request.nextUrl.searchParams.has("pv2")) {
+    res.headers.set("Cache-Control", "private, no-store");
+  }
+  return res;
+}
+
 export async function proxy(request: NextRequest) {
   const host = request.headers.get("host")?.split(":")[0]?.toLowerCase();
   // Một canonical (apex): tránh xen kẽ www và apex làm fetch RSC bị CORS giữa hai origin.
@@ -27,9 +36,9 @@ export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // Chỉ xử lý /danh-muc/xxx (có ít nhất 1 segment)
-  if (!pathname.startsWith("/danh-muc/")) return NextResponse.next();
+  if (!pathname.startsWith("/danh-muc/")) return nextPassthrough(request);
   const rest = pathname.slice("/danh-muc/".length).trim();
-  if (!rest) return NextResponse.next();
+  if (!rest) return nextPassthrough(request);
 
   const checkUrl = `${API_BASE}/category-seo/check-redirect?path=${encodeURIComponent(rest)}`;
   try {
@@ -49,7 +58,7 @@ export async function proxy(request: NextRequest) {
   } catch {
     // API lỗi: không redirect, để trang load bình thường (client sẽ check lại).
   }
-  return NextResponse.next();
+  return nextPassthrough(request);
 }
 
 export const config = {
