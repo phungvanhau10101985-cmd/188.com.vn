@@ -1346,17 +1346,23 @@ def excel_row_to_product(row: Dict) -> Dict:
             logger.warning(f"Missing product_id in row: {row.get('name', 'No name')}")
             return {}
         
-        # VALIDATION: Tên sản phẩm là bắt buộc
+        listed_cell = listed_from_excel_cell(_excel_listed_raw(row), default=1)
+        # Nội bộ bulk_import: pop trước khi ORM — không phải cột Product
+        excel_import_listed = 1 if listed_cell else 0
+        # Cột listed/AN = 0: chỉ cần product_id — bỏ parse 40 cột (nhanh hơn nhiều khi xóa hàng loạt).
+        if excel_import_listed == 0:
+            return {
+                "product_id": product_id,
+                "excel_import_listed": 0,
+            }
+
+        # VALIDATION: Tên sản phẩm là bắt buộc (dòng import/cập nhật)
         if not product_name or product_name.lower() == 'nan':
             logger.warning(f"Missing product name for ID: {product_id}")
             product_name = f"Sản phẩm {product_id}"
         
         # Tạo slug từ tên sản phẩm và product_id
         slug_value = generate_consistent_slug(product_name, product_id)
-
-        listed_cell = listed_from_excel_cell(_excel_listed_raw(row), default=1)
-        # Nội bộ bulk_import: pop trước khi ORM — không phải cột Product
-        excel_import_listed = 1 if listed_cell else 0
 
         # FIX: Xử lý Features - có thể là string hoặc JSON
         features_value = row.get('Features', '')
@@ -5692,10 +5698,101 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
             pass
     return db_product
 
-def _delete_product_orm_only(db: Session, db_product: Product) -> None:
-    """Xóa SP trong session (Bunny best-effort + db.delete); không commit — dùng bulk import batch."""
-    delete_bunny_assets_for_product(db_product)
+def _delete_product_orm_only(
+    db: Session,
+    db_product: Product,
+    *,
+    defer_bunny: bool = False,
+) -> None:
+    """Xóa SP trong session; không commit — dùng bulk import batch. ``defer_bunny`` = dọn CDN nền sau."""
+    if not defer_bunny:
+        delete_bunny_assets_for_product(db_product)
     db.delete(db_product)
+
+
+def _bulk_import_is_delete_row(product_data: Dict[str, Any]) -> bool:
+    return listed_from_excel_cell(product_data.get("excel_import_listed", 1), default=1) == 0
+
+
+def _bulk_import_prefetch_delete_targets(
+    db: Session,
+    products_data: List[Dict],
+    db_prefix_owner: Dict[str, str],
+    *,
+    chunk_size: int = 500,
+) -> Dict[str, Product]:
+    """Load trước Product cần xóa (listed=0) — tránh SELECT từng dòng."""
+    target_ids: Set[str] = set()
+    for row in products_data:
+        if not _bulk_import_is_delete_row(row):
+            continue
+        pid = str(row.get("product_id") or "").strip()
+        if not pid:
+            continue
+        target_ids.add(pid)
+        src = _listing_source_prefix_from_product_id(pid)
+        if src:
+            owner = db_prefix_owner.get(src["prefix_key"])
+            if owner:
+                target_ids.add(str(owner).strip())
+    if not target_ids:
+        return {}
+    out: Dict[str, Product] = {}
+    ids = sorted(target_ids)
+    step = max(1, min(int(chunk_size or 500), 1000))
+    for i in range(0, len(ids), step):
+        chunk = ids[i : i + step]
+        for row in db.query(Product).filter(Product.product_id.in_(chunk)).all():
+            pid = str(row.product_id or "").strip()
+            if pid:
+                out[pid] = row
+    return out
+
+
+def _bulk_import_resolve_delete_target(
+    product_id: str,
+    source_prefix: Dict[str, str],
+    *,
+    batch_prefix_owner: Dict[str, str],
+    db_prefix_owner: Dict[str, str],
+    delete_prefetch: Dict[str, Product],
+    db: Session,
+    delete_candidates: List[str],
+) -> Optional[Product]:
+    prefix_owner = batch_prefix_owner.get(source_prefix["prefix_key"]) or db_prefix_owner.get(
+        source_prefix["prefix_key"]
+    )
+    ordered = [product_id]
+    if prefix_owner and prefix_owner not in ordered:
+        ordered.insert(0, prefix_owner)
+    for cand in ordered:
+        hit = delete_prefetch.get(cand)
+        if hit is not None:
+            return hit
+    if delete_candidates:
+        row = (
+            db.query(Product)
+            .filter(Product.product_id.in_(delete_candidates))
+            .order_by(Product.id.asc())
+            .first()
+        )
+        if row is not None:
+            pid = str(row.product_id or "").strip()
+            if pid:
+                delete_prefetch[pid] = row
+            return row
+    return None
+
+
+def _bulk_import_run_nested_row(db: Session, fn) -> None:
+    """SAVEPOINT cho một dòng import — rollback savepoint nếu lỗi, tránh session kẹt invalid."""
+    try:
+        with db.begin_nested():
+            fn()
+    except Exception:
+        if not db.is_active:
+            db.rollback()
+        raise
 
 
 def delete_product(db: Session, product_id: int, *, admin_force: bool = False):
@@ -6249,8 +6346,15 @@ def bulk_import_products(
     if progress_callback and n_products:
         progress_callback("database", 0, n_products)
 
-    # Cache cat3 lookup 1 lần (tránh query DB N lần). Nếu admin chưa import taxonomy, các dict rỗng.
-    cat3_idx = _build_cat3_lookup_indexes(db)
+    has_upsert_rows = any(not _bulk_import_is_delete_row(row) for row in products_data)
+    has_delete_rows = any(_bulk_import_is_delete_row(row) for row in products_data)
+
+    # Cache cat3 lookup 1 lần — bỏ qua nếu file chỉ xóa (listed=0).
+    cat3_idx = _build_cat3_lookup_indexes(db) if has_upsert_rows else {
+        "by_full_slug": {},
+        "by_slug": {},
+        "by_name": {},
+    }
     unmatched_cat3: List[str] = []
 
     sku_batch_reserved: Set[str] = set()
@@ -6258,6 +6362,13 @@ def bulk_import_products(
     db_prefix_owner, db_code_owner = _bulk_import_conflict_maps_initial(db)
     batch_prefix_owner: Dict[str, str] = {}
     batch_code_owner: Dict[str, str] = {}
+    delete_prefetch = (
+        _bulk_import_prefetch_delete_targets(db, products_data, db_prefix_owner)
+        if has_delete_rows
+        else {}
+    )
+    bunny_delete_deferred: List[Product] = []
+    delete_snapshots: List[Any] = []
     slow_conflict_fallback = bool(
         getattr(settings, "EXCEL_IMPORT_ENABLE_SLOW_CONFLICT_FALLBACK", False)
     )
@@ -6311,12 +6422,25 @@ def bulk_import_products(
 
         excel_listed = listed_from_excel_cell(product_data.pop("excel_import_listed", 1), default=1)
         if excel_listed == 0:
-            existing_del = db.query(Product).filter(Product.product_id == product_id).first()
+            existing_del = delete_prefetch.get(product_id)
+            if existing_del is None:
+                existing_del = db.query(Product).filter(Product.product_id == product_id).first()
+                if existing_del is not None:
+                    delete_prefetch[product_id] = existing_del
             if existing_del:
                 try:
                     wh_svc.assert_product_deletion_allowed(db, existing_del)
-                    with db.begin_nested():
-                        _delete_product_orm_only(db, existing_del)
+                    from app.services.listing_facet_cache import snapshot_product_for_facet_refresh
+
+                    delete_snapshots.append(snapshot_product_for_facet_refresh(existing_del))
+                    bunny_delete_deferred.append(existing_del)
+                    _bulk_import_run_nested_row(
+                        db,
+                        lambda: _delete_product_orm_only(
+                            db, existing_del, defer_bunny=True
+                        ),
+                    )
+                    delete_prefetch.pop(str(existing_del.product_id or "").strip(), None)
                     return "deleted"
                 except ValueError as exc:
                     errors.append(f"Dòng {idx + 1} ({product_id}): {exc}")
@@ -6412,21 +6536,32 @@ def bulk_import_products(
             )
             if prefix_owner and prefix_owner not in delete_candidates:
                 delete_candidates.append(prefix_owner)
-            existing_del = (
-                db.query(Product)
-                .filter(Product.product_id.in_(delete_candidates))
-                .order_by(Product.id.asc())
-                .first()
+            existing_del = _bulk_import_resolve_delete_target(
+                product_id,
+                source_prefix,
+                batch_prefix_owner=batch_prefix_owner,
+                db_prefix_owner=db_prefix_owner,
+                delete_prefetch=delete_prefetch,
+                db=db,
+                delete_candidates=delete_candidates,
             )
             if existing_del:
                 try:
                     from app.services import warehouse_clearance as wh_clearance_svc
+                    from app.services.listing_facet_cache import snapshot_product_for_facet_refresh
 
                     wh_clearance_svc.assert_product_deletion_allowed(db, existing_del)
                     product_id = existing_del.product_id
                     code_upper = str(existing_del.code or "").strip().upper()
-                    with db.begin_nested():
-                        _delete_product_orm_only(db, existing_del)
+                    delete_snapshots.append(snapshot_product_for_facet_refresh(existing_del))
+                    bunny_delete_deferred.append(existing_del)
+                    _bulk_import_run_nested_row(
+                        db,
+                        lambda p=existing_del: _delete_product_orm_only(
+                            db, p, defer_bunny=True
+                        ),
+                    )
+                    delete_prefetch.pop(str(existing_del.product_id or "").strip(), None)
                     _bulk_import_maps_remove_product_id(
                         product_id,
                         batch_prefix_owner,
@@ -6649,6 +6784,8 @@ def bulk_import_products(
     try:
         db.commit()
         logger.info(f"💾 Final commit: {created + updated + deleted} products processed")
+        if bunny_delete_deferred:
+            _schedule_bunny_cleanup_for_deleted_products(bunny_delete_deferred)
         # Import Excel phải hoàn tất và trả trạng thái ổn định trước; Google Sheet sync
         # chạy nền/debounce để lỗi quota/mạng Google không làm hỏng luồng import.
         _schedule_google_sheets_sku_sync()
@@ -6690,9 +6827,13 @@ def bulk_import_products(
     )
 
     only_warehouse_import = warehouse_import_rows > 0 and regular_import_rows == 0
+    only_delete_import = (
+        deleted > 0 and created == 0 and updated == 0 and warehouse_import_rows == 0
+    )
 
     run_cat_gemini = (
         not only_warehouse_import
+        and not only_delete_import
         and _should_run_auto_category_gemini_after_import(db, regular_import_rows or total_processed)
     )
     paths_need_n = 0
@@ -6730,6 +6871,7 @@ def bulk_import_products(
         "total_processed": total_processed,
         "success_rate": success_rate,
         "only_warehouse_import": only_warehouse_import,
+        "only_delete_import": only_delete_import,
         "warehouse_import_rows": warehouse_import_rows,
         "regular_import_rows": regular_import_rows,
     }
@@ -6748,6 +6890,12 @@ def bulk_import_products(
             warnings.append(
                 "Import kho thanh lý: không sinh SEO danh mục / không làm mới cache facet toàn catalog "
                 "(chỉ áp dụng khi import sản phẩm thường)."
+            )
+        elif only_delete_import:
+            if delete_snapshots:
+                _schedule_facet_cache_refresh_after_bulk_delete(delete_snapshots)
+            warnings.append(
+                "Import xóa SP (listed=0): dọn Bunny CDN và làm mới cache nền — không chặn kết thúc import."
             )
         else:
             if progress_callback:

@@ -277,13 +277,24 @@ class ExcelImporter:
                         logger.debug(f"📄 Dòng {row_number}: id={row_dict.get('id')}, name={row_dict.get('name', '')[:30]}...")
                     
                     product_dict = excel_row_to_product(row_dict)
+                    if product_dict and product_dict.get("product_id"):
+                        is_delete_row = product_dict.get("excel_import_listed", 1) == 0
+                        if is_delete_row:
+                            products_data.append(product_dict)
+                            if idx < 10:
+                                logger.info(
+                                    "🗑 Dòng %s: xóa %s",
+                                    row_number,
+                                    product_dict.get("product_id"),
+                                )
+                            continue
+
                     product_dict = apply_category_final_mapping_to_product(product_dict, mappings)
 
                     from app.services.product_image_visibility import colors_valid_for_import
 
                     if product_dict and product_dict.get("product_id"):
-                        is_delete_row = product_dict.get("excel_import_listed", 1) == 0
-                        if not is_delete_row and not colors_valid_for_import(
+                        if not colors_valid_for_import(
                             product_dict.get("colors")
                         ):
                             error_msg = (
