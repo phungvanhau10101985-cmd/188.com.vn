@@ -254,13 +254,18 @@ def admin_login(
             .first()
         )
     if settings.ADMIN_MFA_ENABLED and not trusted:
+        from app.services.admin_otp_email import mask_email_for_display, resolve_admin_otp_recipient_email
+
+        otp_email = resolve_admin_otp_recipient_email(db, admin)
+        if not otp_email:
+            raise HTTPException(status_code=400, detail="Tài khoản admin chưa có email để nhận OTP.")
         try:
             challenge = issue_challenge(
                 db,
                 subject_type="admin",
                 subject_id=admin.id,
                 purpose="admin_login",
-                email=admin.email,
+                email=otp_email,
             )
         except Exception as exc:
             raise HTTPException(status_code=503, detail="Không gửi được OTP quản trị. Vui lòng thử lại.") from exc
@@ -270,7 +275,7 @@ def admin_login(
             admin_id=admin.id,
             username=admin.username,
             role=admin.role.value if hasattr(admin.role, "value") else str(admin.role),
-            message="Thiết bị mới: đã gửi OTP tới email quản trị.",
+            message=f"Thiết bị mới: đã gửi OTP tới {mask_email_for_display(otp_email)}.",
         )
     if trusted:
         trusted.last_used_at = utcnow()
@@ -352,7 +357,10 @@ def admin_request_destructive_step_up(
     db: Session = Depends(get_db),
 ):
     """Gửi OTP email admin trước thao tác xóa sản phẩm / thành viên / đơn hàng / mã EMS hàng loạt."""
-    if not (current_admin.email or "").strip():
+    from app.services.admin_otp_email import mask_email_for_display, resolve_admin_otp_recipient_email
+
+    otp_email = resolve_admin_otp_recipient_email(db, current_admin)
+    if not otp_email:
         raise HTTPException(status_code=400, detail="Tài khoản admin chưa có email để nhận OTP.")
     try:
         row = issue_challenge(
@@ -360,7 +368,7 @@ def admin_request_destructive_step_up(
             subject_type="admin",
             subject_id=current_admin.id,
             purpose=ADMIN_DESTRUCTIVE_STEP_UP_PURPOSE,
-            email=current_admin.email,
+            email=otp_email,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -369,7 +377,8 @@ def admin_request_destructive_step_up(
     return AdminStepUpResponse(
         challenge_id=row.public_id,
         expires_in_minutes=int(settings.STEP_UP_OTP_EXPIRE_MINUTES),
-        message="Đã gửi mã OTP tới email quản trị.",
+        message=f"Đã gửi mã OTP tới {mask_email_for_display(otp_email)}.",
+        recipient_email=mask_email_for_display(otp_email),
     )
 
 

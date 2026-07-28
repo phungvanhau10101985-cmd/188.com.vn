@@ -23,6 +23,7 @@ export default function AdminStepUpOtpModal({
   const [sending, setSending] = useState(true);
   const [verifying, setVerifying] = useState(false);
   const [resendIn, setResendIn] = useState(30);
+  const [recipientHint, setRecipientHint] = useState<string | null>(null);
 
   const sendCode = useCallback(async () => {
     setSending(true);
@@ -30,6 +31,7 @@ export default function AdminStepUpOtpModal({
     try {
       const result = await adminStepUpAPI.request();
       setChallengeId(result.challenge_id);
+      setRecipientHint(result.recipient_email || result.message || null);
       setOtp('');
       setResendIn(30);
     } catch (err: unknown) {
@@ -87,6 +89,9 @@ export default function AdminStepUpOtpModal({
         <p className="mt-2 text-sm text-gray-600">{description}</p>
         <p className="mt-2 text-sm text-gray-600">
           Mã có hiệu lực khoảng 10 phút; các lần xóa hàng loạt tiếp theo trong phiên không cần nhập lại.
+        </p>
+        <p className="mt-1 text-xs text-gray-500">
+          {recipientHint ? recipientHint : 'OTP gửi tới email quản trị của tài khoản đang đăng nhập.'}
         </p>
 
         {error ? (

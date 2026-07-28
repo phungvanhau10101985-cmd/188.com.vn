@@ -4529,7 +4529,7 @@ export async function adminLoginVerifyOtp(
 
 export const adminStepUpAPI = {
   request: () =>
-    fetchAdmin<{ challenge_id: string; expires_in_minutes: number; message: string }>(
+    fetchAdmin<{ challenge_id: string; expires_in_minutes: number; message: string; recipient_email?: string }>(
       '/admin/step-up/request',
       { method: 'POST', body: '{}' },
     ),

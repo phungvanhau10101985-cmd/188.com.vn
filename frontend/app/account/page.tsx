@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import type { UserResponse } from '@/features/auth/types/auth';
 import { apiClient } from '@/lib/api-client';
 import { defaultAdminHome, setStoredAdminModules } from '@/lib/admin-role';
+import { resetAdminStepUpForNewSession } from '@/lib/admin-step-up';
 import { useToast } from '@/components/ToastProvider';
 import AccountSessionActions from '@/components/account/AccountSessionActions';
 
@@ -62,6 +63,7 @@ export default function AccountPage() {
     try {
       const data = await apiClient.exchangeLinkedAdminSession();
       if (typeof window !== 'undefined') {
+        resetAdminStepUpForNewSession();
         localStorage.setItem('admin_token', data.access_token);
         localStorage.setItem('admin_role', data.role || '');
         setStoredAdminModules(data.modules ?? undefined);

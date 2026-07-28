@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/lib/api-client';
 import { defaultAdminHome, setStoredAdminModules } from '@/lib/admin-role';
+import { resetAdminStepUpForNewSession } from '@/lib/admin-step-up';
 import { useToast } from '@/components/ToastProvider';
 
 type Props = {
@@ -23,6 +24,7 @@ export default function LinkedAdminNavButton({ variant = 'sidebar' }: Props) {
     try {
       const data = await apiClient.exchangeLinkedAdminSession();
       if (typeof window !== 'undefined') {
+        resetAdminStepUpForNewSession();
         localStorage.setItem('admin_token', data.access_token);
         localStorage.setItem('admin_role', data.role || '');
         setStoredAdminModules(data.modules ?? undefined);

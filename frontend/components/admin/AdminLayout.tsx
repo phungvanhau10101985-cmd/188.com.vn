@@ -12,6 +12,7 @@ import {
   isPrivilegedAdminRole,
 } from '@/lib/admin-role';
 import { ADMIN_NAV_GROUPS, type AdminNavGroup } from '@/lib/admin-nav-config';
+import { clearAdminStepUp } from '@/lib/admin-step-up';
 
 function adminNavPathFromHref(href: string): string {
   return href.split('#')[0]?.split('?')[0] || href;
@@ -84,6 +85,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   }, [pathname, router]);
 
   const handleLogout = () => {
+    clearAdminStepUp();
     localStorage.removeItem('admin_token');
     localStorage.removeItem('admin_role');
     localStorage.removeItem('admin_modules');

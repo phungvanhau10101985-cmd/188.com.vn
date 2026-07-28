@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { adminLogin, adminLoginVerifyOtp, type AdminLoginResponse } from '@/lib/admin-api';
 import { defaultAdminHome, setStoredAdminModules } from '@/lib/admin-role';
+import { resetAdminStepUpForNewSession } from '@/lib/admin-step-up';
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
 
 function safeAdminRedirect(value: string | null): string {
@@ -47,6 +48,7 @@ export default function AdminLoginPage() {
 
   const finishLogin = (data: AdminLoginResponse) => {
     if (!data.access_token) throw new Error('Phản hồi đăng nhập không có token.');
+    resetAdminStepUpForNewSession();
     localStorage.setItem('admin_token', data.access_token);
     localStorage.setItem('admin_role', data.role || '');
     setStoredAdminModules(data.modules ?? undefined);

@@ -31,3 +31,4 @@ class AdminStepUpResponse(BaseModel):
     expires_in_minutes: int
     message: str
     step_up_token: Optional[str] = None
+    recipient_email: Optional[str] = None
