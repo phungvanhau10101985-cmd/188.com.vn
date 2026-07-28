@@ -79,7 +79,7 @@ from app.schemas.integrations_admin import (
 )
 from app.services.bunny_storage import build_public_object_url, upload_file_to_zone
 from app.services.image_raster_jpeg import raster_bytes_to_jpeg_bytes
-from app.services.linked_admin_staff import apply_linked_staff_role
+from app.services.linked_admin_staff import apply_linked_staff_role, display_email_for_admin, repair_linked_admin_for_user
 from app.services.staff_admin_cleanup import delete_staff_admin_account
 from app.services.user_public_response import admin_panel_user_response, batch_admin_panel_user_responses
 from app.core.security import (
@@ -712,7 +712,7 @@ def admin_list_staff_accounts(
             AdminStaffAccountRow(
                 id=u.id,
                 username=u.username,
-                email=u.email or "",
+                email=display_email_for_admin(db, u),
                 full_name=u.full_name,
                 phone=u.phone,
                 role=rv,

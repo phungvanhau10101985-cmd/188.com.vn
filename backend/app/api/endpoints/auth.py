@@ -573,14 +573,18 @@ def issue_admin_token_for_linked_customer(
     Khách đã đăng nhập có admin_users.linked_user_id → cấp JWT admin.
     Phiên khách (cookie JWT) đã xác thực email/OTP/Google — không yêu cầu step-up OTP lặp lại.
     """
-    admin_row = (
-        db.query(AdminUser)
-        .filter(
-            AdminUser.linked_user_id == current_user.id,
-            AdminUser.is_active.is_(True),
+    from app.services.linked_admin_staff import repair_linked_admin_for_user
+
+    admin_row = repair_linked_admin_for_user(db, current_user)
+    if admin_row is None:
+        admin_row = (
+            db.query(AdminUser)
+            .filter(
+                AdminUser.linked_user_id == current_user.id,
+                AdminUser.is_active.is_(True),
+            )
+            .first()
         )
-        .first()
-    )
     if not admin_row:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

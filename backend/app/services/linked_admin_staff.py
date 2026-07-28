@@ -39,6 +39,84 @@ def _resolved_granular(role: AdminRole, modules: Optional[List[str]]) -> Optiona
     return normalized if normalized else None
 
 
+def _normalize_email(email: Optional[str]) -> str:
+    return (email or "").strip().lower()
+
+
+def display_email_for_admin(db: Session, admin: AdminUser) -> str:
+    """Email hiển thị / OTP: ưu tiên email đăng nhập shop khi có liên kết."""
+    linked_id = getattr(admin, "linked_user_id", None)
+    if linked_id:
+        user = db.query(User).filter(User.id == int(linked_id)).first()
+        if user:
+            user_email = (getattr(user, "email", None) or "").strip()
+            if user_email:
+                return user_email
+    return (getattr(admin, "email", None) or "").strip()
+
+
+def repair_linked_admin_for_user(db: Session, user: User) -> Optional[AdminUser]:
+    """
+    Gộp admin liên kết trùng email shop vào bản admin_users chính (cùng email).
+    Ví dụ: user #7 phungvanhau10101985@gmail.com đang gắn cust_admin placeholder
+    → chuyển linked_user_id sang admin «admin» và xóa bản cust_admin thừa.
+    """
+    user_email = _normalize_email(getattr(user, "email", None))
+    if not user_email or "@" not in user_email:
+        return (
+            db.query(AdminUser)
+            .filter(AdminUser.linked_user_id == user.id, AdminUser.is_active.is_(True))
+            .first()
+        )
+
+    linked = (
+        db.query(AdminUser)
+        .filter(AdminUser.linked_user_id == user.id, AdminUser.is_active.is_(True))
+        .first()
+    )
+    canonical = (
+        db.query(AdminUser)
+        .filter(AdminUser.is_active.is_(True))
+        .filter(AdminUser.email.ilike(user_email))
+        .first()
+    )
+
+    if canonical and linked and canonical.id != linked.id:
+        if linked.role == AdminRole.SUPER_ADMIN:
+            return linked
+        if canonical.linked_user_id is None:
+            canonical.linked_user_id = user.id
+        elif int(canonical.linked_user_id) != int(user.id):
+            return linked
+        remove_linked_staff_admin_row(db, linked)
+        db.commit()
+        db.refresh(canonical)
+        return canonical
+
+    if linked:
+        current = _normalize_email(linked.email)
+        if current != user_email:
+            conflict = (
+                db.query(AdminUser)
+                .filter(AdminUser.email.ilike(user_email), AdminUser.id != linked.id)
+                .first()
+            )
+            if conflict:
+                return repair_linked_admin_for_user(db, user)
+            linked.email = user.email.strip()
+            db.commit()
+            db.refresh(linked)
+        return linked
+
+    if canonical and canonical.linked_user_id is None:
+        canonical.linked_user_id = user.id
+        db.commit()
+        db.refresh(canonical)
+        return canonical
+
+    return canonical
+
+
 def apply_linked_staff_role(
     db: Session,
     user: User,
@@ -75,6 +153,7 @@ def apply_linked_staff_role(
         existing.is_active = True
         existing.granular_permissions = granular
         db.commit()
+        repair_linked_admin_for_user(db, user)
         return
 
     by_email = db.query(AdminUser).filter(AdminUser.email == email).first()
@@ -86,6 +165,7 @@ def apply_linked_staff_role(
         by_email.is_active = True
         by_email.granular_permissions = granular
         db.commit()
+        repair_linked_admin_for_user(db, user)
         return
 
     username = _random_username(user.id)
@@ -106,3 +186,4 @@ def apply_linked_staff_role(
     )
     db.add(admin)
     db.commit()
+    repair_linked_admin_for_user(db, user)
