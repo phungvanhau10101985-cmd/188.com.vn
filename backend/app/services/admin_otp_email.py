@@ -10,20 +10,22 @@ from app.models.user import User
 def resolve_admin_otp_recipient_email(db: Session, admin: AdminUser) -> str:
     """
     Email nhận OTP quản trị (đăng nhập / xóa hàng loạt).
-    Ưu tiên admin_users.email; fallback users.email khi có linked_user_id.
+
+    Khi admin có linked_user_id (vào quản trị qua «Quản trị web»):
+    ưu tiên email đăng nhập shop (users.email), không dùng email nội bộ admin_users
+    kiểu linked-admin-2@188.com.vn.
+
+    Khi đăng nhập /admin/login trực tiếp (không liên kết user): dùng admin_users.email.
     """
-    direct = (getattr(admin, "email", None) or "").strip()
-    if direct:
-        return direct
-
     linked_id = getattr(admin, "linked_user_id", None)
-    if not linked_id:
-        return ""
+    if linked_id:
+        user = db.query(User).filter(User.id == int(linked_id)).first()
+        if user:
+            user_email = (getattr(user, "email", None) or "").strip()
+            if user_email:
+                return user_email
 
-    user = db.query(User).filter(User.id == int(linked_id)).first()
-    if not user:
-        return ""
-    return (getattr(user, "email", None) or "").strip()
+    return (getattr(admin, "email", None) or "").strip()
 
 
 def mask_email_for_display(email: str) -> str:
