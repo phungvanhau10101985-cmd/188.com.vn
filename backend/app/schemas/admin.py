@@ -39,6 +39,10 @@ class AdminStaffAccountRow(BaseModel):
     id: int
     username: str
     email: str
+    login_email: Optional[str] = Field(
+        None,
+        description="Email đăng nhập shop (OTP) khi linked_user_id — khác email nội bộ admin_users",
+    )
     full_name: Optional[str] = None
     phone: Optional[str] = None
     role: str

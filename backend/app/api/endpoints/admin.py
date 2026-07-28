@@ -79,7 +79,7 @@ from app.schemas.integrations_admin import (
 )
 from app.services.bunny_storage import build_public_object_url, upload_file_to_zone
 from app.services.image_raster_jpeg import raster_bytes_to_jpeg_bytes
-from app.services.linked_admin_staff import apply_linked_staff_role, display_email_for_admin, repair_linked_admin_for_user
+from app.services.linked_admin_staff import apply_linked_staff_role, display_email_for_admin
 from app.services.staff_admin_cleanup import delete_staff_admin_account
 from app.services.user_public_response import admin_panel_user_response, batch_admin_panel_user_responses
 from app.core.security import (
@@ -708,11 +708,18 @@ def admin_list_staff_accounts(
     items: List[AdminStaffAccountRow] = []
     for u in rows:
         rv = u.role.value if hasattr(u.role, "value") else str(u.role)
+        internal_email = u.email or ""
+        login_email: Optional[str] = None
+        if u.linked_user_id:
+            shop_email = display_email_for_admin(db, u)
+            if shop_email and shop_email != internal_email:
+                login_email = shop_email
         items.append(
             AdminStaffAccountRow(
                 id=u.id,
                 username=u.username,
-                email=display_email_for_admin(db, u),
+                email=internal_email,
+                login_email=login_email,
                 full_name=u.full_name,
                 phone=u.phone,
                 role=rv,
@@ -779,10 +786,17 @@ def admin_patch_staff_account_permissions(
     db.refresh(target)
 
     rv = target.role.value if hasattr(target.role, "value") else str(target.role)
+    internal_email = target.email or ""
+    login_email = None
+    if target.linked_user_id:
+        shop_email = display_email_for_admin(db, target)
+        if shop_email and shop_email != internal_email:
+            login_email = shop_email
     return AdminStaffAccountRow(
         id=target.id,
         username=target.username,
-        email=target.email or "",
+        email=internal_email,
+        login_email=login_email,
         full_name=target.full_name,
         phone=target.phone,
         role=rv,

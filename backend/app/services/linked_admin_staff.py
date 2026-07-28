@@ -39,12 +39,12 @@ def _resolved_granular(role: AdminRole, modules: Optional[List[str]]) -> Optiona
     return normalized if normalized else None
 
 
-def _normalize_email(email: Optional[str]) -> str:
-    return (email or "").strip().lower()
-
-
 def display_email_for_admin(db: Session, admin: AdminUser) -> str:
-    """Email hiển thị / OTP: ưu tiên email đăng nhập shop khi có liên kết."""
+    """
+    Email hiển thị / OTP cho admin liên kết shop (#7 …):
+    luôn là email đăng nhập thành viên (users.email), không phải email nội bộ admin_users.
+    Admin đăng nhập /admin/login: dùng admin_users.email.
+    """
     linked_id = getattr(admin, "linked_user_id", None)
     if linked_id:
         user = db.query(User).filter(User.id == int(linked_id)).first()
@@ -55,66 +55,27 @@ def display_email_for_admin(db: Session, admin: AdminUser) -> str:
     return (getattr(admin, "email", None) or "").strip()
 
 
-def repair_linked_admin_for_user(db: Session, user: User) -> Optional[AdminUser]:
+def _linked_admin_storage_email(db: Session, user: User) -> str:
     """
-    Gộp admin liên kết trùng email shop vào bản admin_users chính (cùng email).
-    Ví dụ: user #7 phungvanhau10101985@gmail.com đang gắn cust_admin placeholder
-    → chuyển linked_user_id sang admin «admin» và xóa bản cust_admin thừa.
+    Email lưu admin_users cho bản ghi liên kết shop.
+    Nếu email shop đã dùng bởi admin khác (vd. admin /admin/login) → email nội bộ unique.
+    OTP vẫn gửi users.email qua display_email_for_admin.
     """
-    user_email = _normalize_email(getattr(user, "email", None))
-    if not user_email or "@" not in user_email:
-        return (
-            db.query(AdminUser)
-            .filter(AdminUser.linked_user_id == user.id, AdminUser.is_active.is_(True))
-            .first()
-        )
+    shop_email = (user.email or "").strip()
+    if not shop_email or "@" not in shop_email:
+        raise ValueError("Thành viên cần có email để gán quyền quản trị web.")
 
-    linked = (
-        db.query(AdminUser)
-        .filter(AdminUser.linked_user_id == user.id, AdminUser.is_active.is_(True))
-        .first()
-    )
-    canonical = (
-        db.query(AdminUser)
-        .filter(AdminUser.is_active.is_(True))
-        .filter(AdminUser.email.ilike(user_email))
-        .first()
-    )
+    taken = db.query(AdminUser).filter(AdminUser.email == shop_email).first()
+    if taken is None:
+        return shop_email
 
-    if canonical and linked and canonical.id != linked.id:
-        if linked.role == AdminRole.SUPER_ADMIN:
-            return linked
-        if canonical.linked_user_id is None:
-            canonical.linked_user_id = user.id
-        elif int(canonical.linked_user_id) != int(user.id):
-            return linked
-        remove_linked_staff_admin_row(db, linked)
-        db.commit()
-        db.refresh(canonical)
-        return canonical
-
-    if linked:
-        current = _normalize_email(linked.email)
-        if current != user_email:
-            conflict = (
-                db.query(AdminUser)
-                .filter(AdminUser.email.ilike(user_email), AdminUser.id != linked.id)
-                .first()
-            )
-            if conflict:
-                return repair_linked_admin_for_user(db, user)
-            linked.email = user.email.strip()
-            db.commit()
-            db.refresh(linked)
-        return linked
-
-    if canonical and canonical.linked_user_id is None:
-        canonical.linked_user_id = user.id
-        db.commit()
-        db.refresh(canonical)
-        return canonical
-
-    return canonical
+    base = f"linked-user-{user.id}@188.com.vn"
+    candidate = base
+    n = 0
+    while db.query(AdminUser).filter(AdminUser.email == candidate).first():
+        n += 1
+        candidate = f"linked-user-{user.id}-{n}@188.com.vn"
+    return candidate
 
 
 def apply_linked_staff_role(
@@ -138,8 +99,7 @@ def apply_linked_staff_role(
     if role not in LINKABLE_ROLES:
         raise ValueError("Vai trò không được phép gán qua liên kết thành viên.")
 
-    email = (user.email or "").strip()
-    if not email or "@" not in email:
+    if not (user.email or "").strip() or "@" not in (user.email or ""):
         raise ValueError("Thành viên cần có email để gán quyền quản trị web.")
 
     granular = _resolved_granular(role, modules)
@@ -149,23 +109,9 @@ def apply_linked_staff_role(
         if existing.role == AdminRole.SUPER_ADMIN:
             raise ValueError("Không thể đổi vai trò liên kết của super_admin.")
         existing.role = role
-        existing.email = email
         existing.is_active = True
         existing.granular_permissions = granular
         db.commit()
-        repair_linked_admin_for_user(db, user)
-        return
-
-    by_email = db.query(AdminUser).filter(AdminUser.email == email).first()
-    if by_email:
-        if by_email.role == AdminRole.SUPER_ADMIN:
-            raise ValueError("Email này đã gắn super_admin — không liên kết qua thành viên.")
-        by_email.linked_user_id = user.id
-        by_email.role = role
-        by_email.is_active = True
-        by_email.granular_permissions = granular
-        db.commit()
-        repair_linked_admin_for_user(db, user)
         return
 
     username = _random_username(user.id)
@@ -175,7 +121,7 @@ def apply_linked_staff_role(
     pwd = secrets.token_urlsafe(24)
     admin = AdminUser(
         username=username,
-        email=email,
+        email=_linked_admin_storage_email(db, user),
         password_hash=get_password_hash(pwd),
         full_name=user.full_name or username,
         phone=user.phone,
@@ -186,4 +132,3 @@ def apply_linked_staff_role(
     )
     db.add(admin)
     db.commit()
-    repair_linked_admin_for_user(db, user)

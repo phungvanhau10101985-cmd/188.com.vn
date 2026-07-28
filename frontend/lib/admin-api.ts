@@ -2837,6 +2837,7 @@ export interface AdminStaffAccountRow {
   id: number;
   username: string;
   email: string;
+  login_email?: string | null;
   full_name?: string | null;
   phone?: string | null;
   role: string;

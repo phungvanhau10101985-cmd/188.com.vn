@@ -337,7 +337,14 @@ export default function StaffAccessPage() {
                             </span>
                           ) : null}
                         </td>
-                        <td className="py-3 px-4 text-gray-600">{row.email || '—'}</td>
+                        <td className="py-3 px-4 text-gray-600">
+                          <div>{row.email || '—'}</div>
+                          {row.login_email ? (
+                            <div className="mt-0.5 text-[11px] text-emerald-800">
+                              Đăng nhập shop / OTP: {row.login_email}
+                            </div>
+                          ) : null}
+                        </td>
                         <td className="py-3 px-4">{roleLabel(row.role)}</td>
                         <td className="py-3 px-4 text-gray-600">
                           {row.linked_user_id != null ? `#${row.linked_user_id}` : '—'}
