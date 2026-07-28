@@ -291,7 +291,10 @@ class ExcelImporter:
 
                     product_dict = apply_category_final_mapping_to_product(product_dict, mappings)
 
-                    from app.services.product_image_visibility import colors_valid_for_import
+                    from app.services.product_image_visibility import (
+                        colors_valid_for_import,
+                        product_data_has_storefront_image,
+                    )
 
                     if product_dict and product_dict.get("product_id"):
                         if not colors_valid_for_import(
@@ -300,6 +303,14 @@ class ExcelImporter:
                             error_msg = (
                                 f"Dòng {row_number}: Variant rỗng "
                                 "([] hoặc không có tên/ảnh http/https) — không import."
+                            )
+                            errors.append(error_msg)
+                            logger.warning(error_msg)
+                            continue
+                        if not product_data_has_storefront_image(product_dict):
+                            error_msg = (
+                                f"Dòng {row_number}: Thiếu ảnh đại diện/thumbnail hợp lệ "
+                                "— không import."
                             )
                             errors.append(error_msg)
                             logger.warning(error_msg)

@@ -733,7 +733,10 @@ def _publish_payload(product_data: Dict[str, Any]) -> Dict[str, Any]:
             detail=f"Draft thiếu {', '.join(missing_categories)} — không cho import sản phẩm.",
         )
     payload["colors"] = _coerce_colors_for_create(payload.get("colors"))
-    from app.services.product_image_visibility import colors_valid_for_import
+    from app.services.product_image_visibility import (
+        colors_valid_for_import,
+        product_data_has_storefront_image,
+    )
 
     if not colors_valid_for_import(payload.get("colors")):
         raise HTTPException(
@@ -742,6 +745,11 @@ def _publish_payload(product_data: Dict[str, Any]) -> Dict[str, Any]:
                 "Draft thiếu biến thể Variant (rỗng [] hoặc không có tên/ảnh http/https) — "
                 "không cho import sản phẩm."
             ),
+        )
+    if not product_data_has_storefront_image(payload):
+        raise HTTPException(
+            status_code=400,
+            detail="Draft thiếu ảnh đại diện/thumbnail hợp lệ — không cho import sản phẩm.",
         )
     # Khớp nghiệp vụ + cột Excel mẫu (=1): lưu DB dạng bool; draft/export dùng số 1/0.
     payload["deposit_require"] = True

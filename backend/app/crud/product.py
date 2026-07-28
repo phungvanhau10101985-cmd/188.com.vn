@@ -6597,12 +6597,22 @@ def bulk_import_products(
             )
             continue
 
-        from app.services.product_image_visibility import colors_valid_for_import
+        from app.services.product_image_visibility import (
+            colors_valid_for_import,
+            product_data_has_storefront_image,
+        )
 
         if not colors_valid_for_import(product_data.get("colors")):
             errors.append(
                 f"Dòng {idx + 1} ({product_id}): Variant rỗng "
                 "([] hoặc không có tên/ảnh http/https) — không import."
+            )
+            continue
+
+        if not product_data_has_storefront_image(product_data):
+            errors.append(
+                f"Dòng {idx + 1} ({product_id}): Thiếu ảnh đại diện/thumbnail hợp lệ "
+                "— không import."
             )
             continue
 

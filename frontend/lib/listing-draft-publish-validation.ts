@@ -28,6 +28,50 @@ function countHttpImageUrls(raw: unknown): number {
   return n;
 }
 
+const INVALID_IMAGE_LITERALS = new Set(['null', 'none', 'nan', 'undefined', 'n/a', '-', '0']);
+
+function isPlausibleProductImageUrl(url: string): boolean {
+  const u = url.trim();
+  if (!u || INVALID_IMAGE_LITERALS.has(u.toLowerCase())) return false;
+  if (/^(?:https?:\/\/)?(?:www\.)?188\.com\.vn\/?$/i.test(u)) return false;
+  if (u.toLowerCase().startsWith('data:image')) return u.length > 16;
+  if (u.startsWith('//')) return u.length > 4 && u.slice(2).includes('.');
+  if (u.startsWith('/')) return u.length > 2;
+  if (/^https?:\/\//i.test(u)) return u.length > 12 && u.includes('.');
+  return false;
+}
+
+function productDataHasStorefrontImage(pd: Record<string, unknown>): boolean {
+  const candidates: string[] = [];
+  const main = trimStr(pd.main_image);
+  if (main) candidates.push(main);
+
+  for (const field of ['images', 'gallery'] as const) {
+    const raw = pd[field];
+    if (!Array.isArray(raw)) continue;
+    for (const item of raw) {
+      if (typeof item === 'string') {
+        const s = item.trim();
+        if (s) candidates.push(s);
+      }
+    }
+  }
+
+  const colors = pd.colors;
+  if (Array.isArray(colors)) {
+    for (const entry of colors) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      const rec = entry as Record<string, unknown>;
+      for (const key of ['img', 'image', 'url'] as const) {
+        const s = trimStr(rec[key]);
+        if (s) candidates.push(s);
+      }
+    }
+  }
+
+  return candidates.some(isPlausibleProductImageUrl);
+}
+
 const APPAREL_SHOE_RES: RegExp[] = [
   /\bgiày\b/i,
   /\bdép\b/i,
@@ -172,6 +216,10 @@ export function getListingDraftPublishBlockers(pd: Record<string, unknown> | und
   }
 
   issues.push(...validateColorVariants(pd.colors));
+
+  if (!productDataHasStorefrontImage(pd)) {
+    issues.push('Thiếu ảnh đại diện/thumbnail hợp lệ — không import được');
+  }
 
   if (productDataLooksLikeApparelOrFootwear(pd)) {
     const sizes = normalizeProductDataSizes(pd.sizes);

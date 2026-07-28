@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from app.services.product_image_visibility import (
     colors_valid_for_import,
     delete_product_if_no_variant_or_images,
+    product_data_has_storefront_image,
     product_should_remove_after_localization,
 )
 
@@ -28,6 +29,22 @@ def test_colors_valid_for_import_accepts_name_or_http_image():
         ]
     ) is True
     assert colors_valid_for_import([{"name": ""}, {"name": "Xanh"}]) is True
+
+
+def test_product_data_has_storefront_image():
+    assert product_data_has_storefront_image({}) is False
+    assert product_data_has_storefront_image({"colors": [{"name": "Đỏ"}]}) is False
+    assert product_data_has_storefront_image(
+        {"main_image": "https://cdn.example/thumb.jpg"}
+    ) is True
+    assert product_data_has_storefront_image(
+        {"images": ["https://cdn.example/a.jpg"]}
+    ) is True
+    assert product_data_has_storefront_image(
+        {"colors": [{"name": "Đỏ", "img": "https://cdn.example/a.jpg"}]}
+    ) is True
+    assert product_data_has_storefront_image({"main_image": "null"}) is False
+    assert product_data_has_storefront_image({"main_image": "https://188.com.vn"}) is False
 
 
 def test_product_should_remove_after_localization():

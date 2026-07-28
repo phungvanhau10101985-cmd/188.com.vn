@@ -41,20 +41,23 @@ def is_plausible_product_image_url(url: Any) -> bool:
     return False
 
 
-def _iter_image_candidates(product: Product) -> Iterable[str]:
-    main = _norm_url(getattr(product, "main_image", None))
+def _iter_image_candidates_from_mapping(product_data: Any) -> Iterable[str]:
+    if not isinstance(product_data, dict):
+        return
+
+    main = _norm_url(product_data.get("main_image"))
     if main:
         yield main
 
     for field in ("images", "gallery"):
-        raw = getattr(product, field, None) or []
+        raw = product_data.get(field) or []
         if isinstance(raw, list):
             for item in raw:
                 s = _norm_url(item)
                 if s:
                     yield s
 
-    colors = getattr(product, "colors", None) or []
+    colors = product_data.get("colors") or []
     if isinstance(colors, list):
         for entry in colors:
             if isinstance(entry, dict):
@@ -62,6 +65,17 @@ def _iter_image_candidates(product: Product) -> Iterable[str]:
                     s = _norm_url(entry.get(key))
                     if s:
                         yield s
+
+
+def _iter_image_candidates(product: Product) -> Iterable[str]:
+    yield from _iter_image_candidates_from_mapping(
+        {
+            "main_image": getattr(product, "main_image", None),
+            "images": getattr(product, "images", None),
+            "gallery": getattr(product, "gallery", None),
+            "colors": getattr(product, "colors", None),
+        }
+    )
 
 
 def resolve_product_display_image_url(product: Product) -> Optional[str]:
@@ -74,6 +88,14 @@ def resolve_product_display_image_url(product: Product) -> Optional[str]:
 
 def product_has_storefront_image(product: Product) -> bool:
     return resolve_product_display_image_url(product) is not None
+
+
+def product_data_has_storefront_image(product_data: Any) -> bool:
+    """Kiểm tra dict product_data (draft/import) có ảnh đại diện/thumbnail hợp lệ."""
+    for url in _iter_image_candidates_from_mapping(product_data):
+        if is_plausible_product_image_url(url):
+            return True
+    return False
 
 
 def _variant_image_url(entry: dict) -> str:
