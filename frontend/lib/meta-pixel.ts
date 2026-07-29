@@ -3,6 +3,8 @@ import type { CartItem } from '@/features/cart/types/cart';
 import type { Product } from '@/types/api';
 import { newMetaEventId, sendFacebookCapiFromBrowser } from '@/lib/facebook-capi-client';
 
+export const META_PIXEL_CURRENCY = 'VND';
+
 export function metaPurchaseEventId(orderId: number | string): string {
   const id = String(orderId).replace(/\D/g, '') || '0';
   return `Purchase_${id}`;
