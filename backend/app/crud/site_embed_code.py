@@ -12,6 +12,15 @@ from app.schemas.site_embed_code import (
 )
 from app.services.site_embed_templates import collect_expanded_fragments
 
+_PUBLIC_EMBEDS_CACHE_KEY = "embed_codes_v5:public"
+
+
+def invalidate_public_embeds_cache() -> None:
+    """Xóa cache API /embed-codes/public sau khi admin sửa mã nhúng."""
+    from app.utils.ttl_cache import cache as ttl_cache
+
+    ttl_cache.invalidate(_PUBLIC_EMBEDS_CACHE_KEY)
+
 
 def row_to_admin_item(row: SiteEmbedCode) -> SiteEmbedCodeAdminItem:
     c = (row.content or "").strip()
@@ -247,6 +256,7 @@ def create_embed_code(db: Session, data: SiteEmbedCodeCreate) -> SiteEmbedCode:
     db.add(row)
     db.commit()
     db.refresh(row)
+    invalidate_public_embeds_cache()
     return row
 
 
@@ -278,6 +288,7 @@ def update_embed_code(db: Session, embed_id: int, data: SiteEmbedCodeUpdate) -> 
         row.sort_order = int(payload["sort_order"])
     db.commit()
     db.refresh(row)
+    invalidate_public_embeds_cache()
     return row
 
 
@@ -287,6 +298,7 @@ def delete_embed_code(db: Session, embed_id: int) -> bool:
         return False
     db.delete(row)
     db.commit()
+    invalidate_public_embeds_cache()
     return True
 
 

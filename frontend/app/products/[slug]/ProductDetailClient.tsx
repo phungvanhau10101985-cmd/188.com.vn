@@ -23,6 +23,7 @@ import ErrorState from './components/ErrorState/ErrorState';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { trackMetaViewContentProduct } from '@/lib/meta-pixel';
+import { trackTikTokViewContentProduct } from '@/lib/tiktok-pixel';
 import {
   buildAddToCartRequestFromProduct,
   trackMarketingAddToCartIntent,
@@ -123,6 +124,7 @@ export default function ProductDetailClient({
   useLayoutEffect(() => {
     if (!initialProduct?.id) return;
     trackMetaViewContentProduct(initialProduct, { routeKey: slug });
+    trackTikTokViewContentProduct(initialProduct, { routeKey: slug });
   }, [slug, initialProduct]);
 
   useEffect(() => {

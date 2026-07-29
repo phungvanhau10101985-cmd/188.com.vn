@@ -54,7 +54,7 @@ const ID_HINT: Record<string, Record<string, string>> = {
       'Conversion API: Access Token Events Manager (Facebook). Không lộ HTML; ghép Pixel + API máy chủ.',
   },
   tiktok: {
-    pixel: 'TikTok Pixel ID trong Events Manager — remarketing động / catalogue; gửi ttq.track từ trang là bước bổ sung.',
+    pixel: 'TikTok Pixel ID trong Events Manager — remarketing động / catalogue; site tự bắn ttq.track (ViewContent, AddToCart, InitiateCheckout, PlaceAnOrder, CompletePayment) song song Meta.',
     capi_token:
       'TikTok Events API access token — chỉ máy chủ; khuyến nghị dùng cùng Pixel Web.',
   },

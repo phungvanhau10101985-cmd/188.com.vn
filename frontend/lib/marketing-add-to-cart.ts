@@ -3,6 +3,7 @@ import type { Product } from '@/types/api';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { warehouseCartProductDataExtras } from '@/lib/warehouse-clearance';
 import { trackMetaAddToCart } from '@/lib/meta-pixel';
+import { trackTikTokAddToCart } from '@/lib/tiktok-pixel';
 import { trackGoogleAdsAddToCart } from '@/lib/google-ads-gtag';
 
 /** Payload giỏ hàng + trường Meta/Google remarketing (id sheet, SKU, giá, tên). */
@@ -42,5 +43,6 @@ export function buildAddToCartRequestFromProduct(
 /** Pixel + CAPI Meta (+ Google Ads) khi khách xác nhận thêm giỏ — không chờ API / login. */
 export function trackMarketingAddToCartIntent(item: AddToCartRequest): void {
   trackMetaAddToCart(item);
+  trackTikTokAddToCart(item);
   trackGoogleAdsAddToCart(item);
 }

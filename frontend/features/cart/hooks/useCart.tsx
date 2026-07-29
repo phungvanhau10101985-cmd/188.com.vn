@@ -7,6 +7,7 @@ import { cartAPI } from '../api/cart-api';
 import { trackEvent } from '@/lib/analytics';
 import { trackGoogleAdsAddToCart } from '@/lib/google-ads-gtag';
 import { trackMetaAddToCart } from '@/lib/meta-pixel';
+import { trackTikTokAddToCart } from '@/lib/tiktok-pixel';
 import { CartRequiresLoginError } from '../cart-errors';
 import { readPendingCartAfterLogin, clearPendingCartAfterLogin } from '../pending-cart-session';
 import { hasClientAuthUser, hasClientBearerToken } from '@/lib/client-auth-session';
@@ -161,6 +162,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       });
       /** Dự phòng nếu handler trang chưa gọi (dedupe 2s tránh double). */
       trackMetaAddToCart(itemData);
+      trackTikTokAddToCart(itemData);
       trackGoogleAdsAddToCart(itemData);
     } catch (error: any) {
       setCartState((prev) => ({

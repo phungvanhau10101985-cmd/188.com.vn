@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { trackEvent } from '@/lib/analytics';
 import { trackMetaPageView } from '@/lib/meta-pixel';
+import { trackTikTokPageView } from '@/lib/tiktok-pixel';
 import { trackGoogleAdsRouteRetail } from '@/lib/google-ads-gtag';
 
 export default function AnalyticsTracker() {
@@ -22,6 +23,7 @@ export default function AnalyticsTracker() {
       title: typeof document !== 'undefined' ? document.title : '',
     });
     trackMetaPageView(path);
+    trackTikTokPageView(path);
     trackGoogleAdsRouteRetail(path);
   }, [pathname, searchKey]);
 

@@ -16,6 +16,11 @@ import { getStoredReferralCode } from '@/lib/affiliate-ref';
 import { trackEvent } from '@/lib/analytics';
 import { trackMetaOrderAwaitingDeposit, trackMetaPurchase } from '@/lib/meta-pixel';
 import {
+  trackTikTokCompletePayment,
+  trackTikTokInitiateCheckout,
+  trackTikTokPlaceAnOrder,
+} from '@/lib/tiktok-pixel';
+import {
   trackGoogleAdsCartPageView,
   trackGoogleAdsOrderAwaitingDeposit,
   trackGoogleAdsPurchase,
@@ -448,6 +453,7 @@ export default function CartPage() {
   useEffect(() => {
     if (!isAuthenticated || cartItems.length === 0) return;
     trackGoogleAdsCartPageView(cartItems, cartTotalAll);
+    trackTikTokInitiateCheckout({ items: cartItems, value: cartTotalAll });
   }, [isAuthenticated, cartAdsFingerprint, cartTotalAll]);
 
   if (!pageReady || isLoading) {
@@ -711,6 +717,11 @@ export default function CartPage() {
           value: selectedFinalPrice,
           orderId: order.id,
         });
+        trackTikTokCompletePayment({
+          items: linesToOrder.map((i) => ({ ...i })),
+          value: selectedFinalPrice,
+          orderId: order.id,
+        });
         trackGoogleAdsPurchase({
           items: linesToOrder.map((i) => ({ ...i })),
           value: selectedFinalPrice,
@@ -718,6 +729,12 @@ export default function CartPage() {
         });
       } else {
         trackMetaOrderAwaitingDeposit({
+          items: linesToOrder.map((i) => ({ ...i })),
+          value: selectedFinalPrice,
+          depositAmount: order.deposit_amount,
+          orderId: order.id,
+        });
+        trackTikTokPlaceAnOrder({
           items: linesToOrder.map((i) => ({ ...i })),
           value: selectedFinalPrice,
           depositAmount: order.deposit_amount,

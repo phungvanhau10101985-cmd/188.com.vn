@@ -22,6 +22,12 @@ import {
   type OrderApiLineForMeta,
 } from '@/lib/meta-pixel';
 import {
+  trackTikTokCompletePayment,
+  trackTikTokDepositCheckoutPage,
+  trackTikTokPageView,
+  trackTikTokPlaceAnOrder,
+} from '@/lib/tiktok-pixel';
+import {
   trackGoogleAdsDepositCheckoutPage,
   trackGoogleAdsOrderAwaitingDeposit,
   trackGoogleAdsPurchase,
@@ -365,6 +371,7 @@ export default function OrderDepositPage() {
       depositPageViewTrackedForIdRef.current = id;
       const path = `${window.location.pathname}${window.location.search}`;
       trackMetaPageView(path, { skipDedupe: true });
+      trackTikTokPageView(path, { skipDedupe: true });
     }
 
     if (
@@ -385,6 +392,12 @@ export default function OrderDepositPage() {
       };
       trackMetaDepositPageView({ ...depositEvent, items: cartLike });
       trackMetaViewDepositPayment(depositEvent);
+      trackTikTokDepositCheckoutPage({
+        items: cartLike,
+        value,
+        orderId: order.id,
+        depositAmount: orderMoney(order, 'deposit_amount'),
+      });
     }
 
     if (
@@ -440,6 +453,12 @@ export default function OrderDepositPage() {
     );
     const value = fromOrderTotal > 0 ? fromOrderTotal : fromLines;
     trackMetaOrderAwaitingDeposit({
+      items: cartLike,
+      value,
+      depositAmount: order.deposit_amount,
+      orderId: order.id,
+    });
+    trackTikTokPlaceAnOrder({
       items: cartLike,
       value,
       depositAmount: order.deposit_amount,
@@ -520,6 +539,7 @@ export default function OrderDepositPage() {
           }
 
           trackMetaPurchase({ items: cartLike, value, orderId: order.id });
+          trackTikTokCompletePayment({ items: cartLike, value, orderId: order.id });
           trackGoogleAdsPurchase({ items: cartLike, value, orderId: order.id });
           trackEvent('purchase', {
             order_id: order.id,
