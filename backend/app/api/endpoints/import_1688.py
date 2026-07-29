@@ -87,6 +87,7 @@ from app.services.import_vipomall_scraper import (
     is_vipomall_import_url,
     resolve_vipomall_import_url,
     scrape_vipomall_for_import,
+    scrape_vipomall_variants_only,
 )
 from app.services.vipomall_source_stock import VIPOMALL_PLATFORM_TAOBAO
 from app.services.import_1688_scraper import (
@@ -103,8 +104,10 @@ from app.services.import_batch_url_coercion import (
 )
 from app.services.import_link_excel_batch import (
     build_listing_link_import_xlsx_bytes,
+    import_batch_minimal_excel_only,
     merge_import_excel_overlay_into_product_data,
     parse_link_import_excel,
+    set_import_batch_minimal_excel_only,
 )
 
 logger = logging.getLogger(__name__)
@@ -592,9 +595,28 @@ class Import1688CookieSettingsOut(BaseModel):
     message: str | None = None
 
 
+class Import1688ExcelBatchModeSettingsIn(BaseModel):
+    minimal_excel_only: bool
+
+
+class Import1688ExcelBatchModeSettingsOut(BaseModel):
+    minimal_excel_only: bool
+    mode: str
+    message: str | None = None
+
+
 def _cookie_settings_out(message: str | None = None) -> Import1688CookieSettingsOut:
     data = scraper_cookie_settings_dict(message)
     return Import1688CookieSettingsOut(**data)
+
+
+def _excel_batch_mode_settings_out(message: str | None = None) -> Import1688ExcelBatchModeSettingsOut:
+    minimal = import_batch_minimal_excel_only()
+    return Import1688ExcelBatchModeSettingsOut(
+        minimal_excel_only=minimal,
+        mode="minimal" if minimal else "full",
+        message=message,
+    )
 
 
 def _restart_process_later() -> None:
@@ -670,6 +692,23 @@ def delete_import_1688_cookie_settings(
         }
     )
     return _cookie_settings_out("Đã xóa cookie scrape trên server.")
+
+
+@router.get("/settings/excel-batch-mode", response_model=Import1688ExcelBatchModeSettingsOut)
+def get_import_1688_excel_batch_mode_settings(
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    return _excel_batch_mode_settings_out()
+
+
+@router.put("/settings/excel-batch-mode", response_model=Import1688ExcelBatchModeSettingsOut)
+def save_import_1688_excel_batch_mode_settings(
+    payload: Import1688ExcelBatchModeSettingsIn,
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    set_import_batch_minimal_excel_only(payload.minimal_excel_only)
+    label = "Nhanh — chỉ Variant" if payload.minimal_excel_only else "Đầy đủ — mọi trường"
+    return _excel_batch_mode_settings_out(f"Đã chuyển sang chế độ «{label}». Áp dụng ngay, không cần restart API.")
 
 
 @router.post("/settings/restart-api")
@@ -852,12 +891,56 @@ def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _excel_json_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _excel_row_id_variant_only(product_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Export tối thiểu: cột A (id) + cột O (Variant)."""
+    return {
+        "id": product_data.get("product_id", ""),
+        "Variant": _excel_json_cell(product_data.get("colors", [])),
+    }
+
+
+def _build_vipo_variant_only_product_data(
+    overlay: Dict[str, Any],
+    scraped: Dict[str, Any],
+    *,
+    source_url: str = "",
+) -> Dict[str, Any]:
+    """Nháp tối thiểu: ID SP từ Excel cột A + Variant scrape Vipomall."""
+    pid = str(overlay.get("product_id") or "").strip()
+    colors = scraped.get("colors")
+    if not isinstance(colors, list):
+        colors = product_crud.parse_json_field(colors or "[]")
+    return {
+        "product_id": pid,
+        "colors": colors,
+        "sizes": [],
+        "images": [],
+        "gallery": [],
+        "name": pid,
+        "price": 0,
+        "available": 500,
+        "link_default": source_url or "",
+        "main_image": "",
+        "description": "",
+        "is_active": True,
+    }
+
+
 def _run_import_1688_job(job_id: str, download_images: bool) -> None:
     db = SessionLocal()
     try:
         draft = draft_crud.get_by_job_id(db, job_id)
         if not draft:
             return
+
         norm_url = normalize_product_import_url(draft.source_url or "")
         saved_source = (draft.source or "1688").strip().lower()
         if saved_source == "pandamall" or is_pandamall_import_url(norm_url):
@@ -908,6 +991,29 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             return
 
         if source == "vipomall":
+            ov = getattr(draft, "excel_overlays", None) or {}
+            if isinstance(ov, dict) and ov.get("_vipo_variant_only"):
+                draft_crud.mark_running(
+                    db,
+                    draft,
+                    "scraping",
+                    "Vipomall nhanh: chỉ scrape Variant (màu)…",
+                    40,
+                )
+                raw_payload, scraped, warnings = scrape_vipomall_variants_only(draft.source_url)
+                product_data = _build_vipo_variant_only_product_data(
+                    ov, scraped, source_url=draft.source_url or ""
+                )
+                draft_crud.mark_done(
+                    db,
+                    draft,
+                    raw_payload=raw_payload,
+                    product_data=product_data,
+                    warnings=warnings,
+                    success_message="Đã scrape Variant Vipomall + ID SP từ Excel.",
+                )
+                return
+
             draft_crud.mark_running(db, draft, "scraping", "Đang mở trang Vipomall bằng Playwright...", 15)
             raw_payload, product_data, warnings = scrape_vipomall_for_import(draft.source_url)
             _merge_excel_overlay_for_job(db, job_id, product_data)
@@ -1089,11 +1195,21 @@ def _create_import_drafts_from_parsed_excel(
     draft_ids: List[int] = []
     job_ids: List[str] = []
     for it in parsed:
-        url_norm = normalize_product_import_url(it["url"])
+        overlays = dict(it.get("overlays") or {})
+        vipo_fast = bool(overlays.get("_vipo_variant_only"))
+        effective_ft = "vipomall" if vipo_fast else ft
+
+        if vipo_fast:
+            pid = str(overlays.get("product_id") or "").strip()
+            if not pid:
+                skips.append(f"Dòng {it.get('excel_row')}: thiếu ID SP (cột A).")
+                continue
+
+        url_norm = normalize_product_import_url(it.get("url") or "")
         if len(url_norm) < 10:
             skips.append(f"Dòng {it.get('excel_row')}: URL quá ngắn.")
             continue
-        coerced, skip_reason = coerce_url_for_excel_batch_import(url_norm, ft)
+        coerced, skip_reason = coerce_url_for_excel_batch_import(url_norm, effective_ft)
         if skip_reason:
             skips.append(f"Dòng {it.get('excel_row')}: {skip_reason}")
             continue
@@ -1102,16 +1218,23 @@ def _create_import_drafts_from_parsed_excel(
             skips.append(f"Dòng {it.get('excel_row')}: URL sau chuẩn hoá quá ngắn.")
             continue
         try:
-            ext_id, src = _infer_import_source_for_url(url_norm, None)
+            ext_id, src = _infer_import_source_for_url(url_norm, effective_ft if vipo_fast else None)
         except ValueError:
-            skips.append(f"Dòng {it.get('excel_row')}: link không nhận dạng Hibox/taobao1688.kz/Vipomall/PandaMall.")
+            if vipo_fast:
+                skips.append(f"Dòng {it.get('excel_row')}: link không phải Vipomall.")
+            else:
+                skips.append(
+                    f"Dòng {it.get('excel_row')}: link không nhận dạng Hibox/taobao1688.kz/Vipomall/PandaMall."
+                )
+            continue
+        if vipo_fast and src != "vipomall":
+            skips.append(f"Dòng {it.get('excel_row')}: chế độ nhanh chỉ hỗ trợ link Vipomall.")
             continue
         if src == "1688":
             skips.append(
                 f"Dòng {it.get('excel_row')}: import trực tiếp 1688 đã tắt — chỉ hỗ trợ Hibox/taobao1688.kz/Vipomall/PandaMall."
             )
             continue
-        overlays = dict(it.get("overlays") or {})
         overlays["_excel_row"] = int(it["excel_row"])
         overlays["_batch_token"] = batch_token
         jid = str(uuid.uuid4())
@@ -1127,6 +1250,22 @@ def _create_import_drafts_from_parsed_excel(
         draft_ids.append(draft.id)
         job_ids.append(jid)
     return draft_ids, job_ids
+
+
+def _excel_batch_upload_out(
+    *,
+    batch_token: str,
+    total: int,
+    skipped: List[str],
+) -> Import1688ExcelBatchOut:
+    """Phản hồi upload Excel — không trả hàng nghìn draft_id/job_id (đã lưu trong meta JSON)."""
+    return Import1688ExcelBatchOut(
+        batch_token=batch_token,
+        total=total,
+        draft_ids=[],
+        job_ids=[],
+        skipped=skipped[:120],
+    )
 
 
 def _merge_parsed_excel_into_batch(
@@ -1170,12 +1309,10 @@ def _merge_parsed_excel_into_batch(
     meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     if new_job_ids:
         _enqueue_import_1688_batch_chain(str(meta_path.absolute()))
-    return Import1688ExcelBatchOut(
+    return _excel_batch_upload_out(
         batch_token=tid,
         total=len(new_job_ids),
-        draft_ids=new_draft_ids,
-        job_ids=new_job_ids,
-        skipped=skips[:120],
+        skipped=skips,
     )
 
 
@@ -1211,12 +1348,10 @@ def _create_new_excel_batch_from_parsed(
     )
     if job_ids:
         _enqueue_import_1688_batch_chain(str(meta_path.absolute()))
-    return Import1688ExcelBatchOut(
+    return _excel_batch_upload_out(
         batch_token=batch_token,
         total=len(job_ids),
-        draft_ids=draft_ids,
-        job_ids=job_ids,
-        skipped=skips[:120],
+        skipped=skips,
     )
 
 
@@ -1322,6 +1457,19 @@ async def append_import_jobs_batch_from_excel(
                 tmp_path.unlink()
         except Exception:
             pass
+
+
+@router.get("/listing-link-template-sample.xlsx")
+def download_listing_link_template_sample_xlsx(
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Tải file Excel mẫu tái nhập listing (hai hàng nhãn EN/VI, không có dòng dữ liệu)."""
+    content = build_listing_link_import_xlsx_bytes([])
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="listing_link_import_mau.xlsx"'},
+    )
 
 
 @router.post("/export-listing-link-template.xlsx")
@@ -1511,6 +1659,8 @@ def list_import_1688_drafts(
 
 def _file_response_import_excel_rows(rows_data: List[Dict[str, Any]], download_filename: str) -> Response:
     """Tạo Excel mẫu nhập web (cùng layout export bulk draft) — trả bytes, không phụ thuộc CWD hay ghi đĩa."""
+    if import_batch_minimal_excel_only():
+        return _file_response_id_variant_excel_rows(rows_data, download_filename)
     if not rows_data:
         raise HTTPException(
             status_code=400,
@@ -1533,25 +1683,100 @@ def _file_response_import_excel_rows(rows_data: List[Dict[str, Any]], download_f
     )
 
 
+def _file_response_id_variant_excel_rows(rows_data: List[Dict[str, Any]], download_filename: str) -> Response:
+    """Export 2 cột: id (cột A) + Variant (cột O) — hai hàng nhãn EN/VI giống mẫu listing."""
+    if not rows_data:
+        raise HTTPException(
+            status_code=400,
+            detail="Không có draft nào trong danh sách đã có dữ liệu để export (chờ job done).",
+        )
+    columns = ["id", "Variant"]
+    vietnamese_headers = ["Id sản phẩm", "Biến thể"]
+    df = pd.DataFrame(rows_data, columns=columns)
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Products", index=False, startrow=0)
+        ws = writer.sheets["Products"]
+        ws.insert_rows(2)
+        for idx, header in enumerate(vietnamese_headers, 1):
+            ws.cell(row=2, column=idx, value=header)
+    body = buf.getvalue()
+    return Response(
+        content=body,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{download_filename}"'},
+    )
+
+
+def _excel_rows_from_draft_ids(db: Session, draft_ids: List[int], *, preserve_order: bool) -> List[Dict[str, Any]]:
+    """Gom dòng Excel từ draft — bỏ qua nháp chưa có product_data."""
+    if preserve_order:
+        ids = [int(x) for x in draft_ids if x is not None]
+    else:
+        ids = sorted({int(x) for x in draft_ids if x is not None})
+    if not ids:
+        return []
+    by_id = draft_crud.get_by_ids_map(db, ids)
+    rows_data: List[Dict[str, Any]] = []
+    for did in ids:
+        draft = by_id.get(did)
+        if not draft:
+            if not preserve_order:
+                raise HTTPException(status_code=404, detail=f"Không có draft id={did}.")
+            continue
+        if not draft.product_data:
+            continue
+        pdata = _draft_product_data_for_excel_export(db, draft)
+        if import_batch_minimal_excel_only():
+            rows_data.append(_excel_row_id_variant_only(pdata))
+        else:
+            rows_data.append(_excel_row_from_product(pdata))
+    return rows_data
+
+
+def _batch_meta_draft_ids(batch_token: str) -> List[int]:
+    tid = _safe_batch_token_param(batch_token)
+    meta_path = _batch_meta_json_path(tid)
+    if not meta_path.is_file():
+        raise HTTPException(status_code=404, detail="Không tìm thấy đợt import.")
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Meta batch hỏng: {exc}") from exc
+    if meta.get("_deleted"):
+        raise HTTPException(status_code=400, detail="Đợt đã bị xóa.")
+    return [int(x) for x in (meta.get("draft_ids") or []) if x is not None]
+
+
 @router.post("/drafts/export-excel-bulk")
 def export_import_1688_drafts_bulk(
     payload: Import1688DraftIdsBody,
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("products")),
 ):
-    ids_sorted = sorted(set(payload.draft_ids))
-    by_id = draft_crud.get_by_ids_map(db, ids_sorted)
-    rows_data: List[Dict[str, Any]] = []
-    for did in ids_sorted:
-        draft = by_id.get(did)
-        if not draft:
-            raise HTTPException(status_code=404, detail=f"Không có draft id={did}.")
-        if not draft.product_data:
-            continue
-        pdata = _draft_product_data_for_excel_export(db, draft)
-        rows_data.append(_excel_row_from_product(pdata))
-
+    rows_data = _excel_rows_from_draft_ids(db, payload.draft_ids, preserve_order=False)
     filename = f"import_1688_drafts_bulk_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return _file_response_import_excel_rows(rows_data, filename)
+
+
+@router.post("/jobs/excel-batches/{batch_token}/export-excel")
+def export_excel_import_batch(
+    batch_token: str,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Xuất Excel gộp theo đợt upload — đọc draft_id từ meta server, không gửi hàng nghìn id từ trình duyệt."""
+    tid = _safe_batch_token_param(batch_token)
+    draft_ids = _batch_meta_draft_ids(tid)
+    if not draft_ids:
+        raise HTTPException(status_code=400, detail="Đợt này chưa có bản nháp nào để export.")
+    rows_data = _excel_rows_from_draft_ids(db, draft_ids, preserve_order=True)
+    if not rows_data:
+        raise HTTPException(
+            status_code=400,
+            detail="Chưa có nháp nào có dữ liệu sản phẩm để export (đợi crawl xong hoặc kiểm tra lỗi).",
+        )
+    filename = f"import_1688_batch_{tid[:12]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return _file_response_import_excel_rows(rows_data, filename)
 
 
@@ -1593,7 +1818,10 @@ def listing_import_queue_export_products_excel(
             missing_in_db += 1
             continue
         pdata = dict(draft.product_data or {})
-        rows_data.append(_excel_row_from_product(pdata))
+        if import_batch_minimal_excel_only():
+            rows_data.append(_excel_row_id_variant_only(pdata))
+        else:
+            rows_data.append(_excel_row_from_product(pdata))
 
     elapsed = time.perf_counter() - t0
     logger.info(
@@ -1918,7 +2146,12 @@ def export_import_1688_draft_excel(
         raise HTTPException(status_code=400, detail="Draft chưa có dữ liệu sản phẩm để export.")
     pdata = _draft_product_data_for_excel_export(db, draft)
     filename = f"import_1688_draft_{draft.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    return _file_response_import_excel_rows([_excel_row_from_product(pdata)], filename)
+    row = (
+        _excel_row_id_variant_only(pdata)
+        if import_batch_minimal_excel_only()
+        else _excel_row_from_product(pdata)
+    )
+    return _file_response_import_excel_rows([row], filename)
 
 
 def _safe_listing_queue_token_param(raw: str) -> str:

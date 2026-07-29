@@ -1066,6 +1066,12 @@ export interface AdminImport1688CookieSettings {
   message?: string | null;
 }
 
+export interface AdminImport1688ExcelBatchModeSettings {
+  minimal_excel_only: boolean;
+  mode: 'minimal' | 'full' | string;
+  message?: string | null;
+}
+
 export interface AdminSearchMapping {
   id: number;
   keyword_input: string;
@@ -1824,6 +1830,35 @@ export const adminProductAPI = {
     }
   },
 
+  /** Excel mẫu tái nhập listing (2 hàng nhãn, cột Sku trống) — chỉ tiêu đề, không dòng dữ liệu. */
+  downloadListingLinkSampleExcel: async () => {
+    const staticUrl = `${getBackendOriginUrl().replace(/\/$/, '')}/static/templates/listing_link_import_mau.xlsx`;
+    const res = await fetch(staticUrl, { headers: ngrokFetchHeaders() });
+    if (!res.ok) {
+      const token = getAdminToken();
+      if (!token) throw new Error('Chưa đăng nhập admin');
+      const apiUrl = `${getApiBaseUrl()}/import-1688/listing-link-template-sample.xlsx`;
+      const apiRes = await fetch(apiUrl, {
+        headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+      });
+      if (!apiRes.ok) {
+        const err = await apiRes.json().catch(() => ({ detail: apiRes.statusText }));
+        throw new Error(formatFastApiDetail(err?.detail ?? err) || 'Tải file mẫu thất bại');
+      }
+      const blob = await apiRes.blob();
+      await assertBlobLooksLikeXlsx(blob);
+      const cd = apiRes.headers.get('Content-Disposition');
+      let filename = 'listing_link_import_mau.xlsx';
+      const m = cd && /filename="?([^";]+)"?/i.exec(cd);
+      if (m?.[1]) filename = m[1].trim();
+      await triggerBlobDownloadPreferred(blob, filename);
+      return;
+    }
+    const blob = await res.blob();
+    await assertBlobLooksLikeXlsx(blob);
+    await triggerBlobDownloadPreferred(blob, 'listing_link_import_mau.xlsx');
+  },
+
   /** Excel mẫu tái nhập listing (2 hàng nhãn, cột Sku trống) — từ các dòng đã chọn trên trang parse. */
   downloadListingLinkTemplateExcel: async (
     rows: Array<{
@@ -1995,6 +2030,26 @@ export const adminProductAPI = {
     URL.revokeObjectURL(a.href);
   },
 
+  exportImport1688ExcelBatch: async (batchToken: string) => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const url = `${getApiBaseUrl()}/import-1688/jobs/excel-batches/${encodeURIComponent(batchToken)}/export-excel`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail(errBody?.detail ?? errBody) || 'Export Excel đợt thất bại');
+    }
+    const blob = await res.blob();
+    await assertBlobLooksLikeXlsx(blob);
+    const disposition = res.headers.get('Content-Disposition');
+    const match = disposition?.match(/filename="?([^";]+)"?/);
+    const filename = match ? match[1] : `import_1688_batch_${batchToken.slice(0, 12)}.xlsx`;
+    await triggerBlobDownloadPreferred(blob, filename);
+  },
+
   getImport1688CookieSettings: () =>
     fetchAdmin<AdminImport1688CookieSettings>('/import-1688/settings/cookie', {
       timeoutMs: 60_000,
@@ -2032,6 +2087,18 @@ export const adminProductAPI = {
         method: 'DELETE',
         timeoutMs: 60_000,
       });
+    }),
+
+  getImport1688ExcelBatchModeSettings: () =>
+    fetchAdmin<AdminImport1688ExcelBatchModeSettings>('/import-1688/settings/excel-batch-mode', {
+      timeoutMs: 30_000,
+    }),
+
+  saveImport1688ExcelBatchModeSettings: (minimalExcelOnly: boolean) =>
+    fetchAdmin<AdminImport1688ExcelBatchModeSettings>('/import-1688/settings/excel-batch-mode', {
+      method: 'PUT',
+      body: JSON.stringify({ minimal_excel_only: minimalExcelOnly }),
+      timeoutMs: 30_000,
     }),
 
   restartBackendApi: () =>

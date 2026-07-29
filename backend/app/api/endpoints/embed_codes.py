@@ -3,13 +3,13 @@ import logging
 import time
 from typing import Optional
 
-import requests
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.crud import site_embed_code as embed_crud
 from app.db.session import SessionLocal, get_db
+from app.services.facebook_capi import post_facebook_capi_events
 from app.schemas.site_embed_code import FacebookCapiEventIn, PublicSiteEmbedsResponse
 from app.utils.ttl_cache import cache as ttl_cache
 
@@ -85,13 +85,6 @@ def facebook_capi_send_event(
     Frontend / app khác gọi (server-to-server):
     Authorization: Bearer <FACEBOOK_CAPI_INGEST_SECRET>
     """
-    pix, access_token = embed_crud.get_facebook_pixel_id_and_capi_access_token(db)
-    if not pix or not access_token:
-        raise HTTPException(
-            status_code=400,
-            detail="Chưa cấu hình trong admin: Facebook Pixel ID + Conversion API Access Token (đang bật).",
-        )
-
     event_time = int(payload.event_time) if payload.event_time else int(time.time())
     evt: dict = {
         "event_name": payload.event_name,
@@ -107,27 +100,14 @@ def facebook_capi_send_event(
     if payload.user_data:
         evt["user_data"] = payload.user_data
 
-    ver = getattr(settings, "FACEBOOK_GRAPH_API_VERSION", "v21.0")
-    url = f"https://graph.facebook.com/{ver}/{pix}/events"
-    try:
-        r = requests.post(
-            url,
-            params={"access_token": access_token},
-            json={"data": [evt]},
-            timeout=30,
-        )
-    except requests.RequestException as e:
-        logger.exception("Facebook CAPI request failed")
-        raise HTTPException(status_code=502, detail=f"Lỗi kết nối Meta: {e!s}") from e
-
-    try:
-        body = r.json()
-    except Exception:
-        body = {"raw": r.text[:2000]}
-
-    if not r.ok:
-        logger.warning("Facebook CAPI HTTP %s: %s", r.status_code, body)
-        raise HTTPException(status_code=r.status_code if r.status_code < 500 else 502, detail=body)
+    ok, body = post_facebook_capi_events(db, [evt])
+    if not ok:
+        if body == "capi_not_configured":
+            raise HTTPException(
+                status_code=400,
+                detail="Chưa cấu hình trong admin: Facebook Pixel ID + Conversion API Access Token (đang bật).",
+            )
+        raise HTTPException(status_code=502, detail=body)
 
     return {"ok": True, "meta": body}
 

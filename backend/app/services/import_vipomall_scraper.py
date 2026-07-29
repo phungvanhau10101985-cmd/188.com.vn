@@ -680,6 +680,102 @@ def _scrape_vipomall_for_import_sync(source_url: str) -> Tuple[Dict[str, Any], D
     return raw, product_data, warnings
 
 
+def _scrape_vipomall_page_raw_fast(page, page_url: str) -> Dict[str, Any]:
+    """Mở PDP Vipomall — chỉ cuộn tới khối variant, bỏ Xem thêm / ảnh chi tiết (nhanh hơn)."""
+    page.goto(page_url, wait_until="domcontentloaded", timeout=60_000)
+    try:
+        page.wait_for_load_state("networkidle", timeout=12_000)
+    except Exception:
+        pass
+    page.wait_for_timeout(900)
+    try:
+        page.locator(".product-type-list, .product-type-list-size").first.scroll_into_view_if_needed(timeout=5000)
+    except Exception:
+        page.evaluate("() => window.scrollTo(0, 400)")
+    page.wait_for_timeout(700)
+    raw = page.evaluate(_SCRAPE_JS)
+    return raw if isinstance(raw, dict) else {}
+
+
+def _scrape_vipomall_variants_only_sync(source_url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
+    """Scrape Vipomall — chỉ trích Variant/màu (không gallery, mô tả, taxonomy…)."""
+    try:
+        page_url, platform_type = resolve_vipomall_import_url(source_url)
+    except ImportVipomallError:
+        norm = normalize_product_import_url((source_url or "").strip())
+        offer_id = extract_vipomall_offer_id(norm)
+        if not offer_id:
+            raise ImportVipomallError(
+                "Link Vipomall không hợp lệ. Dạng: https://vipomall.vn/san-pham/{id}?platform_type=10|21"
+            )
+        platform_type = infer_vipomall_platform_type(norm, offer_id)
+        page_url = build_vipomall_pdp_url(offer_id, platform_type)
+    offer_id = extract_vipomall_offer_id(page_url) or ""
+
+    warnings: List[str] = []
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise ImportVipomallError("Thiếu Playwright để scrape Vipomall.") from exc
+
+    ua = getattr(settings, "IMPORT_1688_USER_AGENT", None) or (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    )
+    headless_raw = getattr(settings, "SOURCE_STOCK_CHECK_HEADLESS", True)
+    headless = str(headless_raw).strip().lower() not in {"0", "false", "no"}
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=headless, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            context = browser.new_context(
+                viewport={"width": 1366, "height": 900},
+                locale="vi-VN",
+                timezone_id="Asia/Ho_Chi_Minh",
+                user_agent=ua,
+            )
+            page = context.new_page()
+            try:
+                from app.services.import_scraper_cookies import seed_playwright_context_cookies
+
+                seed_playwright_context_cookies(
+                    context,
+                    page,
+                    prefer_hosts={"vipomall.vn"},
+                    target_url=page_url,
+                )
+            except Exception:
+                pass
+            try:
+                raw = _scrape_vipomall_page_raw_fast(page, page_url)
+            finally:
+                for cleanup in (page.close, context.close, browser.close):
+                    try:
+                        cleanup()
+                    except Exception:
+                        pass
+    except Exception as exc:
+        detail = str(exc).strip() or repr(exc) or type(exc).__name__
+        raise ImportVipomallError(f"Lỗi Playwright/Vipomall (variant-only): {detail}") from exc
+
+    page_text = " ".join(str(raw.get(k) or "") for k in ("title", "document_title", "body_text_sample")).lower()
+    if any(token in page_text for token in _BLOCK_MARKERS):
+        raise ImportVipomallError("Vipomall đang chặn/CAPTCHA hoặc không cho tải PDP.")
+
+    product_data = vipomall_row_to_product_data(
+        raw, page_url, offer_id, platform_type=platform_type, variants_only=True
+    )
+    if not product_data.get("colors"):
+        warnings.append("Vipomall (nhanh): chưa thu được Variant từ .product-type-list / .product-type-list-size.")
+    return raw, product_data, warnings
+
+
+def scrape_vipomall_variants_only(source_url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
+    from app.services.import_playwright_dispatch import run_import_playwright_sync
+
+    return run_import_playwright_sync(lambda: _scrape_vipomall_variants_only_sync(source_url))
+
+
 def _pick_shop_name_chinese(row: Dict[str, Any]) -> Optional[str]:
     for raw in row.get("shop_name_candidates") or []:
         s = _clean_text(raw, limit=200)
@@ -829,6 +925,7 @@ def vipomall_row_to_product_data(
     offer_id: str,
     *,
     platform_type: int = VIPOMALL_PLATFORM_1688,
+    variants_only: bool = False,
 ) -> Dict[str, Any]:
     gallery = _dedupe_urls([str(u) for u in row.get("gallery_images") or []])
     meta_image = _norm_img_url(str(row.get("meta_image") or ""))
@@ -863,7 +960,8 @@ def vipomall_row_to_product_data(
     try:
         from app.services.variant_color_translate import apply_deepseek_translations_to_color_entries
 
-        apply_deepseek_translations_to_color_entries(colors_out)
+        if not variants_only:
+            apply_deepseek_translations_to_color_entries(colors_out)
     except Exception:
         pass
 
@@ -925,6 +1023,10 @@ def vipomall_row_to_product_data(
             for sw, raw_c in zip(swatches, colors_raw)
             if _clean_text(raw_c.get("label"), limit=160) in in_stock_raw_colors
         ]
+
+    if variants_only:
+        return {"colors": colors_out}
+
     # Layout chỉ variant (túi, phụ kiện, SP nhiều mẫu «3 Mẫu»…): không có size → sizes=[].
     variant_only_layout = _vipomall_variant_rows_are_color_only(variant_rows)
     color_only_layout = bool(colors_out) and variant_only_layout

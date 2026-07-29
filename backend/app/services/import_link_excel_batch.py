@@ -12,11 +12,15 @@ cột G AK, khối L–O hay layout Excel đặt hàng cũ.
 
 - **shop_name_chinese**, **chinese_name**: nhận qua tiêu đề (`shop_name_chinese`, Shop Trung Quốc, …).
 
-- **Giá Tệ** → `pro_lower_price` và **`price`** (VNĐ) = làm_tròn(CN¥ × hệ_số_IF × tỷ_giá), sau đó làm tròn **lên** bội 10.000 ₫ (`listing_cny_grid`).
+- **category / subcategory / sub_subcategory**: tuỳ chọn — cột Main Category / Danh mục cấp 1–3 (file export đủ cột); bỏ qua ô nhãn mẫu «Danh mục cấp …».
+
+- **Giá Tệ** (hoặc `pro_lower_price` trên file export draft) → `pro_lower_price` và **`price`** (VNĐ) = làm_tròn(CN¥ × hệ_số_IF × tỷ_giá), sau đó làm tròn **lên** bội 10.000 ₫ (`listing_cny_grid`).
 
   Tỷ giá nền `LISTING_IMPORT_VND_PER_CNY`; cột `vnd_per_cny_used` / Tỷ giá ghi đè theo dòng nếu có.
 
 - Cột **Mã sp / SKU** không còn đọc trong luồng lấy thông tin; SKU mặc định để trống.
+
+- Tối đa **3.000** dòng link mỗi lần upload (sau 2 hàng tiêu đề); dòng vượt quá bị bỏ qua.
 
 
 
@@ -46,6 +50,9 @@ from openpyxl import Workbook, load_workbook
 
 
 
+from app.core.config import settings
+from app.crud.product import parse_json_field
+from app.schemas.import_1688 import MAX_IMPORT_1688_EXCEL_BATCH_ROWS
 from app.services.listing_cny_grid import (
 
     DEFAULT_VND_PER_CNY_FOR_LISTING_ESTIMATE,
@@ -62,11 +69,30 @@ _ws_re = re.compile(r"\s+")
 
 
 
-MAX_IMPORT_COL_1BASED = 32
+MAX_IMPORT_COL_1BASED = 40
 
-DATA_FIRST_ROW = 2
+DATA_FIRST_ROW = 3
 
-_MAX_ROWS = 500
+_MAX_ROWS = MAX_IMPORT_1688_EXCEL_BATCH_ROWS
+
+# Mẫu export đầy đủ ~40 cột: A = id, O = Variant (màu sắc / biến thể).
+_EXCEL_COL_PRODUCT_ID_1BASED = 1
+_EXCEL_COL_VARIANT_1BASED = 15
+
+
+def import_batch_minimal_excel_only() -> bool:
+    """Chế độ tạm: batch Excel — scrape Vipomall chỉ lấy Variant; ID SP từ cột A."""
+    return bool(getattr(settings, "IMPORT_1688_BATCH_MINIMAL_EXCEL_ONLY", True))
+
+
+def set_import_batch_minimal_excel_only(enabled: bool) -> None:
+    """Bật/tắt chế độ nhanh — cập nhật runtime + ghi .env.local (không cần restart)."""
+    from app.services.import_scraper_cookies import upsert_scraper_cookie_env_local
+
+    settings.IMPORT_1688_BATCH_MINIMAL_EXCEL_ONLY = bool(enabled)
+    upsert_scraper_cookie_env_local(
+        {"IMPORT_1688_BATCH_MINIMAL_EXCEL_ONLY": "true" if enabled else "false"}
+    )
 
 
 
@@ -167,7 +193,7 @@ def _resolve_link_column_required(by_col: Dict[int, set[str]]) -> Optional[int]:
 
 def _resolve_china_price_column_required(by_col: Dict[int, set[str]]) -> Optional[int]:
 
-    needles = frozenset(
+    tier_strong = frozenset(
 
         _norm_header(x)
 
@@ -193,7 +219,37 @@ def _resolve_china_price_column_required(by_col: Dict[int, set[str]]) -> Optiona
 
     )
 
-    return _first_col_matching(by_col, needles)
+    tier_export = frozenset(
+
+        _norm_header(x)
+
+        for x in (
+
+            "pro_lower_price",
+
+            "pro lower price",
+
+            "sp giá thấp hơn",
+
+            "sp gia thap hon",
+
+        )
+
+    )
+
+    cols_s = _sorted_cols_matching(by_col, tier_strong)
+
+    if cols_s:
+
+        return min(cols_s)
+
+    cols_e = _sorted_cols_matching(by_col, tier_export)
+
+    if cols_e:
+
+        return min(cols_e)
+
+    return None
 
 
 
@@ -318,6 +374,97 @@ def _resolve_chinese_name_column(by_col: Dict[int, set[str]]) -> Optional[int]:
     return _first_col_matching(by_col, needles)
 
 
+def _resolve_main_category_column(by_col: Dict[int, set[str]]) -> Optional[int]:
+    needles = frozenset(
+        _norm_header(x)
+        for x in (
+            "Main Category",
+            "main category",
+            "Danh mục cấp 1",
+            "danh muc cap 1",
+        )
+    )
+    return _first_col_matching(by_col, needles)
+
+
+def _resolve_subcategory_column(by_col: Dict[int, set[str]]) -> Optional[int]:
+    needles = frozenset(
+        _norm_header(x)
+        for x in (
+            "Subcategory",
+            "subcategory",
+            "Danh mục cấp 2",
+            "danh muc cap 2",
+        )
+    )
+    return _first_col_matching(by_col, needles)
+
+
+def _resolve_sub_subcategory_column(by_col: Dict[int, set[str]]) -> Optional[int]:
+    needles = frozenset(
+        _norm_header(x)
+        for x in (
+            "Sub-subcategory",
+            "Sub subcategory",
+            "sub-subcategory",
+            "sub_subcategory",
+            "Danh mục cấp 3",
+            "danh muc cap 3",
+        )
+    )
+    return _first_col_matching(by_col, needles)
+
+
+def _resolve_product_id_column(by_col: Dict[int, set[str]]) -> int:
+    needles = frozenset(
+        _norm_header(x)
+        for x in (
+            "id",
+            "id sp",
+            "id sản phẩm",
+            "id san pham",
+            "id sản phẩm",
+        )
+    )
+    return _first_col_matching(by_col, needles) or _EXCEL_COL_PRODUCT_ID_1BASED
+
+
+def _resolve_variant_column(by_col: Dict[int, set[str]]) -> int:
+    needles = frozenset(
+        _norm_header(x)
+        for x in (
+            "variant",
+            "biến thể",
+            "bien the",
+            "variant_colors",
+        )
+    )
+    return _first_col_matching(by_col, needles) or _EXCEL_COL_VARIANT_1BASED
+
+
+def _resolve_product_url_column(by_col: Dict[int, set[str]]) -> Optional[int]:
+    needles = frozenset(
+        _norm_header(x)
+        for x in (
+            "product_url",
+            "link mặc định",
+            "link mac dinh",
+            "link sp",
+            "link",
+            "item_url",
+            "url",
+            "href",
+        )
+    )
+    col = _first_col_matching(by_col, needles)
+    if col:
+        return col
+    if by_col.get(18):
+        return 18
+    if by_col.get(3):
+        return 3
+    return None
+
 
 
 
@@ -340,6 +487,44 @@ def _norm_header(text: Any) -> str:
     s = unicodedata.normalize("NFKC", str(text)).strip().casefold()
 
     return _ws_re.sub(" ", s)
+
+
+_HEADER_TOKENS_PRODUCT_ID = frozenset(
+    {
+        _norm_header("id"),
+        _norm_header("id sp"),
+        _norm_header("id sản phẩm"),
+        _norm_header("id san pham"),
+    }
+)
+
+
+_CATEGORY_PLACEHOLDER_HEADERS = frozenset(
+    _norm_header(x)
+    for x in (
+        "danh mục",
+        "danh muc",
+        "danh mục cấp 1",
+        "danh mục cấp 2",
+        "danh mục cấp 3",
+        "danh muc cap 1",
+        "danh muc cap 2",
+        "danh muc cap 3",
+        "main category",
+        "subcategory",
+        "sub-subcategory",
+        "sub subcategory",
+        "category",
+    )
+)
+
+
+def is_meaningful_category_cell_value(val: Any) -> bool:
+    """Bỏ qua ô trống hoặc nhãn mẫu («Danh mục cấp 1»…) — không coi là taxonomy thật."""
+    s = _cell_str(val)
+    if not s or s.lower() == "nan":
+        return False
+    return _norm_header(s) not in _CATEGORY_PLACEHOLDER_HEADERS
 
 
 
@@ -536,6 +721,25 @@ def merge_import_excel_overlay_into_product_data(
     if (sc := overlay.get("shop_name_chinese")) is not None and str(sc).strip():
 
         product_data["shop_name_chinese"] = str(sc).strip()
+
+    pid = overlay.get("product_id")
+    if pid is not None and str(pid).strip():
+        product_data["product_id"] = str(pid).strip()
+
+    colors = overlay.get("colors")
+    if colors is not None:
+        if isinstance(colors, list):
+            product_data["colors"] = colors
+        else:
+            product_data["colors"] = parse_json_field(colors)
+
+    for key in ("category", "subcategory", "sub_subcategory"):
+
+        val = overlay.get(key)
+
+        if is_meaningful_category_cell_value(val):
+
+            product_data[key] = _cell_str(val)
 
     vnd_raw = overlay.get("price_display_vnd_g")
 
@@ -745,8 +949,6 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
 
         label_by_col = _merged_labels_for_cols(header, header2, mc)
 
-
-
         link_col = _resolve_link_column_required(label_by_col)
 
         china_price_col = _resolve_china_price_column_required(label_by_col)
@@ -777,6 +979,12 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
 
         ch_name_col = _resolve_chinese_name_column(label_by_col)
 
+        cat1_col = _resolve_main_category_column(label_by_col)
+
+        cat2_col = _resolve_subcategory_column(label_by_col)
+
+        cat3_col = _resolve_sub_subcategory_column(label_by_col)
+
         if shop_cn_col is None:
 
             shop_cn_col = _resolve_compact_listing_shop_column(link_col, china_price_col, ch_name_col)
@@ -784,6 +992,8 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
         vnd_optional_col = _resolve_optional_vnd_per_cny_column(label_by_col)
 
         base_vnd_rate = _default_listing_import_vnd_per_cny()
+
+        pid_col = _resolve_product_id_column(label_by_col) if import_batch_minimal_excel_only() else None
 
 
 
@@ -863,6 +1073,28 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
 
 
 
+            for col, key in (
+
+                (cat1_col, "category"),
+
+                (cat2_col, "subcategory"),
+
+                (cat3_col, "sub_subcategory"),
+
+            ):
+
+                if not col:
+
+                    continue
+
+                cat_cell = coord(col)
+
+                if is_meaningful_category_cell_value(cat_cell):
+
+                    overlays[key] = _cell_str(cat_cell)
+
+
+
             row_vnd_cell = coord(vnd_optional_col) if vnd_optional_col else None
 
             row_rate = _cell_float(row_vnd_cell)
@@ -911,9 +1143,27 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
 
 
 
+            if import_batch_minimal_excel_only():
+                pid_raw = _cell_str(coord(pid_col or _EXCEL_COL_PRODUCT_ID_1BASED))
+                if pid_raw and _norm_header(pid_raw) in _HEADER_TOKENS_PRODUCT_ID:
+                    continue
+                if not pid_raw or pid_raw.lower() == "nan":
+                    skip.append(f"Dòng {excel_row}: thiếu ID SP (cột A).")
+                    continue
+                overlays["product_id"] = pid_raw
+                overlays["_vipo_variant_only"] = True
+
             out.append({"excel_row": excel_row, "url": url.strip(), "overlays": overlays})
 
-
+        sheet_max = int(ws.max_row or 0)
+        if sheet_max > DATA_FIRST_ROW + _MAX_ROWS:
+            data_rows_in_sheet = max(0, sheet_max - DATA_FIRST_ROW + 1)
+            unread = max(0, data_rows_in_sheet - _MAX_ROWS)
+            skip.insert(
+                0,
+                f"File có khoảng {data_rows_in_sheet:,} dòng dữ liệu — chỉ đọc tối đa {_MAX_ROWS:,} dòng/lần upload. "
+                f"Còn khoảng {unread:,} dòng chưa đọc; chia file nhỏ hoặc dùng «Thêm vào đợt đang xử lý».",
+            )
 
     finally:
 

@@ -1327,10 +1327,16 @@ def _apply_vi_listing_from_strings(
 def _should_skip_existing(product_data: Dict[str, Any]) -> bool:
     if getattr(settings, "IMPORT_LINK_DEEPSEEK_TAXONOMY_FORCE", False):
         return False
+    from app.services.import_link_excel_batch import is_meaningful_category_cell_value
+
     c1 = (product_data.get("category") or "").strip()
     c2 = (product_data.get("subcategory") or "").strip()
     c3 = (product_data.get("sub_subcategory") or "").strip()
-    return bool(c1 and c2 and c3)
+    return bool(
+        is_meaningful_category_cell_value(c1)
+        and is_meaningful_category_cell_value(c2)
+        and is_meaningful_category_cell_value(c3)
+    )
 
 
 def _merge_product_info_categories(

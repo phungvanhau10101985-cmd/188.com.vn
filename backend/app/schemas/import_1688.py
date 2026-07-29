@@ -3,6 +3,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+MAX_IMPORT_1688_EXCEL_BATCH_ROWS = 3000
+
 
 class Import1688JobCreate(BaseModel):
     url: str = Field(..., min_length=10)
@@ -55,9 +57,9 @@ class Import1688JobOut(BaseModel):
 class Import1688ExcelBatchOut(BaseModel):
     batch_token: str
     total: int
-    draft_ids: List[int] = Field(default_factory=list)
-    job_ids: List[str] = Field(default_factory=list)
-    skipped: List[str] = Field(default_factory=list)
+    draft_ids: List[int] = Field(default_factory=list, max_length=MAX_IMPORT_1688_EXCEL_BATCH_ROWS)
+    job_ids: List[str] = Field(default_factory=list, max_length=MAX_IMPORT_1688_EXCEL_BATCH_ROWS)
+    skipped: List[str] = Field(default_factory=list, max_length=120)
 
 
 class Import1688BatchStatusItem(BaseModel):
@@ -75,7 +77,10 @@ class Import1688BatchStatusOut(BaseModel):
     completed: int = 0
     failed: int = 0
     pending: int = 0
-    items: List[Import1688BatchStatusItem] = Field(default_factory=list)
+    items: List[Import1688BatchStatusItem] = Field(
+        default_factory=list,
+        max_length=MAX_IMPORT_1688_EXCEL_BATCH_ROWS,
+    )
 
 
 class Import1688ExcelBatchSummaryOut(BaseModel):
@@ -118,7 +123,7 @@ class Import1688DraftListOut(BaseModel):
 
 
 class Import1688DraftIdsBody(BaseModel):
-    draft_ids: List[int] = Field(..., min_length=1, max_length=500)
+    draft_ids: List[int] = Field(..., min_length=1, max_length=MAX_IMPORT_1688_EXCEL_BATCH_ROWS)
 
 
 class ListingImportQueueTaskIn(BaseModel):

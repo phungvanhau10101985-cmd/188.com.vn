@@ -23,6 +23,7 @@ from app.services.email_service import (
     send_order_created_email_task,
     send_order_received_confirmed_email_task,
 )
+from app.services.facebook_capi import schedule_meta_purchase_capi_for_order
 from app.services import sepay as sepay_svc
 from app.services import promotion_grants as grant_svc
 from app.services.order_discounts import calculate_order_discounts
@@ -1467,6 +1468,7 @@ def admin_update_order(
             and str(new_status_val) in deposit_confirmed_statuses
         ):
             schedule_deposit_confirmed_email(order_id)
+            schedule_meta_purchase_capi_for_order(order_id)
         recipient = order.customer_email or (order.user.email if order.user else None)
         if recipient:
             background_tasks.add_task(
@@ -1554,6 +1556,7 @@ def admin_confirm_deposit(
     if payment_data.is_confirmed:
         raw_email = deliver_deposit_confirmed_email(order_id)
         deposit_email_out = schemas.DepositConfirmedEmailOut(**raw_email)
+        schedule_meta_purchase_capi_for_order(order_id)
         if commission:
             background_tasks.add_task(affiliate_svc.notify_referrer_deposit_commission_task, order_id)
 
@@ -1626,6 +1629,7 @@ def admin_confirm_deposit_manual(
     db.refresh(order)
     raw_email = deliver_deposit_confirmed_email(order_id)
     deposit_email_out = schemas.DepositConfirmedEmailOut(**raw_email)
+    schedule_meta_purchase_capi_for_order(order_id)
     if commission:
         background_tasks.add_task(affiliate_svc.notify_referrer_deposit_commission_task, order_id)
     return schemas.AdminOrderDepositConfirmOut(order=order, deposit_email=deposit_email_out)

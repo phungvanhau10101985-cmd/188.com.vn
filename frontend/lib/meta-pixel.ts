@@ -3,7 +3,10 @@ import type { CartItem } from '@/features/cart/types/cart';
 import type { Product } from '@/types/api';
 import { newMetaEventId, sendFacebookCapiFromBrowser } from '@/lib/facebook-capi-client';
 
-export const META_PIXEL_CURRENCY = 'VND';
+export function metaPurchaseEventId(orderId: number | string): string {
+  const id = String(orderId).replace(/\D/g, '') || '0';
+  return `Purchase_${id}`;
+}
 
 type FbqFn = (...args: unknown[]) => void;
 type StandardEventName = 'PageView' | 'ViewContent' | 'AddToCart' | 'Purchase';
@@ -151,9 +154,11 @@ function firePixelAndCapi(
     syncPixel?: boolean;
     onPixelFired?: () => void;
     capiRetries?: number;
+    /** Cố định event_id — dedupe Pixel ↔ CAPI (vd. Purchase theo order_id). */
+    eventId?: string;
   }
 ): void {
-  const eventId = newMetaEventId(eventName);
+  const eventId = opts?.eventId ?? newMetaEventId(eventName);
   const eventTime = Math.floor(Date.now() / 1000);
   const trackFn = opts?.mode === 'custom' ? 'trackCustom' : 'track';
   const firePixel = () => {
@@ -384,7 +389,11 @@ export function trackMetaPurchase(params: {
   if (!items.length) return;
 
   const customData = cartMetaCustomData({ items, value, orderId });
-  firePixelAndCapi('Purchase', customData, { keepalive: true, syncPixel: true });
+  firePixelAndCapi('Purchase', customData, {
+    keepalive: true,
+    syncPixel: true,
+    eventId: orderId != null && orderId !== '' ? metaPurchaseEventId(orderId) : undefined,
+  });
 }
 
 export function trackMetaOrderAwaitingDeposit(params: {

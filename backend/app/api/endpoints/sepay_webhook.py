@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.services import sepay as sepay_svc
 from app.services.email_service import schedule_deposit_confirmed_email
+from app.services.facebook_capi import schedule_meta_purchase_capi_for_order
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ async def _handle_sepay_webhook_post(
         # duplicate / ignored_out / ok — SePay chờ success true (+ 200/201 tuỳ auth)
         if msg == "ok" and order_id:
             schedule_deposit_confirmed_email(order_id)
+            schedule_meta_purchase_capi_for_order(order_id)
         return JSONResponse({"success": True}, status_code=201)
 
     err_en = _SEPAY_WEBHOOK_ERROR_EN.get(msg, msg.replace("_", " "))
