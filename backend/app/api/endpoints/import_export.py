@@ -1049,7 +1049,7 @@ async def download_latest_export():
 # ========== GOOGLE MERCHANT CENTER — FEED TSV ==========
 
 @router.get("/export/merchant-center-feed.tsv")
-def export_merchant_center_feed_tsv(db: Session = Depends(get_db)):
+def export_merchant_center_feed_tsv():
     """
     Xuất primary feed định dạng **TSV UTF-8** (tab) theo các cột Merchant Center.
     URL cố định, công khai — có thể dán vào Merchant Center (**Nguồn dữ liệu** → **Đường dẫn tệp**).
@@ -1062,16 +1062,24 @@ def export_merchant_center_feed_tsv(db: Session = Depends(get_db)):
 
     Tuỳ chọn `.env`: `MERCHANT_FEED_CURRENCY` (mặc định `VND`), `MERCHANT_FEED_IMAGE_BASE_URL`
     (không đặt thì `BUNNY_CDN_PUBLIC_BASE` trong app.core.config).
+
+    Dùng session RIÊNG (pool export nhỏ) — cron nền tảng khác đọc feed có thể chậm (mạng chậm/quét
+    ~100k SP), không được giữ connection pool chính trong lúc đó (tránh 503 cho khách đang duyệt web).
     """
     from app.services.merchant_feed_tsv import iter_merchant_feed_lines
+    from app.db.export_session import get_export_db_session
 
     shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3001"
     cur = getattr(settings, "MERCHANT_FEED_CURRENCY", "VND") or "VND"
     img = getattr(settings, "MERCHANT_FEED_IMAGE_BASE_URL", "") or ""
 
     def body():
-        for line in iter_merchant_feed_lines(db, shop, currency=cur, image_site_base=img or shop):
-            yield (line + "\n").encode("utf-8")
+        db = get_export_db_session()
+        try:
+            for line in iter_merchant_feed_lines(db, shop, currency=cur, image_site_base=img or shop):
+                yield (line + "\n").encode("utf-8")
+        finally:
+            db.close()
 
     return StreamingResponse(
         body(),
@@ -1086,14 +1094,17 @@ def export_merchant_center_feed_tsv(db: Session = Depends(get_db)):
 # ---------- Meta (Facebook / Instagram Commerce) catalogue ----------
 
 @router.get("/export/meta-catalog-feed.tsv")
-def export_meta_catalog_feed_tsv(db: Session = Depends(get_db)):
+def export_meta_catalog_feed_tsv():
     """
     Feed **TSV UTF-8** theo các cột catalogue Meta Commerce (URL để Commerce Manager / scheduled fetch).
     Gồm giá sale (cùng logic `CATALOG_SALE_*` như feed Google), nhóm biến thể, gender/age_group,
     custom_label_0–4, **`video_url`** (link video), shipping weight.
     Đặt `META_FEED_FB_PRODUCT_CATEGORY` và tuỳ chọn `CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY` trong `.env` backend.
+
+    Dùng session RIÊNG (pool export nhỏ) — xem lý do ở `export_merchant_center_feed_tsv`.
     """
     from app.services.social_catalog_feed_tsv import iter_meta_catalog_lines
+    from app.db.export_session import get_export_db_session
 
     shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3001"
     cur = getattr(settings, "MERCHANT_FEED_CURRENCY", "VND") or "VND"
@@ -1102,15 +1113,19 @@ def export_meta_catalog_feed_tsv(db: Session = Depends(get_db)):
     gcat = getattr(settings, "CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY", "") or ""
 
     def body():
-        for line in iter_meta_catalog_lines(
-            db,
-            shop,
-            currency=cur,
-            image_site_base=img or shop,
-            fb_product_category=fb_cat,
-            google_product_category_default=gcat,
-        ):
-            yield (line + "\n").encode("utf-8")
+        db = get_export_db_session()
+        try:
+            for line in iter_meta_catalog_lines(
+                db,
+                shop,
+                currency=cur,
+                image_site_base=img or shop,
+                fb_product_category=fb_cat,
+                google_product_category_default=gcat,
+            ):
+                yield (line + "\n").encode("utf-8")
+        finally:
+            db.close()
 
     return StreamingResponse(
         body(),
@@ -1125,12 +1140,15 @@ def export_meta_catalog_feed_tsv(db: Session = Depends(get_db)):
 # ---------- TikTok catalogue (Ads / Shop) ----------
 
 @router.get("/export/tiktok-catalog-feed.tsv")
-def export_tiktok_catalog_feed_tsv(db: Session = Depends(get_db)):
+def export_tiktok_catalog_feed_tsv():
     """
     Feed **TSV UTF-8** catalogue TikTok (`sku_id`, `link`, `image_link`, giá sale như `CATALOG_SALE_*`, …).
     Tuỳ chọn `CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY` trong `.env` nếu cần taxonomy Google mặc định.
+
+    Dùng session RIÊNG (pool export nhỏ) — xem lý do ở `export_merchant_center_feed_tsv`.
     """
     from app.services.social_catalog_feed_tsv import iter_tiktok_catalog_lines
+    from app.db.export_session import get_export_db_session
 
     shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3001"
     cur = getattr(settings, "MERCHANT_FEED_CURRENCY", "VND") or "VND"
@@ -1138,14 +1156,18 @@ def export_tiktok_catalog_feed_tsv(db: Session = Depends(get_db)):
     gcat = getattr(settings, "CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY", "") or ""
 
     def body():
-        for line in iter_tiktok_catalog_lines(
-            db,
-            shop,
-            currency=cur,
-            image_site_base=img or shop,
-            google_product_category_default=gcat,
-        ):
-            yield (line + "\n").encode("utf-8")
+        db = get_export_db_session()
+        try:
+            for line in iter_tiktok_catalog_lines(
+                db,
+                shop,
+                currency=cur,
+                image_site_base=img or shop,
+                google_product_category_default=gcat,
+            ):
+                yield (line + "\n").encode("utf-8")
+        finally:
+            db.close()
 
     return StreamingResponse(
         body(),
