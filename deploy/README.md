@@ -167,7 +167,18 @@ Tùy chọn trong `backend/.env`: `CATEGORY_MENU_TREE_TTL_SECONDS`, `CATEGORY_CA
 
 ## 3. Crontab VPS
 
-File mẫu: **`deploy/crontab.188.com.vn.example`** (khuyến mãi, tra EMS, dọn temp việt hóa ảnh).
+File mẫu: **`deploy/crontab.188.com.vn.example`** (watchdog API, khuyến mãi, tra EMS, dọn temp việt hóa ảnh).
+
+**Bảo vệ API sau crash:** chạy một lần sau khi deploy để nạp PM2 config mới và cài hai cron
+monitor/watchdog. Watchdog kiểm tra `188-api` mỗi 2 phút và tự chạy phục hồi nếu PM2 không
+`online`, cổng `8001` không phản hồi hoặc probe sản phẩm bị treo.
+
+```bash
+cd /var/www/188.com.vn
+bash deploy/ensure-storefront-resilience.sh
+crontab -l | grep -E 'watchdog-api|monitor-storefront'
+bash deploy/health-check.sh
+```
 
 **Cài lần đầu** (đọc file mẫu, thay secret + domain, ghi crontab):
 

@@ -20,6 +20,10 @@
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
+# Watchdog 188-api — khôi phục khi PM2/API bị crash hoặc kẹt waiting restart.
+# Dòng này không cần CRON_SECRET; giữ log để điều tra nguyên nhân.
+*/2 * * * * cd /var/www/188.com.vn && bash deploy/watchdog-api.sh >> /var/log/188-watchdog.log 2>&1
+
 # Khuyến mãi + voucher + email CMSN (hàng ngày 9:00)
 0 9 * * * curl -sS -H "Authorization: Bearer YOUR_CRON_SECRET" "https://YOUR_API_HOST/api/v1/promotions/cron/daily-all"
 

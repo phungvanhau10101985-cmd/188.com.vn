@@ -18,7 +18,9 @@ module.exports = {
       name: '188-api',
       cwd: BACKEND,
       script: path.join(BACKEND, '.venv/bin/python'),
-      args: '-m uvicorn main:app --host 127.0.0.1 --port 8001',
+      // Bound graceful shutdown so PM2 can forcibly replace an API instance
+      // that is waiting on a stuck request or Starlette background task.
+      args: '-m uvicorn main:app --host 127.0.0.1 --port 8001 --timeout-graceful-shutdown 5',
       env: {
         SERVER_PORT: '8001',
         RUN_DB_INIT_ON_STARTUP: '0',
@@ -43,14 +45,23 @@ module.exports = {
         DATABASE_POOL_RELIEF_INTERVAL_SECONDS: '10',
         DATABASE_POOL_RELIEF_TRIGGER_IDLE_COUNT: '10',
         DATABASE_POOL_SELF_HEAL_PROBE_TIMEOUT_SECONDS: '3',
-        DATABASE_POOL_SELF_HEAL_MAX_FAILURES: '1',
+        // A transient probe failure during a heavy admin operation must not
+        // terminate the only API worker. Restart only after three failed
+        // recovery cycles.
+        DATABASE_POOL_SELF_HEAL_MAX_FAILURES: '3',
         EMS_TRACKING_INTERNAL_SCHEDULER_ENABLED: 'false',
         LEGACY_OOS_DEEPSEEK_ENABLED: 'false',
         GROUP_LISTING_SKIP_SLOW_SLUG_POOL: 'true',
       },
-      max_restarts: 10,
+      autorestart: true,
+      max_restarts: 50,
       min_uptime: '10s',
-      restart_delay: 3000,
+      // Back off crash loops, but do not leave a failed API down after the
+      // default PM2 restart cap is reached.
+      exp_backoff_restart_delay: 100,
+      // PM2 sends SIGKILL after this period if Uvicorn is still waiting for
+      // open connections/background tasks during shutdown.
+      kill_timeout: 8000,
       /** Tránh API treo sau nhiều giờ (RAM phình → pool DB kẹt). 3.5G: dưới mức treo ~3.8G trên VPS nanoai. */
       max_memory_restart: '3500M',
     },
