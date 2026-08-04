@@ -107,7 +107,7 @@ export async function bulkDeleteAdminProducts(
     return { deleted: [], deleted_count: 0, errors: [] };
   }
 
-  const INITIAL_CHUNK = 8;
+  const INITIAL_CHUNK = 3;
   const MIN_CHUNK = 1;
   let chunkSize = INITIAL_CHUNK;
   const deleted: string[] = [];

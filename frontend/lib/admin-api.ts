@@ -1512,8 +1512,8 @@ export const adminProductAPI = {
     if (!unique.length) {
       return { ok: true, deleted_count: 0, deleted_db_ids: [], not_found_db_ids: [], blocked_db_ids: [] };
     }
-    /** Bắt đầu 8; gặp 502/504/timeout thì giảm lô (không cố lại cùng kích thước). */
-    const INITIAL_CHUNK = 8;
+    /** Bắt đầu 3 — Cloudflare origin ~100s; lô lớn dễ 502 dù nginx 900s. Gặp 502 thì giảm tiếp. */
+    const INITIAL_CHUNK = 3;
     const MIN_CHUNK = 1;
     let chunkSize = INITIAL_CHUNK;
     const deleted_db_ids: number[] = [];
@@ -1546,7 +1546,8 @@ export const adminProductAPI = {
           {
             method: 'POST',
             body: JSON.stringify({ db_ids: chunk, skip_step_up: !!options?.skipStepUp }),
-            timeoutMs: 120_000,
+            /** Dưới ngưỡng Cloudflare ~100s để kịp giảm lô thay vì treo đến 502. */
+            timeoutMs: 90_000,
           },
         );
         deleted_db_ids.push(...(res.deleted_db_ids ?? []));

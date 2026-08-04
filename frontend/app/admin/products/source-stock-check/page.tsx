@@ -1161,8 +1161,8 @@ export default function AdminSourceStockCheckPage() {
       total: ids.length,
       deleted: 0,
       chunkIndex: 0,
-      chunkTotal: Math.max(1, Math.ceil(ids.length / 8)),
-      chunkSize: 8,
+      chunkTotal: Math.max(1, Math.ceil(ids.length / 3)),
+      chunkSize: 3,
     });
     try {
       const res = await adminProductAPI.deleteSourceStockBatchProductsByDbIds(ids, {
@@ -2170,9 +2170,9 @@ export default function AdminSourceStockCheckPage() {
                   <p className="text-xs text-red-900/90 tabular-nums">
                     Đã xóa {reportOosDeleteProgress.deleted.toLocaleString('vi-VN')} sản · lô{' '}
                     {reportOosDeleteProgress.chunkIndex}/{reportOosDeleteProgress.chunkTotal} (
-                    {reportOosDeleteProgress.chunkSize ?? 8} mã/lô
+                    {reportOosDeleteProgress.chunkSize ?? 3} mã/lô
                     {reportOosDeleteProgress.chunkSize != null &&
-                    reportOosDeleteProgress.chunkSize < 8
+                    reportOosDeleteProgress.chunkSize < 3
                       ? ' — đã giảm vì timeout'
                       : ''}
                     ; Bunny dọn sau)
