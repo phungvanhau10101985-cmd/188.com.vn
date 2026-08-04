@@ -23,8 +23,11 @@ module.exports = {
         SERVER_PORT: '8001',
         RUN_DB_INIT_ON_STARTUP: '0',
         IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: 'false',
-        DATABASE_POOL_SIZE: '10',
-        DATABASE_MAX_OVERFLOW: '15',
+        // Postgres max_connections=100 trên VPS nanoai — 15+20=35 vẫn còn dư địa lớn cho
+        // các app khác (thu-do-online, worksheet-worker...). Tăng từ 10+15=25 vì admin bấm
+        // nhiều thao tác nặng liên tiếp (tải danh sách + lọc + job ảnh...) từng chạm ngưỡng cũ.
+        DATABASE_POOL_SIZE: '15',
+        DATABASE_MAX_OVERFLOW: '20',
         DATABASE_POOL_TIMEOUT: '8',
         DATABASE_POOL_RECYCLE: '1800',
         DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS: '35',
