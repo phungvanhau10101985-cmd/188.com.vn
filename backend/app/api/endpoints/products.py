@@ -918,10 +918,9 @@ def read_products(
 @router.get("/list/full", response_model=dict)
 def read_products_full_list(
     response: Response,
-    db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=5000),
     category: Optional[str] = None,
     subcategory: Optional[str] = None,
     sub_subcategory: Optional[str] = None,
@@ -963,7 +962,14 @@ def read_products_full_list(
     Danh sách sản phẩm **đầy đủ trường** (khớp schema `Product`: mọi cột bảng `products`, gồm `category_id`,
     `raw_category`, `raw_subcategory`, `raw_sub_subcategory`, `product_info`, SEO, bản địa hóa ảnh, v.v.).
     Bộ lọc và phân trang giống `GET /api/v1/products/`. Không ghi/đọc cache tìm kiếm theo `q` để luôn có payload đầy đủ theo phiên bản schema hiện tại.
+
+    Dùng cho đối tác quét toàn catalog (vd NanoAI Open Catalog) — session RIÊNG (pool export nhỏ),
+    không giữ connection pool chính trong lúc đối tác lặp trang lấy hết ~100k SP (tránh 503 cho
+    khách đang duyệt web + tránh bị đối tác timeout do tranh chấp pool giờ cao điểm).
     """
+    from app.db.export_session import get_export_db_session
+
+    db = get_export_db_session()
     try:
         return _read_products_list_impl(
             response,
@@ -996,6 +1002,8 @@ def read_products_full_list(
         )
     except Exception as e:
         return {"error": str(e), "status": "serialization_error"}
+    finally:
+        db.close()
 
 
 @router.get("/category-facets", response_model=dict)
