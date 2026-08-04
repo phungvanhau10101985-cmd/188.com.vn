@@ -3012,6 +3012,8 @@ export default function AdminProductsPage() {
       }
     } catch (err: unknown) {
       showToast('err', (err as Error)?.message || 'Xóa thất bại');
+      // Có thể đã xóa một phần trước khi dừng (giảm lô / timeout).
+      void fetchProducts({ silent: true });
     } finally {
       setDeleting(false);
     }

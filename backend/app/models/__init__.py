@@ -23,6 +23,9 @@ print("[OK] Product model loaded")
 from app.models.product_deletion import ProductDeletion
 print("[OK] ProductDeletion model loaded")
 
+from app.models.pending_bunny_delete import PendingBunnyDelete
+print("[OK] PendingBunnyDelete model loaded")
+
 from app.models.internal_sku_export import InternalSkuExport
 print("[OK] InternalSkuExport model loaded")
 
@@ -207,6 +210,7 @@ __all__ = [
     "Category",
     "Product",
     "ProductDeletion",
+    "PendingBunnyDelete",
     "InternalSkuExport",
     "ProductImportDraft",
     "ImageLocalizationJob",

@@ -11,6 +11,7 @@ from sqlalchemy import inspect, text
 from app.db.base import Base
 from app.models.product import Product
 from app.models.product_deletion import ProductDeletion
+from app.models.pending_bunny_delete import PendingBunnyDelete
 from app.models.category import Category
 from app.models.product_import_draft import ProductImportDraft
 from app.models.listing_import_queue_snapshot import ListingImportQueueRevocation, ListingImportQueueSnapshot
@@ -967,6 +968,12 @@ class MigrationManager:
         )
         results['product_deletions_sync_columns'] = self._sync_table_columns(
             "product_deletions", ProductDeletion
+        )
+        results['pending_bunny_deletes_create'] = self._create_table_if_not_exists(
+            "pending_bunny_deletes", PendingBunnyDelete
+        )
+        results['pending_bunny_deletes_sync_columns'] = self._sync_table_columns(
+            "pending_bunny_deletes", PendingBunnyDelete
         )
         results['products_incremental_sync_index'] = self.migrate_product_incremental_sync_index()
         results['product_import_drafts_create'] = self._create_table_if_not_exists(

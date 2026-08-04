@@ -1805,7 +1805,7 @@ def admin_source_stock_delete_products_by_db_ids(
     admin: AdminUser = Depends(require_module_permission("products", need="delete")),
 ):
     """
-    Xóa vĩnh viễn các sản trong CSDL (`products.id`), kèm dọn Bunny như DELETE sản đơn lẻ.
+    Xóa vĩnh viễn các sản trong CSDL (`products.id`) trước; dọn Bunny CDN chạy nền sau commit.
     Dùng từ màn Kiểm tra nguồn hàng: danh sách hết/khớp SP trên phiên chỉ là tạm; thao tác này mới gỡ SP khỏi shop.
 
     `skip_step_up=True`: chỉ áp dụng cho nút "Xóa DB (tất cả)" — bỏ OTP luôn, không xác minh lại
@@ -2044,7 +2044,37 @@ def purge_dead_media_url_by_db_id(
     return out
 
 
-# Catch-all product_id (có dấu /) — đăng ký CUỐI để không nuốt /admin/*, /by-id/*, …
+def _require_cron_secret(authorization: str | None) -> None:
+    expected = (settings.CRON_SECRET or "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="CRON_SECRET is not configured")
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or token.strip() != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@router.get("/cron/process-pending-bunny-deletes", include_in_schema=False)
+def cron_process_pending_bunny_deletes(
+    db: Session = Depends(get_db),
+    authorization: Annotated[str | None, Header()] = None,
+    limit: Optional[int] = Query(None, ge=1, le=500),
+):
+    """
+    Cron: dọn object Bunny từ bảng ``pending_bunny_deletes``.
+    Authorization: Bearer CRON_SECRET
+
+    Crontab gợi ý (mỗi 5 phút)::
+
+      */5 * * * * curl -sS -m 300 -H "Authorization: Bearer $CRON_SECRET" \\
+        "https://YOUR_API_HOST/api/v1/products/cron/process-pending-bunny-deletes"
+    """
+    _require_cron_secret(authorization)
+    from app.services.bunny_delete_queue import process_pending_bunny_deletes
+
+    return process_pending_bunny_deletes(db, limit=limit)
+
+
+# Catch-all product_id (có dấu /) — đăng ký CUỐI để không nuốt /admin/*, /by-id/*, /cron/*, …
 @router.get("/{product_id:path}", response_model=Product)
 def read_product(
     product_id: str,

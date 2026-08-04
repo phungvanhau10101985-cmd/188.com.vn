@@ -1503,6 +1503,7 @@ export const adminProductAPI = {
         deleted: number;
         chunkIndex: number;
         chunkTotal: number;
+        chunkSize?: number;
       }) => void;
       skipStepUp?: boolean;
     },
@@ -1511,40 +1512,70 @@ export const adminProductAPI = {
     if (!unique.length) {
       return { ok: true, deleted_count: 0, deleted_db_ids: [], not_found_db_ids: [], blocked_db_ids: [] };
     }
-    /** Nhỏ hơn để mỗi request < timeout nginx (~180s) kể cả commit + cascade DB. */
-    const chunkSize = 8;
-    const chunkTotal = Math.ceil(unique.length / chunkSize);
+    /** Bắt đầu 8; gặp 502/504/timeout thì giảm lô (không cố lại cùng kích thước). */
+    const INITIAL_CHUNK = 8;
+    const MIN_CHUNK = 1;
+    let chunkSize = INITIAL_CHUNK;
     const deleted_db_ids: number[] = [];
     const not_found_db_ids: number[] = [];
     const blocked_db_ids: AdminSourceStockBatchDeleteBlockedItem[] = [];
-    for (let i = 0; i < unique.length; i += chunkSize) {
-      const chunk = unique.slice(i, i + chunkSize);
-      const chunkIndex = Math.floor(i / chunkSize) + 1;
+    let cursor = 0;
+    let chunkIndex = 0;
+
+    const isGatewayOrTimeout = (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      return /\[502\]|\[504\]|Hết giờ chờ proxy|Hết thời gian chờ server|gateway timeout/i.test(msg);
+    };
+
+    while (cursor < unique.length) {
+      const chunk = unique.slice(cursor, cursor + chunkSize);
+      const remaining = unique.length - cursor;
+      const chunkTotal = chunkIndex + Math.max(1, Math.ceil(remaining / chunkSize));
+      chunkIndex += 1;
       options?.onProgress?.({
-        processed: i,
+        processed: cursor,
         total: unique.length,
         deleted: deleted_db_ids.length,
         chunkIndex,
         chunkTotal,
+        chunkSize,
       });
-      const res = await fetchAdmin<AdminSourceStockBatchDeleteByDbIdsResult>(
-        '/products/admin/source-stock-batch/delete-by-db-ids',
-        {
-          method: 'POST',
-          body: JSON.stringify({ db_ids: chunk, skip_step_up: !!options?.skipStepUp }),
-          timeoutMs: 120_000,
-        },
-      );
-      deleted_db_ids.push(...(res.deleted_db_ids ?? []));
-      not_found_db_ids.push(...(res.not_found_db_ids ?? []));
-      blocked_db_ids.push(...(res.blocked_db_ids ?? []));
-      options?.onProgress?.({
-        processed: Math.min(i + chunk.length, unique.length),
-        total: unique.length,
-        deleted: deleted_db_ids.length,
-        chunkIndex,
-        chunkTotal,
-      });
+      try {
+        const res = await fetchAdmin<AdminSourceStockBatchDeleteByDbIdsResult>(
+          '/products/admin/source-stock-batch/delete-by-db-ids',
+          {
+            method: 'POST',
+            body: JSON.stringify({ db_ids: chunk, skip_step_up: !!options?.skipStepUp }),
+            timeoutMs: 120_000,
+          },
+        );
+        deleted_db_ids.push(...(res.deleted_db_ids ?? []));
+        not_found_db_ids.push(...(res.not_found_db_ids ?? []));
+        blocked_db_ids.push(...(res.blocked_db_ids ?? []));
+        cursor += chunk.length;
+        options?.onProgress?.({
+          processed: cursor,
+          total: unique.length,
+          deleted: deleted_db_ids.length,
+          chunkIndex,
+          chunkTotal: chunkIndex + Math.max(0, Math.ceil((unique.length - cursor) / chunkSize)),
+          chunkSize,
+        });
+      } catch (err) {
+        if (isGatewayOrTimeout(err) && chunkSize > MIN_CHUNK) {
+          chunkSize = Math.max(MIN_CHUNK, Math.floor(chunkSize / 2));
+          chunkIndex -= 1;
+          continue;
+        }
+        const done = deleted_db_ids.length;
+        const left = unique.length - cursor;
+        const base = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          done > 0
+            ? `Đã xóa ${done}/${unique.length} sản rồi dừng (còn ${left}). Không cố xóa tiếp — giảm lô xuống ${chunkSize} vẫn lỗi. ${base}`
+            : base,
+        );
+      }
     }
     return {
       ok: true,

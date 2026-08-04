@@ -167,7 +167,7 @@ Tùy chọn trong `backend/.env`: `CATEGORY_MENU_TREE_TTL_SECONDS`, `CATEGORY_CA
 
 ## 3. Crontab VPS
 
-File mẫu: **`deploy/crontab.188.com.vn.example`** (watchdog API, khuyến mãi, tra EMS, dọn temp việt hóa ảnh).
+File mẫu: **`deploy/crontab.188.com.vn.example`** (watchdog API, khuyến mãi, tra EMS, dọn Bunny pending, dọn temp việt hóa ảnh).
 
 **Bảo vệ API sau crash:** chạy một lần sau khi deploy để nạp PM2 config mới và cài hai cron
 monitor/watchdog. Watchdog kiểm tra `188-api` mỗi 2 phút và tự chạy phục hồi nếu PM2 không
@@ -180,6 +180,25 @@ crontab -l | grep -E 'watchdog-api|monitor-storefront'
 bash deploy/health-check.sh
 ```
 
+**Dọn Bunny CDN sau khi xóa SP** (bảng `pending_bunny_deletes`, mỗi 5 phút):
+
+```bash
+cd /var/www/188.com.vn
+bash deploy/install-bunny-delete-cron.sh
+crontab -l | grep process-pending-bunny-deletes
+```
+
+**Khi watchdog phải phục hồi:** trước khi restart, watchdog lưu snapshot điều tra chỉ root đọc được tại
+`/var/log/188-api-incidents/YYYYMMDD-HHMMSS/`. Thư mục gồm PM2 status/log, kernel log, process
+theo RAM, cổng listen và `pg_stat_activity`; tự xóa snapshot cũ hơn 14 ngày. Gmail nhận tóm tắt
+lý do và đường dẫn snapshot. Đặt người nhận cố định trong `backend/.env` để vẫn gửi được khi DB
+đang lỗi:
+
+```bash
+OPS_HEALTH_ALERT_EMAILS=your-gmail@example.com
+OPS_HEALTH_ALERT_ENABLED=true
+```
+
 **Cài lần đầu** (đọc file mẫu, thay secret + domain, ghi crontab):
 
 ```bash
@@ -190,7 +209,7 @@ sed -e 's/YOUR_CRON_SECRET/'"$(grep -E '^CRON_SECRET=' backend/.env | cut -d= -f
 crontab -l
 ```
 
-**Đã có crontab** — chỉ thêm dòng dọn temp: `crontab -e`, dán dòng cuối trong file mẫu (Chủ nhật 3:00).
+**Đã có crontab** — thêm từng dòng còn thiếu (Bunny mỗi 5 phút, dọn temp Chủ nhật 3:00), hoặc chạy `bash deploy/install-bunny-delete-cron.sh`.
 
 ## 4. Tài liệu liên quan
 

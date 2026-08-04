@@ -24,7 +24,6 @@ from app.services.alicdn_urls import normalize_product_data_image_urls_for_db
 from app.services.bunny_storage import (
     collect_product_image_urls_for_bunny,
     delete_bunny_assets_for_product,
-    delete_bunny_storage_objects_for_urls,
 )
 from app.services.import_hibox_scraper import canonicalize_hibox_placeholder_product_id
 from app.services.product_internal_sku import (
@@ -5933,11 +5932,22 @@ def delete_product(db: Session, product_id: int, *, admin_force: bool = False):
     return db_product
 
 
-def _schedule_bunny_cleanup_for_deleted_products(products: List[Product]) -> None:
-    """Dọn object Bunny sau bulk xóa — chạy nền để tránh timeout gateway trên lô lớn."""
-    if not settings.BUNNY_DELETE_ON_PRODUCT_DELETE or not products:
+def _schedule_bunny_cleanup_for_urls(urls: List[str]) -> None:
+    """Ghi hàng đợi Bunny durable + drain nền — cron quét lại nếu sót."""
+    if not settings.BUNNY_DELETE_ON_PRODUCT_DELETE or not urls:
         return
+    try:
+        from app.services.bunny_delete_queue import enqueue_and_schedule_bunny_deletes
 
+        enqueue_and_schedule_bunny_deletes(urls)
+    except Exception as exc:
+        logger.warning("Bulk xóa SP — enqueue Bunny queue lỗi (DB đã xóa): %s", exc)
+
+
+def _schedule_bunny_cleanup_for_deleted_products(products: List[Product]) -> None:
+    """Thu URL từ Product còn trong memory rồi đưa vào hàng đợi Bunny."""
+    if not products:
+        return
     all_urls: List[str] = []
     seen: Set[str] = set()
     for product in products:
@@ -5945,18 +5955,7 @@ def _schedule_bunny_cleanup_for_deleted_products(products: List[Product]) -> Non
             if url not in seen:
                 seen.add(url)
                 all_urls.append(url)
-    if not all_urls:
-        return
-
-    def _run() -> None:
-        try:
-            n = delete_bunny_storage_objects_for_urls(all_urls)
-            if n:
-                logger.info("Bulk xóa SP: đã dọn %s object Bunny (nền)", n)
-        except Exception as exc:
-            logger.warning("Bulk xóa SP — dọn Bunny nền lỗi (DB đã xóa): %s", exc)
-
-    threading.Thread(target=_run, name="bulk-bunny-delete", daemon=True).start()
+    _schedule_bunny_cleanup_for_urls(all_urls)
 
 
 def _schedule_facet_cache_refresh_after_bulk_delete(snapshots: List[Any]) -> None:
@@ -5990,7 +5989,8 @@ def bulk_delete_products_by_db_ids(
     db: Session, db_ids: List[int]
 ) -> Tuple[List[int], List[int], Dict[int, str]]:
     """
-    Xóa nhiều SP theo ``products.id`` trong một transaction; Bunny CDN dọn nền.
+    Xóa nhiều SP theo ``products.id`` trong một transaction.
+    Thứ tự: thu URL Bunny → xóa ORM/commit DB → dọn Bunny CDN nền (không chờ CDN).
     Trả (deleted_db_ids, not_found_db_ids, blocked_db_ids) — thứ tự ``deleted`` khớp tham số đầu vào.
     ``blocked_db_ids``: id -> lý do (ví dụ còn tồn kho thanh lý) — SP bị bỏ qua, KHÔNG bị xóa.
     """
@@ -6010,12 +6010,13 @@ def bulk_delete_products_by_db_ids(
         ordered_unique.append(pk)
 
     if not ordered_unique:
-        return [], []
+        return [], [], {}
 
     rows = db.query(Product).filter(Product.id.in_(ordered_unique)).all()
     by_id = {row.id: row for row in rows}
     deleted: List[int] = []
-    bunny_rows: List[Product] = []
+    pending_bunny_urls: List[str] = []
+    bunny_url_seen: Set[str] = set()
     deleted_snapshots: List[Any] = []
 
     from app.services.listing_facet_cache import snapshot_product_for_facet_refresh
@@ -6032,14 +6033,18 @@ def bulk_delete_products_by_db_ids(
             blocked[pk] = str(exc)
             continue
         deleted_snapshots.append(snapshot_product_for_facet_refresh(row))
-        bunny_rows.append(row)
+        # Thu URL trước khi ORM delete — tránh getattr trên object đã expire sau commit.
+        for url in collect_product_image_urls_for_bunny(row):
+            if url not in bunny_url_seen:
+                bunny_url_seen.add(url)
+                pending_bunny_urls.append(url)
         _delete_product_orm_only(db, row, defer_bunny=True)
         deleted.append(pk)
 
     if deleted:
         db.commit()
         _schedule_google_sheets_sku_sync()
-        _schedule_bunny_cleanup_for_deleted_products(bunny_rows)
+        _schedule_bunny_cleanup_for_urls(pending_bunny_urls)
         _schedule_facet_cache_refresh_after_bulk_delete(deleted_snapshots)
 
     not_found = [pk for pk in ordered_unique if pk not in by_id]
@@ -6054,7 +6059,7 @@ def bulk_delete_products_by_excel_product_ids(
 ) -> Tuple[List[str], List[dict]]:
     """
     Xóa nhiều SP theo product_id Excel trong một transaction.
-    Bunny + facet cache chạy một lần — nhanh hơn gọi delete_product lặp.
+    DB commit trước; Bunny CDN + facet cache chạy nền sau — nhanh hơn gọi delete_product lặp.
     """
     from urllib.parse import unquote
     from app.services import warehouse_clearance as wh_clearance_svc
@@ -6062,7 +6067,8 @@ def bulk_delete_products_by_excel_product_ids(
 
     deleted_pids: List[str] = []
     errors: List[dict] = []
-    bunny_rows: List[Product] = []
+    pending_bunny_urls: List[str] = []
+    bunny_url_seen: Set[str] = set()
     snapshots: List[Any] = []
     seen: Set[str] = set()
 
@@ -6085,14 +6091,17 @@ def bulk_delete_products_by_excel_product_ids(
             continue
 
         snapshots.append(snapshot_product_for_facet_refresh(row))
-        bunny_rows.append(row)
+        for url in collect_product_image_urls_for_bunny(row):
+            if url not in bunny_url_seen:
+                bunny_url_seen.add(url)
+                pending_bunny_urls.append(url)
         _delete_product_orm_only(db, row, defer_bunny=True)
         deleted_pids.append(pid)
 
     if deleted_pids:
         db.commit()
         _schedule_google_sheets_sku_sync()
-        _schedule_bunny_cleanup_for_deleted_products(bunny_rows)
+        _schedule_bunny_cleanup_for_urls(pending_bunny_urls)
         _schedule_facet_cache_refresh_after_bulk_delete(snapshots)
 
     return deleted_pids, errors

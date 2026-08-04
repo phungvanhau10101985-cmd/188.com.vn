@@ -234,6 +234,14 @@ class Settings:
             os.getenv("BUNNY_DELETE_ON_PRODUCT_DELETE", "true").strip().lower()
             not in ("0", "false", "no", "off")
         )
+        self.BUNNY_DELETE_CRON_BATCH_SIZE: int = max(
+            1,
+            min(500, int(os.getenv("BUNNY_DELETE_CRON_BATCH_SIZE", "80") or "80")),
+        )
+        self.BUNNY_DELETE_MAX_ATTEMPTS: int = max(
+            1,
+            min(50, int(os.getenv("BUNNY_DELETE_MAX_ATTEMPTS", "8") or "8")),
+        )
 
         # Bản địa hóa ảnh sản phẩm — Google Vision + DeepSeek + Gemini/OpenAI API + Bunny upload.
         self.IMAGE_LOCALIZATION_ENABLED: bool = os.getenv(

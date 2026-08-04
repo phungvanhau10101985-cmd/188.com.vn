@@ -41,3 +41,6 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Đồng bộ toàn bộ catalog sản phẩm lên Google Sheet — hàng ngày 3:30 sáng giờ Việt Nam
 # (server TZ phải là Asia/Ho_Chi_Minh; nếu UTC thì dùng: 30 20 * * *)
 30 3 * * * curl -sS -m 3600 -H "Authorization: Bearer YOUR_CRON_SECRET" "https://YOUR_API_HOST/api/v1/import-export/cron/sync-google-sheet-product-catalog"
+
+# Dọn Bunny CDN từ hàng đợi pending_bunny_deletes (sau khi xóa SP) — mỗi 5 phút
+*/5 * * * * curl -sS -m 300 -H "Authorization: Bearer YOUR_CRON_SECRET" "https://YOUR_API_HOST/api/v1/products/cron/process-pending-bunny-deletes"

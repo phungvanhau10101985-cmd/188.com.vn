@@ -7,7 +7,9 @@ Env:
   BUNNY_STORAGE_ACCESS_KEY — password API (Dashboard → Storage → Credentials)
   BUNNY_CDN_PUBLIC_BASE     — hostname Pull Zone VD: https://188comvn.b-cdn.net (hoặc custom sau CNAME + SSL)
   MERCHANT_FEED_IMAGE_BASE_URL — khi khác BUNNY_CDN_PUBLIC_BASE nhưng vẫn cùng Bunny (thêm host để nhận URL xoá)
-  BUNNY_DELETE_ON_PRODUCT_DELETE — true (mặc định): xoá object khi xoá sản phẩm DB; false = không gọi DELETE
+  BUNNY_DELETE_ON_PRODUCT_DELETE — true (mặc định): xếp hàng xoá object khi xoá sản phẩm DB; false = tắt
+  BUNNY_DELETE_CRON_BATCH_SIZE — số dòng pending mỗi lần cron/drain (mặc định 80)
+  BUNNY_DELETE_MAX_ATTEMPTS — số lần thử trước khi đánh dấu failed (mặc định 8)
 """
 from __future__ import annotations
 
@@ -207,8 +209,8 @@ def delete_bunny_storage_objects_for_urls(urls: Iterable[str]) -> int:
 
 def delete_bunny_assets_for_product(product: Any) -> int:
     """
-    Best-effort: xoá file storage trên Bunny trùng URL ảnh của sản phẩm. Không ném exception ra ngoài.
-    Đặt BUNNY_DELETE_ON_PRODUCT_DELETE=false để không gọi API DELETE.
+    Best-effort: đưa URL ảnh sản phẩm vào hàng đợi xoá Bunny (durable) + drain nền.
+    Không ném exception ra ngoài. Đặt BUNNY_DELETE_ON_PRODUCT_DELETE=false để tắt.
     """
     if not settings.BUNNY_DELETE_ON_PRODUCT_DELETE:
         return 0
@@ -216,9 +218,18 @@ def delete_bunny_assets_for_product(product: Any) -> int:
         urls = collect_product_image_urls_for_bunny(product)
         if not urls:
             return 0
-        n = delete_bunny_storage_objects_for_urls(urls)
+        from app.services.bunny_delete_queue import enqueue_and_schedule_bunny_deletes
+
+        n = enqueue_and_schedule_bunny_deletes(
+            urls,
+            product_id=str(getattr(product, "product_id", "") or "") or None,
+        )
         if n:
-            logger.info("Đã xoá %s object Bunny cho sản phẩm product_id=%s", n, getattr(product, "product_id", "?"))
+            logger.info(
+                "Đã xếp hàng xoá %s object Bunny cho sản phẩm product_id=%s",
+                n,
+                getattr(product, "product_id", "?"),
+            )
         return n
     except Exception as exc:
         logger.warning("Bunny xoá khi xoá SP — lỗi (vẫn giữ luồng xoá DB): %s", exc)

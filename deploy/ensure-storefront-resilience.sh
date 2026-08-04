@@ -28,8 +28,9 @@ sleep 2
 bash "${ROOT}/deploy/health-check.sh" || true
 
 echo
-echo "==> Cron monitor storefront + watchdog API (mỗi 2 phút)"
+echo "==> Cron monitor storefront + watchdog API (mỗi 2 phút) + Bunny delete queue (mỗi 5 phút)"
 bash "${ROOT}/deploy/install-storefront-monitor-cron.sh" || true
 bash "${ROOT}/deploy/install-api-watchdog-cron.sh" || true
+bash "${ROOT}/deploy/install-bunny-delete-cron.sh" || true
 echo
 echo "✓ Xong. UptimeRobot: GET https://188.com.vn/health/storefront mỗi 1 phút."

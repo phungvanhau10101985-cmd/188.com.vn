@@ -742,6 +742,7 @@ export default function AdminSourceStockCheckPage() {
     deleted: number;
     chunkIndex: number;
     chunkTotal: number;
+    chunkSize?: number;
   } | null>(null);
   const [reportOosSampleSelectedIds, setReportOosSampleSelectedIds] = useState<number[]>([]);
   const [reportOosBulkBusy, setReportOosBulkBusy] = useState(false);
@@ -1161,6 +1162,7 @@ export default function AdminSourceStockCheckPage() {
       deleted: 0,
       chunkIndex: 0,
       chunkTotal: Math.max(1, Math.ceil(ids.length / 8)),
+      chunkSize: 8,
     });
     try {
       const res = await adminProductAPI.deleteSourceStockBatchProductsByDbIds(ids, {
@@ -1183,6 +1185,9 @@ export default function AdminSourceStockCheckPage() {
       void refreshQueueStats();
     } catch (e) {
       showToast('err', e instanceof Error ? e.message : String(e));
+      // Có thể đã xóa một phần trước khi dừng — làm mới báo cáo.
+      void refreshActivityReport();
+      void refreshQueueStats();
     } finally {
       setReportOosDeleting(false);
       setReportOosDeleteProgress(null);
@@ -2112,7 +2117,8 @@ export default function AdminSourceStockCheckPage() {
             <div className="text-sm text-gray-700 mt-3 leading-relaxed space-y-2">
               <p>
                 Sẽ xóa theo khóa <code className="text-xs bg-gray-100 px-1 rounded">products.id</code> — không
-                hoàn tác (kèm dọn Bunny). Thích hợp khi chắc chắn không còn bán những mã này.
+                hoàn tác. Xóa DB trước, dọn Bunny CDN sau (nền). Thích hợp khi chắc chắn không còn bán những mã
+                này.
               </p>
               {!reportOosDeleting ? (
                 <ul className="mt-2 max-h-48 overflow-auto border border-gray-100 rounded-lg divide-y divide-gray-100 text-[13px]">
@@ -2163,8 +2169,13 @@ export default function AdminSourceStockCheckPage() {
                   </div>
                   <p className="text-xs text-red-900/90 tabular-nums">
                     Đã xóa {reportOosDeleteProgress.deleted.toLocaleString('vi-VN')} sản · lô{' '}
-                    {reportOosDeleteProgress.chunkIndex}/{reportOosDeleteProgress.chunkTotal} (tối đa 20
-                    mã/lô, kèm dọn Bunny)
+                    {reportOosDeleteProgress.chunkIndex}/{reportOosDeleteProgress.chunkTotal} (
+                    {reportOosDeleteProgress.chunkSize ?? 8} mã/lô
+                    {reportOosDeleteProgress.chunkSize != null &&
+                    reportOosDeleteProgress.chunkSize < 8
+                      ? ' — đã giảm vì timeout'
+                      : ''}
+                    ; Bunny dọn sau)
                   </p>
                 </div>
               ) : null}

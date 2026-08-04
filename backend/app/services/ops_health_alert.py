@@ -294,3 +294,25 @@ def notify_ops_health_alert(
         daemon=True,
         name=f"ops-alert-{kind}",
     ).start()
+
+
+def send_ops_health_alert_sync(
+    alert_kind: str,
+    title: str,
+    *,
+    detail: str = "",
+    pool_snap: Optional[dict] = None,
+    heavy_hints: Optional[Iterable[str]] = None,
+    action: str = "",
+    env_recipients_only: bool = False,
+) -> None:
+    """Gửi đồng bộ cho script CLI trước khi process Python kết thúc."""
+    _send_ops_alert_email_task(
+        alert_kind=(alert_kind or "ops").strip().lower(),
+        title=title,
+        detail=detail or title,
+        pool_snap=pool_snap,
+        heavy_hints=heavy_hints,
+        action=action,
+        env_recipients_only=env_recipients_only,
+    )
