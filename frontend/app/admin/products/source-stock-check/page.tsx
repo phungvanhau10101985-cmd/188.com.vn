@@ -1171,7 +1171,11 @@ export default function AdminSourceStockCheckPage() {
       if ((res.not_found_db_ids ?? []).length) {
         msg += ` Không thấy id: ${res.not_found_db_ids!.join(', ')}.`;
       }
-      showToast(res.deleted_count ? 'ok' : 'info', msg);
+      const blocked = res.blocked_db_ids ?? [];
+      if (blocked.length) {
+        msg += ` Bỏ qua ${blocked.length} sản (còn tồn kho thanh lý, chưa hết mới xóa được).`;
+      }
+      showToast(res.deleted_count ? (blocked.length ? 'info' : 'ok') : 'info', msg);
       setReportOosDeleteConfirmIds(null);
       const removed = new Set(res.deleted_db_ids ?? []);
       setReportOosSampleSelectedIds((prev) => prev.filter((tid) => !removed.has(tid)));

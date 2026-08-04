@@ -1746,13 +1746,18 @@ def admin_source_stock_delete_products_by_db_ids(
 
         verify_recent_admin_auth(request, admin)
 
-    deleted_db_ids, not_found_db_ids = crud.product.bulk_delete_products_by_db_ids(db, ordered)
+    deleted_db_ids, not_found_db_ids, blocked_db_ids = crud.product.bulk_delete_products_by_db_ids(
+        db, ordered
+    )
 
     return {
         "ok": True,
         "deleted_count": len(deleted_db_ids),
         "deleted_db_ids": deleted_db_ids,
         "not_found_db_ids": not_found_db_ids,
+        "blocked_db_ids": [
+            {"db_id": pk, "reason": reason} for pk, reason in blocked_db_ids.items()
+        ],
     }
 
 

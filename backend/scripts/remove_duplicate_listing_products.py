@@ -163,11 +163,13 @@ def main() -> int:
         if not to_delete_ids:
             return 0
 
-        deleted, not_found = bulk_delete_products_by_db_ids(db, to_delete_ids)
-        print(f"\nĐã xóa: {len(deleted)} | không tìm thấy: {len(not_found)}")
+        deleted, not_found, blocked = bulk_delete_products_by_db_ids(db, to_delete_ids)
+        print(f"\nĐã xóa: {len(deleted)} | không tìm thấy: {len(not_found)} | bị chặn: {len(blocked)}")
         if not_found:
             print("  not_found ids:", not_found[:20])
-        return 0 if not not_found else 1
+        if blocked:
+            print("  blocked ids:", list(blocked.items())[:20])
+        return 0 if not not_found and not blocked else 1
     finally:
         db.close()
 

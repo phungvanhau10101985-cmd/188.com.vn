@@ -5894,13 +5894,16 @@ def _schedule_facet_cache_refresh_after_bulk_delete(snapshots: List[Any]) -> Non
     threading.Thread(target=_run, name="bulk-facet-cache-refresh", daemon=True).start()
 
 
-def bulk_delete_products_by_db_ids(db: Session, db_ids: List[int]) -> Tuple[List[int], List[int]]:
+def bulk_delete_products_by_db_ids(
+    db: Session, db_ids: List[int]
+) -> Tuple[List[int], List[int], Dict[int, str]]:
     """
     Xóa nhiều SP theo ``products.id`` trong một transaction; Bunny CDN dọn nền.
-    Trả (deleted_db_ids, not_found_db_ids) — thứ tự ``deleted`` khớp tham số đầu vào.
+    Trả (deleted_db_ids, not_found_db_ids, blocked_db_ids) — thứ tự ``deleted`` khớp tham số đầu vào.
+    ``blocked_db_ids``: id -> lý do (ví dụ còn tồn kho thanh lý) — SP bị bỏ qua, KHÔNG bị xóa.
     """
     if not db_ids:
-        return [], []
+        return [], [], {}
 
     ordered_unique: List[int] = []
     seen: Set[int] = set()
@@ -5926,15 +5929,15 @@ def bulk_delete_products_by_db_ids(db: Session, db_ids: List[int]) -> Tuple[List
     from app.services.listing_facet_cache import snapshot_product_for_facet_refresh
     from app.services import warehouse_clearance as wh_clearance_svc
 
-    blocked: List[int] = []
+    blocked: Dict[int, str] = {}
     for pk in ordered_unique:
         row = by_id.get(pk)
         if row is None:
             continue
         try:
             wh_clearance_svc.assert_product_deletion_allowed(db, row)
-        except ValueError:
-            blocked.append(pk)
+        except ValueError as exc:
+            blocked[pk] = str(exc)
             continue
         deleted_snapshots.append(snapshot_product_for_facet_refresh(row))
         bunny_rows.append(row)
@@ -5948,7 +5951,7 @@ def bulk_delete_products_by_db_ids(db: Session, db_ids: List[int]) -> Tuple[List
         _schedule_facet_cache_refresh_after_bulk_delete(deleted_snapshots)
 
     not_found = [pk for pk in ordered_unique if pk not in by_id]
-    return deleted, not_found
+    return deleted, not_found, blocked
 
 
 def bulk_delete_products_by_excel_product_ids(

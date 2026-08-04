@@ -99,7 +99,7 @@ def main() -> int:
         deleted_total = 0
         for i in range(0, len(delete_ids), args.batch_size):
             chunk = delete_ids[i : i + args.batch_size]
-            deleted, _ = bulk_delete_products_by_db_ids(db, chunk)
+            deleted, _, _ = bulk_delete_products_by_db_ids(db, chunk)
             deleted_total += len(deleted)
 
         deactivated = 0

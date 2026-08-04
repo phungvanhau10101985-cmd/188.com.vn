@@ -507,11 +507,17 @@ export interface AdminSourceStockProductUrlsResponse {
   active_only?: boolean;
 }
 
+export interface AdminSourceStockBatchDeleteBlockedItem {
+  db_id: number;
+  reason: string;
+}
+
 export interface AdminSourceStockBatchDeleteByDbIdsResult {
   ok: boolean;
   deleted_count: number;
   deleted_db_ids: number[];
   not_found_db_ids: number[];
+  blocked_db_ids?: AdminSourceStockBatchDeleteBlockedItem[];
 }
 
 export interface AdminSourceStockQueueStats {
@@ -1504,13 +1510,14 @@ export const adminProductAPI = {
   ) => {
     const unique = [...new Set(dbIds.filter((id) => Number.isFinite(id) && id > 0))];
     if (!unique.length) {
-      return { ok: true, deleted_count: 0, deleted_db_ids: [], not_found_db_ids: [] };
+      return { ok: true, deleted_count: 0, deleted_db_ids: [], not_found_db_ids: [], blocked_db_ids: [] };
     }
     /** Nhỏ hơn để mỗi request < timeout nginx (~180s) kể cả commit + cascade DB. */
     const chunkSize = 8;
     const chunkTotal = Math.ceil(unique.length / chunkSize);
     const deleted_db_ids: number[] = [];
     const not_found_db_ids: number[] = [];
+    const blocked_db_ids: AdminSourceStockBatchDeleteBlockedItem[] = [];
     for (let i = 0; i < unique.length; i += chunkSize) {
       const chunk = unique.slice(i, i + chunkSize);
       const chunkIndex = Math.floor(i / chunkSize) + 1;
@@ -1531,6 +1538,7 @@ export const adminProductAPI = {
       );
       deleted_db_ids.push(...(res.deleted_db_ids ?? []));
       not_found_db_ids.push(...(res.not_found_db_ids ?? []));
+      blocked_db_ids.push(...(res.blocked_db_ids ?? []));
       options?.onProgress?.({
         processed: Math.min(i + chunk.length, unique.length),
         total: unique.length,
@@ -1544,6 +1552,7 @@ export const adminProductAPI = {
       deleted_count: deleted_db_ids.length,
       deleted_db_ids,
       not_found_db_ids,
+      blocked_db_ids,
     };
   },
 
