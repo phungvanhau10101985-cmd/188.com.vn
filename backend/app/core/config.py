@@ -83,12 +83,13 @@ class Settings:
             self.ACTUAL_DATABASE_PATH = actual_db_path
             self.IS_POSTGRESQL = False
         
-        # PostgreSQL QueuePool — VPS chia sẻ nanoai: 10+15 (tối đa 25 / 188-api).
+        # PostgreSQL QueuePool — VPS: 20+30 (tối đa 50 / 188-api).
         # Tổng connection mọi app < Postgres max_connections (mặc định 100).
-        self.DATABASE_POOL_SIZE: int = int(os.getenv("DATABASE_POOL_SIZE", "10"))
-        self.DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "15"))
-        self.DATABASE_POOL_RECYCLE: int = int(os.getenv("DATABASE_POOL_RECYCLE", "1800"))
-        self.DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "8"))
+        # Tăng từ 10+15=25 để giảm 503 khi NanoAI / cron đồng bộ kho gọi API đồng thời.
+        self.DATABASE_POOL_SIZE: int = int(os.getenv("DATABASE_POOL_SIZE", "20"))
+        self.DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "30"))
+        self.DATABASE_POOL_RECYCLE: int = int(os.getenv("DATABASE_POOL_RECYCLE", "900"))
+        self.DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "15"))
         # Postgres tự đóng session kẹt; daemon API terminate thêm khi gần đầy pool.
         self.DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS: int = int(
             os.getenv("DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS", "35")
