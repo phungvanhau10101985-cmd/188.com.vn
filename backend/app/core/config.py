@@ -1079,6 +1079,21 @@ class Settings:
         # ========================
         self.REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
         self.CACHE_TTL_SECONDS: int = int(os.getenv("CACHE_TTL_SECONDS", "300"))
+        # Bật cache Redis cho PDP/listing (giảm tải Postgres). Tắt an toàn nếu Redis chưa sẵn sàng trên VPS.
+        self.REDIS_ENABLED: bool = os.getenv("REDIS_ENABLED", "False").lower() == "true"
+        self.REDIS_PDP_CACHE_TTL_SECONDS: int = int(os.getenv("REDIS_PDP_CACHE_TTL_SECONDS", "120"))
+        self.REDIS_LISTING_CACHE_TTL_SECONDS: int = int(os.getenv("REDIS_LISTING_CACHE_TTL_SECONDS", "180"))
+        self.REDIS_MENU_CACHE_TTL_SECONDS: int = int(os.getenv("REDIS_MENU_CACHE_TTL_SECONDS", "1800"))
+        self.REDIS_FACET_CACHE_TTL_SECONDS: int = int(os.getenv("REDIS_FACET_CACHE_TTL_SECONDS", "900"))
+        # Timeout ngắn — nếu Redis chậm/treo, request phải rơi ngay về Postgres, không chờ Redis.
+        self.REDIS_SOCKET_TIMEOUT_SECONDS: float = float(os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS", "0.3"))
+
+        # ========================
+        # DEDICATED POOL CHO TÁC VỤ NẶNG (sync Google Sheet / export Excel toàn catalog)
+        # Tách khỏi pool chính để không "cướp" connection của khách khi chạy vài phút.
+        # ========================
+        self.DATABASE_EXPORT_POOL_SIZE: int = int(os.getenv("DATABASE_EXPORT_POOL_SIZE", "2"))
+        self.DATABASE_EXPORT_MAX_OVERFLOW: int = int(os.getenv("DATABASE_EXPORT_MAX_OVERFLOW", "1"))
         
         # ========================
         # LOGGING CONFIGURATION

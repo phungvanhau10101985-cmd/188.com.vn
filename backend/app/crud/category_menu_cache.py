@@ -44,6 +44,16 @@ def _invalidate_menu_ram_cache() -> None:
             ttl_cache.invalidate(key)
     except Exception:
         pass
+    try:
+        from app.core import redis_cache
+
+        if redis_cache.is_enabled():
+            redis_cache.delete(
+                redis_cache.menu_cache_key(CACHE_KEY_ACTIVE),
+                redis_cache.menu_cache_key(CACHE_KEY_ALL),
+            )
+    except Exception:
+        pass
 
 
 def _is_missing_cache_table(exc: BaseException) -> bool:
@@ -52,6 +62,16 @@ def _is_missing_cache_table(exc: BaseException) -> bool:
 
 
 def read_cached_tree(db: Session, is_active: bool, *, allow_stale: bool = True) -> Optional[List[Dict[str, Any]]]:
+    key = cache_key_for_is_active(is_active)
+    try:
+        from app.core import redis_cache
+
+        if redis_cache.is_enabled():
+            cached = redis_cache.get_json(redis_cache.menu_cache_key(key))
+            if isinstance(cached, list) and cached:
+                return cached
+    except Exception:
+        pass
     try:
         row = (
             db.query(CategoryMenuCache)
@@ -71,6 +91,20 @@ def read_cached_tree(db: Session, is_active: bool, *, allow_stale: bool = True) 
         data = json.loads(row.tree_json)
         if not isinstance(data, list) or len(data) == 0:
             return None
+        if not row.is_stale:
+            try:
+                from app.core import redis_cache
+
+                if redis_cache.is_enabled():
+                    from app.core.config import settings
+
+                    redis_cache.set_json(
+                        redis_cache.menu_cache_key(key),
+                        data,
+                        ttl_seconds=settings.REDIS_MENU_CACHE_TTL_SECONDS,
+                    )
+            except Exception:
+                pass
         return data
     except json.JSONDecodeError:
         return None
@@ -105,6 +139,20 @@ def write_cached_tree(db: Session, is_active: bool, tree: List[Dict[str, Any]], 
     except Exception:
         db.rollback()
         raise
+    if not is_stale:
+        try:
+            from app.core import redis_cache
+
+            if redis_cache.is_enabled():
+                from app.core.config import settings
+
+                redis_cache.set_json(
+                    redis_cache.menu_cache_key(key),
+                    tree,
+                    ttl_seconds=settings.REDIS_MENU_CACHE_TTL_SECONDS,
+                )
+        except Exception:
+            pass
 
 
 def mark_all_stale(db: Session) -> int:

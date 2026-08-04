@@ -71,6 +71,34 @@ def _apply_storefront_image_gate(db: Session, row):
     return row
 
 
+def _get_cached_pdp_response(slug: str) -> Optional[Product]:
+    """Đọc PDP từ Redis (chỉ dùng cho khách ẩn danh) — trả None nếu miss/Redis tắt."""
+    from app.core import redis_cache
+
+    if not redis_cache.is_enabled():
+        return None
+    data = redis_cache.get_json(redis_cache.pdp_cache_key(slug))
+    if not isinstance(data, dict):
+        return None
+    try:
+        return Product(**data)
+    except Exception:
+        return None
+
+
+def _set_cached_pdp_response(slug: str, result: Product) -> None:
+    from app.core import redis_cache
+
+    if not redis_cache.is_enabled():
+        return
+    try:
+        payload = result.model_dump()
+    except Exception:
+        return
+    ttl = getattr(settings, "REDIS_PDP_CACHE_TTL_SECONDS", 120)
+    redis_cache.set_json(redis_cache.pdp_cache_key(slug), payload, ttl_seconds=ttl)
+
+
 def _lookup_product_by_slug(db: Session, slug: str):
     try:
         row = crud.product.get_product_by_slug(db, slug=slug)
@@ -1406,10 +1434,16 @@ def read_product_by_slug(
     Get product by slug (path parameter version)
     - URL: /api/v1/products/by-slug/{slug}
     """
+    cached = _get_cached_pdp_response(slug) if current_user is None else None
+    if cached is not None:
+        return cached
     db_product = _lookup_product_by_slug(db, slug=slug)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(db, db_product, user=current_user)
+    result = _product_to_response(db, db_product, user=current_user)
+    if current_user is None:
+        _set_cached_pdp_response(slug, result)
+    return result
 
 
 @router.get("/by-slug", response_model=Product)
@@ -1428,15 +1462,22 @@ def read_product_by_slug_query(
     - URL: /api/v1/products/by-slug?slug={slug}
     - Frontend hiện đang gọi theo cách này
     """
+    cacheable = current_user is None and not attach_group_listing
+    cached = _get_cached_pdp_response(slug) if cacheable else None
+    if cached is not None:
+        return cached
     db_product = _lookup_product_by_slug(db, slug=slug)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(
+    result = _product_to_response(
         db,
         db_product,
         user=current_user,
         attach_group_listing=attach_group_listing,
     )
+    if cacheable:
+        _set_cached_pdp_response(slug, result)
+    return result
 
 
 @router.get("/by-code/{product_code}", response_model=Product)

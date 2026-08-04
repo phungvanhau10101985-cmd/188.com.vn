@@ -5622,11 +5622,18 @@ def create_product(db: Session, product: ProductCreate):
         refresh_caches_after_product_change(db, db_product)
     except Exception:
         pass
+    try:
+        from app.core import redis_cache
+
+        redis_cache.invalidate_pdp_cache(db_product.slug)
+    except Exception:
+        pass
     return db_product
 
 def update_product(db: Session, product_id: int, product_update: ProductUpdate):
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if db_product:
+        old_slug = db_product.slug
         old_category = db_product.category
         old_subcategory = db_product.subcategory
         old_sub_subcategory = db_product.sub_subcategory
@@ -5694,6 +5701,12 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
                 old_category_id=old_category_id,
                 previous_product=previous_product,
             )
+        except Exception:
+            pass
+        try:
+            from app.core import redis_cache
+
+            redis_cache.invalidate_pdp_cache(old_slug, db_product.slug)
         except Exception:
             pass
     return db_product
@@ -5813,6 +5826,12 @@ def delete_product(db: Session, product_id: int, *, admin_force: bool = False):
             from app.crud import product_search_cache as product_search_cache_crud
 
             product_search_cache_crud.schedule_refresh_caches_for_product_states(snapshot)
+        except Exception:
+            pass
+        try:
+            from app.core import redis_cache
+
+            redis_cache.invalidate_pdp_cache(getattr(snapshot, "slug", None))
         except Exception:
             pass
         try:
@@ -6935,10 +6954,20 @@ def bulk_import_products(
 # ========== EXPORT FUNCTIONS ==========
 
 def get_all_products_for_export(db: Session) -> List[Dict]:
-    """Get all products in Excel format (37 columns) — đọc theo lô để giảm RAM và timeout DB."""
+    """
+    Get all products in Excel format (37 columns) — đọc theo lô để giảm RAM và timeout DB.
+
+    Dùng session RIÊNG (pool nhỏ, tách khỏi pool chính phục vụ khách) — quét ~100k SP
+    có thể mất vài phút, không được giữ connection của pool chính trong lúc đó
+    (tránh 503 "Cơ sở dữ liệu tạm thời không phản hồi" cho PDP/listing khách hàng).
+    Tham số `db` giữ lại để tương thích chữ ký cũ, không dùng để query.
+    """
+    from app.db.export_session import get_export_db_session
+
     excel_rows: List[Dict] = []
+    export_db = get_export_db_session()
     try:
-        query = db.query(Product).order_by(Product.id.asc()).yield_per(300)
+        query = export_db.query(Product).order_by(Product.id.asc()).yield_per(300)
         for product in query:
             excel_row = product_to_excel_row(product)
             if excel_row:
@@ -6948,6 +6977,8 @@ def get_all_products_for_export(db: Session) -> List[Dict]:
     except Exception as e:
         logger.error(f"❌ Error getting products for export: {str(e)}")
         raise
+    finally:
+        export_db.close()
 
 
 def get_products_for_export_by_ids(db: Session, product_ids: List[str]) -> List[Dict]:

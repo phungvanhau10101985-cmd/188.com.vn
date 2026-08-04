@@ -307,6 +307,13 @@ def paginate_cached_search_response(
 
 
 def get_cached_result(db: Session, cache_key: str) -> Optional[Dict[str, Any]]:
+    from app.core import redis_cache
+
+    if redis_cache.is_enabled():
+        cached = redis_cache.get_json(redis_cache.listing_cache_key(cache_key))
+        if isinstance(cached, dict):
+            return cached
+
     now = datetime.now(timezone.utc)
     row = (
         db.query(ProductSearchCache)
@@ -316,9 +323,19 @@ def get_cached_result(db: Session, cache_key: str) -> Optional[Dict[str, Any]]:
     if not row:
         return None
     try:
-        return json.loads(row.response_json)
+        data = json.loads(row.response_json)
     except json.JSONDecodeError:
         return None
+
+    if redis_cache.is_enabled() and isinstance(data, dict):
+        from app.core.config import settings
+
+        redis_cache.set_json(
+            redis_cache.listing_cache_key(cache_key),
+            data,
+            ttl_seconds=settings.REDIS_LISTING_CACHE_TTL_SECONDS,
+        )
+    return data
 
 
 def _prune_expired(db: Session) -> None:
@@ -381,6 +398,21 @@ def set_cached_result(
         db.commit()
     except Exception:
         db.rollback()
+        return
+
+    try:
+        from app.core import redis_cache
+
+        if redis_cache.is_enabled():
+            from app.core.config import settings
+
+            redis_cache.set_json(
+                redis_cache.listing_cache_key(cache_key),
+                response,
+                ttl_seconds=settings.REDIS_LISTING_CACHE_TTL_SECONDS,
+            )
+    except Exception:
+        pass
 
 
 def count_cache_by_state(db: Session) -> Tuple[int, int, int]:
@@ -418,12 +450,23 @@ def clear_product_search_cache(db: Session, *, expired_only: bool) -> int:
     q = db.query(ProductSearchCache)
     if expired_only:
         q = q.filter(ProductSearchCache.expires_at.isnot(None), ProductSearchCache.expires_at <= now)
+    cache_keys = [row.cache_key for row in q.all()]
+    q = db.query(ProductSearchCache)
+    if expired_only:
+        q = q.filter(ProductSearchCache.expires_at.isnot(None), ProductSearchCache.expires_at <= now)
     deleted = q.delete(synchronize_session=False)
     try:
         db.commit()
     except Exception:
         db.rollback()
         raise
+    try:
+        from app.core import redis_cache
+
+        if redis_cache.is_enabled() and cache_keys:
+            redis_cache.delete(*(redis_cache.listing_cache_key(k) for k in cache_keys))
+    except Exception:
+        pass
     return int(deleted or 0)
 
 
@@ -673,12 +716,19 @@ def keyword_cache_key_from_payload(payload: Dict[str, Any]) -> str:
 
 
 def _delete_cache_row(db: Session, row: ProductSearchCache) -> None:
+    cache_key = row.cache_key
     try:
         db.delete(row)
         db.commit()
     except Exception:
         db.rollback()
         raise
+    try:
+        from app.core import redis_cache
+
+        redis_cache.delete(redis_cache.listing_cache_key(cache_key))
+    except Exception:
+        pass
 
 
 def _refresh_cache_row(db: Session, row: ProductSearchCache) -> bool:

@@ -203,10 +203,34 @@ def try_get_cached_facets(
     scope_type: str,
     scope_key: str,
 ) -> Optional[Dict[str, Any]]:
+    try:
+        from app.core import redis_cache
+
+        if redis_cache.is_enabled():
+            cached = redis_cache.get_json(redis_cache.facet_cache_key(scope_type, scope_key))
+            if isinstance(cached, dict):
+                return cached
+    except Exception:
+        pass
+
     row = facet_cache_crud.get_by_scope(db, scope_type, scope_key)
     if not row or not row.is_enabled or row.is_stale:
         return None
-    return facet_cache_crud.row_to_facets(row)
+    facets = facet_cache_crud.row_to_facets(row)
+    try:
+        from app.core import redis_cache
+
+        if redis_cache.is_enabled() and isinstance(facets, dict):
+            from app.core.config import settings
+
+            redis_cache.set_json(
+                redis_cache.facet_cache_key(scope_type, scope_key),
+                facets,
+                ttl_seconds=settings.REDIS_FACET_CACHE_TTL_SECONDS,
+            )
+    except Exception:
+        pass
+    return facets
 
 
 def count_products_for_scope(
@@ -408,7 +432,7 @@ def _maybe_save_facets(
     if not _should_persist_scope(scope_type, product_count, is_manual):
         return None
     try:
-        return facet_cache_crud.upsert_facet_cache(
+        row = facet_cache_crud.upsert_facet_cache(
             db,
             scope_type=scope_type,
             scope_key=scope_key,
@@ -420,6 +444,20 @@ def _maybe_save_facets(
     except Exception as exc:
         logger.warning("Không lưu listing facet cache (%s/%s): %s", scope_type, scope_key, exc)
         return None
+    try:
+        from app.core import redis_cache
+
+        if redis_cache.is_enabled():
+            from app.core.config import settings
+
+            redis_cache.set_json(
+                redis_cache.facet_cache_key(scope_type, scope_key),
+                facets,
+                ttl_seconds=settings.REDIS_FACET_CACHE_TTL_SECONDS,
+            )
+    except Exception:
+        pass
+    return row
 
 
 def rebuild_category_scope(

@@ -19,6 +19,11 @@ function apiBaseForProductFetch(): string {
   return getApiBaseUrl();
 }
 
+// Đồng bộ với Nginx `proxy_read_timeout 60s` cho route /api/v1/products/by-slug/ —
+// giữ margin (45s) để Next luôn abort trước khi Nginx cắt kết nối, tránh request
+// "vô hình" vẫn treo ở backend sau khi Next đã bỏ cuộc (trước đây lệch 15s vs 60s).
+const PRODUCT_FETCH_TIMEOUT_MS = 45_000;
+
 export interface ProductForSeo {
   id: number;
   product_id?: string;
@@ -63,13 +68,13 @@ async function fetchProductBySlug(
     let res = await fetch(`${apiBase}/products/by-slug/${encoded}${attachQs}`, {
       ...(noStore ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
       headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(PRODUCT_FETCH_TIMEOUT_MS),
     });
     if (!res.ok) {
       res = await fetch(`${apiBase}/products/by-slug/?${params}`, {
         ...(noStore ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
         headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(PRODUCT_FETCH_TIMEOUT_MS),
       });
     }
     if (!res.ok) return null;

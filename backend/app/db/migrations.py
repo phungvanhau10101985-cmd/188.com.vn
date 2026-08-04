@@ -746,6 +746,48 @@ class MigrationManager:
             logger.warning("migrate_product_category_active_index: %s", e)
             return True
 
+    def migrate_product_listing_default_index(self) -> bool:
+        """Index cho sort mặc định của listing/PDP-related trên 100k SP: (is_active, id DESC)."""
+        try:
+            inspector = inspect(engine)
+            if "products" not in inspector.get_table_names():
+                return True
+            with engine.connect() as conn:
+                if IS_POSTGRESQL:
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_products_active_id_desc "
+                            "ON products (is_active, id DESC) "
+                            "WHERE is_active IS TRUE"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_products_active_created_at_desc "
+                            "ON products (is_active, created_at DESC) "
+                            "WHERE is_active IS TRUE"
+                        )
+                    )
+                else:
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_products_active_id_desc "
+                            "ON products (is_active, id DESC)"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_products_active_created_at_desc "
+                            "ON products (is_active, created_at DESC)"
+                        )
+                    )
+                conn.commit()
+            logger.info("✅ ix_products_active_id_desc / ix_products_active_created_at_desc ensured")
+            return True
+        except Exception as e:
+            logger.warning("migrate_product_listing_default_index: %s", e)
+            return True
+
     def migrate_product_search_document_trgm(self) -> bool:
         """Cột search_document + backfill + index pg_trgm (Postgres)."""
         try:
@@ -1075,6 +1117,7 @@ class MigrationManager:
 
         results['same_shop_recommendation_indexes'] = self.migrate_same_shop_recommendation_indexes()
         results['product_category_active_index'] = self.migrate_product_category_active_index()
+        results['product_listing_default_index'] = self.migrate_product_listing_default_index()
         results['product_search_document_trgm'] = self.migrate_product_search_document_trgm()
 
         from app.models.home_recommendation_snapshot import UserHomeRecommendationSnapshot

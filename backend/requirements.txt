@@ -7,6 +7,9 @@ sqlalchemy==2.0.23
 psycopg2-binary==2.9.9
 alembic==1.12.1
 
+# Cache (PDP/listing) — tùy chọn, chỉ dùng khi REDIS_ENABLED=true
+redis==5.0.1
+
 # Security & Authentication
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4

@@ -1,6 +1,7 @@
 # backend/main.py - FIXED VERSION WITH IMPORT/EXPORT DEBUG
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
@@ -96,6 +97,10 @@ _cors_kwargs = dict(
 if getattr(_settings, "BACKEND_CORS_ORIGIN_REGEX", None):
     _cors_kwargs["allow_origin_regex"] = _settings.BACKEND_CORS_ORIGIN_REGEX
 app.add_middleware(CORSMiddleware, **_cors_kwargs)
+
+# Nén gzip response > 1KB — giảm băng thông cho payload JSON nặng (admin list images/gallery,
+# danh sách sản phẩm, PDP) mà không phải đổi cấu trúc dữ liệu hay tính năng edit-inline hiện có.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 from app.middleware.http_safe import (
