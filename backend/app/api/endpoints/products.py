@@ -1708,10 +1708,11 @@ def admin_source_stock_delete_products_by_db_ids(
     Xóa vĩnh viễn các sản trong CSDL (`products.id`), kèm dọn Bunny như DELETE sản đơn lẻ.
     Dùng từ màn Kiểm tra nguồn hàng: danh sách hết/khớp SP trên phiên chỉ là tạm; thao tác này mới gỡ SP khỏi shop.
 
-    `skip_step_up=True`: chỉ áp dụng cho nút "Xóa DB (tất cả)" — bỏ OTP KHI VÀ CHỈ KHI toàn bộ
-    SP trong `db_ids` đã được worker xác nhận hết hàng nguồn (`source_stock_status="out_of_stock"`).
-    Nếu có bất kỳ SP nào chưa xác nhận OOS, vẫn bắt buộc xác minh OTP như bình thường — tránh
-    trường hợp ai đó gọi thẳng API với `skip_step_up=true` để xoá SP tuỳ ý mà không cần OTP.
+    `skip_step_up=True`: chỉ áp dụng cho nút "Xóa DB (tất cả)" — bỏ OTP luôn, không xác minh lại
+    `source_stock_status` tại thời điểm xóa (tin theo danh sách hiển thị trên báo cáo, tránh vừa
+    bấm xóa vừa bị bắt OTP chỉ vì worker vừa recheck lại 1-2 mã trong lô). An toàn duy nhất còn giữ:
+    `assert_product_deletion_allowed` (chặn xóa SP gốc nếu còn dòng kho thanh lý có tồn > 0).
+    Vẫn yêu cầu quyền admin xóa sản phẩm (`require_module_permission`) như route DELETE thường.
     """
     incoming = getattr(body, "db_ids", None) or []
     seen: set[int] = set()
@@ -1733,13 +1734,6 @@ def admin_source_stock_delete_products_by_db_ids(
         )
 
     can_skip_step_up = bool(getattr(body, "skip_step_up", False))
-    if can_skip_step_up:
-        non_oos_count = (
-            db.query(Product.id)
-            .filter(Product.id.in_(ordered), Product.source_stock_status != "out_of_stock")
-            .count()
-        )
-        can_skip_step_up = non_oos_count == 0
 
     if not can_skip_step_up:
         from app.core.security import verify_recent_admin_auth

@@ -248,9 +248,8 @@ async function fetchAdmin<T>(
     if (res.status === 428) {
       const err = await res.clone().json().catch(() => ({}));
       if (isAdminStepUpRequiredDetail((err as { detail?: unknown }).detail)) {
-        // Backend chỉ trả 428 ở đây khi có SP chưa xác nhận hết hàng nguồn lẫn trong danh sách
-        // (server tự kiểm tra, không tin `skip_step_up` mù) — vẫn cho xác minh OTP bình thường
-        // để admin hoàn tất thao tác, tránh bị kẹt cứng.
+        // 428 chỉ xảy ra khi request KHÔNG gửi skip_step_up (xóa đơn lẻ/route khác) — vẫn
+        // cho xác minh OTP bình thường để admin hoàn tất thao tác, tránh bị kẹt cứng.
         return promptAdminStepUpAndRetry(() => fetchAdmin<T>(endpoint, options));
       }
     }
