@@ -733,6 +733,8 @@ export default function AdminSourceStockCheckPage() {
   const [reportOosDeleteConfirmIds, setReportOosDeleteConfirmIds] = useState<number[] | null>(
     null,
   );
+  /** Khi true, bỏ qua OTP step-up khi xóa (chỉ dùng cho nút "Xóa DB (tất cả)"). */
+  const [reportOosDeleteSkipStepUp, setReportOosDeleteSkipStepUp] = useState(false);
   const [reportOosDeleting, setReportOosDeleting] = useState(false);
   const [reportOosDeleteProgress, setReportOosDeleteProgress] = useState<{
     processed: number;
@@ -1045,7 +1047,7 @@ export default function AdminSourceStockCheckPage() {
   }, []);
 
   const requestReportOosDeleteDbIds = useCallback(
-    (rawIds: number[]) => {
+    (rawIds: number[], opts?: { skipStepUp?: boolean }) => {
       const uniq = [...new Set(rawIds.filter((id) => id > 0))].sort((a, b) => a - b);
       if (!uniq.length) {
         showToast('err', 'Chưa có SP nào được chọn trong bảng mẫu.');
@@ -1059,6 +1061,7 @@ export default function AdminSourceStockCheckPage() {
         showToast('err', `Chỉ xử lý tối đa ${cap} SP mỗi lần (giới hạn trên một trang mẫu).`);
         return;
       }
+      setReportOosDeleteSkipStepUp(!!opts?.skipStepUp);
       setReportOosDeleteConfirmIds(uniq);
     },
     [activityReport?.samples_pagination?.page_size, showToast],
@@ -1150,6 +1153,7 @@ export default function AdminSourceStockCheckPage() {
   const executeReportOosDeleteFromDb = useCallback(async () => {
     const ids = reportOosDeleteConfirmIds;
     if (!ids?.length) return;
+    const skipStepUp = reportOosDeleteSkipStepUp;
     setReportOosDeleting(true);
     setReportOosDeleteProgress({
       processed: 0,
@@ -1161,6 +1165,7 @@ export default function AdminSourceStockCheckPage() {
     try {
       const res = await adminProductAPI.deleteSourceStockBatchProductsByDbIds(ids, {
         onProgress: (p) => setReportOosDeleteProgress(p),
+        skipStepUp,
       });
       let msg = `Đã xóa ${res.deleted_count ?? 0} sản (${(res.deleted_db_ids ?? []).length} khớp).`;
       if ((res.not_found_db_ids ?? []).length) {
@@ -1177,8 +1182,14 @@ export default function AdminSourceStockCheckPage() {
     } finally {
       setReportOosDeleting(false);
       setReportOosDeleteProgress(null);
+      setReportOosDeleteSkipStepUp(false);
     }
-  }, [refreshActivityReport, refreshQueueStats, reportOosDeleteConfirmIds, showToast]);
+  }, [refreshActivityReport, refreshQueueStats, reportOosDeleteConfirmIds, reportOosDeleteSkipStepUp, showToast]);
+
+  const closeReportOosDeleteModal = useCallback(() => {
+    setReportOosDeleteConfirmIds(null);
+    setReportOosDeleteSkipStepUp(false);
+  }, []);
 
   const reportOosBulkSelection = useMemo<ReportSampleOosBulkSelection | undefined>(() => {
     if (!reportOosSampleRows.length) return undefined;
@@ -1194,7 +1205,7 @@ export default function AdminSourceStockCheckPage() {
       onBulkClearFlagSelected: () => void runBulkReportOosClearFlags([...reportOosSampleSelectedIds]),
       onBulkRecheckSelected: () => void runBulkReportOosEnqueueRecheckNoPoll([...reportOosSampleSelectedIds]),
       onBulkDeleteAllDisplayed: () =>
-        requestReportOosDeleteDbIds(reportOosSampleRows.map((r) => r.id)),
+        requestReportOosDeleteDbIds(reportOosSampleRows.map((r) => r.id), { skipStepUp: true }),
       onBulkClearFlagAllDisplayed: () =>
         void runBulkReportOosClearFlags(reportOosSampleRows.map((r) => r.id)),
       onBulkRecheckAllDisplayed: () =>
@@ -1250,11 +1261,11 @@ export default function AdminSourceStockCheckPage() {
     if (reportOosDeleteConfirmIds == null) return;
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
-      if (!reportOosDeleting) setReportOosDeleteConfirmIds(null);
+      if (!reportOosDeleting) closeReportOosDeleteModal();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [reportOosDeleteConfirmIds, reportOosDeleting]);
+  }, [reportOosDeleteConfirmIds, reportOosDeleting, closeReportOosDeleteModal]);
 
   useEffect(() => {
     if (!resetPdpConfirmOpen) return;
@@ -2081,7 +2092,7 @@ export default function AdminSourceStockCheckPage() {
           className="fixed inset-0 z-[121] flex items-center justify-center bg-black/45 p-4"
           role="presentation"
           onClick={() => {
-            if (!reportOosDeleting) setReportOosDeleteConfirmIds(null);
+            if (!reportOosDeleting) closeReportOosDeleteModal();
           }}
         >
           <div
@@ -2159,7 +2170,7 @@ export default function AdminSourceStockCheckPage() {
                 type="button"
                 className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
                 disabled={reportOosDeleting}
-                onClick={() => setReportOosDeleteConfirmIds(null)}
+                onClick={() => closeReportOosDeleteModal()}
               >
                 Hủy
               </button>

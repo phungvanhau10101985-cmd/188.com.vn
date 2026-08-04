@@ -217,7 +217,7 @@ async function adminRawFetch(url: string, init: RequestInit = {}): Promise<Respo
 
 async function fetchAdmin<T>(
   endpoint: string,
-  options: RequestInit & { timeoutMs?: number } = {},
+  options: RequestInit & { timeoutMs?: number; skipStepUp?: boolean } = {},
 ): Promise<T> {
   const token = getAdminToken();
   if (!token) {
@@ -248,6 +248,9 @@ async function fetchAdmin<T>(
     if (res.status === 428) {
       const err = await res.clone().json().catch(() => ({}));
       if (isAdminStepUpRequiredDetail((err as { detail?: unknown }).detail)) {
+        if (options.skipStepUp) {
+          throw new Error('Yêu cầu xác minh OTP quản trị — thao tác này không hỗ trợ OTP.');
+        }
         return promptAdminStepUpAndRetry(() => fetchAdmin<T>(endpoint, options));
       }
     }
@@ -1496,6 +1499,7 @@ export const adminProductAPI = {
         chunkIndex: number;
         chunkTotal: number;
       }) => void;
+      skipStepUp?: boolean;
     },
   ) => {
     const unique = [...new Set(dbIds.filter((id) => Number.isFinite(id) && id > 0))];
@@ -1523,6 +1527,7 @@ export const adminProductAPI = {
           method: 'POST',
           body: JSON.stringify({ db_ids: chunk }),
           timeoutMs: 120_000,
+          skipStepUp: options?.skipStepUp,
         },
       );
       deleted_db_ids.push(...(res.deleted_db_ids ?? []));

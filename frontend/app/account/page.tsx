@@ -188,10 +188,6 @@ export default function AccountPage() {
             <span className="flex-1 text-left">🏦 Tài khoản ngân hàng</span>
             <span className="shrink-0 text-gray-400" aria-hidden>›</span>
           </Link>
-          <button type="button" onClick={notReady} className={menuRowClass}>
-            <span className="flex-1 text-left">💬 Nhắn tin</span>
-            <span className="shrink-0 text-gray-400" aria-hidden>›</span>
-          </button>
           <Link href="/favorites" className={menuRowClass}>
             <span className="flex-1 text-left">❤️ Sản phẩm yêu thích</span>
             <span className="shrink-0 text-gray-400" aria-hidden>›</span>
