@@ -43,4 +43,5 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 30 3 * * * curl -sS -m 3600 -H "Authorization: Bearer YOUR_CRON_SECRET" "https://YOUR_API_HOST/api/v1/import-export/cron/sync-google-sheet-product-catalog"
 
 # Dọn Bunny CDN từ hàng đợi pending_bunny_deletes (sau khi xóa SP) — mỗi 5 phút
-*/5 * * * * curl -sS -m 300 -H "Authorization: Bearer YOUR_CRON_SECRET" "https://YOUR_API_HOST/api/v1/products/cron/process-pending-bunny-deletes"
+# Dùng 127.0.0.1:8001 (không qua Cloudflare) — tránh 502 khi API vừa restart / cold start.
+*/5 * * * * curl -sS -m 300 -H "Authorization: Bearer YOUR_CRON_SECRET" "http://127.0.0.1:8001/api/v1/products/cron/process-pending-bunny-deletes"

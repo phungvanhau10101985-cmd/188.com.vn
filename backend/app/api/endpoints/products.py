@@ -2063,10 +2063,10 @@ def cron_process_pending_bunny_deletes(
     Cron: dọn object Bunny từ bảng ``pending_bunny_deletes``.
     Authorization: Bearer CRON_SECRET
 
-    Crontab gợi ý (mỗi 5 phút)::
+    Crontab gợi ý (mỗi 5 phút, localhost)::
 
       */5 * * * * curl -sS -m 300 -H "Authorization: Bearer $CRON_SECRET" \\
-        "https://YOUR_API_HOST/api/v1/products/cron/process-pending-bunny-deletes"
+        "http://127.0.0.1:8001/api/v1/products/cron/process-pending-bunny-deletes"
     """
     _require_cron_secret(authorization)
     from app.services.bunny_delete_queue import process_pending_bunny_deletes
