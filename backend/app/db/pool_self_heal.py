@@ -183,8 +183,7 @@ def run_pool_self_heal_tick() -> Tuple[bool, Optional[str]]:
     notify_ops_health_alert(
         "pool_exhaustion",
         "API pool DB kẹt — web có thể treo",
-        pool_max_val = int(snap.get("pool_max") or _pool_max_connections())
-        detail=f"Probe DB thất bại lần {fail_n}/{max_fail}. Thường do QueuePool đầy ({pool_max_val}/{pool_max_val}).",
+        detail=f"Probe DB thất bại lần {fail_n}/{max_fail}. Thường do QueuePool đầy (25/25).",
         pool_snap=snap,
         heavy_hints=collect_heavy_process_hints(),
         action="Hệ thống đang tự dispose pool; nếu web vẫn treo — chạy block lệnh SSH trong email.",
