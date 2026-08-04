@@ -788,6 +788,51 @@ class MigrationManager:
             logger.warning("migrate_product_listing_default_index: %s", e)
             return True
 
+    def migrate_order_items_product_id_index(self) -> bool:
+        """
+        Index `order_items.product_id`/`order_id` — thiếu index này khiến mỗi lần xóa 1 SP,
+        Postgres phải quét toàn bảng order_items để thực hiện FK `ON DELETE SET NULL`, gây
+        chậm nghiêm trọng (timeout 502/504) khi xóa hàng loạt SP hết hàng ở admin.
+        Dùng CONCURRENTLY để không khóa ghi bảng order_items lúc build index trên site đang chạy.
+        """
+        try:
+            inspector = inspect(engine)
+            if "order_items" not in inspector.get_table_names():
+                return True
+            if not IS_POSTGRESQL:
+                with engine.connect() as conn:
+                    conn.execute(
+                        text("CREATE INDEX IF NOT EXISTS ix_order_items_product_id ON order_items (product_id)")
+                    )
+                    conn.execute(
+                        text("CREATE INDEX IF NOT EXISTS ix_order_items_order_id ON order_items (order_id)")
+                    )
+                    conn.commit()
+                return True
+
+            existing = {ix["name"] for ix in inspector.get_indexes("order_items")}
+            with engine.connect() as conn:
+                conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+                if "ix_order_items_product_id" not in existing:
+                    conn.execute(
+                        text(
+                            "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_order_items_product_id "
+                            "ON order_items (product_id)"
+                        )
+                    )
+                if "ix_order_items_order_id" not in existing:
+                    conn.execute(
+                        text(
+                            "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_order_items_order_id "
+                            "ON order_items (order_id)"
+                        )
+                    )
+            logger.info("✅ ix_order_items_product_id / ix_order_items_order_id ensured")
+            return True
+        except Exception as e:
+            logger.warning("migrate_order_items_product_id_index: %s", e)
+            return True
+
     def migrate_product_search_document_trgm(self) -> bool:
         """Cột search_document + backfill + index pg_trgm (Postgres)."""
         try:
@@ -1118,6 +1163,7 @@ class MigrationManager:
         results['same_shop_recommendation_indexes'] = self.migrate_same_shop_recommendation_indexes()
         results['product_category_active_index'] = self.migrate_product_category_active_index()
         results['product_listing_default_index'] = self.migrate_product_listing_default_index()
+        results['order_items_product_id_index'] = self.migrate_order_items_product_id_index()
         results['product_search_document_trgm'] = self.migrate_product_search_document_trgm()
 
         from app.models.home_recommendation_snapshot import UserHomeRecommendationSnapshot
