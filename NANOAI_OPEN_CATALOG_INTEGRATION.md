@@ -9,8 +9,10 @@ nào đọc/ghi theo hướng tích hợp này phải dùng đúng field mapping
 GET https://188.com.vn/api/v1/products/list/full?is_active=true&skip={skip}&limit={limit}
 ```
 
-- Phân trang: `skip` (mặc định 0), `limit` (mặc định 100, **tối đa 5000** — đã tăng từ 1000 để
-  giảm số lượt gọi khi quét toàn catalog ~100k SP).
+- Phân trang: `skip` (mặc định 0), `limit` (mặc định 100, **tối đa 1000** — đã ĐO THỰC TẾ: 1000 SP
+  ~30s/response, 100 SP ~4s. **KHÔNG tăng quá 1000** — Cloudflare cắt kết nối origin sau ~100s
+  (edge timeout gói Free/Pro), limit lớn hơn dễ khiến 1 request vượt ngưỡng và trả lỗi
+  `502 origin_bad_gateway` cho đối tác dù backend vẫn xử lý bình thường, không phải lỗi treo).
 - Không yêu cầu xác thực (public GET). Chỉ trả SP `is_active=true` khi truyền đúng query này.
 - Response: `{"products": [...], "total": <int>, ...}` — mỗi phần tử trong `products` có shape
   khớp schema `Product` đầy đủ (`backend/app/schemas/product.py`), nhiều hơn 14 trường NanoAI dùng.
@@ -20,12 +22,13 @@ GET https://188.com.vn/api/v1/products/list/full?is_active=true&skip={skip}&limi
   khách hàng đang mua sắm, và ngược lại không bị timeout do tranh chấp pool giờ cao điểm.
 
 **Khuyến nghị vòng lặp phân trang cho NanoAI/cron:**
-1. Gọi `?is_active=true&skip=0&limit=5000`, đọc `total`.
-2. Lặp `skip += 5000` cho tới khi `skip >= total`.
+1. Gọi `?is_active=true&skip=0&limit=1000` (KHÔNG vượt 1000 — xem lý do ở trên), đọc `total`.
+2. Lặp `skip += 1000` cho tới khi `skip >= total` (~100 trang cho 100k SP).
 3. Gộp toàn bộ `products` từ các trang thành 1 snapshot `items` duy nhất trước khi POST lên
    Open Catalog (đúng nguyên tắc "kho khách là nguồn chuẩn" — không gửi từng đợt thiếu).
-4. Set timeout đủ lớn cho mỗi trang (khuyến nghị ≥ 60s) và tổng thời gian job (khuyến nghị ≥ 10 phút
-   cho toàn bộ vòng lặp ~100k SP / 20 trang).
+4. Set timeout mỗi trang ≥ 45s (mỗi trang 1000 SP đo thực tế ~30s) và tổng thời gian job đủ lớn
+   cho ~100 trang tuần tự (khuyến nghị ≥ 15–20 phút, hoặc gọi song song có kiểm soát 3–5 trang
+   cùng lúc nếu hệ thống NanoAI hỗ trợ, để rút ngắn tổng thời gian).
 
 ## Field mapping — Trường kho NanoAI ↔ Trường JSON kho khách (188)
 
@@ -75,6 +78,9 @@ Nếu không sửa, NanoAI sẽ hiển thị mô tả sản phẩm ở vị trí
 
 ## Lịch sử thay đổi liên quan
 
-- 2026-08-04: `/api/v1/products/list/full` chuyển sang pool export riêng + tăng `limit` tối đa
-  1000 → 5000, khắc phục lỗi "Hết thời gian khi tải danh sách từ kho khách" khi NanoAI cron chạy
-  03:00 hằng ngày.
+- 2026-08-04 (đợt 1): `/api/v1/products/list/full` chuyển sang pool export riêng, khắc phục lỗi
+  "Hết thời gian khi tải danh sách từ kho khách" do tranh chấp pool DB chính.
+- 2026-08-04 (đợt 2, revert): từng tăng `limit` tối đa 1000 → 5000 để giảm số trang, nhưng đo thực
+  tế cho thấy 1000 SP đã mất ~30s/response — ngoại suy 5000 SP sẽ mất ~150s, **vượt ngưỡng timeout
+  origin ~100s của Cloudflare** và gây lỗi `502 origin_bad_gateway` phía NanoAI ngay sau khi tăng.
+  Đã **revert về tối đa 1000** (mức đã đo an toàn, ~30s, có đệm dưới ngưỡng Cloudflare).

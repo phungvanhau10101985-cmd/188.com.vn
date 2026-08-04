@@ -920,7 +920,16 @@ def read_products_full_list(
     response: Response,
     current_user: Optional[User] = Depends(get_current_user_optional),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=5000),
+    limit: int = Query(
+        100,
+        ge=1,
+        le=1000,
+        description=(
+            "Tối đa 1000 — mỗi phần tử payload nặng (đầy đủ ~40 trường + enrich), "
+            "1000 SP đã mất ~30s. Cloudflare timeout origin ~100s: limit lớn hơn dễ vượt ngưỡng"
+            " và trả 502 'origin_bad_gateway' phía đối tác (đã đo thực tế, không phải lý thuyết)."
+        ),
+    ),
     category: Optional[str] = None,
     subcategory: Optional[str] = None,
     sub_subcategory: Optional[str] = None,
@@ -966,6 +975,9 @@ def read_products_full_list(
     Dùng cho đối tác quét toàn catalog (vd NanoAI Open Catalog) — session RIÊNG (pool export nhỏ),
     không giữ connection pool chính trong lúc đối tác lặp trang lấy hết ~100k SP (tránh 503 cho
     khách đang duyệt web + tránh bị đối tác timeout do tranh chấp pool giờ cao điểm).
+
+    `limit` chốt tối đa 1000 (đo thực tế ~30s/1000 SP) — Cloudflare cắt kết nối origin sau ~100s,
+    limit lớn hơn dễ vượt ngưỡng và trả 502 cho đối tác dù backend vẫn đang xử lý bình thường.
     """
     from app.db.export_session import get_export_db_session
 
