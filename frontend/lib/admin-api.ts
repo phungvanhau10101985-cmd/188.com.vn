@@ -217,7 +217,7 @@ async function adminRawFetch(url: string, init: RequestInit = {}): Promise<Respo
 
 async function fetchAdmin<T>(
   endpoint: string,
-  options: RequestInit & { timeoutMs?: number; skipStepUp?: boolean } = {},
+  options: RequestInit & { timeoutMs?: number } = {},
 ): Promise<T> {
   const token = getAdminToken();
   if (!token) {
@@ -248,9 +248,9 @@ async function fetchAdmin<T>(
     if (res.status === 428) {
       const err = await res.clone().json().catch(() => ({}));
       if (isAdminStepUpRequiredDetail((err as { detail?: unknown }).detail)) {
-        if (options.skipStepUp) {
-          throw new Error('Yêu cầu xác minh OTP quản trị — thao tác này không hỗ trợ OTP.');
-        }
+        // Backend chỉ trả 428 ở đây khi có SP chưa xác nhận hết hàng nguồn lẫn trong danh sách
+        // (server tự kiểm tra, không tin `skip_step_up` mù) — vẫn cho xác minh OTP bình thường
+        // để admin hoàn tất thao tác, tránh bị kẹt cứng.
         return promptAdminStepUpAndRetry(() => fetchAdmin<T>(endpoint, options));
       }
     }
@@ -1525,9 +1525,8 @@ export const adminProductAPI = {
         '/products/admin/source-stock-batch/delete-by-db-ids',
         {
           method: 'POST',
-          body: JSON.stringify({ db_ids: chunk }),
+          body: JSON.stringify({ db_ids: chunk, skip_step_up: !!options?.skipStepUp }),
           timeoutMs: 120_000,
-          skipStepUp: options?.skipStepUp,
         },
       );
       deleted_db_ids.push(...(res.deleted_db_ids ?? []));

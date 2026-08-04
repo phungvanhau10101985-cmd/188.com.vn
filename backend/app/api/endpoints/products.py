@@ -6,7 +6,7 @@ import random
 from urllib.parse import unquote
 
 import pandas as pd
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
@@ -159,6 +159,10 @@ class AdminBulkDeleteProductsByDbIdBody(BaseModel):
     """Xóa sản theo khóa chính bảng `products.id` (dùng cho admin sau kiểm tra nguồn)."""
 
     db_ids: Annotated[List[int], Field(default_factory=list, max_length=300)]
+    # Chỉ dùng cho nút "Xóa DB (tất cả)" trong màn Kiểm tra nguồn hàng — xoá các SP
+    # đã được worker xác nhận hết hàng nguồn (nguồn OOS), bỏ qua bước xác minh OTP
+    # quản trị vì đây là dọn hàng loạt SP đã chắc chắn hết hàng, không phải xoá tuỳ ý.
+    skip_step_up: bool = False
 
 
 class AdminSingleProductDbIdBody(BaseModel):
@@ -1695,13 +1699,19 @@ def admin_source_stock_batch_run_next_from_db(
 
 @router.post("/admin/source-stock-batch/delete-by-db-ids", response_model=dict, include_in_schema=False)
 def admin_source_stock_delete_products_by_db_ids(
+    request: Request,
     body: AdminBulkDeleteProductsByDbIdBody,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(require_module_permission_with_destructive_step_up("products")),
+    admin: AdminUser = Depends(require_module_permission("products", need="delete")),
 ):
     """
     Xóa vĩnh viễn các sản trong CSDL (`products.id`), kèm dọn Bunny như DELETE sản đơn lẻ.
     Dùng từ màn Kiểm tra nguồn hàng: danh sách hết/khớp SP trên phiên chỉ là tạm; thao tác này mới gỡ SP khỏi shop.
+
+    `skip_step_up=True`: chỉ áp dụng cho nút "Xóa DB (tất cả)" — bỏ OTP KHI VÀ CHỈ KHI toàn bộ
+    SP trong `db_ids` đã được worker xác nhận hết hàng nguồn (`source_stock_status="out_of_stock"`).
+    Nếu có bất kỳ SP nào chưa xác nhận OOS, vẫn bắt buộc xác minh OTP như bình thường — tránh
+    trường hợp ai đó gọi thẳng API với `skip_step_up=true` để xoá SP tuỳ ý mà không cần OTP.
     """
     incoming = getattr(body, "db_ids", None) or []
     seen: set[int] = set()
@@ -1721,6 +1731,20 @@ def admin_source_stock_delete_products_by_db_ids(
             status_code=400,
             detail="Không có id DB hợp lệ (cần số nguyên dương, tối đa 300 mỗi lần).",
         )
+
+    can_skip_step_up = bool(getattr(body, "skip_step_up", False))
+    if can_skip_step_up:
+        non_oos_count = (
+            db.query(Product.id)
+            .filter(Product.id.in_(ordered), Product.source_stock_status != "out_of_stock")
+            .count()
+        )
+        can_skip_step_up = non_oos_count == 0
+
+    if not can_skip_step_up:
+        from app.core.security import verify_recent_admin_auth
+
+        verify_recent_admin_auth(request, admin)
 
     deleted_db_ids, not_found_db_ids = crud.product.bulk_delete_products_by_db_ids(db, ordered)
 
