@@ -1,5 +1,5 @@
 # backend/app/api/endpoints/products.py - COMPLETE FIXED VERSION WITH BOTH ENDPOINTS
-from datetime import datetime
+from datetime import datetime, timezone
 import io
 import logging
 import random
@@ -813,6 +813,71 @@ def _read_products_list_impl(
     return result
 
 
+def _read_products_incremental_sync(
+    db: Session,
+    *,
+    updated_since: datetime,
+    page: int,
+    limit: int,
+) -> dict:
+    """
+    Wire contract NanoAI: trả các thay đổi kể từ mốc UTC, gồm cả tombstone hard-delete.
+    Endpoint này cố ý không dùng listing cache/enrich sale để response ổn định, nhẹ hơn và
+    không lọc mất `is_active=false` hoặc `is_deleted=true`.
+    """
+    if updated_since.tzinfo is None:
+        raise HTTPException(
+            status_code=422,
+            detail="updated_since phải là thời gian ISO-8601 có timezone UTC, ví dụ 2026-08-04T10:00:00Z",
+        )
+    if limit > 500:
+        raise HTTPException(
+            status_code=422,
+            detail="limit tối đa 500 cho endpoint đồng bộ gia tăng",
+        )
+
+    since_utc = updated_since.astimezone(timezone.utc)
+    total_records, events = crud.product.get_products_for_incremental_sync(
+        db,
+        updated_since=since_utc,
+        page=page,
+        limit=limit,
+    )
+    data: List[dict] = []
+    for event_type, item in events:
+        if event_type == "deleted":
+            deleted_at = item.deleted_at
+            data.append(
+                {
+                    "id": item.product_id,
+                    "product_id": item.product_id,
+                    "updated_at": deleted_at.isoformat() if deleted_at else None,
+                    "deleted_at": deleted_at.isoformat() if deleted_at else None,
+                    "is_deleted": True,
+                }
+            )
+            continue
+
+        payload = Product.model_validate(item).model_dump(mode="json")
+        # NanoAI yêu cầu `id` là định danh bền vững của catalog, không phải PK nội bộ.
+        payload["db_id"] = payload["id"]
+        payload["id"] = payload["product_id"]
+        payload["is_deleted"] = False
+        data.append(payload)
+
+    total_pages = (total_records + limit - 1) // limit if total_records else 0
+    return {
+        "success": True,
+        "pagination": {
+            "total_records": total_records,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages,
+        },
+        "data": data,
+    }
+
+
 @router.get("", response_model=dict, include_in_schema=False)
 @router.get("/", response_model=dict)
 def read_products(
@@ -857,6 +922,14 @@ def read_products(
         None,
         description="Token làm mới random sort cho mỗi lượt search (giữ ổn định trong cùng lần phân trang).",
     ),
+    updated_since: Optional[datetime] = Query(
+        None,
+        description=(
+            "Bật chế độ đồng bộ gia tăng NanoAI. ISO-8601 UTC, ví dụ "
+            "2026-08-04T10:00:00Z. Khi có tham số này response dùng {success,pagination,data}."
+        ),
+    ),
+    page: int = Query(1, ge=1, description="Trang 1-based của chế độ updated_since"),
     skip_total: bool = Query(
         False,
         description="Bỏ COUNT(*) — dùng cho khối SP liên quan PDP (chỉ cần danh sách)",
@@ -877,6 +950,13 @@ def read_products(
     """
     Get products with filtering and search (by name; the product_id filter matches Excel id or SKU code).
     """
+    if updated_since is not None:
+        return _read_products_incremental_sync(
+            db,
+            updated_since=updated_since,
+            page=page,
+            limit=limit,
+        )
     try:
         return _read_products_list_impl(
             response,

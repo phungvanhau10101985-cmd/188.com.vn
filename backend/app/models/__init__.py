@@ -20,6 +20,8 @@ print("[OK] Category model loaded")
 # 2. Import Product (phụ thuộc Category)
 from app.models.product import Product
 print("[OK] Product model loaded")
+from app.models.product_deletion import ProductDeletion
+print("[OK] ProductDeletion model loaded")
 
 from app.models.internal_sku_export import InternalSkuExport
 print("[OK] InternalSkuExport model loaded")
@@ -204,6 +206,7 @@ __all__ = [
     "SeoCluster",
     "Category",
     "Product",
+    "ProductDeletion",
     "InternalSkuExport",
     "ProductImportDraft",
     "ImageLocalizationJob",

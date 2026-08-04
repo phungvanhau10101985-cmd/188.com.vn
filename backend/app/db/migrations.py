@@ -10,6 +10,7 @@ from typing import List, Dict, Any
 from sqlalchemy import inspect, text
 from app.db.base import Base
 from app.models.product import Product
+from app.models.product_deletion import ProductDeletion
 from app.models.category import Category
 from app.models.product_import_draft import ProductImportDraft
 from app.models.listing_import_queue_snapshot import ListingImportQueueRevocation, ListingImportQueueSnapshot
@@ -788,6 +789,37 @@ class MigrationManager:
             logger.warning("migrate_product_listing_default_index: %s", e)
             return True
 
+    def migrate_product_incremental_sync_index(self) -> bool:
+        """Index quét thay đổi catalog theo updated_at cho đồng bộ đối tác."""
+        try:
+            inspector = inspect(engine)
+            if "products" not in inspector.get_table_names():
+                return True
+            if IS_POSTGRESQL:
+                # CONCURRENTLY tránh chặn ghi products khi VPS đang phục vụ shop.
+                with engine.connect() as conn:
+                    conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+                    conn.execute(
+                        text(
+                            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+                            "ix_products_updated_at_id ON products (updated_at ASC, id ASC)"
+                        )
+                    )
+            else:
+                with engine.connect() as conn:
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_products_updated_at_id "
+                            "ON products (updated_at ASC, id ASC)"
+                        )
+                    )
+                    conn.commit()
+            logger.info("✅ ix_products_updated_at_id ensured")
+            return True
+        except Exception as e:
+            logger.warning("migrate_product_incremental_sync_index: %s", e)
+            return True
+
     def migrate_order_items_product_id_index(self) -> bool:
         """
         Index `order_items.product_id`/`order_id` — thiếu index này khiến mỗi lần xóa 1 SP,
@@ -930,6 +962,13 @@ class MigrationManager:
         # 8. Bảng categories/products (taxonomy + product metadata)
         results['categories_sync_columns'] = self._sync_table_columns("categories", Category)
         results['products_sync_columns'] = self._sync_table_columns("products", Product)
+        results['product_deletions_create'] = self._create_table_if_not_exists(
+            "product_deletions", ProductDeletion
+        )
+        results['product_deletions_sync_columns'] = self._sync_table_columns(
+            "product_deletions", ProductDeletion
+        )
+        results['products_incremental_sync_index'] = self.migrate_product_incremental_sync_index()
         results['product_import_drafts_create'] = self._create_table_if_not_exists(
             "product_import_drafts", ProductImportDraft
         )

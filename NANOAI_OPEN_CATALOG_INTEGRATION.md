@@ -3,32 +3,34 @@
 Tài liệu tham chiếu DUY NHẤT cho việc đồng bộ catalog 188.com.vn sang NanoAI. Bất kỳ backend/script
 nào đọc/ghi theo hướng tích hợp này phải dùng đúng field mapping ở đây để tránh lệch dữ liệu.
 
-## API nguồn (188.com.vn cung cấp — "kho khách")
+## API đồng bộ gia tăng (NanoAI dùng từ nay)
 
 ```
-GET https://188.com.vn/api/v1/products/list/full?is_active=true&skip={skip}&limit={limit}
+GET https://188.com.vn/api/v1/products?updated_since=<ISO-8601-UTC>&page=1&limit=500
 ```
 
-- Phân trang: `skip` (mặc định 0), `limit` (mặc định 100, **tối đa 1000** — đã ĐO THỰC TẾ: 1000 SP
-  ~30s/response, 100 SP ~4s. **KHÔNG tăng quá 1000** — Cloudflare cắt kết nối origin sau ~100s
-  (edge timeout gói Free/Pro), limit lớn hơn dễ khiến 1 request vượt ngưỡng và trả lỗi
-  `502 origin_bad_gateway` cho đối tác dù backend vẫn xử lý bình thường, không phải lỗi treo).
-- Không yêu cầu xác thực (public GET). Chỉ trả SP `is_active=true` khi truyền đúng query này.
-- Response: `{"products": [...], "total": <int>, ...}` — mỗi phần tử trong `products` có shape
-  khớp schema `Product` đầy đủ (`backend/app/schemas/product.py`), nhiều hơn 14 trường NanoAI dùng.
-- Endpoint dùng session/pool DB **riêng** (tách khỏi pool chính phục vụ khách duyệt web) — xem
-  `backend/app/api/endpoints/products.py::read_products_full_list` +
-  `backend/app/db/export_session.py`. Mục đích: NanoAI quét chậm/nhiều trang không gây 503 cho
-  khách hàng đang mua sắm, và ngược lại không bị timeout do tranh chấp pool giờ cao điểm.
+- `updated_since` là mốc UTC của **lần đồng bộ thành công trước đó**, ví dụ
+  `2026-08-04T10:00:00Z`; bắt buộc có timezone.
+- `page` bắt đầu từ 1; `limit` tối đa **500**.
+- Không được lọc/loại các item có `is_deleted=true`: NanoAI phải dùng các item này để xóa bản ghi
+  cũ đã bị hard-delete trên 188.
+- Response:
+  ```json
+  {
+    "success": true,
+    "pagination": { "total_records": 120, "page": 1, "limit": 500, "total_pages": 1 },
+    "data": [
+      { "id": "PROD_9981", "updated_at": "2026-08-02T14:30:00Z", "is_deleted": false },
+      { "id": "PROD_9980", "updated_at": "2026-08-02T14:31:00Z", "is_deleted": true }
+    ]
+  }
+  ```
 
-**Khuyến nghị vòng lặp phân trang cho NanoAI/cron:**
-1. Gọi `?is_active=true&skip=0&limit=1000` (KHÔNG vượt 1000 — xem lý do ở trên), đọc `total`.
-2. Lặp `skip += 1000` cho tới khi `skip >= total` (~100 trang cho 100k SP).
-3. Gộp toàn bộ `products` từ các trang thành 1 snapshot `items` duy nhất trước khi POST lên
-   Open Catalog (đúng nguyên tắc "kho khách là nguồn chuẩn" — không gửi từng đợt thiếu).
-4. Set timeout mỗi trang ≥ 45s (mỗi trang 1000 SP đo thực tế ~30s) và tổng thời gian job đủ lớn
-   cho ~100 trang tuần tự (khuyến nghị ≥ 15–20 phút, hoặc gọi song song có kiểm soát 3–5 trang
-   cùng lúc nếu hệ thống NanoAI hỗ trợ, để rút ngắn tổng thời gian).
+**Quy trình chạy NanoAI:**
+1. Lần đầu (tạo baseline): gọi `updated_since=1970-01-01T00:00:00Z`, lặp `page=1..total_pages`.
+2. Các lần sau: giữ lại mốc UTC trước khi job bắt đầu, gọi với mốc đó và lặp hết `total_pages`.
+3. Chỉ lưu mốc mới sau khi tất cả trang xử lý thành công. Có thể nhận lại một số item trùng tại đúng
+   ranh giới timestamp; cần upsert theo `id`, nên hoàn toàn an toàn.
 
 ## Field mapping — Trường kho NanoAI ↔ Trường JSON kho khách (188)
 

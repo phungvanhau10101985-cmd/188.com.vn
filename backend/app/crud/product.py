@@ -1,8 +1,9 @@
 # backend/app/crud/product.py - COMPLETE FIXED VERSION
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, cast, func as sql_func, not_, or_, select, String, union_all
+from sqlalchemy import and_, cast, func as sql_func, literal, not_, or_, select, String, union_all
 from typing import List, Optional, Dict, Any, Set, Tuple
 from app.models.product import Product
+from app.models.product_deletion import ProductDeletion
 from app.models.search_mapping import SearchMapping, SearchMappingType
 from app.models.search_log import SearchLog
 from app.models.category_seo import CategorySeoMeta, CategorySeoGeminiTarget, CategorySeoSettings
@@ -17,7 +18,7 @@ import json
 import copy
 import time
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.config import settings
 from app.services.alicdn_urls import normalize_product_data_image_urls_for_db
 from app.services.bunny_storage import (
@@ -5606,6 +5607,7 @@ def create_product(db: Session, product: ProductCreate):
     assign_search_document_to_mapping(data)
     db_product = Product(**data)
     db.add(db_product)
+    clear_product_deletion_tombstone(db, db_product.product_id)
     db.commit()
     db.refresh(db_product)
     _maybe_schedule_category_gemini_for_product(db, db_product)
@@ -5711,6 +5713,95 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
             pass
     return db_product
 
+def _record_product_deletion_tombstone(db: Session, db_product: Product) -> None:
+    """Ghi tombstone trong cùng transaction trước khi hard-delete sản phẩm."""
+    public_id = str(getattr(db_product, "product_id", "") or "").strip()
+    if not public_id:
+        return
+    deleted_at = datetime.now(timezone.utc)
+    existing = (
+        db.query(ProductDeletion)
+        .filter(ProductDeletion.product_id == public_id)
+        .first()
+    )
+    if existing is None:
+        db.add(ProductDeletion(product_id=public_id, deleted_at=deleted_at))
+    else:
+        existing.deleted_at = deleted_at
+
+
+def clear_product_deletion_tombstone(db: Session, product_id: Optional[str]) -> None:
+    """Nếu mã được tạo lại, tombstone cũ không còn là trạng thái mới nhất."""
+    public_id = str(product_id or "").strip()
+    if public_id:
+        db.query(ProductDeletion).filter(ProductDeletion.product_id == public_id).delete(
+            synchronize_session=False
+        )
+
+
+def get_products_for_incremental_sync(
+    db: Session,
+    *,
+    updated_since: datetime,
+    page: int,
+    limit: int,
+) -> Tuple[int, List[Tuple[str, Any]]]:
+    """
+    Trả thay đổi catalog gồm bản ghi còn sống và tombstone đã xóa.
+    `updated_since` được so sánh inclusive để client dùng mốc lần chạy thành công
+    mà không làm mất thay đổi có cùng timestamp (client cần upsert idempotent).
+    """
+    changed_at = sql_func.coalesce(Product.updated_at, Product.created_at)
+    events = union_all(
+        select(
+            literal("product").label("event_type"),
+            Product.id.label("row_id"),
+            Product.product_id.label("product_id"),
+            changed_at.label("changed_at"),
+        ).where(changed_at >= updated_since),
+        select(
+            literal("deleted").label("event_type"),
+            ProductDeletion.id.label("row_id"),
+            ProductDeletion.product_id.label("product_id"),
+            ProductDeletion.deleted_at.label("changed_at"),
+        ).where(ProductDeletion.deleted_at >= updated_since),
+    ).subquery()
+
+    total = int(db.execute(select(sql_func.count()).select_from(events)).scalar() or 0)
+    offset = (page - 1) * limit
+    event_rows = db.execute(
+        select(
+            events.c.event_type,
+            events.c.row_id,
+            events.c.product_id,
+            events.c.changed_at,
+        )
+        .order_by(events.c.changed_at.asc(), events.c.event_type.asc(), events.c.row_id.asc())
+        .offset(offset)
+        .limit(limit)
+    ).all()
+    if not event_rows:
+        return total, []
+
+    live_ids = [int(row.row_id) for row in event_rows if row.event_type == "product"]
+    deleted_ids = [int(row.row_id) for row in event_rows if row.event_type == "deleted"]
+    live_by_id = {
+        row.id: row for row in db.query(Product).filter(Product.id.in_(live_ids)).all()
+    } if live_ids else {}
+    deletion_by_id = {
+        row.id: row
+        for row in db.query(ProductDeletion).filter(ProductDeletion.id.in_(deleted_ids)).all()
+    } if deleted_ids else {}
+
+    items: List[Tuple[str, Any]] = []
+    for event in event_rows:
+        if event.event_type == "product" and event.row_id in live_by_id:
+            items.append(("product", live_by_id[event.row_id]))
+        elif event.event_type == "deleted" and event.row_id in deletion_by_id:
+            items.append(("deleted", deletion_by_id[event.row_id]))
+    return total, items
+
+
 def _delete_product_orm_only(
     db: Session,
     db_product: Product,
@@ -5720,6 +5811,7 @@ def _delete_product_orm_only(
     """Xóa SP trong session; không commit — dùng bulk import batch. ``defer_bunny`` = dọn CDN nền sau."""
     if not defer_bunny:
         delete_bunny_assets_for_product(db_product)
+    _record_product_deletion_tombstone(db, db_product)
     db.delete(db_product)
 
 
@@ -5941,7 +6033,7 @@ def bulk_delete_products_by_db_ids(
             continue
         deleted_snapshots.append(snapshot_product_for_facet_refresh(row))
         bunny_rows.append(row)
-        db.delete(row)
+        _delete_product_orm_only(db, row, defer_bunny=True)
         deleted.append(pk)
 
     if deleted:
@@ -5994,7 +6086,7 @@ def bulk_delete_products_by_excel_product_ids(
 
         snapshots.append(snapshot_product_for_facet_refresh(row))
         bunny_rows.append(row)
-        db.delete(row)
+        _delete_product_orm_only(db, row, defer_bunny=True)
         deleted_pids.append(pid)
 
     if deleted_pids:
