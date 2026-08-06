@@ -435,8 +435,8 @@ export default function ProductInfo({
       {/* Product Name and Basic Info — một h1 duy nhất trên mobile ladipage */}
       <div>
         <h1
-          className={`font-bold text-gray-900 mb-1 leading-snug ${
-            compactMobile ? 'text-base' : 'text-xl'
+          className={`mb-1 leading-snug tracking-tight text-gray-900 ${
+            compactMobile ? 'text-base font-medium' : 'text-xl font-bold'
           }`}
         >
           {product.name}

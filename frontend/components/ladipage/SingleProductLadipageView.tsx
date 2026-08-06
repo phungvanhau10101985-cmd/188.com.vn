@@ -267,21 +267,23 @@ export default function SingleProductLadipageView({
           onSelectImage={setSelectedColorImage}
         />
 
-        {/* Badge + blurb ngắn (nếu khác tên SP); tên chuẩn chỉ nằm trong ProductInfo h1 */}
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 pt-2.5 pb-1">
+        {/* Badge + blurb: cùng cỡ/đậm với tên SP (text-base font-bold), nét mảnh */}
+        <div className="px-4 pt-2.5 pb-1">
           <p className="inline-flex items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50/80 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-orange-700">
             <span className="h-1.5 w-1.5 rounded-full bg-orange-500" aria-hidden />
             Gợi ý dành cho bạn
           </p>
           {mobileHeroBlurb.showHeadline ? (
-            <p className="text-xs font-medium leading-snug text-orange-900/80">
+            <p className="mt-2 text-base font-bold leading-snug tracking-tight text-orange-800">
               {mobileHeroBlurb.headline}
             </p>
           ) : null}
+          {mobileHeroBlurb.showSub ? (
+            <p className="mt-1 text-base font-bold leading-snug tracking-tight text-gray-600">
+              {mobileHeroBlurb.sub}
+            </p>
+          ) : null}
         </div>
-        {mobileHeroBlurb.showSub ? (
-          <p className="px-4 pb-1 text-sm leading-snug text-gray-600">{mobileHeroBlurb.sub}</p>
-        ) : null}
 
         <div id="ladipage-buy-box" className="scroll-mt-4 px-4 pt-1.5">
           {renderProductInfo({ enableMobileStickyBar: true, compactMobile: true })}
