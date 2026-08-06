@@ -4706,6 +4706,7 @@ export type LadipageSectionType = 'hero' | 'highlights' | 'material' | 'products
 export type LadipageSectionStatus = 'pending' | 'generating' | 'ready' | 'error';
 export type LadipageStatus = 'draft' | 'published';
 export type LadipageSourceType = 'category' | 'products';
+export type LadipageListKind = 'category' | 'product_single' | 'products_multi';
 export type LadipageRegenerateTarget = 'all' | 'text' | 'image';
 
 export interface LadipageSection {
@@ -4750,6 +4751,19 @@ export interface LadipageListResponse {
   items: Ladipage[];
 }
 
+export interface LadipageAdminStats {
+  kind: LadipageListKind;
+  active_products_total?: number | null;
+  products_with_ladipage?: number | null;
+  products_with_published_ladipage?: number | null;
+  products_without_ladipage?: number | null;
+  category_l3_total?: number | null;
+  categories_with_ladipage?: number | null;
+  categories_without_ladipage?: number | null;
+  products_in_multi_ladipages?: number | null;
+  ladipage_pages_total?: number | null;
+}
+
 export type MaterialImageSource = 'ai' | 'product';
 
 export interface LadipageCreatePayload {
@@ -4777,13 +4791,17 @@ export interface LadipageUpdatePayload {
 }
 
 export const ladipageAdminAPI = {
-  list: (params?: { skip?: number; limit?: number; status?: LadipageStatus }) => {
+  list: (params?: { skip?: number; limit?: number; status?: LadipageStatus; kind?: LadipageListKind }) => {
     const sp = new URLSearchParams();
     sp.set('skip', String(params?.skip ?? 0));
     sp.set('limit', String(params?.limit ?? 50));
     if (params?.status) sp.set('status', params.status);
+    if (params?.kind) sp.set('kind', params.kind);
     return fetchAdmin<LadipageListResponse>(`/admin/ladipages/?${sp.toString()}`);
   },
+
+  stats: (kind: LadipageListKind) =>
+    fetchAdmin<LadipageAdminStats>(`/admin/ladipages/stats?kind=${encodeURIComponent(kind)}`),
 
   get: (id: number) => fetchAdmin<LadipageDetail>(`/admin/ladipages/${id}`),
 

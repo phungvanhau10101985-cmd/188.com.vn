@@ -80,6 +80,28 @@ export function buildProductImageOptionsFromProducts(products: LooseProduct[]): 
   return options;
 }
 
+/** URL ảnh hero carousel: ảnh hero đã chọn trước, sau đó gallery SP (dedupe). */
+export function buildHeroCarouselUrlsFromProduct(
+  product: LooseProduct,
+  heroImageUrl?: string | null,
+  maxSlides = 12,
+): string[] {
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string) => {
+    const u = raw.trim();
+    if (!u || seen.has(u)) return;
+    seen.add(u);
+    urls.push(u);
+  };
+  if (heroImageUrl?.trim()) push(heroImageUrl);
+  for (const opt of buildProductImageOptionsFromProducts([product])) {
+    push(opt.url);
+    if (urls.length >= maxSlides) break;
+  }
+  return urls.slice(0, maxSlides);
+}
+
 /** @deprecated Alias — dùng buildProductImageOptionsFromProducts */
 export const buildHeroImageOptionsFromProducts = buildProductImageOptionsFromProducts;
 

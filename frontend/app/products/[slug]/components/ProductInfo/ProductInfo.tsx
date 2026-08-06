@@ -34,6 +34,11 @@ import {
   warehouseVariantsInStock,
 } from '@/lib/warehouse-clearance';
 
+function formatLikeCount(n: unknown): string {
+  const v = Math.max(0, Math.floor(Number(n)) || 0);
+  return new Intl.NumberFormat('vi-VN').format(v);
+}
+
 interface ProductInfoProps {
   product: Product;
   /** Ảnh SP đang xem trên gallery / màu — đồng bộ với cổng NanoAI. */
@@ -47,6 +52,8 @@ interface ProductInfoProps {
   isCartLoading?: boolean;
   isFavorited?: boolean;
   initialGoogleDiscount?: GoogleAutomatedDiscountSsrPayload | null;
+  /** PDP ladipage 1 SP mobile: luôn hiện thanh THÊM GIỎ / MUA HÀNG (không dùng CTA ladipage). */
+  enableMobileStickyBar?: boolean;
 }
 
 export default function ProductInfo({ 
@@ -61,6 +68,7 @@ export default function ProductInfo({
   isCartLoading = false,
   isFavorited = false,
   initialGoogleDiscount = null,
+  enableMobileStickyBar = false,
 }: ProductInfoProps) {
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedColorIndex, setSelectedColorIndex] = useState(-1);
@@ -296,6 +304,102 @@ export default function ProductInfo({
                 {isCartLoading ? 'ĐANG XỬ LÝ...' : 'MUA HÀNG'}
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+    ) : null;
+
+  const mobileStickyActionsBar =
+    enableMobileStickyBar && stickyPortalReady ? (
+      <div
+        className="fixed bottom-0 left-0 right-0 z-[100] border-t border-gray-200 bg-gray-100 md:hidden pointer-events-auto"
+        data-188-pdp-sticky-actions
+        data-188-pdp-sticky-mobile
+        data-188-skip-draggable
+      >
+        {birthdayDiscount.active && birthdaySavingsAmount > 0 && (
+          <div className="border-b border-pink-700 bg-pink-600 px-2 py-0.5 text-center">
+            <span className="flex items-center justify-center gap-1 text-[9px] font-semibold text-white">
+              <span aria-hidden>🎁</span>
+              Giá sinh nhật: tiết kiệm <strong>{formatPrice(birthdaySavingsAmount)}</strong>
+            </span>
+          </div>
+        )}
+        {isAuthenticated && loyaltyDiscountAmount > 0 && (
+          <div className="border-b border-green-100 bg-green-50 px-2 py-0.5 text-center">
+            <span className="flex items-center justify-center gap-1 text-[9px] font-medium text-green-700">
+              <svg className="h-2.5 w-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+              Hạng <strong>{loyaltyTierName}</strong> giảm <strong>{formatPrice(loyaltyDiscountAmount)}</strong>
+            </span>
+          </div>
+        )}
+        <div
+          className="flex min-h-[48px] items-stretch gap-1.5 px-1.5 py-0.5 pb-[max(2px,env(safe-area-inset-bottom,0px))]"
+          data-188-mobile-bar="labeled"
+        >
+          <nav className="mr-0.5 flex shrink-0 items-stretch gap-px border-r border-gray-200 pr-1.5" aria-label="Lối tắt">
+            <Link
+              href="/"
+              className="flex w-11 flex-none flex-col items-center justify-center gap-0.5 py-0.5 text-gray-600 active:opacity-70"
+              aria-label="Trang chủ"
+            >
+              <svg className="h-[17px] w-[17px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+              </svg>
+              <span className="flex flex-col items-center leading-[1.05]">
+                <span className="text-[10px]">Trang</span>
+                <span className="text-[10px]">chủ</span>
+              </span>
+            </Link>
+            <button
+              type="button"
+              onClick={handleNanoAiTryOn}
+              className="flex w-11 flex-none flex-col items-center justify-center gap-0.5 py-0.5 text-[#ea580c] active:opacity-70"
+              aria-label="Thử đồ với NanoAI"
+            >
+              <svg className="h-[17px] w-[17px] shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+              </svg>
+              <span className="flex flex-col items-center leading-[1.05]">
+                <span className="text-[10px] font-medium">Thử</span>
+                <span className="text-[10px] font-medium">đồ</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onToggleFavorite(product)}
+              disabled={isCartLoading}
+              aria-label={`Thích, ${formatLikeCount(product.likes)} lượt`}
+              className={`flex w-11 flex-none flex-col items-center justify-center gap-0.5 py-0.5 active:opacity-70 ${
+                isFavorited ? 'text-red-500' : 'text-gray-600'
+              } ${isCartLoading ? 'opacity-70' : ''}`}
+            >
+              <svg className="h-[17px] w-[17px] shrink-0" fill={isFavorited ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+              </svg>
+              <span className="flex flex-col items-center leading-[1.05] text-center">
+                <span className="text-[10px]">Thích</span>
+                <span className="text-[10px] font-semibold tabular-nums tracking-tight">{formatLikeCount(product.likes)}</span>
+              </span>
+            </button>
+          </nav>
+          <div className="flex min-w-0 flex-1 items-stretch gap-1">
+            <button
+              type="button"
+              onClick={openVariantModal}
+              disabled={!canShowStickyBuy || isCartLoading}
+              className="flex flex-1 items-center justify-center rounded-md bg-gray-500 text-[11px] font-semibold text-white hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isCartLoading ? 'ĐANG THÊM...' : 'THÊM GIỎ'}
+            </button>
+            <button
+              type="button"
+              onClick={openVariantModal}
+              disabled={!canShowStickyBuy || isCartLoading}
+              className="flex flex-1 items-center justify-center rounded-md bg-[#ea580c] text-[11px] font-semibold text-white hover:bg-[#c2410c] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isCartLoading ? 'ĐANG XỬ LÝ...' : 'MUA HÀNG'}
+            </button>
           </div>
         </div>
       </div>
@@ -564,6 +668,9 @@ export default function ProductInfo({
       {/* Sticky bottom actions (desktop) — portal tránh bị NanoAI / ancestor che click */}
       {typeof document !== 'undefined' && stickyActionsBar
         ? createPortal(stickyActionsBar, document.body)
+        : null}
+      {typeof document !== 'undefined' && mobileStickyActionsBar
+        ? createPortal(mobileStickyActionsBar, document.body)
         : null}
 
       <ProductVariantModal

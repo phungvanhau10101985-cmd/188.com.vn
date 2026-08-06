@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Product } from '@/types/api';
 import type { LadipageSection } from '@/lib/admin-api';
@@ -29,8 +29,8 @@ import MaterialSection from './MaterialSection';
 import TrustCtaSection from './TrustCtaSection';
 import FaqSection from './FaqSection';
 import LadipageTrustStrip from './LadipageTrustStrip';
-import MobileStickyCta from './MobileStickyCta';
 import ProductBuyModal from './ProductBuyModal';
+import { buildHeroCarouselUrlsFromProduct } from '@/lib/ladipage-utils';
 import type {
   FaqSectionData,
   HeroSectionData,
@@ -183,6 +183,11 @@ export default function SingleProductLadipageView({
   };
 
   const heroSection = sections.find((s) => s.section_type === 'hero');
+  const heroCarouselImages = useMemo(() => {
+    if (!heroSection) return [];
+    const data = heroSection.data as HeroSectionData;
+    return buildHeroCarouselUrlsFromProduct(product, data.image_url);
+  }, [heroSection, product]);
   const highlightsSection = sections.find((s) => s.section_type === 'highlights');
   const materialSection = sections.find((s) => s.section_type === 'material');
   const trustCtaSection = sections.find((s) => s.section_type === 'trust_cta');
@@ -192,10 +197,11 @@ export default function SingleProductLadipageView({
 
   return (
     <ProductReviewsProvider productId={product.id}>
-      <div className="mx-auto max-w-6xl px-4 pb-24 md:pb-8">
+      <div className="mx-auto max-w-6xl px-4 pb-28 md:pb-8">
         {heroSection && (
           <HeroSection
             data={heroSection.data as HeroSectionData}
+            carouselImages={heroCarouselImages}
             ctaSlot={
               <button
                 type="button"
@@ -225,6 +231,7 @@ export default function SingleProductLadipageView({
             isFavorited={isFavorited}
             onColorImageChange={setSelectedColorImage}
             initialGoogleDiscount={initialGoogleDiscount}
+            enableMobileStickyBar
           />
         </div>
 
@@ -241,7 +248,6 @@ export default function SingleProductLadipageView({
         {faqSection && <FaqSection data={faqSection.data as FaqSectionData} />}
 
         <AgeGenderRecommendationSection excludeProductId={product.id} className="mt-6" />
-        <MobileStickyCta label="Mua ngay" onClick={openBuyModal} />
       </div>
 
       <ProductBuyModal

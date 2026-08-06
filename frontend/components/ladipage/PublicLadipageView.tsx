@@ -15,6 +15,7 @@ import ProductsGridSection from './ProductsGridSection';
 import LadipageTrustStrip from './LadipageTrustStrip';
 import MobileStickyCta from './MobileStickyCta';
 import ProductBuyModal from './ProductBuyModal';
+import { buildHeroCarouselUrlsFromProduct } from '@/lib/ladipage-utils';
 import type {
   FaqSectionData,
   HeroSectionData,
@@ -77,11 +78,16 @@ export default function PublicLadipageView({
     <div className="mx-auto max-w-6xl px-4 pb-24 md:pb-8">
       {sections.map((section) => {
         switch (section.section_type) {
-          case 'hero':
+          case 'hero': {
+            const heroData = section.data as HeroSectionData;
+            const carouselImages = singleProduct
+              ? buildHeroCarouselUrlsFromProduct(singleProduct, heroData.image_url)
+              : undefined;
             return (
               <div key={section.id}>
                 <HeroSection
-                  data={section.data as HeroSectionData}
+                  data={heroData}
+                  carouselImages={carouselImages}
                   ctaSlot={
                     <button
                       type="button"
@@ -96,6 +102,7 @@ export default function PublicLadipageView({
                 <LadipageTrustStrip />
               </div>
             );
+          }
           case 'highlights':
             return <HighlightsSection key={section.id} data={section.data as HighlightsSectionData} />;
           case 'material':

@@ -4,6 +4,7 @@ import EditableText from './EditableText';
 import EditableImage from './EditableImage';
 import HeroEditableImage from './HeroEditableImage';
 import HeroDisplayImage from './HeroDisplayImage';
+import HeroImageCarousel from './HeroImageCarousel';
 import type { HeroSectionData } from './types';
 import type { HeroImageOption } from '@/components/ladipage/types';
 
@@ -17,6 +18,8 @@ interface HeroSectionProps {
   onRegenerateText?: (instruction: string) => void | Promise<void>;
   onRegenerateImage?: (prompt: string) => void | Promise<void>;
   ctaSlot?: React.ReactNode;
+  /** Gallery vuốt ngang (public PDP / 1 SP). */
+  carouselImages?: string[];
 }
 
 export default function HeroSection({
@@ -29,6 +32,7 @@ export default function HeroSection({
   onRegenerateText,
   onRegenerateImage,
   ctaSlot,
+  carouselImages,
 }: HeroSectionProps) {
   const useProductHeroPicker = editable && !!onSaveField;
 
@@ -49,6 +53,16 @@ export default function HeroSection({
     }
 
     if (!editable) {
+      if (carouselImages && carouselImages.length > 1) {
+        return (
+          <HeroImageCarousel
+            images={carouselImages}
+            objectPosition={data.image_object_position}
+            alt={data.headline || 'Ảnh banner'}
+            aspectClassName="aspect-[4/3]"
+          />
+        );
+      }
       return (
         <HeroDisplayImage
           src={data.image_url}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
 import { ladipageAdminAPI, type AdminProduct } from '@/lib/admin-api';
 import LadipageProductPicker from '@/components/ladipage/LadipageProductPicker';
@@ -40,9 +40,14 @@ type SourceMode = 'category' | 'product_single' | 'products_multi';
 
 export default function AdminLadipageNewPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { pushToast } = useToast();
 
-  const [sourceMode, setSourceMode] = useState<SourceMode>('category');
+  const [sourceMode, setSourceMode] = useState<SourceMode>(() => {
+    const mode = searchParams.get('mode');
+    if (mode === 'category' || mode === 'product_single' || mode === 'products_multi') return mode;
+    return 'product_single';
+  });
   const [cat3Options, setCat3Options] = useState<Cat3Option[]>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [categoryId, setCategoryId] = useState<number | ''>('');

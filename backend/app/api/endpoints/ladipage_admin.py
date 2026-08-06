@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.security import require_module_permission, require_module_permission_with_destructive_step_up
@@ -20,6 +21,7 @@ from app.models.ladipage import Ladipage, LadipageSection
 from app.schemas.ladipage import (
     LadipageCreate,
     LadipageDetailResponse,
+    LadipageAdminStatsResponse,
     LadipageListResponse,
     LadipageResponse,
     LadipageSeoResponse,
@@ -36,12 +38,29 @@ from app.services.ladipage_ai_service import (
     resolve_products_for_ladipage,
 )
 from app.services.ladipage_public_url import resolve_ladipage_public_path
+from app.services.ladipage_admin_stats import ladipage_admin_stats
 from app.utils.slug import create_slug
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 MODULE_KEY = "ladipage"
+
+LADIPAGE_LIST_KINDS = frozenset({"category", "product_single", "products_multi"})
+
+
+def _apply_ladipage_kind_filter(q, kind: Optional[str]):
+    if not kind:
+        return q
+    k = kind.strip()
+    if k not in LADIPAGE_LIST_KINDS:
+        raise HTTPException(status_code=400, detail="kind không hợp lệ")
+    if k == "category":
+        return q.filter(Ladipage.source_type == "category")
+    pid_len = func.coalesce(func.json_array_length(Ladipage.product_ids), 0)
+    if k == "product_single":
+        return q.filter(Ladipage.source_type == "products", pid_len == 1)
+    return q.filter(Ladipage.source_type == "products", pid_len > 1)
 
 
 def _unique_slug(db: Session, base: str, *, exclude_id: Optional[int] = None) -> str:
@@ -177,15 +196,35 @@ def list_ladipages(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     status_filter: Optional[str] = Query(None, alias="status"),
+    kind: Optional[str] = Query(
+        None,
+        description="category | product_single | products_multi",
+    ),
     db: Session = Depends(get_db),
     admin: AdminUser = Depends(require_module_permission(MODULE_KEY)),
 ):
     q = db.query(Ladipage)
     if status_filter in ("draft", "published"):
         q = q.filter(Ladipage.status == status_filter)
+    q = _apply_ladipage_kind_filter(q, kind)
     total = q.count()
     rows = q.order_by(Ladipage.id.desc()).offset(skip).limit(limit).all()
     return LadipageListResponse(total=total, items=[_to_response(db, r) for r in rows])
+
+
+@router.get("/stats", response_model=LadipageAdminStatsResponse)
+def get_ladipage_admin_stats(
+    kind: str = Query(
+        ...,
+        description="category | product_single | products_multi",
+    ),
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(require_module_permission(MODULE_KEY)),
+):
+    k = kind.strip()
+    if k not in LADIPAGE_LIST_KINDS:
+        raise HTTPException(status_code=400, detail="kind không hợp lệ")
+    return LadipageAdminStatsResponse(**ladipage_admin_stats(db, k))
 
 
 @router.post("", response_model=LadipageDetailResponse, include_in_schema=False)

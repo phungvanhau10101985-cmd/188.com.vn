@@ -86,6 +86,19 @@ class LadipageListResponse(BaseModel):
     items: List[LadipageResponse]
 
 
+class LadipageAdminStatsResponse(BaseModel):
+    kind: str
+    active_products_total: Optional[int] = None
+    products_with_ladipage: Optional[int] = None
+    products_with_published_ladipage: Optional[int] = None
+    products_without_ladipage: Optional[int] = None
+    category_l3_total: Optional[int] = None
+    categories_with_ladipage: Optional[int] = None
+    categories_without_ladipage: Optional[int] = None
+    products_in_multi_ladipages: Optional[int] = None
+    ladipage_pages_total: Optional[int] = None
+
+
 class SectionRegenerateRequest(BaseModel):
     target: RegenerateTarget = "all"
     custom_prompt: Optional[str] = Field(None, max_length=2000)
