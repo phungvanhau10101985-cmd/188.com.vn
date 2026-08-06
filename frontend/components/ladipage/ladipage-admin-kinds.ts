@@ -28,6 +28,12 @@ export const LADIPAGE_KIND_TABS: {
 
 export const DEFAULT_LADIPAGE_KIND_SLUG = '1-san-pham';
 
+export const LADIPAGE_ADMIN_LIST_BASE = '/admin/ladipage/list';
+
+export function ladipageListHref(kindSlug: string): string {
+  return `${LADIPAGE_ADMIN_LIST_BASE}/${kindSlug}`;
+}
+
 export function ladipageKindFromSlug(slug: string): LadipageListKind | null {
   const row = LADIPAGE_KIND_TABS.find((t) => t.slug === slug);
   return row?.kind ?? null;

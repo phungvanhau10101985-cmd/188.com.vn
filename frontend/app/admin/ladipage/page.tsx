@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
-import { DEFAULT_LADIPAGE_KIND_SLUG } from '@/components/ladipage/ladipage-admin-kinds';
+import { DEFAULT_LADIPAGE_KIND_SLUG, ladipageListHref } from '@/components/ladipage/ladipage-admin-kinds';
 
 export default function AdminLadipageIndexPage() {
-  redirect(`/admin/ladipage/${DEFAULT_LADIPAGE_KIND_SLUG}`);
+  redirect(ladipageListHref(DEFAULT_LADIPAGE_KIND_SLUG));
 }

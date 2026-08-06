@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { DEFAULT_LADIPAGE_KIND_SLUG, LADIPAGE_KIND_TABS } from '@/components/ladipage/ladipage-admin-kinds';
+import { DEFAULT_LADIPAGE_KIND_SLUG, LADIPAGE_KIND_TABS, ladipageListHref } from '@/components/ladipage/ladipage-admin-kinds';
 
 function activeKindSlug(pathname: string): string {
   const base = '/admin/ladipage';
@@ -11,7 +11,8 @@ function activeKindSlug(pathname: string): string {
     return DEFAULT_LADIPAGE_KIND_SLUG;
   }
   for (const tab of LADIPAGE_KIND_TABS) {
-    if (pathname === `${base}/${tab.slug}` || pathname.startsWith(`${base}/${tab.slug}/`)) {
+    const listPath = ladipageListHref(tab.slug);
+    if (pathname === listPath || pathname.startsWith(`${listPath}/`)) {
       return tab.slug;
     }
   }
@@ -52,7 +53,7 @@ export default function AdminLadipageLayout({ children }: { children: React.Reac
               return (
                 <Link
                   key={tab.slug}
-                  href={`/admin/ladipage/${tab.slug}`}
+                  href={ladipageListHref(tab.slug)}
                   className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
                     active
                       ? 'bg-orange-600 text-white shadow-sm'
