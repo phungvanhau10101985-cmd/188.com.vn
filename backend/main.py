@@ -631,6 +631,19 @@ async def startup_event():
         print(f"   ⚠️  listing import queue startup reconcile: {_e_liq}")
 
     try:
+        from app.services.ladipage_on_view_worker import start_ladipage_on_view_worker_if_enabled
+
+        start_ladipage_on_view_worker_if_enabled()
+        from app.core.config import settings as _lpov_settings
+        if getattr(_lpov_settings, "LADIPAGE_ON_VIEW_ENABLED", False):
+            print(
+                "   📄 LADIPAGE_ON_VIEW_ENABLED: sinh ladipage 1 SP khi khách xem PDP "
+                f"(quét backlog mỗi {_lpov_settings.LADIPAGE_ON_VIEW_SCAN_INTERVAL_SECONDS}s)."
+            )
+    except Exception as _e_lpov:
+        print(f"   ⚠️  ladipage on-view worker startup: {_e_lpov}")
+
+    try:
         from app.services.source_stock_checker import start_source_stock_checker_daemon_if_enabled
 
         start_source_stock_checker_daemon_if_enabled()

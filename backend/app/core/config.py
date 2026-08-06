@@ -470,6 +470,39 @@ class Settings:
             1,
             int(os.getenv("ADMIN_SOURCE_BATCH_TRAFFIC_VIEW_WINDOW_DAYS", "30") or "30"),
         )
+        # Ladipage 1 SP theo traffic: chỉ sinh khi khách xem PDP (worker nền), không bootstrap cả catalog.
+        self.LADIPAGE_ON_VIEW_ENABLED: bool = os.getenv(
+            "LADIPAGE_ON_VIEW_ENABLED", "True"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.LADIPAGE_ON_VIEW_PUBLISH: bool = os.getenv(
+            "LADIPAGE_ON_VIEW_PUBLISH", "True"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.LADIPAGE_ON_VIEW_WORKER_INTERVAL_SECONDS: int = max(
+            5,
+            int(os.getenv("LADIPAGE_ON_VIEW_WORKER_INTERVAL_SECONDS", "15") or "15"),
+        )
+        self.LADIPAGE_ON_VIEW_SLEEP_BETWEEN_JOBS: float = max(
+            0.0,
+            float(os.getenv("LADIPAGE_ON_VIEW_SLEEP_BETWEEN_JOBS", "0.35") or "0.35"),
+        )
+        self.LADIPAGE_ON_VIEW_SCAN_INTERVAL_SECONDS: int = max(
+            60,
+            int(os.getenv("LADIPAGE_ON_VIEW_SCAN_INTERVAL_SECONDS", "900") or "900"),
+        )
+        self.LADIPAGE_ON_VIEW_SCAN_BATCH_SIZE: int = max(
+            1,
+            int(os.getenv("LADIPAGE_ON_VIEW_SCAN_BATCH_SIZE", "15") or "15"),
+        )
+        self.LADIPAGE_ON_VIEW_TRAFFIC_WINDOW_DAYS: int = max(
+            1,
+            int(
+                os.getenv(
+                    "LADIPAGE_ON_VIEW_TRAFFIC_WINDOW_DAYS",
+                    os.getenv("ADMIN_SOURCE_BATCH_TRAFFIC_VIEW_WINDOW_DAYS", "30"),
+                )
+                or "30"
+            ),
+        )
         # SP được coi traffic: nếu đã có admin_source_batch_scanned_at trong N ngày gần → không đưa vào hàng chờ.
         self.ADMIN_SOURCE_BATCH_TRAFFIC_CHECK_GAP_DAYS: int = max(
             1,

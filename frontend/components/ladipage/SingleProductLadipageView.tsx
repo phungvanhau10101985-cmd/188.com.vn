@@ -20,7 +20,7 @@ import { trackMetaViewContentProduct } from '@/lib/meta-pixel';
 import { trackTikTokViewContentProduct } from '@/lib/tiktok-pixel';
 import { trackGoogleAdsViewItemProduct } from '@/lib/google-ads-gtag';
 import { buildAddToCartRequestFromProduct, trackMarketingAddToCartIntent } from '@/lib/marketing-add-to-cart';
-import type { GoogleAutomatedDiscountSsrPayload } from '@/lib/google-automated-discount-server';
+import type { GoogleAutomatedDiscountSsrPayload } from '@/lib/google-automated-discount';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
 import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
 import HeroSection from './HeroSection';

@@ -118,11 +118,21 @@ def track_product_view(
     """Theo dõi sản phẩm đã xem với dữ liệu chi tiết (đăng nhập hoặc phiên khách)."""
     if current_user:
         add_product_view_with_data(db, current_user.id, view_data)
+    else:
+        sid = (x_guest_session_id or "").strip()
+        if not sid:
+            raise HTTPException(status_code=400, detail="Cần đăng nhập hoặc gửi header X-Guest-Session-Id")
+        guest_behavior_crud.add_guest_product_view(db, sid, view_data)
+
+    try:
+        from app.services.ladipage_on_view_worker import enqueue_ladipage_on_view_if_needed
+
+        enqueue_ladipage_on_view_if_needed(int(view_data.product_id), reason="product_view")
+    except Exception as exc:
+        logger.debug("ladipage on-view enqueue skipped: %s", exc)
+
+    if current_user:
         return {"message": "Đã lưu lịch sử xem sản phẩm"}
-    sid = (x_guest_session_id or "").strip()
-    if not sid:
-        raise HTTPException(status_code=400, detail="Cần đăng nhập hoặc gửi header X-Guest-Session-Id")
-    guest_behavior_crud.add_guest_product_view(db, sid, view_data)
     return {"message": "Đã lưu lịch sử xem sản phẩm (phiên khách)"}
 
 def _enrich_behavior_product_data(db: Session, product_id: int, product_data: Any) -> Any:
