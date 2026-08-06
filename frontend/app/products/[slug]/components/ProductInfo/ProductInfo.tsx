@@ -54,6 +54,8 @@ interface ProductInfoProps {
   initialGoogleDiscount?: GoogleAutomatedDiscountSsrPayload | null;
   /** PDP ladipage 1 SP mobile: luôn hiện thanh THÊM GIỎ / MUA HÀNG (không dùng CTA ladipage). */
   enableMobileStickyBar?: boolean;
+  /** Mobile ladipage: bỏ banner sale trùng, tiêu đề gọn, ẩn thống kê lặp. */
+  compactMobile?: boolean;
 }
 
 export default function ProductInfo({ 
@@ -69,6 +71,7 @@ export default function ProductInfo({
   isFavorited = false,
   initialGoogleDiscount = null,
   enableMobileStickyBar = false,
+  compactMobile = false,
 }: ProductInfoProps) {
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedColorIndex, setSelectedColorIndex] = useState(-1);
@@ -406,14 +409,15 @@ export default function ProductInfo({
     ) : null;
 
   return (
-    <div className="space-y-4 md:pb-20">
+    <div className={`md:pb-20 ${compactMobile ? 'space-y-3' : 'space-y-4'}`}>
       <BirthdayPromoBanner
         active={birthdayDiscount.active}
         percent={birthdayDiscount.percent}
         nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
         compact
       />
-      {pricing.sitePhase === 'teaser' && pricing.sitePercent > 0 && (
+      {/* compactMobile: sale đã có trong khối giá — bỏ banner trùng phía trên */}
+      {!compactMobile && pricing.sitePhase === 'teaser' && pricing.sitePercent > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <p className="font-semibold">{pricing.siteLabel ?? 'Sắp sale'} — giảm {pricing.sitePercent}%</p>
           <p className="text-xs mt-0.5">
@@ -422,15 +426,19 @@ export default function ProductInfo({
           </p>
         </div>
       )}
-      {pricing.sitePhase === 'active' && (
+      {!compactMobile && pricing.sitePhase === 'active' && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
           <p className="font-semibold">{pricing.siteLabel ?? 'Đang sale'} — giảm {pricing.sitePercent}% hôm nay</p>
         </div>
       )}
 
-      {/* Product Name and Basic Info */}
+      {/* Product Name and Basic Info — một h1 duy nhất trên mobile ladipage */}
       <div>
-        <h1 className="text-xl font-bold text-gray-900 mb-1 leading-snug">
+        <h1
+          className={`font-bold text-gray-900 mb-1 leading-snug ${
+            compactMobile ? 'text-base' : 'text-xl'
+          }`}
+        >
           {product.name}
           {isAuthenticated && loyaltyTierName !== 'L0' && (
             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 ml-2 align-middle">
@@ -439,7 +447,7 @@ export default function ProductInfo({
           )}
         </h1>
         <AffiliateShareBar shareTitle={product.name} className="mb-2" />
-        {displayableBrandOrOrigin(product.brand_name) && (
+        {!compactMobile && displayableBrandOrOrigin(product.brand_name) && (
           <p className="text-sm text-gray-600 mb-2">Thương hiệu: {displayableBrandOrOrigin(product.brand_name)}</p>
         )}
         
@@ -450,9 +458,9 @@ export default function ProductInfo({
           </span>
         </p>
 
-        <div className="flex items-center space-x-3 mb-2 text-sm">
+        <div className={`flex items-center space-x-3 mb-1 ${compactMobile ? 'text-xs' : 'text-sm'}`}>
           <div className="flex items-center space-x-1">
-            <span className="text-yellow-400 text-base">★</span>
+            <span className={`text-yellow-400 ${compactMobile ? 'text-sm' : 'text-base'}`}>★</span>
             <span className="font-semibold text-gray-700">
               {product.rating_point?.toFixed(1) || '0.0'}
             </span>
@@ -461,6 +469,12 @@ export default function ProductInfo({
           <span className="text-gray-600">{product.rating_total || 0} đánh giá</span>
           <span className="text-gray-400">•</span>
           <span className="text-gray-600">{product.purchases || 0} đã bán</span>
+          {compactMobile && (product.likes ?? 0) > 0 ? (
+            <>
+              <span className="text-gray-400">•</span>
+              <span className="text-gray-600">{product.likes} thích</span>
+            </>
+          ) : null}
         </div>
       </div>
 
@@ -481,7 +495,7 @@ export default function ProductInfo({
           promoLabel={isClearancePdp ? 'Thanh lý kho' : googleDiscount ? 'Google Shopping' : null}
           activePriceLabel={googleDiscount ? 'Giá ưu đãi Google' : null}
           suppressSiteSaleBanners={!!googleDiscount}
-          size="lg"
+          size={compactMobile ? 'sm' : 'lg'}
         />
         {googleDiscount ? (
           <p className="mt-2 text-xs text-emerald-800">
@@ -572,8 +586,8 @@ export default function ProductInfo({
         </div>
       )}
 
-      {/* Action Buttons */}
-      <div ref={actionsRef}>
+      {/* Action Buttons — mobile sticky bar đã có CTA thì ẩn khối nút giữa trang */}
+      <div ref={actionsRef} className={enableMobileStickyBar ? 'hidden md:block' : undefined}>
         <ProductActions
           product={product}
           viewingImageUrl={viewingImageUrl}
@@ -621,18 +635,20 @@ export default function ProductInfo({
         </p>
       </div>
 
-      {/* Thống kê: Đã bán, Lượt thích, Đánh giá */}
-      <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600">
-        <span className="flex items-center gap-1">
-          <span className="text-gray-400">🛒</span> Đã bán: <strong className="text-gray-900">{product.purchases ?? 0}</strong>
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="text-red-400">♥</span> Lượt thích: <strong className="text-gray-900">{product.likes ?? 0}</strong>
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="text-amber-400">★</span> Đánh giá: <strong className="text-gray-900">{product.rating_point?.toFixed(1) ?? '0'}/5</strong> ({(product.rating_total ?? 0)} lượt)
-        </span>
-      </div>
+      {/* Thống kê — compactMobile đã gộp vào dòng dưới tên SP */}
+      {!compactMobile && (
+        <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600">
+          <span className="flex items-center gap-1">
+            <span className="text-gray-400">🛒</span> Đã bán: <strong className="text-gray-900">{product.purchases ?? 0}</strong>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="text-red-400">♥</span> Lượt thích: <strong className="text-gray-900">{product.likes ?? 0}</strong>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="text-amber-400">★</span> Đánh giá: <strong className="text-gray-900">{product.rating_point?.toFixed(1) ?? '0'}/5</strong> ({(product.rating_total ?? 0)} lượt)
+          </span>
+        </div>
+      )}
 
       {/* Dịch vụ */}
       <div>

@@ -195,7 +195,35 @@ export default function SingleProductLadipageView({
 
   const openBuyModal = () => setBuyModalOpen(true);
 
-  const renderProductInfo = (opts?: { enableMobileStickyBar?: boolean }) => (
+  /** Hero copy chỉ hiện khi khác tên SP — tránh trùng h1 trong ProductInfo. */
+  const mobileHeroBlurb = useMemo(() => {
+    const norm = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const productTitle = (product.name || '').trim();
+    const headline = (heroData?.headline || '').trim();
+    const sub = (heroData?.subheadline || '').trim();
+    const nProduct = norm(productTitle);
+    const nHeadline = norm(headline);
+    const nSub = norm(sub);
+    const overlaps = (a: string, b: string) =>
+      !!a && !!b && (a === b || a.includes(b) || b.includes(a));
+
+    const showHeadline = !!headline && !overlaps(nHeadline, nProduct);
+    const showSub =
+      !!sub &&
+      !overlaps(nSub, nProduct) &&
+      (!showHeadline || !overlaps(nSub, nHeadline));
+
+    return { showHeadline, headline, showSub, sub };
+  }, [heroData?.headline, heroData?.subheadline, product.name]);
+
+  const renderProductInfo = (opts?: { enableMobileStickyBar?: boolean; compactMobile?: boolean }) => (
     <ProductInfo
       product={product}
       viewingImageUrl={selectedColorImage}
@@ -209,6 +237,7 @@ export default function SingleProductLadipageView({
       onColorImageChange={setSelectedColorImage}
       initialGoogleDiscount={initialGoogleDiscount}
       enableMobileStickyBar={opts?.enableMobileStickyBar}
+      compactMobile={opts?.compactMobile}
     />
   );
 
@@ -229,8 +258,8 @@ export default function SingleProductLadipageView({
 
   return (
     <ProductReviewsProvider productId={product.id}>
-      {/* Mobile: 1 gallery full-bleed + copy hero gọn + mua hàng — không trùng ảnh */}
-      <div className="md:hidden bg-white pb-28">
+      {/* Mobile: gallery gọn + badge/blurb (không trùng tên SP) + buy-box */}
+      <div className="md:hidden overflow-x-hidden bg-white pb-28">
         <ProductGallery
           layout="bleed"
           product={product}
@@ -238,21 +267,24 @@ export default function SingleProductLadipageView({
           onSelectImage={setSelectedColorImage}
         />
 
-        <div className="px-4 pt-3">
-          <p className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50/80 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-orange-700">
+        {/* Badge + blurb ngắn (nếu khác tên SP); tên chuẩn chỉ nằm trong ProductInfo h1 */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 pt-2.5 pb-1">
+          <p className="inline-flex items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50/80 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-orange-700">
             <span className="h-1.5 w-1.5 rounded-full bg-orange-500" aria-hidden />
             Gợi ý dành cho bạn
           </p>
-          <h1 className="text-base font-bold uppercase leading-tight text-gray-900">
-            {(heroData?.headline || product.name || '').trim() || product.name}
-          </h1>
-          {heroData?.subheadline?.trim() ? (
-            <p className="mt-1.5 text-sm leading-snug text-gray-600">{heroData.subheadline.trim()}</p>
+          {mobileHeroBlurb.showHeadline ? (
+            <p className="text-xs font-medium leading-snug text-orange-900/80">
+              {mobileHeroBlurb.headline}
+            </p>
           ) : null}
         </div>
+        {mobileHeroBlurb.showSub ? (
+          <p className="px-4 pb-1 text-sm leading-snug text-gray-600">{mobileHeroBlurb.sub}</p>
+        ) : null}
 
-        <div id="ladipage-buy-box" className="scroll-mt-4 px-4 pt-3">
-          {renderProductInfo({ enableMobileStickyBar: true })}
+        <div id="ladipage-buy-box" className="scroll-mt-4 px-4 pt-1.5">
+          {renderProductInfo({ enableMobileStickyBar: true, compactMobile: true })}
         </div>
 
         <div className="px-4 pt-2">{renderLadipageSections()}</div>

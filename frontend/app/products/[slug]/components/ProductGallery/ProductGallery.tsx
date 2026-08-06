@@ -154,8 +154,9 @@ export default function ProductGallery({
   };
 
   const thumbSizeClass = isBleed ? 'w-14 h-14' : 'w-16 h-16';
+  // bleed: vuông full-width sát mép (chiều cao = 100vw, không inset)
   const frameAspect = isBleed
-    ? 'aspect-[4/5] max-h-[75vh] relative w-full overflow-hidden bg-gray-100'
+    ? 'aspect-square relative w-full overflow-hidden bg-gray-100'
     : 'aspect-square relative w-full overflow-hidden bg-gray-100 lg:rounded-lg';
 
   const renderVideoSlide = () => {
@@ -187,8 +188,8 @@ export default function ProductGallery({
   const renderPhotoSlide = (url: string) => (
     <ProductFillImage
       src={getOptimizedImage(url, {
-        width: isBleed ? 750 : 900,
-        height: isBleed ? 940 : 900,
+        width: isBleed ? 720 : 900,
+        height: isBleed ? 720 : 900,
         hideProductPng: true,
       })}
       alt={product.name}
@@ -261,14 +262,15 @@ export default function ProductGallery({
 
   if (isBleed) {
     return (
-      <div className="image_list min-w-0">
+      <div className="image_list min-w-0 w-full overflow-x-hidden bg-white">
         {mediaCount > 0 && (
-          <div className="relative">
+          <div className="relative w-full min-w-0 overflow-hidden">
             <MobileProductMediaCarousel
               ref={mediaCarouselRef}
               selectedIndex={selectedIndex}
               onSelectedIndexChange={handleCarouselIndexChange}
               slideCount={mediaCount}
+              className="min-w-0"
             >
               {firstPhotoUrl ? (
                 <MobileProductMediaSlide key={firstPhotoUrl} className="overflow-hidden bg-gray-100">
@@ -288,17 +290,17 @@ export default function ProductGallery({
             </MobileProductMediaCarousel>
             {mediaCount > 1 && (
               <>
-                <div className="pointer-events-none absolute top-3 right-3 z-[1] rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-medium tabular-nums text-white">
+                <div className="pointer-events-none absolute top-2.5 right-2.5 z-[1] rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-medium tabular-nums text-white">
                   {selectedIndex + 1}/{mediaCount}
                 </div>
-                <div className="pointer-events-none absolute bottom-3 left-0 right-0 z-[1] flex items-center justify-center gap-1.5">
-                  {Array.from({ length: Math.min(mediaCount, 12) }, (_, i) => (
+                <div className="pointer-events-none absolute bottom-2.5 left-0 right-0 z-[1] flex items-center justify-center gap-1">
+                  {Array.from({ length: Math.min(mediaCount, 10) }, (_, i) => (
                     <span
                       key={i}
                       className={
                         i === selectedIndex
-                          ? 'h-1.5 w-4 rounded-full bg-white shadow-sm'
-                          : 'h-1.5 w-1.5 rounded-full bg-white/55'
+                          ? 'h-1 w-3.5 rounded-full bg-white shadow-sm'
+                          : 'h-1 w-1 rounded-full bg-white/55'
                       }
                     />
                   ))}

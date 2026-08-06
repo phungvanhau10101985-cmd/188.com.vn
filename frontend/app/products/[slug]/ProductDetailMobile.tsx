@@ -252,13 +252,13 @@ export default function ProductDetailMobile({
   const productCode = product.code || product.product_id || '';
 
   return (
-    <div className="md:hidden min-h-screen bg-white pb-28">
+    <div className="md:hidden min-h-screen overflow-x-hidden bg-white pb-28">
       <NanoAiLauncherGatewaySync payload={nanoPayload} />
 
-      {/* Hero gallery: full-bleed tràn viền, vuốt ngang từng ảnh */}
-      <div className="image_list">
+      {/* Hero gallery: vuông gọn trong viewport, vuốt ngang */}
+      <div className="image_list w-full overflow-x-hidden bg-gray-50">
         {mediaCount > 0 && (
-          <div className="relative">
+          <div className="relative mx-auto w-full max-w-[min(100vw,52dvh)]">
             <MobileProductMediaCarousel
               ref={mediaCarouselRef}
               selectedIndex={selectedImage}
@@ -268,9 +268,9 @@ export default function ProductDetailMobile({
               {firstPhotoUrl ? (
                 <MobileProductMediaSlide key={firstPhotoUrl} className="overflow-hidden bg-gray-100">
                   <ProductFillImage
-                    src={getOptimizedImage(firstPhotoUrl, { width: 750, height: 940, hideProductPng: true })}
+                    src={getOptimizedImage(firstPhotoUrl, { width: 720, height: 720, hideProductPng: true })}
                     alt={product.name}
-                    frameClassName="aspect-[4/5] max-h-[75vh] relative w-full"
+                    frameClassName="aspect-square relative w-full"
                     onBroken={() => markBrokenPhoto(firstPhotoUrl)}
                   >
                     <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
@@ -287,7 +287,7 @@ export default function ProductDetailMobile({
               ) : null}
               {hasVideo && parsedVideo ? (
                 <MobileProductMediaSlide className="overflow-hidden bg-gray-100">
-                  <div className="aspect-[4/5] max-h-[75vh] relative w-full">
+                  <div className="aspect-square relative w-full">
                     {parsedVideo.kind === 'youtube' ? (
                       <>
                         <iframe
@@ -327,9 +327,9 @@ export default function ProductDetailMobile({
               {restPhotoUrls.map((img) => (
                 <MobileProductMediaSlide key={img} className="overflow-hidden bg-gray-100">
                   <ProductFillImage
-                    src={getOptimizedImage(img, { width: 750, height: 940, hideProductPng: true })}
+                    src={getOptimizedImage(img, { width: 720, height: 720, hideProductPng: true })}
                     alt={product.name}
-                    frameClassName="aspect-[4/5] max-h-[75vh] relative w-full"
+                    frameClassName="aspect-square relative w-full"
                     onBroken={() => markBrokenPhoto(img)}
                   >
                     <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
