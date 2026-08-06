@@ -2,6 +2,7 @@
 from datetime import datetime
 from typing import List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.guest_behavior import GuestProductView, GuestFavorite, GuestSearchHistory
@@ -59,6 +60,18 @@ def get_guest_viewed_products(db: Session, session_id: str, limit: int = 20) -> 
         .order_by(GuestProductView.viewed_at.desc())
         .limit(limit)
         .all()
+    )
+
+
+def count_guest_viewed_products(db: Session, session_id: str) -> int:
+    sid = _norm_session(session_id)
+    if not sid:
+        return 0
+    return int(
+        db.query(func.count(GuestProductView.id))
+        .filter(GuestProductView.session_id == sid)
+        .scalar()
+        or 0
     )
 
 
@@ -145,6 +158,18 @@ def get_guest_favorites(db: Session, session_id: str, limit: int = 50) -> List[G
         .order_by(GuestFavorite.created_at.desc())
         .limit(limit)
         .all()
+    )
+
+
+def count_guest_favorites(db: Session, session_id: str) -> int:
+    sid = _norm_session(session_id)
+    if not sid:
+        return 0
+    return int(
+        db.query(func.count(GuestFavorite.id))
+        .filter(GuestFavorite.session_id == sid)
+        .scalar()
+        or 0
     )
 
 

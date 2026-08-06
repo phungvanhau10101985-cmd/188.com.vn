@@ -183,11 +183,11 @@ export default function SingleProductLadipageView({
   };
 
   const heroSection = sections.find((s) => s.section_type === 'hero');
+  const heroData = (heroSection?.data as HeroSectionData | undefined) ?? null;
   const heroCarouselImages = useMemo(() => {
-    if (!heroSection) return [];
-    const data = heroSection.data as HeroSectionData;
-    return buildHeroCarouselUrlsFromProduct(product, data.image_url);
-  }, [heroSection, product]);
+    if (!heroSection || !heroData) return [];
+    return buildHeroCarouselUrlsFromProduct(product, heroData.image_url);
+  }, [heroSection, heroData, product]);
   const highlightsSection = sections.find((s) => s.section_type === 'highlights');
   const materialSection = sections.find((s) => s.section_type === 'material');
   const trustCtaSection = sections.find((s) => s.section_type === 'trust_cta');
@@ -195,12 +195,74 @@ export default function SingleProductLadipageView({
 
   const openBuyModal = () => setBuyModalOpen(true);
 
+  const renderProductInfo = (opts?: { enableMobileStickyBar?: boolean }) => (
+    <ProductInfo
+      product={product}
+      viewingImageUrl={selectedColorImage}
+      onAddToCart={handleAddToCart}
+      onToggleFavorite={handleToggleFavorite}
+      onBuyNow={handleBuyNow}
+      onOpenQA={() => setQaModalOpen(true)}
+      onOpenReviews={() => setReviewsModalOpen(true)}
+      isCartLoading={cartLoading}
+      isFavorited={isFavorited}
+      onColorImageChange={setSelectedColorImage}
+      initialGoogleDiscount={initialGoogleDiscount}
+      enableMobileStickyBar={opts?.enableMobileStickyBar}
+    />
+  );
+
+  const renderLadipageSections = () => (
+    <>
+      {highlightsSection && <HighlightsSection data={highlightsSection.data as HighlightsSectionData} />}
+      {materialSection && <MaterialSection data={materialSection.data as MaterialSectionData} />}
+      <div className="border-t border-gray-100 pt-2">
+        <ProductTabs product={product} />
+      </div>
+      {trustCtaSection && (
+        <TrustCtaSection data={trustCtaSection.data as TrustCtaSectionData} onCtaClick={openBuyModal} />
+      )}
+      {faqSection && <FaqSection data={faqSection.data as FaqSectionData} />}
+      <AgeGenderRecommendationSection excludeProductId={product.id} className="mt-6" />
+    </>
+  );
+
   return (
     <ProductReviewsProvider productId={product.id}>
-      <div className="mx-auto max-w-6xl px-4 pb-28 md:pb-8">
-        {heroSection && (
+      {/* Mobile: 1 gallery full-bleed + copy hero gọn + mua hàng — không trùng ảnh */}
+      <div className="md:hidden bg-white pb-28">
+        <ProductGallery
+          layout="bleed"
+          product={product}
+          selectedImageUrl={selectedColorImage}
+          onSelectImage={setSelectedColorImage}
+        />
+
+        <div className="px-4 pt-3">
+          <p className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50/80 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-orange-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-orange-500" aria-hidden />
+            Gợi ý dành cho bạn
+          </p>
+          <h1 className="text-base font-bold uppercase leading-tight text-gray-900">
+            {(heroData?.headline || product.name || '').trim() || product.name}
+          </h1>
+          {heroData?.subheadline?.trim() ? (
+            <p className="mt-1.5 text-sm leading-snug text-gray-600">{heroData.subheadline.trim()}</p>
+          ) : null}
+        </div>
+
+        <div id="ladipage-buy-box" className="scroll-mt-4 px-4 pt-3">
+          {renderProductInfo({ enableMobileStickyBar: true })}
+        </div>
+
+        <div className="px-4 pt-2">{renderLadipageSections()}</div>
+      </div>
+
+      {/* Desktop: giữ hero marketing + gallery cạnh thông tin mua */}
+      <div className="mx-auto hidden max-w-6xl px-4 pb-8 md:block">
+        {heroSection && heroData && (
           <HeroSection
-            data={heroSection.data as HeroSectionData}
+            data={heroData}
             carouselImages={heroCarouselImages}
             ctaSlot={
               <button
@@ -209,45 +271,27 @@ export default function SingleProductLadipageView({
                 className="inline-flex items-center justify-center rounded-full bg-orange-600 px-7 py-3.5 text-sm font-bold text-white shadow-lg shadow-orange-600/25 transition hover:-translate-y-0.5 hover:bg-orange-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
               >
                 Mua ngay
-                <span aria-hidden="true" className="ml-2 text-base leading-none">→</span>
+                <span aria-hidden="true" className="ml-2 text-base leading-none">
+                  →
+                </span>
               </button>
             }
           />
         )}
         <LadipageTrustStrip />
 
-        <div id="ladipage-buy-box" className="scroll-mt-6 grid grid-cols-1 gap-6 py-6 lg:grid-cols-[1fr_1fr]">
+        <div className="scroll-mt-6 grid grid-cols-1 gap-6 py-6 lg:grid-cols-[1fr_1fr]">
           <div className="self-start">
-            <ProductGallery product={product} selectedImageUrl={selectedColorImage} onSelectImage={setSelectedColorImage} />
+            <ProductGallery
+              product={product}
+              selectedImageUrl={selectedColorImage}
+              onSelectImage={setSelectedColorImage}
+            />
           </div>
-          <ProductInfo
-            product={product}
-            onAddToCart={handleAddToCart}
-            onToggleFavorite={handleToggleFavorite}
-            onBuyNow={handleBuyNow}
-            onOpenQA={() => setQaModalOpen(true)}
-            onOpenReviews={() => setReviewsModalOpen(true)}
-            isCartLoading={cartLoading}
-            isFavorited={isFavorited}
-            onColorImageChange={setSelectedColorImage}
-            initialGoogleDiscount={initialGoogleDiscount}
-            enableMobileStickyBar
-          />
+          {renderProductInfo()}
         </div>
 
-        {highlightsSection && <HighlightsSection data={highlightsSection.data as HighlightsSectionData} />}
-        {materialSection && <MaterialSection data={materialSection.data as MaterialSectionData} />}
-
-        <div className="border-t border-gray-100 pt-2">
-          <ProductTabs product={product} />
-        </div>
-
-        {trustCtaSection && (
-          <TrustCtaSection data={trustCtaSection.data as TrustCtaSectionData} onCtaClick={openBuyModal} />
-        )}
-        {faqSection && <FaqSection data={faqSection.data as FaqSectionData} />}
-
-        <AgeGenderRecommendationSection excludeProductId={product.id} className="mt-6" />
+        {renderLadipageSections()}
       </div>
 
       <ProductBuyModal

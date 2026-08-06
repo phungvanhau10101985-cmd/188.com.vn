@@ -747,6 +747,14 @@ class ApiClient {
     return this.fetch<any[]>(`/user-behavior/products/viewed?limit=${limit}`);
   }
 
+  /** Đếm SP đã xem — nhẹ, dùng badge header. */
+  async getViewedProductsCount(): Promise<number> {
+    const res = await this.fetch<{ count?: number }>('/user-behavior/products/viewed/count').catch(() => ({
+      count: 0,
+    }));
+    return Math.max(0, Number(res?.count) || 0);
+  }
+
   /** Đề xuất tuổi/giới: pool 100 SP peer (cache DB), mỗi lần shuffle; cần đăng nhập + hồ sơ. */
   async getProductsViewedBySameAgeGender(limit = 24): Promise<{
     products: Product[];
@@ -878,6 +886,14 @@ class ApiClient {
 
   async getFavorites(): Promise<any[]> {
     return this.fetch<any[]>('/user-behavior/products/favorites');
+  }
+
+  /** Đếm SP yêu thích — nhẹ, dùng badge. */
+  async getFavoritesCount(): Promise<number> {
+    const res = await this.fetch<{ count?: number }>('/user-behavior/products/favorites/count').catch(() => ({
+      count: 0,
+    }));
+    return Math.max(0, Number(res?.count) || 0);
   }
 
   async isProductFavorited(productId: number): Promise<{ is_favorited: boolean }> {

@@ -176,13 +176,8 @@ export default function FavoritesPage() {
           raw,
           (item: FavoriteItem) => {
             const data = item.product_data || {};
-            return (
-              !data.name ||
-              data.price == null ||
-              data.price === undefined ||
-              !data.main_image ||
-              !data.shop_name_chinese
-            );
+            // Chỉ fetch lại khi thiếu thông tin card cơ bản — shop_name_chinese không chặn render.
+            return !data.name || data.price == null || data.price === undefined || !data.main_image;
           },
           (item, product) => ({
             ...item,
@@ -203,6 +198,7 @@ export default function FavoritesPage() {
         if (cancelled) return;
         setItems(enriched);
         setError(null);
+        // Badge count nhẹ — không tải lại full list.
         void refreshFavorites();
       })
       .catch((e) => {

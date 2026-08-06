@@ -267,9 +267,9 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     }
     let cancelled = false;
     apiClient
-      .getViewedProducts(99)
-      .then((list) => {
-        if (!cancelled) setViewedProductsCount(Array.isArray(list) ? list.length : 0);
+      .getViewedProductsCount()
+      .then((count) => {
+        if (!cancelled) setViewedProductsCount(count);
       })
       .catch(() => {
         if (!cancelled) setViewedProductsCount(0);
@@ -277,7 +277,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, pathname]);
+  }, [isAuthenticated]);
 
   /** Sau khi đóng /cart/add hoặc popup thêm giỏ → về shop và mở lại khung chat NanoAI. */
   useEffect(() => {
@@ -315,8 +315,8 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
         .then((r) => setSuggestions(r.suggestions || []))
         .catch(() => setSuggestions([]));
       apiClient
-        .getViewedProducts(99)
-        .then((list) => setViewedProductsCount(Array.isArray(list) ? list.length : 0))
+        .getViewedProductsCount()
+        .then((count) => setViewedProductsCount(count))
         .catch(() => setViewedProductsCount(0));
     };
     window.addEventListener('188-auth-session-changed', onAuthSession);

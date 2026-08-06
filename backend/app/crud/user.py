@@ -518,6 +518,15 @@ def get_user_viewed_products(db: Session, user_id: int, limit: int = 20) -> List
     ).order_by(UserProductView.viewed_at.desc()).limit(limit).all()
 
 
+def count_user_viewed_products(db: Session, user_id: int) -> int:
+    return int(
+        db.query(func.count(UserProductView.id))
+        .filter(UserProductView.user_id == user_id)
+        .scalar()
+        or 0
+    )
+
+
 # Pool peer lưu cache — xem cohort_view_pool_cache.COHORT_VIEW_POOL_CACHE_SIZE (= 100).
 SAME_AGE_GENDER_RECENT_VIEW_POOL = 100
 
@@ -912,6 +921,15 @@ def get_user_favorites(db: Session, user_id: int, limit: int = 50) -> List[UserF
     return db.query(UserFavorite).filter(
         UserFavorite.user_id == user_id
     ).order_by(UserFavorite.created_at.desc()).limit(limit).all()
+
+
+def count_user_favorites(db: Session, user_id: int) -> int:
+    return int(
+        db.query(func.count(UserFavorite.id))
+        .filter(UserFavorite.user_id == user_id)
+        .scalar()
+        or 0
+    )
 
 
 def is_product_favorited(db: Session, user_id: int, product_id: int) -> bool:

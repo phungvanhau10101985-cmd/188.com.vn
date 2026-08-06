@@ -1,32 +1,43 @@
 // frontend/app/products/[slug]/components/ProductGallery/ProductGallery.tsx
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { Product } from '@/types/api';
 import { mergeProductGalleryPhotoUrls, normalizeProductImageUrl } from '@/lib/product-gallery-merge';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { reportUnreachableProductMedia } from '@/lib/report-broken-product-media';
 import { ProductFillImage, GalleryThumbImage } from '@/components/product-detail/HideOnImageError';
+import MobileProductMediaCarousel, {
+  MobileProductMediaSlide,
+  type MobileProductMediaCarouselHandle,
+} from '@/components/product-detail/MobileProductMediaCarousel';
 import { hasVideoLink, parseVideoLink, buildYoutubeEmbedSrc } from '@/lib/video-utils';
-
-/** Số ô thumbnail khi thu gọn (tối đa 7); ô thứ 8 là «+N» nếu còn ảnh/video. */
-const COLLAPSED_THUMB_COUNT = 7;
 
 interface ProductGalleryProps {
   product: Product;
   selectedImageUrl?: string | null;
   onSelectImage?: (imageUrl: string | null) => void;
+  /** bleed = full-width swipe hero (mobile ladipage / compact PDP) */
+  layout?: 'default' | 'bleed';
 }
 
 type GalleryThumbItem =
   | { kind: 'video'; mediaIndex: number }
   | { kind: 'photo'; mediaIndex: number; url: string };
 
-export default function ProductGallery({ product, selectedImageUrl, onSelectImage }: ProductGalleryProps) {
+export default function ProductGallery({
+  product,
+  selectedImageUrl,
+  onSelectImage,
+  layout = 'default',
+}: ProductGalleryProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [broken, setBroken] = useState<Record<string, true>>({});
-  const [thumbsExpanded, setThumbsExpanded] = useState(false);
+  const mediaCarouselRef = useRef<MobileProductMediaCarouselHandle>(null);
+  const thumbStripRef = useRef<HTMLElement>(null);
+  const thumbButtonRefs = useRef<Record<number, HTMLButtonElement | null>>({});
+  const isBleed = layout === 'bleed';
 
   const parsedVideo = parseVideoLink(product.video_link);
   const hasVideo = hasVideoLink(product.video_link);
@@ -38,14 +49,27 @@ export default function ProductGallery({ product, selectedImageUrl, onSelectImag
     [galleryPhotoUrls, broken],
   );
 
+  // Thứ tự: ảnh đầu → video → ảnh còn lại. Không có ảnh thì video ở index 0.
+  const videoIndex = hasVideo ? (visiblePhotoUrls.length > 0 ? 1 : 0) : -1;
+
   const thumbItems = useMemo((): GalleryThumbItem[] => {
     const items: GalleryThumbItem[] = [];
-    if (hasVideo) items.push({ kind: 'video', mediaIndex: 0 });
-    visiblePhotoUrls.forEach((url, index) => {
-      items.push({ kind: 'photo', mediaIndex: hasVideo ? index + 1 : index, url });
+    if (visiblePhotoUrls.length > 0) {
+      items.push({ kind: 'photo', mediaIndex: 0, url: visiblePhotoUrls[0] });
+    }
+    if (hasVideo) {
+      items.push({ kind: 'video', mediaIndex: videoIndex });
+    }
+    visiblePhotoUrls.slice(1).forEach((url, index) => {
+      const photoIndex = index + 1;
+      items.push({
+        kind: 'photo',
+        mediaIndex: hasVideo ? photoIndex + 1 : photoIndex,
+        url,
+      });
     });
     return items;
-  }, [hasVideo, visiblePhotoUrls]);
+  }, [hasVideo, visiblePhotoUrls, videoIndex]);
 
   const markBroken = useCallback(
     (rawUrl: string) => {
@@ -57,33 +81,54 @@ export default function ProductGallery({ product, selectedImageUrl, onSelectImag
     [product.id],
   );
 
+  const mediaCount = thumbItems.length;
+  const firstPhotoUrl = visiblePhotoUrls[0] ?? null;
+  const restPhotoUrls = visiblePhotoUrls.slice(1);
+
   useEffect(() => {
     setSelectedIndex((prev) => {
-      const n = visiblePhotoUrls.length;
-      if (hasVideo) {
-        if (prev === 0) return prev;
-        if (prev > n) return n >= 1 ? n : 0;
-        return prev;
-      }
-      if (n === 0) return 0;
-      if (prev >= n) return n - 1;
+      if (mediaCount <= 0) return 0;
+      if (prev >= mediaCount) return mediaCount - 1;
       return prev;
     });
-  }, [hasVideo, visiblePhotoUrls]);
+  }, [mediaCount]);
+
+  // Khi chọn ảnh màu từ ProductInfo → nhảy tới slide ảnh tương ứng
+  useEffect(() => {
+    const pick = selectedImageUrl?.trim();
+    if (!pick) return;
+    const abs = normalizeProductImageUrl(pick);
+    const photoIdx = visiblePhotoUrls.findIndex(
+      (u) => u === abs || u === pick || normalizeProductImageUrl(u) === abs,
+    );
+    if (photoIdx < 0) return;
+    const mediaIdx = !hasVideo || visiblePhotoUrls.length === 0
+      ? photoIdx
+      : photoIdx === 0
+        ? 0
+        : photoIdx + 1;
+    setSelectedIndex(mediaIdx);
+    mediaCarouselRef.current?.scrollToIndex(mediaIdx, 'smooth');
+  }, [selectedImageUrl, visiblePhotoUrls, hasVideo]);
 
   useEffect(() => {
-    if (thumbItems.length <= COLLAPSED_THUMB_COUNT) {
-      setThumbsExpanded(false);
-    }
-  }, [thumbItems.length]);
+    if (!isBleed) return;
+    const btn = thumbButtonRefs.current[selectedIndex];
+    const strip = thumbStripRef.current;
+    if (!btn || !strip) return;
+    const stripRect = strip.getBoundingClientRect();
+    const btnRect = btn.getBoundingClientRect();
+    const left = btn.offsetLeft - strip.offsetLeft - (stripRect.width - btnRect.width) / 2;
+    strip.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+  }, [selectedIndex, isBleed, mediaCount]);
 
-  const isShowingVideo = hasVideo && selectedIndex === 0 && !selectedImageUrl?.trim();
-  const mediaCount = thumbItems.length;
+  const isShowingVideo = hasVideo && selectedIndex === videoIndex && !selectedImageUrl?.trim();
 
   const displayPhotoUrl: string | null = (() => {
     if (isShowingVideo) return null;
-    if (hasVideo && selectedIndex > 0) return visiblePhotoUrls[selectedIndex - 1] ?? null;
     if (!hasVideo) return visiblePhotoUrls[selectedIndex] ?? null;
+    if (selectedIndex < videoIndex) return visiblePhotoUrls[selectedIndex] ?? null;
+    if (selectedIndex > videoIndex) return visiblePhotoUrls[selectedIndex - 1] ?? null;
     return null;
   })();
 
@@ -95,128 +140,189 @@ export default function ProductGallery({ product, selectedImageUrl, onSelectImag
       ? (visiblePhotoUrls[0] ?? null)
       : logicalMainUrl;
 
-  const overflowCount = thumbsExpanded ? 0 : Math.max(0, thumbItems.length - COLLAPSED_THUMB_COUNT);
-  const visibleThumbItems = thumbsExpanded
-    ? thumbItems
-    : thumbItems.slice(0, COLLAPSED_THUMB_COUNT);
-
   const selectMedia = (mediaIndex: number, photoUrl?: string) => {
     setSelectedIndex(mediaIndex);
+    mediaCarouselRef.current?.scrollToIndex(mediaIndex);
     onSelectImage?.(photoUrl ?? null);
   };
 
-  const thumbSizeClass = 'w-16 h-16';
+  const handleCarouselIndexChange = (index: number) => {
+    setSelectedIndex(index);
+    const item = thumbItems[index];
+    if (item?.kind === 'photo') onSelectImage?.(item.url);
+    else onSelectImage?.(null);
+  };
+
+  const thumbSizeClass = isBleed ? 'w-14 h-14' : 'w-16 h-16';
+  const frameAspect = isBleed
+    ? 'aspect-[4/5] max-h-[75vh] relative w-full overflow-hidden bg-gray-100'
+    : 'aspect-square relative w-full overflow-hidden bg-gray-100 lg:rounded-lg';
+
+  const renderVideoSlide = () => {
+    if (!parsedVideo) return null;
+    return (
+      <div className={frameAspect}>
+        {parsedVideo.kind === 'youtube' ? (
+          <iframe
+            title={`Video ${product.name}`}
+            src={buildYoutubeEmbedSrc(parsedVideo.urlOrId)}
+            className="absolute inset-0 w-full h-full"
+            loading="lazy"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+            allowFullScreen
+            referrerPolicy="strict-origin-when-cross-origin"
+          />
+        ) : (
+          <video
+            src={parsedVideo.urlOrId}
+            controls
+            className="absolute inset-0 w-full h-full object-contain bg-black"
+            playsInline
+          />
+        )}
+      </div>
+    );
+  };
+
+  const renderPhotoSlide = (url: string) => (
+    <ProductFillImage
+      src={getOptimizedImage(url, {
+        width: isBleed ? 750 : 900,
+        height: isBleed ? 940 : 900,
+        hideProductPng: true,
+      })}
+      alt={product.name}
+      frameClassName={frameAspect}
+      onBroken={() => markBroken(url)}
+    />
+  );
+
+  const thumbStrip = mediaCount > 1 ? (
+    <nav
+      ref={thumbStripRef}
+      className={`product-gallery-thumb-strip flex items-center gap-2 overflow-x-auto scrollbar-hide snap-x snap-mandatory ${
+        isBleed ? 'py-2 px-4' : 'py-1'
+      }`}
+      style={{ WebkitOverflowScrolling: 'touch' }}
+      aria-label="Thư viện ảnh sản phẩm"
+    >
+      {thumbItems.map((item) =>
+        item.kind === 'video' ? (
+          <button
+            key="video"
+            ref={(el) => {
+              thumbButtonRefs.current[item.mediaIndex] = el;
+            }}
+            type="button"
+            onClick={() => selectMedia(item.mediaIndex)}
+            className={`relative flex-shrink-0 snap-center snap-always ${thumbSizeClass} rounded-lg border-2 transition-all overflow-hidden ${
+              selectedIndex === item.mediaIndex
+                ? 'border-[#ea580c] scale-[1.02] shadow-md'
+                : 'border-gray-300 hover:border-gray-400'
+            }`}
+            aria-label="Xem video"
+            aria-current={selectedIndex === item.mediaIndex ? 'true' : undefined}
+          >
+            <div className="relative w-full h-full bg-gray-800">
+              {parsedVideo?.thumbUrl ? (
+                <Image
+                  src={parsedVideo.thumbUrl}
+                  alt=""
+                  width={64}
+                  height={64}
+                  className="w-full h-full object-cover"
+                />
+              ) : null}
+              <span className="absolute inset-0 flex items-center justify-center">
+                <svg className="w-6 h-6 text-white drop-shadow" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </span>
+            </div>
+          </button>
+        ) : (
+          <GalleryThumbImage
+            key={item.url}
+            src={getOptimizedImage(item.url, { width: 64, height: 64, hideProductPng: true })}
+            sizeClass={`${thumbSizeClass} snap-center snap-always flex-shrink-0`}
+            selectedClassName="border-[#ea580c] scale-[1.02] shadow-md"
+            unselectedClassName="border-gray-300 hover:border-gray-400"
+            selected={selectedIndex === item.mediaIndex}
+            onClick={() => selectMedia(item.mediaIndex, item.url)}
+            onBroken={() => markBroken(item.url)}
+            buttonRef={(el) => {
+              thumbButtonRefs.current[item.mediaIndex] = el;
+            }}
+          />
+        ),
+      )}
+    </nav>
+  ) : null;
+
+  if (isBleed) {
+    return (
+      <div className="image_list min-w-0">
+        {mediaCount > 0 && (
+          <div className="relative">
+            <MobileProductMediaCarousel
+              ref={mediaCarouselRef}
+              selectedIndex={selectedIndex}
+              onSelectedIndexChange={handleCarouselIndexChange}
+              slideCount={mediaCount}
+            >
+              {firstPhotoUrl ? (
+                <MobileProductMediaSlide key={firstPhotoUrl} className="overflow-hidden bg-gray-100">
+                  {renderPhotoSlide(firstPhotoUrl)}
+                </MobileProductMediaSlide>
+              ) : null}
+              {hasVideo && parsedVideo ? (
+                <MobileProductMediaSlide className="overflow-hidden bg-gray-100">
+                  {renderVideoSlide()}
+                </MobileProductMediaSlide>
+              ) : null}
+              {restPhotoUrls.map((img) => (
+                <MobileProductMediaSlide key={img} className="overflow-hidden bg-gray-100">
+                  {renderPhotoSlide(img)}
+                </MobileProductMediaSlide>
+              ))}
+            </MobileProductMediaCarousel>
+            {mediaCount > 1 && (
+              <>
+                <div className="pointer-events-none absolute top-3 right-3 z-[1] rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-medium tabular-nums text-white">
+                  {selectedIndex + 1}/{mediaCount}
+                </div>
+                <div className="pointer-events-none absolute bottom-3 left-0 right-0 z-[1] flex items-center justify-center gap-1.5">
+                  {Array.from({ length: Math.min(mediaCount, 12) }, (_, i) => (
+                    <span
+                      key={i}
+                      className={
+                        i === selectedIndex
+                          ? 'h-1.5 w-4 rounded-full bg-white shadow-sm'
+                          : 'h-1.5 w-1.5 rounded-full bg-white/55'
+                      }
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        {thumbStrip}
+      </div>
+    );
+  }
 
   return (
     <div className="image_list min-w-0 flex flex-col gap-2">
-      <div className="min-w-0 w-full">
+      <div className="min-w-0 w-full lg:rounded-lg lg:overflow-hidden">
         {isShowingVideo && parsedVideo ? (
-          <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
-            {parsedVideo.kind === 'youtube' ? (
-              <iframe
-                title={`Video ${product.name}`}
-                src={buildYoutubeEmbedSrc(parsedVideo.urlOrId)}
-                className="w-full h-full"
-                loading="lazy"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-                allowFullScreen
-                referrerPolicy="strict-origin-when-cross-origin"
-              />
-            ) : (
-              <video
-                src={parsedVideo.urlOrId}
-                controls
-                className="w-full h-full object-contain bg-black"
-                playsInline
-              />
-            )}
-          </div>
+          renderVideoSlide()
         ) : mainRaw ? (
-          <ProductFillImage
-            src={getOptimizedImage(mainRaw, { width: 900, height: 900, hideProductPng: true })}
-            alt={product.name}
-            frameClassName="aspect-square relative w-full overflow-hidden rounded-lg bg-gray-100"
-            onBroken={() => markBroken(mainRaw)}
-          />
+          renderPhotoSlide(mainRaw)
         ) : null}
       </div>
 
-      {mediaCount > 1 && (
-        <div className="min-w-0">
-          <nav
-            className="product-gallery-thumb-strip flex items-center gap-2 overflow-x-auto scrollbar-hide snap-x snap-mandatory py-1"
-            aria-label="Thư viện ảnh sản phẩm"
-          >
-            {visibleThumbItems.map((item) =>
-              item.kind === 'video' ? (
-                <button
-                  key="video"
-                  type="button"
-                  onClick={() => selectMedia(0)}
-                  className={`relative flex-shrink-0 snap-center ${thumbSizeClass} rounded-lg border-2 transition-all overflow-hidden ${
-                    selectedIndex === 0
-                      ? 'border-[#ea580c] scale-[1.02] shadow-md'
-                      : 'border-gray-300 hover:border-gray-400'
-                  }`}
-                  aria-label="Xem video"
-                  aria-current={selectedIndex === 0 ? 'true' : undefined}
-                >
-                  <div className="relative w-full h-full bg-gray-800">
-                    {parsedVideo?.thumbUrl ? (
-                      <Image
-                        src={parsedVideo.thumbUrl}
-                        alt=""
-                        width={64}
-                        height={64}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : null}
-                    <span className="absolute inset-0 flex items-center justify-center">
-                      <svg className="w-6 h-6 text-white drop-shadow" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
-                    </span>
-                  </div>
-                </button>
-              ) : (
-                <GalleryThumbImage
-                  key={item.url}
-                  src={getOptimizedImage(item.url, { width: 64, height: 64, hideProductPng: true })}
-                  sizeClass={`${thumbSizeClass} snap-center flex-shrink-0`}
-                  selectedClassName="border-[#ea580c] scale-[1.02] shadow-md"
-                  unselectedClassName="border-gray-300 hover:border-gray-400"
-                  selected={selectedIndex === item.mediaIndex}
-                  onClick={() => selectMedia(item.mediaIndex, item.url)}
-                  onBroken={() => markBroken(item.url)}
-                />
-              ),
-            )}
-
-            {overflowCount > 0 && (
-              <button
-                type="button"
-                onClick={() => setThumbsExpanded(true)}
-                className={`flex-shrink-0 snap-center ${thumbSizeClass} rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 text-xs font-semibold text-gray-600 hover:border-[#ea580c] hover:text-[#ea580c] hover:bg-orange-50 transition-colors`}
-                aria-label={`Xem thêm ${overflowCount} ảnh`}
-              >
-                +{overflowCount}
-              </button>
-            )}
-          </nav>
-
-          {thumbsExpanded && thumbItems.length > COLLAPSED_THUMB_COUNT && (
-            <div className="flex justify-end mt-1">
-              <button
-                type="button"
-                onClick={() => setThumbsExpanded(false)}
-                className="text-xs font-medium text-gray-500 hover:text-[#ea580c] transition-colors"
-              >
-                Thu gọn
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      {thumbStrip}
 
       {process.env.NODE_ENV === 'development' && (
         <div className="text-xs text-gray-500 mt-2 p-2 bg-gray-50 rounded">

@@ -17,8 +17,8 @@ export function FavoriteProvider({ children }: { children: ReactNode }) {
 
   const refreshFavorites = useCallback(async () => {
     try {
-      const list = await apiClient.getFavorites();
-      setFavoriteCount(Array.isArray(list) ? list.length : 0);
+      const count = await apiClient.getFavoritesCount();
+      setFavoriteCount(count);
     } catch {
       setFavoriteCount(0);
     }

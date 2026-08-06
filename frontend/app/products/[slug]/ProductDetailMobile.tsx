@@ -73,7 +73,7 @@ export default function ProductDetailMobile({
   initialGoogleDiscount = null,
 }: ProductDetailMobileProps) {
   const [selectedImage, setSelectedImage] = useState(0);
-  const thumbStripRef = useRef<HTMLDivElement>(null);
+  const thumbStripRef = useRef<HTMLElement>(null);
   const thumbButtonRefs = useRef<Record<number, HTMLButtonElement | null>>({});
   const mediaCarouselRef = useRef<MobileProductMediaCarouselHandle>(null);
   const [variantModalOpen, setVariantModalOpen] = useState(false);
@@ -170,23 +170,36 @@ export default function ProductDetailMobile({
     [galleryPhotoUrls, brokenPhoto],
   );
 
+  // Hero order: ảnh đầu → video → ảnh còn lại. Không có ảnh thì video ở index 0.
+  const videoIndex = hasVideo ? (visiblePhotoUrls.length > 0 ? 1 : 0) : -1;
+  const mediaCount = hasVideo ? 1 + visiblePhotoUrls.length : visiblePhotoUrls.length;
+  const isShowingVideo = hasVideo && selectedImage === videoIndex;
+
+  const photoIndexFromMediaIndex = useCallback(
+    (mediaIndex: number): number | null => {
+      if (!hasVideo) return mediaIndex;
+      if (mediaIndex === videoIndex) return null;
+      if (visiblePhotoUrls.length === 0) return null;
+      return mediaIndex < videoIndex ? mediaIndex : mediaIndex - 1;
+    },
+    [hasVideo, videoIndex, visiblePhotoUrls.length],
+  );
+
+  const mediaIndexFromPhotoIndex = useCallback(
+    (photoIndex: number): number => {
+      if (!hasVideo || visiblePhotoUrls.length === 0) return photoIndex;
+      return photoIndex === 0 ? 0 : photoIndex + 1;
+    },
+    [hasVideo, visiblePhotoUrls.length],
+  );
+
   useEffect(() => {
     setSelectedImage((prev) => {
-      const n = visiblePhotoUrls.length;
-      if (hasVideo) {
-        if (prev === 0) return prev;
-        if (prev > n) return n >= 1 ? n : 0;
-        return prev;
-      }
-      if (n === 0) return 0;
-      if (prev >= n) return n - 1;
+      if (mediaCount <= 0) return 0;
+      if (prev >= mediaCount) return mediaCount - 1;
       return prev;
     });
-  }, [hasVideo, visiblePhotoUrls]);
-
-  // Khi có video: index 0 = video, sau đó mới đến ảnh. Video luôn hiển thị đầu tiên.
-  const mediaCount = hasVideo ? 1 + visiblePhotoUrls.length : visiblePhotoUrls.length;
-  const isShowingVideo = hasVideo && selectedImage === 0;
+  }, [mediaCount]);
 
   const selectMediaIndex = useCallback((index: number) => {
     setSelectedImage(index);
@@ -205,8 +218,13 @@ export default function ProductDetailMobile({
 
   const mainImageRaw = isShowingVideo
     ? null
-    : (visiblePhotoUrls[hasVideo ? selectedImage - 1 : selectedImage] ?? null);
+    : (() => {
+        const photoIdx = photoIndexFromMediaIndex(selectedImage);
+        return photoIdx == null ? null : (visiblePhotoUrls[photoIdx] ?? null);
+      })();
   const videoThumb = parsedVideo?.thumbUrl ?? null;
+  const firstPhotoUrl = visiblePhotoUrls[0] ?? null;
+  const restPhotoUrls = visiblePhotoUrls.slice(1);
 
   const nanoPayload = buildNanoAiGatewayPayloadFrom188Product(product, {
     imageUrl: mainImageRaw,
@@ -236,116 +254,151 @@ export default function ProductDetailMobile({
   return (
     <div className="md:hidden min-h-screen bg-white pb-28">
       <NanoAiLauncherGatewaySync payload={nanoPayload} />
-      <div className="px-4 py-3">
-        <BirthdayPromoBanner
-          active={birthdayDiscount.active}
-          percent={birthdayDiscount.percent}
-          nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
-          compact
-          className="mb-3"
-        />
 
-        {/* Tiêu đề sản phẩm */}
-        <h1 className="text-base font-bold text-gray-900 leading-tight mb-3 uppercase">
-          {product.name}
-          {isAuthenticated && loyaltyTierName !== 'L0' && (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 ml-2 align-middle">
-              Hạng thành viên {loyaltyTierName}
-            </span>
-          )}
-        </h1>
-
-        <AffiliateShareBar shareTitle={product.name} className="mb-3" />
-
-        <div className="image_list mb-2">
-        {/* Main media: vuốt ngang trượt mượt (scroll-snap), không nhảy ảnh đột ngột */}
+      {/* Hero gallery: full-bleed tràn viền, vuốt ngang từng ảnh */}
+      <div className="image_list">
         {mediaCount > 0 && (
-          <MobileProductMediaCarousel
-            ref={mediaCarouselRef}
-            selectedIndex={selectedImage}
-            onSelectedIndexChange={setSelectedImage}
-            slideCount={mediaCount}
-            className="mb-2"
-          >
-            {hasVideo && parsedVideo ? (
-              <MobileProductMediaSlide className="rounded-xl overflow-hidden bg-gray-100">
-                <div className="aspect-[4/5] max-h-[70vh] relative">
-                  {parsedVideo.kind === 'youtube' ? (
-                    <>
-                      <iframe
-                        title={`Video ${product.name}`}
-                        src={buildYoutubeEmbedSrc(parsedVideo.urlOrId)}
-                        className="absolute inset-0 w-full h-full"
-                        loading="lazy"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-                        allowFullScreen
-                        referrerPolicy="strict-origin-when-cross-origin"
-                      />
-                      <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
-                        <span className="w-5 h-5 rounded-full bg-white/80 flex items-center justify-center text-black font-bold text-[10px]">T</span>
-                        <span className="font-medium truncate max-w-[120px]">{product.brand_name || '188 com vn Thời Trang'}</span>
-                      </div>
-                      <div className="absolute bottom-0 left-0 right-0 bg-black text-white text-xs py-2 px-3 flex items-center justify-center gap-2">
-                        <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" /></svg>
-                        Xem trên YouTube
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <video
-                        src={parsedVideo.urlOrId}
-                        controls
-                        className="absolute inset-0 w-full h-full object-contain bg-black"
-                        playsInline
-                      />
-                      <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
-                        <span className="font-medium truncate max-w-[120px]">{product.brand_name || '188 com vn'}</span>
-                      </div>
-                    </>
-                  )}
+          <div className="relative">
+            <MobileProductMediaCarousel
+              ref={mediaCarouselRef}
+              selectedIndex={selectedImage}
+              onSelectedIndexChange={setSelectedImage}
+              slideCount={mediaCount}
+            >
+              {firstPhotoUrl ? (
+                <MobileProductMediaSlide key={firstPhotoUrl} className="overflow-hidden bg-gray-100">
+                  <ProductFillImage
+                    src={getOptimizedImage(firstPhotoUrl, { width: 750, height: 940, hideProductPng: true })}
+                    alt={product.name}
+                    frameClassName="aspect-[4/5] max-h-[75vh] relative w-full"
+                    onBroken={() => markBrokenPhoto(firstPhotoUrl)}
+                  >
+                    <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
+                      <span className="font-medium truncate max-w-[140px]">{product.brand_name || '188 com vn'}</span>
+                    </div>
+                    <div className="absolute bottom-2 left-2 flex gap-2">
+                      <ProductShareIconButton shareTitle={product.name} />
+                      <Link href="/da-xem" className="w-8 h-8 rounded-full bg-white/80 flex items-center justify-center" aria-label="Sản phẩm đã xem">
+                        <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      </Link>
+                    </div>
+                  </ProductFillImage>
+                </MobileProductMediaSlide>
+              ) : null}
+              {hasVideo && parsedVideo ? (
+                <MobileProductMediaSlide className="overflow-hidden bg-gray-100">
+                  <div className="aspect-[4/5] max-h-[75vh] relative w-full">
+                    {parsedVideo.kind === 'youtube' ? (
+                      <>
+                        <iframe
+                          title={`Video ${product.name}`}
+                          src={buildYoutubeEmbedSrc(parsedVideo.urlOrId)}
+                          className="absolute inset-0 w-full h-full"
+                          loading="lazy"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+                          allowFullScreen
+                          referrerPolicy="strict-origin-when-cross-origin"
+                        />
+                        <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
+                          <span className="w-5 h-5 rounded-full bg-white/80 flex items-center justify-center text-black font-bold text-[10px]">T</span>
+                          <span className="font-medium truncate max-w-[120px]">{product.brand_name || '188 com vn Thời Trang'}</span>
+                        </div>
+                        <div className="absolute bottom-0 left-0 right-0 bg-black text-white text-xs py-2 px-3 flex items-center justify-center gap-2">
+                          <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" /></svg>
+                          Xem trên YouTube
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <video
+                          src={parsedVideo.urlOrId}
+                          controls
+                          className="absolute inset-0 w-full h-full object-contain bg-black"
+                          playsInline
+                        />
+                        <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
+                          <span className="font-medium truncate max-w-[120px]">{product.brand_name || '188 com vn'}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </MobileProductMediaSlide>
+              ) : null}
+              {restPhotoUrls.map((img) => (
+                <MobileProductMediaSlide key={img} className="overflow-hidden bg-gray-100">
+                  <ProductFillImage
+                    src={getOptimizedImage(img, { width: 750, height: 940, hideProductPng: true })}
+                    alt={product.name}
+                    frameClassName="aspect-[4/5] max-h-[75vh] relative w-full"
+                    onBroken={() => markBrokenPhoto(img)}
+                  >
+                    <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
+                      <span className="font-medium truncate max-w-[140px]">{product.brand_name || '188 com vn'}</span>
+                    </div>
+                    <div className="absolute bottom-2 left-2 flex gap-2">
+                      <ProductShareIconButton shareTitle={product.name} />
+                      <Link href="/da-xem" className="w-8 h-8 rounded-full bg-white/80 flex items-center justify-center" aria-label="Sản phẩm đã xem">
+                        <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      </Link>
+                    </div>
+                  </ProductFillImage>
+                </MobileProductMediaSlide>
+              ))}
+            </MobileProductMediaCarousel>
+            {mediaCount > 1 && (
+              <>
+                <div className="pointer-events-none absolute top-3 right-3 z-[1] rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-medium tabular-nums text-white">
+                  {selectedImage + 1}/{mediaCount}
                 </div>
-              </MobileProductMediaSlide>
-            ) : null}
-            {visiblePhotoUrls.map((img) => (
-              <MobileProductMediaSlide key={img} className="rounded-xl overflow-hidden bg-gray-100">
-                <ProductFillImage
-                  src={getOptimizedImage(img, { width: 600, height: 750, hideProductPng: true })}
-                  alt={product.name}
-                  onBroken={() => markBrokenPhoto(img)}
-                >
-                  <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
-                    <span className="font-medium truncate max-w-[140px]">{product.brand_name || '188 com vn'}</span>
-                  </div>
-                  <div className="absolute bottom-2 left-2 flex gap-2">
-                    <ProductShareIconButton shareTitle={product.name} />
-                    <Link href="/da-xem" className="w-8 h-8 rounded-full bg-white/80 flex items-center justify-center" aria-label="Sản phẩm đã xem">
-                      <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    </Link>
-                  </div>
-                </ProductFillImage>
-              </MobileProductMediaSlide>
-            ))}
-          </MobileProductMediaCarousel>
+                <div className="pointer-events-none absolute bottom-3 left-0 right-0 z-[1] flex items-center justify-center gap-1.5">
+                  {Array.from({ length: mediaCount }, (_, i) => (
+                    <span
+                      key={i}
+                      className={
+                        i === selectedImage
+                          ? 'h-1.5 w-4 rounded-full bg-white shadow-sm'
+                          : 'h-1.5 w-1.5 rounded-full bg-white/55'
+                      }
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         )}
-        {/* Thumbnail dưới khung ảnh chính: chỉ hiển thị nút video khi có video_url; video luôn đầu tiên */}
+
+        {/* Thumbnail: vuốt ngang xem toàn bộ ảnh */}
         {mediaCount > 1 && (
-          <div
+          <nav
             ref={thumbStripRef}
-            className="product-gallery-thumb-strip flex items-center gap-2 overflow-x-auto scrollbar-hide snap-x snap-mandatory py-2 -mx-4 px-4"
+            className="product-gallery-thumb-strip flex items-center gap-2 overflow-x-auto scrollbar-hide snap-x snap-mandatory py-2 px-4"
             style={{ WebkitOverflowScrolling: 'touch' }}
             aria-label="Thư viện ảnh sản phẩm"
           >
+            {firstPhotoUrl ? (
+              <GalleryThumbImage
+                key={firstPhotoUrl}
+                src={getOptimizedImage(firstPhotoUrl, { width: 64, height: 64, hideProductPng: true })}
+                selected={selectedImage === 0}
+                onClick={() => selectMediaIndex(0)}
+                onBroken={() => markBrokenPhoto(firstPhotoUrl)}
+                buttonRef={(el) => {
+                  thumbButtonRefs.current[0] = el;
+                }}
+              />
+            ) : null}
             {hasVideo && (
               <button
                 ref={(el) => {
-                  thumbButtonRefs.current[0] = el;
+                  thumbButtonRefs.current[videoIndex] = el;
                 }}
                 type="button"
-                onClick={() => selectMediaIndex(0)}
+                onClick={() => selectMediaIndex(videoIndex)}
                 className={`relative flex-shrink-0 w-16 h-16 snap-center snap-always rounded-lg overflow-hidden border-2 ${
-                  selectedImage === 0 ? 'border-[#ea580c]' : 'border-gray-200'
+                  selectedImage === videoIndex ? 'border-[#ea580c]' : 'border-gray-200'
                 }`}
                 aria-label="Xem video"
+                aria-current={selectedImage === videoIndex ? 'true' : undefined}
               >
                 {videoThumb ? (
                   <Image src={videoThumb} alt="Video" width={64} height={64} className="w-full h-full object-cover" />
@@ -357,8 +410,9 @@ export default function ProductDetailMobile({
                 </span>
               </button>
             )}
-            {visiblePhotoUrls.map((img, i) => {
-              const mediaIndex = hasVideo ? i + 1 : i;
+            {restPhotoUrls.map((img, i) => {
+              const photoIndex = i + 1;
+              const mediaIndex = mediaIndexFromPhotoIndex(photoIndex);
               return (
                 <GalleryThumbImage
                   key={img}
@@ -379,10 +433,30 @@ export default function ProductDetailMobile({
             >
               {isAffiliateApproved ? 'Copy link giới thiệu' : 'Copy link'}
             </button>
-          </div>
+          </nav>
         )}
+      </div>
 
-        </div>
+      <div className="px-4 py-3">
+        <BirthdayPromoBanner
+          active={birthdayDiscount.active}
+          percent={birthdayDiscount.percent}
+          nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
+          compact
+          className="mb-3"
+        />
+
+        {/* Tiêu đề sản phẩm */}
+        <h1 className="text-base font-bold text-gray-900 leading-tight mb-3 uppercase">
+          {product.name}
+          {isAuthenticated && loyaltyTierName !== 'L0' && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 ml-2 align-middle">
+              Hạng thành viên {loyaltyTierName}
+            </span>
+          )}
+        </h1>
+
+        <AffiliateShareBar shareTitle={product.name} className="mb-3" />
 
         {productCode && (
           <p className="text-xs text-gray-600 mb-2">

@@ -624,27 +624,78 @@ def enrich_snapshot_product_data_for_card(
     product_data: Any,
 ) -> Dict[str, Any]:
     """Bổ sung warehouse_variants / Màu·Size cho snapshot (đã xem, yêu thích, …)."""
-    base: Dict[str, Any] = dict(product_data) if isinstance(product_data, dict) else {}
-    if base.get("warehouse_variants"):
-        return base
+    out = enrich_snapshot_product_data_batch(db, [(int(product_id), product_data)])
     try:
         pid = int(product_id)
     except (TypeError, ValueError):
-        return base
-    row = db.query(Product).filter(Product.id == pid).first()
-    if row is None:
-        return base
-    if getattr(row, "is_warehouse_clearance", False):
-        enrich_standalone_warehouse_product(db, base, row)
-        base["is_warehouse_clearance"] = True
-        base["product_id"] = getattr(row, "product_id", None) or base.get("product_id")
-        if row.sizes is not None:
-            base["sizes"] = row.sizes
-        if row.colors is not None:
-            base["colors"] = row.colors
-    else:
-        enrich_parent_with_warehouse_clearance(db, base, row)
-    return base
+        return dict(product_data) if isinstance(product_data, dict) else {}
+    return out.get(pid) or (dict(product_data) if isinstance(product_data, dict) else {})
+
+
+def enrich_snapshot_product_data_batch(
+    db: Session,
+    items: List[Tuple[int, Any]],
+) -> Dict[int, Dict[str, Any]]:
+    """
+    Enrich snapshot product_data theo lô (đã xem / yêu thích).
+    Tránh N+1 Product + settings + warehouse LIKE từng dòng.
+    """
+    result: Dict[int, Dict[str, Any]] = {}
+    need_rows: List[Tuple[int, Dict[str, Any]]] = []
+
+    for product_id, product_data in items:
+        try:
+            pid = int(product_id)
+        except (TypeError, ValueError):
+            continue
+        base: Dict[str, Any] = dict(product_data) if isinstance(product_data, dict) else {}
+        # Đã gắn variants (kể cả []) hoặc warehouse_clearance → không query lại.
+        if "warehouse_variants" in base or base.get("warehouse_clearance") is not None:
+            result[pid] = base
+            continue
+        need_rows.append((pid, base))
+
+    if not need_rows:
+        return result
+
+    ids = [pid for pid, _ in need_rows]
+    products = db.query(Product).filter(Product.id.in_(ids)).all()
+    by_id = {int(p.id): p for p in products}
+
+    pairs: List[Tuple[Any, Dict[str, Any]]] = []
+    for pid, base in need_rows:
+        row = by_id.get(pid)
+        if row is None:
+            result[pid] = base
+            continue
+        if getattr(row, "is_warehouse_clearance", False):
+            base["is_warehouse_clearance"] = True
+            base["product_id"] = getattr(row, "product_id", None) or base.get("product_id")
+            if row.sizes is not None:
+                base["sizes"] = row.sizes
+            if row.colors is not None:
+                base["colors"] = row.colors
+        else:
+            # Đồng bộ shop cho thẻ yêu thích (tránh vòng fetch by-ids phía FE).
+            shop = getattr(row, "shop_name_chinese", None)
+            if shop and not base.get("shop_name_chinese"):
+                base["shop_name_chinese"] = shop
+            if not base.get("slug") and getattr(row, "slug", None):
+                base["slug"] = row.slug
+            if not base.get("name") and getattr(row, "name", None):
+                base["name"] = row.name
+            if base.get("price") is None and getattr(row, "price", None) is not None:
+                base["price"] = row.price
+            if not base.get("main_image") and getattr(row, "main_image", None):
+                base["main_image"] = row.main_image
+            if not base.get("brand_name") and getattr(row, "brand_name", None):
+                base["brand_name"] = row.brand_name
+        pairs.append((row, base))
+        result[pid] = base
+
+    if pairs:
+        enrich_listing_product_payloads_batched(db, pairs)
+    return result
 
 
 def enrich_listing_product_payloads(

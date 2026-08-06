@@ -35,10 +35,10 @@ from app.crud.home_recommendation_snapshot import (
     home_snapshot_version_key,
 )
 from app.crud.user import (
-    add_product_view_with_data, get_user_viewed_products,
+    add_product_view_with_data, get_user_viewed_products, count_user_viewed_products,
     get_products_viewed_by_same_age_gender, get_products_same_shop_as_recent_views,
     add_favorite_product_with_data, remove_favorite_product,
-    get_user_favorites, is_product_favorited,
+    get_user_favorites, count_user_favorites, is_product_favorited,
     add_category_view_with_name, get_user_viewed_categories,
     add_brand_view, get_user_viewed_brands,
     add_search_history,
@@ -135,10 +135,12 @@ def track_product_view(
         return {"message": "Đã lưu lịch sử xem sản phẩm"}
     return {"message": "Đã lưu lịch sử xem sản phẩm (phiên khách)"}
 
-def _enrich_behavior_product_data(db: Session, product_id: int, product_data: Any) -> Any:
-    from app.services.warehouse_clearance import enrich_snapshot_product_data_for_card
+def _enrich_behavior_rows(db: Session, rows: list) -> dict[int, Any]:
+    """Enrich product_data theo lô — một query Product + batch warehouse."""
+    from app.services.warehouse_clearance import enrich_snapshot_product_data_batch
 
-    return enrich_snapshot_product_data_for_card(db, product_id, product_data)
+    items = [(int(r.product_id), r.product_data) for r in rows]
+    return enrich_snapshot_product_data_batch(db, items)
 
 
 @router.get("/products/viewed", response_model=list[ProductViewResponse])
@@ -151,12 +153,13 @@ def get_viewed_products(
     """Lấy danh sách sản phẩm đã xem"""
     if current_user:
         rows = get_user_viewed_products(db, current_user.id, limit)
+        enriched = _enrich_behavior_rows(db, rows)
         return [
             ProductViewResponse(
                 id=r.id,
                 user_id=r.user_id,
                 product_id=r.product_id,
-                product_data=_enrich_behavior_product_data(db, r.product_id, r.product_data),
+                product_data=enriched.get(int(r.product_id), r.product_data or {}),
                 time_spent_seconds=r.time_spent_seconds or 0,
                 viewed_at=r.viewed_at,
             )
@@ -166,17 +169,33 @@ def get_viewed_products(
     if not sid:
         return []
     rows = guest_behavior_crud.get_guest_viewed_products(db, sid, limit)
+    enriched = _enrich_behavior_rows(db, rows)
     return [
         ProductViewResponse(
             id=r.id,
             user_id=None,
             product_id=r.product_id,
-            product_data=_enrich_behavior_product_data(db, r.product_id, r.product_data),
+            product_data=enriched.get(int(r.product_id), r.product_data or {}),
             time_spent_seconds=r.time_spent_seconds or 0,
             viewed_at=r.viewed_at,
         )
         for r in rows
     ]
+
+
+@router.get("/products/viewed/count", response_model=dict)
+def get_viewed_products_count(
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
+):
+    """Đếm số SP đã xem — nhẹ, dùng cho badge header (không enrich)."""
+    if current_user:
+        return {"count": count_user_viewed_products(db, current_user.id)}
+    sid = (x_guest_session_id or "").strip()
+    if not sid:
+        return {"count": 0}
+    return {"count": guest_behavior_crud.count_guest_viewed_products(db, sid)}
 
 
 @router.get("/products/viewed-by-same-age-gender", response_model=dict)
@@ -498,12 +517,13 @@ def get_favorite_products(
     """Lấy danh sách sản phẩm yêu thích"""
     if current_user:
         rows = get_user_favorites(db, current_user.id, limit)
+        enriched = _enrich_behavior_rows(db, rows)
         return [
             FavoriteResponse(
                 id=r.id,
                 user_id=r.user_id,
                 product_id=r.product_id,
-                product_data=_enrich_behavior_product_data(db, r.product_id, r.product_data),
+                product_data=enriched.get(int(r.product_id), r.product_data or {}),
                 created_at=r.created_at,
             )
             for r in rows
@@ -512,16 +532,32 @@ def get_favorite_products(
     if not sid:
         return []
     rows = guest_behavior_crud.get_guest_favorites(db, sid, limit)
+    enriched = _enrich_behavior_rows(db, rows)
     return [
         FavoriteResponse(
             id=r.id,
             user_id=None,
             product_id=r.product_id,
-            product_data=_enrich_behavior_product_data(db, r.product_id, r.product_data),
+            product_data=enriched.get(int(r.product_id), r.product_data or {}),
             created_at=r.created_at,
         )
         for r in rows
     ]
+
+
+@router.get("/products/favorites/count", response_model=dict)
+def get_favorite_products_count(
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
+):
+    """Đếm số SP yêu thích — nhẹ, dùng cho badge (không enrich)."""
+    if current_user:
+        return {"count": count_user_favorites(db, current_user.id)}
+    sid = (x_guest_session_id or "").strip()
+    if not sid:
+        return {"count": 0}
+    return {"count": guest_behavior_crud.count_guest_favorites(db, sid)}
 
 @router.get("/products/{product_id}/is-favorited")
 def check_product_favorited(

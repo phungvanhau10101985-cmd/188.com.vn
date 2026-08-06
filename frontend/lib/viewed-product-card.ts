@@ -32,11 +32,11 @@ export function snapshotNeedsProductRefresh(data: Record<string, unknown>): bool
   return missingBasics || neverEnrichedClearance;
 }
 
-/** Snapshot chưa có biến thể kho — cần gọi GET /products/:id để lấy warehouse_variants. */
+/** Snapshot chưa enrich kho — chỉ fetch by-ids khi API chưa gắn warehouse_clearance/variants. */
 export function snapshotNeedsClearanceEnrich(data: Record<string, unknown>): boolean {
   if (data.is_warehouse_clearance === true) return false;
-  const variants = data.warehouse_variants;
-  if (Array.isArray(variants) && variants.length > 0) return false;
+  // API đã batch-enrich (kể cả variants rỗng) → không gọi lại by-ids.
+  if (Array.isArray(data.warehouse_variants) || data.warehouse_clearance !== undefined) return false;
   if (String(data.product_id || '').includes('/')) return false;
   return true;
 }
