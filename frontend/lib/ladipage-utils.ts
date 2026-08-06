@@ -1,21 +1,28 @@
-import type { AdminProduct } from '@/lib/admin-api';
 import type { HeroImageOption } from '@/components/ladipage/types';
 
 export type { HeroImageOption };
+
+/** SP public (Product) hoặc admin — chỉ cần trường ảnh cho hero/material picker. */
+export type LadipageProductImageSource = {
+  id: number;
+  name: string;
+  main_image?: string | null;
+  images?: string[] | null;
+  gallery?: string[] | null;
+  color_image_urls?: string[] | null;
+  color_variants?: Array<{ name?: string | null; img?: string | null }> | null;
+  colors?: Array<{ name?: string; img?: string; value?: string }> | null;
+};
 
 export function sortProductsByIds<T extends { id: number }>(products: T[], ids: number[]): T[] {
   const order = new Map(ids.map((id, index) => [id, index]));
   return [...products].sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
 }
 
-type LooseProduct = AdminProduct & {
-  color_image_urls?: string[];
-  color_variants?: Array<{ name?: string | null; img?: string | null }>;
-  colors?: Array<{ name?: string; img?: string; value?: string }>;
-};
+type LooseProduct = LadipageProductImageSource;
 
 /** Gom ảnh đại diện, gallery, chi tiết, màu — dùng chọn hero / ảnh chất liệu ladipage 1 SP. */
-export function buildProductImageOptionsFromProducts(products: LooseProduct[]): HeroImageOption[] {
+export function buildProductImageOptionsFromProducts(products: LadipageProductImageSource[]): HeroImageOption[] {
   const options: HeroImageOption[] = [];
   const seen = new Set<string>();
 
@@ -82,7 +89,7 @@ export function buildProductImageOptionsFromProducts(products: LooseProduct[]): 
 
 /** URL ảnh hero carousel: ảnh hero đã chọn trước, sau đó gallery SP (dedupe). */
 export function buildHeroCarouselUrlsFromProduct(
-  product: LooseProduct,
+  product: LadipageProductImageSource,
   heroImageUrl?: string | null,
   maxSlides = 12,
 ): string[] {
