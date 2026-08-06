@@ -350,6 +350,48 @@ export function trackMetaViewContentProduct(
   });
 }
 
+let lastGroupViewContentFingerprint: string | null = null;
+let lastGroupViewContentAtMs = 0;
+
+/**
+ * ViewContent cho trang hiển thị NHIỀU sản phẩm cùng lúc (vd ladipage theo danh mục/nhiều SP
+ * chọn) — `content_type: 'product_group'`, gộp content_ids từ tất cả sản phẩm hiển thị.
+ */
+export function trackMetaViewContentProducts(
+  products: Product[],
+  opts?: { contentName?: string; skipDedupe?: boolean }
+): void {
+  const content_ids = uniqIds(products.flatMap((p) => metaContentIdsForProduct(p)));
+  if (!content_ids.length) return;
+  const value = products.reduce((sum, p) => sum + (typeof p.price === 'number' ? p.price : 0), 0);
+  const fp = `${content_ids.join(',')}|${products.length}|${value}`;
+  const now = Date.now();
+  if (!opts?.skipDedupe && lastGroupViewContentFingerprint === fp && now - lastGroupViewContentAtMs < VIEW_CONTENT_DEDUPE_MS) {
+    return;
+  }
+  lastGroupViewContentFingerprint = fp;
+  lastGroupViewContentAtMs = now;
+
+  const contents = products.map((p) => {
+    const ids = metaContentIdsForProduct(p);
+    return { id: ids[0] || String(p.id), quantity: 1, item_price: p.price || 0 };
+  });
+
+  const customData: Record<string, unknown> = {
+    content_ids,
+    content_type: 'product_group',
+    ...(opts?.contentName ? { content_name: opts.contentName } : {}),
+    value,
+    currency: META_PIXEL_CURRENCY,
+    contents,
+  };
+  firePixelAndCapi('ViewContent', customData, {
+    syncPixel: true,
+    keepalive: true,
+    capiRetries: 2,
+  });
+}
+
 export function trackMetaAddToCart(item: AddToCartRequest): void {
   const content_ids = metaContentIdsFromAddToCart(item);
   if (!content_ids.length) return;

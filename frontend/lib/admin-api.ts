@@ -1504,8 +1504,15 @@ export const adminProductAPI = {
         chunkIndex: number;
         chunkTotal: number;
         chunkSize?: number;
+        /** Đang tạm dừng vì 502/timeout — giây còn lại trước khi tự xóa tiếp. */
+        waitingRetrySec?: number;
+        timeoutRetryAttempt?: number;
       }) => void;
       skipStepUp?: boolean;
+      /** Chờ giữa các lần retry khi đã giảm lô xuống 1 (mặc định 40s). */
+      timeoutRetryDelayMs?: number;
+      /** Số lần retry liên tiếp tối đa khi lô = 1 vẫn 502 (mặc định 10). */
+      maxConsecutiveTimeoutRetries?: number;
     },
   ) => {
     const unique = [...new Set(dbIds.filter((id) => Number.isFinite(id) && id > 0))];
@@ -1515,16 +1522,52 @@ export const adminProductAPI = {
     /** Bắt đầu 3 — Cloudflare origin ~100s; lô lớn dễ 502 dù nginx 900s. Gặp 502 thì giảm tiếp. */
     const INITIAL_CHUNK = 3;
     const MIN_CHUNK = 1;
+    /** Chờ origin/request cũ nguội rồi tự tiếp tục — tránh bấm tay lại. */
+    const TIMEOUT_RETRY_DELAY_MS = options?.timeoutRetryDelayMs ?? 40_000;
+    const MAX_CONSECUTIVE_TIMEOUT_RETRIES = options?.maxConsecutiveTimeoutRetries ?? 10;
     let chunkSize = INITIAL_CHUNK;
     const deleted_db_ids: number[] = [];
     const not_found_db_ids: number[] = [];
     const blocked_db_ids: AdminSourceStockBatchDeleteBlockedItem[] = [];
     let cursor = 0;
     let chunkIndex = 0;
+    let consecutiveTimeoutRetries = 0;
 
     const isGatewayOrTimeout = (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       return /\[502\]|\[504\]|Hết giờ chờ proxy|Hết thời gian chờ server|gateway timeout/i.test(msg);
+    };
+
+    const emitProgress = (extra?: {
+      waitingRetrySec?: number;
+      timeoutRetryAttempt?: number;
+      chunkTotalOverride?: number;
+    }) => {
+      const remaining = unique.length - cursor;
+      options?.onProgress?.({
+        processed: cursor,
+        total: unique.length,
+        deleted: deleted_db_ids.length,
+        chunkIndex,
+        chunkTotal:
+          extra?.chunkTotalOverride ??
+          chunkIndex + Math.max(0, Math.ceil(remaining / Math.max(1, chunkSize))),
+        chunkSize,
+        waitingRetrySec: extra?.waitingRetrySec,
+        timeoutRetryAttempt: extra?.timeoutRetryAttempt,
+      });
+    };
+
+    const waitBeforeRetry = async (attempt: number) => {
+      const end = Date.now() + TIMEOUT_RETRY_DELAY_MS;
+      while (Date.now() < end) {
+        const secLeft = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+        emitProgress({ waitingRetrySec: secLeft, timeoutRetryAttempt: attempt });
+        const slice = Math.min(1000, end - Date.now());
+        if (slice <= 0) break;
+        await new Promise<void>((resolve) => setTimeout(resolve, slice));
+      }
+      emitProgress({ waitingRetrySec: 0, timeoutRetryAttempt: attempt });
     };
 
     while (cursor < unique.length) {
@@ -1532,14 +1575,7 @@ export const adminProductAPI = {
       const remaining = unique.length - cursor;
       const chunkTotal = chunkIndex + Math.max(1, Math.ceil(remaining / chunkSize));
       chunkIndex += 1;
-      options?.onProgress?.({
-        processed: cursor,
-        total: unique.length,
-        deleted: deleted_db_ids.length,
-        chunkIndex,
-        chunkTotal,
-        chunkSize,
-      });
+      emitProgress({ chunkTotalOverride: chunkTotal });
       try {
         const res = await fetchAdmin<AdminSourceStockBatchDeleteByDbIdsResult>(
           '/products/admin/source-stock-batch/delete-by-db-ids',
@@ -1550,22 +1586,22 @@ export const adminProductAPI = {
             timeoutMs: 90_000,
           },
         );
+        consecutiveTimeoutRetries = 0;
         deleted_db_ids.push(...(res.deleted_db_ids ?? []));
         not_found_db_ids.push(...(res.not_found_db_ids ?? []));
         blocked_db_ids.push(...(res.blocked_db_ids ?? []));
         cursor += chunk.length;
-        options?.onProgress?.({
-          processed: cursor,
-          total: unique.length,
-          deleted: deleted_db_ids.length,
-          chunkIndex,
-          chunkTotal: chunkIndex + Math.max(0, Math.ceil((unique.length - cursor) / chunkSize)),
-          chunkSize,
-        });
+        emitProgress();
       } catch (err) {
         if (isGatewayOrTimeout(err) && chunkSize > MIN_CHUNK) {
           chunkSize = Math.max(MIN_CHUNK, Math.floor(chunkSize / 2));
           chunkIndex -= 1;
+          continue;
+        }
+        if (isGatewayOrTimeout(err) && consecutiveTimeoutRetries < MAX_CONSECUTIVE_TIMEOUT_RETRIES) {
+          consecutiveTimeoutRetries += 1;
+          chunkIndex -= 1;
+          await waitBeforeRetry(consecutiveTimeoutRetries);
           continue;
         }
         const done = deleted_db_ids.length;
@@ -1573,7 +1609,7 @@ export const adminProductAPI = {
         const base = err instanceof Error ? err.message : String(err);
         throw new Error(
           done > 0
-            ? `Đã xóa ${done}/${unique.length} sản rồi dừng (còn ${left}). Không cố xóa tiếp — giảm lô xuống ${chunkSize} vẫn lỗi. ${base}`
+            ? `Đã xóa ${done}/${unique.length} sản rồi dừng (còn ${left}). Đã tự thử lại ${consecutiveTimeoutRetries} lần sau mỗi ${Math.round(TIMEOUT_RETRY_DELAY_MS / 1000)}s vẫn lỗi. ${base}`
             : base,
         );
       }
@@ -4640,11 +4676,18 @@ export async function adminLoginVerifyOtp(
 }
 
 export const adminStepUpAPI = {
-  request: () =>
-    fetchAdmin<{ challenge_id: string; expires_in_minutes: number; message: string; recipient_email?: string }>(
-      '/admin/step-up/request',
-      { method: 'POST', body: '{}' },
-    ),
+  request: (resend = false) =>
+    fetchAdmin<{
+      challenge_id: string;
+      expires_in_minutes: number;
+      message: string;
+      recipient_email?: string;
+      reused?: boolean;
+      resend_available_in_seconds?: number;
+    }>('/admin/step-up/request', {
+      method: 'POST',
+      body: JSON.stringify({ resend }),
+    }),
   verify: (challengeId: string, otp: string) =>
     fetchAdmin<{ expires_in_minutes: number; message: string; step_up_token?: string }>(
       '/admin/step-up/verify',
@@ -4653,4 +4696,144 @@ export const adminStepUpAPI = {
         body: JSON.stringify({ challenge_id: challengeId, otp, remember_device: false }),
       },
     ),
+};
+
+/* ============================================================================
+ * Ladipage AI — landing page bán hàng tạo bởi Gemini (theo danh mục / sản phẩm)
+ * ========================================================================== */
+
+export type LadipageSectionType = 'hero' | 'highlights' | 'material' | 'products_grid' | 'trust_cta' | 'faq';
+export type LadipageSectionStatus = 'pending' | 'generating' | 'ready' | 'error';
+export type LadipageStatus = 'draft' | 'published';
+export type LadipageSourceType = 'category' | 'products';
+export type LadipageRegenerateTarget = 'all' | 'text' | 'image';
+
+export interface LadipageSection {
+  id: number;
+  section_type: LadipageSectionType;
+  order_index: number;
+  status: LadipageSectionStatus;
+  data: Record<string, unknown>;
+  prompt_used?: string | null;
+  error_message?: string | null;
+  updated_at?: string | null;
+}
+
+export interface Ladipage {
+  id: number;
+  slug: string;
+  title: string;
+  status: LadipageStatus;
+  source_type: LadipageSourceType;
+  category_id?: number | null;
+  category_name?: string | null;
+  product_ids: number[];
+  admin_brief?: string | null;
+  include_material: boolean;
+  include_faq: boolean;
+  products_limit: number;
+  meta_title?: string | null;
+  meta_description?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  published_at?: string | null;
+  public_url?: string | null;
+}
+
+export interface LadipageDetail extends Ladipage {
+  sections: LadipageSection[];
+  resolved_product_ids: number[];
+}
+
+export interface LadipageListResponse {
+  total: number;
+  items: Ladipage[];
+}
+
+export type MaterialImageSource = 'ai' | 'product';
+
+export interface LadipageCreatePayload {
+  title: string;
+  source_type: LadipageSourceType;
+  category_id?: number | null;
+  product_ids?: number[];
+  admin_brief?: string;
+  include_material?: boolean;
+  include_faq?: boolean;
+  products_limit?: number;
+  /** Ladipage 1 SP — cách lấy ảnh chất liệu */
+  material_image_source?: MaterialImageSource;
+}
+
+export interface LadipageUpdatePayload {
+  title?: string;
+  slug?: string;
+  status?: LadipageStatus;
+  admin_brief?: string;
+  meta_title?: string;
+  meta_description?: string;
+  products_limit?: number;
+  product_ids?: number[];
+}
+
+export const ladipageAdminAPI = {
+  list: (params?: { skip?: number; limit?: number; status?: LadipageStatus }) => {
+    const sp = new URLSearchParams();
+    sp.set('skip', String(params?.skip ?? 0));
+    sp.set('limit', String(params?.limit ?? 50));
+    if (params?.status) sp.set('status', params.status);
+    return fetchAdmin<LadipageListResponse>(`/admin/ladipages/?${sp.toString()}`);
+  },
+
+  get: (id: number) => fetchAdmin<LadipageDetail>(`/admin/ladipages/${id}`),
+
+  create: (payload: LadipageCreatePayload) =>
+    fetchAdmin<LadipageDetail>('/admin/ladipages/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  update: (id: number, payload: LadipageUpdatePayload) =>
+    fetchAdmin<LadipageDetail>(`/admin/ladipages/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+
+  remove: (id: number) =>
+    fetchAdmin<{ ok: boolean; deleted_id: number }>(`/admin/ladipages/${id}`, { method: 'DELETE' }),
+
+  publish: (id: number) => ladipageAdminAPI.update(id, { status: 'published' }),
+  unpublish: (id: number) => ladipageAdminAPI.update(id, { status: 'draft' }),
+
+  generateSection: (ladipageId: number, sectionId: number) =>
+    fetchAdmin<LadipageSection>(`/admin/ladipages/${ladipageId}/sections/${sectionId}/generate`, {
+      method: 'POST',
+      timeoutMs: 180_000,
+    }),
+
+  generateSeo: (ladipageId: number, opts?: { onlyMissing?: boolean }) =>
+    fetchAdmin<LadipageDetail>(
+      `/admin/ladipages/${ladipageId}/generate-seo${opts?.onlyMissing ? '?only_missing=true' : ''}`,
+      {
+        method: 'POST',
+        timeoutMs: 60_000,
+      },
+    ),
+
+  regenerateSection: (
+    ladipageId: number,
+    sectionId: number,
+    payload: { target?: LadipageRegenerateTarget; custom_prompt?: string },
+  ) =>
+    fetchAdmin<LadipageSection>(`/admin/ladipages/${ladipageId}/sections/${sectionId}/regenerate`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 180_000,
+    }),
+
+  updateSection: (ladipageId: number, sectionId: number, data: Record<string, unknown>) =>
+    fetchAdmin<LadipageSection>(`/admin/ladipages/${ladipageId}/sections/${sectionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ data }),
+    }),
 };

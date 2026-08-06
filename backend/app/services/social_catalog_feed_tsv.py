@@ -15,7 +15,7 @@ Meta dùng `video_url` (link video).
 """
 from __future__ import annotations
 
-from typing import Iterator, Optional
+from typing import Dict, Iterator, Optional
 
 from sqlalchemy.orm import Session
 
@@ -119,6 +119,7 @@ def meta_row_values(
     google_product_category_default: str,
     sale_state=None,
     db: Optional[Session] = None,
+    ladipage_links: Optional[Dict[int, str]] = None,
 ) -> list[str]:
     from app.services import sale_calendar as sale_calendar_svc
 
@@ -129,7 +130,7 @@ def meta_row_values(
         sale_calendar_svc.feed_title_with_sale_prefix(raw_title, sale_state) if sale_state else raw_title
     )
     brand = _tsv_cell(getattr(product, "brand_name", "") or "") or "188"
-    link = _product_canonical_link(product, shop_base_url)
+    link = _product_canonical_link(product, shop_base_url, ladipage_links=ladipage_links)
     price = _price_gmc(getattr(product, "price", None), currency)
     gcat = resolved_google_product_category(product, google_product_category_default)
     fb = _tsv_cell(fb_product_category) or gcat
@@ -182,6 +183,7 @@ def tiktok_row_values(
     google_product_category_default: str,
     sale_state=None,
     db: Optional[Session] = None,
+    ladipage_links: Optional[Dict[int, str]] = None,
 ) -> list[str]:
     from app.services import sale_calendar as sale_calendar_svc
 
@@ -192,7 +194,7 @@ def tiktok_row_values(
         sale_calendar_svc.feed_title_with_sale_prefix(raw_title, sale_state) if sale_state else raw_title
     )
     brand = _tsv_cell(getattr(product, "brand_name", "") or "") or "188"
-    link = _product_canonical_link(product, shop_base_url)
+    link = _product_canonical_link(product, shop_base_url, ladipage_links=ladipage_links)
     price = _price_gmc(getattr(product, "price", None), currency)
     gcat = resolved_google_product_category(product, google_product_category_default)
     sale_price, sale_eff = _sale_price_and_effective(product, currency, sale_state=sale_state, db=db)
@@ -237,6 +239,9 @@ def iter_meta_catalog_lines(
 
     img_base = (image_site_base or shop_base_url).rstrip("/")
     sale_state = sale_calendar_svc.resolve_sale_calendar_state(db)
+    from app.services.ladipage_catalog_feed import build_published_ladipage_product_links
+
+    ladipage_links = build_published_ladipage_product_links(db, shop_base_url)
     yield "\t".join(META_TSV_COLUMNS)
     q = db.query(Product).order_by(Product.id)
     if only_active:
@@ -251,6 +256,7 @@ def iter_meta_catalog_lines(
             google_product_category_default=google_product_category_default,
             sale_state=sale_state,
             db=db,
+            ladipage_links=ladipage_links,
         )
         yield "\t".join(vals)
 
@@ -269,6 +275,9 @@ def iter_tiktok_catalog_lines(
 
     img_base = (image_site_base or shop_base_url).rstrip("/")
     sale_state = sale_calendar_svc.resolve_sale_calendar_state(db)
+    from app.services.ladipage_catalog_feed import build_published_ladipage_product_links
+
+    ladipage_links = build_published_ladipage_product_links(db, shop_base_url)
     yield "\t".join(TIKTOK_TSV_COLUMNS)
     q = db.query(Product).order_by(Product.id)
     if only_active:
@@ -282,5 +291,6 @@ def iter_tiktok_catalog_lines(
             google_product_category_default=google_product_category_default,
             sale_state=sale_state,
             db=db,
+            ladipage_links=ladipage_links,
         )
         yield "\t".join(vals)

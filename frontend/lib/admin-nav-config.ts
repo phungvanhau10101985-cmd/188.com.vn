@@ -26,6 +26,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: '/admin/products#import-hibox', label: 'Import Hibox', moduleKey: 'import_1688' },
       { href: '/admin/product-questions', label: 'Hỏi đáp sản phẩm', moduleKey: 'product_questions' },
       { href: '/admin/product-reviews', label: 'Đánh giá sản phẩm', moduleKey: 'product_reviews' },
+      { href: '/admin/ladipage', label: 'Ladipage AI', moduleKey: 'ladipage' },
     ],
   },
   {

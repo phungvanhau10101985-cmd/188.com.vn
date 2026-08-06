@@ -192,8 +192,10 @@ export function truncateDescriptionAtSentence(
 
 /**
  * Tạo JSON-LD schema Product cho Google (rich results, index nhanh).
+ * `overrideUrl`: dùng khi nhúng JSON-LD này ở một trang bán độc lập khác PDP gốc
+ * (vd ladipage `/lp/<slug>`) — `url`/`offers.url` trỏ về trang đó thay vì PDP.
  */
-export function buildProductJsonLd(product: ProductForSeo): object {
+export function buildProductJsonLd(product: ProductForSeo, opts?: { overrideUrl?: string }): object {
   const image = absoluteImage(product.main_image) || (product.images?.[0] ? absoluteImage(product.images[0]) : "");
   const name = product.meta_title || product.name;
   const brandDisplay = displayableBrandWithDefault(product.brand_name);
@@ -203,7 +205,9 @@ export function buildProductJsonLd(product: ProductForSeo): object {
     `${product.name}${brandDisplay ? ` - ${brandDisplay}` : ""}. Mua tại 188.com.vn`;
   const description = stripHtml(rawDesc);
 
-  const pdpUrl = productPublicPdpUrl(product.slug, SITE_URL);
+  const pdpUrl = opts?.overrideUrl
+    ? (opts.overrideUrl.startsWith("http") ? opts.overrideUrl : `${SITE_URL}${opts.overrideUrl}`)
+    : productPublicPdpUrl(product.slug, SITE_URL);
   const listPrice =
     product.original_price && product.original_price > product.price
       ? product.original_price
@@ -270,5 +274,35 @@ export function buildProductJsonLd(product: ProductForSeo): object {
             worstRating: 1,
           }
         : undefined,
+  };
+}
+
+/**
+ * JSON-LD nhẹ cho trang liệt kê nhiều sản phẩm (vd ladipage theo danh mục/nhiều SP chọn) —
+ * không phải PDP nên chỉ dùng `ItemList` + `CollectionPage`, không có `Offer` chi tiết từng dòng.
+ */
+export function buildProductListJsonLd(params: {
+  pageUrl: string;
+  pageTitle: string;
+  pageDescription?: string;
+  products: Array<Pick<ProductForSeo, "id" | "name" | "slug" | "price" | "main_image">>;
+}): object {
+  const pageUrl = params.pageUrl.startsWith("http") ? params.pageUrl : `${SITE_URL}${params.pageUrl}`;
+  return {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: params.pageTitle,
+    description: params.pageDescription ? stripHtml(params.pageDescription) : undefined,
+    url: pageUrl,
+    mainEntity: {
+      "@type": "ItemList",
+      itemListElement: params.products.slice(0, 30).map((p, idx) => ({
+        "@type": "ListItem",
+        position: idx + 1,
+        url: productPublicPdpUrl(p.slug, SITE_URL),
+        name: p.name,
+        image: absoluteImage(p.main_image) || undefined,
+      })),
+    },
   };
 }

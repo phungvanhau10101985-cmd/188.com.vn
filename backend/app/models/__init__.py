@@ -204,6 +204,10 @@ print("[OK] MarketingEmailSuppression model loaded")
 from app.models.email_send_management import EmailSendManagement
 print("[OK] EmailSendManagement model loaded")
 
+# 12. Ladipage AI (landing page bán hàng tạo bởi Gemini)
+from app.models.ladipage import Ladipage, LadipageSection
+print("[OK] Ladipage model loaded")
+
 # ========== TẠO DANH SÁCH ==========
 __all__ = [
     "SeoCluster",
@@ -274,6 +278,8 @@ __all__ = [
     "NewsletterSubscriber",
     "MarketingEmailSuppression",
     "EmailSendManagement",
+    "Ladipage",
+    "LadipageSection",
 ]
 
 # Thêm các models user behavior

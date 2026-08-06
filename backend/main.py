@@ -236,6 +236,8 @@ def load_api_routes():
         ("notifications", "/notifications", "notifications"),
         ("newsletter", "/newsletter", "newsletter"),  # CMSN + warm-up + marketing
         ("push", "/push", "push"),
+        ("ladipage_admin", "/admin/ladipages", "ladipage-admin"),
+        ("ladipage_public", "/ladipages", "ladipage-public"),
     ]
     
     loaded = []

@@ -743,6 +743,8 @@ export default function AdminSourceStockCheckPage() {
     chunkIndex: number;
     chunkTotal: number;
     chunkSize?: number;
+    waitingRetrySec?: number;
+    timeoutRetryAttempt?: number;
   } | null>(null);
   const [reportOosSampleSelectedIds, setReportOosSampleSelectedIds] = useState<number[]>([]);
   const [reportOosBulkBusy, setReportOosBulkBusy] = useState(false);
@@ -2117,7 +2119,8 @@ export default function AdminSourceStockCheckPage() {
             <div className="text-sm text-gray-700 mt-3 leading-relaxed space-y-2">
               <p>
                 Sẽ xóa theo khóa <code className="text-xs bg-gray-100 px-1 rounded">products.id</code> — không
-                hoàn tác. Xóa DB trước, dọn Bunny CDN sau (nền). Thích hợp khi chắc chắn không còn bán những mã
+                hoàn tác. Xóa DB trước, dọn Bunny CDN sau (nền). Gặp timeout/502 sẽ tạm dừng ~40s rồi tự xóa
+                tiếp — không cần bấm lại. Thích hợp khi chắc chắn không còn bán những mã
                 này.
               </p>
               {!reportOosDeleting ? (
@@ -2145,7 +2148,12 @@ export default function AdminSourceStockCheckPage() {
                   aria-live="polite"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-red-950">
-                    <span className="font-medium">Đang xóa khỏi DB…</span>
+                    <span className="font-medium">
+                      {reportOosDeleteProgress.waitingRetrySec != null &&
+                      reportOosDeleteProgress.waitingRetrySec > 0
+                        ? 'Tạm dừng — sẽ tự xóa tiếp…'
+                        : 'Đang xóa khỏi DB…'}
+                    </span>
                     <span className="tabular-nums">
                       {reportOosDeleteProgress.processed.toLocaleString('vi-VN')} /{' '}
                       {reportOosDeleteProgress.total.toLocaleString('vi-VN')} mã
@@ -2167,16 +2175,29 @@ export default function AdminSourceStockCheckPage() {
                       }}
                     />
                   </div>
-                  <p className="text-xs text-red-900/90 tabular-nums">
-                    Đã xóa {reportOosDeleteProgress.deleted.toLocaleString('vi-VN')} sản · lô{' '}
-                    {reportOosDeleteProgress.chunkIndex}/{reportOosDeleteProgress.chunkTotal} (
-                    {reportOosDeleteProgress.chunkSize ?? 3} mã/lô
-                    {reportOosDeleteProgress.chunkSize != null &&
-                    reportOosDeleteProgress.chunkSize < 3
-                      ? ' — đã giảm vì timeout'
-                      : ''}
-                    ; Bunny dọn sau)
-                  </p>
+                  {reportOosDeleteProgress.waitingRetrySec != null &&
+                  reportOosDeleteProgress.waitingRetrySec > 0 ? (
+                    <p className="text-xs text-amber-900/95 tabular-nums">
+                      Gặp timeout/502 — chờ{' '}
+                      <strong>{reportOosDeleteProgress.waitingRetrySec}s</strong> rồi tự thử lại
+                      {reportOosDeleteProgress.timeoutRetryAttempt
+                        ? ` (lần ${reportOosDeleteProgress.timeoutRetryAttempt})`
+                        : ''}
+                      . Đã xóa {reportOosDeleteProgress.deleted.toLocaleString('vi-VN')} sản; không
+                      cần bấm lại.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-red-900/90 tabular-nums">
+                      Đã xóa {reportOosDeleteProgress.deleted.toLocaleString('vi-VN')} sản · lô{' '}
+                      {reportOosDeleteProgress.chunkIndex}/{reportOosDeleteProgress.chunkTotal} (
+                      {reportOosDeleteProgress.chunkSize ?? 3} mã/lô
+                      {reportOosDeleteProgress.chunkSize != null &&
+                      reportOosDeleteProgress.chunkSize < 3
+                        ? ' — đã giảm vì timeout'
+                        : ''}
+                      ; Bunny dọn sau)
+                    </p>
+                  )}
                 </div>
               ) : null}
             </div>
@@ -2195,13 +2216,19 @@ export default function AdminSourceStockCheckPage() {
                 disabled={reportOosDeleting}
                 onClick={() => void executeReportOosDeleteFromDb()}
               >
-                {reportOosDeleting && reportOosDeleteProgress
-                  ? `${Math.round(
-                      (reportOosDeleteProgress.processed / Math.max(1, reportOosDeleteProgress.total)) * 100,
-                    )}%…`
-                  : reportOosDeleting
-                    ? 'Đang xóa…'
-                    : 'Đồng ý — xóa'}
+                {reportOosDeleting &&
+                reportOosDeleteProgress?.waitingRetrySec != null &&
+                reportOosDeleteProgress.waitingRetrySec > 0
+                  ? `Chờ ${reportOosDeleteProgress.waitingRetrySec}s…`
+                  : reportOosDeleting && reportOosDeleteProgress
+                    ? `${Math.round(
+                        (reportOosDeleteProgress.processed /
+                          Math.max(1, reportOosDeleteProgress.total)) *
+                          100,
+                      )}%…`
+                    : reportOosDeleting
+                      ? 'Đang xóa…'
+                      : 'Đồng ý — xóa'}
               </button>
             </div>
           </div>

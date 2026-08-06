@@ -3,11 +3,13 @@ import {
   loadProductForOosPage,
   resolveOosListingPathForSlug,
 } from '@/lib/product-oos-page';
+import { getPublishedLadipageForProductRecord } from '@/lib/ladipage-public';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { normalizeProductRouteSlug } from '@/lib/product-route-slug';
 import { isReservedNonProductSlug } from '@/lib/reserved-non-product-slugs';
 import { verifyPv2ForProductPage } from '@/lib/google-automated-discount-server';
 import ProductDetailClient from './ProductDetailClient';
+import SingleProductLadipageView from '@/components/ladipage/SingleProductLadipageView';
 import ErrorState from './components/ErrorState/ErrorState';
 
 type Props = {
@@ -64,6 +66,19 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
   }
 
   const initialGoogleDiscount = await verifyPv2ForProductPage(sp, product.product_id);
+  const ladipage = await getPublishedLadipageForProductRecord(product);
+
+  if (ladipage) {
+    return (
+      <SingleProductLadipageView
+        key={slug}
+        slug={slug}
+        product={product}
+        sections={ladipage.sections}
+        initialGoogleDiscount={initialGoogleDiscount}
+      />
+    );
+  }
 
   return (
     <ProductDetailClient
@@ -74,3 +89,4 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
     />
   );
 }
+

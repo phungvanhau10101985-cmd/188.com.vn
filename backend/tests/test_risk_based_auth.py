@@ -92,12 +92,12 @@ def test_action_challenge_is_single_use_and_attempt_limited():
                 purpose="sensitive_action",
                 email="owner@example.com",
             )
-        assert len(row.public_id) >= 32
-        assert not row.public_id.isdigit()
+        assert len(row.challenge.public_id) >= 32
+        assert not row.challenge.public_id.isdigit()
         with pytest.raises(ValueError, match="không đúng"):
             consume_challenge(
                 db,
-                challenge_id=row.public_id,
+                challenge_id=row.challenge.public_id,
                 subject_type="user",
                 subject_id=9,
                 purpose="sensitive_action",
@@ -107,11 +107,11 @@ def test_action_challenge_is_single_use_and_attempt_limited():
         # Set the known hash directly so the test never needs access to an emailed OTP.
         from app.services.auth_challenge import hash_secret
 
-        row.otp_hash = hash_secret("123456")
+        row.challenge.otp_hash = hash_secret("123456")
         db.commit()
         consume_challenge(
             db,
-            challenge_id=row.public_id,
+            challenge_id=row.challenge.public_id,
             subject_type="user",
             subject_id=9,
             purpose="sensitive_action",
@@ -120,7 +120,7 @@ def test_action_challenge_is_single_use_and_attempt_limited():
         with pytest.raises(ValueError, match="hết hạn"):
             consume_challenge(
                 db,
-                challenge_id=row.public_id,
+                challenge_id=row.challenge.public_id,
                 subject_type="user",
                 subject_id=9,
                 purpose="sensitive_action",

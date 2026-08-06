@@ -33,7 +33,7 @@ from app.schemas.admin import (
     StaffRolePresetPutPayload,
 )
 from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate, BankAccountResponse
-from app.schemas.step_up import AdminOtpVerify, AdminStepUpResponse
+from app.schemas.step_up import AdminOtpVerify, AdminStepUpRequest, AdminStepUpResponse
 from app.schemas.user import (
     UserResponse,
     UserAdminUpdate,
@@ -260,7 +260,7 @@ def admin_login(
         if not otp_email:
             raise HTTPException(status_code=400, detail="Tài khoản admin chưa có email để nhận OTP.")
         try:
-            challenge = issue_challenge(
+            result = issue_challenge(
                 db,
                 subject_type="admin",
                 subject_id=admin.id,
@@ -271,7 +271,7 @@ def admin_login(
             raise HTTPException(status_code=503, detail="Không gửi được OTP quản trị. Vui lòng thử lại.") from exc
         return AdminTokenResponse(
             otp_required=True,
-            challenge_id=challenge.public_id,
+            challenge_id=result.challenge.public_id,
             admin_id=admin.id,
             username=admin.username,
             role=admin.role.value if hasattr(admin.role, "value") else str(admin.role),
@@ -353,6 +353,7 @@ def admin_login_verify_otp(
 
 @router.post("/step-up/request", response_model=AdminStepUpResponse)
 def admin_request_destructive_step_up(
+    body: AdminStepUpRequest = AdminStepUpRequest(),
     current_admin: AdminUser = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
@@ -363,22 +364,30 @@ def admin_request_destructive_step_up(
     if not otp_email:
         raise HTTPException(status_code=400, detail="Tài khoản admin chưa có email để nhận OTP.")
     try:
-        row = issue_challenge(
+        result = issue_challenge(
             db,
             subject_type="admin",
             subject_id=current_admin.id,
             purpose=ADMIN_DESTRUCTIVE_STEP_UP_PURPOSE,
             email=otp_email,
+            force_resend=body.resend,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Không gửi được OTP quản trị. Vui lòng thử lại.") from exc
+    masked = mask_email_for_display(otp_email)
+    if result.reused:
+        message = f"Mã OTP đã được gửi tới {masked}. Vui lòng kiểm tra email."
+    else:
+        message = f"Đã gửi mã OTP tới {masked}."
     return AdminStepUpResponse(
-        challenge_id=row.public_id,
+        challenge_id=result.challenge.public_id,
         expires_in_minutes=int(settings.STEP_UP_OTP_EXPIRE_MINUTES),
-        message=f"Đã gửi mã OTP tới {mask_email_for_display(otp_email)}.",
-        recipient_email=mask_email_for_display(otp_email),
+        message=message,
+        recipient_email=masked,
+        reused=result.reused,
+        resend_available_in_seconds=result.resend_available_in_seconds,
     )
 
 

@@ -51,6 +51,8 @@ export interface Product {
   available?: number;
   /** Listing nhóm khi hết hàng (API attach_group_listing) */
   group_listing_path?: string;
+  /** Ladipage 1 SP đã publish — slug để load nội dung bổ sung trên PDP */
+  published_ladipage_slug?: string | null;
   product_description?: string; // Giữ lại cho tương thích ngược
   origin?: string;
   brand_name?: string;

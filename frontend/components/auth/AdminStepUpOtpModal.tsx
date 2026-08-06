@@ -20,20 +20,31 @@ export default function AdminStepUpOtpModal({
   const [challengeId, setChallengeId] = useState<string | null>(null);
   const [otp, setOtp] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [sending, setSending] = useState(true);
   const [verifying, setVerifying] = useState(false);
-  const [resendIn, setResendIn] = useState(30);
+  const [resendIn, setResendIn] = useState(0);
   const [recipientHint, setRecipientHint] = useState<string | null>(null);
 
-  const sendCode = useCallback(async () => {
+  const sendCode = useCallback(async (isResend: boolean) => {
     setSending(true);
-    setError('');
+    if (isResend) {
+      setError('');
+    } else {
+      setError('');
+      setInfo('');
+    }
     try {
-      const result = await adminStepUpAPI.request();
+      const result = await adminStepUpAPI.request(isResend);
       setChallengeId(result.challenge_id);
       setRecipientHint(result.recipient_email || result.message || null);
-      setOtp('');
-      setResendIn(30);
+      setResendIn(result.resend_available_in_seconds ?? 60);
+      if (result.reused && !isResend) {
+        setInfo(result.message || 'Mã OTP đã được gửi. Vui lòng kiểm tra email.');
+      } else if (!result.reused) {
+        setInfo(result.message);
+        setOtp('');
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Không gửi được OTP. Vui lòng thử lại.');
     } finally {
@@ -42,7 +53,7 @@ export default function AdminStepUpOtpModal({
   }, []);
 
   useEffect(() => {
-    void sendCode();
+    void sendCode(false);
   }, [sendCode]);
 
   useEffect(() => {
@@ -94,6 +105,12 @@ export default function AdminStepUpOtpModal({
           {recipientHint ? recipientHint : 'OTP gửi tới email quản trị của tài khoản đang đăng nhập.'}
         </p>
 
+        {info && !error ? (
+          <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+            {info}
+          </div>
+        ) : null}
+
         {error ? (
           <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}
@@ -120,7 +137,7 @@ export default function AdminStepUpOtpModal({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <button
               type="button"
-              onClick={() => void sendCode()}
+              onClick={() => void sendCode(true)}
               disabled={sending || verifying || resendIn > 0}
               className="text-sm font-medium text-orange-700 disabled:text-gray-400"
             >

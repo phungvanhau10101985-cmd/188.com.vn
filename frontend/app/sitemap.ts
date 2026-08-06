@@ -83,5 +83,21 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     });
   }
 
+  // Ladipage AI đã publish: /lp/<slug>
+  const { listPublishedLadipagesForSitemap } = await import("@/lib/ladipage-public");
+  const ladipages = await listPublishedLadipagesForSitemap();
+  for (const lp of ladipages) {
+    const lastMod =
+      (lp.updated_at && new Date(lp.updated_at)) ||
+      (lp.published_at && new Date(lp.published_at)) ||
+      now;
+    entries.push({
+      url: `${BASE_URL}/lp/${lp.slug}`,
+      lastModified: lastMod,
+      changeFrequency: "weekly",
+      priority: 0.75,
+    });
+  }
+
   return entries;
 }

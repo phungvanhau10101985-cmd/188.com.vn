@@ -1,4 +1,5 @@
 """Reusable, database-backed OTP challenges for recent-auth and admin MFA."""
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import secrets
@@ -24,6 +25,13 @@ def hash_secret(value: str) -> str:
     return hashlib.sha256(pepper + b":" + value.strip().encode("utf-8")).hexdigest()
 
 
+@dataclass
+class IssueChallengeResult:
+    challenge: AuthActionChallenge
+    reused: bool = False
+    resend_available_in_seconds: int = 0
+
+
 def acquire_otp_issue_lock(db: Session, key: str) -> None:
     """Serialize OTP issuance per account across PostgreSQL workers."""
     bind = db.get_bind()
@@ -42,7 +50,8 @@ def issue_challenge(
     purpose: str,
     email: str,
     payload_hash: Optional[str] = None,
-) -> AuthActionChallenge:
+    force_resend: bool = False,
+) -> IssueChallengeResult:
     if not email:
         raise ValueError("Tài khoản chưa có email để nhận OTP.")
 
@@ -67,7 +76,13 @@ def issue_challenge(
         age = (now - created).total_seconds() if created else 0
         if age < int(settings.OTP_RESEND_DELAY_SECONDS):
             wait = int(settings.OTP_RESEND_DELAY_SECONDS - age) + 1
-            raise ValueError(f"Vui lòng chờ {wait} giây trước khi gửi lại OTP.")
+            if force_resend:
+                raise ValueError(f"Vui lòng chờ {wait} giây trước khi gửi lại OTP.")
+            return IssueChallengeResult(
+                challenge=existing,
+                reused=True,
+                resend_available_in_seconds=wait,
+            )
 
     sent_today = (
         db.query(AuthActionChallenge)
@@ -108,7 +123,11 @@ def issue_challenge(
         db.delete(row)
         db.commit()
         raise
-    return row
+    return IssueChallengeResult(
+        challenge=row,
+        reused=False,
+        resend_available_in_seconds=int(settings.OTP_RESEND_DELAY_SECONDS),
+    )
 
 
 def consume_challenge(

@@ -637,6 +637,42 @@ export function trackGoogleAdsViewItemProduct(product: Product): void {
   fireGoogleAdsPdpConversion(product, primaryId, value);
 }
 
+let lastViewItemListFp: string | null = null;
+let lastViewItemListAtMs = 0;
+const VIEW_ITEM_LIST_DEDUPE_MS = 2500;
+
+/**
+ * GA4 `view_item_list` — trang hiển thị NHIỀU sản phẩm cùng lúc (ladipage theo danh mục/nhiều SP
+ * chọn), khác `view_item` (1 sản phẩm). Cũng bắn retail dynamic remarketing dạng danh sách.
+ */
+export function trackGoogleAdsViewItemList(products: Product[], listName?: string): void {
+  const idsAndValues = products
+    .map((p) => ({ product: p, ids: metaContentIdsForProduct(p) }))
+    .filter((x) => x.ids.length > 0);
+  if (!idsAndValues.length) return;
+
+  const value = products.reduce((sum, p) => sum + (typeof p.price === 'number' ? p.price : 0), 0);
+  const primaryIds = idsAndValues.map((x) => x.ids[0]!);
+  const fp = `${primaryIds.join(',')}|${value}|${listName ?? ''}`;
+  const now = Date.now();
+  if (shouldDedupe(now, lastViewItemListFp ?? '', fp, lastViewItemListAtMs, VIEW_ITEM_LIST_DEDUPE_MS)) {
+    return;
+  }
+  lastViewItemListFp = fp;
+  lastViewItemListAtMs = now;
+
+  fireGtagEvent('view_item_list', {
+    currency: GOOGLE_ADS_CURRENCY,
+    ...(listName ? { item_list_name: listName } : {}),
+    items: idsAndValues.map((x) => gtagItemFromProduct(x.product, x.ids[0]!, x.product.price || 0)),
+  });
+  retailDynamicPageView({
+    ecomm_pagetype: 'category',
+    ecomm_prodid: primaryIds,
+    ecomm_totalvalue: value > 0 ? value : undefined,
+  });
+}
+
 export function trackGoogleAdsAddToCart(item: AddToCartRequest): void {
   const content_ids = metaContentIdsFromAddToCart(item);
   if (!content_ids.length) return;

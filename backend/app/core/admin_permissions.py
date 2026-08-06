@@ -37,6 +37,7 @@ ALLOWED_MODULE_KEYS: Set[str] = {
     "vps_backup",
     "notifications",
     "newsletter",
+    "ladipage",
 }
 
 LEGACY_ROLE_MODULES = {
@@ -53,6 +54,7 @@ LEGACY_ROLE_MODULES = {
             "listing_facet_cache",
             "category_seo",
             "bunny_cdn",
+            "ladipage",
         }
     ),
     AdminRole.CONTENT_MANAGER: frozenset(

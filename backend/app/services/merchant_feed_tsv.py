@@ -19,7 +19,7 @@ import json
 import math
 import re
 from datetime import date, datetime, timedelta, timezone
-from typing import Iterator, Optional
+from typing import Dict, Iterator, Optional
 from urllib.parse import quote, unquote, urlparse
 
 from sqlalchemy.orm import Session
@@ -222,8 +222,17 @@ def _feed_path_segment_from_slug(raw_slug: str, fallback: str) -> str:
     return s
 
 
-def _product_canonical_link(product: Product, shop_base_url: str) -> str:
-    """URL trang chi tiết trên shop (Merchant/Meta/TikTok). Không dùng `link_default` — trường đó là URL nguồn NCC (1688/Taobao)."""
+def _product_canonical_link(
+    product: Product,
+    shop_base_url: str,
+    *,
+    ladipage_links: Optional[Dict[int, str]] = None,
+) -> str:
+    """URL landing trên shop. Ladipage published (nếu có) ưu tiên hơn PDP."""
+    if ladipage_links:
+        lp_url = ladipage_links.get(product.id)
+        if lp_url:
+            return lp_url
     base = shop_base_url.rstrip("/")
     raw_slug = "" if _is_blankish(getattr(product, "slug", None)) else str(getattr(product, "slug", "")).strip()
     raw_pid = getattr(product, "product_id", None)
@@ -711,6 +720,7 @@ def merchant_row_values(
     *,
     sale_state=None,
     db: Optional[Session] = None,
+    ladipage_links: Optional[Dict[int, str]] = None,
 ) -> list[str]:
     from app.services import sale_calendar as sale_calendar_svc
 
@@ -720,7 +730,7 @@ def merchant_row_values(
     raw_title = getattr(product, "name", "") or ""
     title = _tsv_cell(sale_calendar_svc.feed_title_with_sale_prefix(raw_title, sale_state) if sale_state else raw_title)
     brand = _tsv_cell(getattr(product, "brand_name", "") or "") or "188"
-    link = _product_canonical_link(product, shop_base_url)
+    link = _product_canonical_link(product, shop_base_url, ladipage_links=ladipage_links)
     gtin = _gtin_from_product_info(product)
     mpn = _tsv_cell(getattr(product, "code", None) or "")
     identifier = "yes" if (gtin or mpn) else "no"
@@ -789,6 +799,7 @@ def merchant_feed_line_for_product(
     *,
     sale_state=None,
     db: Optional[Session] = None,
+    ladipage_links: Optional[Dict[int, str]] = None,
 ) -> str:
     vals = merchant_row_values(
         product,
@@ -797,6 +808,7 @@ def merchant_feed_line_for_product(
         currency,
         sale_state=sale_state,
         db=db,
+        ladipage_links=ladipage_links,
     )
     return "\t".join(vals)
 
@@ -815,6 +827,9 @@ def iter_merchant_feed_lines(
 
     img_base = (image_site_base or shop_base_url).rstrip("/")
     sale_state = sale_calendar_svc.resolve_sale_calendar_state(db)
+    from app.services.ladipage_catalog_feed import build_published_ladipage_product_links
+
+    ladipage_links = build_published_ladipage_product_links(db, shop_base_url)
     yield merchant_feed_header_row()
     from app.services.warehouse_clearance import apply_catalog_visibility_filter
 
@@ -830,4 +845,5 @@ def iter_merchant_feed_lines(
             currency,
             sale_state=sale_state,
             db=db,
+            ladipage_links=ladipage_links,
         )

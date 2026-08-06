@@ -1,0 +1,154 @@
+'use client';
+
+import EditableText from './EditableText';
+import EditableImage from './EditableImage';
+import HeroEditableImage from './HeroEditableImage';
+import HeroDisplayImage from './HeroDisplayImage';
+import type { HeroImageOption, MaterialSectionData } from './types';
+
+interface MaterialSectionProps {
+  data: MaterialSectionData;
+  editable?: boolean;
+  isBusy?: boolean;
+  imagePrompt?: string;
+  /** Ladipage 1 SP — bật chọn ảnh SP thay vì AI */
+  singleProductMode?: boolean;
+  productImageOptions?: HeroImageOption[];
+  onSaveField?: (field: keyof MaterialSectionData, value: string) => void | Promise<void>;
+  onRegenerateText?: (instruction: string) => void | Promise<void>;
+  onRegenerateImage?: (prompt: string) => void | Promise<void>;
+}
+
+export default function MaterialSection({
+  data,
+  editable = false,
+  isBusy = false,
+  imagePrompt = '',
+  singleProductMode = false,
+  productImageOptions = [],
+  onSaveField,
+  onRegenerateText,
+  onRegenerateImage,
+}: MaterialSectionProps) {
+  const imageSource =
+    !singleProductMode || data.image_source === 'ai' ? 'ai' : 'product';
+  const useProductImagePicker =
+    editable && singleProductMode && imageSource === 'product' && !!onSaveField;
+
+  const renderImage = () => {
+    if (useProductImagePicker) {
+      return (
+        <HeroEditableImage
+          src={data.image_url}
+          objectPosition={data.image_object_position}
+          alt={data.material ? `Chất liệu ${data.material}` : 'Ảnh chất liệu'}
+          aspectClassName="aspect-square"
+          imageOptions={productImageOptions}
+          isBusy={isBusy}
+          onSelectImage={(url) => onSaveField!('image_url', url)}
+          onSavePosition={(position) => onSaveField!('image_object_position', position)}
+        />
+      );
+    }
+
+    if (!editable) {
+      return (
+        <HeroDisplayImage
+          src={data.image_url}
+          objectPosition={data.image_object_position}
+          alt={data.material ? `Chất liệu ${data.material}` : 'Ảnh chất liệu'}
+          aspectClassName="aspect-square"
+        />
+      );
+    }
+
+    return (
+      <EditableImage
+        src={data.image_url}
+        alt={data.material ? `Chất liệu ${data.material}` : 'Ảnh chất liệu'}
+        editable={editable}
+        isBusy={isBusy}
+        initialPrompt={imagePrompt}
+        onRegenerate={imageSource === 'ai' ? onRegenerateImage : undefined}
+        aspectClassName="aspect-square"
+      />
+    );
+  };
+
+  return (
+    <section className="my-6 grid grid-cols-1 items-center gap-7 overflow-hidden rounded-[1.75rem] border border-gray-100 bg-gradient-to-br from-gray-50 via-white to-orange-50/50 p-5 py-8 md:my-10 md:grid-cols-2 md:gap-12 md:p-10">
+      <div>
+        {editable && singleProductMode && onSaveField ? (
+          <div className="mb-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={isBusy}
+              onClick={() => onSaveField('image_source', 'ai')}
+              className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                imageSource === 'ai'
+                  ? 'border-orange-500 bg-orange-50 text-orange-700'
+                  : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              AI tạo ảnh chất liệu
+            </button>
+            <button
+              type="button"
+              disabled={isBusy}
+              onClick={() => {
+                void onSaveField('image_source', 'product');
+                if (!data.image_url && productImageOptions[0]) {
+                  void onSaveField('image_url', productImageOptions[0].url);
+                  void onSaveField('image_object_position', '50% 50%');
+                }
+              }}
+              className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                imageSource === 'product'
+                  ? 'border-orange-500 bg-orange-50 text-orange-700'
+                  : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              Chọn ảnh sản phẩm
+            </button>
+          </div>
+        ) : null}
+        <div className="overflow-hidden rounded-2xl bg-white shadow-lg shadow-gray-900/5">{renderImage()}</div>
+        {editable && singleProductMode && imageSource === 'product' ? (
+          <p className="mt-2 text-xs text-gray-500">
+            Bấm ảnh để chọn từ gallery / màu / chi tiết SP và kéo để chỉnh vị trí hiển thị.
+          </p>
+        ) : null}
+      </div>
+      <div>
+        <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-600">Chất liệu và trải nghiệm</p>
+        <h2 className="mt-2 text-2xl font-extrabold tracking-tight text-gray-950 md:text-3xl">
+          Chất liệu {data.material ? <span className="text-orange-600">{data.material}</span> : ''}
+        </h2>
+        <EditableText
+          as="p"
+          value={data.body || ''}
+          placeholder="Chưa có nội dung giải thích chất liệu"
+          className="mt-4 text-base leading-relaxed text-gray-700"
+          multiline
+          editable={editable}
+          isBusy={isBusy}
+          onSave={onSaveField ? (v) => onSaveField('body', v) : undefined}
+          onRegenerate={onRegenerateText}
+          regenerateLabel="Yêu cầu thêm khi viết lại (có thể để trống)"
+        />
+        {data.callouts && data.callouts.length > 0 && (
+          <ul className="mt-4 flex flex-wrap gap-2">
+            {data.callouts.map((c, i) => (
+              <li
+                key={i}
+                className="rounded-full border border-orange-100 bg-white px-3 py-1.5 text-xs font-semibold text-orange-700 shadow-sm"
+              >
+                {c}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}

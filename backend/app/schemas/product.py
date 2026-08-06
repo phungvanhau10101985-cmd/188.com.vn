@@ -315,6 +315,10 @@ class Product(ProductBase):
         None,
         description="Đường dẫn listing nhóm khi SP hết hàng (chỉ khi client yêu cầu attach_group_listing)",
     )
+    published_ladipage_slug: Optional[str] = Field(
+        None,
+        description="Ladipage 1 SP đã publish — slug để SSR nội dung bổ sung trên PDP",
+    )
 
     @model_validator(mode="after")
     def fill_product_info_from_columns(self):

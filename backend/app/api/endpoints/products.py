@@ -347,6 +347,9 @@ def _product_to_response(
                     product_id=getattr(row, "product_id", None),
                 )
     try:
+        from app.services.ladipage_cleanup import get_published_single_product_ladipage_slug
+
+        d["published_ladipage_slug"] = get_published_single_product_ladipage_slug(db, int(row.id))
         return Product(**d)
     except Exception as exc:
         logger.exception(

@@ -241,6 +241,44 @@ export function trackTikTokViewContentProduct(
   fireTikTokTrack('ViewContent', properties, { sync: true });
 }
 
+let lastGroupViewContentFingerprint: string | null = null;
+let lastGroupViewContentAtMs = 0;
+
+/** ViewContent cho trang hiển thị nhiều sản phẩm cùng lúc (ladipage theo danh mục/nhiều SP chọn). */
+export function trackTikTokViewContentProducts(
+  products: Product[],
+  opts?: { contentName?: string; skipDedupe?: boolean }
+): void {
+  const ids = uniqIds(products.flatMap((p) => metaContentIdsForProduct(p)));
+  if (!ids.length) return;
+  const value = products.reduce((sum, p) => sum + (typeof p.price === 'number' ? p.price : 0), 0);
+  const fp = `${ids.join(',')}|${products.length}|${value}`;
+  const now = Date.now();
+  if (!opts?.skipDedupe && lastGroupViewContentFingerprint === fp && now - lastGroupViewContentAtMs < VIEW_CONTENT_DEDUPE_MS) {
+    return;
+  }
+  lastGroupViewContentFingerprint = fp;
+  lastGroupViewContentAtMs = now;
+
+  const properties: Record<string, unknown> = {
+    content_type: 'product',
+    ...(opts?.contentName ? { content_name: opts.contentName } : {}),
+    value,
+    currency: TIKTOK_PIXEL_CURRENCY,
+    contents: products.map((p) => {
+      const pIds = metaContentIdsForProduct(p);
+      return {
+        content_id: pIds[0] || String(p.id),
+        content_type: 'product',
+        content_name: p.name,
+        quantity: 1,
+        price: p.price || 0,
+      };
+    }),
+  };
+  fireTikTokTrack('ViewContent', properties, { sync: true });
+}
+
 export function trackTikTokAddToCart(item: AddToCartRequest): void {
   const contentIds = metaContentIdsFromAddToCart(item);
   if (!contentIds.length) return;

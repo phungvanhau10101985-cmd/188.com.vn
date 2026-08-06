@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import {
   getProductBySlugForSeo,
   buildProductJsonLd,
-  stripHtml,
   truncateDescriptionAtSentence,
 } from "@/lib/product-seo";
+import { getPublishedLadipageForProductRecord } from "@/lib/ladipage-public";
+import { buildFaqPageJsonLd, faqItemsFromSections } from "@/lib/ladipage-seo";
 import { serializeJsonLdForScript } from "@/lib/json-ld-script";
 import { displayableBrandOrOrigin, displayableBrandWithDefault } from "@/lib/utils";
 import { productPublicPdpUrl } from "@/lib/product-path-slug";
@@ -44,12 +45,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
 
   const brandForSeo = displayableBrandWithDefault(product.brand_name);
-  const brandForTitle = displayableBrandOrOrigin(product.brand_name); // Chỉ thêm brand vào title khi có thật (tránh lặp "... - 188.com.vn | 188.COM.VN")
+  const brandForTitle = displayableBrandOrOrigin(product.brand_name);
+  const ladipage = product?.id ? await getPublishedLadipageForProductRecord(product) : null;
   const title =
     product.meta_title ||
+    ladipage?.meta_title ||
     `${product.name}${brandForTitle ? ` - ${brandForTitle}` : ""}`;
   const rawDesc =
     product.meta_description ||
+    ladipage?.meta_description ||
     product.description ||
     `${product.name}. ${brandForSeo ? `Thương hiệu ${brandForSeo}. ` : ""}Giá ${new Intl.NumberFormat("vi-VN").format(product.price)} ₫. Mua sắm tại 188.com.vn - Xem là thích click là mê.`;
   const description = truncateDescriptionAtSentence(rawDesc, 160);
@@ -175,8 +179,13 @@ function buildBreadcrumbJsonLd(product: {
 export default async function ProductLayout({ params, children }: Props) {
   const { slug } = await params;
   const product = await getProductBySlugForSeo(slug);
+  const ladipage = product?.id ? await getPublishedLadipageForProductRecord(product) : null;
   const productJsonLd = product ? buildProductJsonLd(product) : null;
   const breadcrumbJsonLd = product ? buildBreadcrumbJsonLd(product) : null;
+  const faqJsonLd =
+    product && ladipage
+      ? buildFaqPageJsonLd(faqItemsFromSections(ladipage.sections), productPublicPdpUrl(product.slug, SITE_URL))
+      : null;
 
   return (
     <>
@@ -192,6 +201,12 @@ export default async function ProductLayout({ params, children }: Props) {
           dangerouslySetInnerHTML={{ __html: serializeJsonLdForScript(breadcrumbJsonLd) }}
         />
       )}
+      {faqJsonLd ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: serializeJsonLdForScript(faqJsonLd) }}
+        />
+      ) : null}
       {children}
     </>
   );

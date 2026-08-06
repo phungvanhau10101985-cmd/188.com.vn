@@ -509,21 +509,28 @@ def request_step_up(
             raise HTTPException(status_code=403, detail="Tài khoản không được gán quyền quản trị.")
         recipient_email = linked_admin.email
     try:
-        row = issue_challenge(
+        result = issue_challenge(
             db,
             subject_type="user",
             subject_id=current_user.id,
             purpose=body.purpose,
             email=recipient_email,
+            force_resend=body.resend,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Không gửi được OTP. Vui lòng thử lại.") from exc
+    if result.reused:
+        message = "Mã OTP đã được gửi tới email tài khoản. Vui lòng kiểm tra hộp thư."
+    else:
+        message = "Đã gửi mã OTP tới email tài khoản."
     return StepUpResponse(
-        challenge_id=row.public_id,
+        challenge_id=result.challenge.public_id,
         expires_in_minutes=int(settings.STEP_UP_OTP_EXPIRE_MINUTES),
-        message="Đã gửi mã OTP tới email tài khoản.",
+        message=message,
+        reused=result.reused,
+        resend_available_in_seconds=result.resend_available_in_seconds,
     )
 
 

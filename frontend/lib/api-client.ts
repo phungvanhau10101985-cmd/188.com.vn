@@ -1130,10 +1130,17 @@ class ApiClient {
 
   async requestStepUp(
     purpose: 'sensitive_action' | 'admin_elevation',
-  ): Promise<{ challenge_id: string; expires_in_minutes: number; message: string }> {
+    resend = false,
+  ): Promise<{
+    challenge_id: string;
+    expires_in_minutes: number;
+    message: string;
+    reused?: boolean;
+    resend_available_in_seconds?: number;
+  }> {
     return this.fetch('/auth/step-up/request', {
       method: 'POST',
-      body: JSON.stringify({ purpose }),
+      body: JSON.stringify({ purpose, resend }),
     });
   }
 

@@ -1,7 +1,7 @@
 /**
  * Xóa SP admin theo product_id Excel (có dấu /) — POST body, không đưa ID vào path URL.
  * Dùng proxy /api/v1 (ổn định trên VPS); tránh route riêng /api/admin/... có thể chưa deploy.
- * Chia lô; gặp 502/504/timeout thì giảm kích thước lô — không cố lại cùng size.
+ * Chia lô; gặp 502/504/timeout thì giảm kích thước lô; lô = 1 vẫn lỗi thì chờ rồi tự thử lại.
  */
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
 import {
@@ -10,6 +10,12 @@ import {
   promptAdminStepUpAndRetry,
 } from '@/lib/admin-step-up';
 
+const TIMEOUT_RETRY_DELAY_MS = 40_000;
+const MAX_CONSECUTIVE_TIMEOUT_RETRIES = 10;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 export type AdminBulkDeleteProductsResult = {
   deleted: string[];
   deleted_count: number;
@@ -113,11 +119,13 @@ export async function bulkDeleteAdminProducts(
   const deleted: string[] = [];
   const errors: AdminBulkDeleteProductsResult['errors'] = [];
   let cursor = 0;
+  let consecutiveTimeoutRetries = 0;
 
   while (cursor < unique.length) {
     const chunk = unique.slice(cursor, cursor + chunkSize);
     try {
       const res = await bulkDeleteOnce(chunk);
+      consecutiveTimeoutRetries = 0;
       deleted.push(...(res.deleted ?? []));
       errors.push(...(res.errors ?? []));
       cursor += chunk.length;
@@ -126,12 +134,17 @@ export async function bulkDeleteAdminProducts(
         chunkSize = Math.max(MIN_CHUNK, Math.floor(chunkSize / 2));
         continue;
       }
+      if (isGatewayOrTimeout(err) && consecutiveTimeoutRetries < MAX_CONSECUTIVE_TIMEOUT_RETRIES) {
+        consecutiveTimeoutRetries += 1;
+        await sleep(TIMEOUT_RETRY_DELAY_MS);
+        continue;
+      }
       const done = deleted.length;
       const left = unique.length - cursor;
       const base = err instanceof Error ? err.message : String(err);
       throw new Error(
         done > 0
-          ? `Đã xóa ${done}/${unique.length} sản rồi dừng (còn ${left}). Không cố xóa tiếp — giảm lô xuống ${chunkSize} vẫn lỗi. ${base}`
+          ? `Đã xóa ${done}/${unique.length} sản rồi dừng (còn ${left}). Đã tự thử lại ${consecutiveTimeoutRetries} lần sau mỗi ${Math.round(TIMEOUT_RETRY_DELAY_MS / 1000)}s vẫn lỗi. ${base}`
           : base,
       );
     }

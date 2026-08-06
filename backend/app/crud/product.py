@@ -5808,6 +5808,16 @@ def _delete_product_orm_only(
     defer_bunny: bool = False,
 ) -> None:
     """Xóa SP trong session; không commit — dùng bulk import batch. ``defer_bunny`` = dọn CDN nền sau."""
+    try:
+        from app.services.ladipage_cleanup import delete_single_product_ladipages_for_product
+
+        delete_single_product_ladipages_for_product(db, db_product.id)
+    except Exception:
+        logger.warning(
+            "Ladipage cleanup khi xóa SP id=%s thất bại (bỏ qua)",
+            getattr(db_product, "id", None),
+            exc_info=True,
+        )
     if not defer_bunny:
         delete_bunny_assets_for_product(db_product)
     _record_product_deletion_tombstone(db, db_product)

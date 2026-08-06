@@ -36,18 +36,29 @@ export default function StepUpOtpModal({
   const [challengeId, setChallengeId] = useState<string | null>(null);
   const [otp, setOtp] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [sending, setSending] = useState(true);
   const [verifying, setVerifying] = useState(false);
-  const [resendIn, setResendIn] = useState(30);
+  const [resendIn, setResendIn] = useState(0);
 
-  const sendCode = useCallback(async () => {
+  const sendCode = useCallback(async (isResend: boolean) => {
     setSending(true);
-    setError('');
+    if (isResend) {
+      setError('');
+    } else {
+      setError('');
+      setInfo('');
+    }
     try {
-      const result = await apiClient.requestStepUp(purpose);
+      const result = await apiClient.requestStepUp(purpose, isResend);
       setChallengeId(result.challenge_id);
-      setOtp('');
-      setResendIn(30);
+      setResendIn(result.resend_available_in_seconds ?? 60);
+      if (result.reused && !isResend) {
+        setInfo(result.message || 'Mã OTP đã được gửi. Vui lòng kiểm tra email.');
+      } else if (!result.reused) {
+        setInfo(result.message);
+        setOtp('');
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Không gửi được OTP. Vui lòng thử lại.');
     } finally {
@@ -56,7 +67,7 @@ export default function StepUpOtpModal({
   }, [purpose]);
 
   useEffect(() => {
-    void sendCode();
+    void sendCode(false);
   }, [sendCode]);
 
   useEffect(() => {
@@ -104,6 +115,12 @@ export default function StepUpOtpModal({
         <p className="mt-2 text-sm text-gray-600">{description}</p>
         <p className="mt-2 text-sm text-gray-600">Mã xác minh được gửi tới email tài khoản và có hiệu lực 10 phút.</p>
 
+        {info && !error ? (
+          <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+            {info}
+          </div>
+        ) : null}
+
         {error ? (
           <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}
@@ -128,7 +145,7 @@ export default function StepUpOtpModal({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <button
               type="button"
-              onClick={() => void sendCode()}
+              onClick={() => void sendCode(true)}
               disabled={sending || verifying || resendIn > 0}
               className="text-sm font-medium text-orange-700 disabled:text-gray-400"
             >
