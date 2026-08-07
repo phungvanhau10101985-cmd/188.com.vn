@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Product } from '@/types/api';
 import type { LadipageSection } from '@/lib/admin-api';
@@ -16,11 +16,13 @@ import ProductQASection from '@/app/products/[slug]/components/ProductQASection/
 import ProductReviewSection from '@/app/products/[slug]/components/ProductReviewSection/ProductReviewSection';
 import AgeGenderRecommendationSection from '@/components/AgeGenderRecommendationSection';
 import { trackEvent } from '@/lib/analytics';
-import { trackMetaViewContentProduct } from '@/lib/meta-pixel';
-import { trackTikTokViewContentProduct } from '@/lib/tiktok-pixel';
-import { trackGoogleAdsViewItemProduct } from '@/lib/google-ads-gtag';
 import { buildAddToCartRequestFromProduct, trackMarketingAddToCartIntent } from '@/lib/marketing-add-to-cart';
-import type { GoogleAutomatedDiscountSsrPayload } from '@/lib/google-automated-discount';
+import { useProductMarketingView } from '@/lib/use-product-marketing-view';
+import {
+  getActiveGoogleAutomatedDiscountToken,
+  markGoogleAutomatedDiscountCartLock,
+  type GoogleAutomatedDiscountSsrPayload,
+} from '@/lib/google-automated-discount';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
 import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
 import HeroSection from './HeroSection';
@@ -65,7 +67,6 @@ export default function SingleProductLadipageView({
   const [reviewsModalOpen, setReviewsModalOpen] = useState(false);
   const [selectedColorImage, setSelectedColorImage] = useState<string | null>(null);
   const [buyModalOpen, setBuyModalOpen] = useState(false);
-  const trackedRef = useRef(false);
 
   const source = `product:${slug}`;
 
@@ -87,17 +88,14 @@ export default function SingleProductLadipageView({
     apiClient.isProductFavorited(product.id).then((r) => setIsFavorited(r.is_favorited)).catch(() => setIsFavorited(false));
   }, [product?.id]);
 
-  /** ViewContent/view_item — 1 sản phẩm, đúng như trang chi tiết sản phẩm thật. */
-  useLayoutEffect(() => {
-    if (!product?.id || trackedRef.current) return;
-    trackedRef.current = true;
-    trackMetaViewContentProduct(product, { routeKey: slug });
-    trackTikTokViewContentProduct(product, { routeKey: slug });
-    trackGoogleAdsViewItemProduct(product);
-  }, [product, slug]);
+  /** Backup ViewContent — dedupe với ProductMarketingTracker ở page.tsx. */
+  useProductMarketingView(product, slug);
 
   const handleAddToCart = async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
-    const payload = buildAddToCartRequestFromProduct(p, quantity, selectedSize, selectedColor);
+    const googlePv2Token = getActiveGoogleAutomatedDiscountToken(p.product_id);
+    const payload = buildAddToCartRequestFromProduct(p, quantity, selectedSize, selectedColor, {
+      google_pv2_token: googlePv2Token ?? undefined,
+    });
     trackMarketingAddToCartIntent(payload);
     if (!isAuthenticated) {
       queuePendingCartAfterLogin(payload);
@@ -113,6 +111,9 @@ export default function SingleProductLadipageView({
     }
     try {
       await addToCart(payload);
+      if (googlePv2Token && p.product_id) {
+        markGoogleAutomatedDiscountCartLock(p.product_id);
+      }
       pushToast({ title: 'Đã thêm vào giỏ hàng', variant: 'success', durationMs: 2000 });
       trackEvent('add_to_cart_click', { product_id: p.id, quantity, source });
     } catch (err: unknown) {
@@ -122,7 +123,10 @@ export default function SingleProductLadipageView({
   };
 
   const handleBuyNow = async (p: Product, quantity: number, selectedSize?: string, selectedColor?: string) => {
-    const payload = buildAddToCartRequestFromProduct(p, quantity, selectedSize, selectedColor);
+    const googlePv2Token = getActiveGoogleAutomatedDiscountToken(p.product_id);
+    const payload = buildAddToCartRequestFromProduct(p, quantity, selectedSize, selectedColor, {
+      google_pv2_token: googlePv2Token ?? undefined,
+    });
     trackMarketingAddToCartIntent(payload);
     if (!isAuthenticated) {
       queuePendingCartAfterLogin(payload);
@@ -138,6 +142,9 @@ export default function SingleProductLadipageView({
     }
     try {
       await addToCart(payload, { skipAddedPopup: true });
+      if (googlePv2Token && p.product_id) {
+        markGoogleAutomatedDiscountCartLock(p.product_id);
+      }
       trackEvent('buy_now', { product_id: p.id, quantity, source });
       router.push('/cart');
     } catch (err: unknown) {

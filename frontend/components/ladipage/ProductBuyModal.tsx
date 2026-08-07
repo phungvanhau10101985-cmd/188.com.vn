@@ -9,6 +9,10 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { buildAddToCartRequestFromProduct, trackMarketingAddToCartIntent } from '@/lib/marketing-add-to-cart';
+import {
+  getActiveGoogleAutomatedDiscountToken,
+  markGoogleAutomatedDiscountCartLock,
+} from '@/lib/google-automated-discount';
 import { buildAuthLoginHrefFromFullPath, getBrowserReturnLocation } from '@/lib/auth-redirect';
 import { isClientAuthLikelyLoggedIn, probeCookieAuthSession } from '@/lib/client-auth-session';
 import { queuePendingCartAfterLogin } from '@/features/cart/pending-cart-session';
@@ -78,11 +82,17 @@ export default function ProductBuyModal({ product, isOpen, onClose, source = 'la
     selectedSize?: string,
     selectedColor?: string,
   ) => {
-    const payload = buildAddToCartRequestFromProduct(p, quantity, selectedSize, selectedColor);
+    const googlePv2Token = getActiveGoogleAutomatedDiscountToken(p.product_id);
+    const payload = buildAddToCartRequestFromProduct(p, quantity, selectedSize, selectedColor, {
+      google_pv2_token: googlePv2Token ?? undefined,
+    });
     trackMarketingAddToCartIntent(payload);
     if (await ensureAuthenticated(payload, 'add')) return;
     try {
       await addToCart(payload);
+      if (googlePv2Token && p.product_id) {
+        markGoogleAutomatedDiscountCartLock(p.product_id);
+      }
       trackEvent('add_to_cart_click', { product_id: p.id, quantity, source });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -96,12 +106,19 @@ export default function ProductBuyModal({ product, isOpen, onClose, source = 'la
     selectedSize?: string,
     selectedColor?: string,
   ) => {
-    const payload = buildAddToCartRequestFromProduct(p, quantity, selectedSize, selectedColor);
+    const googlePv2Token = getActiveGoogleAutomatedDiscountToken(p.product_id);
+    const payload = buildAddToCartRequestFromProduct(p, quantity, selectedSize, selectedColor, {
+      google_pv2_token: googlePv2Token ?? undefined,
+    });
     trackMarketingAddToCartIntent(payload);
     if (await ensureAuthenticated(payload, 'buy')) return;
     try {
       await addToCart(payload, { skipAddedPopup: true });
+      if (googlePv2Token && p.product_id) {
+        markGoogleAutomatedDiscountCartLock(p.product_id);
+      }
       trackEvent('buy_now', { product_id: p.id, quantity, source });
+      onClose();
       router.push('/cart');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

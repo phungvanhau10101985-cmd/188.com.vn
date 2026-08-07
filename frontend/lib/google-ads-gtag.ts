@@ -570,7 +570,8 @@ function shouldDedupe(ts: number, lastKey: string, key: string, lastAt: number, 
 }
 
 /**
- * Theo dõi theo route SPA (trang chủ, danh mục, tìm kiếm, …). Bỏ qua /products/* (xem view_item) và /cart (snapshot giỏ).
+ * Theo dõi theo route SPA (trang chủ, danh mục, tìm kiếm, …).
+ * Bỏ qua /products/* (view_item), /cart (begin_checkout), /lp/* (view_item_list / redirect PDP).
  */
 export function trackGoogleAdsRouteRetail(pathWithQuery: string): void {
   const sendTo = sendToJoined();
@@ -580,7 +581,12 @@ export function trackGoogleAdsRouteRetail(pathWithQuery: string): void {
   const q = query ?? '';
   const sp = new URLSearchParams(q);
 
-  if (pathOnly === '/cart' || /^\/products\/[^/]+\/?$/.test(pathOnly)) {
+  /** PDP / cart / ladipage multi có view_item | begin_checkout | view_item_list riêng — tránh retail page_view «other». */
+  if (
+    pathOnly === '/cart' ||
+    /^\/products\/[^/]+\/?$/.test(pathOnly) ||
+    /^\/lp\/[^/]+\/?$/.test(pathOnly)
+  ) {
     return;
   }
 

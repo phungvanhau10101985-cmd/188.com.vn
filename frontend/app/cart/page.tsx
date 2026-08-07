@@ -14,7 +14,7 @@ import type { UserAddress, AddressCreateInput } from '@/types/api';
 import { VIETNAM_PROVINCES } from '@/lib/vietnam-provinces';
 import { getStoredReferralCode } from '@/lib/affiliate-ref';
 import { trackEvent } from '@/lib/analytics';
-import { trackMetaOrderAwaitingDeposit, trackMetaPurchase } from '@/lib/meta-pixel';
+import { trackMetaOrderAwaitingDeposit, trackMetaPurchase, trackMetaInitiateCheckout } from '@/lib/meta-pixel';
 import {
   trackTikTokCompletePayment,
   trackTikTokInitiateCheckout,
@@ -454,6 +454,7 @@ export default function CartPage() {
     if (!isAuthenticated || cartItems.length === 0) return;
     trackGoogleAdsCartPageView(cartItems, cartTotalAll);
     trackTikTokInitiateCheckout({ items: cartItems, value: cartTotalAll });
+    trackMetaInitiateCheckout({ items: cartItems, value: cartTotalAll });
   }, [isAuthenticated, cartAdsFingerprint, cartTotalAll]);
 
   if (!pageReady || isLoading) {

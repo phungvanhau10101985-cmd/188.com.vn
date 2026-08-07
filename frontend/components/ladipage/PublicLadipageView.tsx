@@ -1,11 +1,8 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Product } from '@/types/api';
 import type { LadipageSection } from '@/lib/admin-api';
-import { trackMetaViewContentProducts } from '@/lib/meta-pixel';
-import { trackTikTokViewContentProducts } from '@/lib/tiktok-pixel';
-import { trackGoogleAdsViewItemList } from '@/lib/google-ads-gtag';
 import HeroSection from './HeroSection';
 import HighlightsSection from './HighlightsSection';
 import MaterialSection from './MaterialSection';
@@ -33,17 +30,21 @@ interface PublicLadipageViewProps {
   initialProducts?: Product[];
 }
 
-/** Render read-only (không sửa) — dùng cho trang public `/lp/<slug>`. */
+/**
+ * Render read-only — trang public `/lp/<slug>` (danh mục / nhiều SP).
+ * Tracking nhóm: `LadipageGroupMarketingTracker` ở page.tsx (Meta + TikTok + Google).
+ * ATC: `ProductBuyModal` → trackMarketingAddToCartIntent.
+ * Ladipage 1 SP không dùng view này (redirect sang `/products/...`).
+ */
 export default function PublicLadipageView({
   slug,
-  title,
   sections,
   resolvedProductIds,
   initialProducts,
 }: PublicLadipageViewProps) {
   const source = `ladipage:${slug}`;
-  const trackedRef = useRef(false);
   const [buyModalOpen, setBuyModalOpen] = useState(false);
+
   const singleProduct = useMemo(() => {
     if (resolvedProductIds.length !== 1) return null;
     if (initialProducts?.length === 1) return initialProducts[0];
@@ -61,18 +62,6 @@ export default function PublicLadipageView({
     }
     scrollToProducts();
   };
-
-  /** ViewContent/view_item_list nhóm sản phẩm — bắn đúng 1 lần khi lưới sản phẩm tải xong. */
-  const handleProductsLoaded = useCallback(
-    (products: Product[]) => {
-      if (trackedRef.current || products.length === 0) return;
-      trackedRef.current = true;
-      trackMetaViewContentProducts(products, { contentName: title });
-      trackTikTokViewContentProducts(products, { contentName: title });
-      trackGoogleAdsViewItemList(products, title);
-    },
-    [title],
-  );
 
   return (
     <div className="mx-auto max-w-6xl px-4 pb-24 md:pb-8">
@@ -95,7 +84,9 @@ export default function PublicLadipageView({
                       className="inline-flex items-center justify-center rounded-full bg-orange-600 px-7 py-3.5 text-sm font-bold text-white shadow-lg shadow-orange-600/25 transition hover:-translate-y-0.5 hover:bg-orange-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
                     >
                       {singleProduct ? 'Mua ngay' : 'Khám phá sản phẩm'}
-                      <span aria-hidden="true" className="ml-2 text-base leading-none">→</span>
+                      <span aria-hidden="true" className="ml-2 text-base leading-none">
+                        →
+                      </span>
                     </button>
                   }
                 />
@@ -114,7 +105,6 @@ export default function PublicLadipageView({
                 productIds={resolvedProductIds}
                 initialProducts={initialProducts}
                 source={source}
-                onProductsLoaded={handleProductsLoaded}
               />
             );
           case 'trust_cta':
@@ -131,10 +121,12 @@ export default function PublicLadipageView({
             return null;
         }
       })}
+
       <MobileStickyCta
         label={singleProduct ? 'Mua ngay' : 'Xem sản phẩm'}
         onClick={handlePrimaryCta}
       />
+
       {singleProduct ? (
         <ProductBuyModal
           product={singleProduct}

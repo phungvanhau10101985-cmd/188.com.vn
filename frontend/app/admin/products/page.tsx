@@ -4199,8 +4199,9 @@ export default function AdminProductsPage() {
               Google / Meta / TikTok <strong className="font-medium text-gray-800">tự kéo file qua HTTP(S) theo lịch</strong> — bạn{' '}
               <strong className="font-medium text-gray-800">không</strong> tải file về máy rồi upload tay. Chỉ cần dán URL vào mục
               nguồn cấp dữ liệu (scheduled fetch / URL máy chủ). Mở link trong trình duyệt chỉ để kiểm tra nhanh nội dung.
-              {' '}Sản phẩm thuộc <strong className="font-medium text-gray-800">Ladipage đã đăng</strong> tự động dùng URL{' '}
-              <code className="text-[11px]">/lp/…</code> trong cột <code className="text-[11px]">link</code> (thay PDP).
+              {' '}Chỉ <strong className="font-medium text-gray-800">Ladipage danh mục / nhiều SP đã đăng</strong> mới ghi đè cột{' '}
+              <code className="text-[11px]">link</code> thành <code className="text-[11px]">/lp/…</code> trong feed Meta / Google / TikTok.
+              Ladipage 1 SP (nội dung trên trang <code className="text-[11px]">/products/…</code>) giữ link PDP như trước — không cần thêm nguồn riêng.
             </p>
             {feedUrlIsNonPublic ? (
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 text-xs leading-snug">

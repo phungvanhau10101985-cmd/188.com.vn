@@ -11,7 +11,7 @@ export function metaPurchaseEventId(orderId: number | string): string {
 }
 
 type FbqFn = (...args: unknown[]) => void;
-type StandardEventName = 'PageView' | 'ViewContent' | 'AddToCart' | 'Purchase';
+type StandardEventName = 'PageView' | 'ViewContent' | 'AddToCart' | 'InitiateCheckout' | 'Purchase';
 type PixelEventMode = 'standard' | 'custom';
 
 /**
@@ -73,18 +73,26 @@ function getFbq(): FbqFn | undefined {
   return typeof fbq === 'function' ? fbq : undefined;
 }
 
-/** Đợi fbq sau khi script Pixel chèn (embed động hoặc chunk Meta). */
+/** Stub SSR có `typeof fbq === 'function'` trước khi fbevents.js load — Pixel Helper dễ mất ViewContent nếu bắn lúc đó. */
+function isFbqFullyReady(): boolean {
+  const fbq = getFbq() as (FbqFn & { loaded?: boolean; callMethod?: unknown }) | undefined;
+  if (!fbq) return false;
+  if (fbq.loaded === true) return true;
+  if (typeof fbq.callMethod === 'function') return true;
+  return false;
+}
+
+/** Đợi fbq thật sự sẵn sàng (không chỉ stub queue). */
 function whenFbqReady(run: () => void): void {
   if (typeof window === 'undefined') return;
-  if (getFbq()) {
+  if (isFbqFullyReady()) {
     run();
     return;
   }
   let done = false;
   const fire = () => {
     if (done) return;
-    const fbq = getFbq();
-    if (!fbq) return;
+    if (!isFbqFullyReady()) return;
     done = true;
     run();
   };
@@ -103,8 +111,11 @@ function whenFbqReady(run: () => void): void {
     if (ticks >= max) {
       window.clearInterval(id);
       window.removeEventListener('188-site-embeds-ready', onEmbeds);
-      /** SPA: pixel có thể inject ngay sau timeout — thử thêm một lần. */
-      window.requestAnimationFrame(() => fire());
+      /** Timeout: vẫn thử nếu chỉ còn stub (tốt hơn mất hẳn sự kiện). */
+      if (getFbq()) {
+        done = true;
+        run();
+      }
     }
   }, 100);
 }
@@ -170,7 +181,7 @@ function firePixelAndCapi(
       opts?.onPixelFired?.();
     }
   };
-  if (opts?.syncPixel && getFbq()) {
+  if (opts?.syncPixel && isFbqFullyReady()) {
     firePixel();
   } else {
     whenFbqReady(firePixel);
@@ -330,6 +341,7 @@ export function trackMetaViewContentProduct(
   const fp = viewContentFingerprint(product, content_ids, value, category);
   const now = Date.now();
   if (!opts?.skipDedupe && shouldDedupeViewContent(fp, now)) return;
+  /** Đánh dấu dedupe sớm để Strict Mode / tracker kép không bắn đôi CAPI; pixel chờ fbq ready. */
   markViewContentDedupe(fp, now);
 
   const primaryId = content_ids[0]!;
@@ -344,7 +356,7 @@ export function trackMetaViewContentProduct(
     contents: [{ id: primaryId, quantity: 1, item_price: value }],
   };
   firePixelAndCapi('ViewContent', customData, {
-    syncPixel: true,
+    /** Chờ fbq.loaded — Pixel Helper mới thấy ViewContent (không kẹt stub). */
     keepalive: true,
     capiRetries: 2,
   });
@@ -386,7 +398,7 @@ export function trackMetaViewContentProducts(
     contents,
   };
   firePixelAndCapi('ViewContent', customData, {
-    syncPixel: true,
+    /** Không syncPixel: lúc PDP mount fbq có thể còn stub — khi ready mới bắn (Pixel Helper thấy ViewContent). */
     keepalive: true,
     capiRetries: 2,
   });
@@ -422,6 +434,34 @@ export function trackMetaAddToCart(item: AddToCartRequest): void {
   markAddToCartDedupe(fp, now);
   /** syncPixel: bắn ngay trong stack click — Pixel Helper / Meta nhận AddToCart (không defer qua whenFbqReady). */
   firePixelAndCapi('AddToCart', customData, { keepalive: true, syncPixel: true });
+}
+
+let lastInitiateCheckoutFingerprint: string | null = null;
+let lastInitiateCheckoutAtMs = 0;
+const INITIATE_CHECKOUT_DEDUPE_MS = 3000;
+
+/** Trang giỏ / bắt đầu checkout — chuẩn Meta InitiateCheckout (parity TikTok + Google begin_checkout). */
+export function trackMetaInitiateCheckout(params: {
+  items: CartItem[];
+  value: number;
+  orderId?: number | string;
+  extra?: Record<string, unknown>;
+}): void {
+  const { items, value, orderId, extra } = params;
+  if (!items.length) return;
+  const fp = `${items.map((l) => `${l.id}:${l.quantity}`).join(',')}|${value}|${orderId ?? ''}|${JSON.stringify(extra ?? {})}`;
+  const now = Date.now();
+  if (
+    lastInitiateCheckoutFingerprint === fp &&
+    now - lastInitiateCheckoutAtMs < INITIATE_CHECKOUT_DEDUPE_MS
+  ) {
+    return;
+  }
+  lastInitiateCheckoutFingerprint = fp;
+  lastInitiateCheckoutAtMs = now;
+
+  const customData = cartMetaCustomData({ items, value, orderId, extra });
+  firePixelAndCapi('InitiateCheckout', customData, { keepalive: true, syncPixel: true });
 }
 
 export function trackMetaPurchase(params: {

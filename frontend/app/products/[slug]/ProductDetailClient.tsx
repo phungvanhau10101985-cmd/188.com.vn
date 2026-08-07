@@ -22,13 +22,11 @@ import ProductDetailMobile from './ProductDetailMobile';
 import ErrorState from './components/ErrorState/ErrorState';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
-import { trackMetaViewContentProduct } from '@/lib/meta-pixel';
-import { trackTikTokViewContentProduct } from '@/lib/tiktok-pixel';
 import {
   buildAddToCartRequestFromProduct,
   trackMarketingAddToCartIntent,
 } from '@/lib/marketing-add-to-cart';
-import { trackGoogleAdsViewItemProduct, peekGoogleAdsConversionsFingerprint } from '@/lib/google-ads-gtag';
+import { useProductMarketingView } from '@/lib/use-product-marketing-view';
 import {
   persistRelatedFiltersFromProduct,
   buildHomeListingSearchParams,
@@ -96,8 +94,6 @@ export default function ProductDetailClient({
   const loginHref = useLoginRedirectHref();
   const { pushToast } = useToast();
 
-  const adsConvCfgFp = peekGoogleAdsConversionsFingerprint();
-
   /** Đã xem: lưu theo phiên khách (header X-Guest-Session-Id) hoặc tài khoản — merge khi đăng nhập */
   useEffect(() => {
     if (!product?.id) return;
@@ -118,19 +114,10 @@ export default function ProductDetailClient({
   }, [slug, initialProduct]);
 
   /**
-   * Meta ViewContent — nguồn DUY NHẤT ở PDP (dedupe theo sản phẩm trong meta-pixel).
-   * Không dùng thêm fallback ở AnalyticsTracker để tránh bắn đôi (event ID khác nhau).
+   * Meta/TikTok ViewContent + Google view_item — nguồn chính: ProductMarketingTracker ở page.tsx.
+   * Giữ hook dự phòng khi ProductDetailClient được mount độc lập (optimized-page / story).
    */
-  useLayoutEffect(() => {
-    if (!initialProduct?.id) return;
-    trackMetaViewContentProduct(initialProduct, { routeKey: slug });
-    trackTikTokViewContentProduct(initialProduct, { routeKey: slug });
-  }, [slug, initialProduct]);
-
-  useEffect(() => {
-    if (!initialProduct?.id) return;
-    trackGoogleAdsViewItemProduct(initialProduct);
-  }, [initialProduct, adsConvCfgFp]);
+  useProductMarketingView(initialProduct, slug);
 
   useEffect(() => {
     setAccountNavReady(true);

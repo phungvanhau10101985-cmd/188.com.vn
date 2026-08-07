@@ -10,6 +10,7 @@ import { isReservedNonProductSlug } from '@/lib/reserved-non-product-slugs';
 import { verifyPv2ForProductPage } from '@/lib/google-automated-discount-server';
 import ProductDetailClient from './ProductDetailClient';
 import SingleProductLadipageView from '@/components/ladipage/SingleProductLadipageView';
+import ProductMarketingTracker from './ProductMarketingTracker';
 import ErrorState from './components/ErrorState/ErrorState';
 
 type Props = {
@@ -68,25 +69,33 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
   const initialGoogleDiscount = await verifyPv2ForProductPage(sp, product.product_id);
   const ladipage = await getPublishedLadipageForProductRecord(product);
 
+  const tracker = <ProductMarketingTracker key={`track:${slug}`} product={product} slug={slug} />;
+
   if (ladipage) {
     return (
-      <SingleProductLadipageView
-        key={slug}
-        slug={slug}
-        product={product}
-        sections={ladipage.sections}
-        initialGoogleDiscount={initialGoogleDiscount}
-      />
+      <>
+        {tracker}
+        <SingleProductLadipageView
+          key={slug}
+          slug={slug}
+          product={product}
+          sections={ladipage.sections}
+          initialGoogleDiscount={initialGoogleDiscount}
+        />
+      </>
     );
   }
 
   return (
-    <ProductDetailClient
-      key={slug}
-      initialProduct={product}
-      slug={slug}
-      initialGoogleDiscount={initialGoogleDiscount}
-    />
+    <>
+      {tracker}
+      <ProductDetailClient
+        key={slug}
+        initialProduct={product}
+        slug={slug}
+        initialGoogleDiscount={initialGoogleDiscount}
+      />
+    </>
   );
 }
 

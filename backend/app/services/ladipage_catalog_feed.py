@@ -1,8 +1,8 @@
 """
-Gắn URL Ladipage đã publish vào feed catalog Google / Meta / TikTok.
+Gắn URL Ladipage (danh mục / nhiều SP) đã publish vào feed catalog Google / Meta / TikTok.
 
-Mỗi sản phẩm thuộc ladipage published → cột `link` trong TSV trỏ `/lp/{slug}`
-thay vì `/products/{slug}` để quảng cáo đưa khách vào landing AI.
+- Ladipage ≥2 SP published → cột `link` TSV trỏ `/lp/{slug}` (landing quảng cáo).
+- Ladipage 1 SP → bỏ qua: feed giữ `/products/...` (nội dung AI nằm trên PDP, không đổi nguồn catalog).
 """
 from __future__ import annotations
 
@@ -17,10 +17,10 @@ from app.services.ladipage_ai_service import resolve_products_for_ladipage
 
 def build_published_ladipage_product_links(db: Session, shop_base_url: str) -> Dict[int, str]:
     """
-    Map `product.id` → absolute URL `/lp/{slug}` cho mọi sản phẩm nằm trong ladipage đã publish.
+    Map `product.id` → absolute URL `/lp/{slug}` cho sản phẩm thuộc ladipage published (≥2 SP).
 
     Nếu nhiều ladipage chứa cùng sản phẩm: ladipage publish mới hơn thắng.
-    Ladipage 1 SP bị bỏ qua — feed dùng URL sản phẩm mặc định.
+    Ladipage 1 SP bị bỏ qua — feed dùng URL PDP mặc định (không thêm nguồn ladipage riêng).
     """
     base = shop_base_url.rstrip("/")
     links: Dict[int, str] = {}
