@@ -9,6 +9,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import { buildAddToCartRequestFromProduct, trackMarketingAddToCartIntent } from '@/lib/marketing-add-to-cart';
+import { useLadipageProductInterestView } from '@/lib/use-ladipage-group-marketing-view';
 import {
   getActiveGoogleAutomatedDiscountToken,
   markGoogleAutomatedDiscountCartLock,
@@ -26,9 +27,7 @@ interface ProductBuyModalProps {
 }
 
 /**
- * Modal mua hàng dùng lại `ProductVariantModal` (giống trang chi tiết sản phẩm) cho từng thẻ
- * sản phẩm trong ladipage — hoạt động như nhau cho cả trường hợp 1 sản phẩm hoặc nhiều sản phẩm,
- * mỗi thẻ mở modal đúng cho sản phẩm của nó.
+ * Modal mua hàng trên ladipage — mở modal = khách quan tâm 1 SP → ViewContent đơn.
  */
 export default function ProductBuyModal({ product, isOpen, onClose, source = 'ladipage' }: ProductBuyModalProps) {
   const router = useRouter();
@@ -36,6 +35,8 @@ export default function ProductBuyModal({ product, isOpen, onClose, source = 'la
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { pushToast } = useToast();
   const [displayStockByVariant, setDisplayStockByVariant] = useState<Record<string, number>>({});
+
+  useLadipageProductInterestView(product, isOpen, `${source}:buy-modal:${product.id}`);
 
   const ensureAuthenticated = useCallback(
     async (

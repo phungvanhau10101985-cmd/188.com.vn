@@ -12,19 +12,16 @@ import ProductBuyModal from './ProductBuyModal';
 
 interface ProductsGridSectionProps {
   productIds: number[];
-  /** Sản phẩm đã fetch server-side — SEO + hiển thị ngay không chờ JS. */
+  /** Sản phẩm đã fetch server-side — SEO + SSR lưới sản phẩm trên ladipage. */
   initialProducts?: Product[];
   /** Nguồn cho analytics, vd `ladipage:{slug}`. */
   source?: string;
-  /** Báo cho component cha khi đã tải xong danh sách sản phẩm thật (dùng để bắn ViewContent nhóm). */
-  onProductsLoaded?: (products: Product[]) => void;
 }
 
 export default function ProductsGridSection({
   productIds,
   initialProducts,
   source,
-  onProductsLoaded,
 }: ProductsGridSectionProps) {
   const sortedInitial = useMemo(
     () => (initialProducts?.length ? sortProductsByIds(initialProducts, productIds) : []),
@@ -42,9 +39,8 @@ export default function ProductsGridSection({
     if (hasInitial) {
       setProducts(sortedInitial);
       setStatus('ready');
-      onProductsLoaded?.(sortedInitial);
     }
-  }, [hasInitial, sortedInitial, onProductsLoaded]);
+  }, [hasInitial, sortedInitial]);
 
   useEffect(() => {
     if (hasInitial) return;
@@ -59,10 +55,8 @@ export default function ProductsGridSection({
       .getProductsByIds(productIds)
       .then((rows) => {
         if (!alive) return;
-        const sorted = sortProductsByIds(rows, productIds);
-        setProducts(sorted);
+        setProducts(sortProductsByIds(rows, productIds));
         setStatus('ready');
-        onProductsLoaded?.(sorted);
       })
       .catch(() => {
         if (!alive) return;
@@ -71,7 +65,6 @@ export default function ProductsGridSection({
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productIds, hasInitial]);
 
   const retryFetch = () => {
@@ -80,10 +73,8 @@ export default function ProductsGridSection({
     apiClient
       .getProductsByIds(productIds)
       .then((rows) => {
-        const sorted = sortProductsByIds(rows, productIds);
-        setProducts(sorted);
+        setProducts(sortProductsByIds(rows, productIds));
         setStatus('ready');
-        onProductsLoaded?.(sorted);
       })
       .catch(() => setStatus('error'));
   };
@@ -96,7 +87,9 @@ export default function ProductsGridSection({
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-600">Lựa chọn dành cho bạn</p>
           <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-gray-950 md:text-3xl">Sản phẩm nổi bật</h2>
-          <p className="mt-2 text-sm text-gray-600">Khám phá thông tin, giá bán và lựa chọn phù hợp với nhu cầu của bạn.</p>
+          <p className="mt-2 text-sm text-gray-600">
+            Khám phá thông tin, giá bán và lựa chọn phù hợp với nhu cầu của bạn.
+          </p>
         </div>
         {status === 'ready' && products.length > 0 && (
           <p className="text-sm font-semibold text-gray-500">{products.length} sản phẩm</p>
@@ -136,7 +129,10 @@ export default function ProductsGridSection({
             const seg = productPathSlugFromApi(p.slug, p.product_id) || p.product_id;
             const href = seg ? `/products/${encodeURIComponent(seg)}` : '#';
             return (
-            <div key={p.id} className="group overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition duration-200 hover:-translate-y-1 hover:border-orange-200 hover:shadow-xl hover:shadow-orange-900/10">
+              <div
+                key={p.id}
+                className="group overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition duration-200 hover:-translate-y-1 hover:border-orange-200 hover:shadow-xl hover:shadow-orange-900/10"
+              >
                 <Link href={href} className="block aspect-square overflow-hidden bg-gray-50">
                   {p.main_image || p.images?.[0] ? (
                     <Image
@@ -153,7 +149,10 @@ export default function ProductsGridSection({
                   )}
                 </Link>
                 <div className="p-4">
-                  <Link href={href} className="line-clamp-2 min-h-[2.5em] text-sm font-semibold leading-relaxed text-gray-900 transition hover:text-orange-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-600">
+                  <Link
+                    href={href}
+                    className="line-clamp-2 min-h-[2.5em] text-sm font-semibold leading-relaxed text-gray-900 transition hover:text-orange-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-600"
+                  >
                     {p.name}
                   </Link>
                   <p className="mt-2 text-lg font-extrabold text-orange-600">{formatPrice(p.price)}</p>

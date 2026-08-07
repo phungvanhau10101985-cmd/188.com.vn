@@ -20,6 +20,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: '/admin/orders', label: 'Đơn hàng', moduleKey: 'orders' },
       { href: '/admin/orders/shipping', label: 'Vận chuyển EMS', moduleKey: 'ems_shipping' },
       { href: '/admin/products', label: 'Sản phẩm', moduleKey: 'products' },
+      { href: '/admin/products/create', label: 'Đăng SP thủ công / AI', moduleKey: 'products' },
       { href: '/admin/test', label: 'Test & thử nghiệm', moduleKey: 'admin_test', privilegedOnly: true },
       { href: '/admin/products/source-stock-check', label: 'Kiểm tra nguồn hàng', moduleKey: 'source_stock_check' },
       { href: '/admin/products/taobao-cards-parse', label: 'Parse HTML listing Taobao', moduleKey: 'taobao_cards_parse' },

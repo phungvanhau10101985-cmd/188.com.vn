@@ -32,9 +32,7 @@ interface PublicLadipageViewProps {
 
 /**
  * Render read-only — trang public `/lp/<slug>` (danh mục / nhiều SP).
- * Tracking nhóm: `LadipageGroupMarketingTracker` ở page.tsx (Meta + TikTok + Google).
- * ATC: `ProductBuyModal` → trackMarketingAddToCartIntent.
- * Ladipage 1 SP không dùng view này (redirect sang `/products/...`).
+ * Remarketing: seed top 2 lúc vào trang + ViewContent 1 SP khi mở modal / vào PDP.
  */
 export default function PublicLadipageView({
   slug,

@@ -219,6 +219,7 @@ def load_api_routes():
         ("import_export", "/import-export", "import-export"),  # ĐẶC BIỆT DEBUG
         ("import_1688", "/import-1688", "import-1688"),
         ("image_localization", "/image-localization", "image-localization"),
+        ("manual_product_create", "/manual-products", "manual-products"),
         ("user_behavior", "/user-behavior", "user-behavior"),
         ("analytics", "/analytics", "analytics"),
         ("birthday_promo", "/birthday-promo", "birthday-promo"),

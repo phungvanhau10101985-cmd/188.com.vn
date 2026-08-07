@@ -5718,24 +5718,39 @@ def _record_product_deletion_tombstone(db: Session, db_product: Product) -> None
     if not public_id:
         return
     deleted_at = datetime.now(timezone.utc)
-    existing = (
-        db.query(ProductDeletion)
-        .filter(ProductDeletion.product_id == public_id)
-        .first()
-    )
-    if existing is None:
-        db.add(ProductDeletion(product_id=public_id, deleted_at=deleted_at))
-    else:
-        existing.deleted_at = deleted_at
+    from sqlalchemy.exc import ProgrammingError
+
+    try:
+        # SAVEPOINT: thiếu bảng product_deletions không làm hỏng transaction xoá SP.
+        with db.begin_nested():
+            existing = (
+                db.query(ProductDeletion)
+                .filter(ProductDeletion.product_id == public_id)
+                .first()
+            )
+            if existing is None:
+                db.add(ProductDeletion(product_id=public_id, deleted_at=deleted_at))
+            else:
+                existing.deleted_at = deleted_at
+    except ProgrammingError:
+        return
 
 
 def clear_product_deletion_tombstone(db: Session, product_id: Optional[str]) -> None:
     """Nếu mã được tạo lại, tombstone cũ không còn là trạng thái mới nhất."""
     public_id = str(product_id or "").strip()
-    if public_id:
-        db.query(ProductDeletion).filter(ProductDeletion.product_id == public_id).delete(
-            synchronize_session=False
-        )
+    if not public_id:
+        return
+    from sqlalchemy.exc import ProgrammingError
+
+    try:
+        # SAVEPOINT: DB chưa migrate product_deletions vẫn tạo SP được.
+        with db.begin_nested():
+            db.query(ProductDeletion).filter(ProductDeletion.product_id == public_id).delete(
+                synchronize_session=False
+            )
+    except ProgrammingError:
+        return
 
 
 def get_products_for_incremental_sync(

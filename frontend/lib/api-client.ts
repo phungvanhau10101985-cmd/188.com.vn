@@ -1091,9 +1091,14 @@ class ApiClient {
 
   /** Kiểm tra user có được phép đánh giá sản phẩm (đã mua và nhận hàng). */
   async canReviewProduct(productId: number): Promise<{ can_review: boolean; reason?: string }> {
-    return this.fetch<{ can_review: boolean; reason?: string }>(
-      `/product-reviews/can-review?product_id=${productId}`
-    );
+    try {
+      return await this.fetch<{ can_review: boolean; reason?: string }>(
+        `/product-reviews/can-review?product_id=${productId}`,
+        { quiet: true },
+      );
+    } catch {
+      return { can_review: false, reason: 'Không kiểm tra được quyền đánh giá' };
+    }
   }
 
   async submitProductReview(data: { product_id: number; star: number; title?: string; content: string; images?: string[] }): Promise<ProductReviewItem> {

@@ -242,6 +242,13 @@ class Settings:
             1,
             min(50, int(os.getenv("BUNNY_DELETE_MAX_ATTEMPTS", "8") or "8")),
         )
+        # Windows dev thiếu CA: BUNNY_SSL_VERIFY=false (production nên true)
+        self.BUNNY_SSL_VERIFY: bool = os.getenv("BUNNY_SSL_VERIFY", "true").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
 
         # Bản địa hóa ảnh sản phẩm — Google Vision + DeepSeek + Gemini/OpenAI API + Bunny upload.
         self.IMAGE_LOCALIZATION_ENABLED: bool = os.getenv(
@@ -695,6 +702,13 @@ class Settings:
         self.IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED: bool = os.getenv(
             "IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED", "true"
         ).strip().lower() in ("1", "true", "yes", "on")
+        # Windows / proxy thiếu CA: DEEPSEEK_SSL_VERIFY=false (production VPS nên true)
+        self.DEEPSEEK_SSL_VERIFY: bool = os.getenv("DEEPSEEK_SSL_VERIFY", "true").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
         self.IMPORT_LINK_DEEPSEEK_TAXONOMY_FORCE: bool = os.getenv(
             "IMPORT_LINK_DEEPSEEK_TAXONOMY_FORCE", ""
         ).strip().lower() in ("1", "true", "yes", "on")
@@ -738,6 +752,13 @@ class Settings:
                 (_gemini_raw or "").strip(),
                 self.GEMINI_MODEL,
             )
+        # Windows / proxy thiếu CA: GEMINI_SSL_VERIFY=false (production VPS nên true)
+        self.GEMINI_SSL_VERIFY: bool = os.getenv("GEMINI_SSL_VERIFY", "true").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
 
         # Category SEO: tự động duyệt mapping khi AI confidence đủ cao
         self.CATEGORY_SEO_AUTO_APPROVE: bool = os.getenv("CATEGORY_SEO_AUTO_APPROVE", "True").lower() == "true"

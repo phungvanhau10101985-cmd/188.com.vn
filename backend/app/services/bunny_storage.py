@@ -6,6 +6,7 @@ Env:
   BUNNY_STORAGE_ZONE_NAME   — VD: 188-com-vn-cdn
   BUNNY_STORAGE_ACCESS_KEY — password API (Dashboard → Storage → Credentials)
   BUNNY_CDN_PUBLIC_BASE     — hostname Pull Zone VD: https://188comvn.b-cdn.net (hoặc custom sau CNAME + SSL)
+  BUNNY_SSL_VERIFY          — true/false; Windows thiếu CA có thể false (chỉ dev)
   MERCHANT_FEED_IMAGE_BASE_URL — khi khác BUNNY_CDN_PUBLIC_BASE nhưng vẫn cùng Bunny (thêm host để nhận URL xoá)
   BUNNY_DELETE_ON_PRODUCT_DELETE — true (mặc định): xếp hàng xoá object khi xoá sản phẩm DB; false = tắt
   BUNNY_DELETE_CRON_BATCH_SIZE — số dòng pending mỗi lần cron/drain (mặc định 80)
@@ -19,12 +20,54 @@ from typing import Any, Iterable, List, Optional, Set
 from urllib.parse import urlparse
 
 import requests
+from requests.exceptions import SSLError
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 BUNNY_API_BASE = "https://storage.bunnycdn.com"
+_ssl_fallback_warned = False
+
+
+def _bunny_ssl_verify() -> bool:
+    return bool(getattr(settings, "BUNNY_SSL_VERIFY", True))
+
+
+def _request_bunny(
+    method: str,
+    url: str,
+    *,
+    headers: dict,
+    data: Optional[bytes] = None,
+    timeout_sec: float = 120.0,
+) -> requests.Response:
+    """PUT/DELETE Bunny; Windows thiếu CA → retry verify=False một lần (hoặc theo BUNNY_SSL_VERIFY)."""
+    global _ssl_fallback_warned
+    verify = _bunny_ssl_verify()
+    try:
+        return requests.request(
+            method, url, headers=headers, data=data, timeout=timeout_sec, verify=verify
+        )
+    except SSLError:
+        if not verify:
+            raise
+        if not _ssl_fallback_warned:
+            logger.warning(
+                "Bunny SSL verify failed — retry với verify=False (dev Windows thiếu CA). "
+                "Đặt BUNNY_SSL_VERIFY=false trong backend/.env để bỏ cảnh báo; "
+                "production nên cài CA đúng và giữ BUNNY_SSL_VERIFY=true."
+            )
+            _ssl_fallback_warned = True
+            try:
+                import urllib3
+
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            except Exception:
+                pass
+        return requests.request(
+            method, url, headers=headers, data=data, timeout=timeout_sec, verify=False
+        )
 
 
 def build_public_object_url(public_base: str, remote_relative_path: str) -> str:
@@ -53,7 +96,7 @@ def upload_file_to_zone(
     headers = {"AccessKey": access_key.strip()}
     ct = content_type or mimetypes.guess_type(remote_path)[0] or "application/octet-stream"
     headers["Content-Type"] = ct
-    resp = requests.put(url, data=data, headers=headers, timeout=timeout_sec)
+    resp = _request_bunny("PUT", url, headers=headers, data=data, timeout_sec=timeout_sec)
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"Bunny PUT {resp.status_code}: {resp.text[:400]}")
 
@@ -76,7 +119,7 @@ def delete_file_from_zone(
         return False
     url = f"{BUNNY_API_BASE}/{zp}/{rp}"
     headers = {"AccessKey": access_key.strip()}
-    resp = requests.delete(url, headers=headers, timeout=timeout_sec)
+    resp = _request_bunny("DELETE", url, headers=headers, timeout_sec=timeout_sec)
     if resp.status_code in (200, 204):
         return True
     if resp.status_code == 404:

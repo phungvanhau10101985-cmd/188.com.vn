@@ -9,6 +9,7 @@ from app.api.endpoints import (
     promotions,
     sale_calendar, newsletter, google_merchant,
     email_preferences,
+    manual_product_create,
 )
 
 api_router = APIRouter()
@@ -33,6 +34,11 @@ api_router.include_router(filters.router, prefix="/filters", tags=["filters"])
 api_router.include_router(import_export.router, prefix="/import-export", tags=["import-export"])
 api_router.include_router(import_1688.router, prefix="/import-1688", tags=["import-1688"])
 api_router.include_router(image_localization.router, prefix="/image-localization", tags=["image-localization"])
+api_router.include_router(
+    manual_product_create.router,
+    prefix="/manual-products",
+    tags=["manual-products"],
+)
 api_router.include_router(user_behavior.router, prefix="/user-behavior", tags=["user-behavior"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(nanoai_search.router, prefix="/nanoai", tags=["nanoai"])

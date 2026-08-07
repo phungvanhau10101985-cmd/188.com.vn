@@ -238,17 +238,29 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
       return res;
     }
 
-    // Một số route FastAPI (vd. int thuần) hoặc race khi uvicorn khởi động có thể trả 200 + body rỗng.
-    if (upstream.status === 200 && bodyBuf.byteLength === 0 && upstreamLooksJson) {
-      const fallbackBody =
-        pathSuffix.includes('/notifications/unread-count') ? '0' : 'null';
-      const res = new NextResponse(fallbackBody, {
-        status: upstream.status,
-        statusText: upstream.statusText,
-        headers: { 'content-type': 'application/json; charset=utf-8' },
-      });
-      applyResponseHeaders(upstream, res, new Set(['content-length', 'content-encoding', 'content-type']));
-      return res;
+    // Một số route FastAPI (vd. int thuần) hoặc race khi uvicorn khởi động / nhiều process 8001
+    // có thể trả 200 + body rỗng → client JSON.parse ném "Unexpected end of JSON input".
+    if (upstream.status === 200 && bodyBuf.byteLength === 0) {
+      const fallbackBody = pathSuffix.includes('/notifications/unread-count')
+        ? '0'
+        : pathSuffix.includes('/product-reviews/can-review')
+          ? '{"can_review":false,"reason":"Không xác định được quyền đánh giá"}'
+          : upstreamLooksJson
+            ? 'null'
+            : '';
+      if (fallbackBody) {
+        const res = new NextResponse(fallbackBody, {
+          status: upstream.status,
+          statusText: upstream.statusText,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+        applyResponseHeaders(
+          upstream,
+          res,
+          new Set(['content-length', 'content-encoding', 'content-type']),
+        );
+        return res;
+      }
     }
 
     // Dùng Uint8Array + bỏ content-length/content-encoding từ upstream:

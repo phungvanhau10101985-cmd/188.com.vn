@@ -2930,6 +2930,233 @@ export const adminBunnyCdnAPI = {
   },
 };
 
+export type ManualProductCreateMode = 'manual' | 'ai';
+
+export type ManualProductJobCreatePayload = {
+  mode: ManualProductCreateMode;
+  price: number;
+  material: string;
+  product_name?: string;
+  gender?: string;
+  style?: string;
+  sizes?: string[];
+  no_size?: boolean;
+  /** Chuẩn catalog: [{ name, img }] — img có thể rỗng (AI sẽ tạo). */
+  colors?: Array<string | { name: string; img?: string }>;
+  available?: number;
+  notes?: string;
+  brand_name?: string | null;
+  shop_name?: string | null;
+  main_image?: string | null;
+  images?: string[];
+  gallery?: string[];
+  ref_image_urls?: string[];
+  gallery_count?: number;
+  detail_count?: number;
+  /** Model tạo ảnh AI: pro | flash | flash3 */
+  image_model?: 'pro' | 'flash' | 'flash3' | string;
+  /** none = không người mẫu; model = có người mẫu */
+  model_presence?: 'none' | 'model' | string;
+  /** Bắt buộc nếu model_presence=model: female | male */
+  model_gender?: 'female' | 'male' | string;
+  /** Bắt buộc nếu model_presence=model: baby | child | teen | adult | middle_aged */
+  model_age_group?: 'baby' | 'child' | 'teen' | 'adult' | 'middle_aged' | string;
+  /** Bắt buộc nếu model_presence=model: asian | western */
+  model_ethnicity?: 'asian' | 'western' | string;
+  /** studio | lifestyle | outdoor */
+  shot_style?: 'studio' | 'lifestyle' | 'outdoor' | string;
+  require_taxonomy?: boolean;
+};
+
+export type ManualProductJobResult = {
+  product_id?: string;
+  product_db_id?: number;
+  code?: string;
+  slug?: string;
+  name?: string;
+  category?: string | null;
+  subcategory?: string | null;
+  sub_subcategory?: string | null;
+  category_id?: number | null;
+  ladipage_id?: number | null;
+  ladipage_slug?: string | null;
+  ladipage_status?: string | null;
+  mode?: string;
+  warnings?: string[];
+};
+
+export type ManualProductStudioSlot = {
+  kind?: string;
+  index?: number;
+  name?: string | null;
+  url?: string | null;
+  attempt?: number;
+  user_prompt?: string | null;
+  ref_urls?: string[] | null;
+  attach_url?: string | null;
+};
+
+export type ManualProductRefPoolItem = {
+  id?: string;
+  url: string;
+  label?: string;
+  kind?: string;
+};
+
+export type ManualProductStudio = {
+  product_key?: string;
+  plan?: {
+    gallery_count?: number;
+    detail_count?: number;
+    model_presence?: string;
+    shot_style?: string;
+    image_model?: string;
+  };
+  ref_pool?: ManualProductRefPoolItem[];
+  phase?: string;
+  suggested_prompt?: string;
+  next_actions?: string[];
+  color_names?: string[];
+  colors?: Array<{ name?: string; img?: string; status?: string }>;
+  main_image?: string;
+  images?: string[];
+  gallery?: string[];
+  current_slot?: ManualProductStudioSlot | null;
+  can_publish?: boolean;
+};
+
+export type ManualProductJob = {
+  job_id: string;
+  status: string;
+  step?: string | null;
+  message?: string | null;
+  progress: number;
+  result?: ManualProductJobResult | null;
+  error?: string | null;
+  vision_product_name?: string | null;
+  vision_colors?: string[] | null;
+  studio?: ManualProductStudio | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type ManualProductUploadResult = {
+  public_url: string;
+  remote_path: string;
+  bytes: number;
+  purpose: string;
+};
+
+export const manualProductCreateAPI = {
+  uploadImage: async (
+    file: File,
+    purpose: 'catalog' | 'ref' = 'catalog',
+  ): Promise<ManualProductUploadResult> => {
+    const token =
+      typeof window !== 'undefined' ? localStorage.getItem('admin_token') : null;
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const url = `${getApiBaseUrl()}/manual-products/upload-image`;
+    const form = new FormData();
+    form.append('file', file);
+    form.append('purpose', purpose);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+      body: form,
+    });
+    if (res.status === 401) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('admin_token');
+        localStorage.removeItem('admin_role');
+        localStorage.removeItem('admin_modules');
+        window.location.href = '/admin/login';
+      }
+      throw new Error('Phiên đăng nhập hết hạn');
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail(err?.detail ?? err) || `Lỗi ${res.status}`);
+    }
+    return res.json();
+  },
+
+  createJob: (payload: ManualProductJobCreatePayload) =>
+    fetchAdmin<ManualProductJob>('/manual-products/jobs', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 60_000,
+    }),
+
+  getJob: (jobId: string) =>
+    fetchAdmin<ManualProductJob>(`/manual-products/jobs/${encodeURIComponent(jobId)}`, {
+      timeoutMs: 30_000,
+    }),
+
+  setColors: (jobId: string, colors: Array<string | { name: string }>) =>
+    fetchAdmin<ManualProductJob>(
+      `/manual-products/jobs/${encodeURIComponent(jobId)}/colors`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ colors }),
+        timeoutMs: 30_000,
+      },
+    ),
+
+  generateImage: (
+    jobId: string,
+    body: {
+      kind: 'color' | 'main' | 'gallery' | 'detail' | string;
+      name?: string;
+      prompt?: string;
+      ref_urls?: string[];
+      attach_url?: string;
+    },
+  ) =>
+    fetchAdmin<ManualProductJob>(
+      `/manual-products/jobs/${encodeURIComponent(jobId)}/images/generate`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+        timeoutMs: 30_000,
+      },
+    ),
+
+  approveImage: (jobId: string) =>
+    fetchAdmin<ManualProductJob>(
+      `/manual-products/jobs/${encodeURIComponent(jobId)}/images/approve`,
+      { method: 'POST', timeoutMs: 30_000 },
+    ),
+
+  regenerateImage: (
+    jobId: string,
+    body?: {
+      prompt?: string | null;
+      ref_urls?: string[] | null;
+      attach_url?: string | null;
+    },
+  ) =>
+    fetchAdmin<ManualProductJob>(
+      `/manual-products/jobs/${encodeURIComponent(jobId)}/images/regenerate`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body || {}),
+        timeoutMs: 30_000,
+      },
+    ),
+
+  publishJob: (jobId: string) =>
+    fetchAdmin<ManualProductJob>(
+      `/manual-products/jobs/${encodeURIComponent(jobId)}/publish`,
+      { method: 'POST', timeoutMs: 30_000 },
+    ),
+
+  retryJob: (jobId: string) =>
+    fetchAdmin<ManualProductJob>(`/manual-products/jobs/${encodeURIComponent(jobId)}/retry`, {
+      method: 'POST',
+      timeoutMs: 30_000,
+    }),
+};
+
 export const adminBankAPI = {
   getAll: () => fetchAdmin<BankAccountAdmin[]>('/admin/bank-accounts/all'),
   create: (data: {

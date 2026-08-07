@@ -15,7 +15,7 @@ import {
 import { buildProductListJsonLd, truncateDescriptionAtSentence } from '@/lib/product-seo';
 import { serializeJsonLdForScript } from '@/lib/json-ld-script';
 import PublicLadipageView from '@/components/ladipage/PublicLadipageView';
-import LadipageGroupMarketingTracker from './LadipageGroupMarketingTracker';
+import LadipageLandingMarketingTracker from './LadipageLandingMarketingTracker';
 
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_DOMAIN || 'https://188.com.vn';
@@ -142,7 +142,7 @@ export default async function LadipagePublicPage({ params, searchParams }: Props
     <main className="py-4">
       {listJsonLd ? <JsonLdScript data={listJsonLd} /> : null}
       {faqJsonLd ? <JsonLdScript data={faqJsonLd} /> : null}
-      <LadipageGroupMarketingTracker products={listProducts} listName={lp.title} />
+      <LadipageLandingMarketingTracker products={listProducts} listName={lp.title} />
       <PublicLadipageView
         slug={lp.slug}
         title={lp.title}

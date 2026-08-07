@@ -490,13 +490,12 @@ def _call_deepseek_text(prompt: str, *, max_tokens: int = 1000, temperature: flo
     if not api_key:
         logger.warning("Ladipage: thiếu DEEPSEEK_API_KEY.")
         return None
-    url = (settings.DEEPSEEK_API_URL or "").strip() or "https://api.deepseek.com/v1/chat/completions"
     model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-v4-flash"
     try:
-        resp = requests.post(
-            url,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
+        from app.services.deepseek_http import deepseek_chat_completions
+
+        resp = deepseek_chat_completions(
+            {
                 "model": model,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
@@ -532,15 +531,11 @@ def _call_deepseek_text(prompt: str, *, max_tokens: int = 1000, temperature: flo
         text = ((choices[0].get("message") or {}).get("content") or "").strip()
         if not text:
             finish = (choices[0].get("finish_reason") or "").lower()
-            logger.warning(
-                "Ladipage DeepSeek: nội dung rỗng (finish_reason=%s, model=%s).",
-                finish,
-                model,
-            )
+            logger.warning("Ladipage DeepSeek: content rỗng (finish_reason=%s).", finish)
             return None
         return text
     except Exception as exc:
-        logger.warning("Ladipage DeepSeek text request failed: %s", exc)
+        logger.warning("Ladipage DeepSeek lỗi: %s", exc)
         return None
 
 
@@ -978,15 +973,34 @@ def generate_or_regenerate_section(
     if st == "hero":
         if target in ("all", "text"):
             text = generate_hero_text(context, custom_instruction=custom_instruction)
-            if not text:
-                raise RuntimeError("DeepSeek không trả nội dung hero hợp lệ.")
-            current.update(text)
+            if text:
+                current.update(text)
+            else:
+                # Fallback: vẫn có headline từ tên SP để trang không trống khi DeepSeek lỗi tạm
+                sp = image_reference or {}
+                pname = str(sp.get("name") or context.get("title") or "Sản phẩm").strip()
+                current.setdefault("headline", pname[:120] or "Sản phẩm nổi bật")
+                current.setdefault(
+                    "subheadline",
+                    "Chất liệu đẹp, form thời thượng — chọn size/màu và đặt hàng ngay.",
+                )
+                if target == "text":
+                    raise RuntimeError("DeepSeek không trả nội dung hero hợp lệ.")
         if target in ("all", "image"):
             if not image_reference:
                 if target == "image":
                     raise RuntimeError("Không có ảnh đại diện sản phẩm để làm hero.")
             else:
-                current.update(resolve_hero_image_url(image_reference))
+                # Luôn gắn ảnh hero từ main_image SP (không phụ thuộc DeepSeek)
+                try:
+                    current.update(resolve_hero_image_url(image_reference))
+                except RuntimeError:
+                    # Thử gallery_urls nếu main_image trống
+                    gallery = image_reference.get("gallery_urls") or []
+                    if isinstance(gallery, list) and gallery:
+                        current["image_url"] = str(gallery[0]).strip()
+                    elif target == "image":
+                        raise
         return current
 
     if st == "highlights":

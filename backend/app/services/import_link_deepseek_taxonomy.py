@@ -526,10 +526,10 @@ def translate_product_listing_deepseek_only(
     model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-v4-flash"
 
     try:
-        resp = requests.post(
-            url,
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={
+        from app.services.deepseek_http import deepseek_chat_completions
+
+        resp = deepseek_chat_completions(
+            {
                 "model": model,
                 "temperature": 0.2,
                 "messages": [
@@ -539,6 +539,8 @@ def translate_product_listing_deepseek_only(
                 "max_tokens": 4096,
             },
             timeout=_TIMEOUT_SEC,
+            api_url=url,
+            api_key=key,
         )
     except requests.RequestException as exc:
         warnings.append(f"deepseek_listing_translate: lỗi mạng: {exc}")
@@ -774,19 +776,22 @@ def classify_product_taxonomy_deepseek(
     model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-v4-flash"
 
     try:
-        resp = requests.post(
-            url,
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={
+        from app.services.deepseek_http import deepseek_chat_completions, deepseek_message_text
+
+        resp = deepseek_chat_completions(
+            {
                 "model": model,
                 "temperature": 0.15,
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
-                "max_tokens": 4096,
+                "max_tokens": 8192,
             },
             timeout=_TIMEOUT_SEC,
+            api_url=url,
+            api_key=key,
+            disable_thinking=True,
         )
     except requests.RequestException as exc:
         warnings.append(f"deepseek_taxonomy: lỗi mạng DeepSeek: {exc}")
@@ -798,7 +803,18 @@ def classify_product_taxonomy_deepseek(
 
     try:
         body = resp.json()
-        content = (body.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+        content = deepseek_message_text(body)
+        if not content:
+            fr = ""
+            try:
+                fr = str(((body.get("choices") or [{}])[0].get("finish_reason")) or "")
+            except Exception:
+                fr = ""
+            warnings.append(
+                f"deepseek_taxonomy: model trả content rỗng (finish_reason={fr or 'n/a'}). "
+                "Thường do DeepSeek V4 thinking hết max_tokens."
+            )
+            return None, warnings
         parsed = _extract_json_object(content)
     except (json.JSONDecodeError, TypeError, ValueError, IndexError, KeyError) as exc:
         warnings.append(f"deepseek_taxonomy: không đọc được JSON từ model: {exc}")
