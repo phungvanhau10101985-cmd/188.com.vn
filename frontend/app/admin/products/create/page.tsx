@@ -140,7 +140,9 @@ function resolveResumeStep(
   return fallback;
 }
 
-function colorRowsFromPayload(payload: ManualProductJobCreatePayload | null | undefined): ColorRow[] {
+function colorRowsFromPayload(
+  payload: Partial<ManualProductJobCreatePayload> | null | undefined,
+): ColorRow[] {
   const raw = payload?.colors;
   if (!Array.isArray(raw) || raw.length === 0) return [newColorRow()];
   return raw.map((c, i) => {
@@ -154,7 +156,7 @@ function colorRowsFromPayload(payload: ManualProductJobCreatePayload | null | un
 }
 
 function applyJobPayloadToDraft(job: ManualProductJob, draft: ProductCreateDraft): ProductCreateDraft {
-  const p = job.payload || {};
+  const p: Partial<ManualProductJobCreatePayload> = job.payload || {};
   return {
     ...draft,
     mode: (p.mode as ManualProductCreateMode) || draft.mode,
@@ -204,12 +206,12 @@ function syncStudioFormFromJob(job: ManualProductJob) {
   const pool = job.studio?.ref_pool || [];
   const slot = job.studio?.current_slot;
   const colorIdx = colorSlotIndex(job.studio, slot);
-  const formKindResolved =
+  const formKindResolved: 'color' | 'gallery' | 'detail' | 'material' =
     phase === 'gallery' || phase === 'detail' || phase === 'material'
       ? phase
       : phase === 'main'
-        ? ('gallery' as const)
-        : ('color' as const);
+        ? 'gallery'
+        : 'color';
   return {
     formKind: formKindResolved,
     formRefUrls:

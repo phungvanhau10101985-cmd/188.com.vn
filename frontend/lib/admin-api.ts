@@ -3043,7 +3043,8 @@ export type ManualProductJob = {
   studio?: ManualProductStudio | null;
   created_at?: string | null;
   updated_at?: string | null;
-  payload?: ManualProductJobCreatePayload | null;
+  /** Job đã lưu có thể thiếu field so với payload lúc create. */
+  payload?: Partial<ManualProductJobCreatePayload> | null;
   mode?: ManualProductCreateMode | string | null;
 };
 
@@ -3057,30 +3058,6 @@ export type ManualProductJobSummary = {
   material?: string | null;
   updated_at?: string | null;
   created_at?: string | null;
-};
-
-export type ManualProductJobCreatePayload = {
-  mode?: ManualProductCreateMode | string;
-  product_name?: string;
-  material?: string;
-  gender?: string;
-  price?: number;
-  sizes?: string[];
-  no_size?: boolean;
-  colors?: Array<string | { name: string; img?: string }>;
-  available?: number;
-  notes?: string;
-  main_image?: string | null;
-  images?: string[];
-  gallery?: string[];
-  ref_image_urls?: string[];
-  model_presence?: string;
-  model_gender?: string;
-  model_age_group?: string;
-  model_ethnicity?: string;
-  shot_style?: string;
-  image_model?: string;
-  aspect_ratio?: string;
 };
 
 export type ManualProductUploadResult = {
