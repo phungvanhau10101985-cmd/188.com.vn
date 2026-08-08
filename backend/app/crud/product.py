@@ -5609,26 +5609,35 @@ def create_product(db: Session, product: ProductCreate):
     clear_product_deletion_tombstone(db, db_product.product_id)
     db.commit()
     db.refresh(db_product)
-    _maybe_schedule_category_gemini_for_product(db, db_product)
-    _schedule_google_sheets_sku_sync()
     try:
-        from app.crud import product_search_cache as product_search_cache_crud
+        _maybe_schedule_category_gemini_for_product(db, db_product)
+        _schedule_google_sheets_sku_sync()
+        try:
+            from app.crud import product_search_cache as product_search_cache_crud
 
-        product_search_cache_crud.schedule_refresh_caches_for_product_states(db_product)
-    except Exception:
-        pass
-    try:
-        from app.services.listing_facet_cache import refresh_caches_after_product_change
+            product_search_cache_crud.schedule_refresh_caches_for_product_states(db_product)
+        except Exception:
+            pass
+        try:
+            from app.services.listing_facet_cache import refresh_caches_after_product_change
 
-        refresh_caches_after_product_change(db, db_product)
-    except Exception:
-        pass
-    try:
-        from app.core import redis_cache
+            refresh_caches_after_product_change(db, db_product)
+        except Exception:
+            pass
+        try:
+            from app.core import redis_cache
 
-        redis_cache.invalidate_pdp_cache(db_product.slug)
+            redis_cache.invalidate_pdp_cache(db_product.slug)
+        except Exception:
+            pass
     except Exception:
-        pass
+        logger.warning("Post-create product hooks failed (product đã lưu)", exc_info=True)
+    finally:
+        # Hook có thể làm abort transaction mới sau commit — rollback để caller query tiếp được.
+        try:
+            db.rollback()
+        except Exception:
+            pass
     return db_product
 
 def update_product(db: Session, product_id: int, product_update: ProductUpdate):

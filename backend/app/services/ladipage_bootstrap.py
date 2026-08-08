@@ -146,6 +146,11 @@ def bootstrap_single_product_ladipage(
     """
     Tạo ladipage 1 SP đầy đủ cho product. Trả None nếu skip (đã có ladipage).
     """
+    try:
+        db.rollback()
+    except Exception:
+        pass
+    db.refresh(product)
     if skip_if_exists and find_single_product_ladipages_for_product(db, int(product.id)):
         return None
 

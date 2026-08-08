@@ -1405,13 +1405,23 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
             _hibox_sync_variant_display_labels(product_data)
         else:
             apply_variant_color_translation_to_product_data(product_data)
-    except Exception:
-        pass
+    except Exception as exc:
+        from sqlalchemy.exc import DBAPIError
+
+        if isinstance(exc, DBAPIError):
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
     name_vi = (product_data.get("name") or "").strip()
     title_src = resolve_taxonomy_source_title(product_data)
     desc_src = (product_data.get("description") or "").strip()
     ctx = build_taxonomy_context_blob(product_data)
+    type_hint = str(product_data.get("_product_type_hint") or "").strip()
+    if type_hint:
+        hint_line = f"LOẠI SẢN PHẨM (admin xác nhận khi tạo): {type_hint}"
+        ctx = f"{hint_line}\n\n{ctx}" if ctx else hint_line
 
     if _should_skip_existing(product_data):
         tv, mv, tw = translate_product_listing_deepseek_only(name_vi or title_src, desc_src, context_text=ctx)

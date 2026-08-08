@@ -86,6 +86,41 @@ def _gender_hint(gender: str) -> Optional[str]:
     return None
 
 
+_PRODUCT_TYPES = frozenset({"apparel", "shoes", "accessory", "medicine", "household"})
+
+_PRODUCT_TYPE_LABELS_VI = {
+    "apparel": "Quần áo (thời trang)",
+    "shoes": "Giày dép",
+    "accessory": "Phụ kiện (túi, trang sức, mũ, thắt lưng…)",
+    "medicine": "Thuốc / thực phẩm chức năng / chăm sóc sức khỏe",
+    "household": "Đồ gia dụng",
+}
+
+# Loại SP không có người "mặc/đeo" — Studio luôn chụp tĩnh sản phẩm, không người mẫu.
+_NON_WEARABLE_PRODUCT_TYPES = frozenset({"medicine", "household"})
+
+
+def _resolve_product_type(raw: Any) -> str:
+    s = str(raw or "").strip().lower()
+    if s in _PRODUCT_TYPES:
+        return s
+    if s in ("thuoc", "thuốc", "tpcn", "duoc", "dược", "medicine", "drug", "pharma", "health", "suc khoe", "sức khỏe"):
+        return "medicine"
+    if s in ("gia dung", "gia dụng", "household", "home", "do gia dung", "đồ gia dụng", "thiet bi", "thiết bị"):
+        return "household"
+    if s in ("giay", "giày", "dep", "dép", "giay dep", "giày dép", "shoe", "shoes", "footwear"):
+        return "shoes"
+    if s in ("phu kien", "phụ kiện", "accessory", "accessories", "tui", "túi", "bag"):
+        return "accessory"
+    if s in ("quan ao", "quần áo", "thoi trang", "thời trang", "apparel", "clothing", "clothes", "fashion"):
+        return "apparel"
+    return "apparel"
+
+
+def _product_type_label_vi(product_type: Any) -> str:
+    return _PRODUCT_TYPE_LABELS_VI.get(_resolve_product_type(product_type), "")
+
+
 def _parse_sizes(raw: Any, *, no_size: bool) -> List[str]:
     if no_size:
         return []
@@ -147,8 +182,10 @@ def _build_brief_blob(payload: Dict[str, Any]) -> str:
     elif ghint == "male":
         gender_line += " — dành cho nam"
     pname = (payload.get("product_name") or payload.get("name") or "").strip()
+    product_type = _resolve_product_type(payload.get("product_type"))
     lines = [
         f"Tên sản phẩm (admin): {pname or 'chưa đặt — AI đặt tên'}",
+        f"Loại sản phẩm (admin xác nhận): {_product_type_label_vi(product_type)}",
         gender_line,
         f"Chất liệu: {(payload.get('material') or '').strip() or 'chưa nêu'}",
         f"Phong cách / mẫu: {(payload.get('style') or '').strip() or 'chưa nêu'}",
@@ -209,6 +246,13 @@ def _patch_studio_ai_plan(
     if aspect_ratio is not None:
         plan["aspect_ratio"] = _normalize_studio_aspect_ratio(aspect_ratio)
     studio["plan"] = plan
+
+
+def _resolve_studio_image_model_choice(kind: str, choice: Optional[str]) -> str:
+    """Ảnh chất liệu luôn Pro 2K; các bước khác theo lựa chọn admin."""
+    if (kind or "").strip().lower() == "material":
+        return "pro"
+    return str(choice or "pro").strip() or "pro"
 
 
 def _resolve_manual_ai_image_model(choice: Optional[str]) -> Tuple[str, Optional[str], str]:
@@ -351,6 +395,13 @@ def _resolve_model_presence(raw: Any) -> str:
     return "none"
 
 
+def _effective_model_presence(payload: Dict[str, Any], raw: Any = None) -> str:
+    """Thuốc/gia dụng: luôn ảnh tĩnh sản phẩm — ép none dù payload/plan gửi gì (phòng FE bị bypass)."""
+    if _resolve_product_type(payload.get("product_type")) in _NON_WEARABLE_PRODUCT_TYPES:
+        return "none"
+    return _resolve_model_presence(raw if raw is not None else payload.get("model_presence"))
+
+
 def _resolve_model_gender(raw: Any) -> str:
     s = str(raw or "").strip().lower()
     if s in ("nam", "male", "man", "men", "boy", "trai"):
@@ -417,11 +468,12 @@ def _commercial_look_brief(
     model_gender: str = "female",
     model_age_group: str = "adult",
     model_ethnicity: str = "",
+    product_kind: str = "generic",
 ) -> str:
     """Mô tả phong cách chụp bán hàng chuyên nghiệp cho prompt Gemini."""
     if shot_style == "outdoor":
         scene = (
-            "Outdoor commercial fashion photography: soft natural daylight, shallow depth of field, "
+            "Outdoor commercial product photography: soft natural daylight, shallow depth of field, "
             "tasteful real-world background (park / street / cafe patio) that stays blurry and does not distract. "
             "Premium look suitable for Shopee/Lazada hero images."
         )
@@ -452,21 +504,58 @@ def _commercial_look_brief(
         else:
             sex_word = "female" if model_gender == "female" else "male"
             article = _indefinite_article(ethnicity_desc or sex_word)
-            talent = (
-                f"Include {article} {ethnicity_prefix}{sex_word} fashion model "
-                f"— {age_desc} — wearing/holding the exact product; "
-                "confident commercial pose, flattering angles that sell."
-            )
-        subject = f"{talent} Keep the product as the hero — face not overpowering the garment."
+            if product_kind == "bag":
+                talent = (
+                    f"Include {article} {ethnicity_prefix}{sex_word} fashion model "
+                    f"— {age_desc} — naturally carrying the exact bag with hand/fingers visibly gripping "
+                    "the handle or strap; bag rests against the body with believable weight — never floating."
+                )
+            elif product_kind == "shoes":
+                talent = (
+                    f"Include {article} {ethnicity_prefix}{sex_word} fashion model "
+                    f"— {age_desc} — wearing the exact shoes on feet naturally; both shoes visible when possible."
+                )
+            else:
+                talent = (
+                    f"Include {article} {ethnicity_prefix}{sex_word} fashion model "
+                    f"— {age_desc} — wearing/holding the exact product; "
+                    "confident commercial pose, flattering angles that sell."
+                )
+        if product_kind == "bag":
+            subject = f"{talent} Keep the bag and hand interaction clearly visible — face must not overpower the product."
+        elif product_kind == "shoes":
+            subject = f"{talent} Keep the footwear as the hero — sharp focus on shoes."
+        elif product_kind == "apparel":
+            subject = f"{talent} Keep the product as the hero — face not overpowering the garment."
+        else:
+            subject = f"{talent} Keep the product as the hero."
+    elif product_kind == "medicine":
+        subject = (
+            "NO human model, NO hands, NO mannequin. Product-only hero packshot of the medicine/health "
+            "product packaging (box, bottle, blister, or jar) standing upright, centered, fully visible. "
+            "The packaging label, brand, and any printed text/dosage must stay EXACTLY as in the reference "
+            "photo — do not invent, alter, translate, or obscure any label text or graphics."
+        )
+    elif product_kind == "household":
+        subject = (
+            "NO human model, NO hands. Product-only hero composition, centered, full product visible, "
+            "clean packshot OR a realistic in-context placement (kitchen counter, living room, bathroom — "
+            "whichever fits the item) at correct real-world scale."
+        )
     else:
         subject = (
             "NO human model, NO mannequin, NO hands. Product-only hero composition, "
             "centered, full product visible, premium flat/ghost-mannequin or hanging presentation as fits the item."
         )
 
+    if product_kind in ("medicine", "household"):
+        photography_style = "Photorealistic commercial product photography, sharp focus on product, "
+    else:
+        photography_style = "Photorealistic commercial fashion photography, sharp focus on product, "
+
     return (
         f"{scene} {subject} "
-        "Photorealistic commercial fashion photography, sharp focus on product, "
+        f"{photography_style}"
         "accurate neutral color reproduction faithful to reference (no filter, no LUT, no shifted white balance), "
         "no watermark, no price tag, no extra logos, no invented text overlays, no low-quality phone snapshot look."
     )
@@ -506,6 +595,144 @@ _COLOR_PRESERVE = (
     "Do not recolor to a prettier shade."
 )
 
+_BAG_FIDELITY = (
+    "Keep the EXACT same bag from the product sample: silhouette, size proportions, handle/strap type and length, "
+    "hardware, logo/plaque placement, stud/quilt/texture pattern, color, and material finish. "
+    "Do not invent a different bag model or change the product type."
+)
+
+_BAG_CARRY_BRIEF = (
+    "The model MUST physically carry the bag — visible skin contact between hand/fingers and the handle or strap; "
+    "natural weight and hang (on forearm, in hand, on shoulder, or crossbody as fits the bag type). "
+    "FORBIDDEN: floating bag, overlay/composite bag detached from the body, bag hovering in front of the torso "
+    "without hand contact, pasted product cutout, or unrealistic scale."
+)
+
+_COLOR_BAG_FOLLOWON_FIDELITY = (
+    "Bag identity MUST match the customer product-sample reference only: shape, handle/strap, hardware, "
+    "pattern/texture, and colors. "
+    "Never borrow bag design from the Color #1 face-lock photo — image #2 contributes FACE/HAIR/SKIN ONLY. "
+    "The model must carry the bag from image #1 with visible hand contact — never floating."
+)
+
+_BAG_COLOR_PRESERVE = (
+    "Match ONLY the bag colors/material finish from the reference — same hue, saturation, brightness, undertone. "
+    "Do not recolor to a prettier shade."
+)
+
+_SHOES_FIDELITY = (
+    "Keep the EXACT same footwear from the product sample: silhouette, sole, upper design, logo, color, and material. "
+    "Model wears them naturally on feet — both shoes visible when possible."
+)
+
+_MEDICINE_FIDELITY = (
+    "Keep the EXACT same packaging from the product sample: box/bottle/blister/jar shape, brand name, logo, "
+    "label layout, printed text, dosage/quantity text, and colors. "
+    "CRITICAL: do NOT invent, translate, alter, or obscure ANY text printed on the packaging or label — "
+    "reproduce it exactly as shown in the reference. Do not add medical claims or new text overlays. "
+    "Do not invent a different product or change the packaging type."
+)
+
+_HOUSEHOLD_FIDELITY = (
+    "Keep the EXACT same product from the sample: shape, size proportions, color, material finish, control "
+    "panel/buttons, ports, and any printed logo or model text. "
+    "Do not invent a different appliance/model or change the product type."
+)
+
+_STUDIO_PRODUCT_KINDS = frozenset(
+    {"bag", "shoes", "apparel", "accessory", "medicine", "household", "generic"}
+)
+
+_BAG_KIND_RE = re.compile(
+    r"(túi|tuí|bag|handbag|clutch|tote|crossbody|backpack|balo|satchel|shoulder\s+bag|"
+    r"ví cầm|vi cam|mini bag|bucket bag)",
+    re.I,
+)
+_SHOES_KIND_RE = re.compile(
+    r"(giày|giay|shoe|sneaker|boot|sandal|dép|dep|heel|loafer|footwear|slipper)",
+    re.I,
+)
+_APPAREL_KIND_RE = re.compile(
+    r"(áo|ao|quần|quan|váy|vay|đầm|dam|set bộ|jacket|coat|hoodie|shirt|dress|garment|"
+    r"blouse|skirt|shorts|pants|cardigan|sweater|top|bottom)",
+    re.I,
+)
+_ACCESSORY_KIND_RE = re.compile(
+    r"(mũ|mu|hat|cap|belt|thắt lưng|scarf|khăn|gloves|gọng kính|glasses|jewelry|phụ kiện)",
+    re.I,
+)
+
+
+def _normalize_studio_product_kind(*texts: Any) -> str:
+    blob = " ".join(str(t or "").strip() for t in texts if str(t or "").strip()).lower()
+    if not blob:
+        return "generic"
+    if _BAG_KIND_RE.search(blob):
+        return "bag"
+    if _SHOES_KIND_RE.search(blob):
+        return "shoes"
+    if _ACCESSORY_KIND_RE.search(blob) and not _APPAREL_KIND_RE.search(blob):
+        return "accessory"
+    if _APPAREL_KIND_RE.search(blob):
+        return "apparel"
+    return "generic"
+
+
+def _studio_product_kind_from_state(state: Dict[str, Any]) -> str:
+    payload = dict(state.get("payload") or {})
+    # Thuốc/gia dụng: không có "mặc/đeo" — nhận diện từ ảnh (túi/giày/áo…) không áp dụng,
+    # nên loại admin chọn luôn ưu tiên tuyệt đối, bỏ qua regex vision.
+    product_type = _resolve_product_type(payload.get("product_type"))
+    if product_type in _NON_WEARABLE_PRODUCT_TYPES:
+        return product_type
+    explicit = str(state.get("vision_product_kind") or "").strip().lower()
+    if explicit in _STUDIO_PRODUCT_KINDS and explicit not in _NON_WEARABLE_PRODUCT_TYPES:
+        return explicit
+    return _normalize_studio_product_kind(
+        state.get("vision_analysis"),
+        state.get("vision_product_name"),
+        payload.get("product_name"),
+        payload.get("name"),
+        payload.get("material"),
+        payload.get("category"),
+        payload.get("subcategory"),
+        payload.get("sub_subcategory"),
+    )
+
+
+def _append_admin_notes_to_prompt(base: str, notes: str, product_kind: str) -> str:
+    if not notes:
+        return base
+    if product_kind == "bag":
+        apply_hint = (
+            "Apply to how the model carries the bag (hand/forearm/shoulder), grip on handle/strap, "
+            "bag angle and contact with the body — never floating or detached."
+        )
+    elif product_kind == "shoes":
+        apply_hint = "Apply to how the shoes are worn on feet and framed in the shot."
+    elif product_kind == "apparel":
+        apply_hint = (
+            "Apply to garment structure (collar/neckline, sleeves, length, cut). "
+            "If the product-sample photo already matches the note (e.g. both collarless), keep that structure — "
+            "do NOT invent a shirt collar / áo cổ bẻ. "
+            "If the note conflicts with the sample, follow the admin note for that detail only; "
+            "keep fabric/print/color from the product sample elsewhere."
+        )
+    elif product_kind == "medicine":
+        apply_hint = (
+            "Apply to packaging placement, angle, or context staging only — never to the label text/graphics, "
+            "which must stay exactly as the reference."
+        )
+    elif product_kind == "household":
+        apply_hint = "Apply to product placement, angle, or usage context staging."
+    else:
+        apply_hint = "Apply to product presentation and how the model uses, wears, or displays the product."
+    return (
+        f"ADMIN NOTE (HIGH PRIORITY): {notes}. "
+        f"{apply_hint}\n"
+        f"{base}"
+    )
+
 _STUDIO_NEW_PHOTO_BRIEF = (
     "GENERATE A COMPLETELY NEW professional e-commerce photograph from scratch — "
     "NOT an edit, collage, overlay, or copy-paste of the reference upload. "
@@ -523,8 +750,34 @@ def _studio_color_match_brief(
     *,
     cname: str,
     color_index: int = 0,
+    product_kind: str = "generic",
 ) -> str:
-    """Ảnh khách upload = mẫu SP (kiểu, màu, cắt may); màu #2+ chỉ lấy khuôn mặt từ ảnh màu #1."""
+    """Ảnh khách upload = mẫu SP (kiểu, màu, cắt may / túi / giày); màu #2+ chỉ lấy khuôn mặt từ ảnh màu #1.
+    Thuốc/gia dụng: không có người mẫu → không áp dụng face-lock, mỗi variant chụp độc lập từ ảnh mẫu riêng."""
+    is_bag = product_kind == "bag"
+    is_non_wearable = product_kind in ("medicine", "household")
+    if is_non_wearable:
+        product_sample_label = (
+            "packaging: box/bottle/blister/jar shape, brand, printed label text, colors"
+            if product_kind == "medicine"
+            else "full product: shape, proportions, color, material finish, printed logo/text"
+        )
+        sample_authority = (
+            "extract packaging design + label text + colors; discard background/hand/table"
+            if product_kind == "medicine"
+            else "extract product design + colors; discard background/table"
+        )
+    else:
+        product_sample_label = (
+            "full bag design: silhouette, handle/strap, hardware, pattern/texture, colors"
+            if is_bag
+            else "full garment: silhouette, cut, sleeves, neckline, print/pattern, fabric, colors"
+        )
+        sample_authority = (
+            "extract bag design + colors; discard background/table/hanger"
+            if is_bag
+            else "extract garment design + colors; discard background/hanger/model body"
+        )
     # vision_* từ màu #1 mô tả SP cũ — không dùng cho màu #2+ (tránh gen nhầm kiểu đồ #1).
     vision_colors = (
         []
@@ -551,41 +804,84 @@ def _studio_color_match_brief(
         color_index <= 0 and bool((state.get("payload") or {}).get("ref_image_urls"))
     )
 
-    if color_index >= 1 and face_url:
+    if not is_non_wearable and color_index >= 1 and face_url:
         lines = [
-            "Reference order: image #1 = NEW customer product sample for THIS colorway "
-            "(full garment: silhouette, cut, sleeves, neckline, print/pattern, fabric, colors). "
-            "Image #2 = approved Color #1 catalog photo — FACE/HAIR/SKIN ONLY. "
-            "CRITICAL: Ignore and discard ALL clothing worn in image #2 (including its collar/neckline); "
-            "do not recolor or restyle the Color #1 garment. "
-            "The output outfit must match image #1's product, worn by image #2's face.",
-            "NECKLINE: follow image #1 only. If image #1 shows a collarless / V-neck / simple open neck "
-            "with no shirt collar, do NOT add a folded collar (áo cổ bẻ) — that mistake often comes from "
-            "copying clothing on image #2.",
-            f"Colorway label «{cname}» is a hint only; follow the customer sample in image #1 if it conflicts.",
-            "Do NOT paste, trace, photocomposite, or 'extend' either reference photo. "
-            "Do NOT keep the sample background or hanger shot.",
-            "This colorway may be a completely different product from Color #1 — not merely a recolor.",
+            f"Reference order: image #1 = NEW customer product sample for THIS colorway "
+            f"({product_sample_label}). "
+            "Image #2 = approved Color #1 catalog photo — FACE/HAIR/SKIN ONLY. ",
         ]
+        if is_bag:
+            lines.extend(
+                [
+                    "CRITICAL: Ignore bag/clothing/accessories in image #2 — do not copy Color #1 bag design. ",
+                    "The output must show the bag from image #1 carried naturally by the same face from image #2 "
+                    "with visible hand/finger contact on handle or strap — never a floating bag. ",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "CRITICAL: Ignore and discard ALL clothing worn in image #2 (including its collar/neckline); "
+                    "do not recolor or restyle the Color #1 garment. ",
+                    "The output outfit must match image #1's product, worn by image #2's face. ",
+                    "NECKLINE: follow image #1 only. If image #1 shows a collarless / V-neck / simple open neck "
+                    "with no shirt collar, do NOT add a folded collar (áo cổ bẻ) — that mistake often comes from "
+                    "copying clothing on image #2. ",
+                ]
+            )
+        lines.extend(
+            [
+                f"Colorway label «{cname}» is a hint only; follow the customer sample in image #1 if it conflicts.",
+                "Do NOT paste, trace, photocomposite, or 'extend' either reference photo. "
+                "Do NOT keep the sample background or hanger shot.",
+                "This colorway may be a completely different product from Color #1 — not merely a recolor.",
+            ]
+        )
         if uses_customer_orig or color_ref_urls:
             lines.append(
-                "Customer upload (image #1) is the sole product authority: extract garment design + colors; "
-                "discard its background/hanger/model body — keep only the Color #1 face identity from image #2."
+                f"Customer upload (image #1) is the sole product authority: {sample_authority} — "
+                "keep only the Color #1 face identity from image #2."
             )
         return " ".join(lines)
 
+    if is_non_wearable:
+        sample_line = (
+            "PRODUCT SAMPLE: from the customer upload reference, reproduce this variant's packaging exactly — "
+            "shape, brand, label layout, and ALL printed text (must stay legible and unaltered), and colors."
+            if product_kind == "medicine"
+            else
+            "PRODUCT SAMPLE: from the customer upload reference, reproduce this variant's product exactly — "
+            "shape, proportions, material finish, printed logo/text, and colors (hue, saturation, undertone)."
+        )
+    else:
+        sample_line = (
+            f"PRODUCT SAMPLE: from the customer upload reference, reproduce this colorway's bag design — "
+            "silhouette, handle/strap, hardware, pattern/texture, trims, and colors (hue, saturation, undertone)."
+            if is_bag
+            else
+            "PRODUCT SAMPLE: from the customer upload reference, reproduce this colorway's garment design — "
+            "silhouette, cut, construction, print/pattern, trims, and fabric colors (hue, saturation, undertone)."
+        )
     lines = [
-        "PRODUCT SAMPLE: from the customer upload reference, reproduce this colorway's garment design — silhouette, cut, "
-        "construction, print/pattern, trims, and fabric colors (hue, saturation, undertone). "
+        sample_line,
         f"Colorway label «{cname}» is a hint only; follow the uploaded sample if it conflicts.",
         "Do NOT paste, trace, photocomposite, or 'extend' the reference photo. Do NOT keep the reference background or hanger shot.",
-        "Each colorway may use a DIFFERENT product sample upload — do not assume the same garment template as other colorways unless the upload shows it.",
+        "Each colorway may use a DIFFERENT product sample upload — do not assume the same product template as other colorways unless the upload shows it.",
     ]
+    if is_bag:
+        lines.append(_BAG_CARRY_BRIEF)
+    if is_non_wearable:
+        lines.append("NO human model, NO hands, NO mannequin in this shot — product-only.")
+        if color_index >= 1 and face_url:
+            lines.append(
+                "A second reference image (previous approved variant) may be attached — use it ONLY for "
+                "matching overall photography style/background/lighting continuity; do NOT copy its "
+                "product design, packaging, or label onto this variant."
+            )
     if uses_customer_orig:
         lines.insert(
             1,
-            "Customer upload — treat as the authoritative product sample for this colorway: extract garment design + colors; "
-            "discard background, hanger, and any model visible in that photo.",
+            f"Customer upload — treat as the authoritative product sample for this colorway: {sample_authority}.",
         )
     if vision_analysis:
         lines.append(f"Product design to render (from vision): {vision_analysis[:500]}.")
@@ -686,7 +982,7 @@ def _init_studio(payload: Dict[str, Any], *, product_key: str) -> Dict[str, Any]
         "plan": {
             "gallery_count": g_count,
             "detail_count": d_count,
-            "model_presence": _resolve_model_presence(payload.get("model_presence")),
+            "model_presence": _effective_model_presence(payload),
             "model_gender": _resolve_model_gender(payload.get("model_gender")),
             "model_age_group": _resolve_model_age_group(payload.get("model_age_group")),
             "model_ethnicity": _resolve_model_ethnicity(payload.get("model_ethnicity")),
@@ -885,6 +1181,14 @@ def _slot_label(slot: Dict[str, Any]) -> str:
 
 
 _DEFAULT_MATERIAL_CALLOUTS = ["Chất lượng cao", "Mềm mại thoải mái", "Bền theo thời gian"]
+_DEFAULT_MATERIAL_CALLOUTS_BY_TYPE = {
+    "medicine": ["Thành phần rõ ràng", "Kiểm định chất lượng", "Dễ sử dụng"],
+    "household": ["Chất lượng cao", "Bền, chắc chắn", "Dễ vệ sinh"],
+}
+
+
+def _default_material_callouts(product_type: str = "apparel") -> List[str]:
+    return list(_DEFAULT_MATERIAL_CALLOUTS_BY_TYPE.get(product_type, _DEFAULT_MATERIAL_CALLOUTS))
 
 
 def _studio_ladipage_context(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -907,8 +1211,10 @@ def _resolve_studio_material_copy(
 ) -> Dict[str, Any]:
     """DeepSeek: ưu điểm chất liệu + callout in trên ảnh."""
     material = (material or "").strip()
+    product_type = _resolve_product_type((state.get("payload") or {}).get("product_type"))
+    fallback_callouts = _default_material_callouts(product_type)
     if not material:
-        return {"body": "", "callouts": list(_DEFAULT_MATERIAL_CALLOUTS)}
+        return {"body": "", "callouts": fallback_callouts}
     try:
         data = generate_material_text(
             _studio_ladipage_context(state),
@@ -919,11 +1225,11 @@ def _resolve_studio_material_copy(
             callouts = [str(x).strip() for x in data["callouts"] if str(x).strip()][:3]
             return {
                 "body": str(data.get("body") or "").strip(),
-                "callouts": callouts or list(_DEFAULT_MATERIAL_CALLOUTS),
+                "callouts": callouts or fallback_callouts,
             }
     except Exception as exc:
         logger.warning("studio material copy DeepSeek failed: %s", exc)
-    return {"body": "", "callouts": list(_DEFAULT_MATERIAL_CALLOUTS)}
+    return {"body": "", "callouts": fallback_callouts}
 
 
 def _build_studio_slot_prompt(
@@ -936,13 +1242,14 @@ def _build_studio_slot_prompt(
     gender_txt = (payload.get("gender") or "").strip() or "unisex"
     material_txt = (payload.get("material") or "").strip() or "chất liệu theo ảnh"
     style_txt = _style_label(str(payload.get("style") or ""))
-    presence = _resolve_model_presence(plan.get("model_presence") or payload.get("model_presence"))
+    presence = _effective_model_presence(payload, plan.get("model_presence") or payload.get("model_presence"))
     scene = _resolve_shot_style(plan.get("shot_style") or payload.get("shot_style"))
     model_gender = _resolve_model_gender(plan.get("model_gender") or payload.get("model_gender"))
     model_age_group = _resolve_model_age_group(plan.get("model_age_group") or payload.get("model_age_group"))
     model_ethnicity = _resolve_model_ethnicity(
         plan.get("model_ethnicity") or payload.get("model_ethnicity")
     )
+    product_kind = _studio_product_kind_from_state(state)
     look = _commercial_look_brief(
         model_presence=presence,
         shot_style=scene,
@@ -950,6 +1257,7 @@ def _build_studio_slot_prompt(
         model_gender=model_gender,
         model_age_group=model_age_group,
         model_ethnicity=model_ethnicity,
+        product_kind=product_kind,
     )
     kind = (slot.get("kind") or "").strip()
     idx = int(slot.get("index") or 0)
@@ -959,18 +1267,21 @@ def _build_studio_slot_prompt(
     if "«màu chính»" in notes:
         notes = ""  # tương thích ngược: bỏ placeholder cũ nếu còn sót từ phiên bản trước
 
-    # Gallery / chi tiết: bắt buộc ý admin — DeepSeek chuẩn hóa trước khi gửi Gemini (xem worker).
-    if kind in ("gallery", "detail"):
+    # Gallery / chi tiết / chất liệu: bắt buộc ý admin — DeepSeek chuẩn hóa trước khi gửi Gemini (xem worker).
+    if kind in ("gallery", "detail", "material"):
         if not notes:
             raise ValueError(
-                "Gallery và ảnh chi tiết bắt buộc nhập nội dung prompt — chỉ dùng prompt do admin nhập."
+                "Gallery, ảnh chi tiết và ảnh chất liệu bắt buộc nhập nội dung prompt — "
+                "chỉ dùng prompt do admin nhập."
             )
         return notes
 
     if kind == "color":
         cname = (slot.get("name") or "").strip() or "màu chính"
         color_idx = int(slot.get("index") or 0)
-        color_brief = _studio_color_match_brief(state, slot, cname=cname, color_index=color_idx)
+        color_brief = _studio_color_match_brief(
+            state, slot, cname=cname, color_index=color_idx, product_kind=product_kind
+        )
         attempt = int(slot.get("attempt") or 1)
         variation = ""
         if color_idx == 0 and attempt > 1:
@@ -981,84 +1292,126 @@ def _build_studio_slot_prompt(
                 "as previous generations in this session."
             )
         elif color_idx >= 1:
-            variation = (
-                " MODEL FACE LOCK: Image #2 is the approved Color #1 catalog photo — copy ONLY that model's "
-                "face, hair, and skin tone. Completely IGNORE the clothing AND neckline/collar on image #2. "
-                "Image #1 is the NEW customer product sample — the output garment MUST match image #1 "
-                "(may be a totally different style/cut/neckline from Color #1, not a recolor). "
-                "Same person from image #2 wearing the product from image #1."
+            if product_kind == "bag":
+                variation = (
+                    " MODEL FACE LOCK: Image #2 is the approved Color #1 catalog photo — copy ONLY that model's "
+                    "face, hair, and skin tone. Image #1 is the NEW customer bag sample — the output bag MUST "
+                    "match image #1 (shape, handle, hardware, pattern, color). Same person from image #2 "
+                    "carrying the bag from image #1 with visible hand contact on handle/strap — never floating."
+                )
+            else:
+                variation = (
+                    " MODEL FACE LOCK: Image #2 is the approved Color #1 catalog photo — copy ONLY that model's "
+                    "face, hair, and skin tone. Completely IGNORE the clothing AND neckline/collar on image #2. "
+                    "Image #1 is the NEW customer product sample — the output garment MUST match image #1 "
+                    "(may be a totally different style/cut/neckline from Color #1, not a recolor). "
+                    "Same person from image #2 wearing the product from image #1."
+                )
+        if product_kind == "bag":
+            fidelity = _COLOR_BAG_FOLLOWON_FIDELITY if color_idx >= 1 else _BAG_FIDELITY
+            color_preserve = _BAG_COLOR_PRESERVE
+            scene_line = (
+                "Create a premium e-commerce colorway photo — single clean image of a fashion model "
+                "naturally carrying the exact bag from the sample."
             )
-        fidelity = _COLOR_FOLLOWON_FIDELITY if color_idx >= 1 else _FIDELITY
+            carry_line = _BAG_CARRY_BRIEF
+        elif product_kind == "shoes":
+            fidelity = _COLOR_FOLLOWON_FIDELITY if color_idx >= 1 else _SHOES_FIDELITY
+            color_preserve = _COLOR_PRESERVE
+            scene_line = (
+                "Create a premium e-commerce colorway photo — single clean image, model wearing the exact shoes naturally."
+            )
+            carry_line = ""
+        elif product_kind == "medicine":
+            fidelity = _MEDICINE_FIDELITY
+            color_preserve = (
+                "Match ONLY the packaging colors from the reference — same hue, saturation, brightness. "
+                "Do not recolor to a prettier shade."
+            )
+            scene_line = (
+                "Create a premium e-commerce packshot of this variant/flavor — single clean product-only image, "
+                "NO human model, packaging standing upright with the label fully legible."
+            )
+            carry_line = ""
+        elif product_kind == "household":
+            fidelity = _HOUSEHOLD_FIDELITY
+            color_preserve = (
+                "Match ONLY the product colors/material finish from the reference — same hue, saturation, brightness. "
+                "Do not recolor to a prettier shade."
+            )
+            scene_line = (
+                "Create a premium e-commerce packshot of this variant/color — single clean product-only image, "
+                "NO human model, correct real-world scale and proportions."
+            )
+            carry_line = ""
+        else:
+            fidelity = _COLOR_FOLLOWON_FIDELITY if color_idx >= 1 else _FIDELITY
+            color_preserve = _COLOR_PRESERVE
+            scene_line = (
+                "Create a premium e-commerce colorway photo — single clean image, worn or displayed correctly."
+            )
+            carry_line = ""
         if notes:
-            fidelity = (
-                f"{fidelity} "
-                "ADMIN NOTES reinforce or refine structure (cut/collar/neckline/sleeve/length): "
-                "obey them together with the product-sample neckline — never invent a collar the sample lacks."
-            )
+            if product_kind == "bag":
+                fidelity = (
+                    f"{fidelity} ADMIN NOTES refine carry style (hand/forearm/shoulder), grip, and bag angle — "
+                    "always keep visible hand contact; never floating."
+                )
+            else:
+                fidelity = (
+                    f"{fidelity} "
+                    "ADMIN NOTES reinforce or refine structure (cut/collar/neckline/sleeve/length): "
+                    "obey them together with the product-sample neckline — never invent a collar the sample lacks."
+                )
         base = (
             f"{_STUDIO_NEW_PHOTO_BRIEF} "
-            "Create a premium e-commerce colorway photo — single clean image, worn or displayed correctly. "
+            f"{scene_line} "
             f"{color_brief}{variation} "
-            f"{fidelity} "
+            f"{fidelity} {color_preserve} "
+            f"{carry_line} "
             f"Shopper: {gender_txt}. {look}"
-        )
+        ).replace("  ", " ").strip()
     elif kind == "main":
+        if product_kind == "medicine":
+            main_fidelity = _MEDICINE_FIDELITY
+            context_line = f"Composition/attributes: {material_txt}."
+        elif product_kind == "household":
+            main_fidelity = _HOUSEHOLD_FIDELITY
+            context_line = f"Material/specs: {material_txt}."
+        else:
+            main_fidelity = f"{_FIDELITY} {_COLOR_PRESERVE}"
+            context_line = f"Shopper: {gender_txt}. Material feel: {material_txt}. Fashion style: {style_txt}."
         base = (
             f"{_STUDIO_NEW_PHOTO_BRIEF} "
             "Create a premium e-commerce HERO product photo that customers want to buy. "
-            f"{_FIDELITY} {_COLOR_PRESERVE} "
-            f"Shopper: {gender_txt}. Material feel: {material_txt}. Fashion style: {style_txt}. "
+            f"{main_fidelity} "
+            f"{context_line} "
             f"{look} "
             "Square-friendly composition, product fills frame confidently, retail-ready quality."
         )
-    elif kind == "material":
-        raw_callouts = slot.get("material_callouts") or studio.get("material_callouts") or []
-        callouts = (
-            [str(c).strip() for c in raw_callouts if str(c).strip()][:3]
-            if isinstance(raw_callouts, list)
-            else []
-        )
-        callout_str = (
-            "; ".join(callouts)
-            if callouts
-            else "; ".join(_DEFAULT_MATERIAL_CALLOUTS)
-        )
-        base = (
-            f"Chỉnh sửa ảnh sản phẩm đính kèm thành ảnh cận cảnh chất liệu «{material_txt}» "
-            "chuyên nghiệp cho trang landing: zoom cận cảnh bề mặt/kết cấu chất liệu thật của đúng sản phẩm trong ảnh, "
-            "ánh sáng studio đẹp, nền trung tính sang trọng. "
-            f"{_FIDELITY}"
-            "Trên ảnh in trực tiếp các nhãn/chú thích ngắn tiếng Việt (callout badges) nêu ưu điểm và điểm đáng mua "
-            f"của loại chất liệu này — bố cục đẹp, không che vùng chất liệu chính: "
-            f"{callout_str}. "
-            "Không watermark, không chữ tiếng Trung, không logo hãng khác. Bố cục vuông, rõ nét, chuyên nghiệp."
-        )
     else:
         focus = _DETAIL_FOCUS[idx % len(_DETAIL_FOCUS)]
+        if product_kind in ("medicine", "household"):
+            focus = (
+                "close-up of packaging label/text legibility and finish quality"
+                if product_kind == "medicine"
+                else "close-up of material finish, control panel, or construction detail that sells quality"
+            )
         base = (
-            "Create a premium PRODUCT DETAIL photo for an online fashion store. "
+            "Create a premium PRODUCT DETAIL photo for an online store. "
             f"Focus: {focus}. Same exact product as references and hero. "
             f"Material: {material_txt}. Style: {style_txt}. "
             "Sharp commercial lighting, no text, no watermark, photorealistic."
         )
 
     if notes:
-        # Ghi chú admin + ảnh mẫu cùng hướng (vd không cổ) → siết chặt; nếu lệch ảnh mẫu thì theo ghi chú.
-        base = (
-            f"ADMIN STRUCTURE NOTE (HIGH PRIORITY): {notes}. "
-            "Apply this to the garment structure (collar/neckline, sleeves, length, cut). "
-            "If the product-sample photo already matches the note (e.g. both collarless), keep that structure — "
-            "do NOT invent a shirt collar / áo cổ bẻ. "
-            "If the note conflicts with the sample, follow the admin note for that detail only; "
-            "keep fabric/print/color from the product sample elsewhere.\n"
-            f"{base}"
-        )
+        return _append_admin_notes_to_prompt(base, notes, product_kind)
     return base
 
 
 def _suggested_prompt_for_phase(state: Dict[str, Any], *, kind: str, name: str = "", index: int = 0) -> str:
-    # Gallery/detail không dùng prompt hệ thống — admin phải tự nhập.
-    if (kind or "").strip() in ("gallery", "detail"):
+    # Gallery/chi tiết/chất liệu không dùng prompt hệ thống — admin phải tự nhập.
+    if (kind or "").strip() in ("gallery", "detail", "material"):
         return ""
     slot = {"kind": kind, "name": name, "index": index, "user_prompt": ""}
     try:
@@ -1072,11 +1425,13 @@ def _refine_gallery_detail_prompt_deepseek(
     *,
     kind: str,
     state: Dict[str, Any],
+    material_callouts: Optional[List[str]] = None,
 ) -> Tuple[str, List[str]]:
     """
-    DeepSeek soạn prompt tạo ảnh gallery/chi tiết:
+    DeepSeek soạn prompt tạo ảnh gallery/chi tiết/chất liệu:
     - Giữ nguyên mọi thứ liên quan sản phẩm từ ảnh mẫu (kiểu, màu, họa tiết, logo, chất liệu…).
-    - Chỉ thay đổi thế đứng / tư thế / cách sử dụng-đeo theo ý admin.
+    - Gallery/chi tiết: chỉ thay đổi thế đứng / tư thế / cách sử dụng-đeo theo ý admin.
+    - Chất liệu: cận cảnh chất liệu + callout tiếng Việt; chỉ điều chỉnh góc/zoom/bố cục theo ý admin.
     """
     warnings: List[str] = []
     intent = (admin_intent or "").strip()
@@ -1084,40 +1439,107 @@ def _refine_gallery_detail_prompt_deepseek(
         return "", ["pose_prompt: thiếu ý admin."]
 
     payload = dict(state.get("payload") or {})
+    product_type = _resolve_product_type(payload.get("product_type"))
+    is_non_wearable = product_type in _NON_WEARABLE_PRODUCT_TYPES
+    _pname_fallback = {
+        "medicine": "sản phẩm chăm sóc sức khỏe",
+        "household": "sản phẩm gia dụng",
+    }.get(product_type, "sản phẩm thời trang")
     pname = (
         (state.get("vision_product_name") or "").strip()
         or (payload.get("product_name") or payload.get("name") or "").strip()
-        or "sản phẩm thời trang"
+        or _pname_fallback
     )
     gender = (payload.get("gender") or "").strip() or "không rõ"
     material = (payload.get("material") or "").strip() or "theo ảnh mẫu"
-    kind_label = "ảnh gallery catalog" if (kind or "").strip() == "gallery" else "ảnh chi tiết sản phẩm"
+    kind_n = (kind or "").strip()
+    if kind_n == "gallery":
+        kind_label = "ảnh gallery catalog"
+    elif kind_n == "material":
+        kind_label = "ảnh cận cảnh chất liệu sản phẩm (material close-up landing page)"
+    else:
+        kind_label = "ảnh chi tiết sản phẩm"
 
     key = (settings.DEEPSEEK_API_KEY or "").strip()
     if len(key) < 10:
         warnings.append("pose_prompt: thiếu DEEPSEEK_API_KEY — dùng prompt fallback.")
-        return _fallback_gallery_detail_prompt(intent, kind=kind, product_name=pname), warnings
+        return (
+            _fallback_gallery_detail_prompt(
+                intent,
+                kind=kind,
+                product_name=pname,
+                material_name=material,
+                material_callouts=material_callouts,
+                product_type=product_type,
+            ),
+            warnings,
+        )
 
     system = (
         "Bạn là chuyên gia viết prompt tạo ảnh e-commerce (Gemini image). "
         "Chỉ trả về JSON hợp lệ, không markdown."
     )
-    user = (
-        f"NHIỆM VỤ: Viết MỘT prompt tiếng Anh ngắn (1–3 câu) để tạo {kind_label}.\n"
-        "QUY TẮC BẮT BUỘC trong prompt:\n"
-        "1) Giữ NGUYÊN mọi thứ liên quan SẢN PHẨM từ ảnh tham khảo đính kèm: "
-        "kiểu dáng, form, màu, họa tiết, logo/chữ trên SP, chất liệu, chi tiết cắt may, phụ kiện của SP "
-        "(không đổi SP, không bịa biến thể khác).\n"
-        "2) CHỈ được thay đổi: thế đứng / tư thế người mẫu / góc máy / cách sử dụng hoặc cách đeo-mặc SP "
-        "theo ý admin bên dưới.\n"
-        "3) Không copy background ảnh gốc; ảnh catalog chuyên nghiệp, photorealistic.\n"
-        "4) Không watermark, không text phụ, không giá.\n\n"
-        f"Tên SP (gợi ý): {pname}\n"
-        f"Giới tính shopper: {gender}\n"
-        f"Chất liệu (gợi ý): {material}\n"
-        f"Ý admin (cách đứng / cách dùng SP): {intent}\n\n"
-        'Trả JSON: {"prompt":"..."}'
-    )
+    if kind_n == "material":
+        callouts = [str(c).strip() for c in (material_callouts or []) if str(c).strip()][:3]
+        if not callouts:
+            callouts = _default_material_callouts(product_type)
+        callout_str = "; ".join(callouts)
+        label_rule = (
+            "1b) Nếu SP có nhãn/bao bì in chữ (thuốc, hộp, chai, lọ): giữ NGUYÊN 100% chữ/nhãn — "
+            "TUYỆT ĐỐI không bịa, không đổi, không dịch chữ trên nhãn.\n"
+            if product_type == "medicine"
+            else ""
+        )
+        no_model_rule = (
+            "6) TUYỆT ĐỐI không có người/tay trong ảnh — chỉ chụp sản phẩm.\n" if is_non_wearable else ""
+        )
+        user = (
+            f"NHIỆM VỤ: Viết MỘT prompt tiếng Anh ngắn (2–4 câu) để tạo {kind_label}.\n"
+            "QUY TẮC BẮT BUỘC trong prompt:\n"
+            "1) Giữ NGUYÊN đúng sản phẩm từ ảnh tham khảo đính kèm (kiểu, màu, họa tiết, logo/chữ trên SP…).\n"
+            f"{label_rule}"
+            "2) Zoom cận cảnh bề mặt/kết cấu chất liệu thật của sản phẩm; ánh sáng studio, nền trung tính sang trọng.\n"
+            f"3) In trực tiếp trên ảnh các nhãn callout tiếng Việt ngắn (badges) nêu ưu điểm: {callout_str}. "
+            "Bố cục đẹp, không che vùng chất liệu chính.\n"
+            "4) CHỈ được điều chỉnh theo ý admin: góc zoom / mức cận cảnh / bố cục / ánh sáng — không đổi SP.\n"
+            "5) Không watermark, không chữ tiếng Trung, không logo hãng khác. Photorealistic.\n"
+            f"{no_model_rule}\n"
+            f"Tên SP (gợi ý): {pname}\n"
+            f"Chất liệu chính: {material}\n"
+            f"Ý admin (góc/zoom/bố cục): {intent}\n\n"
+            'Trả JSON: {"prompt":"..."}'
+        )
+    else:
+        wear_rule = (
+            "2) SP KHÔNG có người mặc/đeo/dùng — TUYỆT ĐỐI không thêm người/tay/mannequin vào ảnh. "
+            "CHỈ được thay đổi: góc máy / bố cục / bối cảnh đặt SP theo ý admin bên dưới.\n"
+            if is_non_wearable
+            else (
+                "2) CHỈ được thay đổi: thế đứng / tư thế người mẫu / góc máy / cách sử dụng hoặc cách đeo-mặc SP "
+                "theo ý admin bên dưới.\n"
+            )
+        )
+        label_rule2 = (
+            "1b) Nếu SP có nhãn/bao bì in chữ: giữ NGUYÊN 100% chữ/nhãn — không bịa, không đổi, không dịch.\n"
+            if product_type == "medicine"
+            else ""
+        )
+        user = (
+            f"NHIỆM VỤ: Viết MỘT prompt tiếng Anh ngắn (1–3 câu) để tạo {kind_label}.\n"
+            "QUY TẮC BẮT BUỘC trong prompt:\n"
+            "1) Giữ NGUYÊN mọi thứ liên quan SẢN PHẨM từ ảnh tham khảo đính kèm: "
+            "kiểu dáng, form, màu, họa tiết, logo/chữ trên SP, chất liệu, chi tiết cắt may, phụ kiện của SP "
+            "(không đổi SP, không bịa biến thể khác).\n"
+            f"{label_rule2}"
+            f"{wear_rule}"
+            "3) Không copy background ảnh gốc; ảnh catalog chuyên nghiệp, photorealistic.\n"
+            "4) Không watermark, không text phụ, không giá.\n\n"
+            f"Tên SP (gợi ý): {pname}\n"
+            f"Giới tính shopper: {gender}\n"
+            f"Chất liệu (gợi ý): {material}\n"
+            f"Ý admin (góc máy / bối cảnh): {intent}\n\n"
+            'Trả JSON: {"prompt":"..."}'
+        )
     api_url = (settings.DEEPSEEK_API_URL or "").strip() or "https://api.deepseek.com/v1/chat/completions"
     model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-v4-flash"
     try:
@@ -1140,7 +1562,17 @@ def _refine_gallery_detail_prompt_deepseek(
         )
         if not resp.ok:
             warnings.append(f"pose_prompt: HTTP {resp.status_code}")
-            return _fallback_gallery_detail_prompt(intent, kind=kind, product_name=pname), warnings
+            return (
+                _fallback_gallery_detail_prompt(
+                    intent,
+                    kind=kind,
+                    product_name=pname,
+                    material_name=material,
+                    material_callouts=material_callouts,
+                    product_type=product_type,
+                ),
+                warnings,
+            )
         content = deepseek_message_text(resp)
         parsed = _extract_json_object(content)
         refined = str(parsed.get("prompt") or "").strip()
@@ -1151,13 +1583,33 @@ def _refine_gallery_detail_prompt_deepseek(
                 refined = refined.split(":", 1)[-1].strip()
         if len(refined) < 20:
             warnings.append("pose_prompt: DeepSeek trả prompt quá ngắn — dùng fallback.")
-            return _fallback_gallery_detail_prompt(intent, kind=kind, product_name=pname), warnings
+            return (
+                _fallback_gallery_detail_prompt(
+                    intent,
+                    kind=kind,
+                    product_name=pname,
+                    material_name=material,
+                    material_callouts=material_callouts,
+                    product_type=product_type,
+                ),
+                warnings,
+            )
         if len(refined) > 2000:
             refined = refined[:2000].strip()
         return refined, warnings
     except Exception as exc:
         warnings.append(f"pose_prompt: {exc}")
-        return _fallback_gallery_detail_prompt(intent, kind=kind, product_name=pname), warnings
+        return (
+            _fallback_gallery_detail_prompt(
+                intent,
+                kind=kind,
+                product_name=pname,
+                material_name=material,
+                material_callouts=material_callouts,
+                product_type=product_type,
+            ),
+            warnings,
+        )
 
 
 def _fallback_gallery_detail_prompt(
@@ -1165,15 +1617,48 @@ def _fallback_gallery_detail_prompt(
     *,
     kind: str,
     product_name: str,
+    material_name: str = "",
+    material_callouts: Optional[List[str]] = None,
+    product_type: str = "apparel",
 ) -> str:
-    """Fallback khi DeepSeek lỗi: vẫn siết giữ nguyên SP, chỉ đổi pose/cách dùng."""
-    shot = "catalog gallery photo" if (kind or "").strip() == "gallery" else "product detail close-up photo"
+    """Fallback khi DeepSeek lỗi: vẫn siết giữ nguyên SP, chỉ đổi pose/cách dùng hoặc góc chất liệu."""
+    kind_n = (kind or "").strip()
+    is_non_wearable = product_type in _NON_WEARABLE_PRODUCT_TYPES
+    label_lock = (
+        " Any printed label/text/packaging must stay EXACTLY as the reference — do not invent or alter text."
+        if product_type == "medicine"
+        else ""
+    )
+    if kind_n == "material":
+        callouts = [str(c).strip() for c in (material_callouts or []) if str(c).strip()][:3]
+        if not callouts:
+            callouts = _default_material_callouts(product_type)
+        callout_str = "; ".join(callouts)
+        mat = (material_name or "").strip() or "material"
+        no_model = " NO human model, NO hands — product-only." if is_non_wearable else ""
+        return (
+            f"Edit the attached product photo into a premium close-up of «{mat}» for «{product_name}». "
+            f"Keep the EXACT same product — identical design, color, print, materials.{label_lock}{no_model} "
+            "Zoom into the real surface/texture/label with studio lighting and a neutral elegant background. "
+            f"Overlay short Vietnamese callout badges highlighting: {callout_str}. "
+            f"Composition/zoom preference: {admin_intent}. "
+            "Square layout, sharp, professional, no watermark, no Chinese text."
+        )
+    shot = "catalog gallery photo" if kind_n == "gallery" else "product detail close-up photo"
+    if is_non_wearable:
+        usage_line = (
+            f"ONLY change the camera angle / composition / context staging (NO human model, NO hands): {admin_intent}. "
+        )
+        style_line = "Photorealistic commercial product photography, clean background, no watermark, no extra text."
+    else:
+        usage_line = f"ONLY change the model's pose/stance and how the product is worn or used: {admin_intent}. "
+        style_line = "Photorealistic commercial fashion photography, clean background, no watermark, no extra text."
     return (
         f"Create a premium e-commerce {shot} of «{product_name}». "
         "Keep the EXACT same product from the attached reference images — identical design, color, print, logo, "
-        "materials, hardware, and construction. Do NOT redesign or substitute the product. "
-        f"ONLY change the model's pose/stance and how the product is worn or used: {admin_intent}. "
-        "Photorealistic commercial fashion photography, clean background, no watermark, no extra text."
+        f"materials, hardware, and construction. Do NOT redesign or substitute the product.{label_lock} "
+        f"{usage_line}"
+        f"{style_line}"
     )
 
 
@@ -1365,7 +1850,9 @@ def maybe_recover_interrupted_job(state: Dict[str, Any]) -> Dict[str, Any]:
     return state
 
 
-def _generate_name_and_description(brief: str, *, seed_name: str = "") -> Tuple[str, str, List[str]]:
+def _generate_name_and_description(
+    brief: str, *, seed_name: str = "", product_type: str = "apparel"
+) -> Tuple[str, str, List[str]]:
     """DeepSeek đặt tên + mô tả marketing (giọng listing/ladipage). Không phụ thuộc flag import taxonomy."""
     from app.services.listing_year_sanitize import (
         LISTING_SANITIZE_PROMPT_VI,
@@ -1379,14 +1866,25 @@ def _generate_name_and_description(brief: str, *, seed_name: str = "") -> Tuple[
     )
 
     warnings: List[str] = []
+    product_type_n = _resolve_product_type(product_type)
+    ad_guardrail = (
+        " TUYỆT ĐỐI không dùng từ khẳng định y tế kiểu «chữa khỏi», «điều trị dứt điểm», "
+        "«thay thế thuốc chữa bệnh» — chỉ mô tả công dụng hỗ trợ chung, đúng theo nhãn/thông tin admin cung cấp."
+        if product_type_n == "medicine"
+        else ""
+    )
     context = (
         "Đăng bán thủ công trên cửa hàng Việt Nam. "
         "Viết tên hấp dẫn, tự nhiên; mô tả theo phong cách landing/ladipage "
         "(lợi ích, chất liệu, đối tượng) nhưng plain text không HTML. "
-        "Không bịa thông số ngoài ngữ cảnh brief.\n\n"
+        f"Không bịa thông số ngoài ngữ cảnh brief.{ad_guardrail}\n\n"
         f"{brief}"
     )
-    name_src = sanitize_listing_context_for_ai((seed_name or "").strip() or "Sản phẩm thời trang")
+    _seed_fallback = {
+        "medicine": "Sản phẩm chăm sóc sức khỏe",
+        "household": "Sản phẩm gia dụng",
+    }.get(product_type_n, "Sản phẩm thời trang")
+    name_src = sanitize_listing_context_for_ai((seed_name or "").strip() or _seed_fallback)
     blob = sanitize_listing_context_for_ai(context.strip()[:9000])
     key = (settings.DEEPSEEK_API_KEY or "").strip()
     tv = ""
@@ -1498,7 +1996,7 @@ def validate_job_payload(payload: Dict[str, Any]) -> None:
         refs = payload.get("ref_image_urls") or []
         if refs and len([u for u in refs if str(u).strip()]) > 3:
             raise ValueError("Mode AI tối đa 3 ảnh gốc (tuỳ chọn).")
-        if _resolve_model_presence(payload.get("model_presence")) == "model":
+        if _effective_model_presence(payload) == "model":
             if not str(payload.get("model_gender") or "").strip():
                 raise ValueError("Chọn «Có người mẫu» thì cần điền giới tính người mẫu.")
             if not str(payload.get("model_age_group") or "").strip():
@@ -1687,6 +2185,7 @@ def name_colorway_from_reference_images(
     image_urls: List[str],
     *,
     admin_hint: str = "",
+    product_type: str = "apparel",
 ) -> Tuple[str, List[str]]:
     """Gemini vision: đọc màu SP chủ đạo từ ảnh mẫu khách upload → tên màu tiếng Việt."""
     warnings: List[str] = []
@@ -1720,8 +2219,15 @@ def name_colorway_from_reference_images(
     model = (getattr(settings, "GEMINI_MODEL", "") or "gemini-2.5-flash").strip() or "gemini-2.5-flash"
     model = model.replace("-latest", "")
     hint = (admin_hint or "").strip()
+    product_type_n = _resolve_product_type(product_type)
+    if product_type_n == "medicine":
+        color_scope = "màu sắc/chất liệu chủ đạo của bao bì/nhãn sản phẩm (không phải màu viên bên trong)"
+    elif product_type_n == "household":
+        color_scope = "màu sắc/chất liệu chủ đạo của sản phẩm"
+    else:
+        color_scope = "màu vải/in chính của SP"
     prompt = (
-        "Bạn nhận diện MÀU SẢN PHẨM CHỦ ĐẠO trên ảnh thời trang (màu vải/in chính của SP).\n"
+        f"Bạn nhận diện MÀU SẢN PHẨM CHỦ ĐẠO trên ảnh ({color_scope}).\n"
         "Trả ĐÚNG một JSON ngắn (không markdown):\n"
         '{"ten_mau":"..."}\n'
         "Quy tắc ten_mau: tiếng Việt ngắn 1–4 từ (VD: Tím, Be nhạt, Xanh navy, Hồng phấn, Trắng kem). "
@@ -1818,6 +2324,7 @@ def _resolve_studio_color_name(
             material=str(payload.get("material") or "").strip(),
             style=str(payload.get("style") or "").strip(),
             notes=str(payload.get("notes") or "").strip(),
+            product_type=_resolve_product_type(payload.get("product_type")),
         )
         warnings.extend(vw)
         color_name = (ten_mau or "").strip()
@@ -1826,13 +2333,16 @@ def _resolve_studio_color_name(
                 "vision_product_name": vision_name,
                 "vision_analysis": vision_analysis or None,
                 "vision_colors": vision_colors or [],
+                "vision_product_kind": _normalize_studio_product_kind(vision_analysis, vision_name),
                 "name_source": "gemini_vision",
                 "payload": {**payload, "product_name": vision_name},
             }
         if not color_name and vision_colors:
             color_name = str(vision_colors[0] or "").strip()
     else:
-        color_name, vw = name_colorway_from_reference_images(sample_urls)
+        color_name, vw = name_colorway_from_reference_images(
+            sample_urls, product_type=_resolve_product_type(payload.get("product_type"))
+        )
         warnings.extend(vw)
 
     if not color_name:
@@ -1849,6 +2359,7 @@ def name_product_from_reference_images(
     style: str = "",
     colors: Optional[List[str]] = None,
     notes: str = "",
+    product_type: str = "apparel",
 ) -> Tuple[str, str, List[str], str, List[str]]:
     """
     Gemini vision đọc 1–3 ảnh gốc → (tên SEO, phân tích, mau_sac[], ten_mau, warnings).
@@ -1889,24 +2400,48 @@ def name_product_from_reference_images(
     colors_txt = ", ".join([c for c in (colors or []) if c]) or "tự nhận từ ảnh"
     notes_txt = (notes or "").strip() or "không"
     n_img = len(image_parts)
+    product_type_n = _resolve_product_type(product_type)
+    type_label = _product_type_label_vi(product_type_n)
+
+    if product_type_n == "medicine":
+        kind_hint = (
+            "hộp/lọ/vỉ/chai thuốc hoặc thực phẩm chức năng — đọc kỹ nhãn/bao bì để nhận diện đúng công dụng chính"
+        )
+        color_hint = "màu sắc chủ đạo của bao bì/nhãn (không phải màu viên/thuốc bên trong)"
+        extra_rule = (
+            "- TUYỆT ĐỐI không dùng từ khẳng định y tế kiểu «chữa khỏi», «điều trị dứt điểm», «thay thế thuốc chữa bệnh» "
+            "— chỉ mô tả công dụng hỗ trợ chung theo nhãn.\n"
+        )
+    elif product_type_n == "household":
+        kind_hint = "đồ dùng gia đình/nhà bếp/thiết bị điện gia dụng — đọc kỹ hình dáng, chất liệu, công năng chính"
+        color_hint = "màu sắc/chất liệu chủ đạo của sản phẩm"
+        extra_rule = ""
+    else:
+        kind_hint = (
+            "set bộ áo+quần / đầm / áo / giày / túi / phụ kiện… — nhìn kỹ có quần/short riêng không"
+        )
+        color_hint = "màu vải/in chính của SP trên ảnh"
+        extra_rule = ""
 
     prompt = (
-        "Bạn là chuyên gia đặt tên sản phẩm e-commerce thời trang Việt Nam (SEO + chuyển đổi).\n"
-        f"NHIỆM VỤ: Nhìn {n_img} ảnh sản phẩm (1 ảnh cũng đủ), nhận diện đúng loại hàng "
-        "(set bộ áo+quần / đầm / áo / giày / túi… — nhìn kỹ có quần/short riêng không), "
+        "Bạn là chuyên gia đặt tên sản phẩm e-commerce Việt Nam (SEO + chuyển đổi).\n"
+        f"Admin đã xác nhận LOẠI SẢN PHẨM: {type_label} — hãy đặt tên và mô tả đúng theo loại này, "
+        "không suy diễn thành loại khác dù ảnh có chi tiết gây nhầm.\n"
+        f"NHIỆM VỤ: Nhìn {n_img} ảnh sản phẩm (1 ảnh cũng đủ), nhận diện đúng loại hàng ({kind_hint}), "
         "form, chất cảm, chi tiết nổi bật — rồi đặt MỘT TÊN TIẾNG VIỆT "
         "chuẩn SEO, khách dễ tìm và muốn mua.\n"
-        "Đồng thời nhận MÀU SP CHỦ ĐẠO trên ảnh (ten_mau) và liệt kê thêm màu phụ nếu có (mau_sac).\n"
+        f"Đồng thời nhận MÀU SP CHỦ ĐẠO trên ảnh (ten_mau: {color_hint}) và liệt kê thêm màu phụ nếu có (mau_sac).\n"
         "Quy tắc tên:\n"
         "- 45–90 ký tự, tự nhiên, có loại SP + đặc điểm bán (đối tượng, họa tiết, form).\n"
         "- Không mã SKU, không emoji, không dấu ngoặc thừa.\n"
         "- Không liệt kê hết size/màu ở cuối tên.\n"
         "- Có thể nêu motif/nhân vật in trên áo nếu nhìn thấy vì khách hay search.\n"
-        f"Gợi ý admin — Giới tính: {gender_txt}; Chất liệu: {material_txt}; "
+        f"{extra_rule}"
+        f"Gợi ý admin — Giới tính: {gender_txt}; Chất liệu/thành phần: {material_txt}; "
         f"Phong cách: {style_txt}; Màu gợi ý: {colors_txt}; Ghi chú: {notes_txt}.\n"
         "Trả ĐÚNG một JSON ngắn (không markdown, không giải thích):\n"
         '{"ten_san_pham":"...","ten_mau":"...","loai_san_pham":"...","diem_noi_bat":"...","mo_ta_ngan":"...","mau_sac":["..."]}\n'
-        "Quy tắc ten_mau: tiếng Việt ngắn 1–4 từ (VD: Tím, Be nhạt, Xanh navy) — màu vải/in chính của SP trên ảnh."
+        f"Quy tắc ten_mau: tiếng Việt ngắn 1–4 từ (VD: Tím, Be nhạt, Xanh navy) — {color_hint}."
     )
 
     parts: List[Dict[str, Any]] = [{"text": prompt}]
@@ -1994,6 +2529,7 @@ def name_product_from_reference_image(
     style: str = "",
     colors: Optional[List[str]] = None,
     notes: str = "",
+    product_type: str = "apparel",
 ) -> Tuple[str, str, List[str], str, List[str]]:
     """Alias tương thích — ủy quyền sang name_product_from_reference_images."""
     return name_product_from_reference_images(
@@ -2003,6 +2539,7 @@ def name_product_from_reference_image(
         style=style,
         colors=colors,
         notes=notes,
+        product_type=product_type,
     )
 
 
@@ -2020,6 +2557,32 @@ def _resolve_category_id_for_product_data(db: Session, product_data: Dict[str, A
         return cid
     cat3_idx = product_crud._build_cat3_lookup_indexes(db)
     return product_crud._resolve_category_id_from_row(product_data, cat3_idx)
+
+
+def _ensure_db_session_ready(db: Session, product: Any) -> Any:
+    """Sau create_product / hook lỗi: rollback txn abort rồi refresh SP cho bước Ladipage."""
+    try:
+        db.rollback()
+    except Exception:
+        pass
+    try:
+        db.refresh(product)
+    except Exception:
+        from app.models.product import Product
+
+        pid = getattr(product, "id", None)
+        if pid is not None:
+            product = db.query(Product).filter(Product.id == int(pid)).first() or product
+    return product
+
+
+def _find_existing_product_by_key(db: Session, product_key: str) -> Any:
+    from app.models.product import Product
+
+    key = (product_key or "").strip()
+    if not key:
+        return None
+    return db.query(Product).filter(Product.product_id == key).first()
 
 
 def _apply_studio_material_image_to_ladipage(
@@ -2197,7 +2760,7 @@ def _run_generate_studio_slot(job_id: str) -> None:
             product_key = new_manual_product_id()
             studio["product_key"] = product_key
         plan = dict(studio.get("plan") or {})
-        image_model_choice = str(plan.get("image_model") or "pro").strip() or "pro"
+        image_model_choice = _resolve_studio_image_model_choice(kind, plan.get("image_model"))
         model_id, model_size, model_label = _resolve_manual_ai_image_model(image_model_choice)
         aspect_ratio = _normalize_studio_aspect_ratio(plan.get("aspect_ratio"))
         kind = str(slot.get("kind") or "").strip()
@@ -2283,11 +2846,16 @@ def _run_generate_studio_slot(job_id: str) -> None:
                 studio=studio,
             )
         prompt = _build_studio_slot_prompt({**state, "studio": studio}, slot)
-        if kind in ("gallery", "detail"):
+        if kind in ("gallery", "detail", "material"):
             admin_intent = str(slot.get("user_prompt") or "").strip()
+            refine_hint = (
+                "giữ nguyên SP, chỉ đổi góc/zoom/bố cục chất liệu"
+                if kind == "material"
+                else "giữ nguyên SP, chỉ đổi tư thế/cách dùng"
+            )
             _job_update(
                 job_id,
-                message=f"DeepSeek đang chuẩn hóa prompt {label} (giữ nguyên SP, chỉ đổi tư thế/cách dùng)…",
+                message=f"DeepSeek đang chuẩn hóa prompt {label} ({refine_hint})…",
                 progress=32,
                 studio={**studio, "current_slot": slot},
             )
@@ -2295,6 +2863,7 @@ def _run_generate_studio_slot(job_id: str) -> None:
                 admin_intent,
                 kind=kind,
                 state={**state, "studio": studio},
+                material_callouts=slot.get("material_callouts") if kind == "material" else None,
             )
             if pose_warnings:
                 warnings_state = list(state.get("warnings") or [])
@@ -2395,6 +2964,7 @@ def _finalize_product_from_media(
             or new_manual_product_id()
         )
         sizes = _parse_sizes(payload.get("sizes"), no_size=bool(payload.get("no_size")))
+        product_type = _resolve_product_type(payload.get("product_type"))
         gender = (payload.get("gender") or "").strip()
         material = (payload.get("material") or "").strip()
         style = (payload.get("style") or "").strip()
@@ -2434,6 +3004,7 @@ def _finalize_product_from_media(
                 style=style,
                 colors=color_names_for_vision or _parse_colors(payload.get("colors")),
                 notes=(payload.get("notes") or "").strip(),
+                product_type=_resolve_product_type(payload.get("product_type")),
             )
             warnings.extend(vw)
             if vision_name:
@@ -2445,6 +3016,7 @@ def _finalize_product_from_media(
                     "vision_product_name": vision_name,
                     "vision_analysis": vision_analysis or None,
                     "vision_colors": vision_colors or [],
+                    "vision_product_kind": _normalize_studio_product_kind(vision_analysis, vision_name),
                     "name_source": name_source,
                     "warnings": warnings,
                 }
@@ -2480,7 +3052,9 @@ def _finalize_product_from_media(
             progress=80,
             error=None,
         )
-        name_vi, desc_vi, tw = _generate_name_and_description(brief, seed_name=locked_name)
+        name_vi, desc_vi, tw = _generate_name_and_description(
+            brief, seed_name=locked_name, product_type=_resolve_product_type(payload.get("product_type"))
+        )
         warnings.extend(tw)
         if locked_name:
             name_vi = locked_name[:500]
@@ -2504,6 +3078,7 @@ def _finalize_product_from_media(
             "product_info": {
                 "manual_create": {
                     "mode": mode,
+                    "product_type": product_type,
                     "gender": gender,
                     "brief": brief,
                     "admin_product_name": admin_name,
@@ -2547,7 +3122,12 @@ def _finalize_product_from_media(
             message="DeepSeek đang gán danh mục taxonomy…",
             progress=84,
         )
-        tax_warnings = apply_deepseek_taxonomy_to_product_data(db, product_data)
+        # Hint tạm cho DeepSeek phân loại — không phải cột DB, xóa ngay sau khi dùng.
+        product_data["_product_type_hint"] = _product_type_label_vi(product_type)
+        try:
+            tax_warnings = apply_deepseek_taxonomy_to_product_data(db, product_data)
+        finally:
+            product_data.pop("_product_type_hint", None)
         warnings.extend(tax_warnings)
 
         c1 = (product_data.get("category") or "").strip()
@@ -2589,7 +3169,29 @@ def _finalize_product_from_media(
             ProductCreate, "__fields__", {}
         )
         create = ProductCreate(**{k: v for k, v in product_data.items() if k in create_fields})
-        product = product_crud.create_product(db, create)
+        existing_product = _find_existing_product_by_key(db, product_key)
+        if existing_product is not None:
+            product = existing_product
+            warnings.append(
+                "publish: sản phẩm đã tồn tại (trùng product_id) — bỏ qua tạo mới, tiếp tục Ladipage."
+            )
+        else:
+            try:
+                product = product_crud.create_product(db, create)
+            except Exception as create_exc:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                existing_product = _find_existing_product_by_key(db, product_key)
+                if existing_product is not None:
+                    product = existing_product
+                    warnings.append(
+                        f"publish: dùng lại sản phẩm đã có sau lỗi tạo mới ({create_exc})."
+                    )
+                else:
+                    raise
+        product = _ensure_db_session_ready(db, product)
 
         _job_update(
             job_id,
@@ -2865,16 +3467,18 @@ def start_studio_generate(
         )
         studio = dict(state.get("studio") or _init_studio(payload, product_key=product_key))
         studio["product_key"] = product_key
-        _patch_studio_ai_plan(studio, image_model=image_model, aspect_ratio=aspect_ratio)
+        model_for_plan = "pro" if kind_n == "material" else image_model
+        _patch_studio_ai_plan(studio, image_model=model_for_plan, aspect_ratio=aspect_ratio)
         if not studio.get("ref_pool"):
             studio["ref_pool"] = _ref_pool_from_payload(payload)
 
         color_name = (name or "").strip()
         # Tên màu để trống: worker _resolve_studio_color_name đọc từ ảnh mẫu (Gemini vision).
         admin_prompt = (prompt or "").strip()
-        if kind_n in ("gallery", "detail") and not admin_prompt:
+        if kind_n in ("gallery", "detail", "material") and not admin_prompt:
             raise ValueError(
-                "Gallery / ảnh chi tiết bắt buộc nhập nội dung prompt (chỉ dùng prompt do admin nhập)."
+                "Gallery / ảnh chi tiết / ảnh chất liệu bắt buộc nhập nội dung prompt "
+                "(chỉ dùng prompt do admin nhập)."
             )
 
         if kind_n == "color":
@@ -3199,6 +3803,101 @@ def adopt_studio_images(
         return state
 
 
+def replace_studio_images(
+    job_id: str,
+    *,
+    kind: str,
+    urls: List[str],
+) -> Dict[str, Any]:
+    """Thay toàn bộ ảnh của một nhóm bằng các ảnh Studio đã chọn, giữ thứ tự chọn."""
+    kind_n = (kind or "").strip().lower()
+    if kind_n not in ("gallery", "detail", "material"):
+        raise ValueError("kind phải là gallery | detail | material.")
+
+    picked: List[str] = []
+    for raw in urls or []:
+        url = str(raw or "").strip()
+        if url and url not in picked:
+            picked.append(url)
+    if not picked:
+        raise ValueError("Chọn ít nhất 1 ảnh để lưu.")
+    if kind_n == "material":
+        picked = picked[:1]
+    else:
+        picked = picked[:12]
+
+    with _WORKER_LOCK:
+        state = load_job(job_id)
+        if not state:
+            raise ValueError("Không tìm thấy job")
+        status = (state.get("status") or "").strip()
+        if status not in ("awaiting_input", "awaiting_colors", "ready_to_publish"):
+            raise ValueError(
+                f"Job đang «{status}» — chỉ chọn lại ảnh khi đang chờ tạo/duyệt mốc tiếp."
+            )
+        payload = dict(state.get("payload") or {})
+        if (payload.get("mode") or "").strip().lower() != "ai":
+            raise ValueError("Chỉ dùng cho mode AI.")
+
+        studio = dict(state.get("studio") or {})
+        allowed_urls = {
+            str(item.get("url") or "").strip()
+            for item in (studio.get("ref_pool") or [])
+            if isinstance(item, dict) and str(item.get("url") or "").strip()
+        }
+        for row in studio.get("colors") or []:
+            if isinstance(row, dict):
+                url = str(row.get("img") or "").strip()
+                if url:
+                    allowed_urls.add(url)
+        allowed_urls.update(
+            str(url or "").strip()
+            for url in list(studio.get("images") or []) + list(studio.get("gallery") or [])
+            if str(url or "").strip()
+        )
+        material_url = str(studio.get("material_image") or "").strip()
+        if material_url:
+            allowed_urls.add(material_url)
+        if any(url not in allowed_urls for url in picked):
+            raise ValueError("Chỉ chọn ảnh đã có trong Studio.")
+
+        if kind_n == "gallery":
+            studio["images"] = picked
+            studio["phase"] = "gallery"
+        elif kind_n == "detail":
+            studio["gallery"] = picked
+            studio["phase"] = "detail"
+        else:
+            studio["material_image"] = picked[0]
+            studio["phase"] = "material"
+
+        studio["current_slot"] = None
+        _refresh_studio_hints(state, studio)
+        missing = _studio_publish_missing(studio)
+        label = "gallery" if kind_n == "gallery" else ("chi tiết" if kind_n == "detail" else "chất liệu")
+        state.update(
+            {
+                "studio": studio,
+                "status": "awaiting_input",
+                "step": "awaiting_input",
+                "message": (
+                    f"Đã chọn lại {len(picked)} ảnh {label}."
+                    + (
+                        " Đủ điều kiện đăng — bấm «Đăng sản phẩm»."
+                        if not missing
+                        else f" Còn thiếu: {', '.join(missing)}."
+                    )
+                ),
+                "progress": 55,
+                "error": None,
+                "worker_action": None,
+                "updated_at": _utcnow_iso(),
+            }
+        )
+        persist_job(job_id, state)
+        return state
+
+
 def regenerate_studio_image(
     job_id: str,
     *,
@@ -3217,10 +3916,12 @@ def regenerate_studio_image(
         if status not in ("awaiting_approval", "failed"):
             raise ValueError("Chỉ tạo lại khi đang xem ảnh / lỗi gen.")
         studio = dict(state.get("studio") or {})
-        _patch_studio_ai_plan(studio, image_model=image_model, aspect_ratio=aspect_ratio)
         slot = dict(studio.get("current_slot") or {})
         if not slot.get("kind"):
             raise ValueError("Không còn slot ảnh để tạo lại.")
+        kind_slot = (slot.get("kind") or "").strip()
+        model_for_plan = "pro" if kind_slot == "material" else image_model
+        _patch_studio_ai_plan(studio, image_model=model_for_plan, aspect_ratio=aspect_ratio)
         if prompt is not None:
             slot["user_prompt"] = str(prompt).strip()
         slot_attach = str(slot.get("attach_url") or attach_url or "").strip()
@@ -3257,9 +3958,10 @@ def regenerate_studio_image(
                     attach_url=str(attach_url).strip(),
                 )
         kind_slot = (slot.get("kind") or "").strip()
-        if kind_slot in ("gallery", "detail") and not str(slot.get("user_prompt") or "").strip():
+        if kind_slot in ("gallery", "detail", "material") and not str(slot.get("user_prompt") or "").strip():
             raise ValueError(
-                "Gallery / ảnh chi tiết bắt buộc nhập nội dung prompt (chỉ dùng prompt do admin nhập)."
+                "Gallery / ảnh chi tiết / ảnh chất liệu bắt buộc nhập nội dung prompt "
+                "(chỉ dùng prompt do admin nhập)."
             )
         slot["url"] = None
         studio["current_slot"] = slot

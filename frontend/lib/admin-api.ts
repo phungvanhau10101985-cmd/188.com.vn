@@ -2937,6 +2937,8 @@ export type ManualProductJobCreatePayload = {
   price: number;
   material: string;
   product_name?: string;
+  /** Loại sản phẩm — điều chỉnh Studio ảnh + prompt AI phù hợp từng loại. */
+  product_type?: 'apparel' | 'shoes' | 'accessory' | 'medicine' | 'household' | string;
   gender?: string;
   style?: string;
   sizes?: string[];
@@ -3185,6 +3187,19 @@ export const manualProductCreateAPI = {
   ) =>
     fetchAdmin<ManualProductJob>(
       `/manual-products/jobs/${encodeURIComponent(jobId)}/images/adopt`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+        timeoutMs: 30_000,
+      },
+    ),
+
+  selectImages: (
+    jobId: string,
+    body: { kind: 'gallery' | 'detail' | 'material'; urls: string[] },
+  ) =>
+    fetchAdmin<ManualProductJob>(
+      `/manual-products/jobs/${encodeURIComponent(jobId)}/images/select`,
       {
         method: 'POST',
         body: JSON.stringify(body),

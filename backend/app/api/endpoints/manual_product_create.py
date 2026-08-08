@@ -27,6 +27,7 @@ from app.services.manual_product_create_service import (
     maybe_recover_interrupted_job,
     publish_studio_job,
     regenerate_studio_image,
+    replace_studio_images,
     set_job_colors,
     start_studio_generate,
     validate_job_payload,
@@ -54,6 +55,10 @@ class ManualProductJobCreate(BaseModel):
     product_name: str = Field(
         "",
         description="Tên SP — bắt buộc mode manual; mode AI để trống thì Gemini đọc ảnh gốc đặt tên SEO",
+    )
+    product_type: str = Field(
+        "apparel",
+        description="Loại sản phẩm: apparel | shoes | accessory | medicine | household",
     )
     gender: str = ""
     style: str = ""
@@ -424,6 +429,21 @@ def adopt_manual_product_images(
     _ = current_admin
     try:
         state = adopt_studio_images(job_id, kind=body.kind, urls=body.urls)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _out(state, job_id)
+
+
+@router.post("/jobs/{job_id}/images/select", response_model=ManualProductJobOut)
+def select_manual_product_images(
+    job_id: str,
+    body: ManualProductAdoptBody,
+    current_admin: AdminUser = Depends(require_module_permission("products")),
+):
+    """Thay ảnh gallery/chi tiết/chất liệu bằng các ảnh Studio admin chọn theo thứ tự."""
+    _ = current_admin
+    try:
+        state = replace_studio_images(job_id, kind=body.kind, urls=body.urls)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return _out(state, job_id)

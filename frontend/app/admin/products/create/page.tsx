@@ -17,6 +17,57 @@ const STEPS_MANUAL = ['Chế độ', 'Thuộc tính', 'Ảnh', 'Đăng'] as cons
 const STEPS_AI = ['Chế độ', 'Thuộc tính', 'Cài đặt Studio', 'Studio ảnh'] as const;
 
 type ColorRow = { key: string; name: string; img: string };
+type StudioSelectionKind = 'gallery' | 'detail' | 'material';
+
+type ProductType = 'apparel' | 'shoes' | 'accessory' | 'medicine' | 'household';
+
+const PRODUCT_TYPE_OPTIONS: { value: ProductType; label: string }[] = [
+  { value: 'apparel', label: 'Quần áo' },
+  { value: 'shoes', label: 'Giày dép' },
+  { value: 'accessory', label: 'Phụ kiện' },
+  { value: 'medicine', label: 'Thuốc / TPCN' },
+  { value: 'household', label: 'Gia dụng' },
+];
+
+/** Loại có người mặc/đeo/dùng — Studio cho phép chọn người mẫu. */
+function isWearableProductType(t: ProductType): boolean {
+  return t === 'apparel' || t === 'shoes' || t === 'accessory';
+}
+
+function materialFieldLabel(t: ProductType): string {
+  if (t === 'medicine') return 'Thành phần chính / công dụng *';
+  if (t === 'household') return 'Chất liệu / thông số kỹ thuật *';
+  return 'Chất liệu *';
+}
+
+function materialFieldPlaceholder(t: ProductType): string {
+  if (t === 'medicine') return 'VD: Vitamin C 500mg, Collagen…';
+  if (t === 'household') return 'VD: Inox 304, công suất 800W…';
+  return 'VD: Cotton, da PU, denim…';
+}
+
+function sizeFieldLabel(t: ProductType): string {
+  if (t === 'medicine') return 'Quy cách đóng gói';
+  if (t === 'household') return 'Phiên bản / dung tích';
+  return 'Size';
+}
+
+function sizeFieldPlaceholder(t: ProductType): string {
+  if (t === 'medicine') return 'Gõ quy cách rồi Enter (VD: Hộp 30 viên)';
+  if (t === 'household') return 'Gõ phiên bản/dung tích rồi Enter (VD: 1.8L)';
+  return 'Gõ size rồi Enter (VD: S hoặc 39)';
+}
+
+function colorFieldLabel(t: ProductType): string {
+  if (t === 'medicine') return 'Phiên bản / vị';
+  return 'Màu sắc';
+}
+
+const STUDIO_DEEPSEEK_PROMPT_KINDS = new Set<string>(['gallery', 'detail', 'material']);
+
+function studioNeedsDeepSeekPrompt(kind: string | undefined | null): boolean {
+  return STUDIO_DEEPSEEK_PROMPT_KINDS.has((kind || '').trim());
+}
 
 function newColorRow(partial?: Partial<ColorRow>): ColorRow {
   return {
@@ -60,6 +111,7 @@ type ProductCreateDraft = {
   step: number;
   mode: ManualProductCreateMode;
   jobId: string | null;
+  productType: ProductType;
   gender: string;
   productName: string;
   material: string;
@@ -161,6 +213,9 @@ function applyJobPayloadToDraft(job: ManualProductJob, draft: ProductCreateDraft
     ...draft,
     mode: (p.mode as ManualProductCreateMode) || draft.mode,
     jobId: job.job_id,
+    productType: PRODUCT_TYPE_OPTIONS.some((o) => o.value === p.product_type)
+      ? (p.product_type as ProductType)
+      : draft.productType,
     productName: (p.product_name || job.vision_product_name || draft.productName || '').trim(),
     material: (p.material || draft.material || '').trim(),
     gender: (p.gender || draft.gender || 'Nữ').trim(),
@@ -319,6 +374,12 @@ function syncRefUrlsFromJob(fresh: ManualProductJob) {
   );
 }
 
+const STUDIO_MATERIAL_IMAGE_MODEL: StudioImageModel = 'pro';
+
+function studioImageModelForKind(kind: string, selected: StudioImageModel): StudioImageModel {
+  return (kind || '').trim() === 'material' ? STUDIO_MATERIAL_IMAGE_MODEL : selected;
+}
+
 function loadStudioImageModel(): StudioImageModel {
   if (typeof window === 'undefined') return 'pro';
   const v = localStorage.getItem(STUDIO_IMAGE_MODEL_KEY);
@@ -346,6 +407,7 @@ function StudioAiImageSettings({
   onAspectRatioChange,
   disabled,
   compact = false,
+  materialLocked = false,
 }: {
   imageModel: StudioImageModel;
   aspectRatio: StudioAspectRatio;
@@ -353,6 +415,7 @@ function StudioAiImageSettings({
   onAspectRatioChange: (v: StudioAspectRatio) => void;
   disabled?: boolean;
   compact?: boolean;
+  materialLocked?: boolean;
 }) {
   return (
     <div
@@ -361,9 +424,9 @@ function StudioAiImageSettings({
       <label className="block text-sm min-w-0">
         <span className="font-medium text-slate-800">Model tạo ảnh AI</span>
         <select
-          className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
-          value={imageModel}
-          disabled={disabled}
+          className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white disabled:opacity-50"
+          value={materialLocked ? STUDIO_MATERIAL_IMAGE_MODEL : imageModel}
+          disabled={disabled || materialLocked}
           onChange={(e) => {
             const v = e.target.value as StudioImageModel;
             onImageModelChange(v);
@@ -374,6 +437,11 @@ function StudioAiImageSettings({
           <option value="flash">Flash — rẻ, nhanh (~1.000₫/ảnh, ~1K)</option>
           <option value="flash3">Flash 3.1 — cân bằng (~2.500₫/ảnh, 2K)</option>
         </select>
+        {materialLocked ? (
+          <p className="mt-1 text-[11px] text-amber-800">
+            Ảnh chất liệu luôn dùng Pro 2K (cận cảnh + callout ổn định hơn).
+          </p>
+        ) : null}
       </label>
       <label className="block text-sm min-w-0">
         <span className="font-medium text-slate-800">Tỷ lệ khung hình</span>
@@ -395,7 +463,9 @@ function StudioAiImageSettings({
         </select>
       </label>
       <p className={`text-[11px] text-slate-500 ${compact ? 'sm:col-span-2' : 'sm:col-span-2'}`}>
-        Lưu tự động trên trình duyệt — áp dụng mọi lần tạo / tạo lại cho đến khi bạn đổi lại.
+        {materialLocked
+          ? 'Tỷ lệ khung hình vẫn theo lựa chọn của bạn.'
+          : 'Lưu tự động trên trình duyệt — áp dụng mọi lần tạo / tạo lại cho đến khi bạn đổi lại.'}
       </p>
     </div>
   );
@@ -568,10 +638,12 @@ function SizeChipsInput({
   sizes,
   onChange,
   disabled,
+  placeholder,
 }: {
   sizes: string[];
   onChange: (next: string[]) => void;
   disabled?: boolean;
+  placeholder?: string;
 }) {
   const [draft, setDraft] = useState('');
 
@@ -634,7 +706,7 @@ function SizeChipsInput({
             }
           }}
           onBlur={commitDraft}
-          placeholder="Gõ size rồi Enter (VD: S hoặc 39)"
+          placeholder={placeholder || 'Gõ size rồi Enter (VD: S hoặc 39)'}
         />
         <button
           type="button"
@@ -665,6 +737,7 @@ export default function AdminManualProductCreatePage() {
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState<ManualProductCreateMode>('manual');
 
+  const [productType, setProductType] = useState<ProductType>('apparel');
   const [gender, setGender] = useState('Nữ');
   const [productName, setProductName] = useState('');
   const [material, setMaterial] = useState('');
@@ -686,6 +759,12 @@ export default function AdminManualProductCreatePage() {
   const [refImages, setRefImages] = useState<string[]>([]);
   const [imageModel, setImageModel] = useState<StudioImageModel>(() => loadStudioImageModel());
   const [aspectRatio, setAspectRatio] = useState<StudioAspectRatio>(() => loadStudioAspectRatio());
+
+  useEffect(() => {
+    if (formKind === 'material') {
+      setImageModel(STUDIO_MATERIAL_IMAGE_MODEL);
+    }
+  }, [formKind]);
   const [modelPresence, setModelPresence] = useState<'none' | 'model'>('none');
   const [modelGender, setModelGender] = useState<'' | 'female' | 'male'>('');
   const [modelAgeGroup, setModelAgeGroup] = useState<
@@ -699,6 +778,9 @@ export default function AdminManualProductCreatePage() {
   const [submitting, setSubmitting] = useState(false);
   const [studioBusy, setStudioBusy] = useState(false);
   const [job, setJob] = useState<ManualProductJob | null>(null);
+  const [imageSelectorOpen, setImageSelectorOpen] = useState(false);
+  const [imageSelectionKind, setImageSelectionKind] = useState<StudioSelectionKind>('gallery');
+  const [imageSelectionUrls, setImageSelectionUrls] = useState<string[]>([]);
   const [draftReady, setDraftReady] = useState(false);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
   const [serverSessions, setServerSessions] = useState<ManualProductJobSummary[]>([]);
@@ -722,6 +804,7 @@ export default function AdminManualProductCreatePage() {
       step,
       mode,
       jobId: job?.job_id || null,
+      productType,
       gender,
       productName,
       material,
@@ -750,6 +833,7 @@ export default function AdminManualProductCreatePage() {
     step,
     mode,
     job?.job_id,
+    productType,
     gender,
     productName,
     material,
@@ -840,6 +924,7 @@ export default function AdminManualProductCreatePage() {
   const applyDraftState = useCallback((d: ProductCreateDraft) => {
     setStep(d.step);
     setMode(d.mode);
+    setProductType(d.productType || 'apparel');
     setGender(d.gender);
     setProductName(d.productName);
     setMaterial(d.material);
@@ -875,6 +960,7 @@ export default function AdminManualProductCreatePage() {
           step: 0,
           mode: (fresh.mode as ManualProductCreateMode) || 'ai',
           jobId,
+          productType: 'apparel',
           gender: 'Nữ',
           productName: '',
           material: '',
@@ -1028,6 +1114,7 @@ export default function AdminManualProductCreatePage() {
       step: 0,
       mode: 'manual',
       jobId: null,
+      productType: 'apparel',
       gender: 'Nữ',
       productName: '',
       material: '',
@@ -1136,6 +1223,21 @@ export default function AdminManualProductCreatePage() {
     };
   }, [studio]);
   const canPublish = studioPublishCheck.canPublish;
+  const studioSelectableImages = useMemo(() => {
+    const items = new Map<string, { url: string; label: string }>();
+    const add = (url: string | null | undefined, label: string) => {
+      const value = (url || '').trim();
+      if (value && !items.has(value)) items.set(value, { url: value, label });
+    };
+    (studio?.ref_pool || []).forEach((item) => add(item.url, item.label || 'Ảnh Studio'));
+    (studio?.colors || []).forEach((color, index) =>
+      add(color?.img, color?.name?.trim() || `Ảnh màu ${index + 1}`),
+    );
+    (studio?.images || []).forEach((url, index) => add(url, `Gallery ${index + 1}`));
+    (studio?.gallery || []).forEach((url, index) => add(url, `Ảnh chi tiết ${index + 1}`));
+    add(studio?.material_image, 'Ảnh chất liệu');
+    return [...items.values()];
+  }, [studio]);
 
   const progressLabel = useMemo(() => {
     if (!job) return '';
@@ -1183,7 +1285,7 @@ export default function AdminManualProductCreatePage() {
   function validateStep(s: number): string {
     if (s === 1) {
       if (mode === 'manual' && !productName.trim()) return 'Vui lòng nhập tên sản phẩm.';
-      if (!material.trim()) return 'Vui lòng nhập chất liệu.';
+      if (!material.trim()) return `Vui lòng nhập ${materialFieldLabel(productType).replace(' *', '').toLowerCase()}.`;
       const p = Number(price);
       if (!Number.isFinite(p) || p <= 0) return 'Giá bán phải > 0.';
     }
@@ -1202,12 +1304,10 @@ export default function AdminManualProductCreatePage() {
         }
         const incomplete = colorRows.some((r) => r.img && !r.name.trim());
         if (incomplete) return 'Mỗi ảnh màu cần có tên màu.';
-      } else {
-        if (modelPresence === 'model') {
-          if (!modelGender) return 'Chọn «Có người mẫu» thì cần chọn giới tính người mẫu.';
-          if (!modelAgeGroup) return 'Chọn «Có người mẫu» thì cần chọn tuổi người mẫu.';
-          if (!modelEthnicity) return 'Chọn «Có người mẫu» thì cần chọn quốc tịch/gốc người mẫu.';
-        }
+      } else if (isWearableProductType(productType) && modelPresence === 'model') {
+        if (!modelGender) return 'Chọn «Có người mẫu» thì cần chọn giới tính người mẫu.';
+        if (!modelAgeGroup) return 'Chọn «Có người mẫu» thì cần chọn tuổi người mẫu.';
+        if (!modelEthnicity) return 'Chọn «Có người mẫu» thì cần chọn quốc tịch/gốc người mẫu.';
       }
     }
     return '';
@@ -1247,8 +1347,9 @@ export default function AdminManualProductCreatePage() {
         mode: 'manual' as const,
         price: Number(price),
         product_name: productName.trim(),
+        product_type: productType,
         material: material.trim(),
-        gender,
+        gender: isWearableProductType(productType) ? gender : '',
         no_size: noSize,
         sizes: noSize ? [] : sizes,
         colors: structuredColors.map((c) => ({ name: c.name, img: c.img })),
@@ -1281,12 +1382,15 @@ export default function AdminManualProductCreatePage() {
     setSubmitting(true);
     setJob(null);
     try {
+      const wearable = isWearableProductType(productType);
+      const effectiveModelPresence = wearable ? modelPresence : 'none';
       const payload = {
         mode: 'ai' as const,
         price: Number(price),
         product_name: '',
+        product_type: productType,
         material: material.trim(),
-        gender,
+        gender: wearable ? gender : '',
         no_size: noSize,
         sizes: noSize ? [] : sizes,
         colors: [],
@@ -1298,10 +1402,10 @@ export default function AdminManualProductCreatePage() {
         ref_image_urls: [],
         image_model: imageModel,
         aspect_ratio: aspectRatio,
-        model_presence: modelPresence,
-        model_gender: modelPresence === 'model' ? modelGender : '',
-        model_age_group: modelPresence === 'model' ? modelAgeGroup : '',
-        model_ethnicity: modelPresence === 'model' ? modelEthnicity : '',
+        model_presence: effectiveModelPresence,
+        model_gender: effectiveModelPresence === 'model' ? modelGender : '',
+        model_age_group: effectiveModelPresence === 'model' ? modelAgeGroup : '',
+        model_ethnicity: effectiveModelPresence === 'model' ? modelEthnicity : '',
         shot_style: shotStyle,
         require_taxonomy: true,
       };
@@ -1379,11 +1483,13 @@ export default function AdminManualProductCreatePage() {
     let refs = overrides?.ref_urls ?? formRefUrls;
     refs = sanitizeFormRefUrls(refs, pool, kind, colorIdx, studio);
     const attach = overrides?.attach_url ?? formAttachUrl;
-    if ((kind === 'gallery' || kind === 'detail') && !prompt) {
+    if (studioNeedsDeepSeekPrompt(kind) && !prompt) {
       setFormError(
         kind === 'gallery'
           ? 'Gallery bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).'
-          : 'Ảnh chi tiết bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).',
+          : kind === 'detail'
+            ? 'Ảnh chi tiết bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).'
+            : 'Ảnh chất liệu bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).',
       );
       return;
     }
@@ -1413,7 +1519,7 @@ export default function AdminManualProductCreatePage() {
         prompt,
         ref_urls: refs.slice(0, 3),
         attach_url: attach || '',
-        image_model: imageModel,
+        image_model: studioImageModelForKind(kind, imageModel),
         aspect_ratio: aspectRatio,
       });
       setJob(fresh);
@@ -1442,6 +1548,9 @@ export default function AdminManualProductCreatePage() {
             ? 'gallery'
             : 'color',
       );
+      if (phase === 'material') {
+        setImageModel(STUDIO_MATERIAL_IMAGE_MODEL);
+      }
       setFormPrompt('');
       if (phase === 'color') {
         setFormColorName('');
@@ -1462,11 +1571,13 @@ export default function AdminManualProductCreatePage() {
     if (!job?.job_id) return;
     const slot = job.studio?.current_slot;
     const slotKind = (slot?.kind || '').trim();
-    if ((slotKind === 'gallery' || slotKind === 'detail') && !formPrompt.trim()) {
+    if (studioNeedsDeepSeekPrompt(slotKind) && !formPrompt.trim()) {
       setFormError(
         slotKind === 'gallery'
           ? 'Gallery bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).'
-          : 'Ảnh chi tiết bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).',
+          : slotKind === 'detail'
+            ? 'Ảnh chi tiết bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).'
+            : 'Ảnh chất liệu bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).',
       );
       return;
     }
@@ -1489,7 +1600,7 @@ export default function AdminManualProductCreatePage() {
         prompt: formPrompt.trim() || null,
         ref_urls: refs,
         attach_url: formAttachUrl || null,
-        image_model: imageModel,
+        image_model: studioImageModelForKind(slotKind, imageModel),
         aspect_ratio: aspectRatio,
       });
       setJob(fresh);
@@ -1497,6 +1608,65 @@ export default function AdminManualProductCreatePage() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Không tạo lại được';
       setFormError(msg);
+      setStudioBusy(false);
+    }
+  }
+
+  function currentSelectionForKind(kind: StudioSelectionKind): string[] {
+    if (kind === 'gallery') return (studio?.images || []).filter(Boolean);
+    if (kind === 'detail') return (studio?.gallery || []).filter(Boolean);
+    return studio?.material_image?.trim() ? [studio.material_image.trim()] : [];
+  }
+
+  function openImageSelector(kind: StudioSelectionKind = 'gallery') {
+    setImageSelectionKind(kind);
+    setImageSelectionUrls(currentSelectionForKind(kind));
+    setImageSelectorOpen(true);
+  }
+
+  function changeImageSelectionKind(kind: StudioSelectionKind) {
+    setImageSelectionKind(kind);
+    setImageSelectionUrls(currentSelectionForKind(kind));
+  }
+
+  function toggleImageSelection(url: string) {
+    setImageSelectionUrls((previous) => {
+      if (previous.includes(url)) return previous.filter((value) => value !== url);
+      if (imageSelectionKind === 'material') return [url];
+      return [...previous, url];
+    });
+  }
+
+  async function saveImageSelection() {
+    if (!job?.job_id || imageSelectionUrls.length === 0) {
+      setFormError('Chọn ít nhất 1 ảnh để lưu.');
+      return;
+    }
+    setFormError('');
+    setStudioBusy(true);
+    try {
+      const fresh = await manualProductCreateAPI.selectImages(job.job_id, {
+        kind: imageSelectionKind,
+        urls: imageSelectionUrls,
+      });
+      setJob(fresh);
+      setImageSelectorOpen(false);
+      pushToast({
+        title: 'Đã lưu ảnh đã chọn',
+        description: `Đã cập nhật ảnh ${
+          imageSelectionKind === 'gallery'
+            ? 'gallery'
+            : imageSelectionKind === 'detail'
+              ? 'chi tiết'
+              : 'chất liệu'
+        }.`,
+        variant: 'success',
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Không thể lưu ảnh đã chọn';
+      setFormError(msg);
+      pushToast({ title: 'Không thể lưu lựa chọn', description: msg, variant: 'error' });
+    } finally {
       setStudioBusy(false);
     }
   }
@@ -1675,6 +1845,39 @@ export default function AdminManualProductCreatePage() {
 
       {step === 1 ? (
         <div className="space-y-4 bg-white border border-slate-200 rounded-xl p-4">
+          <div className="space-y-2">
+            <span className="text-sm font-medium text-slate-800">Loại sản phẩm *</span>
+            <div className="flex flex-wrap gap-2">
+              {PRODUCT_TYPE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    setProductType(opt.value);
+                    if (!isWearableProductType(opt.value)) {
+                      setModelPresence('none');
+                      setModelGender('');
+                      setModelAgeGroup('');
+                      setModelEthnicity('');
+                    }
+                  }}
+                  className={`text-sm px-3 py-1.5 rounded-full border ${
+                    productType === opt.value
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'bg-white text-slate-700 border-slate-300'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {!isWearableProductType(productType) ? (
+              <p className="text-xs text-slate-500">
+                Loại này chụp ảnh sản phẩm tĩnh, không có người mẫu mặc/đeo/dùng.
+              </p>
+            ) : null}
+          </div>
+
           {mode === 'manual' ? (
             <label className="block text-sm">
               <span className="font-medium text-slate-800">Tên sản phẩm *</span>
@@ -1687,26 +1890,28 @@ export default function AdminManualProductCreatePage() {
             </label>
           ) : null}
 
-          <label className="block text-sm">
-            <span className="font-medium text-slate-800">Giới tính</span>
-            <select
-              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"
-              value={gender}
-              onChange={(e) => setGender(e.target.value)}
-            >
-              <option>Nữ</option>
-              <option>Nam</option>
-              <option>Unisex</option>
-            </select>
-          </label>
+          {isWearableProductType(productType) ? (
+            <label className="block text-sm">
+              <span className="font-medium text-slate-800">Giới tính</span>
+              <select
+                className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"
+                value={gender}
+                onChange={(e) => setGender(e.target.value)}
+              >
+                <option>Nữ</option>
+                <option>Nam</option>
+                <option>Unisex</option>
+              </select>
+            </label>
+          ) : null}
 
           <label className="block text-sm">
-            <span className="font-medium text-slate-800">Chất liệu *</span>
+            <span className="font-medium text-slate-800">{materialFieldLabel(productType)}</span>
             <input
               className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"
               value={material}
               onChange={(e) => setMaterial(e.target.value)}
-              placeholder="VD: Cotton, da PU, denim…"
+              placeholder={materialFieldPlaceholder(productType)}
             />
           </label>
 
@@ -1754,7 +1959,7 @@ export default function AdminManualProductCreatePage() {
 
           <div className="space-y-2 border-b border-slate-100 pb-4">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-medium text-slate-800">Size</span>
+              <span className="text-sm font-medium text-slate-800">{sizeFieldLabel(productType)}</span>
               <button
                 type="button"
                 onClick={() => {
@@ -1767,13 +1972,18 @@ export default function AdminManualProductCreatePage() {
                     : 'bg-white text-slate-700 border-slate-300'
                 }`}
               >
-                {noSize ? 'Đã chọn: Không có size' : 'Không có size'}
+                {noSize ? `Đã chọn: Không có ${sizeFieldLabel(productType).toLowerCase()}` : `Không có ${sizeFieldLabel(productType).toLowerCase()}`}
               </button>
             </div>
             {!noSize ? (
-              <SizeChipsInput sizes={sizes} onChange={setSizes} disabled={uploading} />
+              <SizeChipsInput
+                sizes={sizes}
+                onChange={setSizes}
+                disabled={uploading}
+                placeholder={sizeFieldPlaceholder(productType)}
+              />
             ) : (
-              <p className="text-xs text-slate-500">Sản phẩm không phân size.</p>
+              <p className="text-xs text-slate-500">Sản phẩm không phân {sizeFieldLabel(productType).toLowerCase()}.</p>
             )}
           </div>
 
@@ -1781,15 +1991,15 @@ export default function AdminManualProductCreatePage() {
             <div className="space-y-3 border-b border-slate-100 pb-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-sm font-medium text-slate-800">Màu sắc</div>
-                  <p className="text-xs text-slate-500 mt-0.5">Mỗi dòng: tên màu + ảnh màu</p>
+                  <div className="text-sm font-medium text-slate-800">{colorFieldLabel(productType)}</div>
+                  <p className="text-xs text-slate-500 mt-0.5">Mỗi dòng: tên + ảnh</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setColorRows((prev) => [...prev, newColorRow()])}
                   className="text-xs px-2.5 py-1 rounded-lg border border-slate-300 text-slate-700"
                 >
-                  + Thêm màu
+                  + Thêm {colorFieldLabel(productType).toLowerCase()}
                 </button>
               </div>
               <div className="space-y-3">
@@ -1804,7 +2014,7 @@ export default function AdminManualProductCreatePage() {
                         <Thumb url={row.img} onRemove={() => updateColorRow(row.key, { img: '' })} />
                       ) : (
                         <div className="w-24 h-24 rounded-lg border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center text-[11px] text-slate-400 text-center px-1">
-                          Ảnh màu
+                          Ảnh
                         </div>
                       )}
                       <input
@@ -1820,12 +2030,14 @@ export default function AdminManualProductCreatePage() {
                     </div>
                     <div className="flex-1 space-y-2">
                       <label className="block text-sm">
-                        <span className="font-medium text-slate-800">Tên màu</span>
+                        <span className="font-medium text-slate-800">Tên {colorFieldLabel(productType).toLowerCase()}</span>
                         <input
                           className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
                           value={row.name}
                           onChange={(e) => updateColorRow(row.key, { name: e.target.value })}
-                          placeholder="VD: Đen, Be, Hồng phấn…"
+                          placeholder={
+                            productType === 'medicine' ? 'VD: Vị cam, Vị dâu…' : 'VD: Đen, Be, Hồng phấn…'
+                          }
                         />
                       </label>
                     </div>
@@ -1899,81 +2111,96 @@ export default function AdminManualProductCreatePage() {
                   <strong>Không upload ảnh ở bước này.</strong> Sang Studio ảnh, mỗi màu bạn upload ảnh tham chiếu
                   riêng khi bấm Tạo.
                 </p>
-                <p>
-                  Ảnh màu #1 chọn người mẫu → ảnh màu #2 trở đi giữ <strong>cùng khuôn mặt</strong> từ ảnh màu #1
-                  đã OK.
-                </p>
+                {isWearableProductType(productType) ? (
+                  <p>
+                    Ảnh màu #1 chọn người mẫu → ảnh màu #2 trở đi giữ <strong>cùng khuôn mặt</strong> từ ảnh màu #1
+                    đã OK.
+                  </p>
+                ) : (
+                  <p>
+                    Loại sản phẩm này chỉ chụp <strong>ảnh tĩnh sản phẩm</strong> (không người mẫu) — mỗi biến thể
+                    chụp độc lập từ ảnh mẫu riêng.
+                  </p>
+                )}
                 <p>
                   Bắt buộc trước khi đăng: {STUDIO_MIN_COLOR_IMAGES} ảnh màu, {STUDIO_MIN_GALLERY_IMAGES} gallery,{' '}
                   {STUDIO_MIN_MATERIAL_IMAGES} ảnh chất liệu. Ảnh chi tiết sản phẩm tuỳ chọn.
                 </p>
               </div>
-              <label className="block text-sm">
-                <span className="font-medium text-slate-800">Người mẫu</span>
-                <select
-                  className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"
-                  value={modelPresence}
-                  onChange={(e) => {
-                    const v = e.target.value as 'none' | 'model';
-                    setModelPresence(v);
-                    if (v === 'none') {
-                      setModelGender('');
-                      setModelAgeGroup('');
-                      setModelEthnicity('');
-                    }
-                  }}
-                >
-                  <option value="none">Không người mẫu — chỉ sản phẩm</option>
-                  <option value="model">Có người mẫu mặc đồ / cầm SP</option>
-                </select>
-              </label>
-              {modelPresence === 'model' ? (
-                <div className="grid grid-cols-2 gap-3 border border-slate-200 rounded-lg p-3 bg-slate-50">
+              {isWearableProductType(productType) ? (
+                <>
                   <label className="block text-sm">
-                    <span className="font-medium text-slate-800">Giới tính người mẫu *</span>
+                    <span className="font-medium text-slate-800">Người mẫu</span>
                     <select
                       className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"
-                      value={modelGender}
-                      onChange={(e) => setModelGender(e.target.value as 'female' | 'male')}
+                      value={modelPresence}
+                      onChange={(e) => {
+                        const v = e.target.value as 'none' | 'model';
+                        setModelPresence(v);
+                        if (v === 'none') {
+                          setModelGender('');
+                          setModelAgeGroup('');
+                          setModelEthnicity('');
+                        }
+                      }}
                     >
-                      <option value="">— Chọn —</option>
-                      <option value="female">Nữ</option>
-                      <option value="male">Nam</option>
+                      <option value="none">Không người mẫu — chỉ sản phẩm</option>
+                      <option value="model">Có người mẫu mặc đồ / cầm SP</option>
                     </select>
                   </label>
-                  <label className="block text-sm">
-                    <span className="font-medium text-slate-800">Tuổi người mẫu *</span>
-                    <select
-                      className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"
-                      value={modelAgeGroup}
-                      onChange={(e) =>
-                        setModelAgeGroup(
-                          e.target.value as 'baby' | 'child' | 'teen' | 'adult' | 'middle_aged',
-                        )
-                      }
-                    >
-                      <option value="">— Chọn —</option>
-                      <option value="baby">Em bé (0–3 tuổi)</option>
-                      <option value="child">Trẻ em (4–12 tuổi)</option>
-                      <option value="teen">Thiếu niên (13–17 tuổi)</option>
-                      <option value="adult">Người lớn (18–35 tuổi)</option>
-                      <option value="middle_aged">Trung niên (35–55 tuổi)</option>
-                    </select>
-                  </label>
-                  <label className="block text-sm col-span-2">
-                    <span className="font-medium text-slate-800">Quốc tịch / gốc người mẫu *</span>
-                    <select
-                      className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"
-                      value={modelEthnicity}
-                      onChange={(e) => setModelEthnicity(e.target.value as 'asian' | 'western')}
-                    >
-                      <option value="">— Chọn —</option>
-                      <option value="asian">Châu Á</option>
-                      <option value="western">Châu Âu / phương Tây</option>
-                    </select>
-                  </label>
+                  {modelPresence === 'model' ? (
+                    <div className="grid grid-cols-2 gap-3 border border-slate-200 rounded-lg p-3 bg-slate-50">
+                      <label className="block text-sm">
+                        <span className="font-medium text-slate-800">Giới tính người mẫu *</span>
+                        <select
+                          className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"
+                          value={modelGender}
+                          onChange={(e) => setModelGender(e.target.value as 'female' | 'male')}
+                        >
+                          <option value="">— Chọn —</option>
+                          <option value="female">Nữ</option>
+                          <option value="male">Nam</option>
+                        </select>
+                      </label>
+                      <label className="block text-sm">
+                        <span className="font-medium text-slate-800">Tuổi người mẫu *</span>
+                        <select
+                          className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"
+                          value={modelAgeGroup}
+                          onChange={(e) =>
+                            setModelAgeGroup(
+                              e.target.value as 'baby' | 'child' | 'teen' | 'adult' | 'middle_aged',
+                            )
+                          }
+                        >
+                          <option value="">— Chọn —</option>
+                          <option value="baby">Em bé (0–3 tuổi)</option>
+                          <option value="child">Trẻ em (4–12 tuổi)</option>
+                          <option value="teen">Thiếu niên (13–17 tuổi)</option>
+                          <option value="adult">Người lớn (18–35 tuổi)</option>
+                          <option value="middle_aged">Trung niên (35–55 tuổi)</option>
+                        </select>
+                      </label>
+                      <label className="block text-sm col-span-2">
+                        <span className="font-medium text-slate-800">Quốc tịch / gốc người mẫu *</span>
+                        <select
+                          className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"
+                          value={modelEthnicity}
+                          onChange={(e) => setModelEthnicity(e.target.value as 'asian' | 'western')}
+                        >
+                          <option value="">— Chọn —</option>
+                          <option value="asian">Châu Á</option>
+                          <option value="western">Châu Âu / phương Tây</option>
+                        </select>
+                      </label>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <div className="border border-slate-200 bg-slate-50 rounded-lg px-3 py-2 text-xs text-slate-700">
+                  Không người mẫu — chỉ chụp sản phẩm (áp dụng cho {PRODUCT_TYPE_OPTIONS.find((o) => o.value === productType)?.label.toLowerCase()}).
                 </div>
-              ) : null}
+              )}
               <label className="block text-sm">
                 <span className="font-medium text-slate-800">Bối cảnh chụp</span>
                 <select
@@ -2001,13 +2228,14 @@ export default function AdminManualProductCreatePage() {
               <span className="font-medium">Tên SP:</span> {productName || '—'}
             </p>
             <p>
-              <span className="font-medium">Chất liệu:</span> {material || '—'}
+              <span className="font-medium">{materialFieldLabel(productType).replace(' *', '')}:</span>{' '}
+              {material || '—'}
             </p>
             <p>
               <span className="font-medium">Giá:</span> {price || '—'} VND
             </p>
             <p>
-              <span className="font-medium">Màu:</span>{' '}
+              <span className="font-medium">{colorFieldLabel(productType)}:</span>{' '}
               {structuredColors.length
                 ? structuredColors.map((c) => c.name).join(', ')
                 : '—'}
@@ -2206,6 +2434,8 @@ export default function AdminManualProductCreatePage() {
                     ' (chưa có — quay lại bước Thuộc tính để nhập)'
                   )}
                   , soạn 3 ưu điểm/điểm đáng mua (DeepSeek) rồi in trực tiếp lên ảnh dạng nhãn tiếng Việt.
+                  Nhập ý muốn (vd cận cảnh bề mặt, góc nghiêng) — DeepSeek chuẩn hóa prompt:{' '}
+                  <strong>giữ nguyên SP</strong>, chỉ đổi góc/zoom/bố cục.
                   Sau khi duyệt, ảnh + nội dung dùng cho section «Chất liệu» trên Ladipage.
                 </p>
               ) : null}
@@ -2276,12 +2506,13 @@ export default function AdminManualProductCreatePage() {
                 onImageModelChange={setImageModel}
                 onAspectRatioChange={setAspectRatio}
                 disabled={studioBusy || uploading}
+                materialLocked={formKind === 'material'}
               />
 
               <label className="block text-sm">
                 <span className="font-medium text-slate-800">
                   Nội dung muốn tạo ảnh{' '}
-                  {formKind === 'gallery' || formKind === 'detail' ? (
+                  {studioNeedsDeepSeekPrompt(formKind) ? (
                     <span className="text-red-600">*</span>
                   ) : (
                     <span className="font-normal text-slate-500">(tuỳ chọn)</span>
@@ -2293,16 +2524,21 @@ export default function AdminManualProductCreatePage() {
                   disabled={studioBusy || uploading}
                   onChange={(e) => setFormPrompt(e.target.value)}
                   placeholder={
-                    formKind === 'gallery' || formKind === 'detail'
-                      ? 'Bắt buộc — VD: đeo túi trên vai, đứng ¾, cầm túi bằng tay… (DeepSeek sẽ soạn lệnh giữ nguyên SP).'
-                      : 'VD: tay ngắn, cổ V, mặc chéo vạt, đứng ¾… — để trống thì AI tự theo ảnh mẫu.'
+                    studioNeedsDeepSeekPrompt(formKind)
+                      ? formKind === 'material'
+                        ? 'Bắt buộc — VD: cận cảnh bề mặt, zoom texture, góc nghiêng… (DeepSeek giữ nguyên SP, chỉ đổi góc/zoom).'
+                        : 'Bắt buộc — VD: đeo túi trên vai, đứng ¾, cầm túi bằng tay… (DeepSeek sẽ soạn lệnh giữ nguyên SP).'
+                      : formKind === 'color'
+                        ? 'VD: cầm túi trên cẳng tay, tay chạm quai; hoặc tay ngắn, cổ V… — để trống thì AI tự theo loại SP.'
+                        : 'VD: tay ngắn, cổ V, mặc chéo vạt, đứng ¾… — để trống thì AI tự theo ảnh mẫu.'
                   }
-                  required={formKind === 'gallery' || formKind === 'detail'}
+                  required={studioNeedsDeepSeekPrompt(formKind)}
                 />
-                {formKind === 'gallery' || formKind === 'detail' ? (
+                {studioNeedsDeepSeekPrompt(formKind) ? (
                   <p className="mt-1 text-[11px] text-slate-500">
-                    DeepSeek viết lại thành prompt chuẩn: giữ nguyên sản phẩm từ ảnh mẫu; chỉ đổi thế đứng/cách dùng
-                    theo ý bạn.
+                    {formKind === 'material'
+                      ? 'DeepSeek viết lại thành prompt chuẩn: giữ nguyên sản phẩm từ ảnh mẫu; chỉ đổi góc zoom/bố cục cận cảnh chất liệu theo ý bạn.'
+                      : 'DeepSeek viết lại thành prompt chuẩn: giữ nguyên sản phẩm từ ảnh mẫu; chỉ đổi thế đứng/cách dùng theo ý bạn.'}
                   </p>
                 ) : null}
               </label>
@@ -2327,7 +2563,7 @@ export default function AdminManualProductCreatePage() {
                   disabled={
                     studioBusy ||
                     uploading ||
-                    ((formKind === 'gallery' || formKind === 'detail') && !formPrompt.trim())
+                    (studioNeedsDeepSeekPrompt(formKind) && !formPrompt.trim())
                   }
                   onClick={() => submitGenerate()}
                   className="px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium disabled:opacity-50"
@@ -2438,12 +2674,13 @@ export default function AdminManualProductCreatePage() {
                 onAspectRatioChange={setAspectRatio}
                 disabled={studioBusy}
                 compact
+                materialLocked={currentSlot?.kind === 'material'}
               />
 
               <label className="block text-sm">
                 <span className="font-medium text-slate-800">
                   Nội dung muốn tạo ảnh{' '}
-                  {currentSlot?.kind === 'gallery' || currentSlot?.kind === 'detail' ? (
+                  {studioNeedsDeepSeekPrompt(currentSlot?.kind) ? (
                     <span className="text-red-600">*</span>
                   ) : (
                     <span className="font-normal text-slate-500">(tuỳ chọn)</span>
@@ -2455,11 +2692,15 @@ export default function AdminManualProductCreatePage() {
                   disabled={studioBusy}
                   onChange={(e) => setFormPrompt(e.target.value)}
                   placeholder={
-                    currentSlot?.kind === 'gallery' || currentSlot?.kind === 'detail'
-                      ? 'Bắt buộc — sửa ý (vd đeo vai) rồi Tạo lại. DeepSeek giữ nguyên SP, chỉ đổi tư thế/cách dùng.'
-                      : 'Sửa mô tả rồi bấm Tạo lại — VD: tay ngắn, cổ V, đứng nghiêng…'
+                    studioNeedsDeepSeekPrompt(currentSlot?.kind)
+                      ? currentSlot?.kind === 'material'
+                        ? 'Bắt buộc — sửa ý (vd cận cảnh bề mặt) rồi Tạo lại. DeepSeek giữ nguyên SP, chỉ đổi góc/zoom.'
+                        : 'Bắt buộc — sửa ý (vd đeo vai) rồi Tạo lại. DeepSeek giữ nguyên SP, chỉ đổi tư thế/cách dùng.'
+                      : currentSlot?.kind === 'color'
+                        ? 'Sửa mô tả rồi bấm Tạo lại — VD: cầm túi bằng tay phải, quai trong lòng bàn tay…'
+                        : 'Sửa mô tả rồi bấm Tạo lại — VD: tay ngắn, cổ V, đứng nghiêng…'
                   }
-                  required={currentSlot?.kind === 'gallery' || currentSlot?.kind === 'detail'}
+                  required={studioNeedsDeepSeekPrompt(currentSlot?.kind)}
                 />
               </label>
 
@@ -2476,8 +2717,7 @@ export default function AdminManualProductCreatePage() {
                   type="button"
                   disabled={
                     studioBusy ||
-                    ((currentSlot?.kind === 'gallery' || currentSlot?.kind === 'detail') &&
-                      !formPrompt.trim())
+                    (studioNeedsDeepSeekPrompt(currentSlot?.kind) && !formPrompt.trim())
                   }
                   onClick={regenerateImage}
                   className="px-4 py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm font-medium disabled:opacity-50"
@@ -2512,8 +2752,18 @@ export default function AdminManualProductCreatePage() {
                   {studioPublishCheck.detailCount > 0 ? ' ✓' : ''}
                 </li>
               </ul>
-              <div className="text-xs font-medium text-slate-600 uppercase tracking-wide pt-1">
-                Đã tạo / chọn được làm ref
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <div className="text-xs font-medium text-slate-600 uppercase tracking-wide">
+                  Đã tạo / chọn được làm ref
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openImageSelector()}
+                  disabled={studioBusy || studioSelectableImages.length === 0}
+                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Chọn lại ảnh
+                </button>
               </div>
               <div className="flex flex-wrap gap-2">
                 {(studio?.ref_pool || []).map((item) => (
@@ -2525,6 +2775,98 @@ export default function AdminManualProductCreatePage() {
                   </div>
                 ))}
               </div>
+              {imageSelectorOpen ? (
+                <div
+                  className="rounded-xl border border-sky-200 bg-sky-50/60 p-3 space-y-3"
+                  role="dialog"
+                  aria-modal="false"
+                  aria-label="Chọn lại ảnh trước khi đăng"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">Chọn lại ảnh để đăng</h3>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        Bấm ảnh để chọn hoặc bỏ chọn. Số trên ảnh là thứ tự dùng khi đăng.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setImageSelectorOpen(false)}
+                      className="text-sm text-slate-600 hover:text-slate-900"
+                      aria-label="Đóng chọn lại ảnh"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2" role="group" aria-label="Loại ảnh cần thay">
+                    {(
+                      [
+                        ['gallery', 'Gallery'],
+                        ['material', 'Ảnh chất liệu'],
+                        ['detail', 'Ảnh chi tiết'],
+                      ] as Array<[StudioSelectionKind, string]>
+                    ).map(([kind, label]) => (
+                      <button
+                        key={kind}
+                        type="button"
+                        onClick={() => changeImageSelectionKind(kind)}
+                        className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+                          imageSelectionKind === kind
+                            ? 'bg-slate-900 text-white'
+                            : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                    {studioSelectableImages.map((item) => {
+                      const order = imageSelectionUrls.indexOf(item.url);
+                      const selected = order >= 0;
+                      return (
+                        <button
+                          key={item.url}
+                          type="button"
+                          onClick={() => toggleImageSelection(item.url)}
+                          className={`relative overflow-hidden rounded-lg border text-left ${
+                            selected
+                              ? 'border-sky-600 ring-2 ring-sky-300'
+                              : 'border-slate-200 hover:border-slate-400'
+                          }`}
+                          aria-pressed={selected}
+                          aria-label={`${selected ? 'Bỏ chọn' : 'Chọn'} ${item.label}`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={item.url} alt="" className="aspect-square w-full object-cover" />
+                          {selected ? (
+                            <span className="absolute left-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-sky-700 text-xs font-bold text-white shadow">
+                              {order + 1}
+                            </span>
+                          ) : null}
+                          <span className="block truncate bg-white px-1.5 py-1 text-[10px] text-slate-600">
+                            {item.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-slate-600">
+                      Đã chọn: {imageSelectionUrls.length}
+                      {imageSelectionKind === 'material' ? ' (dùng 1 ảnh)' : ''}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={saveImageSelection}
+                      disabled={studioBusy || imageSelectionUrls.length === 0}
+                      className="rounded-lg bg-sky-700 px-3 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:opacity-50"
+                    >
+                      {studioBusy ? 'Đang lưu…' : 'Dùng ảnh đã chọn'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               {canPublish ? (
                 <button
                   type="button"
