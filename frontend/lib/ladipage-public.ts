@@ -69,6 +69,11 @@ const getPublishedLadipageForProductCached = cache(
 export async function getPublishedLadipageForProductRecord(
   product: Pick<Product, 'id' | 'published_ladipage_slug'>,
 ): Promise<LadipagePublicDetail | null> {
+  // API sản phẩm đã đính kèm slug ladipage khi có. Đa số sản phẩm không có
+  // ladipage, nên không gọi thêm endpoint (no-store) chỉ để nhận 404 trước
+  // khi PDP có thể render.
+  if (!product.published_ladipage_slug?.trim()) return null;
+
   return getPublishedLadipageForProductCached(product.id, product.published_ladipage_slug);
 }
 

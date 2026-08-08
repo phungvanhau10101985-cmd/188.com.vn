@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import {
   getProductBySlugForSeo,
   buildProductJsonLd,
@@ -176,7 +177,7 @@ function buildBreadcrumbJsonLd(product: {
   };
 }
 
-export default async function ProductLayout({ params, children }: Props) {
+async function ProductStructuredData({ params }: Pick<Props, "params">) {
   const { slug } = await params;
   const product = await getProductBySlugForSeo(slug);
   const ladipage = product?.id ? await getPublishedLadipageForProductRecord(product) : null;
@@ -207,6 +208,20 @@ export default async function ProductLayout({ params, children }: Props) {
           dangerouslySetInnerHTML={{ __html: serializeJsonLdForScript(faqJsonLd) }}
         />
       ) : null}
+    </>
+  );
+}
+
+/**
+ * Giữ layout không chặn để `loading.tsx` xuất hiện ngay khi điều hướng tới PDP.
+ * Dữ liệu schema được stream sau, không làm chậm phần nội dung sản phẩm.
+ */
+export default function ProductLayout({ params, children }: Props) {
+  return (
+    <>
+      <Suspense fallback={null}>
+        <ProductStructuredData params={params} />
+      </Suspense>
       {children}
     </>
   );
