@@ -3179,6 +3179,19 @@ export const manualProductCreateAPI = {
       },
     ),
 
+  adoptImages: (
+    jobId: string,
+    body: { kind: 'gallery' | 'detail' | 'material' | string; urls: string[] },
+  ) =>
+    fetchAdmin<ManualProductJob>(
+      `/manual-products/jobs/${encodeURIComponent(jobId)}/images/adopt`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+        timeoutMs: 30_000,
+      },
+    ),
+
   publishJob: (jobId: string) =>
     fetchAdmin<ManualProductJob>(
       `/manual-products/jobs/${encodeURIComponent(jobId)}/publish`,

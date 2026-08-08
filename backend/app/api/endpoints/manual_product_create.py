@@ -19,6 +19,7 @@ from app.services.image_raster_jpeg import raster_bytes_to_jpeg_bytes
 from app.core.config import settings
 from app.services.manual_product_create_job_store import load_job, list_jobs, persist_job
 from app.services.manual_product_create_service import (
+    adopt_studio_images,
     approve_studio_image,
     create_and_start_job,
     enqueue_manual_product_job,
@@ -162,6 +163,11 @@ class ManualProductRegenerateBody(BaseModel):
     attach_url: Optional[str] = None
     image_model: Optional[str] = None
     aspect_ratio: Optional[str] = None
+
+
+class ManualProductAdoptBody(BaseModel):
+    kind: str = Field(..., description="gallery | detail | material")
+    urls: List[str] = Field(default_factory=list, description="URL ảnh đã có trong Studio pool")
 
 
 class ManualProductUploadOut(BaseModel):
@@ -403,6 +409,21 @@ def regenerate_manual_product_image(
             image_model=body.image_model,
             aspect_ratio=body.aspect_ratio,
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _out(state, job_id)
+
+
+@router.post("/jobs/{job_id}/images/adopt", response_model=ManualProductJobOut)
+def adopt_manual_product_images(
+    job_id: str,
+    body: ManualProductAdoptBody,
+    current_admin: AdminUser = Depends(require_module_permission("products")),
+):
+    """Dùng ảnh đã tạo (màu/gallery/…) làm gallery hoặc chi tiết — không gen AI."""
+    _ = current_admin
+    try:
+        state = adopt_studio_images(job_id, kind=body.kind, urls=body.urls)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return _out(state, job_id)

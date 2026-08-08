@@ -201,24 +201,36 @@ function applyJobPayloadToDraft(job: ManualProductJob, draft: ProductCreateDraft
 
 function syncStudioFormFromJob(job: ManualProductJob) {
   const phaseRaw = job.studio?.phase || 'color';
-  const phase =
-    phaseRaw === 'detail' ? 'gallery' : phaseRaw === 'main' ? 'gallery' : phaseRaw;
+  const phase = phaseRaw === 'main' ? 'gallery' : phaseRaw;
   const pool = job.studio?.ref_pool || [];
   const slot = job.studio?.current_slot;
-  const colorIdx = colorSlotIndex(job.studio, slot);
+  const approvedColorCount = (job.studio?.colors || []).filter((c) =>
+    (c?.img || '').trim(),
+  ).length;
+  // Đang duyệt slot màu → index của slot; đang chờ tạo màu mới → index màu tiếp theo
+  const colorIdx =
+    job.status === 'awaiting_approval' && slot?.kind === 'color'
+      ? colorSlotIndex(job.studio, slot)
+      : approvedColorCount;
   const formKindResolved: 'color' | 'gallery' | 'detail' | 'material' =
     phase === 'gallery' || phase === 'detail' || phase === 'material'
       ? phase
       : phase === 'main'
         ? 'gallery'
         : 'color';
+  // Chỉ giữ tên màu khi đang duyệt ảnh vừa tạo của đúng slot đó.
+  // Không lấy vision_colors[0] (tên màu #1) — màu #2+ phải upload ảnh mới rồi AI mới đọc.
+  const formColorName =
+    job.status === 'awaiting_approval' && slot?.kind === 'color'
+      ? String(slot?.name || '').trim()
+      : '';
   return {
     formKind: formKindResolved,
     formRefUrls:
       job.status === 'awaiting_approval' && slot
         ? syncRefUrlsFromJob(job)
         : studioDefaultRefUrls(pool, formKindResolved, colorIdx),
-    formColorName: (slot?.name || (job.vision_colors || [])[0] || '').trim(),
+    formColorName,
     formPrompt: (slot?.user_prompt || '').trim(),
     formAttachUrl: (slot?.attach_url || '').trim(),
   };
@@ -232,8 +244,16 @@ function studioDefaultRefUrls(
   if (kind === 'color') {
     return [];
   }
+  // Gallery / chi tiết / chất liệu: ưu tiên ảnh màu đã tạo làm ref
   const approved = pool
-    .filter((p) => p.kind === 'ref' || p.kind === 'color' || p.kind === 'gallery')
+    .filter(
+      (p) =>
+        p.kind === 'ref' ||
+        p.kind === 'color' ||
+        p.kind === 'gallery' ||
+        p.kind === 'detail' ||
+        p.kind === 'material',
+    )
     .map((p) => p.url)
     .filter(Boolean) as string[];
   return approved.slice(0, REF_PICKER_MAX);
@@ -285,14 +305,18 @@ function syncRefUrlsFromJob(fresh: ManualProductJob) {
   const pool = fresh.studio?.ref_pool || [];
   const slot = fresh.studio?.current_slot;
   const kind =
-    slot?.kind === 'gallery' || slot?.kind === 'material'
+    slot?.kind === 'gallery' || slot?.kind === 'detail' || slot?.kind === 'material'
       ? slot.kind
-      : slot?.kind === 'detail'
-        ? 'gallery'
-        : 'color';
+      : 'color';
   const idx = colorSlotIndex(fresh.studio, slot);
   const fromSlot = Array.isArray(slot?.ref_urls) ? slot!.ref_urls!.filter(Boolean) : [];
-  return sanitizeFormRefUrls(fromSlot, pool, kind as 'color' | 'gallery' | 'material', idx, fresh.studio);
+  return sanitizeFormRefUrls(
+    fromSlot,
+    pool,
+    kind as 'color' | 'gallery' | 'detail' | 'material',
+    idx,
+    fresh.studio,
+  );
 }
 
 function loadStudioImageModel(): StudioImageModel {
@@ -881,7 +905,8 @@ export default function AdminManualProductCreatePage() {
           ...merged,
           formKind: studioSync.formKind,
           formRefUrls: studioSync.formRefUrls.length ? studioSync.formRefUrls : merged.formRefUrls,
-          formColorName: studioSync.formColorName || merged.formColorName,
+          // Studio sync thắng draft — tránh mang tên màu #1 sang form màu #2+
+          formColorName: studioSync.formColorName,
           formPrompt: studioSync.formPrompt,
           formAttachUrl: studioSync.formAttachUrl,
         });
@@ -975,7 +1000,8 @@ export default function AdminManualProductCreatePage() {
           const studioSync = syncStudioFormFromJob(fresh);
           setFormKind(studioSync.formKind);
           if (studioSync.formRefUrls.length) setFormRefUrls(studioSync.formRefUrls);
-          if (studioSync.formColorName) setFormColorName(studioSync.formColorName);
+          // Luôn đồng bộ (kể cả '') — không giữ tên màu cũ từ ảnh trước
+          setFormColorName(studioSync.formColorName);
         }
         if (POLL_BUSY.has(fresh.status)) {
           startPolling(job.job_id, { stopOnInteractive: true });
@@ -1085,10 +1111,12 @@ export default function AdminManualProductCreatePage() {
   const studioPublishCheck = useMemo(() => {
     const colorCount = (studio?.colors || []).filter((c) => (c?.img || '').trim()).length;
     const galleryCount = (studio?.images || []).length;
+    const detailCount = (studio?.gallery || []).filter((u) => (u || '').trim()).length;
     const materialOk = Boolean((studio?.material_image || '').trim());
     return {
       colorCount,
       galleryCount,
+      detailCount,
       materialOk,
       canPublish: Boolean(studio?.can_publish),
     };
@@ -1274,6 +1302,43 @@ export default function AdminManualProductCreatePage() {
     }
   }
 
+  async function submitAdopt() {
+    if (!job?.job_id) return;
+    if (formKind !== 'gallery' && formKind !== 'detail') return;
+    if (job.status === 'generating' || job.status === 'publishing') {
+      setFormError('Ảnh đang được tạo — vui lòng đợi vài giây.');
+      return;
+    }
+    const urls = sanitizedFormRefUrls.filter(Boolean);
+    if (!urls.length) {
+      setFormError('Chọn ít nhất 1 ảnh đã tạo để dùng làm ảnh mục này.');
+      return;
+    }
+    setFormError('');
+    setStudioBusy(true);
+    try {
+      const fresh = await manualProductCreateAPI.adoptImages(job.job_id, {
+        kind: formKind,
+        urls,
+      });
+      setJob(fresh);
+      setFormPrompt('');
+      const pool = fresh.studio?.ref_pool || [];
+      setFormRefUrls(studioDefaultRefUrls(pool, formKind, 0));
+      setStudioBusy(false);
+      pushToast({
+        title: formKind === 'gallery' ? 'Đã thêm ảnh gallery' : 'Đã thêm ảnh chi tiết',
+        description: fresh.message || '',
+        variant: 'success',
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Không dùng được ảnh đã chọn';
+      setFormError(msg);
+      setStudioBusy(false);
+      pushToast({ title: 'Không thêm được ảnh', description: msg, variant: 'error' });
+    }
+  }
+
   async function submitGenerate(overrides?: {
     kind?: typeof formKind;
     name?: string;
@@ -1291,7 +1356,9 @@ export default function AdminManualProductCreatePage() {
       return;
     }
     const kind = overrides?.kind || formKind;
-    const name = (overrides?.name ?? formColorName).trim();
+    // Màu mới: không gửi tên sẵn (tránh dùng tên màu #1). AI đọc từ ảnh mẫu vừa upload.
+    const name =
+      kind === 'color' ? '' : (overrides?.name ?? formColorName).trim();
     const prompt = (overrides?.prompt ?? formPrompt).trim();
     const pool = studio?.ref_pool || [];
     const colorIdx = kind === 'color' ? pendingColorIndex : 0;
@@ -1307,7 +1374,7 @@ export default function AdminManualProductCreatePage() {
         const face = firstApprovedColorUrl(studio);
         const userRefs = refs.filter((u) => u !== face);
         if (userRefs.length === 0 && !attach.trim()) {
-          setFormError('Ảnh màu tiếp theo: upload ảnh mẫu SP — AI tự đọc tên màu.');
+          setFormError('Ảnh màu tiếp theo: upload ảnh mẫu SP — AI tự đọc màu.');
           return;
         }
       }
@@ -1429,7 +1496,13 @@ export default function AdminManualProductCreatePage() {
   }
 
   function slotKindLabel(kind?: string | null, name?: string | null, index?: number) {
-    if (kind === 'color') return name?.trim() ? `Ảnh màu «${name.trim()}»` : 'Ảnh màu (AI đọc tên từ ảnh)';
+    if (kind === 'color') {
+      if (name?.trim()) return `Ảnh màu «${name.trim()}»`;
+      // #1: AI đọc tên SP + tên màu; #2+: chỉ đọc màu
+      return (index ?? 0) >= 1
+        ? 'Ảnh màu (AI đọc màu từ ảnh)'
+        : 'Ảnh màu (AI đọc tên từ ảnh)';
+    }
     if (kind === 'main') return 'Ảnh chính';
     if (kind === 'gallery') return `Ảnh gallery ${(index ?? 0) + 1}`;
     if (kind === 'detail') return `Ảnh chi tiết ${(index ?? 0) + 1}`;
@@ -1792,8 +1865,8 @@ export default function AdminManualProductCreatePage() {
                   đã OK.
                 </p>
                 <p>
-                  Cần đủ trước khi đăng: {STUDIO_MIN_COLOR_IMAGES} ảnh màu, {STUDIO_MIN_GALLERY_IMAGES} gallery,{' '}
-                  {STUDIO_MIN_MATERIAL_IMAGES} ảnh chất liệu.
+                  Bắt buộc trước khi đăng: {STUDIO_MIN_COLOR_IMAGES} ảnh màu, {STUDIO_MIN_GALLERY_IMAGES} gallery,{' '}
+                  {STUDIO_MIN_MATERIAL_IMAGES} ảnh chất liệu. Ảnh chi tiết sản phẩm tuỳ chọn.
                 </p>
               </div>
               <label className="block text-sm">
@@ -2021,6 +2094,7 @@ export default function AdminManualProductCreatePage() {
                     ['color', 'Ảnh màu'],
                     ['gallery', 'Ảnh gallery'],
                     ['material', 'Ảnh chất liệu'],
+                    ['detail', 'Ảnh chi tiết sản phẩm'],
                   ] as const
                 ).map(([k, label]) => (
                   <button
@@ -2042,6 +2116,9 @@ export default function AdminManualProductCreatePage() {
                     }`}
                   >
                     {label}
+                    {k === 'detail' ? (
+                      <span className="ml-1 opacity-80 font-normal">(tuỳ chọn)</span>
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -2056,10 +2133,24 @@ export default function AdminManualProductCreatePage() {
                   ) : (
                     <>
                       Ảnh màu <strong>thứ {pendingColorIndex + 1}</strong>: upload{' '}
-                      <strong>ảnh mẫu SP mới</strong> — AI tự đọc tên màu. Khuôn mặt giữ từ ảnh màu #1 phía
-                      trên.
+                      <strong>ảnh mẫu SP mới</strong> — AI lấy <strong>kiểu đồ từ ảnh này</strong>, chỉ giữ{' '}
+                      <strong>khuôn mặt</strong> từ ảnh màu #1 (không dùng lại sản phẩm màu #1).
                     </>
                   )}
+                </p>
+              ) : null}
+
+              {formKind === 'gallery' ? (
+                <p className="text-xs text-sky-900 bg-sky-50 border border-sky-100 rounded-lg px-3 py-2">
+                  Chọn ảnh màu / ảnh đã tạo để <strong>dùng luôn làm gallery</strong>, hoặc chọn làm tham khảo
+                  rồi <strong>Tạo mới</strong>. Cần đủ {STUDIO_MIN_GALLERY_IMAGES} ảnh gallery trước khi đăng.
+                </p>
+              ) : null}
+
+              {formKind === 'detail' ? (
+                <p className="text-xs text-violet-900 bg-violet-50 border border-violet-100 rounded-lg px-3 py-2">
+                  Ảnh chi tiết sản phẩm <strong>tuỳ chọn</strong> — chọn ảnh đã tạo để dùng luôn, hoặc tạo thêm
+                  ảnh cận cảnh (cổ áo, khóa kéo, họa tiết…). Không bắt buộc để đăng.
                 </p>
               ) : null}
 
@@ -2100,8 +2191,10 @@ export default function AdminManualProductCreatePage() {
                     {formKind === 'color' && pendingColorIndex === 0
                       ? 'Upload ảnh mẫu SP khách — AI lấy kiểu, màu, cắt may từ ảnh; người mẫu theo cài đặt Studio.'
                       : formKind === 'color' && pendingColorIndex >= 1
-                        ? 'Upload ảnh mẫu SP khách cho màu này — có thể là SP khác hẳn màu #1 (không chỉ đổi màu). Khuôn mặt giữ từ ảnh màu #1.'
-                        : 'Gồm ảnh đã tạo. Chọn màu nào → tạo theo ảnh màu đó.'}
+                        ? 'Upload ảnh mẫu SP khách cho màu này — AI thay sản phẩm theo ảnh mới; chỉ giữ khuôn mặt từ ảnh màu #1.'
+                        : formKind === 'gallery' || formKind === 'detail'
+                          ? 'Gồm ảnh màu và ảnh đã tạo. Có thể dùng luôn làm ảnh mục này, hoặc chọn làm tham khảo rồi tạo mới.'
+                          : 'Gồm ảnh đã tạo. Chọn màu nào → tạo theo ảnh màu đó.'}
                   </p>
                   {formKind === 'color' ? (
                     <>
@@ -2144,14 +2237,55 @@ export default function AdminManualProductCreatePage() {
                 disabled={studioBusy || uploading}
               />
 
-              <button
-                type="button"
-                disabled={studioBusy || uploading}
-                onClick={() => submitGenerate()}
-                className="px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium disabled:opacity-50"
-              >
-                {studioBusy ? 'Đang tạo…' : `Tạo ${slotKindLabel(formKind, formColorName, 0)}`}
-              </button>
+              <label className="block text-sm">
+                <span className="font-medium text-slate-800">
+                  Nội dung muốn tạo ảnh <span className="font-normal text-slate-500">(tuỳ chọn)</span>
+                </span>
+                <textarea
+                  className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-[72px] disabled:opacity-50"
+                  value={formPrompt}
+                  disabled={studioBusy || uploading}
+                  onChange={(e) => setFormPrompt(e.target.value)}
+                  placeholder="VD: tay ngắn, cổ V, mặc chéo vạt, đứng ¾… — để trống thì AI tự theo ảnh mẫu."
+                />
+              </label>
+
+              <div className="flex flex-wrap gap-2">
+                {(formKind === 'gallery' || formKind === 'detail') && sanitizedFormRefUrls.length > 0 ? (
+                  <button
+                    type="button"
+                    disabled={studioBusy || uploading}
+                    onClick={() => submitAdopt()}
+                    className="px-4 py-2.5 rounded-lg border border-emerald-600 text-emerald-800 bg-emerald-50 text-sm font-medium disabled:opacity-50"
+                  >
+                    {studioBusy
+                      ? 'Đang lưu…'
+                      : formKind === 'gallery'
+                        ? `Dùng ${sanitizedFormRefUrls.length} ảnh đã chọn làm gallery`
+                        : `Dùng ${sanitizedFormRefUrls.length} ảnh đã chọn làm chi tiết`}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={studioBusy || uploading}
+                  onClick={() => submitGenerate()}
+                  className="px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium disabled:opacity-50"
+                >
+                  {studioBusy
+                    ? 'Đang tạo…'
+                    : `Tạo mới ${slotKindLabel(
+                        formKind,
+                        formColorName,
+                        formKind === 'color'
+                          ? pendingColorIndex
+                          : formKind === 'gallery'
+                            ? studioPublishCheck.galleryCount
+                            : formKind === 'detail'
+                              ? studioPublishCheck.detailCount
+                              : 0,
+                      )}`}
+                </button>
+              </div>
             </div>
           ) : null}
 
@@ -2225,6 +2359,19 @@ export default function AdminManualProductCreatePage() {
                 compact
               />
 
+              <label className="block text-sm">
+                <span className="font-medium text-slate-800">
+                  Nội dung muốn tạo ảnh <span className="font-normal text-slate-500">(tuỳ chọn)</span>
+                </span>
+                <textarea
+                  className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-[72px] disabled:opacity-50"
+                  value={formPrompt}
+                  disabled={studioBusy}
+                  onChange={(e) => setFormPrompt(e.target.value)}
+                  placeholder="Sửa mô tả rồi bấm Tạo lại — VD: tay ngắn, cổ V, đứng nghiêng…"
+                />
+              </label>
+
               <div className="flex flex-wrap gap-2 items-end">
                 <button
                   type="button"
@@ -2265,6 +2412,10 @@ export default function AdminManualProductCreatePage() {
                   Ảnh chất liệu: {studioPublishCheck.materialOk ? 1 : 0}/{STUDIO_MIN_MATERIAL_IMAGES}
                   {studioPublishCheck.materialOk ? ' ✓' : ''}
                 </li>
+                <li className={studioPublishCheck.detailCount > 0 ? 'text-emerald-700' : 'text-slate-500'}>
+                  Ảnh chi tiết (tuỳ chọn): {studioPublishCheck.detailCount}
+                  {studioPublishCheck.detailCount > 0 ? ' ✓' : ''}
+                </li>
               </ul>
               <div className="text-xs font-medium text-slate-600 uppercase tracking-wide pt-1">
                 Đã tạo / chọn được làm ref
@@ -2296,8 +2447,8 @@ export default function AdminManualProductCreatePage() {
                 </p>
               )}
               <p className="text-xs text-slate-500">
-                Không cần ảnh chi tiết. Chỉ đăng khi đủ {STUDIO_MIN_COLOR_IMAGES} ảnh màu,{' '}
-                {STUDIO_MIN_GALLERY_IMAGES} gallery và {STUDIO_MIN_MATERIAL_IMAGES} ảnh chất liệu.
+                Bắt buộc: {STUDIO_MIN_COLOR_IMAGES} ảnh màu, {STUDIO_MIN_GALLERY_IMAGES} gallery,{' '}
+                {STUDIO_MIN_MATERIAL_IMAGES} ảnh chất liệu. Ảnh chi tiết sản phẩm là tuỳ chọn.
               </p>
             </div>
           ) : null}

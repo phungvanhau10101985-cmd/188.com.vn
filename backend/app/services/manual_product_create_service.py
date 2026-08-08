@@ -485,8 +485,20 @@ _DETAIL_FOCUS = [
 ]
 _FIDELITY = (
     "Keep the SAME product design identity from references: silhouette, print/graphic placement, "
-    "proportions, fabric texture type, and garment construction (layers, skirt, shorts, sleeves). "
+    "proportions, fabric texture type, garment construction (layers, skirt, shorts, sleeves), "
+    "and exact neckline (V-neck / round / collarless / collared — match the sample; "
+    "if the sample has NO collar, do NOT invent a shirt collar, lapel, polo collar, or folded collar). "
     "Do not invent a different SKU or change the product type."
+)
+
+# Màu #2+: fidelity chỉ theo ảnh mẫu khách — không lấy kiểu đồ từ ảnh màu #1 (face-lock).
+_COLOR_FOLLOWON_FIDELITY = (
+    "Garment identity MUST match the customer product-sample reference only: silhouette, cut, sleeves, "
+    "neckline, length, print/pattern, fabric texture, and colors. "
+    "NECKLINE LOCK: copy the product-sample neckline exactly — if that sample is collarless / V-neck / "
+    "round neck without a collar stand, the output MUST stay collarless (no áo cổ bẻ, no lapel, no polo collar). "
+    "Never borrow collar or neckline from the Color #1 face-lock photo. "
+    "The Color #1 / face-lock reference must NOT contribute any clothing, colorway, or product design."
 )
 
 _COLOR_PRESERVE = (
@@ -512,11 +524,16 @@ def _studio_color_match_brief(
     cname: str,
     color_index: int = 0,
 ) -> str:
-    """Ảnh khách upload = mẫu SP (kiểu, màu, cắt may); màu #2+ ref #1 chỉ khuôn mặt."""
-    vision_colors = [
-        str(c).strip() for c in (state.get("vision_colors") or []) if str(c).strip()
-    ]
-    vision_analysis = str(state.get("vision_analysis") or "").strip()
+    """Ảnh khách upload = mẫu SP (kiểu, màu, cắt may); màu #2+ chỉ lấy khuôn mặt từ ảnh màu #1."""
+    # vision_* từ màu #1 mô tả SP cũ — không dùng cho màu #2+ (tránh gen nhầm kiểu đồ #1).
+    vision_colors = (
+        []
+        if color_index >= 1
+        else [str(c).strip() for c in (state.get("vision_colors") or []) if str(c).strip()]
+    )
+    vision_analysis = (
+        "" if color_index >= 1 else str(state.get("vision_analysis") or "").strip()
+    )
     ref_urls = [str(u).strip() for u in (slot.get("ref_urls") or []) if str(u).strip()]
     attach = str(slot.get("attach_url") or "").strip()
     pool = (state.get("studio") or {}).get("ref_pool") or []
@@ -526,15 +543,36 @@ def _studio_color_match_brief(
         if isinstance(item, dict) and str(item.get("url") or "").strip()
     }
     face_url = _first_approved_color_url(state.get("studio") or {}) if color_index >= 1 else ""
-    color_ref_urls = [
-        u for u in ref_urls if u and u != face_url
-    ]
+    color_ref_urls = [u for u in ref_urls if u and u != face_url]
     if attach and attach not in color_ref_urls:
         color_ref_urls.insert(0, attach)
 
     uses_customer_orig = any(pool_by_url.get(u) == "ref" for u in color_ref_urls) or (
         color_index <= 0 and bool((state.get("payload") or {}).get("ref_image_urls"))
     )
+
+    if color_index >= 1 and face_url:
+        lines = [
+            "Reference order: image #1 = NEW customer product sample for THIS colorway "
+            "(full garment: silhouette, cut, sleeves, neckline, print/pattern, fabric, colors). "
+            "Image #2 = approved Color #1 catalog photo — FACE/HAIR/SKIN ONLY. "
+            "CRITICAL: Ignore and discard ALL clothing worn in image #2 (including its collar/neckline); "
+            "do not recolor or restyle the Color #1 garment. "
+            "The output outfit must match image #1's product, worn by image #2's face.",
+            "NECKLINE: follow image #1 only. If image #1 shows a collarless / V-neck / simple open neck "
+            "with no shirt collar, do NOT add a folded collar (áo cổ bẻ) — that mistake often comes from "
+            "copying clothing on image #2.",
+            f"Colorway label «{cname}» is a hint only; follow the customer sample in image #1 if it conflicts.",
+            "Do NOT paste, trace, photocomposite, or 'extend' either reference photo. "
+            "Do NOT keep the sample background or hanger shot.",
+            "This colorway may be a completely different product from Color #1 — not merely a recolor.",
+        ]
+        if uses_customer_orig or color_ref_urls:
+            lines.append(
+                "Customer upload (image #1) is the sole product authority: extract garment design + colors; "
+                "discard its background/hanger/model body — keep only the Color #1 face identity from image #2."
+            )
+        return " ".join(lines)
 
     lines = [
         "PRODUCT SAMPLE: from the customer upload reference, reproduce this colorway's garment design — silhouette, cut, "
@@ -543,19 +581,11 @@ def _studio_color_match_brief(
         "Do NOT paste, trace, photocomposite, or 'extend' the reference photo. Do NOT keep the reference background or hanger shot.",
         "Each colorway may use a DIFFERENT product sample upload — do not assume the same garment template as other colorways unless the upload shows it.",
     ]
-    if color_index >= 1 and face_url:
-        lines.insert(
-            0,
-            "Reference order: image #1 = approved Color #1 catalog photo — use ONLY for model face/hair/skin identity. "
-            "Do NOT copy garment design, color, or styling from image #1. "
-            "Image #2+ (customer upload) = the FULL product sample for THIS colorway (may be a completely different "
-            "style/cut/color from color #1 — not just a recolor).",
-        )
     if uses_customer_orig:
         lines.insert(
-            2 if color_index >= 1 else 1,
+            1,
             "Customer upload — treat as the authoritative product sample for this colorway: extract garment design + colors; "
-            "discard background, hanger, and any model visible in that photo (face comes from image #1 when applicable).",
+            "discard background, hanger, and any model visible in that photo.",
         )
     if vision_analysis:
         lines.append(f"Product design to render (from vision): {vision_analysis[:500]}.")
@@ -717,11 +747,15 @@ def _resolve_selected_refs(
     ref_urls: Optional[List[str]] = None,
     attach_url: Optional[str] = None,
 ) -> List[str]:
-    """Ưu tiên thứ tự ref_urls đã merge (mặt #1 trước, màu SP sau). attach chỉ prepend nếu chưa có trong list."""
+    """Giữ thứ tự ref_urls đã merge (màu #2+: mẫu SP trước, mặt #1 sau). Không tự chèn mẫu cũ từ pool khi đã có ref."""
     ordered: List[str] = []
     attach = (attach_url or "").strip()
     ref_list = [str(u).strip() for u in (ref_urls or []) if str(u).strip()]
-    if attach and attach in ref_list:
+    # Đã merge sẵn: giữ nguyên thứ tự (không prepend attach làm đảo face/product).
+    if ref_list:
+        if attach and attach not in ref_list:
+            # attach mới chưa có trong list → đưa lên đầu (mẫu SP ưu tiên)
+            ordered.append(attach)
         for u in ref_list:
             if u and u not in ordered:
                 ordered.append(u)
@@ -730,15 +764,9 @@ def _resolve_selected_refs(
         return ordered[:3]
     if attach:
         ordered.append(attach)
-    for u in ref_list:
-        s = str(u or "").strip()
-        if s and s not in ordered:
-            ordered.append(s)
-        if len(ordered) >= 3:
-            break
     if ordered:
         return ordered[:3]
-    # fallback: ảnh gốc trong pool
+    # fallback: ảnh gốc trong pool (chỉ khi chưa có ref/attach)
     for item in studio.get("ref_pool") or []:
         if not isinstance(item, dict):
             continue
@@ -762,6 +790,17 @@ def _first_approved_color_url(studio: Dict[str, Any]) -> str:
     return ""
 
 
+def _approved_color_urls(studio: Dict[str, Any]) -> List[str]:
+    out: List[str] = []
+    for row in studio.get("colors") or []:
+        if not isinstance(row, dict):
+            continue
+        u = (row.get("img") or "").strip()
+        if u and u not in out:
+            out.append(u)
+    return out
+
+
 def _merge_color_slot_refs(
     studio: Dict[str, Any],
     selected: List[str],
@@ -769,7 +808,7 @@ def _merge_color_slot_refs(
     attach_url: str = "",
     color_index: int = 0,
 ) -> List[str]:
-    """Màu #1: ref do admin upload/chọn. Màu #2+: khuôn mặt từ ảnh màu #1 + ref màu mới."""
+    """Màu #1: ref do admin upload/chọn. Màu #2+: mẫu SP khách trước, khuôn mặt màu #1 sau."""
     picked = [str(u).strip() for u in (selected or []) if str(u).strip()]
     attach = (attach_url or "").strip()
     if color_index <= 0:
@@ -785,17 +824,24 @@ def _merge_color_slot_refs(
     face = _first_approved_color_url(studio)
     if not face:
         raise ValueError("Cần duyệt ảnh màu #1 trước khi tạo màu tiếp theo.")
-    merged = [face]
-    if attach and attach not in merged:
-        merged.append(attach)
+    approved = set(_approved_color_urls(studio))
+    # Có ảnh kèm: chỉ dùng đúng mẫu SP vừa upload (+ mặt #1). Không kèm mẫu màu cũ.
+    if attach and attach != face and attach not in approved:
+        return [attach, face]
+    products: List[str] = []
     for u in picked:
-        if u not in merged:
-            merged.append(u)
-        if len(merged) >= 3:
+        if not u or u == face or u in approved or u in products:
+            continue
+        # Bỏ mẫu SP màu #1 trong pool (kind=ref đã dùng cho màu trước) — chỉ nhận URL mới chọn.
+        products.append(u)
+        if len(products) >= 1:
             break
-    if len(merged) <= 1:
-            raise ValueError("Ảnh màu tiếp theo: upload ảnh mẫu sản phẩm (có thể khác mẫu/màu so với màu #1).")
-    return merged[:3]
+    if not products:
+        raise ValueError(
+            "Ảnh màu tiếp theo: upload ảnh mẫu sản phẩm (có thể khác mẫu/màu so với màu #1)."
+        )
+    # Thứ tự gửi AI: #1 mẫu SP khách (kiểu đồ), #2 ảnh màu #1 (chỉ mặt)
+    return [products[0], face]
 
 
 def _merge_customer_orig_refs(
@@ -928,17 +974,24 @@ def _build_studio_slot_prompt(
             )
         elif color_idx >= 1:
             variation = (
-                " MODEL FACE LOCK: The FIRST attached reference is the approved Color #1 catalog photo — "
-                "reuse the EXACT same model face, hair, and skin tone only. "
-                "The customer upload defines THIS colorway's product sample (design + colors) — it may be a "
-                "completely different garment/style from Color #1, not merely a different color of the same item. "
-                "Same person wearing/rendering the uploaded product sample."
+                " MODEL FACE LOCK: Image #2 is the approved Color #1 catalog photo — copy ONLY that model's "
+                "face, hair, and skin tone. Completely IGNORE the clothing AND neckline/collar on image #2. "
+                "Image #1 is the NEW customer product sample — the output garment MUST match image #1 "
+                "(may be a totally different style/cut/neckline from Color #1, not a recolor). "
+                "Same person from image #2 wearing the product from image #1."
+            )
+        fidelity = _COLOR_FOLLOWON_FIDELITY if color_idx >= 1 else _FIDELITY
+        if notes:
+            fidelity = (
+                f"{fidelity} "
+                "ADMIN NOTES reinforce or refine structure (cut/collar/neckline/sleeve/length): "
+                "obey them together with the product-sample neckline — never invent a collar the sample lacks."
             )
         base = (
             f"{_STUDIO_NEW_PHOTO_BRIEF} "
             "Create a premium e-commerce colorway photo — single clean image, worn or displayed correctly. "
             f"{color_brief}{variation} "
-            f"{_FIDELITY} "
+            f"{fidelity} "
             f"Shopper: {gender_txt}. {look}"
         )
     elif kind == "main":
@@ -992,10 +1045,15 @@ def _build_studio_slot_prompt(
         )
 
     if notes:
+        # Ghi chú admin + ảnh mẫu cùng hướng (vd không cổ) → siết chặt; nếu lệch ảnh mẫu thì theo ghi chú.
         base = (
-            f"{base}\n"
-            "Ghi chú cấu trúc/cách mặc từ admin (ưu tiên cao — mô tả đúng kiểu sản phẩm, KHÔNG copy bối cảnh ảnh gốc): "
-            f"{notes}"
+            f"ADMIN STRUCTURE NOTE (HIGH PRIORITY): {notes}. "
+            "Apply this to the garment structure (collar/neckline, sleeves, length, cut). "
+            "If the product-sample photo already matches the note (e.g. both collarless), keep that structure — "
+            "do NOT invent a shirt collar / áo cổ bẻ. "
+            "If the note conflicts with the sample, follow the admin note for that detail only; "
+            "keep fabric/print/color from the product sample elsewhere.\n"
+            f"{base}"
         )
     return base
 
@@ -1003,6 +1061,10 @@ def _build_studio_slot_prompt(
 def _suggested_prompt_for_phase(state: Dict[str, Any], *, kind: str, name: str = "", index: int = 0) -> str:
     slot = {"kind": kind, "name": name, "index": index, "user_prompt": ""}
     return _build_studio_slot_prompt(state, slot)
+
+
+def _studio_detail_count(studio: Dict[str, Any]) -> int:
+    return len([u for u in (studio.get("gallery") or []) if str(u or "").strip()])
 
 
 def _compute_next_actions(studio: Dict[str, Any]) -> List[str]:
@@ -1013,6 +1075,12 @@ def _compute_next_actions(studio: Dict[str, Any]) -> List[str]:
         actions.append("gallery")
     if not _studio_has_material_image(studio):
         actions.append("material")
+    # Ảnh chi tiết: tuỳ chọn — gợi ý sau khi đủ gallery tối thiểu
+    if (
+        _studio_gallery_count(studio) >= STUDIO_MIN_GALLERY_IMAGES
+        and _studio_detail_count(studio) == 0
+    ):
+        actions.append("detail")
     if _studio_can_publish(studio):
         actions.append("publish")
     if not actions:
@@ -2635,8 +2703,6 @@ def start_studio_generate(
     kind_n = (kind or "").strip().lower()
     if kind_n not in ("color", "main", "gallery", "detail", "material"):
         raise ValueError("kind phải là color | main | gallery | detail | material.")
-    if kind_n == "detail":
-        raise ValueError("Không cần tạo ảnh chi tiết — chỉ cần ảnh màu, gallery và chất liệu.")
     with _WORKER_LOCK:
         state = load_job(job_id)
         if not state:
@@ -2781,8 +2847,10 @@ def approve_studio_image(job_id: str) -> Dict[str, Any]:
             studio["phase"] = (
                 "gallery"
                 if _studio_gallery_count(studio) < STUDIO_MIN_GALLERY_IMAGES
-                else ("material" if not _studio_has_material_image(studio) else "gallery")
+                else ("material" if not _studio_has_material_image(studio) else "detail")
             )
+        elif kind == "detail":
+            studio["phase"] = "detail"
         elif kind == "material":
             studio["phase"] = "material"
         else:
@@ -2791,20 +2859,25 @@ def approve_studio_image(job_id: str) -> Dict[str, Any]:
         _refresh_studio_hints(state, studio)
         n_colors = _studio_color_count(studio)
         n_gallery = _studio_gallery_count(studio)
+        n_detail = _studio_detail_count(studio)
         missing = _studio_publish_missing(studio)
         if _studio_can_publish(studio):
-            msg = "Đã duyệt — đủ ảnh màu, gallery và chất liệu. Bấm «Đăng sản phẩm»."
+            msg = (
+                "Đã duyệt — đủ ảnh màu, gallery và chất liệu. "
+                f"Ảnh chi tiết tuỳ chọn ({n_detail}). Bấm «Đăng sản phẩm»."
+            )
         elif kind == "color":
             msg = (
                 f"Đã duyệt màu ({n_colors}/{STUDIO_MIN_COLOR_IMAGES}). "
                 f"Tiếp: gallery ({n_gallery}/{STUDIO_MIN_GALLERY_IMAGES}), "
-                f"ảnh chất liệu ({1 if _studio_has_material_image(studio) else 0}/{STUDIO_MIN_MATERIAL_IMAGES})."
+                f"ảnh chất liệu ({1 if _studio_has_material_image(studio) else 0}/{STUDIO_MIN_MATERIAL_IMAGES}). "
+                "Ảnh chi tiết tuỳ chọn."
             )
         elif kind == "material":
             msg = (
                 "Đã duyệt ảnh chất liệu. "
                 + (
-                    "Đủ điều kiện đăng — bấm «Đăng sản phẩm»."
+                    "Đủ điều kiện đăng — có thể thêm ảnh chi tiết (tuỳ chọn) rồi bấm «Đăng sản phẩm»."
                     if not missing
                     else f"Còn thiếu: {', '.join(missing)}."
                 )
@@ -2813,6 +2886,19 @@ def approve_studio_image(job_id: str) -> Dict[str, Any]:
             msg = (
                 f"Đã duyệt gallery ({n_gallery}/{STUDIO_MIN_GALLERY_IMAGES}). "
                 + (
+                    "Đủ gallery — tiếp ảnh chất liệu (bắt buộc) hoặc ảnh chi tiết (tuỳ chọn)."
+                    if not missing and _studio_gallery_count(studio) >= STUDIO_MIN_GALLERY_IMAGES
+                    else (
+                        "Đủ điều kiện đăng — có thể thêm ảnh chi tiết (tuỳ chọn)."
+                        if not missing
+                        else f"Còn thiếu: {', '.join(missing)}."
+                    )
+                )
+            )
+        elif kind == "detail":
+            msg = (
+                f"Đã duyệt ảnh chi tiết ({n_detail}). "
+                + (
                     "Đủ điều kiện đăng — bấm «Đăng sản phẩm»."
                     if not missing
                     else f"Còn thiếu: {', '.join(missing)}."
@@ -2820,6 +2906,136 @@ def approve_studio_image(job_id: str) -> Dict[str, Any]:
             )
         else:
             msg = f"Đã duyệt. Còn thiếu: {', '.join(missing)}." if missing else "Đã duyệt — có thể đăng sản phẩm."
+        state.update(
+            {
+                "studio": studio,
+                "status": "awaiting_input",
+                "step": "awaiting_input",
+                "message": msg,
+                "progress": 55,
+                "error": None,
+                "worker_action": None,
+                "updated_at": _utcnow_iso(),
+            }
+        )
+        persist_job(job_id, state)
+        return state
+
+
+def adopt_studio_images(
+    job_id: str,
+    *,
+    kind: str,
+    urls: List[str],
+) -> Dict[str, Any]:
+    """
+    Dùng ảnh đã có trong pool (ảnh màu / gallery / chi tiết / ref…) làm ảnh gallery hoặc chi tiết
+    — không gen AI. kind: gallery | detail | material.
+    """
+    kind_n = (kind or "").strip().lower()
+    if kind_n not in ("gallery", "detail", "material"):
+        raise ValueError("kind phải là gallery | detail | material.")
+    picked = [str(u).strip() for u in (urls or []) if str(u).strip()]
+    if not picked:
+        raise ValueError("Chọn ít nhất 1 ảnh đã tạo để dùng.")
+    if kind_n == "material":
+        picked = picked[:1]
+    else:
+        picked = picked[:6]
+
+    with _WORKER_LOCK:
+        state = load_job(job_id)
+        if not state:
+            raise ValueError("Không tìm thấy job")
+        status = (state.get("status") or "").strip()
+        if status not in ("awaiting_input", "awaiting_colors", "ready_to_publish"):
+            raise ValueError(
+                f"Job đang «{status}» — chỉ chọn ảnh khi đang chờ tạo/duyệt mốc tiếp."
+            )
+        payload = dict(state.get("payload") or {})
+        if (payload.get("mode") or "").strip().lower() != "ai":
+            raise ValueError("Chỉ dùng cho mode AI.")
+        studio = dict(state.get("studio") or {})
+        pool_urls = {
+            str(item.get("url") or "").strip()
+            for item in (studio.get("ref_pool") or [])
+            if isinstance(item, dict) and str(item.get("url") or "").strip()
+        }
+        for row in studio.get("colors") or []:
+            if isinstance(row, dict):
+                u = str(row.get("img") or "").strip()
+                if u:
+                    pool_urls.add(u)
+        for u in list(studio.get("images") or []) + list(studio.get("gallery") or []):
+            s = str(u or "").strip()
+            if s:
+                pool_urls.add(s)
+        mat = str(studio.get("material_image") or "").strip()
+        if mat:
+            pool_urls.add(mat)
+
+        unknown = [u for u in picked if u not in pool_urls]
+        if unknown:
+            raise ValueError("Chỉ chọn ảnh đã có trong Studio (ảnh màu / ảnh đã tạo).")
+
+        added = 0
+        if kind_n == "gallery":
+            existing = {str(x).strip() for x in (studio.get("images") or []) if str(x or "").strip()}
+            images = list(studio.get("images") or [])
+            for u in picked:
+                if u in existing:
+                    continue
+                images.append(u)
+                existing.add(u)
+                i = len(images) - 1
+                _add_to_ref_pool(
+                    studio, url=u, label=f"Gallery {i + 1}", kind="gallery", pool_id=f"gallery-{i}"
+                )
+                added += 1
+            studio["images"] = images
+            studio["phase"] = "gallery"
+        elif kind_n == "detail":
+            existing = {str(x).strip() for x in (studio.get("gallery") or []) if str(x or "").strip()}
+            details = list(studio.get("gallery") or [])
+            for u in picked:
+                if u in existing:
+                    continue
+                details.append(u)
+                existing.add(u)
+                i = len(details) - 1
+                _add_to_ref_pool(
+                    studio, url=u, label=f"Chi tiết {i + 1}", kind="detail", pool_id=f"detail-{i}"
+                )
+                added += 1
+            studio["gallery"] = details
+            studio["phase"] = "detail"
+        else:
+            studio["material_image"] = picked[0]
+            _add_to_ref_pool(
+                studio, url=picked[0], label="Ảnh chất liệu", kind="material", pool_id="material-0"
+            )
+            added = 1
+            studio["phase"] = "material"
+
+        if added == 0:
+            raise ValueError("Ảnh đã có trong mục này — chọn ảnh khác hoặc tạo mới.")
+
+        studio["current_slot"] = None
+        _refresh_studio_hints(state, studio)
+        label = (
+            "gallery"
+            if kind_n == "gallery"
+            else ("chi tiết" if kind_n == "detail" else "chất liệu")
+        )
+        missing = _studio_publish_missing(studio)
+        msg = (
+            f"Đã thêm {added} ảnh {label} từ ảnh đã tạo."
+            + (
+                " Đủ điều kiện đăng — bấm «Đăng sản phẩm»."
+                if not missing
+                else f" Còn thiếu: {', '.join(missing)}."
+            )
+        )
         state.update(
             {
                 "studio": studio,
