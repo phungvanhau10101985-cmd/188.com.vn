@@ -69,6 +69,7 @@ export default function HeroSection({
           objectPosition={data.image_object_position}
           alt={data.headline || 'Ảnh banner'}
           aspectClassName="aspect-[4/3]"
+          priority
         />
       );
     }

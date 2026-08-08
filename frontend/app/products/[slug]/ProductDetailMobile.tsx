@@ -16,8 +16,8 @@ import MobileProductMediaCarousel, {
 import { reportUnreachableProductMedia } from '@/lib/report-broken-product-media';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { hasVideoLink, parseVideoLink, buildYoutubeEmbedSrc } from '@/lib/video-utils';
-import RelatedProducts from '@/components/product-detail/RelatedProducts';
 import AgeGenderRecommendationSection from '@/components/AgeGenderRecommendationSection';
+import SectionErrorBoundary from '@/components/ui/SectionErrorBoundary';
 import ProductTabs from '@/components/product-detail/ProductTabs';
 import ProductVariantModal from './components/ProductVariantModal/ProductVariantModal';
 import ProductQAReviewCards from './components/ProductQAReviewCards/ProductQAReviewCards';
@@ -256,6 +256,7 @@ export default function ProductDetailMobile({
       <NanoAiLauncherGatewaySync payload={nanoPayload} />
 
       {/* Hero gallery: vuông gọn trong viewport, vuốt ngang */}
+      <SectionErrorBoundary>
       <div className="image_list w-full overflow-x-hidden bg-gray-50">
         {mediaCount > 0 && (
           <div className="relative mx-auto w-full max-w-[min(100vw,52dvh)]">
@@ -271,6 +272,7 @@ export default function ProductDetailMobile({
                     src={getOptimizedImage(firstPhotoUrl, { width: 720, height: 720, hideProductPng: true })}
                     alt={product.name}
                     frameClassName="aspect-square relative w-full"
+                    priority
                     onBroken={() => markBrokenPhoto(firstPhotoUrl)}
                   >
                     <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
@@ -436,6 +438,7 @@ export default function ProductDetailMobile({
           </nav>
         )}
       </div>
+      </SectionErrorBoundary>
 
       <div className="px-4 py-3">
         <BirthdayPromoBanner
@@ -579,18 +582,18 @@ export default function ProductDetailMobile({
 
         {/* Mô tả & Thông tin sản phẩm (tabs như desktop) */}
         <div className="mb-4">
-          <ProductTabs product={product} />
+          <SectionErrorBoundary>
+            <ProductTabs product={product} />
+          </SectionErrorBoundary>
         </div>
 
         <ProductReviewSection product={product} modalOnly modalOpen={reviewsModalOpen} onModalClose={() => setReviewsModalOpen(false)} onModalOpen={() => setReviewsModalOpen(true)} />
         <ProductQASection product={product} modalOnly modalOpen={qaModalOpen} onModalClose={() => setQaModalOpen(false)} onModalOpen={() => setQaModalOpen(true)} />
 
-        {/* Related products - 1 block, tab chỉ đổi filter sau */}
-        <div className="border-t border-gray-100 pt-4">
-          <RelatedProducts currentProduct={product} />
-        </div>
-
-        <AgeGenderRecommendationSection excludeProductId={product.id} className="mt-4 border-t border-gray-100 pt-4" />
+        {/* RelatedProducts đã hiển thị sẵn trong tab "Mô tả" của ProductTabs — không lặp lại ở đây. */}
+        <SectionErrorBoundary>
+          <AgeGenderRecommendationSection excludeProductId={product.id} className="mt-4 border-t border-gray-100 pt-4" />
+        </SectionErrorBoundary>
       </div>
 
       {/* Sticky bottom bar: Trang · Thử đồ · Thích | THÊM GIỎ | MUA HÀNG */}

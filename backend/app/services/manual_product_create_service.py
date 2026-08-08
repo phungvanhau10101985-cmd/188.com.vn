@@ -30,7 +30,7 @@ from app.services.image_localization_service import (
     _normalize_gemini_image_size,
     _sanitize_model_id,
 )
-from app.services.ladipage_ai_service import _guess_mime_from_url
+from app.services.ladipage_ai_service import _guess_mime_from_url, generate_material_text
 from app.services.ladipage_bootstrap import (
     bootstrap_single_product_ladipage,
     fill_ladipage_ai_content,
@@ -187,6 +187,30 @@ def _upload_product_image_bytes(image_bytes: bytes, *, name_hint: str, product_k
     return url
 
 
+_VALID_STUDIO_ASPECT_RATIOS = frozenset(
+    {"1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"}
+)
+
+
+def _normalize_studio_aspect_ratio(raw: Any) -> str:
+    s = str(raw or "").strip()
+    return s if s in _VALID_STUDIO_ASPECT_RATIOS else "1:1"
+
+
+def _patch_studio_ai_plan(
+    studio: Dict[str, Any],
+    *,
+    image_model: Optional[str] = None,
+    aspect_ratio: Optional[str] = None,
+) -> None:
+    plan = dict(studio.get("plan") or {})
+    if image_model is not None and str(image_model).strip():
+        plan["image_model"] = str(image_model).strip()
+    if aspect_ratio is not None:
+        plan["aspect_ratio"] = _normalize_studio_aspect_ratio(aspect_ratio)
+    studio["plan"] = plan
+
+
 def _resolve_manual_ai_image_model(choice: Optional[str]) -> Tuple[str, Optional[str], str]:
     """
     Map lựa chọn UI → (model_id, image_size|None, label).
@@ -222,6 +246,7 @@ def _gemini_edit_from_urls(
     *,
     image_model: Optional[str] = None,
     image_size: Optional[str] = "",
+    aspect_ratio: Optional[str] = None,
     timeout_sec: Optional[int] = None,
 ) -> bytes:
     """Gemini image-edit với 1..N ảnh tham chiếu (inline_data)."""
@@ -269,8 +294,14 @@ def _gemini_edit_from_urls(
     )
 
     gen_cfg: Dict[str, Any] = {"responseModalities": ["TEXT", "IMAGE"]}
-    if eff_size:
-        gen_cfg["imageConfig"] = {"imageSize": eff_size}
+    eff_aspect = _normalize_studio_aspect_ratio(aspect_ratio) if aspect_ratio else None
+    if eff_size or eff_aspect:
+        image_cfg: Dict[str, Any] = {}
+        if eff_size:
+            image_cfg["imageSize"] = eff_size
+        if eff_aspect:
+            image_cfg["aspectRatio"] = eff_aspect
+        gen_cfg["imageConfig"] = image_cfg
 
     payload: Dict[str, Any] = {
         "contents": [{"role": "user", "parts": parts}],
@@ -435,7 +466,8 @@ def _commercial_look_brief(
 
     return (
         f"{scene} {subject} "
-        "Photorealistic commercial fashion photography, sharp focus on product, true colors, "
+        "Photorealistic commercial fashion photography, sharp focus on product, "
+        "accurate neutral color reproduction faithful to reference (no filter, no LUT, no shifted white balance), "
         "no watermark, no price tag, no extra logos, no invented text overlays, no low-quality phone snapshot look."
     )
 
@@ -452,9 +484,88 @@ _DETAIL_FOCUS = [
     "macro of distinctive design element while remaining photorealistic",
 ]
 _FIDELITY = (
-    "CRITICAL: Keep the EXACT same product from the reference photos "
-    "(silhouette, print, logo placement, proportions, fabric look). Do not redesign or invent a different item. "
+    "Keep the SAME product design identity from references: silhouette, print/graphic placement, "
+    "proportions, fabric texture type, and garment construction (layers, skirt, shorts, sleeves). "
+    "Do not invent a different SKU or change the product type."
 )
+
+_COLOR_PRESERVE = (
+    "Match ONLY the garment/print colors from the reference — same hue, saturation, brightness, undertone. "
+    "Do not recolor to a prettier shade."
+)
+
+_STUDIO_NEW_PHOTO_BRIEF = (
+    "GENERATE A COMPLETELY NEW professional e-commerce photograph from scratch — "
+    "NOT an edit, collage, overlay, or copy-paste of the reference upload. "
+    "The attached reference is for product identity and color sampling ONLY. "
+    "NEVER reproduce from the reference photo: background (bed, quilt, wall, floor), hanger, hook, clip, "
+    "original lighting, original camera angle, original crop, props, packaging, or any partial body part "
+    "(leg, hand, face) visible in the customer upload. "
+    "Output one clean, coherent catalog image following the shoot settings below."
+)
+
+
+def _studio_color_match_brief(
+    state: Dict[str, Any],
+    slot: Dict[str, Any],
+    *,
+    cname: str,
+    color_index: int = 0,
+) -> str:
+    """Ảnh khách upload = mẫu SP (kiểu, màu, cắt may); màu #2+ ref #1 chỉ khuôn mặt."""
+    vision_colors = [
+        str(c).strip() for c in (state.get("vision_colors") or []) if str(c).strip()
+    ]
+    vision_analysis = str(state.get("vision_analysis") or "").strip()
+    ref_urls = [str(u).strip() for u in (slot.get("ref_urls") or []) if str(u).strip()]
+    attach = str(slot.get("attach_url") or "").strip()
+    pool = (state.get("studio") or {}).get("ref_pool") or []
+    pool_by_url = {
+        str(item.get("url") or "").strip(): str(item.get("kind") or "").strip()
+        for item in pool
+        if isinstance(item, dict) and str(item.get("url") or "").strip()
+    }
+    face_url = _first_approved_color_url(state.get("studio") or {}) if color_index >= 1 else ""
+    color_ref_urls = [
+        u for u in ref_urls if u and u != face_url
+    ]
+    if attach and attach not in color_ref_urls:
+        color_ref_urls.insert(0, attach)
+
+    uses_customer_orig = any(pool_by_url.get(u) == "ref" for u in color_ref_urls) or (
+        color_index <= 0 and bool((state.get("payload") or {}).get("ref_image_urls"))
+    )
+
+    lines = [
+        "PRODUCT SAMPLE: from the customer upload reference, reproduce this colorway's garment design — silhouette, cut, "
+        "construction, print/pattern, trims, and fabric colors (hue, saturation, undertone). "
+        f"Colorway label «{cname}» is a hint only; follow the uploaded sample if it conflicts.",
+        "Do NOT paste, trace, photocomposite, or 'extend' the reference photo. Do NOT keep the reference background or hanger shot.",
+        "Each colorway may use a DIFFERENT product sample upload — do not assume the same garment template as other colorways unless the upload shows it.",
+    ]
+    if color_index >= 1 and face_url:
+        lines.insert(
+            0,
+            "Reference order: image #1 = approved Color #1 catalog photo — use ONLY for model face/hair/skin identity. "
+            "Do NOT copy garment design, color, or styling from image #1. "
+            "Image #2+ (customer upload) = the FULL product sample for THIS colorway (may be a completely different "
+            "style/cut/color from color #1 — not just a recolor).",
+        )
+    if uses_customer_orig:
+        lines.insert(
+            2 if color_index >= 1 else 1,
+            "Customer upload — treat as the authoritative product sample for this colorway: extract garment design + colors; "
+            "discard background, hanger, and any model visible in that photo (face comes from image #1 when applicable).",
+        )
+    if vision_analysis:
+        lines.append(f"Product design to render (from vision): {vision_analysis[:500]}.")
+    if vision_colors:
+        lines.append(
+            "Observed colors in upload: "
+            + ", ".join(vision_colors[:8])
+            + f" — map «{cname}» to the matching swatch."
+        )
+    return " ".join(lines)
 
 
 def _normalize_color_name_list(raw: Any) -> List[str]:
@@ -498,9 +609,48 @@ def _ref_pool_from_payload(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     return pool
 
 
+STUDIO_MIN_COLOR_IMAGES = 1
+STUDIO_MIN_GALLERY_IMAGES = 2
+STUDIO_MIN_MATERIAL_IMAGES = 1
+
+
+def _studio_color_count(studio: Dict[str, Any]) -> int:
+    return len(
+        [
+            c
+            for c in (studio.get("colors") or [])
+            if isinstance(c, dict) and (c.get("img") or "").strip()
+        ]
+    )
+
+
+def _studio_gallery_count(studio: Dict[str, Any]) -> int:
+    return len([u for u in (studio.get("images") or []) if str(u or "").strip()])
+
+
+def _studio_has_material_image(studio: Dict[str, Any]) -> bool:
+    return bool((studio.get("material_image") or "").strip())
+
+
+def _studio_publish_missing(studio: Dict[str, Any]) -> List[str]:
+    missing: List[str] = []
+    n_colors = _studio_color_count(studio)
+    if n_colors < STUDIO_MIN_COLOR_IMAGES:
+        missing.append(f"ít nhất {STUDIO_MIN_COLOR_IMAGES} ảnh màu ({n_colors}/{STUDIO_MIN_COLOR_IMAGES})")
+    n_gallery = _studio_gallery_count(studio)
+    if n_gallery < STUDIO_MIN_GALLERY_IMAGES:
+        missing.append(f"ít nhất {STUDIO_MIN_GALLERY_IMAGES} ảnh gallery ({n_gallery}/{STUDIO_MIN_GALLERY_IMAGES})")
+    if not _studio_has_material_image(studio):
+        missing.append(f"{STUDIO_MIN_MATERIAL_IMAGES} ảnh chất liệu (0/{STUDIO_MIN_MATERIAL_IMAGES})")
+    return missing
+
+
 def _init_studio(payload: Dict[str, Any], *, product_key: str) -> Dict[str, Any]:
-    g_count = max(0, min(12, int(payload.get("gallery_count") if payload.get("gallery_count") is not None else 5)))
-    d_count = max(0, min(12, int(payload.get("detail_count") if payload.get("detail_count") is not None else 3)))
+    g_count = max(
+        STUDIO_MIN_GALLERY_IMAGES,
+        min(12, int(payload.get("gallery_count") if payload.get("gallery_count") is not None else STUDIO_MIN_GALLERY_IMAGES)),
+    )
+    d_count = max(0, min(12, int(payload.get("detail_count") if payload.get("detail_count") is not None else 0)))
     return {
         "product_key": product_key,
         "plan": {
@@ -515,6 +665,7 @@ def _init_studio(payload: Dict[str, Any], *, product_key: str) -> Dict[str, Any]
                 payload.get("image_model") or payload.get("ai_image_model") or "pro"
             ).strip()
             or "pro",
+            "aspect_ratio": _normalize_studio_aspect_ratio(payload.get("aspect_ratio")),
         },
         "ref_pool": _ref_pool_from_payload(payload),
         "phase": "color",
@@ -524,6 +675,9 @@ def _init_studio(payload: Dict[str, Any], *, product_key: str) -> Dict[str, Any]
         "main_image": "",
         "images": [],
         "gallery": [],
+        "material_image": "",
+        "material_callouts": [],
+        "material_body": "",
         "current_slot": None,
         "can_publish": False,
         "next_actions": ["color"],
@@ -531,12 +685,7 @@ def _init_studio(payload: Dict[str, Any], *, product_key: str) -> Dict[str, Any]
 
 
 def _studio_can_publish(studio: Dict[str, Any]) -> bool:
-    if (studio.get("main_image") or "").strip():
-        return True
-    for row in studio.get("colors") or []:
-        if isinstance(row, dict) and (row.get("img") or "").strip():
-            return True
-    return False
+    return len(_studio_publish_missing(studio)) == 0
 
 
 def _studio_approved_color_urls(studio: Dict[str, Any]) -> List[str]:
@@ -568,12 +717,20 @@ def _resolve_selected_refs(
     ref_urls: Optional[List[str]] = None,
     attach_url: Optional[str] = None,
 ) -> List[str]:
-    """Ưu tiên attach + ref_urls khách chọn (tối đa 3)."""
+    """Ưu tiên thứ tự ref_urls đã merge (mặt #1 trước, màu SP sau). attach chỉ prepend nếu chưa có trong list."""
     ordered: List[str] = []
     attach = (attach_url or "").strip()
+    ref_list = [str(u).strip() for u in (ref_urls or []) if str(u).strip()]
+    if attach and attach in ref_list:
+        for u in ref_list:
+            if u and u not in ordered:
+                ordered.append(u)
+            if len(ordered) >= 3:
+                break
+        return ordered[:3]
     if attach:
         ordered.append(attach)
-    for u in ref_urls or []:
+    for u in ref_list:
         s = str(u or "").strip()
         if s and s not in ordered:
             ordered.append(s)
@@ -595,6 +752,75 @@ def _resolve_selected_refs(
     return ordered[:3]
 
 
+def _first_approved_color_url(studio: Dict[str, Any]) -> str:
+    for row in studio.get("colors") or []:
+        if not isinstance(row, dict):
+            continue
+        u = (row.get("img") or "").strip()
+        if u:
+            return u
+    return ""
+
+
+def _merge_color_slot_refs(
+    studio: Dict[str, Any],
+    selected: List[str],
+    *,
+    attach_url: str = "",
+    color_index: int = 0,
+) -> List[str]:
+    """Màu #1: ref do admin upload/chọn. Màu #2+: khuôn mặt từ ảnh màu #1 + ref màu mới."""
+    picked = [str(u).strip() for u in (selected or []) if str(u).strip()]
+    attach = (attach_url or "").strip()
+    if color_index <= 0:
+        merged: List[str] = []
+        if attach:
+            merged.append(attach)
+        for u in picked:
+            if u not in merged:
+                merged.append(u)
+        if not merged:
+            raise ValueError("Ảnh màu đầu: upload ảnh mẫu sản phẩm cho màu này.")
+        return merged[:3]
+    face = _first_approved_color_url(studio)
+    if not face:
+        raise ValueError("Cần duyệt ảnh màu #1 trước khi tạo màu tiếp theo.")
+    merged = [face]
+    if attach and attach not in merged:
+        merged.append(attach)
+    for u in picked:
+        if u not in merged:
+            merged.append(u)
+        if len(merged) >= 3:
+            break
+    if len(merged) <= 1:
+            raise ValueError("Ảnh màu tiếp theo: upload ảnh mẫu sản phẩm (có thể khác mẫu/màu so với màu #1).")
+    return merged[:3]
+
+
+def _merge_customer_orig_refs(
+    studio: Dict[str, Any],
+    selected: List[str],
+    *,
+    for_color: bool = False,
+    color_index: int = 0,
+    attach_url: str = "",
+) -> List[str]:
+    """Tương thích: gallery/material dùng selected; color dùng _merge_color_slot_refs."""
+    if for_color:
+        return _merge_color_slot_refs(
+            studio, selected, attach_url=attach_url, color_index=color_index
+        )
+    pool = studio.get("ref_pool") or []
+    orig = [
+        str(item.get("url") or "").strip()
+        for item in pool
+        if isinstance(item, dict) and (item.get("kind") or "") == "ref"
+    ]
+    orig = [u for u in orig if u]
+    return (selected or orig)[:3]
+
+
 def _slot_label(slot: Dict[str, Any]) -> str:
     kind = (slot.get("kind") or "").strip()
     idx = int(slot.get("index") or 0)
@@ -607,7 +833,51 @@ def _slot_label(slot: Dict[str, Any]) -> str:
         return f"ảnh gallery {idx + 1}"
     if kind == "detail":
         return f"ảnh chi tiết {idx + 1}"
+    if kind == "material":
+        return "ảnh chất liệu (Ladipage)"
     return "ảnh"
+
+
+_DEFAULT_MATERIAL_CALLOUTS = ["Chất lượng cao", "Mềm mại thoải mái", "Bền theo thời gian"]
+
+
+def _studio_ladipage_context(state: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(state.get("payload") or {})
+    pname = (state.get("vision_product_name") or payload.get("product_name") or "").strip()
+    material = (payload.get("material") or "").strip()
+    return {
+        "product_names": [pname] if pname else [],
+        "dominant_material": material,
+        "gender_hint": (payload.get("gender") or "").strip(),
+        "is_category_landing": False,
+    }
+
+
+def _resolve_studio_material_copy(
+    state: Dict[str, Any],
+    material: str,
+    *,
+    notes: str = "",
+) -> Dict[str, Any]:
+    """DeepSeek: ưu điểm chất liệu + callout in trên ảnh."""
+    material = (material or "").strip()
+    if not material:
+        return {"body": "", "callouts": list(_DEFAULT_MATERIAL_CALLOUTS)}
+    try:
+        data = generate_material_text(
+            _studio_ladipage_context(state),
+            material,
+            custom_instruction=(notes or "").strip() or None,
+        )
+        if data and isinstance(data.get("callouts"), list) and data.get("callouts"):
+            callouts = [str(x).strip() for x in data["callouts"] if str(x).strip()][:3]
+            return {
+                "body": str(data.get("body") or "").strip(),
+                "callouts": callouts or list(_DEFAULT_MATERIAL_CALLOUTS),
+            }
+    except Exception as exc:
+        logger.warning("studio material copy DeepSeek failed: %s", exc)
+    return {"body": "", "callouts": list(_DEFAULT_MATERIAL_CALLOUTS)}
 
 
 def _build_studio_slot_prompt(
@@ -645,16 +915,37 @@ def _build_studio_slot_prompt(
 
     if kind == "color":
         cname = (slot.get("name") or "").strip() or "màu chính"
+        color_idx = int(slot.get("index") or 0)
+        color_brief = _studio_color_match_brief(state, slot, cname=cname, color_index=color_idx)
+        attempt = int(slot.get("attempt") or 1)
+        variation = ""
+        if color_idx == 0 and attempt > 1:
+            variation = (
+                f" Regeneration attempt #{attempt}: MUST show a clearly DIFFERENT model identity "
+                "(different face, hair, pose, stance, expression) while keeping the same "
+                "configured age group, gender, and ethnicity — do NOT reuse the same person likeness "
+                "as previous generations in this session."
+            )
+        elif color_idx >= 1:
+            variation = (
+                " MODEL FACE LOCK: The FIRST attached reference is the approved Color #1 catalog photo — "
+                "reuse the EXACT same model face, hair, and skin tone only. "
+                "The customer upload defines THIS colorway's product sample (design + colors) — it may be a "
+                "completely different garment/style from Color #1, not merely a different color of the same item. "
+                "Same person wearing/rendering the uploaded product sample."
+            )
         base = (
-            "Create a premium e-commerce colorway photo of the SAME product, recolored to this exact colorway: "
-            f"«{cname}». Keep identical shape, print layout, and construction; only change the garment color as specified. "
-            f"{_FIDELITY}"
+            f"{_STUDIO_NEW_PHOTO_BRIEF} "
+            "Create a premium e-commerce colorway photo — single clean image, worn or displayed correctly. "
+            f"{color_brief}{variation} "
+            f"{_FIDELITY} "
             f"Shopper: {gender_txt}. {look}"
         )
     elif kind == "main":
         base = (
+            f"{_STUDIO_NEW_PHOTO_BRIEF} "
             "Create a premium e-commerce HERO product photo that customers want to buy. "
-            f"{_FIDELITY}"
+            f"{_FIDELITY} {_COLOR_PRESERVE} "
             f"Shopper: {gender_txt}. Material feel: {material_txt}. Fashion style: {style_txt}. "
             f"{look} "
             "Square-friendly composition, product fills frame confidently, retail-ready quality."
@@ -662,11 +953,34 @@ def _build_studio_slot_prompt(
     elif kind == "gallery":
         angle = _GALLERY_ANGLES[idx % len(_GALLERY_ANGLES)]
         base = (
+            f"{_STUDIO_NEW_PHOTO_BRIEF} "
             "Create another premium commercial catalog photo of the SAME product. "
-            f"{_FIDELITY}"
+            f"{_FIDELITY} {_COLOR_PRESERVE} "
             f"Camera/composition: {angle}. "
             f"Shopper: {gender_txt}. Style: {style_txt}. Material: {material_txt}. "
             f"{look}"
+        )
+    elif kind == "material":
+        raw_callouts = slot.get("material_callouts") or studio.get("material_callouts") or []
+        callouts = (
+            [str(c).strip() for c in raw_callouts if str(c).strip()][:3]
+            if isinstance(raw_callouts, list)
+            else []
+        )
+        callout_str = (
+            "; ".join(callouts)
+            if callouts
+            else "; ".join(_DEFAULT_MATERIAL_CALLOUTS)
+        )
+        base = (
+            f"Chỉnh sửa ảnh sản phẩm đính kèm thành ảnh cận cảnh chất liệu «{material_txt}» "
+            "chuyên nghiệp cho trang landing: zoom cận cảnh bề mặt/kết cấu chất liệu thật của đúng sản phẩm trong ảnh, "
+            "ánh sáng studio đẹp, nền trung tính sang trọng. "
+            f"{_FIDELITY}"
+            "Trên ảnh in trực tiếp các nhãn/chú thích ngắn tiếng Việt (callout badges) nêu ưu điểm và điểm đáng mua "
+            f"của loại chất liệu này — bố cục đẹp, không che vùng chất liệu chính: "
+            f"{callout_str}. "
+            "Không watermark, không chữ tiếng Trung, không logo hãng khác. Bố cục vuông, rõ nét, chuyên nghiệp."
         )
     else:
         focus = _DETAIL_FOCUS[idx % len(_DETAIL_FOCUS)]
@@ -678,7 +992,11 @@ def _build_studio_slot_prompt(
         )
 
     if notes:
-        base = f"{base}\nMô tả/ghi chú thêm từ admin: {notes}"
+        base = (
+            f"{base}\n"
+            "Ghi chú cấu trúc/cách mặc từ admin (ưu tiên cao — mô tả đúng kiểu sản phẩm, KHÔNG copy bối cảnh ảnh gốc): "
+            f"{notes}"
+        )
     return base
 
 
@@ -688,13 +1006,17 @@ def _suggested_prompt_for_phase(state: Dict[str, Any], *, kind: str, name: str =
 
 
 def _compute_next_actions(studio: Dict[str, Any]) -> List[str]:
-    actions: List[str] = ["color"]
-    if _studio_approved_color_urls(studio) or (studio.get("main_image") or "").strip():
-        actions.append("main")
+    actions: List[str] = []
+    if _studio_color_count(studio) < STUDIO_MIN_COLOR_IMAGES:
+        actions.append("color")
+    if _studio_gallery_count(studio) < STUDIO_MIN_GALLERY_IMAGES:
         actions.append("gallery")
-        actions.append("detail")
+    if not _studio_has_material_image(studio):
+        actions.append("material")
     if _studio_can_publish(studio):
         actions.append("publish")
+    if not actions:
+        actions.append("color")
     return actions
 
 
@@ -708,6 +1030,8 @@ def _refresh_studio_hints(state: Dict[str, Any], studio: Dict[str, Any]) -> None
         idx = len(studio.get("images") or [])
     elif phase == "detail":
         idx = len(studio.get("gallery") or [])
+    elif phase == "material":
+        idx = 0
     studio["suggested_prompt"] = _suggested_prompt_for_phase(state, kind=phase, name=name, index=idx)
     studio["next_actions"] = _compute_next_actions(studio)
     studio["can_publish"] = _studio_can_publish(studio)
@@ -736,7 +1060,7 @@ def _commit_approved_slot(studio: Dict[str, Any], slot: Dict[str, Any]) -> None:
         _add_to_ref_pool(
             studio,
             url=url,
-            label=f"Màu {name}",
+            label=name[:80],
             kind="color",
             pool_id=f"color-{idx}",
         )
@@ -759,6 +1083,17 @@ def _commit_approved_slot(studio: Dict[str, Any], slot: Dict[str, Any]) -> None:
         _add_to_ref_pool(
             studio, url=url, label=f"Chi tiết {i + 1}", kind="detail", pool_id=f"detail-{i}"
         )
+    elif kind == "material":
+        studio["material_image"] = url
+        callouts = slot.get("material_callouts") or studio.get("material_callouts") or []
+        body = str(slot.get("material_body") or studio.get("material_body") or "").strip()
+        if isinstance(callouts, list) and callouts:
+            studio["material_callouts"] = [str(c).strip() for c in callouts if str(c).strip()][:3]
+        if body:
+            studio["material_body"] = body
+        _add_to_ref_pool(
+            studio, url=url, label="Ảnh chất liệu", kind="material", pool_id="material-0"
+        )
     else:
         raise ValueError(f"Slot không hợp lệ: {kind}")
     studio["can_publish"] = _studio_can_publish(studio)
@@ -766,6 +1101,13 @@ def _commit_approved_slot(studio: Dict[str, Any], slot: Dict[str, Any]) -> None:
 
 def job_public_view(state: Dict[str, Any]) -> Dict[str, Any]:
     """Shape trả API (kèm studio / vision)."""
+    payload = dict(state.get("payload") or {})
+    studio_raw = state.get("studio")
+    studio_out = None
+    if isinstance(studio_raw, dict):
+        studio_out = dict(studio_raw)
+        studio_out["can_publish"] = _studio_can_publish(studio_out)
+        studio_out["next_actions"] = _compute_next_actions(studio_out)
     return {
         "job_id": state.get("job_id"),
         "status": state.get("status") or "unknown",
@@ -778,8 +1120,67 @@ def job_public_view(state: Dict[str, Any]) -> Dict[str, Any]:
         "updated_at": state.get("updated_at"),
         "vision_product_name": state.get("vision_product_name"),
         "vision_colors": state.get("vision_colors"),
-        "studio": state.get("studio"),
+        "studio": studio_out,
+        "payload": payload,
+        "mode": str(payload.get("mode") or "").strip() or None,
     }
+
+
+def _parse_job_iso_ts(raw: Any) -> Optional[datetime]:
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+def maybe_recover_interrupted_job(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Worker chạy in-memory — mất điện/restart khiến job kẹt generating/queued.
+    Khôi phục về trạng thái tương tác để admin tiếp tục.
+    """
+    status = str(state.get("status") or "").strip()
+    if status not in ("generating", "queued", "publishing"):
+        return state
+    updated = _parse_job_iso_ts(state.get("updated_at"))
+    if updated is None:
+        return state
+    age_sec = (datetime.now(timezone.utc) - updated.astimezone(timezone.utc)).total_seconds()
+    if age_sec < 90:
+        return state
+    job_id = str(state.get("job_id") or "").strip()
+    if not job_id:
+        return state
+    studio = dict(state.get("studio") or {})
+    slot = dict(studio.get("current_slot") or {})
+    payload = dict(state.get("payload") or {})
+    mode = str(payload.get("mode") or "").strip().lower()
+    if (slot.get("url") or "").strip():
+        state["status"] = "awaiting_approval"
+        state["message"] = (
+            "Phiên bị gián đoạn (tắt máy/mất điện) — ảnh đã tạo vẫn còn. Bấm OK — Tiếp hoặc Tạo lại."
+        )
+    elif slot.get("kind"):
+        state["status"] = "awaiting_approval"
+        state["message"] = "Phiên bị gián đoạn — bấm Tạo lại để tiếp tục tạo ảnh."
+    elif studio.get("ref_pool") or studio.get("colors"):
+        state["status"] = "awaiting_input"
+        state["message"] = "Đã khôi phục phiên Studio — tiếp tục chọn mốc và tạo ảnh."
+    elif mode == "ai" and status in ("generating", "queued"):
+        state["status"] = "awaiting_colors"
+        state["message"] = "Phiên AI bị gián đoạn — kiểm tra tên/màu rồi tiếp tục Studio."
+    else:
+        state["status"] = "failed"
+        state["message"] = "Phiên bị gián đoạn — bấm Thử lại hoặc tạo phiên mới."
+    state["error"] = None
+    state["worker_action"] = None
+    state["updated_at"] = _utcnow_iso()
+    persist_job(job_id, state)
+    return state
 
 
 def _generate_name_and_description(brief: str, *, seed_name: str = "") -> Tuple[str, str, List[str]]:
@@ -911,12 +1312,10 @@ def validate_job_payload(payload: Dict[str, Any]) -> None:
         if not product_name:
             raise ValueError("Vui lòng nhập tên sản phẩm.")
     else:
+        # Mode AI: không bắt buộc ảnh gốc lúc tạo job — ref theo từng màu ở Studio; đặt tên SEO khi đăng.
         refs = payload.get("ref_image_urls") or []
-        if not isinstance(refs, list) or not any(str(u).strip() for u in refs):
-            raise ValueError("Mode AI cần ít nhất 1 ảnh gốc tham chiếu (tối đa 3).")
-        if len([u for u in refs if str(u).strip()]) > 3:
-            raise ValueError("Mode AI tối đa 3 ảnh gốc.")
-        # Mode AI: tên có thể để trống — Gemini đọc ảnh đặt tên SEO.
+        if refs and len([u for u in refs if str(u).strip()]) > 3:
+            raise ValueError("Mode AI tối đa 3 ảnh gốc (tuỳ chọn).")
         if _resolve_model_presence(payload.get("model_presence")) == "model":
             if not str(payload.get("model_gender") or "").strip():
                 raise ValueError("Chọn «Có người mẫu» thì cần điền giới tính người mẫu.")
@@ -986,11 +1385,11 @@ def _resize_image_bytes_for_vision_name(raw: bytes) -> Tuple[bytes, str]:
     return enc.tobytes(), "image/jpeg"
 
 
-def _extract_vision_name_json(text: str) -> Tuple[str, str, List[str]]:
-    """Parse JSON tên SP + danh sách màu; nếu bị cắt MAX_TOKENS vẫn cố lấy ten_san_pham."""
+def _extract_vision_name_json(text: str) -> Tuple[str, str, List[str], str]:
+    """Parse JSON tên SP + màu chủ đạo + danh sách màu; nếu bị cắt MAX_TOKENS vẫn cố lấy ten_san_pham."""
     text = (text or "").strip()
     if not text:
-        return "", "", []
+        return "", "", [], ""
     parsed: Dict[str, Any] = {}
     try:
         start = text.find("{")
@@ -1044,9 +1443,220 @@ def _extract_vision_name_json(text: str) -> Tuple[str, str, List[str]]:
                 cn = piece.strip()
                 if cn and cn.lower() not in {x.lower() for x in colors_out}:
                     colors_out.append(cn[:40])
+    ten_mau = str(parsed.get("ten_mau") or parsed.get("color_name") or "").strip()
+    if not ten_mau:
+        m3 = re.search(r'"ten_mau"\s*:\s*"((?:\\.|[^"\\])*)"', text)
+        if m3:
+            try:
+                ten_mau = json.loads(f'"{m3.group(1)}"')
+            except Exception:
+                ten_mau = m3.group(1).replace('\\"', '"').strip()
+    if not ten_mau and colors_out:
+        ten_mau = colors_out[0]
+    if len(ten_mau) > 40:
+        ten_mau = ten_mau[:40].strip()
     if len(name) > 120:
         name = name[:120].strip()
-    return name, analysis, colors_out
+    return name, analysis, colors_out, ten_mau
+
+
+def _extract_color_name_json(text: str) -> str:
+    text = (text or "").strip()
+    if not text:
+        return ""
+    try:
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        parsed = json.loads(text[start:end] if start >= 0 and end > start else text)
+    except Exception:
+        parsed = {}
+    name = str(parsed.get("ten_mau") or parsed.get("color_name") or parsed.get("mau") or "").strip()
+    if not name:
+        m = re.search(r'"ten_mau"\s*:\s*"((?:\\.|[^"\\])*)"', text)
+        if m:
+            try:
+                name = json.loads(f'"{m.group(1)}"')
+            except Exception:
+                name = m.group(1).replace('\\"', '"').strip()
+    if len(name) > 40:
+        name = name[:40].strip()
+    return name
+
+
+def _dedupe_studio_color_name(studio: Dict[str, Any], name: str) -> str:
+    base = (name or "").strip()[:40]
+    if not base:
+        return base
+    existing = {
+        str(c.get("name") or "").strip().lower()
+        for c in (studio.get("colors") or [])
+        if isinstance(c, dict) and str(c.get("name") or "").strip()
+    }
+    if base.lower() not in existing:
+        return base
+    for i in range(2, 24):
+        candidate = f"{base} {i}"[:40].strip()
+        if candidate.lower() not in existing:
+            return candidate
+    return f"{base} mới"[:40]
+
+
+def name_colorway_from_reference_images(
+    image_urls: List[str],
+    *,
+    admin_hint: str = "",
+) -> Tuple[str, List[str]]:
+    """Gemini vision: đọc màu SP chủ đạo từ ảnh mẫu khách upload → tên màu tiếng Việt."""
+    warnings: List[str] = []
+    api_key = (getattr(settings, "GEMINI_API_KEY", "") or "").strip()
+    if len(api_key) < 10:
+        warnings.append("vision_color: thiếu GEMINI_API_KEY.")
+        return "", warnings
+
+    urls = [str(u).strip() for u in (image_urls or []) if str(u).strip()][:3]
+    if not urls:
+        warnings.append("vision_color: thiếu ảnh mẫu.")
+        return "", warnings
+
+    image_parts: List[Dict[str, Any]] = []
+    for idx, image_url in enumerate(urls):
+        try:
+            img_resp = requests.get(image_url, timeout=30)
+            img_resp.raise_for_status()
+            jpeg_bytes, mime = _resize_image_bytes_for_vision_name(img_resp.content)
+            if not mime:
+                mime = _guess_mime_from_url(image_url, img_resp.headers.get("Content-Type")) or "image/jpeg"
+            b64 = base64.b64encode(jpeg_bytes).decode("ascii")
+            image_parts.append({"inline_data": {"mime_type": mime, "data": b64}})
+        except Exception as exc:
+            warnings.append(f"vision_color: tải ảnh {idx + 1} lỗi: {exc}")
+
+    if not image_parts:
+        warnings.append("vision_color: không tải được ảnh.")
+        return "", warnings
+
+    model = (getattr(settings, "GEMINI_MODEL", "") or "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+    model = model.replace("-latest", "")
+    hint = (admin_hint or "").strip()
+    prompt = (
+        "Bạn nhận diện MÀU SẢN PHẨM CHỦ ĐẠO trên ảnh thời trang (màu vải/in chính của SP).\n"
+        "Trả ĐÚNG một JSON ngắn (không markdown):\n"
+        '{"ten_mau":"..."}\n'
+        "Quy tắc ten_mau: tiếng Việt ngắn 1–4 từ (VD: Tím, Be nhạt, Xanh navy, Hồng phấn, Trắng kem). "
+        "Không emoji, không mã, không mô tả dài."
+    )
+    if hint:
+        prompt += f"\nGợi ý admin (chỉ dùng nếu khớp ảnh): {hint}."
+
+    parts: List[Dict[str, Any]] = [{"text": prompt}, *image_parts]
+    gem_url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
+    gen_cfg: Dict[str, Any] = {
+        "temperature": 0.15,
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "thinkingConfig": {"thinkingBudget": 0},
+    }
+
+    def _call(cfg: Dict[str, Any]) -> Dict[str, Any]:
+        return _gemini_request_json(
+            gem_url,
+            {"contents": [{"role": "user", "parts": parts}], "generationConfig": cfg},
+            timeout=60,
+        )
+
+    try:
+        body = _call(gen_cfg)
+    except Exception as exc:
+        cfg2 = dict(gen_cfg)
+        cfg2.pop("thinkingConfig", None)
+        try:
+            body = _call(cfg2)
+            warnings.append(f"vision_color: fallback config: {exc}")
+        except Exception as exc2:
+            warnings.append(f"vision_color: {exc2}")
+            return "", warnings
+
+    text = ""
+    try:
+        cands = body.get("candidates") or []
+        if cands:
+            resp_parts = ((cands[0].get("content") or {}).get("parts") or [])
+            for p in resp_parts:
+                if isinstance(p, dict) and p.get("text"):
+                    text += str(p["text"])
+    except Exception:
+        text = ""
+    color_name = _extract_color_name_json(text)
+    if not color_name:
+        warnings.append("vision_color: không đọc được tên màu từ ảnh.")
+    return color_name, warnings
+
+
+def _resolve_color_sample_urls_for_vision(
+    studio: Dict[str, Any],
+    refs: List[str],
+    *,
+    color_index: int,
+) -> List[str]:
+    """URL ảnh mẫu SP khách (bỏ ref mặt màu #1)."""
+    face = _first_approved_color_url(studio) if color_index >= 1 else ""
+    sample = [u for u in refs if u and u != face]
+    return sample or list(refs[:1])
+
+
+def _resolve_studio_color_name(
+    state: Dict[str, Any],
+    studio: Dict[str, Any],
+    slot: Dict[str, Any],
+    refs: List[str],
+) -> Tuple[str, List[str], Dict[str, Any]]:
+    """
+    Admin gõ tên màu → dùng.
+    Màu #1 (chưa có tên SP): 1 lần Gemini gộp tên SEO + tên màu từ ảnh mẫu.
+    Màu #2+ hoặc đã có tên SP: chỉ Gemini đọc tên màu.
+    Trả (tên_màu, warnings, state_patches).
+    """
+    warnings: List[str] = list(state.get("warnings") or [])
+    patches: Dict[str, Any] = {}
+    color_index = int(slot.get("index") or 0)
+    admin_hint = (slot.get("name") or "").strip()
+    if admin_hint:
+        return _dedupe_studio_color_name(studio, admin_hint), warnings, patches
+
+    payload = dict(state.get("payload") or {})
+    admin_product = (payload.get("product_name") or payload.get("name") or "").strip()
+    vision_product = (state.get("vision_product_name") or "").strip()
+    sample_urls = _resolve_color_sample_urls_for_vision(studio, refs, color_index=color_index)
+    use_combined_vision = color_index == 0 and not admin_product and not vision_product
+
+    if use_combined_vision:
+        vision_name, vision_analysis, vision_colors, ten_mau, vw = name_product_from_reference_images(
+            sample_urls,
+            gender=str(payload.get("gender") or "").strip(),
+            material=str(payload.get("material") or "").strip(),
+            style=str(payload.get("style") or "").strip(),
+            notes=str(payload.get("notes") or "").strip(),
+        )
+        warnings.extend(vw)
+        color_name = (ten_mau or "").strip()
+        if vision_name:
+            patches = {
+                "vision_product_name": vision_name,
+                "vision_analysis": vision_analysis or None,
+                "vision_colors": vision_colors or [],
+                "name_source": "gemini_vision",
+                "payload": {**payload, "product_name": vision_name},
+            }
+        if not color_name and vision_colors:
+            color_name = str(vision_colors[0] or "").strip()
+    else:
+        color_name, vw = name_colorway_from_reference_images(sample_urls)
+        warnings.extend(vw)
+
+    if not color_name:
+        color_name = f"Màu {color_index + 1}"
+        warnings.append(f"vision_color: fallback tên «{color_name}».")
+    return _dedupe_studio_color_name(studio, color_name), warnings, patches
 
 
 def name_product_from_reference_images(
@@ -1057,20 +1667,20 @@ def name_product_from_reference_images(
     style: str = "",
     colors: Optional[List[str]] = None,
     notes: str = "",
-) -> Tuple[str, str, List[str], List[str]]:
+) -> Tuple[str, str, List[str], str, List[str]]:
     """
-    Gemini vision đọc 1–3 ảnh gốc → (tên SEO, phân tích, mau_sac[], warnings).
+    Gemini vision đọc 1–3 ảnh gốc → (tên SEO, phân tích, mau_sac[], ten_mau, warnings).
     """
     warnings: List[str] = []
     api_key = (getattr(settings, "GEMINI_API_KEY", "") or "").strip()
     if len(api_key) < 10:
         warnings.append("vision_name: thiếu GEMINI_API_KEY.")
-        return "", "", [], warnings
+        return "", "", [], "", warnings
 
     urls = [str(u).strip() for u in (image_urls or []) if str(u).strip()][:3]
     if not urls:
         warnings.append("vision_name: thiếu ảnh gốc.")
-        return "", "", [], warnings
+        return "", "", [], "", warnings
 
     image_parts: List[Dict[str, Any]] = []
     for idx, image_url in enumerate(urls):
@@ -1087,7 +1697,7 @@ def name_product_from_reference_images(
 
     if not image_parts:
         warnings.append("vision_name: không tải được ảnh nào.")
-        return "", "", [], warnings
+        return "", "", [], "", warnings
 
     model = (getattr(settings, "GEMINI_MODEL", "") or "gemini-2.5-flash").strip() or "gemini-2.5-flash"
     model = model.replace("-latest", "")
@@ -1104,7 +1714,7 @@ def name_product_from_reference_images(
         "(set bộ áo+quần / đầm / áo / giày / túi… — nhìn kỹ có quần/short riêng không), "
         "form, chất cảm, chi tiết nổi bật — rồi đặt MỘT TÊN TIẾNG VIỆT "
         "chuẩn SEO, khách dễ tìm và muốn mua.\n"
-        "Đồng thời liệt kê các MÀU sản phẩm nhìn thấy trên ảnh (tiếng Việt ngắn).\n"
+        "Đồng thời nhận MÀU SP CHỦ ĐẠO trên ảnh (ten_mau) và liệt kê thêm màu phụ nếu có (mau_sac).\n"
         "Quy tắc tên:\n"
         "- 45–90 ký tự, tự nhiên, có loại SP + đặc điểm bán (đối tượng, họa tiết, form).\n"
         "- Không mã SKU, không emoji, không dấu ngoặc thừa.\n"
@@ -1113,7 +1723,8 @@ def name_product_from_reference_images(
         f"Gợi ý admin — Giới tính: {gender_txt}; Chất liệu: {material_txt}; "
         f"Phong cách: {style_txt}; Màu gợi ý: {colors_txt}; Ghi chú: {notes_txt}.\n"
         "Trả ĐÚNG một JSON ngắn (không markdown, không giải thích):\n"
-        '{"ten_san_pham":"...","loai_san_pham":"...","diem_noi_bat":"...","mo_ta_ngan":"...","mau_sac":["..."]}'
+        '{"ten_san_pham":"...","ten_mau":"...","loai_san_pham":"...","diem_noi_bat":"...","mo_ta_ngan":"...","mau_sac":["..."]}\n'
+        "Quy tắc ten_mau: tiếng Việt ngắn 1–4 từ (VD: Tím, Be nhạt, Xanh navy) — màu vải/in chính của SP trên ảnh."
     )
 
     parts: List[Dict[str, Any]] = [{"text": prompt}]
@@ -1160,10 +1771,10 @@ def name_product_from_reference_images(
                 warnings.append(f"vision_name: fallback config sau lỗi: {exc}")
             except Exception as exc2:
                 warnings.append(f"vision_name: {exc2}")
-                return "", "", [], warnings
+                return "", "", [], "", warnings
         else:
             warnings.append(f"vision_name: {exc}")
-            return "", "", [], warnings
+            return "", "", [], "", warnings
 
     text = ""
     finish = ""
@@ -1182,15 +1793,15 @@ def name_product_from_reference_images(
         text = ""
     if not text.strip():
         warnings.append(f"vision_name: Gemini không trả text (finish={finish or 'n/a'}).")
-        return "", "", [], warnings
+        return "", "", [], "", warnings
     if "MAX" in finish.upper() and "TOKEN" in finish.upper():
         warnings.append("vision_name: output bị cắt MAX_TOKENS — đang parse phần còn lại.")
 
-    name, analysis, colors_out = _extract_vision_name_json(text)
+    name, analysis, colors_out, ten_mau = _extract_vision_name_json(text)
     if not name:
         warnings.append("vision_name: thiếu ten_san_pham trong JSON.")
-        return "", analysis, colors_out, warnings
-    return name, analysis, colors_out, warnings
+        return "", analysis, colors_out, ten_mau, warnings
+    return name, analysis, colors_out, ten_mau, warnings
 
 
 def name_product_from_reference_image(
@@ -1201,7 +1812,7 @@ def name_product_from_reference_image(
     style: str = "",
     colors: Optional[List[str]] = None,
     notes: str = "",
-) -> Tuple[str, str, List[str], List[str]]:
+) -> Tuple[str, str, List[str], str, List[str]]:
     """Alias tương thích — ủy quyền sang name_product_from_reference_images."""
     return name_product_from_reference_images(
         [image_url],
@@ -1227,6 +1838,48 @@ def _resolve_category_id_for_product_data(db: Session, product_data: Dict[str, A
         return cid
     cat3_idx = product_crud._build_cat3_lookup_indexes(db)
     return product_crud._resolve_category_id_from_row(product_data, cat3_idx)
+
+
+def _apply_studio_material_image_to_ladipage(
+    db: Session,
+    lp: Any,
+    material_url: str,
+    *,
+    material_name: str = "",
+    material_body: str = "",
+    material_callouts: Optional[List[str]] = None,
+) -> None:
+    """Gắn ảnh + copy chất liệu Studio vào section material của Ladipage 1 SP."""
+    url = (material_url or "").strip()
+    if not url:
+        return
+    from app.models.ladipage import LadipageSection
+
+    sections = (
+        db.query(LadipageSection)
+        .filter(LadipageSection.ladipage_id == int(lp.id))
+        .all()
+    )
+    mat = (material_name or "").strip()
+    body = (material_body or "").strip()
+    callouts = [str(c).strip() for c in (material_callouts or []) if str(c).strip()][:3]
+    for section in sections:
+        if (section.section_type or "").strip() != "material":
+            continue
+        data = dict(section.data or {})
+        data["image_url"] = url
+        data["image_source"] = "product"
+        data["image_object_position"] = str(data.get("image_object_position") or "").strip() or "50% 50%"
+        if mat:
+            data["material"] = mat
+        if body:
+            data["body"] = body
+        if callouts:
+            data["callouts"] = callouts
+        section.data = data
+        db.add(section)
+        break
+    db.flush()
 
 
 def _sync_product_description_from_ladipage(db: Session, product: Any, lp: Any) -> None:
@@ -1287,7 +1940,7 @@ def _sync_product_description_from_ladipage(db: Session, product: Any, lp: Any) 
 
 
 def _run_ai_studio_bootstrap(job_id: str) -> None:
-    """Mode AI: chỉ vision đặt tên → awaiting_input (form tạo từng mốc)."""
+    """Mode AI: khởi tạo studio → awaiting_input (tạo từng màu, đặt tên SEO khi đăng)."""
     state = load_job(job_id) or {}
     payload = dict(state.get("payload") or {})
     warnings: List[str] = list(state.get("warnings") or [])
@@ -1303,61 +1956,34 @@ def _run_ai_studio_bootstrap(job_id: str) -> None:
         validate_job_payload(payload)
         product_key = (state.get("product_key") or "").strip() or new_manual_product_id()
         studio = _init_studio(payload, product_key=product_key)
-        refs = [str(u).strip() for u in (payload.get("ref_image_urls") or []) if str(u).strip()][:3]
-        gender = (payload.get("gender") or "").strip()
-        material = (payload.get("material") or "").strip()
-        style = (payload.get("style") or "").strip()
         admin_name = (payload.get("product_name") or payload.get("name") or "").strip()
+        name_source = "admin" if admin_name else "pending_vision"
 
-        _job_update(
-            job_id,
-            status="generating",
-            step="vision_name",
-            message=f"Gemini đang đọc {len(refs)} ảnh gốc để đặt tên SEO…",
-            progress=12,
-            product_key=product_key,
-            studio=studio,
-        )
-        vision_name, vision_analysis, vision_colors, vw = name_product_from_reference_images(
-            refs,
-            gender=gender,
-            material=material,
-            style=style,
-            colors=_parse_colors(payload.get("colors")),
-            notes=(payload.get("notes") or "").strip(),
-        )
-        warnings.extend(vw)
-        if admin_name:
-            name_source = "admin"
-        elif vision_name:
-            name_source = "gemini_vision"
-            payload = {**payload, "product_name": vision_name}
-        else:
-            detail = "; ".join([w for w in vw if w][:3]) or "Gemini không trả tên hợp lệ."
-            raise RuntimeError(
-                "Chưa đặt được tên SEO từ ảnh gốc. "
-                f"Chi tiết: {detail} "
-                "1 ảnh là đủ; thử lại hoặc kiểm tra GEMINI_API_KEY / ảnh tải được."
-            )
-
-        studio = _init_studio(payload, product_key=product_key)
         _refresh_studio_hints({"payload": payload, "studio": studio}, studio)
+
+        if admin_name:
+            msg = (
+                f"Tên SP: {admin_name[:80]}. "
+                "Nhập màu đầu tiên + upload ảnh tham chiếu màu đó rồi bấm Tạo."
+            )
+        else:
+            msg = (
+                "Sang Studio: upload ảnh mẫu từng màu — AI tự đọc tên màu. "
+                "Ảnh màu đầu: AI đọc luôn tên SEO sản phẩm từ ảnh."
+            )
 
         _job_update(
             job_id,
             status="awaiting_input",
             step="awaiting_input",
-            message=(
-                f"Đã đặt tên SEO: {(admin_name or vision_name)[:80]}. "
-                "Nhập màu đầu tiên + chọn ảnh tham khảo + prompt rồi bấm Tạo."
-            ),
+            message=msg,
             progress=20,
             payload=payload,
             product_key=product_key,
             studio=studio,
-            vision_product_name=vision_name or admin_name or None,
-            vision_analysis=vision_analysis or None,
-            vision_colors=vision_colors or [],
+            vision_product_name=admin_name or None,
+            vision_analysis=None,
+            vision_colors=[],
             name_source=name_source,
             warnings=warnings,
             error=None,
@@ -1391,6 +2017,7 @@ def _run_generate_studio_slot(job_id: str) -> None:
         plan = dict(studio.get("plan") or {})
         image_model_choice = str(plan.get("image_model") or "pro").strip() or "pro"
         model_id, model_size, model_label = _resolve_manual_ai_image_model(image_model_choice)
+        aspect_ratio = _normalize_studio_aspect_ratio(plan.get("aspect_ratio"))
         kind = str(slot.get("kind") or "").strip()
         attempt = int(slot.get("attempt") or 0) + 1
         slot["attempt"] = attempt
@@ -1415,12 +2042,71 @@ def _run_generate_studio_slot(job_id: str) -> None:
         )
         if not refs:
             raise RuntimeError("Chọn ít nhất 1 ảnh tham khảo (hoặc gửi ảnh kèm).")
+
+        payload = dict(state.get("payload") or {})
+        if kind == "color":
+            admin_color_before = (slot.get("name") or "").strip()
+            resolved_name, name_warnings, vision_patches = _resolve_studio_color_name(
+                state, studio, slot, refs
+            )
+            slot["name"] = resolved_name
+            studio["current_slot"] = slot
+            label = _slot_label(slot)
+            if name_warnings:
+                warnings_state = list(state.get("warnings") or [])
+                warnings_state.extend(name_warnings)
+                state = {**state, "warnings": warnings_state}
+            product_title = (vision_patches.get("vision_product_name") or "").strip()
+            payload_patch = vision_patches.get("payload")
+            if vision_patches:
+                patch_body = {k: v for k, v in vision_patches.items() if k != "payload"}
+                state = {**state, **patch_body}
+                if payload_patch:
+                    state = {**state, "payload": payload_patch}
+            if admin_color_before:
+                color_msg = f"Màu «{resolved_name}» — đang tạo {label}…"
+            elif product_title:
+                color_msg = (
+                    f"AI đọc tên SP «{product_title[:72]}» + màu «{resolved_name}» "
+                    f"từ ảnh mẫu — đang tạo {label}…"
+                )
+            else:
+                color_msg = f"AI đọc màu «{resolved_name}» từ ảnh mẫu — đang tạo {label}…"
+            update_kw: Dict[str, Any] = {
+                "message": color_msg,
+                "progress": 28,
+                "studio": studio,
+                "warnings": state.get("warnings"),
+            }
+            if vision_patches:
+                update_kw.update({k: v for k, v in vision_patches.items() if k != "payload"})
+                if payload_patch:
+                    update_kw["payload"] = payload_patch
+            _job_update(job_id, **update_kw)
+        if kind == "material":
+            material_txt = (payload.get("material") or "").strip()
+            copy = _resolve_studio_material_copy(
+                state,
+                material_txt,
+                notes=str(slot.get("user_prompt") or "").strip(),
+            )
+            slot["material_callouts"] = copy.get("callouts") or []
+            slot["material_body"] = copy.get("body") or ""
+            studio["material_callouts"] = slot["material_callouts"]
+            studio["material_body"] = slot["material_body"]
+            studio["current_slot"] = slot
+            _job_update(
+                job_id,
+                message=f"Đang tạo {label} — ưu điểm: {', '.join(slot['material_callouts'][:3])}…",
+                studio=studio,
+            )
         prompt = _build_studio_slot_prompt({**state, "studio": studio}, slot)
         raw = _gemini_edit_from_urls(
             refs,
             prompt,
             image_model=model_id,
             image_size=model_size,
+            aspect_ratio=aspect_ratio,
         )
         hint = f"{kind}-{int(slot.get('index') or 0) + 1}-a{attempt}"
         url = _upload_product_image_bytes(raw, name_hint=hint, product_key=product_key)
@@ -1510,7 +2196,56 @@ def _finalize_product_from_media(
         vision_name = (state.get("vision_product_name") or "").strip()
         vision_analysis = (state.get("vision_analysis") or "").strip()
         vision_colors = list(state.get("vision_colors") or [])
-        name_source = state.get("name_source") or ("admin" if admin_name else "gemini_vision")
+        name_source = state.get("name_source") or ("admin" if admin_name else "pending_vision")
+
+        if mode == "ai" and not admin_name and not vision_name:
+            vision_refs: List[str] = []
+            if (main_image or "").strip():
+                vision_refs.append(main_image.strip())
+            elif colors_payload:
+                first_img = (colors_payload[0].get("img") or "").strip()
+                if first_img:
+                    vision_refs.append(first_img)
+            if not vision_refs:
+                raise RuntimeError("Chưa có ảnh màu để Gemini đặt tên SEO.")
+            _job_update(
+                job_id,
+                status="publishing",
+                step="vision_name",
+                message="Gemini đọc lại ảnh màu để đặt tên SEO (fallback)…",
+                progress=72,
+                error=None,
+            )
+            color_names_for_vision = [str(c.get("name") or "").strip() for c in colors_payload if c.get("name")]
+            vision_name, vision_analysis, vision_colors, _ten_mau, vw = name_product_from_reference_images(
+                vision_refs[:1],
+                gender=gender,
+                material=material,
+                style=style,
+                colors=color_names_for_vision or _parse_colors(payload.get("colors")),
+                notes=(payload.get("notes") or "").strip(),
+            )
+            warnings.extend(vw)
+            if vision_name:
+                name_source = "gemini_vision"
+                payload = {**payload, "product_name": vision_name}
+                state = {
+                    **state,
+                    "payload": payload,
+                    "vision_product_name": vision_name,
+                    "vision_analysis": vision_analysis or None,
+                    "vision_colors": vision_colors or [],
+                    "name_source": name_source,
+                    "warnings": warnings,
+                }
+                persist_job(job_id, state)
+            else:
+                detail = "; ".join([w for w in vw if w][:3]) or "Gemini không trả tên hợp lệ."
+                raise RuntimeError(
+                    "Chưa đặt được tên SEO từ ảnh màu. "
+                    f"Chi tiết: {detail} "
+                    "Thử lại hoặc kiểm tra GEMINI_API_KEY."
+                )
 
         # Sync màu vào payload brief
         payload = {
@@ -1679,6 +2414,20 @@ def _finalize_product_from_media(
             raise RuntimeError(
                 "Không tạo được Ladipage 1 SP — trang sản phẩm sẽ không có hero/highlights/FAQ."
             )
+
+        studio_state = dict(state.get("studio") or {})
+        material_image = (studio_state.get("material_image") or "").strip()
+        if material_image:
+            _apply_studio_material_image_to_ladipage(
+                db,
+                lp,
+                material_image,
+                material_name=material,
+                material_body=str(studio_state.get("material_body") or "").strip(),
+                material_callouts=studio_state.get("material_callouts") or [],
+            )
+            db.commit()
+            db.refresh(lp)
 
         try:
             _sync_product_description_from_ladipage(db, product, lp)
@@ -1876,14 +2625,18 @@ def start_studio_generate(
     prompt: str = "",
     ref_urls: Optional[List[str]] = None,
     attach_url: str = "",
+    image_model: Optional[str] = None,
+    aspect_ratio: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Tạo 1 ảnh theo mốc: color | main | gallery | detail.
+    Tạo 1 ảnh theo mốc: color | main | gallery | detail | material.
     Khách chọn ref + (tuỳ chọn) ảnh kèm + prompt rồi mới gen.
     """
     kind_n = (kind or "").strip().lower()
-    if kind_n not in ("color", "main", "gallery", "detail"):
-        raise ValueError("kind phải là color | main | gallery | detail.")
+    if kind_n not in ("color", "main", "gallery", "detail", "material"):
+        raise ValueError("kind phải là color | main | gallery | detail | material.")
+    if kind_n == "detail":
+        raise ValueError("Không cần tạo ảnh chi tiết — chỉ cần ảnh màu, gallery và chất liệu.")
     with _WORKER_LOCK:
         state = load_job(job_id)
         if not state:
@@ -1891,7 +2644,8 @@ def start_studio_generate(
         status = (state.get("status") or "").strip()
         if status not in ("awaiting_input", "awaiting_colors", "ready_to_publish"):
             raise ValueError(
-                f"Job đang «{status}» — chỉ tạo ảnh khi đang nhập form (awaiting_input)."
+                f"Job đang «{status}» — không thể tạo ảnh mới. "
+                "Nếu đang xem ảnh vừa tạo, bấm «Tạo lại»; nếu đang gen, chờ vài giây."
             )
         payload = dict(state.get("payload") or {})
         if (payload.get("mode") or "").strip().lower() != "ai":
@@ -1903,12 +2657,12 @@ def start_studio_generate(
         )
         studio = dict(state.get("studio") or _init_studio(payload, product_key=product_key))
         studio["product_key"] = product_key
+        _patch_studio_ai_plan(studio, image_model=image_model, aspect_ratio=aspect_ratio)
         if not studio.get("ref_pool"):
             studio["ref_pool"] = _ref_pool_from_payload(payload)
 
         color_name = (name or "").strip()
-        if kind_n == "color" and not color_name:
-            raise ValueError("Tạo ảnh màu cần nhập tên màu.")
+        # Tên màu để trống: worker _resolve_studio_color_name đọc từ ảnh mẫu (Gemini vision).
 
         if kind_n == "color":
             idx = len([c for c in (studio.get("colors") or []) if isinstance(c, dict) and c.get("img")])
@@ -1916,11 +2670,33 @@ def start_studio_generate(
             idx = len(studio.get("images") or [])
         elif kind_n == "detail":
             idx = len(studio.get("gallery") or [])
+        elif kind_n == "material":
+            idx = 0
         else:
             idx = 0
 
         selected = [str(u).strip() for u in (ref_urls or []) if str(u).strip()]
         attach = (attach_url or "").strip()
+        color_index = 0
+        if kind_n == "color":
+            color_index = len(
+                [c for c in (studio.get("colors") or []) if isinstance(c, dict) and c.get("img")]
+            )
+            selected = _merge_customer_orig_refs(
+                studio,
+                selected,
+                for_color=True,
+                color_index=color_index,
+                attach_url=attach,
+            )
+            if attach:
+                _add_to_ref_pool(
+                    studio,
+                    url=attach,
+                    label=f"Mẫu {color_name or 'SP'}"[:80],
+                    kind="ref",
+                    pool_id=f"color-ref-{color_index}-{len(studio.get('ref_pool') or [])}",
+                )
         resolved = _resolve_selected_refs(studio, ref_urls=selected, attach_url=attach)
         if not resolved:
             raise ValueError("Chọn ít nhất 1 ảnh tham khảo hoặc gửi ảnh kèm.")
@@ -1998,21 +2774,52 @@ def approve_studio_image(job_id: str) -> Dict[str, Any]:
         _commit_approved_slot(studio, slot)
         # Gợi ý mốc tiếp theo hành vi người dùng
         if kind == "color":
-            studio["phase"] = "color"  # có thể thêm màu nữa hoặc chuyển gallery
+            studio["phase"] = "color"
         elif kind == "main":
             studio["phase"] = "gallery"
         elif kind == "gallery":
-            studio["phase"] = "gallery"
+            studio["phase"] = (
+                "gallery"
+                if _studio_gallery_count(studio) < STUDIO_MIN_GALLERY_IMAGES
+                else ("material" if not _studio_has_material_image(studio) else "gallery")
+            )
+        elif kind == "material":
+            studio["phase"] = "material"
         else:
-            studio["phase"] = "detail"
+            studio["phase"] = "gallery"
         studio["current_slot"] = None
         _refresh_studio_hints(state, studio)
-        n_colors = len([c for c in (studio.get("colors") or []) if isinstance(c, dict) and c.get("img")])
-        msg = (
-            f"Đã duyệt. Có {n_colors} màu — thêm màu khác, hoặc tạo gallery/chi tiết, hoặc Đăng."
-            if kind == "color"
-            else "Đã duyệt. Chọn mốc tiếp (gallery / chi tiết / ảnh chính) hoặc Đăng sản phẩm."
-        )
+        n_colors = _studio_color_count(studio)
+        n_gallery = _studio_gallery_count(studio)
+        missing = _studio_publish_missing(studio)
+        if _studio_can_publish(studio):
+            msg = "Đã duyệt — đủ ảnh màu, gallery và chất liệu. Bấm «Đăng sản phẩm»."
+        elif kind == "color":
+            msg = (
+                f"Đã duyệt màu ({n_colors}/{STUDIO_MIN_COLOR_IMAGES}). "
+                f"Tiếp: gallery ({n_gallery}/{STUDIO_MIN_GALLERY_IMAGES}), "
+                f"ảnh chất liệu ({1 if _studio_has_material_image(studio) else 0}/{STUDIO_MIN_MATERIAL_IMAGES})."
+            )
+        elif kind == "material":
+            msg = (
+                "Đã duyệt ảnh chất liệu. "
+                + (
+                    "Đủ điều kiện đăng — bấm «Đăng sản phẩm»."
+                    if not missing
+                    else f"Còn thiếu: {', '.join(missing)}."
+                )
+            )
+        elif kind == "gallery":
+            msg = (
+                f"Đã duyệt gallery ({n_gallery}/{STUDIO_MIN_GALLERY_IMAGES}). "
+                + (
+                    "Đủ điều kiện đăng — bấm «Đăng sản phẩm»."
+                    if not missing
+                    else f"Còn thiếu: {', '.join(missing)}."
+                )
+            )
+        else:
+            msg = f"Đã duyệt. Còn thiếu: {', '.join(missing)}." if missing else "Đã duyệt — có thể đăng sản phẩm."
         state.update(
             {
                 "studio": studio,
@@ -2035,6 +2842,8 @@ def regenerate_studio_image(
     prompt: Optional[str] = None,
     ref_urls: Optional[List[str]] = None,
     attach_url: Optional[str] = None,
+    image_model: Optional[str] = None,
+    aspect_ratio: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Tạo lại slot hiện tại — có thể sửa prompt / ref / ảnh kèm."""
     with _WORKER_LOCK:
@@ -2045,15 +2854,45 @@ def regenerate_studio_image(
         if status not in ("awaiting_approval", "failed"):
             raise ValueError("Chỉ tạo lại khi đang xem ảnh / lỗi gen.")
         studio = dict(state.get("studio") or {})
+        _patch_studio_ai_plan(studio, image_model=image_model, aspect_ratio=aspect_ratio)
         slot = dict(studio.get("current_slot") or {})
         if not slot.get("kind"):
             raise ValueError("Không còn slot ảnh để tạo lại.")
         if prompt is not None:
             slot["user_prompt"] = str(prompt).strip()
+        slot_attach = str(slot.get("attach_url") or attach_url or "").strip()
         if ref_urls is not None:
-            slot["ref_urls"] = [str(u).strip() for u in ref_urls if str(u).strip()][:3]
+            picked = [str(u).strip() for u in ref_urls if str(u).strip()][:3]
+            if (slot.get("kind") or "").strip() == "color":
+                color_index = int(slot.get("index") or 0)
+                picked = _merge_customer_orig_refs(
+                    studio,
+                    picked,
+                    for_color=True,
+                    color_index=color_index,
+                    attach_url=slot_attach,
+                )
+            slot["ref_urls"] = picked
+        elif (slot.get("kind") or "").strip() == "color":
+            color_index = int(slot.get("index") or 0)
+            slot["ref_urls"] = _merge_customer_orig_refs(
+                studio,
+                [str(u).strip() for u in (slot.get("ref_urls") or []) if str(u).strip()],
+                for_color=True,
+                color_index=color_index,
+                attach_url=slot_attach,
+            )
         if attach_url is not None:
             slot["attach_url"] = str(attach_url).strip() or None
+            if (slot.get("kind") or "").strip() == "color":
+                color_index = int(slot.get("index") or 0)
+                slot["ref_urls"] = _merge_customer_orig_refs(
+                    studio,
+                    [str(u).strip() for u in (slot.get("ref_urls") or []) if str(u).strip()],
+                    for_color=True,
+                    color_index=color_index,
+                    attach_url=str(attach_url).strip(),
+                )
         slot["url"] = None
         studio["current_slot"] = slot
         label = _slot_label(slot)
@@ -2102,7 +2941,12 @@ def publish_studio_job(job_id: str) -> Dict[str, Any]:
             except ValueError:
                 pass
         if not _studio_can_publish(studio):
-            raise ValueError("Cần ít nhất 1 ảnh đã duyệt (màu hoặc chính) trước khi đăng.")
+            missing = _studio_publish_missing(studio)
+            raise ValueError(
+                "Chưa đủ ảnh để đăng — cần "
+                + ", ".join(missing)
+                + "."
+            )
         state.update(
             {
                 "studio": studio,

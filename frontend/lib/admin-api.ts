@@ -2955,6 +2955,8 @@ export type ManualProductJobCreatePayload = {
   detail_count?: number;
   /** Model tạo ảnh AI: pro | flash | flash3 */
   image_model?: 'pro' | 'flash' | 'flash3' | string;
+  /** Tỷ lệ khung Gemini: 1:1 | 3:4 | 4:3 | 9:16 | 16:9 … */
+  aspect_ratio?: string;
   /** none = không người mẫu; model = có người mẫu */
   model_presence?: 'none' | 'model' | string;
   /** Bắt buộc nếu model_presence=model: female | male */
@@ -3021,6 +3023,9 @@ export type ManualProductStudio = {
   main_image?: string;
   images?: string[];
   gallery?: string[];
+  material_image?: string;
+  material_callouts?: string[];
+  material_body?: string;
   current_slot?: ManualProductStudioSlot | null;
   can_publish?: boolean;
 };
@@ -3038,6 +3043,44 @@ export type ManualProductJob = {
   studio?: ManualProductStudio | null;
   created_at?: string | null;
   updated_at?: string | null;
+  payload?: ManualProductJobCreatePayload | null;
+  mode?: ManualProductCreateMode | string | null;
+};
+
+export type ManualProductJobSummary = {
+  job_id: string;
+  status: string;
+  message?: string | null;
+  progress: number;
+  mode?: ManualProductCreateMode | string | null;
+  product_name?: string | null;
+  material?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+};
+
+export type ManualProductJobCreatePayload = {
+  mode?: ManualProductCreateMode | string;
+  product_name?: string;
+  material?: string;
+  gender?: string;
+  price?: number;
+  sizes?: string[];
+  no_size?: boolean;
+  colors?: Array<string | { name: string; img?: string }>;
+  available?: number;
+  notes?: string;
+  main_image?: string | null;
+  images?: string[];
+  gallery?: string[];
+  ref_image_urls?: string[];
+  model_presence?: string;
+  model_gender?: string;
+  model_age_group?: string;
+  model_ethnicity?: string;
+  shot_style?: string;
+  image_model?: string;
+  aspect_ratio?: string;
 };
 
 export type ManualProductUploadResult = {
@@ -3092,6 +3135,17 @@ export const manualProductCreateAPI = {
       timeoutMs: 30_000,
     }),
 
+  listJobs: (params?: { active?: boolean; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.active === false) q.set('active', 'false');
+    if (params?.limit) q.set('limit', String(params.limit));
+    const qs = q.toString();
+    return fetchAdmin<ManualProductJobSummary[]>(
+      `/manual-products/jobs${qs ? `?${qs}` : ''}`,
+      { timeoutMs: 30_000 },
+    );
+  },
+
   setColors: (jobId: string, colors: Array<string | { name: string }>) =>
     fetchAdmin<ManualProductJob>(
       `/manual-products/jobs/${encodeURIComponent(jobId)}/colors`,
@@ -3105,11 +3159,13 @@ export const manualProductCreateAPI = {
   generateImage: (
     jobId: string,
     body: {
-      kind: 'color' | 'main' | 'gallery' | 'detail' | string;
+      kind: 'color' | 'main' | 'gallery' | 'detail' | 'material' | string;
       name?: string;
       prompt?: string;
       ref_urls?: string[];
       attach_url?: string;
+      image_model?: 'pro' | 'flash' | 'flash3' | string;
+      aspect_ratio?: string;
     },
   ) =>
     fetchAdmin<ManualProductJob>(
@@ -3133,6 +3189,8 @@ export const manualProductCreateAPI = {
       prompt?: string | null;
       ref_urls?: string[] | null;
       attach_url?: string | null;
+      image_model?: 'pro' | 'flash' | 'flash3' | string;
+      aspect_ratio?: string | null;
     },
   ) =>
     fetchAdmin<ManualProductJob>(

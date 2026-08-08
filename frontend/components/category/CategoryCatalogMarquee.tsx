@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import LoadingLink from '@/components/ui/LoadingLink';
 import { useRouter } from 'next/navigation';
@@ -145,7 +145,6 @@ export default function CategoryCatalogMarquee({
   const gridCols = useGridCols(desktopCols);
   const [touchPaused, setTouchPaused] = useState(false);
   const [hoverPaused, setHoverPaused] = useState(false);
-  const viewportRef = useRef<HTMLDivElement>(null);
 
   const displayTiles = useMemo(() => {
     const l23 = tiles.filter((t) => t.level === 2 || t.level === 3);
@@ -164,26 +163,6 @@ export default function CategoryCatalogMarquee({
   }, [displayTiles, gridCols, manualScroll]);
 
   const isPaused = touchPaused || hoverPaused;
-
-  useEffect(() => {
-    if (manualScroll) return;
-    const el = viewportRef.current;
-    if (!el) return;
-
-    let raf = 0;
-    const tick = () => {
-      if (!isPaused) {
-        el.scrollTop += 0.55;
-        const half = el.scrollHeight / 2;
-        if (half > 0 && el.scrollTop >= half - 1) {
-          el.scrollTop = 0;
-        }
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [manualScroll, isPaused, rows.length]);
 
   if (rows.length === 0) return null;
 
@@ -214,10 +193,8 @@ export default function CategoryCatalogMarquee({
 
   return (
     <div
-      ref={viewportRef}
-      className={`hero-category-viewport hero-category-viewport--scroll overflow-y-auto overflow-x-hidden overscroll-y-contain touch-pan-y ${viewportClassName} ${isPaused ? 'is-paused' : ''}`}
+      className={`hero-category-viewport overflow-hidden ${viewportClassName} ${isPaused ? 'is-paused' : ''}`}
       aria-label={ariaLabel}
-      style={{ WebkitOverflowScrolling: 'touch' }}
       onMouseEnter={() => setHoverPaused(true)}
       onMouseLeave={() => setHoverPaused(false)}
       onTouchStart={() => setTouchPaused(true)}

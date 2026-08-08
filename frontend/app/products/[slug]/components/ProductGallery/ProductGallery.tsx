@@ -185,7 +185,7 @@ export default function ProductGallery({
     );
   };
 
-  const renderPhotoSlide = (url: string) => (
+  const renderPhotoSlide = (url: string, priority = false) => (
     <ProductFillImage
       src={getOptimizedImage(url, {
         width: isBleed ? 720 : 900,
@@ -194,6 +194,7 @@ export default function ProductGallery({
       })}
       alt={product.name}
       frameClassName={frameAspect}
+      priority={priority}
       onBroken={() => markBroken(url)}
     />
   );
@@ -274,7 +275,7 @@ export default function ProductGallery({
             >
               {firstPhotoUrl ? (
                 <MobileProductMediaSlide key={firstPhotoUrl} className="overflow-hidden bg-gray-100">
-                  {renderPhotoSlide(firstPhotoUrl)}
+                  {renderPhotoSlide(firstPhotoUrl, true)}
                 </MobileProductMediaSlide>
               ) : null}
               {hasVideo && parsedVideo ? (
@@ -320,7 +321,7 @@ export default function ProductGallery({
         {isShowingVideo && parsedVideo ? (
           renderVideoSlide()
         ) : mainRaw ? (
-          renderPhotoSlide(mainRaw)
+          renderPhotoSlide(mainRaw, true)
         ) : null}
       </div>
 

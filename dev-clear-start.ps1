@@ -1,13 +1,15 @@
 #Requires -Version 5.1
 <#
   Xoá cache, rồi khởi động local: backend (uvicorn), frontend (Next.js), ngrok.
-  Cấu hình cổng ở biến bên dưới (mặc định: backend 8001, frontend 3001 — trùng deploy/update-vps.sh + NEXT_PUBLIC_API_BASE_URL).
+  Cấu hình cổng ở biến bên dưới (mặc định: backend 8001, frontend 3001 — trùng deploy/update-vps.sh 188.com.vn).
 
-  Giải phóng cổng: chỉ LISTEN trên hai port trên (Get-NetTCPConnection); và chỉ dừng ngrok.exe khi dòng lệnh có forward tới đúng port frontend (vd ngrok http 3001). Không dừng ngrok tunnel khác cổng.
+  An toàn với Thu-do-online (dev :3000, deploy/update-vps.sh riêng): chỉ dừng process LISTEN trên
+  8001/3001 nếu command line thuộc thư mục backend/frontend repo này. Không taskkill toàn bộ node.exe
+  trừ khi -KillAllNode (và khi đó vẫn chỉ node/esbuild trong thư mục frontend 188-com-vn).
 
   Cách chạy:
     powershell -ExecutionPolicy Bypass -File .\dev-clear-start.ps1
-    .\dev-clear-start.ps1 -KillAllNode    # tat moi node.exe — than trong
+    .\dev-clear-start.ps1 -KillAllNode    # chi node/esbuild trong frontend repo nay
     .\dev-clear-start.ps1 -NoNgrok        # bo qua ngrok
     .\dev-clear-start.ps1 -OnlyClean      # chi xoa cache, khong khoi dong
 #>
@@ -24,31 +26,104 @@ $ErrorActionPreference = "Continue"
 # --- Cấu hình ---
 $BackendPort  = 8001
 $FrontendPort = 3001
+# Thu-do-online dev mac dinh :3000 — khong dung cho 188-com-vn (deploy/update-vps.sh Thu-do-online).
+$ProtectedForeignPorts = @(3000)
 
 $Root         = $PSScriptRoot
 $BackendDir   = Join-Path $Root "backend"
 $FrontendDir  = Join-Path $Root "frontend"
+$ProjectNeedle = ""
+$BackendNeedle = ""
+$FrontendNeedle = ""
 
-function Write-Step([string]$msg) {
-    Write-Host ""
-    Write-Host "==> $msg" -ForegroundColor Cyan
+function Initialize-ProjectNeedles {
+    $script:ProjectNeedle = Normalize-PathForMatch $Root
+    $script:BackendNeedle = Normalize-PathForMatch $BackendDir
+    $script:FrontendNeedle = Normalize-PathForMatch $FrontendDir
 }
 
-function Stop-ProcessOnPort([int]$Port) {
+function Test-ForeignProjectCommandLine([string]$CommandLine) {
+    $cmd = ([string]$CommandLine).Replace('\', '/').ToLowerInvariant()
+    if (-not $cmd) { return $false }
+    # Khong dong process Thu-do-online / NanoAI (deploy/update-vps.sh rieng).
+    return ($cmd -like '*thu-do-online*' -or $cmd -like '*thudo-online*')
+}
+
+function Test-ProcessBelongsTo188Repo {
+    param(
+        [int]$ProcessId,
+        [ValidateSet('backend', 'frontend', 'any')]
+        [string]$Scope = 'any'
+    )
+    if (-not $ProcessId -or $ProcessId -le 0) { return $false }
+    try {
+        $p = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction Stop
+    } catch { return $false }
+    $cmd = [string]$p.CommandLine
+    if (Test-ForeignProjectCommandLine $cmd) { return $false }
+    $norm = $cmd.Replace('\', '/').ToLowerInvariant()
+    if (-not $norm) { return $false }
+    if ($Scope -eq 'backend') {
+        return ($norm -like "*$BackendNeedle*" -or $norm -like "*$ProjectNeedle/backend*")
+    }
+    if ($Scope -eq 'frontend') {
+        return ($norm -like "*$FrontendNeedle*" -or $norm -like "*$ProjectNeedle/frontend*")
+    }
+    return ($norm -like "*$ProjectNeedle*")
+}
+
+function Stop-ProcessOnPortForProject {
+    param(
+        [int]$Port,
+        [ValidateSet('backend', 'frontend')]
+        [string]$Scope
+    )
+    if ($ProtectedForeignPorts -contains $Port) {
+        Write-Host ("  Bo qua port {0} (thuoc du an khac, vd Thu-do-online :3000)" -f $Port) -ForegroundColor DarkGray
+        return
+    }
     $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     if (-not $conns) { return }
     $pids = $conns | Select-Object -ExpandProperty OwningProcess -Unique
     foreach ($procId in $pids) {
-        if ($procId -and $procId -ne 0) {
-            try {
-                Stop-Process -Id $procId -Force -ErrorAction Stop
-                Write-Host ("  Da dung process PID {0} (chi port LISTEN {1})" -f $procId, $Port)
-            } catch {
-                $errText = if ($null -ne $_.Exception) { $_.Exception.Message } else { $_.ToString() }
-                Write-Host ("  Khong the dung PID {0} - {1}" -f $procId, $errText) -ForegroundColor Yellow
-            }
+        if (-not (Test-ProcessBelongsTo188Repo -ProcessId $procId -Scope $Scope)) {
+            Write-Host ("  Bo qua PID {0} (port {1} - khong thuoc 188-com-vn {2})" -f $procId, $Port, $Scope) -ForegroundColor DarkGray
+            continue
+        }
+        try {
+            Stop-Process -Id $procId -Force -ErrorAction Stop
+            Write-Host ("  Da dung process PID {0} (188-com-vn LISTEN {1})" -f $procId, $Port)
+        } catch {
+            $errText = if ($null -ne $_.Exception) { $_.Exception.Message } else { $_.ToString() }
+            Write-Host ("  Khong the dung PID {0} - {1}" -f $procId, $errText) -ForegroundColor Yellow
         }
     }
+}
+
+function Stop-PythonProcessesForDirectory([string]$Dir) {
+    if (-not (Test-Path -LiteralPath $Dir)) { return }
+    $needle = Normalize-PathForMatch $Dir
+    if (-not $needle) { return }
+    try { $procs = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue }
+    catch { return }
+    foreach ($p in @($procs)) {
+        $cmd = [string]$p.CommandLine
+        if (Test-ForeignProjectCommandLine $cmd) { continue }
+        $norm = $cmd.Replace('\', '/').ToLowerInvariant()
+        if (-not $norm -or $norm -notlike "*$needle*") { continue }
+        if ($norm -notmatch 'uvicorn|main:app') { continue }
+        try {
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop
+            Write-Host ("  Da dung python.exe PID {0} (backend 188-com-vn)" -f $p.ProcessId)
+        } catch {
+            Write-Host ("  Khong the dung python PID {0}" -f $p.ProcessId) -ForegroundColor Yellow
+        }
+    }
+}
+
+function Write-Step([string]$msg) {
+    Write-Host ""
+    Write-Host "==> $msg" -ForegroundColor Cyan
 }
 
 # Chi dung ngrok forward toi dung local port (vd ngrok http 3001). Khong dong tunnel khac port.
@@ -88,7 +163,9 @@ function Stop-NodeProcessesForDirectory([string]$Dir) {
     catch { $procs = $null }
     if (-not $procs) { return }
     foreach ($p in @($procs)) {
-        $cmd = ([string]$p.CommandLine).Replace('\', '/').ToLowerInvariant()
+        $cmd = ([string]$p.CommandLine)
+        if (Test-ForeignProjectCommandLine $cmd) { continue }
+        $cmd = $cmd.Replace('\', '/').ToLowerInvariant()
         if (-not $cmd) { continue }
         if ($cmd -notlike "*$needle*") { continue }
         try {
@@ -106,7 +183,9 @@ function Stop-EsbuildForDirectory([string]$Dir) {
     try { $procs = Get-CimInstance Win32_Process -Filter "Name = 'esbuild.exe'" -ErrorAction SilentlyContinue }
     catch { return }
     foreach ($p in @($procs)) {
-        $cmd = ([string]$p.CommandLine).Replace('\', '/').ToLowerInvariant()
+        $cmd = ([string]$p.CommandLine)
+        if (Test-ForeignProjectCommandLine $cmd) { continue }
+        $cmd = $cmd.Replace('\', '/').ToLowerInvariant()
         if (-not $cmd) { continue }
         if ($cmd -notlike "*$needle*") { continue }
         try {
@@ -187,23 +266,31 @@ function Remove-DirIfExists([string]$Path, [string]$Label) {
                 } catch { }
                 Write-Host "  Thu doi ten thu muc (giai phong .next cho Next)..." -ForegroundColor Yellow
                 if (Move-DirAsideStale -Path $Path -Label $Label) { return }
-                Write-Host "  LOI: Khong xoa/doi ten duoc $Label. Chay: .\dev-clear-start.ps1 -KillAllNode hoac dong Cursor roi xoa tay." -ForegroundColor Red
+                Write-Host "  LOI: Khong xoa/doi ten duoc $Label. Chay lai script hoac dong Cursor roi xoa tay." -ForegroundColor Red
             }
         }
     }
 }
 
 # ===========================================================================
-Write-Step "Giai phong chi port du an (LISTEN $BackendPort, $FrontendPort) + ngrok gan port $FrontendPort..."
-Stop-ProcessOnPort -Port $BackendPort
-Stop-ProcessOnPort -Port $FrontendPort
+Initialize-ProjectNeedles
+
+Write-Step "Giai phong port 188-com-vn (LISTEN $BackendPort backend, $FrontendPort frontend) - bo qua Thu-do-online :3000..."
+Stop-ProcessOnPortForProject -Port $BackendPort -Scope 'backend'
+Stop-ProcessOnPortForProject -Port $FrontendPort -Scope 'frontend'
+Stop-PythonProcessesForDirectory -Dir $BackendDir
 Stop-NgrokForwardingLocalPort -LocalPort $FrontendPort
 
-Write-Step "Dung node.exe lien quan thu muc frontend (giai phong lock .next)..."
+Write-Step "Dung node.exe lien quan thu muc frontend 188-com-vn (giai phong lock .next)..."
 if ($KillAllNode) {
-    Write-Host "  -KillAllNode: taskkill node.exe, esbuild.exe ..." -ForegroundColor Yellow
-    $null = & taskkill.exe /F /IM node.exe /T 2>$null
-    $null = & taskkill.exe /F /IM esbuild.exe /T 2>$null
+    Write-Host "  -KillAllNode: chi node/esbuild trong frontend repo nay (khong dong Thu-do-online)." -ForegroundColor Yellow
+    if (Test-Path $FrontendDir) {
+        Stop-NodeProcessesForDirectory -Dir $FrontendDir
+        Stop-EsbuildForDirectory -Dir $FrontendDir
+        Start-Sleep -Seconds 1
+        Stop-NodeProcessesForDirectory -Dir $FrontendDir
+        Stop-EsbuildForDirectory -Dir $FrontendDir
+    }
     Start-Sleep -Seconds 2
 } elseif (Test-Path $FrontendDir) {
     Stop-NodeProcessesForDirectory -Dir $FrontendDir
@@ -316,6 +403,7 @@ if ($NoNgrok) {
 
 Write-Host ""
 Write-Host "Xong. Kiem tra cua so CMD: BACKEND / FRONTEND / NGROK (neu co)." -ForegroundColor Green
+Write-Host "  Thu-do-online (:3000) va deploy/update-vps.sh cua du an do - khong bi script nay dong." -ForegroundColor DarkGray
 Write-Host "  API:      http://127.0.0.1:${BackendPort}/docs" -ForegroundColor Gray
 Write-Host "  Web:      http://localhost:${FrontendPort}/admin/products" -ForegroundColor Gray
 Write-Host "  Health:   curl http://127.0.0.1:${BackendPort}/health" -ForegroundColor DarkGray

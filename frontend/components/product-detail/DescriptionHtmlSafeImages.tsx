@@ -40,6 +40,12 @@ function wireImage(img: HTMLImageElement) {
       img.setAttribute('referrerpolicy', 'no-referrer');
     }
   }
+  if (!img.getAttribute('loading')) {
+    img.setAttribute('loading', 'lazy');
+  }
+  if (!img.getAttribute('decoding')) {
+    img.setAttribute('decoding', 'async');
+  }
   const onFail = () => hideBrokenImg(img);
   const onLoad = () => {
     if (img.naturalWidth < 2 || img.naturalHeight < 2) onFail();

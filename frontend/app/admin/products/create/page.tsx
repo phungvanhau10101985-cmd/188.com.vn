@@ -7,11 +7,14 @@ import {
   manualProductCreateAPI,
   type ManualProductCreateMode,
   type ManualProductJob,
+  type ManualProductJobCreatePayload,
+  type ManualProductRefPoolItem,
+  type ManualProductJobSummary,
 } from '@/lib/admin-api';
 import { useToast } from '@/components/ToastProvider';
 
 const STEPS_MANUAL = ['Chế độ', 'Thuộc tính', 'Ảnh', 'Đăng'] as const;
-const STEPS_AI = ['Chế độ', 'Thuộc tính', 'Ảnh gốc', 'Studio ảnh'] as const;
+const STEPS_AI = ['Chế độ', 'Thuộc tính', 'Cài đặt Studio', 'Studio ảnh'] as const;
 
 type ColorRow = { key: string; name: string; img: string };
 
@@ -38,6 +41,498 @@ function Thumb({ url, onRemove }: { url: string; onRemove?: () => void }) {
           ×
         </button>
       ) : null}
+    </div>
+  );
+}
+
+const REF_PICKER_MAX = 3;
+
+type StudioImageModel = 'pro' | 'flash' | 'flash3';
+type StudioAspectRatio = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
+
+const STUDIO_IMAGE_MODEL_KEY = '188-admin-manual-product-image-model';
+const STUDIO_ASPECT_RATIO_KEY = '188-admin-manual-product-aspect-ratio';
+const CREATE_DRAFT_KEY = '188-admin-product-create-draft-v1';
+
+type ProductCreateDraft = {
+  v: 1;
+  savedAt: string;
+  step: number;
+  mode: ManualProductCreateMode;
+  jobId: string | null;
+  gender: string;
+  productName: string;
+  material: string;
+  noSize: boolean;
+  sizes: string[];
+  colorRows: ColorRow[];
+  formKind: 'color' | 'gallery' | 'detail' | 'material';
+  formColorName: string;
+  formPrompt: string;
+  formRefUrls: string[];
+  formAttachUrl: string;
+  price: string;
+  available: string;
+  notes: string;
+  mainImage: string;
+  galleryImages: string[];
+  detailImages: string[];
+  refImages: string[];
+  modelPresence: 'none' | 'model';
+  modelGender: '' | 'female' | 'male';
+  modelAgeGroup: '' | 'baby' | 'child' | 'teen' | 'adult' | 'middle_aged';
+  modelEthnicity: '' | 'asian' | 'western';
+  shotStyle: 'studio' | 'lifestyle' | 'outdoor';
+};
+
+function loadProductCreateDraft(): ProductCreateDraft | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(CREATE_DRAFT_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw) as ProductCreateDraft;
+    if (d?.v !== 1) return null;
+    return d;
+  } catch {
+    return null;
+  }
+}
+
+function saveProductCreateDraft(draft: ProductCreateDraft) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(CREATE_DRAFT_KEY, JSON.stringify({ ...draft, savedAt: new Date().toISOString() }));
+  } catch {
+    /* quota */
+  }
+}
+
+function clearProductCreateDraft() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(CREATE_DRAFT_KEY);
+}
+
+function resolveResumeStep(
+  mode: ManualProductCreateMode,
+  job: ManualProductJob | null,
+  fallback: number,
+): number {
+  if (!job || job.status === 'done') return fallback;
+  const jobMode = (job.mode || job.payload?.mode || mode) as ManualProductCreateMode;
+  if (jobMode === 'ai') {
+    if (
+      [
+        'awaiting_input',
+        'awaiting_approval',
+        'ready_to_publish',
+        'awaiting_colors',
+        'generating',
+        'queued',
+        'publishing',
+        'failed',
+      ].includes(job.status)
+    ) {
+      return 3;
+    }
+  } else if (job.status !== 'done') {
+    return 3;
+  }
+  return fallback;
+}
+
+function colorRowsFromPayload(payload: ManualProductJobCreatePayload | null | undefined): ColorRow[] {
+  const raw = payload?.colors;
+  if (!Array.isArray(raw) || raw.length === 0) return [newColorRow()];
+  return raw.map((c, i) => {
+    if (typeof c === 'string') return newColorRow({ name: c, key: `res-${i}` });
+    if (c && typeof c === 'object') {
+      const row = c as { name?: string; img?: string };
+      return newColorRow({ name: row.name || '', img: row.img || '', key: `res-${i}` });
+    }
+    return newColorRow({ key: `res-${i}` });
+  });
+}
+
+function applyJobPayloadToDraft(job: ManualProductJob, draft: ProductCreateDraft): ProductCreateDraft {
+  const p = job.payload || {};
+  return {
+    ...draft,
+    mode: (p.mode as ManualProductCreateMode) || draft.mode,
+    jobId: job.job_id,
+    productName: (p.product_name || job.vision_product_name || draft.productName || '').trim(),
+    material: (p.material || draft.material || '').trim(),
+    gender: (p.gender || draft.gender || 'Nữ').trim(),
+    price: p.price != null ? String(p.price) : draft.price,
+    available: p.available != null ? String(p.available) : draft.available,
+    notes: (p.notes || draft.notes || '').trim(),
+    noSize: Boolean(p.no_size),
+    sizes: Array.isArray(p.sizes) ? p.sizes.map(String) : draft.sizes,
+    colorRows: colorRowsFromPayload(p),
+    mainImage: (p.main_image || draft.mainImage || '').trim(),
+    galleryImages: Array.isArray(p.images) ? p.images.map(String) : draft.galleryImages,
+    detailImages: Array.isArray(p.gallery) ? p.gallery.map(String) : draft.detailImages,
+    refImages: Array.isArray(p.ref_image_urls) ? p.ref_image_urls.map(String) : draft.refImages,
+    modelPresence: p.model_presence === 'model' ? 'model' : draft.modelPresence,
+    modelGender:
+      p.model_gender === 'female' || p.model_gender === 'male'
+        ? p.model_gender
+        : draft.modelGender,
+    modelAgeGroup:
+      p.model_age_group === 'baby' ||
+      p.model_age_group === 'child' ||
+      p.model_age_group === 'teen' ||
+      p.model_age_group === 'adult' ||
+      p.model_age_group === 'middle_aged'
+        ? p.model_age_group
+        : draft.modelAgeGroup,
+    modelEthnicity:
+      p.model_ethnicity === 'asian' || p.model_ethnicity === 'western'
+        ? p.model_ethnicity
+        : draft.modelEthnicity,
+    shotStyle:
+      p.shot_style === 'lifestyle' || p.shot_style === 'outdoor'
+        ? p.shot_style
+        : draft.shotStyle,
+    step: resolveResumeStep((p.mode as ManualProductCreateMode) || draft.mode, job, draft.step),
+  };
+}
+
+function syncStudioFormFromJob(job: ManualProductJob) {
+  const phaseRaw = job.studio?.phase || 'color';
+  const phase =
+    phaseRaw === 'detail' ? 'gallery' : phaseRaw === 'main' ? 'gallery' : phaseRaw;
+  const pool = job.studio?.ref_pool || [];
+  const slot = job.studio?.current_slot;
+  const colorIdx = colorSlotIndex(job.studio, slot);
+  const formKindResolved =
+    phase === 'gallery' || phase === 'detail' || phase === 'material'
+      ? phase
+      : phase === 'main'
+        ? ('gallery' as const)
+        : ('color' as const);
+  return {
+    formKind: formKindResolved,
+    formRefUrls:
+      job.status === 'awaiting_approval' && slot
+        ? syncRefUrlsFromJob(job)
+        : studioDefaultRefUrls(pool, formKindResolved, colorIdx),
+    formColorName: (slot?.name || (job.vision_colors || [])[0] || '').trim(),
+    formPrompt: (slot?.user_prompt || '').trim(),
+    formAttachUrl: (slot?.attach_url || '').trim(),
+  };
+}
+
+function studioDefaultRefUrls(
+  pool: ManualProductRefPoolItem[],
+  kind: 'color' | 'gallery' | 'detail' | 'material',
+  colorIndex = 0,
+): string[] {
+  if (kind === 'color') {
+    return [];
+  }
+  const approved = pool
+    .filter((p) => p.kind === 'ref' || p.kind === 'color' || p.kind === 'gallery')
+    .map((p) => p.url)
+    .filter(Boolean) as string[];
+  return approved.slice(0, REF_PICKER_MAX);
+}
+
+function firstApprovedColorRow(studio: ManualProductJob['studio']): { url: string; name: string } {
+  for (const row of studio?.colors || []) {
+    const u = (row?.img || '').trim();
+    if (u) return { url: u, name: (row?.name || '').trim() || 'Màu #1' };
+  }
+  const fromPool = (studio?.ref_pool || []).find((p) => p.kind === 'color' && p.url);
+  if (fromPool?.url) {
+    const lbl = (fromPool.label || '').trim();
+    return { url: fromPool.url, name: lbl || 'Màu #1' };
+  }
+  return { url: '', name: '' };
+}
+
+function firstApprovedColorUrl(studio: ManualProductJob['studio']): string {
+  return firstApprovedColorRow(studio).url;
+}
+
+function colorSlotIndex(studio: ManualProductJob['studio'], slot?: { index?: number | null } | null): number {
+  return Math.max(0, Number(slot?.index ?? 0) || 0);
+}
+
+/** Chỉ giữ URL có trong pool; màu #2+ luôn giữ ảnh màu #1 (khuôn mặt). */
+function sanitizeFormRefUrls(
+  urls: string[],
+  pool: ManualProductRefPoolItem[],
+  kind: 'color' | 'gallery' | 'detail' | 'material',
+  colorIndex = 0,
+  studio?: ManualProductJob['studio'],
+): string[] {
+  const poolSet = new Set(pool.map((p) => p.url).filter(Boolean));
+  const filtered = urls.filter((u) => poolSet.has(u));
+  if (kind === 'color' && colorIndex >= 1) {
+    const face = firstApprovedColorUrl(studio || null);
+    return filtered.filter((u) => u !== face).slice(0, REF_PICKER_MAX);
+  }
+  if (kind === 'color' && colorIndex === 0) {
+    return filtered.slice(0, REF_PICKER_MAX);
+  }
+  if (filtered.length) return filtered.slice(0, REF_PICKER_MAX);
+  return studioDefaultRefUrls(pool, kind, colorIndex);
+}
+
+function syncRefUrlsFromJob(fresh: ManualProductJob) {
+  const pool = fresh.studio?.ref_pool || [];
+  const slot = fresh.studio?.current_slot;
+  const kind =
+    slot?.kind === 'gallery' || slot?.kind === 'material'
+      ? slot.kind
+      : slot?.kind === 'detail'
+        ? 'gallery'
+        : 'color';
+  const idx = colorSlotIndex(fresh.studio, slot);
+  const fromSlot = Array.isArray(slot?.ref_urls) ? slot!.ref_urls!.filter(Boolean) : [];
+  return sanitizeFormRefUrls(fromSlot, pool, kind as 'color' | 'gallery' | 'material', idx, fresh.studio);
+}
+
+function loadStudioImageModel(): StudioImageModel {
+  if (typeof window === 'undefined') return 'pro';
+  const v = localStorage.getItem(STUDIO_IMAGE_MODEL_KEY);
+  return v === 'flash' || v === 'flash3' ? v : 'pro';
+}
+
+function loadStudioAspectRatio(): StudioAspectRatio {
+  if (typeof window === 'undefined') return '1:1';
+  const v = localStorage.getItem(STUDIO_ASPECT_RATIO_KEY);
+  return v === '3:4' || v === '4:3' || v === '9:16' || v === '16:9' ? v : '1:1';
+}
+
+function studioAspectClass(ratio: StudioAspectRatio): string {
+  if (ratio === '3:4') return 'aspect-[3/4]';
+  if (ratio === '4:3') return 'aspect-[4/3]';
+  if (ratio === '9:16') return 'aspect-[9/16]';
+  if (ratio === '16:9') return 'aspect-[16/9]';
+  return 'aspect-square';
+}
+
+function StudioAiImageSettings({
+  imageModel,
+  aspectRatio,
+  onImageModelChange,
+  onAspectRatioChange,
+  disabled,
+  compact = false,
+}: {
+  imageModel: StudioImageModel;
+  aspectRatio: StudioAspectRatio;
+  onImageModelChange: (v: StudioImageModel) => void;
+  onAspectRatioChange: (v: StudioAspectRatio) => void;
+  disabled?: boolean;
+  compact?: boolean;
+}) {
+  return (
+    <div
+      className={`grid gap-3 ${compact ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-2'} rounded-lg border border-slate-200 bg-slate-50/80 p-3`}
+    >
+      <label className="block text-sm min-w-0">
+        <span className="font-medium text-slate-800">Model tạo ảnh AI</span>
+        <select
+          className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
+          value={imageModel}
+          disabled={disabled}
+          onChange={(e) => {
+            const v = e.target.value as StudioImageModel;
+            onImageModelChange(v);
+            if (typeof window !== 'undefined') localStorage.setItem(STUDIO_IMAGE_MODEL_KEY, v);
+          }}
+        >
+          <option value="pro">Pro — chất lượng cao (~3.350₫/ảnh, 2K)</option>
+          <option value="flash">Flash — rẻ, nhanh (~1.000₫/ảnh, ~1K)</option>
+          <option value="flash3">Flash 3.1 — cân bằng (~2.500₫/ảnh, 2K)</option>
+        </select>
+      </label>
+      <label className="block text-sm min-w-0">
+        <span className="font-medium text-slate-800">Tỷ lệ khung hình</span>
+        <select
+          className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
+          value={aspectRatio}
+          disabled={disabled}
+          onChange={(e) => {
+            const v = e.target.value as StudioAspectRatio;
+            onAspectRatioChange(v);
+            if (typeof window !== 'undefined') localStorage.setItem(STUDIO_ASPECT_RATIO_KEY, v);
+          }}
+        >
+          <option value="1:1">1:1 — Vuông (SP / Ladipage)</option>
+          <option value="3:4">3:4 — Dọc (mobile)</option>
+          <option value="4:3">4:3 — Ngang</option>
+          <option value="9:16">9:16 — Story / Reels</option>
+          <option value="16:9">16:9 — Banner ngang</option>
+        </select>
+      </label>
+      <p className={`text-[11px] text-slate-500 ${compact ? 'sm:col-span-2' : 'sm:col-span-2'}`}>
+        Lưu tự động trên trình duyệt — áp dụng mọi lần tạo / tạo lại cho đến khi bạn đổi lại.
+      </p>
+    </div>
+  );
+}
+
+function StudioFaceRefCard({
+  url,
+  colorName,
+  compact = false,
+}: {
+  url: string;
+  colorName: string;
+  compact?: boolean;
+}) {
+  if (!url) return null;
+  return (
+    <div
+      className={`rounded-xl border-2 border-sky-300 bg-sky-50/80 p-2 ${
+        compact ? 'max-w-[8rem]' : 'max-w-xs'
+      }`}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={url}
+        alt=""
+        className={`w-full rounded-lg object-cover bg-white ${compact ? 'h-16' : 'h-24'}`}
+      />
+      <p className="mt-1.5 text-[10px] font-semibold text-sky-900 leading-tight">
+        Khuôn mặt người mẫu (ảnh màu #1)
+      </p>
+      <p className="text-[10px] text-sky-800 leading-tight">
+        {colorName ? `«${colorName}»` : 'Màu đầu'} — <strong>chỉ</strong> giữ khuôn mặt; không lấy mẫu/màu SP
+        từ ảnh này.
+      </p>
+      <span className="mt-1 inline-block rounded-full bg-sky-200 px-2 py-0.5 text-[9px] font-semibold uppercase text-sky-900">
+        Khóa · ref mặt
+      </span>
+    </div>
+  );
+}
+
+function toggleRefUrl(prev: string[], url: string, max = REF_PICKER_MAX): string[] {
+  if (prev.includes(url)) return prev.filter((x) => x !== url);
+  if (prev.length >= max) return [...prev.slice(1), url];
+  return [...prev, url];
+}
+
+function StudioRefPicker({
+  items,
+  selectedUrls,
+  onChange,
+  disabled,
+  compact = false,
+  lockedUrls = [],
+}: {
+  items: ManualProductRefPoolItem[];
+  selectedUrls: string[];
+  onChange: (next: string[]) => void;
+  disabled?: boolean;
+  compact?: boolean;
+  lockedUrls?: string[];
+}) {
+  const lockedSet = new Set(lockedUrls.filter(Boolean));
+  const visibleSelected = selectedUrls.filter(
+    (u) => lockedSet.has(u) || items.some((item) => item.url === u),
+  );
+  if (!items.length) {
+    return (
+      <p className="text-xs text-slate-500 rounded-lg border border-dashed border-slate-200 px-3 py-2">
+        Chưa có ảnh trong pool — upload ảnh mẫu SP hoặc tạo ảnh màu trước.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div
+        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+          selectedUrls.length
+            ? 'bg-orange-100 text-orange-800'
+            : 'bg-slate-100 text-slate-600'
+        }`}
+      >
+        {visibleSelected.length
+          ? `Đã chọn ${visibleSelected.length}/${REF_PICKER_MAX} ảnh`
+          : `Chưa chọn — bấm ảnh để chọn (tối đa ${REF_PICKER_MAX})`}
+      </div>
+      <div className={`flex flex-wrap ${compact ? 'gap-2' : 'gap-3'}`}>
+        {items.map((item) => {
+          const selectedIndex = visibleSelected.indexOf(item.url);
+          const checked = selectedIndex >= 0;
+          const isLocked = lockedSet.has(item.url);
+          const label = item.label || item.kind || 'Ảnh';
+          return (
+            <button
+              key={item.id || item.url}
+              type="button"
+              disabled={disabled || isLocked}
+              aria-pressed={checked}
+              aria-label={checked ? `Bỏ chọn ${label}` : `Chọn ${label}`}
+              onClick={() => {
+                if (isLocked) return;
+                const next = toggleRefUrl(selectedUrls, item.url);
+                onChange([...lockedUrls.filter(Boolean), ...next.filter((u) => !lockedSet.has(u))].slice(0, REF_PICKER_MAX));
+              }}
+              className={`group relative text-left rounded-xl border-2 p-1.5 transition-all ${
+                compact ? 'w-[5.5rem]' : 'w-[7rem]'
+              } ${
+                checked
+                  ? 'border-[#ea580c] bg-orange-50 shadow-md ring-2 ring-orange-200/80'
+                  : 'border-dashed border-slate-300 bg-slate-50 opacity-80 hover:border-slate-400 hover:bg-white hover:opacity-100 hover:shadow-sm'
+              } ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
+            >
+              <span
+                className={`absolute top-1.5 right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border-2 shadow-sm ${
+                  checked
+                    ? 'border-white bg-[#ea580c] text-white'
+                    : 'border-white/90 bg-white/80 text-transparent group-hover:border-slate-300 group-hover:bg-slate-100'
+                }`}
+                aria-hidden
+              >
+                {checked ? (
+                  visibleSelected.length > 1 ? (
+                    <span className="text-[10px] font-bold leading-none">{selectedIndex + 1}</span>
+                  ) : (
+                    <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                      <path
+                        fillRule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  )
+                ) : null}
+              </span>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={item.url}
+                alt=""
+                className={`w-full rounded-md bg-slate-100 object-cover ${
+                  compact ? 'h-16' : 'h-20'
+                } ${checked ? '' : 'grayscale-[15%] group-hover:grayscale-0'}`}
+              />
+              <div
+                className={`mt-1 truncate text-[10px] leading-tight ${
+                  checked ? 'font-semibold text-[#c2410c]' : 'text-slate-600'
+                }`}
+              >
+                {label}
+              </div>
+              {checked ? (
+                <div className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#ea580c]">
+                  {isLocked ? 'Cố định' : 'Đã chọn'}
+                </div>
+              ) : (
+                <div className="mt-0.5 text-[9px] text-slate-400 group-hover:text-slate-500">
+                  Bấm để chọn
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -128,7 +623,16 @@ function SizeChipsInput({
   );
 }
 
+const STUDIO_MIN_COLOR_IMAGES = 1;
+const STUDIO_MIN_GALLERY_IMAGES = 2;
+const STUDIO_MIN_MATERIAL_IMAGES = 1;
 const POLL_BUSY = new Set(['queued', 'generating', 'publishing', 'running']);
+const INTERACTIVE_STATUSES = new Set([
+  'awaiting_colors',
+  'awaiting_input',
+  'awaiting_approval',
+  'ready_to_publish',
+]);
 
 export default function AdminManualProductCreatePage() {
   const { pushToast } = useToast();
@@ -138,11 +642,10 @@ export default function AdminManualProductCreatePage() {
   const [gender, setGender] = useState('Nữ');
   const [productName, setProductName] = useState('');
   const [material, setMaterial] = useState('');
-  const [style, setStyle] = useState('Châu Á');
   const [noSize, setNoSize] = useState(false);
   const [sizes, setSizes] = useState<string[]>([]);
   const [colorRows, setColorRows] = useState<ColorRow[]>([newColorRow()]);
-  const [formKind, setFormKind] = useState<'color' | 'gallery' | 'detail'>('color');
+  const [formKind, setFormKind] = useState<'color' | 'gallery' | 'detail' | 'material'>('color');
   const [formColorName, setFormColorName] = useState('');
   const [formPrompt, setFormPrompt] = useState('');
   const [formRefUrls, setFormRefUrls] = useState<string[]>([]);
@@ -155,7 +658,8 @@ export default function AdminManualProductCreatePage() {
   const [galleryImages, setGalleryImages] = useState<string[]>([]);
   const [detailImages, setDetailImages] = useState<string[]>([]);
   const [refImages, setRefImages] = useState<string[]>([]);
-  const [imageModel, setImageModel] = useState<'pro' | 'flash' | 'flash3'>('pro');
+  const [imageModel, setImageModel] = useState<StudioImageModel>(() => loadStudioImageModel());
+  const [aspectRatio, setAspectRatio] = useState<StudioAspectRatio>(() => loadStudioAspectRatio());
   const [modelPresence, setModelPresence] = useState<'none' | 'model'>('none');
   const [modelGender, setModelGender] = useState<'' | 'female' | 'male'>('');
   const [modelAgeGroup, setModelAgeGroup] = useState<
@@ -169,6 +673,9 @@ export default function AdminManualProductCreatePage() {
   const [submitting, setSubmitting] = useState(false);
   const [studioBusy, setStudioBusy] = useState(false);
   const [job, setJob] = useState<ManualProductJob | null>(null);
+  const [draftReady, setDraftReady] = useState(false);
+  const [resumeNotice, setResumeNotice] = useState<string | null>(null);
+  const [serverSessions, setServerSessions] = useState<ManualProductJobSummary[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const steps = mode === 'ai' ? STEPS_AI : STEPS_MANUAL;
@@ -182,6 +689,344 @@ export default function AdminManualProductCreatePage() {
 
   useEffect(() => () => stopPoll(), [stopPoll]);
 
+  const draftSnapshot = useCallback((): ProductCreateDraft => {
+    return {
+      v: 1,
+      savedAt: new Date().toISOString(),
+      step,
+      mode,
+      jobId: job?.job_id || null,
+      gender,
+      productName,
+      material,
+      noSize,
+      sizes,
+      colorRows,
+      formKind,
+      formColorName,
+      formPrompt,
+      formRefUrls,
+      formAttachUrl,
+      price,
+      available,
+      notes,
+      mainImage,
+      galleryImages,
+      detailImages,
+      refImages,
+      modelPresence,
+      modelGender,
+      modelAgeGroup,
+      modelEthnicity,
+      shotStyle,
+    };
+  }, [
+    step,
+    mode,
+    job?.job_id,
+    gender,
+    productName,
+    material,
+    noSize,
+    sizes,
+    colorRows,
+    formKind,
+    formColorName,
+    formPrompt,
+    formRefUrls,
+    formAttachUrl,
+    price,
+    available,
+    notes,
+    mainImage,
+    galleryImages,
+    detailImages,
+    refImages,
+    modelPresence,
+    modelGender,
+    modelAgeGroup,
+    modelEthnicity,
+    shotStyle,
+  ]);
+
+  const startPolling = useCallback(
+    (jobId: string, opts?: { stopOnInteractive?: boolean }) => {
+      stopPoll();
+      pollRef.current = setInterval(async () => {
+        try {
+          const fresh = await manualProductCreateAPI.getJob(jobId);
+          setJob(fresh);
+          if (fresh.status === 'done') {
+            stopPoll();
+            setSubmitting(false);
+            setStudioBusy(false);
+            clearProductCreateDraft();
+            pushToast({
+              title: 'Đăng sản phẩm thành công',
+              description: fresh.result?.name || fresh.result?.product_id || '',
+              variant: 'success',
+            });
+            return;
+          }
+          if (fresh.status === 'failed') {
+            stopPoll();
+            setSubmitting(false);
+            setStudioBusy(false);
+            return;
+          }
+          if (opts?.stopOnInteractive && INTERACTIVE_STATUSES.has(fresh.status)) {
+            stopPoll();
+            setSubmitting(false);
+            setStudioBusy(false);
+            if (fresh.status === 'awaiting_approval') {
+              setFormRefUrls(syncRefUrlsFromJob(fresh));
+              const slot = fresh.studio?.current_slot;
+              if (slot?.user_prompt) setFormPrompt(String(slot.user_prompt));
+              if (slot?.attach_url) setFormAttachUrl(String(slot.attach_url));
+              if (slot?.name) setFormColorName(String(slot.name));
+            } else if (fresh.status === 'awaiting_input' || fresh.status === 'awaiting_colors') {
+              const phase = fresh.studio?.phase || 'color';
+              setFormKind(
+                phase === 'gallery' || phase === 'detail' || phase === 'material'
+                  ? phase
+                  : phase === 'main'
+                    ? 'gallery'
+                    : 'color',
+              );
+              setFormPrompt('');
+              const pool = fresh.studio?.ref_pool || [];
+              const nextColorIdx = (fresh.studio?.colors || []).filter((c) =>
+                (c?.img || '').trim(),
+              ).length;
+              setFormRefUrls(studioDefaultRefUrls(pool, 'color', nextColorIdx));
+              setFormAttachUrl('');
+              setFormColorName('');
+            }
+          }
+        } catch {
+          /* keep polling */
+        }
+      }, 2000);
+    },
+    [stopPoll, pushToast],
+  );
+
+  const applyDraftState = useCallback((d: ProductCreateDraft) => {
+    setStep(d.step);
+    setMode(d.mode);
+    setGender(d.gender);
+    setProductName(d.productName);
+    setMaterial(d.material);
+    setNoSize(d.noSize);
+    setSizes(d.sizes);
+    setColorRows(d.colorRows.length ? d.colorRows : [newColorRow()]);
+    setFormKind(d.formKind);
+    setFormColorName(d.formColorName);
+    setFormPrompt(d.formPrompt);
+    setFormRefUrls(d.formRefUrls);
+    setFormAttachUrl(d.formAttachUrl);
+    setPrice(d.price);
+    setAvailable(d.available);
+    setNotes(d.notes);
+    setMainImage(d.mainImage);
+    setGalleryImages(d.galleryImages);
+    setDetailImages(d.detailImages);
+    setRefImages(d.refImages);
+    setModelPresence(d.modelPresence);
+    setModelGender(d.modelGender);
+    setModelAgeGroup(d.modelAgeGroup);
+    setModelEthnicity(d.modelEthnicity);
+    setShotStyle(d.shotStyle);
+  }, []);
+
+  const resumeJobById = useCallback(
+    async (jobId: string, notice?: string) => {
+      try {
+        const fresh = await manualProductCreateAPI.getJob(jobId);
+        const base: ProductCreateDraft = loadProductCreateDraft() || {
+          v: 1,
+          savedAt: new Date().toISOString(),
+          step: 0,
+          mode: (fresh.mode as ManualProductCreateMode) || 'ai',
+          jobId,
+          gender: 'Nữ',
+          productName: '',
+          material: '',
+          noSize: false,
+          sizes: [],
+          colorRows: [newColorRow()],
+          formKind: 'color',
+          formColorName: '',
+          formPrompt: '',
+          formRefUrls: [],
+          formAttachUrl: '',
+          price: '',
+          available: '500',
+          notes: '',
+          mainImage: '',
+          galleryImages: [],
+          detailImages: [],
+          refImages: [],
+          modelPresence: 'none',
+          modelGender: '',
+          modelAgeGroup: '',
+          modelEthnicity: '',
+          shotStyle: 'studio',
+        };
+        const merged = applyJobPayloadToDraft(fresh, { ...base, jobId });
+        const studioSync = syncStudioFormFromJob(fresh);
+        applyDraftState({
+          ...merged,
+          formKind: studioSync.formKind,
+          formRefUrls: studioSync.formRefUrls.length ? studioSync.formRefUrls : merged.formRefUrls,
+          formColorName: studioSync.formColorName || merged.formColorName,
+          formPrompt: studioSync.formPrompt,
+          formAttachUrl: studioSync.formAttachUrl,
+        });
+        setJob(fresh);
+        if (fresh.status === 'awaiting_approval') {
+          const slot = fresh.studio?.current_slot;
+          if (slot?.user_prompt) setFormPrompt(String(slot.user_prompt));
+          setFormRefUrls(syncRefUrlsFromJob(fresh));
+          if (slot?.attach_url) setFormAttachUrl(String(slot.attach_url));
+          if (slot?.name) setFormColorName(String(slot.name));
+        }
+        setResumeNotice(
+          notice ||
+            fresh.message ||
+            'Đã khôi phục phiên làm việc — tiếp tục từ chỗ đang dở.',
+        );
+        if (POLL_BUSY.has(fresh.status)) {
+          startPolling(jobId, { stopOnInteractive: true });
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Không tải được phiên';
+        setFormError(msg);
+      }
+    },
+    [applyDraftState, startPolling],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const local = loadProductCreateDraft();
+      if (local) {
+        applyDraftState(local);
+        if (local.jobId) {
+          await resumeJobById(
+            local.jobId,
+            'Đã khôi phục phiên trên trình duyệt — tiếp tục tạo sản phẩm.',
+          );
+        } else {
+          setResumeNotice('Đã khôi phục bản nháp form — tiếp tục nhập liệu.');
+        }
+      } else {
+        try {
+          const rows = await manualProductCreateAPI.listJobs({ active: true, limit: 5 });
+          if (!cancelled && rows.length) setServerSessions(rows);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (!cancelled) setDraftReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [applyDraftState, resumeJobById]);
+
+  useEffect(() => {
+    if (!draftReady) return;
+    if (job?.status === 'done') {
+      clearProductCreateDraft();
+      return;
+    }
+    const t = window.setTimeout(() => {
+      saveProductCreateDraft(draftSnapshot());
+    }, 500);
+    return () => window.clearTimeout(t);
+  }, [draftReady, draftSnapshot, job?.status]);
+
+  useEffect(() => {
+    if (!draftReady || job?.status === 'done') return;
+    const flush = () => saveProductCreateDraft(draftSnapshot());
+    window.addEventListener('beforeunload', flush);
+    return () => window.removeEventListener('beforeunload', flush);
+  }, [draftReady, draftSnapshot, job?.status]);
+
+  useEffect(() => {
+    if (!draftReady || mode !== 'ai' || step !== 3 || !job?.job_id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const fresh = await manualProductCreateAPI.getJob(job.job_id);
+        if (cancelled) return;
+        setJob(fresh);
+        if (fresh.status === 'awaiting_approval') {
+          const slot = fresh.studio?.current_slot;
+          if (slot?.user_prompt) setFormPrompt(String(slot.user_prompt));
+          setFormRefUrls(syncRefUrlsFromJob(fresh));
+          if (slot?.attach_url) setFormAttachUrl(String(slot.attach_url));
+          if (slot?.name) setFormColorName(String(slot.name));
+        } else if (fresh.status === 'awaiting_input' || fresh.status === 'awaiting_colors') {
+          const studioSync = syncStudioFormFromJob(fresh);
+          setFormKind(studioSync.formKind);
+          if (studioSync.formRefUrls.length) setFormRefUrls(studioSync.formRefUrls);
+          if (studioSync.formColorName) setFormColorName(studioSync.formColorName);
+        }
+        if (POLL_BUSY.has(fresh.status)) {
+          startPolling(job.job_id, { stopOnInteractive: true });
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [draftReady, mode, step, job?.job_id, startPolling]);
+
+  function discardSavedSession() {
+    clearProductCreateDraft();
+    setResumeNotice(null);
+    setServerSessions([]);
+    setJob(null);
+    stopPoll();
+    setFormError('');
+    applyDraftState({
+      v: 1,
+      savedAt: new Date().toISOString(),
+      step: 0,
+      mode: 'manual',
+      jobId: null,
+      gender: 'Nữ',
+      productName: '',
+      material: '',
+      noSize: false,
+      sizes: [],
+      colorRows: [newColorRow()],
+      formKind: 'color',
+      formColorName: '',
+      formPrompt: '',
+      formRefUrls: [],
+      formAttachUrl: '',
+      price: '',
+      available: '500',
+      notes: '',
+      mainImage: '',
+      galleryImages: [],
+      detailImages: [],
+      refImages: [],
+      modelPresence: 'none',
+      modelGender: '',
+      modelAgeGroup: '',
+      modelEthnicity: '',
+      shotStyle: 'studio',
+    });
+    pushToast({ title: 'Đã xóa bản nháp', description: 'Bắt đầu phiên mới.', variant: 'success' });
+  }
+
   const structuredColors = useMemo(
     () =>
       colorRows
@@ -192,17 +1037,61 @@ export default function AdminManualProductCreatePage() {
 
   const studio = job?.studio;
   const currentSlot = studio?.current_slot;
-  const canPublish = Boolean(
-    studio?.can_publish ||
-      studio?.main_image ||
-      (studio?.colors || []).some((c) => c?.img),
+  const pendingColorIndex = useMemo(() => {
+    if (formKind !== 'color') return 0;
+    return (studio?.colors || []).filter((c) => (c?.img || '').trim()).length;
+  }, [formKind, studio?.colors]);
+  const approvalColorIndex = colorSlotIndex(studio, currentSlot);
+  const lockedModelFaceUrls = useMemo(() => {
+    const face = firstApprovedColorUrl(studio);
+    return face ? [face] : [];
+  }, [studio]);
+  const firstColorRef = useMemo(() => firstApprovedColorRow(studio), [studio]);
+  const sanitizedFormRefUrls = useMemo(
+    () =>
+      sanitizeFormRefUrls(
+        formRefUrls,
+        studio?.ref_pool || [],
+        formKind,
+        job?.status === 'awaiting_approval' ? approvalColorIndex : pendingColorIndex,
+        studio,
+      ),
+    [formRefUrls, studio, formKind, job?.status, approvalColorIndex, pendingColorIndex],
   );
-  const interactiveStatuses = new Set([
-    'awaiting_colors',
-    'awaiting_input',
-    'awaiting_approval',
-    'ready_to_publish',
+
+  useEffect(() => {
+    if (!draftReady || !job || formKind !== 'color') return;
+    const idx =
+      job.status === 'awaiting_approval' ? approvalColorIndex : pendingColorIndex;
+    if (idx >= 1 && lockedModelFaceUrls.length) {
+      const withoutFace = formRefUrls.filter((u) => u !== lockedModelFaceUrls[0]);
+      if (withoutFace.length !== formRefUrls.length) {
+        setFormRefUrls(withoutFace);
+      }
+    }
+  }, [
+    draftReady,
+    job,
+    job?.status,
+    formKind,
+    approvalColorIndex,
+    pendingColorIndex,
+    lockedModelFaceUrls,
+    formRefUrls,
   ]);
+
+  const studioPublishCheck = useMemo(() => {
+    const colorCount = (studio?.colors || []).filter((c) => (c?.img || '').trim()).length;
+    const galleryCount = (studio?.images || []).length;
+    const materialOk = Boolean((studio?.material_image || '').trim());
+    return {
+      colorCount,
+      galleryCount,
+      materialOk,
+      canPublish: Boolean(studio?.can_publish),
+    };
+  }, [studio]);
+  const canPublish = studioPublishCheck.canPublish;
 
   const progressLabel = useMemo(() => {
     if (!job) return '';
@@ -210,63 +1099,6 @@ export default function AdminManualProductCreatePage() {
     if (job.status === 'failed') return 'Thất bại';
     return job.message || job.step || 'Đang xử lý…';
   }, [job]);
-
-  function startPolling(jobId: string, opts?: { stopOnInteractive?: boolean }) {
-    stopPoll();
-    pollRef.current = setInterval(async () => {
-      try {
-        const fresh = await manualProductCreateAPI.getJob(jobId);
-        setJob(fresh);
-        if (fresh.status === 'done') {
-          stopPoll();
-          setSubmitting(false);
-          setStudioBusy(false);
-          pushToast({
-            title: 'Đăng sản phẩm thành công',
-            description: fresh.result?.name || fresh.result?.product_id || '',
-            variant: 'success',
-          });
-          return;
-        }
-        if (fresh.status === 'failed') {
-          stopPoll();
-          setSubmitting(false);
-          setStudioBusy(false);
-          return;
-        }
-        if (opts?.stopOnInteractive && interactiveStatuses.has(fresh.status)) {
-          stopPoll();
-          setSubmitting(false);
-          setStudioBusy(false);
-          if (fresh.status === 'awaiting_input' || fresh.status === 'awaiting_colors') {
-            const phase = fresh.studio?.phase || 'color';
-            setFormKind(
-              phase === 'gallery' || phase === 'detail'
-                ? phase
-                : phase === 'main'
-                  ? 'gallery'
-                  : 'color',
-            );
-            setFormPrompt('');
-            const pool = fresh.studio?.ref_pool || [];
-            const defaults = pool
-              .filter((p) => p.kind === 'ref' || p.kind === 'color')
-              .map((p) => p.url)
-              .filter(Boolean)
-              .slice(0, 3);
-            if (defaults.length && formRefUrls.length === 0) {
-              setFormRefUrls(defaults);
-            }
-            if ((fresh.vision_colors || []).length && !formColorName) {
-              setFormColorName((fresh.vision_colors || [])[0] || '');
-            }
-          }
-        }
-      } catch {
-        /* keep polling */
-      }
-    }, 2000);
-  }
 
   async function uploadFiles(files: FileList | null, purpose: 'catalog' | 'ref') {
     if (!files || files.length === 0) return [] as string[];
@@ -317,11 +1149,16 @@ export default function AdminManualProductCreatePage() {
       }
       if (mode === 'manual') {
         if (!mainImage) return 'Cần ảnh chính.';
+        const colorsWithImg = colorRows.filter((r) => r.img.trim() && r.name.trim());
+        if (colorsWithImg.length < STUDIO_MIN_COLOR_IMAGES) {
+          return `Cần ít nhất ${STUDIO_MIN_COLOR_IMAGES} ảnh màu (có tên + ảnh).`;
+        }
+        if (galleryImages.length < STUDIO_MIN_GALLERY_IMAGES) {
+          return `Cần ít nhất ${STUDIO_MIN_GALLERY_IMAGES} ảnh gallery.`;
+        }
         const incomplete = colorRows.some((r) => r.img && !r.name.trim());
         if (incomplete) return 'Mỗi ảnh màu cần có tên màu.';
       } else {
-        if (refImages.length === 0) return 'Cần ít nhất 1 ảnh gốc tham chiếu (tối đa 3).';
-        if (refImages.length > 3) return 'Tối đa 3 ảnh gốc.';
         if (modelPresence === 'model') {
           if (!modelGender) return 'Chọn «Có người mẫu» thì cần chọn giới tính người mẫu.';
           if (!modelAgeGroup) return 'Chọn «Có người mẫu» thì cần chọn tuổi người mẫu.';
@@ -368,7 +1205,6 @@ export default function AdminManualProductCreatePage() {
         product_name: productName.trim(),
         material: material.trim(),
         gender,
-        style,
         no_size: noSize,
         sizes: noSize ? [] : sizes,
         colors: structuredColors.map((c) => ({ name: c.name, img: c.img })),
@@ -376,7 +1212,7 @@ export default function AdminManualProductCreatePage() {
         notes: notes.trim(),
         main_image: mainImage,
         images: galleryImages,
-        gallery: detailImages,
+        gallery: [],
         require_taxonomy: false,
       };
       const created = await manualProductCreateAPI.createJob(payload);
@@ -407,7 +1243,6 @@ export default function AdminManualProductCreatePage() {
         product_name: '',
         material: material.trim(),
         gender,
-        style,
         no_size: noSize,
         sizes: noSize ? [] : sizes,
         colors: [],
@@ -416,8 +1251,9 @@ export default function AdminManualProductCreatePage() {
         main_image: null,
         images: [],
         gallery: [],
-        ref_image_urls: refImages,
+        ref_image_urls: [],
         image_model: imageModel,
+        aspect_ratio: aspectRatio,
         model_presence: modelPresence,
         model_gender: modelPresence === 'model' ? modelGender : '',
         model_age_group: modelPresence === 'model' ? modelAgeGroup : '',
@@ -444,17 +1280,37 @@ export default function AdminManualProductCreatePage() {
     attach_url?: string;
   }) {
     if (!job?.job_id) return;
+    if (job.status === 'awaiting_approval') {
+      await regenerateImage();
+      return;
+    }
+    if (job.status === 'generating' || job.status === 'publishing') {
+      setFormError('Ảnh đang được tạo — vui lòng đợi vài giây.');
+      return;
+    }
     const kind = overrides?.kind || formKind;
     const name = (overrides?.name ?? formColorName).trim();
     const prompt = (overrides?.prompt ?? formPrompt).trim();
-    const refs = overrides?.ref_urls ?? formRefUrls;
+    const pool = studio?.ref_pool || [];
+    const colorIdx = kind === 'color' ? pendingColorIndex : 0;
+    let refs = overrides?.ref_urls ?? formRefUrls;
+    refs = sanitizeFormRefUrls(refs, pool, kind, colorIdx, studio);
     const attach = overrides?.attach_url ?? formAttachUrl;
-    if (kind === 'color' && !name) {
-      setFormError('Nhập tên màu trước khi tạo.');
-      return;
-    }
-    if (refs.length === 0 && !attach) {
-      setFormError('Chọn ít nhất 1 ảnh tham khảo hoặc gửi ảnh kèm.');
+    if (kind === 'color') {
+      if (colorIdx === 0 && refs.length === 0 && !attach.trim()) {
+        setFormError('Ảnh màu đầu: upload ảnh mẫu sản phẩm — AI tự đọc tên màu.');
+        return;
+      }
+      if (colorIdx >= 1) {
+        const face = firstApprovedColorUrl(studio);
+        const userRefs = refs.filter((u) => u !== face);
+        if (userRefs.length === 0 && !attach.trim()) {
+          setFormError('Ảnh màu tiếp theo: upload ảnh mẫu SP — AI tự đọc tên màu.');
+          return;
+        }
+      }
+    } else if (refs.length === 0 && !attach.trim()) {
+      setFormError('Chọn ít nhất 1 ảnh tham khảo hoặc upload ảnh kèm.');
       return;
     }
     setFormError('');
@@ -466,6 +1322,8 @@ export default function AdminManualProductCreatePage() {
         prompt,
         ref_urls: refs.slice(0, 3),
         attach_url: attach || '',
+        image_model: imageModel,
+        aspect_ratio: aspectRatio,
       });
       setJob(fresh);
       startPolling(job.job_id, { stopOnInteractive: true });
@@ -487,9 +1345,17 @@ export default function AdminManualProductCreatePage() {
       setFormAttachUrl('');
       const phase = fresh.studio?.phase || 'color';
       setFormKind(
-        phase === 'gallery' || phase === 'detail' ? phase : phase === 'main' ? 'gallery' : 'color',
+        phase === 'gallery' || phase === 'detail' || phase === 'material'
+          ? phase
+          : phase === 'main'
+            ? 'gallery'
+            : 'color',
       );
       setFormPrompt('');
+      if (phase === 'color') {
+        setFormColorName('');
+        setFormRefUrls([]);
+      }
       setStudioBusy(false);
       if (POLL_BUSY.has(fresh.status)) {
         startPolling(job.job_id, { stopOnInteractive: true });
@@ -505,11 +1371,18 @@ export default function AdminManualProductCreatePage() {
     if (!job?.job_id) return;
     setFormError('');
     setStudioBusy(true);
+    const slot = job.studio?.current_slot;
+    const colorIdx = colorSlotIndex(job.studio, slot);
+    const pool = job.studio?.ref_pool || [];
+    const refs = sanitizeFormRefUrls(formRefUrls, pool, 'color', colorIdx, job.studio);
+    setFormRefUrls(refs);
     try {
       const fresh = await manualProductCreateAPI.regenerateImage(job.job_id, {
         prompt: formPrompt.trim() || null,
-        ref_urls: formRefUrls.length ? formRefUrls.slice(0, 3) : null,
+        ref_urls: refs,
         attach_url: formAttachUrl || null,
+        image_model: imageModel,
+        aspect_ratio: aspectRatio,
       });
       setJob(fresh);
       startPolling(job.job_id, { stopOnInteractive: true });
@@ -554,10 +1427,11 @@ export default function AdminManualProductCreatePage() {
   }
 
   function slotKindLabel(kind?: string | null, name?: string | null, index?: number) {
-    if (kind === 'color') return `Ảnh màu «${name || ''}»`;
+    if (kind === 'color') return name?.trim() ? `Ảnh màu «${name.trim()}»` : 'Ảnh màu (AI đọc tên từ ảnh)';
     if (kind === 'main') return 'Ảnh chính';
     if (kind === 'gallery') return `Ảnh gallery ${(index ?? 0) + 1}`;
     if (kind === 'detail') return `Ảnh chi tiết ${(index ?? 0) + 1}`;
+    if (kind === 'material') return 'Ảnh chất liệu (Ladipage)';
     return 'Ảnh';
   }
 
@@ -600,6 +1474,53 @@ export default function AdminManualProductCreatePage() {
         </div>
       ) : null}
 
+      {resumeNotice ? (
+        <div
+          className="bg-sky-50 border border-sky-200 text-sky-900 rounded-lg px-4 py-3 text-sm flex flex-wrap items-start justify-between gap-3"
+          role="status"
+        >
+          <p>{resumeNotice}</p>
+          <button
+            type="button"
+            onClick={discardSavedSession}
+            className="shrink-0 text-sm font-medium underline text-sky-800"
+          >
+            Bắt đầu mới
+          </button>
+        </div>
+      ) : null}
+
+      {!resumeNotice && serverSessions.length > 0 ? (
+        <div className="bg-amber-50 border border-amber-200 text-amber-950 rounded-lg px-4 py-3 text-sm space-y-2">
+          <p className="font-medium">Có phiên tạo sản phẩm đang dở trên server</p>
+          <ul className="space-y-2">
+            {serverSessions.map((s) => (
+              <li
+                key={s.job_id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-100 bg-white/70 px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <div className="font-medium truncate">
+                    {s.product_name || s.material || 'Sản phẩm chưa đặt tên'}
+                  </div>
+                  <div className="text-xs text-amber-900/80">
+                    {s.mode === 'ai' ? 'AI Studio' : 'Thủ công'} · {s.status}
+                    {s.message ? ` · ${s.message}` : ''}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => resumeJobById(s.job_id, 'Đã khôi phục phiên từ server.')}
+                  className="shrink-0 text-sm font-medium px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700"
+                >
+                  Tiếp tục
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {step === 0 ? (
         <div className="space-y-4">
           <button
@@ -632,7 +1553,7 @@ export default function AdminManualProductCreatePage() {
           >
             <div className="font-medium text-slate-900">Đăng tự động bằng AI</div>
             <p className="text-sm text-slate-600 mt-1">
-              Ảnh gốc → Gemini đặt tên → bạn gõ màu → tạo/duyệt từng ảnh → bấm Đăng khi đủ.
+              Ảnh mẫu từng màu ở Studio → AI đọc tên → tạo/duyệt → DeepSeek viết nội dung khi đăng.
             </p>
           </button>
         </div>
@@ -650,11 +1571,7 @@ export default function AdminManualProductCreatePage() {
                 placeholder="VD: Áo sơ mi linen nữ form rộng…"
               />
             </label>
-          ) : (
-            <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-100 rounded px-2 py-1.5">
-              Mode AI: Gemini đọc ảnh gốc đặt tên SEO — không cần nhập tên.
-            </p>
-          )}
+          ) : null}
 
           <label className="block text-sm">
             <span className="font-medium text-slate-800">Giới tính</span>
@@ -677,19 +1594,6 @@ export default function AdminManualProductCreatePage() {
               onChange={(e) => setMaterial(e.target.value)}
               placeholder="VD: Cotton, da PU, denim…"
             />
-          </label>
-
-          <label className="block text-sm">
-            <span className="font-medium text-slate-800">Mẫu / phong cách</span>
-            <select
-              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"
-              value={style}
-              onChange={(e) => setStyle(e.target.value)}
-            >
-              <option>Châu Á</option>
-              <option>Châu Âu</option>
-              <option>Khác</option>
-            </select>
           </label>
 
           <div className="grid grid-cols-2 gap-3">
@@ -716,15 +1620,17 @@ export default function AdminManualProductCreatePage() {
             </label>
           </div>
 
-          <label className="block text-sm">
-            <span className="font-medium text-slate-800">Ghi chú thêm (tuỳ chọn)</span>
-            <textarea
-              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-[64px]"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Điểm nổi bật, dịp dùng…"
-            />
-          </label>
+          {mode === 'manual' ? (
+            <label className="block text-sm">
+              <span className="font-medium text-slate-800">Ghi chú thêm (tuỳ chọn)</span>
+              <textarea
+                className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-[64px]"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Điểm nổi bật, dịp dùng…"
+              />
+            </label>
+          ) : null}
         </div>
       ) : null}
 
@@ -826,7 +1732,7 @@ export default function AdminManualProductCreatePage() {
             </div>
           ) : (
             <div className="border border-emerald-100 bg-emerald-50 rounded-lg px-3 py-2 text-xs text-emerald-900">
-              Bước Studio: từng mốc tạo ảnh — gõ màu + chọn ảnh tham khảo + prompt → Tạo / Tạo lại / Tiếp.
+              Bước Studio: upload ảnh mẫu từng mốc → Tạo / duyệt / Tiếp. AI tự đọc tên màu (ảnh đầu: cả tên SP).
             </div>
           )}
 
@@ -847,7 +1753,9 @@ export default function AdminManualProductCreatePage() {
                 />
               </div>
               <div>
-                <div className="text-sm font-medium text-slate-800 mb-1">Ảnh gallery</div>
+                <div className="text-sm font-medium text-slate-800 mb-1">
+                  Ảnh gallery * (tối thiểu {STUDIO_MIN_GALLERY_IMAGES})
+                </div>
                 <div className="flex flex-wrap gap-2 mb-2">
                   {galleryImages.map((u) => (
                     <Thumb
@@ -869,73 +1777,23 @@ export default function AdminManualProductCreatePage() {
                   }}
                 />
               </div>
-              <div>
-                <div className="text-sm font-medium text-slate-800 mb-1">Ảnh chi tiết</div>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {detailImages.map((u) => (
-                    <Thumb
-                      key={u}
-                      url={u}
-                      onRemove={() => setDetailImages((prev) => prev.filter((x) => x !== u))}
-                    />
-                  ))}
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="block w-full text-sm"
-                  onChange={async (e) => {
-                    const urls = await uploadFiles(e.target.files, 'catalog');
-                    if (urls.length) setDetailImages((prev) => [...prev, ...urls]);
-                    e.target.value = '';
-                  }}
-                />
-              </div>
             </>
           ) : (
             <>
-              <div>
-                <div className="text-sm font-medium text-slate-800 mb-1">
-                  Ảnh gốc tham chiếu (tối đa 3) *
-                </div>
-                <p className="text-xs text-slate-500 mb-2">
-                  AI đọc ảnh đặt tên SEO, rồi tạo ảnh đăng theo màu bạn gõ. Ảnh gốc không đăng lên SP.
+              <div className="border border-sky-100 bg-sky-50 rounded-lg px-3 py-2 text-xs text-sky-900 space-y-1">
+                <p>
+                  <strong>Không upload ảnh ở bước này.</strong> Sang Studio ảnh, mỗi màu bạn upload ảnh tham chiếu
+                  riêng khi bấm Tạo.
                 </p>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {refImages.map((u) => (
-                    <Thumb
-                      key={u}
-                      url={u}
-                      onRemove={() => setRefImages((prev) => prev.filter((x) => x !== u))}
-                    />
-                  ))}
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  disabled={refImages.length >= 3}
-                  className="block w-full text-sm"
-                  onChange={async (e) => {
-                    const room = 3 - refImages.length;
-                    if (room <= 0) return;
-                    const files = e.target.files;
-                    if (!files) return;
-                    const limited = Array.from(files).slice(0, room);
-                    const dt = new DataTransfer();
-                    limited.forEach((f) => dt.items.add(f));
-                    const urls = await uploadFiles(dt.files, 'ref');
-                    if (urls.length) setRefImages((prev) => [...prev, ...urls].slice(0, 3));
-                    e.target.value = '';
-                  }}
-                />
+                <p>
+                  Ảnh màu #1 chọn người mẫu → ảnh màu #2 trở đi giữ <strong>cùng khuôn mặt</strong> từ ảnh màu #1
+                  đã OK.
+                </p>
+                <p>
+                  Cần đủ trước khi đăng: {STUDIO_MIN_COLOR_IMAGES} ảnh màu, {STUDIO_MIN_GALLERY_IMAGES} gallery,{' '}
+                  {STUDIO_MIN_MATERIAL_IMAGES} ảnh chất liệu.
+                </p>
               </div>
-              <p className="text-xs text-slate-500">
-                Không cần chọn số lượng ảnh trước — sang Studio sẽ tạo từng ảnh một: gõ màu, chọn ảnh
-                tham khảo, viết nội dung rồi tạo; tạo lại nếu chưa ưng, tiếp tục tạo màu/gallery/chi tiết
-                khi nào bạn thấy đủ.
-              </p>
               <label className="block text-sm">
                 <span className="font-medium text-slate-800">Người mẫu</span>
                 <select
@@ -1014,20 +1872,6 @@ export default function AdminManualProductCreatePage() {
                   <option value="studio">Studio chuyên nghiệp (nền sạch)</option>
                   <option value="lifestyle">Lifestyle trong nhà</option>
                   <option value="outdoor">Phong cảnh / ngoài trời</option>
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="font-medium text-slate-800">Model tạo ảnh AI</span>
-                <select
-                  className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"
-                  value={imageModel}
-                  onChange={(e) =>
-                    setImageModel(e.target.value as 'pro' | 'flash' | 'flash3')
-                  }
-                >
-                  <option value="pro">Pro — chất lượng cao (~3.350₫/ảnh, 2K)</option>
-                  <option value="flash">Flash — rẻ, nhanh (~1.000₫/ảnh, ~1K)</option>
-                  <option value="flash3">Flash 3.1 — cân bằng (~2.500₫/ảnh, 2K)</option>
                 </select>
               </label>
             </>
@@ -1115,7 +1959,7 @@ export default function AdminManualProductCreatePage() {
       {mode === 'ai' && step === 3 ? (
         <div className="space-y-4 bg-white border border-slate-200 rounded-xl p-4">
           {!job ||
-          (submitting && !interactiveStatuses.has(job.status) && job.status !== 'done' && job.status !== 'failed') ? (
+          (submitting && !INTERACTIVE_STATUSES.has(job.status) && job.status !== 'done' && job.status !== 'failed') ? (
             <div className="rounded-lg border border-slate-200 p-3 space-y-2">
               <p className="text-sm font-medium text-slate-800">
                 {job ? progressLabel : 'Đang khởi tạo session AI…'}
@@ -1161,17 +2005,11 @@ export default function AdminManualProductCreatePage() {
           {/* Form tạo theo mốc */}
           {job &&
           (job.status === 'awaiting_input' ||
-            job.status === 'awaiting_colors' ||
-            job.status === 'ready_to_publish') ? (
+            job.status === 'awaiting_colors') ? (
             <div className="space-y-4">
               {job.vision_product_name ? (
                 <p className="text-sm text-slate-800">
                   <span className="font-medium">Tên SEO:</span> {job.vision_product_name}
-                </p>
-              ) : null}
-              {(job.vision_colors || []).length ? (
-                <p className="text-xs text-slate-500">
-                  Gợi ý màu từ ảnh: {(job.vision_colors || []).join(', ')}
                 </p>
               ) : null}
 
@@ -1180,7 +2018,7 @@ export default function AdminManualProductCreatePage() {
                   [
                     ['color', 'Ảnh màu'],
                     ['gallery', 'Ảnh gallery'],
-                    ['detail', 'Ảnh chi tiết'],
+                    ['material', 'Ảnh chất liệu'],
                   ] as const
                 ).map(([k, label]) => (
                   <button
@@ -1189,6 +2027,11 @@ export default function AdminManualProductCreatePage() {
                     onClick={() => {
                       setFormKind(k);
                       setFormPrompt('');
+                      const nextColorIdx =
+                        k === 'color'
+                          ? (studio?.colors || []).filter((c) => (c?.img || '').trim()).length
+                          : 0;
+                      setFormRefUrls(studioDefaultRefUrls(studio?.ref_pool || [], k, nextColorIdx));
                     }}
                     className={`text-xs px-3 py-1.5 rounded-full border ${
                       formKind === k
@@ -1202,95 +2045,102 @@ export default function AdminManualProductCreatePage() {
               </div>
 
               {formKind === 'color' ? (
-                <label className="block text-sm">
-                  <span className="font-medium text-slate-800">Tên màu *</span>
-                  <input
-                    className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"
-                    value={formColorName}
-                    onChange={(e) => setFormColorName(e.target.value)}
-                    placeholder="VD: Đỏ, Be, Đen…"
-                    disabled={studioBusy}
-                  />
-                </label>
+                <p className="text-xs text-sky-900 bg-sky-50 border border-sky-100 rounded-lg px-3 py-2">
+                  {pendingColorIndex === 0 ? (
+                    <>
+                      Ảnh màu <strong>đầu tiên</strong>: upload ảnh mẫu SP — AI tự đọc tên SP + tên màu. Mỗi lần
+                      Tạo lại → người mẫu khác (cùng cài đặt tuổi/giới tính).
+                    </>
+                  ) : (
+                    <>
+                      Ảnh màu <strong>thứ {pendingColorIndex + 1}</strong>: upload{' '}
+                      <strong>ảnh mẫu SP mới</strong> — AI tự đọc tên màu. Khuôn mặt giữ từ ảnh màu #1 phía
+                      trên.
+                    </>
+                  )}
+                </p>
               ) : null}
 
-              <div>
-                <div className="text-sm font-medium text-slate-800 mb-1">
-                  Chọn ảnh tham khảo (tối đa 3) *
-                </div>
-                <p className="text-xs text-slate-500 mb-2">
-                  Gồm ảnh gốc + mọi ảnh đã tạo. Chọn màu nào → tạo theo ảnh màu đó.
+              {formKind === 'material' ? (
+                <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                  Ảnh cận cảnh chất liệu — AI đọc chất liệu đã nhập ở bước 1
+                  {material.trim() ? (
+                    <>
+                      : <strong>{material.trim()}</strong>
+                    </>
+                  ) : (
+                    ' (chưa có — quay lại bước Thuộc tính để nhập)'
+                  )}
+                  , soạn 3 ưu điểm/điểm đáng mua (DeepSeek) rồi in trực tiếp lên ảnh dạng nhãn tiếng Việt.
+                  Sau khi duyệt, ảnh + nội dung dùng cho section «Chất liệu» trên Ladipage.
                 </p>
-                <div className="flex flex-wrap gap-3">
-                  {(studio?.ref_pool || []).map((item) => {
-                    const checked = formRefUrls.includes(item.url);
-                    return (
-                      <button
-                        key={item.id || item.url}
-                        type="button"
-                        disabled={studioBusy}
-                        onClick={() => {
-                          setFormRefUrls((prev) => {
-                            if (prev.includes(item.url)) return prev.filter((x) => x !== item.url);
-                            if (prev.length >= 3) return [...prev.slice(1), item.url];
-                            return [...prev, item.url];
-                          });
-                        }}
-                        className={`text-left rounded-lg border p-1.5 w-[6.5rem] ${
-                          checked ? 'border-emerald-600 ring-2 ring-emerald-600/20' : 'border-slate-200'
-                        }`}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={item.url}
-                          alt=""
-                          className="w-full h-20 object-cover rounded-md bg-slate-50"
-                        />
-                        <div className="text-[10px] text-slate-600 mt-1 truncate">
-                          {item.label || item.kind}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+              ) : null}
 
-              <div>
-                <div className="text-sm font-medium text-slate-800 mb-1">Ảnh kèm (tuỳ chọn)</div>
-                <p className="text-xs text-slate-500 mb-2">
-                  Upload thêm ảnh gửi kèm lần tạo này (ưu tiên làm ref đầu).
-                </p>
-                {formAttachUrl ? (
-                  <div className="mb-2">
-                    <Thumb url={formAttachUrl} onRemove={() => setFormAttachUrl('')} />
+              <div className="space-y-4">
+                {formKind === 'color' && pendingColorIndex >= 1 && firstColorRef.url ? (
+                  <div>
+                    <div className="text-sm font-medium text-slate-800 mb-2">
+                      Khuôn mẫu người mẫu (từ ảnh màu #1)
+                    </div>
+                    <StudioFaceRefCard url={firstColorRef.url} colorName={firstColorRef.name} />
                   </div>
                 ) : null}
-                <input
-                  type="file"
-                  accept="image/*"
-                  disabled={studioBusy || uploading}
-                  className="block w-full text-sm"
-                  onChange={async (e) => {
-                    const urls = await uploadFiles(e.target.files, 'ref');
-                    if (urls[0]) setFormAttachUrl(urls[0]);
-                    e.target.value = '';
-                  }}
-                />
+
+                <div>
+                  <div className="text-sm font-medium text-slate-800 mb-1">
+                    {formKind === 'color'
+                      ? pendingColorIndex >= 1
+                        ? 'Ảnh mẫu sản phẩm mới *'
+                        : 'Ảnh mẫu sản phẩm *'
+                      : 'Chọn ảnh tham khảo (tối đa 3) *'}
+                  </div>
+                  <p className="text-xs text-slate-500 mb-2">
+                    {formKind === 'color' && pendingColorIndex === 0
+                      ? 'Upload ảnh mẫu SP khách — AI lấy kiểu, màu, cắt may từ ảnh; người mẫu theo cài đặt Studio.'
+                      : formKind === 'color' && pendingColorIndex >= 1
+                        ? 'Upload ảnh mẫu SP khách cho màu này — có thể là SP khác hẳn màu #1 (không chỉ đổi màu). Khuôn mặt giữ từ ảnh màu #1.'
+                        : 'Gồm ảnh đã tạo. Chọn màu nào → tạo theo ảnh màu đó.'}
+                  </p>
+                  {formKind === 'color' ? (
+                    <>
+                      {formAttachUrl ? (
+                        <div className="mb-2">
+                          <Thumb url={formAttachUrl} onRemove={() => setFormAttachUrl('')} />
+                          <p className="text-[10px] text-emerald-800 mt-1">Mẫu SP (màu + kiểu) gửi cho AI</p>
+                        </div>
+                      ) : null}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        disabled={studioBusy || uploading}
+                        className="block w-full text-sm mb-1"
+                        onChange={async (e) => {
+                          const urls = await uploadFiles(e.target.files, 'ref');
+                          if (urls[0]) setFormAttachUrl(urls[0]);
+                          e.target.value = '';
+                        }}
+                      />
+                    </>
+                  ) : null}
+                </div>
+
+                {formKind !== 'color' && (studio?.ref_pool || []).length > 0 ? (
+                  <StudioRefPicker
+                    items={studio?.ref_pool || []}
+                    selectedUrls={sanitizedFormRefUrls}
+                    onChange={setFormRefUrls}
+                    disabled={studioBusy}
+                  />
+                ) : null}
               </div>
 
-              <label className="block text-sm">
-                <span className="font-medium text-slate-800">Ghi chú thêm (tuỳ chọn)</span>
-                <textarea
-                  className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-[64px]"
-                  value={formPrompt}
-                  onChange={(e) => setFormPrompt(e.target.value)}
-                  disabled={studioBusy}
-                  placeholder="VD: mô tả thêm chất liệu, chi tiết ảnh kèm, tay áo dài hơn…"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Chỉ bổ sung vào prompt AI có sẵn (giữ nguyên màu/kiểu đã chọn) — không cần điền cũng được.
-                </p>
-              </label>
+              <StudioAiImageSettings
+                imageModel={imageModel}
+                aspectRatio={aspectRatio}
+                onImageModelChange={setImageModel}
+                onAspectRatioChange={setAspectRatio}
+                disabled={studioBusy || uploading}
+              />
 
               <button
                 type="button"
@@ -1312,7 +2162,9 @@ export default function AdminManualProductCreatePage() {
                     {slotKindLabel(currentSlot.kind, currentSlot.name, currentSlot.index)}
                     {currentSlot.attempt ? ` · lần ${currentSlot.attempt}` : ''}
                   </div>
-                  <div className="relative w-full max-w-md aspect-square rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
+                  <div
+                    className={`relative w-full max-w-md ${studioAspectClass(aspectRatio)} rounded-xl overflow-hidden border border-slate-200 bg-slate-50`}
+                  >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={currentSlot.url} alt="" className="w-full h-full object-contain" />
                   </div>
@@ -1323,47 +2175,55 @@ export default function AdminManualProductCreatePage() {
                 </p>
               )}
 
-              <label className="block text-sm">
-                <span className="font-medium text-slate-800">Ghi chú thêm (tuỳ chọn) — sửa rồi Tạo lại</span>
-                <textarea
-                  className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-[64px]"
-                  value={formPrompt}
-                  onChange={(e) => setFormPrompt(e.target.value)}
-                  disabled={studioBusy}
-                  placeholder="VD: chưa ưng chỗ này, đổi ánh sáng ấm hơn…"
-                />
-              </label>
-
-              <div>
-                <div className="text-sm font-medium text-slate-800 mb-1">Ảnh tham khảo (tạo lại)</div>
-                <div className="flex flex-wrap gap-2">
-                  {(studio?.ref_pool || []).map((item) => {
-                    const checked = formRefUrls.includes(item.url);
-                    return (
-                      <button
-                        key={`r-${item.id || item.url}`}
-                        type="button"
-                        disabled={studioBusy}
-                        onClick={() => {
-                          setFormRefUrls((prev) => {
-                            if (prev.includes(item.url)) return prev.filter((x) => x !== item.url);
-                            if (prev.length >= 3) return [...prev.slice(1), item.url];
-                            return [...prev, item.url];
-                          });
+              {currentSlot?.kind === 'color' ? (
+                <div>
+                  {approvalColorIndex === 0 ? (
+                    <p className="text-xs text-sky-800 bg-sky-50 border border-sky-100 rounded-lg px-2 py-1.5">
+                      Tạo lại ảnh màu đầu → người mẫu khác (cùng tuổi/giới tính đã cài).
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
+                        Upload ảnh mẫu SP mới nếu cần đổi mẫu — khuôn mặt giữ từ màu #1.
+                      </p>
+                      {firstColorRef.url ? (
+                        <StudioFaceRefCard
+                          url={firstColorRef.url}
+                          colorName={firstColorRef.name}
+                          compact
+                        />
+                      ) : null}
+                      {formAttachUrl ? (
+                        <div>
+                          <Thumb url={formAttachUrl} onRemove={() => setFormAttachUrl('')} />
+                        </div>
+                      ) : null}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        disabled={studioBusy || uploading}
+                        className="block w-full text-sm"
+                        onChange={async (e) => {
+                          const urls = await uploadFiles(e.target.files, 'ref');
+                          if (urls[0]) setFormAttachUrl(urls[0]);
+                          e.target.value = '';
                         }}
-                        className={`rounded-lg border p-1 w-20 ${
-                          checked ? 'border-emerald-600' : 'border-slate-200'
-                        }`}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={item.url} alt="" className="w-full h-16 object-cover rounded" />
-                      </button>
-                    );
-                  })}
+                      />
+                    </div>
+                  )}
                 </div>
-              </div>
+              ) : null}
 
-              <div className="flex flex-wrap gap-2">
+              <StudioAiImageSettings
+                imageModel={imageModel}
+                aspectRatio={aspectRatio}
+                onImageModelChange={setImageModel}
+                onAspectRatioChange={setAspectRatio}
+                disabled={studioBusy}
+                compact
+              />
+
+              <div className="flex flex-wrap gap-2 items-end">
                 <button
                   type="button"
                   disabled={studioBusy || !currentSlot?.url}
@@ -1388,6 +2248,23 @@ export default function AdminManualProductCreatePage() {
           {job && job.status !== 'done' && job.status !== 'queued' ? (
             <div className="space-y-2 border-t border-slate-100 pt-3">
               <div className="text-xs font-medium text-slate-600 uppercase tracking-wide">
+                Tiến độ ảnh trước khi đăng
+              </div>
+              <ul className="text-sm space-y-1">
+                <li className={studioPublishCheck.colorCount >= STUDIO_MIN_COLOR_IMAGES ? 'text-emerald-700' : 'text-slate-700'}>
+                  Ảnh màu: {studioPublishCheck.colorCount}/{STUDIO_MIN_COLOR_IMAGES}
+                  {studioPublishCheck.colorCount >= STUDIO_MIN_COLOR_IMAGES ? ' ✓' : ''}
+                </li>
+                <li className={studioPublishCheck.galleryCount >= STUDIO_MIN_GALLERY_IMAGES ? 'text-emerald-700' : 'text-slate-700'}>
+                  Gallery: {studioPublishCheck.galleryCount}/{STUDIO_MIN_GALLERY_IMAGES}
+                  {studioPublishCheck.galleryCount >= STUDIO_MIN_GALLERY_IMAGES ? ' ✓' : ''}
+                </li>
+                <li className={studioPublishCheck.materialOk ? 'text-emerald-700' : 'text-slate-700'}>
+                  Ảnh chất liệu: {studioPublishCheck.materialOk ? 1 : 0}/{STUDIO_MIN_MATERIAL_IMAGES}
+                  {studioPublishCheck.materialOk ? ' ✓' : ''}
+                </li>
+              </ul>
+              <div className="text-xs font-medium text-slate-600 uppercase tracking-wide pt-1">
                 Đã tạo / chọn được làm ref
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1411,9 +2288,14 @@ export default function AdminManualProductCreatePage() {
                     ? 'Đang đăng (DeepSeek + taxonomy)…'
                     : 'Đăng sản phẩm'}
                 </button>
-              ) : null}
+              ) : (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                  Chưa đủ ảnh để đăng — hoàn thành checklist phía trên (màu, gallery, chất liệu).
+                </p>
+              )}
               <p className="text-xs text-slate-500">
-                Có ≥1 ảnh màu/chính đã OK là Đăng được — không bắt buộc tạo hết gallery.
+                Không cần ảnh chi tiết. Chỉ đăng khi đủ {STUDIO_MIN_COLOR_IMAGES} ảnh màu,{' '}
+                {STUDIO_MIN_GALLERY_IMAGES} gallery và {STUDIO_MIN_MATERIAL_IMAGES} ảnh chất liệu.
               </p>
             </div>
           ) : null}

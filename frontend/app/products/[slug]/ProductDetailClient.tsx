@@ -20,6 +20,7 @@ import ProductQASection from './components/ProductQASection/ProductQASection';
 import ProductReviewSection from './components/ProductReviewSection/ProductReviewSection';
 import ProductDetailMobile from './ProductDetailMobile';
 import ErrorState from './components/ErrorState/ErrorState';
+import SectionErrorBoundary from '@/components/ui/SectionErrorBoundary';
 import { useToast } from '@/components/ToastProvider';
 import { trackEvent } from '@/lib/analytics';
 import {
@@ -187,14 +188,23 @@ export default function ProductDetailClient({
   }, [categoryTree, openLevel1]);
 
   useEffect(() => {
-    const handleScroll = () => {
+    let rafId = 0;
+    const measure = () => {
+      rafId = 0;
       if (!stickyBarRef.current) return;
       const rect = stickyBarRef.current.getBoundingClientRect();
       setIsStickyPinned(rect.top <= 0);
     };
-    handleScroll();
+    const handleScroll = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(measure);
+    };
+    measure();
     window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
   }, []);
 
   useEffect(() => {
@@ -689,35 +699,43 @@ export default function ProductDetailClient({
             <div className="p-4">
               <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-6">
               <div className="self-start">
-                <ProductGallery
-                  product={product}
-                  selectedImageUrl={selectedColorImage}
-                  onSelectImage={setSelectedColorImage}
-                />
+                <SectionErrorBoundary>
+                  <ProductGallery
+                    product={product}
+                    selectedImageUrl={selectedColorImage}
+                    onSelectImage={setSelectedColorImage}
+                  />
+                </SectionErrorBoundary>
               </div>
-              <ProductInfo
-                product={product}
-                viewingImageUrl={nanoPrimaryImage}
-                onAddToCart={handleAddToCart}
-                onToggleFavorite={handleToggleFavorite}
-                onBuyNow={handleBuyNow}
-                onOpenQA={() => setQaModalOpen(true)}
-                onOpenReviews={() => setReviewsModalOpen(true)}
-                isCartLoading={uiCartLoading}
-                isFavorited={isFavorited}
-                onColorImageChange={setSelectedColorImage}
-                initialGoogleDiscount={initialGoogleDiscount}
-              />
+              <SectionErrorBoundary>
+                <ProductInfo
+                  product={product}
+                  viewingImageUrl={nanoPrimaryImage}
+                  onAddToCart={handleAddToCart}
+                  onToggleFavorite={handleToggleFavorite}
+                  onBuyNow={handleBuyNow}
+                  onOpenQA={() => setQaModalOpen(true)}
+                  onOpenReviews={() => setReviewsModalOpen(true)}
+                  isCartLoading={uiCartLoading}
+                  isFavorited={isFavorited}
+                  onColorImageChange={setSelectedColorImage}
+                  initialGoogleDiscount={initialGoogleDiscount}
+                />
+              </SectionErrorBoundary>
             </div>
             </div>
             <div className="border-t">
-              <ProductTabs product={product} />
+              <SectionErrorBoundary>
+                <ProductTabs product={product} />
+              </SectionErrorBoundary>
             </div>
             <ProductQASection product={product} modalOnly modalOpen={qaModalOpen} onModalClose={() => setQaModalOpen(false)} onModalOpen={() => setQaModalOpen(true)} />
             <ProductReviewSection product={product} modalOnly modalOpen={reviewsModalOpen} onModalClose={() => setReviewsModalOpen(false)} onModalOpen={() => setReviewsModalOpen(true)} />
           </article>
 
-          <AgeGenderRecommendationSection excludeProductId={product.id} className="mt-6" />
+          <SectionErrorBoundary>
+            <AgeGenderRecommendationSection excludeProductId={product.id} className="mt-6" />
+          </SectionErrorBoundary>
         </main>
       </div>
     </div>

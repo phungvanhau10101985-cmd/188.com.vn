@@ -77,13 +77,16 @@ export default function PersonalizedHeroBanner({
     if (hasInitial) {
       setHeroCategories(initialHeroCategories!);
       setCategoriesResolved(true);
+      // SSR đã có tile khớp giới tính mặc định — không cần gọi API thêm, tránh request thừa.
+      return () => {
+        cancelled = true;
+      };
     }
 
     void apiClient
       .getHeroCategoryTiles(HERO_CATEGORY_TILE_COUNT, 8)
       .then((res) => {
         if (cancelled) return;
-        if (hasInitial) return;
         if (res.tiles?.length) {
           setHeroCategories(res);
         } else {
@@ -96,7 +99,7 @@ export default function PersonalizedHeroBanner({
         setHeroCategories(fallback);
       })
       .catch(() => {
-        if (cancelled || hasInitial) return;
+        if (cancelled) return;
         return apiClient
           .getHeroCategoryTilesCached(defaultGender, HERO_CATEGORY_TILE_COUNT)
           .then((cached) => {

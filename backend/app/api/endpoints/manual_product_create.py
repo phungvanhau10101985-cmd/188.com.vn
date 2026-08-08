@@ -17,12 +17,13 @@ from app.models.admin import AdminUser
 from app.services import bunny_storage
 from app.services.image_raster_jpeg import raster_bytes_to_jpeg_bytes
 from app.core.config import settings
-from app.services.manual_product_create_job_store import load_job, persist_job
+from app.services.manual_product_create_job_store import load_job, list_jobs, persist_job
 from app.services.manual_product_create_service import (
     approve_studio_image,
     create_and_start_job,
     enqueue_manual_product_job,
     job_public_view,
+    maybe_recover_interrupted_job,
     publish_studio_job,
     regenerate_studio_image,
     set_job_colors,
@@ -76,6 +77,10 @@ class ManualProductJobCreate(BaseModel):
         "pro",
         description="Model tạo ảnh: pro (chất lượng cao) | flash (rẻ) | flash3",
     )
+    aspect_ratio: str = Field(
+        "1:1",
+        description="Tỷ lệ khung ảnh Gemini: 1:1 | 3:4 | 4:3 | 9:16 | 16:9 …",
+    )
     # none | model
     model_presence: str = Field(
         "none",
@@ -118,6 +123,20 @@ class ManualProductJobOut(BaseModel):
     vision_product_name: Optional[str] = None
     vision_colors: Optional[List[str]] = None
     studio: Optional[Dict[str, Any]] = None
+    payload: Optional[Dict[str, Any]] = None
+    mode: Optional[str] = None
+
+
+class ManualProductJobSummary(BaseModel):
+    job_id: str
+    status: str
+    message: Optional[str] = None
+    progress: int = 0
+    mode: Optional[str] = None
+    product_name: Optional[str] = None
+    material: Optional[str] = None
+    updated_at: Optional[str] = None
+    created_at: Optional[str] = None
 
 
 class ManualProductColorsBody(BaseModel):
@@ -128,17 +147,21 @@ class ManualProductColorsBody(BaseModel):
 
 
 class ManualProductGenerateBody(BaseModel):
-    kind: str = Field(..., description="color | main | gallery | detail")
-    name: str = Field("", description="Tên màu (bắt buộc khi kind=color)")
+    kind: str = Field(..., description="color | main | gallery | detail | material")
+    name: str = Field("", description="Tên màu (tuỳ chọn — để trống thì AI đọc từ ảnh mẫu)")
     prompt: str = Field("", description="Prompt tùy chỉnh (để trống dùng gợi ý)")
     ref_urls: List[str] = Field(default_factory=list, description="Ảnh tham khảo đã chọn (≤3)")
     attach_url: str = Field("", description="Ảnh kèm upload thêm cho lần tạo này")
+    image_model: str = Field("", description="pro | flash | flash3 — model Gemini tạo ảnh")
+    aspect_ratio: str = Field("", description="1:1 | 3:4 | 4:3 | 9:16 | 16:9 …")
 
 
 class ManualProductRegenerateBody(BaseModel):
     prompt: Optional[str] = None
     ref_urls: Optional[List[str]] = None
     attach_url: Optional[str] = None
+    image_model: Optional[str] = None
+    aspect_ratio: Optional[str] = None
 
 
 class ManualProductUploadOut(BaseModel):
@@ -174,6 +197,8 @@ def _out(state: Dict[str, Any], job_id: Optional[str] = None) -> ManualProductJo
         vision_product_name=view.get("vision_product_name"),
         vision_colors=view.get("vision_colors"),
         studio=view.get("studio"),
+        payload=view.get("payload"),
+        mode=view.get("mode"),
     )
 
 
@@ -263,6 +288,38 @@ def create_manual_product_job(
     return _out(state)
 
 
+@router.get("/jobs", response_model=List[ManualProductJobSummary])
+def list_manual_product_jobs(
+    active: bool = True,
+    limit: int = 20,
+    current_admin: AdminUser = Depends(require_module_permission("products")),
+):
+    """Phiên đang dở trên server (survive mất điện / restart backend)."""
+    admin_id = getattr(current_admin, "id", None)
+    rows = list_jobs(active_only=active, limit=min(max(1, limit), 50), created_by=admin_id)
+    out: List[ManualProductJobSummary] = []
+    for state in rows:
+        payload = dict(state.get("payload") or {})
+        pname = (
+            (state.get("vision_product_name") or "").strip()
+            or (payload.get("product_name") or "").strip()
+        )
+        out.append(
+            ManualProductJobSummary(
+                job_id=str(state.get("job_id") or ""),
+                status=str(state.get("status") or "unknown"),
+                message=state.get("message"),
+                progress=int(state.get("progress") or 0),
+                mode=str(payload.get("mode") or "").strip() or None,
+                product_name=pname or None,
+                material=(payload.get("material") or "").strip() or None,
+                updated_at=state.get("updated_at"),
+                created_at=state.get("created_at"),
+            )
+        )
+    return out
+
+
 @router.get("/jobs/{job_id}", response_model=ManualProductJobOut)
 def get_manual_product_job(
     job_id: str,
@@ -272,6 +329,7 @@ def get_manual_product_job(
     state = load_job(job_id)
     if not state:
         raise HTTPException(status_code=404, detail="Không tìm thấy job")
+    state = maybe_recover_interrupted_job(state)
     return _out(state, job_id)
 
 
@@ -306,6 +364,8 @@ def generate_manual_product_image(
             prompt=body.prompt,
             ref_urls=body.ref_urls,
             attach_url=body.attach_url,
+            image_model=body.image_model or None,
+            aspect_ratio=body.aspect_ratio or None,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -340,6 +400,8 @@ def regenerate_manual_product_image(
             prompt=body.prompt,
             ref_urls=body.ref_urls,
             attach_url=body.attach_url,
+            image_model=body.image_model,
+            aspect_ratio=body.aspect_ratio,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

@@ -17,6 +17,7 @@ const CategoryProductFilters = dynamic(() => import('@/components/CategoryProduc
   ),
 });
 import PersonalizedHeroBanner from '@/components/home/PersonalizedHeroBanner';
+import HomeSectionErrorBoundary from '@/components/home/HomeSectionErrorBoundary';
 import SameShopRecommendationHeader from '@/components/home/SameShopRecommendationHeader';
 import HomeProductPagination from '@/components/home/HomeProductPagination';
 import Button from '@/components/ui/Button';
@@ -1417,6 +1418,7 @@ export default function HomePageClient({
 
         {/* Cùng shop + trộn ngẫu nhiên pool tuổi/giới (1 lưới). */}
         {!hasFilterParams && showMixedRecommendationSection && (
+          <HomeSectionErrorBoundary>
           <section className="mb-8" id="san-pham-cung-shop">
             <SameShopRecommendationHeader
               cohortMode={sameAgeGenderCohortMode}
@@ -1468,10 +1470,12 @@ export default function HomePageClient({
               )}
             </div>
           </section>
+          </HomeSectionErrorBoundary>
         )}
 
         {/* Grid SP chính: không có ?category/lọc URL — trước đây không render danh sách filteredProducts */}
         {!hasFilterParams && (
+          <HomeSectionErrorBoundary>
           <section className="mb-8" aria-labelledby="home-all-products-heading">
             <div className="mb-4">
               <h2
@@ -1530,6 +1534,7 @@ export default function HomePageClient({
               </p>
             )}
           </section>
+          </HomeSectionErrorBoundary>
         )}
 
       </main>

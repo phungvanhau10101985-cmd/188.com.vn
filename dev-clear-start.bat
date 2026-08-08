@@ -1,12 +1,12 @@
 @echo off
 REM ============================================================
 REM  dev-clear-start.bat — DEV LOCAL 188.com.vn
-REM  - Giai phong LISTEN tren port backend/frontend (mac dinh 8001 + 3001); chi tat ngrok neu CLI forward dung port frontend
+REM  - Chi dung process LISTEN 8001/3001 thuoc repo nay; khong dong Thu-do-online (:3000)
 REM  - Khoi dong backend uvicorn (8001) + Next (3001) + ngrok (neu co)
 REM
 REM  Cach dung:
 REM    dev-clear-start.bat                   (chay binh thuong)
-REM    dev-clear-start.bat -KillAllNode      (tat HET node.exe — can than)
+REM    dev-clear-start.bat -KillAllNode      (chi node/esbuild trong frontend 188-com-vn)
 REM    dev-clear-start.bat -NoNgrok          (khong mo ngrok)
 REM    dev-clear-start.bat -OnlyClean        (chi xoa cache, khong khoi dong)
 REM ============================================================

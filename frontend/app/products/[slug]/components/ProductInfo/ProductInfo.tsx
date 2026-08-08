@@ -519,6 +519,8 @@ export default function ProductInfo({
       ) : null}
 
       <div className={sourceAvailable ? '' : 'opacity-60 pointer-events-none select-none'} aria-disabled={!sourceAvailable}>
+      {/* Mobile ladipage: chọn size/màu/số lượng trong ProductVariantModal (giống PDP thường) */}
+      <div className={enableMobileStickyBar ? 'hidden md:block' : undefined}>
       <VariantSelector
         sizes={product.sizes || []}
         colors={colorList}
@@ -569,6 +571,7 @@ export default function ProductInfo({
             </p>
           ) : null}
         </div>
+      </div>
       </div>
 
       <BirthdaySavingsCard

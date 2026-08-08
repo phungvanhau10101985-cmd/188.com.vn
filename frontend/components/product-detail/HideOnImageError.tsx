@@ -19,6 +19,8 @@ type RemoteProductImgProps = {
   alt: string;
   className?: string;
   displaySize?: number;
+  /** Ảnh chính hiển thị ngay khi vào trang (LCP) — tải eager, không lazy. */
+  priority?: boolean;
   onLoad?: (e: React.SyntheticEvent<HTMLImageElement>) => void;
   onBroken?: () => void;
 };
@@ -29,6 +31,7 @@ function RemoteProductImg({
   alt,
   className,
   displaySize = 800,
+  priority = false,
   onLoad,
   onBroken,
 }: RemoteProductImgProps) {
@@ -61,7 +64,8 @@ function RemoteProductImg({
     <img
       src={currentSrc}
       alt={alt}
-      loading="lazy"
+      loading={priority ? 'eager' : 'lazy'}
+      fetchPriority={priority ? 'high' : undefined}
       decoding="async"
       referrerPolicy="no-referrer"
       className={className}
@@ -126,6 +130,8 @@ type ProductFillImageProps = {
   src: string;
   alt: string;
   frameClassName?: string;
+  /** Ảnh chính hiển thị ngay khi vào trang (LCP) — tải eager, không lazy. */
+  priority?: boolean;
   onBroken?: () => void;
   children?: React.ReactNode;
 };
@@ -135,6 +141,7 @@ export function ProductFillImage({
   src,
   alt,
   frameClassName = 'aspect-[4/5] max-h-[70vh] relative',
+  priority = false,
   onBroken,
   children,
 }: ProductFillImageProps) {
@@ -164,6 +171,7 @@ export function ProductFillImage({
         alt={alt}
         className="absolute inset-0 h-full w-full object-cover"
         displaySize={960}
+        priority={priority}
         onLoad={handleLoad}
         onBroken={markFailed}
       />

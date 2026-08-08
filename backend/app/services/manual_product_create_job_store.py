@@ -39,3 +39,35 @@ def load_job(job_id: str) -> Optional[Dict[str, Any]]:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return None
+
+
+def list_jobs(
+    *,
+    active_only: bool = True,
+    limit: int = 30,
+    created_by: Optional[int] = None,
+) -> list[Dict[str, Any]]:
+    """Liệt kê job (mới nhất trước) — dùng khôi phục phiên sau mất điện."""
+    _DONE = frozenset({"done"})
+    root = _jobs_root()
+    rows: list[Dict[str, Any]] = []
+    paths = sorted(root.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for path in paths:
+        if path.suffix == ".tmp" or path.name.endswith(".json.tmp"):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                state = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(state, dict):
+            continue
+        if created_by is not None and state.get("created_by") != created_by:
+            continue
+        status = str(state.get("status") or "").strip()
+        if active_only and status in _DONE:
+            continue
+        rows.append(state)
+        if len(rows) >= max(1, min(limit, 100)):
+            break
+    return rows

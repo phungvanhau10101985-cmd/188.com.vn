@@ -1,11 +1,29 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import MobileProductMediaCarousel, {
   MobileProductMediaSlide,
+  type MobileProductMediaCarouselHandle,
 } from '@/components/product-detail/MobileProductMediaCarousel';
 import { parseHeroObjectPosition } from '@/lib/ladipage-utils';
+
+const HERO_AUTOPLAY_MS = 3500;
+
+function useDesktopFinePointer(): boolean {
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(min-width: 768px) and (pointer: fine)');
+    const update = () => setIsDesktop(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
+  return isDesktop;
+}
 
 interface HeroImageCarouselProps {
   images: string[];
@@ -22,8 +40,37 @@ export default function HeroImageCarousel({
   aspectClassName = 'aspect-[4/3]',
 }: HeroImageCarouselProps) {
   const [index, setIndex] = useState(0);
+  const [autoplayActive, setAutoplayActive] = useState(false);
+  const [hoverPaused, setHoverPaused] = useState(false);
+  const carouselRef = useRef<MobileProductMediaCarouselHandle>(null);
+  const indexRef = useRef(0);
+  const isDesktop = useDesktopFinePointer();
   const pos = parseHeroObjectPosition(objectPosition);
   const slides = images.filter((u) => u?.trim());
+
+  indexRef.current = index;
+
+  const goToSlide = useCallback((next: number, behavior: ScrollBehavior = 'smooth') => {
+    setIndex(next);
+    carouselRef.current?.scrollToIndex(next, behavior);
+  }, []);
+
+  const advanceSlide = useCallback(() => {
+    if (slides.length <= 1) return;
+    goToSlide((indexRef.current + 1) % slides.length);
+  }, [goToSlide, slides.length]);
+
+  useEffect(() => {
+    if (!autoplayActive || hoverPaused || slides.length <= 1 || !isDesktop) return;
+    const timer = window.setInterval(advanceSlide, HERO_AUTOPLAY_MS);
+    return () => window.clearInterval(timer);
+  }, [advanceSlide, autoplayActive, hoverPaused, isDesktop, slides.length]);
+
+  const handleDesktopClick = useCallback(() => {
+    if (!isDesktop || slides.length <= 1) return;
+    setAutoplayActive(true);
+    advanceSlide();
+  }, [advanceSlide, isDesktop, slides.length]);
 
   if (slides.length === 0) {
     return (
@@ -45,14 +92,26 @@ export default function HeroImageCarousel({
           sizes="(max-width: 768px) 100vw, 50vw"
           className="object-cover"
           style={{ objectPosition: `${pos.x}% ${pos.y}%` }}
+          priority
+          fetchPriority="high"
         />
       </div>
     );
   }
 
   return (
-    <div className={`relative overflow-hidden rounded-xl bg-gray-100 ${aspectClassName}`}>
+    <div
+      className={`relative overflow-hidden rounded-xl bg-gray-100 ${aspectClassName} ${
+        isDesktop ? 'md:cursor-pointer' : ''
+      }`}
+      onClick={isDesktop ? handleDesktopClick : undefined}
+      onMouseEnter={isDesktop ? () => setHoverPaused(true) : undefined}
+      onMouseLeave={isDesktop ? () => setHoverPaused(false) : undefined}
+      role={isDesktop ? 'group' : undefined}
+      aria-label={isDesktop ? 'Gallery ảnh hero — bấm để xem ảnh tiếp theo' : undefined}
+    >
       <MobileProductMediaCarousel
+        ref={carouselRef}
         selectedIndex={index}
         onSelectedIndexChange={setIndex}
         slideCount={slides.length}
@@ -68,6 +127,8 @@ export default function HeroImageCarousel({
               className="object-cover"
               style={{ objectPosition: i === 0 ? `${pos.x}% ${pos.y}%` : '50% 50%' }}
               draggable={false}
+              priority={i === 0}
+              fetchPriority={i === 0 ? 'high' : undefined}
             />
           </MobileProductMediaSlide>
         ))}

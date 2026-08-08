@@ -9,6 +9,8 @@ interface HeroDisplayImageProps {
   objectPosition?: string | null;
   alt: string;
   aspectClassName?: string;
+  /** Ảnh hero chính hiển thị ngay khi vào trang (LCP) — tải eager. */
+  priority?: boolean;
 }
 
 /** Ảnh hero read-only — áp dụng object-position đã lưu từ admin. */
@@ -17,6 +19,7 @@ export default function HeroDisplayImage({
   objectPosition,
   alt,
   aspectClassName = 'aspect-[4/3]',
+  priority = false,
 }: HeroDisplayImageProps) {
   const pos = parseHeroObjectPosition(objectPosition);
 
@@ -30,6 +33,8 @@ export default function HeroDisplayImage({
           sizes="(max-width: 768px) 100vw, 50vw"
           className="object-cover"
           style={{ objectPosition: `${pos.x}% ${pos.y}%` }}
+          priority={priority}
+          fetchPriority={priority ? 'high' : undefined}
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center px-4 text-center text-sm text-gray-400">

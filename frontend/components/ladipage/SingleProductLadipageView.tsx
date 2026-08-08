@@ -15,6 +15,7 @@ import ProductTabs from '@/components/product-detail/ProductTabs';
 import ProductQASection from '@/app/products/[slug]/components/ProductQASection/ProductQASection';
 import ProductReviewSection from '@/app/products/[slug]/components/ProductReviewSection/ProductReviewSection';
 import AgeGenderRecommendationSection from '@/components/AgeGenderRecommendationSection';
+import SectionErrorBoundary from '@/components/ui/SectionErrorBoundary';
 import { trackEvent } from '@/lib/analytics';
 import { buildAddToCartRequestFromProduct, trackMarketingAddToCartIntent } from '@/lib/marketing-add-to-cart';
 import { useProductMarketingView } from '@/lib/use-product-marketing-view';
@@ -231,35 +232,55 @@ export default function SingleProductLadipageView({
   }, [heroData?.headline, heroData?.subheadline, product.name]);
 
   const renderProductInfo = (opts?: { enableMobileStickyBar?: boolean; compactMobile?: boolean }) => (
-    <ProductInfo
-      product={product}
-      viewingImageUrl={selectedColorImage}
-      onAddToCart={handleAddToCart}
-      onToggleFavorite={handleToggleFavorite}
-      onBuyNow={handleBuyNow}
-      onOpenQA={() => setQaModalOpen(true)}
-      onOpenReviews={() => setReviewsModalOpen(true)}
-      isCartLoading={cartLoading}
-      isFavorited={isFavorited}
-      onColorImageChange={setSelectedColorImage}
-      initialGoogleDiscount={initialGoogleDiscount}
-      enableMobileStickyBar={opts?.enableMobileStickyBar}
-      compactMobile={opts?.compactMobile}
-    />
+    <SectionErrorBoundary>
+      <ProductInfo
+        product={product}
+        viewingImageUrl={selectedColorImage}
+        onAddToCart={handleAddToCart}
+        onToggleFavorite={handleToggleFavorite}
+        onBuyNow={handleBuyNow}
+        onOpenQA={() => setQaModalOpen(true)}
+        onOpenReviews={() => setReviewsModalOpen(true)}
+        isCartLoading={cartLoading}
+        isFavorited={isFavorited}
+        onColorImageChange={setSelectedColorImage}
+        initialGoogleDiscount={initialGoogleDiscount}
+        enableMobileStickyBar={opts?.enableMobileStickyBar}
+        compactMobile={opts?.compactMobile}
+      />
+    </SectionErrorBoundary>
   );
 
   const renderLadipageSections = () => (
     <>
-      {highlightsSection && <HighlightsSection data={highlightsSection.data as HighlightsSectionData} />}
-      {materialSection && <MaterialSection data={materialSection.data as MaterialSectionData} />}
+      {highlightsSection && (
+        <SectionErrorBoundary>
+          <HighlightsSection data={highlightsSection.data as HighlightsSectionData} />
+        </SectionErrorBoundary>
+      )}
+      {materialSection && (
+        <SectionErrorBoundary>
+          <MaterialSection data={materialSection.data as MaterialSectionData} />
+        </SectionErrorBoundary>
+      )}
       <div className="border-t border-gray-100 pt-2">
-        <ProductTabs product={product} />
+        <SectionErrorBoundary>
+          <ProductTabs product={product} />
+        </SectionErrorBoundary>
       </div>
       {trustCtaSection && (
-        <TrustCtaSection data={trustCtaSection.data as TrustCtaSectionData} onCtaClick={openBuyModal} />
+        <SectionErrorBoundary>
+          <TrustCtaSection data={trustCtaSection.data as TrustCtaSectionData} onCtaClick={openBuyModal} />
+        </SectionErrorBoundary>
       )}
-      {faqSection && <FaqSection data={faqSection.data as FaqSectionData} />}
-      <AgeGenderRecommendationSection excludeProductId={product.id} className="mt-6" />
+      {faqSection && (
+        <SectionErrorBoundary>
+          <FaqSection data={faqSection.data as FaqSectionData} />
+        </SectionErrorBoundary>
+      )}
+      <SectionErrorBoundary>
+        <AgeGenderRecommendationSection excludeProductId={product.id} className="mt-6" />
+      </SectionErrorBoundary>
     </>
   );
 
@@ -267,12 +288,14 @@ export default function SingleProductLadipageView({
     <ProductReviewsProvider productId={product.id}>
       {/* Mobile: gallery gọn + badge/blurb (không trùng tên SP) + buy-box */}
       <div className="md:hidden overflow-x-hidden bg-white pb-28">
-        <ProductGallery
-          layout="bleed"
-          product={product}
-          selectedImageUrl={selectedColorImage}
-          onSelectImage={setSelectedColorImage}
-        />
+        <SectionErrorBoundary>
+          <ProductGallery
+            layout="bleed"
+            product={product}
+            selectedImageUrl={selectedColorImage}
+            onSelectImage={setSelectedColorImage}
+          />
+        </SectionErrorBoundary>
 
         {/* Badge + blurb: cùng cỡ/đậm với tên SP (text-base font-bold), nét mảnh */}
         <div className="px-4 pt-2.5 pb-1">
@@ -302,32 +325,36 @@ export default function SingleProductLadipageView({
       {/* Desktop: giữ hero marketing + gallery cạnh thông tin mua */}
       <div className="mx-auto hidden max-w-6xl px-4 pb-8 md:block">
         {heroSection && heroData && (
-          <HeroSection
-            data={heroData}
-            carouselImages={heroCarouselImages}
-            ctaSlot={
-              <button
-                type="button"
-                onClick={openBuyModal}
-                className="inline-flex items-center justify-center rounded-full bg-orange-600 px-7 py-3.5 text-sm font-bold text-white shadow-lg shadow-orange-600/25 transition hover:-translate-y-0.5 hover:bg-orange-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
-              >
-                Mua ngay
-                <span aria-hidden="true" className="ml-2 text-base leading-none">
-                  →
-                </span>
-              </button>
-            }
-          />
+          <SectionErrorBoundary>
+            <HeroSection
+              data={heroData}
+              carouselImages={heroCarouselImages}
+              ctaSlot={
+                <button
+                  type="button"
+                  onClick={openBuyModal}
+                  className="inline-flex items-center justify-center rounded-full bg-orange-600 px-7 py-3.5 text-sm font-bold text-white shadow-lg shadow-orange-600/25 transition hover:-translate-y-0.5 hover:bg-orange-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
+                >
+                  Mua ngay
+                  <span aria-hidden="true" className="ml-2 text-base leading-none">
+                    →
+                  </span>
+                </button>
+              }
+            />
+          </SectionErrorBoundary>
         )}
         <LadipageTrustStrip />
 
         <div className="scroll-mt-6 grid grid-cols-1 gap-6 py-6 lg:grid-cols-[1fr_1fr]">
           <div className="self-start">
-            <ProductGallery
-              product={product}
-              selectedImageUrl={selectedColorImage}
-              onSelectImage={setSelectedColorImage}
-            />
+            <SectionErrorBoundary>
+              <ProductGallery
+                product={product}
+                selectedImageUrl={selectedColorImage}
+                onSelectImage={setSelectedColorImage}
+              />
+            </SectionErrorBoundary>
           </div>
           {renderProductInfo()}
         </div>
