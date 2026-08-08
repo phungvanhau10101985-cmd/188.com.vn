@@ -72,6 +72,38 @@ import { sameAgeGenderCompactHint } from '@/lib/same-age-gender-hint';
 const HOME_MIX_INITIAL_LIMIT = 24;
 const HOME_MIX_LOAD_MORE_LIMIT = 24;
 
+/**
+ * Cache trong bộ nhớ (module-scope, KHÔNG lưu localStorage/sessionStorage) cho block
+ * «CÓ THỂ BẠN THÍCH» — sống sót qua các lần remount của trang chủ trong cùng phiên SPA
+ * (rời `/` sang trang khác rồi quay lại). Nhờ vậy khi quay lại trang chủ, UI hiển thị
+ * NGAY kết quả gợi ý lần trước (không phải chờ/skeleton trắng) trong khi vẫn âm thầm
+ * gọi lại API ở nền để cập nhật dữ liệu mới nhất — vừa nhanh vừa vẫn tươi.
+ * Cache tự hết hạn sau ít phút và bị bỏ qua nếu quá cũ.
+ */
+type HomeRecommendationCacheEntry = {
+  sameShopProducts: Product[];
+  sameShopTotal: number;
+  sameShopSeed: number | null;
+  sameShopCanLoadMore: boolean;
+  sameAgeGenderProducts: Product[];
+  sameAgeGenderCohortMode: SameAgeGenderCohortMode | null;
+  displayedRecommendationProducts: Product[];
+  cohortBadgeProductIds: number[];
+  sameShopMergedCount: number;
+  cachedAt: number;
+};
+const HOME_RECOMMENDATION_CACHE_TTL_MS = 10 * 60 * 1000;
+let homeRecommendationCache: HomeRecommendationCacheEntry | null = null;
+
+function readHomeRecommendationCache(): HomeRecommendationCacheEntry | null {
+  if (!homeRecommendationCache) return null;
+  if (Date.now() - homeRecommendationCache.cachedAt > HOME_RECOMMENDATION_CACHE_TTL_MS) {
+    homeRecommendationCache = null;
+    return null;
+  }
+  return homeRecommendationCache;
+}
+
 function favoritePayloadFromProduct(p: Product): Record<string, unknown> {
   return {
     name: p.name,
@@ -584,21 +616,42 @@ export default function HomePageClient({
     return guestBehaviorKey;
   }, [user?.id, guestBehaviorKey]);
 
-  const [sameAgeGenderProducts, setSameAgeGenderProducts] = useState<Product[]>([]);
+  // Đọc 1 lần lúc mount — dùng cho các lazy initializer bên dưới để hiển thị ngay
+  // dữ liệu gợi ý lần trước (nếu còn trong TTL) thay vì skeleton trắng.
+  const initialRecommendationCache = readHomeRecommendationCache();
+
+  const [sameAgeGenderProducts, setSameAgeGenderProducts] = useState<Product[]>(
+    () => initialRecommendationCache?.sameAgeGenderProducts ?? []
+  );
   const [sameAgeGenderLoading, setSameAgeGenderLoading] = useState(false);
-  const [sameAgeGenderCohortMode, setSameAgeGenderCohortMode] = useState<SameAgeGenderCohortMode | null>(null);
-  const [sameShopProducts, setSameShopProducts] = useState<Product[]>([]);
-  const [sameShopTotal, setSameShopTotal] = useState(0);
-  const [sameShopSeed, setSameShopSeed] = useState<number | null>(null);
-  const [sameShopLoading, setSameShopLoading] = useState(true);
+  const [sameAgeGenderCohortMode, setSameAgeGenderCohortMode] = useState<SameAgeGenderCohortMode | null>(
+    () => initialRecommendationCache?.sameAgeGenderCohortMode ?? null
+  );
+  const [sameShopProducts, setSameShopProducts] = useState<Product[]>(
+    () => initialRecommendationCache?.sameShopProducts ?? []
+  );
+  const [sameShopTotal, setSameShopTotal] = useState(() => initialRecommendationCache?.sameShopTotal ?? 0);
+  const [sameShopSeed, setSameShopSeed] = useState<number | null>(
+    () => initialRecommendationCache?.sameShopSeed ?? null
+  );
+  // Có cache hiển thị ngay → không cần skeleton chờ; chỉ trang chủ lần đầu trong phiên mới chờ.
+  const [sameShopLoading, setSameShopLoading] = useState(() => !initialRecommendationCache);
   const [sameShopLoadMoreLoading, setSameShopLoadMoreLoading] = useState(false);
-  const [sameShopCanLoadMore, setSameShopCanLoadMore] = useState(false);
-  const [displayedRecommendationProducts, setDisplayedRecommendationProducts] = useState<Product[]>([]);
-  const cohortAppendedIdsRef = useRef<Set<number>>(new Set());
+  const [sameShopCanLoadMore, setSameShopCanLoadMore] = useState(
+    () => initialRecommendationCache?.sameShopCanLoadMore ?? false
+  );
+  const [displayedRecommendationProducts, setDisplayedRecommendationProducts] = useState<Product[]>(
+    () => initialRecommendationCache?.displayedRecommendationProducts ?? []
+  );
+  const cohortAppendedIdsRef = useRef<Set<number>>(
+    new Set(initialRecommendationCache?.cohortBadgeProductIds ?? [])
+  );
   const pendingCohortProductsRef = useRef<Product[]>([]);
-  const hasDisplayedRecommendationRef = useRef(false);
+  const hasDisplayedRecommendationRef = useRef(
+    (initialRecommendationCache?.displayedRecommendationProducts.length ?? 0) > 0
+  );
   /** Số SP same-shop đã gộp vào lưới — chỉ append khi tăng (tránh «Xem thêm» nhảy lưới). */
-  const sameShopMergedCountRef = useRef(0);
+  const sameShopMergedCountRef = useRef(initialRecommendationCache?.sameShopMergedCount ?? 0);
   const showSameShopSection = !sameShopLoading && sameShopTotal > 0;
   const showRecommendationSkeleton =
     sameShopLoading && displayedRecommendationProducts.length === 0;
@@ -707,14 +760,18 @@ export default function HomePageClient({
       })
       .catch(() => {
         if (cancelled) return;
-        setSameShopProducts([]);
-        setSameShopTotal(0);
-        setSameShopSeed(null);
-        setSameAgeGenderProducts([]);
-        setSameAgeGenderCohortMode('requires_login');
-        setSameShopCanLoadMore(false);
-        setDisplayedRecommendationProducts([]);
-        sameShopMergedCountRef.current = 0;
+        // Lỗi khi refetch nền mà đã có dữ liệu (từ cache/snapshot) đang hiển thị → giữ nguyên,
+        // không xóa trắng UI vì một lần gọi API tạm lỗi.
+        if (!hasDisplayedRecommendationRef.current) {
+          setSameShopProducts([]);
+          setSameShopTotal(0);
+          setSameShopSeed(null);
+          setSameAgeGenderProducts([]);
+          setSameAgeGenderCohortMode('requires_login');
+          setSameShopCanLoadMore(false);
+          setDisplayedRecommendationProducts([]);
+          sameShopMergedCountRef.current = 0;
+        }
         setSameShopLoading(false);
         setSameAgeGenderLoading(false);
       });
@@ -726,6 +783,33 @@ export default function HomePageClient({
   useEffect(() => {
     hasDisplayedRecommendationRef.current = displayedRecommendationProducts.length > 0;
   }, [displayedRecommendationProducts]);
+
+  // Đồng bộ kết quả gợi ý đã ổn định (không còn loading) vào cache bộ nhớ — lần remount
+  // tiếp theo của trang chủ trong phiên này sẽ đọc lại để hiển thị ngay, vẫn refetch nền để tươi.
+  useEffect(() => {
+    if (sameShopLoading) return;
+    homeRecommendationCache = {
+      sameShopProducts,
+      sameShopTotal,
+      sameShopSeed,
+      sameShopCanLoadMore,
+      sameAgeGenderProducts,
+      sameAgeGenderCohortMode,
+      displayedRecommendationProducts,
+      cohortBadgeProductIds: Array.from(cohortAppendedIdsRef.current),
+      sameShopMergedCount: sameShopMergedCountRef.current,
+      cachedAt: Date.now(),
+    };
+  }, [
+    sameShopLoading,
+    sameShopProducts,
+    sameShopTotal,
+    sameShopSeed,
+    sameShopCanLoadMore,
+    sameAgeGenderProducts,
+    sameAgeGenderCohortMode,
+    displayedRecommendationProducts,
+  ]);
 
   const cohortProductsForMix = useMemo(() => {
     if (sameAgeGenderLoading) return [];

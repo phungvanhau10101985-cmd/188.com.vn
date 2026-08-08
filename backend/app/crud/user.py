@@ -543,7 +543,7 @@ def get_products_viewed_by_same_age_gender(
     return sample_cohort_products_from_pool(db, user_id, limit=limit)
 
 
-SAME_SHOP_MAX_POOL = 8000
+SAME_SHOP_MAX_POOL = 800
 SAME_SHOP_MAX_PER_SHOP_PER_PAGE = 8
 SAME_SHOP_RECENT_WINDOW = 8
 SAME_SHOP_HISTORY_WINDOW = 40
