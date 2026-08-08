@@ -790,6 +790,47 @@ class MigrationManager:
             logger.warning("migrate_product_listing_default_index: %s", e)
             return True
 
+    def migrate_product_warehouse_clearance_lookup_index(self) -> bool:
+        """
+        Index cho subquery EXISTS «còn hàng kho thanh lý thay SP hết hàng nguồn» (storefront
+        visibility, PDP-related «bán chạy tương tự» / «tương tự»): mỗi dòng khớp category/subcategory
+        đang phải Seq Scan lại TOÀN BẢNG products (is_warehouse_clearance=true) — rất chậm khi listing
+        có nhiều SP hết hàng nguồn. Bảng kho thanh lý chỉ vài trăm dòng → partial index thu hẹp
+        Seq Scan hàng chục nghìn dòng xuống còn phạm vi kho thanh lý, không đổi kết quả truy vấn.
+        """
+        try:
+            inspector = inspect(engine)
+            if "products" not in inspector.get_table_names():
+                return True
+            if IS_POSTGRESQL:
+                # CONCURRENTLY tránh khóa ghi products khi VPS đang phục vụ shop.
+                # Predicate dùng "= true" (không phải IS TRUE) — khớp đúng SQL SQLAlchemy sinh ra
+                # (Product.is_warehouse_clearance == True) để Postgres nhận diện được partial index.
+                with engine.connect() as conn:
+                    conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+                    conn.execute(
+                        text(
+                            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+                            "ix_products_wh_clearance_base_sku_lookup "
+                            "ON products (base_sku, product_id) "
+                            "WHERE is_warehouse_clearance = true AND is_active = true"
+                        )
+                    )
+            else:
+                with engine.connect() as conn:
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_products_wh_clearance_base_sku_lookup "
+                            "ON products (base_sku, product_id)"
+                        )
+                    )
+                    conn.commit()
+            logger.info("✅ ix_products_wh_clearance_base_sku_lookup ensured")
+            return True
+        except Exception as e:
+            logger.warning("migrate_product_warehouse_clearance_lookup_index: %s", e)
+            return True
+
     def migrate_product_incremental_sync_index(self) -> bool:
         """Index quét thay đổi catalog theo updated_at cho đồng bộ đối tác."""
         try:
@@ -1209,6 +1250,9 @@ class MigrationManager:
         results['same_shop_recommendation_indexes'] = self.migrate_same_shop_recommendation_indexes()
         results['product_category_active_index'] = self.migrate_product_category_active_index()
         results['product_listing_default_index'] = self.migrate_product_listing_default_index()
+        results['product_warehouse_clearance_lookup_index'] = (
+            self.migrate_product_warehouse_clearance_lookup_index()
+        )
         results['order_items_product_id_index'] = self.migrate_order_items_product_id_index()
         results['product_search_document_trgm'] = self.migrate_product_search_document_trgm()
 

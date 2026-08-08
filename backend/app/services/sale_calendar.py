@@ -4,6 +4,7 @@ Sale ngày trùng tháng: tháng lẻ 6%, tháng chẵn 8%, teaser T-3 → T-1, 
 from __future__ import annotations
 
 import calendar
+import time as _perf_time
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
@@ -12,6 +13,15 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 _VN_TZ = timezone(timedelta(hours=7))
+
+# Bảng settings/month-rule gần như không đổi giữa các request — ensure/maintain lại
+# mỗi lần gọi (PDP/listing gọi hàm này rất nhiều lần/giây) gây N+1 (13+ query/lần).
+# Cache lại theo tiến trình với TTL ngắn: không đổi kết quả đọc (resolve_sale_calendar_state
+# vẫn luôn đọc thẳng từ DB), chỉ bớt phần bookkeeping lặp lại vô ích.
+_defaults_ensured_at: float = 0.0
+_DEFAULTS_ENSURE_TTL_SECONDS = 300.0
+_maintain_checked_at: float = 0.0
+_MAINTAIN_CHECK_TTL_SECONDS = 60.0
 
 FEED_TITLE_PREFIX_TEASER = "Sắp giảm giá"
 FEED_TITLE_PREFIX_ACTIVE = "Đang giảm giá"
@@ -609,6 +619,11 @@ def effective_unit_price(db: Session, list_price: float, user=None) -> float:
 
 
 def ensure_sale_calendar_defaults(db: Session) -> None:
+    global _defaults_ensured_at
+    now = _perf_time.monotonic()
+    if _defaults_ensured_at and (now - _defaults_ensured_at) < _DEFAULTS_ENSURE_TTL_SECONDS:
+        return
+
     from app.models.sale_calendar import SaleCalendarMonthRule, SaleCalendarSettings
 
     try:
@@ -627,6 +642,7 @@ def ensure_sale_calendar_defaults(db: Session) -> None:
             if not db.query(SaleCalendarMonthRule).filter(SaleCalendarMonthRule.month == month).first():
                 db.add(SaleCalendarMonthRule(month=month, enabled=True, discount_percent_override=None))
         db.commit()
+        _defaults_ensured_at = now
     except Exception:
         db.rollback()
         raise
@@ -634,9 +650,16 @@ def ensure_sale_calendar_defaults(db: Session) -> None:
 
 def maintain_sale_calendar_settings(db: Session) -> bool:
     """Dọn lịch cũ: xóa ngày đặt lịch / sale hôm nay đã qua; giữ schedule_mode=auto."""
+    global _maintain_checked_at
     from app.models.sale_calendar import SaleCalendarSettings
 
     ensure_sale_calendar_defaults(db)
+
+    now = _perf_time.monotonic()
+    if _maintain_checked_at and (now - _maintain_checked_at) < _MAINTAIN_CHECK_TTL_SECONDS:
+        return False
+    _maintain_checked_at = now
+
     row = db.query(SaleCalendarSettings).filter(SaleCalendarSettings.id == 1).first()
     if not row:
         return False

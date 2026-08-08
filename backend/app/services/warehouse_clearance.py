@@ -569,11 +569,17 @@ def apply_clearance_pricing(list_price: float, *, percent: float) -> Dict[str, A
     }
 
 
-def warehouse_variant_payload(db: Session, wh: Product) -> Dict[str, Any]:
+def warehouse_variant_payload(
+    db: Session,
+    wh: Product,
+    *,
+    settings: Optional[Tuple[bool, float]] = None,
+    list_price: Optional[float] = None,
+) -> Dict[str, Any]:
     from app.services.warehouse_stock import warehouse_sellable_qty
 
-    enabled, pct = get_warehouse_clearance_settings(db)
-    base_price = resolve_warehouse_list_price(db, wh)
+    enabled, pct = settings if settings is not None else get_warehouse_clearance_settings(db)
+    base_price = list_price if list_price is not None else resolve_warehouse_list_price(db, wh)
     pricing = apply_clearance_pricing(base_price, percent=pct)
     sellable = warehouse_sellable_qty(wh)
     wh_color = (wh.color or "").strip()
@@ -713,7 +719,8 @@ def enrich_listing_product_payloads_batched(
     """Một lần đọc settings + query kho theo batch base_sku (tránh N+1 trên lưới gợi ý)."""
     if not pairs:
         return
-    enabled, pct = get_warehouse_clearance_settings(db)
+    settings = get_warehouse_clearance_settings(db)
+    enabled, pct = settings
     base_skus: List[str] = []
     seen_bases: Set[str] = set()
     for row, _payload in pairs:
@@ -725,11 +732,15 @@ def enrich_listing_product_payloads_batched(
             base_skus.append(base)
     wh_by_base = _list_warehouse_variants_for_base_skus(db, base_skus) if base_skus else {}
 
+    # Toàn bộ dòng kho khớp trong lô → resolve list_price 1 lần (tránh N+1 tìm SP gốc từng dòng).
+    all_wh_rows = [wh for rows in wh_by_base.values() for wh in rows]
+    list_price_by_wh_id = _resolve_warehouse_list_prices_batch(db, all_wh_rows) if all_wh_rows else {}
+
     for row, payload in pairs:
         if row is None or not isinstance(payload, dict):
             continue
         if getattr(row, "is_warehouse_clearance", False):
-            enrich_standalone_warehouse_product(db, payload, row)
+            enrich_standalone_warehouse_product(db, payload, row, settings=settings)
             payload["group_listing_path"] = WAREHOUSE_CLEARANCE_GROUP_LISTING_PATH
             continue
         source_oos = is_source_product_oos(row)
@@ -740,7 +751,14 @@ def enrich_listing_product_payloads_batched(
             for wh in wh_by_base.get(base, []):
                 if int(wh.available or 0) <= 0:
                     continue
-                variants.append(warehouse_variant_payload(db, wh))
+                variants.append(
+                    warehouse_variant_payload(
+                        db,
+                        wh,
+                        settings=settings,
+                        list_price=list_price_by_wh_id.get(wh.id),
+                    )
+                )
         payload["warehouse_variants"] = variants
         payload["warehouse_clearance"] = {
             "enabled": enabled or len(variants) > 0,
@@ -776,19 +794,80 @@ def _list_warehouse_variants_for_base_skus(
     return grouped
 
 
+def _batch_find_parents_by_base_sku(db: Session, base_skus: List[str]) -> Dict[str, Product]:
+    """Tier-1 (khớp code/product_id đúng) của find_parent_for_warehouse_row cho nhiều base_sku
+    trong 1 query — giữ đúng thứ tự ORDER BY id ASC / match đầu tiên như find_parent_product_by_base_sku."""
+    wanted = sorted({str(s or "").strip() for s in base_skus if str(s or "").strip()})
+    if not wanted:
+        return {}
+    rows = (
+        db.query(Product)
+        .filter(
+            Product.is_warehouse_clearance == False,  # noqa: E712
+            or_(Product.code.in_(wanted), Product.product_id.in_(wanted)),
+        )
+        .order_by(Product.id.asc())
+        .all()
+    )
+    wanted_set = set(wanted)
+    out: Dict[str, Product] = {}
+    for row in rows:
+        for key in (row.code, row.product_id):
+            k = str(key or "").strip()
+            if k in wanted_set and k not in out:
+                out[k] = row
+    return out
+
+
+def _resolve_warehouse_list_prices_batch(db: Session, wh_rows: List[Product]) -> Dict[int, float]:
+    """Bản batch của resolve_warehouse_list_price — 1 query tier-1 cho cả lô dòng kho;
+    chỉ fallback query riêng (tier 2/3 hiếm gặp) cho những dòng tier-1 không khớp."""
+    if not wh_rows:
+        return {}
+    bases_by_id = {wh.id: _warehouse_row_base_sku(wh) for wh in wh_rows}
+    parents_by_base = _batch_find_parents_by_base_sku(db, list(bases_by_id.values()))
+    out: Dict[int, float] = {}
+    for wh in wh_rows:
+        base = bases_by_id.get(wh.id)
+        parent = parents_by_base.get(base) if base else None
+        if base and parent is None:
+            # Tier-1 không khớp — giữ đúng fallback tier 2/3 như resolve_warehouse_list_price.
+            out[wh.id] = resolve_warehouse_list_price(db, wh)
+            continue
+        price = 0.0
+        if parent is not None and parent.price is not None:
+            try:
+                p = float(parent.price)
+                if p > 0:
+                    price = p
+            except (TypeError, ValueError):
+                pass
+        if price <= 0:
+            try:
+                price = max(0.0, float(wh.price or 0))
+            except (TypeError, ValueError):
+                price = 0.0
+        out[wh.id] = price
+    return out
+
+
 def enrich_parent_with_warehouse_clearance(db: Session, payload: Dict[str, Any], product: Product) -> None:
     if getattr(product, "is_warehouse_clearance", False):
         return
     base = _resolve_base_sku_for_parent(product)
     source_oos = is_source_product_oos(product)
     payload["source_oos"] = source_oos
-    enabled, pct = get_warehouse_clearance_settings(db)
-    variants: List[Dict[str, Any]] = []
-    if base:
-        for wh in list_warehouse_variants_for_base_sku(db, base):
-            if int(wh.available or 0) <= 0:
-                continue
-            variants.append(warehouse_variant_payload(db, wh))
+    settings = get_warehouse_clearance_settings(db)
+    enabled, pct = settings
+    wh_rows = list_warehouse_variants_for_base_sku(db, base) if base else []
+    sellable_wh_rows = [wh for wh in wh_rows if int(wh.available or 0) > 0]
+    list_price_by_wh_id = (
+        _resolve_warehouse_list_prices_batch(db, sellable_wh_rows) if sellable_wh_rows else {}
+    )
+    variants: List[Dict[str, Any]] = [
+        warehouse_variant_payload(db, wh, settings=settings, list_price=list_price_by_wh_id.get(wh.id))
+        for wh in sellable_wh_rows
+    ]
     payload["warehouse_variants"] = variants
     payload["warehouse_clearance"] = {
         "enabled": enabled or len(variants) > 0,
@@ -1247,10 +1326,18 @@ def merge_clone_from_parent(parent: Product, product_data: Dict[str, Any], parse
         product_data["available"] = excel_available
 
 
-def enrich_standalone_warehouse_product(db: Session, payload: Dict[str, Any], product: Product) -> None:
+def enrich_standalone_warehouse_product(
+    db: Session,
+    payload: Dict[str, Any],
+    product: Product,
+    *,
+    settings: Optional[Tuple[bool, float]] = None,
+) -> None:
     """PDP trực tiếp dòng kho khi chưa có SP gốc cùng base_sku."""
-    enabled, pct = get_warehouse_clearance_settings(db)
-    base = resolve_warehouse_list_price(db, product)
+    settings = settings if settings is not None else get_warehouse_clearance_settings(db)
+    enabled, pct = settings
+    resolved_list_price = resolve_warehouse_list_price(db, product)
+    base = resolved_list_price
     if base <= 0:
         base = float(getattr(product, "price", None) or payload.get("price") or 0)
     pricing = apply_clearance_pricing(base, percent=pct)
@@ -1265,7 +1352,12 @@ def enrich_standalone_warehouse_product(db: Session, payload: Dict[str, Any], pr
         "discount_percent": pct,
     }
     apply_zero_engagement_stats(payload)
-    variant_img = (warehouse_variant_payload(db, product).get("color_image") or "").strip()
+    variant_img = (
+        warehouse_variant_payload(db, product, settings=settings, list_price=resolved_list_price).get(
+            "color_image"
+        )
+        or ""
+    ).strip()
     if variant_img:
         payload["main_image"] = variant_img
         colors = payload.get("colors")
