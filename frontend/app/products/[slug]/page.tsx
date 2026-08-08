@@ -66,8 +66,10 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
     await redirectOosGroupIfAny();
   }
 
-  const initialGoogleDiscount = await verifyPv2ForProductPage(sp, product.product_id);
-  const ladipage = await getPublishedLadipageForProductRecord(product);
+  const [initialGoogleDiscount, ladipage] = await Promise.all([
+    verifyPv2ForProductPage(sp, product.product_id),
+    getPublishedLadipageForProductRecord(product),
+  ]);
 
   const tracker = <ProductMarketingTracker key={`track:${slug}`} product={product} slug={slug} />;
 

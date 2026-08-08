@@ -42,6 +42,18 @@ export function productPathSlugFromApi(slug: string | null | undefined, fallback
   return raw.replace(/\//g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
+/** Đường dẫn nội bộ Next.js tới PDP — `/products/{slug}`. */
+export function productPdpHref(
+  slug: string | null | undefined,
+  fallback?: string | null,
+): string | null {
+  const pathSlug = productPathSlugFromApi(slug, fallback);
+  if (pathSlug) return `/products/${encodeURIComponent(pathSlug)}`;
+  const fb = (fallback ?? '').trim();
+  if (fb) return `/products/${encodeURIComponent(fb)}`;
+  return null;
+}
+
 /** URL PDP công khai — nếu slug đã là URL thì dùng luôn, không ghép SITE_URL thêm lần. */
 export function productPublicPdpUrl(
   slug: string | null | undefined,

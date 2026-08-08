@@ -82,8 +82,16 @@ body {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
   overscroll-behavior-y: auto;
+  scroll-behavior: auto;
   scroll-snap-type: x mandatory;
-  touch-action: pan-x pan-y;
+  touch-action: pan-x pinch-zoom;
+}
+
+.product-gallery-media-slide {
+  scroll-snap-align: start;
+  scroll-snap-stop: normal;
+  -webkit-user-drag: none;
+  user-select: none;
 }
 
 /* Scrollbar: ẩn mặc định, hover mới hiện */

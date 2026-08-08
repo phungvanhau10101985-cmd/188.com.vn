@@ -3,6 +3,7 @@
  * Ladipage 1 SP: nội dung bổ sung trên PDP `/products/...` (không dùng URL /lp/ riêng).
  */
 
+import { cache } from 'react';
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
 import { sortProductsByIds } from '@/lib/ladipage-utils';
 import type { LadipageSection } from '@/lib/admin-api';
@@ -60,12 +61,15 @@ export async function getPublicLadipage(slug: string): Promise<LadipagePublicDet
   }
 }
 
+const getPublishedLadipageForProductCached = cache(
+  async (productDbId: number, fallbackSlug?: string | null): Promise<LadipagePublicDetail | null> =>
+    getPublishedLadipageForProduct(productDbId, { fallbackSlug }),
+);
+
 export async function getPublishedLadipageForProductRecord(
   product: Pick<Product, 'id' | 'published_ladipage_slug'>,
 ): Promise<LadipagePublicDetail | null> {
-  return getPublishedLadipageForProduct(product.id, {
-    fallbackSlug: product.published_ladipage_slug,
-  });
+  return getPublishedLadipageForProductCached(product.id, product.published_ladipage_slug);
 }
 
 /** Server-side: lấy full product theo id (khoá chính). */

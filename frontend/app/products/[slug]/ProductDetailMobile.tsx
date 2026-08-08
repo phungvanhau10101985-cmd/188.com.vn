@@ -213,7 +213,7 @@ export default function ProductDetailMobile({
     const stripRect = strip.getBoundingClientRect();
     const btnRect = btn.getBoundingClientRect();
     const left = btn.offsetLeft - strip.offsetLeft - (stripRect.width - btnRect.width) / 2;
-    strip.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+    strip.scrollTo({ left: Math.max(0, left), behavior: 'auto' });
   }, [selectedImage, visiblePhotoUrls.length, hasVideo]);
 
   const mainImageRaw = isShowingVideo
@@ -265,6 +265,29 @@ export default function ProductDetailMobile({
               selectedIndex={selectedImage}
               onSelectedIndexChange={setSelectedImage}
               slideCount={mediaCount}
+              renderOverlay={
+                mediaCount > 1
+                  ? (liveIndex) => (
+                      <>
+                        <div className="pointer-events-none absolute top-3 right-3 z-[1] rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-medium tabular-nums text-white">
+                          {liveIndex + 1}/{mediaCount}
+                        </div>
+                        <div className="pointer-events-none absolute bottom-3 left-0 right-0 z-[1] flex items-center justify-center gap-1.5">
+                          {Array.from({ length: mediaCount }, (_, i) => (
+                            <span
+                              key={i}
+                              className={
+                                i === liveIndex
+                                  ? 'h-1.5 w-4 rounded-full bg-white shadow-sm'
+                                  : 'h-1.5 w-1.5 rounded-full bg-white/55'
+                              }
+                            />
+                          ))}
+                        </div>
+                      </>
+                    )
+                  : undefined
+              }
             >
               {firstPhotoUrl ? (
                 <MobileProductMediaSlide key={firstPhotoUrl} className="overflow-hidden bg-gray-100">
@@ -347,25 +370,6 @@ export default function ProductDetailMobile({
                 </MobileProductMediaSlide>
               ))}
             </MobileProductMediaCarousel>
-            {mediaCount > 1 && (
-              <>
-                <div className="pointer-events-none absolute top-3 right-3 z-[1] rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-medium tabular-nums text-white">
-                  {selectedImage + 1}/{mediaCount}
-                </div>
-                <div className="pointer-events-none absolute bottom-3 left-0 right-0 z-[1] flex items-center justify-center gap-1.5">
-                  {Array.from({ length: mediaCount }, (_, i) => (
-                    <span
-                      key={i}
-                      className={
-                        i === selectedImage
-                          ? 'h-1.5 w-4 rounded-full bg-white shadow-sm'
-                          : 'h-1.5 w-1.5 rounded-full bg-white/55'
-                      }
-                    />
-                  ))}
-                </div>
-              </>
-            )}
           </div>
         )}
 

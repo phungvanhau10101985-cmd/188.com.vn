@@ -67,6 +67,7 @@ function RemoteProductImg({
       loading={priority ? 'eager' : 'lazy'}
       fetchPriority={priority ? 'high' : undefined}
       decoding="async"
+      draggable={false}
       referrerPolicy="no-referrer"
       className={className}
       onLoad={onLoad}

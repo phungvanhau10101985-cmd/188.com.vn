@@ -2,14 +2,14 @@
 'use client';
 
 import Image from 'next/image';
-import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useMemo, useState } from 'react';
 import { Product } from '@/types/api';
 import { formatPrice, getDiscountPercentage, truncateText } from '@/lib/utils';
 import { getOptimizedImage, hasValidProductImageUrl } from '@/lib/image-utils';
 import { hasVideoLink } from '@/lib/video-utils';
-import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import { productPathSlugFromApi, productPdpHref } from '@/lib/product-path-slug';
+import ProductPdpLink from '@/components/ProductPdpLink';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
 import SiteSaleProductBadge from '@/components/SiteSaleProductBadge';
@@ -326,11 +326,7 @@ export default function ProductCard({
 
   const sizeClasses = getSizeClasses(size);
 
-  const productSlug =
-    productPathSlugFromApi(product.slug, product.product_id) ||
-    product.product_id ||
-    (product.id != null ? String(product.id) : '');
-  const productHref = productSlug ? `/products/${productSlug}` : '#';
+  const productHref = productPdpHref(product.slug, product.product_id) ?? '#';
 
   return (
     <div className={`product-card group bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-lg hover:border-orange-200 overflow-hidden ${sizeClasses.container}`}>
@@ -340,7 +336,7 @@ export default function ProductCard({
           showsClearance ? 'ring-2 ring-inset ring-amber-400/70' : ''
         }`}
       >
-        <Link href={productHref}>
+        <ProductPdpLink href={productHref}>
           {!imageError ? (
             <>
               {imageLoading && (
@@ -371,7 +367,7 @@ export default function ProductCard({
               </div>
             </div>
           )}
-        </Link>
+        </ProductPdpLink>
 
         {/* Discount Badge */}
         {!imageError && (
@@ -431,11 +427,11 @@ export default function ProductCard({
         )}
 
         {/* Product Name */}
-        <Link href={productHref}>
+        <ProductPdpLink href={productHref}>
           <h3 className={`font-medium text-gray-900 leading-tight line-clamp-2 hover:text-orange-500 transition-colors cursor-pointer ${sizeClasses.name}`}>
             {truncateText(product.name, size === 'small' ? 40 : 50)}
           </h3>
-        </Link>
+        </ProductPdpLink>
 
         {/* Price */}
         <div className="space-y-1">
@@ -566,18 +562,12 @@ export const SimpleProductCard = ({
     setImageError(true);
   };
 
-  const pathSlug = productPathSlugFromApi(product.slug, product.product_id) || product.product_id;
+  const productHref = productPdpHref(product.slug, product.product_id) ?? '#';
   const stackedPromoBadgeClass = showPersonalizedBadge ? '!top-8' : '';
 
   return (
-    <Link 
-      href={
-        pathSlug
-          ? `/products/${encodeURIComponent(pathSlug)}`
-          : product.product_id
-            ? `/products/${encodeURIComponent(String(product.product_id))}`
-            : '#'
-      }
+    <ProductPdpLink
+      href={productHref}
       className="product-card group bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-lg hover:border-orange-200 overflow-hidden transition-all block"
     >
       {/* Image Container */}
@@ -681,6 +671,6 @@ export const SimpleProductCard = ({
           <span>Đã bán: {product.purchases || 0}</span>
         </div>
       </div>
-    </Link>
+    </ProductPdpLink>
   );
 };

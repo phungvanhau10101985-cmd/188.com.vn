@@ -1075,17 +1075,31 @@ export default function AdminManualProductCreatePage() {
     return face ? [face] : [];
   }, [studio]);
   const firstColorRef = useMemo(() => firstApprovedColorRow(studio), [studio]);
-  const sanitizedFormRefUrls = useMemo(
-    () =>
-      sanitizeFormRefUrls(
-        formRefUrls,
-        studio?.ref_pool || [],
-        formKind,
-        job?.status === 'awaiting_approval' ? approvalColorIndex : pendingColorIndex,
-        studio,
-      ),
-    [formRefUrls, studio, formKind, job?.status, approvalColorIndex, pendingColorIndex],
-  );
+  const sanitizedFormRefUrls = useMemo(() => {
+    const kindForSanitize =
+      job?.status === 'awaiting_approval' &&
+      (currentSlot?.kind === 'gallery' ||
+        currentSlot?.kind === 'detail' ||
+        currentSlot?.kind === 'material' ||
+        currentSlot?.kind === 'color')
+        ? (currentSlot.kind as 'color' | 'gallery' | 'detail' | 'material')
+        : formKind;
+    return sanitizeFormRefUrls(
+      formRefUrls,
+      studio?.ref_pool || [],
+      kindForSanitize,
+      job?.status === 'awaiting_approval' ? approvalColorIndex : pendingColorIndex,
+      studio,
+    );
+  }, [
+    formRefUrls,
+    studio,
+    formKind,
+    job?.status,
+    currentSlot?.kind,
+    approvalColorIndex,
+    pendingColorIndex,
+  ]);
 
   useEffect(() => {
     if (!draftReady || !job || formKind !== 'color') return;
@@ -1365,6 +1379,14 @@ export default function AdminManualProductCreatePage() {
     let refs = overrides?.ref_urls ?? formRefUrls;
     refs = sanitizeFormRefUrls(refs, pool, kind, colorIdx, studio);
     const attach = overrides?.attach_url ?? formAttachUrl;
+    if ((kind === 'gallery' || kind === 'detail') && !prompt) {
+      setFormError(
+        kind === 'gallery'
+          ? 'Gallery bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).'
+          : 'Ảnh chi tiết bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).',
+      );
+      return;
+    }
     if (kind === 'color') {
       if (colorIdx === 0 && refs.length === 0 && !attach.trim()) {
         setFormError('Ảnh màu đầu: upload ảnh mẫu sản phẩm — AI tự đọc tên màu.');
@@ -1438,12 +1460,29 @@ export default function AdminManualProductCreatePage() {
 
   async function regenerateImage() {
     if (!job?.job_id) return;
+    const slot = job.studio?.current_slot;
+    const slotKind = (slot?.kind || '').trim();
+    if ((slotKind === 'gallery' || slotKind === 'detail') && !formPrompt.trim()) {
+      setFormError(
+        slotKind === 'gallery'
+          ? 'Gallery bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).'
+          : 'Ảnh chi tiết bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).',
+      );
+      return;
+    }
     setFormError('');
     setStudioBusy(true);
-    const slot = job.studio?.current_slot;
     const colorIdx = colorSlotIndex(job.studio, slot);
     const pool = job.studio?.ref_pool || [];
-    const refs = sanitizeFormRefUrls(formRefUrls, pool, 'color', colorIdx, job.studio);
+    const refs = sanitizeFormRefUrls(
+      formRefUrls,
+      pool,
+      slotKind === 'gallery' || slotKind === 'detail' || slotKind === 'material'
+        ? (slotKind as 'gallery' | 'detail' | 'material')
+        : 'color',
+      colorIdx,
+      job.studio,
+    );
     setFormRefUrls(refs);
     try {
       const fresh = await manualProductCreateAPI.regenerateImage(job.job_id, {
@@ -2142,15 +2181,17 @@ export default function AdminManualProductCreatePage() {
 
               {formKind === 'gallery' ? (
                 <p className="text-xs text-sky-900 bg-sky-50 border border-sky-100 rounded-lg px-3 py-2">
-                  Chọn ảnh màu / ảnh đã tạo để <strong>dùng luôn làm gallery</strong>, hoặc chọn làm tham khảo
-                  rồi <strong>Tạo mới</strong>. Cần đủ {STUDIO_MIN_GALLERY_IMAGES} ảnh gallery trước khi đăng.
+                  Chọn ảnh màu / ảnh đã tạo để <strong>dùng luôn làm gallery</strong>, hoặc chọn làm tham khảo rồi{' '}
+                  <strong>Tạo mới</strong>. Nhập ý muốn (vd đeo vai, đứng nghiêng) — DeepSeek chuẩn hóa prompt:{' '}
+                  <strong>giữ nguyên SP</strong>, chỉ đổi tư thế/cách dùng. Cần đủ {STUDIO_MIN_GALLERY_IMAGES} ảnh
+                  gallery trước khi đăng.
                 </p>
               ) : null}
 
               {formKind === 'detail' ? (
                 <p className="text-xs text-violet-900 bg-violet-50 border border-violet-100 rounded-lg px-3 py-2">
-                  Ảnh chi tiết sản phẩm <strong>tuỳ chọn</strong> — chọn ảnh đã tạo để dùng luôn, hoặc tạo thêm
-                  ảnh cận cảnh (cổ áo, khóa kéo, họa tiết…). Không bắt buộc để đăng.
+                  Ảnh chi tiết <strong>tuỳ chọn để đăng</strong> — chọn ảnh đã tạo để dùng luôn, hoặc tạo mới. Nhập ý
+                  muốn — DeepSeek chuẩn hóa prompt: <strong>giữ nguyên SP</strong>, chỉ đổi góc/cách dùng.
                 </p>
               ) : null}
 
@@ -2239,15 +2280,31 @@ export default function AdminManualProductCreatePage() {
 
               <label className="block text-sm">
                 <span className="font-medium text-slate-800">
-                  Nội dung muốn tạo ảnh <span className="font-normal text-slate-500">(tuỳ chọn)</span>
+                  Nội dung muốn tạo ảnh{' '}
+                  {formKind === 'gallery' || formKind === 'detail' ? (
+                    <span className="text-red-600">*</span>
+                  ) : (
+                    <span className="font-normal text-slate-500">(tuỳ chọn)</span>
+                  )}
                 </span>
                 <textarea
                   className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-[72px] disabled:opacity-50"
                   value={formPrompt}
                   disabled={studioBusy || uploading}
                   onChange={(e) => setFormPrompt(e.target.value)}
-                  placeholder="VD: tay ngắn, cổ V, mặc chéo vạt, đứng ¾… — để trống thì AI tự theo ảnh mẫu."
+                  placeholder={
+                    formKind === 'gallery' || formKind === 'detail'
+                      ? 'Bắt buộc — VD: đeo túi trên vai, đứng ¾, cầm túi bằng tay… (DeepSeek sẽ soạn lệnh giữ nguyên SP).'
+                      : 'VD: tay ngắn, cổ V, mặc chéo vạt, đứng ¾… — để trống thì AI tự theo ảnh mẫu.'
+                  }
+                  required={formKind === 'gallery' || formKind === 'detail'}
                 />
+                {formKind === 'gallery' || formKind === 'detail' ? (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    DeepSeek viết lại thành prompt chuẩn: giữ nguyên sản phẩm từ ảnh mẫu; chỉ đổi thế đứng/cách dùng
+                    theo ý bạn.
+                  </p>
+                ) : null}
               </label>
 
               <div className="flex flex-wrap gap-2">
@@ -2267,7 +2324,11 @@ export default function AdminManualProductCreatePage() {
                 ) : null}
                 <button
                   type="button"
-                  disabled={studioBusy || uploading}
+                  disabled={
+                    studioBusy ||
+                    uploading ||
+                    ((formKind === 'gallery' || formKind === 'detail') && !formPrompt.trim())
+                  }
                   onClick={() => submitGenerate()}
                   className="px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium disabled:opacity-50"
                 >
@@ -2350,6 +2411,26 @@ export default function AdminManualProductCreatePage() {
                 </div>
               ) : null}
 
+              {currentSlot?.kind === 'gallery' ||
+              currentSlot?.kind === 'detail' ||
+              currentSlot?.kind === 'material' ? (
+                <div>
+                  <div className="text-sm font-medium text-slate-800 mb-1">
+                    Ảnh tham khảo đã chọn (tối đa 3) — có thể chọn lại trước khi Tạo lại
+                  </div>
+                  <p className="text-xs text-slate-500 mb-2">
+                    Giữ nguyên lựa chọn lần tạo trước; bấm ảnh để bỏ/chọn thêm rồi Tạo lại.
+                  </p>
+                  <StudioRefPicker
+                    items={studio?.ref_pool || []}
+                    selectedUrls={sanitizedFormRefUrls}
+                    onChange={setFormRefUrls}
+                    disabled={studioBusy}
+                    compact
+                  />
+                </div>
+              ) : null}
+
               <StudioAiImageSettings
                 imageModel={imageModel}
                 aspectRatio={aspectRatio}
@@ -2361,14 +2442,24 @@ export default function AdminManualProductCreatePage() {
 
               <label className="block text-sm">
                 <span className="font-medium text-slate-800">
-                  Nội dung muốn tạo ảnh <span className="font-normal text-slate-500">(tuỳ chọn)</span>
+                  Nội dung muốn tạo ảnh{' '}
+                  {currentSlot?.kind === 'gallery' || currentSlot?.kind === 'detail' ? (
+                    <span className="text-red-600">*</span>
+                  ) : (
+                    <span className="font-normal text-slate-500">(tuỳ chọn)</span>
+                  )}
                 </span>
                 <textarea
                   className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-[72px] disabled:opacity-50"
                   value={formPrompt}
                   disabled={studioBusy}
                   onChange={(e) => setFormPrompt(e.target.value)}
-                  placeholder="Sửa mô tả rồi bấm Tạo lại — VD: tay ngắn, cổ V, đứng nghiêng…"
+                  placeholder={
+                    currentSlot?.kind === 'gallery' || currentSlot?.kind === 'detail'
+                      ? 'Bắt buộc — sửa ý (vd đeo vai) rồi Tạo lại. DeepSeek giữ nguyên SP, chỉ đổi tư thế/cách dùng.'
+                      : 'Sửa mô tả rồi bấm Tạo lại — VD: tay ngắn, cổ V, đứng nghiêng…'
+                  }
+                  required={currentSlot?.kind === 'gallery' || currentSlot?.kind === 'detail'}
                 />
               </label>
 
@@ -2383,7 +2474,11 @@ export default function AdminManualProductCreatePage() {
                 </button>
                 <button
                   type="button"
-                  disabled={studioBusy}
+                  disabled={
+                    studioBusy ||
+                    ((currentSlot?.kind === 'gallery' || currentSlot?.kind === 'detail') &&
+                      !formPrompt.trim())
+                  }
                   onClick={regenerateImage}
                   className="px-4 py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm font-medium disabled:opacity-50"
                 >

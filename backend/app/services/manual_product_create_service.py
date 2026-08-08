@@ -959,6 +959,14 @@ def _build_studio_slot_prompt(
     if "«màu chính»" in notes:
         notes = ""  # tương thích ngược: bỏ placeholder cũ nếu còn sót từ phiên bản trước
 
+    # Gallery / chi tiết: bắt buộc ý admin — DeepSeek chuẩn hóa trước khi gửi Gemini (xem worker).
+    if kind in ("gallery", "detail"):
+        if not notes:
+            raise ValueError(
+                "Gallery và ảnh chi tiết bắt buộc nhập nội dung prompt — chỉ dùng prompt do admin nhập."
+            )
+        return notes
+
     if kind == "color":
         cname = (slot.get("name") or "").strip() or "màu chính"
         color_idx = int(slot.get("index") or 0)
@@ -1002,16 +1010,6 @@ def _build_studio_slot_prompt(
             f"Shopper: {gender_txt}. Material feel: {material_txt}. Fashion style: {style_txt}. "
             f"{look} "
             "Square-friendly composition, product fills frame confidently, retail-ready quality."
-        )
-    elif kind == "gallery":
-        angle = _GALLERY_ANGLES[idx % len(_GALLERY_ANGLES)]
-        base = (
-            f"{_STUDIO_NEW_PHOTO_BRIEF} "
-            "Create another premium commercial catalog photo of the SAME product. "
-            f"{_FIDELITY} {_COLOR_PRESERVE} "
-            f"Camera/composition: {angle}. "
-            f"Shopper: {gender_txt}. Style: {style_txt}. Material: {material_txt}. "
-            f"{look}"
         )
     elif kind == "material":
         raw_callouts = slot.get("material_callouts") or studio.get("material_callouts") or []
@@ -1059,8 +1057,124 @@ def _build_studio_slot_prompt(
 
 
 def _suggested_prompt_for_phase(state: Dict[str, Any], *, kind: str, name: str = "", index: int = 0) -> str:
+    # Gallery/detail không dùng prompt hệ thống — admin phải tự nhập.
+    if (kind or "").strip() in ("gallery", "detail"):
+        return ""
     slot = {"kind": kind, "name": name, "index": index, "user_prompt": ""}
-    return _build_studio_slot_prompt(state, slot)
+    try:
+        return _build_studio_slot_prompt(state, slot)
+    except ValueError:
+        return ""
+
+
+def _refine_gallery_detail_prompt_deepseek(
+    admin_intent: str,
+    *,
+    kind: str,
+    state: Dict[str, Any],
+) -> Tuple[str, List[str]]:
+    """
+    DeepSeek soạn prompt tạo ảnh gallery/chi tiết:
+    - Giữ nguyên mọi thứ liên quan sản phẩm từ ảnh mẫu (kiểu, màu, họa tiết, logo, chất liệu…).
+    - Chỉ thay đổi thế đứng / tư thế / cách sử dụng-đeo theo ý admin.
+    """
+    warnings: List[str] = []
+    intent = (admin_intent or "").strip()
+    if not intent:
+        return "", ["pose_prompt: thiếu ý admin."]
+
+    payload = dict(state.get("payload") or {})
+    pname = (
+        (state.get("vision_product_name") or "").strip()
+        or (payload.get("product_name") or payload.get("name") or "").strip()
+        or "sản phẩm thời trang"
+    )
+    gender = (payload.get("gender") or "").strip() or "không rõ"
+    material = (payload.get("material") or "").strip() or "theo ảnh mẫu"
+    kind_label = "ảnh gallery catalog" if (kind or "").strip() == "gallery" else "ảnh chi tiết sản phẩm"
+
+    key = (settings.DEEPSEEK_API_KEY or "").strip()
+    if len(key) < 10:
+        warnings.append("pose_prompt: thiếu DEEPSEEK_API_KEY — dùng prompt fallback.")
+        return _fallback_gallery_detail_prompt(intent, kind=kind, product_name=pname), warnings
+
+    system = (
+        "Bạn là chuyên gia viết prompt tạo ảnh e-commerce (Gemini image). "
+        "Chỉ trả về JSON hợp lệ, không markdown."
+    )
+    user = (
+        f"NHIỆM VỤ: Viết MỘT prompt tiếng Anh ngắn (1–3 câu) để tạo {kind_label}.\n"
+        "QUY TẮC BẮT BUỘC trong prompt:\n"
+        "1) Giữ NGUYÊN mọi thứ liên quan SẢN PHẨM từ ảnh tham khảo đính kèm: "
+        "kiểu dáng, form, màu, họa tiết, logo/chữ trên SP, chất liệu, chi tiết cắt may, phụ kiện của SP "
+        "(không đổi SP, không bịa biến thể khác).\n"
+        "2) CHỈ được thay đổi: thế đứng / tư thế người mẫu / góc máy / cách sử dụng hoặc cách đeo-mặc SP "
+        "theo ý admin bên dưới.\n"
+        "3) Không copy background ảnh gốc; ảnh catalog chuyên nghiệp, photorealistic.\n"
+        "4) Không watermark, không text phụ, không giá.\n\n"
+        f"Tên SP (gợi ý): {pname}\n"
+        f"Giới tính shopper: {gender}\n"
+        f"Chất liệu (gợi ý): {material}\n"
+        f"Ý admin (cách đứng / cách dùng SP): {intent}\n\n"
+        'Trả JSON: {"prompt":"..."}'
+    )
+    api_url = (settings.DEEPSEEK_API_URL or "").strip() or "https://api.deepseek.com/v1/chat/completions"
+    model = (settings.DEEPSEEK_MODEL or "").strip() or "deepseek-v4-flash"
+    try:
+        from app.services.deepseek_http import deepseek_chat_completions, deepseek_message_text
+        from app.services.import_link_deepseek_taxonomy import _extract_json_object
+
+        resp = deepseek_chat_completions(
+            {
+                "model": model,
+                "temperature": 0.25,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "max_tokens": 1024,
+            },
+            timeout=60,
+            api_url=api_url,
+            api_key=key,
+        )
+        if not resp.ok:
+            warnings.append(f"pose_prompt: HTTP {resp.status_code}")
+            return _fallback_gallery_detail_prompt(intent, kind=kind, product_name=pname), warnings
+        content = deepseek_message_text(resp)
+        parsed = _extract_json_object(content)
+        refined = str(parsed.get("prompt") or "").strip()
+        if not refined:
+            # Model có thể trả plain text
+            refined = (content or "").strip().strip("`").strip()
+            if refined.lower().startswith("prompt"):
+                refined = refined.split(":", 1)[-1].strip()
+        if len(refined) < 20:
+            warnings.append("pose_prompt: DeepSeek trả prompt quá ngắn — dùng fallback.")
+            return _fallback_gallery_detail_prompt(intent, kind=kind, product_name=pname), warnings
+        if len(refined) > 2000:
+            refined = refined[:2000].strip()
+        return refined, warnings
+    except Exception as exc:
+        warnings.append(f"pose_prompt: {exc}")
+        return _fallback_gallery_detail_prompt(intent, kind=kind, product_name=pname), warnings
+
+
+def _fallback_gallery_detail_prompt(
+    admin_intent: str,
+    *,
+    kind: str,
+    product_name: str,
+) -> str:
+    """Fallback khi DeepSeek lỗi: vẫn siết giữ nguyên SP, chỉ đổi pose/cách dùng."""
+    shot = "catalog gallery photo" if (kind or "").strip() == "gallery" else "product detail close-up photo"
+    return (
+        f"Create a premium e-commerce {shot} of «{product_name}». "
+        "Keep the EXACT same product from the attached reference images — identical design, color, print, logo, "
+        "materials, hardware, and construction. Do NOT redesign or substitute the product. "
+        f"ONLY change the model's pose/stance and how the product is worn or used: {admin_intent}. "
+        "Photorealistic commercial fashion photography, clean background, no watermark, no extra text."
+    )
 
 
 def _studio_detail_count(studio: Dict[str, Any]) -> int:
@@ -2169,6 +2283,34 @@ def _run_generate_studio_slot(job_id: str) -> None:
                 studio=studio,
             )
         prompt = _build_studio_slot_prompt({**state, "studio": studio}, slot)
+        if kind in ("gallery", "detail"):
+            admin_intent = str(slot.get("user_prompt") or "").strip()
+            _job_update(
+                job_id,
+                message=f"DeepSeek đang chuẩn hóa prompt {label} (giữ nguyên SP, chỉ đổi tư thế/cách dùng)…",
+                progress=32,
+                studio={**studio, "current_slot": slot},
+            )
+            refined, pose_warnings = _refine_gallery_detail_prompt_deepseek(
+                admin_intent,
+                kind=kind,
+                state={**state, "studio": studio},
+            )
+            if pose_warnings:
+                warnings_state = list(state.get("warnings") or [])
+                warnings_state.extend(pose_warnings)
+                state = {**state, "warnings": warnings_state}
+                _job_update(job_id, warnings=warnings_state)
+            if refined:
+                slot["refined_prompt"] = refined
+                studio["current_slot"] = slot
+                prompt = refined
+            _job_update(
+                job_id,
+                message=f"Đang tạo {label} (Gemini)…",
+                progress=38,
+                studio=studio,
+            )
         raw = _gemini_edit_from_urls(
             refs,
             prompt,
@@ -2729,6 +2871,11 @@ def start_studio_generate(
 
         color_name = (name or "").strip()
         # Tên màu để trống: worker _resolve_studio_color_name đọc từ ảnh mẫu (Gemini vision).
+        admin_prompt = (prompt or "").strip()
+        if kind_n in ("gallery", "detail") and not admin_prompt:
+            raise ValueError(
+                "Gallery / ảnh chi tiết bắt buộc nhập nội dung prompt (chỉ dùng prompt do admin nhập)."
+            )
 
         if kind_n == "color":
             idx = len([c for c in (studio.get("colors") or []) if isinstance(c, dict) and c.get("img")])
@@ -2773,7 +2920,7 @@ def start_studio_generate(
             "name": color_name if kind_n == "color" else None,
             "url": None,
             "attempt": 0,
-            "user_prompt": (prompt or "").strip(),
+            "user_prompt": admin_prompt,
             "ref_urls": selected[:3],
             "attach_url": attach or None,
         }
@@ -3109,6 +3256,11 @@ def regenerate_studio_image(
                     color_index=color_index,
                     attach_url=str(attach_url).strip(),
                 )
+        kind_slot = (slot.get("kind") or "").strip()
+        if kind_slot in ("gallery", "detail") and not str(slot.get("user_prompt") or "").strip():
+            raise ValueError(
+                "Gallery / ảnh chi tiết bắt buộc nhập nội dung prompt (chỉ dùng prompt do admin nhập)."
+            )
         slot["url"] = None
         studio["current_slot"] = slot
         label = _slot_label(slot)

@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { cdnUrl } from '@/lib/cdn-url';
 import Image from 'next/image';
 import Link from 'next/link';
+import ProductPdpLink from '@/components/ProductPdpLink';
 import Button from '@/components/ui/Button';
 import LoadingLink from '@/components/ui/LoadingLink';
 import type { Product, ProductSearchParams } from '@/types/api';
@@ -23,7 +24,7 @@ import {
   loadRelatedProductsSnapshot,
   productSearchParamsFromChineseShopCat2,
 } from '@/lib/related-products-pdp-fetch';
-import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import { productPdpHref } from '@/lib/product-path-slug';
 import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
@@ -69,14 +70,14 @@ function emptyHint(tab: ProductRelatedTabId): string {
 }
 
 function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSizes: string }) {
-  const seg = productPathSlugFromApi(product.slug, product.product_id) || String(product.id);
+  const href = productPdpHref(product.slug, product.product_id) ?? `/products/${product.id}`;
   const birthdayDiscount = useBirthdayDiscount();
   const displayPrice = birthdayDiscount.active
     ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
     : product.price || 0;
   return (
-    <Link
-      href={`/products/${seg}`}
+    <ProductPdpLink
+      href={href}
       className="group block bg-white rounded-lg border border-gray-200 overflow-hidden hover:shadow-md transition-all"
     >
       <div className="aspect-square bg-gray-100 overflow-hidden relative">
@@ -115,7 +116,7 @@ function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSi
           <div className="mt-1 text-[10px] text-gray-500">Đã bán {product.purchases}</div>
         )}
       </div>
-    </Link>
+    </ProductPdpLink>
   );
 }
 
