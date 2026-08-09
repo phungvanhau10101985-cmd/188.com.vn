@@ -1,9 +1,7 @@
 'use client';
 
-import { useState } from 'react';
 import Link from 'next/link';
 import AgeGenderRecommendationHelpButton from '@/components/AgeGenderRecommendationHelpButton';
-import GuestGenderHintPrompt from '@/components/home/GuestGenderHintPrompt';
 import type { SameAgeGenderCohortMode } from '@/types/api';
 
 type SameShopRecommendationHeaderProps = {
@@ -12,10 +10,6 @@ type SameShopRecommendationHeaderProps = {
   isAuthenticated: boolean;
   hasCohortProducts: boolean;
   hint: React.ReactNode;
-  /** Khách chưa đăng nhập đã chọn giới tính nhẹ chưa (đọc từ localStorage lúc mount). */
-  guestGenderHintAnswered?: boolean;
-  /** Gọi khi khách chọn xong giới tính — parent nên đánh dấu đã trả lời + refetch gợi ý. */
-  onGuestGenderAnswered?: () => void;
 };
 
 export default function SameShopRecommendationHeader({
@@ -24,11 +18,7 @@ export default function SameShopRecommendationHeader({
   isAuthenticated,
   hasCohortProducts,
   hint,
-  guestGenderHintAnswered = true,
-  onGuestGenderAnswered,
 }: SameShopRecommendationHeaderProps) {
-  const [manualReopen, setManualReopen] = useState(false);
-
   const showHelp = !cohortLoading && cohortMode != null;
   const showEditProfile =
     !cohortLoading &&
@@ -36,10 +26,7 @@ export default function SameShopRecommendationHeader({
     hasCohortProducts &&
     cohortMode !== 'profile_incomplete' &&
     cohortMode !== 'requires_login';
-  const showGuestGenderPrompt = !isAuthenticated && (manualReopen || !guestGenderHintAnswered);
-  const showChangeGuestGender =
-    !isAuthenticated && !showGuestGenderPrompt && guestGenderHintAnswered && hasCohortProducts;
-  const showActions = showHelp || showEditProfile || showGuestGenderPrompt || showChangeGuestGender;
+  const showActions = showHelp || showEditProfile;
 
   return (
     <div className="mb-1 space-y-1.5">
@@ -50,32 +37,17 @@ export default function SameShopRecommendationHeader({
 
         {showActions ? (
           <div
-            className="inline-flex max-w-full shrink-0 flex-wrap items-center gap-0.5 rounded-full border border-orange-100 bg-orange-50/90 px-1 py-0.5"
+            className="inline-flex max-w-full shrink-0 items-center gap-0.5 rounded-full border border-orange-100 bg-orange-50/90 px-1 py-0.5"
             role="group"
             aria-label="Cá nhân hóa theo hồ sơ"
           >
-            {showGuestGenderPrompt ? (
-              <GuestGenderHintPrompt
-                onAnswered={() => {
-                  setManualReopen(false);
-                  onGuestGenderAnswered?.();
-                }}
-              />
-            ) : showEditProfile ? (
+            {showEditProfile ? (
               <Link
                 href="/account/profile"
                 className="inline-flex min-h-[30px] items-center rounded-full px-2 text-xs font-semibold text-[#ea580c] hover:bg-orange-100 hover:text-[#c2410c] transition-colors whitespace-nowrap"
               >
                 Sửa tuổi / giới tính
               </Link>
-            ) : showChangeGuestGender ? (
-              <button
-                type="button"
-                onClick={() => setManualReopen(true)}
-                className="inline-flex min-h-[30px] items-center rounded-full px-2 text-xs font-semibold text-[#ea580c] hover:bg-orange-100 hover:text-[#c2410c] transition-colors whitespace-nowrap"
-              >
-                Đổi lựa chọn
-              </button>
             ) : (
               <span className="inline-flex min-h-[30px] items-center px-2 text-[11px] font-medium text-orange-800/90 whitespace-nowrap">
                 Cá nhân hóa

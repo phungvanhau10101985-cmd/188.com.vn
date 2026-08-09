@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from sqlalchemy import func as sql_func
 from sqlalchemy.orm import Session
 
+from app.crud.category_hero_suggestions import _text_has_gender_nam, _text_has_gender_nu
 from app.crud.product import _product_view_totals_subquery
 from app.models.product import Product
 
@@ -79,18 +80,69 @@ def _interleave_and_diversify(
     return result
 
 
+def _gender_tag(product: Product) -> str:
+    """'nam' | 'nu' | 'neutral' — suy từ tên category/subcategory/sub_subcategory (đuôi
+    " Nam"/" Nữ" — cùng quy ước với `category_hero_suggestions`)."""
+    blob = " ".join(
+        x
+        for x in [
+            getattr(product, "category", None) or "",
+            getattr(product, "subcategory", None) or "",
+            getattr(product, "sub_subcategory", None) or "",
+        ]
+        if x
+    )
+    is_nam = _text_has_gender_nam(blob)
+    is_nu = _text_has_gender_nu(blob)
+    if is_nam and not is_nu:
+        return "nam"
+    if is_nu and not is_nam:
+        return "nu"
+    return "neutral"
+
+
+def _partition_by_gender(products: List[Product]) -> Dict[str, List[Product]]:
+    buckets: Dict[str, List[Product]] = {"nam": [], "nu": [], "neutral": []}
+    for p in products:
+        buckets[_gender_tag(p)].append(p)
+    return buckets
+
+
+def _macro_interleave_two(a: List[Product], b: List[Product], limit: int) -> List[Product]:
+    """Xen kẽ 1-1 giữa 2 danh sách (đã dedup/cap riêng), giữ thứ tự trong từng danh sách."""
+    result: List[Product] = []
+    i = j = 0
+    while (i < len(a) or j < len(b)) and len(result) < limit:
+        if i < len(a):
+            result.append(a[i])
+            i += 1
+        if len(result) >= limit:
+            break
+        if j < len(b):
+            result.append(b[j])
+            j += 1
+    return result[:limit]
+
+
 def get_popular_fallback_products(
     db: Session,
     *,
     exclude_product_ids: Optional[Sequence[int]] = None,
     limit: int = 24,
+    balance_gender: bool = False,
 ) -> List[Product]:
     """
     Trả về tối đa `limit` sản phẩm "phổ biến" — trộn bán chạy nhất + được xem nhiều nhất,
     đa dạng theo subcategory, loại `exclude_product_ids` (SP khách đã xem/đã có trong lưới).
+
+    `balance_gender=True`: ép tỷ lệ ~50/50 Nam/Nữ (theo tên category/subcategory) thay vì để
+    thứ hạng bán chạy/xem nhiều tự quyết — dùng cho khách CHƯA CÓ tín hiệu gì (chưa xem sản
+    phẩm nào) để tránh lệch giới ngoài ý muốn (ví dụ catalog/lượt mua nghiêng Nam nhiều hơn
+    Nữ) khi hoàn toàn không biết khách là ai.
     """
     exclude_ids = {int(pid) for pid in (exclude_product_ids or []) if pid is not None}
-    fetch_limit = max(int(limit) * 4, 100)
+    limit = max(1, int(limit))
+    fetch_limit = max(limit * (8 if balance_gender else 4), 100)
 
     bestsellers = _fetch_ranked(
         db,
@@ -110,4 +162,33 @@ def get_popular_fallback_products(
         join_condition=view_totals_subq.c.product_id == Product.id,
     )
 
-    return _interleave_and_diversify([bestsellers, most_viewed], limit=max(1, int(limit)))
+    if not balance_gender:
+        return _interleave_and_diversify([bestsellers, most_viewed], limit=limit)
+
+    best_by_gender = _partition_by_gender(bestsellers)
+    viewed_by_gender = _partition_by_gender(most_viewed)
+
+    half = limit // 2
+    other_half = limit - half
+    nam_pool = _interleave_and_diversify(
+        [best_by_gender["nam"], viewed_by_gender["nam"]], limit=half
+    )
+    nu_pool = _interleave_and_diversify(
+        [best_by_gender["nu"], viewed_by_gender["nu"]], limit=other_half
+    )
+
+    result = _macro_interleave_two(nam_pool, nu_pool, limit)
+
+    shortfall = limit - len(result)
+    if shortfall > 0:
+        # nam_pool + nu_pool không đủ lấp limit (catalog ít SP rõ giới) — bù bằng SP trung
+        # tính (không xác định được giới qua tên category/subcategory).
+        used_ids = {p.id for p in result}
+        neutral_candidates = [
+            p
+            for p in best_by_gender["neutral"] + viewed_by_gender["neutral"]
+            if p.id not in used_ids
+        ]
+        result.extend(_interleave_and_diversify([neutral_candidates, []], limit=shortfall))
+
+    return result[:limit]

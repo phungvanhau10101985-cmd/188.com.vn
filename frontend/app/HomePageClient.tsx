@@ -67,7 +67,6 @@ import { consumeHomeRecommendationFresh } from '@/lib/home-navigation-mode';
 import { isSaleListingSearchTerm } from '@/lib/navigate-product-text-search';
 import type { HomeRecommendationSnapshotResponse } from '@/types/api';
 import { sameAgeGenderCompactHint } from '@/lib/same-age-gender-hint';
-import { hasAnsweredGuestGenderHint } from '@/lib/guest-gender-hint';
 
 /** Lần đầu block «CÓ THỂ BẠN THÍCH» — ít SP hơn để luôn có «Xem thêm» khi còn dữ liệu. */
 const HOME_MIX_INITIAL_LIMIT = 24;
@@ -664,10 +663,6 @@ export default function HomePageClient({
   const lastSearchTrackedRef = useRef<string>('');
   const lastFilterTrackedRef = useRef<string>('');
   const recommendationFetchGenRef = useRef(0);
-  /** Khách chưa đăng nhập đã chọn giới tính nhẹ chưa (đọc 1 lần lúc mount). */
-  const [guestGenderHintAnswered, setGuestGenderHintAnswered] = useState(() =>
-    hasAnsweredGuestGenderHint()
-  );
 
   const applyRecommendationSnapshot = useCallback(
     (snap: HomeRecommendationSnapshotResponse) => {
@@ -791,12 +786,6 @@ export default function HomePageClient({
     if (authLoading || hasFilterParams || recommendationSource !== 'fresh') return;
     void fetchRecommendationBlock();
   }, [shopBehaviorKey, authLoading, hasFilterParams, recommendationSource, fetchRecommendationBlock]);
-
-  /** Khách chọn xong giới tính nhẹ (Phase 5) — cập nhật cờ + refetch ngay, không cần reload. */
-  const handleGuestGenderHintAnswered = useCallback(() => {
-    setGuestGenderHintAnswered(true);
-    void fetchRecommendationBlock();
-  }, [fetchRecommendationBlock]);
 
   useEffect(() => {
     hasDisplayedRecommendationRef.current = displayedRecommendationProducts.length > 0;
@@ -1549,8 +1538,6 @@ export default function HomePageClient({
               isAuthenticated={isAuthenticated}
               hasCohortProducts={hasCohortProductsForHeader}
               hint={sameAgeGenderHint}
-              guestGenderHintAnswered={guestGenderHintAnswered}
-              onGuestGenderAnswered={handleGuestGenderHintAnswered}
             />
             <div className="mt-3">
               {showRecommendationSkeleton ? (

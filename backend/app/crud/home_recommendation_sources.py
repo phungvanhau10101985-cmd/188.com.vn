@@ -102,8 +102,11 @@ def _resolve_guest_cohort_or_fallback(
         exclude_ids = get_recent_view_product_ids(
             db, guest_session_id=guest_session_id, limit=40
         )
+        # Chưa xem gì + không biết giới tính → ép cân bằng ~50/50 Nam/Nữ thay vì để thứ hạng
+        # bán chạy/xem nhiều tự quyết (tránh lệch giới ngoài ý muốn khi hoàn toàn chưa có
+        # tín hiệu gì về khách).
         fallback = get_popular_fallback_products(
-            db, exclude_product_ids=exclude_ids, limit=limit
+            db, exclude_product_ids=exclude_ids, limit=limit, balance_gender=True
         )
     except Exception:
         logger.exception("home_recommendation_sources: guest popular fallback failed")
