@@ -163,7 +163,7 @@ const MobileProductMediaCarousel = forwardRef<
     <div className={`relative min-w-0 ${className}`}>
       <div
         ref={scrollerRef}
-        className="product-gallery-media-carousel flex h-full min-w-0 w-full overflow-x-auto scrollbar-hide touch-pan-x"
+        className="product-gallery-media-carousel flex h-full min-w-0 w-full overflow-x-auto scrollbar-hide"
         onScroll={handleScroll}
         onTouchStart={handleTouchStart}
         onPointerDown={(e) => {

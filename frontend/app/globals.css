@@ -84,7 +84,8 @@ body {
   overscroll-behavior-y: auto;
   scroll-behavior: auto;
   scroll-snap-type: x mandatory;
-  touch-action: pan-x pinch-zoom;
+  /* Cho phép vuốt dọc trang + vuốt ngang carousel; tránh pan-x thuần chặn scroll trang trên mobile */
+  touch-action: pan-x pan-y pinch-zoom;
 }
 
 .product-gallery-media-slide {
