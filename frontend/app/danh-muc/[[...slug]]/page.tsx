@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import {
   getCategorySeoData,
+  getCategorySeoDataResult,
   getProductsByCategory,
   getCategoryCatalogTilesForPage,
   getCategoryTreeForLayout,
@@ -167,8 +168,15 @@ export default async function CategoryPage({ params, searchParams }: Props) {
   }
 
   // `seo-data` đã gồm breadcrumb/product_count; dùng luôn để tránh thêm request by-path.
-  const seoData = await getCategorySeoData(level1, level2, level3);
-  if (!seoData) {
+  // Phân biệt rõ "không tồn tại" (404 xác nhận) với "lỗi tạm" (mạng/timeout/5xx) — nếu không,
+  // một lần backend chậm/lỗi tạm sẽ bị hiểu nhầm thành danh mục trống, gây khó hiểu cho khách.
+  const seoDataResult = await getCategorySeoDataResult(level1, level2, level3);
+  if (seoDataResult.status === 'error') {
+    // Ném lỗi để Next hiển thị error.tsx (đã có nút "Thử lại") — tránh render nhầm
+    // "danh mục không có sản phẩm" khi thực ra dữ liệu chưa tải được.
+    throw new Error(`Không tải được dữ liệu danh mục: ${level1}/${level2 ?? ''}/${level3 ?? ''}`);
+  }
+  if (seoDataResult.status === 'not_found') {
     return (
       <main className="max-w-7xl mx-auto px-4 py-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-4">Danh mục không tồn tại</h1>
@@ -181,6 +189,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
       </main>
     );
   }
+  const seoData = seoDataResult.data;
 
   const breadcrumbNames = seoData.breadcrumb_names || [];
   const pathSegments = [level1];
@@ -191,7 +200,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
 
   // Sản phẩm + cây danh mục (chỉ cần khi có seoBody) không phụ thuộc lẫn nhau — chạy song song
   // thay vì nối tiếp để giảm thời gian mở trang danh mục.
-  const [{ products, total, total_pages, page: currentPage }, categoryTree] = await Promise.all([
+  const [productsResult, categoryTree] = await Promise.all([
     getProductsByCategory(
       level1,
       level2,
@@ -201,6 +210,12 @@ export default async function CategoryPage({ params, searchParams }: Props) {
     ),
     seoBody ? getCategoryTreeForLayout() : Promise.resolve([] as Awaited<ReturnType<typeof getCategoryTreeForLayout>>),
   ]);
+  if (productsResult.fetchFailed) {
+    // Cùng lý do như trên: gọi API sản phẩm lỗi tạm (mạng/timeout/5xx) — không phải danh mục
+    // trống thật. Ném lỗi để hiển thị error.tsx (nút "Thử lại") thay vì "chưa có sản phẩm".
+    throw new Error(`Không tải được sản phẩm danh mục: ${level1}/${level2 ?? ''}/${level3 ?? ''}`);
+  }
+  const { products, total, total_pages, page: currentPage } = productsResult;
   const internalLinkMap = seoBody ? buildInternalLinkMap(categoryTree, pathSegments) : [];
 
   return (

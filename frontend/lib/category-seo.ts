@@ -220,18 +220,28 @@ export const getCategoryByPathForSeo = cache(async function getCategoryByPathFor
 });
 
 /**
- * Lấy dữ liệu SEO đầy đủ cho danh mục (ảnh, seo_description, seo_body đã lưu trong DB).
- * Không gọi Gemini — chỉ admin/script mới tạo seo_body.
- *
+ * Kết quả đầy đủ của `getCategorySeoData` — phân biệt rõ 3 trường hợp:
+ * - `ok`: có dữ liệu.
+ * - `not_found`: backend xác nhận 404 (danh mục thật sự không tồn tại).
+ * - `error`: lỗi tạm (mạng/timeout/5xx) — KHÔNG có nghĩa là danh mục trống/không tồn tại.
+ * Dùng nơi cần hiển thị đúng trạng thái lỗi (banner + thử lại) thay vì hiển thị nhầm
+ * "danh mục không có sản phẩm" khi thực ra chỉ là tải lỗi tạm thời.
+ */
+export type CategorySeoDataResult =
+  | { status: "ok"; data: CategorySeoData }
+  | { status: "not_found" }
+  | { status: "error" };
+
+/**
  * Bọc `cache()` (React) — layout.tsx (generateMetadata + component) và page.tsx (generateMetadata +
  * component) đều gọi hàm này với cùng tham số trong 1 request; memo hoá theo request tránh gọi API
  * lặp lại 3-4 lần nối tiếp (mỗi lần kèm 1 query COUNT sản phẩm) cho một lần mở trang danh mục.
  */
-export const getCategorySeoData = cache(async function getCategorySeoData(
+const fetchCategorySeoDataResult = cache(async function fetchCategorySeoDataResult(
   level1: string,
   level2?: string | null,
   level3?: string | null
-): Promise<CategorySeoData | null> {
+): Promise<CategorySeoDataResult> {
   try {
     const params = new URLSearchParams({ level1: level1.trim() });
     if (level2?.trim()) params.set("level2", level2.trim());
@@ -242,13 +252,43 @@ export const getCategorySeoData = cache(async function getCategorySeoData(
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(LAYOUT_FETCH_TIMEOUT_MS),
     });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data as CategorySeoData;
+    if (res.status === 404) return { status: "not_found" };
+    if (!res.ok) return { status: "error" };
+    const data = (await res.json()) as CategorySeoData;
+    return { status: "ok", data };
   } catch {
-    return null;
+    return { status: "error" };
   }
 });
+
+/**
+ * Trạng thái đầy đủ (ok/not_found/error) cho danh mục theo path — dùng ở nơi cần phân biệt
+ * "danh mục không tồn tại" với "tải dữ liệu lỗi tạm thời" (page.tsx component: hiển thị đúng
+ * banner lỗi + thử lại, tránh báo nhầm "chưa có sản phẩm" khi backend chỉ đang chậm/lỗi tạm).
+ */
+export async function getCategorySeoDataResult(
+  level1: string,
+  level2?: string | null,
+  level3?: string | null
+): Promise<CategorySeoDataResult> {
+  return fetchCategorySeoDataResult(level1, level2, level3);
+}
+
+/**
+ * Lấy dữ liệu SEO đầy đủ cho danh mục (ảnh, seo_description, seo_body đã lưu trong DB).
+ * Không gọi Gemini — chỉ admin/script mới tạo seo_body.
+ *
+ * Trả `null` cho cả "không tồn tại" và "lỗi tạm" — phù hợp cho nơi chỉ cần fallback nhẹ (metadata,
+ * JSON-LD). Nơi cần phân biệt lỗi thật để hiển thị đúng trạng thái: dùng `getCategorySeoDataResult`.
+ */
+export async function getCategorySeoData(
+  level1: string,
+  level2?: string | null,
+  level3?: string | null
+): Promise<CategorySeoData | null> {
+  const result = await fetchCategorySeoDataResult(level1, level2, level3);
+  return result.status === "ok" ? result.data : null;
+}
 
 /** Giá trị lọc từ query string trang danh mục — khớp GET `/products/` (min_price, max_price, size, color, sort). */
 export type CategoryListingFilters = {
@@ -342,6 +382,8 @@ export async function getProductsByCategory(
   category?: string;
   subcategory?: string;
   sub_subcategory?: string;
+  /** true = gọi API sản phẩm thất bại (mạng/timeout/5xx) — khác với "danh mục thật sự trống" (total=0 hợp lệ). */
+  fetchFailed?: boolean;
 }> {
   const { limit = 96, skip = 0, filters, listingRefresh } = options;
   const info = resolvedInfo ?? (await getCategoryByPathForSeo(level1, level2, level3));
@@ -393,7 +435,16 @@ export async function getProductsByCategory(
       signal: AbortSignal.timeout(CATEGORY_PRODUCTS_FETCH_TIMEOUT_MS),
     });
     if (!res.ok) {
-      return { products: [], total: 0, total_pages: 0, page: 1, category, subcategory, sub_subcategory };
+      return {
+        products: [],
+        total: 0,
+        total_pages: 0,
+        page: 1,
+        category,
+        subcategory,
+        sub_subcategory,
+        fetchFailed: true,
+      };
     }
     const data = (await res.json()) as {
       products?: unknown[];
@@ -424,7 +475,16 @@ export async function getProductsByCategory(
       sub_subcategory,
     };
   } catch {
-    return { products: [], total: 0, total_pages: 0, page: 1, category, subcategory, sub_subcategory };
+    return {
+      products: [],
+      total: 0,
+      total_pages: 0,
+      page: 1,
+      category,
+      subcategory,
+      sub_subcategory,
+      fetchFailed: true,
+    };
   }
 }
 
