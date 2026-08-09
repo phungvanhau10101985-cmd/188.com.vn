@@ -3,6 +3,7 @@
  * Và lấy cây danh mục 3 cấp cho thanh Navigation (tránh phụ thuộc fetch client/CORS).
  */
 
+import { cache } from "react";
 import type { CategoryLevel1, HeroCategoryTile } from "@/types/api";
 import { isNextProductionBuild } from "@/lib/build-phase";
 import { categoryListingUsesRandomSort } from "@/lib/category-listing-random";
@@ -191,7 +192,11 @@ export interface CategorySeoData extends CategoryByPathInfo {
   seo_body: string | null; // Đoạn cuối trang — chỉ có sau khi admin/script chủ động tạo
 }
 
-export async function getCategoryByPathForSeo(
+/**
+ * Bọc `cache()` (React) — nhiều nơi trong cùng 1 request (layout + page generateMetadata + component)
+ * gọi lại đúng path này; memo hoá theo request giúp chỉ gọi API 1 lần thay vì 2-4 lần nối tiếp.
+ */
+export const getCategoryByPathForSeo = cache(async function getCategoryByPathForSeo(
   level1: string,
   level2?: string | null,
   level3?: string | null
@@ -212,13 +217,17 @@ export async function getCategoryByPathForSeo(
   } catch {
     return null;
   }
-}
+});
 
 /**
  * Lấy dữ liệu SEO đầy đủ cho danh mục (ảnh, seo_description, seo_body đã lưu trong DB).
  * Không gọi Gemini — chỉ admin/script mới tạo seo_body.
+ *
+ * Bọc `cache()` (React) — layout.tsx (generateMetadata + component) và page.tsx (generateMetadata +
+ * component) đều gọi hàm này với cùng tham số trong 1 request; memo hoá theo request tránh gọi API
+ * lặp lại 3-4 lần nối tiếp (mỗi lần kèm 1 query COUNT sản phẩm) cho một lần mở trang danh mục.
  */
-export async function getCategorySeoData(
+export const getCategorySeoData = cache(async function getCategorySeoData(
   level1: string,
   level2?: string | null,
   level3?: string | null
@@ -239,7 +248,7 @@ export async function getCategorySeoData(
   } catch {
     return null;
   }
-}
+});
 
 /** Giá trị lọc từ query string trang danh mục — khớp GET `/products/` (min_price, max_price, size, color, sort). */
 export type CategoryListingFilters = {

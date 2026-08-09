@@ -748,6 +748,45 @@ class MigrationManager:
             logger.warning("migrate_product_category_active_index: %s", e)
             return True
 
+    def migrate_product_category_text_lower_index(self) -> bool:
+        """
+        Index cho lọc/đếm sản phẩm theo category/subcategory/sub_subcategory (dạng chữ, không FK):
+        listing `/danh-muc/...`, `by-path`, `seo-data` (product_count), `category-facets` đều dùng
+        `lower(trim(category)) = ...` / `lower(trim(subcategory)) IN (...)` — thiếu index này Postgres
+        phải Seq Scan toàn bảng products (~100k dòng) mỗi lần mở trang danh mục → rất chậm.
+        Composite index phục vụ cả 3 mức lọc (chỉ cấp 1, cấp 1+2, cấp 1+2+3) qua prefix match.
+        """
+        try:
+            inspector = inspect(engine)
+            if "products" not in inspector.get_table_names():
+                return True
+            if IS_POSTGRESQL:
+                # CONCURRENTLY tránh khóa ghi products khi VPS đang phục vụ shop (bảng lớn ~100k dòng).
+                with engine.connect() as conn:
+                    conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+                    conn.execute(
+                        text(
+                            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+                            "ix_products_active_cat_path_lower ON products "
+                            "(lower(trim(category)), lower(trim(subcategory)), lower(trim(sub_subcategory)), id) "
+                            "WHERE is_active IS TRUE"
+                        )
+                    )
+            else:
+                with engine.connect() as conn:
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_products_active_cat_path_lower ON products "
+                            "(lower(trim(category)), lower(trim(subcategory)), lower(trim(sub_subcategory)), id)"
+                        )
+                    )
+                    conn.commit()
+            logger.info("✅ ix_products_active_cat_path_lower ensured")
+            return True
+        except Exception as e:
+            logger.warning("migrate_product_category_text_lower_index: %s", e)
+            return True
+
     def migrate_product_listing_default_index(self) -> bool:
         """Index cho sort mặc định của listing/PDP-related trên 100k SP: (is_active, id DESC)."""
         try:
@@ -1249,6 +1288,7 @@ class MigrationManager:
 
         results['same_shop_recommendation_indexes'] = self.migrate_same_shop_recommendation_indexes()
         results['product_category_active_index'] = self.migrate_product_category_active_index()
+        results['product_category_text_lower_index'] = self.migrate_product_category_text_lower_index()
         results['product_listing_default_index'] = self.migrate_product_listing_default_index()
         results['product_warehouse_clearance_lookup_index'] = (
             self.migrate_product_warehouse_clearance_lookup_index()

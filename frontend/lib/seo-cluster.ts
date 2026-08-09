@@ -6,6 +6,7 @@
  * `/danh-muc/[[...slug]]/page.tsx` redirect 301 sang `/c/<cluster_slug>` qua API mapping này.
  */
 
+import { cache } from 'react';
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
 import { isNextProductionBuild } from '@/lib/build-phase';
 
@@ -220,7 +221,13 @@ function flattenCat3(nodes: TreeV2Node[]): TreeV2Node[] {
   return out;
 }
 
-export async function getClusterSlugForCat3(cat3Slug: string): Promise<string | null> {
+/**
+ * Bọc `cache()` (React) — `page.tsx` gọi hàm này 2 lần (generateMetadata + component) với cùng
+ * `cat3Slug` trong 1 request; memo hoá theo request tránh gọi lại `fetchTreeV2()` lần thứ hai.
+ */
+export const getClusterSlugForCat3 = cache(async function getClusterSlugForCat3(
+  cat3Slug: string
+): Promise<string | null> {
   if (!cat3Slug) return null;
   const target = cat3Slug.trim().toLowerCase();
   const tree = await fetchTreeV2();
@@ -230,4 +237,4 @@ export async function getClusterSlugForCat3(cat3Slug: string): Promise<string | 
     }
   }
   return null;
-}
+});

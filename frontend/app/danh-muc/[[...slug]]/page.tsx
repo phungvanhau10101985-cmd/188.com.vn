@@ -187,16 +187,20 @@ export default async function CategoryPage({ params, searchParams }: Props) {
   if (level2) pathSegments.push(level2);
   if (level3) pathSegments.push(level3);
 
-  const { products, total, total_pages, page: currentPage } = await getProductsByCategory(
-    level1,
-    level2,
-    level3,
-    { limit: PAGE_SIZE, skip, filters: listingFilters, listingRefresh },
-    seoData,
-  );
-
   const seoBody = seoData?.seo_body ?? null;
-  const categoryTree = seoBody ? await getCategoryTreeForLayout() : [];
+
+  // Sản phẩm + cây danh mục (chỉ cần khi có seoBody) không phụ thuộc lẫn nhau — chạy song song
+  // thay vì nối tiếp để giảm thời gian mở trang danh mục.
+  const [{ products, total, total_pages, page: currentPage }, categoryTree] = await Promise.all([
+    getProductsByCategory(
+      level1,
+      level2,
+      level3,
+      { limit: PAGE_SIZE, skip, filters: listingFilters, listingRefresh },
+      seoData,
+    ),
+    seoBody ? getCategoryTreeForLayout() : Promise.resolve([] as Awaited<ReturnType<typeof getCategoryTreeForLayout>>),
+  ]);
   const internalLinkMap = seoBody ? buildInternalLinkMap(categoryTree, pathSegments) : [];
 
   return (
